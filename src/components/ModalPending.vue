@@ -1,16 +1,13 @@
 <template>
   <div class="modal-overlay" :class="{ open: store.pendingModal.open }" @click.self="store.closePendingModal()">
-    <div class="modal-sheet" ref="sheetEl">
-      <div class="sheet-drag-zone"
-        @touchstart.passive="onTouchStart"
-        @touchmove="onTouchMove"
-        @touchend="onTouchEnd">
+    <div class="modal-sheet" ref="sheetEl"
+      @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd">
+      <div class="sheet-drag-zone">
         <div class="sheet-handle"></div>
       </div>
-      <div class="sheet-header"
-        @touchstart.passive="onTouchStart"
-        @touchmove="onTouchMove"
-        @touchend="onTouchEnd">
+      <div class="sheet-header">
         <div class="sheet-title">{{ store.pendingModal.bill?.status === 'done' ? '编辑账单信息' : '补充账单信息' }}</div>
         <div class="sheet-sub">{{ store.pendingModal.bill?.date }} {{ store.pendingModal.bill?.time }} · 截图识别</div>
       </div>
@@ -25,9 +22,13 @@
       <div class="thumb-wrap">
         <div v-if="store.pendingModal.bill?.image_url" style="width:100%" @click="store.openImgFull(store.pendingModal.bill.image_url)">
           <img :src="store.pendingModal.bill.image_url"
+            @error="store.markPendingImageUnavailable()"
             style="width:100%; max-height:160px; object-fit:contain; background:#f0f0f0; display:block;">
           <div style="text-align:center; padding:6px 0; font-size:11px; color:var(--text3);">👆 点击放大原图</div>
         </div>
+        <template v-else-if="store.pendingModal.bill?.imageLoadError">
+          <span>⚠️</span><span>截图文件不可用或已删除</span>
+        </template>
         <template v-else>
           <span>🖼</span><span>无截图预览</span>
         </template>
@@ -40,9 +41,9 @@
           placeholder="如：麦当劳、京东购物…" maxlength="50">
       </div>
 
-      <!-- 消费平台 -->
+      <!-- 消费渠道 -->
       <div class="sel-section">
-        <div class="sel-label">消费平台</div>
+        <div class="sel-label">消费渠道</div>
         <div class="sel-grid">
           <div v-for="p in platforms" :key="p.val" class="sel-chip"
             :class="{ selected: store.pendingModal.platform === p.val }"
@@ -83,7 +84,7 @@
         @click="store.confirmEntry()">确认保存</button>
 
       <button class="delete-bill-btn"
-        @click="store.openDeleteConfirm('bill', store.pendingModal.bill?.id, store.pendingModal.bill?.image_url)">
+        @click="store.openDeleteConfirm('bill', store.pendingModal.bill?.id, store.pendingModal.bill?.image_path)">
         🗑 删除此账单
       </button>
     </div>
@@ -91,25 +92,71 @@
 </template>
 
 <script setup>
-import { inject, ref } from 'vue'
+import { inject, ref, watch, onUnmounted } from 'vue'
 const store = inject('store')
 
 const sheetEl = ref(null)
 let touchStartY = 0
+let touchStartX = 0
+let canDragSheet = false
+let isDraggingSheet = false
+let bodyScrollY = 0
+let originalBodyOverflow = ''
+let originalBodyPosition = ''
+let originalBodyTop = ''
+let originalBodyWidth = ''
+
+function lockBodyScroll() {
+  bodyScrollY = window.scrollY
+  originalBodyOverflow = document.body.style.overflow
+  originalBodyPosition = document.body.style.position
+  originalBodyTop = document.body.style.top
+  originalBodyWidth = document.body.style.width
+  document.body.style.overflow = 'hidden'
+  document.body.style.position = 'fixed'
+  document.body.style.top = `-${bodyScrollY}px`
+  document.body.style.width = '100%'
+}
+
+function unlockBodyScroll() {
+  document.body.style.overflow = originalBodyOverflow
+  document.body.style.position = originalBodyPosition
+  document.body.style.top = originalBodyTop
+  document.body.style.width = originalBodyWidth
+  window.scrollTo(0, bodyScrollY)
+}
+
+watch(() => store.pendingModal.open, open => {
+  if (open) lockBodyScroll()
+  else unlockBodyScroll()
+})
+
+onUnmounted(unlockBodyScroll)
+
+function isInteractiveTarget(target) {
+  return !!target.closest('input, button, img, .sel-chip, .thumb-wrap, .confirm-btn, .delete-bill-btn')
+}
 
 function onTouchStart(e) {
+  canDragSheet = !isInteractiveTarget(e.target)
+  isDraggingSheet = false
   touchStartY = e.touches[0].clientY
+  touchStartX = e.touches[0].clientX
   if (sheetEl.value) sheetEl.value.style.transition = 'none'
 }
 
 function onTouchMove(e) {
+  if (!canDragSheet) return
   const delta = e.touches[0].clientY - touchStartY
-  if (delta <= 0) return
+  const deltaX = Math.abs(e.touches[0].clientX - touchStartX)
+  if (delta <= 0 || delta < 8 || delta < deltaX * 1.2) return
   e.preventDefault()
-  if (sheetEl.value) sheetEl.value.style.transform = `translateY(${delta}px)`
+  isDraggingSheet = true
+  if (sheetEl.value) sheetEl.value.style.transform = `translateY(${Math.min(delta, window.innerHeight)}px)`
 }
 
 function onTouchEnd(e) {
+  if (!canDragSheet || !isDraggingSheet) return
   const delta = e.changedTouches[0].clientY - touchStartY
   if (!sheetEl.value) return
   sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
@@ -122,16 +169,20 @@ function onTouchEnd(e) {
   } else {
     sheetEl.value.style.transform = 'translateY(0)'
   }
+  canDragSheet = false
+  isDraggingSheet = false
 }
 
 const platforms = [
   { val: '美团',  label: '🛵 美团',  hot: true },
   { val: '微信',  label: '💬 微信' },
+  { val: '线下消费', label: '🏪 线下消费', hot: true },
   { val: '京东',  label: '📦 京东' },
   { val: '拼多多',label: '🛍 拼多多' },
   { val: '淘宝',  label: '🧡 淘宝' },
   { val: '抖音',  label: '🎵 抖音' },
   { val: '支付宝',label: '💙 支付宝' },
+  { val: '其他', label: '💰 其他' },
 ]
 
 const categories = [

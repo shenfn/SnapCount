@@ -32,12 +32,12 @@ export function formatMonthLabel(y, m) {
 }
 
 export function platformIcon(p) {
-  const m = { 美团: '🛵', 微信: '💬', 京东: '📦', 拼多多: '🛍', 淘宝: '🧡', 抖音: '🎵', 支付宝: '💙', 滴滴: '🚗' }
+  const m = { 美团: '🛵', 微信: '💬', 京东: '📦', 拼多多: '🛍', 淘宝: '🧡', 抖音: '🎵', 支付宝: '💙', 滴滴: '🚗', 线下消费: '🏪', 其他: '💰' }
   return m[p] || '💰'
 }
 
 export function platformBg(p) {
-  const m = { 美团: '#FFF7ED', 微信: '#ECFDF5', 京东: '#EFF6FF', 拼多多: '#FFF7ED', 淘宝: '#FFF7ED', 抖音: '#F5F3FF', 支付宝: '#EFF6FF' }
+  const m = { 美团: '#FFF7ED', 微信: '#ECFDF5', 京东: '#EFF6FF', 拼多多: '#FFF7ED', 淘宝: '#FFF7ED', 抖音: '#F5F3FF', 支付宝: '#EFF6FF', 线下消费: '#F0FDF4', 其他: '#F0EEE9' }
   return m[p] || '#F0EEE9'
 }
 
@@ -56,6 +56,7 @@ export function mapTransaction(t) {
     icon: platformIcon(t.platform),
     iconBg: platformBg(t.platform),
     image_url: t.image_url,
+    image_path: t.image_url,
     transport_type: t.transport_type,
   }
 }

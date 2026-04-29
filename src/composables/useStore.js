@@ -153,19 +153,30 @@ export function useStore() {
   async function getSignedImageUrl(raw) {
     if (!raw) return null
     if (raw.startsWith('https://')) return raw
-    const { data } = await sb.storage.from('receipt-images').createSignedUrl(raw, 3600)
+    const { data, error } = await sb.storage.from('receipt-images').createSignedUrl(raw, 3600)
+    if (error) {
+      console.warn('生成截图预览链接失败:', error.message, raw)
+      return null
+    }
     return data?.signedUrl || null
   }
 
   async function openPendingModal(bill) {
     pendingModal.open = true
-    const resolvedUrl = await getSignedImageUrl(bill.image_url)
-    pendingModal.bill = { ...bill, image_url: resolvedUrl }
+    const rawImagePath = bill.image_path || bill.image_url || null
+    const resolvedUrl = await getSignedImageUrl(rawImagePath)
+    pendingModal.bill = { ...bill, image_path: rawImagePath, image_url: resolvedUrl, imageLoadError: !!rawImagePath && !resolvedUrl }
     pendingModal.merchantName = bill.name !== '未识别商家' ? bill.name : ''
     pendingModal.amount = String(bill.amount)
     pendingModal.platform = bill.platform !== '?' ? bill.platform : null
     pendingModal.category = catCodeMap[bill.cat] || (bill.cat !== '?' ? bill.cat : null)
     pendingModal.payment = payAliasMap[bill.payment] || (bill.payment !== '?' ? bill.payment : null)
+  }
+
+  function markPendingImageUnavailable() {
+    if (!pendingModal.bill) return
+    pendingModal.bill.image_url = null
+    pendingModal.bill.imageLoadError = true
   }
 
   function closePendingModal() {
@@ -254,7 +265,16 @@ export function useStore() {
         const { error } = await sb.from('transactions').delete().eq('id', id)
         if (error) throw new Error(error.message)
         if (imagePath && !imagePath.startsWith('https://')) {
-          await sb.storage.from('receipt-images').remove([imagePath]).catch(() => {})
+          const { data: refs, error: refErr } = await sb.from('transactions')
+            .select('id')
+            .eq('image_url', imagePath)
+            .neq('id', id)
+            .limit(1)
+          if (refErr) console.warn('检查截图引用失败:', refErr.message)
+          if (!refErr && (!refs || refs.length === 0)) {
+            const { error: removeErr } = await sb.storage.from('receipt-images').remove([imagePath])
+            if (removeErr) console.warn('删除截图文件失败:', removeErr.message)
+          }
         }
       } else if (type === 'income') {
         const { error } = await sb.from('income_records').delete().eq('id', id)
@@ -282,6 +302,7 @@ export function useStore() {
     incomeCatMap,
     loadData, changeMonth, showFlash,
     openPendingModal, closePendingModal, confirmEntry,
+    markPendingImageUnavailable,
     openIncomeModal, closeIncomeModal, confirmIncome,
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
