@@ -31,13 +31,21 @@
           placeholder="如：XX公司、接单项目名…" maxlength="50">
       </div>
 
+      <div class="sel-section" style="margin-top:16px">
+        <div class="sel-label">到账日期</div>
+        <input type="date" class="sheet-input" v-model="store.incomeModal.date"
+          :max="today">
+      </div>
+
       <div class="sel-section" style="margin-top:12px">
         <div class="sel-label">备注（可选）</div>
         <input type="text" class="sheet-input" v-model="store.incomeModal.note"
           placeholder="备注信息…" maxlength="100">
       </div>
 
-      <button class="confirm-btn" style="background:#1565C0" @click="store.confirmIncome()">确认保存</button>
+      <button class="confirm-btn" style="background:#1565C0"
+        :disabled="!store.incomeModal.amount || !store.incomeModal.cat || !store.incomeModal.date"
+        @click="store.confirmIncome()">确认保存</button>
     </div>
   </div>
 </template>
@@ -45,6 +53,7 @@
 <script setup>
 import { inject } from 'vue'
 const store = inject('store')
+const today = new Date().toISOString().slice(0, 10)
 
 const incomeTypes = [
   { val: 'salary',        label: '💼 工资',     hot: true },

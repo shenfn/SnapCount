@@ -6,7 +6,12 @@
         <div class="sheet-title">补充账单信息</div>
         <div class="sheet-sub">{{ store.pendingModal.bill?.date }} {{ store.pendingModal.bill?.time }} · 截图识别</div>
       </div>
-      <div class="sheet-amount">-¥{{ store.pendingModal.bill?.amount?.toFixed(2) }}</div>
+      <!-- 金额（可修正 AI 识别错误） -->
+      <div class="amount-edit-wrap">
+        <span class="amount-edit-prefix">-¥</span>
+        <input type="number" class="amount-edit-input" v-model="store.pendingModal.amount"
+          min="0.01" max="999999.99" step="0.01" placeholder="0.00">
+      </div>
 
       <!-- 截图预览 -->
       <div class="thumb-wrap">
@@ -65,7 +70,14 @@
         </div>
       </div>
 
-      <button class="confirm-btn" @click="store.confirmEntry()">确认保存</button>
+      <button class="confirm-btn"
+        :disabled="!store.pendingModal.platform || !store.pendingModal.category || !store.pendingModal.payment"
+        @click="store.confirmEntry()">确认保存</button>
+
+      <button class="delete-bill-btn"
+        @click="store.openDeleteConfirm('bill', store.pendingModal.bill?.id, store.pendingModal.bill?.image_url)">
+        🗑 删除此账单
+      </button>
     </div>
   </div>
 </template>

@@ -156,8 +156,7 @@ Deno.serve(async (req) => {
     if (upErr && !upErr.message.includes("already exists")) {
       throw new Error(`Upload failed: ${upErr.message}`);
     }
-    const { data: signed } = await supabase.storage.from(BUCKET_NAME)
-      .createSignedUrl(path, 60 * 60 * 24 * 365); // 1 年有效
+    // 存储路径（非 signed URL），前端查询时动态生成 signed URL，避免过期问题
 
     // 4. 调用 Kimi Vision 识别
     let ai: AIResult;
@@ -210,7 +209,7 @@ Deno.serve(async (req) => {
       category: ai.category,
       payment_method: ai.payment_method,
       status: ai.amount === null ? "pending" : status,
-      image_url: signed?.signedUrl ?? null,
+      image_url: path,
       image_hash: hash,
       is_large_transport: isLargeTransport,
       transaction_date: now.toISOString().slice(0, 10),

@@ -27,6 +27,7 @@ export function useStore() {
     open: false,
     bill: null,
     merchantName: '',
+    amount: '',
     platform: null,
     category: null,
     payment: null,
@@ -38,6 +39,14 @@ export function useStore() {
     amount: '',
     source: '',
     note: '',
+    date: '',
+  })
+
+  const deleteConfirm = reactive({
+    open: false,
+    type: null,
+    id: null,
+    imagePath: null,
   })
 
   const monthLabel = computed(() => formatMonthLabel(currentYear.value, currentMonth.value))
@@ -141,10 +150,19 @@ export function useStore() {
     flashTimer = setTimeout(() => { flashVisible.value = false }, 2000)
   }
 
-  function openPendingModal(bill) {
+  async function getSignedImageUrl(raw) {
+    if (!raw) return null
+    if (raw.startsWith('https://')) return raw
+    const { data } = await sb.storage.from('receipt-images').createSignedUrl(raw, 3600)
+    return data?.signedUrl || null
+  }
+
+  async function openPendingModal(bill) {
     pendingModal.open = true
-    pendingModal.bill = bill
+    const resolvedUrl = await getSignedImageUrl(bill.image_url)
+    pendingModal.bill = { ...bill, image_url: resolvedUrl }
     pendingModal.merchantName = bill.name !== '未识别商家' ? bill.name : ''
+    pendingModal.amount = String(bill.amount)
     pendingModal.platform = bill.platform !== '?' ? bill.platform : null
     pendingModal.category = catCodeMap[bill.cat] || (bill.cat !== '?' ? bill.cat : null)
     pendingModal.payment = payAliasMap[bill.payment] || (bill.payment !== '?' ? bill.payment : null)
@@ -156,15 +174,15 @@ export function useStore() {
   }
 
   async function confirmEntry() {
-    if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) {
-      alert('请选择平台、分类和支付方式')
-      return
-    }
+    if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
+    const amt = parseFloat(pendingModal.amount)
+    if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
     const { error } = await sb.from('transactions').update({
       platform: pendingModal.platform,
       category: pendingModal.category,
       payment_method: pendingModal.payment,
       merchant_name: pendingModal.merchantName || `${pendingModal.platform}消费`,
+      amount: amt,
       status: 'done',
     }).eq('id', pendingModal.bill.id)
     if (error) { alert('保存失败：' + error.message); return }
@@ -179,6 +197,7 @@ export function useStore() {
     incomeModal.amount = ''
     incomeModal.source = ''
     incomeModal.note = ''
+    incomeModal.date = new Date().toISOString().slice(0, 10)
   }
 
   function closeIncomeModal() {
@@ -187,14 +206,15 @@ export function useStore() {
 
   async function confirmIncome() {
     const amt = parseFloat(incomeModal.amount)
-    if (!amt || amt <= 0) { alert('请输入有效金额'); return }
+    if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
+    if (!incomeModal.cat) { alert('请选择收入类型'); return }
+    if (!incomeModal.date) { alert('请选择到账日期'); return }
     const source = incomeModal.source.trim() || (incomeCatMap[incomeModal.cat]?.label || '收入')
-    const now = new Date()
     const { error } = await sb.from('income_records').insert({
       category: incomeModal.cat,
       source_name: source,
       amount: amt,
-      income_date: now.toISOString().slice(0, 10),
+      income_date: incomeModal.date,
       note: incomeModal.note.trim() || null,
     })
     if (error) { alert('保存失败：' + error.message); return }
@@ -214,6 +234,39 @@ export function useStore() {
     if (pendingModal.bill) pendingModal.open = true
   }
 
+  function openDeleteConfirm(type, id, imagePath = null) {
+    deleteConfirm.open = true
+    deleteConfirm.type = type
+    deleteConfirm.id = id
+    deleteConfirm.imagePath = imagePath
+  }
+
+  function closeDeleteConfirm() {
+    deleteConfirm.open = false
+  }
+
+  async function confirmDelete() {
+    const { type, id, imagePath } = deleteConfirm
+    deleteConfirm.open = false
+    try {
+      if (type === 'bill') {
+        if (pendingModal.open && pendingModal.bill?.id === id) closePendingModal()
+        const { error } = await sb.from('transactions').delete().eq('id', id)
+        if (error) throw new Error(error.message)
+        if (imagePath && !imagePath.startsWith('https://')) {
+          await sb.storage.from('receipt-images').remove([imagePath]).catch(() => {})
+        }
+      } else if (type === 'income') {
+        const { error } = await sb.from('income_records').delete().eq('id', id)
+        if (error) throw new Error(error.message)
+      }
+      showFlash('✓ 已删除')
+      await loadData()
+    } catch (e) {
+      showFlash('❌ 删除失败：' + e.message)
+    }
+  }
+
   return {
     currentYear, currentMonth, currentPage, monthLabel,
     loading, loadError,
@@ -231,5 +284,6 @@ export function useStore() {
     openPendingModal, closePendingModal, confirmEntry,
     openIncomeModal, closeIncomeModal, confirmIncome,
     openImgFull, closeImgFull,
+    deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
   }
 }

@@ -35,7 +35,7 @@ body {
 }
 
 /* ── Page layout ── */
-.page { display: none; padding-bottom: calc(var(--nav-h) + 16px); min-height: 100vh; }
+.page { display: none; padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 16px); min-height: 100vh; }
 .page.active { display: block; }
 
 /* ── Top bar ── */
@@ -51,10 +51,11 @@ body {
 .nav {
   position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
   width: 100%; max-width: 430px;
-  height: var(--nav-h);
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
   background: var(--surface);
   border-top: 0.5px solid var(--border);
   display: flex; align-items: flex-start; padding-top: 10px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   z-index: 100;
 }
 .nav-item {
@@ -310,7 +311,7 @@ body {
 
 /* ── FAB ── */
 .fab {
-  position: fixed; bottom: calc(var(--nav-h) + 16px); right: 20px;
+  position: fixed; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 16px); right: 20px;
   width: 52px; height: 52px; border-radius: 50%;
   background: var(--accent); color: #fff; border: none; font-size: 28px;
   cursor: pointer; box-shadow: 0 4px 16px rgba(45,106,79,0.35);
@@ -319,7 +320,7 @@ body {
 }
 .fab:active { transform: scale(0.93); }
 .fab-menu {
-  position: fixed; bottom: calc(var(--nav-h) + 76px); right: 20px;
+  position: fixed; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 76px); right: 20px;
   display: none; flex-direction: column; gap: 8px; z-index: 90; align-items: flex-end;
 }
 .fab-menu.open { display: flex; }
@@ -417,3 +418,29 @@ body {
   font-family: var(--font);
 }
 .amount-input::placeholder { color: var(--text3); font-size: 22px; }
+
+/* ── Pending amount edit ── */
+.amount-edit-wrap {
+  padding: 14px 20px 0;
+  display: flex; align-items: center; gap: 6px;
+  border-bottom: 0.5px solid var(--border);
+  margin-bottom: 4px;
+}
+.amount-edit-prefix { font-size: 26px; font-weight: 600; color: var(--danger); }
+.amount-edit-input {
+  flex: 1; font-size: 26px; font-weight: 600; color: var(--danger);
+  border: none; outline: none; background: transparent;
+  font-family: var(--font); min-width: 0;
+}
+.amount-edit-input::placeholder { color: var(--text3); font-size: 20px; }
+
+/* ── Delete bill button ── */
+.delete-bill-btn {
+  display: block; width: calc(100% - 40px); margin: 12px 20px 0;
+  padding: 12px; border-radius: var(--radius);
+  border: 1.5px solid var(--danger); background: transparent;
+  color: var(--danger); font-size: 14px; font-weight: 500;
+  cursor: pointer; font-family: var(--font);
+  transition: background 0.15s;
+}
+.delete-bill-btn:active { background: var(--danger-light); }

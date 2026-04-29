@@ -54,6 +54,26 @@
     <ModalPending />
     <ModalIncome />
 
+    <!-- Delete confirmation -->
+    <div v-if="store.deleteConfirm.open"
+      style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9000;display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="background:#fff;border-radius:16px;width:100%;max-width:320px;padding:24px;text-align:center;">
+        <div style="font-size:28px;margin-bottom:12px;">🗑</div>
+        <div style="font-size:16px;font-weight:600;color:#1A1A18;margin-bottom:8px;">确认删除？</div>
+        <div style="font-size:13px;color:#6B6A65;margin-bottom:24px;">此操作不可撤销，记录将永久删除</div>
+        <div style="display:flex;gap:12px;">
+          <button @click="store.closeDeleteConfirm()"
+            style="flex:1;padding:12px;border-radius:10px;border:1.5px solid #E0E0E0;background:#fff;font-size:15px;cursor:pointer;font-family:'PingFang SC',system-ui,sans-serif;">
+            取消
+          </button>
+          <button @click="store.confirmDelete()"
+            style="flex:1;padding:12px;border-radius:10px;border:none;background:#B91C1C;color:#fff;font-size:15px;font-weight:600;cursor:pointer;font-family:'PingFang SC',system-ui,sans-serif;">
+            确认删除
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Flash -->
     <div class="flash" :class="{ show: store.flashVisible.value }">{{ store.flashMsg.value }}</div>
 
