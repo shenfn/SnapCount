@@ -98,6 +98,7 @@ const store = inject('store')
 const sheetEl = ref(null)
 let touchStartY = 0
 let touchStartX = 0
+let touchStartTime = 0
 let canDragSheet = false
 let isDraggingSheet = false
 let bodyScrollY = 0
@@ -142,6 +143,7 @@ function onTouchStart(e) {
   isDraggingSheet = false
   touchStartY = e.touches[0].clientY
   touchStartX = e.touches[0].clientX
+  touchStartTime = Date.now()
   if (sheetEl.value) sheetEl.value.style.transition = 'none'
 }
 
@@ -156,11 +158,19 @@ function onTouchMove(e) {
 }
 
 function onTouchEnd(e) {
-  if (!canDragSheet || !isDraggingSheet) return
+  if (!canDragSheet || !isDraggingSheet) {
+    canDragSheet = false
+    isDraggingSheet = false
+    return
+  }
   const delta = e.changedTouches[0].clientY - touchStartY
   if (!sheetEl.value) return
   sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
-  if (delta > 80) {
+  const distanceThreshold = Math.max(140, window.innerHeight * 0.28)
+  const elapsed = Math.max(1, Date.now() - touchStartTime)
+  const velocity = delta / elapsed
+  const shouldClose = delta > distanceThreshold || velocity > 0.6
+  if (shouldClose) {
     sheetEl.value.style.transform = 'translateY(110%)'
     setTimeout(() => {
       store.closePendingModal()

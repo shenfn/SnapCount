@@ -25,6 +25,59 @@
       </div>
     </div>
 
+    <!-- 分类消费占比环图 M2 -->
+    <div class="sec-title">分类消费占比</div>
+    <div class="card">
+      <div v-if="!catDonutData.length" class="empty" style="padding:20px">
+        <p>本月暂无数据</p>
+      </div>
+      <div v-else class="donut-wrap">
+        <svg width="120" height="120" viewBox="0 0 42 42">
+          <circle cx="21" cy="21" r="15.9" fill="transparent"
+            stroke="var(--surface2)" stroke-width="5" />
+          <circle v-for="(seg, i) in donutSegments" :key="i"
+            cx="21" cy="21" r="15.9" fill="transparent"
+            :stroke="seg.color" stroke-width="5"
+            :stroke-dasharray="seg.dash"
+            :stroke-dashoffset="seg.offset"
+            stroke-linecap="round" />
+        </svg>
+        <div class="donut-legend">
+          <div v-for="item in catDonutData" :key="item.cat" class="legend-item">
+            <div class="legend-dot" :style="{ background: item.color }"></div>
+            <div class="legend-label">{{ item.label }}</div>
+            <div class="legend-pct">{{ item.pct }}%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 每日支出折线图 M6 -->
+    <div class="sec-title">每日支出趋势</div>
+    <div class="card" style="padding:16px 12px 8px;">
+      <div v-if="!dailyLineData.length" class="empty" style="padding:20px">
+        <p>本月暂无数据</p>
+      </div>
+      <svg v-else :viewBox="`0 0 ${lineW} ${lineH + 20}`" style="width:100%;height:auto;display:block;">
+        <!-- 日均参考线 -->
+        <line x1="0" :y1="avgLineY" :x2="lineW" :y2="avgLineY"
+          stroke="var(--accent)" stroke-width="0.8" stroke-dasharray="3,3" opacity="0.5" />
+        <text :x="lineW - 2" :y="avgLineY - 3" text-anchor="end"
+          fill="var(--accent)" font-size="8" opacity="0.7">日均 ¥{{ dailyAvgNum }}</text>
+        <!-- 折线 -->
+        <polyline :points="linePoints" fill="none" stroke="var(--accent)" stroke-width="1.5"
+          stroke-linejoin="round" stroke-linecap="round" />
+        <!-- 数据点 -->
+        <circle v-for="(pt, i) in dailyLineData" :key="i"
+          :cx="pt.x" :cy="pt.y" r="2" fill="var(--accent)" />
+        <!-- X 轴日期标签(每5天) -->
+        <text v-for="(pt, i) in dailyLineData" :key="'l'+i"
+          v-show="i % 5 === 0 || i === dailyLineData.length - 1"
+          :x="pt.x" :y="lineH + 14" text-anchor="middle"
+          fill="var(--text3)" font-size="7">{{ pt.day }}</text>
+      </svg>
+    </div>
+
     <div class="sec-title">各平台消费</div>
     <div class="card">
       <div v-if="!store.platformChartData.value.length" class="empty" style="padding:20px">
@@ -110,6 +163,78 @@ const maxBill = computed(() => {
 const transportTotal = computed(() =>
   store.transportRecords.value.reduce((s, r) => s + r.amount, 0)
 )
+
+// ── 分类消费占比环图 M2 ──
+const catColors = ['#2D6A4F', '#40916C', '#52B788', '#74C69D', '#95D5B2', '#B7E4C7', '#D8F3DC', '#A7C4A0']
+const catLabelMap = { food: '餐饮', shopping: '购物', transport: '出行', entertainment: '娱乐', life: '生活', health: '医疗', education: '教育', other: '其他' }
+
+const catDonutData = computed(() => {
+  const grouped = {}
+  store.doneBills.value.forEach(b => {
+    const c = b.cat && b.cat !== '?' ? b.cat : 'other'
+    grouped[c] = (grouped[c] || 0) + b.amount
+  })
+  const total = Object.values(grouped).reduce((a, b) => a + b, 0) || 1
+  return Object.entries(grouped)
+    .sort((a, b) => b[1] - a[1])
+    .map(([cat, amount], i) => ({
+      cat,
+      label: catLabelMap[cat] || cat,
+      amount,
+      pct: Math.round(amount / total * 100),
+      color: catColors[i % catColors.length],
+    }))
+})
+
+const donutSegments = computed(() => {
+  const circ = 2 * Math.PI * 15.9
+  let offset = circ * 0.25
+  return catDonutData.value.map(item => {
+    const len = (item.pct / 100) * circ
+    const seg = { color: item.color, dash: `${len} ${circ - len}`, offset: offset }
+    offset -= len
+    return seg
+  })
+})
+
+// ── 每日支出折线图 M6 ──
+const lineW = 320
+const lineH = 100
+
+const dailyLineData = computed(() => {
+  const y = store.currentYear.value
+  const m = store.currentMonth.value
+  const daysInMonth = new Date(y, m, 0).getDate()
+  const byDay = new Array(daysInMonth).fill(0)
+  store.doneBills.value.forEach(b => {
+    if (!b.dateRaw) return
+    const day = parseInt(b.dateRaw.slice(8, 10), 10)
+    if (day >= 1 && day <= daysInMonth) byDay[day - 1] += b.amount
+  })
+  const maxVal = Math.max(...byDay, 1)
+  const padX = 10
+  const usableW = lineW - padX * 2
+  return byDay.map((v, i) => ({
+    day: i + 1,
+    amount: v,
+    x: padX + (daysInMonth > 1 ? (i / (daysInMonth - 1)) * usableW : usableW / 2),
+    y: lineH - (v / maxVal) * (lineH - 10) - 5,
+  }))
+})
+
+const dailyAvgNum = computed(() => {
+  if (!dailyLineData.value.length) return 0
+  const total = dailyLineData.value.reduce((s, d) => s + d.amount, 0)
+  return Math.round(total / dailyLineData.value.length)
+})
+
+const avgLineY = computed(() => {
+  if (!dailyLineData.value.length) return lineH / 2
+  const maxVal = Math.max(...dailyLineData.value.map(d => d.amount), 1)
+  return lineH - (dailyAvgNum.value / maxVal) * (lineH - 10) - 5
+})
+
+const linePoints = computed(() => dailyLineData.value.map(d => `${d.x},${d.y}`).join(' '))
 
 const creditPayments = ['花呗', '京东白条', '美团月付', '先用后付', '拼多多先用后付']
 

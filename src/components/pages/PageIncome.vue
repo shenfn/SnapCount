@@ -2,11 +2,7 @@
   <div class="page active">
     <div class="topbar">
       <h1>收入</h1>
-      <div class="month-nav">
-        <button class="month-nav-btn" @click="store.changeMonth(-1)">‹</button>
-        <span class="month-nav-label">{{ store.monthLabel.value }}</span>
-        <button class="month-nav-btn" @click="store.changeMonth(1)">›</button>
-      </div>
+      <MonthPicker />
     </div>
 
     <div class="income-hero">
@@ -58,6 +54,7 @@
 
 <script setup>
 import { inject, computed } from 'vue'
+import MonthPicker from '../MonthPicker.vue'
 
 const store = inject('store')
 

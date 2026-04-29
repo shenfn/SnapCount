@@ -237,12 +237,10 @@ export function useStore() {
   function openImgFull(src) {
     imgOverlay.src = src
     imgOverlay.open = true
-    pendingModal.open = false
   }
 
   function closeImgFull() {
     imgOverlay.open = false
-    if (pendingModal.bill) pendingModal.open = true
   }
 
   function openDeleteConfirm(type, id, imagePath = null) {

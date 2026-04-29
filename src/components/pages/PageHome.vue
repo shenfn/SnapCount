@@ -2,11 +2,7 @@
   <div class="page active">
     <div class="topbar">
       <h1>随手账</h1>
-      <div class="month-nav">
-        <button class="month-nav-btn" @click="store.changeMonth(-1)">‹</button>
-        <span class="month-nav-label">{{ store.monthLabel.value }}</span>
-        <button class="month-nav-btn" @click="store.changeMonth(1)">›</button>
-      </div>
+      <MonthPicker />
     </div>
 
     <!-- 支出总览 -->
@@ -90,6 +86,7 @@
 import { inject, computed } from 'vue'
 import { computeWeekData } from '../../utils/helpers'
 import BillRow from '../BillRow.vue'
+import MonthPicker from '../MonthPicker.vue'
 
 const store = inject('store')
 const weekLabels = ['周一','周二','周三','周四','周五','周六','周日']

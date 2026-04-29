@@ -317,6 +317,40 @@ body {
 }
 .month-nav-label { font-size: 13px; color: var(--text2); font-weight: 500; }
 
+/* ── Month picker panel ── */
+.mp-overlay {
+  position: fixed; inset: 0; z-index: 150;
+  background: rgba(0,0,0,0.25);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 100px;
+}
+.mp-panel {
+  background: var(--surface); border-radius: 16px;
+  padding: 16px 20px 20px; width: 280px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+}
+.mp-year-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.mp-year { font-size: 16px; font-weight: 600; color: var(--text1); }
+.mp-arrow {
+  background: none; border: none; font-size: 22px; cursor: pointer;
+  color: var(--text2); padding: 4px 8px; line-height: 1; font-family: var(--font);
+}
+.mp-arrow:disabled { opacity: 0.3; cursor: default; }
+.mp-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+}
+.mp-cell {
+  text-align: center; padding: 10px 0; border-radius: 10px;
+  font-size: 13px; font-weight: 500; color: var(--text1);
+  cursor: pointer; transition: background 0.15s;
+}
+.mp-cell:active { background: var(--surface2); }
+.mp-cell.active { background: var(--accent); color: #fff; }
+.mp-cell.disabled { color: var(--border2); pointer-events: none; }
+
 /* ── FAB ── */
 .fab {
   position: fixed; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 16px); right: 20px;
