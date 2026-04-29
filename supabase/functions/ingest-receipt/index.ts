@@ -53,6 +53,19 @@ interface AIResult {
   confidence: number;
 }
 
+function normalizeAmount(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.round(value * 100) / 100;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[^\d.]/g, ""));
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.round(parsed * 100) / 100;
+    }
+  }
+  return null;
+}
+
 // 把 Uint8Array 转成 base64（避免大图时 String.fromCharCode 栈溢出）
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -151,11 +164,13 @@ Deno.serve(async (req) => {
     // 3. 上传到 Storage
     const ext  = mime.includes("png") ? "png" : "jpg";
     const path = `${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${ext}`;
+    let uploadedNewObject = false;
     const { error: upErr } = await supabase.storage.from(BUCKET_NAME)
       .upload(path, bytes, { contentType: mime, upsert: false });
     if (upErr && !upErr.message.includes("already exists")) {
       throw new Error(`Upload failed: ${upErr.message}`);
     }
+    uploadedNewObject = !upErr;
     // 存储路径（非 signed URL），前端查询时动态生成 signed URL，避免过期问题
 
     // 4. 调用 Kimi Vision 识别
@@ -173,15 +188,16 @@ Deno.serve(async (req) => {
     //    不阻断入库，允许用户真实的重复消费，仅在响应中提示
     let possibleDuplicate = false;
     let dupRefId: string | null = null;
-    if (aiOk && ai.amount !== null && ai.payment_method !== null) {
+    const normalizedAmount = normalizeAmount(ai.amount);
+    if (aiOk && normalizedAmount !== null && ai.payment_method !== null) {
       const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
       const today = new Date().toISOString().slice(0, 10);
       let dupQuery = supabase.from("transactions")
         .select("id")
         .eq("transaction_date", today)
         .eq("payment_method", ai.payment_method)
-        .gte("amount", (ai.amount - 0.01).toFixed(2))
-        .lte("amount", (ai.amount + 0.01).toFixed(2))
+        .gte("amount", (normalizedAmount - 0.01).toFixed(2))
+        .lte("amount", (normalizedAmount + 0.01).toFixed(2))
         .gte("created_at", threeMinAgo);
       // 商家名已识别时额外过滤，减少误判；未识别时仅靠金额+支付方式兜底
       if (ai.merchant_name !== null) {
@@ -195,20 +211,20 @@ Deno.serve(async (req) => {
     }
 
     // 6. 判断是否完整
-    const isComplete = ai.amount !== null && ai.platform !== null && ai.category !== null && ai.payment_method !== null;
+    const isComplete = normalizedAmount !== null && ai.platform !== null && ai.category !== null && ai.payment_method !== null;
     const status = isComplete && (ai.confidence ?? 0) >= 0.7 ? "done" : "pending";
-    const isLargeTransport = ai.category === "transport" && (ai.amount ?? 0) >= 200;
+    const isLargeTransport = ai.category === "transport" && (normalizedAmount ?? 0) >= 200;
 
     // 6. 写入数据库
     const now = new Date();
     const { data: row, error: insErr } = await supabase.from("transactions").insert({
       type: "expense",
-      amount: ai.amount ?? 0.01,            // 金额识别失败时占位 0.01，由用户改
+      amount: normalizedAmount ?? 0.01,     // 金额识别失败或非法时占位 0.01，由用户改
       merchant_name: ai.merchant_name,
       platform: ai.platform,
       category: ai.category,
       payment_method: ai.payment_method,
-      status: ai.amount === null ? "pending" : status,
+      status: normalizedAmount === null ? "pending" : status,
       image_url: path,
       image_hash: hash,
       is_large_transport: isLargeTransport,
@@ -217,7 +233,13 @@ Deno.serve(async (req) => {
       source: "ai_scan",
     }).select().single();
 
-    if (insErr) throw new Error(`DB insert failed: ${insErr.message}`);
+    if (insErr) {
+      if (uploadedNewObject) {
+        const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
+        if (removeErr) console.error("Cleanup uploaded image failed:", removeErr);
+      }
+      throw new Error(`DB insert failed: ${insErr.message}`);
+    }
 
     return new Response(JSON.stringify({
       status: row.status,
