@@ -174,19 +174,21 @@ Deno.serve(async (req) => {
     //    不阻断入库，允许用户真实的重复消费，仅在响应中提示
     let possibleDuplicate = false;
     let dupRefId: string | null = null;
-    if (aiOk && ai.amount !== null && ai.payment_method !== null && ai.merchant_name !== null) {
+    if (aiOk && ai.amount !== null && ai.payment_method !== null) {
       const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
       const today = new Date().toISOString().slice(0, 10);
-      const { data: dup } = await supabase.from("transactions")
+      let dupQuery = supabase.from("transactions")
         .select("id")
         .eq("transaction_date", today)
         .eq("payment_method", ai.payment_method)
-        .eq("merchant_name", ai.merchant_name)
         .gte("amount", (ai.amount - 0.01).toFixed(2))
         .lte("amount", (ai.amount + 0.01).toFixed(2))
-        .gte("created_at", threeMinAgo)
-        .limit(1)
-        .maybeSingle();
+        .gte("created_at", threeMinAgo);
+      // 商家名已识别时额外过滤，减少误判；未识别时仅靠金额+支付方式兜底
+      if (ai.merchant_name !== null) {
+        dupQuery = dupQuery.eq("merchant_name", ai.merchant_name);
+      }
+      const { data: dup } = await dupQuery.limit(1).maybeSingle();
       if (dup) {
         possibleDuplicate = true;
         dupRefId = dup.id;
