@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="随手账">
+<title>随手账</title>
+<style>
+  :root {
+    --bg: #F7F6F3;
+    --surface: #FFFFFF;
+    --surface2: #F0EEE9;
+    --text: #1A1A18;
+    --text2: #6B6A65;
+    --text3: #A8A7A2;
+    --accent: #2D6A4F;
+    --accent-light: #E8F4EE;
+    --accent-text: #1B4332;
+    --warn: #B45309;
+    --warn-light: #FEF3C7;
+    --warn-text: #78350F;
+    --danger: #B91C1C;
+    --danger-light: #FEE2E2;
+    --border: rgba(0,0,0,0.07);
+    --border2: rgba(0,0,0,0.12);
+    --radius: 14px;
+    --radius-sm: 9px;
+    --nav-h: 68px;
+    --font: 'PingFang SC', 'Hiragino Sans GB', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    max-width: 430px;
+    margin: 0 auto;
+    position: relative;
+    overflow-x: hidden;
+  }
+  .page { display: none; padding-bottom: calc(var(--nav-h) + 16px); min-height: 100vh; }
+  .page.active { display: block; }
+
+  /* ── Top bar ── */
+  .topbar {
+    padding: 52px 20px 16px;
+    background: var(--surface);
+    border-bottom: 0.5px solid var(--border);
+  }
+  .topbar h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+  .topbar .sub { font-size: 13px; color: var(--text2); margin-top: 2px; }
+
+  /* ── Bottom nav ── */
+  .nav {
+    position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 100%; max-width: 430px;
+    height: var(--nav-h);
+    background: var(--surface);
+    border-top: 0.5px solid var(--border);
+    display: flex; align-items: flex-start; padding-top: 10px;
+    z-index: 100;
+  }
+  .nav-item {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    gap: 4px; cursor: pointer; padding: 4px 0;
+    color: var(--text3); font-size: 11px; font-weight: 500;
+    transition: color 0.15s;
+  }
+  .nav-item.active { color: var(--accent); }
+  .nav-icon { font-size: 22px; line-height: 1; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface); border-radius: var(--radius);
+    border: 0.5px solid var(--border); margin: 0 16px 12px;
+    padding: 16px;
+  }
+  .card-sm { padding: 12px 14px; }
+
+  /* ── Summary hero ── */
+  .hero {
+    background: var(--accent); border-radius: var(--radius);
+    margin: 16px 16px 12px; padding: 20px;
+    color: #fff;
+  }
+  .hero .label { font-size: 12px; opacity: 0.7; }
+  .hero .amount { font-size: 36px; font-weight: 600; letter-spacing: -1px; margin: 4px 0 16px; }
+  .hero-row { display: flex; gap: 20px; }
+  .hero-col .h-label { font-size: 11px; opacity: 0.65; }
+  .hero-col .h-val { font-size: 15px; font-weight: 500; }
+
+  /* ── Pending badge ── */
+  .pending-banner {
+    background: var(--warn-light);
+    border: 0.5px solid rgba(180,83,9,0.2);
+    border-radius: var(--radius);
+    margin: 0 16px 12px; padding: 14px 16px;
+    display: flex; align-items: center; gap: 12px; cursor: pointer;
+  }
+  .pending-dot {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--warn); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600; flex-shrink: 0;
+  }
+  .pending-text .pt { font-size: 14px; font-weight: 500; color: var(--warn-text); }
+  .pending-text .ps { font-size: 12px; color: var(--warn); margin-top: 1px; }
+  .pending-arrow { margin-left: auto; color: var(--warn); font-size: 16px; }
+
+  /* ── Section title ── */
+  .sec-title {
+    font-size: 13px; font-weight: 500; color: var(--text2);
+    padding: 0 20px; margin: 16px 0 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .sec-title span { font-size: 12px; color: var(--accent); cursor: pointer; }
+
+  /* ── Bill item ── */
+  .bill-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 0; border-bottom: 0.5px solid var(--border);
+  }
+  .bill-item:last-child { border-bottom: none; }
+  .bill-icon {
+    width: 38px; height: 38px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .bill-info { flex: 1; min-width: 0; }
+  .bill-name { font-size: 14px; font-weight: 500; }
+  .bill-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .bill-amount { font-size: 15px; font-weight: 600; color: var(--text); }
+  .bill-amount.neg { color: #B91C1C; }
+
+  /* ── Tags ── */
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 500;
+    padding: 2px 8px; border-radius: 20px;
+  }
+  .tag-pending { background: var(--warn-light); color: var(--warn-text); }
+  .tag-done { background: var(--accent-light); color: var(--accent-text); }
+  .tag-cat { background: var(--surface2); color: var(--text2); }
+
+  /* ── Chart bar ── */
+  .chart-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .chart-label { font-size: 12px; color: var(--text2); width: 40px; text-align: right; flex-shrink: 0; }
+  .chart-bar-wrap { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+  .chart-bar { height: 100%; border-radius: 4px; background: var(--accent); transition: width 0.6s cubic-bezier(.4,0,.2,1); }
+  .chart-val { font-size: 12px; color: var(--text2); width: 56px; text-align: right; flex-shrink: 0; }
+
+  /* ── Donut ── */
+  .donut-wrap { display: flex; align-items: center; gap: 16px; }
+  .donut-legend { flex: 1; }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .legend-label { font-size: 12px; color: var(--text2); flex: 1; }
+  .legend-pct { font-size: 12px; font-weight: 500; }
+
+  /* ── Bills page filter ── */
+  .filter-row {
+    display: flex; gap: 8px; padding: 12px 16px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; background: var(--surface);
+    border-bottom: 0.5px solid var(--border);
+  }
+  .filter-row::-webkit-scrollbar { display: none; }
+  .filter-chip {
+    flex-shrink: 0; font-size: 13px; padding: 6px 14px;
+    border-radius: 20px; background: var(--surface2); color: var(--text2);
+    border: none; cursor: pointer; font-family: var(--font);
+    transition: all 0.15s;
+  }
+  .filter-chip.active { background: var(--accent); color: #fff; }
+
+  /* ── Bill group ── */
+  .bill-group { margin: 0 16px 12px; }
+  .bill-date { font-size: 12px; color: var(--text2); font-weight: 500; margin-bottom: 8px; padding-top: 4px; }
+
+  /* ── Modal overlay ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.4); backdrop-filter: blur(2px);
+    align-items: flex-end; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-sheet {
+    background: var(--surface); border-radius: 20px 20px 0 0;
+    width: 100%; max-width: 430px;
+    max-height: 92vh; overflow-y: auto;
+    padding: 0 0 40px;
+    animation: slideUp 0.28s cubic-bezier(.4,0,.2,1);
+  }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .sheet-handle {
+    width: 36px; height: 4px; background: var(--border2);
+    border-radius: 2px; margin: 12px auto 0;
+  }
+  .sheet-header {
+    padding: 16px 20px 12px;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .sheet-title { font-size: 16px; font-weight: 600; }
+  .sheet-sub { font-size: 13px; color: var(--text2); margin-top: 3px; }
+  .sheet-amount {
+    font-size: 30px; font-weight: 600; color: var(--danger);
+    padding: 16px 20px 0; letter-spacing: -0.5px;
+  }
+
+  /* ── Selector section ── */
+  .sel-section { padding: 16px 20px 0; }
+  .sel-label { font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 10px; }
+  .sel-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sel-chip {
+    font-size: 14px; padding: 8px 16px; border-radius: 20px;
+    background: var(--surface2); color: var(--text);
+    border: 1.5px solid transparent; cursor: pointer;
+    font-family: var(--font); transition: all 0.15s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .sel-chip.selected { background: var(--accent-light); border-color: var(--accent); color: var(--accent-text); }
+  .sel-chip .chip-count { font-size: 11px; color: var(--text3); }
+  .sel-chip.selected .chip-count { color: var(--accent); }
+  .hot-badge { font-size: 10px; background: var(--warn); color: #fff; padding: 1px 5px; border-radius: 4px; }
+
+  /* ── Confirm button ── */
+  .confirm-btn {
+    margin: 20px 20px 0;
+    width: calc(100% - 40px);
+    padding: 14px; border-radius: var(--radius);
+    background: var(--accent); color: #fff; border: none;
+    font-size: 16px; font-weight: 600; font-family: var(--font);
+    cursor: pointer; transition: opacity 0.15s;
+  }
+  .confirm-btn:active { opacity: 0.85; }
+  .confirm-btn:disabled { background: var(--text3); cursor: not-allowed; }
+
+  /* ── Pending list ── */
+  .pending-item {
+    background: var(--surface); border-radius: var(--radius);
+    border: 0.5px solid var(--border); margin: 0 16px 10px;
+    padding: 14px 16px; cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .pending-item:active { border-color: var(--accent); }
+  .pending-row { display: flex; justify-content: space-between; align-items: flex-start; }
+  .pending-amount { font-size: 20px; font-weight: 600; color: var(--danger); }
+  .pending-time { font-size: 12px; color: var(--text3); margin-top: 4px; }
+  .pending-fields { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .field-chip {
+    font-size: 12px; padding: 3px 10px; border-radius: 20px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .field-missing { background: var(--warn-light); color: var(--warn-text); }
+  .field-ok { background: var(--accent-light); color: var(--accent-text); }
+
+  /* ── Stats grid ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 0 16px 12px; }
+  .stat-card {
+    background: var(--surface); border-radius: var(--radius-sm);
+    border: 0.5px solid var(--border); padding: 14px;
+  }
+  .stat-label { font-size: 11px; color: var(--text2); }
+  .stat-val { font-size: 22px; font-weight: 600; margin-top: 4px; letter-spacing: -0.5px; }
+  .stat-val.red { color: var(--danger); }
+  .stat-val.green { color: var(--accent); }
+  .stat-change { font-size: 11px; color: var(--text3); margin-top: 3px; }
+
+  /* ── Report period switch ── */
+  .period-tabs { display: flex; background: var(--surface2); border-radius: 10px; padding: 3px; margin: 16px 16px 12px; }
+  .period-tab {
+    flex: 1; text-align: center; padding: 7px 0; border-radius: 8px;
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    color: var(--text2); transition: all 0.2s;
+  }
+  .period-tab.active { background: var(--surface); color: var(--text); }
+
+  /* ── Weekly trend ── */
+  .week-bars { display: flex; align-items: flex-end; gap: 6px; height: 80px; padding: 0 4px; }
+  .week-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .week-bar {
+    width: 100%; border-radius: 4px 4px 0 0;
+    background: var(--surface2); transition: height 0.4s cubic-bezier(.4,0,.2,1);
+  }
+  .week-bar.today { background: var(--accent); }
+  .week-day { font-size: 10px; color: var(--text3); }
+
+  /* ── Scroll spacer ── */
+  .spacer { height: 20px; }
+
+  .divider { height: 0.5px; background: var(--border); margin: 0 16px; }
+
+  /* ── Empty state ── */
+  .empty { text-align: center; padding: 48px 20px; color: var(--text3); }
+  .empty .e-icon { font-size: 40px; margin-bottom: 12px; }
+  .empty p { font-size: 14px; }
+
+  /* success flash */
+  .flash {
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: #fff; padding: 10px 20px;
+    border-radius: 20px; font-size: 14px; font-weight: 500;
+    z-index: 300; opacity: 0; pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  .flash.show { opacity: 1; }
+
+  /* ── Month nav ── */
+  .month-nav { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+  .month-nav-btn {
+    background: none; border: none; font-size: 20px; cursor: pointer;
+    color: var(--text2); padding: 0; line-height: 1; font-family: var(--font);
+  }
+  .month-nav-label { font-size: 13px; color: var(--text2); font-weight: 500; }
+
+  /* ── FAB ── */
+  .fab {
+    position: fixed; bottom: calc(var(--nav-h) + 16px); right: 20px;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: var(--accent); color: #fff; border: none; font-size: 28px;
+    cursor: pointer; box-shadow: 0 4px 16px rgba(45,106,79,0.35);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 90; transition: transform 0.15s; font-family: var(--font);
+  }
+  .fab:active { transform: scale(0.93); }
+  .fab-menu {
+    position: fixed; bottom: calc(var(--nav-h) + 76px); right: 20px;
+    display: none; flex-direction: column; gap: 8px; z-index: 90; align-items: flex-end;
+  }
+  .fab-menu.open { display: flex; }
+  .fab-item {
+    background: var(--surface); border-radius: 20px; padding: 9px 18px;
+    font-size: 14px; font-weight: 500; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+    cursor: pointer; border: 0.5px solid var(--border);
+    display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  }
+  .fab-overlay { display: none; position: fixed; inset: 0; z-index: 89; }
+  .fab-overlay.open { display: block; }
+
+  /* ── Income hero ── */
+  .income-hero {
+    background: linear-gradient(135deg, #1565C0 0%, #1976D2 100%);
+    border-radius: var(--radius); margin: 16px 16px 12px; padding: 20px; color: #fff;
+  }
+  .income-hero .label { font-size: 12px; opacity: 0.7; }
+  .income-hero .amount { font-size: 36px; font-weight: 600; letter-spacing: -1px; margin: 4px 0 16px; }
+  .income-hero-row { display: flex; gap: 20px; }
+  .income-hero-col .ih-label { font-size: 11px; opacity: 0.65; }
+  .income-hero-col .ih-val { font-size: 15px; font-weight: 500; }
+
+  /* ── Home hero balance row ── */
+  .hero-balance-row {
+    display: flex; gap: 16px; padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.18); margin-top: 12px;
+  }
+  .hero-bal-col .hb-label { font-size: 10px; opacity: 0.65; }
+  .hero-bal-col .hb-val { font-size: 14px; font-weight: 600; margin-top: 2px; }
+
+  /* ── Screenshot thumb ── */
+  .thumb-wrap {
+    margin: 12px 20px 0; background: var(--surface2); border-radius: var(--radius-sm);
+    height: 90px; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: var(--text3); gap: 8px; cursor: pointer;
+    border: 0.5px dashed var(--border2);
+  }
+
+  /* ── Sheet text input ── */
+  .sheet-input {
+    width: 100%; padding: 10px 14px; border-radius: var(--radius-sm);
+    border: 1.5px solid var(--border2); background: var(--surface2);
+    font-size: 14px; font-family: var(--font); color: var(--text); outline: none;
+    transition: border-color 0.15s;
+  }
+  .sheet-input:focus { border-color: var(--accent); background: var(--surface); }
+  .sheet-input::placeholder { color: var(--text3); }
+
+  /* ── Income item ── */
+  .income-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 0; border-bottom: 0.5px solid var(--border);
+  }
+  .income-item:last-child { border-bottom: none; }
+  .income-icon {
+    width: 38px; height: 38px; border-radius: 10px; background: #DBEAFE;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .income-amount { font-size: 15px; font-weight: 600; color: #1565C0; }
+
+  /* ── Transport row ── */
+  .transport-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-bottom: 0.5px solid var(--border);
+  }
+  .transport-row:last-child { border-bottom: none; }
+  .transport-info .transport-label { font-size: 13px; color: var(--text); }
+  .transport-info .transport-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .transport-amount { font-size: 15px; font-weight: 600; color: var(--danger); }
+
+  /* ── Income add modal number input ── */
+  .amount-input-wrap {
+    padding: 16px 20px 0;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .amount-prefix { font-size: 28px; font-weight: 600; color: #1565C0; }
+  .amount-input {
+    flex: 1; font-size: 28px; font-weight: 600; color: #1565C0;
+    border: none; outline: none; background: transparent;
+    font-family: var(--font);
+  }
+  .amount-input::placeholder { color: var(--text3); font-size: 22px; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════
+     页面 1：首页
+══════════════════════════════════ -->
+<div class="page active" id="page-home">
+  <div class="topbar">
+    <h1>随手账</h1>
+    <div class="month-nav">
+      <button class="month-nav-btn" onclick="changeMonth(-1)">‹</button>
+      <span class="month-nav-label month-display">2025年4月</span>
+      <button class="month-nav-btn" onclick="changeMonth(1)">›</button>
+    </div>
+  </div>
+
+  <!-- 支出总览 -->
+  <div class="hero">
+    <div class="label">本月总支出</div>
+    <div class="amount">¥3,842.50</div>
+    <div class="hero-row">
+      <div class="hero-col">
+        <div class="h-label">笔数</div>
+        <div class="h-val">34 笔</div>
+      </div>
+      <div class="hero-col">
+        <div class="h-label">日均</div>
+        <div class="h-val">¥139</div>
+      </div>
+      <div class="hero-col">
+        <div class="h-label">较上月</div>
+        <div class="h-val">↑ 12%</div>
+      </div>
+    </div>
+    <div class="hero-balance-row">
+      <div class="hero-bal-col">
+        <div class="hb-label">本月收入</div>
+        <div class="hb-val" id="heroIncomeVal">¥12,500</div>
+      </div>
+      <div class="hero-bal-col">
+        <div class="hb-label">本月结余</div>
+        <div class="hb-val" id="heroNetVal" style="color:#4ADE80">¥8,657</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 待补充提醒 -->
+  <div class="pending-banner" onclick="switchPage('pending')">
+    <div class="pending-dot">3</div>
+    <div class="pending-text">
+      <div class="pt">有 3 条记录待补充</div>
+      <div class="ps">信息不完整，点击逐一完善</div>
+    </div>
+    <div class="pending-arrow">›</div>
+  </div>
+
+  <!-- 本周支出趋势 -->
+  <div class="sec-title">本周支出趋势</div>
+  <div class="card">
+    <div class="week-bars" id="weekBars"></div>
+    <div style="display:flex; gap:6px; margin-top:6px;" id="weekDays"></div>
+  </div>
+
+  <!-- 分类占比 -->
+  <div class="sec-title">消费分类 <span>查看全部</span></div>
+  <div class="card">
+    <div class="donut-wrap">
+      <svg width="90" height="90" viewBox="0 0 36 36" style="flex-shrink:0">
+        <circle cx="18" cy="18" r="14" fill="none" stroke="#F0EEE9" stroke-width="5"/>
+        <circle cx="18" cy="18" r="14" fill="none" stroke="#2D6A4F" stroke-width="5"
+          stroke-dasharray="44 44" stroke-dashoffset="11" transform="rotate(-90 18 18)"/>
+        <circle cx="18" cy="18" r="14" fill="none" stroke="#B45309" stroke-width="5"
+          stroke-dasharray="22 66" stroke-dashoffset="-33" transform="rotate(-90 18 18)"/>
+        <circle cx="18" cy="18" r="14" fill="none" stroke="#1D6FA4" stroke-width="5"
+          stroke-dasharray="15 73" stroke-dashoffset="-55" transform="rotate(-90 18 18)"/>
+        <circle cx="18" cy="18" r="14" fill="none" stroke="#A8A7A2" stroke-width="5"
+          stroke-dasharray="7 81" stroke-dashoffset="-70" transform="rotate(-90 18 18)"/>
+      </svg>
+      <div class="donut-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#2D6A4F"></div><div class="legend-label">餐饮</div><div class="legend-pct">39%</div></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#B45309"></div><div class="legend-label">购物</div><div class="legend-pct">20%</div></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#1D6FA4"></div><div class="legend-label">出行</div><div class="legend-pct">13%</div></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#A8A7A2"></div><div class="legend-label">其他</div><div class="legend-pct">28%</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 最近记录 -->
+  <div class="sec-title">最近记录 <span onclick="switchPage('bills')">查看全部 ›</span></div>
+  <div class="card" id="recentBills"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ══════════════════════════════════
+     页面 2：待补充
+══════════════════════════════════ -->
+<div class="page" id="page-pending">
+  <div class="topbar">
+    <h1>待补充</h1>
+    <div class="sub">3 条记录信息不完整</div>
+  </div>
+  <div style="height:12px"></div>
+  <div id="pendingList"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ══════════════════════════════════
+     页面 3：账单
+══════════════════════════════════ -->
+<div class="page" id="page-bills">
+  <div class="topbar">
+    <h1>账单记录</h1>
+    <div class="sub">本月 34 笔</div>
+  </div>
+  <div class="filter-row" id="filterRow">
+    <button class="filter-chip active" onclick="setFilter('all',this)">全部</button>
+    <button class="filter-chip" onclick="setFilter('餐饮',this)">餐饮</button>
+    <button class="filter-chip" onclick="setFilter('购物',this)">购物</button>
+    <button class="filter-chip" onclick="setFilter('出行',this)">出行</button>
+    <button class="filter-chip" onclick="setFilter('娱乐',this)">娱乐</button>
+    <button class="filter-chip" onclick="setFilter('生活',this)">生活</button>
+  </div>
+  <div id="billsList" style="padding-top:12px"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ══════════════════════════════════
+     页面 4：报告
+══════════════════════════════════ -->
+<div class="page" id="page-report">
+  <div class="topbar">
+    <h1>消费报告</h1>
+    <div class="sub">本月数据截至今日</div>
+  </div>
+
+  <div class="period-tabs">
+    <div class="period-tab active">本月</div>
+    <div class="period-tab">上月</div>
+    <div class="period-tab">近3月</div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">总支出</div>
+      <div class="stat-val red">¥3,842</div>
+      <div class="stat-change">↑ 12% 较上月</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">记录笔数</div>
+      <div class="stat-val">34</div>
+      <div class="stat-change">↓ 2笔 较上月</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">最大单笔</div>
+      <div class="stat-val red">¥498</div>
+      <div class="stat-change">购物 · 京东</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">日均支出</div>
+      <div class="stat-val">¥139</div>
+      <div class="stat-change">较预算 +¥39</div>
+    </div>
+  </div>
+
+  <div class="sec-title">各平台消费</div>
+  <div class="card" id="platformChart"></div>
+
+  <div class="sec-title">支付方式分布</div>
+  <div class="card" id="payChart"></div>
+
+  <div class="sec-title">大额交通汇总</div>
+  <div class="card" id="transportSummary"></div>
+
+  <div class="sec-title">先用后付汇总</div>
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="font-size:13px; color:var(--text2)">花呗未还</div>
+      <div style="font-size:16px; font-weight:600; color:var(--danger)">¥680</div>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="font-size:13px; color:var(--text2)">京东白条未还</div>
+      <div style="font-size:16px; font-weight:600; color:var(--danger)">¥498</div>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="font-size:13px; color:var(--text2)">美团月付未还</div>
+      <div style="font-size:16px; font-weight:600; color:var(--danger)">¥234</div>
+    </div>
+    <div style="border-top:0.5px solid var(--border); padding-top:12px; display:flex; justify-content:space-between;">
+      <div style="font-size:14px; font-weight:500;">合计待还</div>
+      <div style="font-size:18px; font-weight:600; color:var(--danger)">¥1,412</div>
+    </div>
+  </div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ══════════════════════════════════
+     页面 5：收入
+══════════════════════════════════ -->
+<div class="page" id="page-income">
+  <div class="topbar">
+    <h1>收入</h1>
+    <div class="month-nav">
+      <button class="month-nav-btn" onclick="changeMonth(-1)">‹</button>
+      <span class="month-nav-label month-display">2025年4月</span>
+      <button class="month-nav-btn" onclick="changeMonth(1)">›</button>
+    </div>
+  </div>
+
+  <!-- 收入总览 -->
+  <div class="income-hero">
+    <div class="label">本月总收入</div>
+    <div class="amount" id="incomeTotalAmt">¥12,500.00</div>
+    <div class="income-hero-row">
+      <div class="income-hero-col">
+        <div class="ih-label">笔数</div>
+        <div class="ih-val" id="incomeTotalCnt">2 笔</div>
+      </div>
+      <div class="income-hero-col">
+        <div class="ih-label">较上月</div>
+        <div class="ih-val">— 持平</div>
+      </div>
+      <div class="income-hero-col">
+        <div class="ih-label">本月结余</div>
+        <div class="ih-val" id="incomeNetVal">¥8,657</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 收入来源分布 -->
+  <div class="sec-title">收入来源 <span onclick="openAddIncome()">＋ 添加</span></div>
+  <div class="card" id="incomeSourceChart"></div>
+
+  <!-- 收入记录 -->
+  <div class="sec-title">本月记录</div>
+  <div class="card" id="incomeList"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ══════════════════════════════════
+     底部导航
+══════════════════════════════════ -->
+<nav class="nav">
+  <div class="nav-item active" onclick="switchPage('home')" id="nav-home">
+    <div class="nav-icon">⊙</div>
+    <div>首页</div>
+  </div>
+  <div class="nav-item" onclick="switchPage('pending')" id="nav-pending">
+    <div class="nav-icon">◎</div>
+    <div>待补充</div>
+  </div>
+  <div class="nav-item" onclick="switchPage('bills')" id="nav-bills">
+    <div class="nav-icon">☰</div>
+    <div>账单</div>
+  </div>
+  <div class="nav-item" onclick="switchPage('income')" id="nav-income">
+    <div class="nav-icon">💰</div>
+    <div>收入</div>
+  </div>
+  <div class="nav-item" onclick="switchPage('report')" id="nav-report">
+    <div class="nav-icon">◈</div>
+    <div>报告</div>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════
+     FAB 快速添加
+══════════════════════════════════ -->
+<div class="fab-overlay" id="fabOverlay" onclick="closeFabMenu()"></div>
+<div class="fab-menu" id="fabMenu">
+  <div class="fab-item" onclick="openAddIncome();closeFabMenu()">💰 添加收入</div>
+  <div class="fab-item" onclick="showFlash('手动新增支出开发中');closeFabMenu()">💸 添加支出</div>
+</div>
+<button class="fab" onclick="toggleFabMenu()">+</button>
+
+<!-- ══════════════════════════════════
+     收入录入 Modal
+══════════════════════════════════ -->
+<div class="modal-overlay" id="incomeModal" onclick="closeIncomeModal(event)">
+  <div class="modal-sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <div class="sheet-title">添加收入</div>
+      <div class="sheet-sub">手动录入收入记录</div>
+    </div>
+    <div class="amount-input-wrap">
+      <span class="amount-prefix">¥</span>
+      <input type="number" class="amount-input" id="income-amount-input" placeholder="0.00" min="0.01" step="0.01">
+    </div>
+
+    <div class="sel-section" style="margin-top:16px">
+      <div class="sel-label">收入类型</div>
+      <div class="sel-grid" id="sel-income-cat">
+        <div class="sel-chip selected" onclick="selectIncomeCategory(this)" data-val="salary">💼 工资 <span class="chip-count hot-badge">常用</span></div>
+        <div class="sel-chip" onclick="selectIncomeCategory(this)" data-val="bonus">🎁 奖金</div>
+        <div class="sel-chip" onclick="selectIncomeCategory(this)" data-val="freelance">💻 兼职</div>
+        <div class="sel-chip" onclick="selectIncomeCategory(this)" data-val="investment">📈 投资收益</div>
+        <div class="sel-chip" onclick="selectIncomeCategory(this)" data-val="reimbursement">🧾 报销</div>
+        <div class="sel-chip" onclick="selectIncomeCategory(this)" data-val="other">💰 其他</div>
+      </div>
+    </div>
+
+    <div class="sel-section" style="margin-top:16px">
+      <div class="sel-label">来源名称（可选）</div>
+      <input type="text" class="sheet-input" id="income-source-input" placeholder="如：XX公司、接单项目名…" maxlength="50">
+    </div>
+
+    <div class="sel-section" style="margin-top:12px">
+      <div class="sel-label">备注（可选）</div>
+      <input type="text" class="sheet-input" id="income-note-input" placeholder="备注信息…" maxlength="100">
+    </div>
+
+    <button class="confirm-btn" onclick="confirmIncome()" style="background:#1565C0">确认保存</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     补全 Modal
+══════════════════════════════════ -->
+<div class="modal-overlay" id="modal" onclick="closeModal(event)">
+  <div class="modal-sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <div class="sheet-title" id="modalTitle">补充账单信息</div>
+      <div class="sheet-sub" id="modalSub">截图时间 · 信息不完整</div>
+    </div>
+    <div class="sheet-amount" id="modalAmount">¥0.00</div>
+
+    <!-- 截图预览 -->
+    <div class="thumb-wrap" id="modalThumb">
+      <span>🖼</span><span>原始截图预览</span>
+    </div>
+
+    <!-- 商家名称 -->
+    <div class="sel-section" style="margin-top:12px">
+      <div class="sel-label">商家名称（可选）</div>
+      <input type="text" class="sheet-input" id="modal-merchant" placeholder="如：麦当劳、京东购物…" maxlength="50">
+    </div>
+
+    <!-- 消费平台 -->
+    <div class="sel-section">
+      <div class="sel-label">消费平台</div>
+      <div class="sel-grid" id="sel-platform">
+        <div class="sel-chip selected" onclick="select('platform',this)" data-val="美团">🛵 美团 <span class="chip-count hot-badge">常用</span></div>
+        <div class="sel-chip" onclick="select('platform',this)" data-val="微信">💬 微信</div>
+        <div class="sel-chip" onclick="select('platform',this)" data-val="京东">📦 京东</div>
+        <div class="sel-chip" onclick="select('platform',this)" data-val="拼多多">🛍 拼多多</div>
+        <div class="sel-chip" onclick="select('platform',this)" data-val="淘宝">🧡 淘宝</div>
+        <div class="sel-chip" onclick="select('platform',this)" data-val="抖音">🎵 抖音</div>
+        <div class="sel-chip" onclick="select('platform',this)" data-val="支付宝">💙 支付宝</div>
+      </div>
+    </div>
+
+    <!-- 消费分类 -->
+    <div class="sel-section" style="margin-top:16px">
+      <div class="sel-label">消费分类</div>
+      <div class="sel-grid" id="sel-category">
+        <div class="sel-chip selected" onclick="select('category',this)" data-val="餐饮">🍜 餐饮 <span class="chip-count hot-badge">最常用</span></div>
+        <div class="sel-chip" onclick="select('category',this)" data-val="购物">🛒 购物 <span class="chip-count">8次</span></div>
+        <div class="sel-chip" onclick="select('category',this)" data-val="出行">🚗 出行 <span class="chip-count">5次</span></div>
+        <div class="sel-chip" onclick="select('category',this)" data-val="娱乐">🎮 娱乐 <span class="chip-count">3次</span></div>
+        <div class="sel-chip" onclick="select('category',this)" data-val="生活">🏠 生活 <span class="chip-count">2次</span></div>
+        <div class="sel-chip" onclick="select('category',this)" data-val="其他">📌 其他</div>
+      </div>
+    </div>
+
+    <!-- 支付方式 -->
+    <div class="sel-section" style="margin-top:16px">
+      <div class="sel-label">支付方式</div>
+      <div class="sel-grid" id="sel-payment">
+        <div class="sel-chip selected" onclick="select('payment',this)" data-val="微信支付">💚 微信支付 <span class="chip-count hot-badge">常用</span></div>
+        <div class="sel-chip" onclick="select('payment',this)" data-val="花呗">🔵 花呗 <span class="chip-count">6次</span></div>
+        <div class="sel-chip" onclick="select('payment',this)" data-val="支付宝">🔷 支付宝</div>
+        <div class="sel-chip" onclick="select('payment',this)" data-val="银行卡">💳 银行卡 <span class="chip-count">4次</span></div>
+        <div class="sel-chip" onclick="select('payment',this)" data-val="京东白条">🟡 京东白条</div>
+        <div class="sel-chip" onclick="select('payment',this)" data-val="美团月付">🔴 美团月付</div>
+        <div class="sel-chip" onclick="select('payment',this)" data-val="先用后付">⚡ 先用后付</div>
+      </div>
+    </div>
+
+    <button class="confirm-btn" onclick="confirmEntry()" id="confirmBtn">确认保存</button>
+  </div>
+</div>
+
+<!-- Flash -->
+<div class="flash" id="flash">✓ 已保存</div>
+
+<script>
+// ══ Month state ══
+let currentYear = 2025;
+let currentMonth = 4;
+
+function formatMonthLabel(y, m) { return `${y}年${m}月`; }
+
+function changeMonth(delta) {
+  const now = new Date();
+  let m = currentMonth + delta;
+  let y = currentYear;
+  if (m < 1) { m = 12; y--; }
+  if (m > 12) { m = 1; y++; }
+  if (new Date(y, m - 1, 1) > new Date(now.getFullYear(), now.getMonth(), 1)) return;
+  currentYear = y; currentMonth = m;
+  document.querySelectorAll('.month-display').forEach(el => el.textContent = formatMonthLabel(y, m));
+}
+
+// ══ Data ══
+const bills = [
+  { id:1, name:'麦当劳', platform:'美团', payment:'微信支付', cat:'餐饮', amount:38.5, date:'今天', time:'12:34', status:'done', icon:'🍔', iconBg:'#FEF3C7' },
+  { id:2, name:'未识别商家', platform:'?', payment:'?', cat:'?', amount:128, date:'今天', time:'10:12', status:'pending', icon:'❓', iconBg:'#FEE2E2' },
+  { id:3, name:'京东购物', platform:'京东', payment:'京东白条', cat:'购物', amount:498, date:'昨天', time:'20:05', status:'done', icon:'📦', iconBg:'#EFF6FF' },
+  { id:4, name:'滴滴出行', platform:'滴滴', payment:'微信支付', cat:'出行', amount:23.6, date:'昨天', time:'18:40', status:'done', icon:'🚗', iconBg:'#F0FDF4' },
+  { id:5, name:'便利蜂', platform:'微信', payment:'微信支付', cat:'餐饮', amount:15.5, date:'昨天', time:'09:20', status:'done', icon:'🥤', iconBg:'#ECFDF5' },
+  { id:6, name:'未识别商家', platform:'?', payment:'?', cat:'?', amount:56, date:'4月25日', time:'21:10', status:'pending', icon:'❓', iconBg:'#FEE2E2' },
+  { id:7, name:'拼多多', platform:'拼多多', payment:'先用后付', cat:'购物', amount:89, date:'4月25日', time:'15:30', status:'done', icon:'🛍', iconBg:'#FFF7ED' },
+  { id:8, name:'美团外卖', platform:'美团', payment:'美团月付', cat:'餐饮', amount:42, date:'4月24日', time:'12:00', status:'done', icon:'🛵', iconBg:'#FFF7ED' },
+  { id:9, name:'未识别商家', platform:'?', payment:'花呗', cat:'?', amount:200, date:'4月24日', time:'09:00', status:'pending', icon:'❓', iconBg:'#FEE2E2' },
+];
+
+const incomeRecords = [
+  { id:101, cat:'salary', source:'公司薪资', amount:12000, date:'4月10日', time:'09:00', icon:'💼' },
+  { id:102, cat:'freelance', source:'接单收入', amount:500, date:'4月15日', time:'18:30', icon:'💻' },
+];
+
+const incomeCatMap = {
+  salary:        { label:'工资',     icon:'💼' },
+  bonus:         { label:'奖金',     icon:'🎁' },
+  freelance:     { label:'兼职',     icon:'💻' },
+  investment:    { label:'投资收益', icon:'📈' },
+  reimbursement: { label:'报销',     icon:'🧾' },
+  other:         { label:'其他',     icon:'💰' },
+};
+
+const transportRecords = [
+  { id:201, type:'机票', desc:'上海→北京', amount:980, date:'4月18日' },
+  { id:202, type:'高铁动车', desc:'导览', amount:263.5, date:'4月05日' },
+];
+
+const platforms = [
+  {name:'美团', amount:680, pct:18},
+  {name:'京东', amount:760, pct:20},
+  {name:'微信', amount:1100, pct:29},
+  {name:'支付宝', amount:580, pct:15},
+  {name:'拼多多', amount:420, pct:11},
+  {name:'其他', amount:302, pct:7},
+];
+
+const payments = [
+  {name:'微信支付', pct:42},
+  {name:'花呗', pct:22},
+  {name:'京东白条', pct:16},
+  {name:'银行卡', pct:11},
+  {name:'其他', pct:9},
+];
+
+const weekData = [45, 120, 88, 0, 210, 65, 138];
+const weekLabels = ['周一','周二','周三','周四','周五','周六','周日'];
+let currentFilter = 'all';
+let pendingIds = [2,6,9];
+let modalData = {};
+let selections = { platform:null, category:null, payment:null };
+
+// ══ Init ══
+function init() {
+  renderWeekBars();
+  renderRecentBills();
+  renderPendingList();
+  renderBillsList();
+  renderPlatformChart();
+  renderPayChart();
+  renderIncomeSourceChart();
+  renderIncomeList();
+  renderTransportSummary();
+  updateIncomeHero();
+}
+
+function renderWeekBars() {
+  const max = Math.max(...weekData);
+  const bars = document.getElementById('weekBars');
+  const days = document.getElementById('weekDays');
+  bars.innerHTML = weekData.map((v,i) => `
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%">
+      <div style="flex:1;display:flex;align-items:flex-end;width:100%">
+        <div style="width:100%;height:${max?Math.max(v/max*72,v>0?6:0):0}px;
+          border-radius:4px 4px 0 0;background:${i===6?'var(--accent)':'var(--surface2)'}">
+        </div>
+      </div>
+    </div>`).join('');
+  days.innerHTML = weekLabels.map((d,i) =>
+    `<div style="flex:1;text-align:center;font-size:10px;color:${i===6?'var(--accent)':'var(--text3)'};">${d}</div>`
+  ).join('');
+}
+
+function renderRecentBills() {
+  const el = document.getElementById('recentBills');
+  el.innerHTML = bills.slice(0,5).map(b => billRow(b)).join('');
+}
+
+function billRow(b) {
+  return `<div class="bill-item">
+    <div class="bill-icon" style="background:${b.iconBg}">${b.icon}</div>
+    <div class="bill-info">
+      <div class="bill-name">${b.name} ${b.status==='pending'?'<span class="tag tag-pending">待补充</span>':''}</div>
+      <div class="bill-meta">${b.platform!='?'?b.platform:'未知平台'} · ${b.time}</div>
+    </div>
+    <div class="bill-amount neg">-¥${b.amount.toFixed(2)}</div>
+  </div>`;
+}
+
+function renderPendingList() {
+  const el = document.getElementById('pendingList');
+  const pending = bills.filter(b => b.status==='pending');
+  if (!pending.length) {
+    el.innerHTML = `<div class="empty"><div class="e-icon">✓</div><p>全部补充完毕</p></div>`;
+    return;
+  }
+  el.innerHTML = pending.map(b => `
+    <div class="pending-item" onclick="openModal(${b.id})">
+      <div class="pending-row">
+        <div>
+          <div class="pending-amount">-¥${b.amount.toFixed(2)}</div>
+          <div class="pending-time">${b.date} ${b.time} · 截图识别</div>
+        </div>
+        <div style="font-size:13px;color:var(--accent)">补充 ›</div>
+      </div>
+      <div class="pending-fields">
+        ${b.platform==='?'?'<span class="field-chip field-missing">? 平台未知</span>':'<span class="field-chip field-ok">✓ '+b.platform+'</span>'}
+        ${b.cat==='?'?'<span class="field-chip field-missing">? 分类未知</span>':'<span class="field-chip field-ok">✓ '+b.cat+'</span>'}
+        ${b.payment==='?'?'<span class="field-chip field-missing">? 支付方式未知</span>':'<span class="field-chip field-ok">✓ '+b.payment+'</span>'}
+      </div>
+    </div>`).join('');
+}
+
+function renderBillsList() {
+  const el = document.getElementById('billsList');
+  const filtered = currentFilter==='all' ? bills : bills.filter(b=>b.cat===currentFilter);
+  const groups = {};
+  filtered.forEach(b => {
+    if (!groups[b.date]) groups[b.date]=[];
+    groups[b.date].push(b);
+  });
+  el.innerHTML = Object.entries(groups).map(([date,items])=>`
+    <div class="bill-group">
+      <div class="bill-date">${date}</div>
+      <div class="card" style="padding:0 16px">
+        ${items.map(b=>billRow(b)).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function renderPlatformChart() {
+  const el = document.getElementById('platformChart');
+  const max = Math.max(...platforms.map(p=>p.pct));
+  el.innerHTML = platforms.map(p=>`
+    <div class="chart-row">
+      <div class="chart-label">${p.name}</div>
+      <div class="chart-bar-wrap">
+        <div class="chart-bar" style="width:${p.pct/max*100}%"></div>
+      </div>
+      <div class="chart-val">¥${p.amount}</div>
+    </div>`).join('');
+}
+
+function renderPayChart() {
+  const el = document.getElementById('payChart');
+  el.innerHTML = payments.map(p=>`
+    <div class="chart-row">
+      <div class="chart-label">${p.name}</div>
+      <div class="chart-bar-wrap">
+        <div class="chart-bar" style="width:${p.pct}%"></div>
+      </div>
+      <div class="chart-val">${p.pct}%</div>
+    </div>`).join('');
+}
+
+// ══ Navigation ══
+function switchPage(name) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  document.getElementById('nav-'+name).classList.add('active');
+  window.scrollTo(0,0);
+}
+
+function setFilter(cat, btn) {
+  currentFilter = cat;
+  document.querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));
+  btn.classList.add('active');
+  renderBillsList();
+}
+
+// ══ Modal ══
+function openModal(id) {
+  const b = bills.find(x=>x.id===id);
+  modalData = b;
+  selections = { platform: b.platform!='?' ? b.platform : null,
+                 category: b.cat!='?' ? b.cat : null,
+                 payment: b.payment!='?' ? b.payment : null };
+  document.getElementById('modalTitle').textContent = '补充账单信息';
+  document.getElementById('modalSub').textContent = `${b.date} ${b.time} · 截图识别`;
+  document.getElementById('modalAmount').textContent = `-¥${b.amount.toFixed(2)}`;
+  syncSelections();
+  document.getElementById('modal-merchant').value = b.name !== '未识别商家' ? b.name : '';
+  document.getElementById('modal').classList.add('open');
+}
+
+function closeModal(e) {
+  document.getElementById('modal').classList.remove('open');
+}
+
+function select(type, el) {
+  const group = document.getElementById('sel-'+type);
+  group.querySelectorAll('.sel-chip').forEach(c=>c.classList.remove('selected'));
+  el.classList.add('selected');
+  selections[type] = el.dataset.val;
+}
+
+function syncSelections() {
+  ['platform','category','payment'].forEach(type => {
+    const val = selections[type];
+    const group = document.getElementById('sel-'+type);
+    group.querySelectorAll('.sel-chip').forEach(c=>{
+      c.classList.toggle('selected', c.dataset.val===val);
+    });
+  });
+}
+
+function confirmEntry() {
+  if (!selections.platform || !selections.category || !selections.payment) {
+    alert('请选择平台、分类和支付方式');
+    return;
+  }
+  const b = bills.find(x=>x.id===modalData.id);
+  b.status = 'done';
+  b.platform = selections.platform;
+  b.cat = selections.category;
+  b.payment = selections.payment;
+  const merchantInput = document.getElementById('modal-merchant');
+  const merchantName = merchantInput ? merchantInput.value.trim() : '';
+  b.name = merchantName || `${selections.platform}消费`;
+  b.icon = platformIcon(selections.platform);
+  b.iconBg = platformBg(selections.platform);
+  pendingIds = pendingIds.filter(i=>i!==b.id);
+  closeModal();
+  renderPendingList();
+  renderRecentBills();
+  renderBillsList();
+  showFlash('✓ 已保存');
+  // update pending count
+  const cnt = bills.filter(x=>x.status==='pending').length;
+  document.querySelector('#page-pending .sub').textContent = cnt?`${cnt} 条记录信息不完整`:'全部已补充完毕';
+  if (cnt) {
+    document.querySelector('.pending-dot').textContent = cnt;
+    document.querySelector('.pending-text .pt').textContent = `有 ${cnt} 条记录待补充`;
+  } else {
+    document.querySelector('.pending-banner').style.display='none';
+  }
+}
+
+function platformIcon(p) {
+  const m = {美团:'🛵',微信:'💬',京东:'📦',拼多多:'🛍',淘宝:'🧡',抖音:'🎵',支付宝:'💙',滴滴:'🚗'};
+  return m[p] || '💰';
+}
+function platformBg(p) {
+  const m = {美团:'#FFF7ED',微信:'#ECFDF5',京东:'#EFF6FF',拼多多:'#FFF7ED',淘宝:'#FFF7ED',抖音:'#F5F3FF',支付宝:'#EFF6FF'};
+  return m[p] || '#F0EEE9';
+}
+
+function showFlash(msg) {
+  const f = document.getElementById('flash');
+  f.textContent = msg;
+  f.classList.add('show');
+  setTimeout(()=>f.classList.remove('show'), 2200);
+}
+
+// ══ Income Render ══
+function renderIncomeSourceChart() {
+  const el = document.getElementById('incomeSourceChart');
+  if (!el) return;
+  const grouped = {};
+  incomeRecords.forEach(r => { grouped[r.cat] = (grouped[r.cat] || 0) + r.amount; });
+  const total = Object.values(grouped).reduce((a,b)=>a+b, 0);
+  const entries = Object.entries(grouped).sort((a,b)=>b[1]-a[1]);
+  if (!entries.length) {
+    el.innerHTML = `<div class="empty"><div class="e-icon">\ud83d\udcb0</div><p>\u6682\u65e0\u6536\u5165\u8bb0\u5f55\uff0c\u70b9\u51fb\u53f3\u4e0a\u89d2\u6dfb\u52a0</p></div>`;
+    return;
+  }
+  el.innerHTML = entries.map(([cat, amt]) => {
+    const info = incomeCatMap[cat] || {label: cat, icon: '\ud83d\udcb0'};
+    const pct = total ? Math.round(amt / total * 100) : 0;
+    return `<div class="chart-row">
+      <div class="chart-label">${info.label}</div>
+      <div class="chart-bar-wrap"><div class="chart-bar" style="width:${pct}%;background:#1565C0"></div></div>
+      <div class="chart-val">\u00a5${amt.toLocaleString()}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderIncomeList() {
+  const el = document.getElementById('incomeList');
+  if (!el) return;
+  if (!incomeRecords.length) {
+    el.innerHTML = `<div class="empty"><div class="e-icon">\ud83d\udcb0</div><p>\u6682\u65e0\u6536\u5165\u8bb0\u5f55\uff0c\u70b9\u51fb\u6dfb\u52a0</p></div>`;
+    return;
+  }
+  el.innerHTML = incomeRecords.map(r => {
+    const info = incomeCatMap[r.cat] || {label: r.cat, icon: '\ud83d\udcb0'};
+    return `<div class="income-item">
+      <div class="income-icon">${info.icon}</div>
+      <div class="bill-info">
+        <div class="bill-name">${r.source || info.label}</div>
+        <div class="bill-meta">${info.label} \u00b7 ${r.date} ${r.time}</div>
+      </div>
+      <div class="income-amount">+\u00a5${r.amount.toFixed(2)}</div>
+    </div>`;
+  }).join('');
+}
+
+function updateIncomeHero() {
+  const totalIncome = incomeRecords.reduce((s, r) => s + r.amount, 0);
+  const totalExpense = bills.filter(b => b.status === 'done').reduce((s, b) => s + b.amount, 0);
+  const net = totalIncome - totalExpense;
+  const heroIncome = document.getElementById('heroIncomeVal');
+  const heroNet = document.getElementById('heroNetVal');
+  const incomeTot = document.getElementById('incomeTotalAmt');
+  const incomeCnt = document.getElementById('incomeTotalCnt');
+  const incomeNet = document.getElementById('incomeNetVal');
+  if (heroIncome) heroIncome.textContent = `\u00a5${totalIncome.toLocaleString()}`;
+  if (heroNet) { heroNet.textContent = `\u00a5${net.toLocaleString()}`; heroNet.style.color = net >= 0 ? '#4ADE80' : '#FCA5A5'; }
+  if (incomeTot) incomeTot.textContent = `\u00a5${totalIncome.toFixed(2)}`;
+  if (incomeCnt) incomeCnt.textContent = `${incomeRecords.length} \u7b14`;
+  if (incomeNet) { incomeNet.textContent = `\u00a5${net.toLocaleString()}`; }
+}
+
+// ══ Income Modal ══
+let incomeSelections = { cat: 'salary' };
+
+function openAddIncome() {
+  document.getElementById('incomeModal').classList.add('open');
+}
+
+function closeIncomeModal(e) {
+  if (!e || e.target === document.getElementById('incomeModal')) {
+    document.getElementById('incomeModal').classList.remove('open');
+    resetIncomeForm();
+  }
+}
+
+function selectIncomeCategory(el) {
+  document.querySelectorAll('#sel-income-cat .sel-chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  incomeSelections.cat = el.dataset.val;
+}
+
+function resetIncomeForm() {
+  document.getElementById('income-amount-input').value = '';
+  document.getElementById('income-source-input').value = '';
+  document.getElementById('income-note-input').value = '';
+  incomeSelections = { cat: 'salary' };
+  const chips = document.querySelectorAll('#sel-income-cat .sel-chip');
+  chips.forEach((c, i) => c.classList.toggle('selected', i === 0));
+}
+
+function confirmIncome() {
+  const amt = parseFloat(document.getElementById('income-amount-input').value);
+  if (!amt || amt <= 0) { alert('\u8bf7\u8f93\u5165\u6709\u6548\u91d1\u989d'); return; }
+  const source = document.getElementById('income-source-input').value.trim() || (incomeCatMap[incomeSelections.cat]?.label || '\u6536\u5165');
+  const now = new Date();
+  incomeRecords.unshift({
+    id: Date.now(),
+    cat: incomeSelections.cat,
+    source: source,
+    amount: amt,
+    date: '\u4eca\u5929',
+    time: `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`,
+    icon: incomeCatMap[incomeSelections.cat]?.icon || '\ud83d\udcb0',
+  });
+  closeIncomeModal();
+  renderIncomeList();
+  renderIncomeSourceChart();
+  updateIncomeHero();
+  showFlash('\u2713 \u6536\u5165\u5df2\u8bb0\u5f55');
+}
+
+// ══ FAB ══
+function toggleFabMenu() {
+  const isOpen = document.getElementById('fabMenu').classList.contains('open');
+  document.getElementById('fabMenu').classList.toggle('open', !isOpen);
+  document.getElementById('fabOverlay').classList.toggle('open', !isOpen);
+}
+
+function closeFabMenu() {
+  document.getElementById('fabMenu').classList.remove('open');
+  document.getElementById('fabOverlay').classList.remove('open');
+}
+
+// ══ Transport ══
+function renderTransportSummary() {
+  const el = document.getElementById('transportSummary');
+  if (!el) return;
+  if (!transportRecords.length) {
+    el.innerHTML = `<div class="empty" style="padding:20px"><div class="e-icon">\u2708\ufe0f</div><p>\u672c\u6708\u6682\u65e0\u5927\u989d\u4ea4\u901a\u652f\u51fa</p></div>`;
+    return;
+  }
+  const total = transportRecords.reduce((s,r)=>s+r.amount,0);
+  el.innerHTML = transportRecords.map(r => `
+    <div class="transport-row">
+      <div class="transport-info">
+        <div>
+          <div class="transport-label">${r.type} ${r.desc ? '· ' + r.desc : ''}</div>
+          <div class="transport-sub">${r.date}</div>
+        </div>
+      </div>
+      <div class="transport-amount">-\u00a5${r.amount.toFixed(2)}</div>
+    </div>`).join('') +
+    `<div style="border-top:0.5px solid var(--border); padding-top:12px; margin-top:4px; display:flex; justify-content:space-between;">
+      <div style="font-size:13px;font-weight:500;">\u5408\u8ba1</div>
+      <div style="font-size:16px;font-weight:600;color:var(--danger)">\u00a5${total.toFixed(2)}</div>
+    </div>`;
+}
+
+init();
+</script>
+</body>
+</html>

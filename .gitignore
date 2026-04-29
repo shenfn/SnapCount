@@ -1,0 +1,24 @@
+# 本地环境变量（含 API key、service_role 等敏感信息）
+.env
+.env.local
+.env.*.local
+*.env
+
+# Supabase CLI 本地状态
+supabase/.branches
+supabase/.temp
+supabase/.env
+
+# 下载的 CLI 二进制
+supabase.exe
+
+# Node / 依赖
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
