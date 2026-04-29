@@ -79,46 +79,47 @@ export function useStore() {
   async function loadData() {
     loading.value = true
     loadError.value = ''
-    const padM = String(currentMonth.value).padStart(2, '0')
-    const start = `${currentYear.value}-${padM}-01`
-    const lastDay = new Date(currentYear.value, currentMonth.value, 0).getDate()
-    const end = `${currentYear.value}-${padM}-${String(lastDay).padStart(2, '0')}`
+    try {
+      const padM = String(currentMonth.value).padStart(2, '0')
+      const start = `${currentYear.value}-${padM}-01`
+      const lastDay = new Date(currentYear.value, currentMonth.value, 0).getDate()
+      const end = `${currentYear.value}-${padM}-${String(lastDay).padStart(2, '0')}`
 
-    const { data: txs, error: txErr } = await sb.from('transactions')
-      .select('*')
-      .gte('transaction_date', start)
-      .lte('transaction_date', end)
-      .order('transaction_date', { ascending: false })
-      .order('transaction_time', { ascending: false })
-    if (txErr) {
-      console.error('加载账单失败:', txErr.message)
-      loadError.value = '数据加载失败，请检查网络后刷新'
+      const { data: txs, error: txErr } = await sb.from('transactions')
+        .select('*')
+        .gte('transaction_date', start)
+        .lte('transaction_date', end)
+        .order('transaction_date', { ascending: false })
+        .order('transaction_time', { ascending: false })
+      if (txErr) throw new Error('账单查询失败: ' + txErr.message)
+
+      bills.value = (txs || []).map(mapTransaction)
+      transportRecords.value = bills.value
+        .filter(b => b.cat === 'transport' && b.amount >= 200)
+        .map(b => ({ id: b.id, type: b.transport_type || '交通', desc: b.name, amount: b.amount, date: b.date }))
+
+      const { data: incs, error: incErr } = await sb.from('income_records')
+        .select('*')
+        .gte('income_date', start)
+        .lte('income_date', end)
+        .order('income_date', { ascending: false })
+      if (incErr) console.warn('加载收入失败:', incErr.message)
+
+      incomeRecords.value = (incs || []).map(r => ({
+        id: r.id,
+        cat: r.category,
+        source: r.source_name,
+        amount: Number(r.amount),
+        date: formatDate(r.income_date),
+        time: '',
+        icon: incomeCatMap[r.category]?.icon || '💰',
+      }))
+    } catch (e) {
+      console.error('[loadData 异常]', e)
+      loadError.value = `加载失败: ${e.message}`
+    } finally {
       loading.value = false
-      return
     }
-
-    bills.value = (txs || []).map(mapTransaction)
-    transportRecords.value = bills.value
-      .filter(b => b.cat === 'transport' && b.amount >= 200)
-      .map(b => ({ id: b.id, type: b.transport_type || '交通', desc: b.name, amount: b.amount, date: b.date }))
-
-    const { data: incs, error: incErr } = await sb.from('income_records')
-      .select('*')
-      .gte('income_date', start)
-      .lte('income_date', end)
-      .order('income_date', { ascending: false })
-    if (incErr) console.error('加载收入失败:', incErr.message)
-
-    incomeRecords.value = (incs || []).map(r => ({
-      id: r.id,
-      cat: r.category,
-      source: r.source_name,
-      amount: Number(r.amount),
-      date: formatDate(r.income_date),
-      time: '',
-      icon: incomeCatMap[r.category]?.icon || '💰',
-    }))
-    loading.value = false
   }
 
   async function changeMonth(delta) {
