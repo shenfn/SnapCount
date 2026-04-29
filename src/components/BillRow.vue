@@ -1,5 +1,5 @@
 <template>
-  <div class="bill-item">
+  <div class="bill-item" @click="store.openPendingModal(bill)">
     <div class="bill-icon" :style="{ background: bill.iconBg }">{{ bill.icon }}</div>
     <div class="bill-info">
       <div class="bill-name">{{ bill.name }}</div>
@@ -15,5 +15,8 @@
 </template>
 
 <script setup>
-defineProps({ bill: Object })
+import { inject } from 'vue'
+
+const store = inject('store')
+defineProps({ bill: { type: Object, required: true } })
 </script>

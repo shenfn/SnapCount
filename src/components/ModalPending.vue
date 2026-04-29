@@ -1,13 +1,17 @@
 <template>
   <div class="modal-overlay" :class="{ open: store.pendingModal.open }" @click.self="store.closePendingModal()">
     <div class="modal-sheet" ref="sheetEl">
-      <div class="sheet-handle"
+      <div class="sheet-drag-zone"
         @touchstart.passive="onTouchStart"
         @touchmove="onTouchMove"
-        @touchend="onTouchEnd"
-        style="padding: 12px 0; margin-top: -12px; cursor: grab;"></div>
-      <div class="sheet-header">
-        <div class="sheet-title">补充账单信息</div>
+        @touchend="onTouchEnd">
+        <div class="sheet-handle"></div>
+      </div>
+      <div class="sheet-header"
+        @touchstart.passive="onTouchStart"
+        @touchmove="onTouchMove"
+        @touchend="onTouchEnd">
+        <div class="sheet-title">{{ store.pendingModal.bill?.status === 'done' ? '编辑账单信息' : '补充账单信息' }}</div>
         <div class="sheet-sub">{{ store.pendingModal.bill?.date }} {{ store.pendingModal.bill?.time }} · 截图识别</div>
       </div>
       <!-- 金额（可修正 AI 识别错误） -->

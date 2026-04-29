@@ -193,9 +193,16 @@ body {
   width: 36px; height: 4px; background: var(--border2);
   border-radius: 2px; margin: 12px auto 0;
 }
+.sheet-drag-zone {
+  padding: 12px 0 8px;
+  cursor: grab;
+  touch-action: none;
+}
 .sheet-header {
   padding: 16px 20px 12px;
   border-bottom: 0.5px solid var(--border);
+  cursor: grab;
+  touch-action: none;
 }
 .sheet-title { font-size: 16px; font-weight: 600; }
 .sheet-sub { font-size: 13px; color: var(--text2); margin-top: 3px; }
