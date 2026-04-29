@@ -431,11 +431,11 @@
   <!-- 支出总览 -->
   <div class="hero">
     <div class="label">本月总支出</div>
-    <div class="amount">¥3,842.50</div>
+    <div class="amount" id="heroExpenseVal">¥0</div>
     <div class="hero-row">
       <div class="hero-col">
         <div class="h-label">笔数</div>
-        <div class="h-val">34 笔</div>
+        <div class="h-val" id="heroCountVal">0 笔</div>
       </div>
       <div class="hero-col">
         <div class="h-label">日均</div>
@@ -798,14 +798,20 @@
 <!-- Flash -->
 <div class="flash" id="flash">✓ 已保存</div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
+// ══ Supabase 客户端 ══
+const SUPABASE_URL = 'https://igbghrhsdaolxljgiisf.supabase.co';
+const SUPABASE_ANON_KEY = '***LEGACY_ANON_KEY_REDACTED***';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 // ══ Month state ══
-let currentYear = 2025;
-let currentMonth = 4;
+let currentYear = new Date().getFullYear();
+let currentMonth = new Date().getMonth() + 1;
 
 function formatMonthLabel(y, m) { return `${y}年${m}月`; }
 
-function changeMonth(delta) {
+async function changeMonth(delta) {
   const now = new Date();
   let m = currentMonth + delta;
   let y = currentYear;
@@ -814,25 +820,14 @@ function changeMonth(delta) {
   if (new Date(y, m - 1, 1) > new Date(now.getFullYear(), now.getMonth(), 1)) return;
   currentYear = y; currentMonth = m;
   document.querySelectorAll('.month-display').forEach(el => el.textContent = formatMonthLabel(y, m));
+  await loadData();
+  renderAll();
 }
 
-// ══ Data ══
-const bills = [
-  { id:1, name:'麦当劳', platform:'美团', payment:'微信支付', cat:'餐饮', amount:38.5, date:'今天', time:'12:34', status:'done', icon:'🍔', iconBg:'#FEF3C7' },
-  { id:2, name:'未识别商家', platform:'?', payment:'?', cat:'?', amount:128, date:'今天', time:'10:12', status:'pending', icon:'❓', iconBg:'#FEE2E2' },
-  { id:3, name:'京东购物', platform:'京东', payment:'京东白条', cat:'购物', amount:498, date:'昨天', time:'20:05', status:'done', icon:'📦', iconBg:'#EFF6FF' },
-  { id:4, name:'滴滴出行', platform:'滴滴', payment:'微信支付', cat:'出行', amount:23.6, date:'昨天', time:'18:40', status:'done', icon:'🚗', iconBg:'#F0FDF4' },
-  { id:5, name:'便利蜂', platform:'微信', payment:'微信支付', cat:'餐饮', amount:15.5, date:'昨天', time:'09:20', status:'done', icon:'🥤', iconBg:'#ECFDF5' },
-  { id:6, name:'未识别商家', platform:'?', payment:'?', cat:'?', amount:56, date:'4月25日', time:'21:10', status:'pending', icon:'❓', iconBg:'#FEE2E2' },
-  { id:7, name:'拼多多', platform:'拼多多', payment:'先用后付', cat:'购物', amount:89, date:'4月25日', time:'15:30', status:'done', icon:'🛍', iconBg:'#FFF7ED' },
-  { id:8, name:'美团外卖', platform:'美团', payment:'美团月付', cat:'餐饮', amount:42, date:'4月24日', time:'12:00', status:'done', icon:'🛵', iconBg:'#FFF7ED' },
-  { id:9, name:'未识别商家', platform:'?', payment:'花呗', cat:'?', amount:200, date:'4月24日', time:'09:00', status:'pending', icon:'❓', iconBg:'#FEE2E2' },
-];
-
-const incomeRecords = [
-  { id:101, cat:'salary', source:'公司薪资', amount:12000, date:'4月10日', time:'09:00', icon:'💼' },
-  { id:102, cat:'freelance', source:'接单收入', amount:500, date:'4月15日', time:'18:30', icon:'💻' },
-];
+// ══ Live data (从 Supabase 实时加载) ══
+let bills = [];
+let incomeRecords = [];
+let transportRecords = [];
 
 const incomeCatMap = {
   salary:        { label:'工资',     icon:'💼' },
@@ -843,37 +838,100 @@ const incomeCatMap = {
   other:         { label:'其他',     icon:'💰' },
 };
 
-const transportRecords = [
-  { id:201, type:'机票', desc:'上海→北京', amount:980, date:'4月18日' },
-  { id:202, type:'高铁动车', desc:'导览', amount:263.5, date:'4月05日' },
-];
-
-const platforms = [
-  {name:'美团', amount:680, pct:18},
-  {name:'京东', amount:760, pct:20},
-  {name:'微信', amount:1100, pct:29},
-  {name:'支付宝', amount:580, pct:15},
-  {name:'拼多多', amount:420, pct:11},
-  {name:'其他', amount:302, pct:7},
-];
-
-const payments = [
-  {name:'微信支付', pct:42},
-  {name:'花呗', pct:22},
-  {name:'京东白条', pct:16},
-  {name:'银行卡', pct:11},
-  {name:'其他', pct:9},
-];
-
-const weekData = [45, 120, 88, 0, 210, 65, 138];
 const weekLabels = ['周一','周二','周三','周四','周五','周六','周日'];
 let currentFilter = 'all';
-let pendingIds = [2,6,9];
 let modalData = {};
 let selections = { platform:null, category:null, payment:null };
 
+function formatDate(dateStr) {
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  if (dateStr === today) return '今天';
+  if (dateStr === yesterday) return '昨天';
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${d.getMonth()+1}月${d.getDate()}日`;
+}
+
+async function loadData() {
+  const padM = String(currentMonth).padStart(2, '0');
+  const start = `${currentYear}-${padM}-01`;
+  const lastDay = new Date(currentYear, currentMonth, 0).getDate();
+  const end = `${currentYear}-${padM}-${String(lastDay).padStart(2, '0')}`;
+
+  const { data: txs, error: txErr } = await sb.from('transactions')
+    .select('*')
+    .gte('transaction_date', start)
+    .lte('transaction_date', end)
+    .order('transaction_date', { ascending: false })
+    .order('transaction_time', { ascending: false });
+  if (txErr) console.error('加载账单失败:', txErr.message);
+
+  bills = (txs || []).map(t => ({
+    id: t.id,
+    name: t.merchant_name || '未识别商家',
+    platform: t.platform || '?',
+    payment: t.payment_method || '?',
+    cat: t.category || '?',
+    amount: Number(t.amount),
+    date: formatDate(t.transaction_date),
+    dateRaw: t.transaction_date,
+    time: t.transaction_time ? t.transaction_time.slice(0, 5) : '',
+    status: t.status,
+    icon: platformIcon(t.platform),
+    iconBg: platformBg(t.platform),
+    image_url: t.image_url,
+    transport_type: t.transport_type,
+  }));
+
+  transportRecords = bills
+    .filter(b => b.cat === 'transport' && b.amount >= 200)
+    .map(b => ({ id: b.id, type: b.transport_type || '交通', desc: b.name, amount: b.amount, date: b.date }));
+
+  const { data: incs, error: incErr } = await sb.from('income_records')
+    .select('*')
+    .gte('income_date', start)
+    .lte('income_date', end)
+    .order('income_date', { ascending: false });
+  if (incErr) console.error('加载收入失败:', incErr.message);
+
+  incomeRecords = (incs || []).map(r => ({
+    id: r.id,
+    cat: r.category,
+    source: r.source_name,
+    amount: Number(r.amount),
+    date: formatDate(r.income_date),
+    time: '',
+    icon: incomeCatMap[r.category]?.icon || '💰',
+  }));
+}
+
+function computeWeekData() {
+  const today = new Date();
+  const dow = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+  monday.setHours(0, 0, 0, 0);
+  const data = [0, 0, 0, 0, 0, 0, 0];
+  bills.forEach(b => {
+    if (b.status !== 'done' || !b.dateRaw) return;
+    const d = new Date(b.dateRaw + 'T00:00:00');
+    const diff = Math.round((d - monday) / 86400000);
+    if (diff >= 0 && diff < 7) data[diff] += b.amount;
+  });
+  return data;
+}
+
 // ══ Init ══
-function init() {
+async function init() {
+  const now = new Date();
+  currentYear = now.getFullYear();
+  currentMonth = now.getMonth() + 1;
+  document.querySelectorAll('.month-display').forEach(el => el.textContent = formatMonthLabel(currentYear, currentMonth));
+  await loadData();
+  renderAll();
+}
+
+function renderAll() {
   renderWeekBars();
   renderRecentBills();
   renderPendingList();
@@ -884,22 +942,25 @@ function init() {
   renderIncomeList();
   renderTransportSummary();
   updateIncomeHero();
+  updatePendingBanner();
 }
 
 function renderWeekBars() {
-  const max = Math.max(...weekData);
+  const weekData = computeWeekData();
+  const todayIdx = (() => { const d = new Date().getDay(); return d === 0 ? 6 : d - 1; })();
+  const max = Math.max(...weekData, 1);
   const bars = document.getElementById('weekBars');
   const days = document.getElementById('weekDays');
   bars.innerHTML = weekData.map((v,i) => `
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%">
       <div style="flex:1;display:flex;align-items:flex-end;width:100%">
-        <div style="width:100%;height:${max?Math.max(v/max*72,v>0?6:0):0}px;
-          border-radius:4px 4px 0 0;background:${i===6?'var(--accent)':'var(--surface2)'}">
+        <div style="width:100%;height:${Math.max(v/max*72, v>0?6:0)}px;
+          border-radius:4px 4px 0 0;background:${i===todayIdx?'var(--accent)':'var(--surface2)'}">
         </div>
       </div>
     </div>`).join('');
   days.innerHTML = weekLabels.map((d,i) =>
-    `<div style="flex:1;text-align:center;font-size:10px;color:${i===6?'var(--accent)':'var(--text3)'};">${d}</div>`
+    `<div style="flex:1;text-align:center;font-size:10px;color:${i===todayIdx?'var(--accent)':'var(--text3)'};">` + d + `</div>`
   ).join('');
 }
 
@@ -927,7 +988,7 @@ function renderPendingList() {
     return;
   }
   el.innerHTML = pending.map(b => `
-    <div class="pending-item" onclick="openModal(${b.id})">
+    <div class="pending-item" onclick="openModal('${b.id}')">
       <div class="pending-row">
         <div>
           <div class="pending-amount">-¥${b.amount.toFixed(2)}</div>
@@ -962,27 +1023,44 @@ function renderBillsList() {
 
 function renderPlatformChart() {
   const el = document.getElementById('platformChart');
-  const max = Math.max(...platforms.map(p=>p.pct));
-  el.innerHTML = platforms.map(p=>`
+  const grouped = {};
+  bills.filter(b => b.status === 'done').forEach(b => {
+    const p = b.platform && b.platform !== '?' ? b.platform : '其他';
+    grouped[p] = (grouped[p] || 0) + b.amount;
+  });
+  const entries = Object.entries(grouped).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) { el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">本月暂无数据</div>'; return; }
+  const maxAmt = entries[0][1];
+  el.innerHTML = entries.map(([name, amount]) => `
     <div class="chart-row">
-      <div class="chart-label">${p.name}</div>
+      <div class="chart-label">${name}</div>
       <div class="chart-bar-wrap">
-        <div class="chart-bar" style="width:${p.pct/max*100}%"></div>
+        <div class="chart-bar" style="width:${amount/maxAmt*100}%"></div>
       </div>
-      <div class="chart-val">¥${p.amount}</div>
+      <div class="chart-val">¥${amount.toFixed(0)}</div>
     </div>`).join('');
 }
 
 function renderPayChart() {
   const el = document.getElementById('payChart');
-  el.innerHTML = payments.map(p=>`
-    <div class="chart-row">
-      <div class="chart-label">${p.name}</div>
+  const grouped = {};
+  bills.filter(b => b.status === 'done').forEach(b => {
+    const p = b.payment && b.payment !== '?' ? b.payment : '其他';
+    grouped[p] = (grouped[p] || 0) + b.amount;
+  });
+  const total = Object.values(grouped).reduce((a,b) => a+b, 0) || 1;
+  const entries = Object.entries(grouped).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) { el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">本月暂无数据</div>'; return; }
+  el.innerHTML = entries.map(([name, amount]) => {
+    const pct = Math.round(amount / total * 100);
+    return `<div class="chart-row">
+      <div class="chart-label">${name}</div>
       <div class="chart-bar-wrap">
-        <div class="chart-bar" style="width:${p.pct}%"></div>
+        <div class="chart-bar" style="width:${pct}%"></div>
       </div>
-      <div class="chart-val">${p.pct}%</div>
-    </div>`).join('');
+      <div class="chart-val">${pct}%</div>
+    </div>`;
+  }).join('');
 }
 
 // ══ Navigation ══
@@ -1037,36 +1115,25 @@ function syncSelections() {
   });
 }
 
-function confirmEntry() {
+async function confirmEntry() {
   if (!selections.platform || !selections.category || !selections.payment) {
     alert('请选择平台、分类和支付方式');
     return;
   }
-  const b = bills.find(x=>x.id===modalData.id);
-  b.status = 'done';
-  b.platform = selections.platform;
-  b.cat = selections.category;
-  b.payment = selections.payment;
   const merchantInput = document.getElementById('modal-merchant');
   const merchantName = merchantInput ? merchantInput.value.trim() : '';
-  b.name = merchantName || `${selections.platform}消费`;
-  b.icon = platformIcon(selections.platform);
-  b.iconBg = platformBg(selections.platform);
-  pendingIds = pendingIds.filter(i=>i!==b.id);
+  const { error } = await sb.from('transactions').update({
+    platform: selections.platform,
+    category: selections.category,
+    payment_method: selections.payment,
+    merchant_name: merchantName || `${selections.platform}消费`,
+    status: 'done',
+  }).eq('id', modalData.id);
+  if (error) { alert('保存失败：' + error.message); return; }
   closeModal();
-  renderPendingList();
-  renderRecentBills();
-  renderBillsList();
   showFlash('✓ 已保存');
-  // update pending count
-  const cnt = bills.filter(x=>x.status==='pending').length;
-  document.querySelector('#page-pending .sub').textContent = cnt?`${cnt} 条记录信息不完整`:'全部已补充完毕';
-  if (cnt) {
-    document.querySelector('.pending-dot').textContent = cnt;
-    document.querySelector('.pending-text .pt').textContent = `有 ${cnt} 条记录待补充`;
-  } else {
-    document.querySelector('.pending-banner').style.display='none';
-  }
+  await loadData();
+  renderAll();
 }
 
 function platformIcon(p) {
@@ -1129,19 +1196,41 @@ function renderIncomeList() {
 }
 
 function updateIncomeHero() {
+  const doneBills = bills.filter(b => b.status === 'done');
+  const totalExpense = doneBills.reduce((s, b) => s + b.amount, 0);
   const totalIncome = incomeRecords.reduce((s, r) => s + r.amount, 0);
-  const totalExpense = bills.filter(b => b.status === 'done').reduce((s, b) => s + b.amount, 0);
   const net = totalIncome - totalExpense;
+  const heroExp = document.getElementById('heroExpenseVal');
+  const heroCount = document.getElementById('heroCountVal');
   const heroIncome = document.getElementById('heroIncomeVal');
   const heroNet = document.getElementById('heroNetVal');
   const incomeTot = document.getElementById('incomeTotalAmt');
   const incomeCnt = document.getElementById('incomeTotalCnt');
   const incomeNet = document.getElementById('incomeNetVal');
-  if (heroIncome) heroIncome.textContent = `\u00a5${totalIncome.toLocaleString()}`;
-  if (heroNet) { heroNet.textContent = `\u00a5${net.toLocaleString()}`; heroNet.style.color = net >= 0 ? '#4ADE80' : '#FCA5A5'; }
-  if (incomeTot) incomeTot.textContent = `\u00a5${totalIncome.toFixed(2)}`;
-  if (incomeCnt) incomeCnt.textContent = `${incomeRecords.length} \u7b14`;
-  if (incomeNet) { incomeNet.textContent = `\u00a5${net.toLocaleString()}`; }
+  if (heroExp) heroExp.textContent = `¥${totalExpense.toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  if (heroCount) heroCount.textContent = `${doneBills.length} 笔`;
+  if (heroIncome) heroIncome.textContent = `¥${totalIncome.toLocaleString()}`;
+  if (heroNet) { heroNet.textContent = `¥${net.toLocaleString()}`; heroNet.style.color = net >= 0 ? '#4ADE80' : '#FCA5A5'; }
+  if (incomeTot) incomeTot.textContent = `¥${totalIncome.toFixed(2)}`;
+  if (incomeCnt) incomeCnt.textContent = `${incomeRecords.length} 笔`;
+  if (incomeNet) { incomeNet.textContent = `¥${net.toLocaleString()}`; }
+}
+
+function updatePendingBanner() {
+  const cnt = bills.filter(b => b.status === 'pending').length;
+  const banner = document.querySelector('.pending-banner');
+  const dot = document.querySelector('.pending-dot');
+  const pt = document.querySelector('.pending-text .pt');
+  const sub = document.querySelector('#page-pending .sub');
+  if (cnt > 0) {
+    if (banner) banner.style.display = '';
+    if (dot) dot.textContent = cnt;
+    if (pt) pt.textContent = `有 ${cnt} 条记录待补充`;
+    if (sub) sub.textContent = `${cnt} 条记录信息不完整`;
+  } else {
+    if (banner) banner.style.display = 'none';
+    if (sub) sub.textContent = '全部已补充完毕';
+  }
 }
 
 // ══ Income Modal ══
@@ -1173,25 +1262,25 @@ function resetIncomeForm() {
   chips.forEach((c, i) => c.classList.toggle('selected', i === 0));
 }
 
-function confirmIncome() {
+async function confirmIncome() {
   const amt = parseFloat(document.getElementById('income-amount-input').value);
-  if (!amt || amt <= 0) { alert('\u8bf7\u8f93\u5165\u6709\u6548\u91d1\u989d'); return; }
-  const source = document.getElementById('income-source-input').value.trim() || (incomeCatMap[incomeSelections.cat]?.label || '\u6536\u5165');
+  if (!amt || amt <= 0) { alert('请输入有效金额'); return; }
+  const source = document.getElementById('income-source-input').value.trim() ||
+    (incomeCatMap[incomeSelections.cat]?.label || '收入');
+  const note = document.getElementById('income-note-input').value.trim();
   const now = new Date();
-  incomeRecords.unshift({
-    id: Date.now(),
-    cat: incomeSelections.cat,
-    source: source,
+  const { error } = await sb.from('income_records').insert({
+    category: incomeSelections.cat,
+    source_name: source,
     amount: amt,
-    date: '\u4eca\u5929',
-    time: `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`,
-    icon: incomeCatMap[incomeSelections.cat]?.icon || '\ud83d\udcb0',
+    income_date: now.toISOString().slice(0, 10),
+    note: note || null,
   });
+  if (error) { alert('保存失败：' + error.message); return; }
   closeIncomeModal();
-  renderIncomeList();
-  renderIncomeSourceChart();
-  updateIncomeHero();
-  showFlash('\u2713 \u6536\u5165\u5df2\u8bb0\u5f55');
+  showFlash('✓ 收入已记录');
+  await loadData();
+  renderAll();
 }
 
 // ══ FAB ══
