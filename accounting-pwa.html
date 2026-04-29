@@ -361,9 +361,21 @@
   /* ── Screenshot thumb ── */
   .thumb-wrap {
     margin: 12px 20px 0; background: var(--surface2); border-radius: var(--radius-sm);
-    height: 90px; display: flex; align-items: center; justify-content: center;
+    min-height: 90px; display: flex; align-items: center; justify-content: center;
     font-size: 13px; color: var(--text3); gap: 8px; cursor: pointer;
-    border: 0.5px dashed var(--border2);
+    border: 0.5px dashed var(--border2); overflow: hidden;
+  }
+  /* ── Fullscreen image overlay ── */
+  .img-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92);
+    z-index: 9999; align-items: center; justify-content: center; flex-direction: column;
+  }
+  .img-overlay.open { display: flex; }
+  .img-overlay img { max-width: 100%; max-height: 88vh; object-fit: contain; border-radius: 4px; }
+  .img-overlay-close {
+    position: fixed; top: 16px; right: 16px; width: 36px; height: 36px;
+    background: rgba(255,255,255,0.15); border-radius: 50%; border: none;
+    color: #fff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
   }
 
   /* ── Sheet text input ── */
@@ -798,6 +810,12 @@
 <!-- Flash -->
 <div class="flash" id="flash">✓ 已保存</div>
 
+<!-- Fullscreen image overlay -->
+<div class="img-overlay" id="imgOverlay" onclick="closeImgFull()">
+  <button class="img-overlay-close" onclick="closeImgFull()">✕</button>
+  <img src="" id="imgOverlayImg" onclick="event.stopPropagation()">
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
 // ══ Supabase 客户端 ══
@@ -1098,7 +1116,11 @@ function openModal(id) {
   // 截图预览
   const thumb = document.getElementById('modalThumb');
   if (b.image_url) {
-    thumb.innerHTML = `<img src="${b.image_url}" style="width:100%;border-radius:8px;max-height:180px;object-fit:contain;background:#f0f0f0;">`;
+    thumb.innerHTML = `
+      <div style="width:100%;position:relative;" onclick="openImgFull('${b.image_url}')">
+        <img src="${b.image_url}" style="width:100%;max-height:160px;object-fit:contain;background:#f0f0f0;display:block;">
+        <div style="text-align:center;padding:6px 0;font-size:11px;color:var(--text3);">👆 点击放大原图</div>
+      </div>`;
   } else {
     thumb.innerHTML = '<span>🖼</span><span>无截图预览</span>';
   }
@@ -1109,6 +1131,17 @@ function openModal(id) {
 
 function closeModal(e) {
   document.getElementById('modal').classList.remove('open');
+}
+
+function openImgFull(src) {
+  document.getElementById('imgOverlayImg').src = src;
+  document.getElementById('imgOverlay').classList.add('open');
+  document.getElementById('modal').classList.remove('open');
+}
+
+function closeImgFull() {
+  document.getElementById('imgOverlay').classList.remove('open');
+  document.getElementById('modal').classList.add('open');
 }
 
 function select(type, el) {
