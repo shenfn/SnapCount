@@ -7,10 +7,13 @@
     </div>
 
     <!-- Error overlay -->
-    <div v-if="!store.loading.value && store.loadError.value" style="position:fixed;inset:0;background:#F7F6F3;z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px;text-align:center;">
+    <div v-if="!store.loading.value && store.loadError.value" style="position:fixed;inset:0;background:#F7F6F3;z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px;text-align:center;overflow-y:auto;">
       <div style="font-size:40px">⚠️</div>
-      <div style="font-size:15px;color:#1A1A18;font-family:'PingFang SC',system-ui,sans-serif">{{ store.loadError.value }}</div>
+      <div style="font-size:15px;color:#1A1A18;font-family:'PingFang SC',system-ui,sans-serif;font-weight:600">数据加载失败</div>
+      <div style="font-size:12px;color:#B91C1C;background:#FEE2E2;border-radius:8px;padding:12px 16px;word-break:break-all;max-width:340px;text-align:left;">{{ store.loadError.value }}</div>
+      <div style="font-size:11px;color:#6B6A65;">Supabase URL 是否正确？网络是否正常？</div>
       <button @click="store.loadData()" style="padding:12px 24px;background:#2D6A4F;color:#fff;border:none;border-radius:12px;font-size:15px;cursor:pointer;font-family:'PingFang SC',system-ui,sans-serif">重试</button>
+      <a :href="'?debug=1'" style="font-size:12px;color:#2D6A4F;">开启调试控制台</a>
     </div>
 
     <!-- Pages -->
