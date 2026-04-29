@@ -25,26 +25,66 @@ async function sha256(buf: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const PROMPT = `你是移动支付截图识别助手。识别截图中的支付信息，严格返回纯 JSON（不要 markdown 包裹）。
+const PROMPT = `你是移动支付截图与账单记录识别助手。图片可能是以下几种类型，请先判断类型再提取信息：
 
-字段要求：
-- amount: 数字，不带货币符号，无法识别返回 null
-- merchant_name: 商家名称字符串，无法识别返回 null（不要猜测）
-- platform: 从中选一个 [美团,微信,京东,拼多多,淘宝,抖音,支付宝,滴滴,饿了么,其他]，无法判断返回 null
-  平台识别规则（优先级高于外观判断）：
-  * 页面含"先用后付"文字 且 订单号以 PO 开头 → 拼多多
-  * 页面含"先用后付"文字 且 订单号以 OD 开头 → 淘宝
-- category: 从中选一个 [food,shopping,transport,entertainment,life,health,education,other]
-- payment_method: 从中选一个 [微信支付,支付宝,花呗,京东白条,美团月付,拼多多先用后付,银行卡,其他]
-  支付方式识别规则：
-  * 页面含"先用后付"且平台为拼多多 → 拼多多先用后付
-  * 页面含"先用后付"且平台为淘宝/天猫 → 花呗（花呗先用后付）
-- confidence: 0-1 浮点数，识别整体置信度
+【图片类型识别】
+- payment_confirm：支付成功确认页（有“支付成功”“付款成功”等字样）
+- wechat_bill：微信账单详情页（有“记录时间”“来源”“备注”字段，灰色背景卡片风格）
+- alipay_bill：支付宝账单详情页（有“交易时间”“交易状态”“商家订单号”等字段）
+- bank_bill：银行账单/流水页（有银行标志、“账户余额”等）
+- other：其他
 
-只返回如下结构的 JSON：
-{"amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"confidence":0}`;
+【通用字段提取规则】
+
+amount（金额）：
+- 数字，不带货币符号，无法识别返回 null
+- 若显示为负数（如 -16.00），取绝对值（返回 16.00）
+- 若同时有“优惠”或“实付”，以实际支付金额为准
+
+merchant_name（商家）：
+- 优先从商家名称/收款方/收款账号字段提取
+- 若备注/摘要格式为“扫二维码付款-给X”或“转账给X”或“付款给X”，则 X 为商家名
+- 若备注含个人姓名（给张三、给李四），merchant_name 填写该姓名
+- 无法识别返回 null（不要猜测）
+
+platform（平台）：
+从 [美团,微信,京东,拼多多,淘宝,抖音,支付宝,滴滴,饿了么,其他] 中选一个，识别规则（按优先级）：
+* 页面含“先用后付”且订单号以 PO 开头 → 拼多多
+* 页面含“先用后付”且订单号以 OD 开头 → 淘宝
+* image_type 为 wechat_bill，或页面有微信特征（灰色圆角卡片、“记录时间”“来源:自动同步”）→ 微信
+* image_type 为 alipay_bill，或页面有支付宝特征（蓝色主题、“交易快照”）→ 支付宝
+* 无法判断 → null
+
+category（消费类别）：
+从 [food,shopping,transport,entertainment,life,health,education,other] 中选一个
+- 微信账单详情页顶部有分类图标+文字，直接使用：
+  * 餐饮/美食/餐厅 → food
+  * 交通/出行/打车 → transport
+  * 购物/网购 → shopping
+  * 娱乐/休闲 → entertainment
+  * 生活/日用/缴费 → life
+  * 医疗/健康/药品 → health
+  * 教育/学习 → education
+  * 其余 → other
+- 无分类图标时，根据商家名和平台推断
+
+payment_method（支付方式）：
+从 [微信支付,支付宝,花呗,京东白条,美团月付,拼多多先用后付,银行卡,其他] 中选一个
+* 页面含“先用后付”且平台为拼多多 → 拼多多先用后付
+* 页面含“先用后付”且平台为淘宝/天猫 → 花呗（花呗先用后付）
+* image_type 为 wechat_bill 或平台为微信 → 微信支付
+* image_type 为 alipay_bill 或平台为支付宝（且无花呗字样）→ 支付宝
+* 页面含“花呗”字样 → 花呗
+* 页面含“白条”字样 → 京东白条
+* 无法识别 → null
+
+confidence（置信度）：0-1 浮点数，识别整体置信度
+
+只返回如下结构的纯 JSON（不要 markdown 包裹）：
+{"image_type":"other","amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"confidence":0}`;
 
 interface AIResult {
+  image_type: string;
   amount: number | null;
   merchant_name: string | null;
   platform: string | null;
@@ -54,13 +94,15 @@ interface AIResult {
 }
 
 function normalizeAmount(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return Math.round(value * 100) / 100;
+  if (typeof value === "number" && Number.isFinite(value) && value !== 0) {
+    const abs = Math.abs(value);
+    return Math.round(abs * 100) / 100;
   }
   if (typeof value === "string") {
-    const parsed = Number(value.replace(/[^\d.]/g, ""));
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.round(parsed * 100) / 100;
+    const cleaned = value.replace(/[^\d.\-]/g, "");
+    const parsed = Number(cleaned);
+    if (Number.isFinite(parsed) && parsed !== 0) {
+      return Math.round(Math.abs(parsed) * 100) / 100;
     }
   }
   return null;
@@ -180,7 +222,7 @@ Deno.serve(async (req) => {
       ai = await callKimiVision(bytes, mime, moonshot_key);
     } catch (e) {
       aiOk = false;
-      ai = { amount: null, merchant_name: null, platform: null, category: null, payment_method: null, confidence: 0 };
+      ai = { image_type: "other", amount: null, merchant_name: null, platform: null, category: null, payment_method: null, confidence: 0 };
       console.error("Kimi Vision failed:", e);
     }
 
