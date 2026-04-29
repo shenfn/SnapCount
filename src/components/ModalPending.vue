@@ -1,7 +1,11 @@
 <template>
   <div class="modal-overlay" :class="{ open: store.pendingModal.open }" @click.self="store.closePendingModal()">
-    <div class="modal-sheet">
-      <div class="sheet-handle"></div>
+    <div class="modal-sheet" ref="sheetEl">
+      <div class="sheet-handle"
+        @touchstart.passive="onTouchStart"
+        @touchmove="onTouchMove"
+        @touchend="onTouchEnd"
+        style="padding: 12px 0; margin-top: -12px; cursor: grab;"></div>
       <div class="sheet-header">
         <div class="sheet-title">补充账单信息</div>
         <div class="sheet-sub">{{ store.pendingModal.bill?.date }} {{ store.pendingModal.bill?.time }} · 截图识别</div>
@@ -83,8 +87,38 @@
 </template>
 
 <script setup>
-import { inject } from 'vue'
+import { inject, ref } from 'vue'
 const store = inject('store')
+
+const sheetEl = ref(null)
+let touchStartY = 0
+
+function onTouchStart(e) {
+  touchStartY = e.touches[0].clientY
+  if (sheetEl.value) sheetEl.value.style.transition = 'none'
+}
+
+function onTouchMove(e) {
+  const delta = e.touches[0].clientY - touchStartY
+  if (delta <= 0) return
+  e.preventDefault()
+  if (sheetEl.value) sheetEl.value.style.transform = `translateY(${delta}px)`
+}
+
+function onTouchEnd(e) {
+  const delta = e.changedTouches[0].clientY - touchStartY
+  if (!sheetEl.value) return
+  sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
+  if (delta > 80) {
+    sheetEl.value.style.transform = 'translateY(110%)'
+    setTimeout(() => {
+      store.closePendingModal()
+      if (sheetEl.value) sheetEl.value.style.transform = ''
+    }, 280)
+  } else {
+    sheetEl.value.style.transform = 'translateY(0)'
+  }
+}
 
 const platforms = [
   { val: '美团',  label: '🛵 美团',  hot: true },
