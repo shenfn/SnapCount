@@ -15,6 +15,8 @@ export function useStore() {
   const transportRecords = ref([])
 
   const currentFilter = ref('all')
+  const loading = ref(false)
+  const loadError = ref('')
   const flashMsg = ref('')
   const flashVisible = ref(false)
   let flashTimer = null
@@ -75,6 +77,8 @@ export function useStore() {
   })
 
   async function loadData() {
+    loading.value = true
+    loadError.value = ''
     const padM = String(currentMonth.value).padStart(2, '0')
     const start = `${currentYear.value}-${padM}-01`
     const lastDay = new Date(currentYear.value, currentMonth.value, 0).getDate()
@@ -86,7 +90,12 @@ export function useStore() {
       .lte('transaction_date', end)
       .order('transaction_date', { ascending: false })
       .order('transaction_time', { ascending: false })
-    if (txErr) console.error('加载账单失败:', txErr.message)
+    if (txErr) {
+      console.error('加载账单失败:', txErr.message)
+      loadError.value = '数据加载失败，请检查网络后刷新'
+      loading.value = false
+      return
+    }
 
     bills.value = (txs || []).map(mapTransaction)
     transportRecords.value = bills.value
@@ -109,6 +118,7 @@ export function useStore() {
       time: '',
       icon: incomeCatMap[r.category]?.icon || '💰',
     }))
+    loading.value = false
   }
 
   async function changeMonth(delta) {
@@ -205,6 +215,7 @@ export function useStore() {
 
   return {
     currentYear, currentMonth, currentPage, monthLabel,
+    loading, loadError,
     bills, incomeRecords, transportRecords,
     doneBills, pendingBills, filteredBills,
     totalExpense, totalIncome, netBalance,

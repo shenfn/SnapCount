@@ -1,0 +1,18 @@
+{
+  "name": "随手账",
+  "short_name": "随手账",
+  "description": "个人收支管理 PWA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F6F3",
+  "theme_color": "#2D6A4F",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://fav.farm/💰",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

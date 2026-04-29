@@ -1,5 +1,18 @@
 <template>
   <div>
+    <!-- Loading overlay -->
+    <div v-if="store.loading.value" style="position:fixed;inset:0;background:#F7F6F3;z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
+      <div style="font-size:40px">💰</div>
+      <div style="font-size:15px;color:#6B6A65;font-family:'PingFang SC',system-ui,sans-serif">加载中…</div>
+    </div>
+
+    <!-- Error overlay -->
+    <div v-if="!store.loading.value && store.loadError.value" style="position:fixed;inset:0;background:#F7F6F3;z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px;text-align:center;">
+      <div style="font-size:40px">⚠️</div>
+      <div style="font-size:15px;color:#1A1A18;font-family:'PingFang SC',system-ui,sans-serif">{{ store.loadError.value }}</div>
+      <button @click="store.loadData()" style="padding:12px 24px;background:#2D6A4F;color:#fff;border:none;border-radius:12px;font-size:15px;cursor:pointer;font-family:'PingFang SC',system-ui,sans-serif">重试</button>
+    </div>
+
     <!-- Pages -->
     <PageHome     v-show="store.currentPage.value === 'home'" />
     <PagePending  v-show="store.currentPage.value === 'pending'" />
