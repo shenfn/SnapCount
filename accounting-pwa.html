@@ -1080,15 +1080,28 @@ function setFilter(cat, btn) {
 }
 
 // ══ Modal ══
+// AI 存英文分类码 → modal 芯片中文值
+const catCodeMap = { food:'餐饮', shopping:'购物', transport:'出行', entertainment:'娱乐', life:'生活', health:'生活', education:'其他', other:'其他' };
+// 支付方式别名（数据库值 → 芯片值）
+const payAliasMap = { '拼多多先用后付':'先用后付', '花呗（先用后付）':'先用后付' };
+
 function openModal(id) {
   const b = bills.find(x=>x.id===id);
+  if (!b) return;
   modalData = b;
-  selections = { platform: b.platform!='?' ? b.platform : null,
-                 category: b.cat!='?' ? b.cat : null,
-                 payment: b.payment!='?' ? b.payment : null };
+  const catVal  = catCodeMap[b.cat]  || (b.cat  !== '?' ? b.cat  : null);
+  const payVal  = payAliasMap[b.payment] || (b.payment !== '?' ? b.payment : null);
+  selections = { platform: b.platform !== '?' ? b.platform : null, category: catVal, payment: payVal };
   document.getElementById('modalTitle').textContent = '补充账单信息';
   document.getElementById('modalSub').textContent = `${b.date} ${b.time} · 截图识别`;
   document.getElementById('modalAmount').textContent = `-¥${b.amount.toFixed(2)}`;
+  // 截图预览
+  const thumb = document.getElementById('modalThumb');
+  if (b.image_url) {
+    thumb.innerHTML = `<img src="${b.image_url}" style="width:100%;border-radius:8px;max-height:180px;object-fit:contain;background:#f0f0f0;">`;
+  } else {
+    thumb.innerHTML = '<span>🖼</span><span>无截图预览</span>';
+  }
   syncSelections();
   document.getElementById('modal-merchant').value = b.name !== '未识别商家' ? b.name : '';
   document.getElementById('modal').classList.add('open');
