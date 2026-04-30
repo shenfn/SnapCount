@@ -216,6 +216,15 @@ function normalizeAmount(value: unknown): number | null {
   return null;
 }
 
+function normalizeName(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function isSameAmount(a: number | string | null | undefined, b: number | null): boolean {
+  const left = normalizeAmount(a);
+  return left !== null && b !== null && Math.abs(left - b) <= 0.01;
+}
+
 // 把 Uint8Array 转成 base64（避免大图时 String.fromCharCode 栈溢出）
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -400,10 +409,68 @@ Deno.serve(async (req) => {
       const incomeCategory = ["salary", "bonus", "freelance", "investment", "reimbursement", "other"].includes(ai.income_category ?? "")
         ? ai.income_category
         : "other";
+      const sourceName = ai.source_name ?? ai.merchant_name ?? "截图识别收入";
+
+      if (duplicateKind === "perceptual_hash" && duplicateRefId) {
+        const { data: refLog } = await supabase
+          .from("ai_recognition_logs")
+          .select("id,target_table,target_id,record_type")
+          .eq("id", duplicateRefId)
+          .maybeSingle();
+
+        if (refLog?.record_type === "income" && refLog.target_table === "income_records" && refLog.target_id) {
+          const { data: refIncome } = await supabase
+            .from("income_records")
+            .select("id,amount,source_name")
+            .eq("id", refLog.target_id)
+            .maybeSingle();
+
+          const currentSource = normalizeName(sourceName);
+          const refSource = normalizeName(refIncome?.source_name);
+          const sourceMatches = currentSource && refSource
+            ? currentSource === refSource
+            : currentSource === refSource || currentSource === "截图识别收入" || refSource === "截图识别收入";
+
+          if (refIncome && isSameAmount(refIncome.amount, normalizedAmount) && sourceMatches) {
+            await writeAiLog(supabase, {
+              image_hash: hash,
+              perceptual_hash: perceptualHash,
+              perceptual_distance: perceptualDistance,
+              image_url: path,
+              image_type: ai.image_type,
+              record_type: "income",
+              occurred_at: occurredAt,
+              order_finished_at: orderFinishedAt,
+              duplicate_kind: duplicateKind,
+              duplicate_ref_table: duplicateRefTable,
+              duplicate_ref_id: duplicateRefId,
+              target_table: "income_records",
+              target_id: refIncome.id,
+              status: "duplicate",
+              confidence: ai.confidence ?? 0,
+              duration_ms: Date.now() - startedAt,
+              ai_response: ai,
+              error_message: aiErrorMessage,
+            });
+            if (uploadedNewObject) {
+              const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
+              if (removeErr) console.error("Cleanup duplicate income image failed:", removeErr);
+            }
+            return new Response(JSON.stringify({
+              status: "duplicate",
+              id: refIncome.id,
+              record_type: "income",
+              ai_ok: aiOk,
+              message: "该收入截图疑似已记录",
+            }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+        }
+      }
+
       const { data: row, error: incErr } = await supabase.from("income_records").insert({
         amount: normalizedAmount,
         category: incomeCategory,
-        source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
+        source_name: sourceName,
         income_date: occurredAt ? occurredAt.slice(0, 10) : today,
         image_url: path,
         image_hash: hash,

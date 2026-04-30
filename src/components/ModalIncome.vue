@@ -95,13 +95,8 @@ const sheet = useBottomSheet(
   computed(() => store.incomeModal.open),
   store.closeIncomeModal,
   {
-    hasChanges: () => !!(store.incomeModal.amount || store.incomeModal.source || store.incomeModal.note || store.incomeModal.cat !== 'salary'),
-    resetChanges: () => {
-      store.incomeModal.amount = ''
-      store.incomeModal.source = ''
-      store.incomeModal.note = ''
-      store.incomeModal.cat = 'salary'
-    },
+    hasChanges: store.hasIncomeChanges,
+    resetChanges: store.resetIncomeChanges,
   }
 )
 const sheetEl = sheet.sheetEl

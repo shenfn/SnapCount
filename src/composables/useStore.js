@@ -273,6 +273,50 @@ export function useStore() {
     pendingModalInitial = null
   }
 
+  let incomeModalInitial = null
+
+  function snapshotIncomeModal() {
+    return {
+      mode: incomeModal.mode,
+      id: incomeModal.id,
+      cat: incomeModal.cat,
+      amount: incomeModal.amount,
+      source: incomeModal.source,
+      note: incomeModal.note,
+      date: incomeModal.date,
+      imagePath: incomeModal.imagePath,
+    }
+  }
+
+  function setIncomeModalInitial() {
+    incomeModalInitial = snapshotIncomeModal()
+  }
+
+  function hasIncomeChanges() {
+    if (!incomeModalInitial) return false
+    const current = snapshotIncomeModal()
+    return current.mode !== incomeModalInitial.mode
+      || current.id !== incomeModalInitial.id
+      || current.cat !== incomeModalInitial.cat
+      || current.amount !== incomeModalInitial.amount
+      || current.source !== incomeModalInitial.source
+      || current.note !== incomeModalInitial.note
+      || current.date !== incomeModalInitial.date
+      || current.imagePath !== incomeModalInitial.imagePath
+  }
+
+  function resetIncomeChanges() {
+    if (!incomeModalInitial) return
+    incomeModal.mode = incomeModalInitial.mode
+    incomeModal.id = incomeModalInitial.id
+    incomeModal.cat = incomeModalInitial.cat
+    incomeModal.amount = incomeModalInitial.amount
+    incomeModal.source = incomeModalInitial.source
+    incomeModal.note = incomeModalInitial.note
+    incomeModal.date = incomeModalInitial.date
+    incomeModal.imagePath = incomeModalInitial.imagePath
+  }
+
   async function confirmEntry() {
     const amt = parseFloat(pendingModal.amount)
     if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
@@ -328,6 +372,7 @@ export function useStore() {
     incomeModal.imageUrl = null
     incomeModal.imagePath = null
     incomeModal.imageLoadError = false
+    setIncomeModalInitial()
   }
 
   async function openIncomeEditModal(record) {
@@ -342,10 +387,12 @@ export function useStore() {
     incomeModal.imagePath = record.image_path || record.image_url || null
     incomeModal.imageUrl = await getSignedImageUrl(incomeModal.imagePath)
     incomeModal.imageLoadError = !!incomeModal.imagePath && !incomeModal.imageUrl
+    setIncomeModalInitial()
   }
 
   function closeIncomeModal() {
     incomeModal.open = false
+    incomeModalInitial = null
   }
 
   async function confirmIncome() {
@@ -524,7 +571,8 @@ export function useStore() {
     openPendingModal, closePendingModal, confirmEntry,
     hasPendingChanges, resetPendingChanges,
     markPendingImageUnavailable,
-    openIncomeModal, openIncomeEditModal, closeIncomeModal, confirmIncome, markIncomeImageUnavailable,
+    openIncomeModal, openIncomeEditModal, closeIncomeModal, confirmIncome,
+    hasIncomeChanges, resetIncomeChanges, markIncomeImageUnavailable,
     openExpenseModal, closeExpenseModal, confirmExpense,
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
