@@ -37,11 +37,16 @@ export function useStore() {
 
   const incomeModal = reactive({
     open: false,
+    mode: 'create',
+    id: null,
     cat: 'salary',
     amount: '',
     source: '',
     note: '',
     date: '',
+    imageUrl: null,
+    imagePath: null,
+    imageLoadError: false,
   })
 
   const expenseModal = reactive({
@@ -70,6 +75,12 @@ export function useStore() {
   const totalExpense = computed(() => doneBills.value.reduce((s, b) => s + b.amount, 0))
   const totalIncome = computed(() => incomeRecords.value.reduce((s, r) => s + r.amount, 0))
   const netBalance = computed(() => totalIncome.value - totalExpense.value)
+
+  const recentEntries = computed(() => {
+    const expenseItems = bills.value.map(b => ({ ...b, entryKind: 'expense', sortDate: `${b.dateRaw || ''} ${b.time || ''}` }))
+    const incomeItems = incomeRecords.value.map(r => ({ ...r, entryKind: 'income', sortDate: `${r.dateRaw || ''} ${r.time || ''}` }))
+    return [...expenseItems, ...incomeItems].sort((a, b) => (b.sortDate || '').localeCompare(a.sortDate || ''))
+  })
 
   const filteredBills = computed(() => {
     if (currentFilter.value === 'all') return bills.value
@@ -133,8 +144,13 @@ export function useStore() {
         source: r.source_name,
         amount: Number(r.amount),
         date: formatDate(r.income_date),
+        dateRaw: r.income_date,
         time: '',
         icon: incomeCatMap[r.category]?.icon || '💰',
+        note: r.note,
+        image_url: r.image_url,
+        image_path: r.image_url,
+        sourceType: r.source || 'manual',
       }))
     } catch (e) {
       console.error('[loadData 异常]', e)
@@ -245,6 +261,9 @@ export function useStore() {
         source_name: source,
         amount: amt,
         income_date: pendingModal.bill.dateRaw || new Date().toISOString().slice(0, 10),
+        image_url: pendingModal.bill.image_path || null,
+        image_hash: pendingModal.bill.image_hash || null,
+        source: 'ai_scan',
         note: pendingModal.bill.image_path ? '由截图待补充转入收入' : null,
       })
       if (incErr) { alert('保存失败：' + incErr.message); return }
@@ -252,10 +271,6 @@ export function useStore() {
       const imagePath = pendingModal.bill.image_path
       const { error: delErr } = await sb.from('transactions').delete().eq('id', pendingModal.bill.id)
       if (delErr) { alert('收入已保存，但原待补充记录删除失败：' + delErr.message); return }
-      if (imagePath && !imagePath.startsWith('https://')) {
-        const { error: removeErr } = await sb.storage.from('receipt-images').remove([imagePath])
-        if (removeErr) console.warn('删除收入截图占位文件失败:', removeErr.message)
-      }
       closePendingModal()
       showFlash('✓ 收入已记录')
       await loadData()
@@ -279,11 +294,30 @@ export function useStore() {
 
   function openIncomeModal() {
     incomeModal.open = true
+    incomeModal.mode = 'create'
+    incomeModal.id = null
     incomeModal.cat = 'salary'
     incomeModal.amount = ''
     incomeModal.source = ''
     incomeModal.note = ''
     incomeModal.date = new Date().toISOString().slice(0, 10)
+    incomeModal.imageUrl = null
+    incomeModal.imagePath = null
+    incomeModal.imageLoadError = false
+  }
+
+  async function openIncomeEditModal(record) {
+    incomeModal.open = true
+    incomeModal.mode = 'edit'
+    incomeModal.id = record.id
+    incomeModal.cat = record.cat || 'other'
+    incomeModal.amount = String(record.amount)
+    incomeModal.source = record.source || ''
+    incomeModal.note = record.note || ''
+    incomeModal.date = record.dateRaw || new Date().toISOString().slice(0, 10)
+    incomeModal.imagePath = record.image_path || record.image_url || null
+    incomeModal.imageUrl = await getSignedImageUrl(incomeModal.imagePath)
+    incomeModal.imageLoadError = !!incomeModal.imagePath && !incomeModal.imageUrl
   }
 
   function closeIncomeModal() {
@@ -296,17 +330,37 @@ export function useStore() {
     if (!incomeModal.cat) { alert('请选择收入类型'); return }
     if (!incomeModal.date) { alert('请选择到账日期'); return }
     const source = incomeModal.source.trim() || (incomeCatMap[incomeModal.cat]?.label || '收入')
+    if (incomeModal.mode === 'edit' && incomeModal.id) {
+      const { error } = await sb.from('income_records').update({
+        category: incomeModal.cat,
+        source_name: source,
+        amount: amt,
+        income_date: incomeModal.date,
+        note: incomeModal.note.trim() || null,
+      }).eq('id', incomeModal.id)
+      if (error) { alert('保存失败：' + error.message); return }
+      closeIncomeModal()
+      showFlash('✓ 收入已更新')
+      await loadData()
+      return
+    }
     const { error } = await sb.from('income_records').insert({
       category: incomeModal.cat,
       source_name: source,
       amount: amt,
       income_date: incomeModal.date,
       note: incomeModal.note.trim() || null,
+      source: 'manual',
     })
     if (error) { alert('保存失败：' + error.message); return }
     closeIncomeModal()
     showFlash('✓ 收入已记录')
     await loadData()
+  }
+
+  function markIncomeImageUnavailable() {
+    incomeModal.imageUrl = null
+    incomeModal.imageLoadError = true
   }
 
   function openExpenseModal() {
@@ -408,6 +462,17 @@ export function useStore() {
       } else if (type === 'income') {
         const { error } = await sb.from('income_records').delete().eq('id', id)
         if (error) throw new Error(error.message)
+        if (imagePath && !imagePath.startsWith('https://')) {
+          const { data: txRefs, error: txRefErr } = await sb.from('transactions').select('id').eq('image_url', imagePath).limit(1)
+          const { data: incRefs, error: incRefErr } = await sb.from('income_records').select('id').eq('image_url', imagePath).limit(1)
+          if (txRefErr || incRefErr) {
+            console.warn('检查收入截图引用失败:', txRefErr?.message || incRefErr?.message)
+          } else if ((!txRefs || txRefs.length === 0) && (!incRefs || incRefs.length === 0)) {
+            const { error: removeErr } = await sb.storage.from('receipt-images').remove([imagePath])
+            if (removeErr) console.warn('删除收入截图文件失败:', removeErr.message)
+          }
+        }
+        if (incomeModal.open && incomeModal.id === id) closeIncomeModal()
         showFlash('✓ 已删除')
       }
       await loadData()
@@ -421,6 +486,7 @@ export function useStore() {
     loading, loadError,
     bills, incomeRecords, transportRecords,
     doneBills, pendingBills, filteredBills,
+    recentEntries,
     totalExpense, totalIncome, netBalance,
     platformChartData, payChartData,
     currentFilter,
@@ -434,7 +500,7 @@ export function useStore() {
     openPendingModal, closePendingModal, confirmEntry,
     hasPendingChanges, resetPendingChanges,
     markPendingImageUnavailable,
-    openIncomeModal, closeIncomeModal, confirmIncome,
+    openIncomeModal, openIncomeEditModal, closeIncomeModal, confirmIncome, markIncomeImageUnavailable,
     openExpenseModal, closeExpenseModal, confirmExpense,
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,

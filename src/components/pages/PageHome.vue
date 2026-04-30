@@ -73,10 +73,20 @@
     <!-- 最近记录 -->
     <div class="sec-title">最近记录 <span @click="store.currentPage.value = 'bills'">查看全部 ›</span></div>
     <div class="card">
-      <div v-if="!store.bills.value.length" class="empty">
+      <div v-if="!store.recentEntries.value.length" class="empty">
         <div class="e-icon">📋</div><p>本月暂无记录</p>
       </div>
-      <BillRow v-for="b in store.bills.value.slice(0, 5)" :key="b.id" :bill="b" />
+      <template v-for="entry in store.recentEntries.value.slice(0, 5)" :key="entry.entryKind + entry.id">
+        <div v-if="entry.entryKind === 'income'" class="income-item compact" @click="store.openIncomeEditModal(entry)">
+          <div class="income-icon">{{ entry.icon }}</div>
+          <div class="bill-info">
+            <div class="bill-name">{{ entry.source || store.incomeCatMap[entry.cat]?.label }}</div>
+            <div class="bill-meta">{{ store.incomeCatMap[entry.cat]?.label }} · {{ entry.date }}</div>
+          </div>
+          <div class="income-amount">+¥{{ entry.amount.toFixed(2) }}</div>
+        </div>
+        <BillRow v-else :bill="entry" />
+      </template>
     </div>
     <div class="spacer"></div>
   </div>

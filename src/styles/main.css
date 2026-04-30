@@ -184,7 +184,7 @@ body {
 .modal-sheet {
   background: var(--surface); border-radius: 20px 20px 0 0;
   width: 100%; max-width: 430px;
-  max-height: 88vh;
+  max-height: min(88vh, 760px);
   display: flex; flex-direction: column;
   animation: slideUp 0.28s cubic-bezier(.4,0,.2,1);
 }
@@ -197,13 +197,13 @@ body {
 }
 .sheet-drag-zone {
   flex-shrink: 0;
-  padding: 12px 0 8px;
+  padding: 10px 0 6px;
   cursor: grab;
   touch-action: none;
 }
 .sheet-header {
   flex-shrink: 0;
-  padding: 16px 20px 12px;
+  padding: 12px 20px 10px;
   border-bottom: 0.5px solid var(--border);
   cursor: grab;
   touch-action: none;
@@ -216,12 +216,14 @@ body {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
 }
 
 .sheet-footer {
   flex-shrink: 0;
-  padding: 8px 20px 24px;
+  padding: 8px 20px calc(18px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-top: 0.5px solid var(--border);
 }
 .sheet-amount {
   font-size: 30px; font-weight: 600; color: var(--danger);
@@ -229,11 +231,11 @@ body {
 }
 
 /* ── Selector section ── */
-.sel-section { padding: 16px 20px 0; }
+.sel-section { padding: 14px 20px 0; }
 .sel-label { font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 10px; }
 .sel-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .sel-chip {
-  font-size: 14px; padding: 8px 16px; border-radius: 20px;
+  font-size: 13px; padding: 8px 13px; border-radius: 18px;
   background: var(--surface2); color: var(--text);
   border: 1.5px solid transparent; cursor: pointer;
   font-family: var(--font); transition: all 0.15s;
@@ -444,7 +446,9 @@ body {
 .income-item {
   display: flex; align-items: center; gap: 12px;
   padding: 12px 0; border-bottom: 0.5px solid var(--border);
+  cursor: pointer;
 }
+.income-item.compact { padding: 12px 0; }
 .income-item:last-child { border-bottom: none; }
 .income-icon {
   width: 38px; height: 38px; border-radius: 10px; background: #DBEAFE;
@@ -465,9 +469,11 @@ body {
 
 /* ── Income add modal ── */
 .amount-input-wrap {
-  padding: 16px 20px 0;
+  padding: 16px 20px 4px;
   display: flex; align-items: center; gap: 8px;
+  border-bottom: 0.5px solid var(--border);
 }
+.amount-input-wrap.compact { padding-top: 12px; }
 .amount-prefix { font-size: 28px; font-weight: 600; color: #1565C0; }
 .amount-prefix.expense { color: var(--danger); }
 .amount-input {
@@ -477,6 +483,16 @@ body {
 }
 .amount-input.expense { color: var(--danger); }
 .amount-input::placeholder { color: var(--text3); font-size: 22px; }
+
+@media (max-height: 760px) {
+  .modal-sheet { max-height: 92vh; }
+  .sheet-header { padding-top: 10px; padding-bottom: 8px; }
+  .sel-section { padding-top: 12px; }
+  .sel-label { margin-bottom: 8px; }
+  .amount-input-wrap { padding-top: 10px; }
+  .amount-prefix, .amount-input { font-size: 24px; }
+  .sel-chip { padding: 7px 11px; font-size: 13px; }
+}
 
 /* ── Pending amount edit ── */
 .amount-edit-wrap {

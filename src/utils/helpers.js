@@ -53,10 +53,12 @@ export function mapTransaction(t) {
     dateRaw: t.transaction_date,
     time: t.transaction_time ? t.transaction_time.slice(0, 5) : '',
     status: t.status,
+    type: t.type,
     icon: platformIcon(t.platform),
     iconBg: platformBg(t.platform),
     image_url: t.image_url,
     image_path: t.image_url,
+    image_hash: t.image_hash,
     transport_type: t.transport_type,
   }
 }

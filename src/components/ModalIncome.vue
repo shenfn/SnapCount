@@ -9,15 +9,30 @@
         <div class="sheet-handle"></div>
       </div>
       <div class="sheet-header">
-        <div class="sheet-title">添加收入</div>
-        <div class="sheet-sub">手动录入收入记录</div>
+        <div class="sheet-title">{{ store.incomeModal.mode === 'edit' ? '编辑收入' : '添加收入' }}</div>
+        <div class="sheet-sub">{{ store.incomeModal.mode === 'edit' ? '调整收入信息与截图' : '手动录入收入记录' }}</div>
       </div>
 
       <div class="sheet-body" ref="bodyEl">
-      <div class="amount-input-wrap">
-        <span class="amount-prefix">¥</span>
+      <div class="amount-input-wrap compact">
+        <span class="amount-prefix">+¥</span>
         <input type="number" class="amount-input" v-model="store.incomeModal.amount"
           placeholder="0.00" min="0.01" step="0.01">
+      </div>
+
+      <div v-if="store.incomeModal.mode === 'edit'" class="thumb-wrap">
+        <div v-if="store.incomeModal.imageUrl" style="width:100%" @click="store.openImgFull(store.incomeModal.imageUrl)">
+          <img :src="store.incomeModal.imageUrl"
+            @error="store.markIncomeImageUnavailable()"
+            style="width:100%; max-height:160px; object-fit:contain; background:#f0f0f0; display:block;">
+          <div style="text-align:center; padding:6px 0; font-size:11px; color:var(--text3);">点击放大原图</div>
+        </div>
+        <template v-else-if="store.incomeModal.imageLoadError">
+          <span>!</span><span>截图文件不可用或已删除</span>
+        </template>
+        <template v-else>
+          <span>□</span><span>无截图预览</span>
+        </template>
       </div>
 
       <div class="sel-section" style="margin-top:16px">
@@ -55,6 +70,10 @@
       <button class="confirm-btn" style="background:#1565C0"
         :disabled="!store.incomeModal.amount || !store.incomeModal.cat || !store.incomeModal.date"
         @click="store.confirmIncome()">确认保存</button>
+      <button v-if="store.incomeModal.mode === 'edit'" class="delete-bill-btn"
+        @click="store.openDeleteConfirm('income', store.incomeModal.id, store.incomeModal.imagePath)">
+        删除此收入
+      </button>
       </div>
 
       <div v-if="sheet.showUnsaved.value" class="unsaved-bar">

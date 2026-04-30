@@ -14,7 +14,7 @@
       </div>
 
       <div class="sheet-body" ref="bodyEl">
-      <div class="amount-input-wrap">
+      <div class="amount-input-wrap compact">
         <span class="amount-prefix expense">-¥</span>
         <input type="number" class="amount-input expense" v-model="store.expenseModal.amount"
           placeholder="0.00" min="0.01" step="0.01">

@@ -217,10 +217,17 @@ Deno.serve(async (req) => {
 
     // 2. 计算 hash 去重
     const hash = await sha256(buf);
-    const { data: dup } = await supabase
+    const { data: txDup } = await supabase
       .from("transactions").select("id").eq("image_hash", hash).maybeSingle();
-    if (dup) {
-      return new Response(JSON.stringify({ status: "duplicate", id: dup.id, message: "该截图已记账" }), {
+    if (txDup) {
+      return new Response(JSON.stringify({ status: "duplicate", id: txDup.id, record_type: "expense", message: "该截图已记账" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { data: incDup } = await supabase
+      .from("income_records").select("id").eq("image_hash", hash).maybeSingle();
+    if (incDup) {
+      return new Response(JSON.stringify({ status: "duplicate", id: incDup.id, record_type: "income", message: "该收入截图已记录" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -263,6 +270,9 @@ Deno.serve(async (req) => {
         category: incomeCategory,
         source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
         income_date: today,
+        image_url: path,
+        image_hash: hash,
+        source: "ai_scan",
         note: ai.platform ? `来自${ai.platform}截图识别` : "截图识别收入",
       }).select().single();
 

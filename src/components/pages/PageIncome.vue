@@ -39,11 +39,11 @@
       <div v-if="!store.incomeRecords.value.length" class="empty" style="padding:20px">
         <div class="e-icon">📋</div><p>暂无记录</p>
       </div>
-      <div v-for="r in store.incomeRecords.value" :key="r.id" class="income-item">
+      <div v-for="r in store.incomeRecords.value" :key="r.id" class="income-item" @click="store.openIncomeEditModal(r)">
         <div class="income-icon">{{ r.icon }}</div>
         <div class="bill-info">
           <div class="bill-name">{{ r.source || store.incomeCatMap[r.cat]?.label }}</div>
-          <div class="bill-meta">{{ store.incomeCatMap[r.cat]?.label }} · {{ r.date }}</div>
+          <div class="bill-meta">{{ store.incomeCatMap[r.cat]?.label }} · {{ r.date }}{{ r.image_path ? ' · 有截图' : '' }}</div>
         </div>
         <div class="income-amount">+¥{{ r.amount.toFixed(2) }}</div>
       </div>
