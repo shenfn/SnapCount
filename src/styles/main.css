@@ -184,22 +184,25 @@ body {
 .modal-sheet {
   background: var(--surface); border-radius: 20px 20px 0 0;
   width: 100%; max-width: 430px;
-  max-height: 92vh; overflow-y: auto;
-  padding: 0 0 40px;
+  max-height: 88vh;
+  display: flex; flex-direction: column;
   animation: slideUp 0.28s cubic-bezier(.4,0,.2,1);
-  overscroll-behavior: contain;
 }
+.modal-sheet.swiping { transition: none; }
+.modal-sheet.closing { transition: transform 0.28s cubic-bezier(0.32,0,0.67,0); }
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .sheet-handle {
   width: 36px; height: 4px; background: var(--border2);
   border-radius: 2px; margin: 12px auto 0;
 }
 .sheet-drag-zone {
+  flex-shrink: 0;
   padding: 12px 0 8px;
   cursor: grab;
   touch-action: none;
 }
 .sheet-header {
+  flex-shrink: 0;
   padding: 16px 20px 12px;
   border-bottom: 0.5px solid var(--border);
   cursor: grab;
@@ -207,6 +210,19 @@ body {
 }
 .sheet-title { font-size: 16px; font-weight: 600; }
 .sheet-sub { font-size: 13px; color: var(--text2); margin-top: 3px; }
+
+.sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: 8px;
+}
+
+.sheet-footer {
+  flex-shrink: 0;
+  padding: 8px 20px 24px;
+}
 .sheet-amount {
   font-size: 30px; font-weight: 600; color: var(--danger);
   padding: 16px 20px 0; letter-spacing: -0.5px;
@@ -230,8 +246,7 @@ body {
 
 /* ── Confirm button ── */
 .confirm-btn {
-  margin: 20px 20px 0;
-  width: calc(100% - 40px);
+  width: 100%;
   padding: 14px; border-radius: var(--radius);
   background: var(--accent); color: #fff; border: none;
   font-size: 16px; font-weight: 600; font-family: var(--font);
@@ -478,11 +493,37 @@ body {
 
 /* ── Delete bill button ── */
 .delete-bill-btn {
-  display: block; width: calc(100% - 40px); margin: 12px 20px 0;
+  display: block; width: 100%;
   padding: 12px; border-radius: var(--radius);
   border: 1.5px solid var(--danger); background: transparent;
   color: var(--danger); font-size: 14px; font-weight: 500;
   cursor: pointer; font-family: var(--font);
-  transition: background 0.15s;
+  transition: background 0.15s; margin-top: 10px;
 }
 .delete-bill-btn:active { background: var(--danger-light); }
+
+/* ── Unsaved changes bar ── */
+.unsaved-bar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 20px 18px;
+  background: #FFF7ED; border-top: 1px solid #FED7AA;
+  animation: unsavedIn 0.2s ease;
+}
+@keyframes unsavedIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.unsaved-text {
+  flex: 1;
+  font-size: 13px; font-weight: 500; color: #C2410C;
+}
+.unsaved-cancel {
+  padding: 8px 16px; border-radius: 8px; border: 1px solid #D1D5DB;
+  background: #fff; color: #374151; font-size: 13px; font-weight: 500;
+  cursor: pointer; font-family: var(--font);
+}
+.unsaved-cancel:active { background: #F3F4F6; }
+.unsaved-confirm {
+  padding: 8px 16px; border-radius: 8px; border: none;
+  background: #EF4444; color: #fff; font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: var(--font);
+}
+.unsaved-confirm:active { background: #DC2626; }

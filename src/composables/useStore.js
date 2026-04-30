@@ -161,6 +161,8 @@ export function useStore() {
     return data?.signedUrl || null
   }
 
+  let pendingModalInitial = null
+
   async function openPendingModal(bill) {
     pendingModal.open = true
     const rawImagePath = bill.image_path || bill.image_url || null
@@ -171,6 +173,31 @@ export function useStore() {
     pendingModal.platform = bill.platform !== '?' ? bill.platform : null
     pendingModal.category = catCodeMap[bill.cat] || (bill.cat !== '?' ? bill.cat : null)
     pendingModal.payment = payAliasMap[bill.payment] || (bill.payment !== '?' ? bill.payment : null)
+    pendingModalInitial = {
+      merchantName: pendingModal.merchantName,
+      amount: pendingModal.amount,
+      platform: pendingModal.platform,
+      category: pendingModal.category,
+      payment: pendingModal.payment,
+    }
+  }
+
+  function hasPendingChanges() {
+    if (!pendingModalInitial) return false
+    return pendingModal.merchantName !== pendingModalInitial.merchantName
+      || pendingModal.amount !== pendingModalInitial.amount
+      || pendingModal.platform !== pendingModalInitial.platform
+      || pendingModal.category !== pendingModalInitial.category
+      || pendingModal.payment !== pendingModalInitial.payment
+  }
+
+  function resetPendingChanges() {
+    if (!pendingModalInitial) return
+    pendingModal.merchantName = pendingModalInitial.merchantName
+    pendingModal.amount = pendingModalInitial.amount
+    pendingModal.platform = pendingModalInitial.platform
+    pendingModal.category = pendingModalInitial.category
+    pendingModal.payment = pendingModalInitial.payment
   }
 
   function markPendingImageUnavailable() {
@@ -182,6 +209,7 @@ export function useStore() {
   function closePendingModal() {
     pendingModal.open = false
     pendingModal.bill = null
+    pendingModalInitial = null
   }
 
   async function confirmEntry() {
@@ -309,6 +337,7 @@ export function useStore() {
     incomeCatMap,
     loadData, changeMonth, showFlash,
     openPendingModal, closePendingModal, confirmEntry,
+    hasPendingChanges, resetPendingChanges,
     markPendingImageUnavailable,
     openIncomeModal, closeIncomeModal, confirmIncome,
     openImgFull, closeImgFull,

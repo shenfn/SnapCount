@@ -1,6 +1,7 @@
 <template>
-  <div class="modal-overlay" :class="{ open: store.pendingModal.open }" @click.self="store.closePendingModal()">
+  <div class="modal-overlay" :class="{ open: store.pendingModal.open }" @click.self="tryClose">
     <div class="modal-sheet" ref="sheetEl"
+      :class="{ swiping: isSwiping, closing: isClosing, unsaved: showUnsaved }"
       @touchstart="onTouchStart"
       @touchmove="onTouchMove"
       @touchend="onTouchEnd">
@@ -11,82 +12,86 @@
         <div class="sheet-title">{{ store.pendingModal.bill?.status === 'done' ? '编辑账单信息' : '补充账单信息' }}</div>
         <div class="sheet-sub">{{ store.pendingModal.bill?.date }} {{ store.pendingModal.bill?.time }} · 截图识别</div>
       </div>
-      <!-- 金额（可修正 AI 识别错误） -->
-      <div class="amount-edit-wrap">
-        <span class="amount-edit-prefix">-¥</span>
-        <input type="number" class="amount-edit-input" v-model="store.pendingModal.amount"
-          min="0.01" max="999999.99" step="0.01" placeholder="0.00">
-      </div>
 
-      <!-- 截图预览 -->
-      <div class="thumb-wrap">
-        <div v-if="store.pendingModal.bill?.image_url" style="width:100%" @click="store.openImgFull(store.pendingModal.bill.image_url)">
-          <img :src="store.pendingModal.bill.image_url"
-            @error="store.markPendingImageUnavailable()"
-            style="width:100%; max-height:160px; object-fit:contain; background:#f0f0f0; display:block;">
-          <div style="text-align:center; padding:6px 0; font-size:11px; color:var(--text3);">👆 点击放大原图</div>
+      <div class="sheet-body" ref="bodyEl">
+        <div class="amount-edit-wrap">
+          <span class="amount-edit-prefix">-¥</span>
+          <input type="number" class="amount-edit-input" v-model="store.pendingModal.amount"
+            min="0.01" max="999999.99" step="0.01" placeholder="0.00">
         </div>
-        <template v-else-if="store.pendingModal.bill?.imageLoadError">
-          <span>⚠️</span><span>截图文件不可用或已删除</span>
-        </template>
-        <template v-else>
-          <span>🖼</span><span>无截图预览</span>
-        </template>
-      </div>
 
-      <!-- 商家名称 -->
-      <div class="sel-section" style="margin-top:12px">
-        <div class="sel-label">商家名称（可选）</div>
-        <input type="text" class="sheet-input" v-model="store.pendingModal.merchantName"
-          placeholder="如：麦当劳、京东购物…" maxlength="50">
-      </div>
+        <div class="thumb-wrap">
+          <div v-if="store.pendingModal.bill?.image_url" style="width:100%" @click="store.openImgFull(store.pendingModal.bill.image_url)">
+            <img :src="store.pendingModal.bill.image_url"
+              @error="store.markPendingImageUnavailable()"
+              style="width:100%; max-height:160px; object-fit:contain; background:#f0f0f0; display:block;">
+            <div style="text-align:center; padding:6px 0; font-size:11px; color:var(--text3);">👆 点击放大原图</div>
+          </div>
+          <template v-else-if="store.pendingModal.bill?.imageLoadError">
+            <span>⚠️</span><span>截图文件不可用或已删除</span>
+          </template>
+          <template v-else>
+            <span>🖼</span><span>无截图预览</span>
+          </template>
+        </div>
 
-      <!-- 消费渠道 -->
-      <div class="sel-section">
-        <div class="sel-label">消费渠道</div>
-        <div class="sel-grid">
-          <div v-for="p in platforms" :key="p.val" class="sel-chip"
-            :class="{ selected: store.pendingModal.platform === p.val }"
-            @click="store.pendingModal.platform = p.val">
-            {{ p.label }}
-            <span v-if="p.hot" class="hot-badge">常用</span>
+        <div class="sel-section" style="margin-top:12px">
+          <div class="sel-label">商家名称（可选）</div>
+          <input type="text" class="sheet-input" v-model="store.pendingModal.merchantName"
+            placeholder="如：麦当劳、京东购物…" maxlength="50">
+        </div>
+
+        <div class="sel-section">
+          <div class="sel-label">消费渠道</div>
+          <div class="sel-grid">
+            <div v-for="p in platforms" :key="p.val" class="sel-chip"
+              :class="{ selected: store.pendingModal.platform === p.val }"
+              @click="store.pendingModal.platform = p.val">
+              {{ p.label }}
+              <span v-if="p.hot" class="hot-badge">常用</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sel-section" style="margin-top:16px">
+          <div class="sel-label">消费分类</div>
+          <div class="sel-grid">
+            <div v-for="c in categories" :key="c.val" class="sel-chip"
+              :class="{ selected: store.pendingModal.category === c.val }"
+              @click="store.pendingModal.category = c.val">
+              {{ c.label }}
+            </div>
+          </div>
+        </div>
+
+        <div class="sel-section" style="margin-top:16px">
+          <div class="sel-label">支付方式</div>
+          <div class="sel-grid">
+            <div v-for="p in payments" :key="p.val" class="sel-chip"
+              :class="{ selected: store.pendingModal.payment === p.val }"
+              @click="store.pendingModal.payment = p.val">
+              {{ p.label }}
+              <span v-if="p.hot" class="hot-badge">常用</span>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- 消费分类 -->
-      <div class="sel-section" style="margin-top:16px">
-        <div class="sel-label">消费分类</div>
-        <div class="sel-grid">
-          <div v-for="c in categories" :key="c.val" class="sel-chip"
-            :class="{ selected: store.pendingModal.category === c.val }"
-            @click="store.pendingModal.category = c.val">
-            {{ c.label }}
-          </div>
-        </div>
+      <div class="sheet-footer">
+        <button class="confirm-btn"
+          :disabled="!store.pendingModal.platform || !store.pendingModal.category || !store.pendingModal.payment"
+          @click="doSave">确认保存</button>
+        <button class="delete-bill-btn"
+          @click="store.openDeleteConfirm('bill', store.pendingModal.bill?.id, store.pendingModal.bill?.image_path)">
+          🗑 删除此账单
+        </button>
       </div>
 
-      <!-- 支付方式 -->
-      <div class="sel-section" style="margin-top:16px">
-        <div class="sel-label">支付方式</div>
-        <div class="sel-grid">
-          <div v-for="p in payments" :key="p.val" class="sel-chip"
-            :class="{ selected: store.pendingModal.payment === p.val }"
-            @click="store.pendingModal.payment = p.val">
-            {{ p.label }}
-            <span v-if="p.hot" class="hot-badge">常用</span>
-          </div>
-        </div>
+      <div v-if="showUnsaved" class="unsaved-bar">
+        <span class="unsaved-text">内容未保存，确认退出？</span>
+        <button class="unsaved-cancel" @click="showUnsaved = false">继续编辑</button>
+        <button class="unsaved-confirm" @click="doForceClose">退出</button>
       </div>
-
-      <button class="confirm-btn"
-        :disabled="!store.pendingModal.platform || !store.pendingModal.category || !store.pendingModal.payment"
-        @click="store.confirmEntry()">确认保存</button>
-
-      <button class="delete-bill-btn"
-        @click="store.openDeleteConfirm('bill', store.pendingModal.bill?.id, store.pendingModal.bill?.image_path)">
-        🗑 删除此账单
-      </button>
     </div>
   </div>
 </template>
@@ -96,11 +101,15 @@ import { inject, ref, watch, onUnmounted } from 'vue'
 const store = inject('store')
 
 const sheetEl = ref(null)
+const bodyEl = ref(null)
+const showUnsaved = ref(false)
+const isSwiping = ref(false)
+const isClosing = ref(false)
+const swipeDir = ref(null)
+
 let touchStartY = 0
 let touchStartX = 0
 let touchStartTime = 0
-let canDragSheet = false
-let isDraggingSheet = false
 let bodyScrollY = 0
 let originalBodyOverflow = ''
 let originalBodyPosition = ''
@@ -128,19 +137,74 @@ function unlockBodyScroll() {
 }
 
 watch(() => store.pendingModal.open, open => {
-  if (open) lockBodyScroll()
+  if (open) { lockBodyScroll(); showUnsaved.value = false }
   else unlockBodyScroll()
 })
 
 onUnmounted(unlockBodyScroll)
 
+function isScrollAtTop() {
+  if (!bodyEl.value) return true
+  return bodyEl.value.scrollTop <= 1
+}
+
 function isInteractiveTarget(target) {
-  return !!target.closest('input, button, img, .sel-chip, .thumb-wrap, .confirm-btn, .delete-bill-btn')
+  return !!target.closest('input, button, img, .sel-chip, .thumb-wrap, .confirm-btn, .delete-bill-btn, .unsaved-bar')
+}
+
+function tryClose() {
+  if (store.hasPendingChanges()) {
+    showUnsaved.value = true
+    return
+  }
+  store.closePendingModal()
+}
+
+function doForceClose() {
+  showUnsaved.value = false
+  store.resetPendingChanges()
+  store.closePendingModal()
+}
+
+function doSave() {
+  store.confirmEntry()
+  showUnsaved.value = false
+}
+
+function animateClose(direction) {
+  if (!sheetEl.value) return
+  isClosing.value = true
+  swipeDir.value = direction
+  sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
+  if (direction === 'down') {
+    sheetEl.value.style.transform = 'translateY(110%)'
+  } else if (direction === 'right') {
+    sheetEl.value.style.transform = 'translateX(110%)'
+  }
+  setTimeout(() => {
+    if (store.hasPendingChanges()) {
+      showUnsaved.value = true
+      sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
+      sheetEl.value.style.transform = ''
+      isClosing.value = false
+      swipeDir.value = null
+    } else {
+      store.closePendingModal()
+      if (sheetEl.value) {
+        sheetEl.value.style.transition = ''
+        sheetEl.value.style.transform = ''
+      }
+      isClosing.value = false
+      swipeDir.value = null
+    }
+  }, 280)
 }
 
 function onTouchStart(e) {
-  canDragSheet = !isInteractiveTarget(e.target)
-  isDraggingSheet = false
+  showUnsaved.value = false
+  isSwiping.value = false
+  isClosing.value = false
+  swipeDir.value = null
   touchStartY = e.touches[0].clientY
   touchStartX = e.touches[0].clientX
   touchStartTime = Date.now()
@@ -148,39 +212,71 @@ function onTouchStart(e) {
 }
 
 function onTouchMove(e) {
-  if (!canDragSheet) return
-  const delta = e.touches[0].clientY - touchStartY
-  const deltaX = Math.abs(e.touches[0].clientX - touchStartX)
-  if (delta <= 0 || delta < 8 || delta < deltaX * 1.2) return
-  e.preventDefault()
-  isDraggingSheet = true
-  if (sheetEl.value) sheetEl.value.style.transform = `translateY(${Math.min(delta, window.innerHeight)}px)`
+  if (isClosing.value) return
+  const deltaY = e.touches[0].clientY - touchStartY
+  const deltaX = e.touches[0].clientX - touchStartX
+  const absX = Math.abs(deltaX)
+  const absY = Math.abs(deltaY)
+
+  if (absX < 8 && absY < 8) return
+
+  if (absX > absY * 1.5 && absX > 20) {
+    if (isInteractiveTarget(e.target)) return
+    e.preventDefault()
+    isSwiping.value = true
+    swipeDir.value = 'right'
+    if (sheetEl.value) {
+      sheetEl.value.style.transform = `translateX(${Math.min(absX, window.innerWidth * 0.6)}px)`
+    }
+    return
+  }
+
+  if (absY > absX * 1.2 && deltaY > 0) {
+    if (!isScrollAtTop()) return
+    if (isInteractiveTarget(e.target)) return
+    e.preventDefault()
+    isSwiping.value = true
+    swipeDir.value = 'down'
+    if (sheetEl.value) {
+      sheetEl.value.style.transform = `translateY(${Math.min(deltaY, window.innerHeight * 0.5)}px)`
+    }
+  }
 }
 
 function onTouchEnd(e) {
-  if (!canDragSheet || !isDraggingSheet) {
-    canDragSheet = false
-    isDraggingSheet = false
+  if (!isSwiping.value || !sheetEl.value) {
+    isSwiping.value = false
+    swipeDir.value = null
     return
   }
-  const delta = e.changedTouches[0].clientY - touchStartY
-  if (!sheetEl.value) return
-  sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
-  const distanceThreshold = Math.max(140, window.innerHeight * 0.28)
-  const elapsed = Math.max(1, Date.now() - touchStartTime)
-  const velocity = delta / elapsed
-  const shouldClose = delta > distanceThreshold || velocity > 0.6
-  if (shouldClose) {
-    sheetEl.value.style.transform = 'translateY(110%)'
-    setTimeout(() => {
-      store.closePendingModal()
-      if (sheetEl.value) sheetEl.value.style.transform = ''
-    }, 280)
-  } else {
-    sheetEl.value.style.transform = 'translateY(0)'
+
+  if (swipeDir.value === 'right') {
+    const deltaX = Math.abs(e.changedTouches[0].clientX - touchStartX)
+    const elapsed = Math.max(1, Date.now() - touchStartTime)
+    const velocity = deltaX / elapsed
+    const shouldClose = deltaX > 80 || velocity > 0.4
+    if (shouldClose) {
+      animateClose('right')
+    } else {
+      sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
+      sheetEl.value.style.transform = ''
+    }
+  } else if (swipeDir.value === 'down') {
+    const deltaY = e.changedTouches[0].clientY - touchStartY
+    const elapsed = Math.max(1, Date.now() - touchStartTime)
+    const velocity = deltaY / elapsed
+    const distanceThreshold = Math.max(100, window.innerHeight * 0.22)
+    const shouldClose = deltaY > distanceThreshold || velocity > 0.5
+    if (shouldClose) {
+      animateClose('down')
+    } else {
+      sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
+      sheetEl.value.style.transform = ''
+    }
   }
-  canDragSheet = false
-  isDraggingSheet = false
+
+  isSwiping.value = false
+  swipeDir.value = null
 }
 
 const platforms = [
