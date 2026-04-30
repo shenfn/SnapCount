@@ -49,6 +49,7 @@ export function mapTransaction(t) {
     payment: t.payment_method || '?',
     cat: t.category || '?',
     amount: Number(t.amount),
+    createdAt: t.created_at,
     date: formatDate(t.transaction_date),
     dateRaw: t.transaction_date,
     time: t.transaction_time ? t.transaction_time.slice(0, 5) : '',

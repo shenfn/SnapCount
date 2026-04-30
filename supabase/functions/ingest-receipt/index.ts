@@ -99,8 +99,18 @@ income_category（收入类别）：
 source_name（收入来源）：
 当 record_type 为 income 时，提取付款方、转账方、备注中的来源名称；无法识别返回 null。
 
+occurred_at（业务发生时间）：
+- 优先提取支付时间、转账时间、交易时间、账单时间、收款时间等字段。
+- 返回 ISO 8601 字符串，无法识别返回 null。
+- 这是判断真实重复消费的重要字段，同金额同商家但完成时间不同，仍可能是两笔真实交易。
+
+order_finished_at（订单完成时间）：
+- 如果页面有明确的“完成时间”“支付完成时间”“收款时间”，返回该时间的 ISO 8601 字符串。
+- 如果只有一个交易/转账/收款时间，可与 occurred_at 相同。
+- 无法识别返回 null。
+
 只返回如下结构的纯 JSON（不要 markdown 包裹）：
-{"image_type":"other","record_type":"uncertain","amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"income_category":null,"source_name":null,"confidence":0}`;
+{"image_type":"other","record_type":"uncertain","amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"income_category":null,"source_name":null,"occurred_at":null,"order_finished_at":null,"confidence":0}`;
 
 interface AIResult {
   image_type: string;
@@ -112,7 +122,25 @@ interface AIResult {
   payment_method: string | null;
   income_category?: string | null;
   source_name?: string | null;
+  occurred_at?: string | null;
+  order_finished_at?: string | null;
   confidence: number;
+}
+
+function normalizeAiDate(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const text = value.trim().replace("年", "-").replace("月", "-").replace("日", "");
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+async function writeAiLog(
+  supabase: ReturnType<typeof createClient>,
+  payload: Record<string, unknown>,
+) {
+  const { error } = await supabase.from("ai_recognition_logs").insert(payload);
+  if (error) console.error("AI log insert failed:", error);
 }
 
 function normalizeAmount(value: unknown): number | null {
@@ -203,6 +231,7 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const startedAt = Date.now();
     // 1. 接收图片（multipart/form-data，字段名 image）
     const form = await req.formData();
     const file = form.get("image") as File | null;
@@ -220,6 +249,15 @@ Deno.serve(async (req) => {
     const { data: txDup } = await supabase
       .from("transactions").select("id").eq("image_hash", hash).maybeSingle();
     if (txDup) {
+      await writeAiLog(supabase, {
+        image_hash: hash,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: "expense",
+        target_table: "transactions",
+        target_id: txDup.id,
+        duration_ms: Date.now() - startedAt,
+      });
       return new Response(JSON.stringify({ status: "duplicate", id: txDup.id, record_type: "expense", message: "该截图已记账" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -227,6 +265,15 @@ Deno.serve(async (req) => {
     const { data: incDup } = await supabase
       .from("income_records").select("id").eq("image_hash", hash).maybeSingle();
     if (incDup) {
+      await writeAiLog(supabase, {
+        image_hash: hash,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: "income",
+        target_table: "income_records",
+        target_id: incDup.id,
+        duration_ms: Date.now() - startedAt,
+      });
       return new Response(JSON.stringify({ status: "duplicate", id: incDup.id, record_type: "income", message: "该收入截图已记录" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -247,11 +294,13 @@ Deno.serve(async (req) => {
     // 4. 调用 Kimi Vision 识别
     let ai: AIResult;
     let aiOk = true;
+    let aiErrorMessage: string | null = null;
     try {
       ai = await callKimiVision(bytes, mime, moonshot_key);
     } catch (e) {
       aiOk = false;
-      ai = { image_type: "other", record_type: "uncertain", amount: null, merchant_name: null, platform: null, category: null, payment_method: null, income_category: null, source_name: null, confidence: 0 };
+      aiErrorMessage = String(e);
+      ai = { image_type: "other", record_type: "uncertain", amount: null, merchant_name: null, platform: null, category: null, payment_method: null, income_category: null, source_name: null, occurred_at: null, order_finished_at: null, confidence: 0 };
       console.error("Kimi Vision failed:", e);
     }
 
@@ -260,6 +309,8 @@ Deno.serve(async (req) => {
     const today = now.toISOString().slice(0, 10);
     const nowTime = now.toTimeString().slice(0, 8);
     const recordType = ai.record_type ?? "expense";
+    const occurredAt = normalizeAiDate(ai.occurred_at) ?? normalizeAiDate(ai.order_finished_at);
+    const orderFinishedAt = normalizeAiDate(ai.order_finished_at) ?? occurredAt;
 
     if (recordType === "income" && normalizedAmount !== null && (ai.confidence ?? 0) >= 0.7) {
       const incomeCategory = ["salary", "bonus", "freelance", "investment", "reimbursement", "other"].includes(ai.income_category ?? "")
@@ -269,7 +320,7 @@ Deno.serve(async (req) => {
         amount: normalizedAmount,
         category: incomeCategory,
         source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
-        income_date: today,
+        income_date: occurredAt ? occurredAt.slice(0, 10) : today,
         image_url: path,
         image_hash: hash,
         source: "ai_scan",
@@ -277,12 +328,41 @@ Deno.serve(async (req) => {
       }).select().single();
 
       if (incErr) {
+        await writeAiLog(supabase, {
+          image_hash: hash,
+          image_url: path,
+          image_type: ai.image_type,
+          record_type: "income",
+          occurred_at: occurredAt,
+          order_finished_at: orderFinishedAt,
+          status: "db_error",
+          confidence: ai.confidence ?? 0,
+          duration_ms: Date.now() - startedAt,
+          ai_response: ai,
+          error_message: incErr.message,
+        });
         if (uploadedNewObject) {
           const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
           if (removeErr) console.error("Cleanup uploaded income image failed:", removeErr);
         }
         throw new Error(`Income insert failed: ${incErr.message}`);
       }
+
+      await writeAiLog(supabase, {
+        image_hash: hash,
+        image_url: path,
+        image_type: ai.image_type,
+        record_type: "income",
+        occurred_at: occurredAt,
+        order_finished_at: orderFinishedAt,
+        target_table: "income_records",
+        target_id: row.id,
+        status: "success",
+        confidence: ai.confidence ?? 0,
+        duration_ms: Date.now() - startedAt,
+        ai_response: ai,
+        error_message: aiErrorMessage,
+      });
 
       return new Response(JSON.stringify({
         status: "done",
@@ -300,18 +380,27 @@ Deno.serve(async (req) => {
     let dupRefId: string | null = null;
     if (aiOk && normalizedAmount !== null && ai.payment_method !== null) {
       const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+      const duplicateDate = occurredAt ? occurredAt.slice(0, 10) : today;
       let dupQuery = supabase.from("transactions")
-        .select("id")
-        .eq("transaction_date", today)
+        .select("id,transaction_time")
+        .eq("transaction_date", duplicateDate)
         .eq("payment_method", ai.payment_method)
         .gte("amount", (normalizedAmount - 0.01).toFixed(2))
-        .lte("amount", (normalizedAmount + 0.01).toFixed(2))
-        .gte("created_at", threeMinAgo);
+        .lte("amount", (normalizedAmount + 0.01).toFixed(2));
+      if (!occurredAt) {
+        dupQuery = dupQuery.gte("created_at", threeMinAgo);
+      }
       // 商家名已识别时额外过滤，减少误判；未识别时仅靠金额+支付方式兜底
       if (ai.merchant_name !== null) {
         dupQuery = dupQuery.eq("merchant_name", ai.merchant_name);
       }
-      const { data: dup } = await dupQuery.limit(1).maybeSingle();
+      const { data: candidates } = await dupQuery.limit(5);
+      const dup = (candidates || []).find((item) => {
+        if (!occurredAt || !item.transaction_time) return true;
+        const current = new Date(occurredAt);
+        const existing = new Date(`${duplicateDate}T${item.transaction_time}`);
+        return Math.abs(current.getTime() - existing.getTime()) <= 3 * 60 * 1000;
+      });
       if (dup) {
         possibleDuplicate = true;
         dupRefId = dup.id;
@@ -335,18 +424,53 @@ Deno.serve(async (req) => {
       image_url: path,
       image_hash: hash,
       is_large_transport: isLargeTransport,
-      transaction_date: today,
-      transaction_time: nowTime,
+      transaction_date: occurredAt ? occurredAt.slice(0, 10) : today,
+      transaction_time: occurredAt ? new Date(occurredAt).toTimeString().slice(0, 8) : nowTime,
       source: "ai_scan",
     }).select().single();
 
     if (insErr) {
+      await writeAiLog(supabase, {
+        image_hash: hash,
+        image_url: path,
+        image_type: ai.image_type,
+        record_type: "expense",
+        occurred_at: occurredAt,
+        order_finished_at: orderFinishedAt,
+        duplicate_kind: possibleDuplicate ? "business_possible" : null,
+        duplicate_ref_table: dupRefId ? "transactions" : null,
+        duplicate_ref_id: dupRefId,
+        status: "db_error",
+        confidence: ai.confidence ?? 0,
+        duration_ms: Date.now() - startedAt,
+        ai_response: ai,
+        error_message: insErr.message,
+      });
       if (uploadedNewObject) {
         const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
         if (removeErr) console.error("Cleanup uploaded image failed:", removeErr);
       }
       throw new Error(`DB insert failed: ${insErr.message}`);
     }
+
+    await writeAiLog(supabase, {
+      image_hash: hash,
+      image_url: path,
+      image_type: ai.image_type,
+      record_type: "expense",
+      occurred_at: occurredAt,
+      order_finished_at: orderFinishedAt,
+      duplicate_kind: possibleDuplicate ? "business_possible" : null,
+      duplicate_ref_table: dupRefId ? "transactions" : null,
+      duplicate_ref_id: dupRefId,
+      target_table: "transactions",
+      target_id: row.id,
+      status: aiOk ? row.status : "ai_error",
+      confidence: ai.confidence ?? 0,
+      duration_ms: Date.now() - startedAt,
+      ai_response: ai,
+      error_message: aiErrorMessage,
+    });
 
     return new Response(JSON.stringify({
       status: row.status,

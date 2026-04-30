@@ -77,8 +77,8 @@ export function useStore() {
   const netBalance = computed(() => totalIncome.value - totalExpense.value)
 
   const recentEntries = computed(() => {
-    const expenseItems = bills.value.map(b => ({ ...b, entryKind: 'expense', sortDate: `${b.dateRaw || ''} ${b.time || ''}` }))
-    const incomeItems = incomeRecords.value.map(r => ({ ...r, entryKind: 'income', sortDate: `${r.dateRaw || ''} ${r.time || ''}` }))
+    const expenseItems = bills.value.map(b => ({ ...b, entryKind: 'expense', sortDate: b.createdAt || `${b.dateRaw || ''} ${b.time || ''}` }))
+    const incomeItems = incomeRecords.value.map(r => ({ ...r, entryKind: 'income', sortDate: r.createdAt || `${r.dateRaw || ''} ${r.time || ''}` }))
     return [...expenseItems, ...incomeItems].sort((a, b) => (b.sortDate || '').localeCompare(a.sortDate || ''))
   })
 
@@ -145,6 +145,7 @@ export function useStore() {
         amount: Number(r.amount),
         date: formatDate(r.income_date),
         dateRaw: r.income_date,
+        createdAt: r.created_at,
         time: '',
         icon: incomeCatMap[r.category]?.icon || '💰',
         note: r.note,
