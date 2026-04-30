@@ -20,10 +20,10 @@
       </div>
     </div>
 
-    <div class="sec-title">今日收入概览</div>
+    <div class="sec-title">{{ scopedDayTitle }}收入概览 <span>{{ scopedDayLabel }}</span></div>
     <div class="today-strip">
       <div class="today-card">
-        <div class="today-label">今日收入</div>
+        <div class="today-label">{{ scopedDayTitle }}收入</div>
         <div class="today-value income">¥{{ todayIncome.toFixed(2) }}</div>
         <div class="today-meta">{{ todayIncomeCount }} 笔 · {{ todayTopSource }}</div>
       </div>
@@ -81,18 +81,21 @@
 
 <script setup>
 import { inject, computed } from 'vue'
-import { getLocalDateKey } from '../../utils/helpers'
+import { buildScopedDayKey, formatDateKeyLabel, getLocalDateKey } from '../../utils/helpers'
 import MonthPicker from '../MonthPicker.vue'
 
 const store = inject('store')
 
-const todayKey = computed(() => getLocalDateKey())
+const realTodayKey = computed(() => getLocalDateKey())
+const scopedDayKey = computed(() => buildScopedDayKey(store.currentYear.value, store.currentMonth.value))
+const scopedDayLabel = computed(() => formatDateKeyLabel(scopedDayKey.value))
+const scopedDayTitle = computed(() => scopedDayKey.value === realTodayKey.value ? '今日' : '当日')
 
-const todayIncomeRecords = computed(() => store.incomeRecords.value.filter(r => r.dateRaw === todayKey.value))
+const todayIncomeRecords = computed(() => store.incomeRecords.value.filter(r => r.dateRaw === scopedDayKey.value))
 const todayIncome = computed(() => todayIncomeRecords.value.reduce((sum, item) => sum + item.amount, 0))
 const todayIncomeCount = computed(() => todayIncomeRecords.value.length)
 const todayTopRecord = computed(() => todayIncomeRecords.value.reduce((max, item) => item.amount > (max?.amount || 0) ? item : max, null))
-const todayTopSource = computed(() => todayTopRecord.value ? `最高 ${todayTopRecord.value.source || '收入'}` : '今天暂无收入')
+const todayTopSource = computed(() => todayTopRecord.value ? `最高 ${todayTopRecord.value.source || '收入'}` : `${scopedDayLabel.value}暂无收入`)
 
 const sourceTotals = computed(() => {
   const grouped = {}

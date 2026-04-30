@@ -47,20 +47,20 @@
       <div class="pending-arrow">›</div>
     </div>
 
-    <div class="sec-title">今日收支概览</div>
+    <div class="sec-title">{{ scopedDayTitle }}收支概览 <span>{{ scopedDayLabel }}</span></div>
     <div class="today-strip">
       <div class="today-card">
-        <div class="today-label">今日支出</div>
+        <div class="today-label">{{ scopedDayTitle }}支出</div>
         <div class="today-value expense">¥{{ todayExpenseDisplay }}</div>
         <div class="today-meta">{{ todayExpenseCount }} 笔 · {{ todayExpenseTop }}</div>
       </div>
       <div class="today-card">
-        <div class="today-label">今日收入</div>
+        <div class="today-label">{{ scopedDayTitle }}收入</div>
         <div class="today-value income">¥{{ todayIncomeDisplay }}</div>
         <div class="today-meta">{{ todayIncomeCount }} 笔 · {{ todayIncomeTop }}</div>
       </div>
       <div class="today-card highlight">
-        <div class="today-label">今日结余</div>
+        <div class="today-label">{{ scopedDayTitle }}结余</div>
         <div class="today-value" :class="todayNet >= 0 ? 'income' : 'expense'">
           {{ todayNet >= 0 ? '+' : '-' }}¥{{ Math.abs(todayNet).toFixed(2) }}
         </div>
@@ -129,7 +129,7 @@
 
 <script setup>
 import { inject, computed } from 'vue'
-import { computeWeekData, getLocalDateKey } from '../../utils/helpers'
+import { buildScopedDayKey, computeWeekData, formatDateKeyLabel, getLocalDateKey } from '../../utils/helpers'
 import BillRow from '../BillRow.vue'
 import MonthPicker from '../MonthPicker.vue'
 
@@ -140,10 +140,13 @@ const weekData = computed(() => computeWeekData(store.bills.value))
 const weekMax = computed(() => Math.max(...weekData.value, 1))
 const daysInMonth = computed(() => new Date(store.currentYear.value, store.currentMonth.value, 0).getDate())
 const dailyAvg = computed(() => (store.totalExpense.value / daysInMonth.value).toFixed(0))
-const todayKey = computed(() => getLocalDateKey())
+const realTodayKey = computed(() => getLocalDateKey())
+const scopedDayKey = computed(() => buildScopedDayKey(store.currentYear.value, store.currentMonth.value))
+const scopedDayLabel = computed(() => formatDateKeyLabel(scopedDayKey.value))
+const scopedDayTitle = computed(() => scopedDayKey.value === realTodayKey.value ? '今日' : '当日')
 
-const todayBills = computed(() => store.doneBills.value.filter(b => b.dateRaw === todayKey.value))
-const todayIncomes = computed(() => store.recentIncomeRecords.value.filter(r => r.dateRaw === todayKey.value))
+const todayBills = computed(() => store.doneBills.value.filter(b => b.dateRaw === scopedDayKey.value))
+const todayIncomes = computed(() => store.incomeRecords.value.filter(r => r.dateRaw === scopedDayKey.value))
 
 const todayExpense = computed(() => todayBills.value.reduce((sum, item) => sum + item.amount, 0))
 const todayIncome = computed(() => todayIncomes.value.reduce((sum, item) => sum + item.amount, 0))
@@ -159,10 +162,10 @@ const todayIncomeCount = computed(() => todayIncomes.value.length)
 const todayExpenseTop = computed(() => topExpenseBill.value ? `最高 ${topExpenseBill.value.name}` : '暂无支出')
 const todayIncomeTop = computed(() => topIncomeRecord.value ? `最高 ${topIncomeRecord.value.source || '收入'}` : '暂无收入')
 const todayStatusText = computed(() => {
-  if (!todayBills.value.length && !todayIncomes.value.length) return '今天还没有新增记录'
-  if (todayNet.value > 0) return '今天是净流入'
-  if (todayNet.value < 0) return '今天是净流出'
-  return '今天收支持平'
+  if (!todayBills.value.length && !todayIncomes.value.length) return `${scopedDayLabel.value}暂无记录`
+  if (todayNet.value > 0) return `${scopedDayLabel.value}净流入`
+  if (todayNet.value < 0) return `${scopedDayLabel.value}净流出`
+  return `${scopedDayLabel.value}收支持平`
 })
 
 const weekTotal = computed(() => weekData.value.reduce((sum, value) => sum + value, 0))

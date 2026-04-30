@@ -5,6 +5,17 @@ export function getLocalDateKey(date = new Date()) {
   return `${year}-${month}-${day}`
 }
 
+export function buildScopedDayKey(year, month, day = new Date().getDate()) {
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const safeDay = Math.min(day, daysInMonth)
+  return `${year}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`
+}
+
+export function formatDateKeyLabel(dateKey) {
+  const [, month, day] = dateKey.split('-')
+  return `${Number(month)}月${Number(day)}日`
+}
+
 export const incomeCatMap = {
   salary:        { label: '工资',     icon: '💼' },
   bonus:         { label: '奖金',     icon: '🎁' },

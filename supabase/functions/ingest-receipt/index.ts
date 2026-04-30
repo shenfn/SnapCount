@@ -98,6 +98,7 @@ amount（金额）：
 merchant_name（商家）：
 - 优先从商家名称/收款方/收款账号字段提取
 - 若备注/摘要格式为“扫二维码付款-给X”或“转账给X”或“付款给X”，则 X 为商家名
+- 若备注格式为“转账-转给X”，则 X 为商家名
 - 若备注含个人姓名（给张三、给李四），merchant_name 填写该姓名
 - 无法识别返回 null（不要猜测）
 
@@ -156,7 +157,8 @@ source_name（收入来源）：
 - 不要把视频号/广告卡片标题当作收入来源。
 
 occurred_at（业务发生时间）：
-- 优先提取支付时间、转账时间、交易时间、账单时间、收款时间等字段。
+- 优先提取支付时间、转账时间、交易时间、账单时间、收款时间、记录时间等字段。
+- 微信账单详情页如出现“记录时间 2026年4月24日 13:13”，occurred_at 必须返回 2026-04-24T13:13:00+08:00。
 - 返回 ISO 8601 字符串，无法识别返回 null。
 - 这是判断真实重复消费的重要字段，同金额同商家但完成时间不同，仍可能是两笔真实交易。
 - 如果页面只有“星期二 16:46”这类缺少年月日的聊天时间，不要根据星期几猜测日期，返回 null。
@@ -185,12 +187,38 @@ interface AIResult {
   confidence: number;
 }
 
-function normalizeAiDate(value: unknown): string | null {
+function normalizeAiDateTime(value: unknown): { date: string; time: string | null; iso: string } | null {
   if (typeof value !== "string" || !value.trim()) return null;
-  const text = value.trim().replace("年", "-").replace("月", "-").replace("日", "");
+  let text = value.trim();
+  const compact = text.match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日?\s*(\d{1,2})?:?(\d{1,2})?/);
+  if (compact) {
+    const [, y, m, d, hh, mm] = compact;
+    const date = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    const time = hh && mm ? `${hh.padStart(2, "0")}:${mm.padStart(2, "0")}:00` : null;
+    return { date, time, iso: `${date}T${time ?? "00:00:00"}+08:00` };
+  }
+
+  text = text.replace("年", "-").replace("月", "-").replace("日", "");
+  const normalized = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:([+-]\d{2}:?\d{2}|Z))?$/);
+  if (normalized) {
+    const [, y, m, d, hh, mm, ss, zone] = normalized;
+    const date = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    const time = hh && mm ? `${hh.padStart(2, "0")}:${mm.padStart(2, "0")}:${(ss ?? "00").padStart(2, "0")}` : null;
+    const zoneText = zone ? (zone === "Z" ? "Z" : zone.includes(":") ? zone : `${zone.slice(0, 3)}:${zone.slice(3)}`) : "+08:00";
+    return { date, time, iso: `${date}T${time ?? "00:00:00"}${zoneText}` };
+  }
+
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString();
+  return {
+    date: parsed.toISOString().slice(0, 10),
+    time: parsed.toISOString().slice(11, 19),
+    iso: parsed.toISOString(),
+  };
+}
+
+function normalizeAiDate(value: unknown): string | null {
+  return normalizeAiDateTime(value)?.iso ?? null;
 }
 
 async function writeAiLog(
@@ -399,8 +427,12 @@ Deno.serve(async (req) => {
     const today = now.toISOString().slice(0, 10);
     const nowTime = now.toTimeString().slice(0, 8);
     const recordType = ai.record_type ?? "expense";
-    const occurredAt = normalizeAiDate(ai.occurred_at) ?? normalizeAiDate(ai.order_finished_at);
-    const orderFinishedAt = normalizeAiDate(ai.order_finished_at) ?? occurredAt;
+    const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
+    const orderFinishedDateTime = normalizeAiDateTime(ai.order_finished_at) ?? occurredDateTime;
+    const occurredAt = occurredDateTime?.iso ?? null;
+    const orderFinishedAt = orderFinishedDateTime?.iso ?? occurredAt;
+    const recordDate = occurredDateTime?.date ?? today;
+    const recordTime = occurredDateTime?.time ?? nowTime;
     let duplicateKind: string | null = perceptualDupRefId ? "perceptual_hash" : null;
     let duplicateRefTable: string | null = perceptualDupRefId ? "ai_recognition_logs" : null;
     let duplicateRefId: string | null = perceptualDupRefId;
@@ -471,7 +503,7 @@ Deno.serve(async (req) => {
         amount: normalizedAmount,
         category: incomeCategory,
         source_name: sourceName,
-        income_date: occurredAt ? occurredAt.slice(0, 10) : today,
+        income_date: recordDate,
         image_url: path,
         image_hash: hash,
         source: "ai_scan",
@@ -541,7 +573,7 @@ Deno.serve(async (req) => {
     let dupRefId: string | null = null;
     if (aiOk && normalizedAmount !== null && ai.payment_method !== null) {
       const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-      const duplicateDate = occurredAt ? occurredAt.slice(0, 10) : today;
+      const duplicateDate = recordDate;
       let dupQuery = supabase.from("transactions")
         .select("id,transaction_time")
         .eq("transaction_date", duplicateDate)
@@ -588,8 +620,8 @@ Deno.serve(async (req) => {
       image_url: path,
       image_hash: hash,
       is_large_transport: isLargeTransport,
-      transaction_date: occurredAt ? occurredAt.slice(0, 10) : today,
-      transaction_time: occurredAt ? new Date(occurredAt).toTimeString().slice(0, 8) : nowTime,
+      transaction_date: recordDate,
+      transaction_time: recordTime,
       source: "ai_scan",
     }).select().single();
 
