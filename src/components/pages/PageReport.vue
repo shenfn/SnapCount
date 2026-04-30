@@ -76,6 +76,20 @@
           :x="pt.x" :y="lineH + 14" text-anchor="middle"
           fill="var(--text3)" font-size="7">{{ pt.day }}</text>
       </svg>
+      <div v-if="dailyLineData.length" class="trend-summary report-trend-summary">
+        <div class="trend-pill">
+          <span>峰值日</span>
+          <strong>{{ peakDaySummary }}</strong>
+        </div>
+        <div class="trend-pill">
+          <span>近7天累计</span>
+          <strong>¥{{ recentWeekExpense.toFixed(2) }}</strong>
+        </div>
+        <div class="trend-pill">
+          <span>近3天</span>
+          <strong>{{ recentThreeDayText }}</strong>
+        </div>
+      </div>
     </div>
 
     <div class="sec-title">各平台消费</div>
@@ -235,6 +249,23 @@ const avgLineY = computed(() => {
 })
 
 const linePoints = computed(() => dailyLineData.value.map(d => `${d.x},${d.y}`).join(' '))
+
+const peakDay = computed(() => dailyLineData.value.reduce((max, item) => item.amount > (max?.amount || 0) ? item : max, null))
+const peakDaySummary = computed(() => peakDay.value && peakDay.value.amount > 0
+  ? `${peakDay.value.day}日 ¥${peakDay.value.amount.toFixed(0)}`
+  : '暂无峰值')
+
+const recentActiveDays = computed(() => dailyLineData.value.filter(item => item.amount > 0).slice(-3).reverse())
+const recentThreeDayText = computed(() => {
+  if (!recentActiveDays.value.length) return '暂无支出'
+  return recentActiveDays.value
+    .map(item => `${item.day}日 ¥${item.amount.toFixed(0)}`)
+    .join(' / ')
+})
+
+const recentWeekExpense = computed(() =>
+  dailyLineData.value.slice(-7).reduce((sum, item) => sum + item.amount, 0)
+)
 
 const creditPayments = ['花呗', '京东白条', '美团月付', '先用后付', '拼多多先用后付']
 

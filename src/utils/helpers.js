@@ -1,3 +1,10 @@
+export function getLocalDateKey(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 export const incomeCatMap = {
   salary:        { label: '工资',     icon: '💼' },
   bonus:         { label: '奖金',     icon: '🎁' },
@@ -19,8 +26,8 @@ export const payAliasMap = {
 }
 
 export function formatDate(dateStr) {
-  const today = new Date().toISOString().slice(0, 10)
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const today = getLocalDateKey()
+  const yesterday = getLocalDateKey(new Date(Date.now() - 86400000))
   if (dateStr === today) return '今天'
   if (dateStr === yesterday) return '昨天'
   const d = new Date(dateStr + 'T00:00:00')

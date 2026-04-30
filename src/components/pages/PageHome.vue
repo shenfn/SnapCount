@@ -47,6 +47,27 @@
       <div class="pending-arrow">›</div>
     </div>
 
+    <div class="sec-title">今日收支概览</div>
+    <div class="today-strip">
+      <div class="today-card">
+        <div class="today-label">今日支出</div>
+        <div class="today-value expense">¥{{ todayExpenseDisplay }}</div>
+        <div class="today-meta">{{ todayExpenseCount }} 笔 · {{ todayExpenseTop }}</div>
+      </div>
+      <div class="today-card">
+        <div class="today-label">今日收入</div>
+        <div class="today-value income">¥{{ todayIncomeDisplay }}</div>
+        <div class="today-meta">{{ todayIncomeCount }} 笔 · {{ todayIncomeTop }}</div>
+      </div>
+      <div class="today-card highlight">
+        <div class="today-label">今日结余</div>
+        <div class="today-value" :class="todayNet >= 0 ? 'income' : 'expense'">
+          {{ todayNet >= 0 ? '+' : '-' }}¥{{ Math.abs(todayNet).toFixed(2) }}
+        </div>
+        <div class="today-meta">{{ todayStatusText }}</div>
+      </div>
+    </div>
+
     <!-- 本周支出趋势 -->
     <div class="sec-title">本周支出趋势</div>
     <div class="card">
@@ -67,6 +88,20 @@
         <div v-for="(d, i) in weekLabels" :key="i"
           style="flex:1; text-align:center; font-size:10px;"
           :style="{ color: i === todayIdx ? 'var(--accent)' : 'var(--text3)' }">{{ d }}</div>
+      </div>
+      <div class="trend-summary">
+        <div class="trend-pill">
+          <span>本周累计</span>
+          <strong>¥{{ weekTotal.toFixed(2) }}</strong>
+        </div>
+        <div class="trend-pill">
+          <span>最高单日</span>
+          <strong>{{ weekPeakLabel }}</strong>
+        </div>
+        <div class="trend-pill">
+          <span>今日占比</span>
+          <strong>{{ todayWeekShare }}</strong>
+        </div>
       </div>
     </div>
 
@@ -94,7 +129,7 @@
 
 <script setup>
 import { inject, computed } from 'vue'
-import { computeWeekData } from '../../utils/helpers'
+import { computeWeekData, getLocalDateKey } from '../../utils/helpers'
 import BillRow from '../BillRow.vue'
 import MonthPicker from '../MonthPicker.vue'
 
@@ -105,4 +140,47 @@ const weekData = computed(() => computeWeekData(store.bills.value))
 const weekMax = computed(() => Math.max(...weekData.value, 1))
 const daysInMonth = computed(() => new Date(store.currentYear.value, store.currentMonth.value, 0).getDate())
 const dailyAvg = computed(() => (store.totalExpense.value / daysInMonth.value).toFixed(0))
+const todayKey = computed(() => getLocalDateKey())
+
+const todayBills = computed(() => store.doneBills.value.filter(b => b.dateRaw === todayKey.value))
+const todayIncomes = computed(() => store.recentIncomeRecords.value.filter(r => r.dateRaw === todayKey.value))
+
+const todayExpense = computed(() => todayBills.value.reduce((sum, item) => sum + item.amount, 0))
+const todayIncome = computed(() => todayIncomes.value.reduce((sum, item) => sum + item.amount, 0))
+const todayNet = computed(() => todayIncome.value - todayExpense.value)
+
+const topExpenseBill = computed(() => todayBills.value.reduce((max, item) => item.amount > (max?.amount || 0) ? item : max, null))
+const topIncomeRecord = computed(() => todayIncomes.value.reduce((max, item) => item.amount > (max?.amount || 0) ? item : max, null))
+
+const todayExpenseDisplay = computed(() => todayExpense.value.toFixed(2))
+const todayIncomeDisplay = computed(() => todayIncome.value.toFixed(2))
+const todayExpenseCount = computed(() => todayBills.value.length)
+const todayIncomeCount = computed(() => todayIncomes.value.length)
+const todayExpenseTop = computed(() => topExpenseBill.value ? `最高 ${topExpenseBill.value.name}` : '暂无支出')
+const todayIncomeTop = computed(() => topIncomeRecord.value ? `最高 ${topIncomeRecord.value.source || '收入'}` : '暂无收入')
+const todayStatusText = computed(() => {
+  if (!todayBills.value.length && !todayIncomes.value.length) return '今天还没有新增记录'
+  if (todayNet.value > 0) return '今天是净流入'
+  if (todayNet.value < 0) return '今天是净流出'
+  return '今天收支持平'
+})
+
+const weekTotal = computed(() => weekData.value.reduce((sum, value) => sum + value, 0))
+const weekPeak = computed(() => {
+  let max = 0
+  let idx = 0
+  weekData.value.forEach((value, index) => {
+    if (value > max) {
+      max = value
+      idx = index
+    }
+  })
+  return { max, idx }
+})
+const weekPeakLabel = computed(() => weekPeak.value.max > 0
+  ? `${weekLabels[weekPeak.value.idx]} ¥${weekPeak.value.max.toFixed(0)}`
+  : '本周暂无支出')
+const todayWeekShare = computed(() => weekTotal.value > 0
+  ? `${Math.round(((weekData.value[todayIdx.value] || 0) / weekTotal.value) * 100)}%`
+  : '0%')
 </script>

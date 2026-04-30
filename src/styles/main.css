@@ -113,6 +113,82 @@ body {
 }
 .sec-title span { font-size: 12px; color: var(--accent); cursor: pointer; }
 
+.today-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 16px 12px;
+}
+
+.today-card {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 12px;
+  min-width: 0;
+}
+
+.today-card.highlight {
+  background: linear-gradient(180deg, #F8FCF9 0%, #EEF7F1 100%);
+}
+
+.today-label {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.today-value {
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.4px;
+}
+
+.today-value.expense { color: var(--danger); }
+.today-value.income { color: #1565C0; }
+
+.today-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text3);
+}
+
+.trend-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.trend-pill {
+  background: var(--surface2);
+  border-radius: 10px;
+  padding: 10px 10px 9px;
+  min-width: 0;
+}
+
+.trend-pill span {
+  display: block;
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.trend-pill strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.report-trend-summary {
+  padding: 0 4px 4px;
+}
+
 /* ── Bill item ── */
 .bill-item {
   display: flex; align-items: center; gap: 12px;
@@ -173,6 +249,17 @@ body {
 /* ── Bill group ── */
 .bill-group { margin: 0 16px 12px; }
 .bill-date { font-size: 12px; color: var(--text2); font-weight: 500; margin-bottom: 8px; padding-top: 4px; }
+.bill-date-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.bill-date-summary strong {
+  font-size: 12px;
+  color: #1565C0;
+  font-weight: 600;
+}
 
 /* ── Modal overlay ── */
 .modal-overlay {
@@ -492,6 +579,23 @@ body {
   .amount-input-wrap { padding-top: 10px; }
   .amount-prefix, .amount-input { font-size: 24px; }
   .sel-chip { padding: 7px 11px; font-size: 13px; }
+}
+
+@media (max-width: 380px) {
+  .today-strip,
+  .trend-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .today-card,
+  .trend-pill {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .today-value {
+    font-size: 18px;
+  }
 }
 
 /* ── Pending amount edit ── */
