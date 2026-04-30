@@ -201,7 +201,9 @@ function animateClose(direction) {
 }
 
 function onTouchStart(e) {
-  showUnsaved.value = false
+  if (!isInteractiveTarget(e.target)) {
+    showUnsaved.value = false
+  }
   isSwiping.value = false
   isClosing.value = false
   swipeDir.value = null
