@@ -42,6 +42,17 @@ export function useStore() {
     date: '',
   })
 
+  const expenseModal = reactive({
+    open: false,
+    amount: '',
+    merchantName: '',
+    platform: null,
+    category: null,
+    payment: null,
+    note: '',
+    date: '',
+  })
+
   const deleteConfirm = reactive({
     open: false,
     type: null,
@@ -262,6 +273,53 @@ export function useStore() {
     await loadData()
   }
 
+  function openExpenseModal() {
+    expenseModal.open = true
+    expenseModal.amount = ''
+    expenseModal.merchantName = ''
+    expenseModal.platform = null
+    expenseModal.category = null
+    expenseModal.payment = null
+    expenseModal.note = ''
+    expenseModal.date = new Date().toISOString().slice(0, 10)
+  }
+
+  function closeExpenseModal() {
+    expenseModal.open = false
+  }
+
+  async function confirmExpense() {
+    const amt = parseFloat(expenseModal.amount)
+    if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
+    if (!expenseModal.platform || !expenseModal.category || !expenseModal.payment) { alert('请选择消费渠道、分类和支付方式'); return }
+    if (!expenseModal.date) { alert('请选择消费日期'); return }
+
+    const merchantName = expenseModal.merchantName.trim() || `${expenseModal.platform}消费`
+    const isLargeTransport = expenseModal.category === '出行' && amt >= 200
+    const today = new Date().toISOString().slice(0, 10)
+    const nowTime = new Date().toTimeString().slice(0, 8)
+
+    const { error } = await sb.from('transactions').insert({
+      type: 'expense',
+      amount: amt,
+      merchant_name: merchantName,
+      platform: expenseModal.platform,
+      category: expenseModal.category,
+      payment_method: expenseModal.payment,
+      status: 'done',
+      transaction_date: expenseModal.date,
+      transaction_time: expenseModal.date === today ? nowTime : null,
+      source: 'manual',
+      note: expenseModal.note.trim() || null,
+      is_large_transport: isLargeTransport,
+      transport_type: isLargeTransport ? '交通' : null,
+    })
+    if (error) { alert('保存失败：' + error.message); return }
+    closeExpenseModal()
+    showFlash('✓ 支出已记录')
+    await loadData()
+  }
+
   function openImgFull(src) {
     imgOverlay.src = src
     imgOverlay.open = true
@@ -334,12 +392,14 @@ export function useStore() {
     imgOverlay,
     pendingModal,
     incomeModal,
+    expenseModal,
     incomeCatMap,
     loadData, changeMonth, showFlash,
     openPendingModal, closePendingModal, confirmEntry,
     hasPendingChanges, resetPendingChanges,
     markPendingImageUnavailable,
     openIncomeModal, closeIncomeModal, confirmIncome,
+    openExpenseModal, closeExpenseModal, confirmExpense,
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
   }

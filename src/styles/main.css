@@ -469,11 +469,13 @@ body {
   display: flex; align-items: center; gap: 8px;
 }
 .amount-prefix { font-size: 28px; font-weight: 600; color: #1565C0; }
+.amount-prefix.expense { color: var(--danger); }
 .amount-input {
   flex: 1; font-size: 28px; font-weight: 600; color: #1565C0;
   border: none; outline: none; background: transparent;
   font-family: var(--font);
 }
+.amount-input.expense { color: var(--danger); }
 .amount-input::placeholder { color: var(--text3); font-size: 22px; }
 
 /* ── Pending amount edit ── */

@@ -1,0 +1,112 @@
+<template>
+  <div class="modal-overlay" :class="{ open: store.expenseModal.open }" @click.self="store.closeExpenseModal()">
+    <div class="modal-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <div class="sheet-title">添加支出</div>
+        <div class="sheet-sub">手动补录一笔消费</div>
+      </div>
+
+      <div class="amount-input-wrap">
+        <span class="amount-prefix expense">-¥</span>
+        <input type="number" class="amount-input expense" v-model="store.expenseModal.amount"
+          placeholder="0.00" min="0.01" step="0.01">
+      </div>
+
+      <div class="sel-section" style="margin-top:16px">
+        <div class="sel-label">商家名称（可选）</div>
+        <input type="text" class="sheet-input" v-model="store.expenseModal.merchantName"
+          placeholder="如：麦当劳、京东购物…" maxlength="50">
+      </div>
+
+      <div class="sel-section" style="margin-top:16px">
+        <div class="sel-label">消费渠道</div>
+        <div class="sel-grid">
+          <div v-for="p in platforms" :key="p.val" class="sel-chip"
+            :class="{ selected: store.expenseModal.platform === p.val }"
+            @click="store.expenseModal.platform = p.val">
+            {{ p.label }}
+            <span v-if="p.hot" class="hot-badge">常用</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sel-section" style="margin-top:16px">
+        <div class="sel-label">消费分类</div>
+        <div class="sel-grid">
+          <div v-for="c in categories" :key="c.val" class="sel-chip"
+            :class="{ selected: store.expenseModal.category === c.val }"
+            @click="store.expenseModal.category = c.val">
+            {{ c.label }}
+          </div>
+        </div>
+      </div>
+
+      <div class="sel-section" style="margin-top:16px">
+        <div class="sel-label">支付方式</div>
+        <div class="sel-grid">
+          <div v-for="p in payments" :key="p.val" class="sel-chip"
+            :class="{ selected: store.expenseModal.payment === p.val }"
+            @click="store.expenseModal.payment = p.val">
+            {{ p.label }}
+            <span v-if="p.hot" class="hot-badge">常用</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sel-section" style="margin-top:16px">
+        <div class="sel-label">消费日期</div>
+        <input type="date" class="sheet-input" v-model="store.expenseModal.date" :max="today">
+      </div>
+
+      <div class="sel-section" style="margin-top:12px">
+        <div class="sel-label">备注（可选）</div>
+        <input type="text" class="sheet-input" v-model="store.expenseModal.note"
+          placeholder="备注信息…" maxlength="100">
+      </div>
+
+      <div class="sheet-footer">
+        <button class="confirm-btn"
+          :disabled="!store.expenseModal.amount || !store.expenseModal.platform || !store.expenseModal.category || !store.expenseModal.payment || !store.expenseModal.date"
+          @click="store.confirmExpense()">确认保存</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { inject } from 'vue'
+const store = inject('store')
+const today = new Date().toISOString().slice(0, 10)
+
+const platforms = [
+  { val: '美团',  label: '🛵 美团',  hot: true },
+  { val: '微信',  label: '💬 微信' },
+  { val: '线下消费', label: '🏪 线下消费', hot: true },
+  { val: '京东',  label: '📦 京东' },
+  { val: '拼多多',label: '🛍 拼多多' },
+  { val: '淘宝',  label: '🧡 淘宝' },
+  { val: '抖音',  label: '🎵 抖音' },
+  { val: '支付宝',label: '💙 支付宝' },
+  { val: '其他', label: '💰 其他' },
+]
+
+const categories = [
+  { val: '餐饮', label: '🍜 餐饮' },
+  { val: '购物', label: '🛒 购物' },
+  { val: '出行', label: '🚗 出行' },
+  { val: '娱乐', label: '🎮 娱乐' },
+  { val: '生活', label: '🏠 生活' },
+  { val: '其他', label: '📌 其他' },
+]
+
+const payments = [
+  { val: '微信支付', label: '💚 微信支付', hot: true },
+  { val: '花呗',    label: '🔵 花呗' },
+  { val: '支付宝',  label: '🔷 支付宝' },
+  { val: '银行卡',  label: '💳 银行卡' },
+  { val: '京东白条',label: '🟡 京东白条' },
+  { val: '美团月付',label: '🔴 美团月付' },
+  { val: '先用后付',label: '⚡ 先用后付' },
+]
+</script>

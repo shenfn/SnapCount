@@ -46,13 +46,14 @@
     <div class="fab-overlay" :class="{ open: fabOpen }" @click="fabOpen = false"></div>
     <div class="fab-menu" :class="{ open: fabOpen }">
       <div class="fab-item" @click="store.openIncomeModal(); fabOpen = false">💰 添加收入</div>
-      <div class="fab-item" @click="store.showFlash('手动新增支出开发中'); fabOpen = false">💸 添加支出</div>
+      <div class="fab-item" @click="store.openExpenseModal(); fabOpen = false">💸 添加支出</div>
     </div>
     <button class="fab" @click="fabOpen = !fabOpen">+</button>
 
     <!-- Modals -->
     <ModalPending />
     <ModalIncome />
+    <ModalExpense />
 
     <!-- Delete confirmation -->
     <div v-if="store.deleteConfirm.open"
@@ -95,6 +96,7 @@ import PageIncome  from './components/pages/PageIncome.vue'
 import PageReport  from './components/pages/PageReport.vue'
 import ModalPending from './components/ModalPending.vue'
 import ModalIncome  from './components/ModalIncome.vue'
+import ModalExpense from './components/ModalExpense.vue'
 
 const store = useStore()
 provide('store', store)
