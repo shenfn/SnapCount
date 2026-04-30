@@ -9,9 +9,16 @@ values ('receipt-images', 'receipt-images', false)
 on conflict (id) do update set public = false;
 
 drop policy if exists "allow_anon_select_receipt_images" on storage.objects;
+drop policy if exists "allow_anon_delete_receipt_images" on storage.objects;
 
 create policy "allow_anon_select_receipt_images"
 on storage.objects
 for select
+to anon
+using (bucket_id = 'receipt-images');
+
+create policy "allow_anon_delete_receipt_images"
+on storage.objects
+for delete
 to anon
 using (bucket_id = 'receipt-images');

@@ -266,19 +266,28 @@ export function useStore() {
           const { data: refs, error: refErr } = await sb.from('transactions')
             .select('id')
             .eq('image_url', imagePath)
-            .neq('id', id)
             .limit(1)
-          if (refErr) console.warn('检查截图引用失败:', refErr.message)
-          if (!refErr && (!refs || refs.length === 0)) {
+          if (refErr) {
+            console.warn('检查截图引用失败:', refErr.message)
+          } else if (!refs || refs.length === 0) {
             const { error: removeErr } = await sb.storage.from('receipt-images').remove([imagePath])
-            if (removeErr) console.warn('删除截图文件失败:', removeErr.message)
+            if (removeErr) {
+              console.warn('删除截图文件失败:', removeErr.message)
+              showFlash('✓ 已删除（截图清理失败，可稍后重试）')
+            } else {
+              showFlash('✓ 已删除')
+            }
+          } else {
+            showFlash('✓ 已删除')
           }
+        } else {
+          showFlash('✓ 已删除')
         }
       } else if (type === 'income') {
         const { error } = await sb.from('income_records').delete().eq('id', id)
         if (error) throw new Error(error.message)
+        showFlash('✓ 已删除')
       }
-      showFlash('✓ 已删除')
       await loadData()
     } catch (e) {
       showFlash('❌ 删除失败：' + e.message)
