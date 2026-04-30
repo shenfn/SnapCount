@@ -12,6 +12,7 @@ export function useStore() {
 
   const bills = ref([])
   const incomeRecords = ref([])
+  const recentIncomeRecords = ref([])
   const transportRecords = ref([])
 
   const currentFilter = ref('all')
@@ -78,7 +79,7 @@ export function useStore() {
 
   const recentEntries = computed(() => {
     const expenseItems = bills.value.map(b => ({ ...b, entryKind: 'expense', sortDate: b.createdAt || `${b.dateRaw || ''} ${b.time || ''}` }))
-    const incomeItems = incomeRecords.value.map(r => ({ ...r, entryKind: 'income', sortDate: r.createdAt || `${r.dateRaw || ''} ${r.time || ''}` }))
+    const incomeItems = recentIncomeRecords.value.map(r => ({ ...r, entryKind: 'income', sortDate: r.createdAt || `${r.dateRaw || ''} ${r.time || ''}` }))
     return [...expenseItems, ...incomeItems].sort((a, b) => (b.sortDate || '').localeCompare(a.sortDate || ''))
   })
 
@@ -139,6 +140,28 @@ export function useStore() {
       if (incErr) console.warn('加载收入失败:', incErr.message)
 
       incomeRecords.value = (incs || []).map(r => ({
+        id: r.id,
+        cat: r.category,
+        source: r.source_name,
+        amount: Number(r.amount),
+        date: formatDate(r.income_date),
+        dateRaw: r.income_date,
+        createdAt: r.created_at,
+        time: '',
+        icon: incomeCatMap[r.category]?.icon || '💰',
+        note: r.note,
+        image_url: r.image_url,
+        image_path: r.image_url,
+        sourceType: r.source || 'manual',
+      }))
+
+      const { data: recentIncs, error: recentIncErr } = await sb.from('income_records')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10)
+      if (recentIncErr) console.warn('加载最近收入失败:', recentIncErr.message)
+
+      recentIncomeRecords.value = (recentIncs || []).map(r => ({
         id: r.id,
         cat: r.category,
         source: r.source_name,
@@ -485,7 +508,7 @@ export function useStore() {
   return {
     currentYear, currentMonth, currentPage, monthLabel,
     loading, loadError,
-    bills, incomeRecords, transportRecords,
+    bills, incomeRecords, recentIncomeRecords, transportRecords,
     doneBills, pendingBills, filteredBills,
     recentEntries,
     totalExpense, totalIncome, netBalance,
