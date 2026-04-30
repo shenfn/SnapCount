@@ -15,8 +15,11 @@
 
       <div class="sheet-body" ref="bodyEl">
         <div class="amount-edit-wrap">
-          <span class="amount-edit-prefix">-¥</span>
+          <span class="amount-edit-prefix" :class="{ income: store.pendingModal.entryType === 'income' }">
+            {{ store.pendingModal.entryType === 'income' ? '+¥' : '-¥' }}
+          </span>
           <input type="number" class="amount-edit-input" v-model="store.pendingModal.amount"
+            :class="{ income: store.pendingModal.entryType === 'income' }"
             min="0.01" max="999999.99" step="0.01" placeholder="0.00">
         </div>
 
@@ -36,11 +39,22 @@
         </div>
 
         <div class="sel-section" style="margin-top:12px">
-          <div class="sel-label">商家名称（可选）</div>
+          <div class="sel-label">{{ store.pendingModal.entryType === 'income' ? '来源名称（可选）' : '商家名称（可选）' }}</div>
           <input type="text" class="sheet-input" v-model="store.pendingModal.merchantName"
-            placeholder="如：麦当劳、京东购物…" maxlength="50">
+            :placeholder="store.pendingModal.entryType === 'income' ? '如：转账方、项目名、平台收益…' : '如：麦当劳、京东购物…'" maxlength="50">
         </div>
 
+        <div class="sel-section" style="margin-top:16px">
+          <div class="sel-label">记录类型</div>
+          <div class="seg-control">
+            <button :class="{ active: store.pendingModal.entryType === 'expense' }"
+              @click="store.pendingModal.entryType = 'expense'">支出</button>
+            <button :class="{ active: store.pendingModal.entryType === 'income' }"
+              @click="store.pendingModal.entryType = 'income'">收入</button>
+          </div>
+        </div>
+
+        <template v-if="store.pendingModal.entryType === 'expense'">
         <div class="sel-section">
           <div class="sel-label">消费渠道</div>
           <div class="sel-grid">
@@ -75,11 +89,28 @@
             </div>
           </div>
         </div>
+        </template>
+
+        <template v-else>
+        <div class="sel-section" style="margin-top:16px">
+          <div class="sel-label">收入类型</div>
+          <div class="sel-grid">
+            <div v-for="item in incomeTypes" :key="item.val" class="sel-chip"
+              :class="{ selected: store.pendingModal.incomeCategory === item.val }"
+              @click="store.pendingModal.incomeCategory = item.val">
+              {{ item.label }}
+              <span v-if="item.hot" class="hot-badge">常用</span>
+            </div>
+          </div>
+        </div>
+        </template>
       </div>
 
       <div class="sheet-footer">
         <button class="confirm-btn"
-          :disabled="!store.pendingModal.platform || !store.pendingModal.category || !store.pendingModal.payment"
+          :disabled="store.pendingModal.entryType === 'expense'
+            ? (!store.pendingModal.platform || !store.pendingModal.category || !store.pendingModal.payment)
+            : !store.pendingModal.incomeCategory"
           @click="doSave">确认保存</button>
         <button class="delete-bill-btn"
           @click="store.openDeleteConfirm('bill', store.pendingModal.bill?.id, store.pendingModal.bill?.image_path)">
@@ -310,5 +341,14 @@ const payments = [
   { val: '京东白条',label: '🟡 京东白条' },
   { val: '美团月付',label: '🔴 美团月付' },
   { val: '先用后付',label: '⚡ 先用后付' },
+]
+
+const incomeTypes = [
+  { val: 'salary',        label: '💼 工资', hot: true },
+  { val: 'bonus',         label: '🎁 奖金' },
+  { val: 'freelance',     label: '💻 兼职' },
+  { val: 'investment',    label: '📈 投资收益' },
+  { val: 'reimbursement', label: '🧾 报销' },
+  { val: 'other',         label: '💰 其他' },
 ]
 </script>

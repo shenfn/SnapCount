@@ -26,11 +26,13 @@ export function useStore() {
   const pendingModal = reactive({
     open: false,
     bill: null,
+    entryType: 'expense',
     merchantName: '',
     amount: '',
     platform: null,
     category: null,
     payment: null,
+    incomeCategory: 'other',
   })
 
   const incomeModal = reactive({
@@ -179,36 +181,44 @@ export function useStore() {
     const rawImagePath = bill.image_path || bill.image_url || null
     const resolvedUrl = await getSignedImageUrl(rawImagePath)
     pendingModal.bill = { ...bill, image_path: rawImagePath, image_url: resolvedUrl, imageLoadError: !!rawImagePath && !resolvedUrl }
+    pendingModal.entryType = bill.type === 'income' ? 'income' : 'expense'
     pendingModal.merchantName = bill.name !== '未识别商家' ? bill.name : ''
     pendingModal.amount = String(bill.amount)
     pendingModal.platform = bill.platform !== '?' ? bill.platform : null
     pendingModal.category = catCodeMap[bill.cat] || (bill.cat !== '?' ? bill.cat : null)
     pendingModal.payment = payAliasMap[bill.payment] || (bill.payment !== '?' ? bill.payment : null)
+    pendingModal.incomeCategory = 'other'
     pendingModalInitial = {
+      entryType: pendingModal.entryType,
       merchantName: pendingModal.merchantName,
       amount: pendingModal.amount,
       platform: pendingModal.platform,
       category: pendingModal.category,
       payment: pendingModal.payment,
+      incomeCategory: pendingModal.incomeCategory,
     }
   }
 
   function hasPendingChanges() {
     if (!pendingModalInitial) return false
-    return pendingModal.merchantName !== pendingModalInitial.merchantName
+    return pendingModal.entryType !== pendingModalInitial.entryType
+      || pendingModal.merchantName !== pendingModalInitial.merchantName
       || pendingModal.amount !== pendingModalInitial.amount
       || pendingModal.platform !== pendingModalInitial.platform
       || pendingModal.category !== pendingModalInitial.category
       || pendingModal.payment !== pendingModalInitial.payment
+      || pendingModal.incomeCategory !== pendingModalInitial.incomeCategory
   }
 
   function resetPendingChanges() {
     if (!pendingModalInitial) return
+    pendingModal.entryType = pendingModalInitial.entryType
     pendingModal.merchantName = pendingModalInitial.merchantName
     pendingModal.amount = pendingModalInitial.amount
     pendingModal.platform = pendingModalInitial.platform
     pendingModal.category = pendingModalInitial.category
     pendingModal.payment = pendingModalInitial.payment
+    pendingModal.incomeCategory = pendingModalInitial.incomeCategory
   }
 
   function markPendingImageUnavailable() {
@@ -224,9 +234,35 @@ export function useStore() {
   }
 
   async function confirmEntry() {
-    if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
     const amt = parseFloat(pendingModal.amount)
     if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
+
+    if (pendingModal.entryType === 'income') {
+      if (!pendingModal.incomeCategory) { alert('请选择收入类型'); return }
+      const source = pendingModal.merchantName.trim() || (incomeCatMap[pendingModal.incomeCategory]?.label || '收入')
+      const { error: incErr } = await sb.from('income_records').insert({
+        category: pendingModal.incomeCategory,
+        source_name: source,
+        amount: amt,
+        income_date: pendingModal.bill.dateRaw || new Date().toISOString().slice(0, 10),
+        note: pendingModal.bill.image_path ? '由截图待补充转入收入' : null,
+      })
+      if (incErr) { alert('保存失败：' + incErr.message); return }
+
+      const imagePath = pendingModal.bill.image_path
+      const { error: delErr } = await sb.from('transactions').delete().eq('id', pendingModal.bill.id)
+      if (delErr) { alert('收入已保存，但原待补充记录删除失败：' + delErr.message); return }
+      if (imagePath && !imagePath.startsWith('https://')) {
+        const { error: removeErr } = await sb.storage.from('receipt-images').remove([imagePath])
+        if (removeErr) console.warn('删除收入截图占位文件失败:', removeErr.message)
+      }
+      closePendingModal()
+      showFlash('✓ 收入已记录')
+      await loadData()
+      return
+    }
+
+    if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
     const { error } = await sb.from('transactions').update({
       platform: pendingModal.platform,
       category: pendingModal.category,

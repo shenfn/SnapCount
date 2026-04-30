@@ -486,12 +486,28 @@ body {
   margin-bottom: 4px;
 }
 .amount-edit-prefix { font-size: 26px; font-weight: 600; color: var(--danger); }
+.amount-edit-prefix.income { color: #1565C0; }
 .amount-edit-input {
   flex: 1; font-size: 26px; font-weight: 600; color: var(--danger);
   border: none; outline: none; background: transparent;
   font-family: var(--font); min-width: 0;
 }
+.amount-edit-input.income { color: #1565C0; }
 .amount-edit-input::placeholder { color: var(--text3); font-size: 20px; }
+
+.seg-control {
+  display: grid; grid-template-columns: repeat(2, 1fr);
+  background: var(--surface2); border-radius: 12px; padding: 3px;
+}
+.seg-control button {
+  border: none; background: transparent; border-radius: 10px;
+  padding: 9px 0; font-family: var(--font); font-size: 14px;
+  color: var(--text2); cursor: pointer;
+}
+.seg-control button.active {
+  background: var(--surface); color: var(--text);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
 
 /* ── Delete bill button ── */
 .delete-bill-btn {

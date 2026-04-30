@@ -1,12 +1,19 @@
 <template>
-  <div class="modal-overlay" :class="{ open: store.expenseModal.open }" @click.self="store.closeExpenseModal()">
-    <div class="modal-sheet">
-      <div class="sheet-handle"></div>
+  <div class="modal-overlay" :class="{ open: store.expenseModal.open }" @click.self="sheet.tryClose">
+    <div class="modal-sheet" ref="sheetEl"
+      :class="{ swiping: sheet.isSwiping.value, closing: sheet.isClosing.value }"
+      @touchstart="sheet.onTouchStart"
+      @touchmove="sheet.onTouchMove"
+      @touchend="sheet.onTouchEnd">
+      <div class="sheet-drag-zone">
+        <div class="sheet-handle"></div>
+      </div>
       <div class="sheet-header">
         <div class="sheet-title">添加支出</div>
         <div class="sheet-sub">手动补录一笔消费</div>
       </div>
 
+      <div class="sheet-body" ref="bodyEl">
       <div class="amount-input-wrap">
         <span class="amount-prefix expense">-¥</span>
         <input type="number" class="amount-input expense" v-model="store.expenseModal.amount"
@@ -64,20 +71,46 @@
         <input type="text" class="sheet-input" v-model="store.expenseModal.note"
           placeholder="备注信息…" maxlength="100">
       </div>
+      </div>
 
       <div class="sheet-footer">
         <button class="confirm-btn"
           :disabled="!store.expenseModal.amount || !store.expenseModal.platform || !store.expenseModal.category || !store.expenseModal.payment || !store.expenseModal.date"
           @click="store.confirmExpense()">确认保存</button>
       </div>
+
+      <div v-if="sheet.showUnsaved.value" class="unsaved-bar">
+        <span class="unsaved-text">内容未保存，确认退出？</span>
+        <button class="unsaved-cancel" @click="sheet.showUnsaved.value = false">继续编辑</button>
+        <button class="unsaved-confirm" @click="sheet.doForceClose">退出</button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { inject } from 'vue'
+import { computed, inject } from 'vue'
+import { useBottomSheet } from '../composables/useBottomSheet'
 const store = inject('store')
 const today = new Date().toISOString().slice(0, 10)
+
+const sheet = useBottomSheet(
+  computed(() => store.expenseModal.open),
+  store.closeExpenseModal,
+  {
+    hasChanges: () => !!(store.expenseModal.amount || store.expenseModal.merchantName || store.expenseModal.note || store.expenseModal.platform || store.expenseModal.category || store.expenseModal.payment),
+    resetChanges: () => {
+      store.expenseModal.amount = ''
+      store.expenseModal.merchantName = ''
+      store.expenseModal.note = ''
+      store.expenseModal.platform = null
+      store.expenseModal.category = null
+      store.expenseModal.payment = null
+    },
+  }
+)
+const sheetEl = sheet.sheetEl
+const bodyEl = sheet.bodyEl
 
 const platforms = [
   { val: '美团',  label: '🛵 美团',  hot: true },
