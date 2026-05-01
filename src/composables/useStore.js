@@ -1211,11 +1211,12 @@ export function useStore() {
     if (!record) return
     let imageUrl = null
     const imagePath = record.image_path || record.image_url || null
+      || (kind === 'universal' ? record.imagePath : null)
     if (imagePath) imageUrl = await getSignedImageUrl(imagePath)
     detailRecord.value = {
       id: record.id,
       kind,
-      domainId: kind,
+      domainId: kind === 'universal' ? record.domainKey : kind,
       imagePath,
       imageUrl,
       imageLoadError: !!imagePath && !imageUrl,
@@ -1255,6 +1256,11 @@ export function useStore() {
     if (detailRecord.value.kind === 'expense') {
       const fresh = bills.value.find(item => item.id === detailRecord.value.id)
       if (fresh) await openRecordDetail('expense', fresh)
+      return
+    }
+    if (detailRecord.value.kind === 'universal') {
+      const fresh = dataRecords.value.find(item => item.id === detailRecord.value.id)
+      if (fresh) await openRecordDetail('universal', fresh)
     }
   }
 
@@ -1270,6 +1276,10 @@ export function useStore() {
         return
       }
       await openExpenseEditModal(detailRecord.value.raw)
+      return
+    }
+    if (detailRecord.value.kind === 'universal') {
+      await openUniversalEditModal(detailRecord.value.raw)
     }
   }
 
@@ -1329,6 +1339,7 @@ export function useStore() {
         const { error } = await sb.from('data_records').delete().eq('id', id)
         if (error) throw new Error(error.message)
         if (universalModal.open && universalModal.id === id) closeUniversalModal()
+        if (detailRecord.value?.id === id) goBack()
         showFlash('✓ 已删除')
       }
       await loadData()

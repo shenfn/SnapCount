@@ -176,7 +176,7 @@ function handleTimelineClick(item) {
     return
   }
   if (item.kind === 'universal' && item.raw) {
-    store.openUniversalEditModal(item.raw)
+    store.openRecordDetail('universal', item.raw)
   }
 }
 </script>

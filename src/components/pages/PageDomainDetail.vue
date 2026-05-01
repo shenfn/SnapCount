@@ -228,7 +228,7 @@ const capabilities = computed(() => {
 function openRecord(item) {
   if (item.kind === 'expense') store.openRecordDetail('expense', item.raw)
   if (item.kind === 'income') store.openRecordDetail('income', item.raw)
-  if (item.kind === 'universal') store.openUniversalEditModal(item.raw)
+  if (item.kind === 'universal') store.openRecordDetail('universal', item.raw)
 }
 
 const universalRecords = computed(() => {

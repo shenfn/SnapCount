@@ -21,7 +21,7 @@
           <div class="record-detail-image-label">点击查看原始截图</div>
         </template>
         <div v-else class="record-detail-image-empty">
-          <div class="record-detail-image-empty-mark">{{ record.kind === 'income' ? '收' : '支' }}</div>
+          <div class="record-detail-image-empty-mark">{{ emptyMark }}</div>
           <div class="record-detail-image-label">{{ record.imageLoadError ? '截图文件不可用' : '暂无截图预览' }}</div>
         </div>
       </div>
@@ -31,7 +31,7 @@
         <div class="record-detail-field">
           <span class="field-label">数据域</span>
           <span class="field-value">
-            <span class="badge" :class="record.kind === 'income' ? 'badge-income' : 'badge-expense'">{{ record.kind === 'income' ? '收入记录' : '消费记账' }}</span>
+            <span class="badge" :class="domainBadgeClass">{{ domainLabel }}</span>
           </span>
         </div>
         <div class="record-detail-field">
@@ -78,12 +78,36 @@ import { formatDateTimeLabel, incomeCatMap } from '../../utils/helpers'
 const store = inject('store')
 
 const record = computed(() => store.detailRecord.value)
-const deleteType = computed(() => (record.value?.kind === 'income' ? 'income' : 'bill'))
+const deleteType = computed(() => {
+  if (record.value?.kind === 'income') return 'income'
+  if (record.value?.kind === 'universal') return 'universal'
+  return 'bill'
+})
 const isPendingExpense = computed(() => record.value?.kind === 'expense' && record.value?.raw?.status === 'pending')
+const domainMeta = computed(() => {
+  if (!record.value) return null
+  return store.domains.value.find(item => item.id === record.value.domainId) || null
+})
+const domainLabel = computed(() => {
+  if (record.value?.kind === 'income') return '收入记录'
+  if (record.value?.kind === 'expense') return '消费记账'
+  return domainMeta.value?.name || '通用记录'
+})
+const domainBadgeClass = computed(() => {
+  if (record.value?.kind === 'income') return 'badge-income'
+  if (record.value?.kind === 'expense') return 'badge-expense'
+  return 'badge-primary'
+})
+const emptyMark = computed(() => {
+  if (record.value?.kind === 'income') return '收'
+  if (record.value?.kind === 'expense') return '支'
+  return domainMeta.value?.shortName?.slice(0, 1) || '域'
+})
 
 const recordTime = computed(() => {
   if (!record.value?.raw) return '--'
   const raw = record.value.raw
+  if (record.value.kind === 'universal') return formatDateTimeLabel(raw.occurredAt || raw.createdAt) || '--'
   if (raw.createdAt) return formatDateTimeLabel(raw.createdAt)
   if (raw.dateRaw) return raw.time ? `${raw.date} ${raw.time}` : raw.date
   return '--'
@@ -93,6 +117,7 @@ const sourceLabel = computed(() => {
   if (!record.value?.raw) return '--'
   const raw = record.value.raw
   if (record.value.kind === 'income') return raw.sourceType === 'ai_scan' ? '截图识别' : '手动录入'
+  if (record.value.kind === 'universal') return raw.source === 'staging' ? '中转站归档' : '手动录入'
   return raw.source === 'ai_scan' ? '截图识别' : '手动录入'
 })
 
@@ -106,6 +131,18 @@ const fields = computed(() => {
       { label: '来源名称', value: raw.source || '未填写' },
       { label: '到账日期', value: raw.date || '--' },
       { label: '备注', value: raw.note || '无' },
+    ]
+  }
+  if (record.value.kind === 'universal') {
+    const payload = raw.payload || {}
+    const meta = store.getUniversalDomainMeta(raw.domainKey)
+    return [
+      { label: '标题', value: raw.title || meta.defaultTitle },
+      { label: meta.dimensionLabel, value: payload[meta.dimensionKey] || '未填写' },
+      { label: meta.primaryLabel, value: `${Number(payload[meta.primaryKey] || 0).toFixed(2)}`, numeric: true },
+      { label: '模板版本', value: raw.domainVersion || '1.0' },
+      { label: '来源类型', value: raw.source === 'staging' ? '中转站归档' : '手动录入' },
+      { label: '备注', value: payload.note || raw.summary || '无' },
     ]
   }
   return [
@@ -126,6 +163,13 @@ const aiSummary = computed(() => {
     const source = raw.source || '未命名来源'
     const cat = incomeCatMap[raw.cat]?.label || '其他收入'
     return `系统记录了一笔 ${cat}，金额 ${Number(raw.amount || 0).toFixed(2)} 元，来源为 ${source}。`
+  }
+  if (record.value.kind === 'universal') {
+    const meta = store.getUniversalDomainMeta(raw.domainKey)
+    const payload = raw.payload || {}
+    const dimension = payload[meta.dimensionKey] || raw.title || domainLabel.value
+    const primary = Number(payload[meta.primaryKey] || 0)
+    return `${domainLabel.value}中记录了「${dimension}」，${meta.primaryLabel}为 ${primary.toFixed(2)}。${raw.summary || ''}`
   }
   return `系统记录了一笔支出，商家为 ${raw.name || '未识别商家'}，金额 ${Number(raw.amount || 0).toFixed(2)} 元，渠道 ${raw.platform || '未知'}，分类 ${raw.cat || '未知'}。`
 })
