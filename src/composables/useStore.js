@@ -154,7 +154,7 @@ export function useStore() {
         icon: '💸',
         tone: 'expense',
         color: '#C2410C',
-        meta: `${expenseCount} 条记录 · 系统内置`,
+        meta: `本月 ${expenseCount} 条 · 系统内置`,
         recordCount: expenseCount,
         isSystem: true,
         description: '识别消费截图、账单详情和手动支出记录。',
@@ -166,7 +166,7 @@ export function useStore() {
         icon: '💰',
         tone: 'income',
         color: '#1565C0',
-        meta: `${incomeCount} 条记录 · 系统内置`,
+        meta: `本月 ${incomeCount} 条 · 系统内置`,
         recordCount: incomeCount,
         isSystem: true,
         description: '记录工资、转账收款、报销和其他收入来源。',
@@ -178,7 +178,7 @@ export function useStore() {
         icon: '🏃',
         tone: 'sport',
         color: '#B45309',
-        meta: `${universalCount('sport')} 条记录 · 系统内置`,
+        meta: `本月 ${universalCount('sport')} 条 · 系统内置`,
         recordCount: universalCount('sport'),
         isSystem: true,
         description: '后续承接华为健康、Keep 等运动截图。',
@@ -190,7 +190,7 @@ export function useStore() {
         icon: '🌙',
         tone: 'sleep',
         color: '#4338CA',
-        meta: `${universalCount('sleep')} 条记录 · 系统内置`,
+        meta: `本月 ${universalCount('sleep')} 条 · 系统内置`,
         recordCount: universalCount('sleep'),
         isSystem: true,
         description: '后续承接睡眠追踪截图和睡眠日志。',
@@ -202,7 +202,7 @@ export function useStore() {
         icon: '📚',
         tone: 'reading',
         color: '#0369A1',
-        meta: `${universalCount('reading')} 条记录 · 系统内置`,
+        meta: `本月 ${universalCount('reading')} 条 · 系统内置`,
         recordCount: universalCount('reading'),
         isSystem: true,
         description: '后续承接阅读时长、页数和书籍进度记录。',
@@ -361,9 +361,11 @@ export function useStore() {
 
       const { data: universalRows, error: universalErr } = await sb.from('data_records')
         .select('*')
+        .gte('occurred_at', `${start}T00:00:00+08:00`)
+        .lte('occurred_at', `${end}T23:59:59+08:00`)
         .order('occurred_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
-        .limit(80)
+        .limit(120)
       if (universalErr) {
         console.warn('加载通用记录失败:', universalErr.message)
         dataRecords.value = []
