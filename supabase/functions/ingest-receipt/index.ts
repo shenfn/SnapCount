@@ -76,38 +76,6 @@ function computePerceptualHash(bytes: Uint8Array, mime: string): string | null {
   return hex;
 }
 
-function getImageFeatures(bytes: Uint8Array, mime: string): ImageFeatures {
-  const img = decodeImage(bytes, mime);
-  if (!img || img.width <= 0 || img.height <= 0) {
-    return {
-      width: null,
-      height: null,
-      aspect_ratio: null,
-      megapixels: null,
-      decode_ok: false,
-      is_tall_screenshot: false,
-      is_wide_screenshot: false,
-      is_tiny_image: false,
-      likely_phone_screenshot: false,
-      mime,
-    };
-  }
-  const ratio = Math.round((img.height / img.width) * 100) / 100;
-  const megapixels = Math.round((img.width * img.height / 1_000_000) * 100) / 100;
-  return {
-    width: img.width,
-    height: img.height,
-    aspect_ratio: ratio,
-    megapixels,
-    decode_ok: true,
-    is_tall_screenshot: ratio >= 1.6,
-    is_wide_screenshot: img.width > img.height * 1.25,
-    is_tiny_image: img.width < 320 || img.height < 320,
-    likely_phone_screenshot: img.height >= 1000 && img.width >= 600 && ratio >= 1.5 && ratio <= 2.4,
-    mime,
-  };
-}
-
 const PROMPT = `你是个人数据平台的截图识别与路由助手。图片可能来自财务、运动、睡眠、阅读等生活数据域。请先判断图片类型和 record_type，再按对应数据域提取结构化字段。
 
 【图片类型识别】
@@ -267,68 +235,6 @@ order_finished_at（订单完成时间）：
 type RecordType = "expense" | "income" | "sport" | "sleep" | "reading" | "uncertain";
 type BuiltinDomainKey = "sport" | "sleep" | "reading";
 
-interface ImageFeatures {
-  width: number | null;
-  height: number | null;
-  aspect_ratio: number | null;
-  megapixels: number | null;
-  decode_ok: boolean;
-  is_tall_screenshot: boolean;
-  is_wide_screenshot: boolean;
-  is_tiny_image: boolean;
-  likely_phone_screenshot: boolean;
-  mime: string;
-}
-
-interface DispatcherCandidate {
-  key: string;
-  name: string;
-  confidence: number;
-  reason: string;
-  matched_keywords: string[];
-  matched_apps: string[];
-}
-
-interface DispatcherResult {
-  raw_text: string | null;
-  source_app: string | null;
-  image_features: ImageFeatures;
-  candidate_domains: DispatcherCandidate[];
-  selected_domain_key: string | null;
-  route_confidence: number;
-  route_reason: string;
-  should_call_vision: boolean;
-  skip_reason: string | null;
-}
-
-const BUILTIN_ROUTE_RULES: Record<string, { keywords: string[]; apps: string[]; threshold: number }> = {
-  expense: {
-    keywords: ["支付成功", "付款成功", "交易成功", "订单已送达", "实付", "支付方式", "商家", "收款方", "账单详情"],
-    apps: ["微信", "支付宝", "美团", "饿了么", "京东", "淘宝", "拼多多"],
-    threshold: 0.72,
-  },
-  income: {
-    keywords: ["你已收款", "收款成功", "到账", "已存入零钱", "转入", "退款到账", "报销"],
-    apps: ["微信", "支付宝", "银行"],
-    threshold: 0.72,
-  },
-  sport: {
-    keywords: ["运动时间", "总消耗热量", "平均心率", "公里", "配速", "步频", "羽毛球", "户外骑行", "室内跑步", "自由训练"],
-    apps: ["华为运动健康", "Keep", "健康", "Fitness"],
-    threshold: 0.75,
-  },
-  sleep: {
-    keywords: ["睡眠", "夜间睡眠", "睡眠评分", "入睡", "醒来", "深睡", "浅睡", "快速眼动"],
-    apps: ["华为运动健康", "健康", "Sleep"],
-    threshold: 0.75,
-  },
-  reading: {
-    keywords: ["继续阅读", "今日阅读", "阅读进度", "图书", "之前读过", "书库", "书名"],
-    apps: ["微信读书", "Kindle", "阅读"],
-    threshold: 0.75,
-  },
-};
-
 interface AIResult {
   image_type: string;
   record_type?: RecordType;
@@ -380,24 +286,6 @@ function normalizeAiDateTime(value: unknown): { date: string; time: string | nul
 
 function normalizeAiDate(value: unknown): string | null {
   return normalizeAiDateTime(value)?.iso ?? null;
-}
-
-function normalizeText(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const text = value.replace(/\s+/g, " ").trim();
-  return text ? text.slice(0, 4000) : null;
-}
-
-function arrayFromUnknown(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => typeof item === "string" ? item.trim() : "")
-    .filter(Boolean);
-}
-
-function includesAny(text: string, words: string[]): string[] {
-  const lowerText = text.toLowerCase();
-  return words.filter((word) => lowerText.includes(word.toLowerCase()));
 }
 
 function isBuiltinDomain(recordType: string | undefined | null): recordType is BuiltinDomainKey {
@@ -549,83 +437,6 @@ async function getDomainByKey(
   return data;
 }
 
-async function runLowCostDispatcher(
-  supabase: ReturnType<typeof createClient>,
-  params: {
-    rawText: string | null;
-    sourceApp: string | null;
-    imageFeatures: ImageFeatures;
-  },
-): Promise<DispatcherResult> {
-  const text = [params.rawText, params.sourceApp].filter(Boolean).join(" ");
-  const { data: domains, error } = await supabase
-    .from("data_domains")
-    .select("key,name,routing_json,status")
-    .eq("status", "active");
-
-  if (error) console.error("Dispatcher domain load failed:", error);
-
-  const candidates: DispatcherCandidate[] = [];
-  const seenKeys = new Set<string>();
-  for (const domain of domains || []) {
-    const routing = domain.routing_json && typeof domain.routing_json === "object" && !Array.isArray(domain.routing_json)
-      ? domain.routing_json as Record<string, unknown>
-      : {};
-    const fallback = BUILTIN_ROUTE_RULES[domain.key] ?? { keywords: [], apps: [], threshold: 0.7 };
-    const keywords = [...new Set([...arrayFromUnknown(routing.keywords ?? routing.trigger_keywords), ...fallback.keywords])];
-    const apps = [...new Set([...arrayFromUnknown(routing.trigger_apps), ...fallback.apps])];
-    const threshold = normalizeNumber(routing.confidence_threshold) ?? fallback.threshold;
-    const matchedKeywords = text ? includesAny(text, keywords) : [];
-    const matchedApps = params.sourceApp ? includesAny(params.sourceApp, apps) : [];
-    if (matchedKeywords.length === 0 && matchedApps.length === 0) continue;
-    seenKeys.add(domain.key);
-    const confidence = Math.min(0.95, Math.max(threshold, 0.45 + matchedKeywords.length * 0.12 + matchedApps.length * 0.2));
-    candidates.push({
-      key: domain.key,
-      name: domain.name,
-      confidence: Math.round(confidence * 100) / 100,
-      reason: `命中 ${[...matchedKeywords, ...matchedApps].join(" / ")}`,
-      matched_keywords: matchedKeywords,
-      matched_apps: matchedApps,
-    });
-  }
-  for (const [key, rule] of Object.entries(BUILTIN_ROUTE_RULES)) {
-    if (seenKeys.has(key)) continue;
-    const matchedKeywords = text ? includesAny(text, rule.keywords) : [];
-    const matchedApps = params.sourceApp ? includesAny(params.sourceApp, rule.apps) : [];
-    if (matchedKeywords.length === 0 && matchedApps.length === 0) continue;
-    const confidence = Math.min(0.95, Math.max(rule.threshold, 0.45 + matchedKeywords.length * 0.12 + matchedApps.length * 0.2));
-    candidates.push({
-      key,
-      name: domainNameFromKey(key) ?? key,
-      confidence: Math.round(confidence * 100) / 100,
-      reason: `命中内置规则 ${[...matchedKeywords, ...matchedApps].join(" / ")}`,
-      matched_keywords: matchedKeywords,
-      matched_apps: matchedApps,
-    });
-  }
-
-  candidates.sort((a, b) => b.confidence - a.confidence);
-  const selected = candidates[0] ?? null;
-  const hasTextButNoCandidate = Boolean(text) && !selected;
-  const looksMeaningless = !params.imageFeatures.likely_phone_screenshot
-    && !params.imageFeatures.is_tall_screenshot
-    && !text
-    && (params.imageFeatures.is_tiny_image || params.imageFeatures.is_wide_screenshot);
-
-  return {
-    raw_text: params.rawText,
-    source_app: params.sourceApp,
-    image_features: params.imageFeatures,
-    candidate_domains: candidates,
-    selected_domain_key: selected?.key ?? null,
-    route_confidence: selected?.confidence ?? 0,
-    route_reason: selected?.reason ?? (hasTextButNoCandidate ? "OCR 文本未命中任何模板规则" : looksMeaningless ? "图片基础特征疑似非手机业务截图" : "未命中低成本路由规则"),
-    should_call_vision: !looksMeaningless && !hasTextButNoCandidate,
-    skip_reason: hasTextButNoCandidate ? "NO_TRIGGER_RULE_MATCH" : looksMeaningless ? "LOW_VALUE_IMAGE_FEATURES" : null,
-  };
-}
-
 async function writeAiLog(
   supabase: ReturnType<typeof createClient>,
   payload: Record<string, unknown>,
@@ -670,7 +481,6 @@ async function createStagingRecord(
     orderFinishedAt: string | null;
     errorType?: string | null;
     errorMessage?: string | null;
-    dispatcher?: DispatcherResult | null;
   },
 ): Promise<{ id: string } | null> {
   const detectedDomainKey = isBuiltinDomain(payload.ai.domain_key)
@@ -699,22 +509,12 @@ async function createStagingRecord(
     confidence: payload.ai.confidence ?? 0,
     ai_summary: summaryParts.join(" · ") || "截图已进入中转站，等待确认",
     extracted_json: payload.ai,
-    raw_text: payload.dispatcher?.raw_text ?? null,
-    routing_candidates: payload.dispatcher?.candidate_domains?.length
-      ? payload.dispatcher.candidate_domains
-      : detectedDomainKey
-        ? [{ key: detectedDomainKey, name: detectedDomainName, confidence: payload.ai.confidence ?? 0 }]
-        : [],
+    routing_candidates: detectedDomainKey
+      ? [{ key: detectedDomainKey, name: detectedDomainName, confidence: payload.ai.confidence ?? 0 }]
+      : [],
     quality_report: {
       error_type: payload.errorType ?? null,
       missing_fields: [],
-      dispatcher: payload.dispatcher ? {
-        source_app: payload.dispatcher.source_app,
-        image_features: payload.dispatcher.image_features,
-        route_reason: payload.dispatcher.route_reason,
-        route_confidence: payload.dispatcher.route_confidence,
-        skip_reason: payload.dispatcher.skip_reason,
-      } : null,
     },
     last_error_type: payload.errorType ?? null,
     last_error_message: payload.errorMessage ?? null,
@@ -819,9 +619,6 @@ Deno.serve(async (req) => {
     const buf = await file.arrayBuffer();
     const bytes = new Uint8Array(buf);
     const mime = file.type || "image/jpeg";
-    const rawText = normalizeText(form.get("ocr_text") ?? form.get("text") ?? form.get("raw_text"));
-    const sourceApp = normalizeText(form.get("source_app") ?? form.get("app_name"));
-    const imageFeatures = getImageFeatures(bytes, mime);
 
     // 2. 计算 hash 去重
     const hash = await sha256(buf);
@@ -901,11 +698,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    const dispatcher = await runLowCostDispatcher(supabase, { rawText, sourceApp, imageFeatures });
-    let duplicateKind: string | null = perceptualDupRefId ? "perceptual_hash" : null;
-    let duplicateRefTable: string | null = perceptualDupRefId ? "ai_recognition_logs" : null;
-    let duplicateRefId: string | null = perceptualDupRefId;
-
     // 3. 上传到 Storage
     const ext  = mime.includes("png") ? "png" : "jpg";
     const path = `${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${ext}`;
@@ -917,71 +709,6 @@ Deno.serve(async (req) => {
     }
     uploadedNewObject = !upErr;
     // 存储路径（非 signed URL），前端查询时动态生成 signed URL，避免过期问题
-
-    if (!dispatcher.should_call_vision) {
-      const ai: AIResult = {
-        image_type: "other",
-        record_type: "uncertain",
-        domain_key: null,
-        title: null,
-        summary: dispatcher.route_reason,
-        amount: null,
-        merchant_name: null,
-        platform: null,
-        category: null,
-        payment_method: null,
-        income_category: null,
-        source_name: null,
-        occurred_at: null,
-        order_finished_at: null,
-        payload_jsonb: null,
-        confidence: dispatcher.route_confidence,
-      };
-      const staging = await createStagingRecord(supabase, {
-        status: "routing_failed",
-        imagePath: path,
-        imageHash: hash,
-        perceptualHash,
-        ai,
-        occurredAt: null,
-        orderFinishedAt: null,
-        errorType: dispatcher.skip_reason ?? "LOW_COST_DISPATCHER_SKIP",
-        errorMessage: dispatcher.route_reason,
-        dispatcher,
-      });
-      await writeAiLog(supabase, {
-        image_hash: hash,
-        perceptual_hash: perceptualHash,
-        perceptual_distance: perceptualDistance,
-        image_url: path,
-        image_type: ai.image_type,
-        record_type: "uncertain",
-        duplicate_kind: duplicateKind,
-        duplicate_ref_table: duplicateRefTable,
-        duplicate_ref_id: duplicateRefId,
-        target_table: "staging_records",
-        target_id: staging?.id ?? null,
-        staging_record_id: staging?.id ?? null,
-        status: "pending",
-        confidence: dispatcher.route_confidence,
-        duration_ms: Date.now() - startedAt,
-        ai_response: ai,
-        raw_response: JSON.stringify({ dispatcher }),
-        error_message: dispatcher.route_reason,
-        model_provider: "low_cost_dispatcher",
-        model_name: "rules-v1",
-        prompt_version: "platform-v3-builtins",
-      });
-
-      return new Response(JSON.stringify({
-        status: "staging",
-        staging_status: "routing_failed",
-        id: staging?.id ?? null,
-        ai_ok: true,
-        skipped_vision: true,
-        message: "⚠ 低成本路由未命中，已进入待处理",
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
 
     // 4. 调用 Kimi Vision 识别
     let ai: AIResult;
@@ -1016,6 +743,9 @@ Deno.serve(async (req) => {
     const orderFinishedAt = orderFinishedDateTime?.iso ?? occurredAt;
     const recordDate = occurredDateTime?.date ?? today;
     const recordTime = occurredDateTime?.time ?? nowTime;
+    let duplicateKind: string | null = perceptualDupRefId ? "perceptual_hash" : null;
+    let duplicateRefTable: string | null = perceptualDupRefId ? "ai_recognition_logs" : null;
+    let duplicateRefId: string | null = perceptualDupRefId;
 
     if (!aiOk || (!builtinKey && recordType === "uncertain") || (!builtinKey && (ai.confidence ?? 0) < 0.35 && normalizedAmount === null)) {
       const stagingStatus = !aiOk ? "ai_error" : "routing_failed";
@@ -1029,7 +759,6 @@ Deno.serve(async (req) => {
         orderFinishedAt,
         errorType: !aiOk ? "AI_PROVIDER_ERROR" : "ROUTING_FAILED",
         errorMessage: aiErrorMessage,
-        dispatcher,
       });
       await writeAiLog(supabase, {
         image_hash: hash,
@@ -1050,7 +779,6 @@ Deno.serve(async (req) => {
         confidence: ai.confidence ?? 0,
         duration_ms: Date.now() - startedAt,
         ai_response: ai,
-        raw_response: JSON.stringify({ dispatcher }),
         error_message: aiErrorMessage,
         model_provider: "moonshot",
         model_name: MOONSHOT_MODEL,
@@ -1086,7 +814,6 @@ Deno.serve(async (req) => {
           errorMessage: !domain
             ? `未找到内置数据域 ${builtinKey}，请确认 007 迁移已执行`
             : `缺少字段或置信度不足：${missing.join(", ") || "confidence"}`,
-          dispatcher,
         });
         await writeAiLog(supabase, {
           image_hash: hash,
@@ -1108,7 +835,6 @@ Deno.serve(async (req) => {
           confidence: ai.confidence ?? 0,
           duration_ms: Date.now() - startedAt,
           ai_response: ai,
-          raw_response: JSON.stringify({ dispatcher }),
           error_message: !domain ? `data_domains.${builtinKey} 不存在` : null,
           model_provider: "moonshot",
           model_name: MOONSHOT_MODEL,
@@ -1156,7 +882,6 @@ Deno.serve(async (req) => {
           confidence: ai.confidence ?? 0,
           duration_ms: Date.now() - startedAt,
           ai_response: ai,
-          raw_response: JSON.stringify({ dispatcher }),
           error_message: dataErr.message,
           model_provider: "moonshot",
           model_name: MOONSHOT_MODEL,
@@ -1189,7 +914,6 @@ Deno.serve(async (req) => {
         confidence: ai.confidence ?? 0,
         duration_ms: Date.now() - startedAt,
         ai_response: ai,
-        raw_response: JSON.stringify({ dispatcher }),
         error_message: aiErrorMessage,
         model_provider: "moonshot",
         model_name: MOONSHOT_MODEL,
