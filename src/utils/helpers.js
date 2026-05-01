@@ -97,3 +97,10 @@ export function computeWeekData(bills) {
   })
   return data
 }
+
+export function formatDateTimeLabel(value) {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}

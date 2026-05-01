@@ -1,0 +1,2943 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>个人数据平台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --primary: #4F46E5;
+  --primary-light: #818CF8;
+  --primary-dark: #3730A3;
+  --primary-bg: #EEF2FF;
+  --secondary: #0EA5E9;
+  --secondary-light: #38BDF8;
+  --accent: #F59E0B;
+  --accent-light: #FCD34D;
+  --success: #10B981;
+  --success-light: #D1FAE5;
+  --warning: #F59E0B;
+  --warning-light: #FEF3C7;
+  --danger: #EF4444;
+  --danger-light: #FEE2E2;
+  --info: #6366F1;
+  --info-light: #E0E7FF;
+  --bg: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-tertiary: #94A3B8;
+  --text-inverse: #FFFFFF;
+  --border: #E2E8F0;
+  --border-light: #F1F5F9;
+  --divider: #F1F5F9;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+  --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.04);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 20px;
+  --spacing-2xl: 24px;
+  --spacing-3xl: 32px;
+  --nav-height: 64px;
+  --statusbar-height: 0px;
+  --font-sans: 'DM Sans', 'Noto Sans SC', -apple-system, sans-serif;
+  --font-num: 'DM Sans', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  max-width: 480px;
+  margin: 0 auto;
+  position: relative;
+  box-shadow: 0 0 40px rgba(0,0,0,0.08);
+}
+
+.page-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(var(--nav-height) + 16px);
+}
+
+.page { display: none; min-height: 100%; }
+.page.active { display: block; animation: pageFadeIn 0.25s ease; }
+
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  height: var(--nav-height);
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 100;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.nav-item i {
+  font-size: 20px;
+  color: var(--text-tertiary);
+  transition: all 0.2s ease;
+}
+
+.nav-item span {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  transition: all 0.2s ease;
+}
+
+.nav-item.active i { color: var(--primary); }
+.nav-item.active span { color: var(--primary); font-weight: 600; }
+
+.nav-item .badge {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  background: var(--danger);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-lg) var(--spacing-xl) var(--spacing-sm);
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.section-action {
+  font-size: 13px;
+  color: var(--primary);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  overflow: hidden;
+}
+
+.card-body { padding: var(--spacing-lg); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+
+.btn:active { transform: scale(0.96); }
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--text-inverse);
+}
+.btn-primary:hover { background: var(--primary-dark); }
+
+.btn-secondary {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.btn-secondary:hover { background: #DDD6FE; }
+
+.btn-danger {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+.btn-danger:hover { background: #FECACA; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { background: var(--border-light); }
+
+.btn-sm { padding: 6px 10px; font-size: 12px; }
+.btn-block { width: 100%; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.badge-primary { background: var(--primary-bg); color: var(--primary); }
+.badge-success { background: var(--success-light); color: var(--success); }
+.badge-warning { background: var(--warning-light); color: var(--warning); }
+.badge-danger { background: var(--danger-light); color: var(--danger); }
+.badge-info { background: var(--info-light); color: var(--info); }
+
+.form-group { margin-bottom: var(--spacing-lg); }
+
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.form-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-card);
+  transition: border-color 0.2s;
+  outline: none;
+}
+
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+
+.form-input::placeholder { color: var(--text-tertiary); }
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--spacing-xl);
+  margin-bottom: var(--spacing-md);
+}
+
+.search-bar .form-input {
+  padding-left: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'%3E%3C/line%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 12px center;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 200;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  animation: overlayIn 0.2s ease;
+}
+
+.modal-overlay.active { display: flex; }
+
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-sheet {
+  background: var(--bg-card);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  width: 100%;
+  max-width: 480px;
+  max-height: 85vh;
+  overflow-y: auto;
+  animation: sheetUp 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.modal-handle {
+  width: 36px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 10px auto 0;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-lg) var(--spacing-xl);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-close {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  background: var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.modal-body { padding: var(--spacing-xl); }
+.modal-footer {
+  padding: var(--spacing-lg) var(--spacing-xl);
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.toast-container {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 440px;
+  width: calc(100% - 40px);
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  font-weight: 500;
+  animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards;
+  pointer-events: auto;
+  border: 1px solid var(--border-light);
+}
+
+.toast i { font-size: 16px; }
+.toast.toast-success i { color: var(--success); }
+.toast.toast-error i { color: var(--danger); }
+.toast.toast-warning i { color: var(--warning); }
+.toast.toast-info i { color: var(--info); }
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toastOut {
+  from { opacity: 1; }
+  to { opacity: 0; transform: translateY(-8px); }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px;
+  text-align: center;
+}
+
+.empty-state i {
+  font-size: 48px;
+  color: var(--text-tertiary);
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-state .empty-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.empty-state .empty-desc {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.chip-group {
+  display: flex;
+  gap: 6px;
+  padding: 0 var(--spacing-xl);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  margin-bottom: var(--spacing-md);
+}
+
+.chip-group::-webkit-scrollbar { display: none; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.chip.active {
+  background: var(--primary);
+  color: var(--text-inverse);
+  border-color: var(--primary);
+}
+
+.chip .chip-count {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--border-light) 25%, var(--bg) 50%, var(--border-light) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.divider {
+  height: 1px;
+  background: var(--divider);
+  margin: 0 var(--spacing-xl);
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  padding: var(--spacing-xl);
+  padding-bottom: var(--spacing-sm);
+}
+
+.page-subtitle {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  padding: 0 var(--spacing-xl);
+  margin-bottom: var(--spacing-lg);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-md);
+  padding: 0 var(--spacing-xl);
+  margin-bottom: var(--spacing-lg);
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+}
+
+.stat-card .stat-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.stat-card .stat-value {
+  font-family: var(--font-num);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.stat-card .stat-change {
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.stat-card .stat-change.up { color: var(--danger); }
+.stat-card .stat-change.down { color: var(--success); }
+
+.icon-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-light);
+  padding: 0 var(--spacing-xl);
+  margin-bottom: var(--spacing-md);
+}
+
+.tab {
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-xl);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.list-item:active { background: var(--border-light); }
+
+.list-item + .list-item { border-top: 1px solid var(--border-light); }
+
+.list-item-content { flex: 1; min-width: 0; }
+
+.list-item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-item-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.list-item-right {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.list-item-amount {
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.list-item-date {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.fab {
+  position: fixed;
+  bottom: calc(var(--nav-height) + 20px);
+  right: calc(50% - 220px);
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  box-shadow: 0 4px 14px rgba(79,70,229,0.4);
+  cursor: pointer;
+  border: none;
+  z-index: 50;
+  transition: all 0.2s;
+}
+
+.fab:active { transform: scale(0.92); }
+
+@media (max-width: 480px) {
+  .fab { right: 20px; }
+}
+
+.progress-bar {
+  height: 4px;
+  background: var(--border-light);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+.confidence-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.confidence-bar .progress-bar { flex: 1; }
+.confidence-bar .confidence-value {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-num);
+  min-width: 32px;
+  text-align: right;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0F172A;
+    --bg-card: #1E293B;
+    --bg-elevated: #1E293B;
+    --text-primary: #F1F5F9;
+    --text-secondary: #94A3B8;
+    --text-tertiary: #64748B;
+    --border: #334155;
+    --border-light: #1E293B;
+    --divider: #1E293B;
+    --primary-bg: rgba(79,70,229,0.15);
+    --success-light: rgba(16,185,129,0.15);
+    --warning-light: rgba(245,158,11,0.15);
+    --danger-light: rgba(239,68,68,0.15);
+    --info-light: rgba(99,102,241,0.15);
+  }
+}
+
+.home-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--spacing-xl) var(--spacing-xl) var(--spacing-md);
+}
+
+.greeting-text {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.greeting-date {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.month-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.month-selector i { font-size: 10px; }
+
+.home-stats { padding: 0 var(--spacing-xl); margin-bottom: var(--spacing-lg); }
+
+.stats-hero-card {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-xl);
+  color: white;
+  margin-bottom: var(--spacing-md);
+}
+
+.stats-hero-label {
+  font-size: 13px;
+  opacity: 0.85;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.stats-hero-value {
+  font-family: var(--font-num);
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.stats-hero-compare {
+  font-size: 12px;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stats-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-md);
+}
+
+.stats-mini-card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+}
+
+.stats-mini-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.stats-mini-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.stats-mini-value {
+  font-family: var(--font-num);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 2px;
+}
+
+.home-pending-alert {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin: 0 var(--spacing-xl) var(--spacing-lg);
+  padding: var(--spacing-lg);
+  background: var(--warning-light);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid rgba(245,158,11,0.2);
+}
+
+.home-pending-alert:active { transform: scale(0.98); }
+
+.pending-alert-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: rgba(245,158,11,0.15);
+  color: var(--warning);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.pending-alert-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  background: var(--danger);
+  border-radius: 50%;
+  border: 2px solid var(--warning-light);
+}
+
+.pending-alert-content { flex: 1; }
+
+.pending-alert-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pending-alert-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.pending-alert-arrow {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.home-domains-scroll {
+  display: flex;
+  gap: var(--spacing-md);
+  padding: 0 var(--spacing-xl);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  margin-bottom: var(--spacing-lg);
+}
+
+.home-domains-scroll::-webkit-scrollbar { display: none; }
+
+.domain-quick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 80px;
+  padding: var(--spacing-lg) var(--spacing-md);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.domain-quick-card:active { transform: scale(0.95); }
+
+.domain-quick-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.domain-quick-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.domain-quick-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.home-timeline { padding: 0 var(--spacing-xl); }
+
+.timeline-item {
+  display: flex;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) 0;
+  position: relative;
+}
+
+.timeline-item:not(:last-child) { border-bottom: 1px solid var(--border-light); }
+
+.timeline-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.timeline-content { flex: 1; min-width: 0; }
+
+.timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.timeline-domain {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.timeline-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-num);
+}
+
+.timeline-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-detail {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.timeline-amount {
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.home-week-chart-wrap {
+  margin: 0 var(--spacing-xl) var(--spacing-lg);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  padding: var(--spacing-lg);
+  position: relative;
+}
+
+.home-week-chart-inner {
+  position: relative;
+  height: 160px;
+}
+
+.home-week-stats {
+  display: flex;
+  justify-content: space-around;
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-light);
+}
+
+.home-week-stat { text-align: center; }
+
+.home-week-stat-value {
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.home-week-stat-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.staging-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-xl);
+  background: var(--primary-bg);
+  border-bottom: 1px solid rgba(79,70,229,0.1);
+  margin-bottom: var(--spacing-sm);
+}
+
+.batch-bar-left {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.batch-bar-right {
+  display: flex;
+  gap: 6px;
+}
+
+.staging-list { padding: 0 var(--spacing-xl); }
+
+.staging-card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  margin-bottom: var(--spacing-md);
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.staging-card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(79,70,229,0.15);
+}
+
+.staging-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  padding-bottom: var(--spacing-sm);
+}
+
+.staging-checkbox {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.staging-checkbox.checked {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.staging-checkbox.checked i { display: block; }
+.staging-checkbox i { display: none; font-size: 10px; color: white; }
+
+.staging-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  background: var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: 20px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.staging-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.staging-info { flex: 1; min-width: 0; }
+
+.staging-summary {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staging-ai-summary {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.staging-card-body {
+  padding: var(--spacing-sm) var(--spacing-lg) var(--spacing-md);
+}
+
+.staging-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--spacing-sm);
+}
+
+.staging-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+}
+
+.status-unrouted { background: var(--info-light); color: var(--info); }
+.status-routed { background: var(--primary-bg); color: var(--primary); }
+.status-pending_review { background: var(--warning-light); color: var(--warning); }
+.status-ai_error { background: var(--danger-light); color: var(--danger); }
+.status-routing_failed { background: rgba(148,163,184,0.15); color: var(--text-tertiary); }
+.status-extracted { background: var(--success-light); color: var(--success); }
+
+.staging-candidate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.staging-candidate i { font-size: 9px; }
+
+.staging-confidence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--spacing-sm);
+}
+
+.staging-confidence-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.staging-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-num);
+}
+
+.staging-card-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 var(--spacing-lg) var(--spacing-lg);
+}
+
+.staging-card-actions .btn { flex: 1; }
+
+.domain-list { padding: 0 var(--spacing-xl); }
+
+.domain-card {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  margin-bottom: var(--spacing-md);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.domain-card:active { transform: scale(0.98); }
+
+.domain-card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.domain-card-info { flex: 1; min-width: 0; }
+
+.domain-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.domain-card-meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.domain-card-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.domain-card-arrow {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg) var(--spacing-xl);
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-card);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.detail-back {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.detail-header-info {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex: 1;
+}
+
+.detail-header-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.detail-header-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.detail-header-sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.detail-more {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 16px;
+}
+
+.detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg) var(--spacing-xl);
+}
+
+.detail-metric {
+  text-align: center;
+  padding: var(--spacing-md);
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+}
+
+.detail-metric-value {
+  font-family: var(--font-num);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.detail-metric-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.detail-grain-group {
+  display: flex;
+  gap: 4px;
+  background: var(--border-light);
+  border-radius: var(--radius-full);
+  padding: 2px;
+}
+
+.detail-grain {
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.detail-grain.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.detail-chart-wrap {
+  padding: 0 var(--spacing-xl);
+  margin-bottom: var(--spacing-lg);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  margin-left: var(--spacing-xl);
+  margin-right: var(--spacing-xl);
+  border: 1px solid var(--border-light);
+  padding: var(--spacing-lg);
+  position: relative;
+}
+
+.detail-records { padding: 0 var(--spacing-xl); }
+
+.detail-record-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) 0;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+}
+
+.detail-record-item:last-child { border-bottom: none; }
+
+.detail-record-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.detail-record-info { flex: 1; min-width: 0; }
+
+.detail-record-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-record-sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.detail-record-value {
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.report-summary { padding: 0 var(--spacing-xl); margin-bottom: var(--spacing-lg); }
+
+.report-summary-card {
+  background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-xl);
+  color: white;
+}
+
+.report-summary-label { font-size: 13px; opacity: 0.85; font-weight: 500; margin-bottom: 6px; }
+.report-summary-value { font-family: var(--font-num); font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+.report-summary-change { font-size: 12px; opacity: 0.8; display: flex; align-items: center; gap: 4px; }
+.report-summary-change.down { color: rgba(255,255,255,0.9); }
+
+.report-category-list { padding: 0 var(--spacing-xl); }
+
+.report-category-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.report-category-item:last-child { border-bottom: none; }
+
+.report-category-rank {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  font-family: var(--font-num);
+}
+
+.report-category-rank.top { background: var(--primary-bg); color: var(--primary); }
+
+.report-category-info { flex: 1; }
+
+.report-category-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+
+.report-category-bar {
+  height: 4px;
+  background: var(--border-light);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.report-category-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.report-category-amount {
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.report-cross-intro {
+  text-align: center;
+  padding: var(--spacing-xl);
+  margin-bottom: var(--spacing-md);
+}
+
+.report-cross-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-full);
+  background: var(--primary-bg);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  margin-bottom: var(--spacing-md);
+}
+
+.report-cross-title { font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+.report-cross-desc { font-size: 13px; color: var(--text-tertiary); }
+
+.report-cross-card {
+  margin: 0 var(--spacing-xl) var(--spacing-md);
+  padding: var(--spacing-lg);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.report-cross-card:active { transform: scale(0.98); }
+.report-cross-card.disabled { opacity: 0.6; cursor: default; }
+.report-cross-card.disabled:active { transform: none; }
+
+.cross-card-header { margin-bottom: var(--spacing-md); }
+
+.cross-card-icons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cross-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.cross-link { color: var(--text-tertiary); font-size: 12px; }
+
+.cross-card-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+
+.cross-card-finding {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: var(--spacing-sm);
+  display: flex;
+  gap: 6px;
+}
+
+.cross-card-finding i { color: var(--accent); flex-shrink: 0; margin-top: 3px; }
+
+.cross-card-meta { font-size: 11px; color: var(--text-tertiary); margin-bottom: var(--spacing-md); }
+
+.cross-card-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cross-bar-label { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+
+.report-selector-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+}
+
+.report-selector-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.2s;
+  position: relative;
+}
+
+.report-selector-wrap:hover { border-color: var(--primary); }
+
+.report-selector-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.report-selector-value i { font-size: 14px; }
+
+.report-selector-arrow {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s;
+}
+
+.report-selector-arrow.open { transform: rotate(180deg); }
+
+.report-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 60;
+  overflow: hidden;
+  animation: dropIn 0.15s ease;
+}
+
+@keyframes dropIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.report-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.report-dropdown-item:hover { background: var(--border-light); }
+.report-dropdown-item.active { background: var(--primary-bg); color: var(--primary); }
+.report-dropdown-item i { font-size: 14px; width: 18px; text-align: center; }
+
+.report-dropdown-divider {
+  height: 1px;
+  background: var(--border-light);
+  margin: 4px 0;
+}
+
+.record-detail-content { padding-bottom: var(--spacing-3xl); }
+
+.record-detail-image {
+  height: 200px;
+  background: var(--border-light);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: 40px;
+  position: relative;
+}
+
+.record-detail-image-label {
+  font-size: 12px;
+  margin-top: 8px;
+  position: absolute;
+  bottom: 12px;
+  background: rgba(0,0,0,0.5);
+  color: white;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+}
+
+.record-detail-section {
+  padding: var(--spacing-lg) var(--spacing-xl);
+  border-bottom: 8px solid var(--border-light);
+}
+
+.record-detail-section:last-of-type { border-bottom: none; }
+
+.record-detail-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-md);
+}
+
+.record-detail-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.record-detail-field:last-child { border-bottom: none; }
+
+.field-label { font-size: 13px; color: var(--text-tertiary); }
+.field-value { font-size: 13px; color: var(--text-primary); font-weight: 500; }
+
+.record-detail-ai-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  padding: var(--spacing-md);
+  background: var(--primary-bg);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--primary);
+}
+
+.settings-profile {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg) var(--spacing-xl);
+  margin: 0 var(--spacing-xl) var(--spacing-lg);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+}
+
+.settings-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-full);
+  background: var(--primary-bg);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.settings-profile-info { flex: 1; }
+
+.settings-profile-name { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.settings-profile-plan { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+
+.settings-arrow { color: var(--text-tertiary); font-size: 12px; }
+
+.settings-section {
+  margin-bottom: var(--spacing-lg);
+}
+
+.settings-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: var(--spacing-sm) var(--spacing-xl);
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-xl);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.settings-item:active { background: var(--border-light); }
+
+.settings-item-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.settings-item-content { flex: 1; min-width: 0; }
+
+.settings-item-title { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+.settings-item-sub { font-size: 12px; color: var(--text-tertiary); margin-top: 1px; }
+
+.settings-toggle {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--border);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.settings-toggle.active { background: var(--primary); }
+
+.toggle-knob {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.settings-toggle.active .toggle-knob { transform: translateX(20px); }
+
+.fab-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 49;
+}
+
+.fab-menu {
+  position: fixed;
+  bottom: calc(var(--nav-height) + 72px);
+  right: calc(50% - 220px);
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fabMenuIn 0.25s ease;
+}
+
+@media (max-width: 480px) {
+  .fab-menu { right: 20px; }
+}
+
+@keyframes fabMenuIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fab-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  border: 1px solid var(--border-light);
+}
+
+.fab-menu-item:active { transform: scale(0.96); }
+
+.fab-menu-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.fab-menu-item span {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.add-form-group { margin-bottom: var(--spacing-lg); }
+
+.add-form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.add-form-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg);
+  transition: border-color 0.2s;
+  outline: none;
+}
+
+.add-form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+
+.add-amount-input {
+  font-family: var(--font-num);
+  font-size: 24px;
+  font-weight: 700;
+  height: 52px;
+  text-align: center;
+  border: none;
+  border-bottom: 2px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.add-amount-input:focus { border-bottom-color: var(--primary); box-shadow: none; }
+
+.add-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.add-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.add-chip.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.add-chip .add-chip-tag {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.2);
+  color: inherit;
+  opacity: 0.7;
+}
+
+.add-chip:not(.active) .add-chip-tag {
+  background: var(--primary-bg);
+  color: var(--primary);
+  opacity: 1;
+}
+</style>
+</head>
+<body>
+
+<div class="page-container">
+
+  <div id="page-home" class="page active">
+    <div class="home-header">
+      <div class="home-greeting">
+        <div class="greeting-text">下午好，张明</div>
+        <div class="greeting-date">2026年5月1日 周五</div>
+      </div>
+      <div class="month-selector" onclick="openMonthPicker()">
+        <span id="current-month">5月</span>
+        <i class="fas fa-chevron-down"></i>
+      </div>
+    </div>
+
+    <div class="home-stats">
+      <div class="stats-hero-card">
+        <div class="stats-hero-label">本月支出</div>
+        <div class="stats-hero-value">¥ 3,847.60</div>
+        <div class="stats-hero-compare">
+          <i class="fas fa-arrow-up"></i>
+          <span>较上月同期增加 12.3%</span>
+        </div>
+      </div>
+      <div class="stats-row">
+        <div class="stats-mini-card">
+          <div class="stats-mini-icon" style="background:rgba(16,185,129,0.1);color:#10B981">
+            <i class="fas fa-arrow-trend-up"></i>
+          </div>
+          <div class="stats-mini-info">
+            <div class="stats-mini-label">本月收入</div>
+            <div class="stats-mini-value">¥ 12,500</div>
+          </div>
+        </div>
+        <div class="stats-mini-card">
+          <div class="stats-mini-icon" style="background:rgba(245,158,11,0.1);color:#F59E0B">
+            <i class="fas fa-calendar-day"></i>
+          </div>
+          <div class="stats-mini-info">
+            <div class="stats-mini-label">今日支出</div>
+            <div class="stats-mini-value">¥ 86.50</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="home-pending-alert" onclick="navigate('staging')">
+      <div class="pending-alert-icon">
+        <i class="fas fa-inbox"></i>
+        <div class="pending-alert-dot"></div>
+      </div>
+      <div class="pending-alert-content">
+        <div class="pending-alert-title">5 条待处理记录</div>
+        <div class="pending-alert-desc">2条待分类 · 2条待确认 · 1条识别失败</div>
+      </div>
+      <i class="fas fa-chevron-right pending-alert-arrow"></i>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">本周支出趋势</div>
+      <div class="section-action" onclick="navigate('reports')">报告 <i class="fas fa-chevron-right" style="font-size:10px"></i></div>
+    </div>
+    <div class="home-week-chart-wrap">
+      <div class="home-week-chart-inner">
+        <canvas id="home-week-chart"></canvas>
+      </div>
+      <div class="home-week-stats">
+        <div class="home-week-stat">
+          <div class="home-week-stat-value">¥ 1,509</div>
+          <div class="home-week-stat-label">本周累计</div>
+        </div>
+        <div class="home-week-stat">
+          <div class="home-week-stat-value">¥ 423</div>
+          <div class="home-week-stat-label">最高单日</div>
+        </div>
+        <div class="home-week-stat">
+          <div class="home-week-stat-value">20%</div>
+          <div class="home-week-stat-label">今日占比</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">数据域</div>
+      <div class="section-action" onclick="navigate('domains')">全部 <i class="fas fa-chevron-right" style="font-size:10px"></i></div>
+    </div>
+    <div class="home-domains-scroll">
+      <div class="domain-quick-card" onclick="navigate('domain-detail')">
+        <div class="domain-quick-icon" style="background:rgba(239,68,68,0.1);color:#EF4444">
+          <i class="fas fa-wallet"></i>
+        </div>
+        <div class="domain-quick-name">消费记账</div>
+        <div class="domain-quick-count">156条</div>
+      </div>
+      <div class="domain-quick-card" onclick="navigate('domain-detail')">
+        <div class="domain-quick-icon" style="background:rgba(16,185,129,0.1);color:#10B981">
+          <i class="fas fa-arrow-trend-up"></i>
+        </div>
+        <div class="domain-quick-name">收入记录</div>
+        <div class="domain-quick-count">23条</div>
+      </div>
+      <div class="domain-quick-card" onclick="navigate('domain-detail')">
+        <div class="domain-quick-icon" style="background:rgba(245,158,11,0.1);color:#F59E0B">
+          <i class="fas fa-person-running"></i>
+        </div>
+        <div class="domain-quick-name">运动记录</div>
+        <div class="domain-quick-count">42条</div>
+      </div>
+      <div class="domain-quick-card" onclick="navigate('domain-detail')">
+        <div class="domain-quick-icon" style="background:rgba(99,102,241,0.1);color:#6366F1">
+          <i class="fas fa-moon"></i>
+        </div>
+        <div class="domain-quick-name">睡眠记录</div>
+        <div class="domain-quick-count">30条</div>
+      </div>
+      <div class="domain-quick-card" onclick="navigate('domain-detail')">
+        <div class="domain-quick-icon" style="background:rgba(14,165,233,0.1);color:#0EA5E9">
+          <i class="fas fa-book-open"></i>
+        </div>
+        <div class="domain-quick-name">阅读记录</div>
+        <div class="domain-quick-count">18条</div>
+      </div>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">最近记录</div>
+      <div class="section-action">筛选 <i class="fas fa-sliders" style="font-size:10px"></i></div>
+    </div>
+    <div class="home-timeline" id="home-timeline"></div>
+  </div>
+
+  <div id="page-staging" class="page">
+    <div class="page-title">待处理</div>
+    <div class="page-subtitle">中转站 · 需要您确认或处理的数据</div>
+
+    <div class="search-bar">
+      <input class="form-input" placeholder="搜索摘要、候选域..." id="staging-search" oninput="filterStagingRecords()">
+    </div>
+
+    <div class="chip-group" id="staging-filters">
+      <div class="chip active" data-filter="all" onclick="setStagingFilter('all', this)">全部 <span class="chip-count">5</span></div>
+      <div class="chip" data-filter="unrouted" onclick="setStagingFilter('unrouted', this)">待分类 <span class="chip-count">1</span></div>
+      <div class="chip" data-filter="pending_review" onclick="setStagingFilter('pending_review', this)">待确认 <span class="chip-count">2</span></div>
+      <div class="chip" data-filter="ai_error" onclick="setStagingFilter('ai_error', this)">AI失败 <span class="chip-count">1</span></div>
+      <div class="chip" data-filter="routing_failed" onclick="setStagingFilter('routing_failed', this)">无匹配 <span class="chip-count">1</span></div>
+    </div>
+
+    <div class="staging-batch-bar" id="staging-batch-bar" style="display:none">
+      <div class="batch-bar-left">
+        <span id="batch-count">0</span> 条已选
+      </div>
+      <div class="batch-bar-right">
+        <button class="btn btn-sm btn-secondary" onclick="batchRetry()"><i class="fas fa-redo"></i> 批量重试</button>
+        <button class="btn btn-sm btn-danger" onclick="batchDiscard()"><i class="fas fa-trash"></i> 批量销毁</button>
+        <button class="btn btn-sm btn-ghost" onclick="cancelBatch()"><i class="fas fa-times"></i></button>
+      </div>
+    </div>
+
+    <div class="staging-list" id="staging-list"></div>
+  </div>
+
+  <div id="page-domains" class="page">
+    <div class="page-title">数据域</div>
+    <div class="page-subtitle">已安装的数据模板，点击查看详情</div>
+
+    <div class="search-bar">
+      <input class="form-input" placeholder="搜索数据域..." id="domain-search" oninput="filterDomains()">
+    </div>
+
+    <div class="domain-list" id="domain-list"></div>
+
+    <div style="padding:var(--spacing-xl);margin-top:var(--spacing-md)">
+      <button class="btn btn-secondary btn-block" onclick="showCreateDomain('')">
+        <i class="fas fa-plus"></i> 创建新数据域
+      </button>
+    </div>
+  </div>
+
+  <div id="page-reports" class="page">
+    <div class="page-title">报告</div>
+    <div class="page-subtitle">数据洞察与趋势分析</div>
+
+    <div class="report-domain-selector" style="padding:0 var(--spacing-xl);margin-bottom:var(--spacing-lg);position:relative">
+      <div class="report-selector-label">选择数据域</div>
+      <div class="report-selector-wrap" onclick="toggleReportDropdown()">
+        <div class="report-selector-value" id="report-selector-value">
+          <i class="fas fa-wallet" style="color:#EF4444"></i>
+          <span>消费</span>
+        </div>
+        <i class="fas fa-chevron-down report-selector-arrow" id="report-selector-arrow"></i>
+      </div>
+      <div class="report-dropdown" id="report-dropdown" style="display:none">
+        <div class="report-dropdown-item active" data-domain="expense" onclick="setReportDomain('expense',this)">
+          <i class="fas fa-wallet" style="color:#EF4444"></i><span>消费</span>
+        </div>
+        <div class="report-dropdown-item" data-domain="income" onclick="setReportDomain('income',this)">
+          <i class="fas fa-arrow-trend-up" style="color:#10B981"></i><span>收入</span>
+        </div>
+        <div class="report-dropdown-item" data-domain="sport" onclick="setReportDomain('sport',this)">
+          <i class="fas fa-person-running" style="color:#F59E0B"></i><span>运动</span>
+        </div>
+        <div class="report-dropdown-item" data-domain="sleep" onclick="setReportDomain('sleep',this)">
+          <i class="fas fa-moon" style="color:#6366F1"></i><span>睡眠</span>
+        </div>
+        <div class="report-dropdown-item" data-domain="reading" onclick="setReportDomain('reading',this)">
+          <i class="fas fa-book-open" style="color:#0EA5E9"></i><span>阅读</span>
+        </div>
+        <div class="report-dropdown-divider"></div>
+        <div class="report-dropdown-item" data-domain="cross" onclick="setReportDomain('cross',this)">
+          <i class="fas fa-link" style="color:var(--primary)"></i><span>跨域分析</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="report-domain-content"></div>
+  </div>
+
+  <div id="page-settings" class="page">
+    <div class="page-title">设置</div>
+
+    <div class="settings-profile">
+      <div class="settings-avatar">
+        <i class="fas fa-user"></i>
+      </div>
+      <div class="settings-profile-info">
+        <div class="settings-profile-name">张明</div>
+        <div class="settings-profile-plan">免费版</div>
+      </div>
+      <i class="fas fa-chevron-right settings-arrow"></i>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">数据管理</div>
+      <div class="settings-item" onclick="navigate('domains')">
+        <div class="settings-item-icon" style="background:var(--primary-bg);color:var(--primary)"><i class="fas fa-layer-group"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">模板管理</div>
+          <div class="settings-item-sub">5个已安装模板</div>
+        </div>
+        <i class="fas fa-chevron-right settings-arrow"></i>
+      </div>
+      <div class="settings-item" onclick="showTokenInfo()">
+        <div class="settings-item-icon" style="background:var(--success-light);color:var(--success)"><i class="fas fa-key"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">上传 Token</div>
+          <div class="settings-item-sub">用于快捷指令上传</div>
+        </div>
+        <i class="fas fa-chevron-right settings-arrow"></i>
+      </div>
+      <div class="settings-item" onclick="showToast('info','功能开发中')">
+        <div class="settings-item-icon" style="background:var(--info-light);color:var(--info)"><i class="fas fa-file-import"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">数据导入</div>
+          <div class="settings-item-sub">从CSV或其他格式导入</div>
+        </div>
+        <i class="fas fa-chevron-right settings-arrow"></i>
+      </div>
+      <div class="settings-item" onclick="showToast('info','功能开发中')">
+        <div class="settings-item-icon" style="background:var(--warning-light);color:var(--warning)"><i class="fas fa-file-export"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">数据导出</div>
+          <div class="settings-item-sub">导出所有数据</div>
+        </div>
+        <i class="fas fa-chevron-right settings-arrow"></i>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">隐私与安全</div>
+      <div class="settings-item" onclick="showToast('info','功能开发中')">
+        <div class="settings-item-icon" style="background:var(--danger-light);color:var(--danger)"><i class="fas fa-shield-alt"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">隐私设置</div>
+          <div class="settings-item-sub">敏感数据域权限管理</div>
+        </div>
+        <i class="fas fa-chevron-right settings-arrow"></i>
+      </div>
+      <div class="settings-item" onclick="showToast('info','功能开发中')">
+        <div class="settings-item-icon" style="background:rgba(99,102,241,0.1);color:#6366F1"><i class="fas fa-lock"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">数据存储</div>
+          <div class="settings-item-sub">新加坡节点 · 已用 128MB</div>
+        </div>
+        <i class="fas fa-chevron-right settings-arrow"></i>
+      </div>
+      <div class="settings-item">
+        <div class="settings-item-icon" style="background:var(--success-light);color:var(--success)"><i class="fas fa-eye"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">AI 日志记录</div>
+          <div class="settings-item-sub">记录AI识别摘要（可关闭）</div>
+        </div>
+        <div class="settings-toggle active" onclick="toggleSwitch(this)"><div class="toggle-knob"></div></div>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">存储策略</div>
+      <div class="settings-item">
+        <div class="settings-item-icon" style="background:rgba(14,165,233,0.1);color:#0EA5E9"><i class="fas fa-image"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">原图保留</div>
+          <div class="settings-item-sub">默认保留，可手动删除</div>
+        </div>
+        <div class="settings-toggle active" onclick="toggleSwitch(this)"><div class="toggle-knob"></div></div>
+      </div>
+      <div class="settings-item" onclick="showToast('info','功能开发中')">
+        <div class="settings-item-icon" style="background:rgba(245,158,11,0.1);color:#F59E0B"><i class="fas fa-broom"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">清理缓存</div>
+          <div class="settings-item-sub">当前缓存 23.5MB</div>
+        </div>
+        <i class="fas fa-chevron-right settings-arrow"></i>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">关于</div>
+      <div class="settings-item">
+        <div class="settings-item-icon" style="background:var(--primary-bg);color:var(--primary)"><i class="fas fa-info-circle"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">版本</div>
+          <div class="settings-item-sub">V0.2.0</div>
+        </div>
+      </div>
+      <div class="settings-item" onclick="showToast('info','功能开发中')">
+        <div class="settings-item-icon" style="background:var(--primary-bg);color:var(--primary)"><i class="fas fa-file-contract"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">用户协议</div>
+        </div>
+        <i class="fas fa-chevron-right settings-arrow"></i>
+      </div>
+      <div class="settings-item" onclick="showToast('info','功能开发中')">
+        <div class="settings-item-icon" style="background:var(--primary-bg);color:var(--primary)"><i class="fas fa-user-shield"></i></div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">隐私政策</div>
+        </div>
+        <i class="fas fa-chevron-right settings-arrow"></i>
+      </div>
+    </div>
+
+    <div style="padding:var(--spacing-xl);margin-top:var(--spacing-md)">
+      <button class="btn btn-secondary btn-block" onclick="showProUpgrade()">
+        <i class="fas fa-crown"></i> 升级到 Pro
+      </button>
+    </div>
+  </div>
+
+  <div id="page-domain-detail" class="page">
+    <div class="detail-header">
+      <button class="detail-back" onclick="goBack()"><i class="fas fa-arrow-left"></i></button>
+      <div class="detail-header-info">
+        <div class="detail-header-icon" id="detail-domain-icon"></div>
+        <div>
+          <div class="detail-header-title" id="detail-domain-name">运动记录</div>
+          <div class="detail-header-sub" id="detail-domain-sub">42条记录 · 系统内置</div>
+        </div>
+      </div>
+      <button class="detail-more" onclick="showDomainMenu()"><i class="fas fa-ellipsis-v"></i></button>
+    </div>
+
+    <div class="detail-metrics" id="detail-metrics"></div>
+
+    <div class="section-header">
+      <div class="section-title">趋势</div>
+      <div class="detail-grain-group">
+        <span class="detail-grain active" onclick="setGrain('day',this)">日</span>
+        <span class="detail-grain" onclick="setGrain('week',this)">周</span>
+        <span class="detail-grain" onclick="setGrain('month',this)">月</span>
+      </div>
+    </div>
+    <div class="detail-chart-wrap">
+      <canvas id="detail-trend-chart" height="180"></canvas>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">分类分布</div>
+    </div>
+    <div class="detail-chart-wrap">
+      <canvas id="detail-dim-chart" height="200"></canvas>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">最近记录</div>
+      <div class="section-action" onclick="showAllRecords()">全部</div>
+    </div>
+    <div class="detail-records" id="detail-records"></div>
+  </div>
+
+  <div id="page-record-detail" class="page">
+    <div class="detail-header">
+      <button class="detail-back" onclick="goBack()"><i class="fas fa-arrow-left"></i></button>
+      <div class="detail-header-info">
+        <div style="flex:1">
+          <div class="detail-header-title">记录详情</div>
+        </div>
+      </div>
+      <button class="detail-more" onclick="showRecordMenu()"><i class="fas fa-ellipsis-v"></i></button>
+    </div>
+
+    <div class="record-detail-content" id="record-detail-content"></div>
+  </div>
+
+</div>
+
+<nav class="bottom-nav">
+  <div class="nav-item active" data-page="home" onclick="navigate('home')">
+    <i class="fas fa-home"></i>
+    <span>首页</span>
+  </div>
+  <div class="nav-item" data-page="staging" onclick="navigate('staging')">
+    <i class="fas fa-inbox"></i>
+    <span>待处理</span>
+    <div class="badge">5</div>
+  </div>
+  <div class="nav-item" data-page="domains" onclick="navigate('domains')">
+    <i class="fas fa-layer-group"></i>
+    <span>数据域</span>
+  </div>
+  <div class="nav-item" data-page="reports" onclick="navigate('reports')">
+    <i class="fas fa-chart-line"></i>
+    <span>报告</span>
+  </div>
+  <div class="nav-item" data-page="settings" onclick="navigate('settings')">
+    <i class="fas fa-cog"></i>
+    <span>设置</span>
+  </div>
+</nav>
+
+<div class="modal-overlay" id="modal-overlay" onclick="closeCurrentModal(event)">
+  <div class="modal-sheet" id="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title"></div>
+      <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<button class="fab" id="fab-btn" onclick="toggleFabMenu()">
+  <i class="fas fa-plus"></i>
+</button>
+<div class="fab-menu" id="fab-menu" style="display:none">
+  <div class="fab-menu-item" onclick="openAddRecordModal('expense')">
+    <div class="fab-menu-icon" style="background:rgba(239,68,68,0.1);color:#EF4444"><i class="fas fa-wallet"></i></div>
+    <span>添加支出</span>
+  </div>
+  <div class="fab-menu-item" onclick="openAddRecordModal('income')">
+    <div class="fab-menu-icon" style="background:rgba(16,185,129,0.1);color:#10B981"><i class="fas fa-arrow-trend-up"></i></div>
+    <span>添加收入</span>
+  </div>
+  <div class="fab-menu-item" onclick="openAddRecordModal('sport')">
+    <div class="fab-menu-icon" style="background:rgba(245,158,11,0.1);color:#F59E0B"><i class="fas fa-person-running"></i></div>
+    <span>添加运动</span>
+  </div>
+  <div class="fab-menu-item" onclick="openAddRecordModal('sleep')">
+    <div class="fab-menu-icon" style="background:rgba(99,102,241,0.1);color:#6366F1"><i class="fas fa-moon"></i></div>
+    <span>添加睡眠</span>
+  </div>
+  <div class="fab-menu-item" onclick="openAddRecordModal('reading')">
+    <div class="fab-menu-icon" style="background:rgba(14,165,233,0.1);color:#0EA5E9"><i class="fas fa-book-open"></i></div>
+    <span>添加阅读</span>
+  </div>
+</div>
+<div class="fab-overlay" id="fab-overlay" style="display:none" onclick="toggleFabMenu()"></div>
+
+<script>
+const mainPages = ['home', 'staging', 'domains', 'reports', 'settings'];
+const subPages = ['domain-detail', 'record-detail'];
+let currentPage = 'home';
+let pageHistory = [];
+
+function navigate(pageId) {
+  if (currentPage === pageId) return;
+  var isMainPage = mainPages.includes(pageId);
+  if (isMainPage) { pageHistory = []; } else { pageHistory.push(currentPage); }
+  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+  var target = document.getElementById('page-' + pageId);
+  if (target) target.classList.add('active');
+  if (isMainPage) {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.classList.toggle('active', item.dataset.page === pageId);
+    });
+  }
+  currentPage = pageId;
+  document.querySelector('.page-container').scrollTop = 0;
+  document.querySelector('.bottom-nav').style.display = isMainPage ? 'flex' : 'none';
+}
+
+function goBack() {
+  if (pageHistory.length > 0) {
+    var prev = pageHistory.pop();
+    var isMainPage = mainPages.includes(prev);
+    document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+    document.getElementById('page-' + prev).classList.add('active');
+    if (isMainPage) {
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        item.classList.toggle('active', item.dataset.page === prev);
+      });
+      document.querySelector('.bottom-nav').style.display = 'flex';
+    }
+    currentPage = prev;
+    document.querySelector('.page-container').scrollTop = 0;
+  }
+}
+
+function showToast(type, message) {
+  var container = document.getElementById('toast-container');
+  var icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', warning: 'fa-exclamation-triangle', info: 'fa-info-circle' };
+  var toast = document.createElement('div');
+  toast.className = 'toast toast-' + type;
+  toast.innerHTML = '<i class="fas ' + (icons[type] || icons.info) + '"></i><span>' + message + '</span>';
+  container.appendChild(toast);
+  setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 3000);
+}
+
+function openModal(title, bodyHtml, footerHtml) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.getElementById('modal-footer').innerHTML = footerHtml || '';
+  document.getElementById('modal-overlay').classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('active');
+  document.body.style.overflow = '';
+}
+
+function closeCurrentModal(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+}
+
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
+
+var MOCK_DATA = {
+  user: { name: '张明', email: 'zhangming@example.com', plan: 'free', token: 'usr_a8k2m9x4p7q1' },
+  domains: [
+    { id: 'expense', key: 'expense', name: '消费记账', icon: 'fa-wallet', color: '#EF4444', isSystem: true, recordCount: 156 },
+    { id: 'income', key: 'income', name: '收入记录', icon: 'fa-arrow-trend-up', color: '#10B981', isSystem: true, recordCount: 23 },
+    { id: 'sport', key: 'sport', name: '运动记录', icon: 'fa-person-running', color: '#F59E0B', isSystem: true, recordCount: 42 },
+    { id: 'sleep', key: 'sleep', name: '睡眠记录', icon: 'fa-moon', color: '#6366F1', isSystem: true, recordCount: 30 },
+    { id: 'reading', key: 'reading', name: '阅读记录', icon: 'fa-book-open', color: '#0EA5E9', isSystem: true, recordCount: 18 }
+  ],
+  stagingRecords: [
+    { id: 's1', status: 'unrouted', summary: '华为健康运动截图', aiSummary: '检测到运动数据，包含跑步5.2公里', candidates: [{domainId:'sport',confidence:0.82}], imageUrl: '', createdAt: '2026-05-01T14:30:00', errorType: null },
+    { id: 's2', status: 'pending_review', summary: '微信读书阅读时长', aiSummary: '今日阅读45分钟《深度工作》', candidates: [{domainId:'reading',confidence:0.75}], imageUrl: '', createdAt: '2026-05-01T12:15:00', errorType: null },
+    { id: 's3', status: 'ai_error', summary: '睡眠追踪截图', aiSummary: '识别超时，未能完成分析', candidates: [], imageUrl: '', createdAt: '2026-05-01T09:00:00', errorType: 'TIMEOUT', retryCount: 1 },
+    { id: 's4', status: 'routing_failed', summary: '桌面截图', aiSummary: '无法匹配任何已有数据域', candidates: [], imageUrl: '', createdAt: '2026-04-30T22:10:00', errorType: null },
+    { id: 's5', status: 'pending_review', summary: '美团外卖订单', aiSummary: '检测到外卖消费32.5元，但置信度不足', candidates: [{domainId:'expense',confidence:0.68}], imageUrl: '', createdAt: '2026-04-30T19:45:00', errorType: null }
+  ],
+  recentRecords: [
+    { id: 'r1', domain: 'expense', domainName: '消费记账', domainColor: '#EF4444', title: '美团外卖 - 麻辣香锅', detail: '餐饮美食', amount: -32.50, time: '14:30', date: '05-01' },
+    { id: 'r2', domain: 'sport', domainName: '运动记录', domainColor: '#F59E0B', title: '户外跑步 5.2km', detail: '时长32分钟 · 消耗286kcal', amount: null, time: '07:15', date: '05-01' },
+    { id: 'r3', domain: 'expense', domainName: '消费记账', domainColor: '#EF4444', title: '滴滴出行 - 公司到家', detail: '交通出行', amount: -18.60, time: '22:30', date: '04-30' },
+    { id: 'r4', domain: 'sleep', domainName: '睡眠记录', domainColor: '#6366F1', title: '睡眠 7小时23分', detail: '入睡23:15 · 质量评分82', amount: null, time: '06:38', date: '04-30' },
+    { id: 'r5', domain: 'reading', domainName: '阅读记录', domainColor: '#0EA5E9', title: '《深度工作》阅读45分钟', detail: '进度 68% · 第156页', amount: null, time: '21:00', date: '04-30' },
+    { id: 'r6', domain: 'income', domainName: '收入记录', domainColor: '#10B981', title: '工资收入', detail: '月薪', amount: 12500, time: '10:00', date: '04-28' },
+    { id: 'r7', domain: 'expense', domainName: '消费记账', domainColor: '#EF4444', title: '京东 - 数据线', detail: '数码电器', amount: -29.90, time: '16:20', date: '04-28' },
+    { id: 'r8', domain: 'sport', domainName: '运动记录', domainColor: '#F59E0B', title: '游泳 1500m', detail: '时长45分钟 · 消耗420kcal', amount: null, time: '18:00', date: '04-27' }
+  ]
+};
+
+function renderHomeTimeline() {
+  var container = document.getElementById('home-timeline');
+  if (!container) return;
+  container.innerHTML = MOCK_DATA.recentRecords.map(function(r) {
+    var amountHtml = r.amount !== null ? '<div class="timeline-amount" style="color:' + (r.amount > 0 ? 'var(--success)' : 'var(--danger)') + '">' + (r.amount > 0 ? '+' : '') + r.amount.toFixed(2) + '</div>' : '';
+    return '<div class="timeline-item" onclick="openRecordDetail(\'' + r.domain + '\')"><div class="timeline-dot" style="background:' + r.domainColor + '"></div><div class="timeline-content"><div class="timeline-header"><span class="timeline-domain" style="background:' + r.domainColor + '15;color:' + r.domainColor + '">' + r.domainName + '</span><span class="timeline-time">' + r.date + ' ' + r.time + '</span></div><div class="timeline-title">' + r.title + '</div><div class="timeline-detail">' + r.detail + '</div>' + amountHtml + '</div></div>';
+  }).join('');
+}
+
+function openMonthPicker() {
+  var months = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  var bodyHtml = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">';
+  months.forEach(function(m, i) { bodyHtml += '<div class="btn ' + (i === 4 ? 'btn-primary' : 'btn-ghost') + '" onclick="selectMonth(\'' + m + '\')" style="padding:10px">' + m + '</div>'; });
+  bodyHtml += '</div>';
+  openModal('选择月份', bodyHtml, '');
+}
+
+function selectMonth(month) { document.getElementById('current-month').textContent = month; closeModal(); showToast('success', '已切换到' + month); }
+
+var homeWeekChart = null;
+function renderHomeWeekChart() {
+  var ctx = document.getElementById('home-week-chart');
+  if (!ctx) return;
+  if (homeWeekChart) homeWeekChart.destroy();
+  var days = ['周一','周二','周三','周四','周五','周六','周日'];
+  var today = 4;
+  homeWeekChart = new Chart(ctx, { type: 'bar', data: { labels: days, datasets: [{ data: [245, 89, 312, 156, 86, 0, 0], backgroundColor: days.map(function(_, i) { return i === today ? 'rgba(79,70,229,0.9)' : i < today ? 'rgba(79,70,229,0.35)' : 'rgba(79,70,229,0.1)'; }), borderRadius: 6, borderSkipped: false, barThickness: 28 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0F172A', bodyFont: { size: 12 }, padding: 8, cornerRadius: 8, callbacks: { label: function(ctx) { return '¥ ' + ctx.raw; } } } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#94A3B8' } }, y: { display: false, beginAtZero: true } } } });
+}
+
+renderHomeTimeline();
+renderHomeWeekChart();
+
+var stagingFilter = 'all';
+var selectedStaging = new Set();
+var batchMode = false;
+
+var statusLabels = { unrouted: '待分类', routed: '已路由', extracted: '已抽取', pending_review: '待确认', confirmed: '已确认', archived: '已归档', routing_failed: '无匹配', extraction_failed: '抽取失败', schema_failed: '校验失败', ai_error: 'AI失败', discarded: '已丢弃' };
+var statusIcons = { unrouted: 'fa-question-circle', routed: 'fa-route', extracted: 'fa-file-alt', pending_review: 'fa-clock', confirmed: 'fa-check-circle', archived: 'fa-archive', routing_failed: 'fa-unlink', extraction_failed: 'fa-exclamation-triangle', schema_failed: 'fa-shield-alt', ai_error: 'fa-robot', discarded: 'fa-trash' };
+
+function formatTime(isoStr) { var d = new Date(isoStr); return String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
+
+function renderStagingList() {
+  var container = document.getElementById('staging-list');
+  if (!container) return;
+  var searchTerm = (document.getElementById('staging-search') || {}).value || '';
+  searchTerm = searchTerm.toLowerCase();
+  var records = MOCK_DATA.stagingRecords;
+  if (stagingFilter !== 'all') records = records.filter(function(r) { return r.status === stagingFilter; });
+  if (searchTerm) records = records.filter(function(r) { return r.summary.toLowerCase().includes(searchTerm) || r.aiSummary.toLowerCase().includes(searchTerm); });
+  if (records.length === 0) { container.innerHTML = '<div class="empty-state"><i class="fas fa-inbox"></i><div class="empty-title">没有符合筛选条件的记录</div><div class="empty-desc">调整筛选条件或等待新数据进入中转站</div></div>'; return; }
+  container.innerHTML = records.map(function(r) {
+    var domain = MOCK_DATA.domains.find(function(d) { return d.id === (r.candidates[0] || {}).domainId; });
+    var confidence = (r.candidates[0] || {}).confidence || 0;
+    var confidencePct = Math.round(confidence * 100);
+    var confidenceColor = confidence >= 0.9 ? 'var(--success)' : confidence >= 0.7 ? 'var(--warning)' : 'var(--danger)';
+    var isSelected = selectedStaging.has(r.id);
+    var thumbIcon = r.errorType === 'TIMEOUT' ? 'fa-clock' : domain ? domain.icon : 'fa-image';
+    var html = '<div class="staging-card ' + (isSelected ? 'selected' : '') + '" data-id="' + r.id + '">';
+    html += '<div class="staging-card-header"><div class="staging-checkbox ' + (isSelected ? 'checked' : '') + '" onclick="toggleStagingSelect(\'' + r.id + '\')"><i class="fas fa-check"></i></div><div class="staging-thumb"><i class="fas ' + thumbIcon + '"></i></div><div class="staging-info"><div class="staging-summary">' + r.summary + '</div><div class="staging-ai-summary">' + r.aiSummary + '</div></div></div>';
+    html += '<div class="staging-card-body"><div class="staging-meta"><span class="staging-status status-' + r.status + '"><i class="fas ' + (statusIcons[r.status] || 'fa-circle') + '"></i> ' + (statusLabels[r.status] || r.status) + '</span>';
+    if (domain) html += '<span class="staging-candidate"><i class="fas ' + domain.icon + '"></i> ' + domain.name + '</span>';
+    if (r.errorType) html += '<span class="staging-status status-ai_error"><i class="fas fa-bug"></i> ' + r.errorType + '</span>';
+    html += '</div>';
+    if (confidence > 0) html += '<div class="staging-confidence"><span class="staging-confidence-label">置信度</span><div class="confidence-bar"><div class="progress-bar" style="flex:1"><div class="progress-bar-fill" style="width:' + confidencePct + '%;background:' + confidenceColor + '"></div></div><span class="confidence-value" style="color:' + confidenceColor + '">' + confidencePct + '%</span></div></div>';
+    html += '<div style="display:flex;justify-content:flex-end;margin-top:6px"><span class="staging-time">' + formatTime(r.createdAt) + '</span></div></div>';
+    html += '<div class="staging-card-actions">';
+    if (r.status === 'ai_error') html += '<button class="btn btn-sm btn-secondary" onclick="retryRecord(\'' + r.id + '\')"><i class="fas fa-redo"></i> 重试</button>';
+    if (r.status === 'pending_review') html += '<button class="btn btn-sm btn-primary" onclick="confirmRecord(\'' + r.id + '\')"><i class="fas fa-check"></i> 确认归档</button>';
+    if (r.status === 'unrouted' || r.status === 'routing_failed') html += '<button class="btn btn-sm btn-secondary" onclick="selectDomain(\'' + r.id + '\')"><i class="fas fa-folder"></i> 选择域</button>';
+    html += '<button class="btn btn-sm btn-ghost" onclick="showCreateDomain(\'' + r.id + '\')"><i class="fas fa-plus"></i> 新建域</button>';
+    html += '<button class="btn btn-sm btn-danger" onclick="discardRecord(\'' + r.id + '\')"><i class="fas fa-trash"></i> 销毁</button>';
+    html += '</div></div>';
+    return html;
+  }).join('');
+}
+
+function setStagingFilter(filter, el) { stagingFilter = filter; document.querySelectorAll('#staging-filters .chip').forEach(function(c) { c.classList.remove('active'); }); el.classList.add('active'); renderStagingList(); }
+function filterStagingRecords() { renderStagingList(); }
+function toggleStagingSelect(id) { if (selectedStaging.has(id)) selectedStaging.delete(id); else selectedStaging.add(id); batchMode = selectedStaging.size > 0; document.getElementById('staging-batch-bar').style.display = batchMode ? 'flex' : 'none'; document.getElementById('batch-count').textContent = selectedStaging.size; renderStagingList(); }
+function cancelBatch() { selectedStaging.clear(); batchMode = false; document.getElementById('staging-batch-bar').style.display = 'none'; renderStagingList(); }
+function batchRetry() { showToast('success', '已重试 ' + selectedStaging.size + ' 条记录'); cancelBatch(); }
+function batchDiscard() { var count = selectedStaging.size; openModal('确认批量销毁', '<p style="color:var(--text-secondary);line-height:1.6">确定要销毁选中的 <strong>' + count + '</strong> 条记录吗？此操作不可恢复。</p>', '<button class="btn btn-ghost" onclick="closeModal()">取消</button><button class="btn btn-danger" onclick="doBatchDiscard()">确认销毁</button>'); }
+function doBatchDiscard() { closeModal(); showToast('success', '已销毁 ' + selectedStaging.size + ' 条记录'); cancelBatch(); }
+function retryRecord(id) { showToast('info', '正在重新识别...'); setTimeout(function() { showToast('success', '识别完成'); }, 1500); }
+function confirmRecord(id) { var record = MOCK_DATA.stagingRecords.find(function(r) { return r.id === id; }); var domain = MOCK_DATA.domains.find(function(d) { return d.id === (record && record.candidates[0] && record.candidates[0].domainId); }); openModal('确认归档', '<div style="text-align:center;padding:8px 0"><div style="font-size:40px;color:' + (domain ? domain.color : 'var(--primary)') + ';margin-bottom:12px"><i class="fas ' + (domain ? domain.icon : 'fa-folder') + '"></i></div><div style="font-size:15px;font-weight:600;margin-bottom:6px">归档到「' + (domain ? domain.name : '未知域') + '」</div><div style="font-size:13px;color:var(--text-secondary)">' + (record ? record.summary : '') + '</div></div>', '<button class="btn btn-ghost" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doConfirmRecord(\'' + id + '\')">确认归档</button>'); }
+function doConfirmRecord(id) { closeModal(); showToast('success', '已归档到数据域'); }
+function selectDomain(id) { var bodyHtml = MOCK_DATA.domains.map(function(d) { return '<div class="list-item" onclick="doSelectDomain(\'' + id + '\',\'' + d.id + '\')" style="border-radius:var(--radius-md);margin-bottom:4px"><div class="icon-circle" style="background:' + d.color + '15;color:' + d.color + '"><i class="fas ' + d.icon + '"></i></div><div class="list-item-content"><div class="list-item-title">' + d.name + '</div><div class="list-item-subtitle">' + d.recordCount + ' 条记录</div></div></div>'; }).join(''); openModal('选择数据域', bodyHtml, ''); }
+function doSelectDomain(recordId, domainId) { closeModal(); var domain = MOCK_DATA.domains.find(function(d) { return d.id === domainId; }); showToast('success', '已归档到「' + domain.name + '」'); }
+function showCreateDomain(recordId) { openModal('创建新数据域', '<div class="form-group"><label class="form-label">数据域名称</label><input class="form-input" placeholder="例如：用药记录" id="new-domain-name"></div><div class="form-group"><label class="form-label">描述（可选）</label><input class="form-input" placeholder="简要描述这个数据域的用途"></div><div style="padding:12px 16px;background:var(--info-light);border-radius:var(--radius-md);font-size:12px;color:var(--info);line-height:1.6"><i class="fas fa-magic" style="margin-right:4px"></i> AI 将根据您的描述自动生成模板字段、路由规则和展示配置</div>', '<button class="btn btn-ghost" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doCreateDomain()">创建</button>'); }
+function doCreateDomain() { var name = (document.getElementById('new-domain-name') || {}).value; if (!name) { showToast('warning', '请输入数据域名称'); return; } closeModal(); showToast('success', '数据域「' + name + '」创建成功，AI 正在生成模板...'); }
+function discardRecord(id) { openModal('确认销毁', '<p style="color:var(--text-secondary);line-height:1.6">确定要销毁这条记录吗？销毁后截图和识别结果将被删除，此操作不可恢复。</p>', '<button class="btn btn-ghost" onclick="closeModal()">取消</button><button class="btn btn-danger" onclick="doDiscardRecord(\'' + id + '\')">确认销毁</button>'); }
+function doDiscardRecord(id) { closeModal(); showToast('success', '记录已销毁'); }
+
+renderStagingList();
+
+function renderDomainList() {
+  var container = document.getElementById('domain-list');
+  if (!container) return;
+  var searchTerm = ((document.getElementById('domain-search') || {}).value || '').toLowerCase();
+  var domains = MOCK_DATA.domains;
+  if (searchTerm) domains = domains.filter(function(d) { return d.name.toLowerCase().includes(searchTerm); });
+  container.innerHTML = domains.map(function(d) { return '<div class="domain-card" onclick="openDomainDetail(\'' + d.id + '\')"><div class="domain-card-icon" style="background:' + d.color + '15;color:' + d.color + '"><i class="fas ' + d.icon + '"></i></div><div class="domain-card-info"><div class="domain-card-name">' + d.name + '</div><div class="domain-card-meta">' + d.recordCount + ' 条记录 · ' + (d.isSystem ? '系统内置' : '自定义') + '</div></div>' + (d.isSystem ? '<span class="domain-card-badge">内置</span>' : '') + '<i class="fas fa-chevron-right domain-card-arrow"></i></div>'; }).join('');
+}
+function filterDomains() { renderDomainList(); }
+
+var trendChart = null, dimChart = null;
+var domainDetailData = {
+  sport: { name: '运动记录', icon: 'fa-person-running', color: '#F59E0B', metrics: [{label:'总距离',value:'186.4',unit:'km'},{label:'总时长',value:'1,240',unit:'分钟'},{label:'总消耗',value:'8,960',unit:'kcal'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[3.2,0,5.1,4.8,0,6.3,5.2], dimLabels:['跑步','游泳','骑行','瑜伽','力量训练'], dimData:[82,45,32,18,15], records:[{title:'户外跑步 5.2km',sub:'32分钟 · 286kcal',value:'5.2km',color:'#F59E0B'},{title:'游泳 1500m',sub:'45分钟 · 420kcal',value:'1.5km',color:'#0EA5E9'},{title:'骑行 12km',sub:'38分钟 · 310kcal',value:'12km',color:'#10B981'}] },
+  expense: { name: '消费记账', icon: 'fa-wallet', color: '#EF4444', metrics: [{label:'本月支出',value:'3,847.60',unit:'元'},{label:'日均支出',value:'128.25',unit:'元'},{label:'记录数',value:'156',unit:'条'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[245,89,312,156,423,198,86], dimLabels:['餐饮','交通','购物','娱乐','数码'], dimData:[1280,456,892,345,874], records:[{title:'美团外卖 - 麻辣香锅',sub:'餐饮美食',value:'¥32.50',color:'#EF4444'},{title:'滴滴出行 - 公司到家',sub:'交通出行',value:'¥18.60',color:'#0EA5E9'},{title:'京东 - 数据线',sub:'数码电器',value:'¥29.90',color:'#6366F1'}] },
+  sleep: { name: '睡眠记录', icon: 'fa-moon', color: '#6366F1', metrics: [{label:'平均时长',value:'7.2',unit:'小时'},{label:'平均质量',value:'78',unit:'分'},{label:'记录数',value:'30',unit:'天'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[7.5,6.8,7.2,8.1,6.5,7.4,7.4], dimLabels:['深睡','浅睡','REM','清醒'], dimData:[35,40,18,7], records:[{title:'睡眠 7小时23分',sub:'入睡23:15 · 质量评分82',value:'7.4h',color:'#6366F1'},{title:'睡眠 6小时30分',sub:'入睡00:45 · 质量评分65',value:'6.5h',color:'#EF4444'}] },
+  reading: { name: '阅读记录', icon: 'fa-book-open', color: '#0EA5E9', metrics: [{label:'总时长',value:'24.5',unit:'小时'},{label:'在读',value:'3',unit:'本'},{label:'已完成',value:'5',unit:'本'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[45,30,60,0,90,45,45], dimLabels:['深度工作','原子习惯','思考快与慢','原则','人类简史'], dimData:[320,280,210,180,150], records:[{title:'《深度工作》阅读45分钟',sub:'进度 68% · 第156页',value:'45min',color:'#0EA5E9'},{title:'《原子习惯》阅读30分钟',sub:'进度 42% · 第98页',value:'30min',color:'#10B981'}] },
+  income: { name: '收入记录', icon: 'fa-arrow-trend-up', color: '#10B981', metrics: [{label:'本月收入',value:'12,500',unit:'元'},{label:'日均收入',value:'416.67',unit:'元'},{label:'记录数',value:'23',unit:'条'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[0,0,0,12500,0,0,0], dimLabels:['工资','兼职','投资','其他'], dimData:[12500,3200,1800,500], records:[{title:'工资收入',sub:'月薪',value:'¥12,500',color:'#10B981'},{title:'自由职业 - 设计稿',sub:'兼职',value:'¥3,200',color:'#F59E0B'}] }
+};
+
+function openDomainDetail(domainId) {
+  var data = domainDetailData[domainId] || domainDetailData.sport;
+  var domain = MOCK_DATA.domains.find(function(d) { return d.id === domainId; }) || MOCK_DATA.domains[2];
+  document.getElementById('detail-domain-icon').innerHTML = '<i class="fas ' + data.icon + '"></i>';
+  document.getElementById('detail-domain-icon').style.cssText = 'background:' + data.color + '15;color:' + data.color + ';width:40px;height:40px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-size:18px';
+  document.getElementById('detail-domain-name').textContent = data.name;
+  document.getElementById('detail-domain-sub').textContent = domain.recordCount + '条记录 · ' + (domain.isSystem ? '系统内置' : '自定义');
+  document.getElementById('detail-metrics').innerHTML = data.metrics.map(function(m) { return '<div class="detail-metric"><div class="detail-metric-value">' + m.value + '<span style="font-size:12px;font-weight:400;color:var(--text-tertiary);margin-left:2px">' + m.unit + '</span></div><div class="detail-metric-label">' + m.label + '</div></div>'; }).join('');
+  document.getElementById('detail-records').innerHTML = data.records.map(function(r) { return '<div class="detail-record-item" onclick="openRecordDetail(\'' + domainId + '\')"><div class="detail-record-dot" style="background:' + r.color + '"></div><div class="detail-record-info"><div class="detail-record-title">' + r.title + '</div><div class="detail-record-sub">' + r.sub + '</div></div><div class="detail-record-value">' + r.value + '</div></div>'; }).join('');
+  navigate('domain-detail');
+  setTimeout(function() { renderTrendChart(data); renderDimChart(data); }, 100);
+}
+
+function renderTrendChart(data) { var ctx = document.getElementById('detail-trend-chart'); if (!ctx) return; if (trendChart) trendChart.destroy(); trendChart = new Chart(ctx, { type: 'line', data: { labels: data.trendLabels, datasets: [{ data: data.trendData, borderColor: '#4F46E5', backgroundColor: 'rgba(79,70,229,0.08)', borderWidth: 2, fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#4F46E5', pointBorderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0F172A', bodyFont: { size: 12 }, padding: 8, cornerRadius: 8 } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, color: '#94A3B8' } }, y: { grid: { color: '#F1F5F9' }, ticks: { font: { size: 10 }, color: '#94A3B8' }, beginAtZero: true } } } }); }
+function renderDimChart(data) { var ctx = document.getElementById('detail-dim-chart'); if (!ctx) return; if (dimChart) dimChart.destroy(); var colors = ['#4F46E5','#818CF8','#A5B4FC','#C7D2FE','#DDD6FE']; dimChart = new Chart(ctx, { type: 'bar', data: { labels: data.dimLabels, datasets: [{ data: data.dimData, backgroundColor: colors.slice(0, data.dimLabels.length), borderRadius: 6, borderSkipped: false, barThickness: 28 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0F172A', bodyFont: { size: 12 }, padding: 8, cornerRadius: 8 } }, scales: { x: { grid: { color: '#F1F5F9' }, ticks: { font: { size: 10 }, color: '#94A3B8' }, beginAtZero: true }, y: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#475569' } } } } }); }
+function setGrain(grain, el) { document.querySelectorAll('.detail-grain').forEach(function(g) { g.classList.remove('active'); }); el.classList.add('active'); showToast('info', '已切换为' + ({day:'日',week:'周',month:'月'}[grain]) + '视图'); }
+function showDomainMenu() { openModal('数据域操作', '<div class="list-item" onclick="closeModal();showToast(\'info\',\'功能开发中\')"><div class="icon-circle" style="background:var(--primary-bg);color:var(--primary)"><i class="fas fa-edit"></i></div><div class="list-item-content"><div class="list-item-title">编辑模板</div></div></div><div class="list-item" onclick="closeModal();showToast(\'info\',\'功能开发中\')"><div class="icon-circle" style="background:var(--warning-light);color:var(--warning)"><i class="fas fa-download"></i></div><div class="list-item-content"><div class="list-item-title">导出数据</div></div></div>', ''); }
+function showAllRecords() { showToast('info', '查看全部记录'); }
+
+renderDomainList();
+
+var reportExpenseChart = null;
+var reportData = {
+  expense: { name: '消费记账', color: '#EF4444', icon: 'fa-wallet', summary: { label: '4月总支出', value: '¥ 4,326.80', change: '较3月减少 8.2%', changeDir: 'down' }, stats: [{label:'记录笔数',value:'156'},{label:'最大单笔',value:'¥ 423'},{label:'日均支出',value:'¥ 128'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[245,89,312,156,423,198,86], categories: [{name:'餐饮美食',amount:1280},{name:'日用百货',amount:892},{name:'数码电器',amount:874},{name:'交通出行',amount:456},{name:'娱乐休闲',amount:345},{name:'其他',amount:479}], platforms: [{name:'美团',amount:1245},{name:'微信支付',amount:986},{name:'京东',amount:678},{name:'支付宝',amount:534},{name:'线下消费',amount:412}], paymentMethods: [{name:'微信支付',amount:1567},{name:'花呗',amount:892},{name:'支付宝',amount:756},{name:'银行卡',amount:534},{name:'先用后付',amount:378}], specialSummaries: [{label:'大额交通（≥200元）',value:'¥ 860',icon:'fa-car',color:'#0EA5E9'},{label:'先用后付待还',value:'¥ 1,270',icon:'fa-credit-card',color:'#F59E0B'}] },
+  income: { name: '收入记录', color: '#10B981', icon: 'fa-arrow-trend-up', summary: { label: '4月总收入', value: '¥ 18,000', change: '较3月增加 12.5%', changeDir: 'up' }, stats: [{label:'记录笔数',value:'23'},{label:'最高来源',value:'工资'},{label:'最高单笔',value:'¥ 12,500'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[0,0,0,12500,3200,0,0], categories: [{name:'工资',amount:12500},{name:'兼职',amount:3200},{name:'投资收益',amount:1800},{name:'其他',amount:500}], platforms: [], paymentMethods: [], specialSummaries: [] },
+  sport: { name: '运动记录', color: '#F59E0B', icon: 'fa-person-running', summary: { label: '4月运动总距离', value: '186.4 km', change: '较3月增加 15%', changeDir: 'up' }, stats: [{label:'运动次数',value:'42'},{label:'总消耗',value:'8,960 kcal'},{label:'总时长',value:'1,240 min'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[3.2,0,5.1,4.8,0,6.3,5.2], categories: [{name:'跑步',amount:82},{name:'游泳',amount:45},{name:'骑行',amount:32},{name:'瑜伽',amount:18},{name:'力量训练',amount:15}], platforms: [{name:'华为健康',amount:28},{name:'Keep',amount:10},{name:'Apple Watch',amount:4}], paymentMethods: [], specialSummaries: [] },
+  sleep: { name: '睡眠记录', color: '#6366F1', icon: 'fa-moon', summary: { label: '4月平均睡眠', value: '7.2 小时', change: '较3月减少 0.3h', changeDir: 'down' }, stats: [{label:'记录天数',value:'30'},{label:'平均质量',value:'78 分'},{label:'最早入睡',value:'22:15'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[7.5,6.8,7.2,8.1,6.5,7.4,7.4], categories: [{name:'深睡',amount:35},{name:'浅睡',amount:40},{name:'REM',amount:18},{name:'清醒',amount:7}], platforms: [], paymentMethods: [], specialSummaries: [] },
+  reading: { name: '阅读记录', color: '#0EA5E9', icon: 'fa-book-open', summary: { label: '4月阅读总时长', value: '24.5 小时', change: '较3月增加 18%', changeDir: 'up' }, stats: [{label:'在读',value:'3 本'},{label:'已完成',value:'5 本'},{label:'日均阅读',value:'49 min'}], trendLabels:['4/25','4/26','4/27','4/28','4/29','4/30','5/1'], trendData:[45,30,60,0,90,45,45], categories: [{name:'深度工作',amount:320},{name:'原子习惯',amount:280},{name:'思考快与慢',amount:210},{name:'原则',amount:180},{name:'人类简史',amount:150}], platforms: [{name:'微信读书',amount:15},{name:'Kindle',amount:3}], paymentMethods: [], specialSummaries: [] }
+};
+
+var currentReportDomain = 'expense';
+var reportDropdownOpen = false;
+
+function toggleReportDropdown() {
+  reportDropdownOpen = !reportDropdownOpen;
+  document.getElementById('report-dropdown').style.display = reportDropdownOpen ? 'block' : 'none';
+  document.getElementById('report-selector-arrow').classList.toggle('open', reportDropdownOpen);
+}
+
+function setReportDomain(domain, el) {
+  currentReportDomain = domain;
+  var domainNames = { expense: '消费', income: '收入', sport: '运动', sleep: '睡眠', reading: '阅读', cross: '跨域分析' };
+  var domainIcons = { expense: 'fa-wallet', income: 'fa-arrow-trend-up', sport: 'fa-person-running', sleep: 'fa-moon', reading: 'fa-book-open', cross: 'fa-link' };
+  var domainColors = { expense: '#EF4444', income: '#10B981', sport: '#F59E0B', sleep: '#6366F1', reading: '#0EA5E9', cross: 'var(--primary)' };
+  document.getElementById('report-selector-value').innerHTML = '<i class="fas ' + domainIcons[domain] + '" style="color:' + domainColors[domain] + '"></i><span>' + domainNames[domain] + '</span>';
+  document.querySelectorAll('.report-dropdown-item').forEach(function(item) { item.classList.remove('active'); });
+  el.classList.add('active');
+  reportDropdownOpen = false;
+  document.getElementById('report-dropdown').style.display = 'none';
+  document.getElementById('report-selector-arrow').classList.remove('open');
+  renderReportContent();
+}
+
+function renderReportContent() {
+  var container = document.getElementById('report-domain-content');
+  if (!container) return;
+  if (currentReportDomain === 'cross') { container.innerHTML = renderCrossDomainReport(); return; }
+  var data = reportData[currentReportDomain]; if (!data) return;
+  var changeIcon = data.summary.changeDir === 'up' ? 'fa-arrow-up' : 'fa-arrow-down';
+  var html = '<div class="report-summary"><div class="report-summary-card" style="background:linear-gradient(135deg,' + data.color + ' 0%,' + data.color + 'dd 100%)"><div class="report-summary-label">' + data.summary.label + '</div><div class="report-summary-value">' + data.summary.value + '</div><div class="report-summary-change" style="color:rgba(255,255,255,0.85)"><i class="fas ' + changeIcon + '"></i> ' + data.summary.change + '</div></div></div>';
+  html += '<div class="stat-grid" style="margin-top:var(--spacing-md)">';
+  data.stats.forEach(function(s) { html += '<div class="stat-card"><div class="stat-label">' + s.label + '</div><div class="stat-value" style="font-size:18px">' + s.value + '</div></div>'; });
+  html += '</div><div class="section-header"><div class="section-title">趋势</div><div class="detail-grain-group"><span class="detail-grain active" onclick="setReportGrain(this)">日</span><span class="detail-grain" onclick="setReportGrain(this)">周</span><span class="detail-grain" onclick="setReportGrain(this)">月</span></div></div><div class="detail-chart-wrap"><canvas id="report-trend-chart" height="180"></canvas></div>';
+  html += '<div class="section-header"><div class="section-title">分类排行</div></div><div class="report-category-list" id="report-category-list"></div>';
+  if (data.platforms && data.platforms.length > 0) html += '<div class="section-header"><div class="section-title">' + (currentReportDomain === 'expense' ? '消费渠道' : '来源 App') + '</div></div><div class="detail-chart-wrap"><canvas id="report-platform-chart" height="' + Math.max(120, data.platforms.length * 40) + '"></canvas></div>';
+  if (data.paymentMethods && data.paymentMethods.length > 0) html += '<div class="section-header"><div class="section-title">支付方式</div></div><div class="detail-chart-wrap"><canvas id="report-payment-chart" height="' + Math.max(120, data.paymentMethods.length * 40) + '"></canvas></div>';
+  if (data.specialSummaries && data.specialSummaries.length > 0) { html += '<div class="section-header"><div class="section-title">专项汇总</div></div><div style="padding:0 var(--spacing-xl);display:grid;grid-template-columns:1fr 1fr;gap:var(--spacing-md)">'; data.specialSummaries.forEach(function(s) { html += '<div class="stat-card" style="display:flex;align-items:center;gap:var(--spacing-md)"><div class="icon-circle" style="background:' + s.color + '15;color:' + s.color + '"><i class="fas ' + s.icon + '"></i></div><div><div class="stat-label">' + s.label + '</div><div class="stat-value" style="font-size:16px">' + s.value + '</div></div></div>'; }); html += '</div>'; }
+  container.innerHTML = html;
+  setTimeout(function() { renderReportTrendChart(data); renderReportCategories(data); if (data.platforms && data.platforms.length) renderReportPlatformChart(data); if (data.paymentMethods && data.paymentMethods.length) renderReportPaymentChart(data); }, 50);
+}
+
+function renderReportTrendChart(data) { var ctx = document.getElementById('report-trend-chart'); if (!ctx) return; if (reportExpenseChart) reportExpenseChart.destroy(); reportExpenseChart = new Chart(ctx, { type: 'line', data: { labels: data.trendLabels, datasets: [{ data: data.trendData, borderColor: data.color, backgroundColor: data.color + '15', borderWidth: 2, fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: data.color, pointBorderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0F172A', bodyFont: { size: 12 }, padding: 8, cornerRadius: 8 } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, color: '#94A3B8' } }, y: { grid: { color: '#F1F5F9' }, ticks: { font: { size: 10 }, color: '#94A3B8' }, beginAtZero: true } } } }); }
+function renderReportCategories(data) { var container = document.getElementById('report-category-list'); if (!container) return; var maxAmount = Math.max.apply(null, data.categories.map(function(c) { return c.amount; })); container.innerHTML = data.categories.map(function(c, i) { return '<div class="report-category-item"><div class="report-category-rank ' + (i < 3 ? 'top' : '') + '">' + (i + 1) + '</div><div class="report-category-info"><div class="report-category-name">' + c.name + '</div><div class="report-category-bar"><div class="report-category-bar-fill" style="width:' + (c.amount / maxAmount * 100).toFixed(0) + '%;background:' + data.color + '"></div></div></div><div class="report-category-amount">' + (currentReportDomain === 'expense' || currentReportDomain === 'income' ? '¥' : '') + c.amount.toLocaleString() + '</div></div>'; }).join(''); }
+function renderReportPlatformChart(data) { var ctx = document.getElementById('report-platform-chart'); if (!ctx) return; var colors = [data.color, data.color + 'cc', data.color + '99', data.color + '66', data.color + '44']; new Chart(ctx, { type: 'bar', data: { labels: data.platforms.map(function(p) { return p.name; }), datasets: [{ data: data.platforms.map(function(p) { return p.amount; }), backgroundColor: colors.slice(0, data.platforms.length), borderRadius: 6, borderSkipped: false, barThickness: 24 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0F172A', bodyFont: { size: 12 }, padding: 8, cornerRadius: 8 } }, scales: { x: { grid: { color: '#F1F5F9' }, ticks: { font: { size: 10 }, color: '#94A3B8' }, beginAtZero: true }, y: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#475569' } } } } }); }
+function renderReportPaymentChart(data) { var ctx = document.getElementById('report-payment-chart'); if (!ctx) return; var colors = ['#4F46E5','#818CF8','#A5B4FC','#C7D2FE','#DDD6FE']; new Chart(ctx, { type: 'bar', data: { labels: data.paymentMethods.map(function(p) { return p.name; }), datasets: [{ data: data.paymentMethods.map(function(p) { return p.amount; }), backgroundColor: colors.slice(0, data.paymentMethods.length), borderRadius: 6, borderSkipped: false, barThickness: 24 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0F172A', bodyFont: { size: 12 }, padding: 8, cornerRadius: 8, callbacks: { label: function(ctx) { return '¥ ' + ctx.raw.toLocaleString(); } } } }, scales: { x: { grid: { color: '#F1F5F9' }, ticks: { font: { size: 10 }, color: '#94A3B8', callback: function(v) { return '¥' + v; } }, beginAtZero: true }, y: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#475569' } } } } }); }
+function renderCrossDomainReport() { return '<div class="report-cross-intro"><div class="report-cross-icon"><i class="fas fa-link"></i></div><div class="report-cross-title">跨域关联分析</div><div class="report-cross-desc">发现不同数据域之间的隐藏关联</div></div><div class="report-cross-card" onclick="showCrossDetail(\'sport_expense\')"><div class="cross-card-header"><div class="cross-card-icons"><span class="cross-icon" style="background:#F59E0B15;color:#F59E0B"><i class="fas fa-person-running"></i></span><span class="cross-link"><i class="fas fa-arrows-left-right"></i></span><span class="cross-icon" style="background:#EF444415;color:#EF4444"><i class="fas fa-wallet"></i></span></div><div class="cross-card-title">运动 × 消费</div></div><div class="cross-card-finding"><i class="fas fa-lightbulb"></i> 运动日的餐饮外卖支出比非运动日低 23%</div><div class="cross-card-meta">基于42条运动记录 + 156条消费记录分析</div><div class="cross-card-bar"><div class="cross-bar-label">相关性强度</div><div class="progress-bar" style="flex:1"><div class="progress-bar-fill" style="width:72%;background:var(--primary)"></div></div><span style="font-size:12px;font-weight:600;color:var(--primary);font-family:var(--font-num)">0.72</span></div></div><div class="report-cross-card" onclick="showCrossDetail(\'sleep_expense\')"><div class="cross-card-header"><div class="cross-card-icons"><span class="cross-icon" style="background:#6366F115;color:#6366F1"><i class="fas fa-moon"></i></span><span class="cross-link"><i class="fas fa-arrows-left-right"></i></span><span class="cross-icon" style="background:#EF444415;color:#EF4444"><i class="fas fa-wallet"></i></span></div><div class="cross-card-title">睡眠 × 消费</div></div><div class="cross-card-finding"><i class="fas fa-lightbulb"></i> 睡眠不足7小时时，次日冲动消费增加 35%</div><div class="cross-card-meta">基于30条睡眠记录 + 156条消费记录分析</div><div class="cross-card-bar"><div class="cross-bar-label">相关性强度</div><div class="progress-bar" style="flex:1"><div class="progress-bar-fill" style="width:58%;background:var(--warning)"></div></div><span style="font-size:12px;font-weight:600;color:var(--warning);font-family:var(--font-num)">0.58</span></div></div><div class="report-cross-card disabled"><div class="cross-card-header"><div class="cross-card-icons"><span class="cross-icon" style="background:#0EA5E915;color:#0EA5E9"><i class="fas fa-book-open"></i></span><span class="cross-link"><i class="fas fa-arrows-left-right"></i></span><span class="cross-icon" style="background:#EF444415;color:#EF4444"><i class="fas fa-wallet"></i></span></div><div class="cross-card-title">阅读 × 消费</div></div><div class="cross-card-finding" style="opacity:0.5"><i class="fas fa-hourglass-half"></i> 数据积累中，还需 2 条阅读记录</div><div class="cross-card-meta">当前18条记录，需至少20条</div><div class="cross-card-bar"><div class="cross-bar-label">数据进度</div><div class="progress-bar" style="flex:1"><div class="progress-bar-fill" style="width:90%;background:var(--text-tertiary)"></div></div><span style="font-size:12px;font-weight:600;color:var(--text-tertiary);font-family:var(--font-num)">90%</span></div></div>'; }
+function setReportGrain(el) { el.parentElement.querySelectorAll('.detail-grain').forEach(function(g) { g.classList.remove('active'); }); el.classList.add('active'); }
+function showCrossDetail(type) { var details = { sport_expense: { title: '运动 × 消费 关联分析', content: '<div style="padding:8px 0"><div style="font-size:14px;font-weight:600;margin-bottom:12px">核心发现</div><div style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-bottom:16px">在有运动记录的日期中，餐饮外卖支出平均为 ¥28.5/天；而在无运动记录的日期中，该数字为 ¥37.1/天。运动日的餐饮外卖支出降低了约 23%。</div><div style="font-size:14px;font-weight:600;margin-bottom:12px">可能解释</div><div style="font-size:13px;color:var(--text-secondary);line-height:1.7">运动后更倾向于在家准备健康饮食，减少了外卖点单频率。</div><div style="margin-top:16px;padding:12px;background:var(--warning-light);border-radius:var(--radius-md);font-size:12px;color:var(--warning);line-height:1.6"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i> 相关性不等于因果关系，以上分析仅供参考</div></div>' }, sleep_expense: { title: '睡眠 × 消费 关联分析', content: '<div style="padding:8px 0"><div style="font-size:14px;font-weight:600;margin-bottom:12px">核心发现</div><div style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-bottom:16px">睡眠时长低于7小时的次日，冲动消费平均增加 35%。</div><div style="font-size:14px;font-weight:600;margin-bottom:12px">可能解释</div><div style="font-size:13px;color:var(--text-secondary);line-height:1.7">睡眠不足影响前额叶皮层功能，降低自控力，导致冲动消费增加。</div><div style="margin-top:16px;padding:12px;background:var(--warning-light);border-radius:var(--radius-md);font-size:12px;color:var(--warning);line-height:1.6"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i> 相关性不等于因果关系，以上分析仅供参考</div></div>' } }; var detail = details[type]; if (!detail) return; openModal(detail.title, detail.content, '<button class="btn btn-ghost" onclick="closeModal()">关闭</button>'); }
+var currentRecordDomain = 'sport';
+
+var recordDetailData = {
+  expense: {
+    domain: 'expense', domainName: '消费记账', domainIcon: 'fa-wallet', domainColor: '#EF4444',
+    time: '2026-05-01 14:30', confidence: 88, quality: '完整',
+    fields: [
+      { label: '金额', value: '-¥ 32.50', num: true },
+      { label: '商家', value: '美团外卖' },
+      { label: '消费渠道', value: '美团' },
+      { label: '消费分类', value: '餐饮' },
+      { label: '支付方式', value: '微信支付' },
+      { label: '消费日期', value: '2026-05-01' },
+      { label: '备注', value: '-' }
+    ],
+    aiSummary: '检测到美团外卖订单截图，记录了一笔餐饮消费，金额32.5元，通过微信支付完成。商家为麻辣香锅，分类为餐饮美食。'
+  },
+  income: {
+    domain: 'income', domainName: '收入记录', domainIcon: 'fa-arrow-trend-up', domainColor: '#10B981',
+    time: '2026-04-28 10:00', confidence: 95, quality: '完整',
+    fields: [
+      { label: '金额', value: '+¥ 12,500', num: true },
+      { label: '收入类型', value: '工资' },
+      { label: '来源名称', value: '公司' },
+      { label: '到账日期', value: '2026-04-28' },
+      { label: '备注', value: '月薪' }
+    ],
+    aiSummary: '检测到银行到账通知截图，记录了一笔工资收入，金额12,500元，来源为公司月薪发放。'
+  },
+  sport: {
+    domain: 'sport', domainName: '运动记录', domainIcon: 'fa-person-running', domainColor: '#F59E0B',
+    time: '2026-05-01 07:15', confidence: 92, quality: '完整',
+    fields: [
+      { label: '运动类型', value: '户外跑步' },
+      { label: '距离', value: '5.2 km', num: true },
+      { label: '时长', value: '32 分钟', num: true },
+      { label: '消耗', value: '286 kcal', num: true },
+      { label: '来源', value: '华为健康' },
+      { label: '运动日期', value: '2026-05-01' }
+    ],
+    aiSummary: '检测到华为健康运动截图，记录了一次户外跑步活动，距离5.2公里，耗时32分钟，消耗热量286千卡。运动强度中等，配速约6分09秒/公里。'
+  },
+  sleep: {
+    domain: 'sleep', domainName: '睡眠记录', domainIcon: 'fa-moon', domainColor: '#6366F1',
+    time: '2026-04-30 06:38', confidence: 90, quality: '完整',
+    fields: [
+      { label: '入睡时间', value: '23:15' },
+      { label: '起床时间', value: '06:38' },
+      { label: '睡眠时长', value: '7小时23分', num: true },
+      { label: '质量评分', value: '82 / 100', num: true },
+      { label: '来源', value: '华为健康' },
+      { label: '日期', value: '2026-04-30' }
+    ],
+    aiSummary: '检测到华为健康睡眠追踪截图，记录了一次睡眠数据，入睡时间23:15，起床时间06:38，总睡眠时长7小时23分钟，睡眠质量评分82分，深睡占比约35%。'
+  },
+  reading: {
+    domain: 'reading', domainName: '阅读记录', domainIcon: 'fa-book-open', domainColor: '#0EA5E9',
+    time: '2026-04-30 21:00', confidence: 75, quality: '部分缺失',
+    fields: [
+      { label: '书名', value: '《深度工作》' },
+      { label: '阅读时长', value: '45 分钟', num: true },
+      { label: '阅读页数', value: '第156页' },
+      { label: '进度', value: '68%' },
+      { label: '来源', value: '微信读书' },
+      { label: '日期', value: '2026-04-30' }
+    ],
+    aiSummary: '检测到微信读书阅读时长截图，记录了一次阅读活动，阅读书籍为《深度工作》，阅读时长45分钟，当前进度68%，已读到第156页。'
+  }
+};
+
+function openRecordDetail(domainId) {
+  currentRecordDomain = domainId || 'sport';
+  var data = recordDetailData[currentRecordDomain] || recordDetailData.sport;
+  var container = document.getElementById('record-detail-content');
+  if (!container) return;
+
+  var confidenceColor = data.confidence >= 90 ? 'var(--success)' : data.confidence >= 70 ? 'var(--warning)' : 'var(--danger)';
+  var qualityBadge = data.quality === '完整' ? 'badge-success' : data.quality === '部分缺失' ? 'badge-warning' : 'badge-danger';
+
+  var html = '<div class="record-detail-image"><i class="fas fa-image"></i><div class="record-detail-image-label">原始截图</div></div>';
+
+  html += '<div class="record-detail-section"><div class="record-detail-section-title">基本信息</div>';
+  html += '<div class="record-detail-field"><span class="field-label">数据域</span><span class="field-value"><span class="badge" style="background:' + data.domainColor + '15;color:' + data.domainColor + '"><i class="fas ' + data.domainIcon + '"></i> ' + data.domainName + '</span></span></div>';
+  html += '<div class="record-detail-field"><span class="field-label">记录时间</span><span class="field-value">' + data.time + '</span></div>';
+  html += '<div class="record-detail-field"><span class="field-label">置信度</span><span class="field-value" style="color:' + confidenceColor + ';font-weight:600">' + data.confidence + '%</span></div>';
+  html += '<div class="record-detail-field"><span class="field-label">质量状态</span><span class="field-value"><span class="badge ' + qualityBadge + '">' + data.quality + '</span></span></div>';
+  html += '</div>';
+
+  html += '<div class="record-detail-section"><div class="record-detail-section-title">抽取字段</div>';
+  data.fields.forEach(function(f) {
+    html += '<div class="record-detail-field"><span class="field-label">' + f.label + '</span><span class="field-value"' + (f.num ? ' style="font-family:var(--font-num);font-weight:600"' : '') + '>' + f.value + '</span></div>';
+  });
+  html += '</div>';
+
+  html += '<div class="record-detail-section"><div class="record-detail-section-title">AI 摘要</div><div class="record-detail-ai-summary">' + data.aiSummary + '</div></div>';
+
+  html += '<div style="padding:var(--spacing-xl);display:flex;gap:var(--spacing-sm)"><button class="btn btn-secondary" style="flex:1" onclick="openEditRecordModal(\'' + data.domain + '\')"><i class="fas fa-edit"></i> 编辑</button><button class="btn btn-danger" style="flex:1" onclick="confirmDeleteRecord(\'' + data.domain + '\')"><i class="fas fa-trash"></i> 删除</button></div>';
+
+  container.innerHTML = html;
+  navigate('record-detail');
+}
+
+function showRecordMenu() { openModal('记录操作', '<div class="list-item" onclick="closeModal();showToast(\'info\',\'功能开发中\')"><div class="icon-circle" style="background:var(--primary-bg);color:var(--primary)"><i class="fas fa-edit"></i></div><div class="list-item-content"><div class="list-item-title">编辑记录</div></div></div><div class="list-item" onclick="closeModal();showToast(\'info\',\'功能开发中\')"><div class="icon-circle" style="background:var(--info-light);color:var(--info)"><i class="fas fa-exchange-alt"></i></div><div class="list-item-content"><div class="list-item-title">移动到其他域</div></div></div><div class="list-item" onclick="closeModal();showToast(\'info\',\'功能开发中\')"><div class="icon-circle" style="background:var(--danger-light);color:var(--danger)"><i class="fas fa-trash"></i></div><div class="list-item-content"><div class="list-item-title">删除记录</div></div></div>', ''); }
+
+renderReportContent();
+
+var fabOpen = false;
+function toggleFabMenu() { fabOpen = !fabOpen; var menu = document.getElementById('fab-menu'); var overlay = document.getElementById('fab-overlay'); var btn = document.getElementById('fab-btn'); menu.style.display = fabOpen ? 'flex' : 'none'; overlay.style.display = fabOpen ? 'block' : 'none'; btn.innerHTML = fabOpen ? '<i class="fas fa-times"></i>' : '<i class="fas fa-plus"></i>'; btn.style.transform = fabOpen ? 'rotate(45deg)' : ''; }
+
+var domainFormConfigs = {
+  expense: { title: '添加支出', prefix: '-¥', fields: [{type:'amount',key:'amount',label:'金额',required:true},{type:'text',key:'merchant',label:'商家名称',placeholder:'例如：美团外卖'},{type:'chip',key:'platform',label:'消费渠道',options:['美团','微信','线下消费','京东','拼多多','淘宝','抖音','支付宝','其他'],tags:{'常用':['美团','微信','线下消费']}},{type:'chip',key:'category',label:'消费分类',options:['餐饮','购物','出行','娱乐','生活','其他'],tags:{}},{type:'chip',key:'payment',label:'支付方式',options:['微信支付','花呗','支付宝','银行卡','京东白条','美团月付','先用后付'],tags:{'常用':['微信支付','花呗']}},{type:'date',key:'date',label:'消费日期'},{type:'text',key:'note',label:'备注',placeholder:'可选'}] },
+  income: { title: '添加收入', prefix: '+¥', fields: [{type:'amount',key:'amount',label:'金额',required:true},{type:'chip',key:'source',label:'收入类型',options:['工资','奖金','兼职','投资收益','报销','其他'],tags:{'常用':['工资','兼职']}},{type:'text',key:'sourceName',label:'来源名称',placeholder:'例如：公司名称'},{type:'date',key:'date',label:'到账日期'},{type:'text',key:'note',label:'备注',placeholder:'可选'}] },
+  sport: { title: '添加运动', prefix: '', fields: [{type:'chip',key:'type',label:'运动类型',options:['跑步','游泳','骑行','瑜伽','力量训练','其他'],tags:{}},{type:'number',key:'distance',label:'距离 (km)',placeholder:'0.0'},{type:'number',key:'duration',label:'时长 (分钟)',placeholder:'0'},{type:'number',key:'calories',label:'消耗 (kcal)',placeholder:'0'},{type:'chip',key:'source',label:'来源',options:['手动记录','华为健康','Keep','Apple Watch','其他'],tags:{}},{type:'date',key:'date',label:'运动日期'},{type:'text',key:'note',label:'备注',placeholder:'可选'}] },
+  sleep: { title: '添加睡眠', prefix: '', fields: [{type:'time',key:'bedtime',label:'入睡时间'},{type:'time',key:'wakeup',label:'起床时间'},{type:'number',key:'quality',label:'质量评分 (0-100)',placeholder:'80'},{type:'chip',key:'source',label:'来源',options:['手动记录','华为健康','Apple Watch','小米手环','其他'],tags:{}},{type:'date',key:'date',label:'日期'},{type:'text',key:'note',label:'备注',placeholder:'可选'}] },
+  reading: { title: '添加阅读', prefix: '', fields: [{type:'text',key:'bookName',label:'书名',placeholder:'例如：深度工作'},{type:'number',key:'duration',label:'阅读时长 (分钟)',placeholder:'30'},{type:'number',key:'pages',label:'阅读页数',placeholder:'0'},{type:'chip',key:'source',label:'来源',options:['手动记录','微信读书','Kindle','其他'],tags:{}},{type:'date',key:'date',label:'日期'},{type:'text',key:'note',label:'备注',placeholder:'可选'}] }
+};
+
+function openAddRecordModal(domainId) {
+  toggleFabMenu();
+  var config = domainFormConfigs[domainId]; if (!config) return;
+  var bodyHtml = '';
+  config.fields.forEach(function(f) {
+    if (f.type === 'amount') { bodyHtml += '<div class="add-form-group" style="text-align:center"><div style="font-size:16px;color:var(--text-tertiary);margin-bottom:8px">' + config.prefix + '</div><input class="add-form-input add-amount-input" type="number" placeholder="0.00" step="0.01" id="add-' + f.key + '"></div>'; }
+    else if (f.type === 'text') { bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><input class="add-form-input" type="text" placeholder="' + (f.placeholder || '') + '" id="add-' + f.key + '"></div>'; }
+    else if (f.type === 'number') { bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><input class="add-form-input" type="number" placeholder="' + (f.placeholder || '0') + '" id="add-' + f.key + '"></div>'; }
+    else if (f.type === 'date') { bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><input class="add-form-input" type="date" id="add-' + f.key + '" value="' + new Date().toISOString().split('T')[0] + '"></div>'; }
+    else if (f.type === 'time') { bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><input class="add-form-input" type="time" id="add-' + f.key + '"></div>'; }
+    else if (f.type === 'chip') {
+      var chipsHtml = ''; var commonTags = (f.tags && f.tags['常用']) ? f.tags['常用'] : [];
+      if (commonTags.length > 0) { commonTags.forEach(function(opt) { chipsHtml += '<div class="add-chip" data-key="' + f.key + '" data-value="' + opt + '" onclick="toggleAddChip(this)">' + opt + '<span class="add-chip-tag">常用</span></div>'; }); f.options.filter(function(o) { return commonTags.indexOf(o) === -1; }).forEach(function(opt) { chipsHtml += '<div class="add-chip" data-key="' + f.key + '" data-value="' + opt + '" onclick="toggleAddChip(this)">' + opt + '</div>'; }); }
+      else { f.options.forEach(function(opt) { chipsHtml += '<div class="add-chip" data-key="' + f.key + '" data-value="' + opt + '" onclick="toggleAddChip(this)">' + opt + '</div>'; }); }
+      bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><div class="add-chip-group">' + chipsHtml + '</div></div>';
+    }
+  });
+  var domain = MOCK_DATA.domains.find(function(d) { return d.id === domainId; });
+  openModal(config.title, bodyHtml, '<button class="btn btn-ghost" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="submitAddRecord(\'' + domainId + '\')">保存</button>');
+}
+
+function toggleAddChip(el) { var key = el.dataset.key; document.querySelectorAll('.add-chip[data-key="' + key + '"]').forEach(function(c) { c.classList.remove('active'); }); el.classList.add('active'); }
+function submitAddRecord(domainId) { var config = domainFormConfigs[domainId]; var amountField = config.fields.find(function(f) { return f.type === 'amount'; }); if (amountField) { var amount = document.getElementById('add-' + amountField.key); if (amount && (!amount.value || parseFloat(amount.value) <= 0)) { showToast('warning', '请输入有效金额'); return; } } closeModal(); var domain = MOCK_DATA.domains.find(function(d) { return d.id === domainId; }); showToast('success', '已添加到「' + domain.name + '」'); }
+
+function openEditRecordModal(domainId) {
+  var config = domainFormConfigs[domainId] || domainFormConfigs.expense;
+  var domain = MOCK_DATA.domains.find(function(d) { return d.id === domainId; }) || MOCK_DATA.domains[0];
+  var bodyHtml = '<div style="text-align:center;margin-bottom:16px"><div style="width:56px;height:56px;border-radius:var(--radius-md);background:' + domain.color + '15;color:' + domain.color + ';display:inline-flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:8px"><i class="fas ' + domain.icon + '"></i></div></div>';
+  config.fields.forEach(function(f) {
+    var prefill = '';
+    if (f.type === 'amount') prefill = domainId === 'expense' ? '32.50' : domainId === 'income' ? '12500' : '';
+    else if (f.type === 'text' && f.key === 'merchant') prefill = '美团外卖';
+    else if (f.type === 'text' && f.key === 'bookName') prefill = '深度工作';
+    else if (f.type === 'number' && f.key === 'distance') prefill = '5.2';
+    else if (f.type === 'number' && f.key === 'duration') prefill = domainId === 'sport' ? '32' : domainId === 'reading' ? '45' : '';
+    else if (f.type === 'number' && f.key === 'calories') prefill = '286';
+    else if (f.type === 'number' && f.key === 'quality') prefill = '82';
+    else if (f.type === 'time' && f.key === 'bedtime') prefill = '23:15';
+    else if (f.type === 'time' && f.key === 'wakeup') prefill = '06:38';
+    if (f.type === 'amount') { bodyHtml += '<div class="add-form-group" style="text-align:center"><div style="font-size:16px;color:var(--text-tertiary);margin-bottom:8px">' + config.prefix + '</div><input class="add-form-input add-amount-input" type="number" value="' + prefill + '" step="0.01" id="edit-' + f.key + '"></div>'; }
+    else if (f.type === 'text') { bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><input class="add-form-input" type="text" value="' + prefill + '" placeholder="' + (f.placeholder || '') + '" id="edit-' + f.key + '"></div>'; }
+    else if (f.type === 'number') { bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><input class="add-form-input" type="number" value="' + prefill + '" placeholder="' + (f.placeholder || '0') + '" id="edit-' + f.key + '"></div>'; }
+    else if (f.type === 'date') { bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><input class="add-form-input" type="date" id="edit-' + f.key + '" value="2026-05-01"></div>'; }
+    else if (f.type === 'time') { bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><input class="add-form-input" type="time" value="' + prefill + '" id="edit-' + f.key + '"></div>'; }
+    else if (f.type === 'chip') {
+      var prefillChip = f.key === 'platform' ? '美团' : f.key === 'category' ? '餐饮' : f.key === 'payment' ? '微信支付' : f.key === 'type' ? '跑步' : '';
+      var chipsHtml = '';
+      f.options.forEach(function(opt) { chipsHtml += '<div class="add-chip ' + (opt === prefillChip ? 'active' : '') + '" data-key="' + f.key + '" data-value="' + opt + '" onclick="toggleAddChip(this)">' + opt + '</div>'; });
+      bodyHtml += '<div class="add-form-group"><label class="add-form-label">' + f.label + '</label><div class="add-chip-group">' + chipsHtml + '</div></div>';
+    }
+  });
+  bodyHtml += '<div style="margin-top:var(--spacing-lg);padding-top:var(--spacing-lg);border-top:1px solid var(--border-light)"><button class="btn btn-danger btn-block" onclick="confirmDeleteRecord(\'' + domainId + '\')"><i class="fas fa-trash"></i> 删除此记录</button></div>';
+  openModal('编辑记录', bodyHtml, '<button class="btn btn-ghost" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="submitEditRecord()">保存</button>');
+}
+
+function submitEditRecord() { closeModal(); showToast('success', '记录已更新'); }
+function confirmDeleteRecord(domainId) { openModal('确认删除', '<div style="text-align:center;padding:8px 0"><div style="font-size:36px;color:var(--danger);margin-bottom:12px"><i class="fas fa-exclamation-triangle"></i></div><div style="font-size:15px;font-weight:600;margin-bottom:6px">确定删除此记录？</div><div style="font-size:13px;color:var(--text-secondary)">删除后不可恢复，关联的截图和AI摘要也将被移除</div></div>', '<button class="btn btn-ghost" onclick="closeModal()">取消</button><button class="btn btn-danger" onclick="doDeleteRecord()">确认删除</button>'); }
+function doDeleteRecord() { closeModal(); showToast('success', '记录已删除'); }
+function toggleSwitch(el) { el.classList.toggle('active'); showToast('success', el.classList.contains('active') ? '已开启' : '已关闭'); }
+function showTokenInfo() { openModal('上传 Token', '<div style="text-align:center;padding:8px 0"><div style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.6">将此 Token 复制到 iOS 快捷指令中，即可通过截图直接上传数据到平台。</div><div style="background:var(--border-light);border-radius:var(--radius-md);padding:14px 16px;font-family:var(--font-num);font-size:14px;font-weight:600;color:var(--text-primary);word-break:break-all;user-select:all">' + MOCK_DATA.user.token + '</div><div style="margin-top:12px;font-size:11px;color:var(--text-tertiary)"><i class="fas fa-info-circle"></i> 请勿将 Token 分享给他人</div></div>', '<button class="btn btn-ghost" onclick="closeModal()">关闭</button><button class="btn btn-primary" onclick="copyToken()">复制 Token</button>'); }
+function copyToken() { showToast('success', 'Token 已复制到剪贴板'); closeModal(); }
+function showProUpgrade() { openModal('升级到 Pro', '<div style="text-align:center;padding:8px 0"><div style="font-size:36px;color:var(--accent);margin-bottom:12px"><i class="fas fa-crown"></i></div><div style="font-size:18px;font-weight:700;margin-bottom:6px">个人数据平台 Pro</div><div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">解锁全部高级能力</div><div style="text-align:left"><div style="display:flex;align-items:center;gap:8px;padding:8px 0;font-size:13px;color:var(--text-primary)"><i class="fas fa-check-circle" style="color:var(--success)"></i> 无限自定义数据域</div><div style="display:flex;align-items:center;gap:8px;padding:8px 0;font-size:13px;color:var(--text-primary)"><i class="fas fa-check-circle" style="color:var(--success)"></i> AI 辅助建模板</div><div style="display:flex;align-items:center;gap:8px;padding:8px 0;font-size:13px;color:var(--text-primary)"><i class="fas fa-check-circle" style="color:var(--success)"></i> 高级跨域分析</div><div style="display:flex;align-items:center;gap:8px;padding:8px 0;font-size:13px;color:var(--text-primary)"><i class="fas fa-check-circle" style="color:var(--success)"></i> 更长图片留存</div><div style="display:flex;align-items:center;gap:8px;padding:8px 0;font-size:13px;color:var(--text-primary)"><i class="fas fa-check-circle" style="color:var(--success)"></i> 批量导入</div><div style="display:flex;align-items:center;gap:8px;padding:8px 0;font-size:13px;color:var(--text-primary)"><i class="fas fa-check-circle" style="color:var(--success)"></i> 更高 AI 识别额度</div></div><div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border-light)"><div style="font-family:var(--font-num);font-size:28px;font-weight:700;color:var(--text-primary)">¥25<span style="font-size:14px;font-weight:400;color:var(--text-tertiary)">/月</span></div><div style="font-size:12px;color:var(--text-tertiary);margin-top:4px">年付 ¥229/年，节省 ¥71</div></div></div>', '<button class="btn btn-ghost" onclick="closeModal()">稍后再说</button><button class="btn btn-primary" onclick="closeModal();showToast(\'info\',\'支付功能开发中\')">立即订阅</button>'); }
+
+</script>
+
+</body>
+</html>

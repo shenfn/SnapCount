@@ -1,80 +1,94 @@
 <template>
   <div class="page active">
-    <div class="topbar">
-      <h1>待处理</h1>
-      <div class="sub">
-        {{ totalPending ? `${totalPending} 条记录需要处理` : '全部处理完毕' }}
-      </div>
-    </div>
-    <div style="height:12px"></div>
-
-    <div v-if="!totalPending" class="empty">
-      <div class="e-icon">✓</div><p>全部补充完毕</p>
+    <div class="page-title">待处理</div>
+    <div class="page-subtitle">
+      {{ totalPending ? `${totalPending} 条记录等待分类、确认或补全` : '当前没有待处理记录' }}
     </div>
 
-    <div v-if="store.stagingRecords.value.length" class="sec-title">
-      <div>中转站</div>
-      <span>{{ store.stagingRecords.value.length }} 条</span>
+    <div class="chip-group">
+      <div class="chip active">全部 <span class="chip-count">{{ totalPending }}</span></div>
+      <div class="chip">待分类 <span class="chip-count">{{ store.pendingSummary.value.routingFailed }}</span></div>
+      <div class="chip">待确认 <span class="chip-count">{{ store.pendingSummary.value.pendingReview }}</span></div>
+      <div class="chip">AI失败 <span class="chip-count">{{ store.pendingSummary.value.aiError }}</span></div>
+      <div class="chip">账单补充 <span class="chip-count">{{ store.pendingSummary.value.billPending }}</span></div>
     </div>
-    <div v-for="r in store.stagingRecords.value" :key="r.id" class="staging-item">
-      <div class="staging-head">
-        <div v-if="r.imageUrl" class="staging-thumb" @click="store.openImgFull(r.imageUrl)">
-          <img :src="r.imageUrl" alt="">
+
+    <div v-if="!totalPending" class="empty-state">
+      <div class="empty-title">中转站是空的</div>
+      <div class="empty-desc">新的非记账截图、待确认记录和识别失败截图都会先进入这里。</div>
+    </div>
+
+    <div v-if="store.stagingRecords.value.length" class="section-header">
+      <div class="section-title">中转站</div>
+      <div class="section-action">{{ store.stagingRecords.value.length }} 条</div>
+    </div>
+    <div class="pending-record-list" v-if="store.stagingRecords.value.length">
+      <div v-for="r in store.stagingRecords.value" :key="r.id" class="pending-record-card">
+        <div class="pending-record-top">
+          <div class="pending-record-thumb" @click="r.imageUrl && store.openImgFull(r.imageUrl)">
+            <img v-if="r.imageUrl" :src="r.imageUrl" alt="">
+            <span v-else>图</span>
+          </div>
+          <div class="pending-record-main">
+            <div class="pending-record-title-row">
+              <div class="pending-record-title">{{ r.domainName || statusLabel(r.status) }}</div>
+              <span class="badge" :class="badgeClass(r.status)">{{ statusLabel(r.status) }}</span>
+            </div>
+            <div class="pending-record-sub">{{ typeLabel(r.recordType) }} · {{ formatCreated(r.createdAt) }}</div>
+            <div class="pending-record-summary">{{ r.summary }}</div>
+          </div>
         </div>
-        <div v-else class="staging-thumb placeholder">图</div>
-        <div>
-          <div class="staging-title">{{ r.domainName || statusLabel(r.status) }}</div>
-          <div class="staging-meta">{{ formatCreated(r.createdAt) }} · {{ typeLabel(r.recordType) }}</div>
+
+        <div class="pending-record-meta">
+          <div class="confidence-bar">
+            <div class="progress-bar">
+              <div class="progress-bar-fill" :style="{ width: `${Math.round((r.confidence || 0) * 100)}%`, background: confidenceColor(r.confidence) }"></div>
+            </div>
+            <div class="confidence-value">{{ Math.round((r.confidence || 0) * 100) }}%</div>
+          </div>
+          <div v-if="r.lastErrorMessage" class="pending-record-error">{{ r.lastErrorMessage }}</div>
         </div>
-        <span class="staging-status" :class="statusClass(r.status)">{{ statusLabel(r.status) }}</span>
-      </div>
-      <div class="staging-summary">{{ r.summary }}</div>
-      <div v-if="r.lastErrorMessage" class="staging-error">{{ r.lastErrorMessage }}</div>
-      <div class="pending-fields">
-        <span class="field-chip" :class="r.confidence >= 0.7 ? 'field-ok' : 'field-missing'">
-          置信度 {{ Math.round((r.confidence || 0) * 100) }}%
-        </span>
-        <span v-if="r.imageType" class="field-chip field-ok">{{ r.imageType }}</span>
-        <span v-if="r.retryCount" class="field-chip field-missing">已重试 {{ r.retryCount }} 次</span>
-      </div>
-      <div class="staging-actions">
-        <button class="staging-btn" @click="store.retryStagingRecord(r)">重试</button>
-        <button class="staging-btn danger" @click="store.discardStagingRecord(r)">销毁</button>
+
+        <div class="pending-record-actions">
+          <button class="btn btn-secondary btn-sm" @click="store.retryStagingRecord(r)">重试</button>
+          <button class="btn btn-danger btn-sm" @click="store.discardStagingRecord(r)">销毁</button>
+        </div>
       </div>
     </div>
 
-    <div v-if="store.pendingBills.value.length" class="sec-title">
-      <div>账单待补充</div>
-      <span>{{ store.pendingBills.value.length }} 条</span>
+    <div v-if="store.pendingBills.value.length" class="section-header">
+      <div class="section-title">账单待补充</div>
+      <div class="section-action">{{ store.pendingBills.value.length }} 条</div>
     </div>
-    <div v-for="b in store.pendingBills.value" :key="b.id" class="pending-item" @click="store.openPendingModal(b)">
-      <div class="pending-row">
-        <div>
-          <div class="pending-amount">-¥{{ b.amount.toFixed(2) }}</div>
-          <div class="pending-time">{{ b.date }} {{ b.time }} · 截图识别</div>
+    <div class="pending-record-list" v-if="store.pendingBills.value.length">
+      <div v-for="b in store.pendingBills.value" :key="b.id" class="pending-record-card clickable" @click="store.openPendingModal(b)">
+        <div class="pending-record-top">
+          <div class="pending-record-thumb placeholder expense">支</div>
+          <div class="pending-record-main">
+            <div class="pending-record-title-row">
+              <div class="pending-record-title">{{ b.name }}</div>
+              <div class="pending-record-amount">-¥{{ b.amount.toFixed(2) }}</div>
+            </div>
+            <div class="pending-record-sub">{{ b.date }} {{ b.time }} · 截图识别</div>
+            <div class="pending-field-row">
+              <span class="badge" :class="b.platform === '?' ? 'badge-warning' : 'badge-success'">{{ b.platform === '?' ? '平台未知' : b.platform }}</span>
+              <span class="badge" :class="b.cat === '?' ? 'badge-warning' : 'badge-success'">{{ b.cat === '?' ? '分类未知' : b.cat }}</span>
+              <span class="badge" :class="b.payment === '?' ? 'badge-warning' : 'badge-success'">{{ b.payment === '?' ? '支付未知' : b.payment }}</span>
+            </div>
+          </div>
         </div>
-        <div style="font-size:13px; color:var(--accent)">补充 ›</div>
-      </div>
-      <div class="pending-fields">
-        <span class="field-chip" :class="b.platform === '?' ? 'field-missing' : 'field-ok'">
-          {{ b.platform === '?' ? '? 平台未知' : '✓ ' + b.platform }}
-        </span>
-        <span class="field-chip" :class="b.cat === '?' ? 'field-missing' : 'field-ok'">
-          {{ b.cat === '?' ? '? 分类未知' : '✓ ' + b.cat }}
-        </span>
-        <span class="field-chip" :class="b.payment === '?' ? 'field-missing' : 'field-ok'">
-          {{ b.payment === '?' ? '? 支付未知' : '✓ ' + b.payment }}
-        </span>
       </div>
     </div>
+
     <div class="spacer"></div>
   </div>
 </template>
 
 <script setup>
 import { computed, inject } from 'vue'
-const store = inject('store')
+import { formatDateTimeLabel } from '../../utils/helpers'
 
+const store = inject('store')
 const totalPending = computed(() => store.pendingBills.value.length + store.stagingRecords.value.length)
 
 function statusLabel(status) {
@@ -89,21 +103,24 @@ function statusLabel(status) {
   return map[status] || '待处理'
 }
 
-function statusClass(status) {
-  if (status === 'ai_error' || status === 'failed') return 'error'
-  if (status === 'routing_failed' || status === 'unrouted' || status === 'unassigned') return 'warn'
-  return 'ok'
+function badgeClass(status) {
+  if (status === 'ai_error' || status === 'failed') return 'badge-danger'
+  if (status === 'routing_failed' || status === 'unrouted' || status === 'unassigned') return 'badge-warning'
+  return 'badge-primary'
 }
 
 function typeLabel(type) {
-  const map = { expense: '支出', income: '收入', uncertain: '未确定' }
-  return map[type] || '未确定'
+  const map = { expense: '支出截图', income: '收入截图', uncertain: '未确定截图' }
+  return map[type] || '待处理截图'
+}
+
+function confidenceColor(confidence) {
+  if ((confidence || 0) >= 0.7) return 'var(--success)'
+  if ((confidence || 0) >= 0.4) return 'var(--warning)'
+  return 'var(--danger)'
 }
 
 function formatCreated(value) {
-  if (!value) return ''
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return ''
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return formatDateTimeLabel(value)
 }
 </script>

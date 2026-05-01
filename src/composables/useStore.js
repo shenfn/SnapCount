@@ -69,6 +69,11 @@ export function useStore() {
     imagePath: null,
   })
 
+  const settingsState = reactive({
+    aiLogsEnabled: true,
+    keepSourceImages: true,
+  })
+
   const monthLabel = computed(() => formatMonthLabel(currentYear.value, currentMonth.value))
 
   const doneBills = computed(() => bills.value.filter(b => b.status === 'done'))
@@ -87,6 +92,134 @@ export function useStore() {
   const filteredBills = computed(() => {
     if (currentFilter.value === 'all') return bills.value
     return bills.value.filter(b => b.cat === currentFilter.value)
+  })
+
+  const pendingSummary = computed(() => {
+    const summary = {
+      total: pendingBills.value.length + stagingRecords.value.length,
+      billPending: pendingBills.value.length,
+      routingFailed: 0,
+      pendingReview: 0,
+      aiError: 0,
+    }
+    stagingRecords.value.forEach(item => {
+      if (item.status === 'routing_failed' || item.status === 'unrouted' || item.status === 'unassigned') summary.routingFailed += 1
+      else if (item.status === 'pending_review') summary.pendingReview += 1
+      else if (item.status === 'ai_error' || item.status === 'failed') summary.aiError += 1
+    })
+    return summary
+  })
+
+  const domains = computed(() => {
+    const expenseCount = bills.value.length
+    const incomeCount = incomeRecords.value.length
+    return [
+      {
+        id: 'expense',
+        name: '消费记账',
+        shortName: '消费',
+        icon: '💸',
+        tone: 'expense',
+        color: '#C2410C',
+        meta: `${expenseCount} 条记录 · 系统内置`,
+        recordCount: expenseCount,
+        isSystem: true,
+        description: '识别消费截图、账单详情和手动支出记录。',
+      },
+      {
+        id: 'income',
+        name: '收入记录',
+        shortName: '收入',
+        icon: '💰',
+        tone: 'income',
+        color: '#1565C0',
+        meta: `${incomeCount} 条记录 · 系统内置`,
+        recordCount: incomeCount,
+        isSystem: true,
+        description: '记录工资、转账收款、报销和其他收入来源。',
+      },
+      {
+        id: 'sport',
+        name: '运动记录',
+        shortName: '运动',
+        icon: '🏃',
+        tone: 'sport',
+        color: '#B45309',
+        meta: '0 条记录 · 预留模板',
+        recordCount: 0,
+        isSystem: true,
+        description: '后续承接华为健康、Keep 等运动截图。',
+      },
+      {
+        id: 'sleep',
+        name: '睡眠记录',
+        shortName: '睡眠',
+        icon: '🌙',
+        tone: 'sleep',
+        color: '#4338CA',
+        meta: '0 条记录 · 预留模板',
+        recordCount: 0,
+        isSystem: true,
+        description: '后续承接睡眠追踪截图和睡眠日志。',
+      },
+      {
+        id: 'reading',
+        name: '阅读记录',
+        shortName: '阅读',
+        icon: '📚',
+        tone: 'reading',
+        color: '#0369A1',
+        meta: '0 条记录 · 预留模板',
+        recordCount: 0,
+        isSystem: true,
+        description: '后续承接阅读时长、页数和书籍进度记录。',
+      },
+    ]
+  })
+
+  const homeTimeline = computed(() => {
+    const stagingItems = stagingRecords.value.slice(0, 8).map(item => ({
+      id: `staging-${item.id}`,
+      kind: 'staging',
+      title: item.domainName || '待处理截图',
+      subtitle: item.summary,
+      amountLabel: item.recordType === 'income'
+        ? '+ 待确认'
+        : item.recordType === 'expense'
+          ? '- 待确认'
+          : '待分类',
+      dateLabel: item.createdAt,
+      imageUrl: item.imageUrl,
+      color: item.status === 'ai_error' ? '#B91C1C' : '#B45309',
+    }))
+
+    const expenseItems = bills.value.slice(0, 8).map(item => ({
+      id: `expense-${item.id}`,
+      kind: 'expense',
+      title: item.name,
+      subtitle: `${item.platform} · ${item.cat}`,
+      amountLabel: `-¥${item.amount.toFixed(2)}`,
+      dateLabel: item.createdAt,
+      imageUrl: null,
+      color: '#C2410C',
+      raw: item,
+    }))
+
+    const incomeItems = recentIncomeRecords.value.slice(0, 8).map(item => ({
+      id: `income-${item.id}`,
+      kind: 'income',
+      title: item.source || incomeCatMap[item.cat]?.label || '收入',
+      subtitle: incomeCatMap[item.cat]?.label || '收入记录',
+      amountLabel: `+¥${item.amount.toFixed(2)}`,
+      dateLabel: item.createdAt,
+      imageUrl: null,
+      color: '#1565C0',
+      raw: item,
+    }))
+
+    return [...stagingItems, ...expenseItems, ...incomeItems]
+      .sort((a, b) => (b.dateLabel || '').localeCompare(a.dateLabel || ''))
+      .slice(0, 10)
   })
 
   const platformChartData = computed(() => {
@@ -555,6 +688,18 @@ export function useStore() {
     showFlash('重试入口已预留，下一步接入重新识别队列')
   }
 
+  function openDomainPage(domainId) {
+    if (domainId === 'expense') currentPage.value = 'domains'
+    else if (domainId === 'income') currentPage.value = 'domains'
+    else currentPage.value = 'domains'
+  }
+
+  function toggleSetting(key) {
+    if (!(key in settingsState)) return
+    settingsState[key] = !settingsState[key]
+    showFlash(settingsState[key] ? '✓ 已开启' : '✓ 已关闭')
+  }
+
   async function confirmDelete() {
     const { type, id, imagePath } = deleteConfirm
     deleteConfirm.open = false
@@ -612,6 +757,7 @@ export function useStore() {
     bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords,
     doneBills, pendingBills, filteredBills,
     recentEntries,
+    domains, pendingSummary, homeTimeline,
     totalExpense, totalIncome, netBalance,
     platformChartData, payChartData,
     currentFilter,
@@ -631,5 +777,6 @@ export function useStore() {
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
     discardStagingRecord, retryStagingRecord,
+    openDomainPage, settingsState, toggleSetting,
   }
 }
