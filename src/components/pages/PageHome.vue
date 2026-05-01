@@ -24,16 +24,16 @@
           </div>
         </div>
         <div class="stats-mini-card">
-          <div class="stats-mini-icon balance">余</div>
+          <div class="stats-mini-icon today">今</div>
           <div>
-            <div class="stats-mini-label">本月结余</div>
-            <div class="stats-mini-value">¥ {{ store.netBalance.value.toFixed(0) }}</div>
+            <div class="stats-mini-label">今日支出</div>
+            <div class="stats-mini-value">¥ {{ store.todayExpense.value.toFixed(2) }}</div>
           </div>
         </div>
       </div>
     </div>
 
-    <div v-if="store.pendingSummary.value.total" class="home-pending-alert" @click="store.currentPage.value = 'pending'">
+    <div v-if="store.pendingSummary.value.total" class="home-pending-alert" @click="store.navigateTo('pending')">
       <div class="pending-alert-icon">
         待
         <div class="pending-alert-dot"></div>
@@ -50,8 +50,8 @@
     </div>
 
     <div class="section-header">
-      <div class="section-title">本周趋势</div>
-      <div class="section-action" @click="store.currentPage.value = 'report'">报告 ›</div>
+      <div class="section-title">本周支出趋势</div>
+      <div class="section-action" @click="store.navigateTo('report')">报告 ›</div>
     </div>
     <div class="home-week-chart-wrap">
       <div class="home-week-chart-inner">
@@ -86,14 +86,14 @@
 
     <div class="section-header">
       <div class="section-title">已安装数据域</div>
-      <div class="section-action" @click="store.currentPage.value = 'domains'">全部 ›</div>
+      <div class="section-action" @click="store.navigateTo('domains')">全部 ›</div>
     </div>
-    <div class="home-domains-scroll">
+    <div class="home-domains-grid">
       <div
         v-for="domain in store.domains.value"
         :key="domain.id"
         class="domain-quick-card"
-        @click="store.currentPage.value = 'domains'"
+        @click="store.openDomainPage(domain.id)"
       >
         <div class="domain-quick-icon" :style="{ background: `${domain.color}18`, color: domain.color }">
           {{ domain.icon }}
@@ -105,7 +105,7 @@
 
     <div class="section-header">
       <div class="section-title">最新时间线</div>
-      <div class="section-action" @click="store.currentPage.value = 'pending'">待处理 ›</div>
+      <div class="section-action" @click="store.navigateTo('pending')">待处理 ›</div>
     </div>
     <div class="home-timeline">
       <div v-if="!store.homeTimeline.value.length" class="empty-state">
@@ -164,17 +164,15 @@ function timelineMark(kind) {
 
 function handleTimelineClick(item) {
   if (item.kind === 'staging') {
-    store.currentPage.value = 'pending'
+    store.navigateTo('pending')
     return
   }
   if (item.kind === 'income' && item.raw) {
-    store.openIncomeEditModal(item.raw)
+    store.openRecordDetail('income', item.raw)
     return
   }
-  if (item.kind === 'expense' && item.raw?.status === 'pending') {
-    store.openPendingModal(item.raw)
-    return
+  if (item.kind === 'expense' && item.raw) {
+    store.openRecordDetail('expense', item.raw)
   }
-  store.currentPage.value = 'domains'
 }
 </script>

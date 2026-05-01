@@ -21,22 +21,23 @@
     <PageDomains  v-show="store.currentPage.value === 'domains'" />
     <PageReport   v-show="store.currentPage.value === 'report'" />
     <PageSettings v-show="store.currentPage.value === 'settings'" />
+    <PageRecordDetail v-show="store.currentPage.value === 'record-detail'" />
 
     <!-- Bottom Nav -->
     <nav class="nav platform-nav">
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'home' }" @click="store.currentPage.value = 'home'">
+      <div class="nav-item" :class="{ active: store.currentPage.value === 'home' }" @click="store.navigateTo('home')">
         <div class="nav-icon">◉</div><div>首页</div>
       </div>
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'pending' }" @click="store.currentPage.value = 'pending'">
+      <div class="nav-item" :class="{ active: store.currentPage.value === 'pending' }" @click="store.navigateTo('pending')">
         <div class="nav-icon">◌</div><div>待处理</div>
       </div>
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'domains' }" @click="store.currentPage.value = 'domains'">
+      <div class="nav-item" :class="{ active: store.currentPage.value === 'domains' }" @click="store.navigateTo('domains')">
         <div class="nav-icon">▣</div><div>数据域</div>
       </div>
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'report' }" @click="store.currentPage.value = 'report'">
+      <div class="nav-item" :class="{ active: store.currentPage.value === 'report' }" @click="store.navigateTo('report')">
         <div class="nav-icon">◫</div><div>报告</div>
       </div>
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'settings' }" @click="store.currentPage.value = 'settings'">
+      <div class="nav-item" :class="{ active: store.currentPage.value === 'settings' }" @click="store.navigateTo('settings')">
         <div class="nav-icon">⚙</div><div>设置</div>
       </div>
     </nav>
@@ -44,7 +45,7 @@
     <!-- FAB -->
     <div class="fab-overlay" :class="{ open: fabOpen }" @click="fabOpen = false"></div>
     <div class="fab-menu" :class="{ open: fabOpen }">
-      <div class="fab-item" @click="store.currentPage.value = 'domains'; store.showFlash('数据域创建入口将在阶段 3 接入'); fabOpen = false">🧩 新建数据域</div>
+      <div class="fab-item" @click="store.navigateTo('domains'); store.showFlash('数据域创建入口将在阶段 3 接入'); fabOpen = false">🧩 新建数据域</div>
       <div class="fab-item" @click="store.openIncomeModal(); fabOpen = false">💰 添加收入</div>
       <div class="fab-item" @click="store.openExpenseModal(); fabOpen = false">💸 添加支出</div>
     </div>
@@ -94,6 +95,7 @@ import PagePending from './components/pages/PagePending.vue'
 import PageDomains from './components/pages/PageDomains.vue'
 import PageReport  from './components/pages/PageReport.vue'
 import PageSettings from './components/pages/PageSettings.vue'
+import PageRecordDetail from './components/pages/PageRecordDetail.vue'
 import ModalPending from './components/ModalPending.vue'
 import ModalIncome  from './components/ModalIncome.vue'
 import ModalExpense from './components/ModalExpense.vue'

@@ -3,12 +3,14 @@ import { sb } from '../lib/supabase'
 import {
   formatDate, formatMonthLabel, mapTransaction,
   incomeCatMap, catCodeMap, payAliasMap,
+  getLocalDateKey,
 } from '../utils/helpers'
 
 export function useStore() {
   const currentYear = ref(new Date().getFullYear())
   const currentMonth = ref(new Date().getMonth() + 1)
   const currentPage = ref('home')
+  const pageHistory = ref([])
 
   const bills = ref([])
   const incomeRecords = ref([])
@@ -24,6 +26,7 @@ export function useStore() {
   let flashTimer = null
 
   const imgOverlay = reactive({ open: false, src: '' })
+  const detailRecord = ref(null)
 
   const pendingModal = reactive({
     open: false,
@@ -53,6 +56,8 @@ export function useStore() {
 
   const expenseModal = reactive({
     open: false,
+    mode: 'create',
+    id: null,
     amount: '',
     merchantName: '',
     platform: null,
@@ -60,6 +65,9 @@ export function useStore() {
     payment: null,
     note: '',
     date: '',
+    imageUrl: null,
+    imagePath: null,
+    imageLoadError: false,
   })
 
   const deleteConfirm = reactive({
@@ -82,6 +90,13 @@ export function useStore() {
   const totalExpense = computed(() => doneBills.value.reduce((s, b) => s + b.amount, 0))
   const totalIncome = computed(() => incomeRecords.value.reduce((s, r) => s + r.amount, 0))
   const netBalance = computed(() => totalIncome.value - totalExpense.value)
+  const currentMonthDayKey = computed(() => getLocalDateKey())
+  const todayExpense = computed(() => {
+    const todayKey = getLocalDateKey()
+    return doneBills.value
+      .filter(bill => bill.dateRaw === todayKey)
+      .reduce((sum, bill) => sum + bill.amount, 0)
+  })
 
   const recentEntries = computed(() => {
     const expenseItems = bills.value.map(b => ({ ...b, entryKind: 'expense', sortDate: b.createdAt || `${b.dateRaw || ''} ${b.time || ''}` }))
@@ -221,6 +236,8 @@ export function useStore() {
       .sort((a, b) => (b.dateLabel || '').localeCompare(a.dateLabel || ''))
       .slice(0, 10)
   })
+
+  const activeDomainId = computed(() => detailRecord.value?.domainId || null)
 
   const platformChartData = computed(() => {
     const grouped = {}
@@ -578,6 +595,13 @@ export function useStore() {
       closeIncomeModal()
       showFlash('✓ 收入已更新')
       await loadData()
+      if (detailRecord.value?.id === incomeModal.id) {
+        const updated = incomeRecords.value.find(item => item.id === incomeModal.id)
+          || recentIncomeRecords.value.find(item => item.id === incomeModal.id)
+        if (updated) {
+          await openRecordDetail('income', updated)
+        }
+      }
       return
     }
     const { error } = await sb.from('income_records').insert({
@@ -599,8 +623,60 @@ export function useStore() {
     incomeModal.imageLoadError = true
   }
 
+  let expenseModalInitial = null
+
+  function snapshotExpenseModal() {
+    return {
+      mode: expenseModal.mode,
+      id: expenseModal.id,
+      amount: expenseModal.amount,
+      merchantName: expenseModal.merchantName,
+      platform: expenseModal.platform,
+      category: expenseModal.category,
+      payment: expenseModal.payment,
+      note: expenseModal.note,
+      date: expenseModal.date,
+      imagePath: expenseModal.imagePath,
+    }
+  }
+
+  function setExpenseModalInitial() {
+    expenseModalInitial = snapshotExpenseModal()
+  }
+
+  function hasExpenseChanges() {
+    if (!expenseModalInitial) return false
+    const current = snapshotExpenseModal()
+    return current.mode !== expenseModalInitial.mode
+      || current.id !== expenseModalInitial.id
+      || current.amount !== expenseModalInitial.amount
+      || current.merchantName !== expenseModalInitial.merchantName
+      || current.platform !== expenseModalInitial.platform
+      || current.category !== expenseModalInitial.category
+      || current.payment !== expenseModalInitial.payment
+      || current.note !== expenseModalInitial.note
+      || current.date !== expenseModalInitial.date
+      || current.imagePath !== expenseModalInitial.imagePath
+  }
+
+  function resetExpenseChanges() {
+    if (!expenseModalInitial) return
+    expenseModal.mode = expenseModalInitial.mode
+    expenseModal.id = expenseModalInitial.id
+    expenseModal.amount = expenseModalInitial.amount
+    expenseModal.merchantName = expenseModalInitial.merchantName
+    expenseModal.platform = expenseModalInitial.platform
+    expenseModal.category = expenseModalInitial.category
+    expenseModal.payment = expenseModalInitial.payment
+    expenseModal.note = expenseModalInitial.note
+    expenseModal.date = expenseModalInitial.date
+    expenseModal.imagePath = expenseModalInitial.imagePath
+  }
+
   function openExpenseModal() {
     expenseModal.open = true
+    expenseModal.mode = 'create'
+    expenseModal.id = null
     expenseModal.amount = ''
     expenseModal.merchantName = ''
     expenseModal.platform = null
@@ -608,10 +684,32 @@ export function useStore() {
     expenseModal.payment = null
     expenseModal.note = ''
     expenseModal.date = new Date().toISOString().slice(0, 10)
+    expenseModal.imageUrl = null
+    expenseModal.imagePath = null
+    expenseModal.imageLoadError = false
+    setExpenseModalInitial()
+  }
+
+  async function openExpenseEditModal(record) {
+    expenseModal.open = true
+    expenseModal.mode = 'edit'
+    expenseModal.id = record.id
+    expenseModal.amount = String(record.amount || '')
+    expenseModal.merchantName = record.name || ''
+    expenseModal.platform = record.platform && record.platform !== '?' ? record.platform : null
+    expenseModal.category = record.cat && record.cat !== '?' ? record.cat : null
+    expenseModal.payment = record.payment && record.payment !== '?' ? record.payment : null
+    expenseModal.note = record.note || ''
+    expenseModal.date = record.dateRaw || new Date().toISOString().slice(0, 10)
+    expenseModal.imagePath = record.image_path || record.image_url || null
+    expenseModal.imageUrl = await getSignedImageUrl(expenseModal.imagePath)
+    expenseModal.imageLoadError = !!expenseModal.imagePath && !expenseModal.imageUrl
+    setExpenseModalInitial()
   }
 
   function closeExpenseModal() {
     expenseModal.open = false
+    expenseModalInitial = null
   }
 
   async function confirmExpense() {
@@ -624,6 +722,32 @@ export function useStore() {
     const isLargeTransport = expenseModal.category === '出行' && amt >= 200
     const today = new Date().toISOString().slice(0, 10)
     const nowTime = new Date().toTimeString().slice(0, 8)
+
+    if (expenseModal.mode === 'edit' && expenseModal.id) {
+      const { error } = await sb.from('transactions').update({
+        amount: amt,
+        merchant_name: merchantName,
+        platform: expenseModal.platform,
+        category: expenseModal.category,
+        payment_method: expenseModal.payment,
+        transaction_date: expenseModal.date,
+        transaction_time: expenseModal.date === today ? nowTime : null,
+        note: expenseModal.note.trim() || null,
+        is_large_transport: isLargeTransport,
+        transport_type: isLargeTransport ? '交通' : null,
+      }).eq('id', expenseModal.id)
+      if (error) { alert('保存失败：' + error.message); return }
+      closeExpenseModal()
+      showFlash('✓ 支出已更新')
+      await loadData()
+      if (detailRecord.value?.id === expenseModal.id) {
+        const updated = bills.value.find(item => item.id === expenseModal.id)
+        if (updated) {
+          await openRecordDetail('expense', updated)
+        }
+      }
+      return
+    }
 
     const { error } = await sb.from('transactions').insert({
       type: 'expense',
@@ -644,6 +768,11 @@ export function useStore() {
     closeExpenseModal()
     showFlash('✓ 支出已记录')
     await loadData()
+  }
+
+  function markExpenseImageUnavailable() {
+    expenseModal.imageUrl = null
+    expenseModal.imageLoadError = true
   }
 
   function openImgFull(src) {
@@ -689,9 +818,74 @@ export function useStore() {
   }
 
   function openDomainPage(domainId) {
-    if (domainId === 'expense') currentPage.value = 'domains'
-    else if (domainId === 'income') currentPage.value = 'domains'
-    else currentPage.value = 'domains'
+    navigateTo('domains')
+    showFlash(`${domains.value.find(item => item.id === domainId)?.name || '该数据域'}详情页将在下一步接入`)
+  }
+
+  async function openRecordDetail(kind, record) {
+    if (!record) return
+    let imageUrl = null
+    const imagePath = record.image_path || record.image_url || null
+    if (imagePath) imageUrl = await getSignedImageUrl(imagePath)
+    detailRecord.value = {
+      id: record.id,
+      kind,
+      domainId: kind,
+      imagePath,
+      imageUrl,
+      imageLoadError: !!imagePath && !imageUrl,
+      raw: { ...record },
+    }
+    navigateTo('record-detail')
+  }
+
+  function closeRecordDetail() {
+    goBack()
+  }
+
+  function navigateTo(page) {
+    if (currentPage.value === page) return
+    const mainPages = ['home', 'pending', 'domains', 'report', 'settings']
+    if (mainPages.includes(page)) {
+      pageHistory.value = []
+    } else {
+      pageHistory.value.push(currentPage.value)
+    }
+    currentPage.value = page
+  }
+
+  function goBack() {
+    const prev = pageHistory.value.pop()
+    currentPage.value = prev || 'home'
+  }
+
+  async function refreshDetailRecord() {
+    if (!detailRecord.value) return
+    if (detailRecord.value.kind === 'income') {
+      const fresh = incomeRecords.value.find(item => item.id === detailRecord.value.id)
+        || recentIncomeRecords.value.find(item => item.id === detailRecord.value.id)
+      if (fresh) await openRecordDetail('income', fresh)
+      return
+    }
+    if (detailRecord.value.kind === 'expense') {
+      const fresh = bills.value.find(item => item.id === detailRecord.value.id)
+      if (fresh) await openRecordDetail('expense', fresh)
+    }
+  }
+
+  async function openDetailEditor() {
+    if (!detailRecord.value?.raw) return
+    if (detailRecord.value.kind === 'income') {
+      await openIncomeEditModal(detailRecord.value.raw)
+      return
+    }
+    if (detailRecord.value.kind === 'expense') {
+      if (detailRecord.value.raw?.status === 'pending') {
+        await openPendingModal(detailRecord.value.raw)
+        return
+      }
+      await openExpenseEditModal(detailRecord.value.raw)
+    }
   }
 
   function toggleSetting(key) {
@@ -708,6 +902,7 @@ export function useStore() {
         if (pendingModal.open && pendingModal.bill?.id === id) closePendingModal()
         const { error } = await sb.from('transactions').delete().eq('id', id)
         if (error) throw new Error(error.message)
+        if (detailRecord.value?.id === id) goBack()
         if (imagePath && !imagePath.startsWith('https://')) {
           const { data: refs, error: refErr } = await sb.from('transactions')
             .select('id')
@@ -743,6 +938,7 @@ export function useStore() {
           }
         }
         if (incomeModal.open && incomeModal.id === id) closeIncomeModal()
+        if (detailRecord.value?.id === id) goBack()
         showFlash('✓ 已删除')
       }
       await loadData()
@@ -753,16 +949,19 @@ export function useStore() {
 
   return {
     currentYear, currentMonth, currentPage, monthLabel,
+    pageHistory,
     loading, loadError,
     bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords,
     doneBills, pendingBills, filteredBills,
     recentEntries,
     domains, pendingSummary, homeTimeline,
     totalExpense, totalIncome, netBalance,
+    todayExpense, currentMonthDayKey,
     platformChartData, payChartData,
     currentFilter,
     flashMsg, flashVisible,
     imgOverlay,
+    detailRecord, activeDomainId,
     pendingModal,
     incomeModal,
     expenseModal,
@@ -773,10 +972,13 @@ export function useStore() {
     markPendingImageUnavailable,
     openIncomeModal, openIncomeEditModal, closeIncomeModal, confirmIncome,
     hasIncomeChanges, resetIncomeChanges, markIncomeImageUnavailable,
-    openExpenseModal, closeExpenseModal, confirmExpense,
+    openExpenseModal, openExpenseEditModal, closeExpenseModal, confirmExpense,
+    hasExpenseChanges, resetExpenseChanges, markExpenseImageUnavailable,
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
     discardStagingRecord, retryStagingRecord,
-    openDomainPage, settingsState, toggleSetting,
+    openDomainPage, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
+    navigateTo, goBack,
+    settingsState, toggleSetting,
   }
 }

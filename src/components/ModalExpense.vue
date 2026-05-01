@@ -9,8 +9,8 @@
         <div class="sheet-handle"></div>
       </div>
       <div class="sheet-header">
-        <div class="sheet-title">添加支出</div>
-        <div class="sheet-sub">手动补录一笔消费</div>
+        <div class="sheet-title">{{ store.expenseModal.mode === 'edit' ? '编辑支出' : '添加支出' }}</div>
+        <div class="sheet-sub">{{ store.expenseModal.mode === 'edit' ? '调整支出信息与截图' : '手动补录一笔消费' }}</div>
       </div>
 
       <div class="sheet-body" ref="bodyEl">
@@ -18,6 +18,21 @@
         <span class="amount-prefix expense">-¥</span>
         <input type="number" class="amount-input expense" v-model="store.expenseModal.amount"
           placeholder="0.00" min="0.01" step="0.01">
+      </div>
+
+      <div v-if="store.expenseModal.mode === 'edit'" class="thumb-wrap">
+        <div v-if="store.expenseModal.imageUrl" style="width:100%" @click="store.openImgFull(store.expenseModal.imageUrl)">
+          <img :src="store.expenseModal.imageUrl"
+            @error="store.markExpenseImageUnavailable()"
+            style="width:100%; max-height:160px; object-fit:contain; background:#f0f0f0; display:block;">
+          <div style="text-align:center; padding:6px 0; font-size:11px; color:var(--text3);">点击放大原图</div>
+        </div>
+        <template v-else-if="store.expenseModal.imageLoadError">
+          <span>!</span><span>截图文件不可用或已删除</span>
+        </template>
+        <template v-else>
+          <span>□</span><span>无截图预览</span>
+        </template>
       </div>
 
       <div class="sel-section" style="margin-top:16px">
@@ -77,6 +92,10 @@
         <button class="confirm-btn"
           :disabled="!store.expenseModal.amount || !store.expenseModal.platform || !store.expenseModal.category || !store.expenseModal.payment || !store.expenseModal.date"
           @click="store.confirmExpense()">确认保存</button>
+        <button v-if="store.expenseModal.mode === 'edit'" class="delete-bill-btn"
+          @click="store.openDeleteConfirm('bill', store.expenseModal.id, store.expenseModal.imagePath)">
+          删除此支出
+        </button>
       </div>
 
       <div v-if="sheet.showUnsaved.value" class="unsaved-bar">
@@ -98,15 +117,8 @@ const sheet = useBottomSheet(
   computed(() => store.expenseModal.open),
   store.closeExpenseModal,
   {
-    hasChanges: () => !!(store.expenseModal.amount || store.expenseModal.merchantName || store.expenseModal.note || store.expenseModal.platform || store.expenseModal.category || store.expenseModal.payment),
-    resetChanges: () => {
-      store.expenseModal.amount = ''
-      store.expenseModal.merchantName = ''
-      store.expenseModal.note = ''
-      store.expenseModal.platform = null
-      store.expenseModal.category = null
-      store.expenseModal.payment = null
-    },
+    hasChanges: store.hasExpenseChanges,
+    resetChanges: store.resetExpenseChanges,
   }
 )
 const sheetEl = sheet.sheetEl

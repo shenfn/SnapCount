@@ -79,6 +79,8 @@ export function mapTransaction(t) {
     image_path: t.image_url,
     image_hash: t.image_hash,
     transport_type: t.transport_type,
+    note: t.note || '',
+    source: t.source || 'manual',
   }
 }
 
