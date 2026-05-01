@@ -620,9 +620,9 @@ async function runLowCostDispatcher(
     candidate_domains: candidates,
     selected_domain_key: selected?.key ?? null,
     route_confidence: selected?.confidence ?? 0,
-    route_reason: selected?.reason ?? (hasTextButNoCandidate ? "OCR 文本未命中任何模板规则" : looksMeaningless ? "图片基础特征疑似非手机业务截图" : "未命中低成本路由规则"),
-    should_call_vision: !looksMeaningless && !hasTextButNoCandidate,
-    skip_reason: hasTextButNoCandidate ? "NO_TRIGGER_RULE_MATCH" : looksMeaningless ? "LOW_VALUE_IMAGE_FEATURES" : null,
+    route_reason: selected?.reason ?? (hasTextButNoCandidate ? "OCR 文本未命中任何模板规则，交由 Vision 兜底判断" : looksMeaningless ? "图片基础特征疑似非手机业务截图，交由 Vision 兜底判断" : "未命中低成本路由规则，交由 Vision 兜底判断"),
+    should_call_vision: true,
+    skip_reason: null,
   };
 }
 
@@ -754,16 +754,42 @@ function extractJson(text: string): string {
   return text;
 }
 
-async function callKimiVision(imageBytes: Uint8Array, mime: string, apiKey: string): Promise<AIResult> {
+function buildVisionPrompt(dispatcher?: DispatcherResult | null): string {
+  if (!dispatcher) return PROMPT;
+  const context = {
+    ocr_text: dispatcher.raw_text,
+    source_app: dispatcher.source_app,
+    image_features: dispatcher.image_features,
+    candidate_hints: dispatcher.candidate_domains.map((item) => ({
+      key: item.key,
+      name: item.name,
+      confidence: item.confidence,
+      reason: item.reason,
+      matched_keywords: item.matched_keywords,
+      matched_apps: item.matched_apps,
+    })),
+    route_reason: dispatcher.route_reason,
+  };
+  return `${PROMPT}
+
+【本次截图的低成本上下文】
+以下信息由系统预处理得到，只能作为线索，不能替代你对图片本身的判断。即使候选域为空，也必须继续结合图片做最终判断，不要因为低成本规则未命中就返回 uncertain。
+${JSON.stringify(context, null, 2)}
+
+请综合图片内容和以上上下文，仍然按前述 JSON 结构输出。`;
+}
+
+async function callKimiVision(imageBytes: Uint8Array, mime: string, apiKey: string, dispatcher?: DispatcherResult | null): Promise<AIResult> {
   const base64 = toBase64(imageBytes);
   const dataUrl = `data:${mime};base64,${base64}`;
+  const prompt = buildVisionPrompt(dispatcher);
   const body = {
     model: MOONSHOT_MODEL,
     messages: [{
       role: "user",
       content: [
         { type: "image_url", image_url: { url: dataUrl } },
-        { type: "text", text: PROMPT },
+        { type: "text", text: prompt },
       ],
     }],
     temperature: 0.1,
@@ -918,77 +944,12 @@ Deno.serve(async (req) => {
     uploadedNewObject = !upErr;
     // 存储路径（非 signed URL），前端查询时动态生成 signed URL，避免过期问题
 
-    if (!dispatcher.should_call_vision) {
-      const ai: AIResult = {
-        image_type: "other",
-        record_type: "uncertain",
-        domain_key: null,
-        title: null,
-        summary: dispatcher.route_reason,
-        amount: null,
-        merchant_name: null,
-        platform: null,
-        category: null,
-        payment_method: null,
-        income_category: null,
-        source_name: null,
-        occurred_at: null,
-        order_finished_at: null,
-        payload_jsonb: null,
-        confidence: dispatcher.route_confidence,
-      };
-      const staging = await createStagingRecord(supabase, {
-        status: "routing_failed",
-        imagePath: path,
-        imageHash: hash,
-        perceptualHash,
-        ai,
-        occurredAt: null,
-        orderFinishedAt: null,
-        errorType: dispatcher.skip_reason ?? "LOW_COST_DISPATCHER_SKIP",
-        errorMessage: dispatcher.route_reason,
-        dispatcher,
-      });
-      await writeAiLog(supabase, {
-        image_hash: hash,
-        perceptual_hash: perceptualHash,
-        perceptual_distance: perceptualDistance,
-        image_url: path,
-        image_type: ai.image_type,
-        record_type: "uncertain",
-        duplicate_kind: duplicateKind,
-        duplicate_ref_table: duplicateRefTable,
-        duplicate_ref_id: duplicateRefId,
-        target_table: "staging_records",
-        target_id: staging?.id ?? null,
-        staging_record_id: staging?.id ?? null,
-        status: "pending",
-        confidence: dispatcher.route_confidence,
-        duration_ms: Date.now() - startedAt,
-        ai_response: ai,
-        raw_response: JSON.stringify({ dispatcher }),
-        error_message: dispatcher.route_reason,
-        model_provider: "low_cost_dispatcher",
-        model_name: "rules-v1",
-        prompt_version: "platform-v3-builtins",
-      });
-
-      return new Response(JSON.stringify({
-        status: "staging",
-        staging_status: "routing_failed",
-        id: staging?.id ?? null,
-        ai_ok: true,
-        skipped_vision: true,
-        message: "⚠ 低成本路由未命中，已进入待处理",
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
     // 4. 调用 Kimi Vision 识别
     let ai: AIResult;
     let aiOk = true;
     let aiErrorMessage: string | null = null;
     try {
-      ai = await callKimiVision(bytes, mime, moonshot_key);
+      ai = await callKimiVision(bytes, mime, moonshot_key, dispatcher);
     } catch (e) {
       aiOk = false;
       aiErrorMessage = String(e);
