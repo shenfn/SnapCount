@@ -21,6 +21,7 @@
     <PageDomains  v-show="store.currentPage.value === 'domains'" />
     <PageReport   v-show="store.currentPage.value === 'report'" />
     <PageSettings v-show="store.currentPage.value === 'settings'" />
+    <PageDomainDetail v-show="store.currentPage.value === 'domain-detail'" />
     <PageRecordDetail v-show="store.currentPage.value === 'record-detail'" />
 
     <!-- Bottom Nav -->
@@ -95,6 +96,7 @@ import PagePending from './components/pages/PagePending.vue'
 import PageDomains from './components/pages/PageDomains.vue'
 import PageReport  from './components/pages/PageReport.vue'
 import PageSettings from './components/pages/PageSettings.vue'
+import PageDomainDetail from './components/pages/PageDomainDetail.vue'
 import PageRecordDetail from './components/pages/PageRecordDetail.vue'
 import ModalPending from './components/ModalPending.vue'
 import ModalIncome  from './components/ModalIncome.vue'

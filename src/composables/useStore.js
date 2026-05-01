@@ -27,6 +27,7 @@ export function useStore() {
 
   const imgOverlay = reactive({ open: false, src: '' })
   const detailRecord = ref(null)
+  const activeDomainId = ref(null)
 
   const pendingModal = reactive({
     open: false,
@@ -236,8 +237,6 @@ export function useStore() {
       .sort((a, b) => (b.dateLabel || '').localeCompare(a.dateLabel || ''))
       .slice(0, 10)
   })
-
-  const activeDomainId = computed(() => detailRecord.value?.domainId || null)
 
   const platformChartData = computed(() => {
     const grouped = {}
@@ -818,8 +817,8 @@ export function useStore() {
   }
 
   function openDomainPage(domainId) {
-    navigateTo('domains')
-    showFlash(`${domains.value.find(item => item.id === domainId)?.name || '该数据域'}详情页将在下一步接入`)
+    activeDomainId.value = domainId
+    navigateTo('domain-detail')
   }
 
   async function openRecordDetail(kind, record) {
