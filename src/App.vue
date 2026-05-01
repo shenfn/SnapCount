@@ -49,6 +49,9 @@
       <div class="fab-item" @click="store.navigateTo('domains'); store.showFlash('数据域创建入口将在阶段 3 接入'); fabOpen = false">🧩 新建数据域</div>
       <div class="fab-item" @click="store.openIncomeModal(); fabOpen = false">💰 添加收入</div>
       <div class="fab-item" @click="store.openExpenseModal(); fabOpen = false">💸 添加支出</div>
+      <div class="fab-item" @click="store.openUniversalModal('sport'); fabOpen = false">🏃 添加运动</div>
+      <div class="fab-item" @click="store.openUniversalModal('sleep'); fabOpen = false">🌙 添加睡眠</div>
+      <div class="fab-item" @click="store.openUniversalModal('reading'); fabOpen = false">📚 添加阅读</div>
     </div>
     <button class="fab" @click="fabOpen = !fabOpen">+</button>
 
@@ -56,6 +59,7 @@
     <ModalPending />
     <ModalIncome />
     <ModalExpense />
+    <ModalUniversal />
 
     <!-- Delete confirmation -->
     <div v-if="store.deleteConfirm.open"
@@ -101,6 +105,7 @@ import PageRecordDetail from './components/pages/PageRecordDetail.vue'
 import ModalPending from './components/ModalPending.vue'
 import ModalIncome  from './components/ModalIncome.vue'
 import ModalExpense from './components/ModalExpense.vue'
+import ModalUniversal from './components/ModalUniversal.vue'
 
 const store = useStore()
 provide('store', store)

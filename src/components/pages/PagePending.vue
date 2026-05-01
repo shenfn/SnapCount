@@ -98,7 +98,7 @@ import { formatDateTimeLabel } from '../../utils/helpers'
 
 const store = inject('store')
 const totalPending = computed(() => store.pendingBills.value.length + store.stagingRecords.value.length)
-const archiveDomains = computed(() => store.domains.value.filter(domain => !['expense', 'income'].includes(domain.id)))
+const archiveDomains = computed(() => store.domains.value)
 
 function statusLabel(status) {
   const map = {

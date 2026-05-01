@@ -72,6 +72,21 @@ export function useStore() {
     imageLoadError: false,
   })
 
+  const universalModal = reactive({
+    open: false,
+    mode: 'create',
+    id: null,
+    domainKey: 'sport',
+    title: '',
+    primaryValue: '',
+    dimension: '',
+    note: '',
+    date: '',
+    imagePath: null,
+    imageUrl: null,
+    imageLoadError: false,
+  })
+
   const deleteConfirm = reactive({
     open: false,
     type: null,
@@ -803,6 +818,179 @@ export function useStore() {
     expenseModal.imageLoadError = true
   }
 
+  let universalModalInitial = null
+
+  function getUniversalDomainMeta(domainKey = universalModal.domainKey) {
+    const map = {
+      sport: {
+        title: '添加运动',
+        editTitle: '编辑运动',
+        primaryLabel: '运动时长（分钟）',
+        primaryKey: 'duration_minutes',
+        dimensionLabel: '运动类型',
+        dimensionKey: 'sport_type',
+        placeholder: '如：跑步、步行、力量训练',
+        defaultTitle: '运动记录',
+      },
+      sleep: {
+        title: '添加睡眠',
+        editTitle: '编辑睡眠',
+        primaryLabel: '睡眠时长（小时）',
+        primaryKey: 'sleep_hours',
+        dimensionLabel: '质量等级',
+        dimensionKey: 'quality_level',
+        placeholder: '如：良好、一般、深睡不足',
+        defaultTitle: '睡眠记录',
+      },
+      reading: {
+        title: '添加阅读',
+        editTitle: '编辑阅读',
+        primaryLabel: '阅读时长（分钟）',
+        primaryKey: 'reading_minutes',
+        dimensionLabel: '书名',
+        dimensionKey: 'book_name',
+        placeholder: '如：原则、微信读书',
+        defaultTitle: '阅读记录',
+      },
+    }
+    return map[domainKey] || map.sport
+  }
+
+  function snapshotUniversalModal() {
+    return {
+      mode: universalModal.mode,
+      id: universalModal.id,
+      domainKey: universalModal.domainKey,
+      title: universalModal.title,
+      primaryValue: universalModal.primaryValue,
+      dimension: universalModal.dimension,
+      note: universalModal.note,
+      date: universalModal.date,
+      imagePath: universalModal.imagePath,
+    }
+  }
+
+  function setUniversalModalInitial() {
+    universalModalInitial = snapshotUniversalModal()
+  }
+
+  function hasUniversalChanges() {
+    if (!universalModalInitial) return false
+    const current = snapshotUniversalModal()
+    return Object.keys(current).some(key => current[key] !== universalModalInitial[key])
+  }
+
+  function resetUniversalChanges() {
+    if (!universalModalInitial) return
+    Object.assign(universalModal, universalModalInitial)
+  }
+
+  function openUniversalModal(domainKey = 'sport') {
+    const meta = getUniversalDomainMeta(domainKey)
+    universalModal.open = true
+    universalModal.mode = 'create'
+    universalModal.id = null
+    universalModal.domainKey = domainKey
+    universalModal.title = ''
+    universalModal.primaryValue = ''
+    universalModal.dimension = ''
+    universalModal.note = ''
+    universalModal.date = new Date().toISOString().slice(0, 10)
+    universalModal.imagePath = null
+    universalModal.imageUrl = null
+    universalModal.imageLoadError = false
+    if (meta.dimensionKey === 'quality_level') universalModal.dimension = '良好'
+    setUniversalModalInitial()
+  }
+
+  async function openUniversalEditModal(record) {
+    const meta = getUniversalDomainMeta(record.domainKey)
+    const payload = record.payload || {}
+    universalModal.open = true
+    universalModal.mode = 'edit'
+    universalModal.id = record.id
+    universalModal.domainKey = record.domainKey
+    universalModal.title = record.title || ''
+    universalModal.primaryValue = payload[meta.primaryKey] ? String(payload[meta.primaryKey]) : ''
+    universalModal.dimension = payload[meta.dimensionKey] || ''
+    universalModal.note = record.summary || payload.note || ''
+    universalModal.date = (record.occurredAt || record.createdAt || new Date().toISOString()).slice(0, 10)
+    universalModal.imagePath = record.imagePath || null
+    universalModal.imageUrl = await getSignedImageUrl(universalModal.imagePath)
+    universalModal.imageLoadError = !!universalModal.imagePath && !universalModal.imageUrl
+    setUniversalModalInitial()
+  }
+
+  function closeUniversalModal() {
+    universalModal.open = false
+    universalModalInitial = null
+  }
+
+  async function confirmUniversalRecord() {
+    const meta = getUniversalDomainMeta(universalModal.domainKey)
+    const primary = parseFloat(universalModal.primaryValue)
+    if (!primary || primary <= 0 || primary > 99999) {
+      alert('请输入有效数值')
+      return
+    }
+    if (!universalModal.dimension.trim()) {
+      alert(`请填写${meta.dimensionLabel}`)
+      return
+    }
+    if (!universalModal.date) {
+      alert('请选择日期')
+      return
+    }
+
+    const { data: domainRows, error: domainErr } = await sb.from('data_domains')
+      .select('id,key,version')
+      .eq('key', universalModal.domainKey)
+      .eq('status', 'active')
+      .limit(1)
+    if (domainErr || !domainRows?.length) {
+      alert('数据域未就绪，请先执行 007 迁移')
+      return
+    }
+
+    const domainRow = domainRows[0]
+    const title = universalModal.title.trim() || universalModal.dimension.trim() || meta.defaultTitle
+    const payload = {
+      [meta.primaryKey]: primary,
+      [meta.dimensionKey]: universalModal.dimension.trim(),
+      note: universalModal.note.trim() || null,
+      source_app: 'manual',
+    }
+    const body = {
+      domain_id: domainRow.id,
+      domain_key: universalModal.domainKey,
+      domain_version: domainRow.version || '1.0',
+      occurred_at: `${universalModal.date}T12:00:00+08:00`,
+      title,
+      summary: universalModal.note.trim() || `${meta.dimensionLabel}：${universalModal.dimension.trim()}`,
+      payload_jsonb: payload,
+      source: 'manual',
+      source_image_path: universalModal.imagePath || null,
+    }
+
+    const wasEdit = universalModal.mode === 'edit' && universalModal.id
+    const query = wasEdit
+      ? sb.from('data_records').update(body).eq('id', universalModal.id)
+      : sb.from('data_records').insert(body)
+    const { error } = await query
+    if (error) {
+      alert('保存失败：' + error.message)
+      return
+    }
+    closeUniversalModal()
+    showFlash(wasEdit ? '✓ 记录已更新' : '✓ 记录已添加')
+    await loadData()
+  }
+
+  function markUniversalImageUnavailable() {
+    universalModal.imageUrl = null
+    universalModal.imageLoadError = true
+  }
+
   function openImgFull(src) {
     imgOverlay.src = src
     imgOverlay.open = true
@@ -848,10 +1036,7 @@ export function useStore() {
   async function archiveStagingRecord(record, domainKey) {
     if (!record?.id || !domainKey) return
     const domain = domains.value.find(item => item.id === domainKey)
-    if (!domain || ['expense', 'income'].includes(domainKey)) {
-      showFlash('当前只支持归档到通用数据域')
-      return
-    }
+    if (!domain) return
 
     const ok = confirm(`确认把这条待处理截图归档到「${domain.name}」？`)
     if (!ok) return
@@ -868,6 +1053,62 @@ export function useStore() {
     const occurredAt = payload.occurred_at || payload.order_finished_at || record.createdAt || new Date().toISOString()
     const title = buildUniversalRecordTitle(domainKey, payload, record)
     const summary = record.summary || `${domain.name}截图归档`
+
+    if (domainKey === 'expense') {
+      const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
+      const { data: inserted, error: insertErr } = await sb.from('transactions').insert({
+        type: 'expense',
+        amount: amount > 0 ? amount : 0.01,
+        merchant_name: payload.merchant_name || payload.source_name || title || '待补充支出',
+        platform: payload.platform || '微信',
+        category: payload.category || null,
+        payment_method: payload.payment_method || null,
+        status: payload.category && payload.payment_method ? 'done' : 'pending',
+        transaction_date: normalizeDateOnly(occurredAt),
+        source: 'ai_scan',
+        image_url: record.imagePath || null,
+        image_hash: record.imageHash || null,
+        note: summary,
+      }).select('id').single()
+      if (insertErr) {
+        showFlash('❌ 转入支出失败：' + insertErr.message)
+        return
+      }
+      await finishStagingArchive(record, inserted.id, null, 'expense', payload)
+      showFlash('✓ 已转入支出，必要时可继续补充')
+      await loadData()
+      const bill = bills.value.find(item => item.id === inserted.id)
+      if (bill) {
+        if (bill.status === 'pending') await openPendingModal(bill)
+        else await openExpenseEditModal(bill)
+      }
+      return
+    }
+
+    if (domainKey === 'income') {
+      const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
+      const { data: inserted, error: insertErr } = await sb.from('income_records').insert({
+        category: payload.income_category || 'other',
+        source_name: payload.source_name || title || '截图识别收入',
+        amount: amount > 0 ? amount : 0.01,
+        income_date: normalizeDateOnly(occurredAt),
+        note: summary,
+        image_url: record.imagePath || null,
+        image_hash: record.imageHash || null,
+        source: 'ai_scan',
+      }).select('id').single()
+      if (insertErr) {
+        showFlash('❌ 转入收入失败：' + insertErr.message)
+        return
+      }
+      await finishStagingArchive(record, inserted.id, null, 'income', payload)
+      showFlash('✓ 已转入收入')
+      await loadData()
+      const income = incomeRecords.value.find(item => item.id === inserted.id)
+        || recentIncomeRecords.value.find(item => item.id === inserted.id)
+      if (income) await openIncomeEditModal(income)
+      return
+    }
 
     const { data: domainRows, error: domainErr } = await sb.from('data_domains')
       .select('id,key,version')
@@ -898,19 +1139,27 @@ export function useStore() {
       return
     }
 
+    const done = await finishStagingArchive(record, inserted.id, domainRow.id, domainKey, payload)
+    if (!done) return
+
+    showFlash(`✓ 已归档到${domain.name}`)
+    await loadData()
+  }
+
+  async function finishStagingArchive(record, targetRecordId, targetDomainId, domainKey, payload) {
     const { error: stagingErr } = await sb.from('staging_records').update({
       status: 'archived',
-      target_domain_id: domainRow.id,
-      target_record_id: inserted.id,
+      target_domain_id: targetDomainId || record.targetDomainId || null,
+      target_record_id: targetRecordId,
       resolved_action: 'archived',
       resolved_at: new Date().toISOString(),
     }).eq('id', record.id)
     if (stagingErr) {
       showFlash('❌ 中转站状态更新失败：' + stagingErr.message)
-      return
+      return false
     }
 
-    await sb.from('user_routing_feedback').insert({
+    const { error: feedbackErr } = await sb.from('user_routing_feedback').insert({
       staging_record_id: record.id,
       image_hash: record.imageHash || null,
       original_domain_key: record.domainKey || null,
@@ -919,9 +1168,8 @@ export function useStore() {
       confidence: record.confidence || null,
       payload_jsonb: payload,
     })
-
-    showFlash(`✓ 已归档到${domain.name}`)
-    await loadData()
+    if (feedbackErr) console.warn('写入路由反馈失败:', feedbackErr.message)
+    return true
   }
 
   function buildUniversalRecordTitle(domainKey, payload, record) {
@@ -929,6 +1177,14 @@ export function useStore() {
     if (domainKey === 'sleep') return payload.quality_level || '睡眠记录'
     if (domainKey === 'reading') return payload.book_name || payload.title || '阅读记录'
     return record.domainName || '通用记录'
+  }
+
+  function normalizeDateOnly(value) {
+    if (!value) return new Date().toISOString().slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+    const d = new Date(value)
+    if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10)
+    return d.toISOString().slice(0, 10)
   }
 
   function openDomainPage(domainId) {
@@ -1054,6 +1310,11 @@ export function useStore() {
         if (incomeModal.open && incomeModal.id === id) closeIncomeModal()
         if (detailRecord.value?.id === id) goBack()
         showFlash('✓ 已删除')
+      } else if (type === 'universal') {
+        const { error } = await sb.from('data_records').delete().eq('id', id)
+        if (error) throw new Error(error.message)
+        if (universalModal.open && universalModal.id === id) closeUniversalModal()
+        showFlash('✓ 已删除')
       }
       await loadData()
     } catch (e) {
@@ -1079,6 +1340,7 @@ export function useStore() {
     pendingModal,
     incomeModal,
     expenseModal,
+    universalModal,
     incomeCatMap,
     loadData, changeMonth, showFlash,
     openPendingModal, closePendingModal, confirmEntry,
@@ -1088,6 +1350,8 @@ export function useStore() {
     hasIncomeChanges, resetIncomeChanges, markIncomeImageUnavailable,
     openExpenseModal, openExpenseEditModal, closeExpenseModal, confirmExpense,
     hasExpenseChanges, resetExpenseChanges, markExpenseImageUnavailable,
+    openUniversalModal, openUniversalEditModal, closeUniversalModal, confirmUniversalRecord,
+    hasUniversalChanges, resetUniversalChanges, markUniversalImageUnavailable, getUniversalDomainMeta,
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
     discardStagingRecord, retryStagingRecord, archiveStagingRecord,
