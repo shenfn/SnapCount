@@ -275,6 +275,41 @@ const maxIncomeAmount = computed(() => {
   return store.incomeRecords.value.reduce((max, item) => Math.max(max, item.amount), 0)
 })
 
+const universalRecords = computed(() => {
+  return store.dataRecords.value.filter(item => item.domainKey === activeDomain.value)
+})
+
+const universalTrend = computed(() => {
+  const result = [0, 0, 0, 0, 0, 0, 0]
+  const today = new Date()
+  const dow = today.getDay()
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1))
+  monday.setHours(0, 0, 0, 0)
+  universalRecords.value.forEach(item => {
+    const d = new Date(item.occurredAt || item.createdAt)
+    if (Number.isNaN(d.getTime())) return
+    d.setHours(0, 0, 0, 0)
+    const diff = Math.round((d - monday) / 86400000)
+    if (diff >= 0 && diff < 7) result[diff] += 1
+  })
+  return result
+})
+
+const universalCategories = computed(() => buildAmountRank(
+  universalRecords.value.map(item => ({
+    name: universalDimensionName(item),
+    amount: 1,
+  })),
+  false,
+  '条'
+))
+
+const universalPrimaryTotal = computed(() => {
+  const meta = universalMeta(activeDomain.value)
+  return universalRecords.value.reduce((sum, item) => sum + Number(item.payload?.[meta.primaryKey] || 0), 0)
+})
+
 const expenseData = computed(() => ({
   summary: {
     label: '本月消费概览',
@@ -373,9 +408,7 @@ const placeholderData = computed(() => ({
 
 const activeData = computed(() => {
   if (activeDomain.value === 'income') return incomeData.value
-  if (activeDomain.value === 'sport') return withEmptyDetail(placeholderData.value.sport)
-  if (activeDomain.value === 'sleep') return withEmptyDetail(placeholderData.value.sleep)
-  if (activeDomain.value === 'reading') return withEmptyDetail(placeholderData.value.reading)
+  if (activeDomain.value === 'sport' || activeDomain.value === 'sleep' || activeDomain.value === 'reading') return universalData(activeDomain.value)
   return expenseData.value
 })
 
@@ -398,7 +431,75 @@ function withEmptyDetail(base) {
   }
 }
 
-function buildAmountRank(list, currency = false) {
+function universalData(domainKey) {
+  const base = placeholderData.value[domainKey]
+  const meta = universalMeta(domainKey)
+  const count = universalRecords.value.length
+  return {
+    summary: {
+      ...base.summary,
+      value: `${count} 条`,
+      change: count
+        ? `${meta.primaryLabel}累计 ${formatNumber(universalPrimaryTotal.value)} ${meta.unit}`
+        : base.summary.change,
+    },
+    stats: [
+      { label: '记录笔数', value: `${count}` },
+      { label: meta.totalLabel, value: `${formatNumber(universalPrimaryTotal.value)} ${meta.unit}` },
+      { label: meta.dimensionLabel, value: universalCategories.value[0]?.name || '暂无' },
+      { label: '本周新增', value: `${universalTrend.value.reduce((sum, item) => sum + item, 0)} 条` },
+    ],
+    trendLabels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+    trendData: universalTrend.value,
+    trendMax: Math.max(...universalTrend.value, 1),
+    categories: universalCategories.value,
+    platforms: [],
+    paymentMethods: [],
+    specialSummaries: [
+      { label: '最近记录', value: universalRecords.value[0]?.title || '暂无', icon: meta.icon, color: activeMeta.value.color },
+    ],
+  }
+}
+
+function universalMeta(domainKey) {
+  const map = {
+    sport: {
+      icon: '动',
+      primaryKey: 'duration_minutes',
+      primaryLabel: '运动时长',
+      totalLabel: '累计运动',
+      unit: '分钟',
+      dimensionKey: 'sport_type',
+      dimensionLabel: '主要类型',
+    },
+    sleep: {
+      icon: '眠',
+      primaryKey: 'sleep_hours',
+      primaryLabel: '睡眠时长',
+      totalLabel: '累计睡眠',
+      unit: '小时',
+      dimensionKey: 'quality_level',
+      dimensionLabel: '主要质量',
+    },
+    reading: {
+      icon: '读',
+      primaryKey: 'reading_minutes',
+      primaryLabel: '阅读时长',
+      totalLabel: '累计阅读',
+      unit: '分钟',
+      dimensionKey: 'book_name',
+      dimensionLabel: '主要书籍',
+    },
+  }
+  return map[domainKey] || map.sport
+}
+
+function universalDimensionName(item) {
+  const meta = universalMeta(item.domainKey)
+  return item.payload?.[meta.dimensionKey] || item.title || '未分类'
+}
+
+function buildAmountRank(list, currency = false, unit = '') {
   const grouped = {}
   list.forEach(item => {
     grouped[item.name] = (grouped[item.name] || 0) + Number(item.amount || 0)
@@ -409,8 +510,13 @@ function buildAmountRank(list, currency = false) {
     name,
     amount,
     pct: Math.round((amount / max) * 100),
-    display: currency ? `¥${amount.toFixed(0)}` : `${amount}`,
+    display: currency ? `¥${amount.toFixed(0)}` : `${formatNumber(amount)}${unit ? ` ${unit}` : ''}`,
   }))
+}
+
+function formatNumber(value) {
+  const num = Number(value || 0)
+  return Number.isInteger(num) ? String(num) : num.toFixed(1)
 }
 
 function normalizeChartList(list) {

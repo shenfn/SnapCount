@@ -250,7 +250,22 @@ export function useStore() {
       raw: item,
     }))
 
-    return [...stagingItems, ...expenseItems, ...incomeItems]
+    const universalItems = dataRecords.value.slice(0, 12).map(item => {
+      const domain = domains.value.find(d => d.id === item.domainKey)
+      return {
+        id: `universal-${item.id}`,
+        kind: 'universal',
+        title: item.title || domain?.name || '通用记录',
+        subtitle: item.summary || domain?.description || '通用数据域记录',
+        amountLabel: domain?.shortName || '记录',
+        dateLabel: item.occurredAt || item.createdAt,
+        imageUrl: null,
+        color: domain?.color || '#2D6A4F',
+        raw: item,
+      }
+    })
+
+    return [...stagingItems, ...expenseItems, ...incomeItems, ...universalItems]
       .sort((a, b) => (b.dateLabel || '').localeCompare(a.dateLabel || ''))
       .slice(0, 10)
   })

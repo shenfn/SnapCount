@@ -158,7 +158,7 @@ const todayWeekShare = computed(() => {
 })
 
 function timelineMark(kind) {
-  const map = { expense: '支', income: '收', staging: '待' }
+  const map = { expense: '支', income: '收', staging: '待', universal: '域' }
   return map[kind] || '记'
 }
 
@@ -173,6 +173,10 @@ function handleTimelineClick(item) {
   }
   if (item.kind === 'expense' && item.raw) {
     store.openRecordDetail('expense', item.raw)
+    return
+  }
+  if (item.kind === 'universal' && item.raw) {
+    store.openUniversalEditModal(item.raw)
   }
 }
 </script>
