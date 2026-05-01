@@ -253,6 +253,75 @@ function isSameAmount(a: number | string | null | undefined, b: number | null): 
   return left !== null && b !== null && Math.abs(left - b) <= 0.01;
 }
 
+async function createStagingRecord(
+  supabase: ReturnType<typeof createClient>,
+  payload: {
+    status: string;
+    imagePath: string;
+    imageHash: string;
+    perceptualHash: string | null;
+    ai: AIResult;
+    occurredAt: string | null;
+    orderFinishedAt: string | null;
+    errorType?: string | null;
+    errorMessage?: string | null;
+  },
+): Promise<{ id: string } | null> {
+  const detectedDomainName = payload.ai.record_type === "income"
+    ? "收入记录"
+    : payload.ai.record_type === "expense"
+      ? "消费记账"
+      : null;
+  const detectedDomainKey = payload.ai.record_type === "income"
+    ? "income"
+    : payload.ai.record_type === "expense"
+      ? "expense"
+      : null;
+  const summaryParts = [
+    payload.ai.record_type && payload.ai.record_type !== "uncertain" ? `疑似${detectedDomainName}` : "无法确定数据域",
+    payload.ai.amount ? `金额 ${payload.ai.amount}` : null,
+    payload.ai.merchant_name || payload.ai.source_name || null,
+  ].filter(Boolean);
+
+  const { data, error } = await supabase.from("staging_records").insert({
+    status: payload.status,
+    image_path: payload.imagePath,
+    image_hash: payload.imageHash,
+    perceptual_hash: payload.perceptualHash,
+    image_type: payload.ai.image_type,
+    record_type: payload.ai.record_type ?? "uncertain",
+    occurred_at: payload.occurredAt,
+    order_finished_at: payload.orderFinishedAt,
+    detected_domain_key: detectedDomainKey,
+    detected_domain_name: detectedDomainName,
+    confidence: payload.ai.confidence ?? 0,
+    ai_summary: summaryParts.join(" · ") || "截图已进入中转站，等待确认",
+    extracted_json: payload.ai,
+    routing_candidates: detectedDomainKey
+      ? [{ key: detectedDomainKey, name: detectedDomainName, confidence: payload.ai.confidence ?? 0 }]
+      : [],
+    quality_report: {
+      error_type: payload.errorType ?? null,
+      missing_fields: [],
+    },
+    last_error_type: payload.errorType ?? null,
+    last_error_message: payload.errorMessage ?? null,
+    failure_reason: payload.errorMessage ?? null,
+  }).select("id").single();
+
+  if (error) {
+    console.error("Staging insert failed:", error);
+    const { data: existing } = await supabase
+      .from("staging_records")
+      .select("id")
+      .eq("image_hash", payload.imageHash)
+      .maybeSingle();
+    if (existing) return existing;
+    return null;
+  }
+  return data;
+}
+
 // 把 Uint8Array 转成 base64（避免大图时 String.fromCharCode 栈溢出）
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -436,6 +505,53 @@ Deno.serve(async (req) => {
     let duplicateKind: string | null = perceptualDupRefId ? "perceptual_hash" : null;
     let duplicateRefTable: string | null = perceptualDupRefId ? "ai_recognition_logs" : null;
     let duplicateRefId: string | null = perceptualDupRefId;
+
+    if (!aiOk || recordType === "uncertain" || ((ai.confidence ?? 0) < 0.35 && normalizedAmount === null)) {
+      const stagingStatus = !aiOk ? "ai_error" : "routing_failed";
+      const staging = await createStagingRecord(supabase, {
+        status: stagingStatus,
+        imagePath: path,
+        imageHash: hash,
+        perceptualHash,
+        ai,
+        occurredAt,
+        orderFinishedAt,
+        errorType: !aiOk ? "AI_PROVIDER_ERROR" : "ROUTING_FAILED",
+        errorMessage: aiErrorMessage,
+      });
+      await writeAiLog(supabase, {
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: perceptualDistance,
+        image_url: path,
+        image_type: ai.image_type,
+        record_type: ai.record_type ?? "uncertain",
+        occurred_at: occurredAt,
+        order_finished_at: orderFinishedAt,
+        duplicate_kind: duplicateKind,
+        duplicate_ref_table: duplicateRefTable,
+        duplicate_ref_id: duplicateRefId,
+        target_table: "staging_records",
+        target_id: staging?.id ?? null,
+        staging_record_id: staging?.id ?? null,
+        status: !aiOk ? "ai_error" : "pending",
+        confidence: ai.confidence ?? 0,
+        duration_ms: Date.now() - startedAt,
+        ai_response: ai,
+        error_message: aiErrorMessage,
+        model_provider: "moonshot",
+        model_name: MOONSHOT_MODEL,
+        prompt_version: "receipt-v2-staging",
+      });
+
+      return new Response(JSON.stringify({
+        status: "staging",
+        staging_status: stagingStatus,
+        id: staging?.id ?? null,
+        ai_ok: aiOk,
+        message: !aiOk ? "⚠ AI 识别失败，已进入待处理" : "⚠ 未确定数据域，已进入待处理",
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     if (recordType === "income" && normalizedAmount !== null && (ai.confidence ?? 0) >= 0.7) {
       const incomeCategory = ["salary", "bonus", "freelance", "investment", "reimbursement", "other"].includes(ai.income_category ?? "")

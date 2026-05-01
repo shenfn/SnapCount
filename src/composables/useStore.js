@@ -14,6 +14,7 @@ export function useStore() {
   const incomeRecords = ref([])
   const recentIncomeRecords = ref([])
   const transportRecords = ref([])
+  const stagingRecords = ref([])
 
   const currentFilter = ref('all')
   const loading = ref(false)
@@ -175,6 +176,37 @@ export function useStore() {
         image_url: r.image_url,
         image_path: r.image_url,
         sourceType: r.source || 'manual',
+      }))
+
+      const { data: staging, error: stagingErr } = await sb.from('staging_records')
+        .select('*')
+        .not('status', 'in', '(discarded,archived)')
+        .order('created_at', { ascending: false })
+        .limit(30)
+      if (stagingErr) console.warn('加载中转站失败:', stagingErr.message)
+
+      stagingRecords.value = stagingErr ? [] : await Promise.all((staging || []).map(async r => {
+        const imageUrl = await getSignedImageUrl(r.image_path)
+        return ({
+        id: r.id,
+        status: r.status,
+        createdAt: r.created_at,
+        imagePath: r.image_path,
+        imageUrl,
+        imageLoadError: !!r.image_path && !imageUrl,
+        imageHash: r.image_hash,
+        imageType: r.image_type,
+        recordType: r.record_type || 'uncertain',
+        domainKey: r.detected_domain_key,
+        domainName: r.detected_domain_name,
+        confidence: Number(r.confidence || 0),
+        summary: r.ai_summary || r.failure_reason || '等待处理的截图',
+        failureReason: r.failure_reason,
+        lastErrorType: r.last_error_type,
+        lastErrorMessage: r.last_error_message,
+        extracted: r.extracted_json || {},
+        retryCount: r.retry_count || 0,
+        })
       }))
     } catch (e) {
       console.error('[loadData 异常]', e)
@@ -501,6 +533,28 @@ export function useStore() {
     deleteConfirm.open = false
   }
 
+  async function discardStagingRecord(record, reason = 'user_discarded') {
+    if (!record?.id) return
+    const ok = confirm('确认销毁这条待处理截图？记录会从待处理列表移除。')
+    if (!ok) return
+    const { error } = await sb.from('staging_records').update({
+      status: 'discarded',
+      discard_reason: reason,
+      resolved_action: 'discarded',
+      resolved_at: new Date().toISOString(),
+    }).eq('id', record.id)
+    if (error) {
+      showFlash('❌ 销毁失败：' + error.message)
+      return
+    }
+    showFlash('✓ 已销毁')
+    await loadData()
+  }
+
+  function retryStagingRecord() {
+    showFlash('重试入口已预留，下一步接入重新识别队列')
+  }
+
   async function confirmDelete() {
     const { type, id, imagePath } = deleteConfirm
     deleteConfirm.open = false
@@ -555,7 +609,7 @@ export function useStore() {
   return {
     currentYear, currentMonth, currentPage, monthLabel,
     loading, loadError,
-    bills, incomeRecords, recentIncomeRecords, transportRecords,
+    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords,
     doneBills, pendingBills, filteredBills,
     recentEntries,
     totalExpense, totalIncome, netBalance,
@@ -576,5 +630,6 @@ export function useStore() {
     openExpenseModal, closeExpenseModal, confirmExpense,
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
+    discardStagingRecord, retryStagingRecord,
   }
 }

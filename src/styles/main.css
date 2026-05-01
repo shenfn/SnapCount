@@ -363,6 +363,111 @@ body {
 .field-missing { background: var(--warn-light); color: var(--warn-text); }
 .field-ok { background: var(--accent-light); color: var(--accent-text); }
 
+.staging-item {
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 0.5px solid var(--border);
+  margin: 0 16px 10px;
+  padding: 14px 16px;
+}
+.staging-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.staging-head > div:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.staging-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  background: var(--surface2);
+  border: 0.5px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.staging-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.staging-thumb.placeholder {
+  border-style: dashed;
+}
+.staging-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.staging-meta {
+  font-size: 12px;
+  color: var(--text3);
+  margin-top: 3px;
+}
+.staging-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--accent-light);
+  color: var(--accent-text);
+}
+.staging-status.warn {
+  background: var(--warn-light);
+  color: var(--warn-text);
+}
+.staging-status.error {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+.staging-summary {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text2);
+}
+.staging-error {
+  margin-top: 8px;
+  border-radius: 10px;
+  background: var(--danger-light);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  word-break: break-word;
+}
+.staging-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.staging-btn {
+  border: 1px solid var(--border2);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 9px 0;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.staging-btn.danger {
+  border-color: rgba(185,28,28,0.35);
+  color: var(--danger);
+}
+
 /* ── Stats grid ── */
 .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 0 16px 12px; }
 .stat-card {
