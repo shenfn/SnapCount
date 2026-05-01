@@ -51,6 +51,14 @@
 
         <div class="pending-record-actions">
           <button class="btn btn-secondary btn-sm" @click="store.retryStagingRecord(r)">重试</button>
+          <button
+            v-for="domain in archiveDomains"
+            :key="`${r.id}-${domain.id}`"
+            class="btn btn-ghost btn-sm"
+            @click="store.archiveStagingRecord(r, domain.id)"
+          >
+            {{ domain.shortName }}
+          </button>
           <button class="btn btn-danger btn-sm" @click="store.discardStagingRecord(r)">销毁</button>
         </div>
       </div>
@@ -90,6 +98,7 @@ import { formatDateTimeLabel } from '../../utils/helpers'
 
 const store = inject('store')
 const totalPending = computed(() => store.pendingBills.value.length + store.stagingRecords.value.length)
+const archiveDomains = computed(() => store.domains.value.filter(domain => !['expense', 'income'].includes(domain.id)))
 
 function statusLabel(status) {
   const map = {

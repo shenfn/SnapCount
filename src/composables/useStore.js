@@ -17,6 +17,7 @@ export function useStore() {
   const recentIncomeRecords = ref([])
   const transportRecords = ref([])
   const stagingRecords = ref([])
+  const dataRecords = ref([])
 
   const currentFilter = ref('all')
   const loading = ref(false)
@@ -129,6 +130,7 @@ export function useStore() {
   const domains = computed(() => {
     const expenseCount = bills.value.length
     const incomeCount = incomeRecords.value.length
+    const universalCount = (key) => dataRecords.value.filter(item => item.domainKey === key).length
     return [
       {
         id: 'expense',
@@ -161,8 +163,8 @@ export function useStore() {
         icon: '🏃',
         tone: 'sport',
         color: '#B45309',
-        meta: '0 条记录 · 预留模板',
-        recordCount: 0,
+        meta: `${universalCount('sport')} 条记录 · 系统内置`,
+        recordCount: universalCount('sport'),
         isSystem: true,
         description: '后续承接华为健康、Keep 等运动截图。',
       },
@@ -173,8 +175,8 @@ export function useStore() {
         icon: '🌙',
         tone: 'sleep',
         color: '#4338CA',
-        meta: '0 条记录 · 预留模板',
-        recordCount: 0,
+        meta: `${universalCount('sleep')} 条记录 · 系统内置`,
+        recordCount: universalCount('sleep'),
         isSystem: true,
         description: '后续承接睡眠追踪截图和睡眠日志。',
       },
@@ -185,8 +187,8 @@ export function useStore() {
         icon: '📚',
         tone: 'reading',
         color: '#0369A1',
-        meta: '0 条记录 · 预留模板',
-        recordCount: 0,
+        meta: `${universalCount('reading')} 条记录 · 系统内置`,
+        recordCount: universalCount('reading'),
         isSystem: true,
         description: '后续承接阅读时长、页数和书籍进度记录。',
       },
@@ -327,6 +329,32 @@ export function useStore() {
         sourceType: r.source || 'manual',
       }))
 
+      const { data: universalRows, error: universalErr } = await sb.from('data_records')
+        .select('*')
+        .order('occurred_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(80)
+      if (universalErr) {
+        console.warn('加载通用记录失败:', universalErr.message)
+        dataRecords.value = []
+      } else {
+        dataRecords.value = (universalRows || []).map(r => ({
+          id: r.id,
+          domainId: r.domain_id,
+          domainKey: r.domain_key,
+          domainVersion: r.domain_version || '1.0',
+          occurredAt: r.occurred_at,
+          createdAt: r.created_at,
+          title: r.title,
+          summary: r.summary,
+          payload: r.payload_jsonb || {},
+          imagePath: r.source_image_path,
+          imageHash: r.source_image_hash,
+          stagingRecordId: r.staging_record_id,
+          source: r.source || 'staging',
+        }))
+      }
+
       const { data: staging, error: stagingErr } = await sb.from('staging_records')
         .select('*')
         .not('status', 'in', '(discarded,archived)')
@@ -348,6 +376,7 @@ export function useStore() {
         recordType: r.record_type || 'uncertain',
         domainKey: r.detected_domain_key,
         domainName: r.detected_domain_name,
+        targetDomainId: r.target_domain_id,
         confidence: Number(r.confidence || 0),
         summary: r.ai_summary || r.failure_reason || '等待处理的截图',
         failureReason: r.failure_reason,
@@ -816,6 +845,92 @@ export function useStore() {
     showFlash('重试入口已预留，下一步接入重新识别队列')
   }
 
+  async function archiveStagingRecord(record, domainKey) {
+    if (!record?.id || !domainKey) return
+    const domain = domains.value.find(item => item.id === domainKey)
+    if (!domain || ['expense', 'income'].includes(domainKey)) {
+      showFlash('当前只支持归档到通用数据域')
+      return
+    }
+
+    const ok = confirm(`确认把这条待处理截图归档到「${domain.name}」？`)
+    if (!ok) return
+
+    const payload = {
+      ...(record.extracted || {}),
+      image_type: record.imageType || null,
+      record_type: record.recordType || null,
+      confidence: record.confidence || 0,
+      ai_summary: record.summary || null,
+      failure_reason: record.failureReason || null,
+    }
+
+    const occurredAt = payload.occurred_at || payload.order_finished_at || record.createdAt || new Date().toISOString()
+    const title = buildUniversalRecordTitle(domainKey, payload, record)
+    const summary = record.summary || `${domain.name}截图归档`
+
+    const { data: domainRows, error: domainErr } = await sb.from('data_domains')
+      .select('id,key,version')
+      .eq('key', domainKey)
+      .eq('status', 'active')
+      .limit(1)
+    if (domainErr || !domainRows?.length) {
+      showFlash('❌ 数据域未就绪，请先执行 007 迁移')
+      return
+    }
+
+    const domainRow = domainRows[0]
+    const { data: inserted, error: insertErr } = await sb.from('data_records').insert({
+      domain_id: domainRow.id,
+      domain_key: domainKey,
+      domain_version: domainRow.version || '1.0',
+      occurred_at: occurredAt,
+      title,
+      summary,
+      payload_jsonb: payload,
+      source: 'staging',
+      source_image_path: record.imagePath || null,
+      source_image_hash: record.imageHash || null,
+      staging_record_id: record.id,
+    }).select('id').single()
+    if (insertErr) {
+      showFlash('❌ 归档失败：' + insertErr.message)
+      return
+    }
+
+    const { error: stagingErr } = await sb.from('staging_records').update({
+      status: 'archived',
+      target_domain_id: domainRow.id,
+      target_record_id: inserted.id,
+      resolved_action: 'archived',
+      resolved_at: new Date().toISOString(),
+    }).eq('id', record.id)
+    if (stagingErr) {
+      showFlash('❌ 中转站状态更新失败：' + stagingErr.message)
+      return
+    }
+
+    await sb.from('user_routing_feedback').insert({
+      staging_record_id: record.id,
+      image_hash: record.imageHash || null,
+      original_domain_key: record.domainKey || null,
+      corrected_domain_key: domainKey,
+      action: 'archive',
+      confidence: record.confidence || null,
+      payload_jsonb: payload,
+    })
+
+    showFlash(`✓ 已归档到${domain.name}`)
+    await loadData()
+  }
+
+  function buildUniversalRecordTitle(domainKey, payload, record) {
+    if (domainKey === 'sport') return payload.sport_type || payload.activity_type || '运动记录'
+    if (domainKey === 'sleep') return payload.quality_level || '睡眠记录'
+    if (domainKey === 'reading') return payload.book_name || payload.title || '阅读记录'
+    return record.domainName || '通用记录'
+  }
+
   function openDomainPage(domainId) {
     activeDomainId.value = domainId
     navigateTo('domain-detail')
@@ -950,7 +1065,7 @@ export function useStore() {
     currentYear, currentMonth, currentPage, monthLabel,
     pageHistory,
     loading, loadError,
-    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords,
+    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, dataRecords,
     doneBills, pendingBills, filteredBills,
     recentEntries,
     domains, pendingSummary, homeTimeline,
@@ -975,7 +1090,7 @@ export function useStore() {
     hasExpenseChanges, resetExpenseChanges, markExpenseImageUnavailable,
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
-    discardStagingRecord, retryStagingRecord,
+    discardStagingRecord, retryStagingRecord, archiveStagingRecord,
     openDomainPage, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
     navigateTo, goBack,
     settingsState, toggleSetting,

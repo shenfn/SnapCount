@@ -141,9 +141,9 @@ const metrics = computed(() => {
     ]
   }
   return [
-    { label: '记录数', value: '0' },
-    { label: '模板状态', value: '预留' },
-    { label: '入库链路', value: '待接入' },
+    { label: '记录数', value: `${universalRecords.value.length}` },
+    { label: '模板状态', value: domain.value.recordCount ? '运行中' : '预留' },
+    { label: '入库链路', value: domain.value.recordCount ? '已接入' : '待接入' },
     { label: '展示组件', value: '已就绪' },
   ]
 })
@@ -155,6 +155,7 @@ const trendItems = computed(() => {
   let values = [0, 0, 0, 0, 0, 0, 0]
   if (domain.value.id === 'expense') values = computeWeekData(store.doneBills.value)
   if (domain.value.id === 'income') values = computeIncomeWeekData()
+  if (!['expense', 'income'].includes(domain.value.id)) values = computeUniversalWeekData()
   const max = Math.max(...values, 1)
   return values.map((value, index) => ({
     label: labels[index],
@@ -176,7 +177,10 @@ const dimensionItems = computed(() => {
       amount: item.amount,
     })))
   }
-  return []
+  return buildDimension(universalRecords.value.map(item => ({
+    name: universalDimensionName(item),
+    amount: 1,
+  })), false)
 })
 
 const recentRecords = computed(() => {
@@ -204,7 +208,16 @@ const recentRecords = computed(() => {
       date: item.createdAt ? formatDateTimeLabel(item.createdAt) : item.date,
     }))
   }
-  return []
+  return universalRecords.value.slice(0, 8).map(item => ({
+    id: item.id,
+    kind: 'universal',
+    raw: item,
+    icon: domain.value.shortName.slice(0, 1),
+    title: item.title || domain.value.name,
+    subtitle: item.summary || universalDimensionName(item),
+    value: item.occurredAt ? '已归档' : '已记录',
+    date: formatDateTimeLabel(item.occurredAt || item.createdAt),
+  }))
 })
 
 const capabilities = computed(() => {
@@ -215,7 +228,14 @@ const capabilities = computed(() => {
 function openRecord(item) {
   if (item.kind === 'expense') store.openRecordDetail('expense', item.raw)
   if (item.kind === 'income') store.openRecordDetail('income', item.raw)
+  if (item.kind === 'universal') store.showFlash('通用记录详情编辑将在下一步接入')
 }
+
+const universalRecords = computed(() => {
+  return store.dataRecords.value
+    .filter(item => item.domainKey === domain.value.id)
+    .sort((a, b) => ((b.occurredAt || b.createdAt || '').localeCompare(a.occurredAt || a.createdAt || '')))
+})
 
 function computeIncomeWeekData() {
   const result = [0, 0, 0, 0, 0, 0, 0]
@@ -233,7 +253,7 @@ function computeIncomeWeekData() {
   return result
 }
 
-function buildDimension(list) {
+function buildDimension(list, currency = true) {
   const grouped = {}
   list.forEach(item => {
     grouped[item.name] = (grouped[item.name] || 0) + Number(item.amount || 0)
@@ -244,8 +264,33 @@ function buildDimension(list) {
     name,
     amount,
     pct: Math.round((amount / max) * 100),
-    display: `¥${amount.toFixed(0)}`,
+    display: currency ? `¥${amount.toFixed(0)}` : `${amount.toFixed(0)} 条`,
   }))
+}
+
+function computeUniversalWeekData() {
+  const result = [0, 0, 0, 0, 0, 0, 0]
+  const today = new Date()
+  const dow = today.getDay()
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1))
+  monday.setHours(0, 0, 0, 0)
+  universalRecords.value.forEach(item => {
+    const d = new Date(item.occurredAt || item.createdAt)
+    if (Number.isNaN(d.getTime())) return
+    d.setHours(0, 0, 0, 0)
+    const diff = Math.round((d - monday) / 86400000)
+    if (diff >= 0 && diff < 7) result[diff] += 1
+  })
+  return result
+}
+
+function universalDimensionName(item) {
+  const payload = item.payload || {}
+  if (domain.value.id === 'sport') return payload.sport_type || payload.activity_type || payload.source_app || '运动记录'
+  if (domain.value.id === 'sleep') return payload.quality_level || payload.source_app || '睡眠记录'
+  if (domain.value.id === 'reading') return payload.book_name || payload.source_app || '阅读记录'
+  return item.title || domain.value.name
 }
 
 function softenColor(color) {

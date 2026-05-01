@@ -2101,12 +2101,13 @@ body {
 
 .pending-record-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }
 
 .pending-record-actions .btn {
-  flex: 1;
+  flex: 1 1 calc(50% - 8px);
 }
 
 .pending-field-row {
