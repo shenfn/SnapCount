@@ -17,9 +17,14 @@ export function useStore() {
   const recentIncomeRecords = ref([])
   const transportRecords = ref([])
   const stagingRecords = ref([])
+  const processedStagingRecords = ref([])
   const dataRecords = ref([])
 
   const currentFilter = ref('all')
+  const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
+  const timelineExpanded = ref(false)
+  const pendingExpanded = ref(false)
+  const processedExpanded = ref(false)
   const loading = ref(false)
   const loadError = ref('')
   const flashMsg = ref('')
@@ -210,41 +215,73 @@ export function useStore() {
     ]
   })
 
+  const todaySummary = computed(() => {
+    const todayKey = getLocalDateKey()
+    const todayBills = bills.value.filter(b => b.status === 'done' && b.dateRaw === todayKey)
+    const expenseByPlatform = {}
+    todayBills.forEach(b => {
+      const p = b.platform && b.platform !== '?' ? b.platform : '其他'
+      expenseByPlatform[p] = (expenseByPlatform[p] || 0) + 1
+    })
+    const todaySport = dataRecords.value.filter(r => r.domainKey === 'sport' && (r.occurredAt || '').slice(0, 10) === todayKey)
+    const todaySleep = dataRecords.value.filter(r => r.domainKey === 'sleep' && (r.occurredAt || '').slice(0, 10) === todayKey)
+    const todayIncome = incomeRecords.value.filter(r => r.dateRaw === todayKey)
+    const todayStaging = stagingRecords.value.filter(r => (r.occurredAt || r.createdAt || '').slice(0, 10) === todayKey)
+
+    return {
+      expenseTotal: todayBills.reduce((s, b) => s + b.amount, 0),
+      expenseCount: todayBills.length,
+      expenseByPlatform,
+      incomeTotal: todayIncome.reduce((s, r) => s + r.amount, 0),
+      incomeCount: todayIncome.length,
+      sportItems: todaySport.map(r => ({ title: r.title || '运动', summary: r.summary, payload: r.payload })),
+      sleepItems: todaySleep.map(r => ({ title: r.title || '睡眠', summary: r.summary, payload: r.payload })),
+      stagingCount: todayStaging.length,
+      isEmpty: todayBills.length === 0 && todaySport.length === 0 && todaySleep.length === 0 && todayIncome.length === 0 && todayStaging.length === 0,
+    }
+  })
+
   const homeTimeline = computed(() => {
     const stagingItems = stagingRecords.value.slice(0, 8).map(item => ({
       id: `staging-${item.id}`,
       kind: 'staging',
       title: item.domainName || '待处理截图',
       subtitle: item.summary,
-      amountLabel: item.recordType === 'income'
-        ? '+ 待确认'
-        : item.recordType === 'expense'
-          ? '- 待确认'
-          : '待分类',
-      dateLabel: item.createdAt,
+      amountLabel: item.recordType === 'income' ? '+ 待确认' : item.recordType === 'expense' ? '- 待确认' : '待分类',
+      dateLabel: item.occurredAt || item.createdAt,
+      dateRaw: (item.occurredAt || item.createdAt || '').slice(0, 10),
+      occurredTime: item.occurredAt,
+      uploadTime: item.createdAt,
       imageUrl: item.imageUrl,
       color: item.status === 'ai_error' ? '#B91C1C' : '#B45309',
+      raw: item,
     }))
 
-    const expenseItems = bills.value.slice(0, 8).map(item => ({
+    const expenseItems = bills.value.slice(0, 15).map(item => ({
       id: `expense-${item.id}`,
       kind: 'expense',
       title: item.name,
-      subtitle: `${item.platform} · ${item.cat}`,
+      subtitle: `${item.platform || '?'} · ${item.cat || '?'}`,
       amountLabel: `-¥${item.amount.toFixed(2)}`,
       dateLabel: item.createdAt,
+      dateRaw: item.dateRaw,
+      occurredTime: `${item.dateRaw}${item.time ? ' ' + item.time : ''}`,
+      uploadTime: item.createdAt,
       imageUrl: null,
       color: '#C2410C',
       raw: item,
     }))
 
-    const incomeItems = recentIncomeRecords.value.slice(0, 8).map(item => ({
+    const incomeItems = incomeRecords.value.slice(0, 15).map(item => ({
       id: `income-${item.id}`,
       kind: 'income',
       title: item.source || incomeCatMap[item.cat]?.label || '收入',
       subtitle: incomeCatMap[item.cat]?.label || '收入记录',
       amountLabel: `+¥${item.amount.toFixed(2)}`,
       dateLabel: item.createdAt,
+      dateRaw: item.dateRaw,
+      occurredTime: item.dateRaw,
+      uploadTime: item.createdAt,
       imageUrl: null,
       color: '#1565C0',
       raw: item,
@@ -259,6 +296,9 @@ export function useStore() {
         subtitle: item.summary || domain?.description || '通用数据域记录',
         amountLabel: domain?.shortName || '记录',
         dateLabel: item.occurredAt || item.createdAt,
+        dateRaw: (item.occurredAt || item.createdAt || '').slice(0, 10),
+        occurredTime: item.occurredAt,
+        uploadTime: item.createdAt,
         imageUrl: null,
         color: domain?.color || '#2D6A4F',
         raw: item,
@@ -267,7 +307,66 @@ export function useStore() {
 
     return [...stagingItems, ...expenseItems, ...incomeItems, ...universalItems]
       .sort((a, b) => (b.dateLabel || '').localeCompare(a.dateLabel || ''))
-      .slice(0, 10)
+      .slice(0, 25)
+  })
+
+  const timelineGroups = computed(() => {
+    const items = homeTimeline.value
+    if (!items.length) return []
+    const today = getLocalDateKey()
+    const yesterday = getLocalDateKey(new Date(Date.now() - 86400000))
+    const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+    function getGroupKey(item) {
+      const raw = item.dateRaw
+      if (!raw || raw.length < 10) return 'older'
+      const dateStr = raw.slice(0, 10)
+      if (dateStr === today) return 'today'
+      if (dateStr === yesterday) return 'yesterday'
+      const d = new Date(dateStr + 'T00:00:00')
+      if (isNaN(d.getTime())) return 'older'
+      const diffDays = Math.floor((new Date(today + 'T00:00:00') - d) / 86400000)
+      if (diffDays <= 6 && diffDays >= 2) return `${dateStr}|${d.getMonth() + 1}月${d.getDate()}日 · ${dayNames[d.getDay()]}`
+      return 'older'
+    }
+
+    const groups = {}
+    items.forEach(item => {
+      const key = getGroupKey(item)
+      if (!groups[key]) groups[key] = []
+      groups[key].push(item)
+    })
+
+    const result = []
+    Object.entries(groups).forEach(([key, groupItems]) => {
+      if (key === 'today') result.push({ key: 'today', label: '今天', items: groupItems })
+      else if (key === 'yesterday') result.push({ key: 'yesterday', label: '昨天', items: groupItems })
+      else if (key !== 'older') {
+        const [, label] = key.split('|')
+        result.push({ key, label: label || key, items: groupItems })
+      }
+    })
+    result.sort((a, b) => {
+      if (a.key === 'today') return -1
+      if (b.key === 'today') return 1
+      if (a.key === 'yesterday') return -1
+      if (b.key === 'yesterday') return 1
+      return (b.key.split('|')[0] || '').localeCompare(a.key.split('|')[0] || '')
+    })
+    if (groups['older']) result.push({ key: 'older', label: '更早的记录', items: groups['older'] })
+    return result
+  })
+
+  const visibleTimelineGroups = computed(() => {
+    const groups = timelineGroups.value
+    if (timelineExpanded.value) return groups
+    const visible = groups.filter(g => g.key === 'today' || g.key === 'yesterday')
+    const older = groups.filter(g => g.key !== 'today' && g.key !== 'yesterday')
+    if (older.length > 0) {
+      const olderCount = older.reduce((sum, g) => sum + g.items.length, 0)
+      visible.push({ key: 'collapsed', label: `更早的记录（${olderCount}条）`, items: [], isCollapsed: true })
+    }
+    return visible
   })
 
   const platformChartData = computed(() => {
@@ -390,7 +489,8 @@ export function useStore() {
       const { data: staging, error: stagingErr } = await sb.from('staging_records')
         .select('*')
         .not('status', 'in', '(discarded,archived)')
-        .order('created_at', { ascending: false })
+        .or(`occurred_at.gte.${start}T00:00:00+08:00,occurred_at.is.null`)
+        .order('occurred_at', { ascending: false, nullsFirst: false })
         .limit(30)
       if (stagingErr) console.warn('加载中转站失败:', stagingErr.message)
 
@@ -399,6 +499,7 @@ export function useStore() {
         return ({
         id: r.id,
         status: r.status,
+        occurredAt: r.occurred_at,
         createdAt: r.created_at,
         imagePath: r.image_path,
         imageUrl,
@@ -416,6 +517,44 @@ export function useStore() {
         lastErrorMessage: r.last_error_message,
         extracted: r.extracted_json || {},
         retryCount: r.retry_count || 0,
+        targetRecordId: r.target_record_id,
+        resolvedAction: r.resolved_action,
+        resolvedAt: r.resolved_at,
+        discardReason: r.discard_reason,
+        })
+      }))
+
+      // 已处理的中转站记录（最近 30 条）
+      const { data: processed, error: procErr } = await sb.from('staging_records')
+        .select('*')
+        .in('status', ['archived', 'discarded'])
+        .order('resolved_at', { ascending: false, nullsFirst: false })
+        .limit(30)
+      if (procErr) console.warn('加载已处理记录失败:', procErr.message)
+
+      processedStagingRecords.value = procErr ? [] : await Promise.all((processed || []).map(async r => {
+        const imageUrl = await getSignedImageUrl(r.image_path)
+        return ({
+        id: r.id,
+        status: r.status,
+        occurredAt: r.occurred_at,
+        createdAt: r.created_at,
+        resolvedAt: r.resolved_at,
+        imagePath: r.image_path,
+        imageUrl,
+        imageLoadError: !!r.image_path && !imageUrl,
+        imageHash: r.image_hash,
+        imageType: r.image_type,
+        recordType: r.record_type || 'uncertain',
+        domainKey: r.detected_domain_key,
+        domainName: r.detected_domain_name,
+        targetDomainId: r.target_domain_id,
+        targetRecordId: r.target_record_id,
+        confidence: Number(r.confidence || 0),
+        summary: r.ai_summary || r.failure_reason || '',
+        failureReason: r.failure_reason,
+        resolvedAction: r.resolved_action,
+        discardReason: r.discard_reason,
         })
       }))
     } catch (e) {
@@ -1354,14 +1493,14 @@ export function useStore() {
     currentYear, currentMonth, currentPage, monthLabel,
     pageHistory,
     loading, loadError,
-    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, dataRecords,
+    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords,
     doneBills, pendingBills, filteredBills,
     recentEntries,
-    domains, pendingSummary, homeTimeline,
+    domains, pendingSummary, todaySummary, homeTimeline, timelineGroups, visibleTimelineGroups,
     totalExpense, totalIncome, netBalance,
     todayExpense, currentMonthDayKey,
     platformChartData, payChartData,
-    currentFilter,
+    currentFilter, pendingFilter, timelineExpanded, pendingExpanded, processedExpanded,
     flashMsg, flashVisible,
     imgOverlay,
     detailRecord, activeDomainId,
