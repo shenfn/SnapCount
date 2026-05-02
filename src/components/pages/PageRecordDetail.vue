@@ -77,6 +77,14 @@ import { formatDateTimeLabel, incomeCatMap } from '../../utils/helpers'
 
 const store = inject('store')
 
+function fmtAbsoluteDate(value) {
+  if (!value) return null
+  const s = String(value).slice(0, 10)
+  const d = new Date(s + 'T00:00:00+08:00')
+  if (isNaN(d.getTime())) return null
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+}
+
 const record = computed(() => store.detailRecord.value)
 const deleteType = computed(() => {
   if (record.value?.kind === 'income') return 'income'
@@ -129,7 +137,7 @@ const fields = computed(() => {
       { label: '金额', value: `+¥${Number(raw.amount || 0).toFixed(2)}`, numeric: true },
       { label: '收入类型', value: incomeCatMap[raw.cat]?.label || '其他' },
       { label: '来源名称', value: raw.source || '未填写' },
-      { label: '到账日期', value: raw.date || '--' },
+      { label: '到账日期', value: fmtAbsoluteDate(raw.dateRaw) || raw.date || '--' },
       { label: '备注', value: raw.note || '无' },
     ]
   }
@@ -140,6 +148,7 @@ const fields = computed(() => {
       { label: '标题', value: raw.title || meta.defaultTitle },
       { label: meta.dimensionLabel, value: payload[meta.dimensionKey] || '未填写' },
       { label: meta.primaryLabel, value: `${Number(payload[meta.primaryKey] || 0).toFixed(2)}`, numeric: true },
+      { label: '发生日期', value: fmtAbsoluteDate(raw.occurredAt) || '--' },
       { label: '模板版本', value: raw.domainVersion || '1.0' },
       { label: '来源类型', value: raw.source === 'staging' ? '中转站归档' : '手动录入' },
       { label: '备注', value: payload.note || raw.summary || '无' },
@@ -151,7 +160,7 @@ const fields = computed(() => {
     { label: '消费渠道', value: raw.platform || '其他' },
     { label: '消费分类', value: raw.cat || '其他' },
     { label: '支付方式', value: raw.payment || '其他' },
-    { label: '消费日期', value: raw.date || '--' },
+    { label: '消费日期', value: fmtAbsoluteDate(raw.dateRaw) || raw.date || '--' },
     { label: '备注', value: raw.note || '无' },
   ]
 })

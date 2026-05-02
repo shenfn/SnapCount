@@ -72,6 +72,7 @@ export function useStore() {
     payment: null,
     note: '',
     date: '',
+    time: '',
     imageUrl: null,
     imagePath: null,
     imageLoadError: false,
@@ -720,9 +721,10 @@ export function useStore() {
       const imagePath = pendingModal.bill.image_path
       const { error: delErr } = await sb.from('transactions').delete().eq('id', pendingModal.bill.id)
       if (delErr) { alert('收入已保存，但原待补充记录删除失败：' + delErr.message); return }
+      const bIdx = bills.value.findIndex(b => b.id === pendingModal.bill.id)
+      if (bIdx >= 0) bills.value.splice(bIdx, 1)
       closePendingModal()
       showFlash('✓ 收入已记录')
-      await loadData()
       return
     }
 
@@ -736,9 +738,21 @@ export function useStore() {
       status: 'done',
     }).eq('id', pendingModal.bill.id)
     if (error) { alert('保存失败：' + error.message); return }
+    // 本地更新账单状态
+    const bIdx2 = bills.value.findIndex(b => b.id === pendingModal.bill.id)
+    if (bIdx2 >= 0) {
+      bills.value[bIdx2] = {
+        ...bills.value[bIdx2],
+        platform: pendingModal.platform,
+        cat: pendingModal.category,
+        payment: pendingModal.payment,
+        name: pendingModal.merchantName || `${pendingModal.platform}消费`,
+        amount: amt,
+        status: 'done',
+      }
+    }
     closePendingModal()
     showFlash('✓ 已保存')
-    await loadData()
   }
 
   function openIncomeModal() {
@@ -835,6 +849,7 @@ export function useStore() {
       payment: expenseModal.payment,
       note: expenseModal.note,
       date: expenseModal.date,
+      time: expenseModal.time,
       imagePath: expenseModal.imagePath,
     }
   }
@@ -855,6 +870,7 @@ export function useStore() {
       || current.payment !== expenseModalInitial.payment
       || current.note !== expenseModalInitial.note
       || current.date !== expenseModalInitial.date
+      || current.time !== expenseModalInitial.time
       || current.imagePath !== expenseModalInitial.imagePath
   }
 
@@ -869,6 +885,7 @@ export function useStore() {
     expenseModal.payment = expenseModalInitial.payment
     expenseModal.note = expenseModalInitial.note
     expenseModal.date = expenseModalInitial.date
+    expenseModal.time = expenseModalInitial.time
     expenseModal.imagePath = expenseModalInitial.imagePath
   }
 
@@ -883,6 +900,7 @@ export function useStore() {
     expenseModal.payment = null
     expenseModal.note = ''
     expenseModal.date = new Date().toISOString().slice(0, 10)
+    expenseModal.time = ''
     expenseModal.imageUrl = null
     expenseModal.imagePath = null
     expenseModal.imageLoadError = false
@@ -900,6 +918,7 @@ export function useStore() {
     expenseModal.payment = record.payment && record.payment !== '?' ? record.payment : null
     expenseModal.note = record.note || ''
     expenseModal.date = record.dateRaw || new Date().toISOString().slice(0, 10)
+    expenseModal.time = record.time || ''
     expenseModal.imagePath = record.image_path || record.image_url || null
     expenseModal.imageUrl = await getSignedImageUrl(expenseModal.imagePath)
     expenseModal.imageLoadError = !!expenseModal.imagePath && !expenseModal.imageUrl
@@ -919,8 +938,7 @@ export function useStore() {
 
     const merchantName = expenseModal.merchantName.trim() || `${expenseModal.platform}消费`
     const isLargeTransport = expenseModal.category === '出行' && amt >= 200
-    const today = new Date().toISOString().slice(0, 10)
-    const nowTime = new Date().toTimeString().slice(0, 8)
+    const resolvedTime = expenseModal.time || null
 
     if (expenseModal.mode === 'edit' && expenseModal.id) {
       const { error } = await sb.from('transactions').update({
@@ -930,7 +948,7 @@ export function useStore() {
         category: expenseModal.category,
         payment_method: expenseModal.payment,
         transaction_date: expenseModal.date,
-        transaction_time: expenseModal.date === today ? nowTime : null,
+        transaction_time: resolvedTime,
         note: expenseModal.note.trim() || null,
         is_large_transport: isLargeTransport,
         transport_type: isLargeTransport ? '交通' : null,
@@ -957,7 +975,7 @@ export function useStore() {
       payment_method: expenseModal.payment,
       status: 'done',
       transaction_date: expenseModal.date,
-      transaction_time: expenseModal.date === today ? nowTime : null,
+      transaction_time: resolvedTime || (new Date().toTimeString().slice(0, 8)),
       source: 'manual',
       note: expenseModal.note.trim() || null,
       is_large_transport: isLargeTransport,
@@ -1181,8 +1199,9 @@ export function useStore() {
       showFlash('❌ 销毁失败：' + error.message)
       return
     }
+    const idx = stagingRecords.value.findIndex(r => r.id === record.id)
+    if (idx >= 0) stagingRecords.value.splice(idx, 1)
     showFlash('✓ 已销毁')
-    await loadData()
   }
 
   async function retryStagingRecord(record) {
@@ -1205,10 +1224,11 @@ export function useStore() {
       if (result.status === 'done') {
         const domainLabel = { expense: '消费记账', income: '收入记录', sport: '运动记录', sleep: '睡眠记录', reading: '阅读记录' }
         showFlash(`✓ 重试成功 → 已归档到「${domainLabel[result.record_type] || result.record_type}」`)
+        const idx = stagingRecords.value.findIndex(r => r.id === record.id)
+        if (idx >= 0) stagingRecords.value.splice(idx, 1)
       } else {
         showFlash('⚠ 重试未确定，请手动选择数据域归档（下方按钮）')
       }
-      await loadData()
     } catch (e) {
       showFlash('❌ 重试失败：' + (e.message || '未知错误'))
     }
@@ -1256,8 +1276,9 @@ export function useStore() {
         return
       }
       await finishStagingArchive(record, inserted.id, null, 'expense', payload)
+      const sIdx = stagingRecords.value.findIndex(r => r.id === record.id)
+      if (sIdx >= 0) stagingRecords.value.splice(sIdx, 1)
       showFlash('✓ 已转入支出，必要时可继续补充')
-      await loadData()
       const bill = bills.value.find(item => item.id === inserted.id)
       if (bill) {
         if (bill.status === 'pending') await openPendingModal(bill)
@@ -1283,8 +1304,9 @@ export function useStore() {
         return
       }
       await finishStagingArchive(record, inserted.id, null, 'income', payload)
+      const sIdx2 = stagingRecords.value.findIndex(r => r.id === record.id)
+      if (sIdx2 >= 0) stagingRecords.value.splice(sIdx2, 1)
       showFlash('✓ 已转入收入')
-      await loadData()
       const income = incomeRecords.value.find(item => item.id === inserted.id)
         || recentIncomeRecords.value.find(item => item.id === inserted.id)
       if (income) await openIncomeEditModal(income)
@@ -1323,8 +1345,9 @@ export function useStore() {
     const done = await finishStagingArchive(record, inserted.id, domainRow.id, domainKey, payload)
     if (!done) return
 
+    const sIdx3 = stagingRecords.value.findIndex(r => r.id === record.id)
+    if (sIdx3 >= 0) stagingRecords.value.splice(sIdx3, 1)
     showFlash(`✓ 已归档到${domain.name}`)
-    await loadData()
   }
 
   async function finishStagingArchive(record, targetRecordId, targetDomainId, domainKey, payload) {
@@ -1464,6 +1487,9 @@ export function useStore() {
         const { error } = await sb.from('transactions').delete().eq('id', id)
         if (error) throw new Error(error.message)
         if (detailRecord.value?.id === id) goBack()
+        // 本地移除，避免全量刷新
+        const billIdx = bills.value.findIndex(b => b.id === id)
+        if (billIdx >= 0) bills.value.splice(billIdx, 1)
         if (imagePath && !imagePath.startsWith('https://')) {
           const { data: refs, error: refErr } = await sb.from('transactions')
             .select('id')
@@ -1473,21 +1499,18 @@ export function useStore() {
             console.warn('检查截图引用失败:', refErr.message)
           } else if (!refs || refs.length === 0) {
             const { error: removeErr } = await sb.storage.from('receipt-images').remove([imagePath])
-            if (removeErr) {
-              console.warn('删除截图文件失败:', removeErr.message)
-              showFlash('✓ 已删除（截图清理失败，可稍后重试）')
-            } else {
-              showFlash('✓ 已删除')
-            }
-          } else {
-            showFlash('✓ 已删除')
+            if (removeErr) console.warn('删除截图文件失败:', removeErr.message)
           }
-        } else {
-          showFlash('✓ 已删除')
         }
+        showFlash('✓ 已删除')
       } else if (type === 'income') {
         const { error } = await sb.from('income_records').delete().eq('id', id)
         if (error) throw new Error(error.message)
+        // 本地移除
+        const incIdx = incomeRecords.value.findIndex(r => r.id === id)
+        if (incIdx >= 0) incomeRecords.value.splice(incIdx, 1)
+        const rIncIdx = recentIncomeRecords.value.findIndex(r => r.id === id)
+        if (rIncIdx >= 0) recentIncomeRecords.value.splice(rIncIdx, 1)
         if (imagePath && !imagePath.startsWith('https://')) {
           const { data: txRefs, error: txRefErr } = await sb.from('transactions').select('id').eq('image_url', imagePath).limit(1)
           const { data: incRefs, error: incRefErr } = await sb.from('income_records').select('id').eq('image_url', imagePath).limit(1)
@@ -1504,11 +1527,13 @@ export function useStore() {
       } else if (type === 'universal') {
         const { error } = await sb.from('data_records').delete().eq('id', id)
         if (error) throw new Error(error.message)
+        // 本地移除
+        const drIdx = dataRecords.value.findIndex(r => r.id === id)
+        if (drIdx >= 0) dataRecords.value.splice(drIdx, 1)
         if (universalModal.open && universalModal.id === id) closeUniversalModal()
         if (detailRecord.value?.id === id) goBack()
         showFlash('✓ 已删除')
       }
-      await loadData()
     } catch (e) {
       showFlash('❌ 删除失败：' + e.message)
     }

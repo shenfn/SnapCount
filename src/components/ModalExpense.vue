@@ -82,6 +82,11 @@
       </div>
 
       <div class="sel-section" style="margin-top:12px">
+        <div class="sel-label">消费时间（可选）</div>
+        <input type="time" class="sheet-input" v-model="store.expenseModal.time">
+      </div>
+
+      <div class="sel-section" style="margin-top:12px">
         <div class="sel-label">备注（可选）</div>
         <input type="text" class="sheet-input" v-model="store.expenseModal.note"
           placeholder="备注信息…" maxlength="100">

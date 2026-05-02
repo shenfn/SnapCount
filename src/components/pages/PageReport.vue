@@ -2,6 +2,7 @@
   <div class="page active report-page">
     <div class="page-title">报告</div>
     <div class="page-subtitle">数据洞察与趋势分析</div>
+    <MonthPicker />
 
     <div class="report-domain-selector" @click.stop>
       <div class="report-selector-label">选择数据域</div>
@@ -174,6 +175,7 @@
 <script setup>
 import { computed, inject, onMounted, onBeforeUnmount, ref } from 'vue'
 import { computeWeekData, incomeCatMap } from '../../utils/helpers'
+import MonthPicker from '../MonthPicker.vue'
 
 const store = inject('store')
 const activeDomain = ref('expense')

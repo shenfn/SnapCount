@@ -983,8 +983,10 @@ Deno.serve(async (req) => {
 
     const normalizedAmount = normalizeAmount(ai.amount);
     const now = new Date();
-    const today = now.toISOString().slice(0, 10);
-    const nowTime = now.toTimeString().slice(0, 8);
+    // Deno 运行在 UTC 环境，显式换算为 UTC+8 时间
+    const chinaNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const today = chinaNow.toISOString().slice(0, 10);
+    const nowTime = `${String(chinaNow.getUTCHours()).padStart(2, '0')}:${String(chinaNow.getUTCMinutes()).padStart(2, '0')}:00`;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
       ? ai.domain_key
