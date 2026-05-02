@@ -71,6 +71,7 @@ async function submit() {
           created_at: new Date().toISOString(),
         }, { onConflict: 'user_id' })
         store.currentUserId.value = data.user.id
+        store.isLoggedIn.value = true
         store.showFlash('✓ 注册成功，已自动登录')
         await store.loadData()
       }
@@ -83,6 +84,7 @@ async function submit() {
 
       if (data?.user) {
         store.currentUserId.value = data.user.id
+        store.isLoggedIn.value = true
         store.showFlash('✓ 登录成功')
         await store.loadData()
       }
