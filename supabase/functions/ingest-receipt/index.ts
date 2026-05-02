@@ -680,6 +680,7 @@ async function createStagingRecord(
     errorType?: string | null;
     errorMessage?: string | null;
     dispatcher?: DispatcherResult | null;
+    userId?: string | null;
   },
 ): Promise<{ id: string } | null> {
   const detectedDomainKey = isBuiltinDomain(payload.ai.domain_key)
@@ -696,6 +697,7 @@ async function createStagingRecord(
 
   const { data, error } = await supabase.from("staging_records").insert({
     status: payload.status,
+    user_id: payload.userId || null,
     image_path: payload.imagePath,
     image_hash: payload.imageHash,
     perceptual_hash: payload.perceptualHash,
@@ -819,6 +821,17 @@ Deno.serve(async (req) => {
     const startedAt = Date.now();
     // 1. 接收图片（multipart/form-data，字段名 image）
     const form = await req.formData();
+    // 用户身份：优先 user_id，其次 upload_token 查表
+    let userId = normalizeString(form.get("user_id"));
+    const uploadToken = normalizeString(form.get("upload_token"));
+    if (!userId && uploadToken) {
+      const { data: cfg } = await supabase.from("user_configs")
+        .select("user_id")
+        .eq("upload_token", uploadToken)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (cfg) userId = cfg.user_id;
+    }
     const stagingRetryId = normalizeString(form.get("staging_record_id"));
     let file = form.get("image") as File | null;
     let retryImageBytes: Uint8Array | null = null;
@@ -1017,7 +1030,7 @@ Deno.serve(async (req) => {
           const { data: incRow } = await supabase.from("income_records").insert({
             amount: normalizedAmount ?? 0.01, category: incomeCat,
             source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
-            income_date: recordDate, image_url: path, image_hash: hash, source: "ai_scan",
+            income_date: recordDate, image_url: path, image_hash: hash, user_id: userId || null, source: "ai_scan",
           }).select("id").single();
           if (incRow) { archivedTo = "income_records"; archivedId = incRow.id; }
         } else if (builtinKey) {
@@ -1027,7 +1040,7 @@ Deno.serve(async (req) => {
             const { data: drRow } = await supabase.from("data_records").insert({
               domain_id: domain.id, domain_key: builtinKey, domain_version: domain.version ?? "1.0",
               occurred_at: occurredAt, title: built.title, summary: built.summary,
-              payload_jsonb: built.payload, source: "ai_scan", source_image_path: path, source_image_hash: hash,
+              payload_jsonb: built.payload, user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
             }).select("id").single();
             if (drRow) { archivedTo = "data_records"; archivedId = drRow.id; }
           }
@@ -1039,7 +1052,7 @@ Deno.serve(async (req) => {
             merchant_name: ai.merchant_name, platform: ai.platform, category: ai.category,
             payment_method: ai.payment_method, status: isComplete ? "done" : "pending",
             image_url: path, image_hash: hash,
-            transaction_date: recordDate, transaction_time: recordTime, source: "ai_scan",
+            transaction_date: recordDate, transaction_time: recordTime, user_id: userId || null, source: "ai_scan",
           }).select("id").single();
           if (txRow) { archivedTo = "transactions"; archivedId = txRow.id; }
         }
@@ -1109,6 +1122,7 @@ Deno.serve(async (req) => {
         errorType: !aiOk ? "AI_PROVIDER_ERROR" : "ROUTING_FAILED",
         errorMessage: aiErrorMessage,
         dispatcher,
+        userId,
       });
       await writeAiLog(supabase, {
         image_hash: hash,
@@ -1166,6 +1180,7 @@ Deno.serve(async (req) => {
             ? `未找到内置数据域 ${builtinKey}，请确认 007 迁移已执行`
             : `缺少字段或置信度不足：${missing.join(", ") || "confidence"}`,
           dispatcher,
+          userId,
         });
         await writeAiLog(supabase, {
           image_hash: hash,
@@ -1212,6 +1227,7 @@ Deno.serve(async (req) => {
         title: built.title,
         summary: built.summary,
         payload_jsonb: built.payload,
+        user_id: userId || null,
         source: "ai_scan",
         source_image_path: path,
         source_image_hash: hash,
@@ -1354,6 +1370,7 @@ Deno.serve(async (req) => {
         income_date: recordDate,
         image_url: path,
         image_hash: hash,
+        user_id: userId || null,
         source: "ai_scan",
         note: ai.platform ? `来自${ai.platform}截图识别` : "截图识别收入",
       }).select().single();
@@ -1504,7 +1521,7 @@ Deno.serve(async (req) => {
     // 6. 写入数据库
     const { data: row, error: insErr } = await supabase.from("transactions").insert({
       type: "expense",
-      amount: normalizedAmount ?? 0.01,     // 金额识别失败或非法时占位 0.01，由用户改
+      amount: normalizedAmount ?? 0.01,
       merchant_name: ai.merchant_name,
       platform: ai.platform,
       category: ai.category,
@@ -1512,6 +1529,7 @@ Deno.serve(async (req) => {
       status: normalizedAmount === null ? "pending" : status,
       image_url: path,
       image_hash: hash,
+      user_id: userId || null,
       is_large_transport: isLargeTransport,
       transaction_date: recordDate,
       transaction_time: recordTime,

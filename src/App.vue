@@ -1,5 +1,9 @@
 <template>
   <div>
+    <!-- Auth gate -->
+    <AuthPage v-if="!store.isLoggedIn.value" />
+
+    <template v-else>
     <!-- Loading overlay -->
     <div v-if="store.loading.value" class="platform-overlay">
       <div class="platform-loader-mark">数</div>
@@ -89,12 +93,15 @@
       <button class="img-overlay-close" @click.stop="store.closeImgFull()">✕</button>
       <img :src="store.imgOverlay.src" @click.stop>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { ref, provide, onMounted } from 'vue'
+import { sb } from './lib/supabase'
 import { useStore } from './composables/useStore'
+import AuthPage   from './components/pages/AuthPage.vue'
 import PageHome    from './components/pages/PageHome.vue'
 import PagePending from './components/pages/PagePending.vue'
 import PageDomains from './components/pages/PageDomains.vue'
@@ -113,6 +120,11 @@ provide('store', store)
 const fabOpen = ref(false)
 
 onMounted(async () => {
-  await store.loadData()
+  const { data } = await sb.auth.getSession()
+  if (data?.session?.user) {
+    store.currentUserId.value = data.session.user.id
+    store.isLoggedIn.value = true
+    await store.loadData()
+  }
 })
 </script>

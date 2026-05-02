@@ -11,6 +11,8 @@ export function useStore() {
   const currentMonth = ref(new Date().getMonth() + 1)
   const currentPage = ref('home')
   const pageHistory = ref([])
+  const currentUserId = ref(null)
+  const isLoggedIn = ref(false)
 
   const bills = ref([])
   const incomeRecords = ref([])
@@ -1283,6 +1285,7 @@ export function useStore() {
       const fnUrl = `${SUPABASE_URL}/functions/v1/ingest-receipt`
       const formData = new FormData()
       formData.append('staging_record_id', record.id)
+      if (currentUserId.value) formData.append('user_id', currentUserId.value)
       const resp = await fetch(fnUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
@@ -1613,7 +1616,7 @@ export function useStore() {
 
   return {
     currentYear, currentMonth, currentPage, monthLabel,
-    pageHistory,
+    pageHistory, currentUserId, isLoggedIn,
     loading, loadError,
     bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords,
     doneBills, pendingBills, filteredBills,

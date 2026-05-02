@@ -2837,6 +2837,144 @@ body {
   color: #fff;
 }
 
+/* ── Auth ── */
+.auth-hero {
+  text-align: center;
+  padding: 64px 20px 32px;
+}
+
+.auth-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 800;
+  margin: 0 auto 16px;
+}
+
+.auth-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.auth-subtitle {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--text2);
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 20px;
+  background: var(--surface2);
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.auth-tabs button {
+  flex: 1;
+  padding: 10px 0;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  color: var(--text2);
+  background: transparent;
+  transition: all 0.2s;
+}
+
+.auth-tabs button.active {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.auth-form {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-input {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1.5px solid var(--border);
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  font-family: var(--font);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.auth-input:focus {
+  border-color: var(--primary);
+  background: #fff;
+}
+
+.auth-input::placeholder {
+  color: var(--text3);
+}
+
+.auth-error {
+  font-size: 13px;
+  color: var(--danger);
+  padding: 8px 12px;
+  background: var(--danger-light);
+  border-radius: 10px;
+  line-height: 1.5;
+}
+
+.auth-btn {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 14px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.auth-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.auth-hint {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text3);
+}
+
+.auth-hint a {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.auth-footer {
+  text-align: center;
+  padding: 0 20px 40px;
+  font-size: 11px;
+  color: var(--text3);
+  line-height: 1.6;
+}
+
 @media (max-width: 390px) {
   .stats-row,
   .stat-grid,

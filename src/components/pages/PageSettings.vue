@@ -5,30 +5,31 @@
     <div class="settings-profile">
       <div class="settings-avatar">数</div>
       <div class="settings-profile-info">
-        <div class="settings-profile-name">个人数据平台</div>
-        <div class="settings-profile-plan">单用户本地阶段</div>
+        <div class="settings-profile-name">{{ userEmail }}</div>
+        <div class="settings-profile-plan">{{ planLabel }} · 已登录</div>
       </div>
-      <div class="settings-arrow">›</div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">账户</div>
+      <div class="settings-item" v-if="uploadToken" @click="copyToken">
+        <div class="settings-item-icon success">钥</div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">上传 Token（点击复制）</div>
+          <div class="settings-item-sub" style="word-break:break-all;font-size:11px;">{{ uploadToken }}</div>
+        </div>
+      </div>
+      <div class="settings-item" @click="handleLogout">
+        <div class="settings-item-icon warn">出</div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">退出登录</div>
+          <div class="settings-item-sub">切换账号或退出</div>
+        </div>
+      </div>
     </div>
 
     <div class="settings-section">
       <div class="settings-section-title">数据管理</div>
-      <div class="settings-item" @click="store.currentPage.value = 'domains'">
-        <div class="settings-item-icon primary">层</div>
-        <div class="settings-item-content">
-          <div class="settings-item-title">模板与数据域</div>
-          <div class="settings-item-sub">{{ store.domains.value.length }} 个已配置数据域</div>
-        </div>
-        <div class="settings-arrow">›</div>
-      </div>
-      <div class="settings-item" @click="store.showFlash('托管用户阶段再接入真实 Token')">
-        <div class="settings-item-icon success">钥</div>
-        <div class="settings-item-content">
-          <div class="settings-item-title">上传 Token</div>
-          <div class="settings-item-sub">用于 iOS 快捷指令上传</div>
-        </div>
-        <div class="settings-arrow">›</div>
-      </div>
       <div class="settings-item" @click="store.showFlash('导入能力将在平台阶段逐步接入')">
         <div class="settings-item-icon info">入</div>
         <div class="settings-item-content">
@@ -95,7 +96,42 @@
 </template>
 
 <script setup>
-import { inject } from 'vue'
+import { ref, inject, onMounted } from 'vue'
+import { sb } from '../../lib/supabase'
 
 const store = inject('store')
+const uploadToken = ref('')
+const userEmail = ref('')
+
+onMounted(async () => {
+  const { data: authData } = await sb.auth.getUser()
+  if (authData?.user) {
+    userEmail.value = authData.user.email || '内测用户'
+  }
+  if (store.currentUserId.value) {
+    const { data: cfg } = await sb.from('user_configs')
+      .select('upload_token, plan')
+      .eq('user_id', store.currentUserId.value)
+      .maybeSingle()
+    if (cfg) {
+      uploadToken.value = cfg.upload_token || ''
+    }
+  }
+})
+
+const planLabel = ref('种子用户')
+
+function copyToken() {
+  if (!uploadToken.value) return
+  navigator.clipboard?.writeText(uploadToken.value)
+    .then(() => store.showFlash('✓ Token 已复制到剪贴板'))
+    .catch(() => store.showFlash('⚠ 复制失败，请手动选择'))
+}
+
+async function handleLogout() {
+  await sb.auth.signOut()
+  store.currentUserId.value = null
+  store.isLoggedIn.value = false
+  store.showFlash('✓ 已退出登录')
+}
 </script>
