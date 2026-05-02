@@ -31,7 +31,15 @@
     <!-- 中转站待处理 -->
     <div v-if="filteredStaging.length" class="section-header">
       <div class="section-title">中转站</div>
-      <div class="section-action">{{ filteredStaging.length }} 条</div>
+      <div class="section-action">
+        <span v-if="!store.batchMode.value" @click="store.toggleBatchMode()" style="margin-right:12px;">批量管理</span>
+        <span v-else @click="store.toggleBatchMode()" style="color:var(--danger);">取消</span>
+        <span>{{ filteredStaging.length }} 条</span>
+      </div>
+    </div>
+    <div v-if="store.batchMode.value && filteredStaging.length" class="batch-select-all" @click="store.selectAllStaging(filteredStaging)">
+      <span v-if="store.selectedStagingIds.value.size === filteredStaging.length">☑ 已全选</span>
+      <span v-else>☐ 全选 {{ filteredStaging.length }} 条</span>
     </div>
     <div class="pending-record-list" v-if="filteredStaging.length">
       <template v-for="(dateLabel, idx) in stagingDateKeys" :key="dateLabel">
@@ -40,8 +48,12 @@
           v-for="r in stagingByDate[dateLabel]"
           :key="r.id"
           class="pending-record-card"
-          :class="{ clickable: r.status !== 'ai_error' }"
+          :class="{ clickable: r.status !== 'ai_error' && !store.batchMode.value }"
         >
+          <div v-if="store.batchMode.value" class="batch-checkbox" @click.stop="store.toggleSelectStaging(r.id)">
+            <span v-if="store.selectedStagingIds.value.has(r.id)" style="color:var(--primary);font-size:20px;">☑</span>
+            <span v-else style="color:var(--text3);font-size:20px;">☐</span>
+          </div>
           <div class="pending-record-top">
             <div class="pending-record-thumb" @click="r.imageUrl && store.openImgFull(r.imageUrl)">
               <img v-if="r.imageUrl" :src="r.imageUrl" alt="">
@@ -90,6 +102,16 @@
           </div>
         </div>
       </template>
+    </div>
+
+    <!-- 批量操作栏 -->
+    <div v-if="store.batchMode.value && store.selectedStagingIds.value.size" class="batch-bar">
+      <span class="batch-bar-count">已选 {{ store.selectedStagingIds.value.size }} 条</span>
+      <div class="batch-bar-actions">
+        <button class="btn btn-secondary btn-sm" @click="store.batchArchive('expense')">💰 归档消费</button>
+        <button class="btn btn-secondary btn-sm" @click="store.batchArchive('income')">💵 归档收入</button>
+        <button class="btn btn-danger btn-sm" @click="store.batchDiscard()">🗑 全部销毁</button>
+      </div>
     </div>
 
     <!-- 账单待补充 -->

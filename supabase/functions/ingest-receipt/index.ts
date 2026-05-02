@@ -1415,6 +1415,51 @@ Deno.serve(async (req) => {
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // 4.5 感知哈希去重：同一笔支出（同金额+同商家）的相似截图 → 拦截
+    if (duplicateKind === "perceptual_hash" && duplicateRefId && normalizedAmount !== null) {
+      const { data: refLog } = await supabase
+        .from("ai_recognition_logs")
+        .select("id,target_table,target_id,record_type,ai_response")
+        .eq("id", duplicateRefId)
+        .maybeSingle();
+
+      if (refLog && refLog.record_type === "expense") {
+        let refAmount: number | null = null;
+        let refMerchant: string | null = null;
+        try {
+          const refAi = typeof refLog.ai_response === "string" ? JSON.parse(refLog.ai_response) : (refLog.ai_response || {});
+          refAmount = normalizeAmount(refAi.amount);
+          refMerchant = (refAi.merchant_name || "").trim();
+        } catch {}
+
+        const currentMerchant = (ai.merchant_name || "").trim();
+        const amountMatch = refAmount !== null && normalizedAmount !== null && Math.abs(refAmount - normalizedAmount) <= 0.01;
+        const merchantMatch = currentMerchant && refMerchant
+          ? currentMerchant === refMerchant
+          : !currentMerchant && !refMerchant;
+
+        if (amountMatch && merchantMatch && refLog.target_id) {
+          await writeAiLog(supabase, {
+            image_hash: hash, perceptual_hash: perceptualHash, perceptual_distance: perceptualDistance,
+            image_url: path, image_type: ai.image_type, record_type: "expense",
+            occurred_at: occurredAt, order_finished_at: orderFinishedAt,
+            duplicate_kind: duplicateKind, duplicate_ref_table: duplicateRefTable, duplicate_ref_id: duplicateRefId,
+            target_table: "transactions", target_id: refLog.target_id, status: "duplicate",
+            confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
+            ai_response: ai, model_provider: "moonshot", model_name: MOONSHOT_MODEL,
+          });
+          if (uploadedNewObject) {
+            const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
+            if (removeErr) console.error("Cleanup duplicate expense image failed:", removeErr);
+          }
+          return new Response(JSON.stringify({
+            status: "duplicate", id: refLog.target_id, record_type: "expense",
+            ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
+          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+    }
+
     // 5. 业务层疑似重复检测：3 分钟内同金额+同支付+同商家 → 标记 possible_duplicate
     //    不阻断入库，允许用户真实的重复消费，仅在响应中提示
     let possibleDuplicate = false;

@@ -25,6 +25,8 @@ export function useStore() {
   const timelineExpanded = ref(false)
   const pendingExpanded = ref(false)
   const processedExpanded = ref(false)
+  const batchMode = ref(false)
+  const selectedStagingIds = ref(new Set())
   const loading = ref(false)
   const loadError = ref('')
   const flashMsg = ref('')
@@ -1208,6 +1210,72 @@ export function useStore() {
     showFlash('✓ 已销毁')
   }
 
+  function toggleBatchMode() {
+    batchMode.value = !batchMode.value
+    if (!batchMode.value) selectedStagingIds.value = new Set()
+  }
+
+  function toggleSelectStaging(id) {
+    const next = new Set(selectedStagingIds.value)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    selectedStagingIds.value = next
+  }
+
+  function selectAllStaging(records) {
+    selectedStagingIds.value = new Set(records.map(r => r.id))
+  }
+
+  function clearSelection() {
+    selectedStagingIds.value = new Set()
+  }
+
+  async function batchDiscard() {
+    const ids = [...selectedStagingIds.value]
+    if (!ids.length) return
+    const ok = confirm(`确认销毁选中的 ${ids.length} 条记录？`)
+    if (!ok) return
+    showFlash(`⏳ 正在销毁 ${ids.length} 条...`)
+    const { error } = await sb.from('staging_records').update({
+      status: 'discarded',
+      discard_reason: 'batch_discard',
+      resolved_action: 'discarded',
+      resolved_at: new Date().toISOString(),
+    }).in('id', ids)
+    if (error) { showFlash('❌ 批量销毁失败：' + error.message); return }
+    ids.forEach(id => {
+      const idx = stagingRecords.value.findIndex(r => r.id === id)
+      if (idx >= 0) stagingRecords.value.splice(idx, 1)
+    })
+    selectedStagingIds.value = new Set()
+    showFlash(`✓ 已销毁 ${ids.length} 条`)
+  }
+
+  async function batchArchive(domainKey) {
+    const ids = [...selectedStagingIds.value]
+    if (!ids.length) return
+    if (domainKey !== 'expense' && domainKey !== 'income') {
+      showFlash('批量归档目前仅支持消费和收入域')
+      return
+    }
+    const ok = confirm(`确认将选中的 ${ids.length} 条批量归档到「${domainKey === 'expense' ? '消费记账' : '收入记录'}」？`)
+    if (!ok) return
+    showFlash(`⏳ 正在批量归档 ${ids.length} 条...`)
+    let successCount = 0
+    for (const id of ids) {
+      const record = stagingRecords.value.find(r => r.id === id)
+      if (!record) continue
+      try {
+        await archiveStagingRecord(record, domainKey)
+        successCount++
+      } catch (e) {
+        console.warn('批量归档单条失败:', id, e)
+      }
+    }
+    selectedStagingIds.value = new Set()
+    showFlash(`✓ 已归档 ${successCount}/${ids.length} 条`)
+  }
+
   async function retryStagingRecord(record) {
     if (!record?.id) return
     showFlash('⏳ 正在重新识别...')
@@ -1555,6 +1623,7 @@ export function useStore() {
     todayExpense, currentMonthDayKey,
     platformChartData, payChartData,
     currentFilter, pendingFilter, timelineExpanded, pendingExpanded, processedExpanded,
+    batchMode, selectedStagingIds, toggleBatchMode, toggleSelectStaging, selectAllStaging, clearSelection, batchDiscard, batchArchive,
     flashMsg, flashVisible,
     imgOverlay,
     detailRecord, activeDomainId,
