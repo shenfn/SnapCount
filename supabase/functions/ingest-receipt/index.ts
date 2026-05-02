@@ -819,21 +819,62 @@ Deno.serve(async (req) => {
     const startedAt = Date.now();
     // 1. 接收图片（multipart/form-data，字段名 image）
     const form = await req.formData();
-    const file = form.get("image") as File | null;
-    if (!file) {
+    const stagingRetryId = normalizeString(form.get("staging_record_id"));
+    let file = form.get("image") as File | null;
+    let retryImageBytes: Uint8Array | null = null;
+    let retryImageMime = "image/jpeg";
+    let retryImagePath: string | null = null;
+    let retryImageHash: string | null = null;
+    if (stagingRetryId && !file) {
+      const { data: stagingRow } = await supabase.from("staging_records")
+        .select("id,image_path,image_hash,retry_count")
+        .eq("id", stagingRetryId)
+        .maybeSingle();
+      if (!stagingRow || !stagingRow.image_path) {
+        return new Response(JSON.stringify({ error: "Staging record not found or missing image" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if ((stagingRow.retry_count || 0) >= 3) {
+        return new Response(JSON.stringify({ error: "Retry limit exceeded (max 3)" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: imgData, error: imgErr } = await supabase.storage.from(BUCKET_NAME).download(stagingRow.image_path);
+      if (imgErr || !imgData) {
+        return new Response(JSON.stringify({ error: "Failed to download image: " + (imgErr?.message || 'not found') }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      retryImageBytes = new Uint8Array(await imgData.arrayBuffer());
+      if (stagingRow.image_path.endsWith(".png")) retryImageMime = "image/png";
+      retryImagePath = stagingRow.image_path;
+      retryImageHash = stagingRow.image_hash;
+    }
+    if (!file && !retryImageBytes) {
       return new Response(JSON.stringify({ error: "Missing 'image' field" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const buf = await file.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    const mime = file.type || "image/jpeg";
+    let bytes: Uint8Array;
+    let buf: ArrayBuffer;
+    let mime: string;
+    if (retryImageBytes) {
+      bytes = retryImageBytes;
+      buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      mime = retryImageMime;
+    } else {
+      buf = await file!.arrayBuffer();
+      bytes = new Uint8Array(buf);
+      mime = file!.type || "image/jpeg";
+    }
+    const isRetry = !!stagingRetryId;
     const rawText = normalizeText(form.get("ocr_text") ?? form.get("text") ?? form.get("raw_text"));
     const sourceApp = normalizeText(form.get("source_app") ?? form.get("app_name"));
     const imageFeatures = getImageFeatures(bytes, mime);
 
     // 2. 计算 hash 去重
-    const hash = await sha256(buf);
+    const hash = retryImageHash || await sha256(buf);
     const perceptualHash = computePerceptualHash(bytes, mime);
     let perceptualDistance: number | null = null;
     let perceptualDupRefId: string | null = null;
@@ -915,17 +956,17 @@ Deno.serve(async (req) => {
     let duplicateRefTable: string | null = perceptualDupRefId ? "ai_recognition_logs" : null;
     let duplicateRefId: string | null = perceptualDupRefId;
 
-    // 3. 上传到 Storage
-    const ext  = mime.includes("png") ? "png" : "jpg";
-    const path = `${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${ext}`;
+    // 3. 上传到 Storage（重试模式跳过，图片已存在）
+    const path = isRetry ? (retryImagePath!) : `${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
     let uploadedNewObject = false;
-    const { error: upErr } = await supabase.storage.from(BUCKET_NAME)
-      .upload(path, bytes, { contentType: mime, upsert: false });
-    if (upErr && !upErr.message.includes("already exists")) {
-      throw new Error(`Upload failed: ${upErr.message}`);
+    if (!isRetry) {
+      const { error: upErr } = await supabase.storage.from(BUCKET_NAME)
+        .upload(path, bytes, { contentType: mime, upsert: false });
+      if (upErr && !upErr.message.includes("already exists")) {
+        throw new Error(`Upload failed: ${upErr.message}`);
+      }
+      uploadedNewObject = !upErr;
     }
-    uploadedNewObject = !upErr;
-    // 存储路径（非 signed URL），前端查询时动态生成 signed URL，避免过期问题
 
     // 4. 调用 Kimi Vision 识别（始终调用，不因低成本路由无匹配而跳过）
     let ai: AIResult;
@@ -953,6 +994,98 @@ Deno.serve(async (req) => {
     if (builtinKey) {
       ai.record_type = builtinKey;
       ai.domain_key = builtinKey;
+    }
+
+    // 重试模式：处理结果后直接返回
+    if (isRetry && stagingRetryId) {
+      const retryResult = aiOk && (recordType !== "uncertain") && (ai.confidence ?? 0) >= 0.5;
+      const retryCount = (await supabase.from("staging_records").select("retry_count").eq("id", stagingRetryId).maybeSingle())?.data?.retry_count ?? 0;
+
+      if (retryResult) {
+        // 重试成功：按 recordType 归档
+        let archivedTo: string | null = null;
+        let archivedId: string | null = null;
+        const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
+        const occurredAt = occurredDateTime?.iso ?? new Date().toISOString();
+        const recordDate = occurredDateTime?.date ?? today;
+        const recordTime = occurredDateTime?.time ?? nowTime;
+
+        if (recordType === "income") {
+          const incomeCat = ["salary","bonus","freelance","investment","reimbursement","other"].includes(ai.income_category ?? "") ? ai.income_category! : "other";
+          const { data: incRow } = await supabase.from("income_records").insert({
+            amount: normalizedAmount ?? 0.01, category: incomeCat,
+            source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
+            income_date: recordDate, image_url: path, image_hash: hash, source: "ai_scan",
+          }).select("id").single();
+          if (incRow) { archivedTo = "income_records"; archivedId = incRow.id; }
+        } else if (builtinKey) {
+          const built = buildBuiltinPayload(ai);
+          const domain = await getDomainByKey(supabase, builtinKey);
+          if (domain && built) {
+            const { data: drRow } = await supabase.from("data_records").insert({
+              domain_id: domain.id, domain_key: builtinKey, domain_version: domain.version ?? "1.0",
+              occurred_at: occurredAt, title: built.title, summary: built.summary,
+              payload_jsonb: built.payload, source: "ai_scan", source_image_path: path, source_image_hash: hash,
+            }).select("id").single();
+            if (drRow) { archivedTo = "data_records"; archivedId = drRow.id; }
+          }
+        } else {
+          // expense
+          const isComplete = normalizedAmount !== null && ai.platform !== null && ai.category !== null && ai.payment_method !== null;
+          const { data: txRow } = await supabase.from("transactions").insert({
+            type: "expense", amount: normalizedAmount ?? 0.01,
+            merchant_name: ai.merchant_name, platform: ai.platform, category: ai.category,
+            payment_method: ai.payment_method, status: isComplete ? "done" : "pending",
+            image_url: path, image_hash: hash,
+            transaction_date: recordDate, transaction_time: recordTime, source: "ai_scan",
+          }).select("id").single();
+          if (txRow) { archivedTo = "transactions"; archivedId = txRow.id; }
+        }
+
+        if (archivedTo && archivedId) {
+          await supabase.from("staging_records").update({
+            status: "archived", resolved_at: now.toISOString(), resolved_action: "archived",
+            target_record_id: archivedId, retry_count: retryCount + 1,
+            ai_summary: ai.record_type ? `重试成功 → ${domainNameFromKey(ai.record_type) ?? ai.record_type}` : "重试成功",
+          }).eq("id", stagingRetryId);
+
+          await writeAiLog(supabase, {
+            image_hash: hash, image_url: path, image_type: ai.image_type,
+            record_type: recordType, occurred_at: occurredAt, status: "success",
+            confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
+            target_table: archivedTo, target_id: archivedId, staging_record_id: stagingRetryId,
+            ai_response: ai, model_provider: "moonshot", model_name: MOONSHOT_MODEL,
+            prompt_version: "platform-v3-builtins-retry",
+          });
+
+          return new Response(JSON.stringify({
+            status: "done", id: archivedId, record_type: recordType, retry: true,
+            message: `✓ 重试成功，已归档到${domainNameFromKey(recordType) ?? recordType}`,
+          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+
+      // 重试失败：更新 staging 记录
+      await supabase.from("staging_records").update({
+        retry_count: retryCount + 1,
+        last_error_type: !aiOk ? "AI_PROVIDER_ERROR" : "RETRY_STILL_UNCERTAIN",
+        last_error_message: aiErrorMessage || `重试后仍无法确定（record_type=${recordType}, confidence=${ai.confidence ?? 0}）`,
+        ai_summary: ai.record_type ? `重试 → ${ai.record_type} (confidence: ${ai.confidence ?? 0})` : "重试失败",
+      }).eq("id", stagingRetryId);
+
+      await writeAiLog(supabase, {
+        image_hash: hash, image_url: path, image_type: ai.image_type,
+        record_type: recordType, status: !aiOk ? "ai_error" : "pending",
+        confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
+        staging_record_id: stagingRetryId, ai_response: ai,
+        error_message: aiErrorMessage, model_provider: "moonshot", model_name: MOONSHOT_MODEL,
+        prompt_version: "platform-v3-builtins-retry",
+      });
+
+      return new Response(JSON.stringify({
+        status: "staging", staging_status: "retry_failed",
+        message: "⚠ 重试仍未确定，请手动选择数据域归档",
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
     const orderFinishedDateTime = normalizeAiDateTime(ai.order_finished_at) ?? occurredDateTime;

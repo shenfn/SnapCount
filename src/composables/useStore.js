@@ -1,5 +1,5 @@
 import { ref, reactive, computed } from 'vue'
-import { sb } from '../lib/supabase'
+import { sb, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase'
 import {
   formatDate, formatMonthLabel, mapTransaction,
   incomeCatMap, catCodeMap, payAliasMap,
@@ -1185,8 +1185,33 @@ export function useStore() {
     await loadData()
   }
 
-  function retryStagingRecord() {
-    showFlash('重试入口已预留，下一步接入重新识别队列')
+  async function retryStagingRecord(record) {
+    if (!record?.id) return
+    showFlash('⏳ 正在重新识别...')
+    try {
+      const fnUrl = `${SUPABASE_URL}/functions/v1/ingest-receipt`
+      const formData = new FormData()
+      formData.append('staging_record_id', record.id)
+      const resp = await fetch(fnUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+        body: formData,
+      })
+      if (!resp.ok) {
+        const errText = await resp.text()
+        throw new Error(`${resp.status}: ${errText}`)
+      }
+      const result = await resp.json()
+      if (result.status === 'done') {
+        const domainLabel = { expense: '消费记账', income: '收入记录', sport: '运动记录', sleep: '睡眠记录', reading: '阅读记录' }
+        showFlash(`✓ 重试成功 → 已归档到「${domainLabel[result.record_type] || result.record_type}」`)
+      } else {
+        showFlash('⚠ 重试未确定，请手动选择数据域归档（下方按钮）')
+      }
+      await loadData()
+    } catch (e) {
+      showFlash('❌ 重试失败：' + (e.message || '未知错误'))
+    }
   }
 
   async function archiveStagingRecord(record, domainKey) {

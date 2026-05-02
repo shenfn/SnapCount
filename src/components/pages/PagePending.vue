@@ -74,16 +74,19 @@
           </div>
 
           <div class="pending-record-actions">
-            <button class="btn btn-secondary btn-sm" @click="store.retryStagingRecord(r)">重试</button>
+            <button class="btn btn-secondary btn-sm" @click="store.retryStagingRecord(r)">🔄 重试识别</button>
+            <button class="btn btn-danger btn-sm" @click="store.discardStagingRecord(r)">🗑 销毁</button>
+          </div>
+          <div class="pending-archive-row">
+            <span class="pending-archive-label">归档到：</span>
             <button
               v-for="domain in archiveDomains"
               :key="`${r.id}-${domain.id}`"
               class="btn btn-ghost btn-sm"
               @click="store.archiveStagingRecord(r, domain.id)"
             >
-              {{ domain.shortName }}
+              {{ domain.icon }} {{ domain.shortName }}
             </button>
-            <button class="btn btn-danger btn-sm" @click="store.discardStagingRecord(r)">销毁</button>
           </div>
         </div>
       </template>

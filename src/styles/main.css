@@ -2275,6 +2275,23 @@ body {
   flex: 1 1 calc(50% - 8px);
 }
 
+.pending-archive-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
+}
+
+.pending-archive-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  white-space: nowrap;
+}
+
 .pending-field-row {
   display: flex;
   flex-wrap: wrap;
