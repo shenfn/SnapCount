@@ -66,6 +66,11 @@
         </div>
 
         <div class="sel-section" style="margin-top:12px">
+          <div class="sel-label">具体时刻（可选）</div>
+          <input type="time" class="sheet-input" v-model="store.universalModal.time">
+        </div>
+
+        <div class="sel-section" style="margin-top:12px">
           <div class="sel-label">备注（可选）</div>
           <input class="sheet-input" v-model="store.universalModal.note" placeholder="补充说明…" maxlength="100">
         </div>

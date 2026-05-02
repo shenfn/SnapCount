@@ -88,6 +88,7 @@ export function useStore() {
     dimension: '',
     note: '',
     date: '',
+    time: '',
     imagePath: null,
     imageUrl: null,
     imageLoadError: false,
@@ -1040,6 +1041,7 @@ export function useStore() {
       dimension: universalModal.dimension,
       note: universalModal.note,
       date: universalModal.date,
+      time: universalModal.time,
       imagePath: universalModal.imagePath,
     }
   }
@@ -1070,6 +1072,7 @@ export function useStore() {
     universalModal.dimension = ''
     universalModal.note = ''
     universalModal.date = new Date().toISOString().slice(0, 10)
+    universalModal.time = ''
     universalModal.imagePath = null
     universalModal.imageUrl = null
     universalModal.imageLoadError = false
@@ -1089,6 +1092,7 @@ export function useStore() {
     universalModal.dimension = payload[meta.dimensionKey] || ''
     universalModal.note = record.summary || payload.note || ''
     universalModal.date = (record.occurredAt || record.createdAt || new Date().toISOString()).slice(0, 10)
+    universalModal.time = (record.occurredAt || '').slice(11, 16) || ''
     universalModal.imagePath = record.imagePath || null
     universalModal.imageUrl = await getSignedImageUrl(universalModal.imagePath)
     universalModal.imageLoadError = !!universalModal.imagePath && !universalModal.imageUrl
@@ -1138,7 +1142,7 @@ export function useStore() {
       domain_id: domainRow.id,
       domain_key: universalModal.domainKey,
       domain_version: domainRow.version || '1.0',
-      occurred_at: `${universalModal.date}T12:00:00+08:00`,
+      occurred_at: `${universalModal.date}T${(universalModal.time ? universalModal.time + ':00' : '12:00:00')}+08:00`,
       title,
       summary: universalModal.note.trim() || `${meta.dimensionLabel}：${universalModal.dimension.trim()}`,
       payload_jsonb: payload,
