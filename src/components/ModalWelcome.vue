@@ -29,47 +29,58 @@
       <!-- Step 2: 快捷指令配置 -->
       <div v-if="step === 2" class="welcome-body">
         <div class="welcome-icon">⚡</div>
-        <h2 class="welcome-title">第一步：配置快捷指令</h2>
+        <h2 class="welcome-title">配置快捷指令</h2>
         <p class="welcome-desc">
-          随手账通过 <strong>iOS 快捷指令</strong> 接收截图。配置一次，之后截图即记账。
+          随手账通过 <strong>iOS 快捷指令</strong> 接收截图。配置一次，之后一键记账。
         </p>
 
         <div class="welcome-token-box">
-          <div class="welcome-token-label">你的专属上传 Token</div>
+          <div class="welcome-token-label">你的专属上传 Token（稍后在设置中复制）</div>
           <div v-if="uploadToken" class="welcome-token-value" @click="copyToken">
             {{ uploadToken }}
             <span class="welcome-token-copy">点击复制</span>
           </div>
-          <div v-else class="welcome-token-loading">加载中…</div>
+          <div v-else class="welcome-token-loading">登录后在「设置」页面查看</div>
         </div>
 
         <ol class="welcome-steps-list">
-          <li>获取分享给你的「随手账」快捷指令</li>
-          <li>打开快捷指令 → 找到请求头中的 <code>upload_token</code> 字段</li>
-          <li>把上方 Token 填入该字段</li>
-          <li>API URL 填写：<code>https://api.snapflow.me/functions/v1/ingest-receipt</code></li>
+          <li>点击下方链接导入快捷指令</li>
+          <li>打开快捷指令 App → 找到 <code>upload_token</code> 字段 → 粘贴上方 Token</li>
+          <li><strong>绑定触发方式</strong>（二选一）：</li>
         </ol>
+        <div class="welcome-sub-options">
+          <div class="welcome-sub-option">
+            <strong>辅助触控</strong>
+            <span>设置 → 辅助触控 → 开启 → 自定义操作 → 绑定快捷指令</span>
+          </div>
+          <div class="welcome-sub-option">
+            <strong>操作按钮</strong>
+            <span>设置 → 操作按钮 → 选择快捷指令</span>
+          </div>
+        </div>
 
         <p class="welcome-tip">
-          ✅ 配置完成后，在相册或应用里选中截图，点「分享 → 随手账」即可自动上传识别。
+          ⚠️ 首次执行可能因网络波动超时，重新执行即可。绑定后在订单页面触发就能自动识别截图。
         </p>
       </div>
 
       <!-- Step 3: 开始使用 -->
       <div v-if="step === 3" class="welcome-body">
         <div class="welcome-icon">🚀</div>
-        <h2 class="welcome-title">准备好了</h2>
-        <p class="welcome-desc">
-          你现在可以：
-        </p>
+        <h2 class="welcome-title">开始使用</h2>
         <ul class="welcome-list">
-          <li>📲 用快捷指令上传第一张截图</li>
+          <li>📲 在订单页面触发快捷指令，上传第一张截图</li>
           <li>◌ 去「待处理」确认 AI 识别结果</li>
           <li>✚ 点右下角 <strong>＋</strong> 手动添加收入/支出</li>
-          <li>⚙ 在「设置」页面查看 Token 和账户信息</li>
+          <li>⚙ 「设置」页面可查看 Token 和账户信息</li>
         </ul>
+
+        <div class="welcome-tip" style="margin-bottom:12px">
+          <strong>添加到桌面</strong>：用 Safari 打开 snapflow.me → 点底部分享按钮 → 添加到主屏幕，即可像 App 一样使用。
+        </div>
+
         <p class="welcome-vision">
-          遇到问题随时在设置里找到反馈入口，祝记录愉快 🎉
+          💡 上传数据后如果首页没刷新，把 App 从后台划掉重新进入即可。
         </p>
       </div>
 
@@ -296,6 +307,33 @@ function copyToken() {
   border-radius: 10px;
   padding: 10px 14px;
   text-align: left;
+  line-height: 1.5;
+}
+
+.welcome-sub-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.welcome-sub-option {
+  background: #F8F6F2;
+  border-radius: 10px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.welcome-sub-option strong {
+  display: block;
+  font-size: 13px;
+  color: #1A1A18;
+  margin-bottom: 2px;
+}
+
+.welcome-sub-option span {
+  font-size: 12px;
+  color: #6B6A65;
   line-height: 1.5;
 }
 
