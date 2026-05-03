@@ -12,6 +12,7 @@ export function useStore() {
   const currentPage = ref('home')
   const pageHistory = ref([])
   const currentUserId = ref(null)
+  const currentUserEmail = ref('')
   const isLoggedIn = ref(false)
 
   const bills = ref([])
@@ -1621,7 +1622,7 @@ export function useStore() {
 
   return {
     currentYear, currentMonth, currentPage, monthLabel,
-    pageHistory, currentUserId, isLoggedIn,
+    pageHistory, currentUserId, currentUserEmail, isLoggedIn,
     loading, loadError,
     bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords,
     doneBills, pendingBills, filteredBills,

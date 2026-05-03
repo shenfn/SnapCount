@@ -101,13 +101,8 @@ import { sb } from '../../lib/supabase'
 
 const store = inject('store')
 const uploadToken = ref('')
-const userEmail = ref('')
 
 onMounted(async () => {
-  const { data: authData } = await sb.auth.getUser()
-  if (authData?.user) {
-    userEmail.value = authData.user.email || '内测用户'
-  }
   if (store.currentUserId.value) {
     const { data: cfg } = await sb.from('user_configs')
       .select('upload_token, plan')
@@ -119,6 +114,7 @@ onMounted(async () => {
   }
 })
 
+const userEmail = ref(store.currentUserEmail.value || '内测用户')
 const planLabel = ref('种子用户')
 
 function copyToken() {
@@ -131,6 +127,7 @@ function copyToken() {
 async function handleLogout() {
   await sb.auth.signOut()
   store.currentUserId.value = null
+  store.currentUserEmail.value = ''
   store.isLoggedIn.value = false
   store.showFlash('✓ 已退出登录')
 }

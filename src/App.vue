@@ -123,7 +123,9 @@ onMounted(async () => {
   const { data } = await sb.auth.getSession()
   if (data?.session?.user) {
     store.currentUserId.value = data.session.user.id
+    store.currentUserEmail.value = data.session.user.email || ''
     store.isLoggedIn.value = true
+    store.navigateTo('home')
     await store.loadData()
   }
 })
