@@ -58,10 +58,10 @@ create policy "dr_user_access" on public.data_records
   for all using (auth.uid() = user_id or user_id is null)
   with check (auth.uid() = user_id);
 
--- data_domains
+-- data_domains（系统域 is_system=true 对所有用户可见）
 drop policy if exists "allow_all_domains" on public.data_domains;
 create policy "domains_user_access" on public.data_domains
-  for all using (auth.uid() = user_id or user_id is null)
+  for select using (auth.uid() = user_id or user_id is null or is_system = true)
   with check (auth.uid() = user_id);
 
 -- ai_recognition_logs

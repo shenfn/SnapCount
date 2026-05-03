@@ -119,14 +119,42 @@ provide('store', store)
 
 const fabOpen = ref(false)
 
-onMounted(async () => {
-  const { data } = await sb.auth.getSession()
-  if (data?.session?.user) {
-    store.currentUserId.value = data.session.user.id
-    store.currentUserEmail.value = data.session.user.email || ''
-    store.isLoggedIn.value = true
+// 登录态：以 supabase 的 auth 事件为唯一真相源，避免冷启动时
+// getSession() 还未完成本地恢复就进入未登录态，或 AuthPage / App
+// 同时各调一次 loadData() 产生竞态。
+async function applySession(session) {
+  if (!session?.user) return
+  const sameUser = store.isLoggedIn.value && store.currentUserId.value === session.user.id
+  store.currentUserId.value = session.user.id
+  store.currentUserEmail.value = session.user.email || ''
+  store.isLoggedIn.value = true
+  if (!sameUser) {
     store.navigateTo('home')
     await store.loadData()
   }
+}
+
+function handleSignedOut() {
+  store.resetUserData()
+  store.currentUserId.value = null
+  store.currentUserEmail.value = ''
+  store.isLoggedIn.value = false
+  store.navigateTo('home')
+}
+
+onMounted(async () => {
+  // 先同步读一次作为快速路径（热启动 / session 已恢复的场景）
+  const { data } = await sb.auth.getSession()
+  await applySession(data?.session)
+
+  // 订阅后续变化：INITIAL_SESSION（冷启动恢复）/ SIGNED_IN /
+  // TOKEN_REFRESHED / SIGNED_OUT 都会走这里
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT') {
+      handleSignedOut()
+    } else if (session) {
+      applySession(session)
+    }
+  })
 })
 </script>

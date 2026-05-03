@@ -36,7 +36,7 @@
 </template>
 
 <script setup>
-import { ref, inject, onMounted } from 'vue'
+import { ref, inject } from 'vue'
 import { sb } from '../../lib/supabase'
 
 const store = inject('store')
@@ -46,10 +46,8 @@ const password = ref('')
 const loading = ref(false)
 const errorMsg = ref('')
 
-onMounted(async () => {
-  const { data } = await sb.auth.getSession()
-  if (data?.session) store.loadData()
-})
+// 登录态/会话恢复统一由 App.vue 的 onAuthStateChange 监听处理，
+// 这里不再自行调用 loadData()，避免与 App.vue 产生竞态。
 
 async function submit(attempt = 0) {
   loading.value = true

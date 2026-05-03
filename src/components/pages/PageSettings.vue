@@ -125,10 +125,9 @@ function copyToken() {
 }
 
 async function handleLogout() {
+  // 实际的状态清理（isLoggedIn/currentUserId/数据数组）统一由
+  // App.vue 监听的 onAuthStateChange('SIGNED_OUT') 处理，避免多处重复。
   await sb.auth.signOut()
-  store.currentUserId.value = null
-  store.currentUserEmail.value = ''
-  store.isLoggedIn.value = false
   store.showFlash('✓ 已退出登录')
 }
 </script>

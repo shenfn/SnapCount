@@ -398,6 +398,23 @@ export function useStore() {
     return entries.map(([name, amount]) => ({ name, amount, pct: Math.round(amount / total * 100) }))
   })
 
+  function resetUserData() {
+    bills.value = []
+    incomeRecords.value = []
+    recentIncomeRecords.value = []
+    transportRecords.value = []
+    stagingRecords.value = []
+    processedStagingRecords.value = []
+    dataRecords.value = []
+    loadError.value = ''
+    loading.value = false
+    selectedStagingIds.value = new Set()
+    batchMode.value = false
+    detailRecord.value = null
+    activeDomainId.value = null
+    pageHistory.value = []
+  }
+
   async function loadData(attempt = 0) {
     if (attempt === 0) loading.value = true
     if (attempt === 0) loadError.value = ''
@@ -1641,7 +1658,7 @@ export function useStore() {
     expenseModal,
     universalModal,
     incomeCatMap,
-    loadData, changeMonth, showFlash,
+    loadData, resetUserData, changeMonth, showFlash,
     openPendingModal, closePendingModal, confirmEntry,
     hasPendingChanges, resetPendingChanges,
     markPendingImageUnavailable,
