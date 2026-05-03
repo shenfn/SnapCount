@@ -583,12 +583,18 @@ export function useStore() {
       }))
     } catch (e) {
       console.error('[loadData 异常]', e)
-      if (attempt < 2) {
-        // 代理超时自动重试
-        await new Promise(r => setTimeout(r, 1000))
+      const isNetworkError = /load failed|fetch|network|failed to fetch/i.test(e.message || '')
+      const maxAttempts = isNetworkError ? 4 : 2
+      if (attempt < maxAttempts) {
+        // 网络层错误使用指数退避重试（1s → 2s → 4s → 8s）
+        const delay = isNetworkError ? Math.min(1000 * 2 ** attempt, 8000) : 1000
+        await new Promise(r => setTimeout(r, delay))
         return loadData(attempt + 1)
       }
-      loadError.value = `加载失败: ${e.message}`
+      const tip = isNetworkError
+        ? `网络连接不稳定，请检查网络或稍后重试`
+        : e.message
+      loadError.value = `加载失败: ${tip}`
     } finally {
       if (attempt >= 2 || !loadError.value) loading.value = false
     }
