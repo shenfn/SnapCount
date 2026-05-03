@@ -397,9 +397,9 @@ export function useStore() {
     return entries.map(([name, amount]) => ({ name, amount, pct: Math.round(amount / total * 100) }))
   })
 
-  async function loadData() {
-    loading.value = true
-    loadError.value = ''
+  async function loadData(attempt = 0) {
+    if (attempt === 0) loading.value = true
+    if (attempt === 0) loadError.value = ''
     try {
       const padM = String(currentMonth.value).padStart(2, '0')
       const start = `${currentYear.value}-${padM}-01`
@@ -565,9 +565,14 @@ export function useStore() {
       }))
     } catch (e) {
       console.error('[loadData 异常]', e)
+      if (attempt < 2) {
+        // 代理超时自动重试
+        await new Promise(r => setTimeout(r, 1000))
+        return loadData(attempt + 1)
+      }
       loadError.value = `加载失败: ${e.message}`
     } finally {
-      loading.value = false
+      if (attempt >= 2 || !loadError.value) loading.value = false
     }
   }
 
