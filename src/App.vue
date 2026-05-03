@@ -60,6 +60,7 @@
     <button class="fab" @click="fabOpen = !fabOpen">+</button>
 
     <!-- Modals -->
+    <ModalWelcome />
     <ModalPending />
     <ModalIncome />
     <ModalExpense />
@@ -113,6 +114,7 @@ import ModalPending from './components/ModalPending.vue'
 import ModalIncome  from './components/ModalIncome.vue'
 import ModalExpense from './components/ModalExpense.vue'
 import ModalUniversal from './components/ModalUniversal.vue'
+import ModalWelcome from './components/ModalWelcome.vue'
 
 const store = useStore()
 provide('store', store)
