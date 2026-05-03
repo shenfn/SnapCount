@@ -16,21 +16,18 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
 ]
 
-function buildCorsHeaders(requestOrigin) {
+function buildCorsHeaders(requestOrigin, requestedHeaders) {
   const origin = ALLOWED_ORIGINS.includes(requestOrigin)
     ? requestOrigin
     : 'https://snapflow.me'
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': [
-      'Content-Type', 'Authorization', 'apikey',
-      'x-client-info', 'x-supabase-api-version',
-      'prefer', 'range', 'content-profile',
-    ].join(', '),
-    'Access-Control-Expose-Headers': 'Content-Range, X-Total-Count',
+    // 关键：回显浏览器请求的 headers，避免预检因 header 不匹配失败
+    'Access-Control-Allow-Headers': requestedHeaders || '*',
+    'Access-Control-Expose-Headers': 'Content-Range, X-Total-Count, Content-Profile',
     'Access-Control-Max-Age': '86400',
-    'Vary': 'Origin',
+    'Vary': 'Origin, Access-Control-Request-Headers',
   }
 }
 
@@ -39,15 +36,19 @@ export default {
     const supabaseUrl = env.SUPABASE_URL || 'https://igbghrhsdaolxljgiisf.supabase.co'
     const anonKey = env.SUPABASE_ANON_KEY
 
+    const url = new URL(request.url)
     const requestOrigin = request.headers.get('Origin') || ''
-    const corsHeaders = buildCorsHeaders(requestOrigin)
+    const requestedHeaders = request.headers.get('Access-Control-Request-Headers') || ''
+    const corsHeaders = buildCorsHeaders(requestOrigin, requestedHeaders)
+
+    // 诊断日志（可在 Cloudflare Workers Logs 中查看）
+    console.log(`[proxy] ${request.method} ${url.pathname}${url.search} origin=${requestOrigin} req-headers=${requestedHeaders}`)
 
     // CORS 预检
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders })
     }
 
-    const url = new URL(request.url)
     const targetUrl = supabaseUrl + url.pathname + url.search
 
     // 转发请求头：注入 anon key，移除 Cloudflare 内部 header 避免干扰
