@@ -1,45 +1,30 @@
-name: Deploy
+name: Deploy Supabase Edge Functions
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+    paths:
+      - "supabase/functions/**"
 
 jobs:
-  deploy-edge-function:
+  deploy:
     runs-on: ubuntu-latest
-    if: contains(github.event.head_commit.modified || '', 'supabase/functions/')
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
         with:
           version: latest
-      - name: Deploy ingest-receipt
+
+      - name: Deploy ingest-receipt function
         run: |
           supabase functions deploy ingest-receipt \
             --no-verify-jwt \
             --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-
-  deploy-pwa:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Build PWA
-        run: |
-          npm install
-          npm run build
-        env:
-          VITE_SUPABASE_URL: https://api.snapflow.me
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=morning-bush-f482 --branch=main
