@@ -39,7 +39,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - name: Deploy to Cloudflare Pages
         run: |
-          npx wrangler@latest pages deploy dist \
+          npx wrangler@3 pages deploy dist \
             --project-name=morning-bush-f482 \
             --branch=main
         env:
