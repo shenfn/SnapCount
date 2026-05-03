@@ -51,7 +51,7 @@ onMounted(async () => {
   if (data?.session) store.loadData()
 })
 
-async function submit() {
+async function submit(attempt = 0) {
   loading.value = true
   errorMsg.value = ''
 
@@ -64,7 +64,6 @@ async function submit() {
       if (error) throw error
 
       if (data?.user) {
-        // 自动创建用户配置
         await sb.from('user_configs').upsert({
           user_id: data.user.id,
           plan: 'seed',
@@ -90,9 +89,14 @@ async function submit() {
       }
     }
   } catch (e) {
+    if (e.message === 'Load failed' && attempt < 1) {
+      errorMsg.value = '网络波动，正在重试...'
+      await new Promise(r => setTimeout(r, 1500))
+      return submit(attempt + 1)
+    }
     errorMsg.value = e.message || '操作失败，请重试'
   } finally {
-    loading.value = false
+    if (!errorMsg.value || !errorMsg.value.startsWith('网络波动')) loading.value = false
   }
 }
 </script>
