@@ -25,6 +25,18 @@
             </div>
           </div>
         </div>
+        <div class="today-overview-row pending-row" v-if="store.todaySummary.value.pendingExpenseCount"
+          @click="store.navigateTo('pending')">
+          <div class="today-overview-icon pending">⚠️</div>
+          <div class="today-overview-content">
+            <div class="today-overview-label">
+              待补全 ¥{{ store.todaySummary.value.pendingExpenseTotal.toFixed(2) }}
+            </div>
+            <div class="today-overview-detail">
+              {{ store.todaySummary.value.pendingExpenseCount }} 笔已识别金额，待补全分类 ›
+            </div>
+          </div>
+        </div>
         <div class="today-overview-row" v-if="store.todaySummary.value.incomeCount">
           <div class="today-overview-icon income">💰</div>
           <div class="today-overview-content">

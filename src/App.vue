@@ -4,6 +4,15 @@
     <AuthPage v-if="!store.isLoggedIn.value" />
 
     <template v-else>
+    <!-- 下拉刷新指示器 -->
+    <div class="ptr-indicator" :class="{ active: ptrActive, refreshing }" :style="ptrStyle">
+      <div class="ptr-spinner" :class="{ ready: ptrReady, spin: refreshing }">
+        <span v-if="refreshing">⟳</span>
+        <span v-else-if="ptrReady">↻ 松开刷新</span>
+        <span v-else>↓ 下拉刷新</span>
+      </div>
+    </div>
+
     <!-- Loading overlay -->
     <div v-if="store.loading.value" class="platform-overlay">
       <div class="platform-loader-mark">数</div>
@@ -99,9 +108,10 @@
 </template>
 
 <script setup>
-import { ref, provide, onMounted, onBeforeUnmount } from 'vue'
+import { ref, provide, onMounted, onBeforeUnmount, computed } from 'vue'
 import { sb } from './lib/supabase'
 import { useStore } from './composables/useStore'
+import { usePullToRefresh } from './composables/usePullToRefresh'
 import AuthPage   from './components/pages/AuthPage.vue'
 import PageHome    from './components/pages/PageHome.vue'
 import PagePending from './components/pages/PagePending.vue'
@@ -143,6 +153,24 @@ function handleSignedOut() {
   store.isLoggedIn.value = false
   store.navigateTo('home')
 }
+
+// 下拉刷新（全局生效，仅在页面滚到顶才会触发）
+const { pullDistance, refreshing, ptrActive } = usePullToRefresh({
+  onRefresh: async () => {
+    if (!store.isLoggedIn.value) return
+    // 静默刷新不显示全屏 loading，配合下拉指示器即可
+    await store.loadData(0, true)
+  },
+  threshold: 60,
+  maxPull: 100,
+})
+
+const ptrStyle = computed(() => ({
+  transform: `translateY(${pullDistance.value}px)`,
+  opacity: Math.min(pullDistance.value / 60, 1),
+}))
+
+const ptrReady = computed(() => pullDistance.value >= 60)
 
 // 后台切回前台时静默刷新：命中快捷指令上传 → 切回 PWA 的核心动线
 function handleVisibilityChange() {

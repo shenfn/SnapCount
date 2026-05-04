@@ -6,6 +6,21 @@ import {
   getLocalDateKey,
 } from '../utils/helpers'
 
+// 把 Supabase/Postgres 常见错误信息翻译为中文
+function humanizeDbError(err) {
+  const msg = (err?.message || String(err || '')).trim()
+  if (!msg) return '未知错误'
+  if (/row-level security|rls/i.test(msg)) return '没有操作权限，请重新登录后再试'
+  if (/duplicate key|unique constraint/i.test(msg)) return '数据已存在（重复）'
+  if (/violates not-null/i.test(msg)) return '必填字段未填写'
+  if (/violates check constraint/i.test(msg)) return '数据格式不符合要求'
+  if (/foreign key/i.test(msg)) return '关联数据不存在或已被删除'
+  if (/permission denied/i.test(msg)) return '权限不足，请重新登录'
+  if (/jwt|invalid.*token|expired/i.test(msg)) return '登录状态已失效，请重新登录'
+  if (/network|failed to fetch|load failed/i.test(msg)) return '网络连接失败，请检查网络后重试'
+  return msg
+}
+
 export function useStore() {
   const currentYear = ref(new Date().getFullYear())
   const currentMonth = ref(new Date().getMonth() + 1)
@@ -225,6 +240,7 @@ export function useStore() {
   const todaySummary = computed(() => {
     const todayKey = getLocalDateKey()
     const todayBills = bills.value.filter(b => b.status === 'done' && b.dateRaw === todayKey)
+    const todayPendingBills = bills.value.filter(b => b.status === 'pending' && b.dateRaw === todayKey)
     const expenseByPlatform = {}
     todayBills.forEach(b => {
       const p = b.platform && b.platform !== '?' ? b.platform : '其他'
@@ -235,16 +251,20 @@ export function useStore() {
     const todayIncome = incomeRecords.value.filter(r => r.dateRaw === todayKey)
     const todayStaging = stagingRecords.value.filter(r => (r.occurredAt || r.createdAt || '').slice(0, 10) === todayKey)
 
+    const pendingExpenseTotal = todayPendingBills.reduce((s, b) => s + (b.amount || 0), 0)
+
     return {
       expenseTotal: todayBills.reduce((s, b) => s + b.amount, 0),
       expenseCount: todayBills.length,
       expenseByPlatform,
+      pendingExpenseTotal,
+      pendingExpenseCount: todayPendingBills.length,
       incomeTotal: todayIncome.reduce((s, r) => s + r.amount, 0),
       incomeCount: todayIncome.length,
       sportItems: todaySport.map(r => ({ title: r.title || '运动', summary: r.summary, payload: r.payload })),
       sleepItems: todaySleep.map(r => ({ title: r.title || '睡眠', summary: r.summary, payload: r.payload })),
       stagingCount: todayStaging.length,
-      isEmpty: todayBills.length === 0 && todaySport.length === 0 && todaySleep.length === 0 && todayIncome.length === 0 && todayStaging.length === 0,
+      isEmpty: todayBills.length === 0 && todayPendingBills.length === 0 && todaySport.length === 0 && todaySleep.length === 0 && todayIncome.length === 0 && todayStaging.length === 0,
     }
   })
 
@@ -770,12 +790,13 @@ export function useStore() {
         image_hash: pendingModal.bill.image_hash || null,
         source: 'ai_scan',
         note: pendingModal.bill.image_path ? '由截图待补充转入收入' : null,
+        user_id: currentUserId.value,
       })
-      if (incErr) { alert('保存失败：' + incErr.message); return }
+      if (incErr) { alert('保存失败：' + humanizeDbError(incErr)); return }
 
       const imagePath = pendingModal.bill.image_path
       const { error: delErr } = await sb.from('transactions').delete().eq('id', pendingModal.bill.id)
-      if (delErr) { alert('收入已保存，但原待补充记录删除失败：' + delErr.message); return }
+      if (delErr) { alert('收入已保存，但原待补充记录删除失败：' + humanizeDbError(delErr)); return }
       const bIdx = bills.value.findIndex(b => b.id === pendingModal.bill.id)
       if (bIdx >= 0) bills.value.splice(bIdx, 1)
       closePendingModal()
@@ -792,7 +813,7 @@ export function useStore() {
       amount: amt,
       status: 'done',
     }).eq('id', pendingModal.bill.id)
-    if (error) { alert('保存失败：' + error.message); return }
+    if (error) { alert('保存失败：' + humanizeDbError(error)); return }
     // 本地更新账单状态
     const bIdx2 = bills.value.findIndex(b => b.id === pendingModal.bill.id)
     if (bIdx2 >= 0) {
@@ -859,7 +880,7 @@ export function useStore() {
         income_date: incomeModal.date,
         note: incomeModal.note.trim() || null,
       }).eq('id', incomeModal.id)
-      if (error) { alert('保存失败：' + error.message); return }
+      if (error) { alert('保存失败：' + humanizeDbError(error)); return }
       closeIncomeModal()
       showFlash('✓ 收入已更新')
       await loadData()
@@ -879,8 +900,9 @@ export function useStore() {
       income_date: incomeModal.date,
       note: incomeModal.note.trim() || null,
       source: 'manual',
+      user_id: currentUserId.value,
     })
-    if (error) { alert('保存失败：' + error.message); return }
+    if (error) { alert('保存失败：' + humanizeDbError(error)); return }
     closeIncomeModal()
     showFlash('✓ 收入已记录')
     await loadData()
@@ -1008,7 +1030,7 @@ export function useStore() {
         is_large_transport: isLargeTransport,
         transport_type: isLargeTransport ? '交通' : null,
       }).eq('id', expenseModal.id)
-      if (error) { alert('保存失败：' + error.message); return }
+      if (error) { alert('保存失败：' + humanizeDbError(error)); return }
       closeExpenseModal()
       showFlash('✓ 支出已更新')
       await loadData()
@@ -1035,8 +1057,9 @@ export function useStore() {
       note: expenseModal.note.trim() || null,
       is_large_transport: isLargeTransport,
       transport_type: isLargeTransport ? '交通' : null,
+      user_id: currentUserId.value,
     })
-    if (error) { alert('保存失败：' + error.message); return }
+    if (error) { alert('保存失败：' + humanizeDbError(error)); return }
     closeExpenseModal()
     showFlash('✓ 支出已记录')
     await loadData()
@@ -1205,12 +1228,13 @@ export function useStore() {
     }
 
     const wasEdit = universalModal.mode === 'edit' && universalModal.id
+    const insertBody = wasEdit ? body : { ...body, user_id: currentUserId.value }
     const query = wasEdit
       ? sb.from('data_records').update(body).eq('id', universalModal.id)
-      : sb.from('data_records').insert(body)
+      : sb.from('data_records').insert(insertBody)
     const { error } = await query
     if (error) {
-      alert('保存失败：' + error.message)
+      alert('保存失败：' + humanizeDbError(error))
       return
     }
     closeUniversalModal()
@@ -1395,9 +1419,10 @@ export function useStore() {
         image_url: record.imagePath || null,
         image_hash: record.imageHash || null,
         note: summary,
+        user_id: currentUserId.value,
       }).select('id').single()
       if (insertErr) {
-        showFlash('❌ 转入支出失败：' + insertErr.message)
+        showFlash('❌ 转入支出失败：' + humanizeDbError(insertErr))
         return
       }
       await finishStagingArchive(record, inserted.id, null, 'expense', payload)
@@ -1423,9 +1448,10 @@ export function useStore() {
         image_url: record.imagePath || null,
         image_hash: record.imageHash || null,
         source: 'ai_scan',
+        user_id: currentUserId.value,
       }).select('id').single()
       if (insertErr) {
-        showFlash('❌ 转入收入失败：' + insertErr.message)
+        showFlash('❌ 转入收入失败：' + humanizeDbError(insertErr))
         return
       }
       await finishStagingArchive(record, inserted.id, null, 'income', payload)
@@ -1461,9 +1487,10 @@ export function useStore() {
       source_image_path: record.imagePath || null,
       source_image_hash: record.imageHash || null,
       staging_record_id: record.id,
+      user_id: currentUserId.value,
     }).select('id').single()
     if (insertErr) {
-      showFlash('❌ 归档失败：' + insertErr.message)
+      showFlash('❌ 归档失败：' + humanizeDbError(insertErr))
       return
     }
 

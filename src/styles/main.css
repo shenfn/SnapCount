@@ -381,6 +381,53 @@ body {
 .today-overview-icon.income { background: rgba(21, 101, 192, 0.1); }
 .today-overview-icon.sport { background: rgba(180, 83, 9, 0.1); }
 .today-overview-icon.sleep { background: rgba(67, 56, 202, 0.1); }
+.today-overview-icon.pending { background: rgba(217, 119, 6, 0.12); }
+
+.today-overview-row.pending-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.today-overview-row.pending-row:active { background: rgba(217, 119, 6, 0.06); }
+
+/* ═════ 下拉刷新指示器 ═════ */
+.ptr-indicator {
+  position: fixed;
+  top: -50px;
+  left: 0;
+  right: 0;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  pointer-events: none;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  will-change: transform, opacity;
+}
+.ptr-indicator.refreshing {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+.ptr-spinner {
+  font-size: 13px;
+  color: #2D6A4F;
+  background: #fff;
+  padding: 8px 16px;
+  border-radius: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  font-weight: 600;
+  transition: color 0.15s;
+}
+.ptr-spinner.ready {
+  color: #B45309;
+}
+.ptr-spinner.spin span {
+  display: inline-block;
+  animation: ptr-spin 0.8s linear infinite;
+}
+@keyframes ptr-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
 .today-overview-content {
   flex: 1;
