@@ -667,6 +667,58 @@ function isSameAmount(a: number | string | null | undefined, b: number | null): 
   return left !== null && b !== null && Math.abs(left - b) <= 0.01;
 }
 
+// 通知摘要相关 helpers ─────────────────────────────────────────
+function fmtYuan(n: number | null | undefined): string {
+  const v = Number(n ?? 0);
+  return `¥${v.toFixed(2)}`;
+}
+
+function chinaTodayStr(): string {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+async function summarizeTodaySpend(
+  supabase: ReturnType<typeof createClient>,
+  userId: string | null,
+): Promise<{ total: number; count: number }> {
+  if (!userId) return { total: 0, count: 0 };
+  const today = chinaTodayStr();
+  const { data } = await supabase
+    .from("transactions")
+    .select("amount")
+    .eq("user_id", userId)
+    .eq("type", "expense")
+    .eq("transaction_date", today);
+  if (!data) return { total: 0, count: 0 };
+  const total = data.reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+  return { total: Math.round(total * 100) / 100, count: data.length };
+}
+
+async function summarizeMonthIncome(
+  supabase: ReturnType<typeof createClient>,
+  userId: string | null,
+): Promise<{ total: number }> {
+  if (!userId) return { total: 0 };
+  const monthStart = chinaTodayStr().slice(0, 7) + "-01";
+  const { data } = await supabase
+    .from("income_records")
+    .select("amount")
+    .eq("user_id", userId)
+    .gte("income_date", monthStart);
+  if (!data) return { total: 0 };
+  const total = data.reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+  return { total: Math.round(total * 100) / 100 };
+}
+
+function todaySpendLine(s: { total: number; count: number }): string {
+  if (s.count === 0) return "今日尚无支出记录";
+  return `今日已花 ${fmtYuan(s.total)}（${s.count} 笔）`;
+}
+
+function monthIncomeLine(s: { total: number }): string {
+  return `本月已入 ${fmtYuan(s.total)}`;
+}
+
 async function createStagingRecord(
   supabase: ReturnType<typeof createClient>,
   payload: {
@@ -921,7 +973,12 @@ Deno.serve(async (req) => {
         target_id: txDup.id,
         duration_ms: Date.now() - startedAt,
       });
-      return new Response(JSON.stringify({ status: "duplicate", id: txDup.id, record_type: "expense", message: "该截图已记账" }), {
+      const _spendSum = await summarizeTodaySpend(supabase, userId);
+      return new Response(JSON.stringify({
+        status: "duplicate", id: txDup.id, record_type: "expense",
+        message: "该截图已记账",
+        notification: `🔁 该截图已记账过\n${todaySpendLine(_spendSum)}`,
+      }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -939,7 +996,12 @@ Deno.serve(async (req) => {
         target_id: incDup.id,
         duration_ms: Date.now() - startedAt,
       });
-      return new Response(JSON.stringify({ status: "duplicate", id: incDup.id, record_type: "income", message: "该收入截图已记录" }), {
+      const _incSum = await summarizeMonthIncome(supabase, userId);
+      return new Response(JSON.stringify({
+        status: "duplicate", id: incDup.id, record_type: "income",
+        message: "该收入截图已记录",
+        notification: `🔁 该收入截图已记录过\n${monthIncomeLine(_incSum)}`,
+      }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -959,7 +1021,11 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
         prompt_version: "platform-v3-builtins",
       });
-      return new Response(JSON.stringify({ status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key, message: "该截图已归档" }), {
+      return new Response(JSON.stringify({
+        status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
+        message: "该截图已归档",
+        notification: `🔁 该截图已归档过 · ${domainNameFromKey(dataDup.domain_key) ?? dataDup.domain_key}`,
+      }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -1073,9 +1139,19 @@ Deno.serve(async (req) => {
             prompt_version: "platform-v3-builtins-retry",
           });
 
+          const _retryDomain = domainNameFromKey(recordType) ?? recordType;
+          let _retryNotif = `✓ 重试成功 · 已归档到${_retryDomain}`;
+          if (recordType === "expense") {
+            const _s = await summarizeTodaySpend(supabase, userId);
+            _retryNotif = `💸 重试成功 · 已记账${normalizedAmount !== null ? " " + fmtYuan(normalizedAmount) : ""}\n${todaySpendLine(_s)}`;
+          } else if (recordType === "income") {
+            const _s = await summarizeMonthIncome(supabase, userId);
+            _retryNotif = `💰 重试成功 · 已入账${normalizedAmount !== null ? " " + fmtYuan(normalizedAmount) : ""}\n${monthIncomeLine(_s)}`;
+          }
           return new Response(JSON.stringify({
             status: "done", id: archivedId, record_type: recordType, retry: true,
-            message: `✓ 重试成功，已归档到${domainNameFromKey(recordType) ?? recordType}`,
+            message: `✓ 重试成功，已归档到${_retryDomain}`,
+            notification: _retryNotif,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       }
@@ -1100,6 +1176,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         status: "staging", staging_status: "retry_failed",
         message: "⚠ 重试仍未确定，请手动选择数据域归档",
+        notification: "⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档",
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
@@ -1150,12 +1227,18 @@ Deno.serve(async (req) => {
         prompt_version: "platform-v3-builtins",
       });
 
+      const _stgSpend = await summarizeTodaySpend(supabase, userId);
+      const _stgAmtPart = normalizedAmount !== null ? `已识别 ${fmtYuan(normalizedAmount)} · ` : "";
+      const _stgPrimary = !aiOk
+        ? "❌ AI 识别失败，已进入待处理"
+        : `⚠️ ${_stgAmtPart}请打开 App 补全`;
       return new Response(JSON.stringify({
         status: "staging",
         staging_status: stagingStatus,
         id: staging?.id ?? null,
         ai_ok: aiOk,
         message: !aiOk ? "⚠ AI 识别失败，已进入待处理" : "⚠ 未确定数据域，已进入待处理",
+        notification: `${_stgPrimary}\n${todaySpendLine(_stgSpend)}`,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -1209,6 +1292,10 @@ Deno.serve(async (req) => {
           prompt_version: "platform-v3-builtins",
         });
 
+        const _bDomainName = domainNameFromKey(builtinKey) ?? builtinKey;
+        const _bNotif = domain
+          ? `⚠️ 已识别为${_bDomainName}\n请打开 App 确认后归档`
+          : `⚠️ 未找到对应数据域\n已进入待处理`;
         return new Response(JSON.stringify({
           status: "staging",
           staging_status: domain ? "pending_review" : "routing_failed",
@@ -1216,6 +1303,7 @@ Deno.serve(async (req) => {
           record_type: builtinKey,
           ai_ok: aiOk,
           message: domain ? "⚠ 已识别为内置数据域，请确认后归档" : "⚠ 未找到对应数据域，已进入待处理",
+          notification: _bNotif,
         }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
@@ -1291,12 +1379,14 @@ Deno.serve(async (req) => {
         prompt_version: "platform-v3-builtins",
       });
 
+      const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : "✓";
       return new Response(JSON.stringify({
         status: "done",
         id: row.id,
         record_type: builtinKey,
         ai_ok: aiOk,
         message: `✓ ${domainNameFromKey(builtinKey) ?? "记录"}已归档`,
+        notification: `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`,
         data: row,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -1352,12 +1442,14 @@ Deno.serve(async (req) => {
               const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
               if (removeErr) console.error("Cleanup duplicate income image failed:", removeErr);
             }
+            const _iSum2 = await summarizeMonthIncome(supabase, userId);
             return new Response(JSON.stringify({
               status: "duplicate",
               id: refIncome.id,
               record_type: "income",
               ai_ok: aiOk,
               message: "该收入截图疑似已记录",
+              notification: `🔁 该收入疑似已记录过\n${monthIncomeLine(_iSum2)}`,
             }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
           }
         }
@@ -1422,12 +1514,15 @@ Deno.serve(async (req) => {
         error_message: aiErrorMessage,
       });
 
+      const _iDoneSum = await summarizeMonthIncome(supabase, userId);
+      const _iSourceLabel = sourceName && sourceName !== "截图识别收入" ? ` · ${sourceName}` : "";
       return new Response(JSON.stringify({
         status: "done",
         id: row.id,
         record_type: "income",
         ai_ok: aiOk,
         message: "✓ 收入已记录",
+        notification: `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`,
         data: row,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -1469,9 +1564,11 @@ Deno.serve(async (req) => {
             const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
             if (removeErr) console.error("Cleanup duplicate expense image failed:", removeErr);
           }
+          const _eDupSum = await summarizeTodaySpend(supabase, userId);
           return new Response(JSON.stringify({
             status: "duplicate", id: refLog.target_id, record_type: "expense",
             ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
+            notification: `🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       }
@@ -1583,6 +1680,18 @@ Deno.serve(async (req) => {
       error_message: aiErrorMessage,
     });
 
+    const _eDoneSum = await summarizeTodaySpend(supabase, userId);
+    const _merchantPart = ai.merchant_name ? ` · ${ai.merchant_name}` : "";
+    const _categoryPart = ai.category ? ` · ${ai.category}` : "";
+    let _ePrimary: string;
+    if (row.status === "done") {
+      _ePrimary = `💸 -${fmtYuan(normalizedAmount)}${_merchantPart}${_categoryPart}`;
+    } else {
+      _ePrimary = `⚠️ -${fmtYuan(normalizedAmount)}${_merchantPart} · 请打开 App 补全`;
+    }
+    if (possibleDuplicate) {
+      _ePrimary = `⚠️ ${_ePrimary.replace(/^[💸⚠️]\s*/, "")} · 疑似 3 分钟内重复`;
+    }
     return new Response(JSON.stringify({
       status: row.status,
       id: row.id,
@@ -1592,6 +1701,7 @@ Deno.serve(async (req) => {
       message: possibleDuplicate
         ? `✓ 已记账（⚠ 3 分钟内有相同消费，请确认是否重复，参考 id: ${dupRefId}）`
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
+      notification: `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`,
       data: row,
     }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
