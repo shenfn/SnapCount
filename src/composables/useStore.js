@@ -415,9 +415,29 @@ export function useStore() {
     pageHistory.value = []
   }
 
-  async function loadData(attempt = 0) {
-    if (attempt === 0) loading.value = true
-    if (attempt === 0) loadError.value = ''
+  let lastRefreshTs = 0
+  const REFRESH_MIN_INTERVAL = 3000
+
+  // 静默刷新（用于后台切回前台时自动拉新）
+  // - 不显示全屏 loading
+  // - 至少间隔 3 秒，避免频繁切换时刷爆
+  // - 失败静默忽略
+  async function refreshIfStale() {
+    if (!isLoggedIn.value) return
+    const now = Date.now()
+    if (now - lastRefreshTs < REFRESH_MIN_INTERVAL) return
+    lastRefreshTs = now
+    try {
+      await loadData(0, true)
+    } catch (e) {
+      console.warn('[refreshIfStale] failed silently:', e)
+    }
+  }
+
+  async function loadData(attempt = 0, silent = false) {
+    if (attempt === 0 && !silent) loading.value = true
+    if (attempt === 0 && !silent) loadError.value = ''
+    if (attempt === 0) lastRefreshTs = Date.now()
     try {
       const padM = String(currentMonth.value).padStart(2, '0')
       const start = `${currentYear.value}-${padM}-01`
@@ -589,8 +609,9 @@ export function useStore() {
         // 网络层错误使用指数退避重试（1s → 2s → 4s → 8s）
         const delay = isNetworkError ? Math.min(1000 * 2 ** attempt, 8000) : 1000
         await new Promise(r => setTimeout(r, delay))
-        return loadData(attempt + 1)
+        return loadData(attempt + 1, silent)
       }
+      if (silent) return
       const tip = isNetworkError
         ? `网络连接不稳定，请检查网络或稍后重试`
         : e.message
@@ -1680,5 +1701,6 @@ export function useStore() {
     openDomainPage, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
     navigateTo, goBack,
     settingsState, toggleSetting,
+    refreshIfStale,
   }
 }

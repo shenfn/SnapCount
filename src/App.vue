@@ -99,7 +99,7 @@
 </template>
 
 <script setup>
-import { ref, provide, onMounted } from 'vue'
+import { ref, provide, onMounted, onBeforeUnmount } from 'vue'
 import { sb } from './lib/supabase'
 import { useStore } from './composables/useStore'
 import AuthPage   from './components/pages/AuthPage.vue'
@@ -144,6 +144,17 @@ function handleSignedOut() {
   store.navigateTo('home')
 }
 
+// 后台切回前台时静默刷新：命中快捷指令上传 → 切回 PWA 的核心动线
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    store.refreshIfStale()
+  }
+}
+function handleWindowFocus() {
+  // 兜底：部分浏览器在 tab 切换时 visibilitychange 不可靠
+  store.refreshIfStale()
+}
+
 onMounted(async () => {
   // 先同步读一次作为快速路径（热启动 / session 已恢复的场景）
   const { data } = await sb.auth.getSession()
@@ -158,5 +169,13 @@ onMounted(async () => {
       applySession(session)
     }
   })
+
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('focus', handleWindowFocus)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('focus', handleWindowFocus)
 })
 </script>
