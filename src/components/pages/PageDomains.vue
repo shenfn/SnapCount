@@ -71,5 +71,5 @@ const filteredDomains = computed(() => {
   )
 })
 
-const featuredDomains = computed(() => store.domains.value.slice(0, 5))
+const featuredDomains = computed(() => store.domains.value)
 </script>

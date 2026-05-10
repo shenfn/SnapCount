@@ -44,21 +44,21 @@
             <div class="today-overview-detail">{{ store.todaySummary.value.incomeCount }} 笔</div>
           </div>
         </div>
-        <div class="today-overview-row" v-for="s in store.todaySummary.value.sportItems" :key="'sport-'+s.title">
+        <div class="today-overview-row" v-for="s in store.todaySummary.value.sportItems" :key="'sport-'+s.title" @click="store.openDomainPage('sport')">
           <div class="today-overview-icon sport">🏃</div>
           <div class="today-overview-content">
             <div class="today-overview-label">{{ s.title }}</div>
             <div class="today-overview-detail">{{ sportSummary(s) }}</div>
           </div>
         </div>
-        <div class="today-overview-row" v-for="s in store.todaySummary.value.sleepItems" :key="'sleep-'+s.title">
+        <div class="today-overview-row" v-for="s in store.todaySummary.value.sleepItems" :key="'sleep-'+s.title" @click="store.openDomainPage('sleep')">
           <div class="today-overview-icon sleep">🌙</div>
           <div class="today-overview-content">
             <div class="today-overview-label">{{ s.title }}</div>
             <div class="today-overview-detail">{{ sleepSummary(s) }}</div>
           </div>
         </div>
-        <div class="today-overview-row" v-if="store.todaySummary.value.foodCount" @click="store.navigateTo('domain', { domainId: 'food' })">
+        <div class="today-overview-row" v-if="store.todaySummary.value.foodCount" @click="store.openDomainPage('food')">
           <div class="today-overview-icon food">🍱</div>
           <div class="today-overview-content">
             <div class="today-overview-label">今日饮食</div>

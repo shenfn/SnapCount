@@ -187,6 +187,7 @@ const baseDomains = [
   { id: 'sport', name: '运动', icon: '🏃', color: '#f59e0b' },
   { id: 'sleep', name: '睡眠', icon: '🌙', color: '#6366f1' },
   { id: 'reading', name: '阅读', icon: '📚', color: '#0ea5e9' },
+  { id: 'food', name: '饮食', icon: '🍱', color: '#ea580c' },
 ]
 
 const reportDomains = baseDomains
@@ -406,11 +407,26 @@ const placeholderData = computed(() => ({
       { label: '下一阶段', value: '模板联动' },
     ],
   },
+  food: {
+    summary: {
+      label: '饮食记录概览',
+      value: '0 餐',
+      change: '拍照估算餐盘热量与三大营养素',
+      gradient: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+      barColor: 'linear-gradient(180deg, #fb923c 0%, #c2410c 100%)',
+    },
+    stats: [
+      { label: '餐次记录', value: '0' },
+      { label: '累计热量', value: '--' },
+      { label: '识别来源', value: 'AI 拍照估算' },
+      { label: '准确度提示', value: '±20-40%' },
+    ],
+  },
 }))
 
 const activeData = computed(() => {
   if (activeDomain.value === 'income') return incomeData.value
-  if (activeDomain.value === 'sport' || activeDomain.value === 'sleep' || activeDomain.value === 'reading') return universalData(activeDomain.value)
+  if (['sport', 'sleep', 'reading', 'food'].includes(activeDomain.value)) return universalData(activeDomain.value)
   return expenseData.value
 })
 
@@ -491,6 +507,15 @@ function universalMeta(domainKey) {
       unit: '分钟',
       dimensionKey: 'book_name',
       dimensionLabel: '主要书籍',
+    },
+    food: {
+      icon: '餐',
+      primaryKey: 'total_calorie_kcal',
+      primaryLabel: '总热量',
+      totalLabel: '累计热量',
+      unit: '千卡',
+      dimensionKey: 'meal_type',
+      dimensionLabel: '餐次分布',
     },
   }
   return map[domainKey] || map.sport
