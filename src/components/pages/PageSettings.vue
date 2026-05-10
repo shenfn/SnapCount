@@ -41,6 +41,31 @@
     </div>
 
     <div class="settings-section">
+      <div class="settings-section-title">AI 识别引擎</div>
+      <div class="settings-item-sub" style="padding:0 16px 8px;color:#6b7280;font-size:12px;">
+        选择截图/拍照识别使用的 AI 模型，设置后立即生效
+      </div>
+      <div
+        v-for="opt in visionOptions"
+        :key="opt.value"
+        class="settings-item"
+        @click="updateVisionPrimary(opt.value)"
+      >
+        <div class="settings-item-icon" :class="opt.toneClass">{{ opt.iconText }}</div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">{{ opt.label }}</div>
+          <div class="settings-item-sub">{{ opt.desc }}</div>
+        </div>
+        <div
+          class="settings-arrow"
+          :style="{ color: visionPrimary === opt.value ? '#10b981' : '#d1d5db', fontSize: '20px', fontWeight: 'bold' }"
+        >
+          {{ visionPrimary === opt.value ? '✓' : '○' }}
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
       <div class="settings-section-title">隐私与留存</div>
       <div class="settings-item">
         <div class="settings-item-icon warn">志</div>
@@ -101,18 +126,71 @@ import { sb } from '../../lib/supabase'
 
 const store = inject('store')
 const uploadToken = ref('')
+const visionPrimary = ref('auto')
+
+const visionOptions = [
+  {
+    value: 'auto',
+    label: '自动（推荐）',
+    desc: '平台调度，快速且稳定。异常时自动降级到备用引擎',
+    iconText: '自',
+    toneClass: 'primary',
+  },
+  {
+    value: 'qwen',
+    label: '阿里云通义千问 Vision',
+    desc: '当前平台默认 · 速度最快（2-4 秒）· 均衡准确度与成本',
+    iconText: '阿',
+    toneClass: 'success',
+  },
+  {
+    value: 'moonshot',
+    label: 'Moonshot Kimi',
+    desc: '财务场景验证最充分 · 速度中等（5-10 秒）',
+    iconText: 'K',
+    toneClass: 'info',
+  },
+  {
+    value: 'mimo',
+    label: '小米 MiMo（实验）',
+    desc: '多模态试验中 · 速度较慢（8-15 秒）· 准确度待验证',
+    iconText: 'M',
+    toneClass: 'warn',
+  },
+]
 
 onMounted(async () => {
   if (store.currentUserId.value) {
     const { data: cfg } = await sb.from('user_configs')
-      .select('upload_token, plan')
+      .select('upload_token, plan, vision_primary')
       .eq('user_id', store.currentUserId.value)
       .maybeSingle()
     if (cfg) {
       uploadToken.value = cfg.upload_token || ''
+      visionPrimary.value = cfg.vision_primary || 'auto'
     }
   }
 })
+
+async function updateVisionPrimary(value) {
+  if (visionPrimary.value === value) return
+  if (!store.currentUserId.value) {
+    store.showFlash('请先登录')
+    return
+  }
+  const prev = visionPrimary.value
+  visionPrimary.value = value
+  const { error } = await sb.from('user_configs')
+    .update({ vision_primary: value, updated_at: new Date().toISOString() })
+    .eq('user_id', store.currentUserId.value)
+  if (error) {
+    visionPrimary.value = prev
+    store.showFlash('⚠ 切换失败：' + error.message)
+    return
+  }
+  const opt = visionOptions.find(o => o.value === value)
+  store.showFlash(`✓ 已切换到「${opt?.label || value}」`)
+}
 
 const userEmail = ref(store.currentUserEmail.value || '内测用户')
 const planLabel = ref('种子用户')

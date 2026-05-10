@@ -234,6 +234,18 @@ export function useStore() {
         isSystem: true,
         description: '后续承接阅读时长、页数和书籍进度记录。',
       },
+      {
+        id: 'food',
+        name: '饮食记录',
+        shortName: '饮食',
+        icon: '🍱',
+        tone: 'food',
+        color: '#EA580C',
+        meta: `本月 ${universalCount('food')} 条 · 系统内置`,
+        recordCount: universalCount('food'),
+        isSystem: true,
+        description: '拍照估算餐盘热量与三大营养素（数值为 AI 估算）。',
+      },
     ]
   })
 
@@ -248,10 +260,12 @@ export function useStore() {
     })
     const todaySport = dataRecords.value.filter(r => r.domainKey === 'sport' && (r.occurredAt || '').slice(0, 10) === todayKey)
     const todaySleep = dataRecords.value.filter(r => r.domainKey === 'sleep' && (r.occurredAt || '').slice(0, 10) === todayKey)
+    const todayFood = dataRecords.value.filter(r => r.domainKey === 'food' && (r.occurredAt || '').slice(0, 10) === todayKey)
     const todayIncome = incomeRecords.value.filter(r => r.dateRaw === todayKey)
     const todayStaging = stagingRecords.value.filter(r => (r.occurredAt || r.createdAt || '').slice(0, 10) === todayKey)
 
     const pendingExpenseTotal = todayPendingBills.reduce((s, b) => s + (b.amount || 0), 0)
+    const todayCalorieTotal = todayFood.reduce((s, r) => s + (Number(r.payload?.total_calorie_kcal) || 0), 0)
 
     return {
       expenseTotal: todayBills.reduce((s, b) => s + b.amount, 0),
@@ -263,8 +277,11 @@ export function useStore() {
       incomeCount: todayIncome.length,
       sportItems: todaySport.map(r => ({ title: r.title || '运动', summary: r.summary, payload: r.payload })),
       sleepItems: todaySleep.map(r => ({ title: r.title || '睡眠', summary: r.summary, payload: r.payload })),
+      foodItems: todayFood.map(r => ({ title: r.title || '饮食', summary: r.summary, payload: r.payload, mealType: r.payload?.meal_type, calories: Number(r.payload?.total_calorie_kcal) || 0 })),
+      foodCalorieTotal: Math.round(todayCalorieTotal),
+      foodCount: todayFood.length,
       stagingCount: todayStaging.length,
-      isEmpty: todayBills.length === 0 && todayPendingBills.length === 0 && todaySport.length === 0 && todaySleep.length === 0 && todayIncome.length === 0 && todayStaging.length === 0,
+      isEmpty: todayBills.length === 0 && todayPendingBills.length === 0 && todaySport.length === 0 && todaySleep.length === 0 && todayFood.length === 0 && todayIncome.length === 0 && todayStaging.length === 0,
     }
   })
 
@@ -1104,6 +1121,16 @@ export function useStore() {
         placeholder: '如：原则、微信读书',
         defaultTitle: '阅读记录',
       },
+      food: {
+        title: '添加饮食',
+        editTitle: '编辑饮食',
+        primaryLabel: '总热量（千卡）',
+        primaryKey: 'total_calorie_kcal',
+        dimensionLabel: '餐次',
+        dimensionKey: 'meal_type',
+        placeholder: '如：午餐、加餐',
+        defaultTitle: '饮食记录',
+      },
     }
     return map[domainKey] || map.sport
   }
@@ -1532,6 +1559,10 @@ export function useStore() {
     if (domainKey === 'sport') return payload.sport_type || payload.activity_type || '运动记录'
     if (domainKey === 'sleep') return payload.quality_level || '睡眠记录'
     if (domainKey === 'reading') return payload.book_name || payload.title || '阅读记录'
+    if (domainKey === 'food') {
+      const dishes = Array.isArray(payload.dishes) ? payload.dishes : []
+      return payload.title || dishes[0]?.name || '饮食记录'
+    }
     return record.domainName || '通用记录'
   }
 

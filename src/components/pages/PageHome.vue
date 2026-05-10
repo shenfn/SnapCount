@@ -58,6 +58,13 @@
             <div class="today-overview-detail">{{ sleepSummary(s) }}</div>
           </div>
         </div>
+        <div class="today-overview-row" v-if="store.todaySummary.value.foodCount" @click="store.navigateTo('domain', { domainId: 'food' })">
+          <div class="today-overview-icon food">🍱</div>
+          <div class="today-overview-content">
+            <div class="today-overview-label">今日饮食</div>
+            <div class="today-overview-detail">{{ store.todaySummary.value.foodCount }} 餐 · 约 {{ store.todaySummary.value.foodCalorieTotal }} 千卡（估算）</div>
+          </div>
+        </div>
       </div>
       <div class="today-overview-footer" v-if="store.todaySummary.value.stagingCount" @click="store.navigateTo('pending')">
         ⏳ {{ store.todaySummary.value.stagingCount }} 条截图待确认 ›
