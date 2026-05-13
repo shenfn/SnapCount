@@ -1037,18 +1037,53 @@ export function useStore() {
     }
 
     const wasEdit = universalModal.mode === 'edit' && universalModal.id
-    const insertBody = wasEdit ? body : { ...body, user_id: currentUserId.value }
-    const query = wasEdit
-      ? sb.from('data_records').update(body).eq('id', universalModal.id)
-      : sb.from('data_records').insert(insertBody)
-    const { error } = await query
-    if (error) {
-      alert('保存失败：' + humanizeDbError(error))
-      return
+
+    if (wasEdit) {
+      const { error } = await sb.from('data_records').update(body).eq('id', universalModal.id)
+      if (error) {
+        alert('保存失败：' + humanizeDbError(error))
+        return
+      }
+      closeUniversalModal()
+      const idx = dataRecords.value.findIndex(r => r.id === universalModal.id)
+      if (idx >= 0) {
+        dataRecords.value[idx] = {
+          ...dataRecords.value[idx],
+          occurredAt: draft.occurredAt,
+          title: draft.title,
+          summary: draft.summary,
+          payload: draft.payload,
+          imagePath: universalModal.imagePath || null,
+        }
+      }
+      showFlash('✓ 记录已更新')
+    } else {
+      const { data: newRow, error } = await sb.from('data_records')
+        .insert({ ...body, user_id: currentUserId.value })
+        .select('*')
+        .single()
+      if (error) {
+        alert('保存失败：' + humanizeDbError(error))
+        return
+      }
+      closeUniversalModal()
+      dataRecords.value.unshift({
+        id: newRow.id,
+        domainId: newRow.domain_id,
+        domainKey: newRow.domain_key,
+        domainVersion: newRow.domain_version || '1.0',
+        occurredAt: newRow.occurred_at,
+        createdAt: newRow.created_at,
+        title: newRow.title,
+        summary: newRow.summary,
+        payload: newRow.payload_jsonb || {},
+        imagePath: newRow.source_image_path,
+        imageHash: newRow.source_image_hash,
+        stagingRecordId: newRow.staging_record_id,
+        source: newRow.source || 'manual',
+      })
+      showFlash('✓ 记录已添加')
     }
-    closeUniversalModal()
-    showFlash(wasEdit ? '✓ 记录已更新' : '✓ 记录已添加')
-    await loadData()
   }
 
   function markUniversalImageUnavailable() {
