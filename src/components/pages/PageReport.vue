@@ -174,6 +174,7 @@
 
 <script setup>
 import { computed, inject, onMounted, onBeforeUnmount, ref } from 'vue'
+import { getReportDomainDefinitions, getUniversalReportMeta } from '../../domains/registry'
 import { computeWeekData, incomeCatMap } from '../../utils/helpers'
 import MonthPicker from '../MonthPicker.vue'
 
@@ -181,16 +182,7 @@ const store = inject('store')
 const activeDomain = ref('expense')
 const dropdownOpen = ref(false)
 
-const baseDomains = [
-  { id: 'expense', name: '消费', icon: '💸', color: '#ef4444' },
-  { id: 'income', name: '收入', icon: '💰', color: '#10b981' },
-  { id: 'sport', name: '运动', icon: '🏃', color: '#f59e0b' },
-  { id: 'sleep', name: '睡眠', icon: '🌙', color: '#6366f1' },
-  { id: 'reading', name: '阅读', icon: '📚', color: '#0ea5e9' },
-  { id: 'food', name: '饮食', icon: '🍱', color: '#ea580c' },
-]
-
-const reportDomains = baseDomains
+const reportDomains = getReportDomainDefinitions()
 
 function closeDropdownOnWindowClick() {
   dropdownOpen.value = false
@@ -480,45 +472,7 @@ function universalData(domainKey) {
 }
 
 function universalMeta(domainKey) {
-  const map = {
-    sport: {
-      icon: '动',
-      primaryKey: 'duration_minutes',
-      primaryLabel: '运动时长',
-      totalLabel: '累计运动',
-      unit: '分钟',
-      dimensionKey: 'sport_type',
-      dimensionLabel: '主要类型',
-    },
-    sleep: {
-      icon: '眠',
-      primaryKey: 'sleep_hours',
-      primaryLabel: '睡眠时长',
-      totalLabel: '累计睡眠',
-      unit: '小时',
-      dimensionKey: 'quality_level',
-      dimensionLabel: '主要质量',
-    },
-    reading: {
-      icon: '读',
-      primaryKey: 'reading_minutes',
-      primaryLabel: '阅读时长',
-      totalLabel: '累计阅读',
-      unit: '分钟',
-      dimensionKey: 'book_name',
-      dimensionLabel: '主要书籍',
-    },
-    food: {
-      icon: '餐',
-      primaryKey: 'total_calorie_kcal',
-      primaryLabel: '总热量',
-      totalLabel: '累计热量',
-      unit: '千卡',
-      dimensionKey: 'meal_type',
-      dimensionLabel: '餐次分布',
-    },
-  }
-  return map[domainKey] || map.sport
+  return getUniversalReportMeta(domainKey)
 }
 
 function universalDimensionName(item) {

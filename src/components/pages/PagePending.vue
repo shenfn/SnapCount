@@ -197,6 +197,7 @@
 <script setup>
 import { computed, inject } from 'vue'
 import { formatDateTimeLabel, getLocalDateKey } from '../../utils/helpers'
+import { getSystemDomainLabel } from '../../domains/registry'
 
 const store = inject('store')
 
@@ -304,8 +305,7 @@ function confidenceColor(confidence) {
 }
 
 function domainLabel(key) {
-  const map = { expense: '消费记账', income: '收入记录', sport: '运动记录', sleep: '睡眠记录', reading: '阅读记录' }
-  return map[key] || key || '未知域'
+  return getSystemDomainLabel(key, key || '未知域')
 }
 
 function fmtShort(value) {

@@ -1,6 +1,18 @@
 import { ref, reactive, computed } from 'vue'
 import { sb, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase'
 import {
+  getSystemDomainDefinitions,
+  getSystemDomainLabel,
+  getUniversalDomainMeta as getRegistryUniversalDomainMeta,
+} from '../domains/registry'
+import { buildHomeTimeline, buildTodaySummary, buildUniversalRecordTitle as buildUniversalRecordTitleFromAdapter } from '../domains/storeAdapters'
+import {
+  buildUniversalRecordDraft,
+  hydrateUniversalModalFromRecord,
+  resetUniversalModal,
+  validateUniversalModal,
+} from '../domains/universalFormAdapter'
+import {
   formatDate, formatMonthLabel, mapTransaction,
   incomeCatMap, catCodeMap, payAliasMap,
   getLocalDateKey,
@@ -170,188 +182,38 @@ export function useStore() {
   })
 
   const domains = computed(() => {
-    const expenseCount = bills.value.length
-    const incomeCount = incomeRecords.value.length
     const universalCount = (key) => dataRecords.value.filter(item => item.domainKey === key).length
-    return [
-      {
-        id: 'expense',
-        name: '消费记账',
-        shortName: '消费',
-        icon: '💸',
-        tone: 'expense',
-        color: '#C2410C',
-        meta: `本月 ${expenseCount} 条 · 系统内置`,
-        recordCount: expenseCount,
+    return getSystemDomainDefinitions().map(domain => {
+      let recordCount = universalCount(domain.id)
+      if (domain.storage.recordKind === 'expense') recordCount = bills.value.length
+      if (domain.storage.recordKind === 'income') recordCount = incomeRecords.value.length
+      return {
+        ...domain,
+        meta: `本月 ${recordCount} 条 · 系统内置`,
+        recordCount,
         isSystem: true,
-        description: '识别消费截图、账单详情和手动支出记录。',
-      },
-      {
-        id: 'income',
-        name: '收入记录',
-        shortName: '收入',
-        icon: '💰',
-        tone: 'income',
-        color: '#1565C0',
-        meta: `本月 ${incomeCount} 条 · 系统内置`,
-        recordCount: incomeCount,
-        isSystem: true,
-        description: '记录工资、转账收款、报销和其他收入来源。',
-      },
-      {
-        id: 'sport',
-        name: '运动记录',
-        shortName: '运动',
-        icon: '🏃',
-        tone: 'sport',
-        color: '#B45309',
-        meta: `本月 ${universalCount('sport')} 条 · 系统内置`,
-        recordCount: universalCount('sport'),
-        isSystem: true,
-        description: '后续承接华为健康、Keep 等运动截图。',
-      },
-      {
-        id: 'sleep',
-        name: '睡眠记录',
-        shortName: '睡眠',
-        icon: '🌙',
-        tone: 'sleep',
-        color: '#4338CA',
-        meta: `本月 ${universalCount('sleep')} 条 · 系统内置`,
-        recordCount: universalCount('sleep'),
-        isSystem: true,
-        description: '后续承接睡眠追踪截图和睡眠日志。',
-      },
-      {
-        id: 'reading',
-        name: '阅读记录',
-        shortName: '阅读',
-        icon: '📚',
-        tone: 'reading',
-        color: '#0369A1',
-        meta: `本月 ${universalCount('reading')} 条 · 系统内置`,
-        recordCount: universalCount('reading'),
-        isSystem: true,
-        description: '后续承接阅读时长、页数和书籍进度记录。',
-      },
-      {
-        id: 'food',
-        name: '饮食记录',
-        shortName: '饮食',
-        icon: '🍱',
-        tone: 'food',
-        color: '#EA580C',
-        meta: `本月 ${universalCount('food')} 条 · 系统内置`,
-        recordCount: universalCount('food'),
-        isSystem: true,
-        description: '拍照估算餐盘热量与三大营养素（数值为 AI 估算）。',
-      },
-    ]
+      }
+    })
   })
 
   const todaySummary = computed(() => {
-    const todayKey = getLocalDateKey()
-    const todayBills = bills.value.filter(b => b.status === 'done' && b.dateRaw === todayKey)
-    const todayPendingBills = bills.value.filter(b => b.status === 'pending' && b.dateRaw === todayKey)
-    const expenseByPlatform = {}
-    todayBills.forEach(b => {
-      const p = b.platform && b.platform !== '?' ? b.platform : '其他'
-      expenseByPlatform[p] = (expenseByPlatform[p] || 0) + 1
+    return buildTodaySummary({
+      bills: bills.value,
+      incomeRecords: incomeRecords.value,
+      dataRecords: dataRecords.value,
+      stagingRecords: stagingRecords.value,
+      todayKey: getLocalDateKey(),
     })
-    const todaySport = dataRecords.value.filter(r => r.domainKey === 'sport' && (r.occurredAt || '').slice(0, 10) === todayKey)
-    const todaySleep = dataRecords.value.filter(r => r.domainKey === 'sleep' && (r.occurredAt || '').slice(0, 10) === todayKey)
-    const todayFood = dataRecords.value.filter(r => r.domainKey === 'food' && (r.occurredAt || '').slice(0, 10) === todayKey)
-    const todayIncome = incomeRecords.value.filter(r => r.dateRaw === todayKey)
-    const todayStaging = stagingRecords.value.filter(r => (r.occurredAt || r.createdAt || '').slice(0, 10) === todayKey)
-
-    const pendingExpenseTotal = todayPendingBills.reduce((s, b) => s + (b.amount || 0), 0)
-    const todayCalorieTotal = todayFood.reduce((s, r) => s + (Number(r.payload?.total_calorie_kcal) || 0), 0)
-
-    return {
-      expenseTotal: todayBills.reduce((s, b) => s + b.amount, 0),
-      expenseCount: todayBills.length,
-      expenseByPlatform,
-      pendingExpenseTotal,
-      pendingExpenseCount: todayPendingBills.length,
-      incomeTotal: todayIncome.reduce((s, r) => s + r.amount, 0),
-      incomeCount: todayIncome.length,
-      sportItems: todaySport.map(r => ({ title: r.title || '运动', summary: r.summary, payload: r.payload })),
-      sleepItems: todaySleep.map(r => ({ title: r.title || '睡眠', summary: r.summary, payload: r.payload })),
-      foodItems: todayFood.map(r => ({ title: r.title || '饮食', summary: r.summary, payload: r.payload, mealType: r.payload?.meal_type, calories: Number(r.payload?.total_calorie_kcal) || 0 })),
-      foodCalorieTotal: Math.round(todayCalorieTotal),
-      foodCount: todayFood.length,
-      stagingCount: todayStaging.length,
-      isEmpty: todayBills.length === 0 && todayPendingBills.length === 0 && todaySport.length === 0 && todaySleep.length === 0 && todayFood.length === 0 && todayIncome.length === 0 && todayStaging.length === 0,
-    }
   })
 
   const homeTimeline = computed(() => {
-    const stagingItems = stagingRecords.value.slice(0, 8).map(item => ({
-      id: `staging-${item.id}`,
-      kind: 'staging',
-      title: item.domainName || '待处理截图',
-      subtitle: item.summary,
-      amountLabel: item.recordType === 'income' ? '+ 待确认' : item.recordType === 'expense' ? '- 待确认' : '待分类',
-      dateLabel: item.occurredAt || item.createdAt,
-      dateRaw: (item.occurredAt || item.createdAt || '').slice(0, 10),
-      occurredTime: item.occurredAt,
-      uploadTime: item.createdAt,
-      imageUrl: item.imageUrl,
-      color: item.status === 'ai_error' ? '#B91C1C' : '#B45309',
-      raw: item,
-    }))
-
-    const expenseItems = bills.value.slice(0, 15).map(item => ({
-      id: `expense-${item.id}`,
-      kind: 'expense',
-      title: item.name,
-      subtitle: `${item.platform || '?'} · ${item.cat || '?'}`,
-      amountLabel: `-¥${item.amount.toFixed(2)}`,
-      dateLabel: item.createdAt,
-      dateRaw: item.dateRaw,
-      occurredTime: `${item.dateRaw}${item.time ? ' ' + item.time : ''}`,
-      uploadTime: item.createdAt,
-      imageUrl: null,
-      color: '#C2410C',
-      raw: item,
-    }))
-
-    const incomeItems = incomeRecords.value.slice(0, 15).map(item => ({
-      id: `income-${item.id}`,
-      kind: 'income',
-      title: item.source || incomeCatMap[item.cat]?.label || '收入',
-      subtitle: incomeCatMap[item.cat]?.label || '收入记录',
-      amountLabel: `+¥${item.amount.toFixed(2)}`,
-      dateLabel: item.createdAt,
-      dateRaw: item.dateRaw,
-      occurredTime: item.dateRaw,
-      uploadTime: item.createdAt,
-      imageUrl: null,
-      color: '#1565C0',
-      raw: item,
-    }))
-
-    const universalItems = dataRecords.value.slice(0, 12).map(item => {
-      const domain = domains.value.find(d => d.id === item.domainKey)
-      return {
-        id: `universal-${item.id}`,
-        kind: 'universal',
-        title: item.title || domain?.name || '通用记录',
-        subtitle: item.summary || domain?.description || '通用数据域记录',
-        amountLabel: domain?.shortName || '记录',
-        dateLabel: item.occurredAt || item.createdAt,
-        dateRaw: (item.occurredAt || item.createdAt || '').slice(0, 10),
-        occurredTime: item.occurredAt,
-        uploadTime: item.createdAt,
-        imageUrl: null,
-        color: domain?.color || '#2D6A4F',
-        raw: item,
-      }
+    return buildHomeTimeline({
+      stagingRecords: stagingRecords.value,
+      bills: bills.value,
+      incomeRecords: incomeRecords.value,
+      dataRecords: dataRecords.value,
+      domains: domains.value,
     })
-
-    return [...stagingItems, ...expenseItems, ...incomeItems, ...universalItems]
-      .sort((a, b) => (b.dateLabel || '').localeCompare(a.dateLabel || ''))
-      .slice(0, 25)
   })
 
   const timelineGroups = computed(() => {
@@ -1090,49 +952,7 @@ export function useStore() {
   let universalModalInitial = null
 
   function getUniversalDomainMeta(domainKey = universalModal.domainKey) {
-    const map = {
-      sport: {
-        title: '添加运动',
-        editTitle: '编辑运动',
-        primaryLabel: '运动时长（分钟）',
-        primaryKey: 'duration_minutes',
-        dimensionLabel: '运动类型',
-        dimensionKey: 'sport_type',
-        placeholder: '如：跑步、步行、力量训练',
-        defaultTitle: '运动记录',
-      },
-      sleep: {
-        title: '添加睡眠',
-        editTitle: '编辑睡眠',
-        primaryLabel: '睡眠时长（小时）',
-        primaryKey: 'sleep_hours',
-        dimensionLabel: '质量等级',
-        dimensionKey: 'quality_level',
-        placeholder: '如：良好、一般、深睡不足',
-        defaultTitle: '睡眠记录',
-      },
-      reading: {
-        title: '添加阅读',
-        editTitle: '编辑阅读',
-        primaryLabel: '阅读时长（分钟）',
-        primaryKey: 'reading_minutes',
-        dimensionLabel: '书名',
-        dimensionKey: 'book_name',
-        placeholder: '如：原则、微信读书',
-        defaultTitle: '阅读记录',
-      },
-      food: {
-        title: '添加饮食',
-        editTitle: '编辑饮食',
-        primaryLabel: '总热量（千卡）',
-        primaryKey: 'total_calorie_kcal',
-        dimensionLabel: '餐次',
-        dimensionKey: 'meal_type',
-        placeholder: '如：午餐、加餐',
-        defaultTitle: '饮食记录',
-      },
-    }
-    return map[domainKey] || map.sport
+    return getRegistryUniversalDomainMeta(domainKey)
   }
 
   function snapshotUniversalModal() {
@@ -1167,37 +987,13 @@ export function useStore() {
 
   function openUniversalModal(domainKey = 'sport') {
     const meta = getUniversalDomainMeta(domainKey)
-    universalModal.open = true
-    universalModal.mode = 'create'
-    universalModal.id = null
-    universalModal.domainKey = domainKey
-    universalModal.title = ''
-    universalModal.primaryValue = ''
-    universalModal.dimension = ''
-    universalModal.note = ''
-    universalModal.date = new Date().toISOString().slice(0, 10)
-    universalModal.time = ''
-    universalModal.imagePath = null
-    universalModal.imageUrl = null
-    universalModal.imageLoadError = false
-    if (meta.dimensionKey === 'quality_level') universalModal.dimension = '良好'
+    resetUniversalModal(universalModal, domainKey, meta, new Date().toISOString().slice(0, 10))
     setUniversalModalInitial()
   }
 
   async function openUniversalEditModal(record) {
     const meta = getUniversalDomainMeta(record.domainKey)
-    const payload = record.payload || {}
-    universalModal.open = true
-    universalModal.mode = 'edit'
-    universalModal.id = record.id
-    universalModal.domainKey = record.domainKey
-    universalModal.title = record.title || ''
-    universalModal.primaryValue = payload[meta.primaryKey] ? String(payload[meta.primaryKey]) : ''
-    universalModal.dimension = payload[meta.dimensionKey] || ''
-    universalModal.note = record.summary || payload.note || ''
-    universalModal.date = (record.occurredAt || record.createdAt || new Date().toISOString()).slice(0, 10)
-    universalModal.time = (record.occurredAt || '').slice(11, 16) || ''
-    universalModal.imagePath = record.imagePath || null
+    hydrateUniversalModalFromRecord(universalModal, record, meta)
     universalModal.imageUrl = await getSignedImageUrl(universalModal.imagePath)
     universalModal.imageLoadError = !!universalModal.imagePath && !universalModal.imageUrl
     setUniversalModalInitial()
@@ -1210,17 +1006,9 @@ export function useStore() {
 
   async function confirmUniversalRecord() {
     const meta = getUniversalDomainMeta(universalModal.domainKey)
-    const primary = parseFloat(universalModal.primaryValue)
-    if (!primary || primary <= 0 || primary > 99999) {
-      alert('请输入有效数值')
-      return
-    }
-    if (!universalModal.dimension.trim()) {
-      alert(`请填写${meta.dimensionLabel}`)
-      return
-    }
-    if (!universalModal.date) {
-      alert('请选择日期')
+    const validationError = validateUniversalModal(universalModal, meta)
+    if (validationError) {
+      alert(validationError)
       return
     }
 
@@ -1235,21 +1023,15 @@ export function useStore() {
     }
 
     const domainRow = domainRows[0]
-    const title = universalModal.title.trim() || universalModal.dimension.trim() || meta.defaultTitle
-    const payload = {
-      [meta.primaryKey]: primary,
-      [meta.dimensionKey]: universalModal.dimension.trim(),
-      note: universalModal.note.trim() || null,
-      source_app: 'manual',
-    }
+    const draft = buildUniversalRecordDraft(universalModal, meta)
     const body = {
       domain_id: domainRow.id,
       domain_key: universalModal.domainKey,
       domain_version: domainRow.version || '1.0',
-      occurred_at: `${universalModal.date}T${(universalModal.time ? universalModal.time + ':00' : '12:00:00')}+08:00`,
-      title,
-      summary: universalModal.note.trim() || `${meta.dimensionLabel}：${universalModal.dimension.trim()}`,
-      payload_jsonb: payload,
+      occurred_at: draft.occurredAt,
+      title: draft.title,
+      summary: draft.summary,
+      payload_jsonb: draft.payload,
       source: 'manual',
       source_image_path: universalModal.imagePath || null,
     }
@@ -1361,7 +1143,7 @@ export function useStore() {
       showFlash('批量归档目前仅支持消费和收入域')
       return
     }
-    const ok = confirm(`确认将选中的 ${ids.length} 条批量归档到「${domainKey === 'expense' ? '消费记账' : '收入记录'}」？`)
+    const ok = confirm(`确认将选中的 ${ids.length} 条批量归档到「${getSystemDomainLabel(domainKey, domainKey)}」？`)
     if (!ok) return
     showFlash(`⏳ 正在批量归档 ${ids.length} 条...`)
     let successCount = 0
@@ -1398,8 +1180,7 @@ export function useStore() {
       }
       const result = await resp.json()
       if (result.status === 'done') {
-        const domainLabel = { expense: '消费记账', income: '收入记录', sport: '运动记录', sleep: '睡眠记录', reading: '阅读记录' }
-        showFlash(`✓ 重试成功 → 已归档到「${domainLabel[result.record_type] || result.record_type}」`)
+        showFlash(`✓ 重试成功 → 已归档到「${getSystemDomainLabel(result.record_type, result.record_type)}」`)
         const idx = stagingRecords.value.findIndex(r => r.id === record.id)
         if (idx >= 0) stagingRecords.value.splice(idx, 1)
       } else {
@@ -1556,14 +1337,7 @@ export function useStore() {
   }
 
   function buildUniversalRecordTitle(domainKey, payload, record) {
-    if (domainKey === 'sport') return payload.sport_type || payload.activity_type || '运动记录'
-    if (domainKey === 'sleep') return payload.quality_level || '睡眠记录'
-    if (domainKey === 'reading') return payload.book_name || payload.title || '阅读记录'
-    if (domainKey === 'food') {
-      const dishes = Array.isArray(payload.dishes) ? payload.dishes : []
-      return payload.title || dishes[0]?.name || '饮食记录'
-    }
-    return record.domainName || '通用记录'
+    return buildUniversalRecordTitleFromAdapter(domainKey, payload, record)
   }
 
   function normalizeDateOnly(value) {

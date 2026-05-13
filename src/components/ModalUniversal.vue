@@ -45,40 +45,29 @@
           </div>
         </div>
 
-        <div class="sel-section" style="margin-top:16px">
-          <div class="sel-label">标题（可选）</div>
-          <input class="sheet-input" v-model="store.universalModal.title" placeholder="不填则使用下面的名称" maxlength="50">
-        </div>
-
-        <div class="sel-section" style="margin-top:16px">
-          <div class="sel-label">{{ meta.dimensionLabel }}</div>
-          <input class="sheet-input" v-model="store.universalModal.dimension" :placeholder="meta.placeholder" maxlength="50">
-        </div>
-
-        <div class="sel-section" style="margin-top:16px">
-          <div class="sel-label">{{ meta.primaryLabel }}</div>
-          <input type="number" class="sheet-input" v-model="store.universalModal.primaryValue" min="0.01" step="0.01" placeholder="0">
-        </div>
-
-        <div class="sel-section" style="margin-top:16px">
-          <div class="sel-label">日期</div>
-          <input type="date" class="sheet-input" v-model="store.universalModal.date" :max="today">
-        </div>
-
-        <div class="sel-section" style="margin-top:12px">
-          <div class="sel-label">具体时刻（可选）</div>
-          <input type="time" class="sheet-input" v-model="store.universalModal.time">
-        </div>
-
-        <div class="sel-section" style="margin-top:12px">
-          <div class="sel-label">备注（可选）</div>
-          <input class="sheet-input" v-model="store.universalModal.note" placeholder="补充说明…" maxlength="100">
+        <div
+          v-for="field in formFields"
+          :key="field.model"
+          class="sel-section"
+          style="margin-top:16px"
+        >
+          <div class="sel-label">{{ field.label }}</div>
+          <input
+            :type="field.type"
+            class="sheet-input"
+            v-model="store.universalModal[field.model]"
+            :placeholder="field.placeholder || ''"
+            :maxlength="field.maxlength || null"
+            :min="field.min || null"
+            :step="field.step || null"
+            :max="field.type === 'date' ? today : null"
+          >
         </div>
       </div>
 
       <div class="sheet-footer">
         <button class="confirm-btn"
-          :disabled="!store.universalModal.primaryValue || !store.universalModal.dimension || !store.universalModal.date"
+          :disabled="isSubmitDisabled"
           @click="store.confirmUniversalRecord()">
           确认保存
         </button>
@@ -118,4 +107,12 @@ const bodyEl = sheet.bodyEl
 const editableDomains = computed(() => store.domains.value.filter(domain => !['expense', 'income'].includes(domain.id)))
 const meta = computed(() => store.getUniversalDomainMeta(store.universalModal.domainKey))
 const metaTitle = computed(() => store.universalModal.mode === 'edit' ? meta.value.editTitle : meta.value.title)
+const formFields = computed(() => meta.value.formFields || [])
+
+const isSubmitDisabled = computed(() => formFields.value.some(field => {
+  if (!field.required) return false
+  const value = store.universalModal[field.model]
+  if (value == null) return true
+  return String(value).trim() === ''
+}))
 </script>
