@@ -6,9 +6,17 @@
 // 出问题时把域 id 从数组移除即可降级，main 上 1 行 commit 回退
 // ════════════════════════════════════════════════════════════════════
 import universalAdapter from './universalAdapter'
+import expenseAdapter from './expenseAdapter'
+import incomeAdapter from './incomeAdapter'
 
-/** 当前已切到新 adapter 的域 */
-export const USE_NEW_ADAPTER_DOMAINS = ['sport']
+/** 当前已切到新 adapter 的域（六个域全部接入） */
+export const USE_NEW_ADAPTER_DOMAINS = ['sport', 'sleep', 'reading', 'food', 'expense', 'income']
+
+/** 特化 adapter 映射；未在此表的域使用 universalAdapter */
+const SPECIALIZED_ADAPTERS = {
+  expense: expenseAdapter,
+  income: incomeAdapter,
+}
 
 /**
  * 判断某域是否使用新 adapter
@@ -18,12 +26,9 @@ export function shouldUseNewAdapter(domainId) {
 }
 
 /**
- * 取域的 adapter；当前只有 universalAdapter
- * 未来 expense/income 会有独立特化 adapter
+ * 取域的 adapter；返回 null 表示走旧的 detailAdapters 兜底逻辑
  */
 export function pickAdapter(domainId) {
-  // expense/income 永远走特化路径（保留独立表逻辑）
-  if (['expense', 'income'].includes(domainId)) return null
-  if (shouldUseNewAdapter(domainId)) return universalAdapter
-  return null
+  if (!shouldUseNewAdapter(domainId)) return null
+  return SPECIALIZED_ADAPTERS[domainId] || universalAdapter
 }

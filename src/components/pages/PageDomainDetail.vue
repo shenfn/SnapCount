@@ -97,7 +97,7 @@ const metricsAccented = computed(() => metrics.value.map((item, idx) => ({
   accent: idx === 0,
 })))
 
-const trendScope = computed(() => getDomainTrendScope(domain.value))
+const trendScope = computed(() => getDomainTrendScope(domain.value, store))
 const trendItemsRaw = computed(() => getDomainTrendItems(store, domain.value))
 const trendValues = computed(() => trendItemsRaw.value.map(item => item.value || 0))
 const trendLabels = computed(() => trendItemsRaw.value.map(item => item.label))
