@@ -4,6 +4,15 @@
     <div class="page-subtitle">数据洞察与趋势分析</div>
     <MonthPicker />
 
+    <button class="report-insights-entry" @click="store.navigateTo('insights')">
+      <span class="report-insights-entry-icon">联</span>
+      <span class="report-insights-entry-main">
+        <span class="report-insights-entry-title">跨域联动分析</span>
+        <span class="report-insights-entry-sub">睡眠 × 饮食、收支流水、每日明细</span>
+      </span>
+      <span class="report-insights-entry-arrow">›</span>
+    </button>
+
     <div class="report-domain-selector" @click.stop>
       <div class="report-selector-label">选择数据域</div>
       <div class="report-selector-wrap" @click="dropdownOpen = !dropdownOpen">
@@ -488,3 +497,65 @@ function normalizeChartList(list) {
   }))
 }
 </script>
+
+<style scoped>
+.report-insights-entry {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(33, 79, 61, 0.06) 0%, rgba(33, 79, 61, 0.02) 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin: 12px 0 16px;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.report-insights-entry:active {
+  transform: scale(0.985);
+}
+.report-insights-entry:hover {
+  border-color: var(--primary-light, var(--primary));
+  box-shadow: 0 2px 10px rgba(33, 79, 61, 0.06);
+}
+.report-insights-entry-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+  letter-spacing: 0.5px;
+}
+.report-insights-entry-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.report-insights-entry-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+.report-insights-entry-sub {
+  font-size: 11.5px;
+  color: var(--text2);
+  letter-spacing: 0.2px;
+}
+.report-insights-entry-arrow {
+  color: var(--text3);
+  font-size: 18px;
+  font-weight: 300;
+  flex-shrink: 0;
+}
+</style>

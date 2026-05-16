@@ -338,6 +338,44 @@ export function useStore() {
   // Phase 1：域协议 hydrate 状态（每次会话只拉一次）
   let domainSchemasLoaded = false
 
+  // ────────────────────────────────────────────────
+  // Phase A：daily_domain_summary 按需加载（PageInsights 用）
+  // ────────────────────────────────────────────────
+  const dailySummary = ref([])
+  const dailySummaryLoading = ref(false)
+  const dailySummaryError = ref('')
+  let dailySummaryLoadedAt = 0
+  const DAILY_SUMMARY_TTL = 60 * 1000 // 60s 缓存窗口，PageInsights 重复打开不重复拉
+
+  async function loadDailySummary({ days = 30, force = false } = {}) {
+    const now = Date.now()
+    if (!force && dailySummary.value.length && (now - dailySummaryLoadedAt < DAILY_SUMMARY_TTL)) {
+      return dailySummary.value
+    }
+    dailySummaryLoading.value = true
+    dailySummaryError.value = ''
+    try {
+      const sinceDate = new Date()
+      sinceDate.setDate(sinceDate.getDate() - (Number(days) || 30))
+      const sinceStr = sinceDate.toISOString().slice(0, 10)
+      const { data, error } = await sb
+        .from('daily_domain_summary')
+        .select('*')
+        .gte('date', sinceStr)
+        .order('date', { ascending: true })
+      if (error) throw error
+      dailySummary.value = data || []
+      dailySummaryLoadedAt = now
+      return dailySummary.value
+    } catch (e) {
+      dailySummaryError.value = humanizeDbError(e)
+      console.warn('[daily_summary] 加载失败:', e?.message || e)
+      return []
+    } finally {
+      dailySummaryLoading.value = false
+    }
+  }
+
   async function loadDomainSchemas() {
     if (domainSchemasLoaded) return
     try {
@@ -1638,6 +1676,7 @@ export function useStore() {
     expenseModal,
     universalModal,
     incomeCatMap,
+    dailySummary, dailySummaryLoading, dailySummaryError, loadDailySummary,
     loadData, resetUserData, changeMonth, showFlash,
     openPendingModal, closePendingModal, confirmEntry,
     hasPendingChanges, resetPendingChanges,

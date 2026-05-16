@@ -36,6 +36,7 @@
     <PageSettings v-show="store.currentPage.value === 'settings'" />
     <PageDomainDetail v-show="store.currentPage.value === 'domain-detail'" />
     <PageRecordDetail v-show="store.currentPage.value === 'record-detail'" />
+    <PageInsights v-if="store.currentPage.value === 'insights'" />
 
     <!-- Bottom Nav -->
     <nav class="nav platform-nav">
@@ -120,6 +121,7 @@ import PageReport  from './components/pages/PageReport.vue'
 import PageSettings from './components/pages/PageSettings.vue'
 import PageDomainDetail from './components/pages/PageDomainDetail.vue'
 import PageRecordDetail from './components/pages/PageRecordDetail.vue'
+import PageInsights from './components/pages/PageInsights.vue'
 import ModalPending from './components/ModalPending.vue'
 import ModalIncome  from './components/ModalIncome.vue'
 import ModalExpense from './components/ModalExpense.vue'
