@@ -761,8 +761,24 @@ export function useStore() {
       }).eq('id', incomeModal.id)
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
       closeIncomeModal()
+      const applyEdit = (arr) => {
+        const idx = arr.findIndex(item => item.id === incomeModal.id)
+        if (idx >= 0) {
+          arr[idx] = {
+            ...arr[idx],
+            cat: incomeModal.cat,
+            source,
+            amount: amt,
+            date: formatDate(incomeModal.date),
+            dateRaw: incomeModal.date,
+            note: incomeModal.note.trim() || null,
+            icon: incomeCatMap[incomeModal.cat]?.icon || '💰',
+          }
+        }
+      }
+      applyEdit(incomeRecords.value)
+      applyEdit(recentIncomeRecords.value)
       showFlash('✓ 收入已更新')
-      await loadData()
       if (detailRecord.value?.id === incomeModal.id) {
         const updated = incomeRecords.value.find(item => item.id === incomeModal.id)
           || recentIncomeRecords.value.find(item => item.id === incomeModal.id)
@@ -772,19 +788,37 @@ export function useStore() {
       }
       return
     }
-    const { error } = await sb.from('income_records').insert({
-      category: incomeModal.cat,
-      source_name: source,
-      amount: amt,
-      income_date: incomeModal.date,
-      note: incomeModal.note.trim() || null,
-      source: 'manual',
-      user_id: currentUserId.value,
-    })
+    const { data: newRow, error } = await sb.from('income_records')
+      .insert({
+        category: incomeModal.cat,
+        source_name: source,
+        amount: amt,
+        income_date: incomeModal.date,
+        note: incomeModal.note.trim() || null,
+        source: 'manual',
+        user_id: currentUserId.value,
+      })
+      .select('*')
+      .single()
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
     closeIncomeModal()
+    const mapped = {
+      id: newRow.id,
+      cat: newRow.category,
+      source: newRow.source_name,
+      amount: Number(newRow.amount),
+      date: formatDate(newRow.income_date),
+      dateRaw: newRow.income_date,
+      createdAt: newRow.created_at,
+      time: '',
+      icon: incomeCatMap[newRow.category]?.icon || '💰',
+      note: newRow.note,
+      image_url: newRow.image_url,
+      image_path: newRow.image_url,
+      sourceType: newRow.source || 'manual',
+    }
+    incomeRecords.value.unshift(mapped)
     showFlash('✓ 收入已记录')
-    await loadData()
   }
 
   function markIncomeImageUnavailable() {
@@ -911,8 +945,23 @@ export function useStore() {
       }).eq('id', expenseModal.id)
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
       closeExpenseModal()
+      const editIdx = bills.value.findIndex(item => item.id === expenseModal.id)
+      if (editIdx >= 0) {
+        bills.value[editIdx] = {
+          ...bills.value[editIdx],
+          name: merchantName,
+          platform: expenseModal.platform,
+          payment: expenseModal.payment,
+          cat: expenseModal.category,
+          amount: amt,
+          date: formatDate(expenseModal.date),
+          dateRaw: expenseModal.date,
+          time: resolvedTime ? resolvedTime.slice(0, 5) : '',
+          transport_type: isLargeTransport ? '交通' : null,
+          note: expenseModal.note.trim() || null,
+        }
+      }
       showFlash('✓ 支出已更新')
-      await loadData()
       if (detailRecord.value?.id === expenseModal.id) {
         const updated = bills.value.find(item => item.id === expenseModal.id)
         if (updated) {
@@ -922,26 +971,29 @@ export function useStore() {
       return
     }
 
-    const { error } = await sb.from('transactions').insert({
-      type: 'expense',
-      amount: amt,
-      merchant_name: merchantName,
-      platform: expenseModal.platform,
-      category: expenseModal.category,
-      payment_method: expenseModal.payment,
-      status: 'done',
-      transaction_date: expenseModal.date,
-      transaction_time: resolvedTime || (new Date().toTimeString().slice(0, 8)),
-      source: 'manual',
-      note: expenseModal.note.trim() || null,
-      is_large_transport: isLargeTransport,
-      transport_type: isLargeTransport ? '交通' : null,
-      user_id: currentUserId.value,
-    })
+    const { data: newRow, error } = await sb.from('transactions')
+      .insert({
+        type: 'expense',
+        amount: amt,
+        merchant_name: merchantName,
+        platform: expenseModal.platform,
+        category: expenseModal.category,
+        payment_method: expenseModal.payment,
+        status: 'done',
+        transaction_date: expenseModal.date,
+        transaction_time: resolvedTime || (new Date().toTimeString().slice(0, 8)),
+        source: 'manual',
+        note: expenseModal.note.trim() || null,
+        is_large_transport: isLargeTransport,
+        transport_type: isLargeTransport ? '交通' : null,
+        user_id: currentUserId.value,
+      })
+      .select('*')
+      .single()
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
     closeExpenseModal()
+    bills.value.unshift(mapTransaction(newRow))
     showFlash('✓ 支出已记录')
-    await loadData()
   }
 
   function markExpenseImageUnavailable() {

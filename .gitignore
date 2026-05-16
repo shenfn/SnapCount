@@ -65,3 +65,8 @@ dogfood-output/
 *.log
 .scan_all_files.txt
 test.jpg
+
+# 本地原型/设计稿（不入主仓库）
+多域联动分析.html
+*_原型*.html
+*_prototype*.html
