@@ -222,3 +222,166 @@ export function getReportDomainDefinitions() {
 export function getArchiveTargetDomainDefinitions() {
   return SYSTEM_DOMAIN_DEFINITIONS
 }
+
+// ════════════════════════════════════════════════════════════════════
+// 协议化重构 Phase 1：新协议层（沉默存在，Phase 3 才会被消费）
+// ────────────────────────────────────────────────────────────────────
+// 设计原则：
+// 1. 单一事实源 = data_domains.schema_json / display_json
+// 2. 前端 registry 只持有"视觉样式"，schema/display 从 DB hydrate
+// 3. DB 不可达时回退到 BUILTIN_SCHEMAS（兜底），不白屏
+// 4. 旧 API 完全保留，新 API 并行存在
+// ════════════════════════════════════════════════════════════════════
+
+// 视觉样式：唯一应该写在前端的域信息
+const VISUAL_REGISTRY = {
+  expense: { color: '#C2410C', icon: '💸', tone: 'expense', shortName: '消费', name: '消费记账', description: '识别消费截图、账单详情和手动支出记录。' },
+  income:  { color: '#1565C0', icon: '💰', tone: 'income',  shortName: '收入', name: '收入记录', description: '记录工资、转账收款、报销和其他收入来源。' },
+  sport:   { color: '#B45309', icon: '🏃', tone: 'sport',   shortName: '运动', name: '运动记录', description: '后续承接华为健康、Keep 等运动截图。' },
+  sleep:   { color: '#4338CA', icon: '🌙', tone: 'sleep',   shortName: '睡眠', name: '睡眠记录', description: '后续承接睡眠追踪截图和睡眠日志。' },
+  reading: { color: '#0369A1', icon: '📚', tone: 'reading', shortName: '阅读', name: '阅读记录', description: '后续承接阅读时长、页数和书籍进度记录。' },
+  food:    { color: '#EA580C', icon: '🍱', tone: 'food',    shortName: '饮食', name: '饮食记录', description: '拍照估算餐盘热量与三大营养素（数值为 AI 估算）。' },
+}
+
+// 内置兜底 schema：DB 不可达时使用，确保应用永不白屏
+// 只声明最小可用结构，DB 同步成功后会被 hydrate 覆盖
+const BUILTIN_SCHEMAS = {
+  expense: {
+    time_field: 'occurred_at',
+    facts: [{ key: 'amount', label: '金额', type: 'number', unit: '元', priority: 1 }],
+    dimensions: [
+      { key: 'category', label: '分类', priority: 1 },
+      { key: 'platform', label: '消费平台', priority: 2 },
+      { key: 'payment_method', label: '支付方式', priority: 3 },
+    ],
+    storage: { target_table: 'transactions', kind: 'specialized' },
+  },
+  income: {
+    time_field: 'income_date',
+    facts: [{ key: 'amount', label: '金额', type: 'number', unit: '元', priority: 1 }],
+    dimensions: [
+      { key: 'category', label: '类别', priority: 1 },
+      { key: 'source_name', label: '来源', priority: 2 },
+    ],
+    storage: { target_table: 'income_records', kind: 'specialized' },
+  },
+  sport: {
+    time_field: 'occurred_at',
+    facts: [
+      { key: 'duration_minutes', label: '运动时长', type: 'number', unit: '分钟' },
+      { key: 'distance_km', label: '距离', type: 'number', unit: '公里' },
+      { key: 'calories', label: '消耗', type: 'number', unit: '千卡' },
+    ],
+    dimensions: [
+      { key: 'sport_type', label: '运动类型' },
+      { key: 'source_app', label: '来源' },
+    ],
+  },
+  sleep: {
+    time_field: 'occurred_at',
+    facts: [
+      { key: 'sleep_hours', label: '睡眠时长', type: 'number', unit: '小时' },
+      { key: 'quality_score', label: '睡眠评分', type: 'number', unit: '分' },
+    ],
+    dimensions: [
+      { key: 'quality_level', label: '质量等级' },
+      { key: 'source_app', label: '来源' },
+    ],
+  },
+  reading: {
+    time_field: 'occurred_at',
+    facts: [
+      { key: 'reading_minutes', label: '阅读时长', type: 'number', unit: '分钟' },
+      { key: 'pages', label: '页数', type: 'number', unit: '页' },
+    ],
+    dimensions: [
+      { key: 'book_name', label: '书名' },
+      { key: 'source_app', label: '来源' },
+    ],
+  },
+  food: {
+    time_field: 'occurred_at',
+    facts: [
+      { key: 'total_calorie_kcal', label: '总热量', type: 'number', unit: '千卡' },
+    ],
+    dimensions: [
+      { key: 'meal_type', label: '餐次' },
+      { key: 'source_app', label: '来源' },
+    ],
+  },
+}
+
+const BUILTIN_DISPLAYS = {
+  expense: { primary_fact: 'amount', primary_dimension: 'category', title_field: 'merchant_name' },
+  income:  { primary_fact: 'amount', primary_dimension: 'category', title_field: 'source_name' },
+  sport:   { primary_fact: 'duration_minutes', primary_dimension: 'sport_type', title_field: 'sport_type' },
+  sleep:   { primary_fact: 'sleep_hours', primary_dimension: 'quality_level', title_field: 'quality_level' },
+  reading: { primary_fact: 'reading_minutes', primary_dimension: 'book_name', title_field: 'book_name' },
+  food:    { primary_fact: 'total_calorie_kcal', primary_dimension: 'meal_type', title_field: 'title' },
+}
+
+// 运行时态：DB hydrate 后存放到这里
+// 默认初始化为 BUILTIN_*（兜底），hydrate 后被 DB 数据覆盖
+const runtimeState = {
+  hydrated: false,
+  hydratedAt: null,
+  schemas: { ...BUILTIN_SCHEMAS },
+  displays: { ...BUILTIN_DISPLAYS },
+}
+
+/**
+ * 把从 DB 拉到的 data_domains 行合并进运行时 registry
+ * @param {Array} dbDomains 形如 [{ key, schema_json, display_json, ... }]
+ */
+export function hydrateDomainRegistry(dbDomains) {
+  if (!Array.isArray(dbDomains)) return
+
+  for (const row of dbDomains) {
+    if (!row || !row.key) continue
+    if (!VISUAL_REGISTRY[row.key]) continue // 只接受已知的系统域，未知域忽略
+
+    const schema = row.schema_json || row.schemaJson
+    const display = row.display_json || row.displayJson
+
+    if (schema && typeof schema === 'object' && Array.isArray(schema.facts)) {
+      runtimeState.schemas[row.key] = schema
+    }
+    if (display && typeof display === 'object') {
+      runtimeState.displays[row.key] = display
+    }
+  }
+
+  runtimeState.hydrated = true
+  runtimeState.hydratedAt = new Date().toISOString()
+}
+
+/** 取域的视觉样式（颜色/icon/简称等）—— 永远本地，零网络依赖 */
+export function getDomainVisual(domainId) {
+  return VISUAL_REGISTRY[domainId] || VISUAL_REGISTRY.sport
+}
+
+/** 取域的 schema（facts/dimensions/time_field）—— DB hydrate 后是 DB 值，否则是兜底 */
+export function getDomainSchema(domainId) {
+  return runtimeState.schemas[domainId] || BUILTIN_SCHEMAS[domainId] || { facts: [], dimensions: [] }
+}
+
+/** 取域的 display（primary_fact/primary_dimension/title_field）—— 同上 */
+export function getDomainDisplay(domainId) {
+  return runtimeState.displays[domainId] || BUILTIN_DISPLAYS[domainId] || {}
+}
+
+/** 调试用：返回当前 registry 是否已 hydrate 以及最近一次 hydrate 时间 */
+export function getDomainRegistryStatus() {
+  return {
+    hydrated: runtimeState.hydrated,
+    hydratedAt: runtimeState.hydratedAt,
+    knownDomains: Object.keys(VISUAL_REGISTRY),
+    schemaSnapshot: runtimeState.schemas,
+    displaySnapshot: runtimeState.displays,
+  }
+}
+
+/** 列出所有视觉注册的域 id（含 system + 未来扩展） */
+export function getRegisteredDomainIds() {
+  return Object.keys(VISUAL_REGISTRY)
+}

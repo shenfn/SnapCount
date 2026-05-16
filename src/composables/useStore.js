@@ -4,6 +4,8 @@ import {
   getSystemDomainDefinitions,
   getSystemDomainLabel,
   getUniversalDomainMeta as getRegistryUniversalDomainMeta,
+  hydrateDomainRegistry,
+  getDomainRegistryStatus,
 } from '../domains/registry'
 import { buildHomeTimeline, buildTodaySummary, buildUniversalRecordTitle as buildUniversalRecordTitleFromAdapter } from '../domains/storeAdapters'
 import {
@@ -333,10 +335,42 @@ export function useStore() {
     }
   }
 
+  // Phase 1：域协议 hydrate 状态（每次会话只拉一次）
+  let domainSchemasLoaded = false
+
+  async function loadDomainSchemas() {
+    if (domainSchemasLoaded) return
+    try {
+      const { data, error } = await sb.from('data_domains')
+        .select('key,schema_json,display_json,version,status')
+        .eq('is_system', true)
+      if (error) {
+        console.warn('[域协议] 加载 data_domains 失败，使用内置兜底 schema:', error.message)
+        return
+      }
+      hydrateDomainRegistry(data || [])
+      domainSchemasLoaded = true
+      // 调试输出：协议化重构 Phase 1 验证用
+      const status = getDomainRegistryStatus()
+      console.log('[域协议] hydrate 完成', {
+        hydratedAt: status.hydratedAt,
+        domains: (data || []).map(d => ({
+          key: d.key,
+          facts: d.schema_json?.facts?.length || 0,
+          dimensions: d.schema_json?.dimensions?.length || 0,
+        })),
+      })
+    } catch (e) {
+      console.warn('[域协议] 加载异常，使用内置兜底 schema:', e?.message || e)
+    }
+  }
+
   async function loadData(attempt = 0, silent = false) {
     if (attempt === 0 && !silent) loading.value = true
     if (attempt === 0 && !silent) loadError.value = ''
     if (attempt === 0) lastRefreshTs = Date.now()
+    // Phase 1：拉取域协议（每会话一次，失败不阻断主流程）
+    if (attempt === 0) loadDomainSchemas()
     try {
       const padM = String(currentMonth.value).padStart(2, '0')
       const start = `${currentYear.value}-${padM}-01`
@@ -1614,6 +1648,7 @@ export function useStore() {
     hasExpenseChanges, resetExpenseChanges, markExpenseImageUnavailable,
     openUniversalModal, openUniversalEditModal, closeUniversalModal, confirmUniversalRecord,
     hasUniversalChanges, resetUniversalChanges, markUniversalImageUnavailable, getUniversalDomainMeta,
+    getDomainRegistryStatus,
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
     discardStagingRecord, retryStagingRecord, archiveStagingRecord,
