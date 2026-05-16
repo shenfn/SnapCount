@@ -347,6 +347,65 @@ export function useStore() {
   let dailySummaryLoadedAt = 0
   const DAILY_SUMMARY_TTL = 60 * 1000 // 60s 缓存窗口，PageInsights 重复打开不重复拉
 
+  // AI 洞察生成（调 generate-insights Edge Function）
+  const aiInsight = ref(null)        // 当前展示的 insight 记录
+  const aiInsightLoading = ref(false)
+  const aiInsightError = ref('')
+  const aiInsightCached = ref(false)
+
+  async function generateAiInsight({ days = 14, force = false } = {}) {
+    aiInsightLoading.value = true
+    aiInsightError.value = ''
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const token = session?.access_token
+      if (!token) throw new Error('未登录，无法调用 AI')
+
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/generate-insights`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'apikey': SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ days, force }),
+      })
+      const json = await resp.json()
+      if (!resp.ok) throw new Error(json?.error || `AI 服务返回 ${resp.status}`)
+
+      aiInsight.value = json.insight
+      aiInsightCached.value = !!json.cached
+      return json
+    } catch (e) {
+      aiInsightError.value = e?.message || String(e)
+      console.warn('[ai_insight] 生成失败:', e)
+      throw e
+    } finally {
+      aiInsightLoading.value = false
+    }
+  }
+
+  // 启动时尝试取最近一次缓存的 insight（如有），不强制
+  async function loadLatestAiInsight({ days = 14 } = {}) {
+    try {
+      const { data } = await sb
+        .from('ai_insights')
+        .select('*')
+        .eq('days_range', days)
+        .eq('status', 'success')
+        .order('generated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (data) {
+        aiInsight.value = data
+        aiInsightCached.value = true
+      }
+      return data
+    } catch (e) {
+      return null
+    }
+  }
+
   async function loadDailySummary({ days = 30, force = false } = {}) {
     const now = Date.now()
     if (!force && dailySummary.value.length && (now - dailySummaryLoadedAt < DAILY_SUMMARY_TTL)) {
@@ -1677,6 +1736,8 @@ export function useStore() {
     universalModal,
     incomeCatMap,
     dailySummary, dailySummaryLoading, dailySummaryError, loadDailySummary,
+    aiInsight, aiInsightLoading, aiInsightError, aiInsightCached,
+    generateAiInsight, loadLatestAiInsight,
     loadData, resetUserData, changeMonth, showFlash,
     openPendingModal, closePendingModal, confirmEntry,
     hasPendingChanges, resetPendingChanges,
