@@ -174,8 +174,10 @@
 
 <script setup>
 import { computed, inject, onMounted, onBeforeUnmount, ref } from 'vue'
-import { getReportDomainDefinitions, getUniversalReportMeta } from '../../domains/registry'
+import { getReportDomainDefinitions, getDomainSchema, getDomainDisplay } from '../../domains/registry'
 import { computeWeekData, incomeCatMap } from '../../utils/helpers'
+import { pickAdapter } from '../../adapters/domain'
+import { isDurationFact } from '../../utils/format'
 import MonthPicker from '../MonthPicker.vue'
 
 const store = inject('store')
@@ -272,37 +274,6 @@ const maxIncomeAmount = computed(() => {
 
 const universalRecords = computed(() => {
   return store.dataRecords.value.filter(item => item.domainKey === activeDomain.value)
-})
-
-const universalTrend = computed(() => {
-  const result = [0, 0, 0, 0, 0, 0, 0]
-  const today = new Date()
-  const dow = today.getDay()
-  const monday = new Date(today)
-  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1))
-  monday.setHours(0, 0, 0, 0)
-  universalRecords.value.forEach(item => {
-    const d = new Date(item.occurredAt || item.createdAt)
-    if (Number.isNaN(d.getTime())) return
-    d.setHours(0, 0, 0, 0)
-    const diff = Math.round((d - monday) / 86400000)
-    if (diff >= 0 && diff < 7) result[diff] += 1
-  })
-  return result
-})
-
-const universalCategories = computed(() => buildAmountRank(
-  universalRecords.value.map(item => ({
-    name: universalDimensionName(item),
-    amount: 1,
-  })),
-  false,
-  '条'
-))
-
-const universalPrimaryTotal = computed(() => {
-  const meta = universalMeta(activeDomain.value)
-  return universalRecords.value.reduce((sum, item) => sum + Number(item.payload?.[meta.primaryKey] || 0), 0)
 })
 
 const expenseData = computed(() => ({
@@ -443,41 +414,50 @@ function withEmptyDetail(base) {
 
 function universalData(domainKey) {
   const base = placeholderData.value[domainKey]
-  const meta = universalMeta(domainKey)
-  const count = universalRecords.value.length
+  const domainObj = reportDomains.find(d => d.id === domainKey) || { id: domainKey, name: base.summary.label }
+  const adapter = pickAdapter(domainKey)
+
+  // 没接入 adapter 时退回原占位
+  if (!adapter) {
+    return { ...base, ...withEmptyDetail(base) }
+  }
+
+  const records = universalRecords.value
+  const count = records.length
+  const metricItems = adapter.getMetricItems(store, domainObj)
+  const trend = adapter.getTrend(store, domainObj)
+  const distribution = adapter.getDistribution(store, domainObj)
+
+  // 主 fact 元信息（用于 summary headline 单位 / 时长格式化）
+  const schema = getDomainSchema(domainKey)
+  const display = getDomainDisplay(domainKey)
+  const primaryFact = schema?.facts?.find(f => f.key === display?.primary_fact) || schema?.facts?.[0]
+  const headlineMetric = metricItems[0] || { value: `${count} 条` }
+
   return {
     summary: {
       ...base.summary,
-      value: `${count} 条`,
+      value: count ? headlineMetric.value : '0 条',
       change: count
-        ? `${meta.primaryLabel}累计 ${formatNumber(universalPrimaryTotal.value)} ${meta.unit}`
+        ? `已记录 ${count} 条 · ${headlineMetric.label || ''}`.trim()
         : base.summary.change,
     },
-    stats: [
-      { label: '记录笔数', value: `${count}` },
-      { label: meta.totalLabel, value: `${formatNumber(universalPrimaryTotal.value)} ${meta.unit}` },
-      { label: meta.dimensionLabel, value: universalCategories.value[0]?.name || '暂无' },
-      { label: '本周新增', value: `${universalTrend.value.reduce((sum, item) => sum + item, 0)} 条` },
-    ],
-    trendLabels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
-    trendData: universalTrend.value,
-    trendMax: Math.max(...universalTrend.value, 1),
-    categories: universalCategories.value,
+    stats: metricItems.map(item => ({ label: item.label, value: item.value })),
+    trendLabels: trend.labels,
+    trendData: trend.values,
+    trendMax: Math.max(...trend.values, 1),
+    categories: distribution.map(d => ({
+      name: d.name,
+      amount: d.value,
+      pct: d.pct,
+      display: d.display || (primaryFact && isDurationFact(primaryFact) ? `${d.value} 分钟` : `${d.value}`),
+    })),
     platforms: [],
     paymentMethods: [],
-    specialSummaries: [
-      { label: '最近记录', value: universalRecords.value[0]?.title || '暂无', icon: meta.icon, color: activeMeta.value.color },
-    ],
+    specialSummaries: count
+      ? [{ label: '最近记录', value: records[0]?.title || '暂无', icon: domainObj.icon || '·', color: activeMeta.value.color }]
+      : [],
   }
-}
-
-function universalMeta(domainKey) {
-  return getUniversalReportMeta(domainKey)
-}
-
-function universalDimensionName(item) {
-  const meta = universalMeta(item.domainKey)
-  return item.payload?.[meta.dimensionKey] || item.title || '未分类'
 }
 
 function buildAmountRank(list, currency = false, unit = '') {
