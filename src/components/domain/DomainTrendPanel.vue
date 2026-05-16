@@ -71,6 +71,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { formatDuration } from '../../utils/format'
 
 const props = defineProps({
   values: { type: Array, required: true },
@@ -80,6 +81,7 @@ const props = defineProps({
   color: { type: String, default: '#2d6a4f' },
   unit: { type: String, default: '' },
   currency: { type: Boolean, default: false },
+  duration: { type: Boolean, default: false }, // 时长场景：值为分钟数，使用 formatDuration 显示
   title: { type: String, default: '趋势' },
   subtitle: { type: String, default: '' },
   scope: { type: String, default: '' },
@@ -128,6 +130,7 @@ function barStyle(value, index) {
   return { height: `${heightPct}%` }
 }
 function shortValue(v) {
+  if (props.duration) return formatDuration(v, { short: true })
   if (props.currency) {
     if (v >= 10000) return `¥${(v / 10000).toFixed(1)}万`
     if (v >= 1000)  return `¥${Math.round(v)}`
@@ -138,6 +141,7 @@ function shortValue(v) {
 }
 function formatValue(v) {
   if (v == null) return '-'
+  if (props.duration) return formatDuration(v)
   if (props.currency) return `¥ ${v.toFixed(2)}`
   if (props.unit)     return `${shortValue(v)} ${props.unit}`
   return shortValue(v)

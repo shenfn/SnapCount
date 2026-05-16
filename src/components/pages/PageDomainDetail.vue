@@ -30,6 +30,7 @@
       :today-index="todayIndex"
       :color="domain.color"
       :currency="trendIsCurrency"
+      :duration="trendIsDuration"
       :unit="trendUnit"
       title="趋势"
       :scope="trendScope"
@@ -75,6 +76,7 @@ import {
   getDomainTrendScope,
 } from '../../domains/detailAdapters'
 import { getDomainSchema, getDomainDisplay } from '../../domains/registry'
+import { isDurationFact } from '../../utils/format'
 import DomainHero from '../domain/DomainHero.vue'
 import DomainMetricStrip from '../domain/DomainMetricStrip.vue'
 import DomainTrendPanel from '../domain/DomainTrendPanel.vue'
@@ -102,14 +104,17 @@ const trendItemsRaw = computed(() => getDomainTrendItems(store, domain.value))
 const trendValues = computed(() => trendItemsRaw.value.map(item => item.value || 0))
 const trendLabels = computed(() => trendItemsRaw.value.map(item => item.label))
 const trendIsCurrency = computed(() => ['expense', 'income'].includes(domain.value.id))
-const trendUnit = computed(() => {
-  if (trendIsCurrency.value) return ''
-  // 从协议读单位：display.primary_fact 对应的 facts[].unit
+const primaryFact = computed(() => {
   const schema = getDomainSchema(domain.value.id)
   const display = getDomainDisplay(domain.value.id)
-  const primaryKey = display?.primary_fact || schema?.facts?.[0]?.key
-  const fact = schema?.facts?.find(f => f.key === primaryKey)
-  return fact?.unit || '条'
+  const key = display?.primary_fact || schema?.facts?.[0]?.key
+  return schema?.facts?.find(f => f.key === key) || null
+})
+const trendIsDuration = computed(() => isDurationFact(primaryFact.value))
+const trendUnit = computed(() => {
+  if (trendIsCurrency.value) return ''
+  if (trendIsDuration.value) return '' // formatDuration 自带单位
+  return primaryFact.value?.unit || '条'
 })
 
 const dimensionItems = computed(() => getDomainDimensionItems(store, domain.value))
