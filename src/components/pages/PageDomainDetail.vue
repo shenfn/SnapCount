@@ -9,94 +9,49 @@
       <button class="detail-more" @click="store.showFlash('数据域配置将在模板阶段开放')">设</button>
     </div>
 
-    <div class="domain-detail-hero" :style="{ '--domain-color': domain.color }">
-      <div class="domain-detail-hero-top">
-        <div class="domain-detail-mark" :style="{ background: `${domain.color}18`, color: domain.color }">{{ domain.icon }}</div>
-        <div class="domain-detail-status">
-          <span class="badge" :class="domain.recordCount ? 'badge-success' : 'badge-warning'">{{ domain.recordCount ? '运行中' : '待接入' }}</span>
-        </div>
-      </div>
-      <div class="domain-detail-title-row">
-        <div>
-          <div class="domain-detail-kicker">Domain Workspace</div>
-          <div class="domain-detail-title">{{ domain.name }}</div>
-        </div>
-        <div class="domain-detail-count">{{ domain.recordCount }}</div>
-      </div>
-      <div class="domain-detail-desc">{{ domain.description }}</div>
-    </div>
+    <DomainHero
+      :name="domain.name"
+      :icon="domain.icon"
+      :description="domain.description"
+      :color="domain.color"
+      :record-count="domain.recordCount"
+      kicker="DOMAIN WORKSPACE"
+    />
 
-    <div class="domain-metric-grid">
-      <div v-for="item in metrics" :key="item.label" class="domain-metric">
-        <div class="domain-metric-label">{{ item.label }}</div>
-        <div class="domain-metric-value">{{ item.value }}</div>
-      </div>
-    </div>
+    <DomainMetricStrip
+      :metrics="metricsAccented"
+      :color="domain.color"
+      :cols="4"
+    />
 
-    <div class="section-header">
-      <div class="section-title">趋势</div>
-      <div class="section-action">{{ trendScope }}</div>
-    </div>
-    <div class="domain-panel">
-      <div class="domain-trend-bars">
-        <div v-for="(item, index) in trendItems" :key="index" class="domain-trend-col">
-          <div class="domain-trend-bar-wrap">
-            <div
-              class="domain-trend-bar"
-              :style="{ height: `${Math.max(item.pct, item.value ? 12 : 4)}%`, background: domainBarColor }"
-            ></div>
-          </div>
-          <div class="domain-trend-label">{{ item.label }}</div>
-        </div>
-      </div>
-    </div>
+    <DomainTrendPanel
+      :values="trendValues"
+      :labels="trendLabels"
+      :today-index="todayIndex"
+      :color="domain.color"
+      :currency="trendIsCurrency"
+      :unit="trendUnit"
+      title="趋势"
+      :scope="trendScope"
+    />
 
-    <div class="section-header">
-      <div class="section-title">维度分布</div>
-      <div class="section-action">Top {{ dimensionItems.length || 0 }}</div>
-    </div>
-    <div class="domain-panel">
-      <div v-if="!dimensionItems.length" class="empty-state compact">
-        <div class="empty-title">还没有可分析的数据</div>
-        <div class="empty-desc">模板接入后会自动生成分类、来源或状态分布。</div>
-      </div>
-      <div v-for="item in dimensionItems" :key="item.name" class="domain-dimension-row">
-        <div class="domain-dimension-main">
-          <div class="domain-dimension-name">{{ item.name }}</div>
-          <div class="domain-dimension-track">
-            <div class="domain-dimension-fill" :style="{ width: `${item.pct}%`, background: domainBarColor }"></div>
-          </div>
-        </div>
-        <div class="domain-dimension-value">{{ item.display }}</div>
-      </div>
-    </div>
+    <DomainDistributionPanel
+      :items="dimensionItems"
+      :color="domain.color"
+      title="维度分布"
+      :top-label="dimensionItems.length ? `Top ${dimensionItems.length}` : ''"
+      :empty-desc="'模板接入后会自动生成分类、来源或状态分布。'"
+    />
 
-    <div class="section-header">
-      <div class="section-title">最近记录</div>
-      <div class="section-action">{{ recentRecords.length }} 条</div>
-    </div>
-    <div class="domain-record-list">
-      <div v-if="!recentRecords.length" class="empty-state">
-        <div class="empty-title">{{ domain.name }}暂无记录</div>
-        <div class="empty-desc">这个数据域已经预留好展示结构，等截图识别链路接入后会自动填充。</div>
-      </div>
-      <div
-        v-for="item in recentRecords"
-        :key="item.id"
-        class="domain-record-row"
-        @click="openRecord(item)"
-      >
-        <div class="domain-record-icon" :style="{ background: `${domain.color}16`, color: domain.color }">{{ item.icon }}</div>
-        <div class="domain-record-main">
-          <div class="domain-record-title-row">
-            <div class="domain-record-title">{{ item.title }}</div>
-            <div class="domain-record-value" :class="item.kind">{{ item.value }}</div>
-          </div>
-          <div class="domain-record-sub">{{ item.subtitle }}</div>
-          <div class="domain-record-date">{{ item.date }}</div>
-        </div>
-      </div>
-    </div>
+    <DomainRecentRecordList
+      :records="recentRecords"
+      :color="domain.color"
+      title="最近记录"
+      :empty-icon="domain.icon"
+      :empty-title="`${domain.name}暂无记录`"
+      :empty-desc="'这个数据域已经预留好展示结构，等截图识别链路接入后会自动填充。'"
+      @select="openRecord"
+    />
 
     <div class="domain-next-panel">
       <div class="domain-next-title">默认展示能力</div>
@@ -119,18 +74,38 @@ import {
   getDomainTrendItems,
   getDomainTrendScope,
 } from '../../domains/detailAdapters'
+import DomainHero from '../domain/DomainHero.vue'
+import DomainMetricStrip from '../domain/DomainMetricStrip.vue'
+import DomainTrendPanel from '../domain/DomainTrendPanel.vue'
+import DomainDistributionPanel from '../domain/DomainDistributionPanel.vue'
+import DomainRecentRecordList from '../domain/DomainRecentRecordList.vue'
 
 const store = inject('store')
+
+const today = new Date()
+const todayIndex = today.getDay() === 0 ? 6 : today.getDay() - 1
 
 const domain = computed(() => {
   return store.domains.value.find(item => item.id === store.activeDomainId.value) || store.domains.value[0]
 })
 
-const domainBarColor = computed(() => `linear-gradient(180deg, ${domain.value.color} 0%, ${softenColor(domain.value.color)} 100%)`)
-
 const metrics = computed(() => getDomainMetricItems(store, domain.value))
+// 第一个指标作为强调卡（可一目了然看到主指标）
+const metricsAccented = computed(() => metrics.value.map((item, idx) => ({
+  ...item,
+  accent: idx === 0,
+})))
+
 const trendScope = computed(() => getDomainTrendScope(domain.value))
-const trendItems = computed(() => getDomainTrendItems(store, domain.value))
+const trendItemsRaw = computed(() => getDomainTrendItems(store, domain.value))
+const trendValues = computed(() => trendItemsRaw.value.map(item => item.value || 0))
+const trendLabels = computed(() => trendItemsRaw.value.map(item => item.label))
+const trendIsCurrency = computed(() => ['expense', 'income'].includes(domain.value.id))
+const trendUnit = computed(() => {
+  if (trendIsCurrency.value) return ''
+  return '条'
+})
+
 const dimensionItems = computed(() => getDomainDimensionItems(store, domain.value))
 const recentRecords = computed(() => getDomainRecentRecords(store, domain.value))
 const capabilities = computed(() => getDomainCapabilities(domain.value))
@@ -139,16 +114,5 @@ function openRecord(item) {
   if (item.kind === 'expense') store.openRecordDetail('expense', item.raw)
   if (item.kind === 'income') store.openRecordDetail('income', item.raw)
   if (item.kind === 'universal') store.openRecordDetail('universal', item.raw)
-}
-
-function softenColor(color) {
-  const map = {
-    '#C2410C': '#F97316',
-    '#1565C0': '#38BDF8',
-    '#B45309': '#FBBF24',
-    '#4338CA': '#818CF8',
-    '#0369A1': '#38BDF8',
-  }
-  return map[color] || color
 }
 </script>
