@@ -52,7 +52,12 @@
           style="margin-top:16px"
         >
           <div class="sel-label">{{ field.label }}</div>
+          <DurationInput
+            v-if="field.input === 'duration'"
+            v-model="store.universalModal[field.model]"
+          />
           <input
+            v-else
             :type="field.type"
             class="sheet-input"
             v-model="store.universalModal[field.model]"
@@ -89,6 +94,7 @@
 <script setup>
 import { computed, inject } from 'vue'
 import { useBottomSheet } from '../composables/useBottomSheet'
+import DurationInput from './DurationInput.vue'
 
 const store = inject('store')
 const today = new Date().toISOString().slice(0, 10)

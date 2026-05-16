@@ -34,7 +34,7 @@ export function hydrateUniversalModalFromRecord(modal, record, meta) {
   }
 
   modal.title = record.title || ''
-  modal.primaryValue = payload[meta.primaryKey] != null ? String(payload[meta.primaryKey]) : ''
+  modal.primaryValue = readPrimaryValue(payload, meta)
   modal.dimension = payload[meta.dimensionKey] || modal.dimension || ''
   modal.note = record.summary || payload.note || ''
   modal.date = (record.occurredAt || record.createdAt || new Date().toISOString()).slice(0, 10)
@@ -42,10 +42,36 @@ export function hydrateUniversalModalFromRecord(modal, record, meta) {
   modal.imagePath = record.imagePath || null
 }
 
+// 读取主指标值；duration 类双兼容：sleep_minutes 不存在时 fallback 到 sleep_hours×60
+function readPrimaryValue(payload, meta) {
+  if (payload[meta.primaryKey] != null) return String(payload[meta.primaryKey])
+  if (meta.primaryUnit !== 'duration') return ''
+  // 时长类双兼容
+  if (meta.primaryKey === 'sleep_minutes' && payload.sleep_hours != null) {
+    return String(Math.round(Number(payload.sleep_hours) * 60))
+  }
+  return ''
+}
+
+// 各类主指标的合理上限（硬约束，超过则拒绝保存）
+const PRIMARY_LIMITS = {
+  duration: { max: 1440, hint: '单次时长不应超过 24 小时（1440 分钟）' },        // 1 天
+  currency: { max: 1000000, hint: '单笔金额不应超过 100 万' },
+  default: { max: 99999, hint: '数值过大，请检查是否填错' },
+}
+
+function getPrimaryLimit(meta) {
+  return PRIMARY_LIMITS[meta.primaryUnit] || PRIMARY_LIMITS.default
+}
+
 export function validateUniversalModal(modal, meta) {
   const primary = parseFloat(modal.primaryValue)
-  if (!primary || primary <= 0 || primary > 99999) {
-    return '请输入有效数值'
+  if (!primary || primary <= 0) {
+    return `请输入有效${meta.primaryLabel || '数值'}`
+  }
+  const limit = getPrimaryLimit(meta)
+  if (primary > limit.max) {
+    return limit.hint
   }
 
   for (const field of meta.formFields || []) {
@@ -83,7 +109,7 @@ export function buildUniversalRecordDraft(modal, meta) {
 
 function getInitialFieldValue(field, record, payload, meta) {
   if (field.model === 'title') return record.title || ''
-  if (field.model === 'primaryValue') return payload[meta.primaryKey] != null ? String(payload[meta.primaryKey]) : ''
+  if (field.model === 'primaryValue') return readPrimaryValue(payload, meta)
   if (field.model === 'dimension') return payload[meta.dimensionKey] || field.defaultValue || ''
   if (field.model === 'note') return record.summary || payload.note || ''
   if (field.model === 'date') return (record.occurredAt || record.createdAt || new Date().toISOString()).slice(0, 10)

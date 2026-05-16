@@ -60,6 +60,22 @@ function getDomainRecords(store, domain) {
     .sort((a, b) => ((b.occurredAt || b.createdAt || '').localeCompare(a.occurredAt || a.createdAt || '')))
 }
 
+/**
+ * 过滤出本月（基于本地时区）的 records
+ * 用于 metrics / distribution，保证"本月总X"的 label 与数据一致
+ */
+function filterCurrentMonth(records) {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  return records.filter(r => {
+    const t = r.occurredAt || r.createdAt
+    if (!t) return false
+    const d = new Date(t)
+    return d.getFullYear() === y && d.getMonth() === m
+  })
+}
+
 /** 取主 fact（display.primary_fact 或 facts[0]） */
 function getPrimaryFact(schema, display) {
   if (!schema?.facts?.length) return null
@@ -80,14 +96,15 @@ function getPrimaryDimension(schema, display) {
 export function getMetricItems(store, domain) {
   const schema = getDomainSchema(domain.id)
   const display = getDomainDisplay(domain.id)
-  const records = getDomainRecords(store, domain)
+  const allRecords = getDomainRecords(store, domain)
+  const records = filterCurrentMonth(allRecords)
   const primary = getPrimaryFact(schema, display)
 
-  // 没有协议时返回兜底
+  // 没有协议时返回兜底（用全量记录数兜底，避免空月份显示 0）
   if (!primary || !records.length) {
     return [
-      { label: '记录数', value: `${records.length}`, accent: true },
-      { label: '模板状态', value: domain.recordCount ? '运行中' : '预留' },
+      { label: '本月记录', value: `${records.length}`, accent: true },
+      { label: '历史记录', value: `${allRecords.length}` },
       { label: '入库链路', value: domain.recordCount ? '已接入' : '待接入' },
       { label: '展示组件', value: '已就绪' },
     ]
@@ -105,7 +122,7 @@ export function getMetricItems(store, domain) {
       value: formatFactValue(total, primary),
       accent: true,
     },
-    { label: '记录数', value: `${records.length}` },
+    { label: '本月记录', value: `${records.length}` },
     { label: `最高单次`, value: formatFactValue(max, primary) },
     { label: `平均`, value: formatFactValue(avg, primary) },
   ]
@@ -168,7 +185,8 @@ export function getTrendScope(store, domain) {
 export function getDistribution(store, domain) {
   const schema = getDomainSchema(domain.id)
   const display = getDomainDisplay(domain.id)
-  const records = getDomainRecords(store, domain)
+  // 分布按本月切片，与「本月总X」指标口径一致
+  const records = filterCurrentMonth(getDomainRecords(store, domain))
   const primary = getPrimaryFact(schema, display)
   const dim = getPrimaryDimension(schema, display)
 

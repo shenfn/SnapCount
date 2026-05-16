@@ -43,8 +43,9 @@ const SYSTEM_DOMAIN_DEFINITIONS = [
     universalMeta: {
       title: '添加运动',
       editTitle: '编辑运动',
-      primaryLabel: '运动时长（分钟）',
+      primaryLabel: '运动时长',
       primaryKey: 'duration_minutes',
+      primaryUnit: 'duration',
       dimensionLabel: '运动类型',
       dimensionKey: 'sport_type',
       placeholder: '如：跑步、步行、力量训练',
@@ -59,7 +60,7 @@ const SYSTEM_DOMAIN_DEFINITIONS = [
       formFields: [
         { model: 'title', label: '标题（可选）', type: 'text', placeholder: '不填则使用下面的名称', maxlength: 50 },
         { model: 'dimension', label: '运动类型', type: 'text', placeholder: '如：跑步、步行、力量训练', maxlength: 50, required: true },
-        { model: 'primaryValue', label: '运动时长（分钟）', type: 'number', placeholder: '0', min: '0.01', step: '0.01', required: true },
+        { model: 'primaryValue', label: '运动时长', type: 'number', input: 'duration', placeholder: '0', min: '0', step: '1', required: true },
         { model: 'date', label: '日期', type: 'date', required: true },
         { model: 'time', label: '具体时刻（可选）', type: 'time' },
         { model: 'note', label: '备注（可选）', type: 'text', placeholder: '补充说明…', maxlength: 100 },
@@ -82,8 +83,9 @@ const SYSTEM_DOMAIN_DEFINITIONS = [
     universalMeta: {
       title: '添加睡眠',
       editTitle: '编辑睡眠',
-      primaryLabel: '睡眠时长（小时）',
-      primaryKey: 'sleep_hours',
+      primaryLabel: '睡眠时长',
+      primaryKey: 'sleep_minutes',
+      primaryUnit: 'duration',
       dimensionLabel: '质量等级',
       dimensionKey: 'quality_level',
       placeholder: '如：良好、一般、深睡不足',
@@ -99,7 +101,7 @@ const SYSTEM_DOMAIN_DEFINITIONS = [
       formFields: [
         { model: 'title', label: '标题（可选）', type: 'text', placeholder: '不填则使用下面的名称', maxlength: 50 },
         { model: 'dimension', label: '质量等级', type: 'text', placeholder: '如：良好、一般、深睡不足', maxlength: 50, required: true, defaultValue: '良好' },
-        { model: 'primaryValue', label: '睡眠时长（小时）', type: 'number', placeholder: '0', min: '0.01', step: '0.01', required: true },
+        { model: 'primaryValue', label: '睡眠时长', type: 'number', input: 'duration', placeholder: '0', min: '0', step: '1', required: true },
         { model: 'date', label: '日期', type: 'date', required: true },
         { model: 'time', label: '具体时刻（可选）', type: 'time' },
         { model: 'note', label: '备注（可选）', type: 'text', placeholder: '补充说明…', maxlength: 100 },
@@ -122,8 +124,9 @@ const SYSTEM_DOMAIN_DEFINITIONS = [
     universalMeta: {
       title: '添加阅读',
       editTitle: '编辑阅读',
-      primaryLabel: '阅读时长（分钟）',
+      primaryLabel: '阅读时长',
       primaryKey: 'reading_minutes',
+      primaryUnit: 'duration',
       dimensionLabel: '书名',
       dimensionKey: 'book_name',
       placeholder: '如：原则、微信读书',
@@ -138,7 +141,7 @@ const SYSTEM_DOMAIN_DEFINITIONS = [
       formFields: [
         { model: 'title', label: '标题（可选）', type: 'text', placeholder: '不填则使用下面的名称', maxlength: 50 },
         { model: 'dimension', label: '书名', type: 'text', placeholder: '如：原则、微信读书', maxlength: 50, required: true },
-        { model: 'primaryValue', label: '阅读时长（分钟）', type: 'number', placeholder: '0', min: '0.01', step: '0.01', required: true },
+        { model: 'primaryValue', label: '阅读时长', type: 'number', input: 'duration', placeholder: '0', min: '0', step: '1', required: true },
         { model: 'date', label: '日期', type: 'date', required: true },
         { model: 'time', label: '具体时刻（可选）', type: 'time' },
         { model: 'note', label: '备注（可选）', type: 'text', placeholder: '补充说明…', maxlength: 100 },
@@ -280,7 +283,7 @@ const BUILTIN_SCHEMAS = {
   sleep: {
     time_field: 'occurred_at',
     facts: [
-      { key: 'sleep_hours', label: '睡眠时长', type: 'number', unit: '小时' },
+      { key: 'sleep_minutes', label: '睡眠时长', type: 'number', unit: '分钟', input: 'duration' },
       { key: 'quality_score', label: '睡眠评分', type: 'number', unit: '分' },
     ],
     dimensions: [
@@ -315,7 +318,7 @@ const BUILTIN_DISPLAYS = {
   expense: { primary_fact: 'amount', primary_dimension: 'category', title_field: 'merchant_name' },
   income:  { primary_fact: 'amount', primary_dimension: 'category', title_field: 'source_name' },
   sport:   { primary_fact: 'duration_minutes', primary_dimension: 'sport_type', title_field: 'sport_type' },
-  sleep:   { primary_fact: 'sleep_hours', primary_dimension: 'quality_level', title_field: 'quality_level' },
+  sleep:   { primary_fact: 'sleep_minutes', primary_dimension: 'quality_level', title_field: 'quality_level' },
   reading: { primary_fact: 'reading_minutes', primary_dimension: 'book_name', title_field: 'book_name' },
   food:    { primary_fact: 'total_calorie_kcal', primary_dimension: 'meal_type', title_field: 'title' },
 }
