@@ -19,10 +19,10 @@ export function getMetricItems(store, domain) {
   const max = records.reduce((m, item) => Math.max(m, item.amount), 0)
 
   return [
-    { label: '本月总额', value: `¥${total.toFixed(0)}`, accent: true },
+    { label: '本月总额', value: `¥${total.toFixed(2)}`, accent: true },
     { label: '记录数', value: `${records.length}` },
-    { label: '今日支出', value: `¥${today.toFixed(0)}` },
-    { label: '最高单笔', value: `¥${max.toFixed(0)}` },
+    { label: '今日支出', value: `¥${today.toFixed(2)}` },
+    { label: '最高单笔', value: `¥${max.toFixed(2)}` },
   ]
 }
 
@@ -73,7 +73,7 @@ function buildAmountDimension(list, currency = true) {
     name,
     amount,
     pct: Math.round((amount / max) * 100),
-    display: currency ? `¥${Math.round(amount)}` : `${formatPlainNumber(amount)} 条`,
+    display: currency ? `¥${amount.toFixed(2)}` : `${formatPlainNumber(amount)} 条`,
   }))
 }
 
