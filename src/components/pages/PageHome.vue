@@ -97,36 +97,17 @@
       <div class="section-title">本周支出趋势</div>
       <div class="section-action" @click="store.navigateTo('report')">报告 ›</div>
     </div>
-    <div class="home-week-chart-wrap">
-      <div class="home-week-chart-inner">
-        <div class="week-bars platform-week-bars">
-          <div v-for="(v, i) in weekData" :key="i" class="week-col">
-            <div class="platform-week-bar-wrap">
-              <div
-                class="week-bar"
-                :class="{ today: i === todayIdx }"
-                :style="{ height: `${Math.max((v / weekMax) * 100, v > 0 ? 8 : 0)}%` }"
-              ></div>
-            </div>
-            <div class="week-day">{{ weekLabels[i] }}</div>
-          </div>
-        </div>
-      </div>
-      <div class="home-week-stats">
-        <div class="home-week-stat">
-          <div class="home-week-stat-value">¥ {{ weekTotal.toFixed(0) }}</div>
-          <div class="home-week-stat-label">本周累计</div>
-        </div>
-        <div class="home-week-stat">
-          <div class="home-week-stat-value">¥ {{ weekPeak.toFixed(0) }}</div>
-          <div class="home-week-stat-label">最高单日</div>
-        </div>
-        <div class="home-week-stat">
-          <div class="home-week-stat-value">{{ todayWeekShare }}</div>
-          <div class="home-week-stat-label">今日占比</div>
-        </div>
-      </div>
-    </div>
+    <DomainTrendPanel
+      :values="weekData"
+      :labels="weekLabels"
+      :full-labels="weekFullLabels"
+      :today-index="todayIdx"
+      color="#C2410C"
+      currency
+      :show-stats="true"
+      title=""
+      scope="本周"
+    />
 
     <div class="section-header">
       <div class="section-title">已安装数据域</div>
@@ -196,9 +177,10 @@
 import { computed, inject } from 'vue'
 import { computeWeekData } from '../../utils/helpers'
 import MonthPicker from '../MonthPicker.vue'
+import DomainTrendPanel from '../domain/DomainTrendPanel.vue'
 
 const store = inject('store')
-const weekLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const weekLabels = ['一', '二', '三', '四', '五', '六', '日']
 const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 const today = new Date()
@@ -206,14 +188,17 @@ const todayLabel = `${today.getFullYear()}年${today.getMonth() + 1}月${today.g
 const todayDayLabel = `${today.getMonth() + 1}月${today.getDate()}日 ${dayNames[today.getDay()]}`
 const todayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1
 
-const weekData = computed(() => computeWeekData(store.bills.value))
-const weekMax = computed(() => Math.max(...weekData.value, 1))
-const weekTotal = computed(() => weekData.value.reduce((sum, value) => sum + value, 0))
-const weekPeak = computed(() => Math.max(...weekData.value, 0))
-const todayWeekShare = computed(() => {
-  if (!weekTotal.value) return '0%'
-  return `${Math.round(((weekData.value[todayIdx] || 0) / weekTotal.value) * 100)}%`
+const weekFullLabels = computed(() => {
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - (today.getDay() === 0 ? 6 : today.getDay() - 1))
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday)
+    d.setDate(monday.getDate() + i)
+    return `周${weekLabels[i]} ${d.getMonth() + 1}/${d.getDate()}`
+  })
 })
+
+const weekData = computed(() => computeWeekData(store.bills.value))
 
 function sportSummary(s) {
   const parts = []
