@@ -1,6 +1,10 @@
 import { computeWeekData, formatDateTimeLabel, incomeCatMap } from '../utils/helpers'
+import { pickAdapter } from '../adapters/domain'
 
 export function getDomainMetricItems(store, domain) {
+  const adapter = pickAdapter(domain.id)
+  if (adapter) return adapter.getMetricItems(store, domain)
+
   if (domain.id === 'expense') {
     const maxBill = store.doneBills.value.reduce((max, item) => Math.max(max, item.amount), 0)
     return [
@@ -30,11 +34,16 @@ export function getDomainMetricItems(store, domain) {
   ]
 }
 
-export function getDomainTrendScope(domain) {
+export function getDomainTrendScope(domain, store) {
+  const adapter = pickAdapter(domain.id)
+  if (adapter && store) return adapter.getTrendScope(store, domain)
   return domain.recordCount ? '本周' : '模板预览'
 }
 
 export function getDomainTrendItems(store, domain) {
+  const adapter = pickAdapter(domain.id)
+  if (adapter) return adapter.getTrendItems(store, domain)
+
   const labels = ['一', '二', '三', '四', '五', '六', '日']
   let values = [0, 0, 0, 0, 0, 0, 0]
 
@@ -51,6 +60,9 @@ export function getDomainTrendItems(store, domain) {
 }
 
 export function getDomainDimensionItems(store, domain) {
+  const adapter = pickAdapter(domain.id)
+  if (adapter) return adapter.getDimensionItems(store, domain)
+
   if (domain.id === 'expense') {
     return buildDimension(store.doneBills.value.map(item => ({
       name: item.cat && item.cat !== '?' ? item.cat : '其他',
@@ -72,6 +84,9 @@ export function getDomainDimensionItems(store, domain) {
 }
 
 export function getDomainRecentRecords(store, domain) {
+  const adapter = pickAdapter(domain.id)
+  if (adapter) return adapter.getRecentRecords(store, domain)
+
   if (domain.id === 'expense') {
     return store.doneBills.value.slice(0, 8).map(item => ({
       id: item.id,

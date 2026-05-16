@@ -74,6 +74,7 @@ import {
   getDomainTrendItems,
   getDomainTrendScope,
 } from '../../domains/detailAdapters'
+import { getDomainSchema, getDomainDisplay } from '../../domains/registry'
 import DomainHero from '../domain/DomainHero.vue'
 import DomainMetricStrip from '../domain/DomainMetricStrip.vue'
 import DomainTrendPanel from '../domain/DomainTrendPanel.vue'
@@ -103,7 +104,12 @@ const trendLabels = computed(() => trendItemsRaw.value.map(item => item.label))
 const trendIsCurrency = computed(() => ['expense', 'income'].includes(domain.value.id))
 const trendUnit = computed(() => {
   if (trendIsCurrency.value) return ''
-  return '条'
+  // 从协议读单位：display.primary_fact 对应的 facts[].unit
+  const schema = getDomainSchema(domain.value.id)
+  const display = getDomainDisplay(domain.value.id)
+  const primaryKey = display?.primary_fact || schema?.facts?.[0]?.key
+  const fact = schema?.facts?.find(f => f.key === primaryKey)
+  return fact?.unit || '条'
 })
 
 const dimensionItems = computed(() => getDomainDimensionItems(store, domain.value))
