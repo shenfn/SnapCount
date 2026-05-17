@@ -77,15 +77,37 @@
       <div class="insights-ai-box">
         <div class="insights-ai-head">
           <span class="insights-ai-title">AI 解读</span>
-          <span v-if="store.aiInsight.value" class="insights-ai-meta">
-            {{ store.aiInsightCached.value ? '缓存' : '刚生成' }} · {{ formatAiTime(store.aiInsight.value.generated_at) }}
-          </span>
+          <div class="insights-ai-meta-wrap">
+            <span v-if="aiPayload.mode_label" class="insights-ai-mode">{{ aiPayload.mode_label }}</span>
+            <span v-if="store.aiInsight.value" class="insights-ai-meta">
+              {{ store.aiInsightCached.value ? '缓存' : '刚生成' }} · {{ formatAiTime(store.aiInsight.value.generated_at) }}
+            </span>
+          </div>
+        </div>
+
+        <div class="insights-ai-input-card">
+          <textarea
+            v-model="aiQuestion"
+            class="insights-ai-question"
+            rows="3"
+            maxlength="500"
+            placeholder="你可以问：这个月钱够不够花？为什么最近睡眠变差了？饮食和睡眠有没有关系？"
+          ></textarea>
+          <div class="insights-ai-quick-list">
+            <button
+              v-for="q in quickQuestions"
+              :key="q"
+              type="button"
+              class="insights-ai-quick"
+              @click="useQuickQuestion(q)"
+            >{{ q }}</button>
+          </div>
         </div>
 
         <!-- 未生成态 -->
         <div v-if="!store.aiInsight.value && !store.aiInsightLoading.value" class="insights-ai-empty">
           <div class="insights-ai-empty-icon">✨</div>
-          <div class="insights-ai-empty-text">让 AI 通读你的 {{ range }} 天数据，写一段更懂你的解读。</div>
+          <div class="insights-ai-empty-text">输入你真正想问的问题，AI 会先识别分析模式，再通读你的 {{ range }} 天多域数据。</div>
           <button class="insights-ai-cta" @click="onGenerateAi">生成 AI 解读</button>
         </div>
 
@@ -98,22 +120,62 @@
         <!-- 已生成 -->
         <div v-else class="insights-ai-content">
           <div v-if="aiPayload.headline" class="insights-ai-headline">{{ aiPayload.headline }}</div>
+          <div v-if="aiPayload.question" class="insights-ai-question-view">你问：{{ aiPayload.question }}</div>
+          <div v-if="aiPayload.content_md" class="insights-ai-markdown" v-html="aiContentHtml"></div>
+          <template v-else>
+            <div v-if="aiPayload.answer" class="insights-ai-answer">{{ aiPayload.answer }}</div>
 
-          <div v-if="aiPayload.observations?.length" class="insights-ai-section">
-            <div class="insights-ai-section-title">观察</div>
+            <div v-if="aiPayload.observations?.length" class="insights-ai-section">
+              <div class="insights-ai-section-title">观察</div>
+              <ul class="insights-ai-list">
+                <li v-for="(o, i) in aiPayload.observations" :key="'o' + i">{{ o }}</li>
+              </ul>
+            </div>
+
+            <div v-if="aiPayload.patterns?.length" class="insights-ai-section">
+              <div class="insights-ai-section-title">规律</div>
+              <ul class="insights-ai-list">
+                <li v-for="(p, i) in aiPayload.patterns" :key="'p' + i">{{ p }}</li>
+              </ul>
+            </div>
+
+            <div v-if="aiPayload.risks?.length" class="insights-ai-section">
+              <div class="insights-ai-section-title">风险</div>
+              <ul class="insights-ai-list">
+                <li v-for="(r, i) in aiPayload.risks" :key="'r' + i">{{ r }}</li>
+              </ul>
+            </div>
+
+            <div v-if="aiPayload.suggestions?.length" class="insights-ai-section">
+              <div class="insights-ai-section-title">建议</div>
+              <ul class="insights-ai-list">
+                <li v-for="(s, i) in aiPayload.suggestions" :key="'s' + i">{{ s }}</li>
+              </ul>
+            </div>
+
+            <div v-if="aiPayload.action_plan?.length" class="insights-ai-section">
+              <div class="insights-ai-section-title">接下来 7 天</div>
+              <ul class="insights-ai-list">
+                <li v-for="(a, i) in aiPayload.action_plan" :key="'a' + i">{{ a }}</li>
+              </ul>
+            </div>
+
+            <div v-if="aiPayload.uncertainty?.length" class="insights-ai-section">
+              <div class="insights-ai-section-title">还不确定</div>
+              <ul class="insights-ai-list">
+                <li v-for="(u, i) in aiPayload.uncertainty" :key="'u' + i">{{ u }}</li>
+              </ul>
+            </div>
+
+            <div v-if="aiPayload.encouragement" class="insights-ai-encourage">{{ aiPayload.encouragement }}</div>
+          </template>
+
+          <div v-if="aiPayload.followup_questions?.length" class="insights-ai-section">
+            <div class="insights-ai-section-title">可以继续补充</div>
             <ul class="insights-ai-list">
-              <li v-for="(o, i) in aiPayload.observations" :key="'o' + i">{{ o }}</li>
+              <li v-for="(q, i) in aiPayload.followup_questions" :key="'fq' + i">{{ q }}</li>
             </ul>
           </div>
-
-          <div v-if="aiPayload.suggestions?.length" class="insights-ai-section">
-            <div class="insights-ai-section-title">建议</div>
-            <ul class="insights-ai-list">
-              <li v-for="(s, i) in aiPayload.suggestions" :key="'s' + i">{{ s }}</li>
-            </ul>
-          </div>
-
-          <div v-if="aiPayload.encouragement" class="insights-ai-encourage">{{ aiPayload.encouragement }}</div>
 
           <div class="insights-ai-actions">
             <button class="insights-ai-refresh" :disabled="store.aiInsightLoading.value" @click="onGenerateAi(true)">
@@ -212,6 +274,15 @@ const DOMAIN_COLOR = {
   food:     '#fb7185',
 }
 const range = ref(14)
+const aiQuestion = ref('这个月钱够不够花？每天最好控制在多少钱，还能不能存下钱？')
+const quickQuestions = [
+  '这个月钱够不够花？',
+  '每天还能花多少？',
+  '最近哪里花多了？',
+  '为什么最近睡眠变差了？',
+  '饮食和睡眠有什么关系？',
+  '接下来 7 天怎么调整？',
+]
 
 // ───────────────────── 数据加载 ─────────────────────
 const rows = computed(() => store.dailySummary.value || [])
@@ -247,13 +318,78 @@ onBeforeUnmount(() => destroyCharts())
 // AI 操作
 async function onGenerateAi(force = false) {
   try {
-    await store.generateAiInsight({ days: range.value, force })
+    await store.generateAiInsight({ days: range.value, force, question: aiQuestion.value })
   } catch (e) {
     // store 已写入 error，前端兜底
   }
 }
 
 const aiPayload = computed(() => store.aiInsight.value?.payload_jsonb || {})
+const aiContentHtml = computed(() => renderAiMarkdown(aiPayload.value.content_md || ''))
+
+function useQuickQuestion(q) {
+  aiQuestion.value = q
+  store.aiInsight.value = null
+  store.aiInsightCached.value = false
+}
+
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function inlineMarkdown(text) {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+}
+
+function renderAiMarkdown(md) {
+  const lines = String(md || '').split(/\r?\n/)
+  const html = []
+  let inList = false
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) {
+      if (inList) {
+        html.push('</ul>')
+        inList = false
+      }
+      continue
+    }
+    if (line.startsWith('### ')) {
+      if (inList) {
+        html.push('</ul>')
+        inList = false
+      }
+      html.push(`<h4>${inlineMarkdown(line.slice(4))}</h4>`)
+    } else if (line.startsWith('## ')) {
+      if (inList) {
+        html.push('</ul>')
+        inList = false
+      }
+      html.push(`<h3>${inlineMarkdown(line.slice(3))}</h3>`)
+    } else if (/^[-*]\s+/.test(line)) {
+      if (!inList) {
+        html.push('<ul>')
+        inList = true
+      }
+      html.push(`<li>${inlineMarkdown(line.replace(/^[-*]\s+/, ''))}</li>`)
+    } else {
+      if (inList) {
+        html.push('</ul>')
+        inList = false
+      }
+      html.push(`<p>${inlineMarkdown(line)}</p>`)
+    }
+  }
+  if (inList) html.push('</ul>')
+  return html.join('')
+}
 
 function formatAiTime(iso) {
   if (!iso) return ''
@@ -887,10 +1023,63 @@ function chartOptions(scaleOverrides = {}, pluginOverrides = {}) {
   color: var(--text);
   letter-spacing: 0.3px;
 }
+.insights-ai-meta-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.insights-ai-mode {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(124, 92, 252, 0.1);
+  color: #6d4df4;
+  font-size: 10.5px;
+  font-weight: 700;
+}
 .insights-ai-meta {
   font-size: 10.5px;
   color: var(--text3);
   letter-spacing: 0.3px;
+}
+.insights-ai-input-card {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(124, 92, 252, 0.12);
+  border-radius: 14px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+.insights-ai-question {
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: vertical;
+  min-height: 66px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+  font-family: inherit;
+}
+.insights-ai-question::placeholder {
+  color: var(--text3);
+}
+.insights-ai-quick-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.insights-ai-quick {
+  border: 1px solid rgba(124, 92, 252, 0.2);
+  background: rgba(124, 92, 252, 0.06);
+  color: #6d4df4;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 11.5px;
+  line-height: 1.2;
+  cursor: pointer;
 }
 
 .insights-ai-empty {
@@ -962,6 +1151,54 @@ function chartOptions(scaleOverrides = {}, pluginOverrides = {}) {
   line-height: 1.5;
   letter-spacing: 0.2px;
   padding: 6px 0 4px;
+}
+.insights-ai-question-view {
+  font-size: 12px;
+  color: var(--text3);
+  line-height: 1.5;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.025);
+  border-radius: 10px;
+}
+.insights-ai-answer {
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.75;
+  white-space: pre-line;
+}
+.insights-ai-markdown {
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.75;
+}
+.insights-ai-markdown :deep(h3),
+.insights-ai-markdown :deep(h4) {
+  margin: 12px 0 6px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.insights-ai-markdown :deep(p) {
+  margin: 8px 0;
+}
+.insights-ai-markdown :deep(ul) {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.insights-ai-markdown :deep(li) {
+  margin: 5px 0;
+}
+.insights-ai-markdown :deep(strong) {
+  color: #5b45d9;
+  font-weight: 800;
+}
+.insights-ai-markdown :deep(code) {
+  padding: 1px 4px;
+  border-radius: 5px;
+  background: rgba(124, 92, 252, 0.08);
+  color: #5b45d9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
 }
 .insights-ai-section-title {
   font-size: 10.5px;

@@ -353,7 +353,7 @@ export function useStore() {
   const aiInsightError = ref('')
   const aiInsightCached = ref(false)
 
-  async function generateAiInsight({ days = 14, force = false } = {}) {
+  async function generateAiInsight({ days = 14, force = false, question = '' } = {}) {
     aiInsightLoading.value = true
     aiInsightError.value = ''
     try {
@@ -368,7 +368,7 @@ export function useStore() {
           'Authorization': `Bearer ${token}`,
           'apikey': SUPABASE_ANON_KEY,
         },
-        body: JSON.stringify({ days, force }),
+        body: JSON.stringify({ days, force, question }),
       })
       const json = await resp.json()
       if (!resp.ok) throw new Error(json?.error || `AI 服务返回 ${resp.status}`)
