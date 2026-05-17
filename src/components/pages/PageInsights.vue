@@ -187,7 +187,7 @@
 </template>
 
 <script setup>
-import { computed, inject, onMounted, onBeforeUnmount, nextTick, ref, watch } from 'vue'
+import { computed, inject, onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
 import { Chart, registerables } from 'chart.js'
 import { formatDuration } from '../../utils/format'
 import { getMaturity, getMaturityHint, getRenderTier } from '../../utils/maturity'
@@ -217,7 +217,12 @@ const range = ref(14)
 const rows = computed(() => store.dailySummary.value || [])
 
 async function reload(force = false) {
+  // 关键：loading 期间整块 ChartPanel 会被 v-if 卸载，旧 canvas 销毁但 chart 实例还在跑
+  // animation，会抛 clipArea(null)。所以先 destroy。
+  destroyCharts()
   await store.loadDailySummary({ days: range.value, force })
+  // 双 nextTick：第一次让 v-else 模板渲染（ChartPanel 出现），第二次让 ChartPanel 内 v-else 渲染（canvas 出现）
+  await nextTick()
   await nextTick()
   rebuildCharts()
 }
@@ -259,11 +264,6 @@ function formatAiTime(iso) {
   if (diff < 86400_000) return Math.floor(diff / 3600_000) + ' 小时前'
   return new Date(iso).toISOString().slice(5, 10)
 }
-
-// 当外部刷新 dailySummary（比如 confirm 后）也重绘
-watch(() => store.dailySummary.value, () => {
-  nextTick(rebuildCharts)
-})
 
 // ───────────────────── 衍生数据 ─────────────────────
 function num(x) { return Number(x) || 0 }
@@ -561,7 +561,10 @@ function rebuildCharts() {
         y: { stacked: true, ticks: { callback: v => '¥' + Math.abs(v) } },
         x: { stacked: true },
       }, {
-        tooltip: { callbacks: { label: ctx => (ctx.raw < 0 ? '支出 ¥' + Math.abs(ctx.raw).toFixed(0) : '收入 ¥' + ctx.raw.toFixed(0)) } },
+        tooltip: { callbacks: { label: ctx => {
+          if (ctx.raw == null) return ''
+          return ctx.raw < 0 ? '支出 ¥' + Math.abs(ctx.raw).toFixed(0) : '收入 ¥' + ctx.raw.toFixed(0)
+        } } },
       }),
     })
   }
