@@ -135,6 +135,7 @@ export function buildUniversalRecordTitle(domainKey, payload, record) {
     const dishes = Array.isArray(payload.dishes) ? payload.dishes : []
     return payload.title || dishes[0]?.name || getSystemDomainLabel('food')
   }
+  if (domainKey === 'wallet') return payload.account_name || payload.title || getSystemDomainLabel('wallet')
   return record.domainName || '通用记录'
 }
 

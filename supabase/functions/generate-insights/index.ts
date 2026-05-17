@@ -97,6 +97,24 @@ function buildDailyRows(rows: any[]) {
 }
 
 function buildDetailRows(transactions: any[], incomes: any[], records: any[]) {
+  const walletRecords = records
+    .filter(r => r.domain_key === "wallet")
+    .map(r => {
+      const payload = r.payload_jsonb || {};
+      return {
+        date: r.occurred_at ? String(r.occurred_at).slice(0, 10) : null,
+        title: r.title,
+        summary: r.summary,
+        recordKind: payload.record_kind,
+        accountName: payload.account_name,
+        accountType: payload.account_type,
+        amount: Number(payload.amount) || 0,
+        dueDate: payload.due_date,
+        billDay: payload.bill_day,
+        minimumPayment: payload.minimum_payment,
+        status: payload.status,
+      };
+    });
   return {
     expenses: transactions.map(r => ({
       date: r.transaction_date,
@@ -122,6 +140,7 @@ function buildDetailRows(transactions: any[], incomes: any[], records: any[]) {
       summary: r.summary,
       payload: compactPayload(r.payload_jsonb),
     })),
+    walletRecords,
   };
 }
 
@@ -187,6 +206,39 @@ function includesAny(text: string, words: string[]) {
   return words.some(w => text.includes(w));
 }
 
+function nextDueDateFromBillDay(dayOfMonth: number, base = getShanghaiDateParts()) {
+  return nextMonthlyDate(dayOfMonth, base);
+}
+
+function summarizeWallet(details: any, today = getShanghaiDateParts(), nextPayday?: string) {
+  const latestByAccount = new Map<string, any>();
+  for (const row of details.walletRecords || []) {
+    const key = `${row.recordKind || ""}:${row.accountName || ""}:${row.accountType || ""}`;
+    const prev = latestByAccount.get(key);
+    if (!prev || String(row.date || "") >= String(prev.date || "")) latestByAccount.set(key, row);
+  }
+  const snapshots = Array.from(latestByAccount.values());
+  const cashAccounts = snapshots.filter((r: any) => r.recordKind === "cash_snapshot" && Number(r.amount) > 0);
+  const liabilities = snapshots.filter((r: any) => r.recordKind === "liability_snapshot" && Number(r.amount) > 0 && r.status !== "paid");
+  const liabilitiesWithDue = liabilities.map((r: any) => {
+    const dueDate = r.dueDate || (r.billDay ? nextDueDateFromBillDay(Number(r.billDay), today) : null);
+    return { ...r, computedDueDate: dueDate };
+  });
+  const shortTermLiabilities = nextPayday
+    ? liabilitiesWithDue.filter((r: any) => !r.computedDueDate || r.computedDueDate <= nextPayday)
+    : liabilitiesWithDue;
+  const availableCash = cashAccounts.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
+  const shortTermLiabilityTotal = shortTermLiabilities.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
+  return {
+    available_cash_total: Math.round(availableCash),
+    short_term_liability_total: Math.round(shortTermLiabilityTotal),
+    cash_accounts: cashAccounts,
+    liabilities: liabilitiesWithDue,
+    short_term_liabilities: shortTermLiabilities,
+    has_wallet_snapshot: snapshots.length > 0,
+  };
+}
+
 function buildFinanceProjection(stats: any, details: any, question: string) {
   const today = getShanghaiDateParts();
   const paydayDay = extractMonthlyDay(question, ["发工资", "工资", "薪"], 15);
@@ -203,8 +255,12 @@ function buildFinanceProjection(stats: any, details: any, question: string) {
   const dayBase = Math.max(1, stats.expenseDays);
   const dailyExpenseAvg = stats.expenseTotal / dayBase;
   const dailyExpenseWithoutRentAvg = expenseWithoutRent / dayBase;
-  const proxyCash = explicitCurrentCash ?? recordedNet;
+  const wallet = summarizeWallet(details, today, nextPayday);
+  const walletCash = wallet.has_wallet_snapshot ? wallet.available_cash_total : null;
+  const proxyCash = explicitCurrentCash ?? walletCash ?? recordedNet;
+  const cashAfterShortTermLiabilities = proxyCash - wallet.short_term_liability_total;
   const safeDailyBudgetByRecordedNet = daysUntilNextPayday > 0 ? proxyCash / daysUntilNextPayday : proxyCash;
+  const safeDailyBudgetAfterLiabilities = daysUntilNextPayday > 0 ? cashAfterShortTermLiabilities / daysUntilNextPayday : cashAfterShortTermLiabilities;
   const projectedDailyNeed = dailyExpenseWithoutRentAvg * daysUntilNextPayday;
   return {
     today: today.iso,
@@ -214,7 +270,9 @@ function buildFinanceProjection(stats: any, details: any, question: string) {
     days_until_next_payday: daysUntilNextPayday,
     daily_wage_from_user: dailyWage,
     explicit_current_cash: explicitCurrentCash,
-    current_cash_known: explicitCurrentCash != null,
+    wallet,
+    current_cash_known: explicitCurrentCash != null || walletCash != null,
+    current_cash_source: explicitCurrentCash != null ? "user_question" : walletCash != null ? "wallet_snapshot" : "recorded_net_proxy",
     recorded_net_balance_proxy: Math.round(recordedNet),
     recorded_income_total: Math.round(stats.incomeTotal),
     recorded_expense_total: Math.round(stats.expenseTotal),
@@ -224,8 +282,9 @@ function buildFinanceProjection(stats: any, details: any, question: string) {
     daily_expense_avg: Math.round(dailyExpenseAvg),
     daily_expense_without_rent_avg: Math.round(dailyExpenseWithoutRentAvg),
     safe_daily_budget_by_available_proxy: Math.round(safeDailyBudgetByRecordedNet),
+    safe_daily_budget_after_short_term_liabilities: Math.round(safeDailyBudgetAfterLiabilities),
     projected_daily_need_until_payday: Math.round(projectedDailyNeed),
-    projected_gap_by_proxy: Math.round(proxyCash - projectedDailyNeed),
+    projected_gap_by_proxy: Math.round(cashAfterShortTermLiabilities - projectedDailyNeed),
   };
 }
 
@@ -278,7 +337,7 @@ function buildExpertPrompt(days: number, maturity: { key: string; label: string;
   }[maturity.key];
 
   const modeGuides: Record<string, string> = {
-    finance_cashflow: "你现在是个人现金流顾问。重点回答钱够不够花、每天安全可花金额、能否撑到下次工资日、是否还能存钱。你必须像做现金流推演一样思考，但表达可以自然，不要机械填表。",
+    finance_cashflow: "你现在是个人现金流顾问。重点回答钱够不够花、每天安全可花金额、能否撑到下次工资日、是否还能存钱。你必须优先使用钱包快照中的可用现金和短期待还款；如果没有钱包快照，再说明只能用记录期净额近似。表达可以自然，不要机械填表。",
     finance_spending_pattern: "你现在是消费规律分析师。重点找出高频分类、异常日期、周期性支出候选、可能的人际/家庭支出，不要只报总额。",
     sleep_quality: "你现在是睡眠与生活节奏分析师。重点分析睡眠时长/评分变化，并谨慎观察运动、饮食、财务压力信号的同日或相邻日关联，不做医学诊断。",
     diet_pattern: "你现在是饮食行为分析师。饮食不能唯热量论，要区分基础正餐、健康补给、放纵零食、功能饮品、情绪性饮食。坚果、鸡蛋、牛油果、鱼类等天然高营养密度食物，不能仅因热量高就负面评价。",
@@ -312,6 +371,7 @@ ${JSON.stringify(route, null, 0)}
 8. 财务推算必须写明口径，例如是否已看到工资、房租、固定支出记录
 9. 不要为了迎合固定栏目而拆碎表达，正文可以自由组织，但必须先给结论
 10. 财务现金流问题不能把"日薪"直接等同于"每天可花金额"，除非用户明确说明接下来每天都有收入
+11. 如果财务现金流辅助数据里有 wallet.available_cash_total，优先把它作为当前可用现金；如果有 short_term_liability_total，必须从可用现金中扣除后再算安全日预算
 
 【本期数据】
 - 范围：最近 ${days} 天
@@ -346,7 +406,7 @@ ${JSON.stringify(financeProjection, null, 0)}
 注意：
 - content_md 可以使用 Markdown 标题、列表和加粗，但不要超过 900 字
 - 如果是 finance_cashflow，content_md 必须包含：结论、推算口径、每日安全预算、关键不确定项
-- 如果无法知道当前真实余额，必须说明"记录期净额只能近似代表可用钱，不能等同于真实余额"
+- 如果有钱包快照，要说明使用了钱包快照；如果没有钱包快照，必须说明"记录期净额只能近似代表可用钱，不能等同于真实余额"
 - 全文中文`;
 }
 

@@ -66,6 +66,7 @@
       <div class="fab-item" @click="store.openUniversalModal('sport'); fabOpen = false">🏃 添加运动</div>
       <div class="fab-item" @click="store.openUniversalModal('sleep'); fabOpen = false">🌙 添加睡眠</div>
       <div class="fab-item" @click="store.openUniversalModal('reading'); fabOpen = false">📚 添加阅读</div>
+      <div class="fab-item" @click="store.openUniversalModal('wallet'); fabOpen = false">👛 添加钱包</div>
     </div>
     <button class="fab" @click="fabOpen = !fabOpen">+</button>
 

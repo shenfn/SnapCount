@@ -86,7 +86,7 @@
       </div>
 
       <div class="section-header">
-        <div class="section-title">分类排行</div>
+        <div class="section-title">{{ activeDomain === 'wallet' ? '账户与待还' : '分类排行' }}</div>
       </div>
       <div class="report-category-list report-category-list-v2">
         <div v-if="!activeData.categories.length" class="empty-state">
@@ -394,11 +394,26 @@ const placeholderData = computed(() => ({
       { label: '准确度提示', value: '±20-40%' },
     ],
   },
+  wallet: {
+    summary: {
+      label: '钱包与待还概览',
+      value: '0 条',
+      change: '记录当前可用现金和花呗/白条/月付等待还款',
+      gradient: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+      barColor: 'linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%)',
+    },
+    stats: [
+      { label: '快照记录', value: '0' },
+      { label: '可用现金', value: '--' },
+      { label: '短期待还', value: '--' },
+      { label: '联动状态', value: 'AI 现金流' },
+    ],
+  },
 }))
 
 const activeData = computed(() => {
   if (activeDomain.value === 'income') return incomeData.value
-  if (['sport', 'sleep', 'reading', 'food'].includes(activeDomain.value)) return universalData(activeDomain.value)
+  if (['sport', 'sleep', 'reading', 'food', 'wallet'].includes(activeDomain.value)) return universalData(activeDomain.value)
   return expenseData.value
 })
 

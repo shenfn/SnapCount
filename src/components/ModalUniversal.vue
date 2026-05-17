@@ -65,7 +65,7 @@
             :maxlength="field.maxlength || null"
             :min="field.min || null"
             :step="field.step || null"
-            :max="field.type === 'date' ? today : null"
+            :max="field.type === 'date' && !field.allowFuture ? today : null"
           >
         </div>
       </div>

@@ -1139,7 +1139,8 @@ export function useStore() {
   }
 
   function snapshotUniversalModal() {
-    return {
+    const meta = getUniversalDomainMeta(universalModal.domainKey)
+    const base = {
       mode: universalModal.mode,
       id: universalModal.id,
       domainKey: universalModal.domainKey,
@@ -1151,6 +1152,10 @@ export function useStore() {
       time: universalModal.time,
       imagePath: universalModal.imagePath,
     }
+    for (const field of meta.formFields || []) {
+      base[field.model] = universalModal[field.model]
+    }
+    return base
   }
 
   function setUniversalModalInitial() {

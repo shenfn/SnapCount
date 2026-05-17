@@ -187,6 +187,51 @@ const SYSTEM_DOMAIN_DEFINITIONS = [
       ],
     },
   },
+  {
+    id: 'wallet',
+    name: '钱包与待还',
+    shortName: '钱包',
+    icon: '👛',
+    tone: 'wallet',
+    color: '#7C3AED',
+    description: '记录当前账户余额、花呗/白条/月付等待还款快照，用于现金流判断。',
+    kind: 'system',
+    storage: {
+      recordKind: 'universal',
+      sourceTable: 'data_records',
+    },
+    universalMeta: {
+      title: '添加钱包快照',
+      editTitle: '编辑钱包快照',
+      primaryLabel: '金额',
+      primaryKey: 'amount',
+      primaryUnit: 'currency',
+      dimensionLabel: '账户/平台',
+      dimensionKey: 'account_name',
+      placeholder: '如：微信余额、招商银行卡、花呗、京东白条',
+      defaultTitle: '钱包快照',
+      defaultDimension: '微信余额',
+      reportMeta: {
+        icon: '钱',
+        primaryLabel: '金额',
+        totalLabel: '钱包快照',
+        unit: '元',
+        dimensionLabel: '账户/平台',
+      },
+      formFields: [
+        { model: 'title', label: '标题（可选）', type: 'text', placeholder: '不填则使用账户/平台名', maxlength: 50 },
+        { model: 'recordKind', label: '记录类型', type: 'text', placeholder: 'cash_snapshot 或 liability_snapshot', maxlength: 40, required: true, defaultValue: 'cash_snapshot' },
+        { model: 'dimension', label: '账户/平台', type: 'text', placeholder: '如：微信余额、花呗、京东白条、抖音月付', maxlength: 50, required: true, defaultValue: '微信余额' },
+        { model: 'accountType', label: '账户类型', type: 'text', placeholder: 'cash / bank_card / wechat / alipay / huabei / jd_baitiao / douyin_monthly / credit_card / other', maxlength: 40, required: true, defaultValue: 'wechat' },
+        { model: 'primaryValue', label: '金额（元）', type: 'number', placeholder: '0.00', min: '0.01', step: '0.01', required: true },
+        { model: 'dueDate', label: '还款日（待还款可选）', type: 'date', allowFuture: true },
+        { model: 'billDay', label: '每月还款日（可选）', type: 'number', placeholder: '如：10', min: '1', max: '31', step: '1' },
+        { model: 'date', label: '快照日期', type: 'date', required: true },
+        { model: 'time', label: '具体时刻（可选）', type: 'time' },
+        { model: 'note', label: '备注（可选）', type: 'text', placeholder: '补充账单周期、最低还款等…', maxlength: 120 },
+      ],
+    },
+  },
 ]
 
 const DOMAIN_DEFINITION_MAP = Object.fromEntries(
@@ -244,6 +289,7 @@ const VISUAL_REGISTRY = {
   sleep:   { color: '#4338CA', icon: '🌙', tone: 'sleep',   shortName: '睡眠', name: '睡眠记录', description: '后续承接睡眠追踪截图和睡眠日志。' },
   reading: { color: '#0369A1', icon: '📚', tone: 'reading', shortName: '阅读', name: '阅读记录', description: '后续承接阅读时长、页数和书籍进度记录。' },
   food:    { color: '#EA580C', icon: '🍱', tone: 'food',    shortName: '饮食', name: '饮食记录', description: '拍照估算餐盘热量与三大营养素（数值为 AI 估算）。' },
+  wallet:  { color: '#7C3AED', icon: '👛', tone: 'wallet',  shortName: '钱包', name: '钱包与待还', description: '记录当前账户余额、花呗/白条/月付等待还款快照。' },
 }
 
 // 内置兜底 schema：DB 不可达时使用，确保应用永不白屏
@@ -312,6 +358,20 @@ const BUILTIN_SCHEMAS = {
       { key: 'source_app', label: '来源' },
     ],
   },
+  wallet: {
+    time_field: 'occurred_at',
+    facts: [
+      { key: 'amount', label: '金额', type: 'number', unit: '元', priority: 1 },
+      { key: 'minimum_payment', label: '最低还款', type: 'number', unit: '元', optional: true },
+    ],
+    dimensions: [
+      { key: 'record_kind', label: '记录类型', priority: 1 },
+      { key: 'account_name', label: '账户/平台', priority: 2 },
+      { key: 'account_type', label: '账户类型', priority: 3 },
+      { key: 'due_date', label: '还款日', priority: 4, optional: true },
+      { key: 'bill_day', label: '每月还款日', priority: 5, optional: true },
+    ],
+  },
 }
 
 const BUILTIN_DISPLAYS = {
@@ -321,6 +381,7 @@ const BUILTIN_DISPLAYS = {
   sleep:   { primary_fact: 'sleep_minutes', primary_dimension: 'quality_level', title_field: 'quality_level' },
   reading: { primary_fact: 'reading_minutes', primary_dimension: 'book_name', title_field: 'book_name' },
   food:    { primary_fact: 'total_calorie_kcal', primary_dimension: 'meal_type', title_field: 'title' },
+  wallet:  { primary_fact: 'amount', primary_dimension: 'account_name', title_field: 'account_name' },
 }
 
 // 运行时态：DB hydrate 后存放到这里

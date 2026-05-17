@@ -99,6 +99,13 @@ export function buildUniversalRecordDraft(modal, meta) {
     source_app: 'manual',
   }
 
+  for (const field of meta.formFields || []) {
+    if (['title', 'primaryValue', 'dimension', 'note', 'date', 'time'].includes(field.model)) continue
+    const raw = modal[field.model]
+    const value = normalizeExtraFieldValue(raw, field)
+    if (value !== undefined) payload[toPayloadKey(field.model)] = value
+  }
+
   return {
     title,
     occurredAt,
@@ -114,5 +121,19 @@ function getInitialFieldValue(field, record, payload, meta) {
   if (field.model === 'note') return record.summary || payload.note || ''
   if (field.model === 'date') return (record.occurredAt || record.createdAt || new Date().toISOString()).slice(0, 10)
   if (field.model === 'time') return (record.occurredAt || '').slice(11, 16) || ''
-  return field.defaultValue ?? ''
+  const payloadValue = payload[toPayloadKey(field.model)]
+  return payloadValue ?? field.defaultValue ?? ''
+}
+
+function toPayloadKey(model) {
+  return String(model || '').replace(/[A-Z]/g, m => '_' + m.toLowerCase())
+}
+
+function normalizeExtraFieldValue(raw, field) {
+  if (raw == null || raw === '') return field.defaultValue ?? undefined
+  if (field.type === 'number') {
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : undefined
+  }
+  return String(raw).trim()
 }

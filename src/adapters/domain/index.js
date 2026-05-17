@@ -8,14 +8,16 @@
 import universalAdapter from './universalAdapter'
 import expenseAdapter from './expenseAdapter'
 import incomeAdapter from './incomeAdapter'
+import walletAdapter from './walletAdapter'
 
 /** 当前已切到新 adapter 的域（六个域全部接入） */
-export const USE_NEW_ADAPTER_DOMAINS = ['sport', 'sleep', 'reading', 'food', 'expense', 'income']
+export const USE_NEW_ADAPTER_DOMAINS = ['sport', 'sleep', 'reading', 'food', 'wallet', 'expense', 'income']
 
 /** 特化 adapter 映射；未在此表的域使用 universalAdapter */
 const SPECIALIZED_ADAPTERS = {
   expense: expenseAdapter,
   income: incomeAdapter,
+  wallet: walletAdapter,
 }
 
 /**

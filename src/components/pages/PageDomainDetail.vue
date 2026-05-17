@@ -18,6 +18,14 @@
       kicker="DOMAIN WORKSPACE"
     />
 
+    <button
+      v-if="domain.id === 'wallet'"
+      class="domain-wallet-add"
+      @click="store.openUniversalModal('wallet')"
+    >
+      👛 添加钱包快照
+    </button>
+
     <DomainMetricStrip
       :metrics="metricsAccented"
       :color="domain.color"
@@ -103,7 +111,7 @@ const trendScope = computed(() => getDomainTrendScope(domain.value, store))
 const trendItemsRaw = computed(() => getDomainTrendItems(store, domain.value))
 const trendValues = computed(() => trendItemsRaw.value.map(item => item.value || 0))
 const trendLabels = computed(() => trendItemsRaw.value.map(item => item.label))
-const trendIsCurrency = computed(() => ['expense', 'income'].includes(domain.value.id))
+const trendIsCurrency = computed(() => ['expense', 'income', 'wallet'].includes(domain.value.id))
 const primaryFact = computed(() => {
   const schema = getDomainSchema(domain.value.id)
   const display = getDomainDisplay(domain.value.id)
@@ -127,3 +135,18 @@ function openRecord(item) {
   if (item.kind === 'universal') store.openRecordDetail('universal', item.raw)
 }
 </script>
+
+<style scoped>
+.domain-wallet-add {
+  width: calc(100% - 32px);
+  margin: 0 16px 14px;
+  border: none;
+  border-radius: 14px;
+  padding: 13px 16px;
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 12px 24px rgba(124, 58, 237, 0.22);
+}
+</style>
