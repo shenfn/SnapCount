@@ -1,4 +1,4 @@
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, nextTick } from 'vue'
 import { sb, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase'
 import {
   getSystemDomainDefinitions,
@@ -8,6 +8,8 @@ import {
   getDomainRegistryStatus,
 } from '../domains/registry'
 import { buildHomeTimeline, buildTodaySummary, buildUniversalRecordTitle as buildUniversalRecordTitleFromAdapter } from '../domains/storeAdapters'
+import { buildDailyCards, buildDayRecords } from '../domains/dayAdapters'
+import { buildFinanceOverview } from '../domains/financeOverviewAdapter'
 import {
   buildUniversalRecordDraft,
   hydrateUniversalModalFromRecord,
@@ -40,6 +42,7 @@ export function useStore() {
   const currentMonth = ref(new Date().getMonth() + 1)
   const currentPage = ref('home')
   const pageHistory = ref([])
+  const pageScrollPositions = reactive({})
   const currentUserId = ref(null)
   const currentUserEmail = ref('')
   const isLoggedIn = ref(false)
@@ -68,6 +71,9 @@ export function useStore() {
   const imgOverlay = reactive({ open: false, src: '' })
   const detailRecord = ref(null)
   const activeDomainId = ref(null)
+  const activeDateKey = ref('')
+  const activeDayKind = ref('all')
+  const dailyCardVisibleCount = ref(8)
 
   const pendingModal = reactive({
     open: false,
@@ -215,6 +221,42 @@ export function useStore() {
       incomeRecords: incomeRecords.value,
       dataRecords: dataRecords.value,
       domains: domains.value,
+    })
+  })
+
+  const dailyCards = computed(() => {
+    return buildDailyCards({
+      bills: bills.value,
+      incomeRecords: incomeRecords.value,
+      dataRecords: dataRecords.value,
+      stagingRecords: stagingRecords.value,
+      year: currentYear.value,
+      month: currentMonth.value,
+    })
+  })
+
+  const visibleDailyCards = computed(() => dailyCards.value.slice(0, dailyCardVisibleCount.value))
+
+  const activeDayRecords = computed(() => {
+    if (!activeDateKey.value) return []
+    const records = buildDayRecords({
+      dateKey: activeDateKey.value,
+      bills: bills.value,
+      incomeRecords: incomeRecords.value,
+      dataRecords: dataRecords.value,
+      stagingRecords: stagingRecords.value,
+      domains: domains.value,
+    })
+    if (activeDayKind.value === 'all') return records
+    return records.filter(item => item.kind === activeDayKind.value || item.domainKey === activeDayKind.value)
+  })
+
+  const financeOverview = computed(() => {
+    return buildFinanceOverview({
+      bills: bills.value,
+      incomeRecords: incomeRecords.value,
+      dataRecords: dataRecords.value,
+      todayKey: getLocalDateKey(),
     })
   })
 
@@ -660,6 +702,9 @@ export function useStore() {
     if (new Date(y, m - 1, 1) > new Date(now.getFullYear(), now.getMonth(), 1)) return
     currentYear.value = y
     currentMonth.value = m
+    dailyCardVisibleCount.value = 8
+    activeDateKey.value = ''
+    activeDayKind.value = 'all'
     await loadData()
   }
 
@@ -1576,6 +1621,16 @@ export function useStore() {
     navigateTo('domain-detail')
   }
 
+  function openDayDetail(dateKey, kind = 'all') {
+    activeDateKey.value = dateKey
+    activeDayKind.value = kind
+    navigateTo('day-detail')
+  }
+
+  function showMoreDailyCards() {
+    dailyCardVisibleCount.value = Math.min(dailyCardVisibleCount.value + 8, dailyCards.value.length)
+  }
+
   async function openRecordDetail(kind, record) {
     if (!record) return
     let imageUrl = null
@@ -1600,6 +1655,7 @@ export function useStore() {
 
   function navigateTo(page) {
     if (currentPage.value === page) return
+    saveCurrentPageScroll()
     const mainPages = ['home', 'pending', 'domains', 'report', 'settings']
     if (mainPages.includes(page)) {
       pageHistory.value = []
@@ -1607,11 +1663,29 @@ export function useStore() {
       pageHistory.value.push(currentPage.value)
     }
     currentPage.value = page
+    restorePageScroll(page)
   }
 
   function goBack() {
+    saveCurrentPageScroll()
     const prev = pageHistory.value.pop()
     currentPage.value = prev || 'home'
+    restorePageScroll(currentPage.value)
+  }
+
+  function saveCurrentPageScroll() {
+    if (typeof window === 'undefined') return
+    pageScrollPositions[currentPage.value] = window.scrollY || 0
+  }
+
+  function restorePageScroll(page) {
+    if (typeof window === 'undefined') return
+    const y = pageScrollPositions[page] || 0
+    nextTick(() => {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: y, left: 0, behavior: 'auto' })
+      })
+    })
   }
 
   async function refreshDetailRecord() {
@@ -1721,12 +1795,14 @@ export function useStore() {
 
   return {
     currentYear, currentMonth, currentPage, monthLabel,
-    pageHistory, currentUserId, currentUserEmail, isLoggedIn,
+    pageHistory, pageScrollPositions, currentUserId, currentUserEmail, isLoggedIn,
     loading, loadError,
     bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords,
     doneBills, pendingBills, filteredBills,
     recentEntries,
     domains, pendingSummary, todaySummary, homeTimeline, timelineGroups, visibleTimelineGroups,
+    dailyCards, visibleDailyCards, activeDateKey, activeDayKind, activeDayRecords, dailyCardVisibleCount,
+    financeOverview,
     totalExpense, totalIncome, netBalance,
     todayExpense, currentMonthDayKey,
     platformChartData, payChartData,
@@ -1757,7 +1833,7 @@ export function useStore() {
     openImgFull, closeImgFull,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
     discardStagingRecord, retryStagingRecord, archiveStagingRecord,
-    openDomainPage, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
+    openDomainPage, openDayDetail, showMoreDailyCards, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
     navigateTo, goBack,
     settingsState, toggleSetting,
     refreshIfStale,
