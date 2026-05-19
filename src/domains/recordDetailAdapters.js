@@ -10,7 +10,7 @@ export function getRecordDetailFields(store, detailRecord) {
       { label: '收入类型', value: incomeCatMap[raw.cat]?.label || '其他' },
       { label: '来源名称', value: raw.source || '未填写' },
       { label: '到账日期', value: fmtAbsoluteDate(raw.dateRaw) || raw.date || '--' },
-      { label: '备注', value: raw.note || '无' },
+      { label: '备注', value: raw.note || '无', multiline: true },
     ]
   }
 
@@ -26,8 +26,8 @@ export function getRecordDetailFields(store, detailRecord) {
         { label: '菜品数', value: `${Array.isArray(payload.dishes) ? payload.dishes.length : 0} 道` },
         { label: '记录日期', value: fmtAbsoluteDate(raw.occurredAt) || '--' },
         { label: '来源类型', value: raw.source === 'staging' ? '中转站归档' : '拍照识别' },
-        { label: '估算依据', value: payload.confidence_note || '无' },
-        { label: '备注', value: payload.note || raw.summary || '无' },
+        { label: '估算依据', value: payload.confidence_note || '无', multiline: true },
+        { label: '备注', value: payload.note || raw.summary || '无', multiline: true },
       ]
     }
 
@@ -38,7 +38,7 @@ export function getRecordDetailFields(store, detailRecord) {
       { label: '发生日期', value: fmtAbsoluteDate(raw.occurredAt) || '--' },
       { label: '模板版本', value: raw.domainVersion || '1.0' },
       { label: '来源类型', value: raw.source === 'staging' ? '中转站归档' : '手动录入' },
-      { label: '备注', value: payload.note || raw.summary || '无' },
+      { label: '备注', value: payload.note || raw.summary || '无', multiline: true },
     ]
   }
 
@@ -49,7 +49,7 @@ export function getRecordDetailFields(store, detailRecord) {
     { label: '消费分类', value: raw.cat || '其他' },
     { label: '支付方式', value: raw.payment || '其他' },
     { label: '消费日期', value: fmtAbsoluteDate(raw.dateRaw) || raw.date || '--' },
-    { label: '备注', value: raw.note || '无' },
+    { label: '备注', value: raw.note || '无', multiline: true },
   ]
 }
 
@@ -68,19 +68,19 @@ export function getRecordAiSummary(store, detailRecord, domainLabel) {
   if (detailRecord.kind === 'income') {
     const source = raw.source || '未命名来源'
     const cat = incomeCatMap[raw.cat]?.label || '其他收入'
-    return `系统记录了一笔 ${cat}，金额 ${Number(raw.amount || 0).toFixed(2)} 元，来源为 ${source}。`
+    return `系统记录了一笔${cat}，金额 ${Number(raw.amount || 0).toFixed(2)} 元，来源为 ${source}。`
   }
 
   if (detailRecord.kind === 'universal') {
     if (raw.domainKey === 'food') {
-      return raw.summary || `饮食记录了 ${raw.title}。`
+      return raw.summary || `饮食记录：${raw.title}。`
     }
 
     const meta = store.getUniversalDomainMeta(raw.domainKey)
     const payload = raw.payload || {}
     const dimension = payload[meta.dimensionKey] || raw.title || domainLabel
     const primary = Number(payload[meta.primaryKey] || 0)
-    return `${domainLabel}中记录了「${dimension}」，${meta.primaryLabel}为 ${primary.toFixed(2)}。${raw.summary || ''}`
+    return `${domainLabel}中记录了“${dimension}”，${meta.primaryLabel}为 ${primary.toFixed(2)}。${raw.summary || ''}`
   }
 
   return `系统记录了一笔支出，商家为 ${raw.name || '未识别商家'}，金额 ${Number(raw.amount || 0).toFixed(2)} 元，渠道 ${raw.platform || '未知'}，分类 ${raw.cat || '未知'}。`

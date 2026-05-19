@@ -18,11 +18,11 @@
       <div class="record-detail-image-card">
         <template v-if="record.imageUrl">
           <img :src="record.imageUrl" class="record-detail-image" @click="store.openImgFull(record.imageUrl)">
-          <div class="record-detail-image-label">点击查看原始截图</div>
+          <div class="record-detail-image-label">点击查看原始图片</div>
         </template>
         <div v-else class="record-detail-image-empty">
           <div class="record-detail-image-empty-mark">{{ emptyMark }}</div>
-          <div class="record-detail-image-label">{{ record.imageLoadError ? '截图文件不可用' : '暂无截图预览' }}</div>
+          <div class="record-detail-image-label">{{ record.imageLoadError ? '图片文件不可用' : '暂无图片预览' }}</div>
         </div>
       </div>
 
@@ -45,30 +45,32 @@
         <div v-if="record.kind === 'expense'" class="record-detail-field">
           <span class="field-label">状态</span>
           <span class="field-value">
-            <span class="badge" :class="isPendingExpense ? 'badge-warning' : 'badge-success'">{{ isPendingExpense ? '待补充' : '已完成' }}</span>
+            <span class="badge" :class="isPendingExpense ? 'badge-warning' : 'badge-success'">
+              {{ isPendingExpense ? '待补充' : '已完成' }}
+            </span>
           </span>
         </div>
       </div>
 
       <div class="record-detail-section">
         <div class="record-detail-section-title">抽取字段</div>
-        <div v-for="field in fields" :key="field.label" class="record-detail-field">
+        <div v-for="field in fields" :key="field.label" class="record-detail-field" :class="{ stacked: field.multiline }">
           <span class="field-label">{{ field.label }}</span>
-          <span class="field-value" :class="{ numeric: field.numeric }">{{ field.value }}</span>
+          <span class="field-value" :class="{ numeric: field.numeric, wrap: field.multiline }">{{ field.value }}</span>
         </div>
       </div>
 
       <div v-if="foodDishes.length" class="record-detail-section">
         <div class="record-detail-section-title">
           菜品明细
-          <span class="badge badge-warning" style="margin-left:8px;font-weight:normal;">估算值</span>
+          <span class="badge badge-warning record-detail-estimate-badge">估算值</span>
         </div>
-        <div v-for="(d, i) in foodDishes" :key="i" class="record-detail-field" style="flex-direction:column;align-items:stretch;gap:4px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="field-label" style="font-weight:600;color:#1f2937;">{{ d.name }}</span>
+        <div v-for="(d, i) in foodDishes" :key="i" class="record-detail-field stacked food-dish-field">
+          <div class="food-dish-header">
+            <span class="field-label food-dish-name">{{ d.name }}</span>
             <span class="field-value numeric">{{ d.calorie_kcal != null ? `${d.calorie_kcal} 千卡` : '--' }}</span>
           </div>
-          <div style="display:flex;gap:12px;font-size:12px;color:#6b7280;">
+          <div class="food-dish-macros">
             <span v-if="d.estimated_grams != null">约 {{ d.estimated_grams }}g</span>
             <span v-if="d.protein_g != null">蛋白 {{ d.protein_g }}g</span>
             <span v-if="d.carb_g != null">碳水 {{ d.carb_g }}g</span>
@@ -122,7 +124,7 @@ const domainBadgeClass = computed(() => {
 const emptyMark = computed(() => {
   if (record.value?.kind === 'income') return '收'
   if (record.value?.kind === 'expense') return '支'
-  return domainMeta.value?.shortName?.slice(0, 1) || '域'
+  return domainMeta.value?.shortName?.slice(0, 1) || '记'
 })
 
 const recordTime = computed(() => {
@@ -138,7 +140,7 @@ const sourceLabel = computed(() => {
   if (!record.value?.raw) return '--'
   const raw = record.value.raw
   if (record.value.kind === 'income') return raw.sourceType === 'ai_scan' ? '截图识别' : '手动录入'
-  if (record.value.kind === 'universal') return raw.source === 'staging' ? '中转站归档' : '手动录入'
+  if (record.value.kind === 'universal') return raw.source === 'staging' ? '中转站归档' : '拍照识别'
   return raw.source === 'ai_scan' ? '截图识别' : '手动录入'
 })
 

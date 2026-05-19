@@ -1364,15 +1364,62 @@ body {
 }
 
 .field-value {
+  min-width: 0;
+  max-width: 62%;
   text-align: right;
   font-size: 13px;
   color: var(--text);
   line-height: 1.5;
+  word-break: break-word;
 }
 
 .field-value.numeric {
   font-family: var(--font-num);
   font-weight: 700;
+}
+
+.record-detail-field.stacked {
+  display: grid;
+  gap: 6px;
+}
+
+.record-detail-field.stacked .field-value {
+  max-width: none;
+  text-align: left;
+}
+
+.field-value.wrap {
+  white-space: normal;
+}
+
+.record-detail-estimate-badge {
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.food-dish-field {
+  gap: 8px;
+}
+
+.food-dish-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.food-dish-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.food-dish-macros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .record-detail-ai-summary {
@@ -1405,6 +1452,34 @@ body {
   border-radius: 14px;
   font-size: 15px;
   font-weight: 700;
+}
+
+@media (max-width: 390px) {
+  .record-detail-field {
+    gap: 10px;
+  }
+
+  .field-label {
+    max-width: 34%;
+  }
+
+  .field-value {
+    max-width: 66%;
+    font-size: 12px;
+  }
+
+  .food-dish-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .food-dish-header .field-value {
+    text-align: left;
+  }
+
+  .record-detail-actions {
+    flex-direction: column;
+  }
 }
 
 .record-detail-btn.secondary {

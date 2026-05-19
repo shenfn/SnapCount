@@ -352,6 +352,8 @@ order_finished_at（订单完成时间）：
   - meal_type：餐次类型，从 ["breakfast","lunch","dinner","snack"] 中选一个；无法判断时根据当前时间推断（早 6-10 → breakfast，11-14 → lunch，17-21 → dinner，其它 → snack）
   - confidence_note：估算依据的文字说明，如“画面可见 1 碗米饭、1 份番茄炒蛋、1 杯酸奶”
 - **重要**：热量估算是基于视觉的近似值，误差通常 ±20-40%，请尽量保守；不要编造未出现的菜品。
+- 对于零食、小袋装、独立包装食品，如果画面里看起来只是 1-3 份小包装，不要仅凭包装外观假设“每包 50g / 100g”之类的大克重；除非标签文字清晰可读，否则单包优先按 5-25g 的保守范围估算。
+- 如果是西梅、果脯、坚果、糖果、海苔、肉干等小包装零食，优先根据“可见包数/颗数”估算总重量，而不是套用大袋商品规格。
 - occurred_at：优先使用图片 EXIF 拍摄时间；若不可见则返回 null，由系统使用上传时间。
 
 当 record_type 为 wallet 时：
@@ -556,6 +558,99 @@ function normalizeString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+const SMALL_PACK_FOOD_KEYWORDS = [
+  "西梅", "梅干", "果脯", "话梅", "坚果", "葡萄干", "肉干", "海苔", "饼干", "薯片",
+  "辣条", "巧克力", "糖", "果冻", "零食", "独立包装", "小包", "迷你", "单包", "随手包",
+];
+
+const SMALL_PACK_HINT_KEYWORDS = [
+  "小包", "独立包装", "迷你", "单包", "一包", "两包", "三包", "四包", "五包",
+  "1包", "2包", "3包", "4包", "5包", "一袋", "两袋", "三袋", "1袋", "2袋", "3袋",
+];
+
+function extractVisiblePackCount(text: string): number | null {
+  const normalized = text.replace(/\s+/g, "");
+  const directMatch = normalized.match(/([1-9]\d?)\s*(?:包|袋|颗|粒|枚)/);
+  if (directMatch) return Number(directMatch[1]);
+
+  const cnMap: Record<string, number> = {
+    "一": 1,
+    "两": 2,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+  };
+  const cnMatch = normalized.match(/([一二两三四五六七八九十])(?:包|袋|颗|粒|枚)/);
+  return cnMatch ? (cnMap[cnMatch[1]] ?? null) : null;
+}
+
+function scaleNutritionValue(value: number | null | undefined, scale: number): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.round(value * scale * 10) / 10;
+}
+
+function applyCompactPackHeuristic(
+  dishes: Array<{
+    name: string;
+    estimated_grams: number | null;
+    calorie_kcal: number | null;
+    protein_g: number | null;
+    carb_g: number | null;
+    fat_g: number | null;
+  }>,
+  payload: Record<string, unknown>,
+  ai: AIResult,
+): { dishes: typeof dishes; note: string | null } {
+  if (dishes.length === 0) return { dishes, note: null };
+
+  const contextText = [
+    normalizeString(ai.title),
+    normalizeString(ai.summary),
+    normalizeString(payload.confidence_note),
+    ...dishes.map((dish) => dish.name),
+  ].filter(Boolean).join(" ");
+
+  if (!contextText) return { dishes, note: null };
+
+  const isSmallPackSnack = includesAny(contextText, SMALL_PACK_FOOD_KEYWORDS).length > 0;
+  const hasPackHint = includesAny(contextText, SMALL_PACK_HINT_KEYWORDS).length > 0;
+  if (!isSmallPackSnack || (!hasPackHint && dishes.length > 2)) {
+    return { dishes, note: null };
+  }
+
+  const visiblePackCount = Math.max(1, extractVisiblePackCount(contextText) ?? 1);
+  const maxTotalGrams = visiblePackCount * 20;
+  const adjustedDishes = dishes.map((dish) => {
+    if (dish.estimated_grams == null || dish.estimated_grams <= maxTotalGrams || dish.estimated_grams > 300) {
+      return dish;
+    }
+
+    const scale = maxTotalGrams / dish.estimated_grams;
+    return {
+      ...dish,
+      estimated_grams: maxTotalGrams,
+      calorie_kcal: scaleNutritionValue(dish.calorie_kcal, scale),
+      protein_g: scaleNutritionValue(dish.protein_g, scale),
+      carb_g: scaleNutritionValue(dish.carb_g, scale),
+      fat_g: scaleNutritionValue(dish.fat_g, scale),
+    };
+  });
+
+  const adjusted = adjustedDishes.some((dish, index) => dish.estimated_grams !== dishes[index]?.estimated_grams);
+  if (!adjusted) return { dishes, note: null };
+
+  return {
+    dishes: adjustedDishes,
+    note: `按小包装零食保守估算：按画面可见约 ${visiblePackCount} 份独立小包计，每包最多按 20g 估算。`,
+  };
+}
+
 function parseDurationMinutes(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return Math.round(value * 100) / 100;
   if (typeof value !== "string") return null;
@@ -698,7 +793,7 @@ function buildBuiltinPayload(ai: AIResult): {
   if (domainKey === "food") {
     // 标准化 dishes 数组：每项至少含 name；其它字段允许为 null
     const rawDishes = Array.isArray(payload.dishes) ? payload.dishes : [];
-    const dishes = rawDishes.map((d: unknown) => {
+    let dishes = rawDishes.map((d: unknown) => {
       if (!d || typeof d !== "object") return null;
       const item = d as Record<string, unknown>;
       const name = normalizeString(item.name);
@@ -713,11 +808,16 @@ function buildBuiltinPayload(ai: AIResult): {
       };
     }).filter((d): d is NonNullable<typeof d> => d !== null);
 
+    const compactPackAdjustment = applyCompactPackHeuristic(dishes, payload, ai);
+    dishes = compactPackAdjustment.dishes;
+
     // 总热量：优先用 AI 给的，回落到 dishes 累加
+    const dishCalorieSum = dishes.reduce((acc, d) => acc + (d.calorie_kcal ?? 0), 0);
     let totalCalorie = normalizeNumber(payload.total_calorie_kcal);
-    if (totalCalorie === null && dishes.length > 0) {
-      const sum = dishes.reduce((acc, d) => acc + (d.calorie_kcal ?? 0), 0);
-      totalCalorie = sum > 0 ? Math.round(sum * 10) / 10 : null;
+    if (compactPackAdjustment.note && dishCalorieSum > 0) {
+      totalCalorie = Math.round(dishCalorieSum * 10) / 10;
+    } else if (totalCalorie === null && dishes.length > 0) {
+      totalCalorie = dishCalorieSum > 0 ? Math.round(dishCalorieSum * 10) / 10 : null;
     }
 
     // meal_type：AI 没给则按当前北京时间推断
@@ -738,7 +838,8 @@ function buildBuiltinPayload(ai: AIResult): {
     payload.dishes = dishes;
     payload.total_calorie_kcal = totalCalorie;
     payload.meal_type = mealType;
-    payload.confidence_note = normalizeString(payload.confidence_note) ?? null;
+    const confidenceNote = normalizeString(payload.confidence_note);
+    payload.confidence_note = [confidenceNote, compactPackAdjustment.note].filter(Boolean).join(" ") || null;
     // 标记为估算值，前端可据此显示提醒
     payload.is_estimated = true;
 

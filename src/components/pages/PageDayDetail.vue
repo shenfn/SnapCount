@@ -229,10 +229,10 @@ function openRecord(item) {
 }
 
 .day-record-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
 }
 
 .day-record-title {
@@ -240,9 +240,8 @@ function openRecord(item) {
   font-size: 15px;
   font-weight: 700;
   color: #111827;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .day-record-value {
@@ -251,20 +250,64 @@ function openRecord(item) {
   font-weight: 900;
   color: #020617;
   flex: 0 0 auto;
+  text-align: right;
+  white-space: nowrap;
+  max-width: 36vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .day-record-sub {
   margin-top: 3px;
   font-size: 12px;
   color: var(--text2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.45;
 }
 
 .day-record-time {
   margin-top: 5px;
   font-size: 11px;
   color: var(--text3);
+}
+
+@media (max-width: 390px) {
+  .day-detail-summary-card {
+    padding: 20px 18px 22px;
+  }
+
+  .day-detail-summary-week {
+    position: static;
+    margin-top: 4px;
+    font-size: 15px;
+  }
+
+  .day-detail-summary-line {
+    grid-template-columns: 12px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .day-detail-summary-line strong {
+    grid-column: 2;
+    margin-top: 2px;
+    font-size: 16px;
+  }
+
+  .day-record-item {
+    padding: 14px 12px;
+  }
+
+  .day-record-top {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .day-record-value {
+    text-align: left;
+    max-width: none;
+    overflow: visible;
+    text-overflow: initial;
+  }
 }
 </style>
