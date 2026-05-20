@@ -5,6 +5,7 @@
 .env.local
 .env.*.local
 *.env
+.mcp.json
 
 # ═══════════════════════════════════════════════
 # Supabase CLI 本地状态

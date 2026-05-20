@@ -51,7 +51,7 @@
 
 **前端**：Vue 3 + Vite · Composition API · PWA
 **后端**：Supabase（Postgres + Edge Functions + Storage + Auth + RLS）
-**AI**：Moonshot / Kimi Vision API（可替换为其他 Vision 模型）
+**AI**：Moonshot / Qwen / MiMo / 自建 OpenAI 兼容 Vision 中转站（可替换为其他 Vision 模型）
 **托管**：Cloudflare Pages（静态）+ Cloudflare Worker（反向代理）
 
 ---
@@ -100,6 +100,9 @@ supabase db push   # 推送 supabase/migrations/ 下的所有迁移文件
 supabase secrets set SUPABASE_URL="https://<your-project-ref>.supabase.co"
 supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
 supabase secrets set MOONSHOT_API_KEY="<your-moonshot-key>"
+supabase secrets set RELAY_API_KEY="<your-relay-key>"           # 可选
+supabase secrets set RELAY_ENDPOINT="http://47.76.157.150:8317/v1/chat/completions"  # 可选
+supabase secrets set RELAY_MODEL="gpt-5.4"                     # 可选
 
 # 部署
 supabase functions deploy ingest-receipt --no-verify-jwt

@@ -19,10 +19,14 @@ const MIMO_DEFAULT_MODEL    = "mimo-v2-omni";
 // 必须在请求体传 enable_thinking=false 关闭推理才能达到 2-4s 响应
 const QWEN_DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 const QWEN_DEFAULT_MODEL    = "qwen3.6-flash";
+
+// 自建 OpenAI 兼容中转站（支持视觉模型时可直接复用）
+const RELAY_DEFAULT_ENDPOINT = "http://47.76.157.150:8317/v1/chat/completions";
+const RELAY_DEFAULT_MODEL    = "gpt-5.4";
 const BUCKET_NAME       = "receipt-images";
 
 // Vision Provider 抽象：用于多 Provider 优雅降级（Moonshot 主 → MiMo 备）
-type ProviderName = "moonshot" | "mimo" | "qwen";
+type ProviderName = "moonshot" | "mimo" | "qwen" | "relay";
 
 interface ProviderConfig {
   name: ProviderName;
@@ -1196,9 +1200,10 @@ async function callOpenAICompatibleVision(
   if (config.name === "moonshot") {
     body.response_format = { type: "json_object" };
   }
-  // 关闭「思考/推理模式」：MiMo v2.5/omni 与 Qwen3.6 系列均为混合思考模型，
+  // 关闭「思考/推理模式」：MiMo v2.5/omni、Qwen3.6 以及部分 OpenAI-compatible 中转模型
+  // 默认为混合思考，若不关闭会生成较长 reasoning_content，明显拉高耗时
   // 默认会生成大段 reasoning_content（实测 28s 级），关掉后预期降到 3-8s
-  if (config.name === "mimo" || config.name === "qwen") {
+  if (config.name === "mimo" || config.name === "qwen" || config.name === "relay") {
     body.enable_thinking = false;
   }
   // 同时附带 Authorization Bearer 与 api-key header：
@@ -1307,12 +1312,21 @@ Deno.serve(async (req) => {
       apiKey: qwenKey,
     } : null;
 
+    const relayKey = getEnvOptional("RELAY_API_KEY");
+    const relayProvider: ProviderConfig | null = relayKey ? {
+      name: "relay",
+      model: getEnvOptional("RELAY_MODEL") ?? RELAY_DEFAULT_MODEL,
+      endpoint: getEnvOptional("RELAY_ENDPOINT") ?? RELAY_DEFAULT_ENDPOINT,
+      apiKey: relayKey,
+    } : null;
+
     // 主备顺序：通过 VISION_PRIMARY env 决定首选 provider，其它 provider 按固定后备顺序拼接
-    // 取值: moonshot (默认) | mimo | qwen
+    // 取值: moonshot (默认) | qwen | mimo | relay
     const primary = (getEnvOptional("VISION_PRIMARY") ?? "moonshot").toLowerCase();
     const allProviders: ProviderConfig[] = [moonshotProvider];
     if (qwenProvider) allProviders.push(qwenProvider);
     if (mimoProvider) allProviders.push(mimoProvider);
+    if (relayProvider) allProviders.push(relayProvider);
     // 把 primary 对应的 provider 移到首位（如果存在）
     const primaryIdx = allProviders.findIndex((p) => p.name === primary);
     if (primaryIdx > 0) {

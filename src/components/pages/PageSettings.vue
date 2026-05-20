@@ -157,6 +157,13 @@ const visionOptions = [
     iconText: 'M',
     toneClass: 'warn',
   },
+  {
+    value: 'relay',
+    label: '自建中转站 Vision',
+    desc: '走自建 OpenAI 兼容网关 · 适合对比速度与识图效果',
+    iconText: 'R',
+    toneClass: 'info',
+  },
 ]
 
 onMounted(async () => {
