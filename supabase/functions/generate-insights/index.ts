@@ -16,6 +16,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const MOONSHOT_TEXT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
 const MOONSHOT_TEXT_MODEL    = "moonshot-v1-32k";
+const RELAY_TEXT_ENDPOINT    = "http://47.76.157.150:8317/v1/chat/completions";
+const RELAY_TEXT_MODEL       = "gpt-5.4";
 const PROMPT_VERSION         = "insights-v3-freeform-advisor";
 const CACHE_TTL_MS           = 30 * 60 * 1000; // 30 分钟内同 hash 不重复调用
 const DEFAULT_QUESTION       = "请综合分析我最近的生活状态，重点指出最值得关注的变化和接下来 7 天的行动建议。";
@@ -61,6 +63,38 @@ function getEnv(key: string): string {
 
 function getOptionalEnv(key: string, fallback: string): string {
   return Deno.env.get(key) || fallback;
+}
+
+type InsightProviderName = "auto" | "moonshot" | "relay";
+
+interface TextProviderConfig {
+  provider: Exclude<InsightProviderName, "auto">;
+  apiKey: string;
+  endpoint: string;
+  model: string;
+}
+
+function getMoonshotTextProvider(): TextProviderConfig {
+  return {
+    provider: "moonshot",
+    apiKey: Deno.env.get("AI_ANALYSIS_API_KEY") || getEnv("MOONSHOT_API_KEY"),
+    endpoint: getOptionalEnv("AI_ANALYSIS_ENDPOINT", MOONSHOT_TEXT_ENDPOINT),
+    model: getOptionalEnv("AI_ANALYSIS_MODEL", getOptionalEnv("AI_MODEL", MOONSHOT_TEXT_MODEL)),
+  };
+}
+
+function getRelayTextProvider(): TextProviderConfig {
+  return {
+    provider: "relay",
+    apiKey: getEnv("RELAY_API_KEY"),
+    endpoint: getOptionalEnv("RELAY_ENDPOINT", RELAY_TEXT_ENDPOINT),
+    model: getOptionalEnv("RELAY_MODEL", RELAY_TEXT_MODEL),
+  };
+}
+
+function getAnalysisProviderByPreference(pref: string | null | undefined): TextProviderConfig {
+  if (pref === "relay") return getRelayTextProvider();
+  return getMoonshotTextProvider();
 }
 
 // ───────────── 数据指纹（用于缓存命中） ─────────────
@@ -504,6 +538,17 @@ Deno.serve(async (req: Request) => {
 
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id || null;
+    let insightProviderPref: InsightProviderName = "auto";
+    if (userId) {
+      const { data: cfg } = await supabase
+        .from("user_configs")
+        .select("ai_insight_provider")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (cfg?.ai_insight_provider === "moonshot" || cfg?.ai_insight_provider === "relay") {
+        insightProviderPref = cfg.ai_insight_provider;
+      }
+    }
 
     // 2. 解析请求
     const body = await req.json().catch(() => ({}));
@@ -642,9 +687,10 @@ Deno.serve(async (req: Request) => {
     const routerApiKey = Deno.env.get("AI_ROUTER_API_KEY") || getEnv("MOONSHOT_API_KEY");
     const routerEndpoint = getOptionalEnv("AI_ROUTER_ENDPOINT", MOONSHOT_TEXT_ENDPOINT);
     const routerModel = getOptionalEnv("AI_ROUTER_MODEL", getOptionalEnv("AI_MODEL", MOONSHOT_TEXT_MODEL));
-    const analysisApiKey = Deno.env.get("AI_ANALYSIS_API_KEY") || getEnv("MOONSHOT_API_KEY");
-    const analysisEndpoint = getOptionalEnv("AI_ANALYSIS_ENDPOINT", MOONSHOT_TEXT_ENDPOINT);
-    const analysisModel = getOptionalEnv("AI_ANALYSIS_MODEL", getOptionalEnv("AI_MODEL", MOONSHOT_TEXT_MODEL));
+    const analysisProvider = getAnalysisProviderByPreference(insightProviderPref);
+    const analysisApiKey = analysisProvider.apiKey;
+    const analysisEndpoint = analysisProvider.endpoint;
+    const analysisModel = analysisProvider.model;
 
     let route: any;
     let routerUsage: any = null;
@@ -709,7 +755,7 @@ Deno.serve(async (req: Request) => {
         payload_jsonb: payload,
         model: analysisModel,
         prompt_version: PROMPT_VERSION,
-        token_usage: { router: routerUsage, analysis: analysisUsage },
+        token_usage: { router: routerUsage, analysis: analysisUsage, analysis_provider: analysisProvider.provider, analysis_preference: insightProviderPref },
         status: "success",
       })
       .select()

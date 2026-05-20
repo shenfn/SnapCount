@@ -106,6 +106,7 @@ supabase secrets set RELAY_MODEL="gpt-5.4"                     # 可选
 
 # 部署
 supabase functions deploy ingest-receipt --no-verify-jwt
+supabase functions deploy generate-insights --no-verify-jwt
 ```
 
 ### 5.（可选）部署 Cloudflare Worker 反代
