@@ -13,6 +13,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { MODE_GUIDES, SAFETY_RULES, WRITING_RULES, buildDomainHeuristics } from "./prompts.ts";
 
 const MOONSHOT_TEXT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
 const MOONSHOT_TEXT_MODEL    = "moonshot-v1-32k";
@@ -370,23 +371,14 @@ function buildExpertPrompt(days: number, maturity: { key: string; label: string;
     rich:    "可以给出基于个人基准线的具体观察和可执行建议。建议必须是具体动作，不能是'多注意休息'这类废话。",
   }[maturity.key];
 
-  const modeGuides: Record<string, string> = {
-    finance_cashflow: "你现在是个人现金流顾问。重点回答钱够不够花、每天安全可花金额、能否撑到下次工资日、是否还能存钱。你必须优先使用钱包快照中的可用现金和短期待还款；如果没有钱包快照，再说明只能用记录期净额近似。表达可以自然，不要机械填表。",
-    finance_spending_pattern: "你现在是消费规律分析师。重点找出高频分类、异常日期、周期性支出候选、可能的人际/家庭支出，不要只报总额。",
-    sleep_quality: "你现在是睡眠与生活节奏分析师。重点分析睡眠时长/评分变化，并谨慎观察运动、饮食、财务压力信号的同日或相邻日关联，不做医学诊断。",
-    diet_pattern: "你现在是饮食行为分析师。饮食不能唯热量论，要区分基础正餐、健康补给、放纵零食、功能饮品、情绪性饮食。坚果、鸡蛋、牛油果、鱼类等天然高营养密度食物，不能仅因热量高就负面评价。",
-    exercise_pattern: "你现在是运动习惯分析师。重点分析运动频率、运动后睡眠/饮食变化和可持续计划。",
-    cross_domain_life_review: "你现在是全域生活数据顾问。不要平均用力，必须找出最值得优先关注的 1-2 个问题，并给接下来 7 天的具体行动。",
-    unknown: "你现在是数据边界说明助手。先说明当前问题哪里不清楚，再基于已有数据给最谨慎的观察。",
-  };
-
   const financeProjection = buildFinanceProjection(stats, details, question);
+  const domainHeuristics = buildDomainHeuristics(route);
 
   return `你是 SnapCount 的个人生活数据顾问。用户已经记录了 ${stats.activeDays}/${days} 天的多域生活数据，当前处于「${maturity.label}」阶段。
 
 【你的角色定位】
 ${stageDirective}
-${modeGuides[route.primary_mode] || modeGuides.cross_domain_life_review}
+${MODE_GUIDES[route.primary_mode] || MODE_GUIDES.cross_domain_life_review}
 
 【用户这次真正想问】
 ${question}
@@ -394,18 +386,11 @@ ${question}
 【第一次路由结果】
 ${JSON.stringify(route, null, 0)}
 
-【硬性规则】
-1. 只说数据能支撑的话，永远不要编造数字或事实
-2. 建议必须具体到行动，不要"多注意休息""保持平衡"这类废话
-3. 样本不足的关联必须明确标注"样本仅 N 天，仅供参考"
-4. 不要刻意找问题，如果数据看起来正常就肯定它
-5. 用第二人称"你"称呼用户，口吻像朋友而非医生
-6. 区分相关性和因果，不能把同日出现直接说成原因
-7. 饮食分析要看食物价值和场景，不得只用热量高低评价
-8. 财务推算必须写明口径，例如是否已看到工资、房租、固定支出记录
-9. 不要为了迎合固定栏目而拆碎表达，正文可以自由组织，但必须先给结论
-10. 财务现金流问题不能把"日薪"直接等同于"每天可花金额"，除非用户明确说明接下来每天都有收入
-11. 如果财务现金流辅助数据里有 wallet.available_cash_total，优先把它作为当前可用现金；如果有 short_term_liability_total，必须从可用现金中扣除后再算安全日预算
+${SAFETY_RULES}
+
+${WRITING_RULES}
+
+${domainHeuristics}
 
 【本期数据】
 - 范围：最近 ${days} 天
@@ -432,7 +417,7 @@ ${JSON.stringify(financeProjection, null, 0)}
   "headline": "一句概括这 ${days} 天的核心观察，不超过 25 字",
   "mode": "${route.primary_mode || "cross_domain_life_review"}",
   "mode_label": "${route.mode_label || "全域生活分析"}",
-  "content_md": "自由 Markdown 正文。必须先给结论，再解释关键依据、计算口径和下一步建议。不要套固定栏目，全文控制在 500-900 字。",
+  "content_md": "自由 Markdown 正文。必须先给结论，再按结论 → 关键证据 → 口径说明 → 不确定性 → 行动建议的顺序组织。不要套死板固定栏目，全文控制在 500-900 字。",
   "confidence": 0.72,
   "followup_questions": ["如果缺少关键数据，可以问 1-2 个追问；没有就空数组"]
 }
@@ -440,6 +425,7 @@ ${JSON.stringify(financeProjection, null, 0)}
 注意：
 - content_md 可以使用 Markdown 标题、列表和加粗，但不要超过 900 字
 - 如果是 finance_cashflow，content_md 必须包含：结论、推算口径、每日安全预算、关键不确定项
+- 如果涉及睡眠、饮食、运动或情绪风险，必须使用生活方式观察表达，不能输出医学诊断或疾病判断
 - 如果有钱包快照，要说明使用了钱包快照；如果没有钱包快照，必须说明"记录期净额只能近似代表可用钱，不能等同于真实余额"
 - 全文中文`;
 }
