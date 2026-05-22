@@ -38,6 +38,10 @@
           <span class="field-label">记录时间</span>
           <span class="field-value">{{ recordTime }}</span>
         </div>
+        <div v-if="eventTime" class="record-detail-field">
+          <span class="field-label">发生时间</span>
+          <span class="field-value">{{ eventTime }}</span>
+        </div>
         <div class="record-detail-field">
           <span class="field-label">来源</span>
           <span class="field-value">{{ sourceLabel }}</span>
@@ -130,17 +134,22 @@ const emptyMark = computed(() => {
 const recordTime = computed(() => {
   if (!record.value?.raw) return '--'
   const raw = record.value.raw
-  if (record.value.kind === 'universal') return formatDateTimeLabel(raw.occurredAt || raw.createdAt) || '--'
+  if (record.value.kind === 'universal') return formatDateTimeLabel(raw.payload?.time_context?.client_captured_at || raw.createdAt || raw.occurredAt) || '--'
   if (raw.createdAt) return formatDateTimeLabel(raw.createdAt)
   if (raw.dateRaw) return raw.time ? `${raw.date} ${raw.time}` : raw.date
   return '--'
+})
+
+const eventTime = computed(() => {
+  if (!record.value?.raw || record.value.kind !== 'universal') return ''
+  return formatDateTimeLabel(record.value.raw.occurredAt) || ''
 })
 
 const sourceLabel = computed(() => {
   if (!record.value?.raw) return '--'
   const raw = record.value.raw
   if (record.value.kind === 'income') return raw.sourceType === 'ai_scan' ? '截图识别' : '手动录入'
-  if (record.value.kind === 'universal') return raw.source === 'staging' ? '中转站归档' : '拍照识别'
+  if (record.value.kind === 'universal') return raw.source === 'staging' ? '中转站归档' : '截图识别'
   return raw.source === 'ai_scan' ? '截图识别' : '手动录入'
 })
 
