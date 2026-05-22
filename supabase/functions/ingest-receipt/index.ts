@@ -1374,7 +1374,7 @@ Deno.serve(async (req) => {
       ai.companion_message = null;
     }
     const companionMessage: string | null = ai.companion_message;
-    const withCompanion = (text: string) => companionMessage ? `${text}\n${companionMessage}` : text;
+    const withCompanion = (text: string) => companionMessage ? `${companionMessage}\n${text}` : text;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
       ? ai.domain_key
