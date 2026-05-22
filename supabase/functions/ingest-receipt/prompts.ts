@@ -18,6 +18,7 @@ const COMPANION_PERSONA = `【陪伴文案 companion_message】
   · 不要简单复述用户已经看到的字段（如"你花了 32 元"）
   · 不要使用感叹号超过一次，不要用 emoji
   · 必须基于这条记录的具体内容，不能是通用句
+  · 支出/收入页面如果同时出现红包、广告、抽免单、优惠活动，只能围绕真实交易主体写，不要说“收到红包”“获得奖励”
 - 如果信息太少写不出有意义的话，返回空字符串 ""，不要硬凑`;
 
 export function buildPrompt(ctx: PromptContext = {}): string {
@@ -176,6 +177,7 @@ order_finished_at（订单完成时间）：
 - summary 用一句短语概括睡眠时长和评分，如“睡眠 5.35 小时，评分 73”
 - payload_jsonb 至少包含：
   - sleep_hours：总睡眠小时数。例：5小时21分钟 返回 5.35，4小时39分钟 返回 4.65
+  - sleep_minutes：总睡眠分钟数。例：6小时1分钟 返回 361；必须与 sleep_hours 表达同一睡眠时长
   - quality_score：睡眠评分，无法识别返回 null
   - quality_level：>=80 为“优秀”，>=70 为“良好”，>=60 为“一般”，否则“较差”；没有评分时可根据页面描述返回 null
   - source_app：来源 App，无法判断可返回“健康”

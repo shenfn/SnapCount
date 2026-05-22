@@ -192,13 +192,22 @@ function parseDateKey(dateKey) {
 }
 
 function datePart(value) {
-  return value ? String(value).slice(0, 10) : ''
+  if (!value) return ''
+  const text = String(value)
+  if (!text.includes('T')) return text.slice(0, 10)
+  const d = new Date(text)
+  if (Number.isNaN(d.getTime())) return text.slice(0, 10)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function timePart(value) {
   if (!value) return ''
   const text = String(value)
-  if (text.includes('T')) return text.split('T')[1].slice(0, 5)
+  if (text.includes('T')) {
+    const d = new Date(text)
+    if (Number.isNaN(d.getTime())) return text.split('T')[1].slice(0, 5)
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
   if (/^\d{2}:\d{2}/.test(text)) return text.slice(0, 5)
   return ''
 }

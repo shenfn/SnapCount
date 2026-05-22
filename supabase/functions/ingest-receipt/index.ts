@@ -531,14 +531,18 @@ function buildBuiltinPayload(ai: AIResult): {
 
   if (domainKey === "sleep") {
     const sleepHours = normalizeNumber(payload.sleep_hours);
+    const sleepMinutes = parseDurationMinutes(payload.sleep_minutes);
     const score = normalizeNumber(payload.quality_score);
-    if (sleepHours === null) missingFields.push("sleep_hours");
-    payload.sleep_hours = sleepHours;
+    const normalizedSleepHours = sleepHours ?? (sleepMinutes !== null ? Math.round((sleepMinutes / 60) * 100) / 100 : null);
+    const normalizedSleepMinutes = sleepMinutes ?? (normalizedSleepHours !== null ? Math.round(normalizedSleepHours * 60) : null);
+    if (normalizedSleepMinutes === null) missingFields.push("sleep_minutes");
+    payload.sleep_hours = normalizedSleepHours;
+    payload.sleep_minutes = normalizedSleepMinutes;
     payload.quality_score = score;
     payload.quality_level = normalizeString(payload.quality_level) ?? qualityLevelFromScore(score);
     title = normalizeString(ai.title) ?? "夜间睡眠";
     summary = [
-      sleepHours !== null ? `睡眠 ${sleepHours} 小时` : null,
+      normalizedSleepHours !== null ? `睡眠 ${normalizedSleepHours} 小时` : null,
       score !== null ? `评分 ${score}` : null,
     ].filter(Boolean).join("，") || summary;
   }
@@ -659,6 +663,15 @@ function buildBuiltinPayload(ai: AIResult): {
   }
 
   return { payload, title, summary, missingFields };
+}
+
+function resolveBuiltinOccurredAt(domainKey: BuiltinDomainKey, occurredAt: string | null, payload: Record<string, unknown>): string {
+  if (domainKey === "sleep") {
+    const wakeAt = normalizeAiDate(payload.wake_at);
+    const sleepStartAt = normalizeAiDate(payload.sleep_start_at);
+    return wakeAt ?? sleepStartAt ?? occurredAt ?? new Date().toISOString();
+  }
+  return occurredAt ?? new Date().toISOString();
 }
 
 async function getDomainByKey(
@@ -1586,7 +1599,7 @@ Deno.serve(async (req) => {
     if (builtinKey) {
       const built = buildBuiltinPayload(ai);
       const domain = await getDomainByKey(supabase, builtinKey);
-      const fallbackOccurredAt = occurredAt ?? new Date().toISOString();
+      const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : (occurredAt ?? new Date().toISOString());
       const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
 
       if (!shouldAutoArchive || !domain || !built) {

@@ -1,4 +1,5 @@
 import { incomeCatMap } from '../utils/helpers'
+import { formatDuration, readDurationAsMinutes } from '../utils/format'
 
 export function getRecordDetailFields(store, detailRecord) {
   if (!detailRecord?.raw) return []
@@ -25,8 +26,24 @@ export function getRecordDetailFields(store, detailRecord) {
         { label: '总热量', value: payload.total_calorie_kcal != null ? `${payload.total_calorie_kcal} 千卡（估算）` : '--', numeric: true },
         { label: '菜品数', value: `${Array.isArray(payload.dishes) ? payload.dishes.length : 0} 道` },
         { label: '记录日期', value: fmtAbsoluteDate(raw.occurredAt) || '--' },
-        { label: '来源类型', value: raw.source === 'staging' ? '中转站归档' : '拍照识别' },
+        { label: '来源类型', value: raw.source === 'staging' ? '中转站归档' : '截图识别' },
         { label: '估算依据', value: payload.confidence_note || '无', multiline: true },
+        { label: '备注', value: payload.note || raw.summary || '无', multiline: true },
+      ]
+    }
+
+    if (raw.domainKey === 'sleep') {
+      const minutes = readDurationAsMinutes({ payload }, { key: 'sleep_minutes' })
+      return [
+        { label: '标题', value: raw.title || meta.defaultTitle },
+        { label: '质量等级', value: payload.quality_level || '未填写' },
+        { label: '睡眠时长', value: minutes > 0 ? formatDuration(minutes) : '--', numeric: true },
+        { label: '睡眠评分', value: payload.quality_score != null ? `${Math.round(Number(payload.quality_score))}` : '--', numeric: true },
+        { label: '入睡时间', value: formatDateTimeShort(payload.sleep_start_at) || '--' },
+        { label: '醒来时间', value: formatDateTimeShort(payload.wake_at) || '--' },
+        { label: '发生日期', value: fmtAbsoluteDate(raw.occurredAt) || '--' },
+        { label: '模板版本', value: raw.domainVersion || '1.0' },
+        { label: '来源类型', value: raw.source === 'staging' ? '中转站归档' : '截图识别' },
         { label: '备注', value: payload.note || raw.summary || '无', multiline: true },
       ]
     }
@@ -78,6 +95,11 @@ export function getRecordAiSummary(store, detailRecord, domainLabel) {
 
     const meta = store.getUniversalDomainMeta(raw.domainKey)
     const payload = raw.payload || {}
+    if (raw.domainKey === 'sleep') {
+      const minutes = readDurationAsMinutes({ payload }, { key: 'sleep_minutes' })
+      const score = Number(payload.quality_score || payload.score || 0)
+      return `${domainLabel}中记录了“${payload.quality_level || raw.title || domainLabel}”，睡眠时长为 ${minutes > 0 ? formatDuration(minutes) : '--'}。${score ? `评分 ${Math.round(score)}。` : ''}${raw.summary || ''}`
+    }
     const dimension = payload[meta.dimensionKey] || raw.title || domainLabel
     const primary = Number(payload[meta.primaryKey] || 0)
     return `${domainLabel}中记录了“${dimension}”，${meta.primaryLabel}为 ${primary.toFixed(2)}。${raw.summary || ''}`
@@ -93,3 +115,11 @@ function fmtAbsoluteDate(value) {
   if (Number.isNaN(d.getTime())) return null
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
 }
+
+function formatDateTimeShort(value) {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 16)
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
