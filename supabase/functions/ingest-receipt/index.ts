@@ -4,7 +4,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
-import { PROMPT } from "./prompts.ts";
+import { PROMPT, buildPrompt } from "./prompts.ts";
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
 
 const MOONSHOT_MODEL    = "moonshot-v1-8k-vision-preview";
@@ -278,6 +278,7 @@ interface AIResult {
   order_finished_at?: string | null;
   payload_jsonb?: Record<string, unknown> | null;
   confidence: number;
+  companion_message?: string | null;
 }
 
 function normalizeText(value: unknown): string | null {
@@ -944,6 +945,7 @@ async function callOpenAICompatibleVision(
   imageBytes: Uint8Array,
   mime: string,
   config: ProviderConfig,
+  promptText: string = PROMPT,
 ): Promise<AIResult> {
   const base64 = toBase64(imageBytes);
   const dataUrl = `data:${mime};base64,${base64}`;
@@ -953,7 +955,7 @@ async function callOpenAICompatibleVision(
       role: "user",
       content: [
         { type: "image_url", image_url: { url: dataUrl } },
-        { type: "text", text: PROMPT },
+        { type: "text", text: promptText },
       ],
     }],
     temperature: 0.1,
@@ -1000,6 +1002,7 @@ async function callVisionWithFallback(
   imageBytes: Uint8Array,
   mime: string,
   providers: ProviderConfig[],
+  promptText: string = PROMPT,
 ): Promise<VisionCallResult> {
   if (providers.length === 0) {
     throw new Error("No vision providers configured");
@@ -1008,7 +1011,7 @@ async function callVisionWithFallback(
   for (const cfg of providers) {
     const startedAt = Date.now();
     try {
-      const ai = await callOpenAICompatibleVision(imageBytes, mime, cfg);
+      const ai = await callOpenAICompatibleVision(imageBytes, mime, cfg, promptText);
       attempts.push({ provider: cfg.name, model: cfg.model, duration_ms: Date.now() - startedAt });
       if (attempts.length > 1) {
         console.warn(`[vision] succeeded on fallback provider=${cfg.name} after ${attempts.length - 1} failure(s)`);
@@ -1196,6 +1199,22 @@ Deno.serve(async (req) => {
     const clientCapturedAt = form.get("client_captured_at") ?? form.get("client_upload_at") ?? form.get("shortcut_time") ?? form.get("captured_at");
     const imageFeatures = getImageFeatures(bytes, mime);
 
+    // 时间锚点：以请求接收时间为基准，附带北京时区换算；陪伴文案 prompt 需要本地时间感
+    const now = new Date();
+    const requestReceivedAt = now.toISOString();
+    // Deno 运行在 UTC 环境，显式换算为 UTC+8 时间
+    const chinaNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const today = chinaNow.toISOString().slice(0, 10);
+    const nowTime = `${String(chinaNow.getUTCHours()).padStart(2, '0')}:${String(chinaNow.getUTCMinutes()).padStart(2, '0')}:00`;
+    // 优先用客户端截图时间（已校验），否则退化到服务端北京时间
+    const clientCapturedIso = normalizeAiDate(clientCapturedAt);
+    const referenceLocal = clientCapturedIso
+      ? new Date(new Date(clientCapturedIso).getTime() + 8 * 60 * 60 * 1000)
+      : chinaNow;
+    const _weekdayCN = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][referenceLocal.getUTCDay()];
+    const clientLocalTime = `${referenceLocal.toISOString().slice(0, 10)} ${String(referenceLocal.getUTCHours()).padStart(2, '0')}:${String(referenceLocal.getUTCMinutes()).padStart(2, '0')}`;
+    const visionPrompt = buildPrompt({ clientLocalTime, weekday: _weekdayCN });
+
     // 2. 计算 hash 去重
     const hash = retryImageHash || await sha256(buf);
     const perceptualHash = computePerceptualHash(bytes, mime);
@@ -1319,7 +1338,7 @@ Deno.serve(async (req) => {
     let aiModel: string = MOONSHOT_MODEL;
     let visionAttempts: VisionAttempt[] = [];
     try {
-      const visionResult = await callVisionWithFallback(bytes, mime, visionProviders);
+      const visionResult = await callVisionWithFallback(bytes, mime, visionProviders, visionPrompt);
       ai = visionResult.ai;
       aiProvider = visionResult.provider;
       aiModel = visionResult.model;
@@ -1347,12 +1366,14 @@ Deno.serve(async (req) => {
     }
 
     const normalizedAmount = normalizeAmount(ai.amount);
-    const now = new Date();
-    const requestReceivedAt = now.toISOString();
-    // Deno 运行在 UTC 环境，显式换算为 UTC+8 时间
-    const chinaNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-    const today = chinaNow.toISOString().slice(0, 10);
-    const nowTime = `${String(chinaNow.getUTCHours()).padStart(2, '0')}:${String(chinaNow.getUTCMinutes()).padStart(2, '0')}:00`;
+    // 归一化陪伴文案：去前后空白和引号、压缩换行、截断到 60 字符（约 30 个汉字裕量）
+    if (typeof ai.companion_message === "string") {
+      const trimmed = ai.companion_message.replace(/[\r\n]+/g, " ").trim().replace(/^["'""''「『]+|["'""''」』]+$/g, "");
+      ai.companion_message = trimmed ? trimmed.slice(0, 60) : null;
+    } else {
+      ai.companion_message = null;
+    }
+    const companionMessage: string | null = ai.companion_message;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
       ? ai.domain_key
@@ -1409,7 +1430,7 @@ Deno.serve(async (req) => {
             const { data: drRow } = await supabase.from("data_records").insert({
               domain_id: domain.id, domain_key: builtinKey, domain_version: domain.version ?? "1.0",
               occurred_at: occurredAt, title: built.title, summary: built.summary,
-              payload_jsonb: { ...built.payload, time_context: timeContext }, user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
+              payload_jsonb: { ...built.payload, time_context: timeContext, companion_message: companionMessage }, user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
             }).select("id").single();
             if (drRow) { archivedTo = "data_records"; archivedId = drRow.id; }
           }
@@ -1457,6 +1478,7 @@ Deno.serve(async (req) => {
             message: `✓ 重试成功，已归档到${_retryDomain}`,
             notification: _retryNotif,
             time_context: timeContext,
+            companion_message: companionMessage,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       }
@@ -1484,6 +1506,7 @@ Deno.serve(async (req) => {
         message: "⚠ 重试仍未确定，请手动选择数据域归档",
         notification: "⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档",
         time_context: retryTimeContext,
+        companion_message: companionMessage,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
@@ -1555,6 +1578,7 @@ Deno.serve(async (req) => {
         message: !aiOk ? "⚠ AI 识别失败，已进入待处理" : "⚠ 未确定数据域，已进入待处理",
         notification: `${_stgPrimary}\n${todaySpendLine(_stgSpend)}`,
         time_context: timeContext,
+        companion_message: companionMessage,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -1622,6 +1646,7 @@ Deno.serve(async (req) => {
           message: domain ? "⚠ 已识别为内置数据域，请确认后归档" : "⚠ 未找到对应数据域，已进入待处理",
           notification: _bNotif,
           time_context: timeContext,
+          companion_message: companionMessage,
         }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
@@ -1707,6 +1732,7 @@ Deno.serve(async (req) => {
         message: `✓ ${domainNameFromKey(builtinKey) ?? "记录"}已归档`,
         notification: `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`,
         time_context: timeContext,
+        companion_message: companionMessage,
         data: row,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -1774,6 +1800,7 @@ Deno.serve(async (req) => {
               message: "该收入截图疑似已记录",
               notification: `🔁 该收入疑似已记录过\n${monthIncomeLine(_iSum2)}`,
               time_context: timeContext,
+              companion_message: companionMessage,
             }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
           }
         }
@@ -1855,6 +1882,7 @@ Deno.serve(async (req) => {
         message: "✓ 收入已记录",
         notification: `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`,
         time_context: timeContext,
+        companion_message: companionMessage,
         data: row,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -1903,6 +1931,7 @@ Deno.serve(async (req) => {
             ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
             notification: `🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`,
             time_context: timeContext,
+            companion_message: companionMessage,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       }
@@ -2044,6 +2073,7 @@ Deno.serve(async (req) => {
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
       notification: `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`,
       time_context: timeContext,
+      companion_message: companionMessage,
       data: row,
     }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
