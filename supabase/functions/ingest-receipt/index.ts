@@ -5,7 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import jpeg from "https://esm.sh/jpeg-js@0.4.4";
 import { decode as decodePng } from "https://esm.sh/fast-png@6.2.0";
 import { PROMPT } from "./prompts.ts";
-import { normalizeAiDate, normalizeAiDateTime } from "./time.ts";
+import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
 
 const MOONSHOT_MODEL    = "moonshot-v1-8k-vision-preview";
 const MOONSHOT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
@@ -853,6 +853,7 @@ async function createStagingRecord(
     errorMessage?: string | null;
     dispatcher?: DispatcherResult | null;
     userId?: string | null;
+    timeContext?: unknown;
   },
 ): Promise<{ id: string } | null> {
   const detectedDomainKey = isBuiltinDomain(payload.ai.domain_key)
@@ -881,7 +882,7 @@ async function createStagingRecord(
     detected_domain_name: detectedDomainName,
     confidence: payload.ai.confidence ?? 0,
     ai_summary: summaryParts.join(" · ") || "截图已进入中转站，等待确认",
-    extracted_json: payload.ai,
+    extracted_json: { ...payload.ai, time_context: payload.timeContext ?? null },
     raw_text: payload.dispatcher?.raw_text ?? null,
     routing_candidates: payload.dispatcher?.candidate_domains?.length
       ? payload.dispatcher.candidate_domains
@@ -890,6 +891,7 @@ async function createStagingRecord(
         : [],
     quality_report: {
       error_type: payload.errorType ?? null,
+      time_context: payload.timeContext ?? null,
       missing_fields: [],
       dispatcher: payload.dispatcher ? {
         source_app: payload.dispatcher.source_app,
@@ -1191,6 +1193,7 @@ Deno.serve(async (req) => {
     const isRetry = !!stagingRetryId;
     const rawText = normalizeText(form.get("ocr_text") ?? form.get("text") ?? form.get("raw_text"));
     const sourceApp = normalizeText(form.get("source_app") ?? form.get("app_name"));
+    const clientCapturedAt = form.get("client_captured_at") ?? form.get("client_upload_at") ?? form.get("shortcut_time") ?? form.get("captured_at");
     const imageFeatures = getImageFeatures(bytes, mime);
 
     // 2. 计算 hash 去重
@@ -1345,6 +1348,7 @@ Deno.serve(async (req) => {
 
     const normalizedAmount = normalizeAmount(ai.amount);
     const now = new Date();
+    const requestReceivedAt = now.toISOString();
     // Deno 运行在 UTC 环境，显式换算为 UTC+8 时间
     const chinaNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
     const today = chinaNow.toISOString().slice(0, 10);
@@ -1364,6 +1368,15 @@ Deno.serve(async (req) => {
     if (isRetry && stagingRetryId) {
       const retryResult = aiOk && (recordType !== "uncertain") && (ai.confidence ?? 0) >= 0.5;
       const retryCount = (await supabase.from("staging_records").select("retry_count").eq("id", stagingRetryId).maybeSingle())?.data?.retry_count ?? 0;
+      const retryOccurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
+      const retryOccurredAt = retryOccurredDateTime?.iso ?? null;
+      const retryTimeContext = buildTimeContext({
+        occurredAt: retryOccurredAt,
+        orderFinishedAt: retryOccurredAt,
+        clientCapturedAt,
+        requestReceivedAt,
+      });
+      const retryAiWithTimeContext = { ...ai, time_context: retryTimeContext };
 
       if (retryResult) {
         // 重试成功：按 recordType 归档
@@ -1371,6 +1384,13 @@ Deno.serve(async (req) => {
         let archivedId: string | null = null;
         const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
         const occurredAt = occurredDateTime?.iso ?? new Date().toISOString();
+        const timeContext = buildTimeContext({
+          occurredAt,
+          orderFinishedAt: occurredAt,
+          clientCapturedAt,
+          requestReceivedAt,
+        });
+        const aiWithTimeContext = { ...ai, time_context: timeContext };
         const recordDate = occurredDateTime?.date ?? today;
         const recordTime = occurredDateTime?.time ?? nowTime;
 
@@ -1389,7 +1409,7 @@ Deno.serve(async (req) => {
             const { data: drRow } = await supabase.from("data_records").insert({
               domain_id: domain.id, domain_key: builtinKey, domain_version: domain.version ?? "1.0",
               occurred_at: occurredAt, title: built.title, summary: built.summary,
-              payload_jsonb: built.payload, user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
+              payload_jsonb: { ...built.payload, time_context: timeContext }, user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
             }).select("id").single();
             if (drRow) { archivedTo = "data_records"; archivedId = drRow.id; }
           }
@@ -1418,7 +1438,7 @@ Deno.serve(async (req) => {
             record_type: recordType, occurred_at: occurredAt, status: "success",
             confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
             target_table: archivedTo, target_id: archivedId, staging_record_id: stagingRetryId,
-            ai_response: ai, model_provider: aiProvider, model_name: aiModel,
+            ai_response: aiWithTimeContext, model_provider: aiProvider, model_name: aiModel,
             raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
             prompt_version: "platform-v3-builtins-retry",
           });
@@ -1436,6 +1456,7 @@ Deno.serve(async (req) => {
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
             notification: _retryNotif,
+            time_context: timeContext,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       }
@@ -1452,7 +1473,7 @@ Deno.serve(async (req) => {
         image_hash: hash, image_url: path, image_type: ai.image_type,
         record_type: recordType, status: !aiOk ? "ai_error" : "pending",
         confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
-        staging_record_id: stagingRetryId, ai_response: ai,
+        staging_record_id: stagingRetryId, ai_response: retryAiWithTimeContext,
         error_message: aiErrorMessage, model_provider: aiProvider, model_name: aiModel,
         raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
         prompt_version: "platform-v3-builtins-retry",
@@ -1462,12 +1483,20 @@ Deno.serve(async (req) => {
         status: "staging", staging_status: "retry_failed",
         message: "⚠ 重试仍未确定，请手动选择数据域归档",
         notification: "⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档",
+        time_context: retryTimeContext,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
     const orderFinishedDateTime = normalizeAiDateTime(ai.order_finished_at) ?? occurredDateTime;
     const occurredAt = occurredDateTime?.iso ?? null;
     const orderFinishedAt = orderFinishedDateTime?.iso ?? occurredAt;
+    const timeContext = buildTimeContext({
+      occurredAt,
+      orderFinishedAt,
+      clientCapturedAt,
+      requestReceivedAt,
+    });
+    const aiWithTimeContext = { ...ai, time_context: timeContext };
     const recordDate = occurredDateTime?.date ?? today;
     const recordTime = occurredDateTime?.time ?? nowTime;
 
@@ -1485,6 +1514,7 @@ Deno.serve(async (req) => {
         errorMessage: aiErrorMessage,
         dispatcher,
         userId,
+        timeContext,
       });
       await writeAiLog(supabase, {
         image_hash: hash,
@@ -1504,7 +1534,7 @@ Deno.serve(async (req) => {
         status: !aiOk ? "ai_error" : "pending",
         confidence: ai.confidence ?? 0,
         duration_ms: Date.now() - startedAt,
-        ai_response: ai,
+        ai_response: aiWithTimeContext,
         raw_response: JSON.stringify({ dispatcher, vision_attempts: visionAttempts, timings: timings.snapshot() }),
         error_message: aiErrorMessage,
         model_provider: aiProvider,
@@ -1524,6 +1554,7 @@ Deno.serve(async (req) => {
         ai_ok: aiOk,
         message: !aiOk ? "⚠ AI 识别失败，已进入待处理" : "⚠ 未确定数据域，已进入待处理",
         notification: `${_stgPrimary}\n${todaySpendLine(_stgSpend)}`,
+        time_context: timeContext,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -1549,6 +1580,7 @@ Deno.serve(async (req) => {
             : `缺少字段或置信度不足：${missing.join(", ") || "confidence"}`,
           dispatcher,
           userId,
+          timeContext,
         });
         await writeAiLog(supabase, {
           image_hash: hash,
@@ -1569,7 +1601,7 @@ Deno.serve(async (req) => {
           status: "pending",
           confidence: ai.confidence ?? 0,
           duration_ms: Date.now() - startedAt,
-          ai_response: ai,
+          ai_response: aiWithTimeContext,
           raw_response: JSON.stringify({ dispatcher, vision_attempts: visionAttempts, timings: timings.snapshot() }),
           error_message: !domain ? `data_domains.${builtinKey} 不存在` : null,
           model_provider: aiProvider,
@@ -1589,6 +1621,7 @@ Deno.serve(async (req) => {
           ai_ok: aiOk,
           message: domain ? "⚠ 已识别为内置数据域，请确认后归档" : "⚠ 未找到对应数据域，已进入待处理",
           notification: _bNotif,
+          time_context: timeContext,
         }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
@@ -1624,7 +1657,7 @@ Deno.serve(async (req) => {
           status: "db_error",
           confidence: ai.confidence ?? 0,
           duration_ms: Date.now() - startedAt,
-          ai_response: ai,
+          ai_response: aiWithTimeContext,
           raw_response: JSON.stringify({ dispatcher, vision_attempts: visionAttempts, timings: timings.snapshot() }),
           error_message: dataErr.message,
           model_provider: aiProvider,
@@ -1657,7 +1690,7 @@ Deno.serve(async (req) => {
         status: "success",
         confidence: ai.confidence ?? 0,
         duration_ms: Date.now() - startedAt,
-        ai_response: ai,
+        ai_response: aiWithTimeContext,
         raw_response: JSON.stringify({ dispatcher, vision_attempts: visionAttempts, timings: timings.snapshot() }),
         error_message: aiErrorMessage,
         model_provider: aiProvider,
@@ -1673,6 +1706,7 @@ Deno.serve(async (req) => {
         ai_ok: aiOk,
         message: `✓ ${domainNameFromKey(builtinKey) ?? "记录"}已归档`,
         notification: `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`,
+        time_context: timeContext,
         data: row,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -1721,7 +1755,7 @@ Deno.serve(async (req) => {
               status: "duplicate",
               confidence: ai.confidence ?? 0,
               duration_ms: Date.now() - startedAt,
-              ai_response: ai,
+              ai_response: aiWithTimeContext,
               error_message: aiErrorMessage,
               model_provider: aiProvider,
               model_name: aiModel,
@@ -1739,6 +1773,7 @@ Deno.serve(async (req) => {
               ai_ok: aiOk,
               message: "该收入截图疑似已记录",
               notification: `🔁 该收入疑似已记录过\n${monthIncomeLine(_iSum2)}`,
+              time_context: timeContext,
             }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
           }
         }
@@ -1773,7 +1808,7 @@ Deno.serve(async (req) => {
         status: "db_error",
           confidence: ai.confidence ?? 0,
           duration_ms: Date.now() - startedAt,
-          ai_response: ai,
+          ai_response: aiWithTimeContext,
           error_message: incErr.message,
           model_provider: aiProvider,
           model_name: aiModel,
@@ -1803,7 +1838,7 @@ Deno.serve(async (req) => {
         status: "success",
         confidence: ai.confidence ?? 0,
         duration_ms: Date.now() - startedAt,
-        ai_response: ai,
+        ai_response: aiWithTimeContext,
         error_message: aiErrorMessage,
         model_provider: aiProvider,
         model_name: aiModel,
@@ -1819,6 +1854,7 @@ Deno.serve(async (req) => {
         ai_ok: aiOk,
         message: "✓ 收入已记录",
         notification: `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`,
+        time_context: timeContext,
         data: row,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -1854,7 +1890,7 @@ Deno.serve(async (req) => {
             duplicate_kind: duplicateKind, duplicate_ref_table: duplicateRefTable, duplicate_ref_id: duplicateRefId,
             target_table: "transactions", target_id: refLog.target_id, status: "duplicate",
             confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
-            ai_response: ai, model_provider: aiProvider, model_name: aiModel,
+            ai_response: aiWithTimeContext, model_provider: aiProvider, model_name: aiModel,
             raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
           });
           if (uploadedNewObject) {
@@ -1866,6 +1902,7 @@ Deno.serve(async (req) => {
             status: "duplicate", id: refLog.target_id, record_type: "expense",
             ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
             notification: `🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`,
+            time_context: timeContext,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       }
@@ -1947,7 +1984,7 @@ Deno.serve(async (req) => {
         status: "db_error",
         confidence: ai.confidence ?? 0,
         duration_ms: Date.now() - startedAt,
-        ai_response: ai,
+        ai_response: aiWithTimeContext,
         error_message: insErr.message,
         model_provider: aiProvider,
         model_name: aiModel,
@@ -1977,7 +2014,7 @@ Deno.serve(async (req) => {
       status: aiOk ? row.status : "ai_error",
       confidence: ai.confidence ?? 0,
       duration_ms: Date.now() - startedAt,
-      ai_response: ai,
+      ai_response: aiWithTimeContext,
       error_message: aiErrorMessage,
       model_provider: aiProvider,
       model_name: aiModel,
@@ -2006,6 +2043,7 @@ Deno.serve(async (req) => {
         ? `✓ 已记账（⚠ 3 分钟内有相同消费，请确认是否重复，参考 id: ${dupRefId}）`
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
       notification: `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`,
+      time_context: timeContext,
       data: row,
     }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
@@ -2016,4 +2054,5 @@ Deno.serve(async (req) => {
     });
   }
 });
+
 
