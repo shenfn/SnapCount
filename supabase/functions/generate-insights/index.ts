@@ -12,7 +12,7 @@
 // ════════════════════════════════════════════════════════════════════
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { MODE_GUIDES, SAFETY_RULES, WRITING_RULES, buildDomainHeuristics } from "./prompts.ts";
 
 const MOONSHOT_TEXT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";

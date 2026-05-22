@@ -1,9 +1,9 @@
 // 随手账 · Edge Function: ingest-receipt
 // 部署: supabase functions deploy ingest-receipt --no-verify-jwt
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import jpeg from "https://esm.sh/jpeg-js@0.4.4";
-import { decode as decodePng } from "https://esm.sh/fast-png@6.2.0";
+import { createClient } from "npm:@supabase/supabase-js@2.45.0";
+import jpeg from "npm:jpeg-js@0.4.4";
+import { decode as decodePng } from "npm:fast-png@6.2.0";
 import { PROMPT } from "./prompts.ts";
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
 
@@ -2054,5 +2054,6 @@ Deno.serve(async (req) => {
     });
   }
 });
+
 
 

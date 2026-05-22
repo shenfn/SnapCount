@@ -17,6 +17,8 @@ export interface TimeContext {
   event_time: string | null;
   event_time_source: "ai_occurred_at" | "ai_order_finished_at" | "fallback" | "unknown";
   client_captured_at: string | null;
+  client_captured_at_raw?: string | null;
+  client_captured_at_invalid_reason?: "too_old" | "too_future" | "unparsable" | null;
   request_received_at: string;
   reference_time: string;
   reference_time_source: "client_captured_at" | "request_received_at";
@@ -25,6 +27,9 @@ export interface TimeContext {
   is_backfill: boolean;
   confidence: number;
 }
+
+const MIN_VALID_CAPTURE_MS = Date.UTC(2010, 0, 1);
+const MAX_FUTURE_OFFSET_MS = 365 * 24 * 60 * 60 * 1000;
 
 export function normalizeAiDateTime(value: unknown): NormalizedAiDateTime | null {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -99,8 +104,28 @@ export function buildTimeContext(input: {
   requestReceivedAt: string;
   fallbackEventTime?: string | null;
 }): TimeContext {
+  const rawClient = typeof input.clientCapturedAt === "string" ? input.clientCapturedAt.trim() || null : null;
   const clientCaptured = normalizeAiDateTime(input.clientCapturedAt);
-  const referenceTime = clientCaptured?.iso ?? input.requestReceivedAt;
+  const requestMs = Date.parse(input.requestReceivedAt);
+  let clientIso: string | null = clientCaptured?.iso ?? null;
+  let invalidReason: TimeContext["client_captured_at_invalid_reason"] = null;
+  if (rawClient && !clientCaptured) {
+    invalidReason = "unparsable";
+  } else if (clientCaptured) {
+    const ms = Date.parse(clientCaptured.iso);
+    if (Number.isNaN(ms)) {
+      invalidReason = "unparsable";
+      clientIso = null;
+    } else if (ms < MIN_VALID_CAPTURE_MS) {
+      invalidReason = "too_old";
+      clientIso = null;
+    } else if (!Number.isNaN(requestMs) && ms - requestMs > MAX_FUTURE_OFFSET_MS) {
+      invalidReason = "too_future";
+      clientIso = null;
+    }
+  }
+
+  const referenceTime = clientIso ?? input.requestReceivedAt;
   const eventTime = input.occurredAt ?? input.orderFinishedAt ?? input.fallbackEventTime ?? null;
   const eventSource: TimeContext["event_time_source"] = input.occurredAt
     ? "ai_occurred_at"
@@ -113,10 +138,12 @@ export function buildTimeContext(input: {
   return {
     event_time: eventTime,
     event_time_source: eventSource,
-    client_captured_at: clientCaptured?.iso ?? null,
+    client_captured_at: clientIso,
+    client_captured_at_raw: rawClient,
+    client_captured_at_invalid_reason: invalidReason,
     request_received_at: input.requestReceivedAt,
     reference_time: referenceTime,
-    reference_time_source: clientCaptured ? "client_captured_at" : "request_received_at",
+    reference_time_source: clientIso ? "client_captured_at" : "request_received_at",
     ...relation,
   };
 }
