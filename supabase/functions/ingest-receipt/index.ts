@@ -1374,6 +1374,7 @@ Deno.serve(async (req) => {
       ai.companion_message = null;
     }
     const companionMessage: string | null = ai.companion_message;
+    const withCompanion = (text: string) => companionMessage ? `${text}\n${companionMessage}` : text;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
       ? ai.domain_key
@@ -1476,7 +1477,7 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
-            notification: _retryNotif,
+            notification: withCompanion(_retryNotif),
             time_context: timeContext,
             companion_message: companionMessage,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -1504,7 +1505,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         status: "staging", staging_status: "retry_failed",
         message: "⚠ 重试仍未确定，请手动选择数据域归档",
-        notification: "⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档",
+        notification: withCompanion("⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档"),
         time_context: retryTimeContext,
         companion_message: companionMessage,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -1576,7 +1577,7 @@ Deno.serve(async (req) => {
         id: staging?.id ?? null,
         ai_ok: aiOk,
         message: !aiOk ? "⚠ AI 识别失败，已进入待处理" : "⚠ 未确定数据域，已进入待处理",
-        notification: `${_stgPrimary}\n${todaySpendLine(_stgSpend)}`,
+        notification: withCompanion(`${_stgPrimary}\n${todaySpendLine(_stgSpend)}`),
         time_context: timeContext,
         companion_message: companionMessage,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -1644,7 +1645,7 @@ Deno.serve(async (req) => {
           record_type: builtinKey,
           ai_ok: aiOk,
           message: domain ? "⚠ 已识别为内置数据域，请确认后归档" : "⚠ 未找到对应数据域，已进入待处理",
-          notification: _bNotif,
+          notification: withCompanion(_bNotif),
           time_context: timeContext,
           companion_message: companionMessage,
         }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -1657,7 +1658,7 @@ Deno.serve(async (req) => {
         occurred_at: fallbackOccurredAt,
         title: built.title,
         summary: built.summary,
-        payload_jsonb: built.payload,
+        payload_jsonb: { ...built.payload, time_context: timeContext, companion_message: companionMessage },
         user_id: userId || null,
         source: "ai_scan",
         source_image_path: path,
@@ -1730,7 +1731,7 @@ Deno.serve(async (req) => {
         record_type: builtinKey,
         ai_ok: aiOk,
         message: `✓ ${domainNameFromKey(builtinKey) ?? "记录"}已归档`,
-        notification: `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`,
+        notification: withCompanion(`${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`),
         time_context: timeContext,
         companion_message: companionMessage,
         data: row,
@@ -1798,7 +1799,7 @@ Deno.serve(async (req) => {
               record_type: "income",
               ai_ok: aiOk,
               message: "该收入截图疑似已记录",
-              notification: `🔁 该收入疑似已记录过\n${monthIncomeLine(_iSum2)}`,
+              notification: withCompanion(`🔁 该收入疑似已记录过\n${monthIncomeLine(_iSum2)}`),
               time_context: timeContext,
               companion_message: companionMessage,
             }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -1880,7 +1881,7 @@ Deno.serve(async (req) => {
         record_type: "income",
         ai_ok: aiOk,
         message: "✓ 收入已记录",
-        notification: `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`,
+        notification: withCompanion(`💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`),
         time_context: timeContext,
         companion_message: companionMessage,
         data: row,
@@ -1929,7 +1930,7 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({
             status: "duplicate", id: refLog.target_id, record_type: "expense",
             ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
-            notification: `🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`,
+            notification: withCompanion(`🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`),
             time_context: timeContext,
             companion_message: companionMessage,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -2071,7 +2072,7 @@ Deno.serve(async (req) => {
       message: possibleDuplicate
         ? `✓ 已记账（⚠ 3 分钟内有相同消费，请确认是否重复，参考 id: ${dupRefId}）`
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
-      notification: `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`,
+      notification: withCompanion(`${_ePrimary}\n${todaySpendLine(_eDoneSum)}`),
       time_context: timeContext,
       companion_message: companionMessage,
       data: row,
