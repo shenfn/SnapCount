@@ -19,7 +19,7 @@ import {
 import {
   formatDate, formatMonthLabel, mapTransaction,
   incomeCatMap, catCodeMap, payAliasMap,
-  getLocalDateKey,
+  getLocalDateKey, localDateKeyOf,
 } from '../utils/helpers'
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
@@ -270,7 +270,7 @@ export function useStore() {
     function getGroupKey(item) {
       const raw = item.dateRaw
       if (!raw || raw.length < 10) return 'older'
-      const dateStr = raw.slice(0, 10)
+      const dateStr = localDateKeyOf(raw)
       if (dateStr === today) return 'today'
       if (dateStr === yesterday) return 'yesterday'
       const d = new Date(dateStr + 'T00:00:00')
@@ -840,7 +840,7 @@ export function useStore() {
         category: pendingModal.incomeCategory,
         source_name: source,
         amount: amt,
-        income_date: pendingModal.bill.dateRaw || new Date().toISOString().slice(0, 10),
+        income_date: pendingModal.bill.dateRaw || getLocalDateKey(),
         image_url: pendingModal.bill.image_path || null,
         image_hash: pendingModal.bill.image_hash || null,
         source: 'ai_scan',
@@ -894,7 +894,7 @@ export function useStore() {
     incomeModal.amount = ''
     incomeModal.source = ''
     incomeModal.note = ''
-    incomeModal.date = new Date().toISOString().slice(0, 10)
+    incomeModal.date = getLocalDateKey()
     incomeModal.imageUrl = null
     incomeModal.imagePath = null
     incomeModal.imageLoadError = false
@@ -909,7 +909,7 @@ export function useStore() {
     incomeModal.amount = String(record.amount)
     incomeModal.source = record.source || ''
     incomeModal.note = record.note || ''
-    incomeModal.date = record.dateRaw || new Date().toISOString().slice(0, 10)
+    incomeModal.date = record.dateRaw || getLocalDateKey()
     incomeModal.imagePath = record.image_path || record.image_url || null
     incomeModal.imageUrl = await getSignedImageUrl(incomeModal.imagePath)
     incomeModal.imageLoadError = !!incomeModal.imagePath && !incomeModal.imageUrl
@@ -1065,7 +1065,7 @@ export function useStore() {
     expenseModal.category = null
     expenseModal.payment = null
     expenseModal.note = ''
-    expenseModal.date = new Date().toISOString().slice(0, 10)
+    expenseModal.date = getLocalDateKey()
     expenseModal.time = ''
     expenseModal.imageUrl = null
     expenseModal.imagePath = null
@@ -1083,7 +1083,7 @@ export function useStore() {
     expenseModal.category = record.cat && record.cat !== '?' ? record.cat : null
     expenseModal.payment = record.payment && record.payment !== '?' ? record.payment : null
     expenseModal.note = record.note || ''
-    expenseModal.date = record.dateRaw || new Date().toISOString().slice(0, 10)
+    expenseModal.date = record.dateRaw || getLocalDateKey()
     expenseModal.time = record.time || ''
     expenseModal.imagePath = record.image_path || record.image_url || null
     expenseModal.imageUrl = await getSignedImageUrl(expenseModal.imagePath)
@@ -1220,7 +1220,7 @@ export function useStore() {
 
   function openUniversalModal(domainKey = 'sport') {
     const meta = getUniversalDomainMeta(domainKey)
-    resetUniversalModal(universalModal, domainKey, meta, new Date().toISOString().slice(0, 10))
+    resetUniversalModal(universalModal, domainKey, meta, getLocalDateKey())
     setUniversalModalInitial()
   }
 
@@ -1609,11 +1609,11 @@ export function useStore() {
   }
 
   function normalizeDateOnly(value) {
-    if (!value) return new Date().toISOString().slice(0, 10)
+    if (!value) return getLocalDateKey()
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
     const d = new Date(value)
-    if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10)
-    return d.toISOString().slice(0, 10)
+    if (Number.isNaN(d.getTime())) return getLocalDateKey()
+    return localDateKeyOf(d)
   }
 
   function openDomainPage(domainId) {

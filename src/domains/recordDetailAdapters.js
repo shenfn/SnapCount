@@ -1,4 +1,4 @@
-import { incomeCatMap } from '../utils/helpers'
+import { incomeCatMap, localDateKeyOf } from '../utils/helpers'
 import { formatDuration, readDurationAsMinutes } from '../utils/format'
 
 export function getRecordDetailFields(store, detailRecord) {
@@ -110,7 +110,7 @@ export function getRecordAiSummary(store, detailRecord, domainLabel) {
 
 function fmtAbsoluteDate(value) {
   if (!value) return null
-  const s = String(value).slice(0, 10)
+  const s = localDateKeyOf(value)
   const d = new Date(s + 'T00:00:00+08:00')
   if (Number.isNaN(d.getTime())) return null
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`

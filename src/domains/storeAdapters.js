@@ -1,4 +1,4 @@
-import { incomeCatMap } from '../utils/helpers'
+import { incomeCatMap, localDateKeyOf } from '../utils/helpers'
 import { getSystemDomainLabel } from './registry'
 
 export function buildTodaySummary({ bills, incomeRecords, dataRecords, stagingRecords, todayKey }) {
@@ -15,7 +15,7 @@ export function buildTodaySummary({ bills, incomeRecords, dataRecords, stagingRe
   const todaySleep = filterDataRecordsByDate(dataRecords, 'sleep', todayKey)
   const todayFood = filterDataRecordsByDate(dataRecords, 'food', todayKey)
   const todayIncome = incomeRecords.filter(record => record.dateRaw === todayKey)
-  const todayStaging = stagingRecords.filter(record => (record.occurredAt || record.createdAt || '').slice(0, 10) === todayKey)
+  const todayStaging = stagingRecords.filter(record => localDateKeyOf(record.occurredAt || record.createdAt) === todayKey)
 
   const pendingExpenseTotal = todayPendingBills.reduce((sum, bill) => sum + (bill.amount || 0), 0)
   const todayCalorieTotal = todayFood.reduce((sum, record) => sum + (Number(record.payload?.total_calorie_kcal) || 0), 0)
@@ -66,7 +66,7 @@ export function buildHomeTimeline({ stagingRecords, bills, incomeRecords, dataRe
     subtitle: item.summary,
     amountLabel: item.recordType === 'income' ? '+ 待确认' : item.recordType === 'expense' ? '- 待确认' : '待分类',
     dateLabel: item.occurredAt || item.createdAt,
-    dateRaw: (item.occurredAt || item.createdAt || '').slice(0, 10),
+    dateRaw: localDateKeyOf(item.occurredAt || item.createdAt),
     occurredTime: item.occurredAt,
     uploadTime: item.createdAt,
     imageUrl: item.imageUrl,
@@ -113,7 +113,7 @@ export function buildHomeTimeline({ stagingRecords, bills, incomeRecords, dataRe
       subtitle: item.summary || domain?.description || '通用数据域记录',
       amountLabel: domain?.shortName || '记录',
       dateLabel: item.occurredAt || item.createdAt,
-      dateRaw: (item.occurredAt || item.createdAt || '').slice(0, 10),
+      dateRaw: localDateKeyOf(item.occurredAt || item.createdAt),
       occurredTime: item.occurredAt,
       uploadTime: item.createdAt,
       imageUrl: null,
@@ -140,5 +140,5 @@ export function buildUniversalRecordTitle(domainKey, payload, record) {
 }
 
 function filterDataRecordsByDate(dataRecords, domainKey, dateKey) {
-  return dataRecords.filter(record => record.domainKey === domainKey && (record.occurredAt || '').slice(0, 10) === dateKey)
+  return dataRecords.filter(record => record.domainKey === domainKey && localDateKeyOf(record.occurredAt) === dateKey)
 }

@@ -1,3 +1,5 @@
+import { localDateKeyOf } from '../utils/helpers'
+
 export function resetUniversalModal(modal, domainKey, meta, today) {
   modal.open = true
   modal.mode = 'create'
@@ -37,7 +39,7 @@ export function hydrateUniversalModalFromRecord(modal, record, meta) {
   modal.primaryValue = readPrimaryValue(payload, meta)
   modal.dimension = payload[meta.dimensionKey] || modal.dimension || ''
   modal.note = record.summary || payload.note || ''
-  modal.date = (record.occurredAt || record.createdAt || new Date().toISOString()).slice(0, 10)
+  modal.date = localDateKeyOf(record.occurredAt || record.createdAt || new Date())
   modal.time = (record.occurredAt || '').slice(11, 16) || ''
   modal.imagePath = record.imagePath || null
 }
@@ -119,7 +121,7 @@ function getInitialFieldValue(field, record, payload, meta) {
   if (field.model === 'primaryValue') return readPrimaryValue(payload, meta)
   if (field.model === 'dimension') return payload[meta.dimensionKey] || field.defaultValue || ''
   if (field.model === 'note') return record.summary || payload.note || ''
-  if (field.model === 'date') return (record.occurredAt || record.createdAt || new Date().toISOString()).slice(0, 10)
+  if (field.model === 'date') return localDateKeyOf(record.occurredAt || record.createdAt || new Date())
   if (field.model === 'time') return (record.occurredAt || '').slice(11, 16) || ''
   const payloadValue = payload[toPayloadKey(field.model)]
   return payloadValue ?? field.defaultValue ?? ''

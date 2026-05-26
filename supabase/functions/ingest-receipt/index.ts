@@ -451,6 +451,25 @@ function normalizeDateOnlyValue(value: unknown): string | null {
   return dt?.date ?? null;
 }
 
+function normalizeSleepClockTime(value: unknown, dateHint: string | null): string | null {
+  const normalized = normalizeAiDateTime(value);
+  if (normalized) return normalized.iso;
+  if (typeof value !== "string" || !dateHint) return null;
+  const text = value.trim();
+  const clock = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!clock) return null;
+  const [, hh, mm, ss] = clock;
+  return `${dateHint}T${hh.padStart(2, "0")}:${mm}:${(ss ?? "00").padStart(2, "0")}+08:00`;
+}
+
+function normalizeSleepStartAt(startAt: string | null, wakeAt: string | null): string | null {
+  if (!startAt || !wakeAt) return startAt;
+  const startMs = Date.parse(startAt);
+  const wakeMs = Date.parse(wakeAt);
+  if (Number.isNaN(startMs) || Number.isNaN(wakeMs) || startMs <= wakeMs) return startAt;
+  return new Date(startMs - 24 * 60 * 60 * 1000).toISOString();
+}
+
 function normalizeRecordKind(value: unknown): "cash_snapshot" | "liability_snapshot" | null {
   const text = normalizeString(value);
   if (text === "cash_snapshot" || text === "liability_snapshot") return text;
@@ -533,11 +552,16 @@ function buildBuiltinPayload(ai: AIResult): {
     const sleepHours = normalizeNumber(payload.sleep_hours);
     const sleepMinutes = parseDurationMinutes(payload.sleep_minutes);
     const score = normalizeNumber(payload.quality_score);
+    const occurredDate = normalizeDateOnlyValue(ai.occurred_at) ?? normalizeDateOnlyValue(payload.wake_at) ?? normalizeDateOnlyValue(payload.sleep_start_at);
+    const wakeAt = normalizeSleepClockTime(payload.wake_at, occurredDate);
+    const sleepStartAt = normalizeSleepStartAt(normalizeSleepClockTime(payload.sleep_start_at, occurredDate), wakeAt);
     const normalizedSleepHours = sleepHours ?? (sleepMinutes !== null ? Math.round((sleepMinutes / 60) * 100) / 100 : null);
     const normalizedSleepMinutes = sleepMinutes ?? (normalizedSleepHours !== null ? Math.round(normalizedSleepHours * 60) : null);
     if (normalizedSleepMinutes === null) missingFields.push("sleep_minutes");
     payload.sleep_hours = normalizedSleepHours;
     payload.sleep_minutes = normalizedSleepMinutes;
+    if (wakeAt) payload.wake_at = wakeAt;
+    if (sleepStartAt) payload.sleep_start_at = sleepStartAt;
     payload.quality_score = score;
     payload.quality_level = normalizeString(payload.quality_level) ?? qualityLevelFromScore(score);
     title = normalizeString(ai.title) ?? "夜间睡眠";

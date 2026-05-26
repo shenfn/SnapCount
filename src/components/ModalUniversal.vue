@@ -95,9 +95,10 @@
 import { computed, inject } from 'vue'
 import { useBottomSheet } from '../composables/useBottomSheet'
 import DurationInput from './DurationInput.vue'
+import { getLocalDateKey } from '../utils/helpers'
 
 const store = inject('store')
-const today = new Date().toISOString().slice(0, 10)
+const today = getLocalDateKey()
 
 const sheet = useBottomSheet(
   computed(() => store.universalModal.open),

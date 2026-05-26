@@ -5,6 +5,16 @@ export function getLocalDateKey(date = new Date()) {
   return `${year}-${month}-${day}`
 }
 
+export function localDateKeyOf(value) {
+  if (!value) return ''
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : getLocalDateKey(value)
+  const text = String(value)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
+  const d = new Date(text)
+  if (Number.isNaN(d.getTime())) return text.slice(0, 10)
+  return getLocalDateKey(d)
+}
+
 export function buildScopedDayKey(year, month, day = new Date().getDate()) {
   const daysInMonth = new Date(year, month, 0).getDate()
   const safeDay = Math.min(day, daysInMonth)

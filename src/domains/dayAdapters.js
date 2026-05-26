@@ -194,7 +194,7 @@ function parseDateKey(dateKey) {
 function datePart(value) {
   if (!value) return ''
   const text = String(value)
-  if (!text.includes('T')) return text.slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
   const d = new Date(text)
   if (Number.isNaN(d.getTime())) return text.slice(0, 10)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

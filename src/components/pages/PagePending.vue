@@ -196,7 +196,7 @@
 
 <script setup>
 import { computed, inject } from 'vue'
-import { formatDateTimeLabel, getLocalDateKey } from '../../utils/helpers'
+import { formatDateTimeLabel, getLocalDateKey, localDateKeyOf } from '../../utils/helpers'
 import { getSystemDomainLabel } from '../../domains/registry'
 
 const store = inject('store')
@@ -228,7 +228,7 @@ function groupByDate(items, dateField) {
   const groups = {}
   items.forEach(item => {
     const raw = item[dateField] || item.createdAt
-    const key = String(raw || '').slice(0, 10)
+    const key = localDateKeyOf(raw)
     if (!key || key.length < 10) {
       if (!groups['未知日期']) groups['未知日期'] = []
       groups['未知日期'].push(item)

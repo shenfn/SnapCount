@@ -88,8 +88,9 @@
 <script setup>
 import { computed, inject } from 'vue'
 import { useBottomSheet } from '../composables/useBottomSheet'
+import { getLocalDateKey } from '../utils/helpers'
 const store = inject('store')
-const today = new Date().toISOString().slice(0, 10)
+const today = getLocalDateKey()
 
 const sheet = useBottomSheet(
   computed(() => store.incomeModal.open),
