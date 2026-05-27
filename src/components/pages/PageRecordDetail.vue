@@ -83,6 +83,14 @@
         </div>
       </div>
 
+      <div v-if="companionMessage" class="record-detail-companion">
+        <div class="record-detail-companion-mark">💬</div>
+        <div>
+          <div class="record-detail-companion-title">AI 陪伴</div>
+          <div class="record-detail-companion-text">{{ companionMessage }}</div>
+        </div>
+      </div>
+
       <div class="record-detail-section">
         <div class="record-detail-section-title">AI 摘要</div>
         <div class="record-detail-ai-summary">{{ aiSummary }}</div>
@@ -155,5 +163,10 @@ const sourceLabel = computed(() => {
 
 const fields = computed(() => getRecordDetailFields(store, record.value))
 const foodDishes = computed(() => getRecordFoodDishes(record.value))
+const companionMessage = computed(() => {
+  const raw = record.value?.raw
+  if (!raw) return ''
+  return raw.companionMessage || raw.companion_message || raw.payload?.companion_message || ''
+})
 const aiSummary = computed(() => getRecordAiSummary(store, record.value, domainLabel.value))
 </script>

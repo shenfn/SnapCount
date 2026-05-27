@@ -91,6 +91,7 @@ export function mapTransaction(t) {
     transport_type: t.transport_type,
     note: t.note || '',
     source: t.source || 'manual',
+    companionMessage: t.companion_message || '',
   }
 }
 

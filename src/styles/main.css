@@ -1428,6 +1428,40 @@ body {
   color: var(--text2);
 }
 
+.record-detail-companion {
+  margin-top: 14px;
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(45, 106, 79, 0.14);
+  background: linear-gradient(135deg, rgba(45, 106, 79, 0.08), rgba(255, 255, 255, 0.92));
+  box-shadow: var(--shadow-sm);
+}
+
+.record-detail-companion-mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(45, 106, 79, 0.12);
+  flex: 0 0 auto;
+}
+
+.record-detail-companion-title {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--brand);
+}
+
+.record-detail-companion-text {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text1);
+}
+
 .badge-income {
   background: rgba(21, 101, 192, 0.12);
   color: #1565c0;

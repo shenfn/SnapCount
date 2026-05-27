@@ -550,6 +550,7 @@ export function useStore() {
         image_url: r.image_url,
         image_path: r.image_url,
         sourceType: r.source || 'manual',
+        companionMessage: r.companion_message || '',
       }))
 
       const { data: recentIncs, error: recentIncErr } = await sb.from('income_records')
@@ -572,6 +573,7 @@ export function useStore() {
         image_url: r.image_url,
         image_path: r.image_url,
         sourceType: r.source || 'manual',
+        companionMessage: r.companion_message || '',
       }))
 
       const { data: universalRows, error: universalErr } = await sb.from('data_records')
@@ -595,6 +597,7 @@ export function useStore() {
           title: r.title,
           summary: r.summary,
           payload: r.payload_jsonb || {},
+          companionMessage: r.payload_jsonb?.companion_message || '',
           imagePath: r.source_image_path,
           imageHash: r.source_image_hash,
           stagingRecordId: r.staging_record_id,
@@ -632,6 +635,7 @@ export function useStore() {
         lastErrorType: r.last_error_type,
         lastErrorMessage: r.last_error_message,
         extracted: r.extracted_json || {},
+        companionMessage: r.companion_message || r.extracted_json?.companion_message || '',
         retryCount: r.retry_count || 0,
         targetRecordId: r.target_record_id,
         resolvedAction: r.resolved_action,
@@ -668,6 +672,7 @@ export function useStore() {
         targetRecordId: r.target_record_id,
         confidence: Number(r.confidence || 0),
         summary: r.ai_summary || r.failure_reason || '',
+        companionMessage: r.companion_message || r.extracted_json?.companion_message || '',
         failureReason: r.failure_reason,
         resolvedAction: r.resolved_action,
         discardReason: r.discard_reason,

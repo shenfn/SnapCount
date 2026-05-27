@@ -921,6 +921,7 @@ async function createStagingRecord(
     confidence: payload.ai.confidence ?? 0,
     ai_summary: summaryParts.join(" · ") || "截图已进入中转站，等待确认",
     extracted_json: { ...payload.ai, time_context: payload.timeContext ?? null },
+    companion_message: payload.ai.companion_message ?? null,
     raw_text: payload.dispatcher?.raw_text ?? null,
     routing_candidates: payload.dispatcher?.candidate_domains?.length
       ? payload.dispatcher.candidate_domains
@@ -1459,6 +1460,7 @@ Deno.serve(async (req) => {
             amount: normalizedAmount ?? 0.01, category: incomeCat,
             source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
             income_date: recordDate, image_url: path, image_hash: hash, user_id: userId || null, source: "ai_scan",
+            companion_message: companionMessage,
           }).select("id").single();
           if (incRow) { archivedTo = "income_records"; archivedId = incRow.id; }
         } else if (builtinKey) {
@@ -1481,6 +1483,7 @@ Deno.serve(async (req) => {
             payment_method: ai.payment_method, status: isComplete ? "done" : "pending",
             image_url: path, image_hash: hash,
             transaction_date: recordDate, transaction_time: recordTime, user_id: userId || null, source: "ai_scan",
+            companion_message: companionMessage,
           }).select("id").single();
           if (txRow) { archivedTo = "transactions"; archivedId = txRow.id; }
         }
@@ -1854,6 +1857,7 @@ Deno.serve(async (req) => {
         user_id: userId || null,
         source: "ai_scan",
         note: ai.platform ? `来自${ai.platform}截图识别` : "截图识别收入",
+        companion_message: companionMessage,
       }).select().single();
       timings.mark("db_insert");
 
@@ -2032,6 +2036,7 @@ Deno.serve(async (req) => {
       transaction_date: recordDate,
       transaction_time: recordTime,
       source: "ai_scan",
+      companion_message: companionMessage,
     }).select().single();
     timings.mark("db_insert");
 
