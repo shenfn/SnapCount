@@ -134,6 +134,7 @@ export function useStore() {
     imagePath: null,
     imageUrl: null,
     imageLoadError: false,
+    originalPayload: null,
   })
 
   const deleteConfirm = reactive({

@@ -75,7 +75,11 @@ export function useBottomSheet(isOpen, close, options = {}) {
     isClosing.value = true
     swipeDir.value = direction
     sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
-    sheetEl.value.style.transform = 'translateY(110%)'
+    if (direction === 'down') {
+      sheetEl.value.style.transform = 'translateY(110%)'
+    } else if (direction === 'right') {
+      sheetEl.value.style.transform = 'translateX(110%)'
+    }
     setTimeout(() => {
       if (hasChanges()) {
         showUnsaved.value = true
@@ -109,10 +113,21 @@ export function useBottomSheet(isOpen, close, options = {}) {
   function onTouchMove(e) {
     if (isClosing.value) return
     const deltaY = e.touches[0].clientY - touchStartY
+    const deltaX = e.touches[0].clientX - touchStartX
+    const absX = Math.abs(deltaX)
     const absY = Math.abs(deltaY)
-    if (absY < 8) return
+    if (absX < 8 && absY < 8) return
 
-    if (deltaY > 0) {
+    if (deltaX > 0 && absX > absY * 1.5 && absX > 20) {
+      if (isInteractiveTarget(e.target)) return
+      e.preventDefault()
+      isSwiping.value = true
+      swipeDir.value = 'right'
+      if (sheetEl.value) sheetEl.value.style.transform = `translateX(${Math.min(absX, window.innerWidth * 0.6)}px)`
+      return
+    }
+
+    if (absY > absX * 1.2 && deltaY > 0) {
       if (!isScrollAtTop()) return
       if (isInteractiveTarget(e.target)) return
       e.preventDefault()
@@ -129,7 +144,15 @@ export function useBottomSheet(isOpen, close, options = {}) {
       return
     }
 
-    if (swipeDir.value === 'down') {
+    if (swipeDir.value === 'right') {
+      const deltaX = e.changedTouches[0].clientX - touchStartX
+      const velocity = deltaX / Math.max(1, Date.now() - touchStartTime)
+      if (deltaX > 80 || velocity > 0.4) animateClose('right')
+      else {
+        sheetEl.value.style.transition = 'transform 0.28s cubic-bezier(0.32,0,0.67,0)'
+        sheetEl.value.style.transform = ''
+      }
+    } else if (swipeDir.value === 'down') {
       const deltaY = e.changedTouches[0].clientY - touchStartY
       const velocity = deltaY / Math.max(1, Date.now() - touchStartTime)
       const distanceThreshold = Math.max(100, window.innerHeight * 0.22)

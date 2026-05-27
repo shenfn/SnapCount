@@ -1098,6 +1098,7 @@ body {
 .amount-input,
 .amount-edit-input {
   width: 100%;
+  box-sizing: border-box;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.88);
@@ -2598,6 +2599,7 @@ body {
   display: flex;
   flex-direction: column;
   animation: slideUp 0.28s ease;
+  overflow: hidden;
 }
 
 @keyframes slideUp {
@@ -2653,9 +2655,12 @@ body {
 
 .sheet-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 12px;
+  overscroll-behavior: contain;
 }
 
 .sheet-footer {
@@ -2711,6 +2716,8 @@ body {
 
 .sel-section {
   padding: 14px 20px 0;
+  box-sizing: border-box;
+  max-width: 100%;
 }
 
 .sel-label {

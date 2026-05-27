@@ -21,6 +21,7 @@ export function resetUniversalModal(modal, domainKey, meta, today) {
   modal.imagePath = null
   modal.imageUrl = null
   modal.imageLoadError = false
+  modal.originalPayload = null
 }
 
 function timePartOf(value) {
@@ -59,6 +60,7 @@ export function hydrateUniversalModalFromRecord(modal, record, meta) {
   modal.note = record.summary || payload.note || ''
   modal.date = localDateKeyOf(record.occurredAt || record.createdAt || new Date())
   modal.time = (record.occurredAt || '').slice(11, 16) || ''
+  modal.originalPayload = { ...payload }
   if (record.domainKey === 'sleep') {
     modal.sleepStartTime = timePartOf(payload.sleep_start_at)
     modal.wakeTime = timePartOf(payload.wake_at || record.occurredAt)
@@ -119,6 +121,7 @@ export function buildUniversalRecordDraft(modal, meta) {
   const occurredAt = wakeAt || `${modal.date}T${(modal.time ? modal.time + ':00' : '12:00:00')}+08:00`
 
   const payload = {
+    ...(modal.originalPayload || {}),
     [meta.primaryKey]: primary,
     [meta.dimensionKey]: dimensionValue,
     note: noteValue || null,
