@@ -23,6 +23,24 @@ export function resetUniversalModal(modal, domainKey, meta, today) {
   modal.imageLoadError = false
 }
 
+function timePartOf(value) {
+  if (!value || typeof value !== 'string') return ''
+  return value.slice(11, 16)
+}
+
+function buildLocalDateTime(date, time) {
+  if (!date || !time) return null
+  return `${date}T${time}:00+08:00`
+}
+
+function normalizeSleepStartAt(startAt, wakeAt) {
+  if (!startAt || !wakeAt) return startAt
+  const startMs = Date.parse(startAt)
+  const wakeMs = Date.parse(wakeAt)
+  if (Number.isNaN(startMs) || Number.isNaN(wakeMs) || startMs <= wakeMs) return startAt
+  return new Date(startMs - 24 * 60 * 60 * 1000).toISOString()
+}
+
 export function hydrateUniversalModalFromRecord(modal, record, meta) {
   const payload = record.payload || {}
 
@@ -41,6 +59,10 @@ export function hydrateUniversalModalFromRecord(modal, record, meta) {
   modal.note = record.summary || payload.note || ''
   modal.date = localDateKeyOf(record.occurredAt || record.createdAt || new Date())
   modal.time = (record.occurredAt || '').slice(11, 16) || ''
+  if (record.domainKey === 'sleep') {
+    modal.sleepStartTime = timePartOf(payload.sleep_start_at)
+    modal.wakeTime = timePartOf(payload.wake_at || record.occurredAt)
+  }
   modal.imagePath = record.imagePath || null
 }
 
@@ -92,7 +114,9 @@ export function buildUniversalRecordDraft(modal, meta) {
   const dimensionValue = String(modal.dimension || '').trim()
   const noteValue = String(modal.note || '').trim()
   const title = String(modal.title || '').trim() || dimensionValue || meta.defaultTitle
-  const occurredAt = `${modal.date}T${(modal.time ? modal.time + ':00' : '12:00:00')}+08:00`
+  const wakeAt = modal.domainKey === 'sleep' ? buildLocalDateTime(modal.date, modal.wakeTime) : null
+  const sleepStartAt = modal.domainKey === 'sleep' ? normalizeSleepStartAt(buildLocalDateTime(modal.date, modal.sleepStartTime), wakeAt) : null
+  const occurredAt = wakeAt || `${modal.date}T${(modal.time ? modal.time + ':00' : '12:00:00')}+08:00`
 
   const payload = {
     [meta.primaryKey]: primary,
@@ -102,10 +126,17 @@ export function buildUniversalRecordDraft(modal, meta) {
   }
 
   for (const field of meta.formFields || []) {
-    if (['title', 'primaryValue', 'dimension', 'note', 'date', 'time'].includes(field.model)) continue
+    if (['title', 'primaryValue', 'dimension', 'note', 'date', 'time', 'sleepStartTime', 'wakeTime'].includes(field.model)) continue
     const raw = modal[field.model]
     const value = normalizeExtraFieldValue(raw, field)
     if (value !== undefined) payload[toPayloadKey(field.model)] = value
+  }
+
+  if (modal.domainKey === 'sleep') {
+    payload.sleep_minutes = Math.round(primary)
+    payload.sleep_hours = Math.round((primary / 60) * 100) / 100
+    payload.sleep_start_at = sleepStartAt
+    payload.wake_at = wakeAt
   }
 
   return {

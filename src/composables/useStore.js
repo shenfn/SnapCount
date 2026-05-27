@@ -129,6 +129,8 @@ export function useStore() {
     note: '',
     date: '',
     time: '',
+    sleepStartTime: '',
+    wakeTime: '',
     imagePath: null,
     imageUrl: null,
     imageLoadError: false,
@@ -1295,6 +1297,9 @@ export function useStore() {
         }
       }
       showFlash('✓ 记录已更新')
+      if (detailRecord.value?.kind === 'universal' && detailRecord.value.id === universalModal.id) {
+        await refreshDetailRecord()
+      }
     } else {
       const { data: newRow, error } = await sb.from('data_records')
         .insert({ ...body, user_id: currentUserId.value })
