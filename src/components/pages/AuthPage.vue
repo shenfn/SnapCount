@@ -11,6 +11,10 @@
       <button :class="{ active: mode === 'register' }" @click="mode = 'register'">注册</button>
     </div>
 
+    <div v-if="isWechatBrowser" class="auth-browser-warning">
+      当前在微信内置浏览器中，注册/登录可能失败。请点击右上角「...」选择「在浏览器中打开」。
+    </div>
+
     <form class="auth-form" @submit.prevent="submit">
       <input v-model="email" type="email" class="auth-input" placeholder="邮箱地址" autocomplete="email" required>
       <input v-model="password" type="password" class="auth-input" placeholder="密码（至少6位）" autocomplete="current-password" minlength="6" required>
@@ -45,6 +49,7 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const errorMsg = ref('')
+const isWechatBrowser = /MicroMessenger/i.test(typeof navigator === 'undefined' ? '' : navigator.userAgent || '')
 
 // 登录态/会话恢复统一由 App.vue 的 onAuthStateChange 监听处理，
 // 这里不再自行调用 loadData()，避免与 App.vue 产生竞态。

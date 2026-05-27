@@ -3061,6 +3061,17 @@ body {
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
+.auth-browser-warning {
+  margin: 14px 20px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(255, 251, 235, 0.95);
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .auth-form {
   padding: 20px;
   display: flex;
