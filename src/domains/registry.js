@@ -364,6 +364,7 @@ const BUILTIN_SCHEMAS = {
     facts: [
       { key: 'amount', label: '金额', type: 'number', unit: '元', priority: 1 },
       { key: 'minimum_payment', label: '最低还款', type: 'number', unit: '元', optional: true },
+      { key: 'snapshot_balance', label: '快照余额', type: 'number', unit: '元', optional: true },
     ],
     dimensions: [
       { key: 'record_kind', label: '记录类型', priority: 1 },
@@ -371,6 +372,10 @@ const BUILTIN_SCHEMAS = {
       { key: 'account_type', label: '账户类型', priority: 3 },
       { key: 'due_date', label: '还款日', priority: 4, optional: true },
       { key: 'bill_day', label: '每月还款日', priority: 5, optional: true },
+      { key: 'account_snapshot_kind', label: '快照类型', priority: 6, optional: true },
+      { key: 'institution', label: '机构', priority: 7, optional: true },
+      { key: 'last4', label: '尾号', priority: 8, optional: true },
+      { key: 'linked_account_id', label: '关联账户', priority: 9, optional: true },
     ],
   },
 }

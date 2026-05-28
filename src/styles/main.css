@@ -3072,6 +3072,74 @@ body {
   line-height: 1.55;
 }
 
+.wallet-account-panel,
+.wallet-snapshot-action-panel {
+  margin: 0 16px 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.wallet-account-section {
+  display: grid;
+  gap: 10px;
+}
+
+.wallet-account-section-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.wallet-account-empty {
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--bg-card);
+  color: var(--text2);
+  font-size: 13px;
+}
+
+.wallet-account-card,
+.wallet-snapshot-action-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: var(--bg-card);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.wallet-account-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.wallet-account-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.wallet-account-value {
+  color: #7c3aed;
+  font-size: 16px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.wallet-snapshot-action-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .auth-form {
   padding: 20px;
   display: flex;

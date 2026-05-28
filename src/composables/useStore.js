@@ -21,6 +21,7 @@ import {
   incomeCatMap, catCodeMap, payAliasMap,
   getLocalDateKey, localDateKeyOf,
 } from '../utils/helpers'
+import { mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
 function humanizeDbError(err) {
@@ -54,6 +55,8 @@ export function useStore() {
   const stagingRecords = ref([])
   const processedStagingRecords = ref([])
   const dataRecords = ref([])
+  const accounts = ref([])
+  const walletAccountCreatingSourceIds = new Set()
 
   const currentFilter = ref('all')
   const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
@@ -590,22 +593,41 @@ export function useStore() {
         console.warn('加载通用记录失败:', universalErr.message)
         dataRecords.value = []
       } else {
-        dataRecords.value = (universalRows || []).map(r => ({
-          id: r.id,
-          domainId: r.domain_id,
-          domainKey: r.domain_key,
-          domainVersion: r.domain_version || '1.0',
-          occurredAt: r.occurred_at,
-          createdAt: r.created_at,
-          title: r.title,
-          summary: r.summary,
-          payload: r.payload_jsonb || {},
-          companionMessage: r.payload_jsonb?.companion_message || '',
-          imagePath: r.source_image_path,
-          imageHash: r.source_image_hash,
-          stagingRecordId: r.staging_record_id,
-          source: r.source || 'staging',
-        }))
+        dataRecords.value = (universalRows || []).map(r => {
+          const payload = r.payload_jsonb || {}
+          return {
+            id: r.id,
+            domainId: r.domain_id,
+            domainKey: r.domain_key,
+            domainVersion: r.domain_version || '1.0',
+            occurredAt: r.occurred_at,
+            createdAt: r.created_at,
+            title: r.title,
+            summary: r.summary,
+            payload: {
+              ...payload,
+              linked_account_id: r.linked_account_id || payload.linked_account_id || null,
+              account_snapshot_kind: r.account_snapshot_kind || payload.account_snapshot_kind || null,
+              snapshot_balance: r.snapshot_balance ?? payload.snapshot_balance ?? null,
+            },
+            companionMessage: payload?.companion_message || '',
+            imagePath: r.source_image_path,
+            imageHash: r.source_image_hash,
+            stagingRecordId: r.staging_record_id,
+            source: r.source || 'staging',
+          }
+        })
+      }
+
+      const { data: accountRows, error: accountErr } = await sb.from('accounts')
+        .select('*')
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true })
+      if (accountErr) {
+        console.warn('加载账户失败:', accountErr.message)
+        accounts.value = []
+      } else {
+        accounts.value = (accountRows || []).map(mapAccountRow)
       }
 
       const { data: staging, error: stagingErr } = await sb.from('staging_records')
@@ -1619,6 +1641,195 @@ export function useStore() {
     return buildUniversalRecordTitleFromAdapter(domainKey, payload, record)
   }
 
+  function walletSnapshotKindOf(record) {
+    const payload = record?.payload || {}
+    if (payload.account_snapshot_kind === 'asset' || payload.account_snapshot_kind === 'liability') return payload.account_snapshot_kind
+    return payload.record_kind === 'liability_snapshot' ? 'liability' : 'asset'
+  }
+
+  function accountTypeFromWalletSnapshot(record) {
+    const payload = record?.payload || {}
+    const normalized = normalizeAccountType(payload.account_type)
+    if (normalized !== 'other') return normalized
+    return walletSnapshotKindOf(record) === 'liability' ? 'credit_line' : 'wallet_balance'
+  }
+
+  function amountFromWalletSnapshot(record) {
+    const payload = record?.payload || {}
+    const value = payload.snapshot_balance ?? payload.amount
+    const amount = Number(value)
+    return Number.isFinite(amount) && amount >= 0 ? amount : 0
+  }
+
+  async function createAccountFromWalletSnapshot(record) {
+    if (!record || record.domainKey !== 'wallet') {
+      showFlash('只能从钱包快照创建账户')
+      return
+    }
+    if (!currentUserId.value) {
+      showFlash('请先登录后再创建账户')
+      return
+    }
+    const payload = record.payload || {}
+    if (payload.linked_account_id) {
+      showFlash('这条快照已经关联账户')
+      return
+    }
+    if (walletAccountCreatingSourceIds.has(record.id)) {
+      showFlash('账户正在创建中，请勿重复点击')
+      return
+    }
+    const localExisting = accounts.value.find(account => account.sourceRecordTable === 'data_records' && account.sourceRecordId === record.id)
+    if (localExisting) {
+      await linkWalletSnapshotToAccount(record, localExisting.id)
+      return
+    }
+    const amount = amountFromWalletSnapshot(record)
+    const now = new Date().toISOString()
+    const snapshotAt = record.occurredAt || record.createdAt || now
+    const body = {
+      user_id: currentUserId.value,
+      name: payload.account_name || record.title || '未命名账户',
+      type: accountTypeFromWalletSnapshot(record),
+      institution: payload.institution || payload.account_name || null,
+      last4: payload.last4 && /^\d{4}$/.test(String(payload.last4)) ? String(payload.last4) : null,
+      currency: 'CNY',
+      initial_balance: amount,
+      current_balance: amount,
+      snapshot_balance: amount,
+      snapshot_at: snapshotAt,
+      source_record_table: 'data_records',
+      source_record_id: record.id,
+    }
+
+    walletAccountCreatingSourceIds.add(record.id)
+    try {
+      const { data: existingRows, error: existingErr } = await sb.from('accounts')
+        .select('*')
+        .eq('source_record_table', 'data_records')
+        .eq('source_record_id', record.id)
+        .eq('user_id', currentUserId.value)
+        .order('created_at', { ascending: true })
+        .limit(1)
+      if (existingErr) {
+        alert('检查账户是否已存在失败：' + humanizeDbError(existingErr))
+        return
+      }
+      if (existingRows?.length) {
+        const existingAccount = mapAccountRow(existingRows[0])
+        if (!accounts.value.some(account => account.id === existingAccount.id)) accounts.value.unshift(existingAccount)
+        await linkWalletSnapshotToAccount(record, existingAccount.id)
+        return
+      }
+
+      const { data: accountRow, error: accountErr } = await sb.from('accounts')
+        .insert(body)
+        .select('*')
+        .single()
+      if (accountErr) {
+        alert('创建账户失败：' + humanizeDbError(accountErr))
+        return
+      }
+
+      if (amount > 0) {
+        const { error: entryErr } = await sb.from('account_entries').insert({
+          user_id: currentUserId.value,
+          account_id: accountRow.id,
+          direction: walletSnapshotKindOf(record) === 'liability' ? 'out' : 'in',
+          amount,
+          entry_type: 'snapshot_initialization',
+          source_table: 'data_records',
+          source_id: record.id,
+          occurred_at: snapshotAt,
+          note: '由钱包快照初始化账户余额',
+        })
+        if (entryErr) {
+          alert('账户已创建，但初始化流水失败：' + humanizeDbError(entryErr))
+          await loadData(0, true)
+          return
+        }
+      }
+
+      const linkedPayload = {
+        ...payload,
+        linked_account_id: accountRow.id,
+        account_snapshot_kind: walletSnapshotKindOf(record),
+        snapshot_balance: amount,
+      }
+      const { error: linkErr } = await sb.from('data_records')
+        .update({
+          linked_account_id: accountRow.id,
+          account_snapshot_kind: walletSnapshotKindOf(record),
+          snapshot_balance: amount,
+          snapshot_at: snapshotAt,
+          payload_jsonb: linkedPayload,
+        })
+        .eq('id', record.id)
+      if (linkErr) {
+        alert('账户已创建，但关联快照失败：' + humanizeDbError(linkErr))
+        await loadData(0, true)
+        return
+      }
+
+      accounts.value.unshift(mapAccountRow(accountRow))
+      const idx = dataRecords.value.findIndex(item => item.id === record.id)
+      if (idx >= 0) {
+        dataRecords.value[idx] = {
+          ...dataRecords.value[idx],
+          payload: linkedPayload,
+        }
+      }
+      showFlash('✓ 已从快照创建账户')
+    } finally {
+      walletAccountCreatingSourceIds.delete(record.id)
+    }
+  }
+
+  async function linkWalletSnapshotToAccount(record, accountId) {
+    if (!record || record.domainKey !== 'wallet' || !accountId) return
+    const payload = record.payload || {}
+    const amount = amountFromWalletSnapshot(record)
+    const snapshotAt = record.occurredAt || record.createdAt || new Date().toISOString()
+
+    const { error: accountErr } = await sb.from('accounts')
+      .update({
+        snapshot_balance: amount,
+        snapshot_at: snapshotAt,
+        source_record_table: 'data_records',
+        source_record_id: record.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', accountId)
+    if (accountErr) {
+      alert('更新账户快照失败：' + humanizeDbError(accountErr))
+      return
+    }
+
+    const linkedPayload = {
+      ...payload,
+      linked_account_id: accountId,
+      account_snapshot_kind: walletSnapshotKindOf(record),
+      snapshot_balance: amount,
+    }
+    const { error: recordErr } = await sb.from('data_records')
+      .update({
+        linked_account_id: accountId,
+        account_snapshot_kind: walletSnapshotKindOf(record),
+        snapshot_balance: amount,
+        snapshot_at: snapshotAt,
+        payload_jsonb: linkedPayload,
+      })
+      .eq('id', record.id)
+    if (recordErr) {
+      alert('账户快照已更新，但记录关联失败：' + humanizeDbError(recordErr))
+      await loadData(0, true)
+      return
+    }
+
+    await loadData(0, true)
+    showFlash('✓ 已关联账户')
+  }
+
   function normalizeDateOnly(value) {
     if (!value) return getLocalDateKey()
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
@@ -1808,7 +2019,7 @@ export function useStore() {
     currentYear, currentMonth, currentPage, monthLabel,
     pageHistory, pageScrollPositions, currentUserId, currentUserEmail, isLoggedIn,
     loading, loadError,
-    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords,
+    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords, accounts,
     doneBills, pendingBills, filteredBills,
     recentEntries,
     domains, pendingSummary, todaySummary, homeTimeline, timelineGroups, visibleTimelineGroups,
@@ -1839,6 +2050,7 @@ export function useStore() {
     openExpenseModal, openExpenseEditModal, closeExpenseModal, confirmExpense,
     hasExpenseChanges, resetExpenseChanges, markExpenseImageUnavailable,
     openUniversalModal, openUniversalEditModal, closeUniversalModal, confirmUniversalRecord,
+    createAccountFromWalletSnapshot, linkWalletSnapshotToAccount,
     hasUniversalChanges, resetUniversalChanges, markUniversalImageUnavailable, getUniversalDomainMeta,
     getDomainRegistryStatus,
     openImgFull, closeImgFull,

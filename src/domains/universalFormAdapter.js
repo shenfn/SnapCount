@@ -142,6 +142,12 @@ export function buildUniversalRecordDraft(modal, meta) {
     payload.wake_at = wakeAt
   }
 
+  if (modal.domainKey === 'wallet') {
+    payload.snapshot_balance = payload.snapshot_balance ?? primary
+    payload.account_snapshot_kind = payload.account_snapshot_kind
+      || (payload.record_kind === 'liability_snapshot' ? 'liability' : 'asset')
+  }
+
   return {
     title,
     occurredAt,

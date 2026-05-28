@@ -481,15 +481,15 @@ function normalizeRecordKind(value: unknown): "cash_snapshot" | "liability_snaps
 
 function normalizeAccountType(value: unknown, accountName: string | null, recordKind: string | null): string {
   const text = `${normalizeString(value) ?? ""} ${accountName ?? ""}`.toLowerCase();
-  if (text.includes("花呗")) return "huabei";
-  if (text.includes("白条") || text.includes("jd")) return "jd_baitiao";
-  if (text.includes("抖音") || text.includes("douyin")) return "douyin_monthly";
+  if (text.includes("花呗")) return "credit_line";
+  if (text.includes("白条") || text.includes("jd")) return "credit_line";
+  if (text.includes("抖音") || text.includes("douyin")) return "credit_line";
   if (text.includes("信用卡")) return "credit_card";
-  if (text.includes("微信") || text.includes("零钱")) return "wechat";
-  if (text.includes("支付宝") || text.includes("余额宝")) return "alipay";
-  if (text.includes("银行") || text.includes("卡")) return "bank_card";
+  if (text.includes("微信") || text.includes("零钱")) return "wallet_balance";
+  if (text.includes("支付宝") || text.includes("余额宝")) return "wallet_balance";
+  if (text.includes("银行") || text.includes("卡")) return "debit_card";
   if (text.includes("现金")) return "cash";
-  return recordKind === "liability_snapshot" ? "other" : "other";
+  return recordKind === "liability_snapshot" ? "credit_line" : "other";
 }
 
 function normalizeWalletStatus(value: unknown, recordKind: string | null): string {
@@ -671,6 +671,13 @@ function buildBuiltinPayload(ai: AIResult): {
     payload.account_name = accountName;
     payload.account_type = normalizeAccountType(payload.account_type, accountName, recordKind);
     payload.amount = amount;
+    payload.snapshot_balance = amount;
+    payload.account_snapshot_kind = recordKind === "liability_snapshot" ? "liability" : "asset";
+    payload.institution = normalizeString(payload.institution) ?? accountName;
+    {
+      const last4 = normalizeString(payload.last4);
+      payload.last4 = last4 && /^\d{4}$/.test(last4) ? last4 : null;
+    }
     payload.due_date = dueDate;
     payload.bill_day = billDay;
     payload.minimum_payment = minimumPayment;

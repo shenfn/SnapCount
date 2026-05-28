@@ -1,5 +1,6 @@
 import { WEEK_LABELS_SHORT } from '../shared/timeBuckets'
 import { formatDateTimeLabel } from '../../utils/helpers'
+import { accountTitle, formatAccountCurrency, splitAccounts } from './accountAdapter'
 
 function getWalletRecords(store) {
   return store.dataRecords.value
@@ -54,6 +55,19 @@ function getNextDueLabel(records) {
 }
 
 export function getMetricItems(store) {
+  const accounts = store.accounts?.value || []
+  if (accounts.length) {
+    const { assets, liabilities } = splitAccounts(accounts)
+    const assetTotal = assets.reduce((sum, account) => sum + Number(account.currentBalance || 0), 0)
+    const liabilityTotal = liabilities.reduce((sum, account) => sum + Number(account.currentBalance || 0), 0)
+    return [
+      { label: '资产合计', value: formatAccountCurrency(assetTotal), accent: true },
+      { label: '负债合计', value: formatAccountCurrency(liabilityTotal) },
+      { label: '净资产', value: formatAccountCurrency(assetTotal - liabilityTotal) },
+      { label: '账户数', value: String(accounts.filter(account => !account.isArchived).length) },
+    ]
+  }
+
   const snapshots = latestSnapshots(getWalletRecords(store))
   const cashTotal = snapshots.filter(isCash).reduce((sum, record) => sum + amountOf(record), 0)
   const liabilityTotal = snapshots.filter(isUnpaidLiability).reduce((sum, record) => sum + amountOf(record), 0)
@@ -154,6 +168,36 @@ export function getRecentRecords(store, domain, limit = 8) {
   })
 }
 
+export function getAccountSections(store) {
+  const { assets, liabilities } = splitAccounts(store.accounts?.value || [])
+  return [
+    {
+      key: 'assets',
+      title: '资产账户',
+      empty: '还没有资产账户，可从余额截图创建',
+      items: assets.map(account => ({
+        id: account.id,
+        title: accountTitle(account),
+        subtitle: account.institution || account.type,
+        value: formatAccountCurrency(account.currentBalance),
+        snapshot: account.snapshotAt ? `最近快照 ${account.snapshotAt.slice(0, 10)}` : '暂无快照',
+      })),
+    },
+    {
+      key: 'liabilities',
+      title: '待还负债',
+      empty: '还没有待还账户，可从花呗/白条截图创建',
+      items: liabilities.map(account => ({
+        id: account.id,
+        title: accountTitle(account),
+        subtitle: account.institution || account.type,
+        value: formatAccountCurrency(account.currentBalance),
+        snapshot: account.snapshotAt ? `最近快照 ${account.snapshotAt.slice(0, 10)}` : '暂无快照',
+      })),
+    },
+  ]
+}
+
 export default {
   getMetricItems,
   getTrend,
@@ -162,4 +206,5 @@ export default {
   getDistribution,
   getDimensionItems,
   getRecentRecords,
+  getAccountSections,
 }

@@ -26,6 +26,20 @@
       👛 添加钱包快照
     </button>
 
+    <section v-if="domain.id === 'wallet'" class="wallet-account-panel">
+      <div v-for="section in walletAccountSections" :key="section.key" class="wallet-account-section">
+        <div class="wallet-account-section-title">{{ section.title }}</div>
+        <div v-if="!section.items.length" class="wallet-account-empty">{{ section.empty }}</div>
+        <div v-for="item in section.items" :key="item.id" class="wallet-account-card">
+          <div>
+            <div class="wallet-account-name">{{ item.title }}</div>
+            <div class="wallet-account-subtitle">{{ item.subtitle }} · {{ item.snapshot }}</div>
+          </div>
+          <div class="wallet-account-value">{{ item.value }}</div>
+        </div>
+      </div>
+    </section>
+
     <DomainMetricStrip
       :metrics="metricsAccented"
       :color="domain.color"
@@ -62,6 +76,21 @@
       @select="openRecord"
     />
 
+    <section v-if="domain.id === 'wallet' && unlinkedWalletSnapshots.length" class="wallet-snapshot-action-panel">
+      <div class="wallet-account-section-title">未关联快照</div>
+      <div
+        v-for="record in unlinkedWalletSnapshots"
+        :key="record.id"
+        class="wallet-snapshot-action-card"
+      >
+        <div>
+          <div class="wallet-account-name">{{ record.title || record.payload?.account_name || '钱包快照' }}</div>
+          <div class="wallet-account-subtitle">截图金额 ¥{{ Number(record.payload?.snapshot_balance ?? record.payload?.amount ?? 0).toFixed(2) }}</div>
+        </div>
+        <button class="wallet-snapshot-action-btn" @click="store.createAccountFromWalletSnapshot(record)">创建账户</button>
+      </div>
+    </section>
+
     <div class="domain-next-panel">
       <div class="domain-next-title">默认展示能力</div>
       <div class="domain-next-grid">
@@ -90,6 +119,7 @@ import DomainMetricStrip from '../domain/DomainMetricStrip.vue'
 import DomainTrendPanel from '../domain/DomainTrendPanel.vue'
 import DomainDistributionPanel from '../domain/DomainDistributionPanel.vue'
 import DomainRecentRecordList from '../domain/DomainRecentRecordList.vue'
+import { getAccountSections } from '../../adapters/domain/walletAdapter'
 
 const store = inject('store')
 
@@ -128,6 +158,14 @@ const trendUnit = computed(() => {
 const dimensionItems = computed(() => getDomainDimensionItems(store, domain.value))
 const recentRecords = computed(() => getDomainRecentRecords(store, domain.value))
 const capabilities = computed(() => getDomainCapabilities(domain.value))
+const walletAccountSections = computed(() => domain.value.id === 'wallet' ? getAccountSections(store) : [])
+const unlinkedWalletSnapshots = computed(() => {
+  if (domain.value.id !== 'wallet') return []
+  return store.dataRecords.value
+    .filter(record => record.domainKey === 'wallet')
+    .filter(record => !record.payload?.linked_account_id)
+    .slice(0, 5)
+})
 
 function openRecord(item) {
   if (item.kind === 'expense') store.openRecordDetail('expense', item.raw)
