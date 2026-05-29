@@ -38,7 +38,13 @@
     </section>
 
     <section v-if="domain.id === 'wallet' && unboundExpenses.length + unboundIncomes.length" class="wallet-account-panel">
-      <div class="wallet-account-section-title">未绑定账户的记录（{{ unboundExpenses.length + unboundIncomes.length }}）</div>
+      <div class="wallet-unbound-header">
+        <div>
+          <div class="wallet-account-section-title">未绑定账户的记录（{{ unboundExpenses.length + unboundIncomes.length }}）</div>
+          <div class="wallet-account-subtitle">补绑后会自动生成账户流水</div>
+        </div>
+        <button class="wallet-snapshot-action-btn secondary" @click="store.openUnboundRecordsPage('all')">去补全</button>
+      </div>
       <div v-for="bill in unboundExpenses" :key="'ub-e-' + bill.id" class="wallet-account-card" @click="store.openExpenseEditModal(bill)">
         <div>
           <div class="wallet-account-name">{{ bill.name }}</div>

@@ -36,6 +36,7 @@
     <PageSettings v-show="store.currentPage.value === 'settings'" />
     <PageDomainDetail v-show="store.currentPage.value === 'domain-detail'" />
     <PageAccountDetail v-show="store.currentPage.value === 'account-detail'" />
+    <PageUnboundRecords v-show="store.currentPage.value === 'unbound-records'" />
     <PageDayDetail v-show="store.currentPage.value === 'day-detail'" />
     <PageRecordDetail v-show="store.currentPage.value === 'record-detail'" />
     <PageInsights v-if="store.currentPage.value === 'insights'" />
@@ -125,6 +126,7 @@ import PageReport  from './components/pages/PageReport.vue'
 import PageSettings from './components/pages/PageSettings.vue'
 import PageDomainDetail from './components/pages/PageDomainDetail.vue'
 import PageAccountDetail from './components/pages/PageAccountDetail.vue'
+import PageUnboundRecords from './components/pages/PageUnboundRecords.vue'
 import PageDayDetail from './components/pages/PageDayDetail.vue'
 import PageRecordDetail from './components/pages/PageRecordDetail.vue'
 import PageInsights from './components/pages/PageInsights.vue'

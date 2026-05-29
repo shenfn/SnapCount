@@ -59,6 +59,9 @@ export function useStore() {
   const selectedAccount = ref(null)
   const selectedAccountEntries = ref([])
   const accountEntriesLoading = ref(false)
+  const unboundRecords = ref({ expenses: [], incomes: [] })
+  const unboundRecordsLoading = ref(false)
+  const unboundRecordFilter = ref('all')
   const walletAccountCreatingSourceIds = new Set()
 
   const currentFilter = ref('all')
@@ -583,6 +586,11 @@ export function useStore() {
         accountId: r.account_id || null,
       }))
 
+      unboundRecords.value = {
+        expenses: bills.value.filter(b => b.status === 'done' && !b.accountId),
+        incomes: incomeRecords.value.filter(r => !r.accountId),
+      }
+
       const { data: recentIncs, error: recentIncErr } = await sb.from('income_records')
         .select('*')
         .order('created_at', { ascending: false })
@@ -1022,6 +1030,7 @@ export function useStore() {
       })
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
       await refreshAccountsFromDB()
+      if (currentPage.value === 'unbound-records') await loadUnboundRecords()
       closeIncomeModal()
       const applyEdit = (arr) => {
         const idx = arr.findIndex(item => item.id === incomeModal.id)
@@ -1066,6 +1075,7 @@ export function useStore() {
     })
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
     await refreshAccountsFromDB()
+    if (currentPage.value === 'unbound-records') await loadUnboundRecords()
     closeIncomeModal()
     const mapped = {
       id: newRow.id,
@@ -1227,6 +1237,7 @@ export function useStore() {
       })
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
       await refreshAccountsFromDB()
+      if (currentPage.value === 'unbound-records') await loadUnboundRecords()
       closeExpenseModal()
       const editIdx = bills.value.findIndex(item => item.id === expenseModal.id)
       if (editIdx >= 0) {
@@ -1275,6 +1286,7 @@ export function useStore() {
     })
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
     await refreshAccountsFromDB()
+    if (currentPage.value === 'unbound-records') await loadUnboundRecords()
     closeExpenseModal()
     bills.value.unshift(mapTransaction(newRow))
     showFlash('✓ 支出已记录')
@@ -2134,6 +2146,71 @@ export function useStore() {
     showFlash('✓ 已关联账户')
   }
 
+  function mapIncomeRow(row) {
+    return {
+      id: row.id,
+      cat: row.category,
+      source: row.source_name,
+      amount: Number(row.amount),
+      date: formatDate(row.income_date),
+      dateRaw: row.income_date,
+      createdAt: row.created_at,
+      time: '',
+      icon: incomeCatMap[row.category]?.icon || '💰',
+      note: row.note,
+      image_url: row.image_url,
+      image_path: row.image_url,
+      sourceType: row.source || 'manual',
+      companionMessage: row.companion_message || '',
+      accountId: row.account_id || null,
+    }
+  }
+
+  async function loadUnboundRecords() {
+    unboundRecordsLoading.value = true
+    const padM = String(currentMonth.value).padStart(2, '0')
+    const start = `${currentYear.value}-${padM}-01`
+    const lastDay = new Date(currentYear.value, currentMonth.value, 0).getDate()
+    const end = `${currentYear.value}-${padM}-${String(lastDay).padStart(2, '0')}`
+
+    const [txResult, incResult] = await Promise.all([
+      sb.from('transactions')
+        .select('*')
+        .eq('status', 'done')
+        .is('account_id', null)
+        .gte('transaction_date', start)
+        .lte('transaction_date', end)
+        .order('transaction_date', { ascending: false })
+        .order('transaction_time', { ascending: false })
+        .limit(100),
+      sb.from('income_records')
+        .select('*')
+        .is('account_id', null)
+        .gte('income_date', start)
+        .lte('income_date', end)
+        .order('income_date', { ascending: false })
+        .limit(100),
+    ])
+    unboundRecordsLoading.value = false
+
+    if (txResult.error || incResult.error) {
+      console.warn('加载未绑定记录失败:', txResult.error?.message || incResult.error?.message)
+      showFlash('未绑定记录加载失败')
+      return
+    }
+
+    unboundRecords.value = {
+      expenses: (txResult.data || []).map(mapTransaction),
+      incomes: (incResult.data || []).map(mapIncomeRow),
+    }
+  }
+
+  async function openUnboundRecordsPage(filter = 'all') {
+    unboundRecordFilter.value = filter
+    await loadUnboundRecords()
+    navigateTo('unbound-records')
+  }
+
   function normalizeDateOnly(value) {
     if (!value) return getLocalDateKey()
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
@@ -2327,6 +2404,7 @@ export function useStore() {
     loading, loadError,
     bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords, accounts,
     selectedAccount, selectedAccountEntries, accountEntriesLoading,
+    unboundRecords, unboundRecordsLoading, unboundRecordFilter,
     doneBills, pendingBills, filteredBills,
     recentEntries,
     domains, pendingSummary, todaySummary, homeTimeline, timelineGroups, visibleTimelineGroups,
@@ -2360,6 +2438,7 @@ export function useStore() {
     createAccountFromWalletSnapshot, linkWalletSnapshotToAccount,
     accountModal, openAccountModalForCreate, openAccountModalForEdit, closeAccountModal, saveAccount, archiveAccount,
     openAccountDetail, refreshAccountDetail, loadAccountEntries, openAccountEntrySource,
+    openUnboundRecordsPage, loadUnboundRecords,
     upsertAccountEntry, voidAccountEntries, refreshAccountsFromDB, defaultAccountIdForKind,
     hasUniversalChanges, resetUniversalChanges, markUniversalImageUnavailable, getUniversalDomainMeta,
     getDomainRegistryStatus,
