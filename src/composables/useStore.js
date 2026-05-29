@@ -2187,8 +2187,7 @@ export function useStore() {
     try {
       if (type === 'bill') {
         if (pendingModal.open && pendingModal.bill?.id === id) closePendingModal()
-        await voidAccountEntries('transactions', id, 'transaction_deleted')
-        const { error } = await sb.from('transactions').delete().eq('id', id)
+        const { error } = await sb.rpc('delete_transaction_with_account', { p_id: id })
         if (error) throw new Error(error.message)
         await refreshAccountsFromDB()
         if (detailRecord.value?.id === id) goBack()
@@ -2209,8 +2208,7 @@ export function useStore() {
         }
         showFlash('✓ 已删除')
       } else if (type === 'income') {
-        await voidAccountEntries('income_records', id, 'income_deleted')
-        const { error } = await sb.from('income_records').delete().eq('id', id)
+        const { error } = await sb.rpc('delete_income_with_account', { p_id: id })
         if (error) throw new Error(error.message)
         await refreshAccountsFromDB()
         // 本地移除
