@@ -21,7 +21,7 @@ import {
   incomeCatMap, catCodeMap, payAliasMap,
   getLocalDateKey, localDateKeyOf,
 } from '../utils/helpers'
-import { isLiabilityAccount, mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
+import { mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
 function humanizeDbError(err) {
@@ -903,40 +903,23 @@ export function useStore() {
       if (!pendingModal.incomeCategory) { alert('请选择收入类型'); return }
       const source = pendingModal.merchantName.trim() || (incomeCatMap[pendingModal.incomeCategory]?.label || '收入')
       const incomeAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || null)
-      const incomeDate = pendingModal.bill.dateRaw || getLocalDateKey()
-      const { data: incomeRow, error: incErr } = await sb.from('income_records').insert({
-        category: pendingModal.incomeCategory,
-        source_name: source,
-        amount: amt,
-        income_date: incomeDate,
-        image_url: pendingModal.bill.image_path || null,
-        image_hash: pendingModal.bill.image_hash || null,
-        source: 'ai_scan',
-        note: pendingModal.bill.image_path ? '由截图待补充转入收入' : null,
-        user_id: currentUserId.value,
-        account_id: incomeAccountId,
-      }).select('id').single()
-      if (incErr) { alert('保存失败：' + humanizeDbError(incErr)); return }
+      const { error: confirmErr } = await sb.rpc('confirm_pending_transaction_with_account', {
+        p_pending_id: pendingModal.bill.id,
+        p_entry_type: 'income',
+        p_amount: amt,
+        p_merchant_or_source_name: source,
+        p_platform: null,
+        p_category: null,
+        p_payment_method: null,
+        p_income_category: pendingModal.incomeCategory,
+        p_account_id: incomeAccountId,
+      })
+      if (confirmErr) { alert('保存失败：' + humanizeDbError(confirmErr)); return }
 
-      if (incomeAccountId && incomeRow?.id) {
-        await upsertAccountEntry({
-          accountId: incomeAccountId,
-          direction: 'in',
-          amount: amt,
-          entryType: 'income',
-          sourceTable: 'income_records',
-          sourceId: incomeRow.id,
-          occurredAt: incomeDate + 'T00:00:00+08:00',
-          note: '中转站确认收入',
-        })
-      }
-
-      const imagePath = pendingModal.bill.image_path
-      const { error: delErr } = await sb.from('transactions').delete().eq('id', pendingModal.bill.id)
-      if (delErr) { alert('收入已保存，但原待补充记录删除失败：' + humanizeDbError(delErr)); return }
       const bIdx = bills.value.findIndex(b => b.id === pendingModal.bill.id)
       if (bIdx >= 0) bills.value.splice(bIdx, 1)
       await refreshAccountsFromDB()
+      await loadData(0, true)
       closePendingModal()
       showFlash('✓ 收入已记录')
       return
@@ -944,36 +927,19 @@ export function useStore() {
 
     if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
     const expenseAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || null)
-    const { error } = await sb.from('transactions').update({
-      platform: pendingModal.platform,
-      category: pendingModal.category,
-      payment_method: pendingModal.payment,
-      merchant_name: pendingModal.merchantName || `${pendingModal.platform}消费`,
-      amount: amt,
-      status: 'done',
-      account_id: expenseAccountId,
-    }).eq('id', pendingModal.bill.id)
+    const { error } = await sb.rpc('confirm_pending_transaction_with_account', {
+      p_pending_id: pendingModal.bill.id,
+      p_entry_type: 'expense',
+      p_amount: amt,
+      p_merchant_or_source_name: pendingModal.merchantName || `${pendingModal.platform}消费`,
+      p_platform: pendingModal.platform,
+      p_category: pendingModal.category,
+      p_payment_method: pendingModal.payment,
+      p_income_category: null,
+      p_account_id: expenseAccountId,
+    })
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
-    if (expenseAccountId) {
-      await upsertAccountEntry({
-        accountId: expenseAccountId,
-        direction: resolveAccountEntryDirection({
-          accountId: expenseAccountId,
-          entryType: 'expense',
-          fallbackDirection: 'out',
-        }),
-        amount: amt,
-        entryType: 'expense',
-        sourceTable: 'transactions',
-        sourceId: pendingModal.bill.id,
-        occurredAt: (pendingModal.bill.dateRaw || getLocalDateKey()) + 'T00:00:00+08:00',
-        note: '中转站确认支出',
-      })
-      await refreshAccountsFromDB()
-    } else {
-      await voidAccountEntries('transactions', pendingModal.bill.id, 'unbound_after_confirm')
-      await refreshAccountsFromDB()
-    }
+    await refreshAccountsFromDB()
     // 本地更新账单状态
     const bIdx2 = bills.value.findIndex(b => b.id === pendingModal.bill.id)
     if (bIdx2 >= 0) {
@@ -1038,29 +1004,20 @@ export function useStore() {
     const source = incomeModal.source.trim() || (incomeCatMap[incomeModal.cat]?.label || '收入')
     if (incomeModal.mode === 'edit' && incomeModal.id) {
       const incomeAccountId = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
-      const { error } = await sb.from('income_records').update({
-        category: incomeModal.cat,
-        source_name: source,
-        amount: amt,
-        income_date: incomeModal.date,
-        note: incomeModal.note.trim() || null,
-        account_id: incomeAccountId,
-      }).eq('id', incomeModal.id)
+      const { error } = await sb.rpc('save_income_with_account', {
+        p_id: incomeModal.id,
+        p_category: incomeModal.cat,
+        p_source_name: source,
+        p_amount: amt,
+        p_income_date: incomeModal.date,
+        p_note: incomeModal.note.trim() || null,
+        p_source: null,
+        p_image_url: incomeModal.imagePath || null,
+        p_image_hash: null,
+        p_companion_message: null,
+        p_account_id: incomeAccountId,
+      })
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
-      if (incomeAccountId) {
-        await upsertAccountEntry({
-          accountId: incomeAccountId,
-          direction: 'in',
-          amount: amt,
-          entryType: 'income',
-          sourceTable: 'income_records',
-          sourceId: incomeModal.id,
-          occurredAt: incomeModal.date + 'T00:00:00+08:00',
-          note: '手动编辑收入',
-        })
-      } else {
-        await voidAccountEntries('income_records', incomeModal.id, 'unbound_after_edit')
-      }
       await refreshAccountsFromDB()
       closeIncomeModal()
       const applyEdit = (arr) => {
@@ -1091,33 +1048,21 @@ export function useStore() {
       return
     }
     const incomeAccountIdNew = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
-    const { data: newRow, error } = await sb.from('income_records')
-      .insert({
-        category: incomeModal.cat,
-        source_name: source,
-        amount: amt,
-        income_date: incomeModal.date,
-        note: incomeModal.note.trim() || null,
-        source: 'manual',
-        user_id: currentUserId.value,
-        account_id: incomeAccountIdNew,
-      })
-      .select('*')
-      .single()
+    const { data: newRow, error } = await sb.rpc('save_income_with_account', {
+      p_id: null,
+      p_category: incomeModal.cat,
+      p_source_name: source,
+      p_amount: amt,
+      p_income_date: incomeModal.date,
+      p_note: incomeModal.note.trim() || null,
+      p_source: 'manual',
+      p_image_url: incomeModal.imagePath || null,
+      p_image_hash: null,
+      p_companion_message: null,
+      p_account_id: incomeAccountIdNew,
+    })
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
-    if (incomeAccountIdNew && newRow?.id) {
-      await upsertAccountEntry({
-        accountId: incomeAccountIdNew,
-        direction: 'in',
-        amount: amt,
-        entryType: 'income',
-        sourceTable: 'income_records',
-        sourceId: newRow.id,
-        occurredAt: incomeModal.date + 'T00:00:00+08:00',
-        note: '手动创建收入',
-      })
-      await refreshAccountsFromDB()
-    }
+    await refreshAccountsFromDB()
     closeIncomeModal()
     const mapped = {
       id: newRow.id,
@@ -1259,38 +1204,25 @@ export function useStore() {
 
     if (expenseModal.mode === 'edit' && expenseModal.id) {
       const expenseAccountId = expenseModal.accountUnbound ? null : (expenseModal.accountId || null)
-      const { error } = await sb.from('transactions').update({
-        amount: amt,
-        merchant_name: merchantName,
-        platform: expenseModal.platform,
-        category: expenseModal.category,
-        payment_method: expenseModal.payment,
-        transaction_date: expenseModal.date,
-        transaction_time: resolvedTime,
-        note: expenseModal.note.trim() || null,
-        is_large_transport: isLargeTransport,
-        transport_type: isLargeTransport ? '交通' : null,
-        account_id: expenseAccountId,
-      }).eq('id', expenseModal.id)
+      const { error } = await sb.rpc('save_transaction_with_account', {
+        p_id: expenseModal.id,
+        p_amount: amt,
+        p_merchant_name: merchantName,
+        p_platform: expenseModal.platform,
+        p_category: expenseModal.category,
+        p_payment_method: expenseModal.payment,
+        p_transaction_date: expenseModal.date,
+        p_transaction_time: resolvedTime,
+        p_note: expenseModal.note.trim() || null,
+        p_is_large_transport: isLargeTransport,
+        p_transport_type: isLargeTransport ? '交通' : null,
+        p_source: null,
+        p_image_url: expenseModal.imagePath || null,
+        p_image_hash: null,
+        p_companion_message: null,
+        p_account_id: expenseAccountId,
+      })
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
-      if (expenseAccountId) {
-        await upsertAccountEntry({
-          accountId: expenseAccountId,
-          direction: resolveAccountEntryDirection({
-            accountId: expenseAccountId,
-            entryType: 'expense',
-            fallbackDirection: 'out',
-          }),
-          amount: amt,
-          entryType: 'expense',
-          sourceTable: 'transactions',
-          sourceId: expenseModal.id,
-          occurredAt: expenseModal.date + 'T00:00:00+08:00',
-          note: '手动编辑支出',
-        })
-      } else {
-        await voidAccountEntries('transactions', expenseModal.id, 'unbound_after_edit')
-      }
       await refreshAccountsFromDB()
       closeExpenseModal()
       const editIdx = bills.value.findIndex(item => item.id === expenseModal.id)
@@ -1320,44 +1252,26 @@ export function useStore() {
     }
 
     const expenseAccountIdNew = expenseModal.accountUnbound ? null : (expenseModal.accountId || null)
-    const { data: newRow, error } = await sb.from('transactions')
-      .insert({
-        type: 'expense',
-        amount: amt,
-        merchant_name: merchantName,
-        platform: expenseModal.platform,
-        category: expenseModal.category,
-        payment_method: expenseModal.payment,
-        status: 'done',
-        transaction_date: expenseModal.date,
-        transaction_time: resolvedTime || (new Date().toTimeString().slice(0, 8)),
-        source: 'manual',
-        note: expenseModal.note.trim() || null,
-        is_large_transport: isLargeTransport,
-        transport_type: isLargeTransport ? '交通' : null,
-        user_id: currentUserId.value,
-        account_id: expenseAccountIdNew,
-      })
-      .select('*')
-      .single()
+    const { data: newRow, error } = await sb.rpc('save_transaction_with_account', {
+      p_id: null,
+      p_amount: amt,
+      p_merchant_name: merchantName,
+      p_platform: expenseModal.platform,
+      p_category: expenseModal.category,
+      p_payment_method: expenseModal.payment,
+      p_transaction_date: expenseModal.date,
+      p_transaction_time: resolvedTime || (new Date().toTimeString().slice(0, 8)),
+      p_note: expenseModal.note.trim() || null,
+      p_is_large_transport: isLargeTransport,
+      p_transport_type: isLargeTransport ? '交通' : null,
+      p_source: 'manual',
+      p_image_url: expenseModal.imagePath || null,
+      p_image_hash: null,
+      p_companion_message: null,
+      p_account_id: expenseAccountIdNew,
+    })
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
-    if (expenseAccountIdNew && newRow?.id) {
-      await upsertAccountEntry({
-        accountId: expenseAccountIdNew,
-        direction: resolveAccountEntryDirection({
-          accountId: expenseAccountIdNew,
-          entryType: 'expense',
-          fallbackDirection: 'out',
-        }),
-        amount: amt,
-        entryType: 'expense',
-        sourceTable: 'transactions',
-        sourceId: newRow.id,
-        occurredAt: expenseModal.date + 'T00:00:00+08:00',
-        note: '手动创建支出',
-      })
-      await refreshAccountsFromDB()
-    }
+    await refreshAccountsFromDB()
     closeExpenseModal()
     bills.value.unshift(mapTransaction(newRow))
     showFlash('✓ 支出已记录')
@@ -1945,13 +1859,6 @@ export function useStore() {
       p_note: note || null,
     })
     if (error) console.warn('写入账户流水失败:', error.message)
-  }
-
-  function resolveAccountEntryDirection({ accountId, entryType, fallbackDirection }) {
-    const account = accounts.value.find(item => item.id === accountId)
-    if (!account) return fallbackDirection
-    if (entryType === 'expense' && isLiabilityAccount(account)) return 'in'
-    return fallbackDirection
   }
 
   async function voidAccountEntries(sourceTable, sourceId, reason = 'source_deleted') {
