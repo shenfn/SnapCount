@@ -27,7 +27,7 @@
       <div v-for="section in walletAccountSections" :key="section.key" class="wallet-account-section">
         <div class="wallet-account-section-title">{{ section.title }}</div>
         <div v-if="!section.items.length" class="wallet-account-empty">{{ section.empty }}</div>
-        <div v-for="item in section.items" :key="item.id" class="wallet-account-card" @click="store.openAccountModalForEdit(item.raw)">
+        <div v-for="item in section.items" :key="item.id" class="wallet-account-card" @click="store.openAccountDetail(item.raw)">
           <div>
             <div class="wallet-account-name">{{ item.title }}<span v-if="item.raw?.isDefaultExpense" class="account-tag">默认支出</span><span v-if="item.raw?.isDefaultIncome" class="account-tag income">默认收入</span></div>
             <div class="wallet-account-subtitle">{{ item.subtitle }} · {{ item.snapshot }}</div>

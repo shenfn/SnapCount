@@ -56,6 +56,9 @@ export function useStore() {
   const processedStagingRecords = ref([])
   const dataRecords = ref([])
   const accounts = ref([])
+  const selectedAccount = ref(null)
+  const selectedAccountEntries = ref([])
+  const accountEntriesLoading = ref(false)
   const walletAccountCreatingSourceIds = new Set()
 
   const currentFilter = ref('all')
@@ -1843,6 +1846,80 @@ export function useStore() {
     showFlash(archived ? '✓ 账户已归档' : '✓ 账户已恢复')
   }
 
+  function mapAccountEntryRow(row) {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      direction: row.direction,
+      amount: Number(row.amount || 0),
+      entryType: row.entry_type,
+      sourceTable: row.source_table || '',
+      sourceId: row.source_id || '',
+      occurredAt: row.occurred_at,
+      note: row.note || '',
+      isVoided: !!row.is_voided,
+      voidedReason: row.voided_reason || '',
+      createdAt: row.created_at,
+    }
+  }
+
+  async function loadAccountEntries(accountId) {
+    if (!accountId) {
+      selectedAccountEntries.value = []
+      return
+    }
+    accountEntriesLoading.value = true
+    const { data, error } = await sb.from('account_entries')
+      .select('*')
+      .eq('account_id', accountId)
+      .order('occurred_at', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(50)
+    accountEntriesLoading.value = false
+    if (error) {
+      console.warn('加载账户流水失败:', error.message)
+      selectedAccountEntries.value = []
+      return
+    }
+    selectedAccountEntries.value = (data || []).map(mapAccountEntryRow)
+  }
+
+  async function openAccountDetail(account) {
+    if (!account?.id) return
+    selectedAccount.value = account
+    await loadAccountEntries(account.id)
+    navigateTo('account-detail')
+  }
+
+  async function refreshAccountDetail() {
+    if (!selectedAccount.value?.id) return
+    const latest = accounts.value.find(account => account.id === selectedAccount.value.id)
+    if (latest) selectedAccount.value = latest
+    await loadAccountEntries(selectedAccount.value.id)
+  }
+
+  function openAccountEntrySource(entry) {
+    if (!entry?.sourceTable || !entry?.sourceId) return
+    if (entry.sourceTable === 'transactions') {
+      const bill = bills.value.find(item => item.id === entry.sourceId)
+      if (bill) openRecordDetail('expense', bill)
+      else showFlash('这条支出不在当前月份列表中')
+      return
+    }
+    if (entry.sourceTable === 'income_records') {
+      const income = incomeRecords.value.find(item => item.id === entry.sourceId)
+        || recentIncomeRecords.value.find(item => item.id === entry.sourceId)
+      if (income) openRecordDetail('income', income)
+      else showFlash('这条收入不在当前列表中')
+      return
+    }
+    if (entry.sourceTable === 'data_records') {
+      const record = dataRecords.value.find(item => item.id === entry.sourceId)
+      if (record) openRecordDetail('universal', record)
+      else showFlash('这条快照不在当前列表中')
+    }
+  }
+
   // 统一流水入口：保证幂等（先作废旧的同源同类流水再插入新的）
   async function upsertAccountEntry({ accountId, direction, amount, entryType, sourceTable, sourceId, occurredAt, note }) {
     if (!accountId) return
@@ -2249,6 +2326,7 @@ export function useStore() {
     pageHistory, pageScrollPositions, currentUserId, currentUserEmail, isLoggedIn,
     loading, loadError,
     bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords, accounts,
+    selectedAccount, selectedAccountEntries, accountEntriesLoading,
     doneBills, pendingBills, filteredBills,
     recentEntries,
     domains, pendingSummary, todaySummary, homeTimeline, timelineGroups, visibleTimelineGroups,
@@ -2281,6 +2359,7 @@ export function useStore() {
     openUniversalModal, openUniversalEditModal, closeUniversalModal, confirmUniversalRecord,
     createAccountFromWalletSnapshot, linkWalletSnapshotToAccount,
     accountModal, openAccountModalForCreate, openAccountModalForEdit, closeAccountModal, saveAccount, archiveAccount,
+    openAccountDetail, refreshAccountDetail, loadAccountEntries, openAccountEntrySource,
     upsertAccountEntry, voidAccountEntries, refreshAccountsFromDB, defaultAccountIdForKind,
     hasUniversalChanges, resetUniversalChanges, markUniversalImageUnavailable, getUniversalDomainMeta,
     getDomainRegistryStatus,
