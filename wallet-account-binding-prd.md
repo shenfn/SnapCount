@@ -739,7 +739,9 @@ flowchart TD
 建议口径：
 
 - `credit_card`、`credit_line` 的 `current_balance` 表示当前欠款额，正数代表负债。
-- 使用信用卡消费时，生成 `in` 方向或专用 `liability_increase` 语义容易混淆；第一版建议仍使用 `out` 表示消费行为，同时在账户类型层将其解释为负债增加。
+- `account_entries.direction` 表示账户余额方向，不表示消费/收入业务方向：`in` 表示该账户余额数值增加，`out` 表示该账户余额数值减少。
+- 使用信用卡、花呗、白条消费时，因为负债账户欠款额增加，应生成 `entry_type = expense` 且 `direction = in` 的账户流水。
+- 信用账户还款会让欠款额减少，应在 V3 转账/还款能力中生成负债账户 `direction = out` 的流水；如果同时从资产账户扣款，应通过同一组转账/还款流水关联两侧账户。
 - 钱包总资产展示时，应区分“资产合计”“负债合计”“净资产”。
 - 信用账户还款在 V3 转账/还款能力中正式处理。
 
@@ -811,7 +813,7 @@ flowchart TD
 约束建议：
 
 - `amount > 0`。
-- `direction in ('in', 'out')`。
+- `direction in ('in', 'out')`，语义为账户余额方向：`in` 增加该账户余额数值，`out` 减少该账户余额数值。
 - `entry_type in ('expense', 'income', 'transfer', 'adjustment')`。
 - `account_id` 建立索引。
 - `source_table + source_id` 建立组合索引。
@@ -1016,7 +1018,8 @@ with check (auth.uid() = user_id);
 
 ### 5.1.3 账户流水
 
-- 支出绑定账户后生成 `out` 流水。
+- 支出绑定资产账户后生成 `out` 流水。
+- 支出绑定负债账户（信用卡、花呗、白条等）后生成 `in` 流水，表示欠款额增加。
 - 收入绑定账户后生成 `in` 流水。
 - 编辑金额后原流水作废，新流水生成。
 - 编辑账户后原账户流水作废，新账户流水生成。

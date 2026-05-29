@@ -104,6 +104,15 @@
           </div>
         </div>
         </template>
+
+        <AccountPicker
+          :label="store.pendingModal.entryType === 'income' ? '到账账户' : '出资账户'"
+          :kind="store.pendingModal.entryType"
+          :selected-id="store.pendingModal.accountId"
+          :unbound="store.pendingModal.accountUnbound"
+          @update:selectedId="store.pendingModal.accountId = $event"
+          @update:unbound="store.pendingModal.accountUnbound = $event"
+        />
       </div>
 
       <div class="sheet-footer">
@@ -129,6 +138,7 @@
 
 <script setup>
 import { inject, ref, watch, onUnmounted } from 'vue'
+import AccountPicker from './AccountPicker.vue'
 const store = inject('store')
 
 const sheetEl = ref(null)

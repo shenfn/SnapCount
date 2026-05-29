@@ -59,6 +59,15 @@
           :max="today">
       </div>
 
+      <AccountPicker
+        label="到账账户"
+        kind="income"
+        :selected-id="store.incomeModal.accountId"
+        :unbound="store.incomeModal.accountUnbound"
+        @update:selectedId="store.incomeModal.accountId = $event"
+        @update:unbound="store.incomeModal.accountUnbound = $event"
+      />
+
       <div class="sel-section" style="margin-top:12px">
         <div class="sel-label">备注（可选）</div>
         <input type="text" class="sheet-input" v-model="store.incomeModal.note"
@@ -89,6 +98,7 @@
 import { computed, inject } from 'vue'
 import { useBottomSheet } from '../composables/useBottomSheet'
 import { getLocalDateKey } from '../utils/helpers'
+import AccountPicker from './AccountPicker.vue'
 const store = inject('store')
 const today = getLocalDateKey()
 

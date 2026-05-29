@@ -3110,6 +3110,18 @@ body {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
 }
 
+.wallet-snapshot-action-card {
+  display: grid;
+  align-items: stretch;
+}
+
+.wallet-snapshot-action-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .wallet-account-name {
   font-size: 15px;
   font-weight: 800;
@@ -3137,6 +3149,69 @@ body {
   color: #fff;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
+}
+
+.wallet-snapshot-action-btn.secondary {
+  background: rgba(124, 58, 237, 0.1);
+  color: #6d28d9;
+}
+
+.wallet-snapshot-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wallet-snapshot-account-picker {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.wallet-snapshot-account-empty {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.5;
+}
+
+.wallet-snapshot-account-option {
+  width: 100%;
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(124, 58, 237, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  color: var(--text);
+}
+
+.wallet-snapshot-account-option span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wallet-snapshot-account-option strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.wallet-snapshot-account-option small {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.wallet-snapshot-account-option em {
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 900;
+  color: #7c3aed;
   white-space: nowrap;
 }
 

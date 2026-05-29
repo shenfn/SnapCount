@@ -21,7 +21,7 @@ import {
   incomeCatMap, catCodeMap, payAliasMap,
   getLocalDateKey, localDateKeyOf,
 } from '../utils/helpers'
-import { mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
+import { isLiabilityAccount, mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
 function humanizeDbError(err) {
@@ -88,6 +88,8 @@ export function useStore() {
     category: null,
     payment: null,
     incomeCategory: 'other',
+    accountId: null,
+    accountUnbound: false,
   })
 
   const incomeModal = reactive({
@@ -102,6 +104,8 @@ export function useStore() {
     imageUrl: null,
     imagePath: null,
     imageLoadError: false,
+    accountId: null,
+    accountUnbound: false,
   })
 
   const expenseModal = reactive({
@@ -119,6 +123,8 @@ export function useStore() {
     imageUrl: null,
     imagePath: null,
     imageLoadError: false,
+    accountId: null,
+    accountUnbound: false,
   })
 
   const universalModal = reactive({
@@ -145,6 +151,20 @@ export function useStore() {
     type: null,
     id: null,
     imagePath: null,
+  })
+
+  const accountModal = reactive({
+    open: false,
+    mode: 'create',
+    id: null,
+    name: '',
+    type: 'wallet_balance',
+    institution: '',
+    last4: '',
+    initialBalance: '',
+    isDefaultExpense: false,
+    isDefaultIncome: false,
+    isArchived: false,
   })
 
   const settingsState = reactive({
@@ -557,6 +577,7 @@ export function useStore() {
         image_path: r.image_url,
         sourceType: r.source || 'manual',
         companionMessage: r.companion_message || '',
+        accountId: r.account_id || null,
       }))
 
       const { data: recentIncs, error: recentIncErr } = await sb.from('income_records')
@@ -580,6 +601,7 @@ export function useStore() {
         image_path: r.image_url,
         sourceType: r.source || 'manual',
         companionMessage: r.companion_message || '',
+        accountId: r.account_id || null,
       }))
 
       const { data: universalRows, error: universalErr } = await sb.from('data_records')
@@ -770,6 +792,8 @@ export function useStore() {
     pendingModal.category = catCodeMap[bill.cat] || (bill.cat !== '?' ? bill.cat : null)
     pendingModal.payment = payAliasMap[bill.payment] || (bill.payment !== '?' ? bill.payment : null)
     pendingModal.incomeCategory = 'other'
+    pendingModal.accountId = bill.accountId || defaultAccountIdForKind(pendingModal.entryType)
+    pendingModal.accountUnbound = !pendingModal.accountId
     pendingModalInitial = {
       entryType: pendingModal.entryType,
       merchantName: pendingModal.merchantName,
@@ -778,6 +802,8 @@ export function useStore() {
       category: pendingModal.category,
       payment: pendingModal.payment,
       incomeCategory: pendingModal.incomeCategory,
+      accountId: pendingModal.accountId,
+      accountUnbound: pendingModal.accountUnbound,
     }
   }
 
@@ -790,6 +816,8 @@ export function useStore() {
       || pendingModal.category !== pendingModalInitial.category
       || pendingModal.payment !== pendingModalInitial.payment
       || pendingModal.incomeCategory !== pendingModalInitial.incomeCategory
+      || pendingModal.accountId !== pendingModalInitial.accountId
+      || pendingModal.accountUnbound !== pendingModalInitial.accountUnbound
   }
 
   function resetPendingChanges() {
@@ -801,6 +829,8 @@ export function useStore() {
     pendingModal.category = pendingModalInitial.category
     pendingModal.payment = pendingModalInitial.payment
     pendingModal.incomeCategory = pendingModalInitial.incomeCategory
+    pendingModal.accountId = pendingModalInitial.accountId
+    pendingModal.accountUnbound = pendingModalInitial.accountUnbound
   }
 
   function markPendingImageUnavailable() {
@@ -827,6 +857,8 @@ export function useStore() {
       note: incomeModal.note,
       date: incomeModal.date,
       imagePath: incomeModal.imagePath,
+      accountId: incomeModal.accountId,
+      accountUnbound: incomeModal.accountUnbound,
     }
   }
 
@@ -845,6 +877,8 @@ export function useStore() {
       || current.note !== incomeModalInitial.note
       || current.date !== incomeModalInitial.date
       || current.imagePath !== incomeModalInitial.imagePath
+      || current.accountId !== incomeModalInitial.accountId
+      || current.accountUnbound !== incomeModalInitial.accountUnbound
   }
 
   function resetIncomeChanges() {
@@ -857,6 +891,8 @@ export function useStore() {
     incomeModal.note = incomeModalInitial.note
     incomeModal.date = incomeModalInitial.date
     incomeModal.imagePath = incomeModalInitial.imagePath
+    incomeModal.accountId = incomeModalInitial.accountId
+    incomeModal.accountUnbound = incomeModalInitial.accountUnbound
   }
 
   async function confirmEntry() {
@@ -866,30 +902,48 @@ export function useStore() {
     if (pendingModal.entryType === 'income') {
       if (!pendingModal.incomeCategory) { alert('请选择收入类型'); return }
       const source = pendingModal.merchantName.trim() || (incomeCatMap[pendingModal.incomeCategory]?.label || '收入')
-      const { error: incErr } = await sb.from('income_records').insert({
+      const incomeAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || null)
+      const incomeDate = pendingModal.bill.dateRaw || getLocalDateKey()
+      const { data: incomeRow, error: incErr } = await sb.from('income_records').insert({
         category: pendingModal.incomeCategory,
         source_name: source,
         amount: amt,
-        income_date: pendingModal.bill.dateRaw || getLocalDateKey(),
+        income_date: incomeDate,
         image_url: pendingModal.bill.image_path || null,
         image_hash: pendingModal.bill.image_hash || null,
         source: 'ai_scan',
         note: pendingModal.bill.image_path ? '由截图待补充转入收入' : null,
         user_id: currentUserId.value,
-      })
+        account_id: incomeAccountId,
+      }).select('id').single()
       if (incErr) { alert('保存失败：' + humanizeDbError(incErr)); return }
+
+      if (incomeAccountId && incomeRow?.id) {
+        await upsertAccountEntry({
+          accountId: incomeAccountId,
+          direction: 'in',
+          amount: amt,
+          entryType: 'income',
+          sourceTable: 'income_records',
+          sourceId: incomeRow.id,
+          occurredAt: incomeDate + 'T00:00:00+08:00',
+          note: '中转站确认收入',
+        })
+      }
 
       const imagePath = pendingModal.bill.image_path
       const { error: delErr } = await sb.from('transactions').delete().eq('id', pendingModal.bill.id)
       if (delErr) { alert('收入已保存，但原待补充记录删除失败：' + humanizeDbError(delErr)); return }
       const bIdx = bills.value.findIndex(b => b.id === pendingModal.bill.id)
       if (bIdx >= 0) bills.value.splice(bIdx, 1)
+      await refreshAccountsFromDB()
       closePendingModal()
       showFlash('✓ 收入已记录')
       return
     }
 
     if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
+    const expenseAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || null)
     const { error } = await sb.from('transactions').update({
       platform: pendingModal.platform,
       category: pendingModal.category,
@@ -897,8 +951,29 @@ export function useStore() {
       merchant_name: pendingModal.merchantName || `${pendingModal.platform}消费`,
       amount: amt,
       status: 'done',
+      account_id: expenseAccountId,
     }).eq('id', pendingModal.bill.id)
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+    if (expenseAccountId) {
+      await upsertAccountEntry({
+        accountId: expenseAccountId,
+        direction: resolveAccountEntryDirection({
+          accountId: expenseAccountId,
+          entryType: 'expense',
+          fallbackDirection: 'out',
+        }),
+        amount: amt,
+        entryType: 'expense',
+        sourceTable: 'transactions',
+        sourceId: pendingModal.bill.id,
+        occurredAt: (pendingModal.bill.dateRaw || getLocalDateKey()) + 'T00:00:00+08:00',
+        note: '中转站确认支出',
+      })
+      await refreshAccountsFromDB()
+    } else {
+      await voidAccountEntries('transactions', pendingModal.bill.id, 'unbound_after_confirm')
+      await refreshAccountsFromDB()
+    }
     // 本地更新账单状态
     const bIdx2 = bills.value.findIndex(b => b.id === pendingModal.bill.id)
     if (bIdx2 >= 0) {
@@ -928,6 +1003,8 @@ export function useStore() {
     incomeModal.imageUrl = null
     incomeModal.imagePath = null
     incomeModal.imageLoadError = false
+    incomeModal.accountId = defaultAccountIdForKind('income')
+    incomeModal.accountUnbound = !incomeModal.accountId
     setIncomeModalInitial()
   }
 
@@ -943,6 +1020,8 @@ export function useStore() {
     incomeModal.imagePath = record.image_path || record.image_url || null
     incomeModal.imageUrl = await getSignedImageUrl(incomeModal.imagePath)
     incomeModal.imageLoadError = !!incomeModal.imagePath && !incomeModal.imageUrl
+    incomeModal.accountId = record.accountId || defaultAccountIdForKind('income')
+    incomeModal.accountUnbound = !incomeModal.accountId
     setIncomeModalInitial()
   }
 
@@ -958,14 +1037,31 @@ export function useStore() {
     if (!incomeModal.date) { alert('请选择到账日期'); return }
     const source = incomeModal.source.trim() || (incomeCatMap[incomeModal.cat]?.label || '收入')
     if (incomeModal.mode === 'edit' && incomeModal.id) {
+      const incomeAccountId = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
       const { error } = await sb.from('income_records').update({
         category: incomeModal.cat,
         source_name: source,
         amount: amt,
         income_date: incomeModal.date,
         note: incomeModal.note.trim() || null,
+        account_id: incomeAccountId,
       }).eq('id', incomeModal.id)
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+      if (incomeAccountId) {
+        await upsertAccountEntry({
+          accountId: incomeAccountId,
+          direction: 'in',
+          amount: amt,
+          entryType: 'income',
+          sourceTable: 'income_records',
+          sourceId: incomeModal.id,
+          occurredAt: incomeModal.date + 'T00:00:00+08:00',
+          note: '手动编辑收入',
+        })
+      } else {
+        await voidAccountEntries('income_records', incomeModal.id, 'unbound_after_edit')
+      }
+      await refreshAccountsFromDB()
       closeIncomeModal()
       const applyEdit = (arr) => {
         const idx = arr.findIndex(item => item.id === incomeModal.id)
@@ -994,6 +1090,7 @@ export function useStore() {
       }
       return
     }
+    const incomeAccountIdNew = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
     const { data: newRow, error } = await sb.from('income_records')
       .insert({
         category: incomeModal.cat,
@@ -1003,10 +1100,24 @@ export function useStore() {
         note: incomeModal.note.trim() || null,
         source: 'manual',
         user_id: currentUserId.value,
+        account_id: incomeAccountIdNew,
       })
       .select('*')
       .single()
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+    if (incomeAccountIdNew && newRow?.id) {
+      await upsertAccountEntry({
+        accountId: incomeAccountIdNew,
+        direction: 'in',
+        amount: amt,
+        entryType: 'income',
+        sourceTable: 'income_records',
+        sourceId: newRow.id,
+        occurredAt: incomeModal.date + 'T00:00:00+08:00',
+        note: '手动创建收入',
+      })
+      await refreshAccountsFromDB()
+    }
     closeIncomeModal()
     const mapped = {
       id: newRow.id,
@@ -1047,6 +1158,8 @@ export function useStore() {
       date: expenseModal.date,
       time: expenseModal.time,
       imagePath: expenseModal.imagePath,
+      accountId: expenseModal.accountId,
+      accountUnbound: expenseModal.accountUnbound,
     }
   }
 
@@ -1068,6 +1181,8 @@ export function useStore() {
       || current.date !== expenseModalInitial.date
       || current.time !== expenseModalInitial.time
       || current.imagePath !== expenseModalInitial.imagePath
+      || current.accountId !== expenseModalInitial.accountId
+      || current.accountUnbound !== expenseModalInitial.accountUnbound
   }
 
   function resetExpenseChanges() {
@@ -1083,6 +1198,8 @@ export function useStore() {
     expenseModal.date = expenseModalInitial.date
     expenseModal.time = expenseModalInitial.time
     expenseModal.imagePath = expenseModalInitial.imagePath
+    expenseModal.accountId = expenseModalInitial.accountId
+    expenseModal.accountUnbound = expenseModalInitial.accountUnbound
   }
 
   function openExpenseModal() {
@@ -1100,6 +1217,8 @@ export function useStore() {
     expenseModal.imageUrl = null
     expenseModal.imagePath = null
     expenseModal.imageLoadError = false
+    expenseModal.accountId = defaultAccountIdForKind('expense')
+    expenseModal.accountUnbound = !expenseModal.accountId
     setExpenseModalInitial()
   }
 
@@ -1118,6 +1237,8 @@ export function useStore() {
     expenseModal.imagePath = record.image_path || record.image_url || null
     expenseModal.imageUrl = await getSignedImageUrl(expenseModal.imagePath)
     expenseModal.imageLoadError = !!expenseModal.imagePath && !expenseModal.imageUrl
+    expenseModal.accountId = record.accountId || defaultAccountIdForKind('expense')
+    expenseModal.accountUnbound = !expenseModal.accountId
     setExpenseModalInitial()
   }
 
@@ -1137,6 +1258,7 @@ export function useStore() {
     const resolvedTime = expenseModal.time || null
 
     if (expenseModal.mode === 'edit' && expenseModal.id) {
+      const expenseAccountId = expenseModal.accountUnbound ? null : (expenseModal.accountId || null)
       const { error } = await sb.from('transactions').update({
         amount: amt,
         merchant_name: merchantName,
@@ -1148,8 +1270,28 @@ export function useStore() {
         note: expenseModal.note.trim() || null,
         is_large_transport: isLargeTransport,
         transport_type: isLargeTransport ? '交通' : null,
+        account_id: expenseAccountId,
       }).eq('id', expenseModal.id)
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+      if (expenseAccountId) {
+        await upsertAccountEntry({
+          accountId: expenseAccountId,
+          direction: resolveAccountEntryDirection({
+            accountId: expenseAccountId,
+            entryType: 'expense',
+            fallbackDirection: 'out',
+          }),
+          amount: amt,
+          entryType: 'expense',
+          sourceTable: 'transactions',
+          sourceId: expenseModal.id,
+          occurredAt: expenseModal.date + 'T00:00:00+08:00',
+          note: '手动编辑支出',
+        })
+      } else {
+        await voidAccountEntries('transactions', expenseModal.id, 'unbound_after_edit')
+      }
+      await refreshAccountsFromDB()
       closeExpenseModal()
       const editIdx = bills.value.findIndex(item => item.id === expenseModal.id)
       if (editIdx >= 0) {
@@ -1177,6 +1319,7 @@ export function useStore() {
       return
     }
 
+    const expenseAccountIdNew = expenseModal.accountUnbound ? null : (expenseModal.accountId || null)
     const { data: newRow, error } = await sb.from('transactions')
       .insert({
         type: 'expense',
@@ -1193,10 +1336,28 @@ export function useStore() {
         is_large_transport: isLargeTransport,
         transport_type: isLargeTransport ? '交通' : null,
         user_id: currentUserId.value,
+        account_id: expenseAccountIdNew,
       })
       .select('*')
       .single()
     if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+    if (expenseAccountIdNew && newRow?.id) {
+      await upsertAccountEntry({
+        accountId: expenseAccountIdNew,
+        direction: resolveAccountEntryDirection({
+          accountId: expenseAccountIdNew,
+          entryType: 'expense',
+          fallbackDirection: 'out',
+        }),
+        amount: amt,
+        entryType: 'expense',
+        sourceTable: 'transactions',
+        sourceId: newRow.id,
+        occurredAt: expenseModal.date + 'T00:00:00+08:00',
+        note: '手动创建支出',
+      })
+      await refreshAccountsFromDB()
+    }
     closeExpenseModal()
     bills.value.unshift(mapTransaction(newRow))
     showFlash('✓ 支出已记录')
@@ -1641,6 +1802,184 @@ export function useStore() {
     return buildUniversalRecordTitleFromAdapter(domainKey, payload, record)
   }
 
+  // ────────────────────────────────────────────────
+  // 账户 CRUD + 账户流水统一入口
+  // ────────────────────────────────────────────────
+
+  function openAccountModalForCreate() {
+    accountModal.open = true
+    accountModal.mode = 'create'
+    accountModal.id = null
+    accountModal.name = ''
+    accountModal.type = 'wallet_balance'
+    accountModal.institution = ''
+    accountModal.last4 = ''
+    accountModal.initialBalance = ''
+    accountModal.isDefaultExpense = false
+    accountModal.isDefaultIncome = false
+    accountModal.isArchived = false
+  }
+
+  function openAccountModalForEdit(account) {
+    if (!account) return
+    accountModal.open = true
+    accountModal.mode = 'edit'
+    accountModal.id = account.id
+    accountModal.name = account.name || ''
+    accountModal.type = normalizeAccountType(account.type || 'other')
+    accountModal.institution = account.institution || ''
+    accountModal.last4 = account.last4 || ''
+    accountModal.initialBalance = String(account.initialBalance ?? '')
+    accountModal.isDefaultExpense = !!account.isDefaultExpense
+    accountModal.isDefaultIncome = !!account.isDefaultIncome
+    accountModal.isArchived = !!account.isArchived
+  }
+
+  function closeAccountModal() {
+    accountModal.open = false
+  }
+
+  function validateAccountForm() {
+    const name = (accountModal.name || '').trim()
+    if (!name) return '请输入账户名称'
+    if (name.length > 30) return '账户名称最多 30 个字'
+    if (accountModal.last4 && !/^\d{4}$/.test(String(accountModal.last4).trim())) return '尾号必须是 4 位数字'
+    const init = parseFloat(accountModal.initialBalance || '0')
+    if (Number.isNaN(init)) return '初始余额必须是数字'
+    return ''
+  }
+
+  async function saveAccount() {
+    if (!currentUserId.value) { alert('请先登录'); return null }
+    const err = validateAccountForm()
+    if (err) { alert(err); return null }
+    const name = accountModal.name.trim()
+    const initial = parseFloat(accountModal.initialBalance || '0') || 0
+    const last4 = accountModal.last4 && /^\d{4}$/.test(String(accountModal.last4).trim()) ? String(accountModal.last4).trim() : null
+    const institution = accountModal.institution.trim() || null
+
+    if (accountModal.mode === 'edit' && accountModal.id) {
+      const body = {
+        name,
+        type: normalizeAccountType(accountModal.type),
+        institution,
+        last4,
+        is_default_expense: !!accountModal.isDefaultExpense,
+        is_default_income: !!accountModal.isDefaultIncome,
+        is_archived: !!accountModal.isArchived,
+        updated_at: new Date().toISOString(),
+      }
+      const { data, error } = await sb.from('accounts').update(body).eq('id', accountModal.id).select('*').single()
+      if (error) { alert('保存失败：' + humanizeDbError(error)); return null }
+      // 默认账户互斥
+      if (body.is_default_expense) await unsetOtherDefaults('expense', data.id)
+      if (body.is_default_income) await unsetOtherDefaults('income', data.id)
+      const idx = accounts.value.findIndex(a => a.id === data.id)
+      if (idx >= 0) accounts.value[idx] = mapAccountRow(data)
+      closeAccountModal()
+      showFlash('✓ 账户已更新')
+      return data
+    }
+
+    const body = {
+      user_id: currentUserId.value,
+      name,
+      type: normalizeAccountType(accountModal.type),
+      institution,
+      last4,
+      currency: 'CNY',
+      initial_balance: initial,
+      current_balance: initial,
+      is_default_expense: !!accountModal.isDefaultExpense,
+      is_default_income: !!accountModal.isDefaultIncome,
+    }
+    const { data, error } = await sb.from('accounts').insert(body).select('*').single()
+    if (error) { alert('创建失败：' + humanizeDbError(error)); return null }
+    if (body.is_default_expense) await unsetOtherDefaults('expense', data.id)
+    if (body.is_default_income) await unsetOtherDefaults('income', data.id)
+    accounts.value.unshift(mapAccountRow(data))
+    closeAccountModal()
+    showFlash('✓ 账户已创建')
+    return data
+  }
+
+  async function unsetOtherDefaults(kind, keepId) {
+    const column = kind === 'expense' ? 'is_default_expense' : 'is_default_income'
+    const { error } = await sb.from('accounts')
+      .update({ [column]: false })
+      .eq('user_id', currentUserId.value)
+      .eq(column, true)
+      .neq('id', keepId)
+    if (error) console.warn(`重置默认 ${kind} 账户失败:`, error.message)
+    accounts.value = accounts.value.map(a => a.id === keepId ? a : { ...a, [kind === 'expense' ? 'isDefaultExpense' : 'isDefaultIncome']: false })
+  }
+
+  async function archiveAccount(account, archived = true) {
+    if (!account?.id) return
+    const ok = confirm(archived ? `确认归档账户「${account.name}」？归档后不再作为默认候选。` : `确认恢复账户「${account.name}」？`)
+    if (!ok) return
+    const { data, error } = await sb.from('accounts')
+      .update({ is_archived: archived, updated_at: new Date().toISOString() })
+      .eq('id', account.id)
+      .select('*')
+      .single()
+    if (error) { alert('操作失败：' + humanizeDbError(error)); return }
+    const idx = accounts.value.findIndex(a => a.id === account.id)
+    if (idx >= 0) accounts.value[idx] = mapAccountRow(data)
+    showFlash(archived ? '✓ 账户已归档' : '✓ 账户已恢复')
+  }
+
+  // 统一流水入口：保证幂等（先作废旧的同源同类流水再插入新的）
+  async function upsertAccountEntry({ accountId, direction, amount, entryType, sourceTable, sourceId, occurredAt, note }) {
+    if (!accountId) return
+    const amt = Number(amount)
+    if (!Number.isFinite(amt) || amt <= 0) return
+    const { error } = await sb.rpc('create_account_entry_for_record', {
+      p_account_id: accountId,
+      p_direction: direction,
+      p_amount: amt,
+      p_entry_type: entryType,
+      p_source_table: sourceTable || null,
+      p_source_id: sourceId || null,
+      p_occurred_at: occurredAt || new Date().toISOString(),
+      p_note: note || null,
+    })
+    if (error) console.warn('写入账户流水失败:', error.message)
+  }
+
+  function resolveAccountEntryDirection({ accountId, entryType, fallbackDirection }) {
+    const account = accounts.value.find(item => item.id === accountId)
+    if (!account) return fallbackDirection
+    if (entryType === 'expense' && isLiabilityAccount(account)) return 'in'
+    return fallbackDirection
+  }
+
+  async function voidAccountEntries(sourceTable, sourceId, reason = 'source_deleted') {
+    if (!sourceTable || !sourceId) return
+    const { error } = await sb.rpc('void_account_entries_for_record', {
+      p_source_table: sourceTable,
+      p_source_id: sourceId,
+      p_reason: reason,
+    })
+    if (error) console.warn('作废账户流水失败:', error.message)
+  }
+
+  function refreshAccountsFromDB() {
+    return sb.from('accounts')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) { console.warn('刷新账户失败:', error.message); return }
+        accounts.value = (data || []).map(mapAccountRow)
+      })
+  }
+
+  function defaultAccountIdForKind(kind) {
+    const acc = accounts.value.find(a => !a.isArchived && (kind === 'expense' ? a.isDefaultExpense : a.isDefaultIncome))
+    return acc?.id || null
+  }
+
   function walletSnapshotKindOf(record) {
     const payload = record?.payload || {}
     if (payload.account_snapshot_kind === 'asset' || payload.account_snapshot_kind === 'liability') return payload.account_snapshot_kind
@@ -1729,25 +2068,6 @@ export function useStore() {
       if (accountErr) {
         alert('创建账户失败：' + humanizeDbError(accountErr))
         return
-      }
-
-      if (amount > 0) {
-        const { error: entryErr } = await sb.from('account_entries').insert({
-          user_id: currentUserId.value,
-          account_id: accountRow.id,
-          direction: walletSnapshotKindOf(record) === 'liability' ? 'out' : 'in',
-          amount,
-          entry_type: 'snapshot_initialization',
-          source_table: 'data_records',
-          source_id: record.id,
-          occurred_at: snapshotAt,
-          note: '由钱包快照初始化账户余额',
-        })
-        if (entryErr) {
-          alert('账户已创建，但初始化流水失败：' + humanizeDbError(entryErr))
-          await loadData(0, true)
-          return
-        }
       }
 
       const linkedPayload = {
@@ -1960,8 +2280,10 @@ export function useStore() {
     try {
       if (type === 'bill') {
         if (pendingModal.open && pendingModal.bill?.id === id) closePendingModal()
+        await voidAccountEntries('transactions', id, 'transaction_deleted')
         const { error } = await sb.from('transactions').delete().eq('id', id)
         if (error) throw new Error(error.message)
+        await refreshAccountsFromDB()
         if (detailRecord.value?.id === id) goBack()
         // 本地移除，避免全量刷新
         const billIdx = bills.value.findIndex(b => b.id === id)
@@ -1980,8 +2302,10 @@ export function useStore() {
         }
         showFlash('✓ 已删除')
       } else if (type === 'income') {
+        await voidAccountEntries('income_records', id, 'income_deleted')
         const { error } = await sb.from('income_records').delete().eq('id', id)
         if (error) throw new Error(error.message)
+        await refreshAccountsFromDB()
         // 本地移除
         const incIdx = incomeRecords.value.findIndex(r => r.id === id)
         if (incIdx >= 0) incomeRecords.value.splice(incIdx, 1)
@@ -2051,6 +2375,8 @@ export function useStore() {
     hasExpenseChanges, resetExpenseChanges, markExpenseImageUnavailable,
     openUniversalModal, openUniversalEditModal, closeUniversalModal, confirmUniversalRecord,
     createAccountFromWalletSnapshot, linkWalletSnapshotToAccount,
+    accountModal, openAccountModalForCreate, openAccountModalForEdit, closeAccountModal, saveAccount, archiveAccount,
+    upsertAccountEntry, voidAccountEntries, refreshAccountsFromDB, defaultAccountIdForKind,
     hasUniversalChanges, resetUniversalChanges, markUniversalImageUnavailable, getUniversalDomainMeta,
     getDomainRegistryStatus,
     openImgFull, closeImgFull,

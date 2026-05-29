@@ -92,6 +92,7 @@ export function mapTransaction(t) {
     note: t.note || '',
     source: t.source || 'manual',
     companionMessage: t.companion_message || '',
+    accountId: t.account_id || null,
   }
 }
 

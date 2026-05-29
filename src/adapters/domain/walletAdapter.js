@@ -181,6 +181,7 @@ export function getAccountSections(store) {
         subtitle: account.institution || account.type,
         value: formatAccountCurrency(account.currentBalance),
         snapshot: account.snapshotAt ? `最近快照 ${account.snapshotAt.slice(0, 10)}` : '暂无快照',
+        raw: account,
       })),
     },
     {
@@ -193,6 +194,7 @@ export function getAccountSections(store) {
         subtitle: account.institution || account.type,
         value: formatAccountCurrency(account.currentBalance),
         snapshot: account.snapshotAt ? `最近快照 ${account.snapshotAt.slice(0, 10)}` : '暂无快照',
+        raw: account,
       })),
     },
   ]

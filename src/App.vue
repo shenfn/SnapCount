@@ -77,6 +77,7 @@
     <ModalIncome />
     <ModalExpense />
     <ModalUniversal />
+    <ModalAccount />
 
     <!-- Delete confirmation -->
     <div v-if="store.deleteConfirm.open"
@@ -129,6 +130,7 @@ import ModalPending from './components/ModalPending.vue'
 import ModalIncome  from './components/ModalIncome.vue'
 import ModalExpense from './components/ModalExpense.vue'
 import ModalUniversal from './components/ModalUniversal.vue'
+import ModalAccount from './components/ModalAccount.vue'
 import ModalWelcome from './components/ModalWelcome.vue'
 
 const store = useStore()
