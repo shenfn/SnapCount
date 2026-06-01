@@ -113,6 +113,22 @@ payment_method（支付方式）：
 * 页面含“白条”字样 → 京东白条
 * 无法识别 → null
 
+funding_source（出资账户线索）：
+- 当 record_type 为 expense 时尽量返回对象；用于自动绑定账户，不确定时也可以返回 null
+- 结构：{raw_text,type,institution,last4,confidence,evidence}
+- type 从 ["cash","wallet_balance","debit_card","credit_card","credit_line","other"] 中选一个；无法判断返回 null
+- institution 填账户机构/产品名，如“微信零钱”“支付宝余额”“招商银行”“花呗”“京东白条”
+- last4 仅在截图能明确看到银行卡/信用卡尾号四位时返回 4 位数字字符串，否则返回 null
+- confidence 为你对这个账户线索本身的置信度，不是整条记录置信度
+- evidence 用一句短语说明依据，如“页面显示 使用京东白条支付”“支付方式尾号 8734”
+- 若只是看到“微信支付/支付宝”但无法区分是零钱还是银行卡，可保留 type=null，institution 写“微信支付”或“支付宝”
+
+receiving_account（入账账户线索）：
+- 当 record_type 为 income 时尽量返回对象；用于自动绑定收款账户，不确定时也可以返回 null
+- 结构与 funding_source 相同：{raw_text,type,institution,last4,confidence,evidence}
+- 优先提取“已存入零钱”“转入招商银行尾号1234”“到账至余额宝”这类明确入账账户
+- 若只能确认平台，不能确认具体账户，也要尽量保留 raw_text / institution 供系统匹配
+
 confidence（置信度）：0-1 浮点数，识别整体置信度
 
 record_type（流水类型）：
@@ -231,10 +247,11 @@ order_finished_at（订单完成时间）：
 字段格式要求：
 - domain_key：仅当 record_type 为 sport/sleep/reading/food/wallet 时填写对应 key；财务收入/支出记录返回 null
 - payload_jsonb：财务记录可返回 null；内置数据域必须返回对象
+- funding_source / receiving_account：仅财务记录使用；无法确认时返回 null，不要编造
 - title、summary：内置数据域尽量返回；财务记录可返回 null
 - 看不清或不可见的字段返回 null，不要编造。
 
 只返回如下结构的纯 JSON（不要 markdown 包裹）：
-{"image_type":"other","record_type":"uncertain","domain_key":null,"title":null,"summary":null,"amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"income_category":null,"source_name":null,"occurred_at":null,"order_finished_at":null,"payload_jsonb":null,"confidence":0,"companion_message":""}`;
+{"image_type":"other","record_type":"uncertain","domain_key":null,"title":null,"summary":null,"amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"funding_source":null,"receiving_account":null,"income_category":null,"source_name":null,"occurred_at":null,"order_finished_at":null,"payload_jsonb":null,"confidence":0,"companion_message":""}`;
 
 export const PROMPT = buildPrompt();

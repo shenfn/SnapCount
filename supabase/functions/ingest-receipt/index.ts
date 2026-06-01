@@ -272,6 +272,22 @@ interface AIResult {
   platform: string | null;
   category: string | null;
   payment_method: string | null;
+  funding_source?: {
+    raw_text?: string | null;
+    type?: string | null;
+    institution?: string | null;
+    last4?: string | null;
+    confidence?: number | null;
+    evidence?: string | null;
+  } | null;
+  receiving_account?: {
+    raw_text?: string | null;
+    type?: string | null;
+    institution?: string | null;
+    last4?: string | null;
+    confidence?: number | null;
+    evidence?: string | null;
+  } | null;
   income_category?: string | null;
   source_name?: string | null;
   occurred_at?: string | null;
@@ -279,6 +295,35 @@ interface AIResult {
   payload_jsonb?: Record<string, unknown> | null;
   confidence: number;
   companion_message?: string | null;
+}
+
+interface AccountRow {
+  id: string;
+  user_id: string;
+  name: string;
+  type: string;
+  institution: string | null;
+  last4: string | null;
+  is_archived: boolean;
+}
+
+interface AccountHint {
+  raw_text: string | null;
+  type: string | null;
+  institution: string | null;
+  last4: string | null;
+  confidence: number;
+  evidence: string | null;
+}
+
+interface AccountCandidate {
+  id: string;
+  score: number;
+  name: string;
+  type: string;
+  institution: string | null;
+  last4: string | null;
+  reasons: string[];
 }
 
 function normalizeText(value: unknown): string | null {
@@ -325,6 +370,166 @@ function normalizeNumber(value: unknown): number | null {
 
 function normalizeString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeAccountTypeValue(value: unknown): string | null {
+  const text = normalizeString(value)?.toLowerCase() ?? null;
+  if (!text) return null;
+  if (["cash", "wallet_balance", "debit_card", "credit_card", "credit_line", "other"].includes(text)) return text;
+  if (["wechat", "alipay", "balance"].includes(text)) return "wallet_balance";
+  if (["bank_card", "bank", "debit"].includes(text)) return "debit_card";
+  if (["huabei", "jd_baitiao", "douyin_monthly"].includes(text)) return "credit_line";
+  return text;
+}
+
+function normalizeLast4(value: unknown): string | null {
+  const text = normalizeString(value)?.replace(/[^\d]/g, "") ?? null;
+  return text && /^\d{4}$/.test(text) ? text : null;
+}
+
+function normalizeComparableText(value: unknown): string {
+  return normalizeString(value)?.toLowerCase().replace(/\s+/g, "") ?? "";
+}
+
+function buildAccountHint(ai: AIResult, recordType: RecordType): AccountHint | null {
+  const source = recordType === "income"
+    ? (ai.receiving_account ?? ai.funding_source ?? null)
+    : (ai.funding_source ?? null);
+  const rawText = normalizeString(source?.raw_text);
+  const type = normalizeAccountTypeValue(source?.type);
+  const institution = normalizeString(source?.institution);
+  const last4 = normalizeLast4(source?.last4);
+  const confidence = normalizeNumber(source?.confidence) ?? 0;
+  const evidence = normalizeString(source?.evidence);
+
+  if (rawText || type || institution || last4) {
+    return { raw_text: rawText, type, institution, last4, confidence, evidence };
+  }
+
+  const paymentMethod = normalizeString(ai.payment_method);
+  if (paymentMethod === "花呗") {
+    return { raw_text: paymentMethod, type: "credit_line", institution: "花呗", last4: null, confidence: 0.92, evidence: "payment_method=花呗" };
+  }
+  if (paymentMethod === "京东白条") {
+    return { raw_text: paymentMethod, type: "credit_line", institution: "京东白条", last4: null, confidence: 0.92, evidence: "payment_method=京东白条" };
+  }
+  if (paymentMethod === "美团月付") {
+    return { raw_text: paymentMethod, type: "credit_line", institution: "美团月付", last4: null, confidence: 0.9, evidence: "payment_method=美团月付" };
+  }
+  return null;
+}
+
+async function loadUserAccounts(
+  supabase: ReturnType<typeof createClient>,
+  userId: string | null,
+): Promise<AccountRow[]> {
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id,user_id,name,type,institution,last4,is_archived")
+    .eq("user_id", userId)
+    .eq("is_archived", false)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.error("Account lookup failed:", error);
+    return [];
+  }
+  return (data || []) as AccountRow[];
+}
+
+function rankAccountCandidates(accounts: AccountRow[], hint: AccountHint | null): AccountCandidate[] {
+  if (!hint) return [];
+  const hintText = [hint.raw_text, hint.institution].filter(Boolean).join(" ");
+  const hintComparable = normalizeComparableText(hintText);
+  return accounts.map((account) => {
+    let score = 0;
+    const reasons: string[] = [];
+    const accountType = normalizeAccountTypeValue(account.type);
+    const accountName = normalizeComparableText(account.name);
+    const institution = normalizeComparableText(account.institution);
+
+    if (hint.type && accountType === hint.type) {
+      score += 0.34;
+      reasons.push("type");
+    }
+    if (hint.last4 && account.last4 === hint.last4) {
+      score += 0.42;
+      reasons.push("last4");
+    }
+    if (hintComparable) {
+      if (accountName && hintComparable.includes(accountName)) {
+        score += 0.2;
+        reasons.push("name");
+      }
+      if (institution && hintComparable.includes(institution)) {
+        score += 0.2;
+        reasons.push("institution");
+      }
+      if (accountName && accountName.includes(hintComparable) && hintComparable.length >= 2) {
+        score += 0.12;
+        reasons.push("name_reverse");
+      }
+      if (institution && institution.includes(hintComparable) && hintComparable.length >= 2) {
+        score += 0.12;
+        reasons.push("institution_reverse");
+      }
+    }
+    if (hint.confidence >= 0.8) score += 0.04;
+    return {
+      id: account.id,
+      score: Math.round(Math.min(score, 0.99) * 100) / 100,
+      name: account.name,
+      type: account.type,
+      institution: account.institution,
+      last4: account.last4,
+      reasons,
+    };
+  })
+  .filter((item) => item.score > 0)
+  .sort((a, b) => b.score - a.score);
+}
+
+function chooseAutoBindAccount(candidates: AccountCandidate[]): AccountCandidate | null {
+  if (!candidates.length) return null;
+  const first = candidates[0];
+  const second = candidates[1];
+  if (first.score < 0.84) return null;
+  if (second && first.score - second.score < 0.08) return null;
+  return first;
+}
+
+function resolveEntryDirectionForAccountType(accountType: string | null, recordType: "expense" | "income"): "in" | "out" {
+  if (recordType === "income") return "in";
+  return accountType === "credit_card" || accountType === "credit_line" ? "in" : "out";
+}
+
+async function createAutoAccountEntry(
+  supabase: ReturnType<typeof createClient>,
+  payload: {
+    userId: string | null;
+    accountId: string;
+    accountType: string | null;
+    recordType: "expense" | "income";
+    amount: number;
+    sourceId: string;
+    occurredAt: string | null;
+  },
+): Promise<void> {
+  if (!payload.userId) return;
+  const direction = resolveEntryDirectionForAccountType(payload.accountType, payload.recordType);
+  const occurredAt = payload.occurredAt ?? new Date().toISOString();
+  const { error } = await supabase.from("account_entries").insert({
+    user_id: payload.userId,
+    account_id: payload.accountId,
+    direction,
+    amount: payload.amount,
+    entry_type: payload.recordType,
+    source_table: payload.recordType === "income" ? "income_records" : "transactions",
+    source_id: payload.sourceId,
+    occurred_at: occurredAt,
+    note: payload.recordType === "income" ? "截图识别自动绑定账户" : "截图识别自动绑定出资账户",
+  });
+  if (error) throw new Error(`Account entry insert failed: ${error.message}`);
 }
 
 const SMALL_PACK_FOOD_KEYWORDS = [
@@ -1430,6 +1635,10 @@ Deno.serve(async (req) => {
       ai.record_type = builtinKey;
       ai.domain_key = builtinKey;
     }
+    const accountHint = !builtinKey ? buildAccountHint(ai, recordType) : null;
+    const userAccounts = !builtinKey ? await loadUserAccounts(supabase, userId) : [];
+    const accountCandidates = !builtinKey ? rankAccountCandidates(userAccounts, accountHint) : [];
+    const autoBoundAccount = !builtinKey ? chooseAutoBindAccount(accountCandidates) : null;
 
     // 重试模式：处理结果后直接返回
     if (isRetry && stagingRetryId) {
@@ -1467,9 +1676,29 @@ Deno.serve(async (req) => {
             amount: normalizedAmount ?? 0.01, category: incomeCat,
             source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
             income_date: recordDate, image_url: path, image_hash: hash, user_id: userId || null, source: "ai_scan",
+            account_id: autoBoundAccount?.id ?? null,
             companion_message: companionMessage,
           }).select("id").single();
-          if (incRow) { archivedTo = "income_records"; archivedId = incRow.id; }
+          if (incRow) {
+            if (autoBoundAccount && normalizedAmount !== null) {
+              try {
+                await createAutoAccountEntry(supabase, {
+                  userId,
+                  accountId: autoBoundAccount.id,
+                  accountType: autoBoundAccount.type,
+                  recordType: "income",
+                  amount: normalizedAmount,
+                  sourceId: incRow.id,
+                  occurredAt,
+                });
+              } catch (entryError) {
+                await supabase.from("income_records").delete().eq("id", incRow.id);
+                throw entryError;
+              }
+            }
+            archivedTo = "income_records";
+            archivedId = incRow.id;
+          }
         } else if (builtinKey) {
           const built = buildBuiltinPayload(ai);
           const domain = await getDomainByKey(supabase, builtinKey);
@@ -1490,9 +1719,29 @@ Deno.serve(async (req) => {
             payment_method: ai.payment_method, status: isComplete ? "done" : "pending",
             image_url: path, image_hash: hash,
             transaction_date: recordDate, transaction_time: recordTime, user_id: userId || null, source: "ai_scan",
+            account_id: autoBoundAccount?.id ?? null,
             companion_message: companionMessage,
           }).select("id").single();
-          if (txRow) { archivedTo = "transactions"; archivedId = txRow.id; }
+          if (txRow) {
+            if (autoBoundAccount && normalizedAmount !== null) {
+              try {
+                await createAutoAccountEntry(supabase, {
+                  userId,
+                  accountId: autoBoundAccount.id,
+                  accountType: autoBoundAccount.type,
+                  recordType: "expense",
+                  amount: normalizedAmount,
+                  sourceId: txRow.id,
+                  occurredAt,
+                });
+              } catch (entryError) {
+                await supabase.from("transactions").delete().eq("id", txRow.id);
+                throw entryError;
+              }
+            }
+            archivedTo = "transactions";
+            archivedId = txRow.id;
+          }
         }
 
         if (archivedTo && archivedId) {
@@ -1863,6 +2112,7 @@ Deno.serve(async (req) => {
         image_hash: hash,
         user_id: userId || null,
         source: "ai_scan",
+        account_id: autoBoundAccount?.id ?? null,
         note: ai.platform ? `来自${ai.platform}截图识别` : "截图识别收入",
         companion_message: companionMessage,
       }).select().single();
@@ -1895,6 +2145,23 @@ Deno.serve(async (req) => {
           if (removeErr) console.error("Cleanup uploaded income image failed:", removeErr);
         }
         throw new Error(`Income insert failed: ${incErr.message}`);
+      }
+
+      if (row && autoBoundAccount) {
+        try {
+          await createAutoAccountEntry(supabase, {
+            userId,
+            accountId: autoBoundAccount.id,
+            accountType: autoBoundAccount.type,
+            recordType: "income",
+            amount: normalizedAmount,
+            sourceId: row.id,
+            occurredAt,
+          });
+        } catch (entryError) {
+          await supabase.from("income_records").delete().eq("id", row.id);
+          throw entryError;
+        }
       }
 
       await writeAiLog(supabase, {
@@ -2043,6 +2310,7 @@ Deno.serve(async (req) => {
       transaction_date: recordDate,
       transaction_time: recordTime,
       source: "ai_scan",
+      account_id: autoBoundAccount?.id ?? null,
       companion_message: companionMessage,
     }).select().single();
     timings.mark("db_insert");
@@ -2074,6 +2342,23 @@ Deno.serve(async (req) => {
         if (removeErr) console.error("Cleanup uploaded image failed:", removeErr);
       }
       throw new Error(`DB insert failed: ${insErr.message}`);
+    }
+
+    if (row && autoBoundAccount && normalizedAmount !== null) {
+      try {
+        await createAutoAccountEntry(supabase, {
+          userId,
+          accountId: autoBoundAccount.id,
+          accountType: autoBoundAccount.type,
+          recordType: "expense",
+          amount: normalizedAmount,
+          sourceId: row.id,
+          occurredAt,
+        });
+      } catch (entryError) {
+        await supabase.from("transactions").delete().eq("id", row.id);
+        throw entryError;
+      }
     }
 
     await writeAiLog(supabase, {
