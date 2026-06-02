@@ -2,15 +2,25 @@ import { formatCurrency } from '../utils/format'
 
 const DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 
-export function buildFinanceOverview({ bills = [], incomeRecords = [], dataRecords = [], todayKey = localDateKey(new Date()) }) {
+export function buildFinanceOverview({ bills = [], incomeRecords = [], dataRecords = [], accounts = [], todayKey = localDateKey(new Date()) }) {
   const walletSnapshots = latestWalletSnapshots(dataRecords.filter(item => item.domainKey === 'wallet'))
   const cashSnapshots = walletSnapshots.filter(item => item.payload?.record_kind === 'cash_snapshot')
   const liabilitySnapshots = walletSnapshots.filter(item => item.payload?.record_kind === 'liability_snapshot' && item.payload?.status !== 'paid')
 
-  const availableCash = cashSnapshots.reduce((sum, item) => sum + amountOf(item), 0)
-  const liabilityTotal = liabilitySnapshots.reduce((sum, item) => sum + amountOf(item), 0)
+  const activeAccounts = accounts.filter(item => !item.isArchived)
+  const assetAccounts = activeAccounts.filter(item => !isLiabilityAccount(item))
+  const liabilityAccounts = activeAccounts.filter(isLiabilityAccount)
+  const accountAvailableCash = assetAccounts.reduce((sum, item) => sum + Number(item.currentBalance || 0), 0)
+  const accountLiabilityTotal = liabilityAccounts.reduce((sum, item) => sum + Number(item.currentBalance || 0), 0)
+
+  const availableCash = activeAccounts.length
+    ? accountAvailableCash
+    : cashSnapshots.reduce((sum, item) => sum + amountOf(item), 0)
+  const liabilityTotal = activeAccounts.length
+    ? accountLiabilityTotal
+    : liabilitySnapshots.reduce((sum, item) => sum + amountOf(item), 0)
   const netWorthEstimate = availableCash - liabilityTotal
-  const nearestLiability = pickNearestLiability(liabilitySnapshots)
+  const nearestLiability = pickNearestLiability(liabilitySnapshots) || pickNearestLiabilityAccount(liabilityAccounts)
 
   const todayExpense = bills
     .filter(item => item.status === 'done' && item.dateRaw === todayKey)
@@ -41,7 +51,7 @@ export function buildFinanceOverview({ bills = [], incomeRecords = [], dataRecor
     maxExpenseDay: sevenDayExpenseTrend.reduce((max, item) => item.amount > max.amount ? item : max, { amount: 0, label: '--', dateKey: '' }),
     todayTrend,
     statusLabel: buildStatusLabel({ availableCash, liabilityTotal, netWorthEstimate, nearestLiability }),
-    hasWalletSnapshot: walletSnapshots.length > 0,
+    hasWalletSnapshot: walletSnapshots.length > 0 || activeAccounts.length > 0,
     display: {
       availableCash: formatCurrency(availableCash, { fractionDigits: 0 }),
       liabilityTotal: formatCurrency(liabilityTotal, { fractionDigits: 0 }),
@@ -51,6 +61,10 @@ export function buildFinanceOverview({ bills = [], incomeRecords = [], dataRecor
       todayNet: `${todayNet >= 0 ? '+' : '-'}${formatCurrency(Math.abs(todayNet), { fractionDigits: 0 })}`,
     },
   }
+}
+
+function isLiabilityAccount(account) {
+  return account?.type === 'credit_card' || account?.type === 'credit_line'
 }
 
 function latestWalletSnapshots(records) {
@@ -86,6 +100,23 @@ function pickNearestLiability(records) {
     }
   })
   return enriched.sort((a, b) => String(a.dueDate || '9999-99-99').localeCompare(String(b.dueDate || '9999-99-99')))[0] || null
+}
+
+function pickNearestLiabilityAccount(accounts) {
+  const sorted = accounts
+    .filter(account => Number(account.currentBalance || 0) > 0)
+    .map(account => ({
+      id: account.id,
+      accountName: account.name || '待还款',
+      amount: Number(account.currentBalance || 0),
+      dueDate: null,
+      billDay: null,
+      status: 'unpaid',
+      raw: account,
+      rawType: 'account',
+    }))
+    .sort((a, b) => b.amount - a.amount)
+  return sorted[0] || null
 }
 
 function normalizeDueDate(dueDate, billDay, todayKey) {

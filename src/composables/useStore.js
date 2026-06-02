@@ -288,6 +288,7 @@ export function useStore() {
       bills: bills.value,
       incomeRecords: incomeRecords.value,
       dataRecords: dataRecords.value,
+      accounts: accounts.value,
       todayKey: getLocalDateKey(),
     })
   })

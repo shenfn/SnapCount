@@ -293,7 +293,12 @@ function scrollToSection(key) {
 }
 
 function openNearestLiability() {
-  const record = finance.value.nearestLiability?.raw
+  const item = finance.value.nearestLiability
+  const record = item?.raw
+  if (record && item?.rawType === 'account') {
+    store.openAccountDetail(record)
+    return
+  }
   if (record) {
     store.openRecordDetail('universal', record)
     return
