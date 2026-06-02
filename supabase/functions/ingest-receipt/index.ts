@@ -416,6 +416,15 @@ function buildAccountHint(ai: AIResult, recordType: RecordType): AccountHint | n
   if (paymentMethod === "美团月付") {
     return { raw_text: paymentMethod, type: "credit_line", institution: "美团月付", last4: null, confidence: 0.9, evidence: "payment_method=美团月付" };
   }
+  if (paymentMethod === "微信支付") {
+    return { raw_text: paymentMethod, type: "wallet_balance", institution: "微信", last4: null, confidence: 0.78, evidence: "payment_method=微信支付" };
+  }
+  if (paymentMethod === "支付宝") {
+    return { raw_text: paymentMethod, type: "wallet_balance", institution: "支付宝", last4: null, confidence: 0.78, evidence: "payment_method=支付宝" };
+  }
+  if (paymentMethod === "银行卡") {
+    return { raw_text: paymentMethod, type: "debit_card", institution: "银行卡", last4: null, confidence: 0.72, evidence: "payment_method=银行卡" };
+  }
   return null;
 }
 
@@ -441,6 +450,7 @@ function rankAccountCandidates(accounts: AccountRow[], hint: AccountHint | null)
   if (!hint) return [];
   const hintText = [hint.raw_text, hint.institution].filter(Boolean).join(" ");
   const hintComparable = normalizeComparableText(hintText);
+  const activeDebitCardCount = accounts.filter((account) => normalizeAccountTypeValue(account.type) === "debit_card").length;
   return accounts.map((account) => {
     let score = 0;
     const reasons: string[] = [];
@@ -472,6 +482,30 @@ function rankAccountCandidates(accounts: AccountRow[], hint: AccountHint | null)
       if (institution && institution.includes(hintComparable) && hintComparable.length >= 2) {
         score += 0.12;
         reasons.push("institution_reverse");
+      }
+      if (hintComparable.includes("花呗") && accountType === "credit_line" && (accountName.includes("花呗") || institution.includes("花呗"))) {
+        score += 0.42;
+        reasons.push("huabei_exact");
+      }
+      if (hintComparable.includes("白条") && accountType === "credit_line" && (accountName.includes("白条") || institution.includes("白条") || accountName.includes("京东") || institution.includes("京东"))) {
+        score += 0.42;
+        reasons.push("baitiao_exact");
+      }
+      if (hintComparable.includes("月付") && accountType === "credit_line" && (accountName.includes("月付") || institution.includes("月付"))) {
+        score += 0.42;
+        reasons.push("monthly_credit_exact");
+      }
+      if (hintComparable.includes("微信") && accountType === "wallet_balance" && (accountName.includes("微信") || institution.includes("微信"))) {
+        score += 0.42;
+        reasons.push("wechat_exact");
+      }
+      if (hintComparable.includes("支付宝") && accountType === "wallet_balance" && (accountName.includes("支付宝") || institution.includes("支付宝"))) {
+        score += 0.42;
+        reasons.push("alipay_exact");
+      }
+      if ((hintComparable.includes("银行卡") || hintComparable.includes("银行")) && accountType === "debit_card") {
+        score += activeDebitCardCount === 1 ? 0.5 : 0.16;
+        reasons.push(activeDebitCardCount === 1 ? "single_debit_card" : "debit_card_type");
       }
     }
     if (hint.confidence >= 0.8) score += 0.04;
