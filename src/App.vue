@@ -15,8 +15,18 @@
 
     <!-- Loading overlay -->
     <div v-if="store.loading.value" class="platform-overlay">
-      <div class="platform-loader-mark">数</div>
-      <div class="platform-loader-text">个人数据平台加载中…</div>
+      <div class="platform-loader-mark platform-loader-brand" aria-hidden="true">
+        <svg class="platform-loader-icon" viewBox="0 0 64 64" role="img">
+          <rect class="loader-book" x="14" y="12" width="36" height="44" rx="10" />
+          <path class="loader-spine" d="M24 14v42" />
+          <path class="loader-line" d="M31 25h12" />
+          <path class="loader-line" d="M31 33h9" />
+          <path class="loader-coin" d="M31 43h14" />
+          <circle class="loader-dot" cx="44" cy="43" r="3" />
+        </svg>
+      </div>
+      <div class="platform-loader-text">正在整理你的账本…</div>
+      <div class="platform-loader-track" aria-hidden="true"><span></span></div>
     </div>
 
     <!-- Error overlay -->
