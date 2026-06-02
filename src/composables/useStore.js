@@ -21,7 +21,7 @@ import {
   incomeCatMap, catCodeMap, payAliasMap,
   getLocalDateKey, localDateKeyOf,
 } from '../utils/helpers'
-import { mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
+import { isLiabilityAccount, mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
 function humanizeDbError(err) {
@@ -803,7 +803,11 @@ export function useStore() {
     pendingModal.category = catCodeMap[bill.cat] || (bill.cat !== '?' ? bill.cat : null)
     pendingModal.payment = payAliasMap[bill.payment] || (bill.payment !== '?' ? bill.payment : null)
     pendingModal.incomeCategory = 'other'
-    pendingModal.accountId = bill.accountId || defaultAccountIdForKind(pendingModal.entryType)
+    pendingModal.accountId = resolveAccountIdForPayment({
+      existingAccountId: bill.accountId,
+      paymentMethod: pendingModal.payment,
+      kind: pendingModal.entryType,
+    })
     pendingModal.accountUnbound = !pendingModal.accountId
     pendingModalInitial = {
       entryType: pendingModal.entryType,
@@ -913,7 +917,7 @@ export function useStore() {
     if (pendingModal.entryType === 'income') {
       if (!pendingModal.incomeCategory) { alert('请选择收入类型'); return }
       const source = pendingModal.merchantName.trim() || (incomeCatMap[pendingModal.incomeCategory]?.label || '收入')
-      const incomeAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || null)
+      const incomeAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || defaultAccountIdForKind('income'))
       const { error: confirmErr } = await sb.rpc('confirm_pending_transaction_with_account', {
         p_pending_id: pendingModal.bill.id,
         p_entry_type: 'income',
@@ -937,7 +941,9 @@ export function useStore() {
     }
 
     if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
-    const expenseAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || null)
+    const expenseAccountId = pendingModal.accountUnbound
+      ? autoAccountIdForPayment(pendingModal.payment, 'expense')
+      : (pendingModal.accountId || autoAccountIdForPayment(pendingModal.payment, 'expense') || null)
     const { error } = await sb.rpc('confirm_pending_transaction_with_account', {
       p_pending_id: pendingModal.bill.id,
       p_entry_type: 'expense',
@@ -1175,7 +1181,11 @@ export function useStore() {
     expenseModal.imageUrl = null
     expenseModal.imagePath = null
     expenseModal.imageLoadError = false
-    expenseModal.accountId = defaultAccountIdForKind('expense')
+    expenseModal.accountId = resolveAccountIdForPayment({
+      existingAccountId: null,
+      paymentMethod: expenseModal.payment,
+      kind: 'expense',
+    })
     expenseModal.accountUnbound = !expenseModal.accountId
     setExpenseModalInitial()
   }
@@ -1195,7 +1205,11 @@ export function useStore() {
     expenseModal.imagePath = record.image_path || record.image_url || null
     expenseModal.imageUrl = await getSignedImageUrl(expenseModal.imagePath)
     expenseModal.imageLoadError = !!expenseModal.imagePath && !expenseModal.imageUrl
-    expenseModal.accountId = record.accountId || defaultAccountIdForKind('expense')
+    expenseModal.accountId = resolveAccountIdForPayment({
+      existingAccountId: record.accountId,
+      paymentMethod: expenseModal.payment,
+      kind: 'expense',
+    })
     expenseModal.accountUnbound = !expenseModal.accountId
     setExpenseModalInitial()
   }
@@ -1216,7 +1230,9 @@ export function useStore() {
     const resolvedTime = expenseModal.time || null
 
     if (expenseModal.mode === 'edit' && expenseModal.id) {
-      const expenseAccountId = expenseModal.accountUnbound ? null : (expenseModal.accountId || null)
+      const expenseAccountId = expenseModal.accountUnbound
+        ? autoAccountIdForPayment(expenseModal.payment, 'expense')
+        : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
       const { error } = await sb.rpc('save_transaction_with_account', {
         p_id: expenseModal.id,
         p_amount: amt,
@@ -1265,7 +1281,9 @@ export function useStore() {
       return
     }
 
-    const expenseAccountIdNew = expenseModal.accountUnbound ? null : (expenseModal.accountId || null)
+    const expenseAccountIdNew = expenseModal.accountUnbound
+      ? autoAccountIdForPayment(expenseModal.payment, 'expense')
+      : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
     const { data: newRow, error } = await sb.rpc('save_transaction_with_account', {
       p_id: null,
       p_amount: amt,
@@ -1605,21 +1623,25 @@ export function useStore() {
 
     if (domainKey === 'expense') {
       const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
-      const { data: inserted, error: insertErr } = await sb.from('transactions').insert({
-        type: 'expense',
-        amount: amount > 0 ? amount : 0.01,
-        merchant_name: payload.merchant_name || payload.source_name || title || '待补充支出',
-        platform: payload.platform || '微信',
-        category: payload.category || null,
-        payment_method: payload.payment_method || null,
-        status: payload.category && payload.payment_method ? 'done' : 'pending',
-        transaction_date: normalizeDateOnly(occurredAt),
-        source: 'ai_scan',
-        image_url: record.imagePath || null,
-        image_hash: record.imageHash || null,
-        note: summary,
-        user_id: currentUserId.value,
-      }).select('id').single()
+      const paymentMethod = payload.payment_method || null
+      const { data: inserted, error: insertErr } = await sb.rpc('save_transaction_with_account', {
+        p_id: null,
+        p_amount: amount > 0 ? amount : 0.01,
+        p_merchant_name: payload.merchant_name || payload.source_name || title || '待补充支出',
+        p_platform: payload.platform || '微信',
+        p_category: payload.category || null,
+        p_payment_method: paymentMethod,
+        p_transaction_date: normalizeDateOnly(occurredAt),
+        p_transaction_time: null,
+        p_note: summary,
+        p_is_large_transport: payload.category === 'transport' && amount >= 200,
+        p_transport_type: payload.category === 'transport' && amount >= 200 ? '交通' : null,
+        p_source: 'ai_scan',
+        p_image_url: record.imagePath || null,
+        p_image_hash: record.imageHash || null,
+        p_companion_message: null,
+        p_account_id: autoAccountIdForPayment(paymentMethod, 'expense'),
+      })
       if (insertErr) {
         showFlash('❌ 转入支出失败：' + humanizeDbError(insertErr))
         return
@@ -1638,17 +1660,19 @@ export function useStore() {
 
     if (domainKey === 'income') {
       const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
-      const { data: inserted, error: insertErr } = await sb.from('income_records').insert({
-        category: payload.income_category || 'other',
-        source_name: payload.source_name || title || '截图识别收入',
-        amount: amount > 0 ? amount : 0.01,
-        income_date: normalizeDateOnly(occurredAt),
-        note: summary,
-        image_url: record.imagePath || null,
-        image_hash: record.imageHash || null,
-        source: 'ai_scan',
-        user_id: currentUserId.value,
-      }).select('id').single()
+      const { data: inserted, error: insertErr } = await sb.rpc('save_income_with_account', {
+        p_id: null,
+        p_category: payload.income_category || 'other',
+        p_source_name: payload.source_name || title || '截图识别收入',
+        p_amount: amount > 0 ? amount : 0.01,
+        p_income_date: normalizeDateOnly(occurredAt),
+        p_note: summary,
+        p_source: 'ai_scan',
+        p_image_url: record.imagePath || null,
+        p_image_hash: record.imageHash || null,
+        p_companion_message: null,
+        p_account_id: defaultAccountIdForKind('income'),
+      })
       if (insertErr) {
         showFlash('❌ 转入收入失败：' + humanizeDbError(insertErr))
         return
@@ -1950,6 +1974,13 @@ export function useStore() {
     if (error) console.warn('写入账户流水失败:', error.message)
   }
 
+  function resolveAccountEntryDirection({ accountId, entryType, fallbackDirection }) {
+    const account = accounts.value.find(item => item.id === accountId)
+    if (!account) return fallbackDirection
+    if (entryType === 'expense' && isLiabilityAccount(account)) return 'in'
+    return fallbackDirection
+  }
+
   async function voidAccountEntries(sourceTable, sourceId, reason = 'source_deleted') {
     if (!sourceTable || !sourceId) return
     const { error } = await sb.rpc('void_account_entries_for_record', {
@@ -1974,6 +2005,44 @@ export function useStore() {
   function defaultAccountIdForKind(kind) {
     const acc = accounts.value.find(a => !a.isArchived && (kind === 'expense' ? a.isDefaultExpense : a.isDefaultIncome))
     return acc?.id || null
+  }
+
+  function normalizeAccountMatchText(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, '')
+  }
+
+  function autoAccountIdForPayment(paymentMethod, kind = 'expense') {
+    const paymentText = normalizeAccountMatchText(payAliasMap[paymentMethod] || paymentMethod)
+    if (!paymentText || kind !== 'expense') return null
+
+    const candidates = accounts.value.filter(account => !account.isArchived)
+    const scoreAccount = (account) => {
+      const name = normalizeAccountMatchText(account.name)
+      const institution = normalizeAccountMatchText(account.institution)
+      const accountText = `${name} ${institution}`
+      const type = normalizeAccountType(account.type)
+      let score = 0
+
+      if (paymentText.includes('花呗') && type === 'credit_line' && accountText.includes('花呗')) score += 100
+      if (paymentText.includes('白条') && type === 'credit_line' && (accountText.includes('白条') || accountText.includes('京东'))) score += 100
+      if (paymentText.includes('月付') && type === 'credit_line' && accountText.includes('月付')) score += 100
+      if (paymentText.includes('银行卡') && type === 'debit_card') score += 40
+      if (paymentText.includes('微信') && type === 'wallet_balance' && accountText.includes('微信')) score += 70
+      if (paymentText.includes('支付宝') && type === 'wallet_balance' && accountText.includes('支付宝')) score += 70
+      if (name && paymentText.includes(name)) score += 60
+      if (institution && paymentText.includes(institution)) score += 50
+      return score
+    }
+
+    const ranked = candidates
+      .map(account => ({ account, score: scoreAccount(account) }))
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+    return ranked[0]?.account.id || null
+  }
+
+  function resolveAccountIdForPayment({ existingAccountId, paymentMethod, kind }) {
+    return existingAccountId || autoAccountIdForPayment(paymentMethod, kind) || defaultAccountIdForKind(kind)
   }
 
   function walletSnapshotKindOf(record) {
