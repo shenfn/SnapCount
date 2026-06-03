@@ -3553,6 +3553,18 @@ body {
   opacity: 0.58;
 }
 
+.account-voided-toggle {
+  width: 100%;
+  margin-top: 10px;
+  border: 1px dashed rgba(120, 113, 108, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 251, 245, 0.8);
+  color: #7c6f64;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 11px 12px;
+}
+
 .account-entry-title {
   font-size: 15px;
   font-weight: 800;

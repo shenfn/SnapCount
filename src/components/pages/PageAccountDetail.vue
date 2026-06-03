@@ -33,8 +33,8 @@
           <strong>{{ typeLabel }}</strong>
         </div>
         <div class="account-stat-card">
-          <span>流水数</span>
-          <strong>{{ entries.length }}</strong>
+          <span>有效流水数</span>
+          <strong>{{ activeEntries.length }}</strong>
         </div>
       </section>
 
@@ -48,19 +48,47 @@
         </div>
 
         <div v-if="store.accountEntriesLoading.value" class="wallet-account-empty">正在加载流水...</div>
-        <div v-else-if="!entries.length" class="wallet-account-empty">还没有账户流水</div>
+        <div v-else-if="!activeEntries.length && !voidedEntries.length" class="wallet-account-empty">还没有账户流水</div>
         <button
-          v-for="entry in entries"
+          v-for="entry in activeEntries"
           v-else
           :key="entry.id"
           class="account-entry-row"
-          :class="{ voided: entry.isVoided }"
           @click="store.openAccountEntrySource(entry)"
         >
           <div class="account-entry-main">
             <div class="account-entry-title">
               {{ entryTypeLabel(entry) }}
-              <span v-if="entry.isVoided" class="account-entry-voided">已作废</span>
+            </div>
+            <div class="account-entry-meta">
+              {{ formatDateTimeLabel(entry.occurredAt) || '--' }}
+              <span v-if="entry.note"> · {{ entry.note }}</span>
+            </div>
+            <div class="account-entry-source">{{ sourceLabel(entry) }}</div>
+          </div>
+          <div class="account-entry-amount" :class="{ positive: entry.direction === 'in', negative: entry.direction === 'out' }">
+            {{ entry.direction === 'in' ? '+' : '-' }}{{ formatAccountCurrency(entry.amount) }}
+          </div>
+        </button>
+
+        <button
+          v-if="voidedEntries.length"
+          class="account-voided-toggle"
+          @click="showVoided = !showVoided"
+        >
+          {{ showVoided ? '收起' : '展开' }}已作废流水（{{ voidedEntries.length }}）
+        </button>
+
+        <button
+          v-for="entry in showVoided ? voidedEntries : []"
+          :key="entry.id"
+          class="account-entry-row voided"
+          @click="store.openAccountEntrySource(entry)"
+        >
+          <div class="account-entry-main">
+            <div class="account-entry-title">
+              {{ entryTypeLabel(entry) }}
+              <span class="account-entry-voided">已作废</span>
             </div>
             <div class="account-entry-meta">
               {{ formatDateTimeLabel(entry.occurredAt) || '--' }}
@@ -78,14 +106,17 @@
 </template>
 
 <script setup>
-import { computed, inject } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { accountTitle, formatAccountCurrency, isLiabilityAccount } from '../../adapters/domain/accountAdapter'
 import { formatDateTimeLabel } from '../../utils/helpers'
 
 const store = inject('store')
 const account = computed(() => store.selectedAccount.value)
 const entries = computed(() => store.selectedAccountEntries.value || [])
+const showVoided = ref(false)
 const isLiability = computed(() => isLiabilityAccount(account.value))
+const activeEntries = computed(() => entries.value.filter(entry => !entry.isVoided))
+const voidedEntries = computed(() => entries.value.filter(entry => entry.isVoided))
 
 const typeLabels = {
   cash: '现金',
