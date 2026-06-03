@@ -105,11 +105,32 @@
         </div>
         </template>
 
+        <div v-if="review.candidates.length || review.reviewReason" class="pending-account-review">
+          <div class="pending-account-review-head">
+            <strong>账户确认线索</strong>
+            <span v-if="review.confidenceText">识别置信度 {{ review.confidenceText }}</span>
+          </div>
+          <div class="pending-account-review-reason">{{ review.reviewReason }}</div>
+          <div v-if="review.hint?.rawText" class="pending-account-review-hint">
+            识别到的账户线索：{{ review.hint.rawText }}
+          </div>
+          <div v-if="review.candidates.length" class="pending-account-review-list">
+            <div v-for="candidate in review.candidates" :key="candidate.account.id" class="pending-account-review-item">
+              <div>
+                <strong>{{ candidate.account.name }}</strong>
+                <span>{{ candidate.reason }}</span>
+              </div>
+              <em>{{ Math.round(candidate.score * 100) }}分 · {{ candidate.confidenceLabel }}</em>
+            </div>
+          </div>
+        </div>
+
         <AccountPicker
           :label="store.pendingModal.entryType === 'income' ? '到账账户' : '出资账户'"
           :kind="store.pendingModal.entryType"
           :selected-id="store.pendingModal.accountId"
           :unbound="store.pendingModal.accountUnbound"
+          :amount="store.pendingModal.amount"
           @update:selectedId="store.pendingModal.accountId = $event"
           @update:unbound="store.pendingModal.accountUnbound = $event"
         />
@@ -137,9 +158,10 @@
 </template>
 
 <script setup>
-import { inject, ref, watch, onUnmounted } from 'vue'
+import { computed, inject, ref, watch, onUnmounted } from 'vue'
 import AccountPicker from './AccountPicker.vue'
 const store = inject('store')
+const review = computed(() => store.pendingAccountReview(store.pendingModal.entryType, store.pendingModal.bill))
 
 const sheetEl = ref(null)
 const bodyEl = ref(null)
@@ -362,3 +384,70 @@ const incomeTypes = [
   { val: 'other',         label: '💰 其他' },
 ]
 </script>
+
+<style scoped>
+.pending-account-review {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(21, 101, 192, 0.08), rgba(255, 255, 255, 0.94));
+  border: 1px solid rgba(21, 101, 192, 0.12);
+  display: grid;
+  gap: 8px;
+}
+
+.pending-account-review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pending-account-review-head strong {
+  font-size: 13px;
+  color: #163d63;
+}
+
+.pending-account-review-head span,
+.pending-account-review-reason,
+.pending-account-review-hint,
+.pending-account-review-item span,
+.pending-account-review-item em {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.pending-account-review-reason,
+.pending-account-review-hint,
+.pending-account-review-item span {
+  color: #4d6478;
+}
+
+.pending-account-review-list {
+  display: grid;
+  gap: 8px;
+}
+
+.pending-account-review-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.pending-account-review-item strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: #12385c;
+}
+
+.pending-account-review-item em {
+  font-style: normal;
+  color: #1565c0;
+  white-space: nowrap;
+}
+</style>

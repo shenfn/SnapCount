@@ -2046,6 +2046,94 @@ export function useStore() {
     return existingAccountId || autoAccountIdForPayment(paymentMethod, kind) || defaultAccountIdForKind(kind)
   }
 
+  function accountConfidenceTone(score) {
+    if (score >= 0.84) return '高'
+    if (score >= 0.6) return '中'
+    return '低'
+  }
+
+  function accountCandidateReasonText(reasons = []) {
+    if (reasons.includes('last4')) return '匹配到账户尾号'
+    if (reasons.includes('huabei_exact') || reasons.includes('baitiao_exact') || reasons.includes('monthly_credit_exact')) return '匹配到明确的信用支付名称'
+    if (reasons.includes('wechat_exact') || reasons.includes('alipay_exact')) return '匹配到明确的钱包余额名称'
+    if (reasons.includes('single_debit_card')) return '当前仅有一张可用银行卡候选'
+    if (reasons.includes('type') && (reasons.includes('institution') || reasons.includes('name'))) return '账户类型与机构名称同时命中'
+    if (reasons.includes('institution')) return '匹配到机构名称'
+    if (reasons.includes('name')) return '匹配到账户名称'
+    if (reasons.includes('debit_card_type')) return '支付线索指向银行卡'
+    if (reasons.includes('type')) return '账户类型与支付线索一致'
+    return '根据支付线索综合推荐'
+  }
+
+  function buildPendingAccountHint(record, kind) {
+    const inference = record?.accountInference || record?.account_inference || record?.extracted?.account_inference || null
+    const source = kind === 'income'
+      ? (inference?.receiving_account || inference?.funding_source || null)
+      : (inference?.funding_source || null)
+    const rawText = source?.raw_text || record?.fundingSourceLabel || record?.payment || null
+    const institution = source?.institution || null
+    const last4 = source?.last4 || null
+    const type = normalizeAccountType(source?.type || null)
+    const confidence = Number(source?.confidence || record?.accountConfidence || 0)
+    const evidence = source?.evidence || inference?.payment_channel?.evidence || null
+    if (!rawText && !institution && !last4 && !type && !confidence) return null
+    return { rawText, institution, last4, type, confidence, evidence }
+  }
+
+  function rankCandidateAccountsByHint(hint) {
+    if (!hint) return []
+    const hintText = normalizeAccountMatchText([hint.rawText, hint.institution].filter(Boolean).join(' '))
+    const activeDebitCardCount = accounts.value.filter(account => !account.isArchived && normalizeAccountType(account.type) === 'debit_card').length
+    return accounts.value
+      .filter(account => !account.isArchived)
+      .map(account => {
+        const type = normalizeAccountType(account.type)
+        const name = normalizeAccountMatchText(account.name)
+        const institution = normalizeAccountMatchText(account.institution)
+        const accountText = `${name} ${institution}`
+        const reasons = []
+        let score = 0
+
+        if (hint.type && type === hint.type) { score += 0.34; reasons.push('type') }
+        if (hint.last4 && account.last4 === hint.last4) { score += 0.42; reasons.push('last4') }
+        if (hintText) {
+          if (name && hintText.includes(name)) { score += 0.2; reasons.push('name') }
+          if (institution && hintText.includes(institution)) { score += 0.2; reasons.push('institution') }
+          if (hintText.includes('花呗') && type === 'credit_line' && accountText.includes('花呗')) { score += 0.42; reasons.push('huabei_exact') }
+          if (hintText.includes('白条') && type === 'credit_line' && (accountText.includes('白条') || accountText.includes('京东'))) { score += 0.42; reasons.push('baitiao_exact') }
+          if (hintText.includes('月付') && type === 'credit_line' && accountText.includes('月付')) { score += 0.42; reasons.push('monthly_credit_exact') }
+          if (hintText.includes('微信') && type === 'wallet_balance' && accountText.includes('微信')) { score += 0.42; reasons.push('wechat_exact') }
+          if (hintText.includes('支付宝') && type === 'wallet_balance' && accountText.includes('支付宝')) { score += 0.42; reasons.push('alipay_exact') }
+          if ((hintText.includes('银行卡') || hintText.includes('银行')) && type === 'debit_card') {
+            score += activeDebitCardCount === 1 ? 0.5 : 0.16
+            reasons.push(activeDebitCardCount === 1 ? 'single_debit_card' : 'debit_card_type')
+          }
+        }
+        if (hint.confidence >= 0.8) score += 0.04
+        return {
+          account,
+          score: Math.round(Math.min(score, 0.99) * 100) / 100,
+          reason: accountCandidateReasonText(reasons),
+          confidenceLabel: accountConfidenceTone(score),
+        }
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+  }
+
+  function pendingAccountReview(kind, record) {
+    const hint = buildPendingAccountHint(record, kind)
+    const candidates = rankCandidateAccountsByHint(hint).slice(0, 3)
+    const top = candidates[0] || null
+    return {
+      hint,
+      candidates,
+      reviewReason: hint?.evidence || (hint?.rawText ? `识别到账户线索「${hint.rawText}」但仍需要你确认真实${kind === 'income' ? '到账' : '出资'}账户。` : '当前只有支付通道线索，真实账户还需要你确认。'),
+      confidenceText: hint ? `${Math.round((hint.confidence || 0) * 100)}%` : null,
+      recommendedAccountId: top?.account?.id || null,
+    }
+  }
+
   function accountById(accountId) {
     return accounts.value.find(account => account.id === accountId) || null
   }
@@ -2098,6 +2186,32 @@ export function useStore() {
     }
   }
 
+  function balanceImpactPreview({ kind, accountId, amount, unbound }) {
+    const normalizedAmount = Number(amount || 0)
+    if (unbound || !accountId || !Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      return {
+        title: '暂不影响账户余额',
+        detail: '保留记录本身，但不会生成账户流水。',
+      }
+    }
+    const account = accountById(accountId)
+    if (!account) {
+      return {
+        title: '将生成账户流水',
+        detail: '保存后会按所选账户更新余额。',
+      }
+    }
+    const liability = isLiabilityAccount(account)
+    const verb = kind === 'income'
+      ? (liability ? '负债增加' : '余额增加')
+      : (liability ? '欠款增加' : '余额减少')
+    const sign = kind === 'income' || liability ? '+' : '-'
+    return {
+      title: `${account.name} ${verb}`,
+      detail: `保存后会生成账户流水，${account.name} ${sign}¥${normalizedAmount.toFixed(2)}。`,
+    }
+  }
+
   async function bindRecordToRecommendedAccount(kind, record) {
     const recommendation = recommendAccountForRecord(kind, record)
     if (!recommendation?.accountId) {
@@ -2106,6 +2220,9 @@ export function useStore() {
       if (kind === 'income') await openIncomeEditModal(record)
       return false
     }
+    const impact = balanceImpactPreview({ kind, accountId: recommendation.accountId, amount: record?.amount, unbound: false })
+    const ok = confirm(`确认补绑到「${recommendation.account.name}」？\n${impact.detail}`)
+    if (!ok) return false
     return bindRecordToAccount(kind, record, recommendation.accountId)
   }
 
@@ -2346,6 +2463,8 @@ export function useStore() {
       sourceType: row.source || 'manual',
       companionMessage: row.companion_message || '',
       accountId: row.account_id || null,
+      accountConfidence: row.account_confidence ?? null,
+      accountInference: row.account_inference || null,
     }
   }
 
@@ -2623,6 +2742,7 @@ export function useStore() {
     openAccountDetail, refreshAccountDetail, loadAccountEntries, openAccountEntrySource,
     openUnboundRecordsPage, loadUnboundRecords,
     upsertAccountEntry, voidAccountEntries, refreshAccountsFromDB, defaultAccountIdForKind,
+    pendingAccountReview, balanceImpactPreview,
     recommendAccountForRecord, accountBindingExplanation, bindRecordToRecommendedAccount, bindRecordToAccount,
     hasUniversalChanges, resetUniversalChanges, markUniversalImageUnavailable, getUniversalDomainMeta,
     getDomainRegistryStatus,

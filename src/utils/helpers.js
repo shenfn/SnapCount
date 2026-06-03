@@ -93,6 +93,11 @@ export function mapTransaction(t) {
     source: t.source || 'manual',
     companionMessage: t.companion_message || '',
     accountId: t.account_id || null,
+    accountConfidence: t.account_confidence ?? null,
+    accountInference: t.account_inference || null,
+    paymentChannel: t.payment_channel || null,
+    fundingSourceLabel: t.funding_source_label || null,
+    merchantPlatform: t.merchant_platform || null,
   }
 }
 

@@ -64,6 +64,7 @@
         kind="income"
         :selected-id="store.incomeModal.accountId"
         :unbound="store.incomeModal.accountUnbound"
+        :amount="store.incomeModal.amount"
         @update:selectedId="store.incomeModal.accountId = $event"
         @update:unbound="store.incomeModal.accountUnbound = $event"
       />

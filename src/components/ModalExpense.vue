@@ -91,6 +91,7 @@
         kind="expense"
         :selected-id="store.expenseModal.accountId"
         :unbound="store.expenseModal.accountUnbound"
+        :amount="store.expenseModal.amount"
         @update:selectedId="store.expenseModal.accountId = $event"
         @update:unbound="store.expenseModal.accountUnbound = $event"
       />

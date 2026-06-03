@@ -24,6 +24,10 @@
         <div class="account-picker-chip-sub">仅记录，不入账</div>
       </button>
     </div>
+    <div class="account-picker-impact" :class="{ unbound }">
+      <strong>{{ impactPreview.title }}</strong>
+      <span>{{ impactPreview.detail }}</span>
+    </div>
   </div>
 </template>
 
@@ -35,6 +39,7 @@ const props = defineProps({
   unbound: { type: Boolean, default: false },
   kind: { type: String, default: 'expense' },
   label: { type: String, default: '出资账户' },
+  amount: { type: [Number, String], default: 0 },
 })
 
 const emit = defineEmits(['update:selectedId', 'update:unbound'])
@@ -44,6 +49,12 @@ const visibleAccounts = computed(() => {
   const list = (store.accounts?.value || []).filter(a => !a.isArchived)
   return list
 })
+const impactPreview = computed(() => store.balanceImpactPreview({
+  kind: props.kind,
+  accountId: props.selectedId,
+  amount: props.amount,
+  unbound: props.unbound,
+}))
 
 function onPick(id) {
   emit('update:unbound', false)
@@ -88,4 +99,19 @@ function formatBalance(account) {
 .account-picker-chip.unbind.selected { background: #f57c00; border-color: #f57c00; color: #fff; }
 .account-picker-chip-title { font-size: 13px; font-weight: 600; }
 .account-picker-chip-sub { font-size: 11px; opacity: 0.8; margin-top: 2px; }
+.account-picker-impact {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(21, 101, 192, 0.08);
+  color: #174a7e;
+  display: grid;
+  gap: 4px;
+}
+.account-picker-impact.unbound {
+  background: rgba(245, 124, 0, 0.1);
+  color: #9a4d00;
+}
+.account-picker-impact strong { font-size: 12px; font-weight: 700; }
+.account-picker-impact span { font-size: 11px; opacity: 0.95; line-height: 1.45; }
 </style>
