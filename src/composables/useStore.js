@@ -2046,6 +2046,119 @@ export function useStore() {
     return existingAccountId || autoAccountIdForPayment(paymentMethod, kind) || defaultAccountIdForKind(kind)
   }
 
+  function accountById(accountId) {
+    return accounts.value.find(account => account.id === accountId) || null
+  }
+
+  function recommendAccountForRecord(kind, record) {
+    if (!record) return null
+    const accountId = kind === 'income'
+      ? (record.accountId || defaultAccountIdForKind('income'))
+      : (record.accountId || autoAccountIdForPayment(record.payment, 'expense') || defaultAccountIdForKind('expense'))
+    const account = accountById(accountId)
+    if (!account) return null
+    const reason = kind === 'income'
+      ? (record.accountId ? '已绑定到账账户' : '使用默认收入账户')
+      : (record.accountId
+          ? '已绑定出资账户'
+          : record.payment && record.payment !== '?'
+            ? `根据支付方式「${record.payment}」推荐`
+            : '使用默认支出账户')
+    return {
+      account,
+      accountId: account.id,
+      reason,
+      confidence: record.accountId ? '已确认' : (kind === 'expense' && record.payment && record.payment !== '?' ? '高' : '默认'),
+    }
+  }
+
+  function accountBindingExplanation(kind, record) {
+    const recommendation = recommendAccountForRecord(kind, record)
+    if (!recommendation) {
+      return {
+        account: null,
+        status: 'unbound',
+        title: '未绑定账户',
+        reason: kind === 'income' ? '这笔收入还没有到账账户，补绑后会生成账户流水。' : '这笔支出还没有出资账户，补绑后会生成账户流水。',
+      }
+    }
+    if (record?.accountId) {
+      return {
+        account: recommendation.account,
+        status: 'bound',
+        title: `已绑定：${recommendation.account.name}`,
+        reason: recommendation.reason,
+      }
+    }
+    return {
+      account: recommendation.account,
+      status: 'recommended',
+      title: `推荐绑定：${recommendation.account.name}`,
+      reason: recommendation.reason,
+    }
+  }
+
+  async function bindRecordToRecommendedAccount(kind, record) {
+    const recommendation = recommendAccountForRecord(kind, record)
+    if (!recommendation?.accountId) {
+      showFlash('暂无可推荐账户，请手动选择')
+      if (kind === 'expense') await openExpenseEditModal(record)
+      if (kind === 'income') await openIncomeEditModal(record)
+      return false
+    }
+    return bindRecordToAccount(kind, record, recommendation.accountId)
+  }
+
+  async function bindRecordToAccount(kind, record, accountId) {
+    if (!record?.id || !accountId) return false
+    if (kind === 'income') {
+      const { error } = await sb.rpc('save_income_with_account', {
+        p_id: record.id,
+        p_category: record.cat || 'other',
+        p_source_name: record.source || '收入',
+        p_amount: Number(record.amount || 0),
+        p_income_date: record.dateRaw || getLocalDateKey(),
+        p_note: record.note || null,
+        p_source: record.sourceType || null,
+        p_image_url: record.image_path || record.image_url || null,
+        p_image_hash: null,
+        p_companion_message: record.companionMessage || null,
+        p_account_id: accountId,
+      })
+      if (error) { showFlash('补绑失败：' + humanizeDbError(error)); return false }
+    } else {
+      const time = record.time ? `${record.time.length === 5 ? `${record.time}:00` : record.time}` : null
+      const { error } = await sb.rpc('save_transaction_with_account', {
+        p_id: record.id,
+        p_amount: Number(record.amount || 0),
+        p_merchant_name: record.name || '支出',
+        p_platform: record.platform && record.platform !== '?' ? record.platform : null,
+        p_category: record.cat && record.cat !== '?' ? record.cat : null,
+        p_payment_method: record.payment && record.payment !== '?' ? record.payment : null,
+        p_transaction_date: record.dateRaw || getLocalDateKey(),
+        p_transaction_time: time,
+        p_note: record.note || null,
+        p_is_large_transport: record.cat === 'transport' && Number(record.amount || 0) >= 200,
+        p_transport_type: record.transport_type || null,
+        p_source: record.source || null,
+        p_image_url: record.image_path || record.image_url || null,
+        p_image_hash: record.image_hash || null,
+        p_companion_message: record.companionMessage || null,
+        p_account_id: accountId,
+      })
+      if (error) { showFlash('补绑失败：' + humanizeDbError(error)); return false }
+    }
+
+    await refreshAccountsFromDB()
+    await loadUnboundRecords()
+    if (detailRecord.value?.id === record.id) {
+      await loadData(0, true)
+      await refreshDetailRecord()
+    }
+    showFlash('✓ 已补绑账户并生成流水')
+    return true
+  }
+
   function walletSnapshotKindOf(record) {
     const payload = record?.payload || {}
     if (payload.account_snapshot_kind === 'asset' || payload.account_snapshot_kind === 'liability') return payload.account_snapshot_kind
@@ -2510,6 +2623,7 @@ export function useStore() {
     openAccountDetail, refreshAccountDetail, loadAccountEntries, openAccountEntrySource,
     openUnboundRecordsPage, loadUnboundRecords,
     upsertAccountEntry, voidAccountEntries, refreshAccountsFromDB, defaultAccountIdForKind,
+    recommendAccountForRecord, accountBindingExplanation, bindRecordToRecommendedAccount, bindRecordToAccount,
     hasUniversalChanges, resetUniversalChanges, markUniversalImageUnavailable, getUniversalDomainMeta,
     getDomainRegistryStatus,
     openImgFull, closeImgFull,

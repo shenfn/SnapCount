@@ -64,6 +64,23 @@
         </div>
       </div>
 
+      <div v-if="accountExplanation" class="record-account-card" :class="accountExplanation.status">
+        <div class="record-account-mark">{{ accountExplanation.status === 'bound' ? '已' : accountExplanation.status === 'recommended' ? '荐' : '绑' }}</div>
+        <div class="record-account-body">
+          <div class="record-account-kicker">账户绑定</div>
+          <div class="record-account-title">{{ accountExplanation.title }}</div>
+          <div class="record-account-reason">{{ accountExplanation.reason }}</div>
+        </div>
+        <button
+          v-if="accountExplanation.status === 'recommended'"
+          class="record-account-bind-btn"
+          :disabled="bindingAccount"
+          @click="bindRecommendedAccount"
+        >
+          {{ bindingAccount ? '绑定中' : '一键绑定' }}
+        </button>
+      </div>
+
       <div v-if="foodDishes.length" class="record-detail-section">
         <div class="record-detail-section-title">
           菜品明细
@@ -105,7 +122,7 @@
 </template>
 
 <script setup>
-import { computed, inject } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { getSystemDomainLabel } from '../../domains/registry'
 import { formatDateTimeLabel } from '../../utils/helpers'
 import { getRecordAiSummary, getRecordDetailFields, getRecordFoodDishes } from '../../domains/recordDetailAdapters'
@@ -113,6 +130,7 @@ import { getRecordAiSummary, getRecordDetailFields, getRecordFoodDishes } from '
 const store = inject('store')
 
 const record = computed(() => store.detailRecord.value)
+const bindingAccount = ref(false)
 const deleteType = computed(() => {
   if (record.value?.kind === 'income') return 'income'
   if (record.value?.kind === 'universal') return 'universal'
@@ -162,6 +180,10 @@ const sourceLabel = computed(() => {
 })
 
 const fields = computed(() => getRecordDetailFields(store, record.value))
+const accountExplanation = computed(() => {
+  if (!record.value || !['expense', 'income'].includes(record.value.kind)) return null
+  return store.accountBindingExplanation(record.value.kind, record.value.raw)
+})
 const foodDishes = computed(() => getRecordFoodDishes(record.value))
 const companionMessage = computed(() => {
   const raw = record.value?.raw
@@ -169,4 +191,14 @@ const companionMessage = computed(() => {
   return raw.companionMessage || raw.companion_message || raw.payload?.companion_message || ''
 })
 const aiSummary = computed(() => getRecordAiSummary(store, record.value, domainLabel.value))
+
+async function bindRecommendedAccount() {
+  if (!record.value) return
+  bindingAccount.value = true
+  try {
+    await store.bindRecordToRecommendedAccount(record.value.kind, record.value.raw)
+  } finally {
+    bindingAccount.value = false
+  }
+}
 </script>
