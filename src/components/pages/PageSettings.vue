@@ -30,6 +30,14 @@
 
     <div class="settings-section">
       <div class="settings-section-title">数据管理</div>
+      <div class="settings-item" @click="showExportModal = true">
+        <div class="settings-item-icon success">出</div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">数据导出</div>
+          <div class="settings-item-sub">导出账单、收入与通用记录为 CSV 或 JSON</div>
+        </div>
+        <div class="settings-arrow">›</div>
+      </div>
       <div class="settings-item" @click="store.showFlash('导入能力会在后续版本逐步接入')">
         <div class="settings-item-icon info">导</div>
         <div class="settings-item-content">
@@ -37,6 +45,87 @@
           <div class="settings-item-sub">CSV 与其他来源的历史数据导入</div>
         </div>
         <div class="settings-arrow">›</div>
+      </div>
+    </div>
+
+    <!-- 数据导出弹窗 -->
+    <div class="modal-overlay" :class="{ open: showExportModal }" @click.self="showExportModal = false">
+      <div class="modal-sheet">
+        <div class="sheet-drag-zone"><div class="sheet-handle"></div></div>
+        <div class="sheet-header">
+          <div class="sheet-title">数据导出</div>
+          <div class="sheet-sub">选择要导出的数据范围和格式</div>
+        </div>
+        <div class="sheet-body">
+          <div class="sel-section">
+            <div class="sel-label">导出内容</div>
+            <div class="sel-grid">
+              <div
+                v-for="opt in exportContentOptions"
+                :key="opt.value"
+                class="chip"
+                :class="{ active: exportContent === opt.value }"
+                @click="exportContent = opt.value"
+              >
+                {{ opt.label }}
+              </div>
+            </div>
+          </div>
+          <div class="sel-section">
+            <div class="sel-label">时间范围</div>
+            <div class="sel-grid">
+              <div
+                v-for="opt in exportRangeOptions"
+                :key="opt.value"
+                class="chip"
+                :class="{ active: exportRange === opt.value }"
+                @click="exportRange = opt.value"
+              >
+                {{ opt.label }}
+              </div>
+            </div>
+          </div>
+          <div class="sel-section">
+            <div class="sel-label">导出格式</div>
+            <div class="sel-grid">
+              <div
+                v-for="opt in exportFormatOptions"
+                :key="opt.value"
+                class="chip"
+                :class="{ active: exportFormat === opt.value }"
+                @click="exportFormat = opt.value"
+              >
+                {{ opt.label }}
+              </div>
+            </div>
+          </div>
+          <div class="sel-section" v-if="exportContent === 'universal'">
+            <div class="sel-label">详情程度</div>
+            <div class="export-detail-options">
+              <div
+                v-for="opt in exportDetailOptions"
+                :key="opt.value"
+                class="export-detail-card"
+                :class="{ active: exportDetail === opt.value }"
+                @click="exportDetail = opt.value"
+              >
+                <div class="export-detail-label">{{ opt.label }}</div>
+                <div class="export-detail-desc">{{ opt.desc }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="export-preview" v-if="exportPreviewCount !== null">
+            <div class="export-preview-icon">📊</div>
+            <div class="export-preview-text">
+              预计导出 <strong>{{ exportPreviewCount }}</strong> 条记录
+            </div>
+          </div>
+        </div>
+        <div class="sheet-footer">
+          <button class="confirm-btn" :disabled="exporting" @click="handleExport">
+            {{ exporting ? '导出中...' : '开始导出' }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -146,13 +235,319 @@
 </template>
 
 <script setup>
-import { ref, inject, onMounted } from 'vue'
+import { ref, inject, onMounted, watch } from 'vue'
 import { sb } from '../../lib/supabase'
 
 const store = inject('store')
 const uploadToken = ref('')
 const visionPrimary = ref('auto')
 const aiInsightProvider = ref('auto')
+
+// ── 数据导出 ──
+const showExportModal = ref(false)
+const exporting = ref(false)
+const exportContent = ref('expense')
+const exportRange = ref('this_month')
+const exportFormat = ref('csv')
+const exportDetail = ref('summary')
+const exportPreviewCount = ref(null)
+
+const exportContentOptions = [
+  { value: 'expense', label: '支出记录' },
+  { value: 'income', label: '收入记录' },
+  { value: 'all_finance', label: '全部财务' },
+  { value: 'universal', label: '通用记录' },
+]
+
+const exportRangeOptions = [
+  { value: 'this_month', label: '本月' },
+  { value: 'last_month', label: '上月' },
+  { value: 'last_3_months', label: '近 3 月' },
+  { value: 'all', label: '全部' },
+]
+
+const exportFormatOptions = [
+  { value: 'csv', label: 'CSV' },
+  { value: 'json', label: 'JSON' },
+]
+
+const exportDetailOptions = [
+  { value: 'summary', label: '简洁模式', desc: '提取关键字段，方便阅读' },
+  { value: 'full', label: '详情模式', desc: '完整 payload，适合 AI 分析' },
+]
+
+function getDateRange(range) {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  let start, end
+
+  switch (range) {
+    case 'this_month':
+      start = new Date(y, m, 1)
+      end = new Date(y, m + 1, 0)
+      break
+    case 'last_month':
+      start = new Date(y, m - 1, 1)
+      end = new Date(y, m, 0)
+      break
+    case 'last_3_months':
+      start = new Date(y, m - 2, 1)
+      end = new Date(y, m + 1, 0)
+      break
+    case 'all':
+    default:
+      start = new Date(2020, 0, 1)
+      end = new Date(y, m + 1, 0)
+  }
+
+  return {
+    start: start.toISOString().split('T')[0],
+    end: end.toISOString().split('T')[0],
+  }
+}
+
+async function fetchExportData() {
+  const { start, end } = getDateRange(exportRange.value)
+  const content = exportContent.value
+
+  if (content === 'expense' || content === 'all_finance') {
+    const { data: expenses } = await sb.from('transactions')
+      .select('*')
+      .eq('type', 'expense')
+      .eq('status', 'done')
+      .gte('transaction_date', start)
+      .lte('transaction_date', end)
+      .order('transaction_date', { ascending: false })
+
+    if (content === 'expense') return expenses || []
+
+    const { data: incomes } = await sb.from('income_records')
+      .select('*')
+      .gte('income_date', start)
+      .lte('income_date', end)
+      .order('income_date', { ascending: false })
+
+    return { expenses: expenses || [], incomes: incomes || [] }
+  }
+
+  if (content === 'income') {
+    const { data } = await sb.from('income_records')
+      .select('*')
+      .gte('income_date', start)
+      .lte('income_date', end)
+      .order('income_date', { ascending: false })
+    return data || []
+  }
+
+  if (content === 'universal') {
+    const { data } = await sb.from('data_records')
+      .select('*')
+      .gte('occurred_at', start + 'T00:00:00')
+      .lte('occurred_at', end + 'T23:59:59')
+      .order('occurred_at', { ascending: false })
+    return data || []
+  }
+
+  return []
+}
+
+function formatUniversalPayload(row) {
+  const p = row.payload_jsonb || {}
+  const dk = row.domain_key
+
+  if (dk === 'food') {
+    const dishes = (p.dishes || []).map(d => d.name).join('+')
+    const cal = p.total_calorie_kcal ? `${p.total_calorie_kcal}千卡` : ''
+    const meal = p.meal_type === 'lunch' ? '午餐' : p.meal_type === 'dinner' ? '晚餐' : p.meal_type === 'breakfast' ? '早餐' : p.meal_type || ''
+    return [meal, dishes, cal].filter(Boolean).join('·')
+  }
+
+  if (dk === 'sleep') {
+    const h = p.sleep_hours ? `${p.sleep_hours}h` : ''
+    const score = p.quality_score ? `评分${p.quality_score}` : ''
+    const level = p.quality_level || ''
+    return [h, score, level].filter(Boolean).join('·')
+  }
+
+  if (dk === 'sport') {
+    const dur = p.duration_minutes ? `${p.duration_minutes}分钟` : ''
+    const dist = p.distance_km ? `${p.distance_km}km` : ''
+    const cal = p.calories ? `${p.calories}千卡` : ''
+    const type = p.sport_type || ''
+    return [type, dur, dist, cal].filter(Boolean).join('·')
+  }
+
+  if (dk === 'reading') {
+    const dur = p.reading_minutes ? `${p.reading_minutes}分钟` : ''
+    const pages = p.pages ? `${p.pages}页` : ''
+    const book = p.book_name || ''
+    return [book, dur, pages].filter(Boolean).join('·')
+  }
+
+  // 通用兜底：提取非嵌套的简短字段
+  return Object.entries(p)
+    .filter(([_, v]) => typeof v !== 'object' && v != null)
+    .map(([k, v]) => `${k}:${v}`)
+    .join('·')
+}
+
+function toCsv(rows, columns) {
+  const header = columns.map(c => c.label).join(',')
+  const body = rows.map(row =>
+    columns.map(c => {
+      let val = row[c.key]
+      if (val == null) return ''
+      if (typeof val === 'object') val = JSON.stringify(val)
+      const str = String(val).replace(/"/g, '""')
+      return str.includes(',') || str.includes('"') || str.includes('\n')
+        ? `"${str}"`
+        : str
+    }).join(',')
+  ).join('\n')
+  return '﻿' + header + '\n' + body
+}
+
+function download(content, filename, type) {
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function formatDate(d) {
+  return new Date(d).toISOString().split('T')[0]
+}
+
+const expenseColumns = [
+  { key: 'transaction_date', label: '日期' },
+  { key: 'transaction_time', label: '时间' },
+  { key: 'amount', label: '金额' },
+  { key: 'merchant_name', label: '商家' },
+  { key: 'category', label: '分类' },
+  { key: 'platform', label: '平台' },
+  { key: 'payment_method', label: '支付方式' },
+  { key: 'note', label: '备注' },
+]
+
+const incomeColumns = [
+  { key: 'income_date', label: '日期' },
+  { key: 'amount', label: '金额' },
+  { key: 'category', label: '分类' },
+  { key: 'source_name', label: '来源' },
+  { key: 'note', label: '备注' },
+]
+
+const universalColumns = [
+  { key: 'occurred_at', label: '时间' },
+  { key: 'domain_key', label: '数据域' },
+  { key: 'title', label: '标题' },
+  { key: 'summary', label: '摘要' },
+  { key: 'detail', label: '关键数据' },
+]
+
+function serializeData(data, format) {
+  const ts = formatDate(new Date())
+
+  if (exportContent.value === 'all_finance' && format === 'csv') {
+    const expCsv = toCsv(data.expenses, expenseColumns)
+    const incCsv = toCsv(data.incomes, incomeColumns)
+    return { expenses: expCsv, incomes: incCsv }
+  }
+
+  let columns
+  let rows = data
+
+  switch (exportContent.value) {
+    case 'expense':
+      columns = expenseColumns
+      break
+    case 'income':
+      columns = incomeColumns
+      break
+    case 'universal':
+      if (exportDetail.value === 'summary') {
+        columns = universalColumns
+        rows = data.map(row => ({
+          ...row,
+          occurred_at: row.occurred_at ? new Date(row.occurred_at).toLocaleString('zh-CN') : '',
+          detail: formatUniversalPayload(row),
+        }))
+      } else {
+        // 详情模式：保留完整 payload
+        columns = [
+          { key: 'occurred_at', label: '时间' },
+          { key: 'domain_key', label: '数据域' },
+          { key: 'title', label: '标题' },
+          { key: 'summary', label: '摘要' },
+          { key: 'payload_jsonb', label: '完整数据' },
+        ]
+        rows = data.map(row => ({
+          ...row,
+          occurred_at: row.occurred_at ? new Date(row.occurred_at).toLocaleString('zh-CN') : '',
+        }))
+      }
+      break
+    default:
+      columns = expenseColumns
+  }
+
+  if (format === 'csv') {
+    return toCsv(rows, columns)
+  }
+
+  return JSON.stringify(rows, null, 2)
+}
+
+function getFilename(label, format) {
+  const ts = formatDate(new Date())
+  return `snapcount_${label}_${ts}.${format}`
+}
+
+async function handleExport() {
+  exporting.value = true
+  try {
+    const data = await fetchExportData()
+    const format = exportFormat.value
+    const contentLabel = exportContentOptions.find(o => o.value === exportContent.value)?.label || 'data'
+
+    if (exportContent.value === 'all_finance' && format === 'csv') {
+      const serialized = serializeData(data, format)
+      download(serialized.expenses, getFilename('支出', 'csv'), 'text/csv;charset=utf-8')
+      setTimeout(() => {
+        download(serialized.incomes, getFilename('收入', 'csv'), 'text/csv;charset=utf-8')
+      }, 500)
+    } else {
+      const serialized = serializeData(data, format)
+      const mime = format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json'
+      download(serialized, getFilename(contentLabel, format), mime)
+    }
+
+    store.showFlash('✓ 导出成功')
+    showExportModal.value = false
+  } catch (e) {
+    store.showFlash('⚠️ 导出失败：' + e.message)
+  } finally {
+    exporting.value = false
+  }
+}
+
+watch([exportContent, exportRange], async () => {
+  exportPreviewCount.value = null
+  try {
+    const data = await fetchExportData()
+    if (Array.isArray(data)) {
+      exportPreviewCount.value = data.length
+    } else {
+      exportPreviewCount.value = (data.expenses?.length || 0) + (data.incomes?.length || 0)
+    }
+  } catch {
+    exportPreviewCount.value = null
+  }
+})
 
 const visionOptions = [
   {

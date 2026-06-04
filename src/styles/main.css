@@ -3844,6 +3844,67 @@ body {
   line-height: 1.6;
 }
 
+.export-preview {
+  margin: 16px 20px 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--primary-bg);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.export-preview-icon {
+  font-size: 20px;
+}
+
+.export-preview-text {
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.export-preview-text strong {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.export-detail-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.export-detail-card {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1.5px solid var(--border);
+  background: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.export-detail-card.active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.export-detail-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.export-detail-desc {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text3);
+  line-height: 1.4;
+}
+
+.export-detail-card.active .export-detail-label {
+  color: var(--primary);
+}
+
 @media (max-width: 390px) {
   .stats-row,
   .stat-grid,
