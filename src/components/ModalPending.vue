@@ -139,9 +139,9 @@
       <div class="sheet-footer">
         <button class="confirm-btn"
           :disabled="store.pendingModal.entryType === 'expense'
-            ? (!store.pendingModal.platform || !store.pendingModal.category || !store.pendingModal.payment)
-            : !store.pendingModal.incomeCategory"
-          @click="doSave">确认保存</button>
+            ? (!store.pendingModal.platform || !store.pendingModal.category || !store.pendingModal.payment || store.isActionPending('pendingEntry'))
+            : (!store.pendingModal.incomeCategory || store.isActionPending('pendingEntry'))"
+          @click="doSave">{{ store.isActionPending('pendingEntry') ? '保存中...' : '确认保存' }}</button>
         <button class="delete-bill-btn"
           @click="store.openDeleteConfirm('bill', store.pendingModal.bill?.id, store.pendingModal.bill?.image_path)">
           🗑 删除此账单

@@ -39,6 +39,11 @@ function humanizeDbError(err) {
 }
 
 export function useStore() {
+  const USER_SETTING_FIELDS = {
+    aiLogsEnabled: 'ai_logs_enabled',
+    keepSourceImages: 'keep_source_images',
+  }
+
   const currentYear = ref(new Date().getFullYear())
   const currentMonth = ref(new Date().getMonth() + 1)
   const currentPage = ref('home')
@@ -176,6 +181,14 @@ export function useStore() {
   const settingsState = reactive({
     aiLogsEnabled: true,
     keepSourceImages: true,
+  })
+  const actionState = reactive({
+    pendingEntry: false,
+    income: false,
+    expense: false,
+    account: false,
+    settings: false,
+    retryStaging: false,
   })
 
   const monthLabel = computed(() => formatMonthLabel(currentYear.value, currentMonth.value))
@@ -389,6 +402,44 @@ export function useStore() {
     detailRecord.value = null
     activeDomainId.value = null
     pageHistory.value = []
+    settingsState.aiLogsEnabled = true
+    settingsState.keepSourceImages = true
+    Object.keys(actionState).forEach((key) => {
+      actionState[key] = false
+    })
+  }
+
+  function isActionPending(key) {
+    return !!actionState[key]
+  }
+
+  async function runLockedAction(key, task) {
+    if (!key || typeof task !== 'function') return null
+    if (actionState[key]) return null
+    actionState[key] = true
+    try {
+      return await task()
+    } finally {
+      actionState[key] = false
+    }
+  }
+
+  async function loadUserSettings() {
+    if (!currentUserId.value) {
+      settingsState.aiLogsEnabled = true
+      settingsState.keepSourceImages = true
+      return
+    }
+    const { data, error } = await sb.from('user_configs')
+      .select('ai_logs_enabled, keep_source_images')
+      .eq('user_id', currentUserId.value)
+      .maybeSingle()
+    if (error) {
+      console.warn('加载用户设置失败:', error.message)
+      return
+    }
+    settingsState.aiLogsEnabled = data?.ai_logs_enabled ?? true
+    settingsState.keepSourceImages = data?.keep_source_images ?? true
   }
 
   let lastRefreshTs = 0
@@ -541,6 +592,7 @@ export function useStore() {
     if (attempt === 0 && !silent) loading.value = true
     if (attempt === 0 && !silent) loadError.value = ''
     if (attempt === 0) lastRefreshTs = Date.now()
+    if (attempt === 0) await loadUserSettings()
     // Phase 1：拉取域协议（每会话一次，失败不阻断主流程）
     if (attempt === 0) loadDomainSchemas()
     try {
@@ -753,7 +805,7 @@ export function useStore() {
         : e.message
       loadError.value = `加载失败: ${tip}`
     } finally {
-      if (attempt >= 2 || !loadError.value) loading.value = false
+      if (attempt === 0 && !silent) loading.value = false
     }
   }
 
@@ -912,67 +964,69 @@ export function useStore() {
   }
 
   async function confirmEntry() {
-    const amt = parseFloat(pendingModal.amount)
-    if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
+    return runLockedAction('pendingEntry', async () => {
+      const amt = parseFloat(pendingModal.amount)
+      if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
 
-    if (pendingModal.entryType === 'income') {
-      if (!pendingModal.incomeCategory) { alert('请选择收入类型'); return }
-      const source = pendingModal.merchantName.trim() || (incomeCatMap[pendingModal.incomeCategory]?.label || '收入')
-      const incomeAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || defaultAccountIdForKind('income'))
-      const { error: confirmErr } = await sb.rpc('confirm_pending_transaction_with_account', {
-        p_pending_id: pendingModal.bill.id,
-        p_entry_type: 'income',
-        p_amount: amt,
-        p_merchant_or_source_name: source,
-        p_platform: null,
-        p_category: null,
-        p_payment_method: null,
-        p_income_category: pendingModal.incomeCategory,
-        p_account_id: incomeAccountId,
-      })
-      if (confirmErr) { alert('保存失败：' + humanizeDbError(confirmErr)); return }
+      if (pendingModal.entryType === 'income') {
+        if (!pendingModal.incomeCategory) { alert('请选择收入类型'); return }
+        const source = pendingModal.merchantName.trim() || (incomeCatMap[pendingModal.incomeCategory]?.label || '收入')
+        const incomeAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || defaultAccountIdForKind('income'))
+        const { error: confirmErr } = await sb.rpc('confirm_pending_transaction_with_account', {
+          p_pending_id: pendingModal.bill.id,
+          p_entry_type: 'income',
+          p_amount: amt,
+          p_merchant_or_source_name: source,
+          p_platform: null,
+          p_category: null,
+          p_payment_method: null,
+          p_income_category: pendingModal.incomeCategory,
+          p_account_id: incomeAccountId,
+        })
+        if (confirmErr) { alert('保存失败：' + humanizeDbError(confirmErr)); return }
 
-      const bIdx = bills.value.findIndex(b => b.id === pendingModal.bill.id)
-      if (bIdx >= 0) bills.value.splice(bIdx, 1)
-      await refreshAccountsFromDB()
-      await loadData(0, true)
-      closePendingModal()
-      showFlash('✓ 收入已记录')
-      return
-    }
-
-    if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
-    const expenseAccountId = pendingModal.accountUnbound
-      ? autoAccountIdForPayment(pendingModal.payment, 'expense')
-      : (pendingModal.accountId || autoAccountIdForPayment(pendingModal.payment, 'expense') || null)
-    const { error } = await sb.rpc('confirm_pending_transaction_with_account', {
-      p_pending_id: pendingModal.bill.id,
-      p_entry_type: 'expense',
-      p_amount: amt,
-      p_merchant_or_source_name: pendingModal.merchantName || `${pendingModal.platform}消费`,
-      p_platform: pendingModal.platform,
-      p_category: pendingModal.category,
-      p_payment_method: pendingModal.payment,
-      p_income_category: null,
-      p_account_id: expenseAccountId,
-    })
-    if (error) { alert('保存失败：' + humanizeDbError(error)); return }
-    await refreshAccountsFromDB()
-    // 本地更新账单状态
-    const bIdx2 = bills.value.findIndex(b => b.id === pendingModal.bill.id)
-    if (bIdx2 >= 0) {
-      bills.value[bIdx2] = {
-        ...bills.value[bIdx2],
-        platform: pendingModal.platform,
-        cat: pendingModal.category,
-        payment: pendingModal.payment,
-        name: pendingModal.merchantName || `${pendingModal.platform}消费`,
-        amount: amt,
-        status: 'done',
+        const bIdx = bills.value.findIndex(b => b.id === pendingModal.bill.id)
+        if (bIdx >= 0) bills.value.splice(bIdx, 1)
+        await refreshAccountsFromDB()
+        await loadData(0, true)
+        closePendingModal()
+        showFlash('✓ 收入已记录')
+        return
       }
-    }
-    closePendingModal()
-    showFlash('✓ 已保存')
+
+      if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
+      const expenseAccountId = pendingModal.accountUnbound
+        ? autoAccountIdForPayment(pendingModal.payment, 'expense')
+        : (pendingModal.accountId || autoAccountIdForPayment(pendingModal.payment, 'expense') || null)
+      const { error } = await sb.rpc('confirm_pending_transaction_with_account', {
+        p_pending_id: pendingModal.bill.id,
+        p_entry_type: 'expense',
+        p_amount: amt,
+        p_merchant_or_source_name: pendingModal.merchantName || `${pendingModal.platform}消费`,
+        p_platform: pendingModal.platform,
+        p_category: pendingModal.category,
+        p_payment_method: pendingModal.payment,
+        p_income_category: null,
+        p_account_id: expenseAccountId,
+      })
+      if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+      await refreshAccountsFromDB()
+      // 本地更新账单状态
+      const bIdx2 = bills.value.findIndex(b => b.id === pendingModal.bill.id)
+      if (bIdx2 >= 0) {
+        bills.value[bIdx2] = {
+          ...bills.value[bIdx2],
+          platform: pendingModal.platform,
+          cat: pendingModal.category,
+          payment: pendingModal.payment,
+          name: pendingModal.merchantName || `${pendingModal.platform}消费`,
+          amount: amt,
+          status: 'done',
+        }
+      }
+      closePendingModal()
+      showFlash('✓ 已保存')
+    })
   }
 
   function openIncomeModal() {
@@ -1015,92 +1069,94 @@ export function useStore() {
   }
 
   async function confirmIncome() {
-    const amt = parseFloat(incomeModal.amount)
-    if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
-    if (!incomeModal.cat) { alert('请选择收入类型'); return }
-    if (!incomeModal.date) { alert('请选择到账日期'); return }
-    const source = incomeModal.source.trim() || (incomeCatMap[incomeModal.cat]?.label || '收入')
-    if (incomeModal.mode === 'edit' && incomeModal.id) {
-      const incomeAccountId = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
-      const { error } = await sb.rpc('save_income_with_account', {
-        p_id: incomeModal.id,
+    return runLockedAction('income', async () => {
+      const amt = parseFloat(incomeModal.amount)
+      if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
+      if (!incomeModal.cat) { alert('请选择收入类型'); return }
+      if (!incomeModal.date) { alert('请选择到账日期'); return }
+      const source = incomeModal.source.trim() || (incomeCatMap[incomeModal.cat]?.label || '收入')
+      if (incomeModal.mode === 'edit' && incomeModal.id) {
+        const incomeAccountId = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
+        const { error } = await sb.rpc('save_income_with_account', {
+          p_id: incomeModal.id,
+          p_category: incomeModal.cat,
+          p_source_name: source,
+          p_amount: amt,
+          p_income_date: incomeModal.date,
+          p_note: incomeModal.note.trim() || null,
+          p_source: null,
+          p_image_url: incomeModal.imagePath || null,
+          p_image_hash: null,
+          p_companion_message: null,
+          p_account_id: incomeAccountId,
+        })
+        if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+        await refreshAccountsFromDB()
+        if (currentPage.value === 'unbound-records') await loadUnboundRecords()
+        closeIncomeModal()
+        const applyEdit = (arr) => {
+          const idx = arr.findIndex(item => item.id === incomeModal.id)
+          if (idx >= 0) {
+            arr[idx] = {
+              ...arr[idx],
+              cat: incomeModal.cat,
+              source,
+              amount: amt,
+              date: formatDate(incomeModal.date),
+              dateRaw: incomeModal.date,
+              note: incomeModal.note.trim() || null,
+              icon: incomeCatMap[incomeModal.cat]?.icon || '💰',
+            }
+          }
+        }
+        applyEdit(incomeRecords.value)
+        applyEdit(recentIncomeRecords.value)
+        showFlash('✓ 收入已更新')
+        if (detailRecord.value?.id === incomeModal.id) {
+          const updated = incomeRecords.value.find(item => item.id === incomeModal.id)
+            || recentIncomeRecords.value.find(item => item.id === incomeModal.id)
+          if (updated) {
+            await openRecordDetail('income', updated)
+          }
+        }
+        return
+      }
+      const incomeAccountIdNew = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
+      const { data: newRow, error } = await sb.rpc('save_income_with_account', {
+        p_id: null,
         p_category: incomeModal.cat,
         p_source_name: source,
         p_amount: amt,
         p_income_date: incomeModal.date,
         p_note: incomeModal.note.trim() || null,
-        p_source: null,
+        p_source: 'manual',
         p_image_url: incomeModal.imagePath || null,
         p_image_hash: null,
         p_companion_message: null,
-        p_account_id: incomeAccountId,
+        p_account_id: incomeAccountIdNew,
       })
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
       await refreshAccountsFromDB()
       if (currentPage.value === 'unbound-records') await loadUnboundRecords()
       closeIncomeModal()
-      const applyEdit = (arr) => {
-        const idx = arr.findIndex(item => item.id === incomeModal.id)
-        if (idx >= 0) {
-          arr[idx] = {
-            ...arr[idx],
-            cat: incomeModal.cat,
-            source,
-            amount: amt,
-            date: formatDate(incomeModal.date),
-            dateRaw: incomeModal.date,
-            note: incomeModal.note.trim() || null,
-            icon: incomeCatMap[incomeModal.cat]?.icon || '💰',
-          }
-        }
+      const mapped = {
+        id: newRow.id,
+        cat: newRow.category,
+        source: newRow.source_name,
+        amount: Number(newRow.amount),
+        date: formatDate(newRow.income_date),
+        dateRaw: newRow.income_date,
+        createdAt: newRow.created_at,
+        time: '',
+        icon: incomeCatMap[newRow.category]?.icon || '💰',
+        note: newRow.note,
+        image_url: newRow.image_url,
+        image_path: newRow.image_url,
+        sourceType: newRow.source || 'manual',
       }
-      applyEdit(incomeRecords.value)
-      applyEdit(recentIncomeRecords.value)
-      showFlash('✓ 收入已更新')
-      if (detailRecord.value?.id === incomeModal.id) {
-        const updated = incomeRecords.value.find(item => item.id === incomeModal.id)
-          || recentIncomeRecords.value.find(item => item.id === incomeModal.id)
-        if (updated) {
-          await openRecordDetail('income', updated)
-        }
-      }
-      return
-    }
-    const incomeAccountIdNew = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
-    const { data: newRow, error } = await sb.rpc('save_income_with_account', {
-      p_id: null,
-      p_category: incomeModal.cat,
-      p_source_name: source,
-      p_amount: amt,
-      p_income_date: incomeModal.date,
-      p_note: incomeModal.note.trim() || null,
-      p_source: 'manual',
-      p_image_url: incomeModal.imagePath || null,
-      p_image_hash: null,
-      p_companion_message: null,
-      p_account_id: incomeAccountIdNew,
+      incomeRecords.value.unshift(mapped)
+      showFlash('✓ 收入已记录')
     })
-    if (error) { alert('保存失败：' + humanizeDbError(error)); return }
-    await refreshAccountsFromDB()
-    if (currentPage.value === 'unbound-records') await loadUnboundRecords()
-    closeIncomeModal()
-    const mapped = {
-      id: newRow.id,
-      cat: newRow.category,
-      source: newRow.source_name,
-      amount: Number(newRow.amount),
-      date: formatDate(newRow.income_date),
-      dateRaw: newRow.income_date,
-      createdAt: newRow.created_at,
-      time: '',
-      icon: incomeCatMap[newRow.category]?.icon || '💰',
-      note: newRow.note,
-      image_url: newRow.image_url,
-      image_path: newRow.image_url,
-      sourceType: newRow.source || 'manual',
-    }
-    incomeRecords.value.unshift(mapped)
-    showFlash('✓ 收入已记录')
   }
 
   function markIncomeImageUnavailable() {
@@ -1221,94 +1277,96 @@ export function useStore() {
   }
 
   async function confirmExpense() {
-    const amt = parseFloat(expenseModal.amount)
-    if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
-    if (!expenseModal.platform || !expenseModal.category || !expenseModal.payment) { alert('请选择消费渠道、分类和支付方式'); return }
-    if (!expenseModal.date) { alert('请选择消费日期'); return }
+    return runLockedAction('expense', async () => {
+      const amt = parseFloat(expenseModal.amount)
+      if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
+      if (!expenseModal.platform || !expenseModal.category || !expenseModal.payment) { alert('请选择消费渠道、分类和支付方式'); return }
+      if (!expenseModal.date) { alert('请选择消费日期'); return }
 
-    const merchantName = expenseModal.merchantName.trim() || `${expenseModal.platform}消费`
-    const isLargeTransport = expenseModal.category === '出行' && amt >= 200
-    const resolvedTime = expenseModal.time || null
+      const merchantName = expenseModal.merchantName.trim() || `${expenseModal.platform}消费`
+      const isLargeTransport = expenseModal.category === '出行' && amt >= 200
+      const resolvedTime = expenseModal.time || null
 
-    if (expenseModal.mode === 'edit' && expenseModal.id) {
-      const expenseAccountId = expenseModal.accountUnbound
+      if (expenseModal.mode === 'edit' && expenseModal.id) {
+        const expenseAccountId = expenseModal.accountUnbound
+          ? autoAccountIdForPayment(expenseModal.payment, 'expense')
+          : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
+        const { error } = await sb.rpc('save_transaction_with_account', {
+          p_id: expenseModal.id,
+          p_amount: amt,
+          p_merchant_name: merchantName,
+          p_platform: expenseModal.platform,
+          p_category: expenseModal.category,
+          p_payment_method: expenseModal.payment,
+          p_transaction_date: expenseModal.date,
+          p_transaction_time: resolvedTime,
+          p_note: expenseModal.note.trim() || null,
+          p_is_large_transport: isLargeTransport,
+          p_transport_type: isLargeTransport ? '交通' : null,
+          p_source: null,
+          p_image_url: expenseModal.imagePath || null,
+          p_image_hash: null,
+          p_companion_message: null,
+          p_account_id: expenseAccountId,
+        })
+        if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+        await refreshAccountsFromDB()
+        if (currentPage.value === 'unbound-records') await loadUnboundRecords()
+        closeExpenseModal()
+        const editIdx = bills.value.findIndex(item => item.id === expenseModal.id)
+        if (editIdx >= 0) {
+          bills.value[editIdx] = {
+            ...bills.value[editIdx],
+            name: merchantName,
+            platform: expenseModal.platform,
+            payment: expenseModal.payment,
+            cat: expenseModal.category,
+            amount: amt,
+            date: formatDate(expenseModal.date),
+            dateRaw: expenseModal.date,
+            time: resolvedTime ? resolvedTime.slice(0, 5) : '',
+            transport_type: isLargeTransport ? '交通' : null,
+            note: expenseModal.note.trim() || null,
+          }
+        }
+        showFlash('✓ 支出已更新')
+        if (detailRecord.value?.id === expenseModal.id) {
+          const updated = bills.value.find(item => item.id === expenseModal.id)
+          if (updated) {
+            await openRecordDetail('expense', updated)
+          }
+        }
+        return
+      }
+
+      const expenseAccountIdNew = expenseModal.accountUnbound
         ? autoAccountIdForPayment(expenseModal.payment, 'expense')
         : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
-      const { error } = await sb.rpc('save_transaction_with_account', {
-        p_id: expenseModal.id,
+      const { data: newRow, error } = await sb.rpc('save_transaction_with_account', {
+        p_id: null,
         p_amount: amt,
         p_merchant_name: merchantName,
         p_platform: expenseModal.platform,
         p_category: expenseModal.category,
         p_payment_method: expenseModal.payment,
         p_transaction_date: expenseModal.date,
-        p_transaction_time: resolvedTime,
+        p_transaction_time: resolvedTime || (new Date().toTimeString().slice(0, 8)),
         p_note: expenseModal.note.trim() || null,
         p_is_large_transport: isLargeTransport,
         p_transport_type: isLargeTransport ? '交通' : null,
-        p_source: null,
+        p_source: 'manual',
         p_image_url: expenseModal.imagePath || null,
         p_image_hash: null,
         p_companion_message: null,
-        p_account_id: expenseAccountId,
+        p_account_id: expenseAccountIdNew,
       })
       if (error) { alert('保存失败：' + humanizeDbError(error)); return }
       await refreshAccountsFromDB()
       if (currentPage.value === 'unbound-records') await loadUnboundRecords()
       closeExpenseModal()
-      const editIdx = bills.value.findIndex(item => item.id === expenseModal.id)
-      if (editIdx >= 0) {
-        bills.value[editIdx] = {
-          ...bills.value[editIdx],
-          name: merchantName,
-          platform: expenseModal.platform,
-          payment: expenseModal.payment,
-          cat: expenseModal.category,
-          amount: amt,
-          date: formatDate(expenseModal.date),
-          dateRaw: expenseModal.date,
-          time: resolvedTime ? resolvedTime.slice(0, 5) : '',
-          transport_type: isLargeTransport ? '交通' : null,
-          note: expenseModal.note.trim() || null,
-        }
-      }
-      showFlash('✓ 支出已更新')
-      if (detailRecord.value?.id === expenseModal.id) {
-        const updated = bills.value.find(item => item.id === expenseModal.id)
-        if (updated) {
-          await openRecordDetail('expense', updated)
-        }
-      }
-      return
-    }
-
-    const expenseAccountIdNew = expenseModal.accountUnbound
-      ? autoAccountIdForPayment(expenseModal.payment, 'expense')
-      : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
-    const { data: newRow, error } = await sb.rpc('save_transaction_with_account', {
-      p_id: null,
-      p_amount: amt,
-      p_merchant_name: merchantName,
-      p_platform: expenseModal.platform,
-      p_category: expenseModal.category,
-      p_payment_method: expenseModal.payment,
-      p_transaction_date: expenseModal.date,
-      p_transaction_time: resolvedTime || (new Date().toTimeString().slice(0, 8)),
-      p_note: expenseModal.note.trim() || null,
-      p_is_large_transport: isLargeTransport,
-      p_transport_type: isLargeTransport ? '交通' : null,
-      p_source: 'manual',
-      p_image_url: expenseModal.imagePath || null,
-      p_image_hash: null,
-      p_companion_message: null,
-      p_account_id: expenseAccountIdNew,
+      bills.value.unshift(mapTransaction(newRow))
+      showFlash('✓ 支出已记录')
     })
-    if (error) { alert('保存失败：' + humanizeDbError(error)); return }
-    await refreshAccountsFromDB()
-    if (currentPage.value === 'unbound-records') await loadUnboundRecords()
-    closeExpenseModal()
-    bills.value.unshift(mapTransaction(newRow))
-    showFlash('✓ 支出已记录')
   }
 
   function markExpenseImageUnavailable() {
@@ -1573,32 +1631,41 @@ export function useStore() {
 
   async function retryStagingRecord(record) {
     if (!record?.id) return
-    showFlash('⏳ 正在重新识别...')
-    try {
-      const fnUrl = `${SUPABASE_URL}/functions/v1/ingest-receipt`
-      const formData = new FormData()
-      formData.append('staging_record_id', record.id)
-      if (currentUserId.value) formData.append('user_id', currentUserId.value)
-      const resp = await fetch(fnUrl, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-        body: formData,
-      })
-      if (!resp.ok) {
-        const errText = await resp.text()
-        throw new Error(`${resp.status}: ${errText}`)
+    return runLockedAction('retryStaging', async () => {
+      showFlash('⏳ 正在重新识别...')
+      try {
+        const { data: { session } } = await sb.auth.getSession()
+        const token = session?.access_token
+        if (!token) throw new Error('登录状态已失效，请重新登录')
+
+        const fnUrl = `${SUPABASE_URL}/functions/v1/ingest-receipt`
+        const formData = new FormData()
+        formData.append('staging_record_id', record.id)
+        if (currentUserId.value) formData.append('user_id', currentUserId.value)
+        const resp = await fetch(fnUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'apikey': SUPABASE_ANON_KEY,
+          },
+          body: formData,
+        })
+        if (!resp.ok) {
+          const errText = await resp.text()
+          throw new Error(`${resp.status}: ${errText}`)
+        }
+        const result = await resp.json()
+        if (result.status === 'done') {
+          showFlash(`✓ 重试成功 → 已归档到「${getSystemDomainLabel(result.record_type, result.record_type)}」`)
+          const idx = stagingRecords.value.findIndex(r => r.id === record.id)
+          if (idx >= 0) stagingRecords.value.splice(idx, 1)
+        } else {
+          showFlash('⚠ 重试未确定，请手动选择数据域归档（下方按钮）')
+        }
+      } catch (e) {
+        showFlash('❌ 重试失败：' + (e.message || '未知错误'))
       }
-      const result = await resp.json()
-      if (result.status === 'done') {
-        showFlash(`✓ 重试成功 → 已归档到「${getSystemDomainLabel(result.record_type, result.record_type)}」`)
-        const idx = stagingRecords.value.findIndex(r => r.id === record.id)
-        if (idx >= 0) stagingRecords.value.splice(idx, 1)
-      } else {
-        showFlash('⚠ 重试未确定，请手动选择数据域归档（下方按钮）')
-      }
-    } catch (e) {
-      showFlash('❌ 重试失败：' + (e.message || '未知错误'))
-    }
+    })
   }
 
   async function archiveStagingRecord(record, domainKey) {
@@ -1804,57 +1871,59 @@ export function useStore() {
   }
 
   async function saveAccount() {
-    if (!currentUserId.value) { alert('请先登录'); return null }
-    const err = validateAccountForm()
-    if (err) { alert(err); return null }
-    const name = accountModal.name.trim()
-    const initial = parseFloat(accountModal.initialBalance || '0') || 0
-    const last4 = accountModal.last4 && /^\d{4}$/.test(String(accountModal.last4).trim()) ? String(accountModal.last4).trim() : null
-    const institution = accountModal.institution.trim() || null
+    return runLockedAction('account', async () => {
+      if (!currentUserId.value) { alert('请先登录'); return null }
+      const err = validateAccountForm()
+      if (err) { alert(err); return null }
+      const name = accountModal.name.trim()
+      const initial = parseFloat(accountModal.initialBalance || '0') || 0
+      const last4 = accountModal.last4 && /^\d{4}$/.test(String(accountModal.last4).trim()) ? String(accountModal.last4).trim() : null
+      const institution = accountModal.institution.trim() || null
 
-    if (accountModal.mode === 'edit' && accountModal.id) {
+      if (accountModal.mode === 'edit' && accountModal.id) {
+        const body = {
+          name,
+          type: normalizeAccountType(accountModal.type),
+          institution,
+          last4,
+          is_default_expense: !!accountModal.isDefaultExpense,
+          is_default_income: !!accountModal.isDefaultIncome,
+          is_archived: !!accountModal.isArchived,
+          updated_at: new Date().toISOString(),
+        }
+        const { data, error } = await sb.from('accounts').update(body).eq('id', accountModal.id).select('*').single()
+        if (error) { alert('保存失败：' + humanizeDbError(error)); return null }
+        // 默认账户互斥
+        if (body.is_default_expense) await unsetOtherDefaults('expense', data.id)
+        if (body.is_default_income) await unsetOtherDefaults('income', data.id)
+        const idx = accounts.value.findIndex(a => a.id === data.id)
+        if (idx >= 0) accounts.value[idx] = mapAccountRow(data)
+        closeAccountModal()
+        showFlash('✓ 账户已更新')
+        return data
+      }
+
       const body = {
+        user_id: currentUserId.value,
         name,
         type: normalizeAccountType(accountModal.type),
         institution,
         last4,
+        currency: 'CNY',
+        initial_balance: initial,
+        current_balance: initial,
         is_default_expense: !!accountModal.isDefaultExpense,
         is_default_income: !!accountModal.isDefaultIncome,
-        is_archived: !!accountModal.isArchived,
-        updated_at: new Date().toISOString(),
       }
-      const { data, error } = await sb.from('accounts').update(body).eq('id', accountModal.id).select('*').single()
-      if (error) { alert('保存失败：' + humanizeDbError(error)); return null }
-      // 默认账户互斥
+      const { data, error } = await sb.from('accounts').insert(body).select('*').single()
+      if (error) { alert('创建失败：' + humanizeDbError(error)); return null }
       if (body.is_default_expense) await unsetOtherDefaults('expense', data.id)
       if (body.is_default_income) await unsetOtherDefaults('income', data.id)
-      const idx = accounts.value.findIndex(a => a.id === data.id)
-      if (idx >= 0) accounts.value[idx] = mapAccountRow(data)
+      accounts.value.unshift(mapAccountRow(data))
       closeAccountModal()
-      showFlash('✓ 账户已更新')
+      showFlash('✓ 账户已创建')
       return data
-    }
-
-    const body = {
-      user_id: currentUserId.value,
-      name,
-      type: normalizeAccountType(accountModal.type),
-      institution,
-      last4,
-      currency: 'CNY',
-      initial_balance: initial,
-      current_balance: initial,
-      is_default_expense: !!accountModal.isDefaultExpense,
-      is_default_income: !!accountModal.isDefaultIncome,
-    }
-    const { data, error } = await sb.from('accounts').insert(body).select('*').single()
-    if (error) { alert('创建失败：' + humanizeDbError(error)); return null }
-    if (body.is_default_expense) await unsetOtherDefaults('expense', data.id)
-    if (body.is_default_income) await unsetOtherDefaults('income', data.id)
-    accounts.value.unshift(mapAccountRow(data))
-    closeAccountModal()
-    showFlash('✓ 账户已创建')
-    return data
+    })
   }
 
   async function unsetOtherDefaults(kind, keepId) {
@@ -2631,10 +2700,32 @@ export function useStore() {
     }
   }
 
-  function toggleSetting(key) {
+  async function toggleSetting(key) {
     if (!(key in settingsState)) return
-    settingsState[key] = !settingsState[key]
-    showFlash(settingsState[key] ? '✓ 已开启' : '✓ 已关闭')
+    if (!currentUserId.value) {
+      showFlash('请先登录')
+      return
+    }
+    if (isActionPending('settings')) return
+    const field = USER_SETTING_FIELDS[key]
+    if (!field) return
+    const prev = settingsState[key]
+    const next = !prev
+    settingsState[key] = next
+    try {
+      await runLockedAction('settings', async () => {
+        const { error } = await sb.from('user_configs').upsert({
+          user_id: currentUserId.value,
+          [field]: next,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' })
+        if (error) throw error
+      })
+      showFlash(next ? '✓ 已开启' : '✓ 已关闭')
+    } catch (e) {
+      settingsState[key] = prev
+      showFlash('⚠️ 设置保存失败：' + humanizeDbError(e))
+    }
   }
 
   async function confirmDelete() {
@@ -2751,7 +2842,8 @@ export function useStore() {
     discardStagingRecord, retryStagingRecord, archiveStagingRecord,
     openDomainPage, openDayDetail, showMoreDailyCards, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
     navigateTo, goBack,
-    settingsState, toggleSetting,
+    settingsState, toggleSetting, loadUserSettings,
+    actionState, isActionPending,
     refreshIfStale,
   }
 }

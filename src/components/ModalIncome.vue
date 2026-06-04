@@ -78,8 +78,8 @@
 
       <div class="sheet-footer">
       <button class="confirm-btn" style="background:#1565C0"
-        :disabled="!store.incomeModal.amount || !store.incomeModal.cat || !store.incomeModal.date"
-        @click="store.confirmIncome()">确认保存</button>
+        :disabled="!store.incomeModal.amount || !store.incomeModal.cat || !store.incomeModal.date || store.isActionPending('income')"
+        @click="store.confirmIncome()">{{ store.isActionPending('income') ? '保存中...' : '确认保存' }}</button>
       <button v-if="store.incomeModal.mode === 'edit'" class="delete-bill-btn"
         @click="store.openDeleteConfirm('income', store.incomeModal.id, store.incomeModal.imagePath)">
         删除此收入

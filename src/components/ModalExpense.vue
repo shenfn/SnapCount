@@ -105,8 +105,8 @@
 
       <div class="sheet-footer">
         <button class="confirm-btn"
-          :disabled="!store.expenseModal.amount || !store.expenseModal.platform || !store.expenseModal.category || !store.expenseModal.payment || !store.expenseModal.date"
-          @click="store.confirmExpense()">确认保存</button>
+          :disabled="!store.expenseModal.amount || !store.expenseModal.platform || !store.expenseModal.category || !store.expenseModal.payment || !store.expenseModal.date || store.isActionPending('expense')"
+          @click="store.confirmExpense()">{{ store.isActionPending('expense') ? '保存中...' : '确认保存' }}</button>
         <button v-if="store.expenseModal.mode === 'edit'" class="delete-bill-btn"
           @click="store.openDeleteConfirm('bill', store.expenseModal.id, store.expenseModal.imagePath)">
           删除此支出

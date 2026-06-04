@@ -235,7 +235,7 @@
 </template>
 
 <script setup>
-import { ref, inject, onMounted, watch } from 'vue'
+import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
 import { sb } from '../../lib/supabase'
 
 const store = inject('store')
@@ -251,6 +251,8 @@ const exportRange = ref('this_month')
 const exportFormat = ref('csv')
 const exportDetail = ref('summary')
 const exportPreviewCount = ref(null)
+let exportPreviewTimer = null
+let exportPreviewSeq = 0
 
 const exportContentOptions = [
   { value: 'expense', label: '支出记录' },
@@ -535,19 +537,27 @@ async function handleExport() {
   }
 }
 
-watch([exportContent, exportRange], async () => {
+function scheduleExportPreview() {
   exportPreviewCount.value = null
-  try {
-    const data = await fetchExportData()
-    if (Array.isArray(data)) {
-      exportPreviewCount.value = data.length
-    } else {
-      exportPreviewCount.value = (data.expenses?.length || 0) + (data.incomes?.length || 0)
+  exportPreviewSeq += 1
+  const seq = exportPreviewSeq
+  if (exportPreviewTimer) clearTimeout(exportPreviewTimer)
+  exportPreviewTimer = setTimeout(async () => {
+    try {
+      const data = await fetchExportData()
+      if (seq !== exportPreviewSeq) return
+      if (Array.isArray(data)) {
+        exportPreviewCount.value = data.length
+      } else {
+        exportPreviewCount.value = (data.expenses?.length || 0) + (data.incomes?.length || 0)
+      }
+    } catch {
+      if (seq === exportPreviewSeq) exportPreviewCount.value = null
     }
-  } catch {
-    exportPreviewCount.value = null
-  }
-})
+  }, 180)
+}
+
+watch([exportContent, exportRange], scheduleExportPreview)
 
 const visionOptions = [
   {
@@ -613,6 +623,7 @@ const insightModelOptions = [
 
 onMounted(async () => {
   if (store.currentUserId.value) {
+    await store.loadUserSettings()
     const { data: cfg } = await sb.from('user_configs')
       .select('upload_token, plan, vision_primary, ai_insight_provider')
       .eq('user_id', store.currentUserId.value)
@@ -623,6 +634,10 @@ onMounted(async () => {
       aiInsightProvider.value = cfg.ai_insight_provider || 'auto'
     }
   }
+})
+
+onUnmounted(() => {
+  if (exportPreviewTimer) clearTimeout(exportPreviewTimer)
 })
 
 async function updateVisionPrimary(value) {

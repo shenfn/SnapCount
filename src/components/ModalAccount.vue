@@ -63,8 +63,8 @@
 
       <div class="sheet-footer">
         <button class="confirm-btn" style="background:#1565C0"
-          :disabled="!store.accountModal.name"
-          @click="store.saveAccount()">{{ store.accountModal.mode === 'edit' ? '保存修改' : '创建账户' }}</button>
+          :disabled="!store.accountModal.name || store.isActionPending('account')"
+          @click="store.saveAccount()">{{ store.isActionPending('account') ? '保存中...' : (store.accountModal.mode === 'edit' ? '保存修改' : '创建账户') }}</button>
       </div>
     </div>
   </div>
