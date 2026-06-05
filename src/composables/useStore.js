@@ -831,6 +831,14 @@ export function useStore() {
     flashTimer = setTimeout(() => { flashVisible.value = false }, 2000)
   }
 
+  function showError(msg) {
+    showFlash(`❌ ${msg}`)
+  }
+
+  function showWarn(msg) {
+    showFlash(`⚠ ${msg}`)
+  }
+
   async function getSignedImageUrl(raw) {
     if (!raw) return null
     if (raw.startsWith('https://')) return raw
@@ -966,10 +974,10 @@ export function useStore() {
   async function confirmEntry() {
     return runLockedAction('pendingEntry', async () => {
       const amt = parseFloat(pendingModal.amount)
-      if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
+      if (!amt || amt <= 0 || amt > 999999.99) { showWarn('请输入有效金额（0.01 ~ 999999.99）'); return }
 
       if (pendingModal.entryType === 'income') {
-        if (!pendingModal.incomeCategory) { alert('请选择收入类型'); return }
+        if (!pendingModal.incomeCategory) { showWarn('请选择收入类型'); return }
         const source = pendingModal.merchantName.trim() || (incomeCatMap[pendingModal.incomeCategory]?.label || '收入')
         const incomeAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || defaultAccountIdForKind('income'))
         const { error: confirmErr } = await sb.rpc('confirm_pending_transaction_with_account', {
@@ -983,7 +991,7 @@ export function useStore() {
           p_income_category: pendingModal.incomeCategory,
           p_account_id: incomeAccountId,
         })
-        if (confirmErr) { alert('保存失败：' + humanizeDbError(confirmErr)); return }
+        if (confirmErr) { showError('保存失败：' + humanizeDbError(confirmErr)); return }
 
         const bIdx = bills.value.findIndex(b => b.id === pendingModal.bill.id)
         if (bIdx >= 0) bills.value.splice(bIdx, 1)
@@ -1009,7 +1017,7 @@ export function useStore() {
         p_income_category: null,
         p_account_id: expenseAccountId,
       })
-      if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+      if (error) { showError('保存失败：' + humanizeDbError(error)); return }
       await refreshAccountsFromDB()
       // 本地更新账单状态
       const bIdx2 = bills.value.findIndex(b => b.id === pendingModal.bill.id)
@@ -1071,9 +1079,9 @@ export function useStore() {
   async function confirmIncome() {
     return runLockedAction('income', async () => {
       const amt = parseFloat(incomeModal.amount)
-      if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
-      if (!incomeModal.cat) { alert('请选择收入类型'); return }
-      if (!incomeModal.date) { alert('请选择到账日期'); return }
+      if (!amt || amt <= 0 || amt > 999999.99) { showWarn('请输入有效金额（0.01 ~ 999999.99）'); return }
+      if (!incomeModal.cat) { showWarn('请选择收入类型'); return }
+      if (!incomeModal.date) { showWarn('请选择到账日期'); return }
       const source = incomeModal.source.trim() || (incomeCatMap[incomeModal.cat]?.label || '收入')
       if (incomeModal.mode === 'edit' && incomeModal.id) {
         const incomeAccountId = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
@@ -1090,7 +1098,7 @@ export function useStore() {
           p_companion_message: null,
           p_account_id: incomeAccountId,
         })
-        if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+        if (error) { showError('保存失败：' + humanizeDbError(error)); return }
         await refreshAccountsFromDB()
         if (currentPage.value === 'unbound-records') await loadUnboundRecords()
         closeIncomeModal()
@@ -1135,7 +1143,7 @@ export function useStore() {
         p_companion_message: null,
         p_account_id: incomeAccountIdNew,
       })
-      if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+      if (error) { showError('保存失败：' + humanizeDbError(error)); return }
       await refreshAccountsFromDB()
       if (currentPage.value === 'unbound-records') await loadUnboundRecords()
       closeIncomeModal()
@@ -1279,9 +1287,9 @@ export function useStore() {
   async function confirmExpense() {
     return runLockedAction('expense', async () => {
       const amt = parseFloat(expenseModal.amount)
-      if (!amt || amt <= 0 || amt > 999999.99) { alert('请输入有效金额（0.01 ~ 999999.99）'); return }
-      if (!expenseModal.platform || !expenseModal.category || !expenseModal.payment) { alert('请选择消费渠道、分类和支付方式'); return }
-      if (!expenseModal.date) { alert('请选择消费日期'); return }
+      if (!amt || amt <= 0 || amt > 999999.99) { showWarn('请输入有效金额（0.01 ~ 999999.99）'); return }
+      if (!expenseModal.platform || !expenseModal.category || !expenseModal.payment) { showWarn('请选择消费渠道、分类和支付方式'); return }
+      if (!expenseModal.date) { showWarn('请选择消费日期'); return }
 
       const merchantName = expenseModal.merchantName.trim() || `${expenseModal.platform}消费`
       const isLargeTransport = expenseModal.category === '出行' && amt >= 200
@@ -1309,7 +1317,7 @@ export function useStore() {
           p_companion_message: null,
           p_account_id: expenseAccountId,
         })
-        if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+        if (error) { showError('保存失败：' + humanizeDbError(error)); return }
         await refreshAccountsFromDB()
         if (currentPage.value === 'unbound-records') await loadUnboundRecords()
         closeExpenseModal()
@@ -1360,7 +1368,7 @@ export function useStore() {
         p_companion_message: null,
         p_account_id: expenseAccountIdNew,
       })
-      if (error) { alert('保存失败：' + humanizeDbError(error)); return }
+      if (error) { showError('保存失败：' + humanizeDbError(error)); return }
       await refreshAccountsFromDB()
       if (currentPage.value === 'unbound-records') await loadUnboundRecords()
       closeExpenseModal()
@@ -1438,7 +1446,7 @@ export function useStore() {
     const meta = getUniversalDomainMeta(universalModal.domainKey)
     const validationError = validateUniversalModal(universalModal, meta)
     if (validationError) {
-      alert(validationError)
+      showWarn(validationError)
       return
     }
 
@@ -1448,7 +1456,7 @@ export function useStore() {
       .eq('status', 'active')
       .limit(1)
     if (domainErr || !domainRows?.length) {
-      alert('数据域未就绪，请先执行 007 迁移')
+      showWarn('数据域未就绪，请先执行 007 迁移')
       return
     }
 
@@ -1471,7 +1479,7 @@ export function useStore() {
     if (wasEdit) {
       const { error } = await sb.from('data_records').update(body).eq('id', universalModal.id)
       if (error) {
-        alert('保存失败：' + humanizeDbError(error))
+        showError('保存失败：' + humanizeDbError(error))
         return
       }
       closeUniversalModal()
@@ -1496,7 +1504,7 @@ export function useStore() {
         .select('*')
         .single()
       if (error) {
-        alert('保存失败：' + humanizeDbError(error))
+        showError('保存失败：' + humanizeDbError(error))
         return
       }
       closeUniversalModal()
@@ -1872,9 +1880,9 @@ export function useStore() {
 
   async function saveAccount() {
     return runLockedAction('account', async () => {
-      if (!currentUserId.value) { alert('请先登录'); return null }
+      if (!currentUserId.value) { showWarn('请先登录'); return null }
       const err = validateAccountForm()
-      if (err) { alert(err); return null }
+      if (err) { showWarn(err); return null }
       const name = accountModal.name.trim()
       const initial = parseFloat(accountModal.initialBalance || '0') || 0
       const last4 = accountModal.last4 && /^\d{4}$/.test(String(accountModal.last4).trim()) ? String(accountModal.last4).trim() : null
@@ -1892,7 +1900,7 @@ export function useStore() {
           updated_at: new Date().toISOString(),
         }
         const { data, error } = await sb.from('accounts').update(body).eq('id', accountModal.id).select('*').single()
-        if (error) { alert('保存失败：' + humanizeDbError(error)); return null }
+        if (error) { showError('保存失败：' + humanizeDbError(error)); return null }
         // 默认账户互斥
         if (body.is_default_expense) await unsetOtherDefaults('expense', data.id)
         if (body.is_default_income) await unsetOtherDefaults('income', data.id)
@@ -1916,7 +1924,7 @@ export function useStore() {
         is_default_income: !!accountModal.isDefaultIncome,
       }
       const { data, error } = await sb.from('accounts').insert(body).select('*').single()
-      if (error) { alert('创建失败：' + humanizeDbError(error)); return null }
+      if (error) { showError('创建失败：' + humanizeDbError(error)); return null }
       if (body.is_default_expense) await unsetOtherDefaults('expense', data.id)
       if (body.is_default_income) await unsetOtherDefaults('income', data.id)
       accounts.value.unshift(mapAccountRow(data))
@@ -1946,7 +1954,7 @@ export function useStore() {
       .eq('id', account.id)
       .select('*')
       .single()
-    if (error) { alert('操作失败：' + humanizeDbError(error)); return }
+    if (error) { showError('操作失败：' + humanizeDbError(error)); return }
     const idx = accounts.value.findIndex(a => a.id === account.id)
     if (idx >= 0) accounts.value[idx] = mapAccountRow(data)
     showFlash(archived ? '✓ 账户已归档' : '✓ 账户已恢复')
@@ -2416,7 +2424,7 @@ export function useStore() {
         .order('created_at', { ascending: true })
         .limit(1)
       if (existingErr) {
-        alert('检查账户是否已存在失败：' + humanizeDbError(existingErr))
+        showError('检查账户是否已存在失败：' + humanizeDbError(existingErr))
         return
       }
       if (existingRows?.length) {
@@ -2431,7 +2439,7 @@ export function useStore() {
         .select('*')
         .single()
       if (accountErr) {
-        alert('创建账户失败：' + humanizeDbError(accountErr))
+        showError('创建账户失败：' + humanizeDbError(accountErr))
         return
       }
 
@@ -2451,7 +2459,7 @@ export function useStore() {
         })
         .eq('id', record.id)
       if (linkErr) {
-        alert('账户已创建，但关联快照失败：' + humanizeDbError(linkErr))
+        showError('账户已创建，但关联快照失败：' + humanizeDbError(linkErr))
         await loadData(0, true)
         return
       }
@@ -2486,7 +2494,7 @@ export function useStore() {
       })
       .eq('id', accountId)
     if (accountErr) {
-      alert('更新账户快照失败：' + humanizeDbError(accountErr))
+      showError('更新账户快照失败：' + humanizeDbError(accountErr))
       return
     }
 
@@ -2506,7 +2514,7 @@ export function useStore() {
       })
       .eq('id', record.id)
     if (recordErr) {
-      alert('账户快照已更新，但记录关联失败：' + humanizeDbError(recordErr))
+      showError('账户快照已更新，但记录关联失败：' + humanizeDbError(recordErr))
       await loadData(0, true)
       return
     }
