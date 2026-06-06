@@ -144,6 +144,9 @@ function onMinutesBlur() {
   /* 隐藏 number 类型的上下箭头 */
   -moz-appearance: textfield;
 }
+.duration-input-field:focus-visible {
+  box-shadow: none;
+}
 .duration-input-field::-webkit-outer-spin-button,
 .duration-input-field::-webkit-inner-spin-button {
   -webkit-appearance: none;

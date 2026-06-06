@@ -573,16 +573,6 @@ export function useStore() {
       }
       hydrateDomainRegistry(data || [])
       domainSchemasLoaded = true
-      // 调试输出：协议化重构 Phase 1 验证用
-      const status = getDomainRegistryStatus()
-      console.log('[域协议] hydrate 完成', {
-        hydratedAt: status.hydratedAt,
-        domains: (data || []).map(d => ({
-          key: d.key,
-          facts: d.schema_json?.facts?.length || 0,
-          dimensions: d.schema_json?.dimensions?.length || 0,
-        })),
-      })
     } catch (e) {
       console.warn('[域协议] 加载异常，使用内置兜底 schema:', e?.message || e)
     }
@@ -2600,6 +2590,7 @@ export function useStore() {
 
   function openDomainPage(domainId) {
     activeDomainId.value = domainId
+    pageScrollPositions['domain-detail'] = 0
     navigateTo('domain-detail')
   }
 

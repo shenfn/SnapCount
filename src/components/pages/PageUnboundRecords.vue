@@ -11,9 +11,9 @@
 
     <section class="unbound-hero">
       <div>
-        <div class="account-hero-kicker">ACCOUNT COVERAGE</div>
+        <div class="account-hero-kicker">账户覆盖率</div>
         <div class="unbound-hero-count">{{ visibleRecords.length }}</div>
-        <div class="account-hero-caption">当前筛选下待补绑记录</div>
+        <div class="account-hero-caption">当前筛选下等待补全来源的记录</div>
       </div>
       <div class="unbound-hero-side">
         <span>支出 {{ expenses.length }}</span>

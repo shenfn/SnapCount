@@ -39,49 +39,72 @@
     </div>
 
     <!-- Pages -->
-    <PageHome     v-show="store.currentPage.value === 'home'" />
-    <PagePending  v-show="store.currentPage.value === 'pending'" />
-    <PageDomains  v-show="store.currentPage.value === 'domains'" />
-    <PageReport   v-show="store.currentPage.value === 'report'" />
-    <PageSettings v-show="store.currentPage.value === 'settings'" />
-    <PageDomainDetail v-show="store.currentPage.value === 'domain-detail'" />
-    <PageAccountDetail v-show="store.currentPage.value === 'account-detail'" />
-    <PageUnboundRecords v-show="store.currentPage.value === 'unbound-records'" />
-    <PageDayDetail v-show="store.currentPage.value === 'day-detail'" />
-    <PageRecordDetail v-show="store.currentPage.value === 'record-detail'" />
-    <PageInsights v-if="store.currentPage.value === 'insights'" />
+    <main id="main-content">
+      <PageHome     v-show="store.currentPage.value === 'home'" />
+      <PagePending  v-show="store.currentPage.value === 'pending'" />
+      <PageDomains  v-show="store.currentPage.value === 'domains'" />
+      <PageReport   v-show="store.currentPage.value === 'report'" />
+      <PageSettings v-show="store.currentPage.value === 'settings'" />
+      <PageDomainDetail v-show="store.currentPage.value === 'domain-detail'" />
+      <PageAccountDetail v-show="store.currentPage.value === 'account-detail'" />
+      <PageUnboundRecords v-show="store.currentPage.value === 'unbound-records'" />
+      <PageDayDetail v-show="store.currentPage.value === 'day-detail'" />
+      <PageRecordDetail v-show="store.currentPage.value === 'record-detail'" />
+      <PageInsights v-if="store.currentPage.value === 'insights'" />
+    </main>
 
     <!-- Bottom Nav -->
     <nav class="nav platform-nav">
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'home' }" @click="store.navigateTo('home')">
-        <div class="nav-icon">◉</div><div>首页</div>
-      </div>
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'pending' }" @click="store.navigateTo('pending')">
-        <div class="nav-icon">◌</div><div>待处理</div>
-      </div>
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'domains' }" @click="store.navigateTo('domains')">
-        <div class="nav-icon">▣</div><div>数据域</div>
-      </div>
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'report' }" @click="store.navigateTo('report')">
-        <div class="nav-icon">◫</div><div>报告</div>
-      </div>
-      <div class="nav-item" :class="{ active: store.currentPage.value === 'settings' }" @click="store.navigateTo('settings')">
-        <div class="nav-icon">⚙</div><div>设置</div>
-      </div>
+      <button type="button" class="nav-item" :class="{ active: store.currentPage.value === 'home' }" @click="store.navigateTo('home')">
+        <span class="nav-icon nav-icon-home">账</span><div>首页</div>
+      </button>
+      <button type="button" class="nav-item" :class="{ active: store.currentPage.value === 'pending' }" @click="store.navigateTo('pending')">
+        <span class="nav-icon nav-icon-pending">待</span><div>待处理</div>
+      </button>
+      <button type="button" class="nav-item" :class="{ active: store.currentPage.value === 'domains' }" @click="store.navigateTo('domains')">
+        <span class="nav-icon nav-icon-domains">域</span><div>数据域</div>
+      </button>
+      <button type="button" class="nav-item" :class="{ active: store.currentPage.value === 'report' }" @click="store.navigateTo('report')">
+        <span class="nav-icon nav-icon-report">析</span><div>报告</div>
+      </button>
+      <button type="button" class="nav-item" :class="{ active: store.currentPage.value === 'settings' }" @click="store.navigateTo('settings')">
+        <span class="nav-icon nav-icon-settings">设</span><div>设置</div>
+      </button>
     </nav>
 
     <!-- FAB -->
     <div class="fab-overlay" :class="{ open: fabOpen }" @click="fabOpen = false"></div>
     <div class="fab-menu" :class="{ open: fabOpen }">
-      <div class="fab-item" @click="store.navigateTo('domains'); store.showFlash('数据域创建入口将在阶段 3 接入'); fabOpen = false">🧩 新建数据域</div>
-      <div class="fab-item" @click="store.openIncomeModal(); fabOpen = false">💰 添加收入</div>
-      <div class="fab-item" @click="store.openExpenseModal(); fabOpen = false">💸 添加支出</div>
-      <div class="fab-item" @click="store.openUniversalModal('sport'); fabOpen = false">🏃 添加运动</div>
-      <div class="fab-item" @click="store.openUniversalModal('sleep'); fabOpen = false">🌙 添加睡眠</div>
-      <div class="fab-item" @click="store.openUniversalModal('reading'); fabOpen = false">📚 添加阅读</div>
-      <div class="fab-item" @click="store.openUniversalModal('wallet'); fabOpen = false">👛 添加钱包</div>
+      <button type="button" class="fab-item" @click="openFabAction(() => { store.navigateTo('domains'); store.showFlash('数据域创建入口将在阶段 3 接入') })">
+        <span class="fab-item-icon fab-item-icon-domain">域</span>
+        <span class="fab-item-copy"><strong>新建数据域</strong><small>从模板扩展新的记录面板</small></span>
+      </button>
+      <button type="button" class="fab-item" @click="openFabAction(() => store.openIncomeModal())">
+        <span class="fab-item-icon fab-item-icon-income">收</span>
+        <span class="fab-item-copy"><strong>添加收入</strong><small>工资、报销与转账收款</small></span>
+      </button>
+      <button type="button" class="fab-item" @click="openFabAction(() => store.openExpenseModal())">
+        <span class="fab-item-icon fab-item-icon-expense">支</span>
+        <span class="fab-item-copy"><strong>添加支出</strong><small>消费、账单与生活流水</small></span>
+      </button>
+      <button type="button" class="fab-item" @click="openFabAction(() => store.openUniversalModal('sport'))">
+        <span class="fab-item-icon fab-item-icon-sport">动</span>
+        <span class="fab-item-copy"><strong>添加运动</strong><small>先记一笔，后续接健康数据</small></span>
+      </button>
+      <button type="button" class="fab-item" @click="openFabAction(() => store.openUniversalModal('sleep'))">
+        <span class="fab-item-icon fab-item-icon-sleep">眠</span>
+        <span class="fab-item-copy"><strong>添加睡眠</strong><small>补充作息与恢复状态</small></span>
+      </button>
+      <button type="button" class="fab-item" @click="openFabAction(() => store.openUniversalModal('reading'))">
+        <span class="fab-item-icon fab-item-icon-reading">读</span>
+        <span class="fab-item-copy"><strong>添加阅读</strong><small>把时长和进度放进账本</small></span>
+      </button>
+      <button type="button" class="fab-item" @click="openFabAction(() => store.openUniversalModal('wallet'))">
+        <span class="fab-item-icon fab-item-icon-wallet">钱</span>
+        <span class="fab-item-copy"><strong>添加钱包</strong><small>记录余额与短期待还</small></span>
+      </button>
     </div>
-    <button class="fab" @click="fabOpen = !fabOpen">+</button>
+    <button type="button" class="fab" @click="fabOpen = !fabOpen">+</button>
 
     <!-- Modals -->
     <ModalWelcome />
@@ -92,19 +115,16 @@
     <ModalAccount />
 
     <!-- Delete confirmation -->
-    <div v-if="store.deleteConfirm.open"
-      style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9000;display:flex;align-items:center;justify-content:center;padding:24px;">
-      <div style="background:#fff;border-radius:16px;width:100%;max-width:320px;padding:24px;text-align:center;">
-        <div style="font-size:28px;margin-bottom:12px;">🗑</div>
-        <div style="font-size:16px;font-weight:600;color:#1A1A18;margin-bottom:8px;">确认删除？</div>
-        <div style="font-size:13px;color:#6B6A65;margin-bottom:24px;">此操作不可撤销，记录将永久删除</div>
-        <div style="display:flex;gap:12px;">
-          <button @click="store.closeDeleteConfirm()"
-            style="flex:1;padding:12px;border-radius:10px;border:1.5px solid #E0E0E0;background:#fff;font-size:15px;cursor:pointer;font-family:'PingFang SC',system-ui,sans-serif;">
+    <div v-if="store.deleteConfirm.open" class="delete-confirm-overlay">
+      <div class="delete-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title">
+        <div class="delete-confirm-icon">🗑</div>
+        <div id="delete-confirm-title" class="delete-confirm-title">确认删除？</div>
+        <div class="delete-confirm-body">此操作不可撤销，记录将永久删除</div>
+        <div class="delete-confirm-actions">
+          <button type="button" class="delete-confirm-btn delete-confirm-btn-secondary" @click="store.closeDeleteConfirm()">
             取消
           </button>
-          <button @click="store.confirmDelete()"
-            style="flex:1;padding:12px;border-radius:10px;border:none;background:#B91C1C;color:#fff;font-size:15px;font-weight:600;cursor:pointer;font-family:'PingFang SC',system-ui,sans-serif;">
+          <button type="button" class="delete-confirm-btn delete-confirm-btn-danger" @click="store.confirmDelete()">
             确认删除
           </button>
         </div>
@@ -192,6 +212,11 @@ const ptrStyle = computed(() => ({
 }))
 
 const ptrReady = computed(() => pullDistance.value >= 60)
+
+function openFabAction(action) {
+  action()
+  fabOpen.value = false
+}
 
 // 后台切回前台时静默刷新：命中快捷指令上传 → 切回 PWA 的核心动线
 function handleVisibilityChange() {

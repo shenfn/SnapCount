@@ -725,21 +725,21 @@ function resetWidgets() {
   align-items: center;
   margin-top: 12px;
   border-radius: 18px;
-  background: rgba(124, 58, 237, 0.08);
+  background: rgba(180, 83, 9, 0.08);
   padding: 13px 14px;
   cursor: pointer;
   transition: transform 0.16s ease;
 }
 
 .finance-due-label {
-  color: #7c6f91;
+  color: #9a3412;
   font-size: 11px;
   font-weight: 800;
 }
 
 .finance-due-name {
   margin-top: 3px;
-  color: #1f163f;
+  color: #6c2d12;
   font-size: 15px;
   font-weight: 800;
 }
@@ -750,7 +750,7 @@ function resetWidgets() {
 
 .finance-due-value strong {
   display: block;
-  color: #1f163f;
+  color: #6c2d12;
   font-family: var(--font-num);
   font-size: 18px;
   font-weight: 900;
@@ -759,7 +759,7 @@ function resetWidgets() {
 .finance-due-value span {
   display: block;
   margin-top: 2px;
-  color: #7c6f91;
+  color: #9a3412;
   font-size: 11px;
   font-weight: 700;
 }

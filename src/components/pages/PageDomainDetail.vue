@@ -247,11 +247,11 @@ async function linkSnapshotToExistingAccount(record, accountId) {
   border: none;
   border-radius: 14px;
   padding: 13px 16px;
-  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  background: linear-gradient(135deg, #c77416 0%, #a54f1d 100%);
   color: #fff;
   font-size: 14px;
   font-weight: 700;
-  box-shadow: 0 12px 24px rgba(124, 58, 237, 0.22);
+  box-shadow: 0 12px 24px rgba(165, 79, 29, 0.2);
   cursor: pointer;
 }
 .domain-wallet-add.subtle {

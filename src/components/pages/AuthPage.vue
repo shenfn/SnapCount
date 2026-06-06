@@ -27,9 +27,9 @@
 
       <p class="auth-hint">
         {{ mode === 'login' ? '还没有账号？' : '已有账号？' }}
-        <a href="#" @click.prevent="mode = mode === 'login' ? 'register' : 'login'">
+        <button type="button" class="auth-switch-btn" @click="mode = mode === 'login' ? 'register' : 'login'">
           {{ mode === 'login' ? '注册' : '登录' }}
-        </a>
+        </button>
       </p>
     </form>
 

@@ -1050,6 +1050,10 @@ function chartOptions(scaleOverrides = {}, pluginOverrides = {}) {
   padding: 10px;
   margin-bottom: 12px;
 }
+.insights-ai-input-card:focus-within {
+  border-color: rgba(45, 106, 79, 0.28);
+  box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.12);
+}
 .insights-ai-question {
   width: 100%;
   border: none;
@@ -1061,6 +1065,9 @@ function chartOptions(scaleOverrides = {}, pluginOverrides = {}) {
   font-size: 13px;
   line-height: 1.55;
   font-family: inherit;
+}
+.insights-ai-question:focus-visible {
+  box-shadow: none;
 }
 .insights-ai-question::placeholder {
   color: var(--text3);

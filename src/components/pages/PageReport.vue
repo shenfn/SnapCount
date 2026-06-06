@@ -17,7 +17,7 @@
       <div class="report-selector-label">选择数据域</div>
       <div class="report-selector-wrap" @click="dropdownOpen = !dropdownOpen">
         <div class="report-selector-value">
-          <span class="report-selector-icon" :style="{ background: `${activeMeta.color}18`, color: activeMeta.color }">{{ activeMeta.icon }}</span>
+          <span class="report-selector-icon" :style="{ background: `${activeMeta.color}18`, color: activeMeta.color }">{{ domainBadge(activeDomain) }}</span>
           <span>{{ activeMeta.name }}</span>
         </div>
         <span class="report-selector-arrow" :class="{ open: dropdownOpen }">⌄</span>
@@ -30,7 +30,7 @@
           :class="{ active: activeDomain === domain.id }"
           @click.stop="selectDomain(domain.id)"
         >
-          <span class="report-selector-icon small" :style="{ background: `${domain.color}18`, color: domain.color }">{{ domain.icon }}</span>
+          <span class="report-selector-icon small" :style="{ background: `${domain.color}18`, color: domain.color }">{{ domainBadge(domain.id) }}</span>
           <span>{{ domain.name }}</span>
         </div>
         <div class="report-dropdown-divider"></div>
@@ -212,6 +212,19 @@ function selectDomain(domainId) {
   dropdownOpen.value = false
 }
 
+function domainBadge(domainId) {
+  return {
+    expense: '支',
+    income: '收',
+    sport: '动',
+    sleep: '眠',
+    reading: '读',
+    food: '餐',
+    wallet: '钱',
+    cross: '联',
+  }[domainId] || '域'
+}
+
 const activeMeta = computed(() => {
   if (activeDomain.value === 'cross') {
     return { name: '跨域分析', icon: '联', color: 'var(--primary)' }
@@ -354,8 +367,8 @@ const placeholderData = computed(() => ({
       label: '睡眠记录概览',
       value: '0 条',
       change: '睡眠域已预留，后续会和 AI 入库一起打通',
-      gradient: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-      barColor: 'linear-gradient(180deg, #818cf8 0%, #4f46e5 100%)',
+      gradient: 'linear-gradient(135deg, #315c63 0%, #214f3d 100%)',
+      barColor: 'linear-gradient(180deg, #4f8d95 0%, #214f3d 100%)',
     },
     stats: [
       { label: '记录天数', value: '0' },
@@ -399,8 +412,8 @@ const placeholderData = computed(() => ({
       label: '钱包与待还概览',
       value: '0 条',
       change: '记录当前可用现金和花呗/白条/月付等待还款',
-      gradient: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-      barColor: 'linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%)',
+      gradient: 'linear-gradient(135deg, #c77416 0%, #8f4b16 100%)',
+      barColor: 'linear-gradient(180deg, #e8a24e 0%, #8f4b16 100%)',
     },
     stats: [
       { label: '快照记录', value: '0' },
@@ -479,7 +492,7 @@ function universalData(domainKey) {
     platforms: [],
     paymentMethods: [],
     specialSummaries: count
-      ? [{ label: '最近记录', value: records[0]?.title || '暂无', icon: domainObj.icon || '·', color: activeMeta.value.color }]
+      ? [{ label: '最近记录', value: records[0]?.title || '暂无', icon: domainBadge(domainKey), color: activeMeta.value.color }]
       : [],
   }
 }
@@ -519,35 +532,34 @@ function normalizeChartList(list) {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: linear-gradient(135deg, rgba(33, 79, 61, 0.06) 0%, rgba(33, 79, 61, 0.02) 100%);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px 16px;
-  margin: 12px 0 16px;
+  background: linear-gradient(135deg, rgba(33, 79, 61, 0.12) 0%, rgba(199, 116, 22, 0.08) 100%);
+  border: 1px solid rgba(33, 79, 61, 0.08);
+  border-radius: 20px;
+  padding: 16px 16px;
+  margin: 14px 20px 18px;
   cursor: pointer;
   text-align: left;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 .report-insights-entry:active {
   transform: scale(0.985);
 }
 .report-insights-entry:hover {
   border-color: var(--primary-light, var(--primary));
-  box-shadow: 0 2px 10px rgba(33, 79, 61, 0.06);
+  box-shadow: 0 16px 28px rgba(45, 40, 30, 0.08);
 }
 .report-insights-entry-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: var(--primary);
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #2b7b88 0%, #214f3d 100%);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14px;
   flex-shrink: 0;
-  letter-spacing: 0.5px;
 }
 .report-insights-entry-main {
   flex: 1;
@@ -557,19 +569,18 @@ function normalizeChartList(list) {
   min-width: 0;
 }
 .report-insights-entry-title {
-  font-size: 14.5px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 800;
   color: var(--text);
-  letter-spacing: 0.2px;
 }
 .report-insights-entry-sub {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text2);
-  letter-spacing: 0.2px;
+  line-height: 1.45;
 }
 .report-insights-entry-arrow {
   color: var(--text3);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 300;
   flex-shrink: 0;
 }
