@@ -59,6 +59,23 @@
   opacity: 0.82;
 }
 
+.account-hero-subline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.account-hero-subline span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
 .account-hero-mark {
   position: relative;
   z-index: 1;
@@ -82,10 +99,59 @@
 }
 
 .account-stat-card,
-.account-entry-panel {
+.account-entry-panel,
+.account-source-card,
+.account-payment-panel,
+.account-repayment-panel {
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(33, 33, 30, 0.08);
   box-shadow: 0 10px 24px rgba(61, 52, 39, 0.06);
+}
+
+.account-source-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px;
+  gap: 14px;
+  align-items: center;
+  border-radius: 24px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.account-source-main {
+  min-width: 0;
+}
+
+.account-source-title {
+  margin-top: 8px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #1A1A18;
+}
+
+.account-source-meta,
+.account-source-summary {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #7a7468;
+}
+
+.account-source-thumb {
+  width: 74px;
+  height: 92px;
+  padding: 0;
+  border: 1px solid rgba(33, 33, 30, 0.08);
+  border-radius: 18px;
+  overflow: hidden;
+  background: #f7f2e8;
+}
+
+.account-source-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .account-stat-card {
@@ -118,6 +184,184 @@
 .account-entry-panel {
   border-radius: 24px;
   padding: 16px;
+}
+
+.account-repayment-panel {
+  border-radius: 24px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.account-payment-panel {
+  border-radius: 24px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.account-payment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.account-payment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 12px;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.account-payment-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1A1A18;
+}
+
+.account-payment-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #7a7468;
+}
+
+.account-payment-row strong {
+  flex: 0 0 auto;
+  color: #047857;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.account-repayment-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.account-repayment-status strong {
+  font-size: 15px;
+  color: #1A1A18;
+}
+
+.account-repayment-status span {
+  font-size: 12px;
+  color: #7a7468;
+}
+
+.account-repayment-status.ok {
+  background: rgba(236, 253, 245, 0.92);
+}
+
+.account-repayment-status.ok strong {
+  color: #047857;
+}
+
+.account-repayment-status.warn {
+  background: rgba(255, 247, 237, 0.96);
+}
+
+.account-repayment-status.warn strong {
+  color: #c2410c;
+}
+
+.account-repayment-status.muted {
+  background: rgba(243, 244, 246, 0.92);
+}
+
+.account-repayment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.account-repayment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.account-repayment-row span {
+  color: #7a7468;
+}
+
+.account-repayment-row strong {
+  text-align: right;
+  color: #1A1A18;
+}
+
+.account-repayment-row.highlight {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 247, 237, 0.82);
+}
+
+.account-repayment-actions {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(33, 33, 30, 0.08);
+}
+
+.account-repayment-primary {
+  width: 100%;
+  border: 0;
+  border-radius: 16px;
+  padding: 13px 16px;
+  background: linear-gradient(135deg, #1f2937, #111827);
+  color: #fffaf0;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: 0 14px 28px rgba(17, 24, 39, 0.18);
+}
+
+.account-repayment-primary:disabled {
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.account-repayment-hint {
+  margin-top: 9px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #7a7468;
+}
+
+.account-repayment-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.account-repayment-preview div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.86);
+}
+
+.account-repayment-preview span {
+  color: #7a7468;
+  font-size: 12px;
+}
+
+.account-repayment-preview strong {
+  color: #1A1A18;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: right;
 }
 
 .account-entry-header {

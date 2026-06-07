@@ -61,9 +61,13 @@ export function useStore() {
   const processedStagingRecords = ref([])
   const dataRecords = ref([])
   const accounts = ref([])
+  const repaymentCycles = ref([])
   const selectedAccount = ref(null)
   const selectedAccountEntries = ref([])
+  const selectedAccountPayments = ref([])
+  const selectedAccountSourceSnapshot = ref(null)
   const accountEntriesLoading = ref(false)
+  const liabilityPaymentsAvailable = ref(true)
   const unboundRecords = ref({ expenses: [], incomes: [] })
   const unboundRecordsLoading = ref(false)
   const unboundRecordFilter = ref('all')
@@ -173,6 +177,10 @@ export function useStore() {
     institution: '',
     last4: '',
     initialBalance: '',
+    billDay: '',
+    paymentDueDay: '',
+    autoDebitAccountId: null,
+    autoConfirmRepayment: false,
     isDefaultExpense: false,
     isDefaultIncome: false,
     isArchived: false,
@@ -302,6 +310,7 @@ export function useStore() {
       incomeRecords: incomeRecords.value,
       dataRecords: dataRecords.value,
       accounts: accounts.value,
+      repaymentCycles: repaymentCycles.value,
       todayKey: getLocalDateKey(),
     })
   })
@@ -395,6 +404,8 @@ export function useStore() {
     stagingRecords.value = []
     processedStagingRecords.value = []
     dataRecords.value = []
+    repaymentCycles.value = []
+    selectedAccountSourceSnapshot.value = null
     loadError.value = ''
     loading.value = false
     selectedStagingIds.value = new Set()
@@ -440,6 +451,108 @@ export function useStore() {
     }
     settingsState.aiLogsEnabled = data?.ai_logs_enabled ?? true
     settingsState.keepSourceImages = data?.keep_source_images ?? true
+  }
+
+  function mapRepaymentCycleRow(row) {
+    return {
+      id: row.id,
+      userId: row.user_id,
+      accountId: row.account_id,
+      cycleMonth: row.cycle_month,
+      statementStartDate: row.statement_start_date || null,
+      statementEndDate: row.statement_end_date || null,
+      dueDate: row.due_date || null,
+      statementAmount: Number(row.statement_amount || 0),
+      paidAmount: Number(row.paid_amount || 0),
+      remainingAmount: Number(row.remaining_amount || 0),
+      carriedOverAmount: Number(row.carried_over_amount || 0),
+      originalStatementAmount: row.original_statement_amount == null ? null : Number(row.original_statement_amount),
+      minPaymentAmount: row.min_payment_amount == null ? null : Number(row.min_payment_amount),
+      refundAppliedAmount: Number(row.refund_applied_amount || 0),
+      status: row.status || 'pending',
+      autoDebitAccountId: row.auto_debit_account_id || null,
+      autoConfirmRepayment: !!row.auto_confirm_repayment,
+      source: row.source || 'system',
+      evidenceRecordId: row.evidence_record_id || null,
+      confidence: row.confidence == null ? null : Number(row.confidence),
+      statementSourcePriority: Number(row.statement_source_priority || 0),
+      note: row.note || '',
+      confirmedAt: row.confirmed_at || null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }
+  }
+
+  function normalizeMonthKey(value) {
+    const text = String(value || '').trim()
+    const match = text.match(/^(\d{4})[-/年](\d{1,2})/)
+    if (!match) return null
+    const month = Number(match[2])
+    if (!Number.isFinite(month) || month < 1 || month > 12) return null
+    return `${match[1]}-${String(month).padStart(2, '0')}`
+  }
+
+  function dateDay(value) {
+    const text = String(value || '').trim()
+    const match = text.match(/^\d{4}-\d{2}-(\d{2})$/)
+    if (!match) return null
+    const day = Number(match[1])
+    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : null
+  }
+
+  function walletSnapshotCycleMonth(record) {
+    const payload = record?.payload || {}
+    return normalizeMonthKey(payload.cycle_month)
+      || normalizeMonthKey(payload.statement_month)
+      || normalizeMonthKey(payload.bill_month)
+      || normalizeMonthKey(payload.due_date)
+      || normalizeMonthKey(record?.occurredAt)
+      || normalizeMonthKey(record?.createdAt)
+  }
+
+  function walletSnapshotPaymentDueDay(record) {
+    const payload = record?.payload || {}
+    const dueDateDay = dateDay(payload.due_date)
+    if (dueDateDay) return dueDateDay
+    const raw = payload.payment_due_day ?? payload.due_day ?? payload.repayment_day
+    const day = Number(raw)
+    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : null
+  }
+
+  function walletSnapshotBillDay(record) {
+    const payload = record?.payload || {}
+    const day = Number(payload.bill_day)
+    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : null
+  }
+
+  function walletSnapshotStatementDate(record, key) {
+    const payload = record?.payload || {}
+    const value = String(payload?.[key] || '').trim()
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null
+  }
+
+  function walletSnapshotDueDate(record) {
+    const payload = record?.payload || {}
+    const dueDate = String(payload.due_date || '').trim()
+    return /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? dueDate : null
+  }
+
+  function dueDateFromMonthAndDay(monthKey, day) {
+    if (!monthKey || !day) return null
+    const [yearText, monthText] = monthKey.split('-')
+    const year = Number(yearText)
+    const month = Number(monthText)
+    const dueDay = Number(day)
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(dueDay)) return null
+    const lastDay = new Date(year, month, 0).getDate()
+    return `${monthKey}-${String(Math.min(Math.max(dueDay, 1), lastDay)).padStart(2, '0')}`
+  }
+
+  function repaymentStatusFromWalletSnapshot(record) {
+    const status = String(record?.payload?.status || '').trim()
+    if (status === 'paid') return 'paid'
+    if (status === 'ignored') return 'ignored'
+    return 'pending'
   }
 
   let lastRefreshTs = 0
@@ -704,6 +817,23 @@ export function useStore() {
         accounts.value = []
       } else {
         accounts.value = (accountRows || []).map(mapAccountRow)
+      }
+
+      const { error: ensureCycleErr } = await sb.rpc('ensure_liability_repayment_cycles', {
+        p_cycle_month: `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`,
+      })
+      if (ensureCycleErr) console.warn('生成还款周期失败:', ensureCycleErr.message)
+
+      const { data: cycleRows, error: cycleErr } = await sb.from('account_repayment_cycles')
+        .select('*')
+        .order('due_date', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(80)
+      if (cycleErr) {
+        console.warn('加载还款周期失败:', cycleErr.message)
+        repaymentCycles.value = []
+      } else {
+        repaymentCycles.value = (cycleRows || []).map(mapRepaymentCycleRow)
       }
 
       const { data: staging, error: stagingErr } = await sb.from('staging_records')
@@ -1834,6 +1964,10 @@ export function useStore() {
     accountModal.institution = ''
     accountModal.last4 = ''
     accountModal.initialBalance = ''
+    accountModal.billDay = ''
+    accountModal.paymentDueDay = ''
+    accountModal.autoDebitAccountId = null
+    accountModal.autoConfirmRepayment = false
     accountModal.isDefaultExpense = false
     accountModal.isDefaultIncome = false
     accountModal.isArchived = false
@@ -1849,6 +1983,10 @@ export function useStore() {
     accountModal.institution = account.institution || ''
     accountModal.last4 = account.last4 || ''
     accountModal.initialBalance = String(account.initialBalance ?? '')
+    accountModal.billDay = account.billDay == null ? '' : String(account.billDay)
+    accountModal.paymentDueDay = account.paymentDueDay == null ? '' : String(account.paymentDueDay)
+    accountModal.autoDebitAccountId = account.autoDebitAccountId || null
+    accountModal.autoConfirmRepayment = !!account.autoConfirmRepayment
     accountModal.isDefaultExpense = !!account.isDefaultExpense
     accountModal.isDefaultIncome = !!account.isDefaultIncome
     accountModal.isArchived = !!account.isArchived
@@ -1865,6 +2003,10 @@ export function useStore() {
     if (accountModal.last4 && !/^\d{4}$/.test(String(accountModal.last4).trim())) return '尾号必须是 4 位数字'
     const init = parseFloat(accountModal.initialBalance || '0')
     if (Number.isNaN(init)) return '初始余额必须是数字'
+    const billDay = accountModal.billDay === '' ? null : Number(accountModal.billDay)
+    if (billDay != null && (!Number.isInteger(billDay) || billDay < 1 || billDay > 31)) return '账单日必须是 1-31 之间的整数'
+    const dueDay = accountModal.paymentDueDay === '' ? null : Number(accountModal.paymentDueDay)
+    if (dueDay != null && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31)) return '还款日必须是 1-31 之间的整数'
     return ''
   }
 
@@ -1877,13 +2019,22 @@ export function useStore() {
       const initial = parseFloat(accountModal.initialBalance || '0') || 0
       const last4 = accountModal.last4 && /^\d{4}$/.test(String(accountModal.last4).trim()) ? String(accountModal.last4).trim() : null
       const institution = accountModal.institution.trim() || null
+      const accountType = normalizeAccountType(accountModal.type)
+      const liability = ['credit_card', 'credit_line'].includes(accountType)
+      const billDay = liability && accountModal.billDay !== '' ? Number(accountModal.billDay) : null
+      const dueDay = liability && accountModal.paymentDueDay !== '' ? Number(accountModal.paymentDueDay) : null
+      const autoDebitAccountId = liability ? (accountModal.autoDebitAccountId || null) : null
 
       if (accountModal.mode === 'edit' && accountModal.id) {
         const body = {
           name,
-          type: normalizeAccountType(accountModal.type),
+          type: accountType,
           institution,
           last4,
+          bill_day: billDay,
+          payment_due_day: dueDay,
+          auto_debit_account_id: autoDebitAccountId,
+          auto_confirm_repayment: liability ? !!accountModal.autoConfirmRepayment : false,
           is_default_expense: !!accountModal.isDefaultExpense,
           is_default_income: !!accountModal.isDefaultIncome,
           is_archived: !!accountModal.isArchived,
@@ -1904,12 +2055,16 @@ export function useStore() {
       const body = {
         user_id: currentUserId.value,
         name,
-        type: normalizeAccountType(accountModal.type),
+        type: accountType,
         institution,
         last4,
         currency: 'CNY',
         initial_balance: initial,
         current_balance: initial,
+        bill_day: billDay,
+        payment_due_day: dueDay,
+        auto_debit_account_id: autoDebitAccountId,
+        auto_confirm_repayment: liability ? !!accountModal.autoConfirmRepayment : false,
         is_default_expense: !!accountModal.isDefaultExpense,
         is_default_income: !!accountModal.isDefaultIncome,
       }
@@ -1967,6 +2122,24 @@ export function useStore() {
     }
   }
 
+  function mapLiabilityPaymentRow(row) {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      statementId: row.statement_id || null,
+      debitAccountId: row.debit_account_id || null,
+      amount: Number(row.amount || 0),
+      overpaymentAmount: Number(row.overpayment_amount || 0),
+      paidAt: row.paid_at,
+      source: row.source || 'manual',
+      evidenceRecordId: row.evidence_record_id || null,
+      status: row.status || 'confirmed',
+      note: row.note || '',
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }
+  }
+
   async function loadAccountEntries(accountId) {
     if (!accountId) {
       selectedAccountEntries.value = []
@@ -1988,10 +2161,70 @@ export function useStore() {
     selectedAccountEntries.value = (data || []).map(mapAccountEntryRow)
   }
 
+  async function loadAccountPayments(accountId) {
+    if (!accountId) {
+      selectedAccountPayments.value = []
+      return
+    }
+    if (!liabilityPaymentsAvailable.value) {
+      selectedAccountPayments.value = []
+      return
+    }
+    const { data, error } = await sb.from('liability_payments')
+      .select('*')
+      .eq('account_id', accountId)
+      .order('paid_at', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(30)
+    if (error) {
+      const missingTable = error.code === 'PGRST205' || /liability_payments|schema cache|Could not find the table/i.test(error.message || '')
+      if (missingTable) {
+        liabilityPaymentsAvailable.value = false
+        console.warn('还款记录表尚未迁移，已临时跳过读取 liability_payments')
+      } else {
+        console.warn('加载还款记录失败:', error.message)
+      }
+      selectedAccountPayments.value = []
+      return
+    }
+    selectedAccountPayments.value = (data || []).map(mapLiabilityPaymentRow)
+  }
+
+  async function loadAccountSourceSnapshot(account) {
+    selectedAccountSourceSnapshot.value = null
+    if (!account?.sourceRecordId || account.sourceRecordTable !== 'data_records') return
+    const { data, error } = await sb.from('data_records')
+      .select('id,title,summary,occurred_at,source_image_path,source_image_hash,payload_jsonb,snapshot_balance,snapshot_at,account_snapshot_kind')
+      .eq('id', account.sourceRecordId)
+      .maybeSingle()
+    if (error || !data) {
+      if (error) console.warn('加载账户来源快照失败:', error.message)
+      return
+    }
+    const payload = data.payload_jsonb || {}
+    selectedAccountSourceSnapshot.value = {
+      id: data.id,
+      title: data.title || '来源快照',
+      summary: data.summary || '',
+      occurredAt: data.occurred_at,
+      imagePath: data.source_image_path || '',
+      imageUrl: await getSignedImageUrl(data.source_image_path),
+      imageHash: data.source_image_hash || '',
+      snapshotBalance: data.snapshot_balance ?? payload.snapshot_balance ?? null,
+      snapshotAt: data.snapshot_at || data.occurred_at || null,
+      accountSnapshotKind: data.account_snapshot_kind || payload.account_snapshot_kind || null,
+      payload,
+    }
+  }
+
   async function openAccountDetail(account) {
     if (!account?.id) return
     selectedAccount.value = account
-    await loadAccountEntries(account.id)
+    await Promise.all([
+      loadAccountEntries(account.id),
+      loadAccountPayments(account.id),
+      loadAccountSourceSnapshot(account),
+    ])
     navigateTo('account-detail')
   }
 
@@ -1999,7 +2232,46 @@ export function useStore() {
     if (!selectedAccount.value?.id) return
     const latest = accounts.value.find(account => account.id === selectedAccount.value.id)
     if (latest) selectedAccount.value = latest
-    await loadAccountEntries(selectedAccount.value.id)
+    await Promise.all([
+      loadAccountEntries(selectedAccount.value.id),
+      loadAccountPayments(selectedAccount.value.id),
+      loadAccountSourceSnapshot(selectedAccount.value),
+    ])
+  }
+
+  async function confirmRepaymentCyclePaid(cycle, options = {}) {
+    if (!cycle?.id) return false
+    const lockKey = `repayment-cycle:${cycle.id}`
+    return runLockedAction(lockKey, async () => {
+      const paidAmount = Number(options.paidAmount ?? cycle.statementAmount ?? 0)
+      if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
+        showFlash('待还金额异常，暂时不能确认')
+        return false
+      }
+      const debitAccountId = options.debitAccountId || cycle.autoDebitAccountId || null
+      const { data, error } = await sb.rpc('set_repayment_cycle_paid_amount', {
+        p_cycle_id: cycle.id,
+        p_paid_amount: paidAmount,
+        p_paid_at: new Date().toISOString(),
+        p_debit_account_id: debitAccountId,
+        p_status: 'paid',
+        p_note: options.note || '手动确认已还清',
+      })
+      if (error) {
+        showFlash('确认还款失败：' + humanizeDbError(error))
+        return false
+      }
+
+      const mapped = mapRepaymentCycleRow(data)
+      const idx = repaymentCycles.value.findIndex(item => item.id === mapped.id)
+      if (idx >= 0) repaymentCycles.value[idx] = mapped
+      else repaymentCycles.value.unshift(mapped)
+
+      await refreshAccountsFromDB()
+      if (selectedAccount.value?.id) await refreshAccountDetail()
+      showFlash(debitAccountId ? '✓ 已确认还款并记录扣款' : '✓ 已确认还款')
+      return true
+    })
   }
 
   function openAccountEntrySource(entry) {
@@ -2363,6 +2635,47 @@ export function useStore() {
     return Number.isFinite(amount) && amount >= 0 ? amount : 0
   }
 
+  async function upsertRepaymentCycleFromWalletSnapshot(record, accountId) {
+    if (!record || !accountId || walletSnapshotKindOf(record) !== 'liability') return
+    const cycleMonth = walletSnapshotCycleMonth(record)
+    if (!cycleMonth) return
+    const amount = amountFromWalletSnapshot(record)
+    if (amount <= 0) return
+    const status = repaymentStatusFromWalletSnapshot(record)
+    const dueDate = walletSnapshotDueDate(record)
+      || dueDateFromMonthAndDay(cycleMonth, walletSnapshotPaymentDueDay(record))
+    const statementStartDate = walletSnapshotStatementDate(record, 'statement_start_date')
+    const statementEndDate = walletSnapshotStatementDate(record, 'statement_end_date')
+    const paidAmount = status === 'paid' ? amount : 0
+    const remainingAmount = status === 'paid' ? 0 : amount
+    const { data, error } = await sb.from('account_repayment_cycles')
+      .upsert({
+        user_id: currentUserId.value,
+        account_id: accountId,
+        cycle_month: cycleMonth,
+        statement_start_date: statementStartDate,
+        statement_end_date: statementEndDate,
+        due_date: dueDate,
+        statement_amount: amount,
+        paid_amount: paidAmount,
+        remaining_amount: remainingAmount,
+        carried_over_amount: 0,
+        status,
+        source: 'screenshot',
+        note: status === 'paid' ? '来源快照显示已还款' : '来源快照生成待还周期',
+      }, { onConflict: 'account_id,cycle_month' })
+      .select('*')
+      .single()
+    if (error) {
+      console.warn('写入快照还款周期失败:', error.message)
+      return
+    }
+    const mapped = mapRepaymentCycleRow(data)
+    const idx = repaymentCycles.value.findIndex(item => item.id === mapped.id)
+    if (idx >= 0) repaymentCycles.value[idx] = mapped
+    else repaymentCycles.value.unshift(mapped)
+  }
+
   async function createAccountFromWalletSnapshot(record) {
     if (!record || record.domainKey !== 'wallet') {
       showFlash('只能从钱包快照创建账户')
@@ -2389,6 +2702,9 @@ export function useStore() {
     const amount = amountFromWalletSnapshot(record)
     const now = new Date().toISOString()
     const snapshotAt = record.occurredAt || record.createdAt || now
+    const isLiabilitySnapshot = walletSnapshotKindOf(record) === 'liability'
+    const billDay = isLiabilitySnapshot ? walletSnapshotBillDay(record) : null
+    const paymentDueDay = isLiabilitySnapshot ? walletSnapshotPaymentDueDay(record) : null
     const body = {
       user_id: currentUserId.value,
       name: payload.account_name || record.title || '未命名账户',
@@ -2402,6 +2718,10 @@ export function useStore() {
       snapshot_at: snapshotAt,
       source_record_table: 'data_records',
       source_record_id: record.id,
+    }
+    if (isLiabilitySnapshot) {
+      if (billDay) body.bill_day = billDay
+      if (paymentDueDay) body.payment_due_day = paymentDueDay
     }
 
     walletAccountCreatingSourceIds.add(record.id)
@@ -2455,6 +2775,7 @@ export function useStore() {
       }
 
       accounts.value.unshift(mapAccountRow(accountRow))
+      await upsertRepaymentCycleFromWalletSnapshot(record, accountRow.id)
       const idx = dataRecords.value.findIndex(item => item.id === record.id)
       if (idx >= 0) {
         dataRecords.value[idx] = {
@@ -2473,15 +2794,23 @@ export function useStore() {
     const payload = record.payload || {}
     const amount = amountFromWalletSnapshot(record)
     const snapshotAt = record.occurredAt || record.createdAt || new Date().toISOString()
+    const isLiabilitySnapshot = walletSnapshotKindOf(record) === 'liability'
+    const billDay = isLiabilitySnapshot ? walletSnapshotBillDay(record) : null
+    const paymentDueDay = isLiabilitySnapshot ? walletSnapshotPaymentDueDay(record) : null
+    const accountPatch = {
+      snapshot_balance: amount,
+      snapshot_at: snapshotAt,
+      source_record_table: 'data_records',
+      source_record_id: record.id,
+      updated_at: new Date().toISOString(),
+    }
+    if (isLiabilitySnapshot) {
+      if (billDay) accountPatch.bill_day = billDay
+      if (paymentDueDay) accountPatch.payment_due_day = paymentDueDay
+    }
 
     const { error: accountErr } = await sb.from('accounts')
-      .update({
-        snapshot_balance: amount,
-        snapshot_at: snapshotAt,
-        source_record_table: 'data_records',
-        source_record_id: record.id,
-        updated_at: new Date().toISOString(),
-      })
+      .update(accountPatch)
       .eq('id', accountId)
     if (accountErr) {
       showError('更新账户快照失败：' + humanizeDbError(accountErr))
@@ -2509,6 +2838,7 @@ export function useStore() {
       return
     }
 
+    await upsertRepaymentCycleFromWalletSnapshot(record, accountId)
     await loadData(0, true)
     showFlash('✓ 已关联账户')
   }
@@ -2794,8 +3124,8 @@ export function useStore() {
     currentYear, currentMonth, currentPage, monthLabel,
     pageHistory, pageScrollPositions, currentUserId, currentUserEmail, isLoggedIn,
     loading, loadError,
-    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords, accounts,
-    selectedAccount, selectedAccountEntries, accountEntriesLoading,
+    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords, accounts, repaymentCycles,
+    selectedAccount, selectedAccountEntries, selectedAccountPayments, selectedAccountSourceSnapshot, accountEntriesLoading,
     unboundRecords, unboundRecordsLoading, unboundRecordFilter,
     doneBills, pendingBills, filteredBills,
     recentEntries,
@@ -2830,6 +3160,7 @@ export function useStore() {
     createAccountFromWalletSnapshot, linkWalletSnapshotToAccount,
     accountModal, openAccountModalForCreate, openAccountModalForEdit, closeAccountModal, saveAccount, archiveAccount,
     openAccountDetail, refreshAccountDetail, loadAccountEntries, openAccountEntrySource,
+    confirmRepaymentCyclePaid,
     openUnboundRecordsPage, loadUnboundRecords,
     upsertAccountEntry, voidAccountEntries, refreshAccountsFromDB, defaultAccountIdForKind,
     pendingAccountReview, balanceImpactPreview,

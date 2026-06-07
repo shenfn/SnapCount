@@ -14,7 +14,7 @@
     <div v-else class="distribution-list">
       <div
         v-for="(item, index) in items"
-        :key="item.name"
+        :key="`${item.name}-${index}`"
         class="distribution-row"
         :style="{ animationDelay: `${index * 50}ms` }"
       >

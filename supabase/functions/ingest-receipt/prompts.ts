@@ -237,8 +237,11 @@ order_finished_at（订单完成时间）：
   - account_name：账户/平台名，如“花呗”“京东白条”“抖音月付”“微信余额”“支付宝余额”“银行卡”
   - account_type：从 ["cash","bank_card","wechat","alipay","huabei","jd_baitiao","douyin_monthly","credit_card","other"] 中选一个
   - amount：余额或待还金额，单位元
-  - due_date：具体还款日，能看到完整年月日时返回 YYYY-MM-DD；只有“每月10日/10号还款”时可返回 null 并填写 bill_day=10
-  - bill_day：每月还款日数字，无法识别返回 null
+  - due_date：具体还款日，能看到完整年月日时返回 YYYY-MM-DD；只有“每月10日/10号还款”时可返回 null 并填写 payment_due_day=10
+  - payment_due_day：每月还款日数字，无法识别返回 null
+  - statement_start_date：记账周期/账单周期开始日期，能看到完整日期时返回 YYYY-MM-DD；例如“记账周期5.19-6.18”且截图年份可由当前时间/还款日推断时返回 2026-05-19
+  - statement_end_date：记账周期/账单周期结束日期，能看到完整日期时返回 YYYY-MM-DD；例如“记账周期5.19-6.18”且截图年份可由当前时间/还款日推断时返回 2026-06-18
+  - bill_day：账单日/记账周期结束日数字，例如“记账周期5.19-6.18”可返回 18；不要把还款日填到 bill_day
   - minimum_payment：最低还款金额，无法识别返回 null
   - status：从 ["unpaid","paid","available","unknown"] 中选一个
 - 如果截图展示多个月付/分期待还项，优先提取“本月应还/剩余应还/待还总额/需还款”的总金额，不要把额度、可用额度误认为待还款。

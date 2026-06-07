@@ -690,6 +690,41 @@ function normalizeDateOnlyValue(value: unknown): string | null {
   return dt?.date ?? null;
 }
 
+function normalizeMonthKeyValue(value: unknown): string | null {
+  const text = normalizeString(value);
+  const match = text?.match(/^(\d{4})[-/年](\d{1,2})/);
+  if (!match) return null;
+  const month = Number(match[2]);
+  if (!Number.isFinite(month) || month < 1 || month > 12) return null;
+  return `${match[1]}-${String(month).padStart(2, "0")}`;
+}
+
+function correctWalletDueDateYear(dueDate: string | null, referenceDate: string | null): string | null {
+  if (!dueDate || !referenceDate) return dueDate;
+  const dueMatch = dueDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const refMatch = referenceDate.match(/^(\d{4})-\d{2}-\d{2}$/);
+  if (!dueMatch || !refMatch) return dueDate;
+  const dueYear = Number(dueMatch[1]);
+  const refYear = Number(refMatch[1]);
+  if (!Number.isFinite(dueYear) || !Number.isFinite(refYear)) return dueDate;
+  if (Math.abs(dueYear - refYear) <= 1) return dueDate;
+  return `${refYear}-${dueMatch[2]}-${dueMatch[3]}`;
+}
+
+function correctWalletStatementDateYear(statementDate: string | null, dueDate: string | null, referenceDate: string | null): string | null {
+  if (!statementDate) return null;
+  const statementMatch = statementDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!statementMatch) return statementDate;
+  const anchor = dueDate ?? referenceDate;
+  const anchorMatch = anchor?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!anchorMatch) return statementDate;
+  const statementYear = Number(statementMatch[1]);
+  const anchorYear = Number(anchorMatch[1]);
+  if (!Number.isFinite(statementYear) || !Number.isFinite(anchorYear)) return statementDate;
+  if (Math.abs(statementYear - anchorYear) <= 1) return statementDate;
+  return `${anchorYear}-${statementMatch[2]}-${statementMatch[3]}`;
+}
+
 function normalizeSleepClockTime(value: unknown, dateHint: string | null): string | null {
   const normalized = normalizeAiDateTime(value);
   if (normalized) return normalized.iso;
@@ -900,8 +935,19 @@ function buildBuiltinPayload(ai: AIResult): {
       ?? normalizeRecordKind(ai.summary)
       ?? (includesAny(`${accountName ?? ""}${ai.summary ?? ""}`, ["花呗", "白条", "月付", "信用卡", "待还", "应还"]).length ? "liability_snapshot" : "cash_snapshot");
     const amount = normalizeNumber(payload.amount ?? ai.amount);
-    const dueDate = normalizeDateOnlyValue(payload.due_date);
-    const billDay = normalizeNumber(payload.bill_day ?? payload.repayment_day);
+    const referenceDate = normalizeDateOnlyValue(ai.occurred_at);
+    const dueDate = correctWalletDueDateYear(normalizeDateOnlyValue(payload.due_date), referenceDate);
+    const statementStartDate = correctWalletStatementDateYear(normalizeDateOnlyValue(payload.statement_start_date), dueDate, referenceDate);
+    const statementEndDate = correctWalletStatementDateYear(normalizeDateOnlyValue(payload.statement_end_date), dueDate, referenceDate);
+    const paymentDueDay = normalizeNumber(payload.payment_due_day ?? payload.due_day ?? payload.repayment_day);
+    const billDay = normalizeNumber(payload.bill_day)
+      ?? (statementEndDate ? Number(statementEndDate.slice(-2)) : null);
+    const cycleMonth = normalizeMonthKeyValue(payload.cycle_month)
+      ?? normalizeMonthKeyValue(payload.statement_month)
+      ?? normalizeMonthKeyValue(payload.bill_month)
+      ?? normalizeMonthKeyValue(dueDate)
+      ?? normalizeMonthKeyValue(statementEndDate)
+      ?? normalizeMonthKeyValue(referenceDate);
     const minimumPayment = normalizeNumber(payload.minimum_payment);
     if (!accountName) missingFields.push("account_name");
     if (!recordKind) missingFields.push("record_kind");
@@ -918,7 +964,11 @@ function buildBuiltinPayload(ai: AIResult): {
       payload.last4 = last4 && /^\d{4}$/.test(last4) ? last4 : null;
     }
     payload.due_date = dueDate;
+    payload.payment_due_day = paymentDueDay ?? (dueDate ? Number(dueDate.slice(-2)) : null);
+    payload.statement_start_date = statementStartDate;
+    payload.statement_end_date = statementEndDate;
     payload.bill_day = billDay;
+    payload.cycle_month = cycleMonth;
     payload.minimum_payment = minimumPayment;
     payload.status = normalizeWalletStatus(payload.status, recordKind);
     payload.source_app = normalizeString(payload.source_app) ?? "截图识别";

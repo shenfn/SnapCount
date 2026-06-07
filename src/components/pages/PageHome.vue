@@ -61,7 +61,7 @@
               <strong>{{ finance.display.availableCash }}</strong>
             </div>
             <div @click="store.openDomainPage('wallet')">
-              <span>待还金额</span>
+              <span>当前总欠款估算</span>
               <strong>{{ finance.display.liabilityTotal }}</strong>
             </div>
             <div @click="store.openDayDetail(todayKey, 'income')">
@@ -77,6 +77,9 @@
             <div>
               <div class="finance-due-label">最近待还</div>
               <div class="finance-due-name">{{ finance.nearestLiability?.accountName || '暂无待还' }}</div>
+              <div v-if="finance.nearestLiability?.cycleMonth" class="finance-due-sub">
+                {{ finance.nearestLiability.cycleMonth }} 账单
+              </div>
             </div>
             <div class="finance-due-value">
               <strong>{{ nearestLiabilityAmount }}</strong>
@@ -453,6 +456,10 @@ function openNearestLiability() {
   const record = item?.raw
   if (record && item?.rawType === 'account') {
     store.openAccountDetail(record)
+    return
+  }
+  if (record && item?.rawType === 'repayment_cycle' && item.account) {
+    store.openAccountDetail(item.account)
     return
   }
   if (record) {

@@ -2,7 +2,7 @@ import { formatCurrency } from '../utils/format'
 
 const DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 
-export function buildFinanceOverview({ bills = [], incomeRecords = [], dataRecords = [], accounts = [], todayKey = localDateKey(new Date()) }) {
+export function buildFinanceOverview({ bills = [], incomeRecords = [], dataRecords = [], accounts = [], repaymentCycles = [], todayKey = localDateKey(new Date()) }) {
   const walletSnapshots = latestWalletSnapshots(dataRecords.filter(item => item.domainKey === 'wallet'))
   const cashSnapshots = walletSnapshots.filter(item => item.payload?.record_kind === 'cash_snapshot')
   const liabilitySnapshots = walletSnapshots.filter(item => item.payload?.record_kind === 'liability_snapshot' && item.payload?.status !== 'paid')
@@ -20,7 +20,8 @@ export function buildFinanceOverview({ bills = [], incomeRecords = [], dataRecor
     ? accountLiabilityTotal
     : liabilitySnapshots.reduce((sum, item) => sum + amountOf(item), 0)
   const netWorthEstimate = availableCash - liabilityTotal
-  const nearestLiability = pickNearestLiability(liabilitySnapshots) || pickNearestLiabilityAccount(liabilityAccounts)
+  const nearestLiability = pickNearestRepaymentCycle(repaymentCycles, liabilityAccounts, todayKey)
+    || pickNearestLiability(liabilitySnapshots, todayKey)
 
   const todayExpense = bills
     .filter(item => item.status === 'done' && item.dateRaw === todayKey)
@@ -63,6 +64,45 @@ export function buildFinanceOverview({ bills = [], incomeRecords = [], dataRecor
   }
 }
 
+function pickNearestRepaymentCycle(cycles, accounts, todayKey) {
+  const accountMap = new Map((accounts || []).map(account => [account.id, account]))
+  const openStatuses = new Set(['pending', 'due_today', 'overdue_unconfirmed', 'partial_paid', 'minimum_paid'])
+  const enriched = (cycles || [])
+    .filter(cycle => openStatuses.has(cycle.status))
+    .filter(cycle => {
+      if (cycle.status === 'historical_unconfirmed' || cycle.status === 'carried_over') return false
+      if (cycle.status === 'partial_paid' || cycle.status === 'minimum_paid') return true
+      if (!cycle.dueDate) return false
+      return cycle.dueDate >= todayKey
+    })
+    .map(cycle => {
+      const account = accountMap.get(cycle.accountId)
+      const amount = Number(cycle.remainingAmount || cycle.statementAmount || account?.currentBalance || 0)
+      return {
+        id: cycle.id,
+        accountName: account?.name || '待还款',
+        amount,
+        dueDate: cycle.dueDate || null,
+        billDay: account?.paymentDueDay || null,
+        statementDay: account?.billDay || null,
+        cycleMonth: cycle.cycleMonth || null,
+        status: normalizeCycleStatus(cycle, cycle.dueDate),
+        raw: cycle,
+        rawType: 'repayment_cycle',
+        account,
+      }
+    })
+    .filter(item => item.amount > 0)
+    .sort((a, b) => String(a.dueDate || '9999-99-99').localeCompare(String(b.dueDate || '9999-99-99')) || b.amount - a.amount)
+  return enriched[0] || null
+}
+
+function normalizeCycleStatus(cycle, dueDate) {
+  if (['partial_paid', 'minimum_paid', 'carried_over', 'historical_unconfirmed'].includes(cycle.status)) return cycle.status
+  if (cycle.status === 'paid' || cycle.status === 'ignored' || cycle.status === 'reconciled') return cycle.status
+  return buildDueStatus(dueDate)
+}
+
 function isLiabilityAccount(account) {
   return account?.type === 'credit_card' || account?.type === 'credit_line'
 }
@@ -84,8 +124,7 @@ function amountOf(record) {
   return Number(record?.payload?.amount || 0)
 }
 
-function pickNearestLiability(records) {
-  const today = localDateKey(new Date())
+function pickNearestLiability(records, today = localDateKey(new Date())) {
   const enriched = records.map(record => {
     const payload = record.payload || {}
     const dueDate = normalizeDueDate(payload.due_date, payload.bill_day, today)
@@ -99,24 +138,9 @@ function pickNearestLiability(records) {
       raw: record,
     }
   })
-  return enriched.sort((a, b) => String(a.dueDate || '9999-99-99').localeCompare(String(b.dueDate || '9999-99-99')))[0] || null
-}
-
-function pickNearestLiabilityAccount(accounts) {
-  const sorted = accounts
-    .filter(account => Number(account.currentBalance || 0) > 0)
-    .map(account => ({
-      id: account.id,
-      accountName: account.name || '待还款',
-      amount: Number(account.currentBalance || 0),
-      dueDate: null,
-      billDay: null,
-      status: 'unpaid',
-      raw: account,
-      rawType: 'account',
-    }))
-    .sort((a, b) => b.amount - a.amount)
-  return sorted[0] || null
+  return enriched
+    .filter(item => item.dueDate && item.dueDate >= today)
+    .sort((a, b) => String(a.dueDate || '9999-99-99').localeCompare(String(b.dueDate || '9999-99-99')))[0] || null
 }
 
 function normalizeDueDate(dueDate, billDay, todayKey) {
@@ -152,6 +176,14 @@ function buildStatusLabel({ availableCash, liabilityTotal, netWorthEstimate, nea
   if (netWorthEstimate < 0) return '待还压力偏高'
   if (nearestLiability && liabilityTotal > availableCash * 0.5) return '近期需预留还款'
   return '短期现金安全'
+}
+
+function buildDueStatus(dueDate) {
+  if (!dueDate) return 'missing_due_day'
+  const today = localDateKey(new Date())
+  if (dueDate < today) return 'overdue_unconfirmed'
+  if (dueDate === today) return 'due_today'
+  return 'upcoming'
 }
 
 function localDateKey(date) {
