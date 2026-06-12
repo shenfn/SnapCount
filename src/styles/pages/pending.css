@@ -149,6 +149,36 @@
   word-break: break-word;
 }
 
+.pending-repayment-match {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(22, 101, 52, 0.1), rgba(255, 255, 255, 0.94));
+  border: 1px solid rgba(22, 101, 52, 0.12);
+}
+
+.pending-repayment-title {
+  color: #166534;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.pending-repayment-desc {
+  margin-top: 3px;
+  color: #3f6f4c;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.pending-repayment-match .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .pending-record-actions {
   display: flex;
   flex-wrap: wrap;

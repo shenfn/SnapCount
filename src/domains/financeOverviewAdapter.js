@@ -87,6 +87,9 @@ function pickNearestRepaymentCycle(cycles, accounts, todayKey) {
         statementDay: account?.billDay || null,
         cycleMonth: cycle.cycleMonth || null,
         status: normalizeCycleStatus(cycle, cycle.dueDate),
+        autoDebitAccountId: cycle.autoDebitAccountId || account?.autoDebitAccountId || null,
+        autoDebitAccountName: accountNameById(accounts, cycle.autoDebitAccountId || account?.autoDebitAccountId),
+        autoDebitPrompt: shouldPromptAutoDebit(cycle, account, todayKey),
         raw: cycle,
         rawType: 'repayment_cycle',
         account,
@@ -95,6 +98,26 @@ function pickNearestRepaymentCycle(cycles, accounts, todayKey) {
     .filter(item => item.amount > 0)
     .sort((a, b) => String(a.dueDate || '9999-99-99').localeCompare(String(b.dueDate || '9999-99-99')) || b.amount - a.amount)
   return enriched[0] || null
+}
+
+function accountNameById(accounts, id) {
+  if (!id) return ''
+  const account = (accounts || []).find(item => item.id === id)
+  return account?.name || account?.institution || '扣款账户'
+}
+
+function shouldPromptAutoDebit(cycle, account, todayKey) {
+  const autoDebitAccountId = cycle?.autoDebitAccountId || account?.autoDebitAccountId
+  if (!autoDebitAccountId || !cycle?.dueDate) return false
+  if (!['pending', 'due_today', 'overdue_unconfirmed', 'partial_paid', 'minimum_paid'].includes(cycle.status)) return false
+  const days = daysBetween(todayKey, cycle.dueDate)
+  return days === 0 || days === 1
+}
+
+function daysBetween(todayKey, targetKey) {
+  const today = new Date(`${todayKey}T00:00:00`)
+  const target = new Date(`${targetKey}T00:00:00`)
+  return Math.round((today - target) / 86400000)
 }
 
 function normalizeCycleStatus(cycle, dueDate) {

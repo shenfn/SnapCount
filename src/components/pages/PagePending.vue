@@ -85,6 +85,23 @@
             <div v-if="r.lastErrorMessage" class="pending-record-error">{{ r.lastErrorMessage }}</div>
           </div>
 
+          <div v-if="r.repaymentCandidate" class="pending-repayment-match">
+            <div>
+              <div class="pending-repayment-title">可能是还款截图</div>
+              <div class="pending-repayment-desc">
+                {{ r.repaymentCandidate.account.name }} {{ r.repaymentCandidate.cycle.cycleMonth }} 账单 ·
+                {{ r.repaymentCandidate.reason }}
+              </div>
+            </div>
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="store.isActionPending(`staging-repayment:${r.id}`)"
+              @click="store.confirmStagingRepayment(r)"
+            >
+              {{ store.isActionPending(`staging-repayment:${r.id}`) ? '确认中' : `确认还款 ¥${Number(r.repaymentCandidate.amount || 0).toFixed(2)}` }}
+            </button>
+          </div>
+
           <div class="pending-record-actions">
             <button class="btn btn-secondary btn-sm" @click="store.retryStagingRecord(r)">🔄 重试识别</button>
             <button class="btn btn-danger btn-sm" @click="store.discardStagingRecord(r)">🗑 销毁</button>

@@ -548,6 +548,26 @@ export function useStore() {
     return `${monthKey}-${String(Math.min(Math.max(dueDay, 1), lastDay)).padStart(2, '0')}`
   }
 
+  function accountPaymentDueDay(accountId) {
+    const account = accounts.value.find(item => item.id === accountId)
+    const day = Number(account?.paymentDueDay ?? account?.payment_due_day)
+    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : null
+  }
+
+  function walletSnapshotConfidence(record) {
+    const candidates = [
+      record?.confidence,
+      record?.accountConfidence,
+      record?.payload?.confidence,
+      record?.payload?.time_context?.confidence,
+    ]
+    for (const candidate of candidates) {
+      const value = Number(candidate)
+      if (Number.isFinite(value) && value >= 0) return Math.min(value, 1)
+    }
+    return null
+  }
+
   function repaymentStatusFromWalletSnapshot(record) {
     const status = String(record?.payload?.status || '').trim()
     if (status === 'paid') return 'paid'
@@ -846,7 +866,7 @@ export function useStore() {
 
       stagingRecords.value = stagingErr ? [] : await Promise.all((staging || []).map(async r => {
         const imageUrl = await getSignedImageUrl(r.image_path)
-        return ({
+        const record = {
         id: r.id,
         status: r.status,
         occurredAt: r.occurred_at,
@@ -872,7 +892,11 @@ export function useStore() {
         resolvedAction: r.resolved_action,
         resolvedAt: r.resolved_at,
         discardReason: r.discard_reason,
-        })
+        }
+        return {
+          ...record,
+          repaymentCandidate: buildRepaymentCandidateForStaging(record),
+        }
       }))
 
       // 已处理的中转站记录（最近 30 条）
@@ -1035,6 +1059,82 @@ export function useStore() {
     pendingModal.bill.imageLoadError = true
   }
 
+  function buildRepaymentCandidateForStaging(record) {
+    const extracted = record?.extracted || {}
+    const payload = extracted.payload_jsonb || {}
+    const isLiabilityPaid = (record?.domainKey === 'wallet' || extracted.domain_key === 'wallet')
+      && (payload.record_kind === 'liability_snapshot' || payload.account_snapshot_kind === 'liability')
+      && payload.status === 'paid'
+    if (!isLiabilityPaid) return null
+
+    const amount = Number(extracted.amount ?? payload.amount ?? payload.snapshot_balance)
+    const accountText = normalizeAccountMatchText([
+      payload.account_name,
+      payload.institution,
+      extracted.title,
+      extracted.summary,
+      record.summary,
+    ].filter(Boolean).join(' '))
+    const openStatuses = new Set(['pending', 'due_today', 'overdue_unconfirmed', 'partial_paid', 'minimum_paid', 'carried_over'])
+    const candidates = repaymentCycles.value
+      .filter(cycle => openStatuses.has(cycle.status))
+      .map(cycle => {
+        const account = accounts.value.find(item => item.id === cycle.accountId)
+        if (!account) return null
+        const accountName = normalizeAccountMatchText(`${account.name || ''} ${account.institution || ''}`)
+        const remaining = Number(cycle.remainingAmount || cycle.statementAmount || 0)
+        const amountDiff = Number.isFinite(amount) ? Math.abs(amount - remaining) : 0
+        let score = 0.35
+        const reasons = []
+        if (accountText && accountName && (accountText.includes(accountName) || accountName.includes(accountText))) {
+          score += 0.28
+          reasons.push(`账户匹配「${account.name}」`)
+        } else if (accountText && accountName && accountText.split('').some(char => char && accountName.includes(char))) {
+          score += 0.1
+          reasons.push('账户名称部分匹配')
+        }
+        if (Number.isFinite(amount) && amount > 0) {
+          if (amountDiff < 0.01) {
+            score += 0.32
+            reasons.push('金额与剩余待还一致')
+          } else if (amountDiff <= 5) {
+            score += 0.18
+            reasons.push(`金额相差 ${formatYuan(amountDiff)}`)
+          }
+        }
+        if (cycle.dueDate && record.occurredAt) {
+          const days = Math.abs(daysBetweenDateKeys(localDateKeyOf(record.occurredAt), cycle.dueDate))
+          if (days <= 3) {
+            score += 0.15
+            reasons.push('还款时间接近还款日')
+          }
+        }
+        return {
+          cycle,
+          account,
+          amount: Number.isFinite(amount) && amount > 0 ? amount : remaining,
+          score: Math.min(score, 0.99),
+          reason: reasons.length ? reasons.join('；') : '识别为已还款截图，需人工确认',
+        }
+      })
+      .filter(Boolean)
+      .filter(item => item.amount > 0 && item.score >= 0.55)
+      .sort((a, b) => b.score - a.score)
+    return candidates[0] || null
+  }
+
+  function daysBetweenDateKeys(a, b) {
+    if (!a || !b) return 999
+    const left = new Date(`${a}T00:00:00`)
+    const right = new Date(`${b}T00:00:00`)
+    return Math.round((left - right) / 86400000)
+  }
+
+  function formatYuan(value) {
+    const amount = Number(value || 0)
+    return `¥${amount.toFixed(2)}`
+  }
+
   function closePendingModal() {
     pendingModal.open = false
     pendingModal.bill = null
@@ -1154,6 +1254,36 @@ export function useStore() {
       }
       closePendingModal()
       showFlash('✓ 已保存')
+    })
+  }
+
+  async function confirmStagingRepayment(record) {
+    const candidate = record?.repaymentCandidate || buildRepaymentCandidateForStaging(record)
+    if (!record?.id || !candidate?.cycle) return false
+    const ok = confirm(`确认把这张截图作为还款证据？\n账单：${candidate.account.name} ${candidate.cycle.cycleMonth}\n金额：¥${Number(candidate.amount || 0).toFixed(2)}`)
+    if (!ok) return false
+    return runLockedAction(`staging-repayment:${record.id}`, async () => {
+      const success = await confirmRepaymentCyclePaid(candidate.cycle, {
+        paidAmount: candidate.amount,
+        debitAccountId: candidate.cycle.autoDebitAccountId || candidate.account.autoDebitAccountId || null,
+        status: 'paid',
+        note: '根据还款截图确认已还清',
+      })
+      if (!success) return false
+      const { error } = await sb.from('staging_records').update({
+        status: 'archived',
+        resolved_action: 'liability_repayment_confirmed',
+        resolved_at: new Date().toISOString(),
+        target_record_id: candidate.cycle.id,
+      }).eq('id', record.id)
+      if (error) {
+        showFlash('还款已确认，但中转站归档失败：' + humanizeDbError(error))
+        return false
+      }
+      const idx = stagingRecords.value.findIndex(item => item.id === record.id)
+      if (idx >= 0) stagingRecords.value.splice(idx, 1)
+      showFlash('✓ 已根据截图确认还款')
+      return true
     })
   }
 
@@ -1655,6 +1785,21 @@ export function useStore() {
   function openImgFull(src) {
     imgOverlay.src = src
     imgOverlay.open = true
+  }
+
+  async function openDataRecordImage(record) {
+    const raw = record?.imagePath || record?.source_image_path || record?.imageUrl || ''
+    if (!raw) {
+      showFlash('这条记录没有可预览的截图')
+      return false
+    }
+    const url = await getSignedImageUrl(raw)
+    if (!url) {
+      showFlash('截图链接生成失败，请稍后重试')
+      return false
+    }
+    openImgFull(url)
+    return true
   }
 
   function closeImgFull() {
@@ -2254,7 +2399,7 @@ export function useStore() {
         p_paid_amount: paidAmount,
         p_paid_at: new Date().toISOString(),
         p_debit_account_id: debitAccountId,
-        p_status: 'paid',
+        p_status: options.status ?? 'paid',
         p_note: options.note || '手动确认已还清',
       })
       if (error) {
@@ -2270,6 +2415,42 @@ export function useStore() {
       await refreshAccountsFromDB()
       if (selectedAccount.value?.id) await refreshAccountDetail()
       showFlash(debitAccountId ? '✓ 已确认还款并记录扣款' : '✓ 已确认还款')
+      return true
+    })
+  }
+
+  async function revokeLiabilityPayment(payment) {
+    if (!payment?.id) return false
+    const ok = confirm(`确认撤销这笔还款记录？\n金额：¥${Number(payment.amount || 0).toFixed(2)}\n撤销后会作废关联账户流水，并恢复账单待还金额。`)
+    if (!ok) return false
+    const lockKey = `liability-payment:${payment.id}`
+    return runLockedAction(lockKey, async () => {
+      const { data, error } = await sb.rpc('revoke_liability_payment', {
+        p_payment_id: payment.id,
+        p_reason: '用户撤销还款',
+      })
+      if (error) {
+        showFlash('撤销还款失败：' + humanizeDbError(error))
+        return false
+      }
+
+      if (data?.id) {
+        const mapped = mapRepaymentCycleRow(data)
+        const idx = repaymentCycles.value.findIndex(item => item.id === mapped.id)
+        if (idx >= 0) repaymentCycles.value[idx] = mapped
+        else repaymentCycles.value.unshift(mapped)
+        if (mapped.cycleMonth && /^\d{4}-\d{2}$/.test(mapped.cycleMonth)) {
+          const [year, month] = mapped.cycleMonth.split('-').map(Number)
+          if (Number.isInteger(year) && Number.isInteger(month)) {
+            currentYear.value = year
+            currentMonth.value = month
+          }
+        }
+      }
+
+      await refreshAccountsFromDB()
+      if (selectedAccount.value?.id) await refreshAccountDetail()
+      showFlash('✓ 已撤销还款')
       return true
     })
   }
@@ -2565,7 +2746,7 @@ export function useStore() {
     return bindRecordToAccount(kind, record, recommendation.accountId)
   }
 
-  async function bindRecordToAccount(kind, record, accountId) {
+  async function bindRecordToAccount(kind, record, accountId, options = {}) {
     if (!record?.id || !accountId) return false
     if (kind === 'income') {
       const { error } = await sb.rpc('save_income_with_account', {
@@ -2605,14 +2786,62 @@ export function useStore() {
       if (error) { showFlash('补绑失败：' + humanizeDbError(error)); return false }
     }
 
-    await refreshAccountsFromDB()
-    await loadUnboundRecords()
-    if (detailRecord.value?.id === record.id) {
+    if (!options.silent) {
+      await refreshAccountsFromDB()
+      await loadUnboundRecords()
+    }
+    if (!options.silent && detailRecord.value?.id === record.id) {
       await loadData(0, true)
       await refreshDetailRecord()
     }
-    showFlash('✓ 已补绑账户并生成流水')
+    if (!options.silent) showFlash('✓ 已补绑账户并生成流水')
     return true
+  }
+
+  function recommendedUnboundRecords(kind = 'all') {
+    const records = []
+    if (kind === 'all' || kind === 'expense') {
+      for (const record of unboundRecords.value.expenses || []) {
+        const recommendation = recommendAccountForRecord('expense', record)
+        if (recommendation?.accountId) records.push({ kind: 'expense', record, recommendation })
+      }
+    }
+    if (kind === 'all' || kind === 'income') {
+      for (const record of unboundRecords.value.incomes || []) {
+        const recommendation = recommendAccountForRecord('income', record)
+        if (recommendation?.accountId) records.push({ kind: 'income', record, recommendation })
+      }
+    }
+    return records
+  }
+
+  async function batchBindRecommendedUnboundRecords(kind = 'all', selected = null) {
+    const candidates = selected || recommendedUnboundRecords(kind)
+    if (!candidates.length) {
+      showFlash('当前没有可批量补绑的推荐记录')
+      return false
+    }
+    if (!selected) {
+      const sample = candidates.slice(0, 3).map(item => {
+        const title = item.kind === 'expense' ? item.record.name : item.record.source
+        return `- ${title || '未命名记录'} → ${item.recommendation.account.name}`
+      }).join('\n')
+      const ok = confirm(`确认批量补绑 ${candidates.length} 条推荐记录？\n\n${sample}${candidates.length > 3 ? '\n...' : ''}\n\n只会处理已有推荐账户的记录。`)
+      if (!ok) return false
+    }
+    return runLockedAction('batchBindUnbound', async () => {
+      let success = 0
+      let failed = 0
+      for (const item of candidates) {
+        const done = await bindRecordToAccount(item.kind, item.record, item.recommendation.accountId, { silent: true })
+        if (done) success++
+        else failed++
+      }
+      await refreshAccountsFromDB()
+      await loadUnboundRecords()
+      showFlash(failed ? `✓ 已补绑 ${success} 条，${failed} 条失败` : `✓ 已批量补绑 ${success} 条`)
+      return success > 0
+    })
   }
 
   function walletSnapshotKindOf(record) {
@@ -2644,10 +2873,12 @@ export function useStore() {
     const status = repaymentStatusFromWalletSnapshot(record)
     const dueDate = walletSnapshotDueDate(record)
       || dueDateFromMonthAndDay(cycleMonth, walletSnapshotPaymentDueDay(record))
+      || dueDateFromMonthAndDay(cycleMonth, accountPaymentDueDay(accountId))
     const statementStartDate = walletSnapshotStatementDate(record, 'statement_start_date')
     const statementEndDate = walletSnapshotStatementDate(record, 'statement_end_date')
     const paidAmount = status === 'paid' ? amount : 0
     const remainingAmount = status === 'paid' ? 0 : amount
+    const confidence = walletSnapshotConfidence(record)
     const { data, error } = await sb.from('account_repayment_cycles')
       .upsert({
         user_id: currentUserId.value,
@@ -2662,6 +2893,10 @@ export function useStore() {
         carried_over_amount: 0,
         status,
         source: 'screenshot',
+        evidence_record_id: record.id,
+        confidence,
+        statement_source_priority: 90,
+        original_statement_amount: amount,
         note: status === 'paid' ? '来源快照显示已还款' : '来源快照生成待还周期',
       }, { onConflict: 'account_id,cycle_month' })
       .select('*')
@@ -2674,6 +2909,31 @@ export function useStore() {
     const idx = repaymentCycles.value.findIndex(item => item.id === mapped.id)
     if (idx >= 0) repaymentCycles.value[idx] = mapped
     else repaymentCycles.value.unshift(mapped)
+  }
+
+  async function reconcileLiabilityAccountFromWalletSnapshot(record, accountId) {
+    if (!record || !accountId || walletSnapshotKindOf(record) !== 'liability') return false
+    const amount = amountFromWalletSnapshot(record)
+    const account = accounts.value.find(item => item.id === accountId)
+    const current = Number(account?.currentBalance ?? account?.current_balance ?? 0)
+    if (!Number.isFinite(amount) || !Number.isFinite(current)) return false
+    const delta = Math.round((amount - current) * 100) / 100
+    if (Math.abs(delta) < 0.01) return false
+    const direction = delta > 0 ? 'in' : 'out'
+    await upsertAccountEntry({
+      accountId,
+      direction,
+      amount: Math.abs(delta),
+      entryType: 'adjustment',
+      sourceTable: 'data_records',
+      sourceId: record.id,
+      occurredAt: record.occurredAt || record.createdAt || new Date().toISOString(),
+      note: `由负债快照校准当前总欠款至 ¥${amount.toFixed(2)}`,
+    })
+    await sb.from('accounts')
+      .update({ last_reconciled_at: record.occurredAt || record.createdAt || new Date().toISOString() })
+      .eq('id', accountId)
+    return true
   }
 
   async function createAccountFromWalletSnapshot(record) {
@@ -2839,6 +3099,8 @@ export function useStore() {
     }
 
     await upsertRepaymentCycleFromWalletSnapshot(record, accountId)
+    await reconcileLiabilityAccountFromWalletSnapshot(record, accountId)
+    await refreshAccountsFromDB()
     await loadData(0, true)
     showFlash('✓ 已关联账户')
   }
@@ -3149,7 +3411,7 @@ export function useStore() {
     aiInsight, aiInsightLoading, aiInsightError, aiInsightCached,
     generateAiInsight, loadLatestAiInsight,
     loadData, resetUserData, changeMonth, showFlash,
-    openPendingModal, closePendingModal, confirmEntry,
+    openPendingModal, closePendingModal, confirmEntry, confirmStagingRepayment,
     hasPendingChanges, resetPendingChanges,
     markPendingImageUnavailable,
     openIncomeModal, openIncomeEditModal, closeIncomeModal, confirmIncome,
@@ -3160,14 +3422,15 @@ export function useStore() {
     createAccountFromWalletSnapshot, linkWalletSnapshotToAccount,
     accountModal, openAccountModalForCreate, openAccountModalForEdit, closeAccountModal, saveAccount, archiveAccount,
     openAccountDetail, refreshAccountDetail, loadAccountEntries, openAccountEntrySource,
-    confirmRepaymentCyclePaid,
+    confirmRepaymentCyclePaid, revokeLiabilityPayment,
     openUnboundRecordsPage, loadUnboundRecords,
     upsertAccountEntry, voidAccountEntries, refreshAccountsFromDB, defaultAccountIdForKind,
     pendingAccountReview, balanceImpactPreview,
     recommendAccountForRecord, accountBindingExplanation, bindRecordToRecommendedAccount, bindRecordToAccount,
+    recommendedUnboundRecords, batchBindRecommendedUnboundRecords,
     hasUniversalChanges, resetUniversalChanges, markUniversalImageUnavailable, getUniversalDomainMeta,
     getDomainRegistryStatus,
-    openImgFull, closeImgFull,
+    openImgFull, closeImgFull, openDataRecordImage,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
     discardStagingRecord, retryStagingRecord, archiveStagingRecord,
     openDomainPage, openDayDetail, showMoreDailyCards, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,

@@ -437,6 +437,54 @@
   font-weight: 700;
 }
 
+.finance-auto-debit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(22, 101, 52, 0.1), rgba(21, 128, 61, 0.05));
+  border: 1px solid rgba(22, 101, 52, 0.12);
+}
+
+.finance-auto-debit-main {
+  min-width: 0;
+  cursor: pointer;
+}
+
+.finance-auto-debit-label {
+  color: #166534;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.finance-auto-debit-desc {
+  margin-top: 3px;
+  color: #3f6f4c;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.finance-auto-debit-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 11px;
+  background: #166534;
+  color: #fffaf0;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+  box-shadow: 0 10px 18px rgba(22, 101, 52, 0.16);
+}
+
+.finance-auto-debit-btn:disabled {
+  opacity: 0.55;
+  box-shadow: none;
+}
+
 .finance-trend {
   margin-top: 16px;
   padding-top: 14px;

@@ -86,6 +86,21 @@
               <span>{{ nearestLiabilityDate }}</span>
             </div>
           </div>
+          <div v-if="autoDebitReminder" class="finance-auto-debit">
+            <div class="finance-auto-debit-main" @click="openNearestLiability">
+              <div class="finance-auto-debit-label">可能已自动扣款</div>
+              <div class="finance-auto-debit-desc">
+                {{ autoDebitReminder.accountName }} {{ autoDebitReminder.cycleMonth }} 账单到期，预计从「{{ autoDebitReminder.autoDebitAccountName }}」扣款
+              </div>
+            </div>
+            <button
+              class="finance-auto-debit-btn"
+              :disabled="autoDebitSubmitting"
+              @click.stop="confirmAutoDebit"
+            >
+              {{ autoDebitSubmitting ? '确认中' : '确认已扣款' }}
+            </button>
+          </div>
           <div class="finance-trend">
             <div class="finance-trend-head">
               <span>近 7 日支出</span>
@@ -416,6 +431,15 @@ const nearestLiabilityDate = computed(() => {
   if (item.billDay) return `每月${item.billDay}号`
   return '待补还款日'
 })
+const autoDebitReminder = computed(() => {
+  const item = finance.value.nearestLiability
+  if (!item?.autoDebitPrompt || !item.raw || item.rawType !== 'repayment_cycle') return null
+  return item
+})
+const autoDebitSubmitting = computed(() => {
+  const cycleId = autoDebitReminder.value?.id
+  return cycleId ? store.isActionPending(`repayment-cycle:${cycleId}`) : false
+})
 
 onMounted(() => {
   if (typeof window === 'undefined') return
@@ -467,6 +491,17 @@ function openNearestLiability() {
     return
   }
   store.openDomainPage('wallet')
+}
+
+async function confirmAutoDebit() {
+  const item = autoDebitReminder.value
+  if (!item?.raw) return
+  await store.confirmRepaymentCyclePaid(item.raw, {
+    paidAmount: item.amount,
+    debitAccountId: item.autoDebitAccountId || null,
+    status: 'paid',
+    note: '首页确认自动扣款已完成',
+  })
 }
 
 function handleTrendClick(item) {

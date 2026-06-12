@@ -102,12 +102,36 @@
           </div>
         </div>
         <div v-if="canConfirmActiveCycle" class="account-repayment-actions">
+          <div class="account-repayment-mode">
+            <button
+              class="account-repayment-mode-btn"
+              :class="{ active: repaymentMode === 'full' }"
+              @click="repaymentMode = 'full'"
+            >
+              还清本期
+            </button>
+            <button
+              class="account-repayment-mode-btn"
+              :class="{ active: repaymentMode === 'partial' }"
+              @click="repaymentMode = 'partial'"
+            >
+              记录部分还款
+            </button>
+          </div>
+          <label v-if="repaymentMode === 'partial'" class="account-repayment-input">
+            <span>本次还款金额</span>
+            <input
+              v-model="partialRepaymentAmount"
+              inputmode="decimal"
+              placeholder="例如 50.00"
+            />
+          </label>
           <button
             class="account-repayment-primary"
             :disabled="isRepaymentSubmitting || !repaymentConfirmAmount"
             @click="confirmActiveCyclePaid"
           >
-            {{ isRepaymentSubmitting ? '正在确认...' : '确认本期已还清' }}
+            {{ repaymentPrimaryText }}
           </button>
           <div class="account-repayment-hint">
             {{ repaymentConfirmSummary }}
@@ -131,10 +155,62 @@
         </div>
       </section>
 
-      <section v-if="isLiability && payments.length" class="account-payment-panel">
+      <section v-if="isLiability && activeCycle" class="account-statement-panel">
+        <div class="account-statement-head">
+          <div>
+            <div class="wallet-account-section-title">账单解释</div>
+            <div class="account-statement-sub">{{ statementExplainText }}</div>
+          </div>
+          <button
+            v-if="statementEvidence"
+            class="account-statement-evidence-btn"
+            @click="openStatementEvidence"
+          >
+            看截图
+          </button>
+        </div>
+        <div class="account-statement-grid">
+          <div>
+            <span>账单来源</span>
+            <strong>{{ cycleSourceLabel(activeCycle) }}</strong>
+          </div>
+          <div>
+            <span>账单周期</span>
+            <strong>{{ statementPeriodLabel }}</strong>
+          </div>
+          <div>
+            <span>还款日</span>
+            <strong>{{ activeCycle.dueDate || '待补' }}</strong>
+          </div>
+          <div>
+            <span>识别置信度</span>
+            <strong>{{ cycleConfidenceLabel(activeCycle) }}</strong>
+          </div>
+        </div>
+        <div class="account-statement-flow">
+          <div class="account-statement-flow-title">账单活动流</div>
+          <button
+            v-for="item in statementActivityItems"
+            :key="item.key"
+            class="account-activity-row"
+            :class="item.tone"
+            @click="openActivityItem(item)"
+          >
+            <div class="account-activity-dot"></div>
+            <div class="account-activity-main">
+              <div class="account-activity-title">{{ item.title }}</div>
+              <div class="account-activity-meta">{{ item.meta }}</div>
+              <div v-if="item.note" class="account-activity-note">{{ item.note }}</div>
+            </div>
+            <div class="account-activity-side">{{ item.amount }}</div>
+          </button>
+        </div>
+      </section>
+
+      <section v-if="isLiability && activePayments.length" class="account-payment-panel">
         <div class="wallet-account-section-title">最近还款记录</div>
         <div class="account-payment-list">
-          <div v-for="payment in payments" :key="payment.id" class="account-payment-row">
+          <div v-for="payment in activePayments" :key="payment.id" class="account-payment-row">
             <div>
               <div class="account-payment-title">{{ paymentSourceLabel(payment) }}</div>
               <div class="account-payment-meta">
@@ -143,7 +219,61 @@
                 <span v-if="payment.overpaymentAmount > 0"> · 待确认溢缴 {{ formatAccountCurrency(payment.overpaymentAmount) }}</span>
               </div>
             </div>
-            <strong>{{ formatAccountCurrency(payment.amount) }}</strong>
+            <div class="account-payment-side">
+              <strong>{{ formatAccountCurrency(payment.amount) }}</strong>
+              <button
+                v-if="payment.status === 'confirmed'"
+                class="account-payment-revoke"
+                :disabled="store.isActionPending(`liability-payment:${payment.id}`)"
+                @click="revokePayment(payment)"
+              >
+                撤销
+              </button>
+            </div>
+          </div>
+        </div>
+        <button
+          v-if="voidedPayments.length"
+          class="account-voided-toggle"
+          @click="showVoidedPayments = !showVoidedPayments"
+        >
+          {{ showVoidedPayments ? '收起' : '展开' }}已作废还款（{{ voidedPayments.length }}）
+        </button>
+        <div v-if="showVoidedPayments" class="account-payment-list voided">
+          <div v-for="payment in voidedPayments" :key="payment.id" class="account-payment-row voided">
+            <div>
+              <div class="account-payment-title">{{ paymentSourceLabel(payment) }}</div>
+              <div class="account-payment-meta">
+                {{ formatDateTimeLabel(payment.paidAt) || '--' }}
+                <span v-if="payment.note"> · {{ payment.note }}</span>
+              </div>
+            </div>
+            <div class="account-payment-side">
+              <strong>{{ formatAccountCurrency(payment.amount) }}</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section v-else-if="isLiability && voidedPayments.length" class="account-payment-panel">
+        <button
+          class="account-voided-toggle"
+          @click="showVoidedPayments = !showVoidedPayments"
+        >
+          {{ showVoidedPayments ? '收起' : '展开' }}已作废还款（{{ voidedPayments.length }}）
+        </button>
+        <div v-if="showVoidedPayments" class="account-payment-list voided">
+          <div v-for="payment in voidedPayments" :key="payment.id" class="account-payment-row voided">
+            <div>
+              <div class="account-payment-title">{{ paymentSourceLabel(payment) }}</div>
+              <div class="account-payment-meta">
+                {{ formatDateTimeLabel(payment.paidAt) || '--' }}
+                <span v-if="payment.note"> · {{ payment.note }}</span>
+              </div>
+            </div>
+            <div class="account-payment-side">
+              <strong>{{ formatAccountCurrency(payment.amount) }}</strong>
+            </div>
           </div>
         </div>
       </section>
@@ -226,6 +356,9 @@ const entries = computed(() => store.selectedAccountEntries.value || [])
 const payments = computed(() => store.selectedAccountPayments?.value || [])
 const sourceSnapshot = computed(() => store.selectedAccountSourceSnapshot?.value || null)
 const showVoided = ref(false)
+const showVoidedPayments = ref(false)
+const repaymentMode = ref('full')
+const partialRepaymentAmount = ref('')
 const isLiability = computed(() => isLiabilityAccount(account.value))
 const activeEntries = computed(() => entries.value.filter(entry => !entry.isVoided))
 const voidedEntries = computed(() => entries.value.filter(entry => entry.isVoided))
@@ -324,9 +457,23 @@ const nextDueDateLabel = computed(() => {
 })
 const repaymentConfirmAmount = computed(() => {
   if (!activeCycle.value) return 0
+  if (repaymentMode.value === 'partial') {
+    const amount = Number(String(partialRepaymentAmount.value || '').replace(',', '.'))
+    if (!Number.isFinite(amount) || amount <= 0) return 0
+    return Math.round(amount * 100) / 100
+  }
   const remainingAmount = cycleRemainingAmount(activeCycle.value)
   if (remainingAmount > 0) return remainingAmount
   return cycleStatementAmount(activeCycle.value) || Number(account.value?.currentBalance || 0)
+})
+const repaymentStatusToSubmit = computed(() => {
+  if (!activeCycle.value) return 'paid'
+  if (repaymentMode.value === 'full') return 'paid'
+  const amount = Number(repaymentConfirmAmount.value || 0)
+  const remaining = cycleRemainingAmount(activeCycle.value)
+  if (remaining > 0 && amount >= remaining) return 'paid'
+  if (activeCycle.value.minPaymentAmount && amount >= Number(activeCycle.value.minPaymentAmount)) return 'minimum_paid'
+  return 'partial_paid'
 })
 const repaymentOverpaymentAmount = computed(() => {
   const amount = Number(repaymentConfirmAmount.value || 0)
@@ -357,6 +504,89 @@ const repaymentDebitAccount = computed(() => {
 })
 const repaymentDebitLabel = computed(() => repaymentDebitAccount.value ? accountTitle(repaymentDebitAccount.value) : '')
 const isRepaymentSubmitting = computed(() => activeCycle.value ? store.isActionPending(`repayment-cycle:${activeCycle.value.id}`) : false)
+const repaymentPrimaryText = computed(() => {
+  if (isRepaymentSubmitting.value) return '正在确认...'
+  return repaymentMode.value === 'partial' ? '记录本次还款' : '确认本期已还清'
+})
+const activePayments = computed(() => payments.value.filter(payment => payment.status !== 'voided'))
+const voidedPayments = computed(() => payments.value.filter(payment => payment.status === 'voided'))
+const statementEvidence = computed(() => {
+  const evidenceId = activeCycle.value?.evidenceRecordId
+  if (evidenceId) {
+    const record = (store.dataRecords?.value || []).find(item => item.id === evidenceId)
+    if (record) return record
+  }
+  if (sourceSnapshot.value && sourceSnapshot.value.id === evidenceId) return sourceSnapshot.value
+  return null
+})
+const statementPeriodLabel = computed(() => {
+  if (!activeCycle.value) return '暂无周期'
+  if (activeCycle.value.statementStartDate && activeCycle.value.statementEndDate) {
+    return `${activeCycle.value.statementStartDate.slice(5)} 至 ${activeCycle.value.statementEndDate.slice(5)}`
+  }
+  return activeCycle.value.cycleMonth ? `${activeCycle.value.cycleMonth} 账单` : '未识别周期'
+})
+const statementExplainText = computed(() => {
+  if (!activeCycle.value) return ''
+  const source = cycleSourceLabel(activeCycle.value)
+  const amount = formatAccountCurrency(cycleStatementAmount(activeCycle.value))
+  const due = activeCycle.value.dueDate ? `，还款日 ${activeCycle.value.dueDate.slice(5)}` : ''
+  return `${source}确认本期应还 ${amount}${due}`
+})
+const statementActivityItems = computed(() => {
+  if (!activeCycle.value) return []
+  const cycle = activeCycle.value
+  const items = [{
+    key: `cycle:${cycle.id}`,
+    kind: 'cycle',
+    at: cycle.createdAt || cycle.updatedAt || '',
+    title: `${cycleSourceLabel(cycle)}生成账单`,
+    meta: [cycle.cycleMonth, statementPeriodLabel.value, cycle.dueDate ? `${cycle.dueDate.slice(5)}还款` : '待补还款日'].filter(Boolean).join(' · '),
+    note: cycle.note || '',
+    amount: formatAccountCurrency(cycleStatementAmount(cycle)),
+    tone: 'statement',
+  }]
+
+  payments.value
+    .filter(payment => payment.statementId === cycle.id)
+    .forEach(payment => {
+      items.push({
+        key: `payment:${payment.id}`,
+        kind: 'payment',
+        payment,
+        at: payment.paidAt || payment.createdAt || '',
+        title: paymentSourceLabel(payment),
+        meta: `${payment.status === 'voided' ? '已作废 · ' : ''}${formatDateTimeLabel(payment.paidAt) || '时间未知'}`,
+        note: payment.note || '',
+        amount: `-${formatAccountCurrency(payment.amount)}`,
+        tone: payment.status === 'voided' ? 'voided' : 'payment',
+      })
+    })
+
+  entries.value
+    .filter(entry => {
+      if (entry.sourceTable === 'liability_payments') {
+        return payments.value.some(payment => payment.id === entry.sourceId && payment.statementId === cycle.id)
+      }
+      if (entry.sourceTable === 'data_records' && cycle.evidenceRecordId) return entry.sourceId === cycle.evidenceRecordId
+      return false
+    })
+    .forEach(entry => {
+      items.push({
+        key: `entry:${entry.id}`,
+        kind: 'entry',
+        entry,
+        at: entry.occurredAt || entry.createdAt || '',
+        title: entryTypeLabel(entry),
+        meta: `${entry.isVoided ? '已作废 · ' : ''}${formatDateTimeLabel(entry.occurredAt) || '时间未知'}`,
+        note: entry.note || sourceLabel(entry),
+        amount: `${entry.direction === 'in' ? '+' : '-'}${formatAccountCurrency(entry.amount)}`,
+        tone: entry.isVoided ? 'voided' : entry.entryType === 'adjustment' ? 'adjustment' : 'ledger',
+      })
+    })
+
+  return items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+})
 const autoDebitLabel = computed(() => {
   const id = account.value?.autoDebitAccountId
   if (!id) return '未设置'
@@ -429,6 +659,49 @@ function paymentSourceLabel(payment) {
   return labels[payment.source] || '还款记录'
 }
 
+function cycleSourceLabel(cycle) {
+  const labels = {
+    screenshot: '截图账单',
+    manual: '手动确认',
+    system: '系统估算',
+    reconciliation: '余额校准',
+  }
+  return labels[cycle?.source] || '账单'
+}
+
+function cycleConfidenceLabel(cycle) {
+  if (cycle?.confidence == null) return '未记录'
+  return `${Math.round(Number(cycle.confidence || 0) * 100)}%`
+}
+
+function openStatementEvidence() {
+  const record = statementEvidence.value
+  if (!record) return
+  if (record.imageUrl) {
+    store.openImgFull(record.imageUrl)
+    return
+  }
+  if (sourceSnapshot.value?.id === record.id && sourceSnapshot.value.imageUrl) {
+    store.openImgFull(sourceSnapshot.value.imageUrl)
+    return
+  }
+  if (store.openDataRecordImage && record.imagePath) {
+    store.openDataRecordImage(record)
+    return
+  }
+  store.openRecordDetail?.('universal', record)
+}
+
+function openActivityItem(item) {
+  if (item.kind === 'entry' && item.entry) {
+    store.openAccountEntrySource(item.entry)
+    return
+  }
+  if (item.kind === 'cycle') {
+    openStatementEvidence()
+  }
+}
+
 function cycleStatusLabel(cycle) {
   const labels = {
     draft_estimated: '系统估算',
@@ -450,10 +723,22 @@ function cycleStatusLabel(cycle) {
 
 async function confirmActiveCyclePaid() {
   if (!activeCycle.value) return
+  if (repaymentMode.value === 'partial' && repaymentConfirmAmount.value <= 0) {
+    if (store.showFlash) store.showFlash('请输入有效的还款金额')
+    else alert('请输入有效的还款金额')
+    return
+  }
   await store.confirmRepaymentCyclePaid(activeCycle.value, {
     paidAmount: repaymentConfirmAmount.value,
     debitAccountId: repaymentDebitAccount.value?.id || null,
+    status: repaymentStatusToSubmit.value,
+    note: repaymentMode.value === 'partial' ? '手动记录部分还款' : '手动确认已还清',
   })
+  if (repaymentMode.value === 'partial') partialRepaymentAmount.value = ''
+}
+
+async function revokePayment(payment) {
+  await store.revokeLiabilityPayment(payment)
 }
 
 function normalizeDueDate(day, today) {
