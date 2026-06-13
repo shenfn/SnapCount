@@ -1,64 +1,4 @@
--- AI companion memory: user-level persona settings, durable memories, and a compact context RPC.
-
-alter table public.user_configs
-  add column if not exists companion_enabled boolean not null default true,
-  add column if not exists companion_memory_enabled boolean not null default true,
-  add column if not exists companion_persona text not null default 'observer'
-    check (companion_persona in ('observer','warm','sharp','minimal')),
-  add column if not exists companion_memory_strength text not null default 'bold'
-    check (companion_memory_strength in ('light','balanced','bold')),
-  add column if not exists companion_custom_note text;
-
-comment on column public.user_configs.companion_enabled is
-  'Whether screenshot recognition responses include AI companion copy.';
-comment on column public.user_configs.companion_memory_enabled is
-  'Whether companion copy may use short-term and long-term user memory.';
-comment on column public.user_configs.companion_persona is
-  'Preferred voice for screenshot companion copy.';
-comment on column public.user_configs.companion_memory_strength is
-  'How strongly companion copy should reference user memory.';
-comment on column public.user_configs.companion_custom_note is
-  'Optional user note that shapes companion copy tone.';
-
-create table if not exists public.user_companion_memories (
-  id            uuid primary key default uuid_generate_v4(),
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now(),
-  user_id       uuid not null references auth.users(id) on delete cascade,
-  memory_key    text not null,
-  memory_type   text not null check (memory_type in (
-    'spending_pattern',
-    'merchant_pattern',
-    'income_pattern',
-    'sleep_pattern',
-    'sport_pattern',
-    'food_pattern',
-    'reading_pattern',
-    'tone_preference',
-    'avoidance'
-  )),
-  content       text not null,
-  evidence_jsonb jsonb not null default '{}'::jsonb,
-  confidence    numeric not null default 0.6 check (confidence >= 0 and confidence <= 1),
-  weight        numeric not null default 1.0 check (weight >= 0 and weight <= 5),
-  last_seen_at  timestamptz not null default now(),
-  expires_at    timestamptz,
-  source_table  text,
-  source_id     uuid,
-  unique (user_id, memory_key)
-);
-
-create index if not exists idx_user_companion_memories_user
-  on public.user_companion_memories (user_id, weight desc, last_seen_at desc);
-
-create index if not exists idx_user_companion_memories_active
-  on public.user_companion_memories (user_id, memory_type, expires_at);
-
-alter table public.user_companion_memories enable row level security;
-
-drop policy if exists user_companion_memories_access on public.user_companion_memories;
-create policy user_companion_memories_access on public.user_companion_memories
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+-- Include companion expression style in the compact context RPC.
 
 create or replace function public.get_companion_context(p_user_id uuid)
 returns jsonb
@@ -80,7 +20,7 @@ as $$
     select
       coalesce(sum(amount), 0) as total,
       count(*) as count,
-      count(*) filter (where category = 'food') as food_count,
+      count(*) filter (where category in ('food','餐饮','美食','餐厅')) as food_count,
       count(*) filter (where transaction_time >= time '21:00') as late_count
     from public.transactions
     where user_id = p_user_id
@@ -91,7 +31,7 @@ as $$
     select
       coalesce(sum(amount), 0) as total,
       count(*) as count,
-      count(*) filter (where category = 'food') as food_count,
+      count(*) filter (where category in ('food','餐饮','美食','餐厅')) as food_count,
       count(*) filter (where transaction_time >= time '21:00') as late_count
     from public.transactions
     where user_id = p_user_id
@@ -205,6 +145,7 @@ as $$
   );
 $$;
 
+revoke execute on function public.get_companion_context(uuid) from public;
 revoke execute on function public.get_companion_context(uuid) from anon;
 revoke execute on function public.get_companion_context(uuid) from authenticated;
 grant execute on function public.get_companion_context(uuid) to service_role;

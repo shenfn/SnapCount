@@ -234,6 +234,47 @@
   transform: scale(0.98);
 }
 
+.companion-note-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.companion-note-input {
+  width: 100%;
+  min-height: 46px;
+  resize: none;
+  border: 1px solid rgba(26, 26, 24, 0.08);
+  border-radius: 12px;
+  background: rgba(247, 248, 246, 0.92);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 9px 10px;
+  outline: none;
+}
+
+.companion-note-input:focus {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: #fff;
+}
+
+.companion-note-input::placeholder {
+  color: var(--text3);
+}
+
+.companion-note-save {
+  min-width: 54px;
+  border: 1px solid rgba(16, 185, 129, 0.26);
+  border-radius: 12px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 @media (max-width: 360px) {
   .companion-toggle-grid {
     grid-template-columns: 1fr;
@@ -241,6 +282,10 @@
 
   .companion-chip-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .companion-note-box {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -4,6 +4,7 @@ export interface PromptContext {
   companionEnabled?: boolean | null;
   memoryEnabled?: boolean | null;
   memoryStrength?: string | null;
+  expressionStyle?: string | null;
   persona?: string | null;
   customNote?: string | null;
   memory?: Record<string, unknown> | null;
@@ -28,7 +29,11 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
 基于本条记录和【用户记忆】写 1 句话作为 companion_message，要求：
 - 不超过 30 个汉字，最多 1 句，句末标点 1 个
 - 优先级：长期记忆中的稳定模式 > 短期快照中的具体数字 > 本条记录细节 > 空字符串
+- 【用户记忆】里的周/月统计是本次截图入库前的快照；当前截图属于同一类型时，次数表达必须先把当前这条算进去
 - 如果记忆里有足够证据，可以写出"这周第 N 次""最近总是""又回到 XX"这类有记忆感的话
+- 次数本身不是价值。只有当数字能表达节奏、偏好、重复选择、身体感受或情绪陪伴时才引用；不要为了展示会数数而写"这周第 N 次"
+- 饮食记录优先观察餐次节奏、食物结构、热量大致轻重、连续外卖/正餐/夜宵等模式；单纯"第 N 顿美食"不够好
+- 更好的饮食写法示例："红烧鸡块配米饭，今天是踏实午餐。"、"这周饭点挺稳，今天这顿很正经。"、"最近午餐很认真，这盘挺有分量。"
 - 如果记忆没有证据，绝不编造"第 N 次""比昨天""最近总是"等对比
 - 【用户记忆】只允许用于 companion_message，严禁用它推断 amount、merchant_name、category、record_type、occurred_at 等识别字段
 - 避免和【最近陪伴文案】重复句式
@@ -36,7 +41,7 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
   · 不说"加油""你真棒""注意身体""请合理饮食"等空话
   · 不给建议、不评判好坏、不教育用户
   · 不要简单复述用户已经看到的字段（如"你花了 32 元"）
-  · 不要使用感叹号超过一次，不要用 emoji
+  · 不要使用感叹号超过一次
   · 必须基于这条记录的具体内容，不能是通用句
   · 支出/收入页面如果同时出现红包、广告、抽免单、优惠活动，只能围绕真实交易主体写，不要说“收到红包”“获得奖励”
 - 如果信息太少写不出有意义的话，返回空字符串 ""，不要硬凑`;
@@ -62,10 +67,16 @@ export function buildPrompt(ctx: PromptContext = {}): string {
   const personaText = PERSONAS[ctx.persona ?? "observer"] ?? PERSONAS.observer;
   const customLine = ctx.customNote ? `\n- 用户附加偏好：${ctx.customNote.slice(0, 80)}` : "";
   const strengthLine = `\n- 记忆引用强度：${ctx.memoryStrength ?? "bold"}（light=偶尔引用，balanced=自然引用，bold=有证据时优先引用）`;
+  const expressionStyle = ctx.expressionStyle ?? "plain";
+  const expressionLine = expressionStyle === "emoji"
+    ? "\n- 表达方式：可在句尾使用 1 个贴切 emoji，但不要每次都用，不要影响识别字段"
+    : expressionStyle === "kaomoji"
+      ? "\n- 表达方式：可偶尔使用 1 个轻量颜文字，如 (´･_･`) / (￣▽￣)，但不要卖萌过度"
+      : "\n- 表达方式：纯文字，不使用 emoji 或颜文字";
 
   return contextBlock + BASE_PROMPT
     + "\n\n" + COMPANION_RULES
-    + "\n\n【你的人格】\n" + personaText + strengthLine + customLine
+    + "\n\n【你的人格】\n" + personaText + strengthLine + expressionLine + customLine
     + buildMemoryBlock(ctx.memory, memoryEnabled);
 }
 

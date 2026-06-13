@@ -1178,6 +1178,7 @@ interface CompanionSettings {
   memoryEnabled: boolean;
   persona: string;
   memoryStrength: string;
+  expressionStyle: string;
   customNote: string | null;
 }
 
@@ -1186,6 +1187,7 @@ const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   memoryEnabled: true,
   persona: "observer",
   memoryStrength: "bold",
+  expressionStyle: "plain",
   customNote: null,
 };
 
@@ -1206,6 +1208,7 @@ async function loadCompanionContext(
     memoryEnabled: settingsRaw.memory_enabled !== false,
     persona: typeof settingsRaw.persona === "string" ? settingsRaw.persona : "observer",
     memoryStrength: typeof settingsRaw.memory_strength === "string" ? settingsRaw.memory_strength : "bold",
+    expressionStyle: typeof settingsRaw.expression_style === "string" ? settingsRaw.expression_style : "plain",
     customNote: typeof settingsRaw.custom_note === "string" ? settingsRaw.custom_note : null,
   };
   return { settings, memory: settings.memoryEnabled ? raw : null };
@@ -1686,7 +1689,7 @@ Deno.serve(async (req) => {
     // 取值 auto 表示跟随平台默认；其它强制指定 provider 优先
     if (userId) {
       const { data: prefRow } = await supabase.from("user_configs")
-        .select("vision_primary, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_custom_note")
+        .select("vision_primary, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note")
         .eq("user_id", userId)
         .maybeSingle();
       const userPref = prefRow?.vision_primary;
@@ -1695,6 +1698,7 @@ Deno.serve(async (req) => {
         memoryEnabled: prefRow?.companion_memory_enabled ?? true,
         persona: prefRow?.companion_persona ?? "observer",
         memoryStrength: prefRow?.companion_memory_strength ?? "bold",
+        expressionStyle: prefRow?.companion_expression_style ?? "plain",
         customNote: prefRow?.companion_custom_note ?? null,
       };
       if (userPref && userPref !== "auto") {
@@ -1785,6 +1789,7 @@ Deno.serve(async (req) => {
       companionEnabled: companionSettings.enabled,
       memoryEnabled: companionSettings.memoryEnabled,
       memoryStrength: companionSettings.memoryStrength,
+      expressionStyle: companionSettings.expressionStyle,
       persona: companionSettings.persona,
       customNote: companionSettings.customNote,
       memory: companionContext.memory,

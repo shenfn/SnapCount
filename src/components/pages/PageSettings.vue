@@ -215,6 +215,43 @@
             </button>
           </div>
         </div>
+
+        <div class="companion-control">
+          <div class="companion-control-head">
+            <span>表达</span>
+            <span>{{ companionExpressionOptions.find(o => o.value === companionExpressionStyle)?.desc }}</span>
+          </div>
+          <div class="companion-chip-row compact">
+            <button
+              v-for="opt in companionExpressionOptions"
+              :key="opt.value"
+              type="button"
+              class="companion-chip"
+              :class="{ active: companionExpressionStyle === opt.value }"
+              @click="updateCompanionExpressionStyle(opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="companion-control">
+          <div class="companion-control-head">
+            <span>专属指令</span>
+            <span>{{ companionCustomNote.length }}/80</span>
+          </div>
+          <div class="companion-note-box">
+            <textarea
+              v-model.trim="companionCustomNote"
+              class="companion-note-input"
+              maxlength="80"
+              rows="2"
+              placeholder="例如：多一点吐槽；别提体重；饭点可以温柔一点"
+              @blur="saveCompanionCustomNote"
+            ></textarea>
+            <button type="button" class="companion-note-save" @click="saveCompanionCustomNote">保存</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -308,6 +345,9 @@ const visionPrimary = ref('auto')
 const aiInsightProvider = ref('auto')
 const companionPersona = ref('observer')
 const companionMemoryStrength = ref('bold')
+const companionExpressionStyle = ref('plain')
+const companionCustomNote = ref('')
+const companionCustomNoteSaved = ref('')
 
 // ── 数据导出 ──
 const showExportModal = ref(false)
@@ -742,11 +782,29 @@ const companionMemoryStrengthOptions = [
   },
 ]
 
+const companionExpressionOptions = [
+  {
+    value: 'plain',
+    label: '纯文字',
+    desc: '克制一点，只用文字表达。',
+  },
+  {
+    value: 'emoji',
+    label: 'Emoji',
+    desc: '偶尔加一个贴切表情。',
+  },
+  {
+    value: 'kaomoji',
+    label: '颜文字',
+    desc: '偶尔带一点轻量小表情。',
+  },
+]
+
 onMounted(async () => {
   if (store.currentUserId.value) {
     await store.loadUserSettings()
     const { data: cfg } = await sb.from('user_configs')
-      .select('upload_token, plan, vision_primary, ai_insight_provider, companion_persona, companion_memory_strength')
+      .select('upload_token, plan, vision_primary, ai_insight_provider, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note')
       .eq('user_id', store.currentUserId.value)
       .maybeSingle()
     if (cfg) {
@@ -755,6 +813,9 @@ onMounted(async () => {
       aiInsightProvider.value = cfg.ai_insight_provider || 'auto'
       companionPersona.value = cfg.companion_persona || 'observer'
       companionMemoryStrength.value = cfg.companion_memory_strength || 'bold'
+      companionExpressionStyle.value = cfg.companion_expression_style || 'plain'
+      companionCustomNote.value = cfg.companion_custom_note || ''
+      companionCustomNoteSaved.value = companionCustomNote.value
     }
   }
 })
@@ -841,6 +902,48 @@ async function updateCompanionMemoryStrength(value) {
   }
   const opt = companionMemoryStrengthOptions.find(o => o.value === value)
   store.showFlash(`✓ 记忆强度已切换到「${opt?.label || value}」`)
+}
+
+async function updateCompanionExpressionStyle(value) {
+  if (companionExpressionStyle.value === value) return
+  if (!store.currentUserId.value) {
+    store.showFlash('请先登录')
+    return
+  }
+  const prev = companionExpressionStyle.value
+  companionExpressionStyle.value = value
+  const { error } = await sb.from('user_configs')
+    .update({ companion_expression_style: value, updated_at: new Date().toISOString() })
+    .eq('user_id', store.currentUserId.value)
+  if (error) {
+    companionExpressionStyle.value = prev
+    store.showFlash('⚠️ 切换失败：' + error.message)
+    return
+  }
+  const opt = companionExpressionOptions.find(o => o.value === value)
+  store.showFlash(`✓ 表达方式已切换到「${opt?.label || value}」`)
+}
+
+async function saveCompanionCustomNote() {
+  if (!store.currentUserId.value) {
+    store.showFlash('请先登录')
+    return
+  }
+  const note = companionCustomNote.value.trim().slice(0, 80)
+  companionCustomNote.value = note
+  if (note === companionCustomNoteSaved.value) return
+  const { error } = await sb.from('user_configs')
+    .update({
+      companion_custom_note: note || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', store.currentUserId.value)
+  if (error) {
+    store.showFlash('⚠️ 保存失败：' + error.message)
+    return
+  }
+  companionCustomNoteSaved.value = note
+  store.showFlash(note ? '✓ 专属指令已保存' : '✓ 已清空专属指令')
 }
 
 const userEmail = ref(store.currentUserEmail.value || '内测用户')
