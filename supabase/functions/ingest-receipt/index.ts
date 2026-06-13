@@ -1173,6 +1173,221 @@ function monthIncomeLine(s: { total: number }): string {
   return `本月已入 ${fmtYuan(s.total)}`;
 }
 
+interface CompanionSettings {
+  enabled: boolean;
+  memoryEnabled: boolean;
+  persona: string;
+  memoryStrength: string;
+  customNote: string | null;
+}
+
+const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
+  enabled: true,
+  memoryEnabled: true,
+  persona: "observer",
+  memoryStrength: "bold",
+  customNote: null,
+};
+
+async function loadCompanionContext(
+  supabase: ReturnType<typeof createClient>,
+  userId: string | null,
+): Promise<{ settings: CompanionSettings; memory: Record<string, unknown> | null }> {
+  if (!userId) return { settings: DEFAULT_COMPANION_SETTINGS, memory: null };
+  const { data, error } = await supabase.rpc("get_companion_context", { p_user_id: userId });
+  if (error) {
+    console.warn("Companion context fetch failed:", error.message);
+    return { settings: DEFAULT_COMPANION_SETTINGS, memory: null };
+  }
+  const raw = (data || {}) as Record<string, unknown>;
+  const settingsRaw = (raw.settings || {}) as Record<string, unknown>;
+  const settings: CompanionSettings = {
+    enabled: settingsRaw.enabled !== false,
+    memoryEnabled: settingsRaw.memory_enabled !== false,
+    persona: typeof settingsRaw.persona === "string" ? settingsRaw.persona : "observer",
+    memoryStrength: typeof settingsRaw.memory_strength === "string" ? settingsRaw.memory_strength : "bold",
+    customNote: typeof settingsRaw.custom_note === "string" ? settingsRaw.custom_note : null,
+  };
+  return { settings, memory: settings.memoryEnabled ? raw : null };
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    const normalized = normalizeString(value);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function memoryText(value: string, max = 80): string {
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+async function upsertCompanionMemory(
+  supabase: ReturnType<typeof createClient>,
+  payload: {
+    userId: string | null;
+    memoryKey: string;
+    memoryType: string;
+    content: string;
+    evidence: Record<string, unknown>;
+    confidence?: number;
+    weight?: number;
+    expiresAt?: string | null;
+    sourceTable?: string | null;
+    sourceId?: string | null;
+  },
+): Promise<void> {
+  if (!payload.userId) return;
+  const { error } = await supabase.from("user_companion_memories").upsert({
+    user_id: payload.userId,
+    memory_key: payload.memoryKey,
+    memory_type: payload.memoryType,
+    content: memoryText(payload.content),
+    evidence_jsonb: payload.evidence,
+    confidence: payload.confidence ?? 0.65,
+    weight: payload.weight ?? 1,
+    last_seen_at: new Date().toISOString(),
+    expires_at: payload.expiresAt ?? null,
+    source_table: payload.sourceTable ?? null,
+    source_id: payload.sourceId ?? null,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id,memory_key" });
+  if (error) console.warn("Companion memory upsert failed:", error.message);
+}
+
+async function rememberCompanionSignals(
+  supabase: ReturnType<typeof createClient>,
+  params: {
+    userId: string | null;
+    ai: AIResult;
+    recordType: RecordType;
+    recordId: string | null;
+    recordTable: string | null;
+    amount: number | null;
+    occurredAt: string | null;
+  },
+): Promise<void> {
+  if (!params.userId || !params.recordId || !params.recordTable) return;
+  const expiresSoon = new Date(Date.now() + 21 * 24 * 3600 * 1000).toISOString();
+  const expiresLater = new Date(Date.now() + 60 * 24 * 3600 * 1000).toISOString();
+  const writes: Promise<void>[] = [];
+
+  if (params.recordType === "expense") {
+    const merchant = firstNonEmpty(params.ai.merchant_name);
+    const category = firstNonEmpty(params.ai.category);
+    if (merchant) {
+      writes.push(upsertCompanionMemory(supabase, {
+        userId: params.userId,
+        memoryKey: `merchant:${merchant}`,
+        memoryType: "merchant_pattern",
+        content: `用户会在「${merchant}」消费。`,
+        evidence: { merchant, category, amount: params.amount, occurred_at: params.occurredAt },
+        confidence: 0.75,
+        weight: category === "food" ? 1.5 : 1.2,
+        expiresAt: expiresLater,
+        sourceTable: params.recordTable,
+        sourceId: params.recordId,
+      }));
+    }
+    if (category) {
+      writes.push(upsertCompanionMemory(supabase, {
+        userId: params.userId,
+        memoryKey: `expense_category:${category}`,
+        memoryType: "spending_pattern",
+        content: `用户最近有「${category}」类支出。`,
+        evidence: { category, merchant, amount: params.amount, occurred_at: params.occurredAt },
+        confidence: 0.65,
+        weight: category === "food" ? 1.3 : 1,
+        expiresAt: expiresSoon,
+        sourceTable: params.recordTable,
+        sourceId: params.recordId,
+      }));
+    }
+  } else if (params.recordType === "income") {
+    const source = firstNonEmpty(params.ai.source_name, params.ai.merchant_name);
+    if (source) {
+      writes.push(upsertCompanionMemory(supabase, {
+        userId: params.userId,
+        memoryKey: `income_source:${source}`,
+        memoryType: "income_pattern",
+        content: `用户有来自「${source}」的收入记录。`,
+        evidence: { source, income_category: params.ai.income_category, amount: params.amount, occurred_at: params.occurredAt },
+        confidence: 0.7,
+        weight: 1.1,
+        expiresAt: expiresLater,
+        sourceTable: params.recordTable,
+        sourceId: params.recordId,
+      }));
+    }
+  } else if (params.recordType === "sleep") {
+    const payload = params.ai.payload_jsonb || {};
+    const hours = payload.sleep_hours ?? payload.sleep_minutes;
+    if (hours !== undefined && hours !== null) {
+      writes.push(upsertCompanionMemory(supabase, {
+        userId: params.userId,
+        memoryKey: "sleep:last_pattern",
+        memoryType: "sleep_pattern",
+        content: `用户最近一次睡眠约 ${String(hours)}${payload.sleep_minutes ? " 分钟" : " 小时"}。`,
+        evidence: { sleep_hours: payload.sleep_hours, sleep_minutes: payload.sleep_minutes, score: payload.quality_score, occurred_at: params.occurredAt },
+        confidence: 0.75,
+        weight: 1.4,
+        expiresAt: expiresSoon,
+        sourceTable: params.recordTable,
+        sourceId: params.recordId,
+      }));
+    }
+  } else if (params.recordType === "sport") {
+    const payload = params.ai.payload_jsonb || {};
+    const sportType = firstNonEmpty(String(payload.sport_type ?? ""), params.ai.title);
+    writes.push(upsertCompanionMemory(supabase, {
+      userId: params.userId,
+      memoryKey: `sport:${sportType ?? "recent"}`,
+      memoryType: "sport_pattern",
+      content: sportType ? `用户最近做过「${sportType}」。` : "用户最近有运动记录。",
+      evidence: { sport_type: sportType, duration_minutes: payload.duration_minutes, calories: payload.calories, occurred_at: params.occurredAt },
+      confidence: 0.7,
+      weight: 1.3,
+      expiresAt: expiresSoon,
+      sourceTable: params.recordTable,
+      sourceId: params.recordId,
+    }));
+  } else if (params.recordType === "food") {
+    const payload = params.ai.payload_jsonb || {};
+    writes.push(upsertCompanionMemory(supabase, {
+      userId: params.userId,
+      memoryKey: `food:${payload.meal_type ?? "recent"}`,
+      memoryType: "food_pattern",
+      content: `用户最近记录过${payload.meal_type ? String(payload.meal_type) : "饮食"}。`,
+      evidence: { meal_type: payload.meal_type, calories: payload.total_calorie_kcal, title: params.ai.title, occurred_at: params.occurredAt },
+      confidence: 0.65,
+      weight: 1.1,
+      expiresAt: expiresSoon,
+      sourceTable: params.recordTable,
+      sourceId: params.recordId,
+    }));
+  } else if (params.recordType === "reading") {
+    const payload = params.ai.payload_jsonb || {};
+    const book = firstNonEmpty(String(payload.book_name ?? ""), params.ai.title);
+    if (book) {
+      writes.push(upsertCompanionMemory(supabase, {
+        userId: params.userId,
+        memoryKey: `reading:${book}`,
+        memoryType: "reading_pattern",
+        content: `用户最近在读「${book}」。`,
+        evidence: { book_name: book, reading_minutes: payload.reading_minutes, progress_percent: payload.progress_percent, occurred_at: params.occurredAt },
+        confidence: 0.7,
+        weight: 1.1,
+        expiresAt: expiresLater,
+        sourceTable: params.recordTable,
+        sourceId: params.recordId,
+      }));
+    }
+  }
+
+  await Promise.all(writes);
+}
+
 async function createStagingRecord(
   supabase: ReturnType<typeof createClient>,
   payload: {
@@ -1461,14 +1676,27 @@ Deno.serve(async (req) => {
       if (cfg) userId = cfg.user_id;
     }
 
+    let companionSettings: CompanionSettings = DEFAULT_COMPANION_SETTINGS;
+    let companionContextPromise: Promise<{ settings: CompanionSettings; memory: Record<string, unknown> | null }> = Promise.resolve({
+      settings: DEFAULT_COMPANION_SETTINGS,
+      memory: null,
+    });
+
     // 用户级 AI 引擎偏好：覆盖 VISION_PRIMARY env
     // 取值 auto 表示跟随平台默认；其它强制指定 provider 优先
     if (userId) {
       const { data: prefRow } = await supabase.from("user_configs")
-        .select("vision_primary")
+        .select("vision_primary, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_custom_note")
         .eq("user_id", userId)
         .maybeSingle();
       const userPref = prefRow?.vision_primary;
+      companionSettings = {
+        enabled: prefRow?.companion_enabled ?? true,
+        memoryEnabled: prefRow?.companion_memory_enabled ?? true,
+        persona: prefRow?.companion_persona ?? "observer",
+        memoryStrength: prefRow?.companion_memory_strength ?? "bold",
+        customNote: prefRow?.companion_custom_note ?? null,
+      };
       if (userPref && userPref !== "auto") {
         const idx = visionProviders.findIndex((p) => p.name === userPref);
         if (idx > 0) {
@@ -1476,6 +1704,7 @@ Deno.serve(async (req) => {
           visionProviders.unshift(picked);
         }
       }
+      companionContextPromise = loadCompanionContext(supabase, userId);
     }
 
     const stagingRetryId = normalizeString(form.get("staging_record_id"));
@@ -1547,7 +1776,19 @@ Deno.serve(async (req) => {
       : chinaNow;
     const _weekdayCN = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][referenceLocal.getUTCDay()];
     const clientLocalTime = `${referenceLocal.toISOString().slice(0, 10)} ${String(referenceLocal.getUTCHours()).padStart(2, '0')}:${String(referenceLocal.getUTCMinutes()).padStart(2, '0')}`;
-    const visionPrompt = buildPrompt({ clientLocalTime, weekday: _weekdayCN });
+    const companionContext = await companionContextPromise;
+    companionSettings = companionContext.settings;
+    timings.mark("companion_context");
+    const visionPrompt = buildPrompt({
+      clientLocalTime,
+      weekday: _weekdayCN,
+      companionEnabled: companionSettings.enabled,
+      memoryEnabled: companionSettings.memoryEnabled,
+      memoryStrength: companionSettings.memoryStrength,
+      persona: companionSettings.persona,
+      customNote: companionSettings.customNote,
+      memory: companionContext.memory,
+    });
 
     // 2. 计算 hash 去重
     const hash = retryImageHash || await sha256(buf);
@@ -1707,6 +1948,7 @@ Deno.serve(async (req) => {
     } else {
       ai.companion_message = null;
     }
+    if (!companionSettings.enabled) ai.companion_message = null;
     const companionMessage: string | null = ai.companion_message;
     const withCompanion = (text: string) => companionMessage ? `${companionMessage}\n${text}` : text;
     const recordType: RecordType = ai.record_type ?? "expense";
@@ -1854,6 +2096,15 @@ Deno.serve(async (req) => {
             const _s = await summarizeMonthIncome(supabase, userId);
             _retryNotif = `💰 重试成功 · 已入账${normalizedAmount !== null ? " " + fmtYuan(normalizedAmount) : ""}\n${monthIncomeLine(_s)}`;
           }
+          await rememberCompanionSignals(supabase, {
+            userId,
+            ai,
+            recordType,
+            recordId: archivedId,
+            recordTable: archivedTo,
+            amount: normalizedAmount,
+            occurredAt,
+          });
           return new Response(JSON.stringify({
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
@@ -2104,6 +2355,16 @@ Deno.serve(async (req) => {
         prompt_version: "platform-v3-builtins",
       });
 
+      await rememberCompanionSignals(supabase, {
+        userId,
+        ai,
+        recordType: builtinKey,
+        recordId: row.id,
+        recordTable: "data_records",
+        amount: null,
+        occurredAt: fallbackOccurredAt,
+      });
+
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
       return new Response(JSON.stringify({
         status: "done",
@@ -2270,6 +2531,16 @@ Deno.serve(async (req) => {
         model_provider: aiProvider,
         model_name: aiModel,
         raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
+      });
+
+      await rememberCompanionSignals(supabase, {
+        userId,
+        ai,
+        recordType: "income",
+        recordId: row.id,
+        recordTable: "income_records",
+        amount: normalizedAmount,
+        occurredAt,
       });
 
       const _iDoneSum = await summarizeMonthIncome(supabase, userId);
@@ -2467,6 +2738,16 @@ Deno.serve(async (req) => {
       model_provider: aiProvider,
       model_name: aiModel,
       raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
+    });
+
+    await rememberCompanionSignals(supabase, {
+      userId,
+      ai,
+      recordType: "expense",
+      recordId: row.id,
+      recordTable: "transactions",
+      amount: normalizedAmount,
+      occurredAt,
     });
 
     const _eDoneSum = await summarizeTodaySpend(supabase, userId);

@@ -1,17 +1,37 @@
 export interface PromptContext {
   clientLocalTime?: string | null;
   weekday?: string | null;
+  companionEnabled?: boolean | null;
+  memoryEnabled?: boolean | null;
+  memoryStrength?: string | null;
+  persona?: string | null;
+  customNote?: string | null;
+  memory?: Record<string, unknown> | null;
 }
 
-const COMPANION_PERSONA = `【陪伴文案 companion_message】
-你同时是用户的"日常旁观者"——观察细致、情绪稳定、从不评判。基于本条记录写 1 句话作为 companion_message，要求：
+const PERSONAS: Record<string, string> = {
+  observer: `你是用户的"日常旁观者"：观察细致、情绪稳定、从不评判。
+- 主要做事实观察，优先引用用户记忆中的具体数字和模式。
+- 语气像看见了生活的细节，而不是在做分析报告。`,
+  warm: `你是用户温柔的老朋友：关心但不啰嗦。
+- 优先注意辛苦信号，例如睡得少、深夜消费、连续外卖、很久没运动。
+- 可以说"我注意到了"，但不要劝、不要教育、不要安排用户。`,
+  sharp: `你是用户毒舌但精准的损友：一针见血，轻轻扎心。
+- 必须基于记忆或本条记录的事实开损，只损行为模式，不攻击人。
+- 没有足够数据时就平静陈述，不硬损。`,
+  minimal: `你惜字如金。
+- 只有记忆显示出明确模式时才写一句极短文案（不超过 15 个汉字）。
+- 没有强信号时返回空字符串 ""。`,
+};
+
+const COMPANION_RULES = `【陪伴文案 companion_message】
+基于本条记录和【用户记忆】写 1 句话作为 companion_message，要求：
 - 不超过 30 个汉字，最多 1 句，句末标点 1 个
-- 70% 陈述事实（让用户看到自己没注意到的细节）
-  · 例："今天的第三顿外卖了。" "晚上 11 点 04 分入睡，比昨天早。" "这周第二次跑步。"
-- 25% 简短共情或关心
-  · 例："忙了一上午，先吃饭。" "睡得不算多，今天慢一点。"
-- 5% 极轻调侃（仅当数据足够"有戏"才用，不要每次都用）
-  · 例："又是麻辣烫。" "钱包瘦了 320 元。"
+- 优先级：长期记忆中的稳定模式 > 短期快照中的具体数字 > 本条记录细节 > 空字符串
+- 如果记忆里有足够证据，可以写出"这周第 N 次""最近总是""又回到 XX"这类有记忆感的话
+- 如果记忆没有证据，绝不编造"第 N 次""比昨天""最近总是"等对比
+- 【用户记忆】只允许用于 companion_message，严禁用它推断 amount、merchant_name、category、record_type、occurred_at 等识别字段
+- 避免和【最近陪伴文案】重复句式
 - 严格禁止：
   · 不说"加油""你真棒""注意身体""请合理饮食"等空话
   · 不给建议、不评判好坏、不教育用户
@@ -21,6 +41,11 @@ const COMPANION_PERSONA = `【陪伴文案 companion_message】
   · 支出/收入页面如果同时出现红包、广告、抽免单、优惠活动，只能围绕真实交易主体写，不要说“收到红包”“获得奖励”
 - 如果信息太少写不出有意义的话，返回空字符串 ""，不要硬凑`;
 
+function buildMemoryBlock(memory: Record<string, unknown> | null | undefined, memoryEnabled: boolean): string {
+  if (!memoryEnabled || !memory) return "";
+  return `\n\n【用户记忆（只供 companion_message 使用，不影响识别字段）】\n${JSON.stringify(memory)}`;
+}
+
 export function buildPrompt(ctx: PromptContext = {}): string {
   const contextLines: string[] = [];
   if (ctx.clientLocalTime) {
@@ -29,7 +54,19 @@ export function buildPrompt(ctx: PromptContext = {}): string {
   const contextBlock = contextLines.length
     ? `【运行时上下文】\n${contextLines.join("\n")}\n\n`
     : "";
-  return contextBlock + BASE_PROMPT + "\n\n" + COMPANION_PERSONA;
+  const companionEnabled = ctx.companionEnabled !== false;
+  const memoryEnabled = companionEnabled && ctx.memoryEnabled !== false;
+  if (!companionEnabled) {
+    return contextBlock + BASE_PROMPT + "\n\n【陪伴文案 companion_message】\n用户已关闭 AI 陪伴文案，companion_message 必须返回空字符串 \"\"。";
+  }
+  const personaText = PERSONAS[ctx.persona ?? "observer"] ?? PERSONAS.observer;
+  const customLine = ctx.customNote ? `\n- 用户附加偏好：${ctx.customNote.slice(0, 80)}` : "";
+  const strengthLine = `\n- 记忆引用强度：${ctx.memoryStrength ?? "bold"}（light=偶尔引用，balanced=自然引用，bold=有证据时优先引用）`;
+
+  return contextBlock + BASE_PROMPT
+    + "\n\n" + COMPANION_RULES
+    + "\n\n【你的人格】\n" + personaText + strengthLine + customLine
+    + buildMemoryBlock(ctx.memory, memoryEnabled);
 }
 
 const BASE_PROMPT = `你是个人数据平台的截图识别与路由助手。图片可能来自财务、运动、睡眠、阅读等生活数据域。请先判断图片类型和 record_type，再按对应数据域提取结构化字段。

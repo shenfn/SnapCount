@@ -42,6 +42,8 @@ export function useStore() {
   const USER_SETTING_FIELDS = {
     aiLogsEnabled: 'ai_logs_enabled',
     keepSourceImages: 'keep_source_images',
+    companionEnabled: 'companion_enabled',
+    companionMemoryEnabled: 'companion_memory_enabled',
   }
 
   const currentYear = ref(new Date().getFullYear())
@@ -189,6 +191,8 @@ export function useStore() {
   const settingsState = reactive({
     aiLogsEnabled: true,
     keepSourceImages: true,
+    companionEnabled: true,
+    companionMemoryEnabled: true,
   })
   const actionState = reactive({
     pendingEntry: false,
@@ -415,6 +419,8 @@ export function useStore() {
     pageHistory.value = []
     settingsState.aiLogsEnabled = true
     settingsState.keepSourceImages = true
+    settingsState.companionEnabled = true
+    settingsState.companionMemoryEnabled = true
     Object.keys(actionState).forEach((key) => {
       actionState[key] = false
     })
@@ -439,10 +445,12 @@ export function useStore() {
     if (!currentUserId.value) {
       settingsState.aiLogsEnabled = true
       settingsState.keepSourceImages = true
+      settingsState.companionEnabled = true
+      settingsState.companionMemoryEnabled = true
       return
     }
     const { data, error } = await sb.from('user_configs')
-      .select('ai_logs_enabled, keep_source_images')
+      .select('ai_logs_enabled, keep_source_images, companion_enabled, companion_memory_enabled')
       .eq('user_id', currentUserId.value)
       .maybeSingle()
     if (error) {
@@ -451,6 +459,8 @@ export function useStore() {
     }
     settingsState.aiLogsEnabled = data?.ai_logs_enabled ?? true
     settingsState.keepSourceImages = data?.keep_source_images ?? true
+    settingsState.companionEnabled = data?.companion_enabled ?? true
+    settingsState.companionMemoryEnabled = data?.companion_memory_enabled ?? true
   }
 
   function mapRepaymentCycleRow(row) {

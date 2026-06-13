@@ -155,6 +155,70 @@
     </div>
 
     <div class="settings-section">
+      <div class="settings-section-title">AI 陪伴弹窗</div>
+      <div class="companion-compact">
+        <div class="companion-toggle-grid">
+          <div class="companion-toggle-row">
+            <div>
+              <div class="settings-item-title">陪伴文案</div>
+              <div class="settings-item-sub">通知第一句话</div>
+            </div>
+            <div class="settings-toggle" :class="{ active: store.settingsState.companionEnabled }" @click.stop="store.toggleSetting('companionEnabled')">
+              <div class="toggle-knob"></div>
+            </div>
+          </div>
+          <div class="companion-toggle-row">
+            <div>
+              <div class="settings-item-title">长期记忆</div>
+              <div class="settings-item-sub">引用历史模式</div>
+            </div>
+            <div class="settings-toggle" :class="{ active: store.settingsState.companionMemoryEnabled }" @click.stop="store.toggleSetting('companionMemoryEnabled')">
+              <div class="toggle-knob"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="companion-control">
+          <div class="companion-control-head">
+            <span>语气</span>
+            <span>{{ companionPersonaOptions.find(o => o.value === companionPersona)?.desc }}</span>
+          </div>
+          <div class="companion-chip-row">
+            <button
+              v-for="opt in companionPersonaOptions"
+              :key="opt.value"
+              type="button"
+              class="companion-chip"
+              :class="{ active: companionPersona === opt.value }"
+              @click="updateCompanionPersona(opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="companion-control">
+          <div class="companion-control-head">
+            <span>记忆强度</span>
+            <span>{{ companionMemoryStrengthOptions.find(o => o.value === companionMemoryStrength)?.desc }}</span>
+          </div>
+          <div class="companion-chip-row compact">
+            <button
+              v-for="opt in companionMemoryStrengthOptions"
+              :key="opt.value"
+              type="button"
+              class="companion-chip"
+              :class="{ active: companionMemoryStrength === opt.value }"
+              @click="updateCompanionMemoryStrength(opt.value)"
+            >
+              {{ opt.label.replace('记忆', '') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
       <div class="settings-section-title">AI 联动分析</div>
       <div class="settings-item-sub" style="padding:0 16px 8px;color:#6b7280;font-size:12px;">
         仅影响“联动分析 / AI 解读”模块，不影响截图识别。可以按速度或思考深度切换。
@@ -242,6 +306,8 @@ const store = inject('store')
 const uploadToken = ref('')
 const visionPrimary = ref('auto')
 const aiInsightProvider = ref('auto')
+const companionPersona = ref('observer')
+const companionMemoryStrength = ref('bold')
 
 // ── 数据导出 ──
 const showExportModal = ref(false)
@@ -621,17 +687,74 @@ const insightModelOptions = [
   },
 ]
 
+const companionPersonaOptions = [
+  {
+    value: 'observer',
+    label: '旁观者',
+    desc: '冷静看见细节，事实为主，偶尔轻调侃。',
+    iconText: '观',
+    toneClass: 'primary',
+  },
+  {
+    value: 'warm',
+    label: '老朋友',
+    desc: '更会接住辛苦信号，关心但不说教。',
+    iconText: '暖',
+    toneClass: 'success',
+  },
+  {
+    value: 'sharp',
+    label: '损友',
+    desc: '基于数据轻轻扎心，只损行为不攻击人。',
+    iconText: '损',
+    toneClass: 'warn',
+  },
+  {
+    value: 'minimal',
+    label: '极简',
+    desc: '有强信号才说一句，没话时保持沉默。',
+    iconText: '简',
+    toneClass: 'info',
+  },
+]
+
+const companionMemoryStrengthOptions = [
+  {
+    value: 'light',
+    label: '轻量',
+    desc: '偶尔引用历史，更多围绕当前截图。',
+    iconText: '轻',
+    toneClass: 'info',
+  },
+  {
+    value: 'balanced',
+    label: '自然',
+    desc: '在当前记录和历史模式之间保持平衡。',
+    iconText: '衡',
+    toneClass: 'primary',
+  },
+  {
+    value: 'bold',
+    label: '大胆',
+    desc: '有证据时优先写出连续性和个人感。',
+    iconText: '敢',
+    toneClass: 'warn',
+  },
+]
+
 onMounted(async () => {
   if (store.currentUserId.value) {
     await store.loadUserSettings()
     const { data: cfg } = await sb.from('user_configs')
-      .select('upload_token, plan, vision_primary, ai_insight_provider')
+      .select('upload_token, plan, vision_primary, ai_insight_provider, companion_persona, companion_memory_strength')
       .eq('user_id', store.currentUserId.value)
       .maybeSingle()
     if (cfg) {
       uploadToken.value = cfg.upload_token || ''
       visionPrimary.value = cfg.vision_primary || 'auto'
       aiInsightProvider.value = cfg.ai_insight_provider || 'auto'
+      companionPersona.value = cfg.companion_persona || 'observer'
+      companionMemoryStrength.value = cfg.companion_memory_strength || 'bold'
     }
   }
 })
@@ -678,6 +801,46 @@ async function updateAiInsightProvider(value) {
   }
   const opt = insightModelOptions.find(o => o.value === value)
   store.showFlash(`✓ AI 分析已切换到「${opt?.label || value}」`)
+}
+
+async function updateCompanionPersona(value) {
+  if (companionPersona.value === value) return
+  if (!store.currentUserId.value) {
+    store.showFlash('请先登录')
+    return
+  }
+  const prev = companionPersona.value
+  companionPersona.value = value
+  const { error } = await sb.from('user_configs')
+    .update({ companion_persona: value, updated_at: new Date().toISOString() })
+    .eq('user_id', store.currentUserId.value)
+  if (error) {
+    companionPersona.value = prev
+    store.showFlash('⚠️ 切换失败：' + error.message)
+    return
+  }
+  const opt = companionPersonaOptions.find(o => o.value === value)
+  store.showFlash(`✓ 陪伴语气已切换到「${opt?.label || value}」`)
+}
+
+async function updateCompanionMemoryStrength(value) {
+  if (companionMemoryStrength.value === value) return
+  if (!store.currentUserId.value) {
+    store.showFlash('请先登录')
+    return
+  }
+  const prev = companionMemoryStrength.value
+  companionMemoryStrength.value = value
+  const { error } = await sb.from('user_configs')
+    .update({ companion_memory_strength: value, updated_at: new Date().toISOString() })
+    .eq('user_id', store.currentUserId.value)
+  if (error) {
+    companionMemoryStrength.value = prev
+    store.showFlash('⚠️ 切换失败：' + error.message)
+    return
+  }
+  const opt = companionMemoryStrengthOptions.find(o => o.value === value)
+  store.showFlash(`✓ 记忆强度已切换到「${opt?.label || value}」`)
 }
 
 const userEmail = ref(store.currentUserEmail.value || '内测用户')
