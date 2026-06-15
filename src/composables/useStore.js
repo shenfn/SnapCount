@@ -830,6 +830,7 @@ export function useStore() {
               snapshot_balance: r.snapshot_balance ?? payload.snapshot_balance ?? null,
             },
             companionMessage: payload?.companion_message || '',
+            aiFeedback: payload?.ai_feedback || null,
             imagePath: r.source_image_path,
             imageHash: r.source_image_hash,
             stagingRecordId: r.staging_record_id,

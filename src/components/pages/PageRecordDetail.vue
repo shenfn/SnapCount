@@ -100,6 +100,26 @@
         </div>
       </div>
 
+      <div v-if="aiFeedback" class="record-ai-feedback" :class="feedbackBandClass">
+        <div class="record-ai-feedback-head">
+          <div class="record-ai-feedback-icon">{{ aiFeedback.icon || '✨' }}</div>
+          <div class="record-ai-feedback-main">
+            <div class="record-ai-feedback-kicker">AI 即时反馈</div>
+            <div class="record-ai-feedback-title">{{ aiFeedback.badge }}</div>
+          </div>
+          <div class="record-ai-feedback-band">{{ feedbackBandLabel }}</div>
+        </div>
+        <div class="record-ai-feedback-emotion">{{ aiFeedback.emotion_line }}</div>
+        <div v-if="aiFeedback.utility_line" class="record-ai-feedback-action">{{ aiFeedback.utility_line }}</div>
+        <div v-if="aiFeedback.detail_reason" class="record-ai-feedback-reason">
+          <span>判断依据</span>
+          {{ aiFeedback.detail_reason }}
+        </div>
+        <div v-if="feedbackTimingLabel" class="record-ai-feedback-meta">
+          <span>{{ feedbackTimingLabel }}</span>
+        </div>
+      </div>
+
       <div v-if="companionMessage" class="record-detail-companion">
         <div class="record-detail-companion-mark">💬</div>
         <div>
@@ -185,10 +205,27 @@ const accountExplanation = computed(() => {
   return store.accountBindingExplanation(record.value.kind, record.value.raw)
 })
 const foodDishes = computed(() => getRecordFoodDishes(record.value))
+const aiFeedback = computed(() => {
+  const raw = record.value?.raw
+  if (!raw) return null
+  return raw.aiFeedback || raw.ai_feedback || raw.payload?.ai_feedback || null
+})
+const feedbackBandClass = computed(() => aiFeedback.value?.band ? `band-${aiFeedback.value.band}` : 'band-neutral')
+const feedbackBandLabel = computed(() => {
+  const band = aiFeedback.value?.band
+  if (band === 'positive') return '正向'
+  if (band === 'watch') return '留意'
+  if (band === 'recover') return '兜底'
+  if (band === 'ritual') return '时机'
+  return '观察'
+})
+const feedbackTimingLabel = computed(() => aiFeedback.value?.timing_signal?.label || '')
 const companionMessage = computed(() => {
   const raw = record.value?.raw
   if (!raw) return ''
-  return raw.companionMessage || raw.companion_message || raw.payload?.companion_message || ''
+  const text = raw.companionMessage || raw.companion_message || raw.payload?.companion_message || ''
+  if (aiFeedback.value?.emotion_line && text === aiFeedback.value.emotion_line) return ''
+  return text
 })
 const aiSummary = computed(() => getRecordAiSummary(store, record.value, domainLabel.value))
 

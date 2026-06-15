@@ -242,6 +242,123 @@
   opacity: 0.6;
 }
 
+.record-ai-feedback {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(33, 79, 61, 0.13);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-md);
+}
+
+.record-ai-feedback.band-positive {
+  border-color: rgba(22, 101, 52, 0.18);
+  background: linear-gradient(135deg, rgba(220, 252, 231, 0.9), rgba(255, 255, 255, 0.96));
+}
+
+.record-ai-feedback.band-watch,
+.record-ai-feedback.band-recover {
+  border-color: rgba(180, 83, 9, 0.18);
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.86), rgba(255, 255, 255, 0.96));
+}
+
+.record-ai-feedback.band-ritual {
+  border-color: rgba(37, 99, 235, 0.16);
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.86), rgba(255, 255, 255, 0.96));
+}
+
+.record-ai-feedback-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.record-ai-feedback-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  background: rgba(33, 79, 61, 0.09);
+  font-size: 20px;
+}
+
+.record-ai-feedback-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.record-ai-feedback-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+}
+
+.record-ai-feedback-title {
+  margin-top: 2px;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.record-ai-feedback-band {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(33, 79, 61, 0.08);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.record-ai-feedback-emotion {
+  margin-top: 14px;
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.record-ai-feedback-action {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text1);
+}
+
+.record-ai-feedback-reason {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text2);
+}
+
+.record-ai-feedback-reason span {
+  margin-right: 6px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.record-ai-feedback-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.record-ai-feedback-meta span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(33, 79, 61, 0.08);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
 .record-detail-companion {
   margin-top: 14px;
   display: flex;

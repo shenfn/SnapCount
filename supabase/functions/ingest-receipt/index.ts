@@ -6,6 +6,7 @@ import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
 import { PROMPT, buildPrompt } from "./prompts.ts";
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
+import type { TimeContext } from "./time.ts";
 
 const MOONSHOT_MODEL    = "moonshot-v1-8k-vision-preview";
 const MOONSHOT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
@@ -295,6 +296,25 @@ interface AIResult {
   payload_jsonb?: Record<string, unknown> | null;
   confidence: number;
   companion_message?: string | null;
+}
+
+interface AIFeedback {
+  version: "feedback-v1";
+  domain_key: string;
+  badge: string;
+  icon: string;
+  band: "positive" | "neutral" | "watch" | "recover" | "ritual";
+  tone: string;
+  emotion_line: string;
+  utility_line?: string | null;
+  detail_reason?: string | null;
+  internal_score?: number | null;
+  confidence: number;
+  source: "rule" | "hybrid";
+  timing_signal?: {
+    key: string;
+    label: string;
+  } | null;
 }
 
 interface AccountRow {
@@ -1342,6 +1362,374 @@ function buildBuiltinCompanionFallback(
   return null;
 }
 
+function compactFeedbackText(value: string | null | undefined, max = 42): string | null {
+  const text = normalizeString(value)?.replace(/[\r\n]+/g, " ").trim();
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function feedbackNotification(feedback: AIFeedback | null, fallback: string): string {
+  if (!feedback || feedback.confidence < 0.5) return fallback;
+  const lines = [
+    `${feedback.icon} ${feedback.badge}`,
+    compactFeedbackText(feedback.emotion_line, 34),
+    compactFeedbackText(feedback.utility_line, 34) ?? fallback.split("\n")[0],
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+function timingSignalFor(domainKey: string, timeContext: TimeContext | null): AIFeedback["timing_signal"] {
+  if (!timeContext || timeContext.delta_minutes === null || timeContext.delta_minutes < 0) return null;
+  const delta = timeContext.delta_minutes;
+  if (domainKey === "sleep" && delta <= 15) return { key: "morning_check", label: "晨起记录" };
+  if (domainKey === "sport" && delta <= 30) return { key: "post_sport_check", label: "运动后记录" };
+  if (domainKey === "expense" && delta <= 10) return { key: "realtime_accounting", label: "即时记账" };
+  if (timeContext.is_backfill) return { key: "backfill", label: "补录完成" };
+  return null;
+}
+
+function buildBuiltinAIFeedback(
+  domainKey: BuiltinDomainKey,
+  built: { payload: Record<string, unknown>; title: string; summary: string },
+  timeContext: TimeContext,
+): AIFeedback | null {
+  const timingSignal = timingSignalFor(domainKey, timeContext);
+  const payload = built.payload || {};
+
+  if (domainKey === "sport") {
+    const sportType = normalizeString(payload.sport_type) ?? "运动";
+    const duration = normalizeNumber(payload.duration_minutes);
+    const distance = normalizeNumber(payload.distance_km);
+    const calories = normalizeNumber(payload.calories);
+    const avgHeartRate = normalizeNumber(payload.avg_heart_rate);
+    if (timingSignal?.key === "post_sport_check") {
+      return {
+        version: "feedback-v1",
+        domain_key: "sport",
+        badge: "即时记录",
+        icon: "🏃",
+        band: "ritual",
+        tone: "ritual_seen",
+        emotion_line: `刚${sportType}完就记录，身体状态还新鲜。`,
+        utility_line: duration !== null ? `这次运动 ${Math.round(duration)} 分钟，后面看恢复更有意义。` : "这条记录留下了运动后的第一手状态。",
+        detail_reason: `截图时间与运动时间相隔约 ${timeContext.delta_minutes} 分钟，属于运动后即时记录。`,
+        internal_score: 82,
+        confidence: 0.82,
+        source: "rule",
+        timing_signal: timingSignal,
+      };
+    }
+    if (duration !== null && duration >= 30 && (distance !== null || calories !== null)) {
+      return {
+        version: "feedback-v1",
+        domain_key: "sport",
+        badge: "有效有氧",
+        icon: "🏃",
+        band: "positive",
+        tone: "specific_recognition",
+        emotion_line: distance !== null
+          ? `${Math.round(duration)} 分钟 ${distance} 公里，不是随便活动一下。`
+          : `${Math.round(duration)} 分钟运动，身体被认真调动起来了。`,
+        utility_line: avgHeartRate !== null ? `平均心率 ${Math.round(avgHeartRate)}，详情里可以看强度。` : "这类完整记录，最适合后面看连续性。",
+        detail_reason: `时长达到 30 分钟以上${distance !== null ? `，距离 ${distance} 公里` : ""}${calories !== null ? `，消耗约 ${Math.round(calories)} 千卡` : ""}。`,
+        internal_score: 78,
+        confidence: 0.78,
+        source: "rule",
+        timing_signal: timingSignal,
+      };
+    }
+    if (duration !== null) {
+      return {
+        version: "feedback-v1",
+        domain_key: "sport",
+        badge: "轻量唤醒",
+        icon: "🏃",
+        band: "neutral",
+        tone: "light_observation",
+        emotion_line: `${sportType} ${Math.round(duration)} 分钟，今天身体被叫醒了。`,
+        utility_line: "量不一定大，但这条记录能接上运动节奏。",
+        detail_reason: "本次运动时长较短或缺少距离/热量信息，先按轻量运动记录处理。",
+        internal_score: 62,
+        confidence: 0.68,
+        source: "rule",
+        timing_signal: timingSignal,
+      };
+    }
+  }
+
+  if (domainKey === "sleep") {
+    const sleepHours = normalizeNumber(payload.sleep_hours);
+    const sleepMinutes = normalizeNumber(payload.sleep_minutes);
+    const hours = sleepHours ?? (sleepMinutes !== null ? sleepMinutes / 60 : null);
+    if (timingSignal?.key === "morning_check") {
+      return {
+        version: "feedback-v1",
+        domain_key: "sleep",
+        badge: "晨起记录",
+        icon: "🌙",
+        band: "ritual",
+        tone: "ritual_seen",
+        emotion_line: `醒后 ${timeContext.delta_minutes} 分钟就截图，像是晨间小仪式。`,
+        utility_line: hours !== null ? `这晚约 ${Math.round(hours * 10) / 10} 小时，状态还很新鲜。` : "刚醒就记录，睡眠感受还没有被白天冲淡。",
+        detail_reason: "截图时间与醒来时间非常接近，记录时机本身具有习惯信号。",
+        internal_score: 84,
+        confidence: 0.84,
+        source: "rule",
+        timing_signal: timingSignal,
+      };
+    }
+    if (timeContext.is_backfill) {
+      return {
+        version: "feedback-v1",
+        domain_key: "sleep",
+        badge: "补录完成",
+        icon: "🌙",
+        band: "neutral",
+        tone: "archive_first",
+        emotion_line: "这是补录，先把睡眠拼图补上就有价值。",
+        utility_line: hours !== null ? `这晚约 ${Math.round(hours * 10) / 10} 小时，后面再看趋势。` : "补齐记录，比空着一晚更有用。",
+        detail_reason: "记录发生时间早于截图时间，系统按补录处理，不强行评价当天状态。",
+        internal_score: 60,
+        confidence: 0.72,
+        source: "rule",
+        timing_signal: timingSignal,
+      };
+    }
+    if (hours !== null && hours >= 7) {
+      return {
+        version: "feedback-v1",
+        domain_key: "sleep",
+        badge: "睡够一晚",
+        icon: "🌙",
+        band: "positive",
+        tone: "specific_recognition",
+        emotion_line: `这晚睡了 ${Math.round(hours * 10) / 10} 小时，底子比较厚。`,
+        utility_line: "今天别急着把电量一次性花完。",
+        detail_reason: "睡眠时长达到 7 小时以上，先按相对充足的一晚处理。",
+        internal_score: 76,
+        confidence: 0.76,
+        source: "rule",
+        timing_signal: timingSignal,
+      };
+    }
+    if (hours !== null) {
+      return {
+        version: "feedback-v1",
+        domain_key: "sleep",
+        badge: "轻缺觉",
+        icon: "🌙",
+        band: "watch",
+        tone: "soft_watch",
+        emotion_line: `这晚约 ${Math.round(hours * 10) / 10} 小时，有点薄。`,
+        utility_line: "今天少给自己加码一点，就算补回来了。",
+        detail_reason: "睡眠时长低于 7 小时，但单晚记录只提示状态，不评价用户。",
+        internal_score: 52,
+        confidence: 0.7,
+        source: "rule",
+        timing_signal: timingSignal,
+      };
+    }
+  }
+
+  if (domainKey === "food") {
+    const mealType = normalizeString(payload.meal_type);
+    const calories = normalizeNumber(payload.total_calorie_kcal);
+    const dishes = Array.isArray(payload.dishes) ? payload.dishes : [];
+    const dishText = dishes
+      .map((item) => item && typeof item === "object" ? normalizeString((item as Record<string, unknown>).name) : null)
+      .filter(Boolean)
+      .join(" ");
+    const isSweetOrFried = includesAny(`${built.title} ${built.summary} ${dishText}`, ["奶茶", "可乐", "炸", "薯条", "甜", "蛋糕", "汉堡"]).length > 0;
+    if (isSweetOrFried || (calories !== null && calories >= 800)) {
+      return {
+        version: "feedback-v1",
+        domain_key: "food",
+        badge: "偏放松",
+        icon: "🍱",
+        band: "recover",
+        tone: "soft_recovery",
+        emotion_line: "偶尔吃得快乐一点很正常，快乐也是刚需。",
+        utility_line: "轻补救：今晚散步 15 分钟，或者下一餐清一点。",
+        detail_reason: calories !== null
+          ? `这顿估算约 ${Math.round(calories)} 千卡，且可能包含甜口或油炸元素。`
+          : "这顿可能包含甜口或油炸元素，按轻量兜底处理。",
+        internal_score: 48,
+        confidence: 0.72,
+        source: "rule",
+        timing_signal: timingSignal,
+      };
+    }
+    if (mealType && mealType !== "snack") {
+      return {
+        version: "feedback-v1",
+        domain_key: "food",
+        badge: "结构扎实",
+        icon: "🍱",
+        band: "positive",
+        tone: "specific_recognition",
+        emotion_line: "这顿像是认真吃饭，不是随便糊弄一口。",
+        utility_line: calories !== null ? `估算约 ${Math.round(calories)} 千卡，适合和当天总量一起看。` : "后面补齐几次，饮食节奏会更清楚。",
+        detail_reason: "当前记录被识别为正餐，且没有明显高糖/油炸信号。",
+        internal_score: 72,
+        confidence: 0.7,
+        source: "rule",
+        timing_signal: timingSignal,
+      };
+    }
+    return {
+      version: "feedback-v1",
+      domain_key: "food",
+      badge: "轻加餐",
+      icon: "🍱",
+      band: "neutral",
+      tone: "light_observation",
+      emotion_line: "这更像一次加餐，不用把它当成正餐压力。",
+      utility_line: "下一顿正常吃，节奏就不会被它带跑。",
+      detail_reason: "当前记录更接近零食或加餐，单次记录不做强评价。",
+      internal_score: 60,
+      confidence: 0.66,
+      source: "rule",
+      timing_signal: timingSignal,
+    };
+  }
+
+  if (domainKey === "reading") {
+    const minutes = normalizeNumber(payload.reading_minutes);
+    return {
+      version: "feedback-v1",
+      domain_key: "reading",
+      badge: minutes !== null && minutes >= 20 ? "连续推进" : "碎片续航",
+      icon: "📚",
+      band: "positive",
+      tone: "steady_progress",
+      emotion_line: minutes !== null && minutes >= 20 ? "今天不是只翻两页，进度往前挪了一格。" : "碎片阅读最怕断，不怕慢。",
+      utility_line: minutes !== null ? `这次 ${Math.round(minutes)} 分钟，后面看连续性更有意义。` : "先把阅读这件事接住了。",
+      detail_reason: "阅读记录更重视连续性和主题沉淀，不按单次数量评价。",
+      internal_score: minutes !== null && minutes >= 20 ? 74 : 66,
+      confidence: 0.68,
+      source: "rule",
+      timing_signal: timingSignal,
+    };
+  }
+
+  if (domainKey === "wallet") {
+    const recordKind = normalizeString(payload.record_kind);
+    const amount = normalizeNumber(payload.amount);
+    return {
+      version: "feedback-v1",
+      domain_key: "wallet",
+      badge: recordKind === "liability_snapshot" ? "现金流提醒" : "账户快照",
+      icon: "💳",
+      band: recordKind === "liability_snapshot" ? "watch" : "neutral",
+      tone: "finance_observation",
+      emotion_line: recordKind === "liability_snapshot" ? "这条重点不是金额，是后面的还款节奏。" : "这次留的是账户状态，不只是单笔流水。",
+      utility_line: amount !== null ? `金额 ${fmtYuan(amount)}，后面适合看余额变化。` : "先把快照留住，后面才看得出变化。",
+      detail_reason: recordKind === "liability_snapshot" ? "识别为待还/账单类快照，优先提醒还款节奏。" : "识别为余额类快照，适合作为账户变化参照。",
+      internal_score: 62,
+      confidence: 0.68,
+      source: "rule",
+      timing_signal: timingSignal,
+    };
+  }
+
+  return null;
+}
+
+function buildExpenseAIFeedback(
+  ai: AIResult,
+  amount: number | null,
+  timeContext: TimeContext,
+  possibleDuplicate: boolean,
+): AIFeedback | null {
+  if (amount === null || (ai.confidence ?? 0) < 0.7) return null;
+  const timingSignal = timingSignalFor("expense", timeContext);
+  const category = normalizeString(ai.category);
+  const merchant = normalizeString(ai.merchant_name);
+  if (possibleDuplicate) {
+    return {
+      version: "feedback-v1",
+      domain_key: "expense",
+      badge: "疑似重复",
+      icon: "💸",
+      band: "watch",
+      tone: "verify_gently",
+      emotion_line: "这笔和刚才的消费很像，先别急着算两次。",
+      utility_line: "轻确认：点进 App 看一眼是不是重复记账。",
+      detail_reason: "3 分钟内存在同金额、同支付方式且商家相近的支出。",
+      internal_score: 50,
+      confidence: 0.82,
+      source: "rule",
+      timing_signal: timingSignal,
+    };
+  }
+  if (timingSignal?.key === "realtime_accounting") {
+    return {
+      version: "feedback-v1",
+      domain_key: "expense",
+      badge: "即时记账",
+      icon: "💸",
+      band: "ritual",
+      tone: "ritual_seen",
+      emotion_line: "这笔刚发生就记下来了，小账没有漏掉。",
+      utility_line: merchant ? `${merchant} 这笔已收进今天账本。` : "这种即时记录，最能防止月底对不上。",
+      detail_reason: `截图时间与交易时间相隔约 ${timeContext.delta_minutes} 分钟，属于即时记账。`,
+      internal_score: 82,
+      confidence: 0.82,
+      source: "rule",
+      timing_signal: timingSignal,
+    };
+  }
+  if (amount <= 20) {
+    return {
+      version: "feedback-v1",
+      domain_key: "expense",
+      badge: "小额渗漏",
+      icon: "💸",
+      band: "watch",
+      tone: "soft_watch",
+      emotion_line: "金额不大，但小额最容易在月底失踪。",
+      utility_line: category ? `先把${category}归好类，后面看频率。` : "先看见它，就已经少漏一笔。",
+      detail_reason: `本笔支出 ${fmtYuan(amount)}，属于小额消费，价值在于频率追踪。`,
+      internal_score: 58,
+      confidence: 0.68,
+      source: "rule",
+      timing_signal: timingSignal,
+    };
+  }
+  if (category && includesAny(category, ["交通", "transport", "缴费", "生活"]).length) {
+    return {
+      version: "feedback-v1",
+      domain_key: "expense",
+      badge: "必要支出",
+      icon: "💸",
+      band: "neutral",
+      tone: "finance_observation",
+      emotion_line: "这笔更像必要支出，不用和冲动消费混着看。",
+      utility_line: `金额 ${fmtYuan(amount)}，重点放在周期和总量。`,
+      detail_reason: "当前分类偏生活必要支出，适合与周期预算一起看。",
+      internal_score: 64,
+      confidence: 0.66,
+      source: "rule",
+      timing_signal: timingSignal,
+    };
+  }
+  return {
+    version: "feedback-v1",
+    domain_key: "expense",
+    badge: "清楚入账",
+    icon: "💸",
+    band: "neutral",
+    tone: "finance_observation",
+    emotion_line: merchant ? `${merchant} 这笔已经归位，今天账面更清楚。` : "这笔已经归位，今天账面更清楚。",
+    utility_line: `金额 ${fmtYuan(amount)}，后面更适合看当天总量。`,
+    detail_reason: "支出识别完整并已入账，本次反馈优先强调记录完整性。",
+    internal_score: 66,
+    confidence: 0.64,
+    source: "rule",
+    timing_signal: timingSignal,
+  };
+}
+
 async function upsertCompanionMemory(
   supabase: ReturnType<typeof createClient>,
   payload: {
@@ -2086,6 +2474,7 @@ Deno.serve(async (req) => {
     if (!companionSettings.enabled) ai.companion_message = null;
     ai.companion_message = sanitizeCompanionMessageForContent(ai.companion_message, ai);
     let companionMessage: string | null = ai.companion_message;
+    let aiFeedback: AIFeedback | null = null;
     const withCompanion = (text: string) => companionMessage ? `${companionMessage}\n${text}` : text;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
@@ -2134,7 +2523,7 @@ Deno.serve(async (req) => {
         companionMessage = sanitizeCompanionMessageForTime(companionMessage, ai, timeContext);
         companionMessage = sanitizeCompanionMessageForContent(companionMessage, ai);
         ai.companion_message = companionMessage;
-        const aiWithTimeContext = { ...ai, time_context: timeContext };
+        let aiWithTimeContext: Record<string, unknown> = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
         const recordDate = occurredDateTime?.date ?? today;
         const recordTime = occurredDateTime?.time ?? nowTime;
 
@@ -2171,10 +2560,19 @@ Deno.serve(async (req) => {
           const built = buildBuiltinPayload(ai);
           const domain = await getDomainByKey(supabase, builtinKey);
           if (domain && built) {
+            const retryFeedback = built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75 && companionSettings.enabled
+              ? buildBuiltinAIFeedback(builtinKey, built, timeContext)
+              : null;
+            if (retryFeedback) {
+              aiFeedback = retryFeedback;
+              companionMessage = retryFeedback.emotion_line;
+              ai.companion_message = companionMessage;
+              aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+            }
             const { data: drRow } = await supabase.from("data_records").insert({
               domain_id: domain.id, domain_key: builtinKey, domain_version: domain.version ?? "1.0",
               occurred_at: occurredAt, title: built.title, summary: built.summary,
-              payload_jsonb: { ...built.payload, time_context: timeContext, companion_message: companionMessage }, user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
+              payload_jsonb: { ...built.payload, time_context: timeContext, companion_message: companionMessage, ai_feedback: aiFeedback }, user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
             }).select("id").single();
             if (drRow) { archivedTo = "data_records"; archivedId = drRow.id; }
           }
@@ -2250,9 +2648,10 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
-            notification: withCompanion(_retryNotif),
+            notification: aiFeedback ? feedbackNotification(aiFeedback, _retryNotif) : withCompanion(_retryNotif),
             time_context: timeContext,
             companion_message: companionMessage,
+            ai_feedback: aiFeedback,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       }
@@ -2296,7 +2695,7 @@ Deno.serve(async (req) => {
     companionMessage = sanitizeCompanionMessageForTime(companionMessage, ai, timeContext);
     companionMessage = sanitizeCompanionMessageForContent(companionMessage, ai);
     ai.companion_message = companionMessage;
-    let aiWithTimeContext = { ...ai, time_context: timeContext };
+    let aiWithTimeContext: Record<string, unknown> = { ...ai, time_context: timeContext };
     const recordDate = occurredDateTime?.date ?? today;
     const recordTime = occurredDateTime?.time ?? nowTime;
 
@@ -2364,6 +2763,14 @@ Deno.serve(async (req) => {
       const domain = await getDomainByKey(supabase, builtinKey);
       const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : (occurredAt ?? new Date().toISOString());
       const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
+      if (shouldAutoArchive && built && companionSettings.enabled) {
+        aiFeedback = buildBuiltinAIFeedback(builtinKey, built, timeContext);
+        if (aiFeedback) {
+          companionMessage = aiFeedback.emotion_line;
+          ai.companion_message = companionMessage;
+          aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+        }
+      }
       if (!companionMessage && built) {
         companionMessage = sanitizeCompanionMessageForContent(buildBuiltinCompanionFallback(builtinKey, built), ai);
         ai.companion_message = companionMessage;
@@ -2439,7 +2846,7 @@ Deno.serve(async (req) => {
         occurred_at: fallbackOccurredAt,
         title: built.title,
         summary: built.summary,
-        payload_jsonb: { ...built.payload, time_context: timeContext, companion_message: companionMessage },
+        payload_jsonb: { ...built.payload, time_context: timeContext, companion_message: companionMessage, ai_feedback: aiFeedback },
         user_id: userId || null,
         source: "ai_scan",
         source_image_path: path,
@@ -2516,15 +2923,17 @@ Deno.serve(async (req) => {
       });
 
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
+      const _domainDoneNotif = `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`;
       return new Response(JSON.stringify({
         status: "done",
         id: row.id,
         record_type: builtinKey,
         ai_ok: aiOk,
         message: `✓ ${domainNameFromKey(builtinKey) ?? "记录"}已归档`,
-        notification: withCompanion(`${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`),
+        notification: aiFeedback ? feedbackNotification(aiFeedback, _domainDoneNotif) : withCompanion(_domainDoneNotif),
         time_context: timeContext,
         companion_message: companionMessage,
+        ai_feedback: aiFeedback,
         data: row,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -2798,6 +3207,14 @@ Deno.serve(async (req) => {
     const isComplete = normalizedAmount !== null && ai.platform !== null && ai.category !== null && ai.payment_method !== null;
     const status = isComplete && (ai.confidence ?? 0) >= 0.7 ? "done" : "pending";
     const isLargeTransport = ai.category === "transport" && (normalizedAmount ?? 0) >= 200;
+    if (status === "done" && companionSettings.enabled) {
+      aiFeedback = buildExpenseAIFeedback(ai, normalizedAmount, timeContext, possibleDuplicate);
+      if (aiFeedback) {
+        companionMessage = aiFeedback.emotion_line;
+        ai.companion_message = companionMessage;
+        aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+      }
+    }
 
     // 6. 写入数据库
     const { data: row, error: insErr } = await supabase.from("transactions").insert({
@@ -2912,6 +3329,7 @@ Deno.serve(async (req) => {
     if (possibleDuplicate) {
       _ePrimary = `⚠️ ${_ePrimary.replace(/^[💸⚠️]\s*/, "")} · 疑似 3 分钟内重复`;
     }
+    const _expenseNotif = `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`;
     return new Response(JSON.stringify({
       status: row.status,
       id: row.id,
@@ -2921,9 +3339,10 @@ Deno.serve(async (req) => {
       message: possibleDuplicate
         ? `✓ 已记账（⚠ 3 分钟内有相同消费，请确认是否重复，参考 id: ${dupRefId}）`
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
-      notification: withCompanion(`${_ePrimary}\n${todaySpendLine(_eDoneSum)}`),
+      notification: aiFeedback ? feedbackNotification(aiFeedback, _expenseNotif) : withCompanion(_expenseNotif),
       time_context: timeContext,
       companion_message: companionMessage,
+      ai_feedback: aiFeedback,
       data: row,
     }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
