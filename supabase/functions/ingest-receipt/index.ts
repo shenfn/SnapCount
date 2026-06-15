@@ -1202,6 +1202,11 @@ interface CompanionSettings {
   customNote: string | null;
 }
 
+type CompanionContext = {
+  settings: CompanionSettings;
+  memory: Record<string, unknown> | null;
+};
+
 const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   enabled: true,
   memoryEnabled: true,
@@ -1211,15 +1216,48 @@ const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   customNote: null,
 };
 
+const COMPANION_CONTEXT_TIMEOUT_MS = 900;
+
+async function withTimeoutFallback<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+  label: string,
+): Promise<T> {
+  let settled = false;
+  return await new Promise<T>((resolve) => {
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      console.warn(`${label} timed out after ${timeoutMs}ms; continuing with fallback`);
+      resolve(fallback);
+    }, timeoutMs);
+
+    promise.then((value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    }).catch((error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      console.warn(`${label} failed:`, error?.message ?? error);
+      resolve(fallback);
+    });
+  });
+}
+
 async function loadCompanionContext(
   supabase: ReturnType<typeof createClient>,
   userId: string | null,
-): Promise<{ settings: CompanionSettings; memory: Record<string, unknown> | null }> {
-  if (!userId) return { settings: DEFAULT_COMPANION_SETTINGS, memory: null };
+  fallbackSettings: CompanionSettings = DEFAULT_COMPANION_SETTINGS,
+): Promise<CompanionContext> {
+  if (!userId) return { settings: fallbackSettings, memory: null };
   const { data, error } = await supabase.rpc("get_companion_context", { p_user_id: userId });
   if (error) {
     console.warn("Companion context fetch failed:", error.message);
-    return { settings: DEFAULT_COMPANION_SETTINGS, memory: null };
+    return { settings: fallbackSettings, memory: null };
   }
   const raw = (data || {}) as Record<string, unknown>;
   const settingsRaw = (raw.settings || {}) as Record<string, unknown>;
@@ -1511,7 +1549,7 @@ function buildBuiltinAIFeedback(
         band: "neutral",
         tone: "archive_first",
         emotion_line: "这是补录，先把睡眠拼图补上就有价值。",
-        utility_line: hours !== null ? `这晚约 ${Math.round(hours * 10) / 10} 小时，后面再看趋势。` : "补齐记录，比空着一晚更有用。",
+        utility_line: hours !== null ? `这晚约 ${Math.round(hours * 10) / 10} 小时。` : null,
         detail_reason: "记录发生时间早于截图时间，系统按补录处理，不强行评价当天状态。",
         internal_score: 60,
         confidence: 0.72,
@@ -2288,7 +2326,7 @@ Deno.serve(async (req) => {
     }
 
     let companionSettings: CompanionSettings = DEFAULT_COMPANION_SETTINGS;
-    let companionContextPromise: Promise<{ settings: CompanionSettings; memory: Record<string, unknown> | null }> = Promise.resolve({
+    let companionContextPromise: Promise<CompanionContext> = Promise.resolve({
       settings: DEFAULT_COMPANION_SETTINGS,
       memory: null,
     });
@@ -2316,7 +2354,7 @@ Deno.serve(async (req) => {
           visionProviders.unshift(picked);
         }
       }
-      companionContextPromise = loadCompanionContext(supabase, userId);
+      companionContextPromise = loadCompanionContext(supabase, userId, companionSettings);
     }
 
     const stagingRetryId = normalizeString(form.get("staging_record_id"));
@@ -2388,7 +2426,12 @@ Deno.serve(async (req) => {
       : chinaNow;
     const _weekdayCN = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][referenceLocal.getUTCDay()];
     const clientLocalTime = `${referenceLocal.toISOString().slice(0, 10)} ${String(referenceLocal.getUTCHours()).padStart(2, '0')}:${String(referenceLocal.getUTCMinutes()).padStart(2, '0')}`;
-    const companionContext = await companionContextPromise;
+    const companionContext = await withTimeoutFallback(
+      companionContextPromise,
+      COMPANION_CONTEXT_TIMEOUT_MS,
+      { settings: companionSettings, memory: null },
+      "companion_context",
+    );
     companionSettings = companionContext.settings;
     timings.mark("companion_context");
     const visionPrompt = buildPrompt({
@@ -3020,7 +3063,7 @@ Deno.serve(async (req) => {
         record_type: builtinKey,
         ai_ok: aiOk,
         message: `✓ ${domainNameFromKey(builtinKey) ?? "记录"}已归档`,
-        notification: aiFeedback ? feedbackNotification(aiFeedback, _domainDoneNotif) : withCompanion(_domainDoneNotif),
+        notification: aiFeedback ? feedbackNotification(aiFeedback, _domainDoneNotif, { preserveFallbackAll: true }) : withCompanion(_domainDoneNotif),
         time_context: timeContext,
         companion_message: companionMessage,
         ai_feedback: aiFeedback,

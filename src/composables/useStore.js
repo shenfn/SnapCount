@@ -586,6 +586,7 @@ export function useStore() {
   }
 
   let lastRefreshTs = 0
+  let loadDataRunId = 0
   const REFRESH_MIN_INTERVAL = 3000
 
   // 静默刷新（用于后台切回前台时自动拉新）
@@ -721,11 +722,14 @@ export function useStore() {
     }
   }
 
-  async function loadData(attempt = 0, silent = false) {
+  async function loadData(attempt = 0, silent = false, runId = null) {
+    if (attempt === 0 || !runId) runId = ++loadDataRunId
     if (attempt === 0 && !silent) loading.value = true
     if (attempt === 0 && !silent) loadError.value = ''
     if (attempt === 0) lastRefreshTs = Date.now()
-    if (attempt === 0) await loadUserSettings()
+    if (attempt === 0) {
+      loadUserSettings().catch(e => console.warn('加载用户设置失败:', e?.message || e))
+    }
     // Phase 1：拉取域协议（每会话一次，失败不阻断主流程）
     if (attempt === 0) loadDomainSchemas()
     try {
@@ -734,12 +738,67 @@ export function useStore() {
       const lastDay = new Date(currentYear.value, currentMonth.value, 0).getDate()
       const end = `${currentYear.value}-${padM}-${String(lastDay).padStart(2, '0')}`
 
-      const { data: txs, error: txErr } = await sb.from('transactions')
-        .select('*')
-        .gte('transaction_date', start)
-        .lte('transaction_date', end)
-        .order('transaction_date', { ascending: false })
-        .order('transaction_time', { ascending: false })
+      const mapIncomeRow = (r) => ({
+        id: r.id,
+        cat: r.category,
+        source: r.source_name,
+        amount: Number(r.amount),
+        date: formatDate(r.income_date),
+        dateRaw: r.income_date,
+        createdAt: r.created_at,
+        time: '',
+        icon: incomeCatMap[r.category]?.icon || '💰',
+        note: r.note,
+        image_url: r.image_url,
+        image_path: r.image_url,
+        sourceType: r.source || 'manual',
+        companionMessage: r.companion_message || '',
+        accountId: r.account_id || null,
+      })
+
+      const [
+        txResult,
+        incResult,
+        recentIncResult,
+        universalResult,
+        accountResult,
+        stagingResult,
+      ] = await Promise.all([
+        sb.from('transactions')
+          .select('*')
+          .gte('transaction_date', start)
+          .lte('transaction_date', end)
+          .order('transaction_date', { ascending: false })
+          .order('transaction_time', { ascending: false }),
+        sb.from('income_records')
+          .select('*')
+          .gte('income_date', start)
+          .lte('income_date', end)
+          .order('income_date', { ascending: false }),
+        sb.from('income_records')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(10),
+        sb.from('data_records')
+          .select('*')
+          .gte('occurred_at', `${start}T00:00:00+08:00`)
+          .lte('occurred_at', `${end}T23:59:59+08:00`)
+          .order('occurred_at', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+          .limit(120),
+        sb.from('accounts')
+          .select('*')
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+        sb.from('staging_records')
+          .select('*')
+          .not('status', 'in', '(discarded,archived)')
+          .or(`occurred_at.gte.${start}T00:00:00+08:00,occurred_at.is.null`)
+          .order('occurred_at', { ascending: false, nullsFirst: false })
+          .limit(30),
+      ])
+
+      const { data: txs, error: txErr } = txResult
       if (txErr) throw new Error('账单查询失败: ' + txErr.message)
 
       bills.value = (txs || []).map(mapTransaction)
@@ -747,67 +806,20 @@ export function useStore() {
         .filter(b => b.cat === 'transport' && b.amount >= 200)
         .map(b => ({ id: b.id, type: b.transport_type || '交通', desc: b.name, amount: b.amount, date: b.date }))
 
-      const { data: incs, error: incErr } = await sb.from('income_records')
-        .select('*')
-        .gte('income_date', start)
-        .lte('income_date', end)
-        .order('income_date', { ascending: false })
+      const { data: incs, error: incErr } = incResult
       if (incErr) console.warn('加载收入失败:', incErr.message)
-
-      incomeRecords.value = (incs || []).map(r => ({
-        id: r.id,
-        cat: r.category,
-        source: r.source_name,
-        amount: Number(r.amount),
-        date: formatDate(r.income_date),
-        dateRaw: r.income_date,
-        createdAt: r.created_at,
-        time: '',
-        icon: incomeCatMap[r.category]?.icon || '💰',
-        note: r.note,
-        image_url: r.image_url,
-        image_path: r.image_url,
-        sourceType: r.source || 'manual',
-        companionMessage: r.companion_message || '',
-        accountId: r.account_id || null,
-      }))
+      incomeRecords.value = (incs || []).map(mapIncomeRow)
 
       unboundRecords.value = {
         expenses: bills.value.filter(b => b.status === 'done' && !b.accountId),
         incomes: incomeRecords.value.filter(r => !r.accountId),
       }
 
-      const { data: recentIncs, error: recentIncErr } = await sb.from('income_records')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10)
+      const { data: recentIncs, error: recentIncErr } = recentIncResult
       if (recentIncErr) console.warn('加载最近收入失败:', recentIncErr.message)
+      recentIncomeRecords.value = (recentIncs || []).map(mapIncomeRow)
 
-      recentIncomeRecords.value = (recentIncs || []).map(r => ({
-        id: r.id,
-        cat: r.category,
-        source: r.source_name,
-        amount: Number(r.amount),
-        date: formatDate(r.income_date),
-        dateRaw: r.income_date,
-        createdAt: r.created_at,
-        time: '',
-        icon: incomeCatMap[r.category]?.icon || '💰',
-        note: r.note,
-        image_url: r.image_url,
-        image_path: r.image_url,
-        sourceType: r.source || 'manual',
-        companionMessage: r.companion_message || '',
-        accountId: r.account_id || null,
-      }))
-
-      const { data: universalRows, error: universalErr } = await sb.from('data_records')
-        .select('*')
-        .gte('occurred_at', `${start}T00:00:00+08:00`)
-        .lte('occurred_at', `${end}T23:59:59+08:00`)
-        .order('occurred_at', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(120)
+      const { data: universalRows, error: universalErr } = universalResult
       if (universalErr) {
         console.warn('加载通用记录失败:', universalErr.message)
         dataRecords.value = []
@@ -839,10 +851,7 @@ export function useStore() {
         })
       }
 
-      const { data: accountRows, error: accountErr } = await sb.from('accounts')
-        .select('*')
-        .order('sort_order', { ascending: true })
-        .order('created_at', { ascending: true })
+      const { data: accountRows, error: accountErr } = accountResult
       if (accountErr) {
         console.warn('加载账户失败:', accountErr.message)
         accounts.value = []
@@ -850,100 +859,138 @@ export function useStore() {
         accounts.value = (accountRows || []).map(mapAccountRow)
       }
 
-      const { error: ensureCycleErr } = await sb.rpc('ensure_liability_repayment_cycles', {
-        p_cycle_month: `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`,
-      })
-      if (ensureCycleErr) console.warn('生成还款周期失败:', ensureCycleErr.message)
-
-      const { data: cycleRows, error: cycleErr } = await sb.from('account_repayment_cycles')
-        .select('*')
-        .order('due_date', { ascending: true, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(80)
-      if (cycleErr) {
-        console.warn('加载还款周期失败:', cycleErr.message)
-        repaymentCycles.value = []
-      } else {
-        repaymentCycles.value = (cycleRows || []).map(mapRepaymentCycleRow)
-      }
-
-      const { data: staging, error: stagingErr } = await sb.from('staging_records')
-        .select('*')
-        .not('status', 'in', '(discarded,archived)')
-        .or(`occurred_at.gte.${start}T00:00:00+08:00,occurred_at.is.null`)
-        .order('occurred_at', { ascending: false, nullsFirst: false })
-        .limit(30)
+      const { data: staging, error: stagingErr } = stagingResult
       if (stagingErr) console.warn('加载中转站失败:', stagingErr.message)
 
-      stagingRecords.value = stagingErr ? [] : await Promise.all((staging || []).map(async r => {
-        const imageUrl = await getSignedImageUrl(r.image_path)
+      const stagingRows = stagingErr ? [] : (staging || [])
+
+      stagingRecords.value = stagingRows.map(r => {
         const record = {
-        id: r.id,
-        status: r.status,
-        occurredAt: r.occurred_at,
-        createdAt: r.created_at,
-        imagePath: r.image_path,
-        imageUrl,
-        imageLoadError: !!r.image_path && !imageUrl,
-        imageHash: r.image_hash,
-        imageType: r.image_type,
-        recordType: r.record_type || 'uncertain',
-        domainKey: r.detected_domain_key,
-        domainName: r.detected_domain_name,
-        targetDomainId: r.target_domain_id,
-        confidence: Number(r.confidence || 0),
-        summary: r.ai_summary || r.failure_reason || '等待处理的截图',
-        failureReason: r.failure_reason,
-        lastErrorType: r.last_error_type,
-        lastErrorMessage: r.last_error_message,
-        extracted: r.extracted_json || {},
-        companionMessage: r.companion_message || r.extracted_json?.companion_message || '',
-        retryCount: r.retry_count || 0,
-        targetRecordId: r.target_record_id,
-        resolvedAction: r.resolved_action,
-        resolvedAt: r.resolved_at,
-        discardReason: r.discard_reason,
+          id: r.id,
+          status: r.status,
+          occurredAt: r.occurred_at,
+          createdAt: r.created_at,
+          imagePath: r.image_path,
+          imageUrl: null,
+          imageLoadError: false,
+          imageHash: r.image_hash,
+          imageType: r.image_type,
+          recordType: r.record_type || 'uncertain',
+          domainKey: r.detected_domain_key,
+          domainName: r.detected_domain_name,
+          targetDomainId: r.target_domain_id,
+          confidence: Number(r.confidence || 0),
+          summary: r.ai_summary || r.failure_reason || '等待处理的截图',
+          failureReason: r.failure_reason,
+          lastErrorType: r.last_error_type,
+          lastErrorMessage: r.last_error_message,
+          extracted: r.extracted_json || {},
+          companionMessage: r.companion_message || r.extracted_json?.companion_message || '',
+          retryCount: r.retry_count || 0,
+          targetRecordId: r.target_record_id,
+          resolvedAction: r.resolved_action,
+          resolvedAt: r.resolved_at,
+          discardReason: r.discard_reason,
         }
         return {
           ...record,
-          repaymentCandidate: buildRepaymentCandidateForStaging(record),
+          repaymentCandidate: null,
         }
-      }))
+      })
 
-      // 已处理的中转站记录（最近 30 条）
-      const { data: processed, error: procErr } = await sb.from('staging_records')
-        .select('*')
-        .in('status', ['archived', 'discarded'])
-        .order('resolved_at', { ascending: false, nullsFirst: false })
-        .limit(30)
-      if (procErr) console.warn('加载已处理记录失败:', procErr.message)
+      if (!silent) {
+        repaymentCycles.value = []
+        processedStagingRecords.value = []
+      }
 
-      processedStagingRecords.value = procErr ? [] : await Promise.all((processed || []).map(async r => {
-        const imageUrl = await getSignedImageUrl(r.image_path)
-        return ({
-        id: r.id,
-        status: r.status,
-        occurredAt: r.occurred_at,
-        createdAt: r.created_at,
-        resolvedAt: r.resolved_at,
-        imagePath: r.image_path,
-        imageUrl,
-        imageLoadError: !!r.image_path && !imageUrl,
-        imageHash: r.image_hash,
-        imageType: r.image_type,
-        recordType: r.record_type || 'uncertain',
-        domainKey: r.detected_domain_key,
-        domainName: r.detected_domain_name,
-        targetDomainId: r.target_domain_id,
-        targetRecordId: r.target_record_id,
-        confidence: Number(r.confidence || 0),
-        summary: r.ai_summary || r.failure_reason || '',
-        companionMessage: r.companion_message || r.extracted_json?.companion_message || '',
-        failureReason: r.failure_reason,
-        resolvedAction: r.resolved_action,
-        discardReason: r.discard_reason,
+      const isCurrentRun = () => runId === loadDataRunId
+      const cycleMonth = `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`
+      const hydrateStagingImages = async () => {
+        const imageUrlMap = await getSignedImageUrlMap(stagingRows.map(r => r.image_path))
+        if (!isCurrentRun()) return
+        stagingRecords.value = stagingRecords.value.map(record => {
+          const imageUrl = imageUrlMap[record.imagePath] || null
+          return {
+            ...record,
+            imageUrl,
+            imageLoadError: !!record.imagePath && !imageUrl,
+          }
         })
-      }))
+      }
+      const loadRepaymentCycles = async () => {
+        const { error: ensureCycleErr } = await sb.rpc('ensure_liability_repayment_cycles', {
+          p_cycle_month: cycleMonth,
+        })
+        if (ensureCycleErr) console.warn('生成还款周期失败:', ensureCycleErr.message)
+
+        const { data: cycleRows, error: cycleErr } = await sb.from('account_repayment_cycles')
+          .select('*')
+          .order('due_date', { ascending: true, nullsFirst: false })
+          .order('created_at', { ascending: false })
+          .limit(80)
+        if (!isCurrentRun()) return
+        if (cycleErr) {
+          console.warn('加载还款周期失败:', cycleErr.message)
+          repaymentCycles.value = []
+        } else {
+          repaymentCycles.value = (cycleRows || []).map(mapRepaymentCycleRow)
+          stagingRecords.value = stagingRecords.value.map(record => ({
+            ...record,
+            repaymentCandidate: buildRepaymentCandidateForStaging(record),
+          }))
+        }
+      }
+      const loadProcessedStaging = async () => {
+        const { data: processed, error: procErr } = await sb.from('staging_records')
+          .select('*')
+          .in('status', ['archived', 'discarded'])
+          .order('resolved_at', { ascending: false, nullsFirst: false })
+          .limit(30)
+        if (procErr) {
+          console.warn('加载已处理记录失败:', procErr.message)
+          return
+        }
+        const processedRows = processed || []
+        const processedImageUrlMap = await getSignedImageUrlMap(processedRows.map(r => r.image_path))
+        if (!isCurrentRun()) return
+        processedStagingRecords.value = processedRows.map(r => {
+          const imageUrl = processedImageUrlMap[r.image_path] || null
+          return ({
+            id: r.id,
+            status: r.status,
+            occurredAt: r.occurred_at,
+            createdAt: r.created_at,
+            resolvedAt: r.resolved_at,
+            imagePath: r.image_path,
+            imageUrl,
+            imageLoadError: !!r.image_path && !imageUrl,
+            imageHash: r.image_hash,
+            imageType: r.image_type,
+            recordType: r.record_type || 'uncertain',
+            domainKey: r.detected_domain_key,
+            domainName: r.detected_domain_name,
+            targetDomainId: r.target_domain_id,
+            targetRecordId: r.target_record_id,
+            confidence: Number(r.confidence || 0),
+            summary: r.ai_summary || r.failure_reason || '',
+            companionMessage: r.companion_message || r.extracted_json?.companion_message || '',
+            failureReason: r.failure_reason,
+            resolvedAction: r.resolved_action,
+            discardReason: r.discard_reason,
+          })
+        })
+      }
+
+      const supplementalLoad = Promise.allSettled([
+        hydrateStagingImages(),
+        loadRepaymentCycles(),
+        loadProcessedStaging(),
+      ]).then(results => {
+        results.forEach(result => {
+          if (result.status === 'rejected') console.warn('后台加载附加数据失败:', result.reason?.message || result.reason)
+        })
+      })
+      if (silent) await supplementalLoad
     } catch (e) {
       console.error('[loadData 异常]', e)
       const isNetworkError = /load failed|fetch|network|failed to fetch/i.test(e.message || '')
@@ -952,7 +999,7 @@ export function useStore() {
         // 网络层错误使用指数退避重试（1s → 2s → 4s → 8s）
         const delay = isNetworkError ? Math.min(1000 * 2 ** attempt, 8000) : 1000
         await new Promise(r => setTimeout(r, delay))
-        return loadData(attempt + 1, silent)
+        return loadData(attempt + 1, silent, runId)
       }
       if (silent) return
       const tip = isNetworkError
@@ -1003,6 +1050,28 @@ export function useStore() {
       return null
     }
     return data?.signedUrl || null
+  }
+
+  async function getSignedImageUrlMap(rawPaths = []) {
+    const out = {}
+    const storagePaths = []
+    rawPaths.filter(Boolean).forEach(raw => {
+      if (raw.startsWith('https://')) out[raw] = raw
+      else storagePaths.push(raw)
+    })
+    const uniquePaths = Array.from(new Set(storagePaths))
+    if (!uniquePaths.length) return out
+
+    const { data, error } = await sb.storage.from('receipt-images').createSignedUrls(uniquePaths, 3600)
+    if (error) {
+      console.warn('批量生成截图预览链接失败:', error.message)
+      return out
+    }
+    ;(data || []).forEach((item, index) => {
+      const path = item.path || uniquePaths[index]
+      if (path && item.signedUrl) out[path] = item.signedUrl
+    })
+    return out
   }
 
   let pendingModalInitial = null
