@@ -1186,7 +1186,7 @@ const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   enabled: true,
   memoryEnabled: true,
   persona: "observer",
-  memoryStrength: "bold",
+  memoryStrength: "balanced",
   expressionStyle: "plain",
   customNote: null,
 };
@@ -1207,7 +1207,7 @@ async function loadCompanionContext(
     enabled: settingsRaw.enabled !== false,
     memoryEnabled: settingsRaw.memory_enabled !== false,
     persona: typeof settingsRaw.persona === "string" ? settingsRaw.persona : "observer",
-    memoryStrength: typeof settingsRaw.memory_strength === "string" ? settingsRaw.memory_strength : "bold",
+    memoryStrength: typeof settingsRaw.memory_strength === "string" ? settingsRaw.memory_strength : "balanced",
     expressionStyle: typeof settingsRaw.expression_style === "string" ? settingsRaw.expression_style : "plain",
     customNote: typeof settingsRaw.custom_note === "string" ? settingsRaw.custom_note : null,
   };
@@ -1224,6 +1224,122 @@ function firstNonEmpty(...values: Array<string | null | undefined>): string | nu
 
 function memoryText(value: string, max = 80): string {
   return value.length > max ? value.slice(0, max) : value;
+}
+
+function formatChinaMonthDay(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return null;
+  const chinaDate = new Date(ms + 8 * 60 * 60 * 1000);
+  return `${chinaDate.getUTCMonth() + 1}月${chinaDate.getUTCDate()}日`;
+}
+
+function sanitizeCompanionMessageForTime(
+  message: string | null,
+  ai: AIResult,
+  timeContext: ReturnType<typeof buildTimeContext>,
+): string | null {
+  if (!message) return null;
+  const recordType = ai.domain_key ?? ai.record_type;
+  if (recordType !== "sleep" || !timeContext.is_backfill) return message;
+  if (!/(昨晚|昨天|昨日)/.test(message)) return message;
+
+  const eventLabel = formatChinaMonthDay(timeContext.event_time);
+  if (!eventLabel) return message;
+  return message
+    .replace(/昨晚/g, `${eventLabel}这晚`)
+    .replace(/昨天|昨日/g, eventLabel)
+    .slice(0, 60);
+}
+
+const COMPANION_FORBIDDEN_PATTERNS = [
+  /刚吃完.+又来/,
+  /这周.*吃过.*今天换成/,
+  /第\s*N\s*顿/i,
+  /第几笔/,
+  /看来.*(熬夜|胃口不错|吃饱了|凑个单)/,
+  /(记得|别忘了|要按时|注意身体|合理饮食|少吃|控制)/,
+  /(超标|放纵|罪恶|买个安心|生活还在继续)/,
+];
+
+const FOOD_MERCHANT_HINTS = [
+  "外婆家",
+  "老婆大人",
+  "杨掌勺",
+  "鱼羊鲜",
+  "沈氏牛肉汤",
+  "甬上嫂子",
+  "RightCode",
+  "乔稚",
+];
+
+function collectCompanionAllowedText(ai: AIResult): string {
+  const payload = ai.payload_jsonb && typeof ai.payload_jsonb === "object" && !Array.isArray(ai.payload_jsonb)
+    ? ai.payload_jsonb
+    : {};
+  const dishes = Array.isArray(payload.dishes)
+    ? payload.dishes
+      .map((item) => item && typeof item === "object" ? normalizeString((item as Record<string, unknown>).name) : null)
+      .filter(Boolean)
+    : [];
+  return [
+    ai.title,
+    ai.summary,
+    ai.merchant_name,
+    ai.source_name,
+    ai.category,
+    ai.payment_method,
+    payload.confidence_note,
+    payload.meal_type,
+    ...dishes,
+  ].map((value) => normalizeString(value)).filter(Boolean).join(" ");
+}
+
+function sanitizeCompanionMessageForContent(message: string | null, ai: AIResult): string | null {
+  if (!message) return null;
+  const text = message.trim();
+  if (!text) return null;
+  if (COMPANION_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(text))) return null;
+
+  const recordType = ai.domain_key ?? ai.record_type;
+  const allowedText = collectCompanionAllowedText(ai);
+  if (recordType === "food" && ai.image_type === "food_photo") {
+    const unrelatedMerchant = FOOD_MERCHANT_HINTS.find((hint) => text.includes(hint) && !allowedText.includes(hint));
+    if (unrelatedMerchant) return null;
+  }
+
+  return text.slice(0, 60);
+}
+
+function buildSportCompanionFallback(payload: Record<string, unknown>, title: string): string | null {
+  const sportType = normalizeString(payload.sport_type) ?? normalizeString(title) ?? "这次运动";
+  const duration = normalizeNumber(payload.duration_minutes);
+  const distance = normalizeNumber(payload.distance_km);
+  const calories = normalizeNumber(payload.calories);
+  const avgHeartRate = normalizeNumber(payload.avg_heart_rate);
+  const label = sportType === "运动记录" ? "这次运动" : sportType;
+
+  if (distance !== null && duration !== null) {
+    return `${label} ${distance} 公里，${Math.round(duration)} 分钟很完整。`;
+  }
+  if (duration !== null && calories !== null) {
+    return `${label} ${Math.round(duration)} 分钟，消耗 ${Math.round(calories)} 千卡。`;
+  }
+  if (duration !== null && avgHeartRate !== null) {
+    return `${label} ${Math.round(duration)} 分钟，心率 ${Math.round(avgHeartRate)}。`;
+  }
+  if (duration !== null) {
+    return `${label} ${Math.round(duration)} 分钟，记录得很清楚。`;
+  }
+  return null;
+}
+
+function buildBuiltinCompanionFallback(
+  domainKey: BuiltinDomainKey,
+  built: { payload: Record<string, unknown>; title: string; summary: string },
+): string | null {
+  if (domainKey === "sport") return buildSportCompanionFallback(built.payload, built.title);
+  return null;
 }
 
 async function upsertCompanionMemory(
@@ -1325,13 +1441,17 @@ async function rememberCompanionSignals(
     }
   } else if (params.recordType === "sleep") {
     const payload = params.ai.payload_jsonb || {};
-    const hours = payload.sleep_hours ?? payload.sleep_minutes;
-    if (hours !== undefined && hours !== null) {
+    const sleepHours = normalizeNumber(payload.sleep_hours);
+    const sleepMinutes = normalizeNumber(payload.sleep_minutes);
+    if (sleepHours !== null || sleepMinutes !== null) {
+      const label = sleepHours !== null
+        ? `${sleepHours} 小时`
+        : `${sleepMinutes} 分钟`;
       writes.push(upsertCompanionMemory(supabase, {
         userId: params.userId,
         memoryKey: "sleep:last_pattern",
         memoryType: "sleep_pattern",
-        content: `用户最近一次睡眠约 ${String(hours)}${payload.sleep_minutes ? " 分钟" : " 小时"}。`,
+        content: `用户最近一次睡眠约 ${label}。`,
         evidence: { sleep_hours: payload.sleep_hours, sleep_minutes: payload.sleep_minutes, score: payload.quality_score, occurred_at: params.occurredAt },
         confidence: 0.75,
         weight: 1.4,
@@ -1357,11 +1477,21 @@ async function rememberCompanionSignals(
     }));
   } else if (params.recordType === "food") {
     const payload = params.ai.payload_jsonb || {};
+    const mealType = normalizeString(payload.meal_type);
+    const mealLabel = mealType === "breakfast" ? "早餐"
+      : mealType === "lunch" ? "午餐"
+      : mealType === "dinner" ? "晚餐"
+      : mealType === "snack" ? "加餐"
+      : "饮食";
+    const title = firstNonEmpty(params.ai.title, params.ai.summary);
+    const calories = normalizeNumber(payload.total_calorie_kcal);
     writes.push(upsertCompanionMemory(supabase, {
       userId: params.userId,
       memoryKey: `food:${payload.meal_type ?? "recent"}`,
       memoryType: "food_pattern",
-      content: `用户最近记录过${payload.meal_type ? String(payload.meal_type) : "饮食"}。`,
+      content: title
+        ? `用户最近记录过${mealLabel}：${title}${calories !== null ? `，约 ${Math.round(calories)} 千卡` : ""}。`
+        : `用户最近记录过${mealLabel}。`,
       evidence: { meal_type: payload.meal_type, calories: payload.total_calorie_kcal, title: params.ai.title, occurred_at: params.occurredAt },
       confidence: 0.65,
       weight: 1.1,
@@ -1697,7 +1827,7 @@ Deno.serve(async (req) => {
         enabled: prefRow?.companion_enabled ?? true,
         memoryEnabled: prefRow?.companion_memory_enabled ?? true,
         persona: prefRow?.companion_persona ?? "observer",
-        memoryStrength: prefRow?.companion_memory_strength ?? "bold",
+        memoryStrength: prefRow?.companion_memory_strength ?? "balanced",
         expressionStyle: prefRow?.companion_expression_style ?? "plain",
         customNote: prefRow?.companion_custom_note ?? null,
       };
@@ -1954,7 +2084,8 @@ Deno.serve(async (req) => {
       ai.companion_message = null;
     }
     if (!companionSettings.enabled) ai.companion_message = null;
-    const companionMessage: string | null = ai.companion_message;
+    ai.companion_message = sanitizeCompanionMessageForContent(ai.companion_message, ai);
+    let companionMessage: string | null = ai.companion_message;
     const withCompanion = (text: string) => companionMessage ? `${companionMessage}\n${text}` : text;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
@@ -1983,6 +2114,9 @@ Deno.serve(async (req) => {
         clientCapturedAt,
         requestReceivedAt,
       });
+      companionMessage = sanitizeCompanionMessageForTime(companionMessage, ai, retryTimeContext);
+      companionMessage = sanitizeCompanionMessageForContent(companionMessage, ai);
+      ai.companion_message = companionMessage;
       const retryAiWithTimeContext = { ...ai, time_context: retryTimeContext };
 
       if (retryResult) {
@@ -1997,6 +2131,9 @@ Deno.serve(async (req) => {
           clientCapturedAt,
           requestReceivedAt,
         });
+        companionMessage = sanitizeCompanionMessageForTime(companionMessage, ai, timeContext);
+        companionMessage = sanitizeCompanionMessageForContent(companionMessage, ai);
+        ai.companion_message = companionMessage;
         const aiWithTimeContext = { ...ai, time_context: timeContext };
         const recordDate = occurredDateTime?.date ?? today;
         const recordTime = occurredDateTime?.time ?? nowTime;
@@ -2156,7 +2293,10 @@ Deno.serve(async (req) => {
       clientCapturedAt,
       requestReceivedAt,
     });
-    const aiWithTimeContext = { ...ai, time_context: timeContext };
+    companionMessage = sanitizeCompanionMessageForTime(companionMessage, ai, timeContext);
+    companionMessage = sanitizeCompanionMessageForContent(companionMessage, ai);
+    ai.companion_message = companionMessage;
+    let aiWithTimeContext = { ...ai, time_context: timeContext };
     const recordDate = occurredDateTime?.date ?? today;
     const recordTime = occurredDateTime?.time ?? nowTime;
 
@@ -2224,6 +2364,11 @@ Deno.serve(async (req) => {
       const domain = await getDomainByKey(supabase, builtinKey);
       const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : (occurredAt ?? new Date().toISOString());
       const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
+      if (!companionMessage && built) {
+        companionMessage = sanitizeCompanionMessageForContent(buildBuiltinCompanionFallback(builtinKey, built), ai);
+        ai.companion_message = companionMessage;
+        aiWithTimeContext = { ...ai, time_context: timeContext };
+      }
 
       if (!shouldAutoArchive || !domain || !built) {
         const missing = built?.missingFields ?? [];
