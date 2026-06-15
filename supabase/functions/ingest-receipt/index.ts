@@ -1368,12 +1368,19 @@ function compactFeedbackText(value: string | null | undefined, max = 42): string
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-function feedbackNotification(feedback: AIFeedback | null, fallback: string): string {
+function feedbackNotification(
+  feedback: AIFeedback | null,
+  fallback: string,
+  options: { preserveFallbackTail?: boolean } = {},
+): string {
   if (!feedback || feedback.confidence < 0.5) return fallback;
+  const fallbackLines = fallback.split("\n").map((line) => line.trim()).filter(Boolean);
+  const fallbackTail = options.preserveFallbackTail ? fallbackLines.slice(1) : [];
   const lines = [
     `${feedback.icon} ${feedback.badge}`,
     compactFeedbackText(feedback.emotion_line, 34),
-    compactFeedbackText(feedback.utility_line, 34) ?? fallback.split("\n")[0],
+    compactFeedbackText(feedback.utility_line, 34) ?? fallbackLines[0],
+    ...fallbackTail,
   ].filter(Boolean);
   return lines.join("\n");
 }
@@ -3339,7 +3346,7 @@ Deno.serve(async (req) => {
       message: possibleDuplicate
         ? `✓ 已记账（⚠ 3 分钟内有相同消费，请确认是否重复，参考 id: ${dupRefId}）`
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
-      notification: aiFeedback ? feedbackNotification(aiFeedback, _expenseNotif) : withCompanion(_expenseNotif),
+      notification: aiFeedback ? feedbackNotification(aiFeedback, _expenseNotif, { preserveFallbackTail: true }) : withCompanion(_expenseNotif),
       time_context: timeContext,
       companion_message: companionMessage,
       ai_feedback: aiFeedback,
