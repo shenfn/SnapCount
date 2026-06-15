@@ -1371,11 +1371,15 @@ function compactFeedbackText(value: string | null | undefined, max = 42): string
 function feedbackNotification(
   feedback: AIFeedback | null,
   fallback: string,
-  options: { preserveFallbackTail?: boolean } = {},
+  options: { preserveFallbackTail?: boolean; preserveFallbackAll?: boolean } = {},
 ): string {
   if (!feedback || feedback.confidence < 0.5) return fallback;
   const fallbackLines = fallback.split("\n").map((line) => line.trim()).filter(Boolean);
-  const fallbackTail = options.preserveFallbackTail ? fallbackLines.slice(1) : [];
+  const fallbackTail = options.preserveFallbackAll
+    ? fallbackLines
+    : options.preserveFallbackTail
+      ? fallbackLines.slice(1)
+      : [];
   const lines = [
     `${feedback.icon} ${feedback.badge}`,
     compactFeedbackText(feedback.emotion_line, 34),
@@ -1395,12 +1399,25 @@ function timingSignalFor(domainKey: string, timeContext: TimeContext | null): AI
   return null;
 }
 
+function financeCompanionLine(ai: AIResult): string | null {
+  const text = compactFeedbackText(ai.companion_message, 34);
+  if (!text) return null;
+  const financeText = `${ai.merchant_name ?? ""} ${ai.source_name ?? ""} ${ai.category ?? ""} ${ai.platform ?? ""}`;
+  const leaksOtherDomain = /(运动|骑行|跑步|睡眠|饮食记录|热量|蛋白|碳水|外婆家|老婆大人)/.test(text)
+    && !/(餐饮|food|美食|饭|餐|外卖)/i.test(financeText);
+  if (leaksOtherDomain) return null;
+  if (/(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text)) return null;
+  return text;
+}
+
 function buildBuiltinAIFeedback(
   domainKey: BuiltinDomainKey,
   built: { payload: Record<string, unknown>; title: string; summary: string },
   timeContext: TimeContext,
+  companionLine: string | null = null,
 ): AIFeedback | null {
   const timingSignal = timingSignalFor(domainKey, timeContext);
+  const aiEmotion = compactFeedbackText(companionLine, 34);
   const payload = built.payload || {};
 
   if (domainKey === "sport") {
@@ -1434,14 +1451,14 @@ function buildBuiltinAIFeedback(
         icon: "🏃",
         band: "positive",
         tone: "specific_recognition",
-        emotion_line: distance !== null
+        emotion_line: aiEmotion ?? (distance !== null
           ? `${Math.round(duration)} 分钟 ${distance} 公里，不是随便活动一下。`
-          : `${Math.round(duration)} 分钟运动，身体被认真调动起来了。`,
+          : `${Math.round(duration)} 分钟运动，身体被认真调动起来了。`),
         utility_line: avgHeartRate !== null ? `平均心率 ${Math.round(avgHeartRate)}，详情里可以看强度。` : "这类完整记录，最适合后面看连续性。",
         detail_reason: `时长达到 30 分钟以上${distance !== null ? `，距离 ${distance} 公里` : ""}${calories !== null ? `，消耗约 ${Math.round(calories)} 千卡` : ""}。`,
         internal_score: 78,
         confidence: 0.78,
-        source: "rule",
+        source: aiEmotion ? "hybrid" : "rule",
         timing_signal: timingSignal,
       };
     }
@@ -1453,12 +1470,12 @@ function buildBuiltinAIFeedback(
         icon: "🏃",
         band: "neutral",
         tone: "light_observation",
-        emotion_line: `${sportType} ${Math.round(duration)} 分钟，今天身体被叫醒了。`,
+        emotion_line: aiEmotion ?? `${sportType} ${Math.round(duration)} 分钟，今天身体被叫醒了。`,
         utility_line: "量不一定大，但这条记录能接上运动节奏。",
         detail_reason: "本次运动时长较短或缺少距离/热量信息，先按轻量运动记录处理。",
         internal_score: 62,
         confidence: 0.68,
-        source: "rule",
+        source: aiEmotion ? "hybrid" : "rule",
         timing_signal: timingSignal,
       };
     }
@@ -1510,12 +1527,12 @@ function buildBuiltinAIFeedback(
         icon: "🌙",
         band: "positive",
         tone: "specific_recognition",
-        emotion_line: `这晚睡了 ${Math.round(hours * 10) / 10} 小时，底子比较厚。`,
+        emotion_line: aiEmotion ?? `这晚睡了 ${Math.round(hours * 10) / 10} 小时，底子比较厚。`,
         utility_line: "今天别急着把电量一次性花完。",
         detail_reason: "睡眠时长达到 7 小时以上，先按相对充足的一晚处理。",
         internal_score: 76,
         confidence: 0.76,
-        source: "rule",
+        source: aiEmotion ? "hybrid" : "rule",
         timing_signal: timingSignal,
       };
     }
@@ -1527,12 +1544,12 @@ function buildBuiltinAIFeedback(
         icon: "🌙",
         band: "watch",
         tone: "soft_watch",
-        emotion_line: `这晚约 ${Math.round(hours * 10) / 10} 小时，有点薄。`,
+        emotion_line: aiEmotion ?? `这晚约 ${Math.round(hours * 10) / 10} 小时，有点薄。`,
         utility_line: "今天少给自己加码一点，就算补回来了。",
         detail_reason: "睡眠时长低于 7 小时，但单晚记录只提示状态，不评价用户。",
         internal_score: 52,
         confidence: 0.7,
-        source: "rule",
+        source: aiEmotion ? "hybrid" : "rule",
         timing_signal: timingSignal,
       };
     }
@@ -1555,14 +1572,14 @@ function buildBuiltinAIFeedback(
         icon: "🍱",
         band: "recover",
         tone: "soft_recovery",
-        emotion_line: "偶尔吃得快乐一点很正常，快乐也是刚需。",
+        emotion_line: aiEmotion ?? "偶尔吃得快乐一点很正常，快乐也是刚需。",
         utility_line: "轻补救：今晚散步 15 分钟，或者下一餐清一点。",
         detail_reason: calories !== null
           ? `这顿估算约 ${Math.round(calories)} 千卡，且可能包含甜口或油炸元素。`
           : "这顿可能包含甜口或油炸元素，按轻量兜底处理。",
         internal_score: 48,
         confidence: 0.72,
-        source: "rule",
+        source: aiEmotion ? "hybrid" : "rule",
         timing_signal: timingSignal,
       };
     }
@@ -1574,12 +1591,12 @@ function buildBuiltinAIFeedback(
         icon: "🍱",
         band: "positive",
         tone: "specific_recognition",
-        emotion_line: "这顿像是认真吃饭，不是随便糊弄一口。",
+        emotion_line: aiEmotion ?? "这顿像是认真吃饭，不是随便糊弄一口。",
         utility_line: calories !== null ? `估算约 ${Math.round(calories)} 千卡，适合和当天总量一起看。` : "后面补齐几次，饮食节奏会更清楚。",
         detail_reason: "当前记录被识别为正餐，且没有明显高糖/油炸信号。",
         internal_score: 72,
         confidence: 0.7,
-        source: "rule",
+        source: aiEmotion ? "hybrid" : "rule",
         timing_signal: timingSignal,
       };
     }
@@ -1590,12 +1607,12 @@ function buildBuiltinAIFeedback(
       icon: "🍱",
       band: "neutral",
       tone: "light_observation",
-      emotion_line: "这更像一次加餐，不用把它当成正餐压力。",
+      emotion_line: aiEmotion ?? "这更像一次加餐，不用把它当成正餐压力。",
       utility_line: "下一顿正常吃，节奏就不会被它带跑。",
       detail_reason: "当前记录更接近零食或加餐，单次记录不做强评价。",
       internal_score: 60,
       confidence: 0.66,
-      source: "rule",
+      source: aiEmotion ? "hybrid" : "rule",
       timing_signal: timingSignal,
     };
   }
@@ -1609,12 +1626,12 @@ function buildBuiltinAIFeedback(
       icon: "📚",
       band: "positive",
       tone: "steady_progress",
-      emotion_line: minutes !== null && minutes >= 20 ? "今天不是只翻两页，进度往前挪了一格。" : "碎片阅读最怕断，不怕慢。",
+      emotion_line: aiEmotion ?? (minutes !== null && minutes >= 20 ? "今天不是只翻两页，进度往前挪了一格。" : "碎片阅读最怕断，不怕慢。"),
       utility_line: minutes !== null ? `这次 ${Math.round(minutes)} 分钟，后面看连续性更有意义。` : "先把阅读这件事接住了。",
       detail_reason: "阅读记录更重视连续性和主题沉淀，不按单次数量评价。",
       internal_score: minutes !== null && minutes >= 20 ? 74 : 66,
       confidence: 0.68,
-      source: "rule",
+      source: aiEmotion ? "hybrid" : "rule",
       timing_signal: timingSignal,
     };
   }
@@ -1629,12 +1646,12 @@ function buildBuiltinAIFeedback(
       icon: "💳",
       band: recordKind === "liability_snapshot" ? "watch" : "neutral",
       tone: "finance_observation",
-      emotion_line: recordKind === "liability_snapshot" ? "这条重点不是金额，是后面的还款节奏。" : "这次留的是账户状态，不只是单笔流水。",
+      emotion_line: aiEmotion ?? (recordKind === "liability_snapshot" ? "这条重点不是金额，是后面的还款节奏。" : "这次留的是账户状态，不只是单笔流水。"),
       utility_line: amount !== null ? `金额 ${fmtYuan(amount)}，后面适合看余额变化。` : "先把快照留住，后面才看得出变化。",
       detail_reason: recordKind === "liability_snapshot" ? "识别为待还/账单类快照，优先提醒还款节奏。" : "识别为余额类快照，适合作为账户变化参照。",
       internal_score: 62,
       confidence: 0.68,
-      source: "rule",
+      source: aiEmotion ? "hybrid" : "rule",
       timing_signal: timingSignal,
     };
   }
@@ -1652,6 +1669,11 @@ function buildExpenseAIFeedback(
   const timingSignal = timingSignalFor("expense", timeContext);
   const category = normalizeString(ai.category);
   const merchant = normalizeString(ai.merchant_name);
+  const aiLine = financeCompanionLine(ai);
+  const financeText = `${merchant ?? ""} ${category ?? ""} ${ai.platform ?? ""} ${ai.payment_method ?? ""}`;
+  const isRepayment = includesAny(financeText, ["还款", "待还", "信贷", "花呗", "白条", "月付", "信用卡"]).length > 0;
+  const isRentLike = includesAny(financeText, ["房租", "租房", "公寓", "房东", "滨江叔叔"]).length > 0
+    || (amount >= 1000 && category !== null && includesAny(category, ["life", "生活", "housing", "rent"]).length > 0);
   if (possibleDuplicate) {
     return {
       version: "feedback-v1",
@@ -1660,29 +1682,50 @@ function buildExpenseAIFeedback(
       icon: "💸",
       band: "watch",
       tone: "verify_gently",
-      emotion_line: "这笔和刚才的消费很像，先别急着算两次。",
+      emotion_line: aiLine ?? "这笔和刚才的消费很像，先别急着算两次。",
       utility_line: "轻确认：点进 App 看一眼是不是重复记账。",
       detail_reason: "3 分钟内存在同金额、同支付方式且商家相近的支出。",
       internal_score: 50,
       confidence: 0.82,
-      source: "rule",
+      source: aiLine ? "hybrid" : "rule",
       timing_signal: timingSignal,
     };
   }
-  if (timingSignal?.key === "realtime_accounting") {
+  if (isRepayment) {
     return {
       version: "feedback-v1",
       domain_key: "expense",
-      badge: "即时记账",
+      badge: "还款节奏",
       icon: "💸",
-      band: "ritual",
-      tone: "ritual_seen",
-      emotion_line: "这笔刚发生就记下来了，小账没有漏掉。",
-      utility_line: merchant ? `${merchant} 这笔已收进今天账本。` : "这种即时记录，最能防止月底对不上。",
-      detail_reason: `截图时间与交易时间相隔约 ${timeContext.delta_minutes} 分钟，属于即时记账。`,
-      internal_score: 82,
-      confidence: 0.82,
-      source: "rule",
+      band: "watch",
+      tone: "finance_observation",
+      emotion_line: aiLine && /(还|待还|账单|信贷|花呗|白条|信用卡)/.test(aiLine)
+        ? aiLine
+        : "这笔重点不是花掉了，而是待还节奏被记录住了。",
+      utility_line: `金额 ${fmtYuan(amount)}，适合和本月还款一起看。`,
+      detail_reason: "商家、分类或支付信息包含还款/信贷信号，按现金流节奏处理。",
+      internal_score: 60,
+      confidence: 0.76,
+      source: aiLine ? "hybrid" : "rule",
+      timing_signal: timingSignal,
+    };
+  }
+  if (isRentLike) {
+    return {
+      version: "feedback-v1",
+      domain_key: "expense",
+      badge: "固定支出",
+      icon: "💸",
+      band: "neutral",
+      tone: "finance_observation",
+      emotion_line: aiLine && /(房|租|住|居住|公寓)/.test(aiLine)
+        ? aiLine
+        : "这类房租/居住成本，重点是周期，不是冲动消费。",
+      utility_line: `金额 ${fmtYuan(amount)}，应该单独看固定支出占比。`,
+      detail_reason: "本笔金额较高且分类偏生活/居住，按固定生活成本处理。",
+      internal_score: 64,
+      confidence: 0.74,
+      source: aiLine ? "hybrid" : "rule",
       timing_signal: timingSignal,
     };
   }
@@ -1694,12 +1737,12 @@ function buildExpenseAIFeedback(
       icon: "💸",
       band: "watch",
       tone: "soft_watch",
-      emotion_line: "金额不大，但小额最容易在月底失踪。",
+      emotion_line: aiLine ?? "金额不大，但小额最容易在月底失踪。",
       utility_line: category ? `先把${category}归好类，后面看频率。` : "先看见它，就已经少漏一笔。",
       detail_reason: `本笔支出 ${fmtYuan(amount)}，属于小额消费，价值在于频率追踪。`,
       internal_score: 58,
       confidence: 0.68,
-      source: "rule",
+      source: aiLine ? "hybrid" : "rule",
       timing_signal: timingSignal,
     };
   }
@@ -1711,12 +1754,29 @@ function buildExpenseAIFeedback(
       icon: "💸",
       band: "neutral",
       tone: "finance_observation",
-      emotion_line: "这笔更像必要支出，不用和冲动消费混着看。",
+      emotion_line: aiLine ?? "这笔更像必要支出，不用和冲动消费混着看。",
       utility_line: `金额 ${fmtYuan(amount)}，重点放在周期和总量。`,
       detail_reason: "当前分类偏生活必要支出，适合与周期预算一起看。",
       internal_score: 64,
       confidence: 0.66,
-      source: "rule",
+      source: aiLine ? "hybrid" : "rule",
+      timing_signal: timingSignal,
+    };
+  }
+  if (timingSignal?.key === "realtime_accounting") {
+    return {
+      version: "feedback-v1",
+      domain_key: "expense",
+      badge: "即时记账",
+      icon: "💸",
+      band: "ritual",
+      tone: "ritual_seen",
+      emotion_line: aiLine ?? "这笔刚发生就记下来了，记录很及时。",
+      utility_line: merchant ? `${merchant} 这笔已收进今天账本。` : "这种即时记录，最能防止月底对不上。",
+      detail_reason: `截图时间与交易时间相隔约 ${timeContext.delta_minutes} 分钟，属于即时记账。`,
+      internal_score: 82,
+      confidence: 0.78,
+      source: aiLine ? "hybrid" : "rule",
       timing_signal: timingSignal,
     };
   }
@@ -1727,13 +1787,36 @@ function buildExpenseAIFeedback(
     icon: "💸",
     band: "neutral",
     tone: "finance_observation",
-    emotion_line: merchant ? `${merchant} 这笔已经归位，今天账面更清楚。` : "这笔已经归位，今天账面更清楚。",
+    emotion_line: aiLine ?? (merchant ? `${merchant} 这笔已经归位，今天账面更清楚。` : "这笔已经归位，今天账面更清楚。"),
     utility_line: `金额 ${fmtYuan(amount)}，后面更适合看当天总量。`,
     detail_reason: "支出识别完整并已入账，本次反馈优先强调记录完整性。",
     internal_score: 66,
     confidence: 0.64,
-    source: "rule",
+    source: aiLine ? "hybrid" : "rule",
     timing_signal: timingSignal,
+  };
+}
+
+function buildIncomeAIFeedback(ai: AIResult, amount: number | null, timeContext: TimeContext): AIFeedback | null {
+  if (amount === null || (ai.confidence ?? 0) < 0.7) return null;
+  const aiLine = financeCompanionLine(ai);
+  const sourceName = normalizeString(ai.source_name ?? ai.merchant_name);
+  const category = normalizeString(ai.income_category);
+  const isSalary = category === "salary" || includesAny(`${sourceName ?? ""} ${category ?? ""}`, ["工资", "薪资", "薪水"]).length > 0;
+  return {
+    version: "feedback-v1",
+    domain_key: "income",
+    badge: isSalary ? "工资到账" : "收入入账",
+    icon: "💰",
+    band: "positive",
+    tone: "cashflow_positive",
+    emotion_line: aiLine ?? (isSalary ? "工资到账，今天的现金流多了一块确定性。" : "这笔收入已入账，现金流被补了一口气。"),
+    utility_line: sourceName ? `${sourceName} · ${fmtYuan(amount)}` : `金额 ${fmtYuan(amount)}，适合和本月收入一起看。`,
+    detail_reason: isSalary ? "识别为工资/薪资类收入，优先作为本月现金流基准。" : "识别为收入记录，优先纳入本月收入累计。",
+    internal_score: 76,
+    confidence: aiLine ? 0.76 : 0.68,
+    source: aiLine ? "hybrid" : "rule",
+    timing_signal: timingSignalFor("income", timeContext),
   };
 }
 
@@ -2568,7 +2651,7 @@ Deno.serve(async (req) => {
           const domain = await getDomainByKey(supabase, builtinKey);
           if (domain && built) {
             const retryFeedback = built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75 && companionSettings.enabled
-              ? buildBuiltinAIFeedback(builtinKey, built, timeContext)
+              ? buildBuiltinAIFeedback(builtinKey, built, timeContext, companionMessage)
               : null;
             if (retryFeedback) {
               aiFeedback = retryFeedback;
@@ -2771,7 +2854,7 @@ Deno.serve(async (req) => {
       const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : (occurredAt ?? new Date().toISOString());
       const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
       if (shouldAutoArchive && built && companionSettings.enabled) {
-        aiFeedback = buildBuiltinAIFeedback(builtinKey, built, timeContext);
+        aiFeedback = buildBuiltinAIFeedback(builtinKey, built, timeContext, companionMessage);
         if (aiFeedback) {
           companionMessage = aiFeedback.emotion_line;
           ai.companion_message = companionMessage;
@@ -3014,6 +3097,15 @@ Deno.serve(async (req) => {
         }
       }
 
+      if (companionSettings.enabled) {
+        aiFeedback = buildIncomeAIFeedback(ai, normalizedAmount, timeContext);
+        if (aiFeedback) {
+          companionMessage = aiFeedback.emotion_line;
+          ai.companion_message = companionMessage;
+          aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+        }
+      }
+
       const { data: row, error: incErr } = await supabase.from("income_records").insert({
         amount: normalizedAmount,
         category: incomeCategory,
@@ -3111,15 +3203,17 @@ Deno.serve(async (req) => {
 
       const _iDoneSum = await summarizeMonthIncome(supabase, userId);
       const _iSourceLabel = sourceName && sourceName !== "截图识别收入" ? ` · ${sourceName}` : "";
+      const _incomeNotif = `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`;
       return new Response(JSON.stringify({
         status: "done",
         id: row.id,
         record_type: "income",
         ai_ok: aiOk,
         message: "✓ 收入已记录",
-        notification: withCompanion(`💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`),
+        notification: aiFeedback ? feedbackNotification(aiFeedback, _incomeNotif, { preserveFallbackAll: true }) : withCompanion(_incomeNotif),
         time_context: timeContext,
         companion_message: companionMessage,
+        ai_feedback: aiFeedback,
         data: row,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -3346,7 +3440,7 @@ Deno.serve(async (req) => {
       message: possibleDuplicate
         ? `✓ 已记账（⚠ 3 分钟内有相同消费，请确认是否重复，参考 id: ${dupRefId}）`
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
-      notification: aiFeedback ? feedbackNotification(aiFeedback, _expenseNotif, { preserveFallbackTail: true }) : withCompanion(_expenseNotif),
+      notification: aiFeedback ? feedbackNotification(aiFeedback, _expenseNotif, { preserveFallbackAll: true }) : withCompanion(_expenseNotif),
       time_context: timeContext,
       companion_message: companionMessage,
       ai_feedback: aiFeedback,
