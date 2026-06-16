@@ -131,26 +131,15 @@
 
     <div class="settings-section">
       <div class="settings-section-title">AI 识别引擎</div>
-      <div class="settings-item-sub" style="padding:0 16px 8px;color:#6b7280;font-size:12px;">
-        选择截图或拍照识别使用的视觉模型，设置后立即生效。
-      </div>
-      <div
-        v-for="opt in visionOptions"
-        :key="opt.value"
-        class="settings-item"
-        @click="updateVisionPrimary(opt.value)"
-      >
-        <div class="settings-item-icon" :class="opt.toneClass">{{ opt.iconText }}</div>
+      <div class="settings-item" @click="store.navigateTo('ai-vision-settings')">
+        <div class="settings-item-icon primary">模</div>
         <div class="settings-item-content">
-          <div class="settings-item-title">{{ opt.label }}</div>
-          <div class="settings-item-sub">{{ opt.desc }}</div>
+          <div class="settings-item-title">截图 / 拍照模型</div>
+          <div class="settings-item-sub">
+            截图：{{ routeSummary('screenshot') }} · 拍照：{{ routeSummary('photo') }}
+          </div>
         </div>
-        <div
-          class="settings-arrow"
-          :style="{ color: visionPrimary === opt.value ? '#10b981' : '#d1d5db', fontSize: '20px', fontWeight: 'bold' }"
-        >
-          {{ visionPrimary === opt.value ? '✓' : '○' }}
-        </div>
+        <div class="settings-arrow">›</div>
       </div>
     </div>
 
@@ -341,7 +330,10 @@ import { sb } from '../../lib/supabase'
 
 const store = inject('store')
 const uploadToken = ref('')
-const visionPrimary = ref('auto')
+const screenshotVisionPrimary = ref('auto')
+const photoVisionPrimary = ref('qwen')
+const qwenScreenshotModel = ref('qwen3.6-flash')
+const qwenPhotoModel = ref('qwen3.7-plus')
 const aiInsightProvider = ref('auto')
 const companionPersona = ref('observer')
 const companionMemoryStrength = ref('balanced')
@@ -675,8 +667,8 @@ const visionOptions = [
   },
   {
     value: 'qwen',
-    label: '阿里云通义千问 Vision',
-    desc: '当前偏快的视觉方案，适合大多数截图识别。',
+    label: '阿里云通义千问',
+    desc: '截图默认快速模型，拍照可切质量模型。',
     iconText: 'Q',
     toneClass: 'success',
   },
@@ -702,6 +694,47 @@ const visionOptions = [
     toneClass: 'info',
   },
 ]
+
+function providerLabel(value) {
+  return visionOptions.find(o => o.value === value)?.label.replace('（推荐）', '') || value || '自动'
+}
+
+function isMissingConfigColumn(error) {
+  const msg = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`
+  return /screenshot_vision_primary|photo_vision_primary|qwen_screenshot|qwen_photo|schema cache|column/i.test(msg)
+}
+
+function routeSummary(route) {
+  const provider = route === 'photo' ? photoVisionPrimary.value : screenshotVisionPrimary.value
+  const model = route === 'photo' ? qwenPhotoModel.value : qwenScreenshotModel.value
+  if (provider === 'qwen') return `${providerLabel(provider)} ${model}`
+  return providerLabel(provider)
+}
+
+function applyVisionConfig(cfg) {
+  if (!cfg) return
+  screenshotVisionPrimary.value = cfg.screenshot_vision_primary || cfg.vision_primary || 'auto'
+  photoVisionPrimary.value = cfg.photo_vision_primary || 'qwen'
+  qwenScreenshotModel.value = cfg.qwen_screenshot_model || 'qwen3.6-flash'
+  qwenPhotoModel.value = cfg.qwen_photo_model || 'qwen3.7-plus'
+}
+
+async function refreshVisionSummary() {
+  if (!store.currentUserId.value) return
+  const { data, error } = await sb.from('user_configs')
+    .select('vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model')
+    .eq('user_id', store.currentUserId.value)
+    .maybeSingle()
+  if (error && isMissingConfigColumn(error)) {
+    const { data: legacy } = await sb.from('user_configs')
+      .select('vision_primary')
+      .eq('user_id', store.currentUserId.value)
+      .maybeSingle()
+    applyVisionConfig(legacy)
+    return
+  }
+  applyVisionConfig(data)
+}
 
 const insightModelOptions = [
   {
@@ -803,13 +836,21 @@ const companionExpressionOptions = [
 onMounted(async () => {
   if (store.currentUserId.value) {
     await store.loadUserSettings()
-    const { data: cfg } = await sb.from('user_configs')
-      .select('upload_token, plan, vision_primary, ai_insight_provider, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note')
+    let { data: cfg, error } = await sb.from('user_configs')
+      .select('upload_token, plan, vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, ai_insight_provider, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note')
       .eq('user_id', store.currentUserId.value)
       .maybeSingle()
+    if (error && isMissingConfigColumn(error)) {
+      const legacy = await sb.from('user_configs')
+        .select('upload_token, plan, vision_primary, ai_insight_provider, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note')
+        .eq('user_id', store.currentUserId.value)
+        .maybeSingle()
+      cfg = legacy.data
+      error = legacy.error
+    }
     if (cfg) {
       uploadToken.value = cfg.upload_token || ''
-      visionPrimary.value = cfg.vision_primary || 'auto'
+      applyVisionConfig(cfg)
       aiInsightProvider.value = cfg.ai_insight_provider || 'auto'
       companionPersona.value = cfg.companion_persona || 'observer'
       companionMemoryStrength.value = cfg.companion_memory_strength || 'balanced'
@@ -820,29 +861,13 @@ onMounted(async () => {
   }
 })
 
+watch(() => store.currentPage.value, page => {
+  if (page === 'settings') refreshVisionSummary()
+})
+
 onUnmounted(() => {
   if (exportPreviewTimer) clearTimeout(exportPreviewTimer)
 })
-
-async function updateVisionPrimary(value) {
-  if (visionPrimary.value === value) return
-  if (!store.currentUserId.value) {
-    store.showFlash('请先登录')
-    return
-  }
-  const prev = visionPrimary.value
-  visionPrimary.value = value
-  const { error } = await sb.from('user_configs')
-    .update({ vision_primary: value, updated_at: new Date().toISOString() })
-    .eq('user_id', store.currentUserId.value)
-  if (error) {
-    visionPrimary.value = prev
-    store.showFlash('⚠️ 切换失败：' + error.message)
-    return
-  }
-  const opt = visionOptions.find(o => o.value === value)
-  store.showFlash(`✓ 已切换到「${opt?.label || value}」`)
-}
 
 async function updateAiInsightProvider(value) {
   if (aiInsightProvider.value === value) return

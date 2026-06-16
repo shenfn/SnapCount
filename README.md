@@ -100,6 +100,10 @@ supabase db push   # 推送 supabase/migrations/ 下的所有迁移文件
 supabase secrets set SUPABASE_URL="https://<your-project-ref>.supabase.co"
 supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
 supabase secrets set MOONSHOT_API_KEY="<your-moonshot-key>"
+supabase secrets set QWEN_API_KEY="<your-qwen-key>"             # 可选，启用 Qwen 视觉识别
+supabase secrets set QWEN_MODEL="qwen3.6-flash"                 # 可选，截图/账户识别默认快速模型
+supabase secrets set QWEN_PHOTO_MODEL="qwen3.7-plus"            # 可选，拍照识别默认质量模型
+supabase secrets set QWEN_PHOTO_ENABLE_THINKING="true"          # 可选，拍照质量优先
 supabase secrets set RELAY_API_KEY="<your-relay-key>"           # 可选
 supabase secrets set RELAY_ENDPOINT="http://47.76.157.150:8317/v1/chat/completions"  # 可选
 supabase secrets set RELAY_MODEL="gpt-5.4"                     # 可选

@@ -45,6 +45,7 @@
       <PageDomains  v-show="store.currentPage.value === 'domains'" />
       <PageReport   v-show="store.currentPage.value === 'report'" />
       <PageSettings v-show="store.currentPage.value === 'settings'" />
+      <PageAiVisionSettings v-show="store.currentPage.value === 'ai-vision-settings'" />
       <PageDomainDetail v-show="store.currentPage.value === 'domain-detail'" />
       <PageAccountDetail v-show="store.currentPage.value === 'account-detail'" />
       <PageUnboundRecords v-show="store.currentPage.value === 'unbound-records'" />
@@ -154,6 +155,7 @@ import PagePending from './components/pages/PagePending.vue'
 import PageDomains from './components/pages/PageDomains.vue'
 import PageReport  from './components/pages/PageReport.vue'
 import PageSettings from './components/pages/PageSettings.vue'
+import PageAiVisionSettings from './components/pages/PageAiVisionSettings.vue'
 import PageDomainDetail from './components/pages/PageDomainDetail.vue'
 import PageAccountDetail from './components/pages/PageAccountDetail.vue'
 import PageUnboundRecords from './components/pages/PageUnboundRecords.vue'

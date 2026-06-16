@@ -18,10 +18,10 @@ const MIMO_DEFAULT_ENDPOINT = "https://api.xiaomimimo.com/v1/chat/completions";
 const MIMO_DEFAULT_MODEL    = "mimo-v2-omni";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
-// qwen3.6-flash 是「混合思考」模型，默认会生成 reasoning_content 大幅拖慢，
-// 必须在请求体传 enable_thinking=false 关闭推理才能达到 2-4s 响应
+// 截图/账单链路默认走 3.6 Flash 保持速度；拍照链路单独升到 3.7 Plus 质量优先。
 const QWEN_DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 const QWEN_DEFAULT_MODEL    = "qwen3.6-flash";
+const QWEN_PHOTO_DEFAULT_MODEL = "qwen3.7-plus";
 
 // 自建 OpenAI 兼容中转站（支持视觉模型时可直接复用）
 const RELAY_DEFAULT_ENDPOINT = "http://47.76.157.150:8317/v1/chat/completions";
@@ -36,6 +36,9 @@ interface ProviderConfig {
   model: string;
   endpoint: string;
   apiKey: string;
+  enableThinking?: boolean;
+  photoModel?: string;
+  photoEnableThinking?: boolean;
 }
 
 interface VisionAttempt {
@@ -63,6 +66,12 @@ function getEnv(key: string): string {
 function getEnvOptional(key: string): string | null {
   const v = Deno.env.get(key);
   return v && v.length > 0 ? v : null;
+}
+
+function getEnvBoolean(key: string, defaultValue: boolean): boolean {
+  const v = getEnvOptional(key);
+  if (v === null) return defaultValue;
+  return !["0", "false", "no", "off"].includes(v.trim().toLowerCase());
 }
 
 const corsHeaders = {
@@ -1107,6 +1116,74 @@ async function runLowCostDispatcher(
     should_call_vision: !looksMeaningless && !hasTextButNoCandidate,
     skip_reason: hasTextButNoCandidate ? "NO_TRIGGER_RULE_MATCH" : looksMeaningless ? "LOW_VALUE_IMAGE_FEATURES" : null,
   };
+}
+
+function looksLikeScreenshotCaptureKind(value: string | null): boolean {
+  const text = normalizeComparableText(value);
+  return Boolean(text) && (
+    text.includes("screenshot") ||
+    text.includes("screen") ||
+    text.includes("截图") ||
+    text.includes("截屏")
+  );
+}
+
+function looksLikePhotoCaptureKind(value: string | null): boolean {
+  const text = normalizeComparableText(value);
+  return Boolean(text) && (
+    text.includes("photo") ||
+    text.includes("camera") ||
+    text.includes("拍照") ||
+    text.includes("相机") ||
+    text.includes("food")
+  );
+}
+
+function shouldUsePhotoQualityVision(params: {
+  captureKind: string | null;
+  rawText: string | null;
+  sourceApp: string | null;
+  imageFeatures: ImageFeatures;
+  dispatcher: DispatcherResult;
+}): boolean {
+  if (looksLikeScreenshotCaptureKind(params.captureKind)) return false;
+  if (looksLikePhotoCaptureKind(params.captureKind)) return true;
+  if (params.dispatcher.selected_domain_key === "food") return true;
+  if (params.dispatcher.selected_domain_key && params.dispatcher.selected_domain_key !== "food") return false;
+  if (params.rawText || params.sourceApp) return false;
+
+  const megapixels = params.imageFeatures.megapixels ?? 0;
+  return params.imageFeatures.decode_ok && !params.imageFeatures.is_tiny_image && megapixels >= 0.5;
+}
+
+function selectVisionProvidersForImage(
+  providers: ProviderConfig[],
+  params: {
+    photoPrimary: string | null;
+    captureKind: string | null;
+    rawText: string | null;
+    sourceApp: string | null;
+    imageFeatures: ImageFeatures;
+    dispatcher: DispatcherResult;
+  },
+): ProviderConfig[] {
+  if (!shouldUsePhotoQualityVision(params)) return providers;
+  const photoProviders = providers.map((p) => p.name === "qwen"
+    ? {
+      ...p,
+      model: p.photoModel ?? QWEN_PHOTO_DEFAULT_MODEL,
+      enableThinking: p.photoEnableThinking ?? true,
+    }
+    : p);
+
+  const preferred = params.photoPrimary && params.photoPrimary !== "auto"
+    ? params.photoPrimary
+    : "qwen";
+  const preferredIdx = photoProviders.findIndex((p) => p.name === preferred);
+  if (preferredIdx <= 0) return photoProviders;
+
+  const [picked] = photoProviders.splice(preferredIdx, 1);
+  return [picked, ...photoProviders];
 }
 
 async function writeAiLog(
@@ -2157,19 +2234,18 @@ async function callOpenAICompatibleVision(
       ],
     }],
     temperature: 0.1,
-    // 限制输出长度，防止思考模式生成过长 reasoning_content 拖慢响应
-    // JSON 实际只需 ~500 token，1024 留足余量
-    max_completion_tokens: 1024,
+    // JSON 实际只需 ~500 token；Qwen 思考模式需要额外预算给 reasoning_content。
+    max_completion_tokens: config.name === "qwen" && config.enableThinking !== false ? 4096 : 1024,
   };
   // response_format 是 OpenAI 扩展，部分兼容服务不支持会 400
   // 仅 Moonshot 已验证支持；其它 provider 依赖 extractJson 兜底从 markdown / 文本中抽 JSON
   if (config.name === "moonshot") {
     body.response_format = { type: "json_object" };
   }
-  // 关闭「思考/推理模式」：MiMo v2.5/omni、Qwen3.6 以及部分 OpenAI-compatible 中转模型
-  // 默认为混合思考，若不关闭会生成较长 reasoning_content，明显拉高耗时
-  // 默认会生成大段 reasoning_content（实测 28s 级），关掉后预期降到 3-8s
-  if (config.name === "mimo" || config.name === "qwen" || config.name === "relay") {
+  // Qwen3.7 Plus 走质量优先，默认保留思考；MiMo/Relay 沿用快速识别策略。
+  if (config.name === "qwen") {
+    body.enable_thinking = config.enableThinking !== false;
+  } else if (config.name === "mimo" || config.name === "relay") {
     body.enable_thinking = false;
   }
   // 同时附带 Authorization Bearer 与 api-key header：
@@ -2277,6 +2353,9 @@ Deno.serve(async (req) => {
       model: getEnvOptional("QWEN_MODEL") ?? QWEN_DEFAULT_MODEL,
       endpoint: getEnvOptional("QWEN_ENDPOINT") ?? QWEN_DEFAULT_ENDPOINT,
       apiKey: qwenKey,
+      enableThinking: getEnvBoolean("QWEN_ENABLE_THINKING", false),
+      photoModel: getEnvOptional("QWEN_PHOTO_MODEL") ?? QWEN_PHOTO_DEFAULT_MODEL,
+      photoEnableThinking: getEnvBoolean("QWEN_PHOTO_ENABLE_THINKING", true),
     } : null;
 
     const relayKey = getEnvOptional("RELAY_API_KEY");
@@ -2330,15 +2409,17 @@ Deno.serve(async (req) => {
       settings: DEFAULT_COMPANION_SETTINGS,
       memory: null,
     });
+    let photoVisionPrimary: string | null = "qwen";
 
     // 用户级 AI 引擎偏好：覆盖 VISION_PRIMARY env
     // 取值 auto 表示跟随平台默认；其它强制指定 provider 优先
     if (userId) {
       const { data: prefRow } = await supabase.from("user_configs")
-        .select("vision_primary, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note")
+        .select("vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, qwen_screenshot_enable_thinking, qwen_photo_enable_thinking, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note")
         .eq("user_id", userId)
         .maybeSingle();
-      const userPref = prefRow?.vision_primary;
+      const userPref = prefRow?.screenshot_vision_primary ?? prefRow?.vision_primary;
+      photoVisionPrimary = prefRow?.photo_vision_primary ?? "qwen";
       companionSettings = {
         enabled: prefRow?.companion_enabled ?? true,
         memoryEnabled: prefRow?.companion_memory_enabled ?? true,
@@ -2347,6 +2428,21 @@ Deno.serve(async (req) => {
         expressionStyle: prefRow?.companion_expression_style ?? "plain",
         customNote: prefRow?.companion_custom_note ?? null,
       };
+      const qwenIdx = visionProviders.findIndex((p) => p.name === "qwen");
+      if (qwenIdx >= 0 && prefRow) {
+        const qwenCfg = visionProviders[qwenIdx];
+        visionProviders[qwenIdx] = {
+          ...qwenCfg,
+          model: normalizeString(prefRow.qwen_screenshot_model) ?? qwenCfg.model,
+          enableThinking: typeof prefRow.qwen_screenshot_enable_thinking === "boolean"
+            ? prefRow.qwen_screenshot_enable_thinking
+            : qwenCfg.enableThinking,
+          photoModel: normalizeString(prefRow.qwen_photo_model) ?? qwenCfg.photoModel,
+          photoEnableThinking: typeof prefRow.qwen_photo_enable_thinking === "boolean"
+            ? prefRow.qwen_photo_enable_thinking
+            : qwenCfg.photoEnableThinking,
+        };
+      }
       if (userPref && userPref !== "auto") {
         const idx = visionProviders.findIndex((p) => p.name === userPref);
         if (idx > 0) {
@@ -2409,6 +2505,7 @@ Deno.serve(async (req) => {
     const isRetry = !!stagingRetryId;
     const rawText = normalizeText(form.get("ocr_text") ?? form.get("text") ?? form.get("raw_text"));
     const sourceApp = normalizeText(form.get("source_app") ?? form.get("app_name"));
+    const captureKind = normalizeText(form.get("capture_kind") ?? form.get("capture_type") ?? form.get("image_source") ?? form.get("media_type"));
     const clientCapturedAt = form.get("client_captured_at") ?? form.get("client_upload_at") ?? form.get("shortcut_time") ?? form.get("captured_at");
     const imageFeatures = getImageFeatures(bytes, mime);
 
@@ -2568,8 +2665,16 @@ Deno.serve(async (req) => {
     let aiProvider: ProviderName = "moonshot";
     let aiModel: string = MOONSHOT_MODEL;
     let visionAttempts: VisionAttempt[] = [];
+    const activeVisionProviders = selectVisionProvidersForImage(visionProviders, {
+      photoPrimary: photoVisionPrimary,
+      captureKind,
+      rawText,
+      sourceApp,
+      imageFeatures,
+      dispatcher,
+    });
     try {
-      const visionResult = await callVisionWithFallback(bytes, mime, visionProviders, visionPrompt);
+      const visionResult = await callVisionWithFallback(bytes, mime, activeVisionProviders, visionPrompt);
       ai = visionResult.ai;
       aiProvider = visionResult.provider;
       aiModel = visionResult.model;
