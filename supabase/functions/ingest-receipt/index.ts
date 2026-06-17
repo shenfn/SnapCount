@@ -107,6 +107,48 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+type ShortcutResponseMode = "json" | "text";
+
+function normalizeResponseMode(value: FormDataEntryValue | null): ShortcutResponseMode {
+  if (typeof value !== "string") return "json";
+  return value.trim().toLowerCase() === "text" ? "text" : "json";
+}
+
+function buildShortcutText(payload: Record<string, unknown>): string {
+  const notification = normalizeString(payload.notification);
+  if (notification) return notification;
+  const message = normalizeString(payload.message);
+  if (message) return message;
+  const error = normalizeString(payload.error);
+  if (error) return error;
+  return "截图已处理，打开 App 查看";
+}
+
+function respondShortcut(
+  payload: Record<string, unknown>,
+  options: {
+    mode: ShortcutResponseMode;
+    status?: number;
+  },
+): Response {
+  const status = options.status ?? 200;
+  const notificationText = buildShortcutText(payload);
+  const enrichedPayload = {
+    ...payload,
+    notification_text: notificationText,
+  };
+  if (options.mode === "text") {
+    return new Response(notificationText, {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+  return new Response(JSON.stringify(enrichedPayload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 // ---- Timings: 链路分段耗时埋点 ----
 // 每个 mark(label) 记录"自上次 mark 以来"的耗时（毫秒），最终通过 snapshot() 输出 dict
 // 最终落盘到 ai_recognition_logs.raw_response.timings，便于在 Dashboard 排查慢请求
@@ -2486,11 +2528,11 @@ async function callKimiVision(imageBytes: Uint8Array, mime: string, apiKey: stri
 }
 
 Deno.serve(async (req) => {
+  const requestUrl = new URL(req.url);
+  let responseMode: ShortcutResponseMode = requestUrl.searchParams.get("response_mode") === "text" ? "text" : "json";
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return respondShortcut({ error: "Method not allowed" }, { mode: responseMode, status: 405 });
   }
 
   // 在请求内层初始化客户端，避免启动崩溃
@@ -2550,9 +2592,7 @@ Deno.serve(async (req) => {
     }
     visionProviders = allProviders;
   } catch (e) {
-    return new Response(JSON.stringify({ error: `Secret config error: ${String(e)}` }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return respondShortcut({ error: `Secret config error: ${String(e)}` }, { mode: responseMode, status: 500 });
   }
 
   try {
@@ -2560,6 +2600,7 @@ Deno.serve(async (req) => {
     const timings = makeTimings();
     // 1. 接收图片（multipart/form-data，字段名 image）
     const form = await req.formData();
+    responseMode = normalizeResponseMode(form.get("response_mode")) === "text" ? "text" : responseMode;
     timings.mark("form_parse");
     // 用户身份：优先 user_id，其次 upload_token 查表
     let userId = normalizeString(form.get("user_id"));
@@ -2634,20 +2675,14 @@ Deno.serve(async (req) => {
         .eq("id", stagingRetryId)
         .maybeSingle();
       if (!stagingRow || !stagingRow.image_path) {
-        return new Response(JSON.stringify({ error: "Staging record not found or missing image" }), {
-          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return respondShortcut({ error: "Staging record not found or missing image" }, { mode: responseMode, status: 404 });
       }
       if ((stagingRow.retry_count || 0) >= 3) {
-        return new Response(JSON.stringify({ error: "Retry limit exceeded (max 3)" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return respondShortcut({ error: "Retry limit exceeded (max 3)" }, { mode: responseMode, status: 400 });
       }
       const { data: imgData, error: imgErr } = await supabase.storage.from(BUCKET_NAME).download(stagingRow.image_path);
       if (imgErr || !imgData) {
-        return new Response(JSON.stringify({ error: "Failed to download image: " + (imgErr?.message || 'not found') }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return respondShortcut({ error: "Failed to download image: " + (imgErr?.message || "not found") }, { mode: responseMode, status: 500 });
       }
       retryImageBytes = new Uint8Array(await imgData.arrayBuffer());
       if (stagingRow.image_path.endsWith(".png")) retryImageMime = "image/png";
@@ -2655,9 +2690,7 @@ Deno.serve(async (req) => {
       retryImageHash = stagingRow.image_hash;
     }
     if (!file && !retryImageBytes) {
-      return new Response(JSON.stringify({ error: "Missing 'image' field" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return respondShortcut({ error: "Missing 'image' field" }, { mode: responseMode, status: 400 });
     }
     let bytes: Uint8Array;
     let buf: ArrayBuffer;
@@ -2752,13 +2785,11 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       });
       const _spendSum = await summarizeTodaySpend(supabase, userId);
-      return new Response(JSON.stringify({
+      return respondShortcut({
         status: "duplicate", id: txDup.id, record_type: "expense",
         message: "该截图已记账",
         notification: `🔁 该截图已记账过\n${todaySpendLine(_spendSum)}`,
-      }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      }, { mode: responseMode });
     }
     const { data: incDup } = await supabase
       .from("income_records").select("id").eq("image_hash", hash).maybeSingle();
@@ -2775,13 +2806,11 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       });
       const _incSum = await summarizeMonthIncome(supabase, userId);
-      return new Response(JSON.stringify({
+      return respondShortcut({
         status: "duplicate", id: incDup.id, record_type: "income",
         message: "该收入截图已记录",
         notification: `🔁 该收入截图已记录过\n${monthIncomeLine(_incSum)}`,
-      }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      }, { mode: responseMode });
     }
     const { data: dataDup } = await supabase
       .from("data_records").select("id,domain_key").eq("source_image_hash", hash).maybeSingle();
@@ -2800,13 +2829,11 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
         prompt_version: promptVersion,
       });
-      return new Response(JSON.stringify({
+      return respondShortcut({
         status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
         message: "该截图已归档",
         notification: `🔁 该截图已归档过 · ${domainNameFromKey(dataDup.domain_key) ?? dataDup.domain_key}`,
-      }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      }, { mode: responseMode });
     }
 
     const dispatcher = await runLowCostDispatcher(supabase, { rawText, sourceApp, imageFeatures });
@@ -3120,14 +3147,14 @@ Deno.serve(async (req) => {
             amount: normalizedAmount,
             occurredAt,
           });
-          return new Response(JSON.stringify({
+          return respondShortcut({
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
             notification: aiFeedback ? feedbackNotification(aiFeedback, _retryNotif) : withCompanion(_retryNotif),
             time_context: timeContext,
             companion_message: companionMessage,
             ai_feedback: aiFeedback,
-          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }, { mode: responseMode });
         }
       }
 
@@ -3156,13 +3183,13 @@ Deno.serve(async (req) => {
         prompt_version: promptVersion,
       });
 
-      return new Response(JSON.stringify({
+      return respondShortcut({
         status: "staging", staging_status: "retry_failed",
         message: "⚠ 重试仍未确定，请手动选择数据域归档",
         notification: withCompanion("⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档"),
         time_context: retryTimeContext,
         companion_message: companionMessage,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, { mode: responseMode });
     }
     const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
     const orderFinishedDateTime = normalizeAiDateTime(ai.order_finished_at) ?? occurredDateTime;
@@ -3229,7 +3256,7 @@ Deno.serve(async (req) => {
       const _stgPrimary = !aiOk
         ? "❌ AI 识别失败，已进入待处理"
         : `⚠️ ${_stgAmtPart}请打开 App 补全`;
-      return new Response(JSON.stringify({
+      return respondShortcut({
         status: "staging",
         staging_status: stagingStatus,
         id: staging?.id ?? null,
@@ -3238,7 +3265,7 @@ Deno.serve(async (req) => {
         notification: withCompanion(`${_stgPrimary}\n${todaySpendLine(_stgSpend)}`),
         time_context: timeContext,
         companion_message: companionMessage,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, { mode: responseMode });
     }
 
     if (builtinKey) {
@@ -3311,7 +3338,7 @@ Deno.serve(async (req) => {
         const _bNotif = domain
           ? `⚠️ 已识别为${_bDomainName}\n请打开 App 确认后归档`
           : `⚠️ 未找到对应数据域\n已进入待处理`;
-        return new Response(JSON.stringify({
+        return respondShortcut({
           status: "staging",
           staging_status: domain ? "pending_review" : "routing_failed",
           id: staging?.id ?? null,
@@ -3321,7 +3348,7 @@ Deno.serve(async (req) => {
           notification: withCompanion(_bNotif),
           time_context: timeContext,
           companion_message: companionMessage,
-        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }, { mode: responseMode });
       }
 
       const { data: row, error: dataErr } = await supabase.from("data_records").insert({
@@ -3409,7 +3436,7 @@ Deno.serve(async (req) => {
 
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
       const _domainDoneNotif = `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`;
-      return new Response(JSON.stringify({
+      return respondShortcut({
         status: "done",
         id: row.id,
         record_type: builtinKey,
@@ -3420,7 +3447,7 @@ Deno.serve(async (req) => {
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
         data: row,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, { mode: responseMode });
     }
 
     if (recordType === "income" && normalizedAmount !== null && (ai.confidence ?? 0) >= 0.7) {
@@ -3479,7 +3506,7 @@ Deno.serve(async (req) => {
               if (removeErr) console.error("Cleanup duplicate income image failed:", removeErr);
             }
             const _iSum2 = await summarizeMonthIncome(supabase, userId);
-            return new Response(JSON.stringify({
+            return respondShortcut({
               status: "duplicate",
               id: refIncome.id,
               record_type: "income",
@@ -3488,7 +3515,7 @@ Deno.serve(async (req) => {
               notification: withCompanion(`🔁 该收入疑似已记录过\n${monthIncomeLine(_iSum2)}`),
               time_context: timeContext,
               companion_message: companionMessage,
-            }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+            }, { mode: responseMode });
           }
         }
       }
@@ -3603,7 +3630,7 @@ Deno.serve(async (req) => {
       const _iDoneSum = await summarizeMonthIncome(supabase, userId);
       const _iSourceLabel = sourceName && sourceName !== "截图识别收入" ? ` · ${sourceName}` : "";
       const _incomeNotif = `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`;
-      return new Response(JSON.stringify({
+      return respondShortcut({
         status: "done",
         id: row.id,
         record_type: "income",
@@ -3614,7 +3641,7 @@ Deno.serve(async (req) => {
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
         data: row,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, { mode: responseMode });
     }
 
     // 4.5 感知哈希去重：同一笔支出（同金额+同商家）的相似截图 → 拦截
@@ -3657,13 +3684,13 @@ Deno.serve(async (req) => {
             if (removeErr) console.error("Cleanup duplicate expense image failed:", removeErr);
           }
           const _eDupSum = await summarizeTodaySpend(supabase, userId);
-          return new Response(JSON.stringify({
+          return respondShortcut({
             status: "duplicate", id: refLog.target_id, record_type: "expense",
             ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
             notification: withCompanion(`🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`),
             time_context: timeContext,
             companion_message: companionMessage,
-          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }, { mode: responseMode });
         }
       }
     }
@@ -3834,7 +3861,7 @@ Deno.serve(async (req) => {
       _ePrimary = `⚠️ ${_ePrimary.replace(/^[💸⚠️]\s*/, "")} · 疑似 3 分钟内重复`;
     }
     const _expenseNotif = `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`;
-    return new Response(JSON.stringify({
+    return respondShortcut({
       status: row.status,
       id: row.id,
       ai_ok: aiOk,
@@ -3848,13 +3875,11 @@ Deno.serve(async (req) => {
       companion_message: companionMessage,
       ai_feedback: aiFeedback,
       data: row,
-    }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }, { mode: responseMode });
 
   } catch (e) {
     console.error(e);
-    return new Response(JSON.stringify({ error: String(e) }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return respondShortcut({ error: String(e) }, { mode: responseMode, status: 500 });
   }
 });
 
