@@ -46,6 +46,7 @@ interface VisionAttempt {
   model: string;
   duration_ms: number;
   error?: string;
+  raw_text_preview?: string;
 }
 
 interface VisionCallResult {
@@ -53,6 +54,20 @@ interface VisionCallResult {
   provider: ProviderName;
   model: string;
   attempts: VisionAttempt[];
+  rawText: string;
+  extractedJson: string;
+  responseId?: string | null;
+  finishReason?: string | null;
+  reasoningText?: string | null;
+}
+
+interface VisionProviderResult {
+  ai: AIResult;
+  rawText: string;
+  extractedJson: string;
+  responseId?: string | null;
+  finishReason?: string | null;
+  reasoningText?: string | null;
 }
 
 // 歺加载：延迟到请求时获取 Secret，避免模块初始化就崩溃
@@ -72,6 +87,18 @@ function getEnvBoolean(key: string, defaultValue: boolean): boolean {
   const v = getEnvOptional(key);
   if (v === null) return defaultValue;
   return !["0", "false", "no", "off"].includes(v.trim().toLowerCase());
+}
+
+function clipForDebug(value: unknown, max = 6000): string | null {
+  if (value === null || value === undefined) return null;
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text.length > max ? `${text.slice(0, max)}...[truncated ${text.length - max} chars]` : text;
+}
+
+async function sha256Short(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
 }
 
 const corsHeaders = {
@@ -1194,6 +1221,80 @@ async function writeAiLog(
   if (error) console.error("AI log insert failed:", error);
 }
 
+interface AiRawDebugPayload {
+  promptVersion: string;
+  promptHash: string | null;
+  visionAttempts: VisionAttempt[];
+  timings: Record<string, number>;
+  dispatcher?: DispatcherResult | null;
+  modelRaw?: {
+    response_id?: string | null;
+    finish_reason?: string | null;
+    text?: string | null;
+    extracted_json?: string | null;
+    reasoning_text?: string | null;
+  } | null;
+  companion?: {
+    model_raw?: string | null;
+    normalized?: string | null;
+    content_guarded?: string | null;
+    time_guarded?: string | null;
+    final?: string | null;
+    disabled?: boolean | null;
+    fallback_used?: boolean | null;
+    feedback_used?: boolean | null;
+    ai_feedback?: AIFeedback | null;
+  } | null;
+  notification?: {
+    final?: string | null;
+    source?: string | null;
+    fallback?: string | null;
+  } | null;
+}
+
+function buildAiRawDebug(payload: AiRawDebugPayload): string {
+  const dispatcher = payload.dispatcher
+    ? {
+      ...payload.dispatcher,
+      raw_text: clipForDebug((payload.dispatcher as { raw_text?: unknown }).raw_text, 4000),
+    }
+    : null;
+
+  return JSON.stringify({
+    debug_version: "ai-raw-v1",
+    prompt: {
+      version: payload.promptVersion,
+      hash: payload.promptHash,
+    },
+    dispatcher,
+    model_raw: {
+      response_id: payload.modelRaw?.response_id ?? null,
+      finish_reason: payload.modelRaw?.finish_reason ?? null,
+      text: clipForDebug(payload.modelRaw?.text, 8000),
+      extracted_json: clipForDebug(payload.modelRaw?.extracted_json, 8000),
+      reasoning_text: clipForDebug(payload.modelRaw?.reasoning_text, 4000),
+    },
+    companion: payload.companion ? {
+      model_raw: clipForDebug(payload.companion.model_raw, 2000),
+      normalized: clipForDebug(payload.companion.normalized, 2000),
+      content_guarded: clipForDebug(payload.companion.content_guarded, 2000),
+      time_guarded: clipForDebug(payload.companion.time_guarded, 2000),
+      final: clipForDebug(payload.companion.final, 2000),
+      disabled: payload.companion.disabled ?? null,
+      fallback_used: payload.companion.fallback_used ?? null,
+      feedback_used: payload.companion.feedback_used ?? null,
+      ai_feedback: payload.companion.ai_feedback ?? null,
+    } : null,
+    notification: payload.notification ? {
+      final: clipForDebug(payload.notification.final, 3000),
+      source: payload.notification.source ?? null,
+      fallback: clipForDebug(payload.notification.fallback, 2000),
+    } : null,
+    vision_attempts: payload.visionAttempts,
+    timings: payload.timings,
+  });
+}
+
 function normalizeAmount(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value) && value !== 0) {
     const abs = Math.abs(value);
@@ -2221,7 +2322,7 @@ async function callOpenAICompatibleVision(
   mime: string,
   config: ProviderConfig,
   promptText: string = PROMPT,
-): Promise<AIResult> {
+): Promise<VisionProviderResult> {
   const base64 = toBase64(imageBytes);
   const dataUrl = `data:${mime};base64,${base64}`;
   const body: Record<string, unknown> = {
@@ -2266,8 +2367,28 @@ async function callOpenAICompatibleVision(
     throw new Error(`${config.name} API error ${resp.status}: ${txt}`);
   }
   const data = await resp.json();
-  const text = data?.choices?.[0]?.message?.content ?? "{}";
-  return JSON.parse(extractJson(text)) as AIResult;
+  const message = data?.choices?.[0]?.message ?? {};
+  const text = typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? {});
+  const extractedJson = extractJson(text);
+  const responseId = typeof data?.id === "string" ? data.id : null;
+  const finishReason = typeof data?.choices?.[0]?.finish_reason === "string" ? data.choices[0].finish_reason : null;
+  const reasoningText = typeof message.reasoning_content === "string" ? message.reasoning_content : null;
+  let ai: AIResult;
+  try {
+    ai = JSON.parse(extractedJson) as AIResult;
+  } catch (parseError) {
+    const err = new Error(`Failed to parse vision JSON: ${String(parseError)}`);
+    Object.assign(err, { rawText: text, extractedJson, responseId, finishReason, reasoningText });
+    throw err;
+  }
+  return {
+    ai,
+    rawText: text,
+    extractedJson,
+    responseId,
+    finishReason,
+    reasoningText,
+  };
 }
 
 // 多 Provider 优雅降级：按顺序尝试，第一个成功即返回；全部失败则抛聚合错误
@@ -2282,18 +2403,58 @@ async function callVisionWithFallback(
     throw new Error("No vision providers configured");
   }
   const attempts: VisionAttempt[] = [];
+  let lastRawText: string | null = null;
+  let lastExtractedJson: string | null = null;
+  let lastResponseId: string | null = null;
+  let lastFinishReason: string | null = null;
+  let lastReasoningText: string | null = null;
   for (const cfg of providers) {
     const startedAt = Date.now();
     try {
-      const ai = await callOpenAICompatibleVision(imageBytes, mime, cfg, promptText);
-      attempts.push({ provider: cfg.name, model: cfg.model, duration_ms: Date.now() - startedAt });
+      const result = await callOpenAICompatibleVision(imageBytes, mime, cfg, promptText);
+      attempts.push({
+        provider: cfg.name,
+        model: cfg.model,
+        duration_ms: Date.now() - startedAt,
+        raw_text_preview: clipForDebug(result.rawText, 600) ?? undefined,
+      });
       if (attempts.length > 1) {
         console.warn(`[vision] succeeded on fallback provider=${cfg.name} after ${attempts.length - 1} failure(s)`);
       }
-      return { ai, provider: cfg.name, model: cfg.model, attempts };
+      return {
+        ai: result.ai,
+        provider: cfg.name,
+        model: cfg.model,
+        attempts,
+        rawText: result.rawText,
+        extractedJson: result.extractedJson,
+        responseId: result.responseId,
+        finishReason: result.finishReason,
+        reasoningText: result.reasoningText,
+      };
     } catch (e) {
       const errMsg = String(e);
-      attempts.push({ provider: cfg.name, model: cfg.model, duration_ms: Date.now() - startedAt, error: errMsg });
+      const errWithDebug = e as Error & {
+        rawText?: string;
+        extractedJson?: string;
+        responseId?: string | null;
+        finishReason?: string | null;
+        reasoningText?: string | null;
+      };
+      if (typeof errWithDebug.rawText === "string") {
+        lastRawText = errWithDebug.rawText;
+        lastExtractedJson = errWithDebug.extractedJson ?? null;
+        lastResponseId = errWithDebug.responseId ?? null;
+        lastFinishReason = errWithDebug.finishReason ?? null;
+        lastReasoningText = errWithDebug.reasoningText ?? null;
+      }
+      attempts.push({
+        provider: cfg.name,
+        model: cfg.model,
+        duration_ms: Date.now() - startedAt,
+        error: errMsg,
+        raw_text_preview: clipForDebug(errWithDebug.rawText, 600) ?? undefined,
+      });
       console.warn(`[vision-fallback] provider=${cfg.name} failed: ${errMsg}`);
       // 继续尝试下一个 provider
     }
@@ -2303,17 +2464,25 @@ async function callVisionWithFallback(
   const err = new Error(`All vision providers failed → ${summary}`);
   // 把 attempts 挂到 error 上，外层可以读取写入日志
   (err as Error & { attempts?: VisionAttempt[] }).attempts = attempts;
+  Object.assign(err, {
+    rawText: lastRawText,
+    extractedJson: lastExtractedJson,
+    responseId: lastResponseId,
+    finishReason: lastFinishReason,
+    reasoningText: lastReasoningText,
+  });
   throw err;
 }
 
 // 兼容保留：现有代码仍可调用 callKimiVision（内部走通用接口）
 async function callKimiVision(imageBytes: Uint8Array, mime: string, apiKey: string): Promise<AIResult> {
-  return callOpenAICompatibleVision(imageBytes, mime, {
+  const result = await callOpenAICompatibleVision(imageBytes, mime, {
     name: "moonshot",
     model: MOONSHOT_MODEL,
     endpoint: MOONSHOT_ENDPOINT,
     apiKey,
   });
+  return result.ai;
 }
 
 Deno.serve(async (req) => {
@@ -2503,6 +2672,7 @@ Deno.serve(async (req) => {
       mime = file!.type || "image/jpeg";
     }
     const isRetry = !!stagingRetryId;
+    const promptVersion = isRetry ? "platform-v3-builtins-retry" : "platform-v3-builtins";
     const rawText = normalizeText(form.get("ocr_text") ?? form.get("text") ?? form.get("raw_text"));
     const sourceApp = normalizeText(form.get("source_app") ?? form.get("app_name"));
     const captureKind = normalizeText(form.get("capture_kind") ?? form.get("capture_type") ?? form.get("image_source") ?? form.get("media_type"));
@@ -2542,6 +2712,7 @@ Deno.serve(async (req) => {
       customNote: companionSettings.customNote,
       memory: companionContext.memory,
     });
+    const visionPromptHash = await sha256Short(visionPrompt);
 
     // 2. 计算 hash 去重
     const hash = retryImageHash || await sha256(buf);
@@ -2627,7 +2798,7 @@ Deno.serve(async (req) => {
         target_id: dataDup.id,
         data_record_id: dataDup.id,
         duration_ms: Date.now() - startedAt,
-        prompt_version: "platform-v3-builtins",
+        prompt_version: promptVersion,
       });
       return new Response(JSON.stringify({
         status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
@@ -2665,6 +2836,11 @@ Deno.serve(async (req) => {
     let aiProvider: ProviderName = "moonshot";
     let aiModel: string = MOONSHOT_MODEL;
     let visionAttempts: VisionAttempt[] = [];
+    let visionRawText: string | null = null;
+    let visionExtractedJson: string | null = null;
+    let visionResponseId: string | null = null;
+    let visionFinishReason: string | null = null;
+    let visionReasoningText: string | null = null;
     const activeVisionProviders = selectVisionProvidersForImage(visionProviders, {
       photoPrimary: photoVisionPrimary,
       captureKind,
@@ -2679,12 +2855,30 @@ Deno.serve(async (req) => {
       aiProvider = visionResult.provider;
       aiModel = visionResult.model;
       visionAttempts = visionResult.attempts;
+      visionRawText = visionResult.rawText;
+      visionExtractedJson = visionResult.extractedJson;
+      visionResponseId = visionResult.responseId ?? null;
+      visionFinishReason = visionResult.finishReason ?? null;
+      visionReasoningText = visionResult.reasoningText ?? null;
     } catch (e) {
       aiOk = false;
       aiErrorMessage = String(e);
       // 从聚合错误中读出 attempts（如果有）
-      const attempts = (e as Error & { attempts?: VisionAttempt[] }).attempts;
+      const debugError = e as Error & {
+        attempts?: VisionAttempt[];
+        rawText?: string | null;
+        extractedJson?: string | null;
+        responseId?: string | null;
+        finishReason?: string | null;
+        reasoningText?: string | null;
+      };
+      const attempts = debugError.attempts;
       if (attempts) visionAttempts = attempts;
+      visionRawText = debugError.rawText ?? null;
+      visionExtractedJson = debugError.extractedJson ?? null;
+      visionResponseId = debugError.responseId ?? null;
+      visionFinishReason = debugError.finishReason ?? null;
+      visionReasoningText = debugError.reasoningText ?? null;
       // 标注最终归属：使用最后一次尝试的 provider，便于排查
       const lastAttempt = visionAttempts[visionAttempts.length - 1];
       if (lastAttempt) {
@@ -2702,6 +2896,45 @@ Deno.serve(async (req) => {
     }
 
     const normalizedAmount = normalizeAmount(ai.amount);
+    const modelRawCompanion = typeof ai.companion_message === "string" ? ai.companion_message : null;
+    let normalizedCompanion: string | null = null;
+    let contentGuardedCompanion: string | null = null;
+    let timeGuardedCompanion: string | null = null;
+    let companionFallbackUsed = false;
+    let companionFeedbackUsed = false;
+    let companionMessage: string | null = null;
+    let aiFeedback: AIFeedback | null = null;
+    const companionDebug = () => ({
+      model_raw: modelRawCompanion,
+      normalized: normalizedCompanion,
+      content_guarded: contentGuardedCompanion,
+      time_guarded: timeGuardedCompanion,
+      final: companionMessage,
+      disabled: !companionSettings.enabled,
+      fallback_used: companionFallbackUsed,
+      feedback_used: companionFeedbackUsed,
+      ai_feedback: aiFeedback,
+    });
+    const rawDebug = (options: {
+      dispatcher?: DispatcherResult | null;
+      promptVersionOverride?: string;
+      notification?: AiRawDebugPayload["notification"];
+    } = {}) => buildAiRawDebug({
+      promptVersion: options.promptVersionOverride ?? promptVersion,
+      promptHash: visionPromptHash,
+      dispatcher: options.dispatcher,
+      visionAttempts,
+      timings: timings.snapshot(),
+      modelRaw: {
+        response_id: visionResponseId,
+        finish_reason: visionFinishReason,
+        text: visionRawText,
+        extracted_json: visionExtractedJson,
+        reasoning_text: visionReasoningText,
+      },
+      companion: companionDebug(),
+      notification: options.notification,
+    });
     // 归一化陪伴文案：去前后空白和引号、压缩换行、截断到 60 字符（约 30 个汉字裕量）
     if (typeof ai.companion_message === "string") {
       const trimmed = ai.companion_message.replace(/[\r\n]+/g, " ").trim().replace(/^["'""''「『]+|["'""''」』]+$/g, "");
@@ -2709,10 +2942,11 @@ Deno.serve(async (req) => {
     } else {
       ai.companion_message = null;
     }
+    normalizedCompanion = ai.companion_message;
     if (!companionSettings.enabled) ai.companion_message = null;
     ai.companion_message = sanitizeCompanionMessageForContent(ai.companion_message, ai);
-    let companionMessage: string | null = ai.companion_message;
-    let aiFeedback: AIFeedback | null = null;
+    contentGuardedCompanion = ai.companion_message;
+    companionMessage = ai.companion_message;
     const withCompanion = (text: string) => companionMessage ? `${companionMessage}\n${text}` : text;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
@@ -2743,6 +2977,7 @@ Deno.serve(async (req) => {
       });
       companionMessage = sanitizeCompanionMessageForTime(companionMessage, ai, retryTimeContext);
       companionMessage = sanitizeCompanionMessageForContent(companionMessage, ai);
+      timeGuardedCompanion = companionMessage;
       ai.companion_message = companionMessage;
       const retryAiWithTimeContext = { ...ai, time_context: retryTimeContext };
 
@@ -2760,6 +2995,7 @@ Deno.serve(async (req) => {
         });
         companionMessage = sanitizeCompanionMessageForTime(companionMessage, ai, timeContext);
         companionMessage = sanitizeCompanionMessageForContent(companionMessage, ai);
+        timeGuardedCompanion = companionMessage;
         ai.companion_message = companionMessage;
         let aiWithTimeContext: Record<string, unknown> = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
         const recordDate = occurredDateTime?.date ?? today;
@@ -2803,6 +3039,7 @@ Deno.serve(async (req) => {
               : null;
             if (retryFeedback) {
               aiFeedback = retryFeedback;
+              companionFeedbackUsed = true;
               companionMessage = retryFeedback.emotion_line;
               ai.companion_message = companionMessage;
               aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
@@ -2861,8 +3098,8 @@ Deno.serve(async (req) => {
             confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
             target_table: archivedTo, target_id: archivedId, staging_record_id: stagingRetryId,
             ai_response: aiWithTimeContext, model_provider: aiProvider, model_name: aiModel,
-            raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
-            prompt_version: "platform-v3-builtins-retry",
+            raw_response: rawDebug({ promptVersionOverride: "platform-v3-builtins-retry" }),
+            prompt_version: promptVersion,
           });
 
           const _retryDomain = domainNameFromKey(recordType) ?? recordType;
@@ -2908,8 +3145,15 @@ Deno.serve(async (req) => {
         confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
         staging_record_id: stagingRetryId, ai_response: retryAiWithTimeContext,
         error_message: aiErrorMessage, model_provider: aiProvider, model_name: aiModel,
-        raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
-        prompt_version: "platform-v3-builtins-retry",
+        raw_response: rawDebug({
+          promptVersionOverride: "platform-v3-builtins-retry",
+          notification: {
+            final: withCompanion("⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档"),
+            source: companionMessage ? "companion" : "base",
+            fallback: "⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档",
+          },
+        }),
+        prompt_version: promptVersion,
       });
 
       return new Response(JSON.stringify({
@@ -2932,6 +3176,7 @@ Deno.serve(async (req) => {
     });
     companionMessage = sanitizeCompanionMessageForTime(companionMessage, ai, timeContext);
     companionMessage = sanitizeCompanionMessageForContent(companionMessage, ai);
+    timeGuardedCompanion = companionMessage;
     ai.companion_message = companionMessage;
     let aiWithTimeContext: Record<string, unknown> = { ...ai, time_context: timeContext };
     const recordDate = occurredDateTime?.date ?? today;
@@ -2972,11 +3217,11 @@ Deno.serve(async (req) => {
         confidence: ai.confidence ?? 0,
         duration_ms: Date.now() - startedAt,
         ai_response: aiWithTimeContext,
-        raw_response: JSON.stringify({ dispatcher, vision_attempts: visionAttempts, timings: timings.snapshot() }),
+        raw_response: rawDebug({ dispatcher }),
         error_message: aiErrorMessage,
         model_provider: aiProvider,
         model_name: aiModel,
-        prompt_version: "platform-v3-builtins",
+        prompt_version: promptVersion,
       });
 
       const _stgSpend = await summarizeTodaySpend(supabase, userId);
@@ -3004,6 +3249,7 @@ Deno.serve(async (req) => {
       if (shouldAutoArchive && built && companionSettings.enabled) {
         aiFeedback = buildBuiltinAIFeedback(builtinKey, built, timeContext, companionMessage);
         if (aiFeedback) {
+          companionFeedbackUsed = true;
           companionMessage = aiFeedback.emotion_line;
           ai.companion_message = companionMessage;
           aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
@@ -3011,6 +3257,7 @@ Deno.serve(async (req) => {
       }
       if (!companionMessage && built) {
         companionMessage = sanitizeCompanionMessageForContent(buildBuiltinCompanionFallback(builtinKey, built), ai);
+        companionFallbackUsed = true;
         ai.companion_message = companionMessage;
         aiWithTimeContext = { ...ai, time_context: timeContext };
       }
@@ -3053,11 +3300,11 @@ Deno.serve(async (req) => {
           confidence: ai.confidence ?? 0,
           duration_ms: Date.now() - startedAt,
           ai_response: aiWithTimeContext,
-          raw_response: JSON.stringify({ dispatcher, vision_attempts: visionAttempts, timings: timings.snapshot() }),
+          raw_response: rawDebug({ dispatcher }),
           error_message: !domain ? `data_domains.${builtinKey} 不存在` : null,
           model_provider: aiProvider,
           model_name: aiModel,
-          prompt_version: "platform-v3-builtins",
+          prompt_version: promptVersion,
         });
 
         const _bDomainName = domainNameFromKey(builtinKey) ?? builtinKey;
@@ -3110,11 +3357,11 @@ Deno.serve(async (req) => {
           confidence: ai.confidence ?? 0,
           duration_ms: Date.now() - startedAt,
           ai_response: aiWithTimeContext,
-          raw_response: JSON.stringify({ dispatcher, vision_attempts: visionAttempts, timings: timings.snapshot() }),
+          raw_response: rawDebug({ dispatcher }),
           error_message: dataErr.message,
           model_provider: aiProvider,
           model_name: aiModel,
-          prompt_version: "platform-v3-builtins",
+          prompt_version: promptVersion,
         });
         if (uploadedNewObject) {
           const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
@@ -3143,11 +3390,11 @@ Deno.serve(async (req) => {
         confidence: ai.confidence ?? 0,
         duration_ms: Date.now() - startedAt,
         ai_response: aiWithTimeContext,
-        raw_response: JSON.stringify({ dispatcher, vision_attempts: visionAttempts, timings: timings.snapshot() }),
+        raw_response: rawDebug({ dispatcher }),
         error_message: aiErrorMessage,
         model_provider: aiProvider,
         model_name: aiModel,
-        prompt_version: "platform-v3-builtins",
+        prompt_version: promptVersion,
       });
 
       await rememberCompanionSignals(supabase, {
@@ -3224,7 +3471,7 @@ Deno.serve(async (req) => {
               error_message: aiErrorMessage,
               model_provider: aiProvider,
               model_name: aiModel,
-              raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
+              raw_response: rawDebug(),
             });
             if (uploadedNewObject) {
               const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
@@ -3248,6 +3495,7 @@ Deno.serve(async (req) => {
       if (companionSettings.enabled) {
         aiFeedback = buildIncomeAIFeedback(ai, normalizedAmount, timeContext);
         if (aiFeedback) {
+          companionFeedbackUsed = true;
           companionMessage = aiFeedback.emotion_line;
           ai.companion_message = companionMessage;
           aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
@@ -3289,7 +3537,7 @@ Deno.serve(async (req) => {
           error_message: incErr.message,
           model_provider: aiProvider,
           model_name: aiModel,
-          raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
+          raw_response: rawDebug(),
         });
         if (uploadedNewObject) {
           const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
@@ -3336,7 +3584,7 @@ Deno.serve(async (req) => {
         error_message: aiErrorMessage,
         model_provider: aiProvider,
         model_name: aiModel,
-        raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
+        raw_response: rawDebug(),
       });
 
       await rememberCompanionSignals(supabase, {
@@ -3398,7 +3646,7 @@ Deno.serve(async (req) => {
             target_table: "transactions", target_id: refLog.target_id, status: "duplicate",
             confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
             ai_response: aiWithTimeContext, model_provider: aiProvider, model_name: aiModel,
-            raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
+            raw_response: rawDebug(),
           });
           if (uploadedNewObject) {
             const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
@@ -3459,6 +3707,7 @@ Deno.serve(async (req) => {
     if (status === "done" && companionSettings.enabled) {
       aiFeedback = buildExpenseAIFeedback(ai, normalizedAmount, timeContext, possibleDuplicate);
       if (aiFeedback) {
+        companionFeedbackUsed = true;
         companionMessage = aiFeedback.emotion_line;
         ai.companion_message = companionMessage;
         aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
@@ -3506,7 +3755,7 @@ Deno.serve(async (req) => {
         error_message: insErr.message,
         model_provider: aiProvider,
         model_name: aiModel,
-        raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
+        raw_response: rawDebug(),
       });
       if (uploadedNewObject) {
         const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
@@ -3553,7 +3802,7 @@ Deno.serve(async (req) => {
       error_message: aiErrorMessage,
       model_provider: aiProvider,
       model_name: aiModel,
-      raw_response: JSON.stringify({ vision_attempts: visionAttempts, timings: timings.snapshot() }),
+      raw_response: rawDebug(),
     });
 
     await rememberCompanionSignals(supabase, {
