@@ -3472,6 +3472,7 @@ Deno.serve(async (req) => {
               model_provider: aiProvider,
               model_name: aiModel,
               raw_response: rawDebug(),
+              prompt_version: promptVersion,
             });
             if (uploadedNewObject) {
               const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
@@ -3538,6 +3539,7 @@ Deno.serve(async (req) => {
           model_provider: aiProvider,
           model_name: aiModel,
           raw_response: rawDebug(),
+          prompt_version: promptVersion,
         });
         if (uploadedNewObject) {
           const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
@@ -3585,6 +3587,7 @@ Deno.serve(async (req) => {
         model_provider: aiProvider,
         model_name: aiModel,
         raw_response: rawDebug(),
+        prompt_version: promptVersion,
       });
 
       await rememberCompanionSignals(supabase, {
@@ -3647,6 +3650,7 @@ Deno.serve(async (req) => {
             confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
             ai_response: aiWithTimeContext, model_provider: aiProvider, model_name: aiModel,
             raw_response: rawDebug(),
+            prompt_version: promptVersion,
           });
           if (uploadedNewObject) {
             const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
@@ -3756,6 +3760,7 @@ Deno.serve(async (req) => {
         model_provider: aiProvider,
         model_name: aiModel,
         raw_response: rawDebug(),
+        prompt_version: promptVersion,
       });
       if (uploadedNewObject) {
         const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
@@ -3795,7 +3800,7 @@ Deno.serve(async (req) => {
       duplicate_ref_id: duplicateRefId,
       target_table: "transactions",
       target_id: row.id,
-      status: aiOk ? row.status : "ai_error",
+      status: aiOk ? (row.status === "done" ? "success" : "pending") : "ai_error",
       confidence: ai.confidence ?? 0,
       duration_ms: Date.now() - startedAt,
       ai_response: aiWithTimeContext,
@@ -3803,6 +3808,7 @@ Deno.serve(async (req) => {
       model_provider: aiProvider,
       model_name: aiModel,
       raw_response: rawDebug(),
+      prompt_version: promptVersion,
     });
 
     await rememberCompanionSignals(supabase, {
