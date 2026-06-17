@@ -470,6 +470,120 @@ function normalizeString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function normalizeIsoDateTime(value: unknown): string | null {
+  const text = normalizeString(value);
+  if (!text) return null;
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function diffMs(startIso: string | null, endIso: string | null): number | null {
+  if (!startIso || !endIso) return null;
+  const start = new Date(startIso).getTime();
+  const end = new Date(endIso).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  return Math.round((end - start) * 100) / 100;
+}
+
+interface ClientTimingDebug {
+  server_received_at: string | null;
+  shortcut_started_at: string | null;
+  image_prepared_at: string | null;
+  request_started_at: string | null;
+  request_sent_at: string | null;
+  response_received_at: string | null;
+  notification_shown_at: string | null;
+  resize_ms: number | null;
+  preprocess_ms: number | null;
+  request_ms: number | null;
+  response_parse_ms: number | null;
+  notification_delay_ms: number | null;
+  total_ms: number | null;
+  edge_queue_ms: number | null;
+}
+
+function collectClientTiming(form: FormData, requestReceivedAtIso: string): ClientTimingDebug | null {
+  const shortcutStartedAt = normalizeIsoDateTime(
+    form.get("client_shortcut_started_at") ?? form.get("shortcut_started_at") ?? form.get("client_started_at"),
+  );
+  const imagePreparedAt = normalizeIsoDateTime(
+    form.get("client_image_prepared_at") ?? form.get("image_prepared_at") ?? form.get("client_upload_ready_at"),
+  );
+  const requestStartedAt = normalizeIsoDateTime(
+    form.get("client_request_started_at") ?? form.get("request_started_at"),
+  );
+  const requestSentAt = normalizeIsoDateTime(
+    form.get("client_request_sent_at") ?? form.get("request_sent_at"),
+  );
+  const responseReceivedAt = normalizeIsoDateTime(
+    form.get("client_response_received_at") ?? form.get("response_received_at"),
+  );
+  const notificationShownAt = normalizeIsoDateTime(
+    form.get("client_notification_shown_at") ?? form.get("notification_shown_at"),
+  );
+
+  const resizeMs = normalizeNumber(form.get("client_resize_ms") ?? form.get("shortcut_resize_ms") ?? form.get("resize_ms"));
+  const preprocessMs = normalizeNumber(
+    form.get("client_preprocess_ms") ?? form.get("shortcut_preprocess_ms") ?? form.get("preprocess_ms"),
+  );
+  const requestMs = normalizeNumber(form.get("client_request_ms") ?? form.get("shortcut_request_ms") ?? form.get("request_ms"));
+  const responseParseMs = normalizeNumber(
+    form.get("client_response_parse_ms") ?? form.get("shortcut_response_parse_ms") ?? form.get("response_parse_ms"),
+  );
+  const notificationDelayMs = normalizeNumber(
+    form.get("client_notification_delay_ms") ?? form.get("shortcut_notification_delay_ms") ?? form.get("notification_delay_ms"),
+  );
+  const totalMs = normalizeNumber(form.get("client_total_ms") ?? form.get("shortcut_total_ms") ?? form.get("total_ms"));
+
+  const derivedPreprocessMs = preprocessMs
+    ?? diffMs(shortcutStartedAt, imagePreparedAt)
+    ?? diffMs(shortcutStartedAt, requestStartedAt);
+  const derivedRequestMs = requestMs
+    ?? diffMs(requestStartedAt, responseReceivedAt)
+    ?? diffMs(requestSentAt, responseReceivedAt);
+  const derivedNotificationDelayMs = notificationDelayMs
+    ?? diffMs(responseReceivedAt, notificationShownAt);
+  const derivedTotalMs = totalMs
+    ?? diffMs(shortcutStartedAt, notificationShownAt)
+    ?? diffMs(shortcutStartedAt, responseReceivedAt);
+  const edgeQueueMs = diffMs(requestStartedAt ?? requestSentAt, requestReceivedAtIso);
+
+  const hasAnyValue = [
+    shortcutStartedAt,
+    imagePreparedAt,
+    requestStartedAt,
+    requestSentAt,
+    responseReceivedAt,
+    notificationShownAt,
+    resizeMs,
+    derivedPreprocessMs,
+    derivedRequestMs,
+    responseParseMs,
+    derivedNotificationDelayMs,
+    derivedTotalMs,
+    edgeQueueMs,
+  ].some((value) => value !== null && value !== undefined);
+
+  if (!hasAnyValue) return null;
+
+  return {
+    server_received_at: requestReceivedAtIso,
+    shortcut_started_at: shortcutStartedAt,
+    image_prepared_at: imagePreparedAt,
+    request_started_at: requestStartedAt,
+    request_sent_at: requestSentAt,
+    response_received_at: responseReceivedAt,
+    notification_shown_at: notificationShownAt,
+    resize_ms: resizeMs,
+    preprocess_ms: derivedPreprocessMs,
+    request_ms: derivedRequestMs,
+    response_parse_ms: responseParseMs,
+    notification_delay_ms: derivedNotificationDelayMs,
+    total_ms: derivedTotalMs,
+    edge_queue_ms: edgeQueueMs,
+  };
+}
+
 function normalizeAccountTypeValue(value: unknown): string | null {
   const text = normalizeString(value)?.toLowerCase() ?? null;
   if (!text) return null;
@@ -1268,6 +1382,22 @@ interface AiRawDebugPayload {
   promptHash: string | null;
   visionAttempts: VisionAttempt[];
   timings: Record<string, number>;
+  clientTiming?: {
+    server_received_at?: string | null;
+    shortcut_started_at?: string | null;
+    image_prepared_at?: string | null;
+    request_started_at?: string | null;
+    request_sent_at?: string | null;
+    response_received_at?: string | null;
+    notification_shown_at?: string | null;
+    resize_ms?: number | null;
+    preprocess_ms?: number | null;
+    request_ms?: number | null;
+    response_parse_ms?: number | null;
+    notification_delay_ms?: number | null;
+    total_ms?: number | null;
+    edge_queue_ms?: number | null;
+  } | null;
   dispatcher?: DispatcherResult | null;
   modelRaw?: {
     response_id?: string | null;
@@ -1308,6 +1438,7 @@ function buildAiRawDebug(payload: AiRawDebugPayload): string {
       version: payload.promptVersion,
       hash: payload.promptHash,
     },
+    client_timing: payload.clientTiming ?? null,
     dispatcher,
     model_raw: {
       response_id: payload.modelRaw?.response_id ?? null,
@@ -2715,6 +2846,7 @@ Deno.serve(async (req) => {
     // 时间锚点：以请求接收时间为基准，附带北京时区换算；陪伴文案 prompt 需要本地时间感
     const now = new Date();
     const requestReceivedAt = now.toISOString();
+    const clientTiming = collectClientTiming(form, requestReceivedAt);
     // Deno 运行在 UTC 环境，显式换算为 UTC+8 时间
     const chinaNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
     const today = chinaNow.toISOString().slice(0, 10);
@@ -2952,6 +3084,7 @@ Deno.serve(async (req) => {
       dispatcher: options.dispatcher,
       visionAttempts,
       timings: timings.snapshot(),
+      clientTiming,
       modelRaw: {
         response_id: visionResponseId,
         finish_reason: visionFinishReason,
