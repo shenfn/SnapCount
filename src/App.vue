@@ -32,9 +32,34 @@
     <!-- Error overlay -->
     <div v-if="!store.loading.value && store.loadError.value" class="platform-overlay error">
       <div class="platform-loader-mark danger">!</div>
-      <div class="platform-loader-text">数据加载失败</div>
+      <div class="platform-loader-text">
+        {{ store.loadErrorDetail.value ? store.loadErrorDetail.value.title : '数据加载失败' }}
+      </div>
       <div class="platform-error-box">{{ store.loadError.value }}</div>
-      <div class="platform-error-sub">请确认网络、Supabase 配置和数据库迁移状态。</div>
+
+      <!-- 友好提示：当 supabase.js 识别出网络/TLS/上游错误时，逐条展示用户可操作的步骤 -->
+      <div
+        v-if="store.loadErrorDetail.value && store.loadErrorDetail.value.userAction && store.loadErrorDetail.value.userAction.length"
+        class="platform-error-actions"
+      >
+        <div class="platform-error-actions-title">你可以尝试：</div>
+        <ol class="platform-error-actions-list">
+          <li
+            v-for="(tip, idx) in store.loadErrorDetail.value.userAction"
+            :key="idx"
+          >{{ tip }}</li>
+        </ol>
+        <div v-if="store.loadErrorDetail.value.code" class="platform-error-code">
+          错误码：{{ store.loadErrorDetail.value.code }}
+        </div>
+      </div>
+
+      <!-- 原始兜底说明：仅在没有结构化提示时显示 -->
+      <div
+        v-else
+        class="platform-error-sub"
+      >请确认网络、Supabase 配置和数据库迁移状态。</div>
+
       <button class="platform-retry-btn" @click="store.loadData()">重新加载</button>
     </div>
 

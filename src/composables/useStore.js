@@ -84,6 +84,10 @@ export function useStore() {
   const selectedStagingIds = ref(new Set())
   const loading = ref(false)
   const loadError = ref('')
+  // loadErrorDetail：承载友好错误结构（title / userAction / code / retryable），
+  // 由 src/lib/supabase.js 的 FriendlyNetworkError 注入；
+  // App.vue 的错误浮层会优先消费这个对象，回退到 loadError 字符串。
+  const loadErrorDetail = ref(null)
   const flashMsg = ref('')
   const flashVisible = ref(false)
   let flashTimer = null
@@ -411,6 +415,7 @@ export function useStore() {
     repaymentCycles.value = []
     selectedAccountSourceSnapshot.value = null
     loadError.value = ''
+    loadErrorDetail.value = null
     loading.value = false
     selectedStagingIds.value = new Set()
     batchMode.value = false
@@ -725,7 +730,10 @@ export function useStore() {
   async function loadData(attempt = 0, silent = false, runId = null) {
     if (attempt === 0 || !runId) runId = ++loadDataRunId
     if (attempt === 0 && !silent) loading.value = true
-    if (attempt === 0 && !silent) loadError.value = ''
+    if (attempt === 0 && !silent) {
+      loadError.value = ''
+      loadErrorDetail.value = null
+    }
     if (attempt === 0) lastRefreshTs = Date.now()
     if (attempt === 0) {
       loadUserSettings().catch(e => console.warn('加载用户设置失败:', e?.message || e))
@@ -993,7 +1001,13 @@ export function useStore() {
       if (silent) await supplementalLoad
     } catch (e) {
       console.error('[loadData 异常]', e)
-      const isNetworkError = /load failed|fetch|network|failed to fetch/i.test(e.message || '')
+      // 优先使用 supabase.js 抛出的 FriendlyNetworkError 上的结构化信息：
+      //   - friendly: { title, message, userAction[], code, retryable }
+      // 没有 friendly 时回退到旧的"消息字符串关键字匹配"逻辑。
+      const friendly = e && e.friendly ? e.friendly : null
+      const isNetworkError = friendly
+        ? friendly.retryable
+        : /load failed|fetch|network|failed to fetch/i.test(e.message || '')
       const maxAttempts = isNetworkError ? 4 : 2
       if (attempt < maxAttempts) {
         // 网络层错误使用指数退避重试（1s → 2s → 4s → 8s）
@@ -1002,10 +1016,17 @@ export function useStore() {
         return loadData(attempt + 1, silent, runId)
       }
       if (silent) return
-      const tip = isNetworkError
-        ? `网络连接不稳定，请检查网络或稍后重试`
-        : e.message
-      loadError.value = `加载失败: ${tip}`
+      if (friendly) {
+        // 有友好结构：同时填充 detail（供 UI 渲染指导步骤）和 string（向后兼容）
+        loadErrorDetail.value = friendly
+        loadError.value = friendly.title || `加载失败: ${friendly.message}`
+      } else {
+        const tip = isNetworkError
+          ? `网络连接不稳定，请检查网络或稍后重试`
+          : e.message
+        loadErrorDetail.value = null
+        loadError.value = `加载失败: ${tip}`
+      }
     } finally {
       if (attempt === 0 && !silent) loading.value = false
     }
@@ -3465,7 +3486,7 @@ export function useStore() {
   return {
     currentYear, currentMonth, currentPage, monthLabel,
     pageHistory, pageScrollPositions, currentUserId, currentUserEmail, isLoggedIn,
-    loading, loadError,
+    loading, loadError, loadErrorDetail,
     bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords, accounts, repaymentCycles,
     selectedAccount, selectedAccountEntries, selectedAccountPayments, selectedAccountSourceSnapshot, accountEntriesLoading,
     unboundRecords, unboundRecordsLoading, unboundRecordFilter,

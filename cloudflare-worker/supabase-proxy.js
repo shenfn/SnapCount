@@ -6,7 +6,15 @@
  *   SUPABASE_URL      = https://igbghrhsdaolxljgiisf.supabase.co
  *   SUPABASE_ANON_KEY = eyJ...（anon key）
  *
- * ALLOWED_ORIGIN 变量可以删除，不再使用（改为代码内多 origin 匹配）。
+ * 设计要点（友好错误回传）：
+ *   1. 上游 fetch 失败时，按错误关键字识别 TLS / DNS / 超时 / 重置等场景；
+ *   2. 返回 JSON 结构化错误体：{ code, title, userAction[], detail, target }，
+ *      让前端（尤其是 iOS Safari，无法看 console 的环境）能直接渲染指导文案；
+ *   3. HTTP 状态码语义化：
+ *        504 = 上游 TLS / 超时（可重试）
+ *        502 = 上游连接异常（可重试）
+ *        500 = Worker 自身异常（极少出现）
+ *   4. 增加 30s 超时控制（AbortController），避免链路异常时长时间挂起。
  */
 
 const ALLOWED_ORIGINS = [
@@ -17,6 +25,9 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
 ]
 
+// 上游请求超时（毫秒）。Supabase 正常响应都在 1-2s 内，30s 足够覆盖慢请求。
+const UPSTREAM_TIMEOUT_MS = 30_000
+
 function buildCorsHeaders(requestOrigin, requestedHeaders) {
   const origin = ALLOWED_ORIGINS.includes(requestOrigin)
     ? requestOrigin
@@ -26,10 +37,114 @@ function buildCorsHeaders(requestOrigin, requestedHeaders) {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
     // 关键：回显浏览器请求的 headers，避免预检因 header 不匹配失败
     'Access-Control-Allow-Headers': requestedHeaders || '*',
-    'Access-Control-Expose-Headers': 'Content-Range, X-Total-Count, Content-Profile',
+    'Access-Control-Expose-Headers': 'Content-Range, X-Total-Count, Content-Profile, X-Proxy-Error-Code',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin, Access-Control-Request-Headers',
   }
+}
+
+/**
+ * 把上游 fetch 抛出的错误归类为可读的错误码 + 用户指导。
+ * Cloudflare Worker 的 fetch 错误大多形如：
+ *   - "fetch failed"
+ *   - "Network connection lost"
+ *   - "TLS handshake error" / "SSL handshake failed"
+ *   - "Aborted" / "The operation was aborted"
+ *   - "Name resolution failed"
+ *
+ * @param {Error} err
+ * @returns {{
+ *   status: number,
+ *   code: string,
+ *   title: string,
+ *   userAction: string[],
+ * }}
+ */
+function classifyUpstreamError(err) {
+  const msg = (err && (err.message || String(err))) || ''
+  const lower = msg.toLowerCase()
+
+  if (/aborted|timeout|timed out/.test(lower)) {
+    return {
+      status: 504,
+      code: 'UPSTREAM_TIMEOUT',
+      title: '后端连接数据库超时',
+      userAction: [
+        '请稍后重试，可能是数据库临时繁忙',
+        '若多次出现，请联系开发者',
+      ],
+    }
+  }
+
+  if (/tls|ssl|handshake|certificate|cipher/.test(lower)) {
+    return {
+      status: 504,
+      code: 'UPSTREAM_TLS',
+      title: '后端到数据库的安全连接异常',
+      userAction: [
+        '此问题与你的本地网络无关，请稍后 1-2 分钟再试',
+        '若长时间不恢复，请联系开发者',
+      ],
+    }
+  }
+
+  if (/dns|name resolution|getaddrinfo|enotfound/.test(lower)) {
+    return {
+      status: 502,
+      code: 'UPSTREAM_DNS',
+      title: '后端无法解析数据库域名',
+      userAction: [
+        '请稍后重试',
+        '若多次出现，请联系开发者',
+      ],
+    }
+  }
+
+  if (/connection|reset|closed|network/.test(lower)) {
+    return {
+      status: 502,
+      code: 'UPSTREAM_CONNECTION',
+      title: '后端到数据库的连接被中断',
+      userAction: [
+        '请稍后重试',
+        '若多次出现，请联系开发者',
+      ],
+    }
+  }
+
+  return {
+    status: 502,
+    code: 'UPSTREAM_UNKNOWN',
+    title: '后端代理出现未知错误',
+    userAction: [
+      '请稍后重试',
+      '若多次出现，请联系开发者并附带错误码',
+    ],
+  }
+}
+
+/**
+ * 构造统一的错误响应体（JSON）。
+ */
+function buildErrorResponse(classification, detail, targetUrl, corsHeaders) {
+  const body = {
+    error: classification.title,
+    code: classification.code,
+    title: classification.title,
+    userAction: classification.userAction,
+    detail,
+    target: targetUrl,
+    timestamp: new Date().toISOString(),
+  }
+  return new Response(JSON.stringify(body), {
+    status: classification.status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      // 把错误码也放进自定义 header，便于前端在不解析 body 的情况下也能拿到
+      'X-Proxy-Error-Code': classification.code,
+      ...corsHeaders,
+    },
+  })
 }
 
 export default {
@@ -50,6 +165,24 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders })
     }
 
+    // anon key 缺失时直接返回明确错误，避免上游因鉴权失败掩盖根因
+    if (!anonKey) {
+      return buildErrorResponse(
+        {
+          status: 500,
+          code: 'PROXY_MISCONFIGURED',
+          title: '后端代理未正确配置',
+          userAction: [
+            '此为后端配置问题，请联系开发者',
+            '错误原因：Worker 未配置 SUPABASE_ANON_KEY',
+          ],
+        },
+        'Missing SUPABASE_ANON_KEY env var',
+        url.toString(),
+        corsHeaders,
+      )
+    }
+
     const targetUrl = supabaseUrl + url.pathname + url.search
 
     // 转发请求头：注入 anon key，移除 Cloudflare 内部 header 避免干扰
@@ -61,9 +194,14 @@ export default {
     headers.delete('cf-ray')
     headers.delete('cf-visitor')
 
+    // 用 AbortController 加超时，避免 TLS 异常时永远挂起
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+
     const fetchOptions = {
       method: request.method,
       headers,
+      signal: controller.signal,
     }
     if (!['GET', 'HEAD'].includes(request.method)) {
       fetchOptions.body = request.body
@@ -71,6 +209,7 @@ export default {
 
     try {
       const response = await fetch(targetUrl, fetchOptions)
+      clearTimeout(timeoutId)
 
       const respHeaders = new Headers(response.headers)
       Object.entries(corsHeaders).forEach(([k, v]) => respHeaders.set(k, v))
@@ -80,10 +219,10 @@ export default {
         headers: respHeaders,
       })
     } catch (err) {
-      return new Response(
-        JSON.stringify({ error: 'Proxy error', detail: err.message }),
-        { status: 502, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-      )
+      clearTimeout(timeoutId)
+      const classification = classifyUpstreamError(err)
+      console.error(`[proxy-error] code=${classification.code} target=${targetUrl} detail=${err.message}`)
+      return buildErrorResponse(classification, err.message, targetUrl, corsHeaders)
     }
   },
 }

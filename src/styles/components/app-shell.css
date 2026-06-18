@@ -153,6 +153,49 @@
   color: var(--text2);
 }
 
+/* 友好错误指导步骤面板：在 iOS Safari / 微信浏览器等无法看 console 的环境下，
+   把"用户可执行的下一步"清晰列出来，避免用户看到 TLS 错误就无所适从。 */
+.platform-error-actions {
+  width: 100%;
+  max-width: 360px;
+  margin: 4px auto 0;
+  padding: 12px 14px;
+  background: var(--bg2, rgba(0, 0, 0, 0.04));
+  border-radius: 10px;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text1);
+  box-sizing: border-box;
+}
+
+.platform-error-actions-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text1);
+}
+
+.platform-error-actions-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.platform-error-actions-list li {
+  margin-bottom: 4px;
+}
+
+.platform-error-actions-list li:last-child {
+  margin-bottom: 0;
+}
+
+.platform-error-code {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+
 .platform-retry-btn {
   border: none;
   border-radius: 999px;
