@@ -52,6 +52,11 @@ async function friendlyFetch(input, init) {
     const friendly = toFriendlyNetworkError(err, { endpoint: url })
     // 控制台留一份完整堆栈，方便 Web Inspector / vConsole 排查
     console.error('[supabase-fetch] network error', { url, code: friendly.code, raw: err })
+    // 挂到全局，供 supabase-js 包装后的上层代码读取（supabase-js 会吞掉 FriendlyNetworkError 实例）
+    if (typeof window !== 'undefined') {
+      friendly.__timestamp = Date.now()
+      window.__lastSupabaseNetworkError = friendly
+    }
     throw new FriendlyNetworkError(friendly)
   }
 

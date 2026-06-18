@@ -1004,7 +1004,16 @@ export function useStore() {
       // 优先使用 supabase.js 抛出的 FriendlyNetworkError 上的结构化信息：
       //   - friendly: { title, message, userAction[], code, retryable }
       // 没有 friendly 时回退到旧的"消息字符串关键字匹配"逻辑。
-      const friendly = e && e.friendly ? e.friendly : null
+      // 注意：supabase-js 内部会吞掉 FriendlyNetworkError 实例，把它包装成普通 Object，
+      // 所以我们从 window.__lastSupabaseNetworkError 读取最近一次网络错误的 friendly 结构。
+      let friendly = e && e.friendly ? e.friendly : null
+      if (!friendly && typeof window !== 'undefined' && window.__lastSupabaseNetworkError) {
+        // 检查时间戳：只使用 5 秒内的错误，避免读到旧的全局残留
+        const age = Date.now() - (window.__lastSupabaseNetworkError.__timestamp || 0)
+        if (age < 5000) {
+          friendly = window.__lastSupabaseNetworkError
+        }
+      }
       const isNetworkError = friendly
         ? friendly.retryable
         : /load failed|fetch|network|failed to fetch/i.test(e.message || '')
