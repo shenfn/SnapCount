@@ -37,21 +37,50 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
 - 禁止把不相干的历史写成连续剧情，例如"刚吃完 X，又来一份 Y""这周吃过 X，今天换成 Y""看来今晚要熬夜了"
 - 饮食记录优先观察餐次节奏、食物结构、热量大致轻重、连续外卖/正餐/夜宵等模式；单纯"第 N 顿美食"不够好
 - 饮食照片（food_photo）只围绕画面里的食物、份量、餐次和营养估算写；除非图片本身就是订单/商家页，否则不要提商家名、外卖店名或最近消费店铺
-- 更好的饮食写法示例："红烧鸡块配米饭，今天是踏实午餐。"、"这周饭点挺稳，今天这顿很正经。"、"最近午餐很认真，这盘挺有分量。"
-- 运动记录优先观察运动类型、时长、距离、心率、热量和连续性；不要劝用户休息，不要说"继续努力"。更好的运动写法示例："这次骑行 9.79 公里，节奏挺完整。"、"44 分钟自由训练，强度拉起来了。"、"今天这段跑步配速很稳。"
+- 运动记录优先观察运动类型、时长、距离、心率、热量和连续性；不要劝用户休息，不要说"继续努力"
 - 如果记忆没有证据，绝不编造"第 N 次""比昨天""最近总是"等对比
 - 【用户记忆】只允许用于 companion_message，严禁用它推断 amount、merchant_name、category、record_type、occurred_at 等识别字段
 - 如果截图记录日期早于【截图所在用户本地时间】的日期，companion_message 禁止使用"昨天""昨晚""刚才""今天"等相对时间；睡眠补录请写具体日期（如"6月10日这晚"）或直接省略时间称呼
 - 避免和【最近陪伴文案】重复句式
-- 严格禁止：
-  · 不说"加油""你真棒""注意身体""请合理饮食"等空话
-  · 不给建议、不评判好坏、不教育用户
-  · 不要说"超标""放纵""罪恶""记得..."这类健康/消费审判
-  · 不要简单复述用户已经看到的字段（如"你花了 32 元"）
-  · 不要使用感叹号超过一次
-  · 必须基于这条记录的具体内容，不能是通用句
-  · 支出/收入页面如果同时出现红包、广告、抽免单、优惠活动，只能围绕真实交易主体写，不要说“收到红包”“获得奖励”
-- 如果信息太少写不出有意义的话，返回空字符串 ""，不要硬凑`;
+
+【表达反例 → 改写正例（对比组，从生产数据中抽取，严禁产出反例左侧形态）】
+反例 1（财务）："这周第 11 笔消费，又是熟悉的支付记录"
+  问题：以"这周第 X 笔"开头 + "又是熟悉的"兜底套话 + 没有任何具体信息
+  改写为："这次 38 元下午茶，临走前刷的常去那家"
+反例 2（饮食）："这周第 12 次记录饮食，又是熟悉的杨国福"
+  问题：数数 + 套话；正确做法是聚焦具体食物或情绪节奏
+  改写为："还是麻辣烫，这周已经第三家不同的店了"
+  或："今天的麻辣烫看起来荤多了点，喝口汤暖一下"
+反例 3（财务）："签约开通处理中，这周第 11 笔消费"
+  问题：把无关字段（签约开通）当作 companion_message 主体
+  改写为："这笔开通费 18 元，第一次见这种月费"
+反例 4（运动）："继续保持，今天又跑了"
+  问题："继续保持""加油"是空话，没数据没观察
+  改写为："3 公里用了 22 分钟，比上次快了一点"
+反例 5（睡眠）："你睡得不够，注意身体"
+  问题：评判 + 教育用户
+  改写为："这晚只睡了 5 小时 20 分，醒来应该挺重的"
+
+【严格禁止】
+- 不说"加油""你真棒""注意身体""请合理饮食"等空话
+- 不给建议、不评判好坏、不教育用户
+- 不要说"超标""放纵""罪恶""记得..."这类健康/消费审判
+- 不要简单复述用户已经看到的字段（如"你花了 32 元"）
+- 不要使用感叹号超过一次
+- 必须基于这条记录的具体内容，不能是通用句
+- 支出/收入页面如果同时出现红包、广告、抽免单、优惠活动，只能围绕真实交易主体写，不要说"收到红包""获得奖励"
+- 禁止以"这周第 X 笔/次"开头，禁止使用"又是熟悉的 XX"句式
+- 如果信息太少写不出有意义的话，返回空字符串 ""，不要硬凑
+
+【ai_feedback 字段产出规范】
+对 ai_feedback 对象内的子字段单独约束：
+- badge：4-8 个汉字，描述本条记录的主题标签，如"夜宵记录""周末长跑""疑似重复"
+- band：严格从 [positive, neutral, watch, recover, ritual] 五选一
+- emotion_line：≤ 28 个汉字，共情/陪伴向，不带建议；可以与 companion_message 相同或互补
+- utility_line：≤ 30 个汉字，提供 1 个具体观察或轻微建议；与 emotion_line 不重复
+- detail_reason：≤ 60 个汉字，说明判断依据；仅当 confidence ≥ 0.7 时输出，否则为 null
+- confidence：0-1 之间小数，自评打分；低于 0.6 整个 ai_feedback 可返回 null
+- 若没有足够强信号产出有意义的 ai_feedback，整个对象返回 null，不要硬凑套话`;
 
 function buildMemoryBlock(memory: Record<string, unknown> | null | undefined, memoryEnabled: boolean): string {
   if (!memoryEnabled || !memory) return "";
@@ -313,3 +342,79 @@ order_finished_at（订单完成时间）：
 {"image_type":"other","record_type":"uncertain","domain_key":null,"title":null,"summary":null,"amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"funding_source":null,"receiving_account":null,"income_category":null,"source_name":null,"occurred_at":null,"order_finished_at":null,"payload_jsonb":null,"confidence":0,"companion_message":""}`;
 
 export const PROMPT = buildPrompt();
+
+// ============================================================
+// 二次调用 · 文案生成专用 Prompt（不带图片，仅基于识别结果 + 记忆）
+// 用于把"识别"和"文案"解耦：识别用低 temperature，文案用高 temperature
+// ============================================================
+
+export interface FeedbackPromptContext {
+  clientLocalTime?: string | null;
+  weekday?: string | null;
+  recognizedFields?: Record<string, unknown>; // 第一阶段识别出的字段
+  timeContext?: Record<string, unknown> | null;
+  builtPayload?: Record<string, unknown> | null;
+  memory?: Record<string, unknown> | null;
+  persona?: string | null;
+  memoryStrength?: string | null;
+  expressionStyle?: string | null;
+  customNote?: string | null;
+  memoryEnabled?: boolean | null;
+  recentCompanionLines?: string[];
+}
+
+export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
+  const personaText = PERSONAS[ctx.persona ?? "observer"] ?? PERSONAS.observer;
+  const strengthLine = `记忆引用强度：${ctx.memoryStrength ?? "balanced"}（light=偶尔引用，balanced=自然引用，bold=有证据时优先引用）`;
+  const expressionStyle = ctx.expressionStyle ?? "plain";
+  const expressionLine = expressionStyle === "emoji"
+    ? "表达方式：可在句尾使用 1 个贴切 emoji，但不要每次都用"
+    : expressionStyle === "kaomoji"
+      ? "表达方式：可偶尔使用 1 个轻量颜文字"
+      : "表达方式：纯文字，不使用 emoji 或颜文字";
+  const customLine = ctx.customNote ? `用户附加偏好：${ctx.customNote.slice(0, 80)}` : "";
+  const memoryBlock = (ctx.memoryEnabled !== false && ctx.memory)
+    ? `\n\n【用户记忆】\n${JSON.stringify(ctx.memory)}`
+    : "";
+  const recentLines = (ctx.recentCompanionLines && ctx.recentCompanionLines.length > 0)
+    ? `\n\n【最近陪伴文案（请避免句式重复）】\n${ctx.recentCompanionLines.slice(0, 5).map((l) => `- ${l}`).join("\n")}`
+    : "";
+  const timeBlock = ctx.clientLocalTime
+    ? `截图时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}`
+    : "";
+  const recognizedBlock = JSON.stringify(ctx.recognizedFields ?? {}, null, 2);
+  const builtBlock = ctx.builtPayload ? `\n\n【内置数据域 payload】\n${JSON.stringify(ctx.builtPayload, null, 2)}` : "";
+  const timeContextBlock = ctx.timeContext ? `\n\n【时间上下文】\n${JSON.stringify(ctx.timeContext, null, 2)}` : "";
+
+  return `你是个人 AI 记忆助手，正在为用户的本条记录生成「陪伴文案」和「AI 即时反馈」。
+
+【任务】
+基于下方已识别的字段、用户记忆、时间上下文，输出符合规范的 JSON：
+{
+  "companion_message": "1 句话，≤ 30 汉字，可以为空字符串",
+  "ai_feedback": {
+    "badge": "4-8 字标签",
+    "band": "positive | neutral | watch | recover | ritual",
+    "emotion_line": "≤ 28 汉字，共情向",
+    "utility_line": "≤ 30 汉字，观察或建议（与 emotion_line 不重复）",
+    "detail_reason": "≤ 60 汉字，判断依据；不确定时为 null",
+    "confidence": 0.0
+  }
+}
+若信号太弱无法产出有意义文案：companion_message 返回 ""，ai_feedback 整个返回 null。
+
+【你的人格】
+${personaText}
+${strengthLine}
+${expressionLine}
+${customLine}
+
+${COMPANION_RULES}
+
+${timeBlock}
+
+【本条记录已识别字段】
+${recognizedBlock}${builtBlock}${timeContextBlock}${memoryBlock}${recentLines}
+
+仅输出上述 JSON 结构，不要任何 markdown 包裹或额外解释。`;
+}

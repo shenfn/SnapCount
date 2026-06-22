@@ -92,6 +92,7 @@ export function mapTransaction(t) {
     note: t.note || '',
     source: t.source || 'manual',
     companionMessage: t.companion_message || '',
+    aiFeedback: t.ai_feedback || null,
     accountId: t.account_id || null,
     accountConfidence: t.account_confidence ?? null,
     accountInference: t.account_inference || null,

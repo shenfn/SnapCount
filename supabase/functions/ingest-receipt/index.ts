@@ -4,7 +4,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
-import { PROMPT, buildPrompt } from "./prompts.ts";
+import { PROMPT, buildPrompt, buildFeedbackPrompt } from "./prompts.ts";
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
 import type { TimeContext } from "./time.ts";
 
@@ -30,6 +30,10 @@ const BUCKET_NAME       = "receipt-images";
 
 // Vision Provider 抽象：用于多 Provider 优雅降级（Moonshot 主 → MiMo 备）
 type ProviderName = "moonshot" | "mimo" | "qwen" | "relay";
+
+function isProviderName(value: string): value is ProviderName {
+  return value === "moonshot" || value === "mimo" || value === "qwen" || value === "relay";
+}
 
 interface ProviderConfig {
   name: ProviderName;
@@ -2431,7 +2435,11 @@ async function createStagingRecord(
     detected_domain_name: detectedDomainName,
     confidence: payload.ai.confidence ?? 0,
     ai_summary: summaryParts.join(" · ") || "截图已进入中转站，等待确认",
-    extracted_json: { ...payload.ai, time_context: payload.timeContext ?? null },
+    extracted_json: {
+      ...payload.ai,
+      time_context: payload.timeContext ?? null,
+      ai_feedback: (payload.ai as Record<string, unknown>).ai_feedback ?? null,
+    },
     companion_message: payload.ai.companion_message ?? null,
     raw_text: payload.dispatcher?.raw_text ?? null,
     routing_candidates: payload.dispatcher?.candidate_domains?.length
@@ -2487,6 +2495,208 @@ function extractJson(text: string): string {
   const end = text.lastIndexOf("}");
   if (start >= 0 && end > start) return text.slice(start, end + 1);
   return text;
+}
+
+// ============================================================
+// 第二次调用：基于已识别字段 + 用户记忆，用高 temperature 生成「陪伴文案 + AI 即时反馈」
+// 目的：把识别（需要 temp=0.1 稳定）和文案（需要 temp≈0.85 多样性）解耦
+// 用纯文本调用（不需要图片），延迟 1-2 秒，失败时返回 null 让上层走规则兜底
+// ============================================================
+interface FeedbackCallResult {
+  companion_message: string | null;
+  ai_feedback: Partial<AIFeedback> | null;
+  raw_text: string | null;
+  duration_ms: number;
+  error?: string;
+}
+
+async function callTextOnlyJsonGeneration(
+  config: ProviderConfig,
+  promptText: string,
+  temperature: number = 0.85,
+): Promise<{ rawText: string; parsed: Record<string, unknown> }> {
+  const body: Record<string, unknown> = {
+    model: config.model,
+    messages: [{ role: "user", content: promptText }],
+    temperature,
+    max_completion_tokens: 1024,
+  };
+  if (config.name === "moonshot") {
+    body.response_format = { type: "json_object" };
+  }
+  if (config.name === "qwen") {
+    // 文案调用不需要思考，关掉以加速
+    body.enable_thinking = false;
+  } else if (config.name === "mimo" || config.name === "relay") {
+    body.enable_thinking = false;
+  }
+  const resp = await fetch(config.endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${config.apiKey}`,
+      "api-key": config.apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`${config.name} text API error ${resp.status}: ${txt}`);
+  }
+  const data = await resp.json();
+  const message = data?.choices?.[0]?.message ?? {};
+  const rawText = typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? {});
+  const extracted = extractJson(rawText);
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(extracted) as Record<string, unknown>;
+  } catch (parseError) {
+    throw new Error(`Failed to parse feedback JSON: ${String(parseError)} | raw=${rawText.slice(0, 300)}`);
+  }
+  return { rawText, parsed };
+}
+
+function clipChineseLen(value: unknown, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.replace(/[\r\n]+/g, " ").trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max - 1)}…`;
+}
+
+const ALLOWED_BANDS = new Set(["positive", "neutral", "watch", "recover", "ritual"]);
+
+function normalizeFeedbackPayload(
+  parsed: Record<string, unknown>,
+  domainKey: string,
+  timingSignal: AIFeedback["timing_signal"] | null,
+): { companion_message: string | null; ai_feedback: Partial<AIFeedback> | null } {
+  const companionRaw = parsed.companion_message;
+  const companion = typeof companionRaw === "string" ? clipChineseLen(companionRaw, 30) : null;
+
+  const fb = parsed.ai_feedback;
+  if (!fb || typeof fb !== "object") {
+    return { companion_message: companion, ai_feedback: null };
+  }
+  const fbObj = fb as Record<string, unknown>;
+  const band = typeof fbObj.band === "string" && ALLOWED_BANDS.has(fbObj.band) ? fbObj.band : "neutral";
+  const badge = clipChineseLen(fbObj.badge, 10) ?? "即时反馈";
+  const emotionLine = clipChineseLen(fbObj.emotion_line, 30);
+  const utilityLine = clipChineseLen(fbObj.utility_line, 32);
+  const detailReason = clipChineseLen(fbObj.detail_reason, 64);
+  const confidenceNum = typeof fbObj.confidence === "number" ? fbObj.confidence : Number(fbObj.confidence);
+  const confidence = Number.isFinite(confidenceNum) ? Math.max(0, Math.min(1, confidenceNum)) : 0.7;
+  if (!emotionLine || confidence < 0.5) {
+    return { companion_message: companion, ai_feedback: null };
+  }
+  return {
+    companion_message: companion,
+    ai_feedback: {
+      version: "feedback-v1",
+      domain_key: domainKey,
+      badge,
+      icon: typeof fbObj.icon === "string" ? fbObj.icon : iconForDomain(domainKey),
+      band: band as AIFeedback["band"],
+      tone: "ai_generated",
+      emotion_line: emotionLine,
+      utility_line: utilityLine,
+      detail_reason: detailReason,
+      confidence,
+      internal_score: Math.round(confidence * 100),
+      source: "hybrid",
+      timing_signal: timingSignal,
+    },
+  };
+}
+
+function iconForDomain(domainKey: string): string {
+  if (domainKey === "sport") return "🏃";
+  if (domainKey === "sleep") return "🌙";
+  if (domainKey === "food") return "🍱";
+  if (domainKey === "reading") return "📚";
+  if (domainKey === "wallet") return "💳";
+  if (domainKey === "income") return "💰";
+  return "💸";
+}
+
+async function regenerateFeedbackWithSecondCall(opts: {
+  ai: AIResult;
+  domainKey: string;
+  builtPayload?: Record<string, unknown> | null;
+  timeContext: TimeContext | null;
+  timingSignal: AIFeedback["timing_signal"] | null;
+  promptCtx: PromptContextLike;
+  textProvider: ProviderConfig | null;
+}): Promise<FeedbackCallResult> {
+  const startedAt = Date.now();
+  if (!opts.textProvider) {
+    return {
+      companion_message: null,
+      ai_feedback: null,
+      raw_text: null,
+      duration_ms: 0,
+      error: "no_text_provider",
+    };
+  }
+  try {
+    const promptText = buildFeedbackPrompt({
+      clientLocalTime: opts.promptCtx.clientLocalTime ?? null,
+      weekday: opts.promptCtx.weekday ?? null,
+      recognizedFields: {
+        record_type: opts.ai.record_type ?? null,
+        domain_key: opts.ai.domain_key ?? null,
+        image_type: opts.ai.image_type ?? null,
+        amount: opts.ai.amount,
+        merchant_name: opts.ai.merchant_name,
+        platform: opts.ai.platform,
+        category: opts.ai.category,
+        payment_method: opts.ai.payment_method,
+        source_name: opts.ai.source_name ?? null,
+        income_category: opts.ai.income_category ?? null,
+        title: opts.ai.title ?? null,
+        summary: opts.ai.summary ?? null,
+        occurred_at: opts.ai.occurred_at ?? null,
+        confidence: opts.ai.confidence,
+      },
+      builtPayload: opts.builtPayload ?? null,
+      timeContext: opts.timeContext ? (opts.timeContext as unknown as Record<string, unknown>) : null,
+      memory: opts.promptCtx.memory ?? null,
+      memoryEnabled: opts.promptCtx.memoryEnabled,
+      persona: opts.promptCtx.persona ?? null,
+      memoryStrength: opts.promptCtx.memoryStrength ?? null,
+      expressionStyle: opts.promptCtx.expressionStyle ?? null,
+      customNote: opts.promptCtx.customNote ?? null,
+      recentCompanionLines: opts.promptCtx.recentCompanionLines ?? [],
+    });
+    const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.85);
+    const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
+    return {
+      companion_message: normalized.companion_message,
+      ai_feedback: normalized.ai_feedback,
+      raw_text: rawText,
+      duration_ms: Date.now() - startedAt,
+    };
+  } catch (err) {
+    return {
+      companion_message: null,
+      ai_feedback: null,
+      raw_text: null,
+      duration_ms: Date.now() - startedAt,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+interface PromptContextLike {
+  clientLocalTime?: string | null;
+  weekday?: string | null;
+  memory?: Record<string, unknown> | null;
+  memoryEnabled?: boolean | null;
+  persona?: string | null;
+  memoryStrength?: string | null;
+  expressionStyle?: string | null;
+  customNote?: string | null;
+  recentCompanionLines?: string[];
 }
 
 // 通用 OpenAI-compatible Vision 调用（Moonshot / MiMo 都走这个）
@@ -2725,6 +2935,26 @@ Deno.serve(async (req) => {
   } catch (e) {
     return respondShortcut({ error: `Secret config error: ${String(e)}` }, { mode: responseMode, status: 500 });
   }
+
+  // 二次调用（文案专用）provider：默认沿用主 vision provider 的密钥，
+  // 但可通过 FEEDBACK_TEXT_PROVIDER / FEEDBACK_TEXT_MODEL / FEEDBACK_TEXT_ENDPOINT 单独覆盖，
+  // 以便接更便宜的纯文本模型。文案调用关闭 enableThinking，固定 temperature=0.85
+  const textProvider: ProviderConfig | null = (() => {
+    const overrideName = (Deno.env.get("FEEDBACK_TEXT_PROVIDER") || "").toLowerCase();
+    const overrideKey = Deno.env.get("FEEDBACK_TEXT_API_KEY");
+    const overrideModel = Deno.env.get("FEEDBACK_TEXT_MODEL");
+    const overrideEndpoint = Deno.env.get("FEEDBACK_TEXT_ENDPOINT");
+    if (overrideName && isProviderName(overrideName) && overrideKey && overrideModel && overrideEndpoint) {
+      return {
+        name: overrideName,
+        model: overrideModel,
+        endpoint: overrideEndpoint,
+        apiKey: overrideKey,
+        enableThinking: false,
+      };
+    }
+    return visionProviders[0] ?? null;
+  })();
 
   try {
     const startedAt = Date.now();
@@ -3169,6 +3399,7 @@ Deno.serve(async (req) => {
             income_date: recordDate, image_url: path, image_hash: hash, user_id: userId || null, source: "ai_scan",
             account_id: autoBoundAccount?.id ?? null,
             companion_message: companionMessage,
+            ai_feedback: aiFeedback,
           }).select("id").single();
           if (incRow) {
             if (autoBoundAccount && normalizedAmount !== null) {
@@ -3222,6 +3453,7 @@ Deno.serve(async (req) => {
             transaction_date: recordDate, transaction_time: recordTime, user_id: userId || null, source: "ai_scan",
             account_id: autoBoundAccount?.id ?? null,
             companion_message: companionMessage,
+            ai_feedback: aiFeedback,
           }).select("id").single();
           if (txRow) {
             if (autoBoundAccount && normalizedAmount !== null) {
@@ -3654,12 +3886,42 @@ Deno.serve(async (req) => {
       }
 
       if (companionSettings.enabled) {
-        aiFeedback = buildIncomeAIFeedback(ai, normalizedAmount, timeContext);
-        if (aiFeedback) {
+        const _secondCallIncome = await regenerateFeedbackWithSecondCall({
+          ai,
+          domainKey: "income",
+          builtPayload: null,
+          timeContext,
+          timingSignal: timingSignalFor("income", timeContext),
+          promptCtx: {
+            clientLocalTime,
+            weekday: _weekdayCN,
+            memoryEnabled: companionSettings.memoryEnabled,
+            memoryStrength: companionSettings.memoryStrength,
+            expressionStyle: companionSettings.expressionStyle,
+            persona: companionSettings.persona,
+            customNote: companionSettings.customNote,
+            memory: companionContext.memory,
+            recentCompanionLines: [],
+          },
+          textProvider,
+        });
+        if (_secondCallIncome.duration_ms > 0) {
+          console.log(`[feedback] second_call income ok=${!_secondCallIncome.error} duration=${_secondCallIncome.duration_ms}ms`);
+        }
+        if (_secondCallIncome.ai_feedback) {
+          aiFeedback = _secondCallIncome.ai_feedback as AIFeedback;
           companionFeedbackUsed = true;
-          companionMessage = aiFeedback.emotion_line;
+          companionMessage = _secondCallIncome.companion_message || aiFeedback.emotion_line;
           ai.companion_message = companionMessage;
           aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+        } else {
+          aiFeedback = buildIncomeAIFeedback(ai, normalizedAmount, timeContext);
+          if (aiFeedback) {
+            companionFeedbackUsed = true;
+            companionMessage = aiFeedback.emotion_line;
+            ai.companion_message = companionMessage;
+            aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+          }
         }
       }
 
@@ -3675,6 +3937,7 @@ Deno.serve(async (req) => {
         account_id: autoBoundAccount?.id ?? null,
         note: ai.platform ? `来自${ai.platform}截图识别` : "截图识别收入",
         companion_message: companionMessage,
+        ai_feedback: aiFeedback,
       }).select().single();
       timings.mark("db_insert");
 
@@ -3869,12 +4132,48 @@ Deno.serve(async (req) => {
     const status = isComplete && (ai.confidence ?? 0) >= 0.7 ? "done" : "pending";
     const isLargeTransport = ai.category === "transport" && (normalizedAmount ?? 0) >= 200;
     if (status === "done" && companionSettings.enabled) {
-      aiFeedback = buildExpenseAIFeedback(ai, normalizedAmount, timeContext, possibleDuplicate);
-      if (aiFeedback) {
+      // 第二次调用：用高 temperature 纯文本模型生成陪伴文案 + 即时反馈
+      const _secondCall = await regenerateFeedbackWithSecondCall({
+        ai,
+        domainKey: "expense",
+        builtPayload: null,
+        timeContext,
+        timingSignal: timingSignalFor("expense", timeContext),
+        promptCtx: {
+          clientLocalTime,
+          weekday: _weekdayCN,
+          memoryEnabled: companionSettings.memoryEnabled,
+          memoryStrength: companionSettings.memoryStrength,
+          expressionStyle: companionSettings.expressionStyle,
+          persona: companionSettings.persona,
+          customNote: companionSettings.customNote,
+          memory: companionContext.memory,
+          recentCompanionLines: [],
+        },
+        textProvider,
+      });
+      if (_secondCall.duration_ms > 0) {
+        console.log(`[feedback] second_call expense ok=${!_secondCall.error} duration=${_secondCall.duration_ms}ms`);
+      }
+      // 如果二次调用成功产出有效反馈，优先使用；否则回退到规则生成
+      if (_secondCall.ai_feedback) {
+        aiFeedback = _secondCall.ai_feedback as AIFeedback;
         companionFeedbackUsed = true;
-        companionMessage = aiFeedback.emotion_line;
+        if (_secondCall.companion_message) {
+          companionMessage = _secondCall.companion_message;
+        } else {
+          companionMessage = aiFeedback.emotion_line;
+        }
         ai.companion_message = companionMessage;
         aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+      } else {
+        aiFeedback = buildExpenseAIFeedback(ai, normalizedAmount, timeContext, possibleDuplicate);
+        if (aiFeedback) {
+          companionFeedbackUsed = true;
+          companionMessage = aiFeedback.emotion_line;
+          ai.companion_message = companionMessage;
+          aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+        }
       }
     }
 
@@ -3896,6 +4195,7 @@ Deno.serve(async (req) => {
       source: "ai_scan",
       account_id: autoBoundAccount?.id ?? null,
       companion_message: companionMessage,
+      ai_feedback: aiFeedback,
     }).select().single();
     timings.mark("db_insert");
 

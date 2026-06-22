@@ -761,6 +761,7 @@ export function useStore() {
         image_path: r.image_url,
         sourceType: r.source || 'manual',
         companionMessage: r.companion_message || '',
+        aiFeedback: r.ai_feedback || null,
         accountId: r.account_id || null,
       })
 
@@ -3231,6 +3232,7 @@ export function useStore() {
       image_path: row.image_url,
       sourceType: row.source || 'manual',
       companionMessage: row.companion_message || '',
+      aiFeedback: row.ai_feedback || null,
       accountId: row.account_id || null,
       accountConfidence: row.account_confidence ?? null,
       accountInference: row.account_inference || null,

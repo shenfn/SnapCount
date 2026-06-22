@@ -23,6 +23,8 @@
             min="0.01" max="999999.99" step="0.01" placeholder="0.00">
         </div>
 
+        <AiFeedbackCard v-if="aiFeedback" :feedback="aiFeedback" compact class="pending-ai-feedback" />
+
         <div class="thumb-wrap">
           <div v-if="store.pendingModal.bill?.image_url" style="width:100%" @click="store.openImgFull(store.pendingModal.bill.image_url)">
             <img :src="store.pendingModal.bill.image_url"
@@ -160,8 +162,15 @@
 <script setup>
 import { computed, inject, ref, watch, onUnmounted } from 'vue'
 import AccountPicker from './AccountPicker.vue'
+import AiFeedbackCard from './AiFeedbackCard.vue'
 const store = inject('store')
 const review = computed(() => store.pendingAccountReview(store.pendingModal.entryType, store.pendingModal.bill))
+
+const aiFeedback = computed(() => {
+  const bill = store.pendingModal.bill
+  if (!bill) return null
+  return bill.aiFeedback || bill.ai_feedback || bill.extracted_json?.ai_feedback || bill.payload?.ai_feedback || null
+})
 
 const sheetEl = ref(null)
 const bodyEl = ref(null)
@@ -386,6 +395,10 @@ const incomeTypes = [
 </script>
 
 <style scoped>
+.pending-ai-feedback {
+  margin-top: 14px;
+}
+
 .pending-account-review {
   margin-top: 16px;
   padding: 14px;
