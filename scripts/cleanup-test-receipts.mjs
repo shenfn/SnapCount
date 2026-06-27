@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const DEFAULT_TEST_USER_ID = '0a552a27-0b64-456e-a5b3-e50e261d2e4f'
+const DEFAULT_UPLOAD_TOKEN = '0a552a27-0b64-456e-a5b3-e50e261d2e4f'
 
 const args = process.argv.slice(2)
 const flags = {}
@@ -16,6 +17,8 @@ for (let i = 0; i < args.length; i += 1) {
   else if (arg === '--run-id') flags.runId = args[++i]
   else if (arg.startsWith('--user-id=')) flags.userId = arg.slice('--user-id='.length)
   else if (arg === '--user-id') flags.userId = args[++i]
+  else if (arg.startsWith('--upload-token=')) flags.uploadToken = arg.slice('--upload-token='.length)
+  else if (arg === '--upload-token') flags.uploadToken = args[++i]
   else if (arg.startsWith('--limit=')) flags.limit = Number(arg.slice('--limit='.length))
   else if (arg === '--limit') flags.limit = Number(args[++i])
 }
@@ -32,7 +35,8 @@ function printHelp() {
 
 选项:
   --run-id <id>      指定测试批次，强烈建议必填
-  --user-id <uuid>   测试账号，默认使用专用测试账号
+  --upload-token <t> 测试账号上传 token，默认使用专用测试账号 token
+  --user-id <uuid>   直接指定测试账号 user_id，仅限调试
   --limit <n>        每张表最多扫描条数，默认 500
   --execute          执行真实删除；不传时只 dry-run
   --yes              配合 --execute 使用，表示已确认删除
@@ -45,10 +49,64 @@ export function requireEnv(name) {
   return value
 }
 
+function trimTrailingSlash(value) {
+  return value.replace(/\/$/, '')
+}
+
+async function resolveSupabaseUrl() {
+  const explicitUrl = process.env.TEST_SUPABASE_URL
+    || process.env.SUPABASE_URL
+    || process.env.SUPABASE_PROJECT_URL
+
+  if (explicitUrl) return trimTrailingSlash(explicitUrl.trim())
+
+  try {
+    const projectRef = (await readFile(path.join(process.cwd(), 'supabase', '.temp', 'project-ref'), 'utf8')).trim()
+    if (projectRef) return `https://${projectRef}.supabase.co`
+  } catch {
+    // Fall through to Vite URL, which may be a Worker proxy in local production-like config.
+  }
+
+  return trimTrailingSlash(requireEnv('VITE_SUPABASE_URL'))
+}
+
+function resolveAdminKey() {
+  return process.env.TEST_SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_SERVICE_ROLE_KEY
+    || requireEnv('VITE_SUPABASE_ANON_KEY')
+}
+
 export function hasMatchingTestMeta(row, jsonField, runId) {
   const meta = row?.[jsonField]?.test_meta
   if (!meta || meta.is_test !== true || meta.source !== 'local_validation') return false
   return runId ? meta.test_run_id === runId : true
+}
+
+async function resolveUserId(sb) {
+  if (flags.userId) {
+    return {
+      userId: flags.userId,
+      uploadToken: null,
+      identitySource: 'user_id',
+    }
+  }
+
+  const uploadToken = flags.uploadToken || process.env.TEST_RECEIPT_UPLOAD_TOKEN || DEFAULT_UPLOAD_TOKEN
+  const { data, error } = await sb
+    .from('user_configs')
+    .select('user_id')
+    .eq('upload_token', uploadToken)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (error) throw new Error(`upload_token 反查 user_id 失败: ${error.message}`)
+  if (!data?.user_id) throw new Error('upload_token 未找到有效测试账号，不能继续清理。')
+
+  return {
+    userId: data.user_id,
+    uploadToken,
+    identitySource: 'upload_token',
+  }
 }
 
 function printRows(title, rows, jsonField) {
@@ -101,9 +159,16 @@ async function main() {
     return
   }
 
-  const userId = flags.userId || process.env.TEST_RECEIPT_USER_ID || DEFAULT_TEST_USER_ID
   const runId = flags.runId || null
   const limit = Number.isFinite(flags.limit) && flags.limit > 0 ? Math.min(flags.limit, 2000) : 500
+  const sb = createClient(await resolveSupabaseUrl(), resolveAdminKey(), {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  })
+  const identity = await resolveUserId(sb)
+  const userId = identity.userId
 
   if (flags.execute && !flags.yes) {
     throw new Error('真实删除必须同时传 --execute --yes。')
@@ -111,16 +176,16 @@ async function main() {
   if (flags.execute && !runId) {
     throw new Error('真实删除必须指定 --run-id，避免误删整个测试账号数据。')
   }
-  if (flags.execute && userId !== DEFAULT_TEST_USER_ID) {
-    throw new Error(`真实删除只允许默认专用测试账号: ${DEFAULT_TEST_USER_ID}`)
+  if (flags.execute && flags.userId) {
+    throw new Error('真实删除不允许直接使用 --user-id，请使用 upload_token 反查，避免误删非测试账号数据。')
   }
-
-  const sb = createClient(requireEnv('VITE_SUPABASE_URL'), requireEnv('VITE_SUPABASE_ANON_KEY'))
 
   console.log('测试识别数据清理')
   console.log('----------------')
   console.log(`mode: ${flags.execute ? 'execute' : 'dry-run'}`)
+  console.log(`identity_source: ${identity.identitySource}`)
   console.log(`user_id: ${userId}`)
+  console.log(`upload_token: ${identity.uploadToken ? '(provided)' : '-'}`)
   console.log(`run_id: ${runId || '(all test_meta records; dry-run only)'}`)
   console.log(`limit: ${limit}`)
 

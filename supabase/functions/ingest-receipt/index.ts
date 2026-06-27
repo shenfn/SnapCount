@@ -74,6 +74,17 @@ interface VisionProviderResult {
   reasoningText?: string | null;
 }
 
+interface TraceResponseMeta {
+  traceId: string;
+  aiLogId?: string | null;
+  captureKind?: string | null;
+  sourceApp?: string | null;
+  visionMode?: "screenshot" | "photo" | null;
+  photoQualityMode?: boolean | null;
+  modelProvider?: ProviderName | null;
+  modelName?: string | null;
+}
+
 // 歺加载：延迟到请求时获取 Secret，避免模块初始化就崩溃
 function getEnv(key: string): string {
   const v = Deno.env.get(key);
@@ -151,6 +162,20 @@ function respondShortcut(
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function withTraceMeta(payload: Record<string, unknown>, trace: TraceResponseMeta): Record<string, unknown> {
+  return {
+    ...payload,
+    trace_id: trace.traceId,
+    ai_log_id: trace.aiLogId ?? null,
+    capture_kind: trace.captureKind ?? null,
+    source_app: trace.sourceApp ?? null,
+    vision_mode: trace.visionMode ?? null,
+    photo_quality_mode: trace.photoQualityMode ?? null,
+    model_provider: trace.modelProvider ?? null,
+    model_name: trace.modelName ?? null,
+  };
 }
 
 // ---- Timings: 链路分段耗时埋点 ----
@@ -1439,12 +1464,20 @@ function selectVisionProvidersForImage(
 async function writeAiLog(
   supabase: ReturnType<typeof createClient>,
   payload: Record<string, unknown>,
-) {
-  const { error } = await supabase.from("ai_recognition_logs").insert(payload);
-  if (error) console.error("AI log insert failed:", error);
+): Promise<string | null> {
+  const { data, error } = await supabase.from("ai_recognition_logs")
+    .insert(payload)
+    .select("id")
+    .single();
+  if (error) {
+    console.error("AI log insert failed:", error);
+    return null;
+  }
+  return (data?.id as string | undefined) ?? null;
 }
 
 interface AiRawDebugPayload {
+  traceId?: string | null;
   promptVersion: string;
   promptHash: string | null;
   visionAttempts: VisionAttempt[];
@@ -1489,6 +1522,10 @@ interface AiRawDebugPayload {
     source?: string | null;
     fallback?: string | null;
   } | null;
+  visionMode?: "screenshot" | "photo" | null;
+  photoQualityMode?: boolean | null;
+  captureKind?: string | null;
+  sourceApp?: string | null;
 }
 
 function buildAiRawDebug(payload: AiRawDebugPayload): string {
@@ -1501,9 +1538,16 @@ function buildAiRawDebug(payload: AiRawDebugPayload): string {
 
   return JSON.stringify({
     debug_version: "ai-raw-v1",
+    trace_id: payload.traceId ?? null,
     prompt: {
       version: payload.promptVersion,
       hash: payload.promptHash,
+    },
+    request_context: {
+      capture_kind: payload.captureKind ?? null,
+      source_app: payload.sourceApp ?? null,
+      vision_mode: payload.visionMode ?? null,
+      photo_quality_mode: payload.photoQualityMode ?? null,
     },
     client_timing: payload.clientTiming ?? null,
     dispatcher,
@@ -3021,9 +3065,18 @@ Deno.serve(async (req) => {
     return visionProviders[0] ?? null;
   })();
 
+  const requestTraceId = crypto.randomUUID();
+  let lastAiLogId: string | null = null;
+
   try {
     const startedAt = Date.now();
     const timings = makeTimings();
+    const traceId = requestTraceId;
+    const writeTraceAiLog = async (payload: Record<string, unknown>): Promise<string | null> => {
+      const aiLogId = await writeAiLog(supabase, payload);
+      if (aiLogId) lastAiLogId = aiLogId;
+      return aiLogId;
+    };
     // 1. 接收图片（multipart/form-data，字段名 image）
     const form = await req.formData();
     responseMode = normalizeResponseMode(form.get("response_mode")) === "text" ? "text" : responseMode;
@@ -3245,7 +3298,7 @@ Deno.serve(async (req) => {
     const { data: txDup } = await supabase
       .from("transactions").select("id").eq("image_hash", hash).maybeSingle();
     if (txDup) {
-      await writeAiLog(supabase, {
+      const aiLogId = await writeTraceAiLog({
         image_hash: hash,
         perceptual_hash: perceptualHash,
         perceptual_distance: perceptualDistance,
@@ -3257,16 +3310,16 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       });
       const _spendSum = await summarizeTodaySpend(supabase, userId);
-      return respondShortcut({
+      return respondShortcut(withTraceMeta({
         status: "duplicate", id: txDup.id, record_type: "expense",
         message: "该截图已记账",
         notification: `🔁 该截图已记账过\n${todaySpendLine(_spendSum)}`,
-      }, { mode: responseMode });
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
     }
     const { data: incDup } = await supabase
       .from("income_records").select("id").eq("image_hash", hash).maybeSingle();
     if (incDup) {
-      await writeAiLog(supabase, {
+      const aiLogId = await writeTraceAiLog({
         image_hash: hash,
         perceptual_hash: perceptualHash,
         perceptual_distance: perceptualDistance,
@@ -3278,17 +3331,17 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       });
       const _incSum = await summarizeMonthIncome(supabase, userId);
-      return respondShortcut({
+      return respondShortcut(withTraceMeta({
         status: "duplicate", id: incDup.id, record_type: "income",
         message: "该收入截图已记录",
         notification: `🔁 该收入截图已记录过\n${monthIncomeLine(_incSum)}`,
-      }, { mode: responseMode });
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
     }
     const { data: dataDup } = await supabase
       .from("data_records").select("id,domain_key").eq("source_image_hash", hash).maybeSingle();
     timings.mark("dup_check");
     if (dataDup) {
-      await writeAiLog(supabase, {
+      const aiLogId = await writeTraceAiLog({
         image_hash: hash,
         perceptual_hash: perceptualHash,
         perceptual_distance: perceptualDistance,
@@ -3301,11 +3354,11 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
         prompt_version: promptVersion,
       });
-      return respondShortcut({
+      return respondShortcut(withTraceMeta({
         status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
         message: "该截图已归档",
         notification: `🔁 该截图已归档过 · ${domainNameFromKey(dataDup.domain_key) ?? dataDup.domain_key}`,
-      }, { mode: responseMode });
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
     }
 
     const dispatcher = await runLowCostDispatcher(supabase, { rawText, sourceApp, imageFeatures, userId });
@@ -3340,6 +3393,21 @@ Deno.serve(async (req) => {
     let visionResponseId: string | null = null;
     let visionFinishReason: string | null = null;
     let visionReasoningText: string | null = null;
+    const usePhotoQualityVision = shouldUsePhotoQualityVision({
+      captureKind,
+      rawText,
+      sourceApp,
+      imageFeatures,
+      dispatcher,
+    });
+    const visionMode: "screenshot" | "photo" = usePhotoQualityVision ? "photo" : "screenshot";
+    const traceMetaBase = {
+      traceId,
+      captureKind,
+      sourceApp,
+      visionMode,
+      photoQualityMode: usePhotoQualityVision,
+    };
     const activeVisionProviders = selectVisionProvidersForImage(visionProviders, {
       photoPrimary: photoVisionPrimary,
       captureKind,
@@ -3393,6 +3461,12 @@ Deno.serve(async (req) => {
     if (_visionMs > 5000) {
       console.warn(`[slow] vision_total=${_visionMs}ms provider=${aiProvider} attempts=${visionAttempts.length}`);
     }
+    const responseTraceMeta = (aiLogId?: string | null): TraceResponseMeta => ({
+      ...traceMetaBase,
+      aiLogId,
+      modelProvider: aiProvider,
+      modelName: aiModel,
+    });
 
     const normalizedAmount = normalizeAmount(ai.amount);
     const modelRawCompanion = typeof ai.companion_message === "string" ? ai.companion_message : null;
@@ -3419,12 +3493,17 @@ Deno.serve(async (req) => {
       promptVersionOverride?: string;
       notification?: AiRawDebugPayload["notification"];
     } = {}) => buildAiRawDebug({
+      traceId,
       promptVersion: options.promptVersionOverride ?? promptVersion,
       promptHash: visionPromptHash,
       dispatcher: options.dispatcher,
       visionAttempts,
       timings: timings.snapshot(),
       clientTiming,
+      visionMode,
+      photoQualityMode: usePhotoQualityVision,
+      captureKind,
+      sourceApp,
       modelRaw: {
         response_id: visionResponseId,
         finish_reason: visionFinishReason,
@@ -3594,7 +3673,7 @@ Deno.serve(async (req) => {
             ai_summary: ai.record_type ? `重试成功 → ${domainNameFromKey(ai.record_type) ?? ai.record_type}` : "重试成功",
           }).eq("id", stagingRetryId);
 
-          await writeAiLog(supabase, {
+          const aiLogId = await writeTraceAiLog({
             image_hash: hash, image_url: path, image_type: ai.image_type,
             record_type: recordType, occurred_at: occurredAt, status: "success",
             confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
@@ -3622,14 +3701,14 @@ Deno.serve(async (req) => {
             amount: normalizedAmount,
             occurredAt,
           });
-          return respondShortcut({
+          return respondShortcut(withTraceMeta({
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
             notification: aiFeedback ? feedbackNotification(aiFeedback, _retryNotif) : withCompanion(_retryNotif),
             time_context: timeContext,
             companion_message: companionMessage,
             ai_feedback: aiFeedback,
-          }, { mode: responseMode });
+          }, responseTraceMeta(aiLogId)), { mode: responseMode });
         }
       }
 
@@ -3641,7 +3720,7 @@ Deno.serve(async (req) => {
         ai_summary: ai.record_type ? `重试 → ${ai.record_type} (confidence: ${ai.confidence ?? 0})` : "重试失败",
       }).eq("id", stagingRetryId);
 
-      await writeAiLog(supabase, {
+      const aiLogId = await writeTraceAiLog({
         image_hash: hash, image_url: path, image_type: ai.image_type,
         record_type: recordType, status: !aiOk ? "ai_error" : "pending",
         confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
@@ -3658,13 +3737,13 @@ Deno.serve(async (req) => {
         prompt_version: promptVersion,
       });
 
-      return respondShortcut({
+      return respondShortcut(withTraceMeta({
         status: "staging", staging_status: "retry_failed",
         message: "⚠ 重试仍未确定，请手动选择数据域归档",
         notification: withCompanion("⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档"),
         time_context: retryTimeContext,
         companion_message: companionMessage,
-      }, { mode: responseMode });
+      }, responseTraceMeta(aiLogId)), { mode: responseMode });
     }
     const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
     const orderFinishedDateTime = normalizeAiDateTime(ai.order_finished_at) ?? occurredDateTime;
@@ -3701,7 +3780,7 @@ Deno.serve(async (req) => {
         timeContext,
         testMeta,
       });
-      await writeAiLog(supabase, {
+      const aiLogId = await writeTraceAiLog({
         image_hash: hash,
         perceptual_hash: perceptualHash,
         perceptual_distance: perceptualDistance,
@@ -3732,7 +3811,7 @@ Deno.serve(async (req) => {
       const _stgPrimary = !aiOk
         ? "❌ AI 识别失败，已进入待处理"
         : `⚠️ ${_stgAmtPart}请打开 App 补全`;
-      return respondShortcut({
+      return respondShortcut(withTraceMeta({
         status: "staging",
         staging_status: stagingStatus,
         id: staging?.id ?? null,
@@ -3741,7 +3820,7 @@ Deno.serve(async (req) => {
         notification: withCompanion(`${_stgPrimary}\n${todaySpendLine(_stgSpend)}`),
         time_context: timeContext,
         companion_message: companionMessage,
-      }, { mode: responseMode });
+      }, responseTraceMeta(aiLogId)), { mode: responseMode });
     }
 
     if (builtinKey) {
@@ -3784,7 +3863,7 @@ Deno.serve(async (req) => {
           timeContext,
           testMeta,
         });
-        await writeAiLog(supabase, {
+        const aiLogId = await writeTraceAiLog({
           image_hash: hash,
           perceptual_hash: perceptualHash,
           perceptual_distance: perceptualDistance,
@@ -3815,7 +3894,7 @@ Deno.serve(async (req) => {
         const _bNotif = domain
           ? `⚠️ 已识别为${_bDomainName}\n请打开 App 确认后归档`
           : `⚠️ 未找到对应数据域\n已进入待处理`;
-        return respondShortcut({
+        return respondShortcut(withTraceMeta({
           status: "staging",
           staging_status: domain ? "pending_review" : "routing_failed",
           id: staging?.id ?? null,
@@ -3825,7 +3904,7 @@ Deno.serve(async (req) => {
           notification: withCompanion(_bNotif),
           time_context: timeContext,
           companion_message: companionMessage,
-        }, { mode: responseMode });
+        }, responseTraceMeta(aiLogId)), { mode: responseMode });
       }
 
       const { data: row, error: dataErr } = await supabase.from("data_records").insert({
@@ -3844,7 +3923,7 @@ Deno.serve(async (req) => {
       timings.mark("db_insert");
 
       if (dataErr) {
-        await writeAiLog(supabase, {
+        await writeTraceAiLog({
           image_hash: hash,
           perceptual_hash: perceptualHash,
           perceptual_distance: perceptualDistance,
@@ -3874,7 +3953,7 @@ Deno.serve(async (req) => {
         throw new Error(`Data record insert failed: ${dataErr.message}`);
       }
 
-      await writeAiLog(supabase, {
+      const aiLogId = await writeTraceAiLog({
         image_hash: hash,
         perceptual_hash: perceptualHash,
         perceptual_distance: perceptualDistance,
@@ -3913,7 +3992,7 @@ Deno.serve(async (req) => {
 
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
       const _domainDoneNotif = `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`;
-      return respondShortcut({
+      return respondShortcut(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: builtinKey,
@@ -3924,7 +4003,7 @@ Deno.serve(async (req) => {
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
         data: row,
-      }, { mode: responseMode });
+      }, responseTraceMeta(aiLogId)), { mode: responseMode });
     }
 
     if (recordType === "income" && normalizedAmount !== null && (ai.confidence ?? 0) >= 0.7) {
@@ -3954,7 +4033,7 @@ Deno.serve(async (req) => {
             : currentSource === refSource || currentSource === "截图识别收入" || refSource === "截图识别收入";
 
           if (refIncome && isSameAmount(refIncome.amount, normalizedAmount) && sourceMatches) {
-            await writeAiLog(supabase, {
+            const aiLogId = await writeTraceAiLog({
               image_hash: hash,
               perceptual_hash: perceptualHash,
               perceptual_distance: perceptualDistance,
@@ -3983,7 +4062,7 @@ Deno.serve(async (req) => {
               if (removeErr) console.error("Cleanup duplicate income image failed:", removeErr);
             }
             const _iSum2 = await summarizeMonthIncome(supabase, userId);
-            return respondShortcut({
+            return respondShortcut(withTraceMeta({
               status: "duplicate",
               id: refIncome.id,
               record_type: "income",
@@ -3992,7 +4071,7 @@ Deno.serve(async (req) => {
               notification: withCompanion(`🔁 该收入疑似已记录过\n${monthIncomeLine(_iSum2)}`),
               time_context: timeContext,
               companion_message: companionMessage,
-            }, { mode: responseMode });
+            }, responseTraceMeta(aiLogId)), { mode: responseMode });
           }
         }
       }
@@ -4054,7 +4133,7 @@ Deno.serve(async (req) => {
       timings.mark("db_insert");
 
       if (incErr) {
-        await writeAiLog(supabase, {
+        await writeTraceAiLog({
           image_hash: hash,
           perceptual_hash: perceptualHash,
           perceptual_distance: perceptualDistance,
@@ -4100,7 +4179,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      await writeAiLog(supabase, {
+      const aiLogId = await writeTraceAiLog({
         image_hash: hash,
         perceptual_hash: perceptualHash,
         perceptual_distance: perceptualDistance,
@@ -4138,7 +4217,7 @@ Deno.serve(async (req) => {
       const _iDoneSum = await summarizeMonthIncome(supabase, userId);
       const _iSourceLabel = sourceName && sourceName !== "截图识别收入" ? ` · ${sourceName}` : "";
       const _incomeNotif = `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`;
-      return respondShortcut({
+      return respondShortcut(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: "income",
@@ -4149,7 +4228,7 @@ Deno.serve(async (req) => {
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
         data: row,
-      }, { mode: responseMode });
+      }, responseTraceMeta(aiLogId)), { mode: responseMode });
     }
 
     // 4.5 感知哈希去重：同一笔支出（同金额+同商家）的相似截图 → 拦截
@@ -4176,7 +4255,7 @@ Deno.serve(async (req) => {
           : !currentMerchant && !refMerchant;
 
         if (amountMatch && merchantMatch && refLog.target_id) {
-          await writeAiLog(supabase, {
+          const aiLogId = await writeTraceAiLog({
             image_hash: hash, perceptual_hash: perceptualHash, perceptual_distance: perceptualDistance,
             image_url: path, image_type: ai.image_type, record_type: "expense",
             occurred_at: occurredAt, order_finished_at: orderFinishedAt,
@@ -4192,13 +4271,13 @@ Deno.serve(async (req) => {
             if (removeErr) console.error("Cleanup duplicate expense image failed:", removeErr);
           }
           const _eDupSum = await summarizeTodaySpend(supabase, userId);
-          return respondShortcut({
+          return respondShortcut(withTraceMeta({
             status: "duplicate", id: refLog.target_id, record_type: "expense",
             ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
             notification: withCompanion(`🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`),
             time_context: timeContext,
             companion_message: companionMessage,
-          }, { mode: responseMode });
+          }, responseTraceMeta(aiLogId)), { mode: responseMode });
         }
       }
     }
@@ -4312,7 +4391,7 @@ Deno.serve(async (req) => {
     timings.mark("db_insert");
 
     if (insErr) {
-      await writeAiLog(supabase, {
+      await writeTraceAiLog({
           image_hash: hash,
           perceptual_hash: perceptualHash,
           perceptual_distance: perceptualDistance,
@@ -4358,7 +4437,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    await writeAiLog(supabase, {
+    const aiLogId = await writeTraceAiLog({
       image_hash: hash,
       perceptual_hash: perceptualHash,
       perceptual_distance: perceptualDistance,
@@ -4406,7 +4485,7 @@ Deno.serve(async (req) => {
       _ePrimary = `⚠️ ${_ePrimary.replace(/^[💸⚠️]\s*/, "")} · 疑似 3 分钟内重复`;
     }
     const _expenseNotif = `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`;
-    return respondShortcut({
+    return respondShortcut(withTraceMeta({
       status: row.status,
       id: row.id,
       ai_ok: aiOk,
@@ -4420,13 +4499,18 @@ Deno.serve(async (req) => {
       companion_message: companionMessage,
       ai_feedback: aiFeedback,
       data: row,
-    }, { mode: responseMode });
+    }, responseTraceMeta(aiLogId)), { mode: responseMode });
 
   } catch (e) {
     console.error(e);
-    return respondShortcut({ error: String(e) }, { mode: responseMode, status: 500 });
+    return respondShortcut({
+      trace_id: requestTraceId,
+      ai_log_id: lastAiLogId,
+      error: String(e),
+    }, { mode: responseMode, status: 500 });
   }
 });
+
 
 
 

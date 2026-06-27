@@ -50,6 +50,7 @@ test-results/
     expense/
       2026-06-27/
         001-meituan-food-order-12_40.response.json
+        001-meituan-food-order-12_40.trace.json
 ```
 
 `test-cases/`、`test-results/`、`.ai-validation-cache/` 都不应该提交到 GitHub。
@@ -106,6 +107,33 @@ npm run test:receipt -- --dir test-cases --domain expense
 npm run test:receipt -- --dir test-cases --run-id local-ai-popup-v1
 ```
 
+如果要尽量模拟拍照链路，例如食物照片，可以显式指定 `capture_kind`：
+
+```powershell
+npm run test:receipt -- --dir test-cases --domain food --capture-kind photo
+```
+
+默认值：
+
+```text
+capture_kind = test-batch
+source_app = codex-local-validation
+```
+
+如果本地配置了以下任一环境变量，脚本会在响应含 `ai_log_id` 时自动读取 `ai_recognition_logs` 并补全 trace：
+
+```text
+SUPABASE_SERVICE_ROLE_KEY
+TEST_SUPABASE_SERVICE_ROLE_KEY
+TEST_RECEIPT_LOG_KEY
+```
+
+如果只想生成接口响应级 trace，不读取线上日志：
+
+```powershell
+npm run test:receipt -- --dir test-cases --run-id local-ai-popup-v1 --no-log-enrich
+```
+
 建议每次真实批量测试都显式指定 `--run-id`，这样后续更容易查结果和清理。
 
 ## 结果怎么看
@@ -122,6 +150,8 @@ test-results/<run-id>/summary.md
 - `record_type` 是否符合预期。
 - 是否返回 `ai_feedback`。
 - 是否进入了预期的数据类型。
+- `vision_mode` 是否符合预期，尤其是食物照片是否走 `photo`。
+- 是否返回 `trace_id` 和 `ai_log_id`。
 - 错误样本对应的 `.response.json` 原始响应。
 
 如果要排查单张图，打开对应的：
@@ -129,6 +159,33 @@ test-results/<run-id>/summary.md
 ```text
 test-results/<run-id>/<domain>/<date>/<file>.response.json
 ```
+
+如果要看链路追踪摘要，打开对应的：
+
+```text
+test-results/<run-id>/<domain>/<date>/<file>.trace.json
+```
+
+`.trace.json` 面向后续追踪台使用，当前会整理：
+
+- `trace_id` / `ai_log_id`
+- 请求上下文：`capture_kind`、`source_app`
+- 模型路径：`vision_mode`、`photo_quality_mode`、`model_provider`、`model_name`
+- 用户可见输出：iOS 通知、伴随文案、AI 弹窗反馈
+- 基础步骤：上传请求、身份解析、模型路径、响应构造
+
+如果日志补全成功，还会从 `ai_recognition_logs.raw_response` 展开更多节点：
+
+- 图片哈希与去重准备
+- 去重检查
+- 域路由 / Dispatcher
+- Prompt 构造
+- 模型调用
+- 模型解析
+- 标准化与校验
+- 伴随文案 / AI 反馈
+- 归档或中转
+- 写入 AI 日志
 
 ## 测试标签机制
 
@@ -172,6 +229,10 @@ npm run cleanup:test-receipts -- --run-id local-ai-popup-v1 --execute --yes
 - 如果某些截图直接进入 `transactions` 或 `income_records`，这两张表当前没有独立 `test_meta` 字段，不能只靠清理脚本完全自动清理。
 - 对直接落入 `transactions` / `income_records` 的测试记录，应结合本地响应里的 `target_id`、`ai_recognition_logs` 或 Supabase 查询人工确认后再处理。
 - 当前脚本验证的是线上已部署的 `ingest-receipt` 行为，不会验证本地尚未部署的 Edge Function 改动。
+- `trace_id`、`ai_log_id`、`vision_mode`、`.trace.json` 需要线上 Edge Function 部署到包含追踪字段的版本后才完整。未部署前，本地脚本仍会生成 partial trace，但 `ai_log_id` 和模型路径可能为空。
+- 完整 step 展开依赖 `ai_recognition_logs.raw_response`，需要本地配置 service role key 或等价测试日志读取 key。没有 key 时不会中断测试，只会生成 partial trace。
+- 本地默认 `capture_kind=test-batch` 不等同于真实 iOS 拍照。食物照片如果要更贴近拍照链路，应显式传 `--capture-kind photo`。
+- 如果 endpoint 走 `https://api.snapflow.me/functions/v1/ingest-receipt`，会经过 Cloudflare Worker 代理。当前 Worker 有约 30 秒上游超时，原图 + `photo` 深度识别链路可能在 Supabase Function 仍会完成的情况下，被 Worker 提前返回 504。排查慢请求时可用 `--endpoint https://<project-ref>.supabase.co/functions/v1/ingest-receipt` 直连 Supabase 做对照。
 - **感知哈希去重验证存在盲区**：本地测试上传的永远是同一张原图（字节级一致），感知哈希完全相同，去重 100% 命中。但真实环境中 iOS 快捷指令截图会经过质量压缩、宽度压缩，加上同一页面截图也会因网络加载状态、动态内容、时间戳等产生像素级差异，导致感知哈希有波动。因此：
   - 本地测试能验证"去重逻辑是否生效"，但**无法验证去重阈值在真实压缩波动下是否稳健**。
   - 真实环境中可能出现"同一页面重复截图但因哈希偏移超过阈值而被当作新图"的漏判情况。
@@ -185,6 +246,7 @@ npm run cleanup:test-receipts -- --run-id local-ai-popup-v1 --execute --yes
 - 不要把 `test_meta` 接入正式 UI、统计、AI 上下文或业务计算。
 - Git 操作遵循“可以多 commit，必须少 push”：本地 commit 可以作为可回滚存档点；push 会影响远程 `main`，并可能触发 GitHub Action 部署，必须在用户明确确认后执行。
 - 涉及 `main` 推送、Edge Function 部署、线上删除时，先向用户确认。
+- 如果通过 Supabase CLI 手动部署了 Edge Function，务必及时把同版本代码提交到 Git；否则后续 GitHub Action 从 `main` 自动部署时，可能用仓库里的旧代码覆盖手动部署版本。
 - 如果要验证未部署的 Edge Function 改动，需要先解决部署链路；本脚本默认打的是线上函数地址。
 
 ## Git 协作规则：多 commit，少 push
