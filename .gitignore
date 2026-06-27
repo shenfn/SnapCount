@@ -62,6 +62,12 @@ docs-private/
 # 其他本地临时文件
 # ═══════════════════════════════════════════════
 .trae/
+.claude/
+.npm-cache/
+.superpowers/
+.tmp/
+.understand-anything/
+.uploads/
 dogfood-output/
 *.log
 .scan_all_files.txt
@@ -69,6 +75,14 @@ test.jpg
 .ai-validation-cache/
 test-cases/
 test-results/
+
+# ═══════════════════════════════════════════════
+# 工作区本地分区
+# 放隐私素材、测试图片、临时草稿、历史归档等不应进入 GitHub 的内容
+# ═══════════════════════════════════════════════
+local-only/
+本地私有/
+archive/
 
 # 本地原型/设计稿（不入主仓库）
 多域联动分析.html
