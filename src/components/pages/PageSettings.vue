@@ -12,6 +12,13 @@
 
     <div class="settings-section">
       <div class="settings-section-title">账户</div>
+      <div class="settings-item" v-if="store.currentUserId.value">
+        <div class="settings-item-icon">号</div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">用户 ID</div>
+          <div class="settings-item-sub" style="word-break:break-all;font-size:11px;">{{ store.currentUserId.value }}</div>
+        </div>
+      </div>
       <div class="settings-item" v-if="uploadToken" @click="copyToken">
         <div class="settings-item-icon success">钥</div>
         <div class="settings-item-content">
