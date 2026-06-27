@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "logs:ai": "node --env-file=.env.local scripts/show-ai-logs.mjs"
+    "logs:ai": "node --env-file=.env.local scripts/show-ai-logs.mjs",
+    "test:receipt": "node --env-file=.env.local scripts/test-ingest-receipt.mjs",
+    "cleanup:test-receipts": "node --env-file=.env.local scripts/cleanup-test-receipts.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

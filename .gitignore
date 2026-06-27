@@ -66,6 +66,9 @@ dogfood-output/
 *.log
 .scan_all_files.txt
 test.jpg
+.ai-validation-cache/
+test-cases/
+test-results/
 
 # 本地原型/设计稿（不入主仓库）
 多域联动分析.html
