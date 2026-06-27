@@ -399,6 +399,15 @@ interface AIFeedback {
   } | null;
 }
 
+interface TestMeta {
+  is_test: true;
+  source: "local_validation";
+  test_run_id: string;
+  test_case_domain: string | null;
+  test_case_date: string | null;
+  test_case_file: string | null;
+}
+
 interface AccountRow {
   id: string;
   user_id: string;
@@ -472,6 +481,28 @@ function normalizeNumber(value: unknown): number | null {
 
 function normalizeString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeShortString(value: unknown, max = 160): string | null {
+  const text = normalizeString(value);
+  return text ? text.slice(0, max) : null;
+}
+
+function buildTestMeta(form: FormData): TestMeta | null {
+  const runId = normalizeShortString(form.get("test_run_id"));
+  if (!runId) return null;
+  return {
+    is_test: true,
+    source: "local_validation",
+    test_run_id: runId,
+    test_case_domain: normalizeShortString(form.get("test_case_domain"), 80),
+    test_case_date: normalizeShortString(form.get("test_case_date"), 32),
+    test_case_file: normalizeShortString(form.get("test_case_file"), 240),
+  };
+}
+
+function withTestMeta<T extends Record<string, unknown>>(payload: T, testMeta: TestMeta | null): T & { test_meta?: TestMeta } {
+  return testMeta ? { ...payload, test_meta: testMeta } : payload;
 }
 
 function normalizeIsoDateTime(value: unknown): string | null {
@@ -1213,19 +1244,34 @@ function resolveBuiltinOccurredAt(domainKey: BuiltinDomainKey, occurredAt: strin
 async function getDomainByKey(
   supabase: ReturnType<typeof createClient>,
   key: BuiltinDomainKey,
+  userId?: string | null,
 ): Promise<{ id: string; key: string; version?: string | null } | null> {
-  const { data, error } = await supabase
+  // 1. 优先查系统共享域（is_system=true AND user_id IS NULL）
+  const { data: systemDomain, error: sysErr } = await supabase
     .from("data_domains")
     .select("id,key,version")
     .eq("key", key)
     .eq("status", "active")
-    .limit(1)
+    .eq("is_system", true)
+    .is("user_id", null)
     .maybeSingle();
-  if (error) {
-    console.error("Domain lookup failed:", error);
-    return null;
+  if (sysErr) console.error("Domain lookup (system) failed:", sysErr);
+  if (systemDomain) return systemDomain;
+
+  // 2. 系统域没有，查当前用户的私有域
+  if (userId) {
+    const { data: userDomain, error: userErr } = await supabase
+      .from("data_domains")
+      .select("id,key,version")
+      .eq("key", key)
+      .eq("status", "active")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (userErr) console.error("Domain lookup (user) failed:", userErr);
+    if (userDomain) return userDomain;
   }
-  return data;
+
+  return null;
 }
 
 async function runLowCostDispatcher(
@@ -1234,15 +1280,32 @@ async function runLowCostDispatcher(
     rawText: string | null;
     sourceApp: string | null;
     imageFeatures: ImageFeatures;
+    userId?: string | null;
   },
 ): Promise<DispatcherResult> {
   const text = [params.rawText, params.sourceApp].filter(Boolean).join(" ");
-  const { data: domains, error } = await supabase
+
+  // 查系统共享域 + 当前用户私有域
+  const { data: systemDomains, error: sysErr } = await supabase
     .from("data_domains")
     .select("key,name,routing_json,status")
-    .eq("status", "active");
+    .eq("status", "active")
+    .eq("is_system", true)
+    .is("user_id", null);
 
-  if (error) console.error("Dispatcher domain load failed:", error);
+  let userDomains: typeof systemDomains = [];
+  if (params.userId) {
+    const { data: uDomains, error: uErr } = await supabase
+      .from("data_domains")
+      .select("key,name,routing_json,status")
+      .eq("status", "active")
+      .eq("user_id", params.userId);
+    if (uErr) console.error("Dispatcher user domain load failed:", uErr);
+    userDomains = uDomains || [];
+  }
+
+  if (sysErr) console.error("Dispatcher system domain load failed:", sysErr);
+  const domains = [...(systemDomains || []), ...userDomains];
 
   const candidates: DispatcherCandidate[] = [];
   const seenKeys = new Set<string>();
@@ -2407,6 +2470,7 @@ async function createStagingRecord(
     dispatcher?: DispatcherResult | null;
     userId?: string | null;
     timeContext?: unknown;
+    testMeta?: TestMeta | null;
   },
 ): Promise<{ id: string } | null> {
   const detectedDomainKey = isBuiltinDomain(payload.ai.domain_key)
@@ -2439,6 +2503,7 @@ async function createStagingRecord(
       ...payload.ai,
       time_context: payload.timeContext ?? null,
       ai_feedback: (payload.ai as Record<string, unknown>).ai_feedback ?? null,
+      ...(payload.testMeta ? { test_meta: payload.testMeta } : {}),
     },
     companion_message: payload.ai.companion_message ?? null,
     raw_text: payload.dispatcher?.raw_text ?? null,
@@ -2962,17 +3027,62 @@ Deno.serve(async (req) => {
     // 1. 接收图片（multipart/form-data，字段名 image）
     const form = await req.formData();
     responseMode = normalizeResponseMode(form.get("response_mode")) === "text" ? "text" : responseMode;
+    const testMeta = buildTestMeta(form);
     timings.mark("form_parse");
-    // 用户身份：优先 user_id，其次 upload_token 查表
-    let userId = normalizeString(form.get("user_id"));
-    const uploadToken = normalizeString(form.get("upload_token"));
-    if (!userId && uploadToken) {
-      const { data: cfg } = await supabase.from("user_configs")
-        .select("user_id")
-        .eq("upload_token", uploadToken)
-        .eq("is_active", true)
-        .maybeSingle();
-      if (cfg) userId = cfg.user_id;
+    // ── 身份校验（三级优先级）──
+    // 1. JWT 优先：从 Authorization 头解析真实 user_id
+    // 2. upload_token：通过 user_configs 反查 user_id
+    // 3. 都没有：401 拒绝
+    let userId: string | null = null;
+    const authHeader = req.headers.get("Authorization") || "";
+    const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+
+    // 尝试 JWT 验证（仅当 Bearer token 不是 anon key 时）
+    if (bearerToken) {
+      const anonKey = getEnvOptional("ANON_PUBLIC_KEY");
+      if (anonKey && bearerToken !== anonKey) {
+        try {
+          const userClient = createClient(getEnv("SUPABASE_URL"), anonKey, {
+            global: { headers: { Authorization: authHeader } },
+          });
+          const { data: { user: jwtUser }, error: jwtErr } = await userClient.auth.getUser();
+          if (!jwtErr && jwtUser) {
+            userId = jwtUser.id;
+          }
+        } catch {
+          // JWT 解析失败，静默跳过，走 upload_token 降级
+        }
+      }
+    }
+
+    // JWT 成功：如果 form 里也传了 user_id，必须和 JWT 一致
+    if (userId) {
+      const formUserId = normalizeString(form.get("user_id"));
+      if (formUserId && formUserId !== userId) {
+        return respondShortcut(
+          { error: "user_id 与登录身份不匹配" },
+          { mode: responseMode, status: 401 }
+        );
+      }
+    } else {
+      // 没有 JWT，尝试 upload_token 反查
+      const uploadToken = normalizeString(form.get("upload_token"));
+      if (uploadToken) {
+        const { data: cfg } = await supabase.from("user_configs")
+          .select("user_id")
+          .eq("upload_token", uploadToken)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (cfg) userId = cfg.user_id;
+      }
+
+      // 既没有有效 JWT，也没有有效 upload_token，拒绝请求
+      if (!userId) {
+        return respondShortcut(
+          { error: "缺少有效身份信息：请通过登录或 upload_token 认证" },
+          { mode: responseMode, status: 401 }
+        );
+      }
     }
 
     let companionSettings: CompanionSettings = DEFAULT_COMPANION_SETTINGS;
@@ -3198,7 +3308,7 @@ Deno.serve(async (req) => {
       }, { mode: responseMode });
     }
 
-    const dispatcher = await runLowCostDispatcher(supabase, { rawText, sourceApp, imageFeatures });
+    const dispatcher = await runLowCostDispatcher(supabase, { rawText, sourceApp, imageFeatures, userId });
     timings.mark("dispatcher");
     let duplicateKind: string | null = perceptualDupRefId ? "perceptual_hash" : null;
     let duplicateRefTable: string | null = perceptualDupRefId ? "ai_recognition_logs" : null;
@@ -3423,10 +3533,10 @@ Deno.serve(async (req) => {
           }
         } else if (builtinKey) {
           const built = buildBuiltinPayload(ai);
-          const domain = await getDomainByKey(supabase, builtinKey);
+          const domain = await getDomainByKey(supabase, builtinKey, userId);
           if (domain && built) {
             const retryFeedback = built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75 && companionSettings.enabled
-              ? buildBuiltinAIFeedback(builtinKey, built, timeContext, companionMessage)
+                ? buildBuiltinAIFeedback(builtinKey, built, timeContext, companionMessage)
               : null;
             if (retryFeedback) {
               aiFeedback = retryFeedback;
@@ -3438,7 +3548,7 @@ Deno.serve(async (req) => {
             const { data: drRow } = await supabase.from("data_records").insert({
               domain_id: domain.id, domain_key: builtinKey, domain_version: domain.version ?? "1.0",
               occurred_at: occurredAt, title: built.title, summary: built.summary,
-              payload_jsonb: { ...built.payload, time_context: timeContext, companion_message: companionMessage, ai_feedback: aiFeedback }, user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
+              payload_jsonb: withTestMeta({ ...built.payload, time_context: timeContext, companion_message: companionMessage, ai_feedback: aiFeedback }, testMeta), user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
             }).select("id").single();
             if (drRow) { archivedTo = "data_records"; archivedId = drRow.id; }
           }
@@ -3589,6 +3699,7 @@ Deno.serve(async (req) => {
         dispatcher,
         userId,
         timeContext,
+        testMeta,
       });
       await writeAiLog(supabase, {
         image_hash: hash,
@@ -3635,7 +3746,7 @@ Deno.serve(async (req) => {
 
     if (builtinKey) {
       const built = buildBuiltinPayload(ai);
-      const domain = await getDomainByKey(supabase, builtinKey);
+      const domain = await getDomainByKey(supabase, builtinKey, userId);
       const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : (occurredAt ?? new Date().toISOString());
       const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
       if (shouldAutoArchive && built && companionSettings.enabled) {
@@ -3671,6 +3782,7 @@ Deno.serve(async (req) => {
           dispatcher,
           userId,
           timeContext,
+          testMeta,
         });
         await writeAiLog(supabase, {
           image_hash: hash,
@@ -3723,7 +3835,7 @@ Deno.serve(async (req) => {
         occurred_at: fallbackOccurredAt,
         title: built.title,
         summary: built.summary,
-        payload_jsonb: { ...built.payload, time_context: timeContext, companion_message: companionMessage, ai_feedback: aiFeedback },
+        payload_jsonb: withTestMeta({ ...built.payload, time_context: timeContext, companion_message: companionMessage, ai_feedback: aiFeedback }, testMeta),
         user_id: userId || null,
         source: "ai_scan",
         source_image_path: path,
