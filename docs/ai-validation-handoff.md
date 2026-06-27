@@ -232,7 +232,7 @@ npm run cleanup:test-receipts -- --run-id local-ai-popup-v1 --execute --yes
 - `trace_id`、`ai_log_id`、`vision_mode`、`.trace.json` 需要线上 Edge Function 部署到包含追踪字段的版本后才完整。未部署前，本地脚本仍会生成 partial trace，但 `ai_log_id` 和模型路径可能为空。
 - 完整 step 展开依赖 `ai_recognition_logs.raw_response`，需要本地配置 service role key 或等价测试日志读取 key。没有 key 时不会中断测试，只会生成 partial trace。
 - 本地默认 `capture_kind=test-batch` 不等同于真实 iOS 拍照。食物照片如果要更贴近拍照链路，应显式传 `--capture-kind photo`。
-- 如果 endpoint 走 `https://api.snapflow.me/functions/v1/ingest-receipt`，会经过 Cloudflare Worker 代理。当前 Worker 有约 30 秒上游超时，原图 + `photo` 深度识别链路可能在 Supabase Function 仍会完成的情况下，被 Worker 提前返回 504。排查慢请求时可用 `--endpoint https://<project-ref>.supabase.co/functions/v1/ingest-receipt` 直连 Supabase 做对照。
+- 如果 endpoint 走 `https://api.snapflow.me/functions/v1/ingest-receipt`，会经过 Cloudflare Worker 代理。仓库中的 Worker 已将 `POST /functions/v1/ingest-receipt` 单独放宽到 120 秒，普通 Supabase API 仍保持 30 秒。注意：这需要 Worker 部署后才在线上生效。排查慢请求时可用 `--endpoint https://<project-ref>.supabase.co/functions/v1/ingest-receipt` 直连 Supabase 做对照。
 - **感知哈希去重验证存在盲区**：本地测试上传的永远是同一张原图（字节级一致），感知哈希完全相同，去重 100% 命中。但真实环境中 iOS 快捷指令截图会经过质量压缩、宽度压缩，加上同一页面截图也会因网络加载状态、动态内容、时间戳等产生像素级差异，导致感知哈希有波动。因此：
   - 本地测试能验证"去重逻辑是否生效"，但**无法验证去重阈值在真实压缩波动下是否稳健**。
   - 真实环境中可能出现"同一页面重复截图但因哈希偏移超过阈值而被当作新图"的漏判情况。

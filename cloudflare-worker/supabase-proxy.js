@@ -14,7 +14,8 @@
  *        504 = 上游 TLS / 超时（可重试）
  *        502 = 上游连接异常（可重试）
  *        500 = Worker 自身异常（极少出现）
- *   4. 增加 30s 超时控制（AbortController），避免链路异常时长时间挂起。
+ *   4. 增加分路径超时控制（AbortController），避免链路异常时长时间挂起。
+ *      普通 Supabase API 保持 30s，AI 图片识别链路允许更长等待。
  */
 
 const ALLOWED_ORIGINS = [
@@ -25,8 +26,9 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
 ]
 
-// 上游请求超时（毫秒）。Supabase 正常响应都在 1-2s 内，30s 足够覆盖慢请求。
-const UPSTREAM_TIMEOUT_MS = 30_000
+// 上游请求超时（毫秒）。普通 API 不应长时间挂起，AI 识别原图/拍照链路可能需要更久。
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000
+const INGEST_RECEIPT_TIMEOUT_MS = 120_000
 
 function buildCorsHeaders(requestOrigin, requestedHeaders) {
   const origin = ALLOWED_ORIGINS.includes(requestOrigin)
@@ -60,7 +62,19 @@ function buildCorsHeaders(requestOrigin, requestedHeaders) {
  *   userAction: string[],
  * }}
  */
-function classifyUpstreamError(err) {
+function isIngestReceiptRequest(method, pathname) {
+  return method === 'POST' && pathname === '/functions/v1/ingest-receipt'
+}
+
+function getUpstreamTimeoutMs(request) {
+  const url = new URL(request.url)
+  if (isIngestReceiptRequest(request.method, url.pathname)) {
+    return INGEST_RECEIPT_TIMEOUT_MS
+  }
+  return DEFAULT_UPSTREAM_TIMEOUT_MS
+}
+
+function classifyUpstreamError(err, { timeoutMs, isIngestReceipt }) {
   const msg = (err && (err.message || String(err))) || ''
   const lower = msg.toLowerCase()
 
@@ -68,11 +82,18 @@ function classifyUpstreamError(err) {
     return {
       status: 504,
       code: 'UPSTREAM_TIMEOUT',
-      title: '后端连接数据库超时',
-      userAction: [
-        '请稍后重试，可能是数据库临时繁忙',
-        '若多次出现，请联系开发者',
-      ],
+      title: isIngestReceipt ? 'AI 识别耗时较长' : '后端请求超时',
+      userAction: isIngestReceipt
+        ? [
+            `本次请求超过 ${Math.round(timeoutMs / 1000)} 秒仍未完成，可能是图片较大或模型识别较慢`,
+            '请稍后重试，或尝试使用压缩后的截图/照片',
+            '若多次出现，请联系开发者',
+          ]
+        : [
+            `本次请求超过 ${Math.round(timeoutMs / 1000)} 秒仍未完成`,
+            '请稍后重试',
+            '若多次出现，请联系开发者',
+          ],
     }
   }
 
@@ -126,7 +147,7 @@ function classifyUpstreamError(err) {
 /**
  * 构造统一的错误响应体（JSON）。
  */
-function buildErrorResponse(classification, detail, targetUrl, corsHeaders) {
+function buildErrorResponse(classification, detail, targetUrl, corsHeaders, timeoutMs) {
   const body = {
     error: classification.title,
     code: classification.code,
@@ -134,6 +155,7 @@ function buildErrorResponse(classification, detail, targetUrl, corsHeaders) {
     userAction: classification.userAction,
     detail,
     target: targetUrl,
+    timeoutMs,
     timestamp: new Date().toISOString(),
   }
   return new Response(JSON.stringify(body), {
@@ -142,6 +164,7 @@ function buildErrorResponse(classification, detail, targetUrl, corsHeaders) {
       'Content-Type': 'application/json; charset=utf-8',
       // 把错误码也放进自定义 header，便于前端在不解析 body 的情况下也能拿到
       'X-Proxy-Error-Code': classification.code,
+      ...(timeoutMs ? { 'X-Proxy-Timeout-Ms': String(timeoutMs) } : {}),
       ...corsHeaders,
     },
   })
@@ -180,10 +203,13 @@ export default {
         'Missing SUPABASE_ANON_KEY env var',
         url.toString(),
         corsHeaders,
+        null,
       )
     }
 
     const targetUrl = supabaseUrl + url.pathname + url.search
+    const isIngestReceipt = isIngestReceiptRequest(request.method, url.pathname)
+    const timeoutMs = getUpstreamTimeoutMs(request)
 
     // 转发请求头：注入 anon key，移除 Cloudflare 内部 header 避免干扰
     const headers = new Headers(request.headers)
@@ -196,7 +222,7 @@ export default {
 
     // 用 AbortController 加超时，避免 TLS 异常时永远挂起
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
     const fetchOptions = {
       method: request.method,
@@ -213,6 +239,7 @@ export default {
 
       const respHeaders = new Headers(response.headers)
       Object.entries(corsHeaders).forEach(([k, v]) => respHeaders.set(k, v))
+      respHeaders.set('X-Proxy-Timeout-Ms', String(timeoutMs))
 
       return new Response(response.body, {
         status: response.status,
@@ -220,9 +247,9 @@ export default {
       })
     } catch (err) {
       clearTimeout(timeoutId)
-      const classification = classifyUpstreamError(err)
-      console.error(`[proxy-error] code=${classification.code} target=${targetUrl} detail=${err.message}`)
-      return buildErrorResponse(classification, err.message, targetUrl, corsHeaders)
+      const classification = classifyUpstreamError(err, { timeoutMs, isIngestReceipt })
+      console.error(`[proxy-error] code=${classification.code} timeout=${timeoutMs} target=${targetUrl} detail=${err.message}`)
+      return buildErrorResponse(classification, err.message, targetUrl, corsHeaders, timeoutMs)
     }
   },
 }
