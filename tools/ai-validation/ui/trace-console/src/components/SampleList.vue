@@ -23,11 +23,11 @@
         v-for="t in filteredTraces"
         :key="t.case_key"
         class="sample-item"
-        :class="{ active: t.case_key === selectedCaseKey }"
+        :class="{ active: t.case_key === selectedCaseKey, 'parse-error': t.status === 'parse_error' }"
         @click="$emit('select', t.case_key)"
       >
-        <!-- 缩略图 -->
-        <div class="thumb-wrapper">
+        <!-- 缩略图（点击放大，阻止冒泡避免触发样本选择） -->
+        <div class="thumb-wrapper" @click.stop="t.image_relative_path ? openImage(t) : null">
           <img
             v-if="t.image_relative_path"
             :src="imageUrl(t.image_relative_path)"
@@ -51,6 +51,7 @@
             <span>·</span>
             <span>{{ formatDuration(t.elapsed_ms) }}</span>
             <span v-if="t.has_ai_feedback" class="feedback-dot" title="有 AI 反馈">AI</span>
+            <span v-if="t.parse_error" class="error-dot" :title="t.parse_error">解析失败</span>
           </div>
         </div>
       </div>
@@ -60,6 +61,12 @@
         <span>无匹配样本</span>
       </div>
     </div>
+
+    <!-- 图片放大查看器 -->
+    <ImageViewer
+      :src="viewerSrc"
+      :file-name="viewerFileName"
+    />
   </div>
 </template>
 
@@ -68,6 +75,7 @@ import { ref, computed } from 'vue'
 import { imageUrl } from '../lib/api.js'
 import { formatDuration, getStatusColor, getStatusLabel } from '../lib/formatters.js'
 import { extractFilterOptions } from '../lib/traceNormalizer.js'
+import ImageViewer from './ImageViewer.vue'
 
 const props = defineProps({
   traces: { type: Array, default: () => [] },
@@ -77,6 +85,8 @@ const props = defineProps({
 defineEmits(['select'])
 
 const activeFilter = ref('all')
+const viewerSrc = ref(null)
+const viewerFileName = ref('')
 
 // 筛选选项
 const filterOptions = computed(() => extractFilterOptions(props.traces))
@@ -97,6 +107,12 @@ function statusLabel(status) {
 
 function onThumbError(e) {
   e.target.style.display = 'none'
+}
+
+// 打开图片放大查看
+function openImage(trace) {
+  viewerSrc.value = imageUrl(trace.image_relative_path)
+  viewerFileName.value = trace.file || ''
 }
 </script>
 
@@ -251,6 +267,19 @@ function onThumbError(e) {
 .feedback-dot {
   background: rgba(188, 140, 255, 0.15);
   color: var(--accent-purple);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.sample-item.parse-error {
+  border: 1px dashed var(--accent-red);
+}
+
+.error-dot {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--accent-red);
   padding: 0 4px;
   border-radius: 3px;
   font-size: 10px;

@@ -37,14 +37,30 @@
 
         <!-- 中栏：时间线 + 用户可见输出 -->
         <div class="center-area">
+          <!-- 加载中 -->
+          <div v-if="traceLoading" class="trace-loading">
+            <span>加载 trace 数据...</span>
+          </div>
+
+          <!-- 错误状态 -->
+          <div v-else-if="traceError" class="trace-error-state">
+            <div class="error-icon">⚠️</div>
+            <div class="error-title">Trace 加载失败</div>
+            <div class="error-detail">{{ traceError }}</div>
+            <div class="error-hint">该样本的 trace.json 可能已损坏或格式不正确</div>
+          </div>
+
+          <!-- 正常时间线 -->
           <Timeline
-            v-if="currentTrace"
+            v-else-if="currentTrace"
             :trace="currentTrace"
             :selected-step-id="selectedStepId"
             :view-mode="viewMode"
             @select-node="onNodeSelect"
             @view-artifact="onViewArtifact"
           />
+
+          <!-- 空状态 -->
           <EmptyState
             v-else
             icon="📋"
@@ -54,7 +70,7 @@
 
           <!-- 底部用户可见输出 -->
           <UserOutputPanel
-            v-if="currentTrace"
+            v-if="currentTrace && !traceError"
             :outputs="currentTrace.user_visible_outputs"
             :trace="currentTrace"
           />
@@ -108,6 +124,8 @@ const viewMode = ref('dev')
 const drawerOpen = ref(false)
 const artifactModalOpen = ref(false)
 const activeArtifactKey = ref('')
+const traceLoading = ref(false)
+const traceError = ref('')
 
 // 当前选中的 step 对象
 const selectedStep = computed(() => {
@@ -186,13 +204,17 @@ async function onCaseSelect(caseKey) {
   selectedCaseKey.value = caseKey
   selectedStepId.value = ''
   currentTrace.value = null
+  drawerOpen.value = false
+  artifactModalOpen.value = false
+  traceLoading.value = true
+  traceError.value = ''
 
   const { data, error } = await fetchTrace(currentRunId.value, caseKey)
+  traceLoading.value = false
+
   if (error) {
     console.error('加载 trace 失败:', error)
-    // 设置一个错误 trace
-    currentTrace.value = normalizeTrace(null)
-    currentTrace.value.errors = [error]
+    traceError.value = error
     return
   }
   currentTrace.value = normalizeTrace(data)
@@ -229,5 +251,54 @@ function onViewArtifact(artifactRef) {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.trace-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.trace-error-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-xl);
+}
+
+.trace-error-state .error-icon {
+  font-size: 32px;
+  margin-bottom: var(--space-md);
+}
+
+.trace-error-state .error-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-red);
+  margin-bottom: var(--space-sm);
+}
+
+.trace-error-state .error-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  background: var(--bg-panel);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  max-width: 500px;
+  margin-bottom: var(--space-sm);
+  word-break: break-all;
+}
+
+.trace-error-state .error-hint {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 </style>
