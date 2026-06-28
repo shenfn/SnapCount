@@ -35,7 +35,7 @@
           @select="onCaseSelect"
         />
 
-        <!-- 中栏：时间线 -->
+        <!-- 中栏：时间线 + 用户可见输出 -->
         <div class="center-area">
           <Timeline
             v-if="currentTrace"
@@ -51,18 +51,44 @@
             title="请选择样本"
             desc="从左侧选择一个测试样本，查看完整识别链路。"
           />
+
+          <!-- 底部用户可见输出 -->
+          <UserOutputPanel
+            v-if="currentTrace"
+            :outputs="currentTrace.user_visible_outputs"
+            :trace="currentTrace"
+          />
         </div>
       </div>
     </template>
+
+    <!-- 节点详情抽屉 -->
+    <NodeDrawer
+      :open="drawerOpen"
+      :step="selectedStep"
+      @close="drawerOpen = false"
+      @view-artifact="onViewArtifact"
+    />
+
+    <!-- Artifact 弹窗 -->
+    <ArtifactModal
+      :open="artifactModalOpen"
+      :artifact-key="activeArtifactKey"
+      :artifacts="currentTrace?.artifacts || {}"
+      @close="artifactModalOpen = false"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import TopBar from './components/TopBar.vue'
 import SampleList from './components/SampleList.vue'
 import Timeline from './components/Timeline.vue'
 import EmptyState from './components/EmptyState.vue'
+import NodeDrawer from './components/NodeDrawer.vue'
+import ArtifactModal from './components/ArtifactModal.vue'
+import UserOutputPanel from './components/UserOutputPanel.vue'
 import { fetchRuns, fetchSummary, fetchTraces, fetchTrace } from './lib/api.js'
 import { normalizeTrace } from './lib/traceNormalizer.js'
 
@@ -79,6 +105,15 @@ const selectedCaseKey = ref('')
 const currentTrace = ref(null)
 const selectedStepId = ref('')
 const viewMode = ref('dev')
+const drawerOpen = ref(false)
+const artifactModalOpen = ref(false)
+const activeArtifactKey = ref('')
+
+// 当前选中的 step 对象
+const selectedStep = computed(() => {
+  if (!currentTrace.value || !selectedStepId.value) return null
+  return currentTrace.value.steps.find((s) => s.step_id === selectedStepId.value) || null
+})
 
 // ═══════════════════════════════════════════════
 // 生命周期
@@ -163,14 +198,16 @@ async function onCaseSelect(caseKey) {
   currentTrace.value = normalizeTrace(data)
 }
 
-// 节点选择
+// 节点选择 - 打开抽屉
 function onNodeSelect(stepId) {
   selectedStepId.value = stepId
+  drawerOpen.value = true
 }
 
-// Artifact 查看（阶段三实现）
+// Artifact 查看 - 打开弹窗
 function onViewArtifact(artifactRef) {
-  console.log('view artifact:', artifactRef)
+  activeArtifactKey.value = artifactRef
+  artifactModalOpen.value = true
 }
 </script>
 
