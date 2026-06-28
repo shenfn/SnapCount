@@ -239,10 +239,11 @@ stateDiagram-v2
 
 | 版本 | 范围 | 状态 |
 |---|---|---|
-| V0.1 | PRD 与技术边界设计 | 当前文档 |
-| V0.2 | Trace 数据契约、脚本输出 trace JSON、API 返回 trace 引用 | 实施中 |
-| V0.3 | 轻量本地追踪台页面，读取 `test-results/` 展示链路 | 待开发 |
-| V0.4 | 在线测试执行、日志拉取、历史批次对比、异常筛选 | 规划中 |
+| V0.1 | PRD 与技术边界设计 | 已完成 |
+| V0.2 | Trace 数据契约、脚本输出 trace JSON、API 返回 trace 引用 | 已完成 |
+| V0.3 | 轻量本地追踪台页面，读取 `test-results/` 展示链路 | 已完成 |
+| V0.4 | Prompt 评测闭环：expected、evaluation、人工 review、Prompt 版本对比 | 设计中，详见 `docs/ai-validation-prompt-evaluation-plan-v0.4.md` |
+| V0.5 | 在线测试执行、日志拉取、历史批次对比、异常筛选 | 规划中 |
 | V1.0 | 独立内部测试平台 / 后台系统评估 | 远期 |
 
 ### 2.7 产品框架
@@ -565,6 +566,8 @@ flowchart TD
 
 用于比较同一批测试图片在不同 prompt、不同 Edge Function 版本、不同前端弹窗映射下的结果差异。
 
+V0.4 的详细设计已拆分为独立文档：`docs/ai-validation-prompt-evaluation-plan-v0.4.md`。该文档重点定义 `expected.json`、`evaluation.json`、人工 `review.json`、评分规则、问题标签和 Prompt 快照边界，避免本 PRD 继续膨胀。
+
 #### 3.7.2 对比维度
 
 | 维度 | 说明 |
@@ -694,6 +697,9 @@ flowchart TD
 1. [已确认] 完整 prompt 默认只存版本/hash；如需保存完整 prompt，应通过本地调试开关启用，避免默认把敏感 prompt 和上下文写入结果文件。
 2. [已确认] V0.2 应让 Edge Function 响应返回 `ai_log_id` 或等价 trace 引用，这是本地结果和线上日志精确关联的关键。
 3. [已确认] 追踪台第一版优先只读本地 `test-results/` / trace JSON；页面发起真实线上上传可以后续支持，但需要保留测试账号、`upload_token`、`test_run_id`、`test_meta` 和清理边界。
+4. [已确认] V0.3 追踪台使用 Vue 3 + Vite + Express 本地服务，不引入 Tailwind，不接入主 PWA 路由。第一次调用的完整 prompt 通过本地源码提取（`extract-prompt.mjs`），不需要改 EF。
+5. [已确认] V0.3 追踪台 UI 全部由真实 trace JSON 驱动，不硬编码域和节点数量。总请求耗时独立显示，慢节点排行排除 upload_request。
+6. [已确认] V0.4 需要 EF 补全 3 项缺失信息：模型调用参数、第二次调用完整 JSON、第二次调用完整 prompt。第一次调用 prompt 已通过本地源码提取解决。
 
 ### 建议确认
 

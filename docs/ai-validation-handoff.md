@@ -14,6 +14,7 @@
 - 验证支出、收入、转账、钱包、运动、睡眠、阅读等截图能否被正确识别。
 - 在推送 `main` 之前，用本地测试图片批量回放真实识别链路。
 - 给每轮测试打 `run_id`，便于回看结果和清理测试数据。
+- 后续通过 `expected.json`、`evaluation.json` 和人工 review，把本地测试从“看结果”升级为“评测 Prompt 改动是否真的变好”。详见 `docs/ai-validation-prompt-evaluation-plan-v0.4.md`。
 
 ## 当前相关文件
 
@@ -21,6 +22,13 @@
 - `scripts/cleanup-test-receipts.mjs`：测试数据清理脚本。
 - `docs/ai-validation-workflow-plan-v0.1.md`：较完整的方案设计文档。
 - `docs/ai-validation-handoff.md`：当前这份交接说明。
+- `docs/ai-recognition-trace-console-prd-v0.1.md`：AI 识别链路追踪台 PRD。
+- `docs/ai-validation-prompt-evaluation-plan-v0.4.md`：Prompt 评测闭环设计，定义 expected/evaluation/review、评分规则和 Prompt 版本对比。
+- `tools/ai-validation/server/index.mjs`：追踪台本地 Express 服务（端口 5181），只读 test-results 和 test-cases。
+- `tools/ai-validation/server/extract-prompt.mjs`：Prompt 快照提取脚本，从 prompts.ts 源码提取完整 prompt 文本。
+- `tools/ai-validation/server/prompt-snapshot.json`：提取脚本生成的 prompt 快照（不要手动编辑）。
+- `tools/ai-validation/start.mjs`：并行启动脚本，同时拉起 server 和 UI。
+- `tools/ai-validation/ui/trace-console/`：Vue 3 + Vite 子项目（端口 5180），追踪台前端。
 - `.gitignore`：已忽略测试素材和测试结果目录。
 
 ## 本地目录约定
@@ -237,6 +245,128 @@ npm run cleanup:test-receipts -- --run-id local-ai-popup-v1 --execute --yes
   - 本地测试能验证"去重逻辑是否生效"，但**无法验证去重阈值在真实压缩波动下是否稳健**。
   - 真实环境中可能出现"同一页面重复截图但因哈希偏移超过阈值而被当作新图"的漏判情况。
   - 后续如需验证去重阈值稳健性，需要模拟 iOS 压缩流程（质量压缩 + 宽度 resize）生成变体图片再上传对比。
+
+## 追踪台（V0.3 已完成）
+
+追踪台是本地白盒调试工具，不部署给正式用户，不进入 PWA 主界面。当前已实现完整的只读展示能力。
+
+### 技术栈
+
+- 前端：Vue 3 + Vite（端口 5180），独立子项目，不依赖主 PWA
+- 本地服务：Node.js + Express（端口 5181），只监听 127.0.0.1
+- 数据来源：只读本地 `test-results/` 和 `test-cases/`，不新建数据库，不接线上 Supabase
+- 不引入 Tailwind，使用 CSS 变量 + scoped style
+
+### 启动方式
+
+```powershell
+# 方式一：并行启动（推荐）
+npm run trace:console
+
+# 方式二：分别启动
+npm run trace:server    # Express 服务 5181
+npm run trace:ui        # Vite 开发 5180
+
+# 方式三：重新生成 prompt 快照（prompts.ts 改动后执行）
+npm run trace:extract-prompt
+```
+
+浏览器打开 `http://localhost:5180/`
+
+### 已实现功能
+
+| 功能 | 说明 |
+|---|---|
+| 批次选择 | 顶部下拉切换 test-results 下的不同 run |
+| 样本列表 | 左栏展示样本，含缩略图、状态筛选、点击图片可放大 |
+| 总请求耗时 | 时间线顶部独立显示，不混入节点流 |
+| 慢节点排行 | 排除 upload_request，只统计后端真实节点，取前 3 |
+| 节点时间线 | 完全由 trace.steps[] 驱动，零硬编码域和节点数 |
+| 节点详情抽屉 | 点击节点打开右侧抽屉，显示状态/说明/输入输出/Artifact 引用 |
+| Artifact 弹窗 | 点击 Artifact chip 打开，支持 JSON 格式化、大文本截断+展开、复制 |
+| 完整 Prompt 展示 | prompt_build 节点详情中展示完整 prompt 文本，从源码提取 100% 真实 |
+| 用户可见输出 | 完全由 user_visible_outputs[] 驱动，按 output_type 动态渲染卡片 |
+| 记录摘要 | 标注"推断"来源，从 db_targets/model_raw 推断关键字段 |
+| 视角切换 | 用户视角只显示 L0 节点，开发视角显示全部 |
+| 边界处理 | 空状态引导、加载中提示、trace 解析失败不崩溃 |
+
+### 完整 Prompt 展示机制
+
+追踪台从 `supabase/functions/ingest-receipt/prompts.ts` 源码直接提取完整 prompt 文本，不手动整理，确保与源码 100% 一致。
+
+- 提取脚本：`tools/ai-validation/server/extract-prompt.mjs`（用 tsx 运行，动态 import prompts.ts）
+- 快照文件：`tools/ai-validation/server/prompt-snapshot.json`（脚本生成，不要手动编辑）
+- API：`GET /api/prompt` 返回视觉识别 prompt（约 11500 字）和文案生成 prompt（约 3400 字）
+- 前端 PromptViewer 组件：标签切换两次调用、分段高亮（段落标题/JSON 字段名/枚举值/禁止规则）、关键词搜索
+
+**重要**：`prompts.ts` 改动后必须重新运行 `npm run trace:extract-prompt`，否则追踪台展示的是旧版本 prompt。
+
+### trace 中当前缺失的信息（待 V0.4 补全）
+
+以下信息当前 trace 未保存，需要修改 Edge Function 才能补全：
+
+| 缺失项 | 影响 | 计划 |
+|---|---|---|
+| 模型调用参数（temperature/max_tokens） | 无法判断是 prompt 问题还是参数问题 | V0.4 改 EF，加到 model_context |
+| 第二次调用的完整 JSON 输出 | 无法定位文案生成逻辑错误 | V0.4 改 EF，加到 artifacts.companion.model_raw_json |
+| 第二次调用的完整 prompt 文本 | 无法回溯文案生成的 prompt | V0.4 改 EF，加到 artifacts.feedback_prompt.full_text |
+
+第一次调用的完整 prompt 通过本地源码提取已解决，不需要改 EF。
+
+### 目录结构
+
+```text
+tools/ai-validation/
+  server/
+    index.mjs              # Express 服务（端口 5181）
+    extract-prompt.mjs     # Prompt 提取脚本
+    prompt-snapshot.json   # 提取生成的快照
+    package.json           # server 依赖（express + tsx）
+  start.mjs                # 并行启动脚本
+  ui/trace-console/        # Vue 3 + Vite 子项目（端口 5180）
+    package.json
+    vite.config.js         # 端口 5180，proxy /api → 5181
+    index.html
+    src/
+      main.js
+      App.vue              # 根布局
+      lib/
+        api.js             # API 调用封装
+        traceNormalizer.js # 数据标准化（处理 null/缺失/计算总耗时/慢节点）
+        formatters.js      # 格式化工具
+      components/
+        TopBar.vue           # 顶部概览栏
+        BatchSelector.vue    # 批次选择
+        SampleList.vue       # 左栏样本列表
+        Timeline.vue         # 时间线（总耗时+慢节点+节点列表）
+        NodeDrawer.vue       # 右侧抽屉节点详情
+        ArtifactModal.vue    # Artifact 弹窗
+        JsonViewer.vue       # JSON 格式化+大文本截断
+        PromptViewer.vue     # 完整 Prompt 展示
+        UserOutputPanel.vue  # 用户可见输出
+        InferredSummary.vue  # 推断的记录摘要
+        ImageViewer.vue      # 图片查看器
+        EmptyState.vue       # 空状态
+      styles/
+        theme.css            # CSS 变量主题
+```
+
+### API 路由
+
+```text
+GET /api/runs                              列出所有批次
+GET /api/runs/:runId/summary               读取批次 summary.json
+GET /api/runs/:runId/traces                列出批次内所有 trace 摘要（返回 case_key）
+GET /api/runs/:runId/traces/:caseKey       读取单个完整 trace.json（零遍历）
+GET /api/images?path=test-cases/...        读取测试图片（仅限 test-cases/ 目录）
+GET /api/prompt                            返回完整 prompt 快照
+GET /api/health                            健康检查
+```
+
+安全约束：
+- server 只监听 127.0.0.1，不暴露外网
+- 图片接口只允许 test-cases/ 目录，拒绝路径逃逸
+- 不读取任何 .env 文件，不需要任何密钥
 
 ## 交接给下一个 Agent 的注意事项
 
