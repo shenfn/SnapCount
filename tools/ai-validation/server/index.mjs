@@ -414,6 +414,29 @@ app.get('/api/images', async (req, res) => {
 })
 
 // ═══════════════════════════════════════════════
+// 路由：GET /api/prompt - 获取 prompt 快照
+// ═══════════════════════════════════════════════
+// 返回从 prompts.ts 提取的完整 prompt 文本
+// 快照由 extract-prompt.mjs 预生成，server 只读文件
+// ═══════════════════════════════════════════════
+
+app.get('/api/prompt', async (req, res) => {
+  try {
+    const snapshotPath = path.join(__dirname, 'prompt-snapshot.json')
+    if (!existsSync(snapshotPath)) {
+      return sendError(res, 404, 'Prompt snapshot not found', '请先运行 npx tsx extract-prompt.mjs 生成快照')
+    }
+    const { data, error } = await safeReadJson(snapshotPath)
+    if (error) {
+      return sendError(res, 500, 'Failed to parse prompt snapshot', error)
+    }
+    res.json(data)
+  } catch (err) {
+    sendError(res, 500, 'Failed to read prompt snapshot', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
 // 健康检查
 // ═══════════════════════════════════════════════
 

@@ -69,6 +69,15 @@
         <div v-else class="empty-field">无输出数据</div>
       </div>
 
+      <!-- 完整 Prompt 展示（仅 prompt_build 节点） -->
+      <div class="section prompt-section" v-if="step.step_id === 'prompt_build'">
+        <div class="section-title">
+          完整 Prompt 文本
+          <span class="section-hint">— 从源码提取，100% 真实</span>
+        </div>
+        <PromptViewer />
+      </div>
+
       <!-- 损耗/转换说明 -->
       <div class="section" v-if="step.loss_or_transform_notes && step.loss_or_transform_notes.length > 0">
         <div class="section-title">转换/损耗说明</div>
@@ -89,6 +98,7 @@
 <script setup>
 import { computed } from 'vue'
 import JsonViewer from './JsonViewer.vue'
+import PromptViewer from './PromptViewer.vue'
 import { formatDuration, getStatusColor, getStatusLabel } from '../lib/formatters.js'
 
 const props = defineProps({
@@ -106,8 +116,8 @@ const stepNote = computed(() => {
     identity_resolve: '通过 upload_token 或 JWT 解析用户身份。',
     image_hash: 'SHA-256 用于精确去重，感知哈希用于相似图判断。',
     duplicate_check: '查询已识别记录，判断是否重复截图。',
-    domain_dispatch: '根据 OCR 文本、source_app 和图片特征判断目标域。',
-    prompt_build: '根据域类型和响应模式构造 prompt。',
+    domain_dispatch: '低成本预路由只用 OCR 文本、source_app 和图片特征做前置判断；未命中不等于最终域识别失败，后续视觉模型仍可能识别出真实域。',
+    prompt_build: '当前 trace 默认只记录 prompt 版本和 hash，完整 prompt 快照尚未采集；如需查看全文，需要后续增加受控调试开关。',
     model_path: '根据 capture_kind 和图片特征选择视觉模型路径。',
     model_call: '调用 AI 视觉模型，获取原始返回。',
     model_parse: '从模型原始文本中提取 JSON。',
@@ -297,6 +307,18 @@ function statusLabel(status) {
   color: var(--text-muted);
   font-style: italic;
   padding: var(--space-xs) 0;
+}
+
+.prompt-section {
+  border-top: 1px dashed var(--border);
+  padding-top: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.section-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .loss-notes {

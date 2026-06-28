@@ -74,6 +74,14 @@ export function imageUrl(relativePath) {
 }
 
 /**
+ * 获取 prompt 快照（完整 prompt 文本）
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export function fetchPrompt() {
+  return request(`${API_BASE}/prompt`)
+}
+
+/**
  * 健康检查
  * @returns {Promise<{data: object|null, error: string|null}>}
  */

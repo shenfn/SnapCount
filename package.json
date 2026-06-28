@@ -12,7 +12,8 @@
     "cleanup:test-receipts": "node --env-file=.env.local scripts/cleanup-test-receipts.mjs",
     "trace:server": "node tools/ai-validation/server/index.mjs",
     "trace:ui": "cd tools/ai-validation/ui/trace-console && npm run dev",
-    "trace:console": "node tools/ai-validation/start.mjs"
+    "trace:console": "node tools/ai-validation/start.mjs",
+    "trace:extract-prompt": "cd tools/ai-validation/server && npx tsx extract-prompt.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
