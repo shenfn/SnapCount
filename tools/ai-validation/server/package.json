@@ -1,0 +1,12 @@
+{
+  "name": "trace-console-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
