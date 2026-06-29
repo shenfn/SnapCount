@@ -82,6 +82,7 @@
     <NodeDrawer
       :open="drawerOpen"
       :step="selectedStep"
+      :artifacts="currentTrace?.artifacts"
       @close="drawerOpen = false"
       @view-artifact="onViewArtifact"
     />

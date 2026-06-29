@@ -75,7 +75,7 @@
           完整 Prompt 文本
           <span class="section-hint">— 从源码提取，100% 真实</span>
         </div>
-        <PromptViewer />
+        <PromptViewer :artifacts="artifacts" />
       </div>
 
       <!-- 损耗/转换说明 -->
@@ -104,6 +104,7 @@ import { formatDuration, getStatusColor, getStatusLabel } from '../lib/formatter
 const props = defineProps({
   open: { type: Boolean, default: false },
   step: { type: Object, default: null },
+  artifacts: { type: Object, default: null },
 })
 
 defineEmits(['close', 'view-artifact'])
