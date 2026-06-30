@@ -657,7 +657,7 @@ function buildTraceSteps({ payload, parsed, summary, aiLog, rawDebug }) {
     }),
     buildTimingStep({
       stepId: 'domain_dispatch',
-      name: '域路由 / Dispatcher',
+      name: '低成本预路由 / Dispatcher',
       timingKey: 'dispatcher',
       rawDebug,
       input: {
@@ -683,6 +683,7 @@ function buildTraceSteps({ payload, parsed, summary, aiLog, rawDebug }) {
       output_snapshot: {
         prompt_version: aiLog?.prompt_version || rawDebug?.prompt?.version || null,
         prompt_hash: rawDebug?.prompt?.hash || null,
+        prompt_snapshot_available: Boolean(rawDebug?.prompt?.messages || rawDebug?.prompt?.text || rawDebug?.prompt?.snapshot),
       },
       user_visible: false,
       visibility_level: 'L2',

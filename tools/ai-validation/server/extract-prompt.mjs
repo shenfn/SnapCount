@@ -11,7 +11,7 @@
  * prompts.ts 改动后需重新执行此脚本。
  */
 
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -97,9 +97,57 @@ const snapshot = {
 }
 
 // ═══════════════════════════════════════════════
+// 保存历史版本（如果内容有变化）
+// ═══════════════════════════════════════════════
+
+const HISTORY_DIR = path.join(__dirname, 'prompt-history')
+
+function saveHistoryIfChanged(newSnapshot) {
+  // 读取上一次的快照
+  let prevSnapshot = null
+  if (existsSync(OUTPUT_PATH)) {
+    try {
+      prevSnapshot = JSON.parse(readFileSync(OUTPUT_PATH, 'utf-8'))
+    } catch {}
+  }
+
+  // 比对 hash，如果没变化就不保存历史
+  const visionChanged = !prevSnapshot || prevSnapshot.vision_prompt?.hash !== newSnapshot.vision_prompt.hash
+  const feedbackChanged = !prevSnapshot || prevSnapshot.feedback_prompt?.hash !== newSnapshot.feedback_prompt.hash
+
+  if (!visionChanged && !feedbackChanged) {
+    return { saved: false, reason: '内容未变化' }
+  }
+
+  // 保存历史
+  if (!existsSync(HISTORY_DIR)) {
+    mkdirSync(HISTORY_DIR, { recursive: true })
+  }
+
+  const now = new Date()
+  const ts = now.toISOString().replace(/[-:T]/g, '').slice(0, 14) // YYYYMMDDhhmmss
+  const shortHash = newSnapshot.vision_prompt.hash.slice(0, 6)
+  const historyFile = path.join(HISTORY_DIR, `${ts}_${shortHash}.json`)
+
+  // 带上变更标记
+  const historyEntry = {
+    ...newSnapshot,
+    saved_at: now.toISOString(),
+    changes: {
+      vision_changed: visionChanged,
+      feedback_changed: feedbackChanged,
+    },
+  }
+
+  writeFileSync(historyFile, JSON.stringify(historyEntry, null, 2), 'utf-8')
+  return { saved: true, file: path.basename(historyFile) }
+}
+
+// ═══════════════════════════════════════════════
 // 写入文件
 // ═══════════════════════════════════════════════
 
+const historyResult = saveHistoryIfChanged(snapshot)
 writeFileSync(OUTPUT_PATH, JSON.stringify(snapshot, null, 2), 'utf-8')
 
 console.log('═══════════════════════════════════════════════')
@@ -115,6 +163,12 @@ console.log('')
 console.log(`  文案生成 Prompt:`)
 console.log(`    字符数: ${snapshot.feedback_prompt.char_count}`)
 console.log(`    hash:   ${snapshot.feedback_prompt.hash}`)
+console.log('')
+if (historyResult.saved) {
+  console.log(`  历史版本已保存: ${historyResult.file}`)
+} else {
+  console.log(`  历史版本: ${historyResult.reason}，未保存`)
+}
 console.log('')
 console.log('  prompts.ts 改动后请重新运行: npx tsx tools/ai-validation/server/extract-prompt.mjs')
 console.log('═══════════════════════════════════════════════')

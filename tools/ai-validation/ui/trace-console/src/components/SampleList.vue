@@ -66,6 +66,7 @@
     <ImageViewer
       :src="viewerSrc"
       :file-name="viewerFileName"
+      v-model:open="viewerOpen"
     />
   </div>
 </template>
@@ -85,6 +86,7 @@ const props = defineProps({
 defineEmits(['select'])
 
 const activeFilter = ref('all')
+const viewerOpen = ref(false)
 const viewerSrc = ref(null)
 const viewerFileName = ref('')
 
@@ -113,6 +115,7 @@ function onThumbError(e) {
 function openImage(trace) {
   viewerSrc.value = imageUrl(trace.image_relative_path)
   viewerFileName.value = trace.file || ''
+  viewerOpen.value = true
 }
 </script>
 

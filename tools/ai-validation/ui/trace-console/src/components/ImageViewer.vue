@@ -1,16 +1,4 @@
 <template>
-  <!-- 缩略图模式 -->
-  <div class="thumb-wrapper" @click="open = true" v-if="!open">
-    <img
-      v-if="src"
-      :src="src"
-      class="thumb-img"
-      loading="lazy"
-      @error="onError"
-    />
-    <div v-else class="thumb-placeholder">无图</div>
-  </div>
-
   <!-- 放大查看模态框 -->
   <teleport to="body">
     <div class="viewer-overlay" v-if="open" @click="open = false">
@@ -25,9 +13,10 @@
             :src="src"
             class="full-image"
             @click="open = false"
+            @error="onError"
           />
           <div v-else class="viewer-error">
-            <div class="error-icon">🖼️</div>
+            <div class="error-icon">IMG</div>
             <div class="error-text">图片加载失败</div>
           </div>
         </div>
@@ -37,17 +26,27 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
   src: { type: String, default: null },
   fileName: { type: String, default: '' },
+  open: { type: Boolean, default: false },
 })
 
-const open = ref(false)
+const emit = defineEmits(['update:open'])
+
 const error = ref(false)
 
 const fileName = computed(() => props.fileName || '测试图片')
+const open = computed({
+  get: () => props.open,
+  set: (value) => emit('update:open', value),
+})
+
+watch(() => props.src, () => {
+  error.value = false
+})
 
 function onError() {
   error.value = true

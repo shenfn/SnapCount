@@ -225,9 +225,9 @@ function getNodeSummary(step) {
     case 'duplicate_check':
       return out.duplicate_kind ? `命中: ${out.duplicate_kind}` : '未命中重复'
     case 'domain_dispatch':
-      return out.route_reason || out.skip_reason || (out.selected_domain_key ? `选中: ${out.selected_domain_key}` : '—')
+      return formatDispatcherSummary(out)
     case 'prompt_build':
-      return out.prompt_version ? `${out.prompt_version} · hash: ${shortId(out.prompt_hash)}` : '—'
+      return formatPromptSummary(out)
     case 'model_path':
       return out.vision_mode ? `${out.vision_mode} · ${out.model_provider || ''} ${out.model_name || ''}` : '—'
     case 'model_call':
@@ -247,6 +247,33 @@ function getNodeSummary(step) {
     default:
       return ''
   }
+}
+
+function getFinalRecordType() {
+  const parseStep = props.trace?.steps?.find((s) => s.step_id === 'model_parse')
+  const responseStep = props.trace?.steps?.find((s) => s.step_id === 'response_build')
+  return parseStep?.output_snapshot?.record_type
+    || responseStep?.output_snapshot?.record_type
+    || null
+}
+
+function formatDispatcherSummary(out) {
+  if (out.selected_domain_key) {
+    return `预路由命中: ${out.selected_domain_key} · ${out.route_reason || '规则命中'}`
+  }
+
+  const finalRecordType = getFinalRecordType()
+  if (finalRecordType && props.trace?.status !== 'error') {
+    return `预路由未命中，已进入视觉识别；最终识别为 ${finalRecordType}`
+  }
+
+  return `预路由未命中 · ${out.route_reason || out.skip_reason || '无匹配规则'}`
+}
+
+function formatPromptSummary(out) {
+  if (!out.prompt_version) return '—'
+  const snapshotText = out.prompt_snapshot_available ? '已采集完整 prompt' : '仅记录版本/hash'
+  return `${out.prompt_version} · hash: ${shortId(out.prompt_hash)} · ${snapshotText}`
 }
 </script>
 

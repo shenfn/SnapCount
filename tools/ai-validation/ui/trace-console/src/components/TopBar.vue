@@ -24,6 +24,10 @@
 
     <div class="spacer"></div>
 
+    <button class="upload-btn" @click="$emit('open-upload')">
+      <span class="upload-icon">+</span> 上传测试
+    </button>
+
     <div class="view-toggle">
       <button
         :class="{ on: viewMode === 'user' }"
@@ -48,7 +52,7 @@ const props = defineProps({
   viewMode: { type: String, default: 'dev' },
 })
 
-defineEmits(['update:currentRunId', 'update:viewMode'])
+defineEmits(['update:currentRunId', 'update:viewMode', 'open-upload'])
 
 // 统计数据：优先从 summary.json 获取，回退从 traces 列表计算
 const totalCount = computed(() => {
@@ -136,6 +140,32 @@ const duplicateCount = computed(() => {
 
 .spacer {
   flex: 1;
+}
+
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: var(--radius-md);
+  background: var(--accent-blue);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: opacity 0.12s;
+}
+
+.upload-btn:hover {
+  opacity: 0.9;
+}
+
+.upload-icon {
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .view-toggle {

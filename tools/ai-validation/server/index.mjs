@@ -14,19 +14,24 @@
  *   - 不执行任何线上调用
  *
  * API 路由：
- *   GET /api/runs                              列出所有批次
- *   GET /api/runs/:runId/summary               读取批次 summary.json
- *   GET /api/runs/:runId/traces                列出批次内所有 trace 摘要
- *   GET /api/runs/:runId/traces/:caseKey       读取单个完整 trace.json
- *   GET /api/images?path=<relative-path>       读取测试图片（仅限 test-cases/）
+ *   GET  /api/runs                              列出所有批次
+ *   GET  /api/runs/:runId/summary               读取批次 summary.json
+ *   GET  /api/runs/:runId/traces                列出批次内所有 trace 摘要
+ *   GET  /api/runs/:runId/traces/:caseKey       读取单个完整 trace.json
+ *   GET  /api/images?path=<relative-path>       读取测试图片（仅限 test-cases/）
+ *   GET  /api/prompt                            返回完整 prompt 快照
+ *   POST /api/upload-test                       上传图片执行测试（返回 jobId）
+ *   GET  /api/upload-test/:jobId/status         轮询上传任务状态
+ *   GET  /api/health                            健康检查
  */
 
 import express from 'express'
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { readFile, readdir, stat, writeFile, mkdir, rename, copyFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+import { spawn } from 'node:child_process'
 
 const require = createRequire(import.meta.url)
 
@@ -435,6 +440,576 @@ app.get('/api/prompt', async (req, res) => {
     sendError(res, 500, 'Failed to read prompt snapshot', err.message)
   }
 })
+
+// ═══════════════════════════════════════════════
+// 路由：GET /api/prompt-history - 列出 prompt 历史版本
+// ═══════════════════════════════════════════════
+
+app.get('/api/prompt-history', async (req, res) => {
+  try {
+    const historyDir = path.join(__dirname, 'prompt-history')
+    if (!existsSync(historyDir)) {
+      return res.json({ versions: [] })
+    }
+    const files = await readdir(historyDir)
+    const versions = []
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      const { data } = await safeReadJson(path.join(historyDir, file))
+      if (!data) continue
+      versions.push({
+        file,
+        saved_at: data.saved_at || file,
+        vision_hash: data.vision_prompt?.hash?.slice(0, 8) || 'unknown',
+        vision_chars: data.vision_prompt?.char_count || 0,
+        feedback_hash: data.feedback_prompt?.hash?.slice(0, 8) || 'unknown',
+        feedback_chars: data.feedback_prompt?.char_count || 0,
+        changes: data.changes || null,
+      })
+    }
+    // 按时间倒序
+    versions.sort((a, b) => (b.saved_at || '').localeCompare(a.saved_at || ''))
+    res.json({ versions })
+  } catch (err) {
+    sendError(res, 500, 'Failed to list prompt history', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
+// 路由：GET /api/prompt-history/:file - 读取指定历史版本
+// ═══════════════════════════════════════════════
+
+app.get('/api/prompt-history/:file', async (req, res) => {
+  try {
+    const file = path.basename(req.params.file)
+    if (!file.endsWith('.json')) {
+      return sendError(res, 400, 'Invalid file')
+    }
+    const filePath = path.join(__dirname, 'prompt-history', file)
+    if (!existsSync(filePath)) {
+      return sendError(res, 404, 'History version not found', file)
+    }
+    const { data, error } = await safeReadJson(filePath)
+    if (error) {
+      return sendError(res, 500, 'Failed to parse', error)
+    }
+    res.json(data)
+  } catch (err) {
+    sendError(res, 500, 'Failed to read history', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
+// 路由：POST /api/refresh-prompt - 刷新 prompt 快照
+// ═══════════════════════════════════════════════
+// 运行 extract-prompt.mjs 重新提取 prompt，自动保存历史版本
+// ═══════════════════════════════════════════════
+
+app.post('/api/refresh-prompt', async (req, res) => {
+  try {
+    const scriptPath = path.join(__dirname, 'extract-prompt.mjs')
+    const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx')
+    const child = spawn(tsxPath, [scriptPath], {
+      cwd: __dirname,
+      env: { ...process.env, ...envLocal },
+      shell: true,
+    })
+
+    let stdoutData = ''
+    let stderrData = ''
+
+    child.stdout.on('data', (data) => { stdoutData += data.toString() })
+    child.stderr.on('data', (data) => { stderrData += data.toString() })
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        return res.json({ success: false, error: `脚本退出码 ${code}`, stderr: stderrData })
+      }
+      // 解析输出中的 hash 和字符数
+      const visionHash = stdoutData.match(/vision.*?hash:\s*(\S+)/i)?.[1] || ''
+      const visionChars = stdoutData.match(/视觉.*?字符数:\s*(\d+)/)?.[1] || 0
+      const feedbackChars = stdoutData.match(/文案.*?字符数:\s*(\d+)/)?.[1] || 0
+      const historySaved = stdoutData.match(/历史版本已保存:\s*(\S+)/)?.[1] || null
+
+      res.json({
+        success: true,
+        vision_hash: visionHash,
+        vision_chars: Number(visionChars),
+        feedback_chars: Number(feedbackChars),
+        history_saved: historySaved,
+      })
+    })
+  } catch (err) {
+    sendError(res, 500, 'Refresh failed', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
+// 路由：POST /api/local-simulate - 本地 prompt 模拟
+// ═══════════════════════════════════════════════
+// 直接调用 qwen API，使用本地 prompts.ts 的 prompt，
+// 不经过 Edge Function，用于快速验证 prompt 改动。
+//
+// 请求体 JSON:
+//   { mode: 'paste' | 'file', imageBase64?: string, existingPath?: string }
+//
+// 返回:
+//   { jobId }
+// 轮询 GET /api/local-simulate/:jobId/status 获取结果
+// ═══════════════════════════════════════════════
+
+const simulateJobs = new Map()
+
+app.post('/api/local-simulate', express.json({ limit: '20mb' }), async (req, res) => {
+  try {
+    const { mode, imageBase64, existingPath } = req.body
+
+    let imagePath = ''
+
+    if (mode === 'paste') {
+      if (!imageBase64) {
+        return sendError(res, 400, 'Missing imageBase64')
+      }
+      const pendingDir = path.join(PROJECT_ROOT, 'test-cases', '_pending')
+      if (!existsSync(pendingDir)) {
+        await mkdir(pendingDir, { recursive: true })
+      }
+      const timestamp = Date.now()
+      imagePath = path.join(pendingDir, `sim_${timestamp}.png`)
+      await writeFile(imagePath, Buffer.from(imageBase64, 'base64'))
+    } else {
+      if (!existingPath) {
+        return sendError(res, 400, 'Missing existingPath')
+      }
+      const resolved = path.resolve(PROJECT_ROOT, existingPath)
+      if (!resolved.startsWith(PROJECT_ROOT)) {
+        return sendError(res, 403, 'Path not allowed')
+      }
+      if (!existsSync(resolved)) {
+        return sendError(res, 404, 'File not found', existingPath)
+      }
+      imagePath = resolved
+    }
+
+    const jobId = `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+    simulateJobs.set(jobId, {
+      status: 'running',
+      step: 'starting',
+      imagePath,
+      startTime: Date.now(),
+      output: [],
+      error: null,
+      result: null,
+    })
+
+    runLocalSimulate(jobId, imagePath)
+
+    res.json({ jobId })
+  } catch (err) {
+    sendError(res, 500, 'Local simulate failed', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
+// 路由：GET /api/local-simulate/:jobId/status
+// ═══════════════════════════════════════════════
+
+app.get('/api/local-simulate/:jobId/status', (req, res) => {
+  const job = simulateJobs.get(req.params.jobId)
+  if (!job) {
+    return sendError(res, 404, 'Job not found', req.params.jobId)
+  }
+  res.json({
+    status: job.status,
+    step: job.step,
+    elapsed: Date.now() - job.startTime,
+    output: job.output.slice(-10),
+    error: job.error,
+    result: job.result,
+  })
+})
+
+// ═══════════════════════════════════════════════
+// 异步执行本地模拟
+// ═══════════════════════════════════════════════
+
+async function runLocalSimulate(jobId, imagePath) {
+  const job = simulateJobs.get(jobId)
+  const scriptPath = path.join(__dirname, 'local-simulate.mjs')
+  const relativeImagePath = path.relative(PROJECT_ROOT, imagePath).replace(/\\/g, '/')
+
+  // 用 tsx 执行（需要 TS 支持）
+  const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx')
+  const child = spawn(tsxPath, [scriptPath, '--image', relativeImagePath], {
+    cwd: PROJECT_ROOT,
+    env: { ...process.env, ...envLocal },
+    shell: true,
+  })
+
+  let stdoutData = ''
+
+  child.stdout.on('data', (data) => {
+    stdoutData += data.toString()
+  })
+
+  child.stderr.on('data', (data) => {
+    const text = data.toString().trim()
+    if (text) {
+      job.output.push(text)
+      if (text.includes('视觉识别')) job.step = 'recognizing'
+      else if (text.includes('文案生成')) job.step = 'generating'
+    }
+  })
+
+  child.on('close', (code) => {
+    if (code !== 0) {
+      job.status = 'error'
+      job.step = 'failed'
+      job.error = `脚本退出码 ${code}`
+      return
+    }
+
+    try {
+      const result = JSON.parse(stdoutData.trim())
+      job.result = result
+      job.status = 'done'
+      job.step = 'completed'
+    } catch (err) {
+      job.status = 'error'
+      job.step = 'parse-failed'
+      job.error = `结果解析失败: ${err.message}`
+    }
+  })
+}
+
+// ═══════════════════════════════════════════════
+// 路由：POST /api/upload-test - 上传图片执行测试
+// ═══════════════════════════════════════════════
+// 接收图片（base64）或已有路径，spawn 脚本执行，返回 jobId
+//
+// 请求体 JSON:
+//   { mode: 'paste' | 'file', imageBase64?: string, existingPath?: string, runId?: string }
+//
+// 流程:
+//   1. paste 模式：保存到 test-cases/_pending/<timestamp>.png
+//   2. file 模式 + existingPath 在 test-cases 下：直接用原路径
+//   3. file 模式 + existingPath 不在 test-cases 下：复制到 _pending
+//   4. spawn 脚本执行
+//   5. 完成后从 trace 读取域，移动图片到 test-cases/<domain>/<date>/
+//   6. 更新 trace 中的路径字段
+// ═══════════════════════════════════════════════
+
+const uploadJobs = new Map()
+
+app.post('/api/upload-test', express.json({ limit: '20mb' }), async (req, res) => {
+  try {
+    const { mode, imageBase64, existingPath, runId } = req.body
+
+    if (!mode || (mode !== 'paste' && mode !== 'file')) {
+      return sendError(res, 400, 'Invalid mode', 'mode must be "paste" or "file"')
+    }
+
+    // 生成默认 runId
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const finalRunId = runId || `manual-check-${today}`
+
+    let imagePath = ''
+
+    if (mode === 'paste') {
+      if (!imageBase64) {
+        return sendError(res, 400, 'Missing imageBase64', 'paste mode requires imageBase64')
+      }
+      // 保存到 _pending 目录
+      const pendingDir = path.join(PROJECT_ROOT, 'test-cases', '_pending')
+      if (!existsSync(pendingDir)) {
+        await mkdir(pendingDir, { recursive: true })
+      }
+      const timestamp = Date.now()
+      imagePath = path.join(pendingDir, `${timestamp}.png`)
+      const buffer = Buffer.from(imageBase64, 'base64')
+      await writeFile(imagePath, buffer)
+    } else {
+      // file 模式
+      if (!existingPath) {
+        return sendError(res, 400, 'Missing existingPath', 'file mode requires existingPath')
+      }
+      // 安全校验
+      const resolved = path.resolve(PROJECT_ROOT, existingPath)
+      if (!resolved.startsWith(PROJECT_ROOT)) {
+        return sendError(res, 403, 'Path not allowed', 'existingPath must be within project root')
+      }
+      if (!existsSync(resolved)) {
+        return sendError(res, 404, 'File not found', existingPath)
+      }
+
+      // 检查是否已在 test-cases 下
+      const testCasesDir = path.join(PROJECT_ROOT, 'test-cases')
+      if (resolved.startsWith(testCasesDir)) {
+        // 直接用原路径
+        imagePath = resolved
+      } else {
+        // 复制到 _pending
+        const pendingDir = path.join(PROJECT_ROOT, 'test-cases', '_pending')
+        if (!existsSync(pendingDir)) {
+          await mkdir(pendingDir, { recursive: true })
+        }
+        const timestamp = Date.now()
+        const ext = path.extname(resolved) || '.png'
+        imagePath = path.join(pendingDir, `${timestamp}${ext}`)
+        await copyFile(resolved, imagePath)
+      }
+    }
+
+    // 生成 jobId
+    const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+    // 初始化任务状态
+    uploadJobs.set(jobId, {
+      status: 'running',
+      step: 'starting',
+      imagePath,
+      runId: finalRunId,
+      startTime: Date.now(),
+      output: [],
+      error: null,
+      traceCaseKey: null,
+    })
+
+    // 异步执行脚本
+    runTestScript(jobId, imagePath, finalRunId)
+
+    res.json({ jobId, runId: finalRunId })
+  } catch (err) {
+    sendError(res, 500, 'Upload failed', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
+// 路由：GET /api/upload-test/:jobId/status - 轮询任务状态
+// ═══════════════════════════════════════════════
+
+app.get('/api/upload-test/:jobId/status', (req, res) => {
+  const job = uploadJobs.get(req.params.jobId)
+  if (!job) {
+    return sendError(res, 404, 'Job not found', req.params.jobId)
+  }
+  res.json({
+    status: job.status,
+    step: job.step,
+    runId: job.runId,
+    elapsed: Date.now() - job.startTime,
+    output: job.output.slice(-10),
+    error: job.error,
+    traceCaseKey: job.traceCaseKey,
+  })
+})
+
+// ═══════════════════════════════════════════════
+// 加载 .env.local（上传测试功能需要）
+// ═══════════════════════════════════════════════
+// 安全说明：server 自身的 API 路由不使用这些环境变量，
+// 仅在 spawn test-ingest-receipt.mjs 时注入到子进程环境，
+// 让脚本能读取 VITE_SUPABASE_URL 等配置。
+// ═══════════════════════════════════════════════
+
+function loadEnvLocal() {
+  const envPath = path.join(PROJECT_ROOT, '.env.local')
+  if (!existsSync(envPath)) return {}
+  const content = require('fs').readFileSync(envPath, 'utf-8')
+  const env = {}
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eqIdx = trimmed.indexOf('=')
+    if (eqIdx < 0) continue
+    const key = trimmed.slice(0, eqIdx).trim()
+    let val = trimmed.slice(eqIdx + 1).trim()
+    // 去除引号
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1)
+    }
+    env[key] = val
+  }
+  return env
+}
+
+const envLocal = loadEnvLocal()
+
+// ═══════════════════════════════════════════════
+// 异步执行测试脚本
+// ═══════════════════════════════════════════════
+
+async function runTestScript(jobId, imagePath, runId) {
+  const job = uploadJobs.get(jobId)
+  const scriptPath = path.join(PROJECT_ROOT, 'scripts', 'test-ingest-receipt.mjs')
+  const relativeImagePath = path.relative(PROJECT_ROOT, imagePath).replace(/\\/g, '/')
+
+  // 合并环境变量：process.env + .env.local（.env.local 优先）
+  const childEnv = { ...process.env, ...envLocal }
+
+  const child = spawn('node', [scriptPath, '--image', relativeImagePath, '--run-id', runId], {
+    cwd: PROJECT_ROOT,
+    env: childEnv,
+    shell: false,
+  })
+
+  child.stdout.on('data', (data) => {
+    const text = data.toString().trim()
+    if (text) {
+      job.output.push(text)
+      // 更新步骤
+      if (text.includes('上传中') || text.includes('uploading')) job.step = 'uploading'
+      else if (text.includes('识别中') || text.includes('AI')) job.step = 'recognizing'
+      else if (text.includes('写入') || text.includes('trace')) job.step = 'saving'
+    }
+  })
+
+  child.stderr.on('data', (data) => {
+    const text = data.toString().trim()
+    if (text) job.output.push(`[stderr] ${text}`)
+  })
+
+  child.on('close', async (code) => {
+    if (code !== 0) {
+      job.status = 'error'
+      job.step = 'failed'
+      job.error = `脚本退出码 ${code}`
+      return
+    }
+
+    try {
+      job.step = 'moving'
+      // 从 trace 中读取域信息，移动图片到最终目录
+      const traceResult = await findAndProcessTrace(runId, relativeImagePath)
+      job.traceCaseKey = traceResult.caseKey
+      job.status = 'done'
+      job.step = 'completed'
+    } catch (err) {
+      job.status = 'error'
+      job.step = 'trace-post-process-failed'
+      job.error = `脚本成功但后处理失败: ${err.message}`
+    }
+  })
+}
+
+// ═══════════════════════════════════════════════
+// 从 trace 中读取域，移动图片，更新路径
+// ═══════════════════════════════════════════════
+
+async function findAndProcessTrace(runId, originalRelativePath) {
+  const runDir = path.join(PROJECT_ROOT, 'test-results', runId)
+  if (!existsSync(runDir)) {
+    throw new Error(`Run directory not found: ${runDir}`)
+  }
+
+  // 遍历 run 目录找到匹配的 trace.json
+  const traceFile = await findTraceByImagePath(runDir, originalRelativePath)
+  if (!traceFile) {
+    throw new Error(`Trace file not found for image: ${originalRelativePath}`)
+  }
+
+  const { data: traceData } = await safeReadJson(traceFile)
+  if (!traceData) {
+    throw new Error(`Failed to parse trace: ${traceFile}`)
+  }
+
+  // 获取域：优先从 model_raw 的 extracted_json 中取 domain_key/record_type
+  // test_case_domain 在单图模式下是 "single"，不是实际识别的域
+  let domain = 'uncertain'
+  const modelRaw = traceData.artifacts?.model_raw?.extracted_json
+  let parsedModel = null
+  if (modelRaw) {
+    try { parsedModel = typeof modelRaw === 'string' ? JSON.parse(modelRaw) : modelRaw } catch {}
+  }
+  domain = parsedModel?.domain_key
+    || parsedModel?.record_type
+    || traceData.artifacts?.model_raw?.text && (() => {
+      try {
+        const t = traceData.artifacts.model_raw.text
+        const m = t.match(/"domain_key"\s*:\s*"([^"]+)"/)
+        return m ? m[1] : null
+      } catch { return null }
+    })()
+    || 'uncertain'
+
+  // 确定最终域目录名
+  const domainDir = (domain && domain !== 'uncertain' && domain !== 'unknown' && domain !== 'single') ? domain : 'uncertain'
+
+  // 获取日期
+  const today = new Date().toISOString().slice(0, 10)
+  const finalDir = path.join(PROJECT_ROOT, 'test-cases', domainDir, today)
+
+  // 原图片路径
+  const originalAbsPath = path.join(PROJECT_ROOT, originalRelativePath)
+  const fileName = path.basename(originalAbsPath)
+
+  // 如果图片在 _pending 下，移动到最终目录
+  // 如果图片已在 test-cases 下，不移动
+  const pendingDir = path.join(PROJECT_ROOT, 'test-cases', '_pending')
+  let finalRelativePath = originalRelativePath
+
+  if (originalAbsPath.startsWith(pendingDir)) {
+    if (!existsSync(finalDir)) {
+      await mkdir(finalDir, { recursive: true })
+    }
+    const finalAbsPath = path.join(finalDir, fileName)
+    await rename(originalAbsPath, finalAbsPath)
+    finalRelativePath = path.relative(PROJECT_ROOT, finalAbsPath).replace(/\\/g, '/')
+
+    // 更新 trace 中的路径
+    traceData.case = traceData.case || {}
+    traceData.case.test_case_file = finalRelativePath
+    traceData.case.image_relative_path = finalRelativePath
+    // 更新 steps 中可能引用图片路径的地方
+    if (traceData.steps) {
+      for (const step of traceData.steps) {
+        if (step.input_snapshot?.image_relative_path === originalRelativePath) {
+          step.input_snapshot.image_relative_path = finalRelativePath
+        }
+        // 也匹配只含文件名的情况
+        if (step.input_snapshot?.image_relative_path === path.basename(originalRelativePath)) {
+          step.input_snapshot.image_relative_path = finalRelativePath
+        }
+      }
+    }
+
+    await writeFile(traceFile, JSON.stringify(traceData, null, 2), 'utf-8')
+  }
+
+  // 计算 caseKey
+  const traceRelPath = path.relative(path.join(PROJECT_ROOT, 'test-results', runId), traceFile).replace(/\\/g, '/')
+  const caseKey = traceRelPath.replace(/\.trace\.json$/, '')
+
+  return { caseKey, domain: domainDir }
+}
+
+// 递归查找匹配 image_relative_path 的 trace.json
+async function findTraceByImagePath(dir, targetPath) {
+  const entries = await readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      const found = await findTraceByImagePath(fullPath, targetPath)
+      if (found) return found
+    } else if (entry.name.endsWith('.trace.json')) {
+      const { data } = await safeReadJson(fullPath)
+      if (!data) continue
+      // 匹配 image_relative_path 或 test_case_file（可能只含文件名）
+      const imgPath = data.case?.image_relative_path || ''
+      const caseFile = data.case?.test_case_file || ''
+      // 归一化比较：都转成正斜杠
+      const targetNorm = targetPath.replace(/\\/g, '/')
+      if (imgPath === targetNorm
+        || caseFile === targetNorm
+        || caseFile === path.basename(targetNorm)
+        || imgPath === path.basename(targetNorm)) {
+        return fullPath
+      }
+    }
+  }
+  return null
+}
 
 // ═══════════════════════════════════════════════
 // 健康检查

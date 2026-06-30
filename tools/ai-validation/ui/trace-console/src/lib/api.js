@@ -82,6 +82,104 @@ export function fetchPrompt() {
 }
 
 /**
+ * 本地 prompt 模拟
+ * @param {Object} payload - { mode, imageBase64?, existingPath? }
+ * @returns {Promise<{data: {jobId: string}|null, error: string|null}>}
+ */
+export async function localSimulate(payload) {
+  try {
+    const res = await fetch(`${API_BASE}/local-simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      return { data: null, error: errBody.error || `HTTP ${res.status}` }
+    }
+    const data = await res.json()
+    return { data, error: null }
+  } catch (err) {
+    return { data: null, error: err.message }
+  }
+}
+
+/**
+ * 轮询本地模拟状态
+ * @param {string} jobId
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export async function fetchSimulateStatus(jobId) {
+  return request(`${API_BASE}/local-simulate/${encodeURIComponent(jobId)}/status`)
+}
+
+/**
+ * 获取 prompt 历史版本列表
+ * @returns {Promise<{data: {versions: Array}|null, error: string|null}>}
+ */
+export function fetchPromptHistory() {
+  return request(`${API_BASE}/prompt-history`)
+}
+
+/**
+ * 刷新 prompt 快照（运行 extract-prompt.mjs）
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export async function refreshPrompt() {
+  try {
+    const res = await fetch(`${API_BASE}/refresh-prompt`, { method: 'POST' })
+    if (!res.ok) {
+      return { data: null, error: `HTTP ${res.status}` }
+    }
+    const data = await res.json()
+    return { data, error: data.success ? null : (data.error || '刷新失败') }
+  } catch (err) {
+    return { data: null, error: err.message }
+  }
+}
+
+/**
+ * 读取指定历史版本详情
+ * @param {string} file
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export function fetchPromptHistoryFile(file) {
+  return request(`${API_BASE}/prompt-history/${encodeURIComponent(file)}`)
+}
+
+/**
+ * 上传图片执行测试
+ * @param {Object} payload - { mode, imageBase64?, existingPath?, runId? }
+ * @returns {Promise<{data: {jobId: string, runId: string}|null, error: string|null}>}
+ */
+export async function uploadTest(payload) {
+  try {
+    const res = await fetch(`${API_BASE}/upload-test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      return { data: null, error: errBody.error || `HTTP ${res.status}` }
+    }
+    const data = await res.json()
+    return { data, error: null }
+  } catch (err) {
+    return { data: null, error: err.message }
+  }
+}
+
+/**
+ * 轮询上传任务状态
+ * @param {string} jobId
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export async function fetchUploadStatus(jobId) {
+  return request(`${API_BASE}/upload-test/${encodeURIComponent(jobId)}/status`)
+}
+
+/**
  * 健康检查
  * @returns {Promise<{data: object|null, error: string|null}>}
  */

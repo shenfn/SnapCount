@@ -136,3 +136,37 @@ export function formatDateTime(isoStr) {
     return isoStr
   }
 }
+
+/**
+ * 将本地测试 run_id 转成更适合下拉框阅读的中文批次名。
+ * 原始 run_id 仍会保留，方便回到 test-results 目录定位文件。
+ * @param {object|string} run
+ * @returns {string}
+ */
+export function formatRunLabel(run) {
+  const runId = typeof run === 'string' ? run : run?.run_id
+  if (!runId) return '未命名批次'
+
+  const suffix = typeof run === 'object' && run?.total_cases != null
+    ? ` (${run.success_cases ?? 0}/${run.total_cases})`
+    : ''
+
+  const normalized = runId.toLowerCase()
+  const numberMatch = runId.match(/(?:^|-)(\d{3,})(?:-|$)/)
+  const serial = numberMatch ? ` ${numberMatch[1]}` : ''
+
+  let label = runId
+  if (normalized.includes('trace-prototype')) {
+    label = `原型验证批次${serial}`
+  } else if (normalized.includes('trace-v02') || normalized.includes('trace-v0.2')) {
+    const domain = normalized.includes('food') ? '食物' : normalized.includes('sport') ? '运动' : ''
+    const mode = normalized.includes('direct') ? '直连' : ''
+    label = `V0.2 ${domain}${mode}烟测${serial}`.replace(/\s+/g, ' ').trim()
+  } else if (normalized.includes('verify-fix')) {
+    label = `修复验证批次${serial}`
+  } else if (normalized.includes('verify-link')) {
+    label = `链路验证批次${serial}`
+  }
+
+  return label === runId ? `${runId}${suffix}` : `${label}${suffix} · ${runId}`
+}

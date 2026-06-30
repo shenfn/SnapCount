@@ -13,16 +13,36 @@
 
     <!-- 已加载 -->
     <div v-else-if="snapshot" class="prompt-content">
-      <!-- 标签切换 -->
+      <!-- 标签切换 + 历史版本 -->
       <div class="prompt-tabs">
         <button
           :class="{ on: activeTab === 'vision' }"
           @click="activeTab = 'vision'"
-        >视觉识别 Prompt ({{ snapshot.vision_prompt.char_count }} 字)</button>
+        >视觉识别 Prompt ({{ currentVisionChars }} 字)</button>
         <button
           :class="{ on: activeTab === 'feedback' }"
           @click="activeTab = 'feedback'"
-        >文案生成 Prompt ({{ snapshot.feedback_prompt.char_count }} 字)</button>
+        >文案生成 Prompt ({{ currentFeedbackChars }} 字)</button>
+        <!-- 历史版本下拉 + 刷新按钮 -->
+        <div class="prompt-toolbar">
+          <select
+            v-if="historyVersions.length > 0"
+            v-model="selectedHistory"
+            class="history-select"
+            @change="onHistoryChange"
+          >
+            <option value="">当前版本</option>
+            <option v-for="v in historyVersions" :key="v.file" :value="v.file">
+              {{ formatHistoryLabel(v) }}
+            </option>
+          </select>
+          <button
+            class="refresh-btn"
+            :disabled="refreshing"
+            @click="onRefresh"
+            :title="'从 prompts.ts 重新提取 prompt'"
+          >{{ refreshing ? '刷新中...' : '刷新快照' }}</button>
+        </div>
       </div>
 
       <!-- 视图切换：仅 Prompt / Prompt + 模型输出 -->
@@ -48,6 +68,9 @@
       <!-- ═══ Prompt 文本（分段高亮） ═══ -->
       <div class="section-label">
         <span class="label-arrow">▶</span> 发送给模型的 Prompt
+        <button class="copy-prompt-btn" @click="copyPrompt">
+          {{ copied ? '已复制' : '复制' }}
+        </button>
       </div>
       <div class="prompt-text-area" :class="{ collapsed: viewMode === 'comparison' && promptCollapsed }">
         <pre class="prompt-pre" v-html="highlightedPrompt"></pre>
@@ -113,7 +136,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { fetchPrompt } from '../lib/api.js'
+import { fetchPrompt, fetchPromptHistory, fetchPromptHistoryFile, refreshPrompt } from '../lib/api.js'
 import { stripMarkdownCodeBlock, formatJsonString } from '../lib/formatters.js'
 
 const props = defineProps({
@@ -127,6 +150,42 @@ const activeTab = ref('vision')
 const searchKeyword = ref('')
 const viewMode = ref('comparison')
 const promptCollapsed = ref(false)
+const copied = ref(false)
+const historyVersions = ref([])
+const selectedHistory = ref('')
+const historySnapshot = ref(null) // 选中历史版本时的数据
+const refreshing = ref(false)
+
+async function onRefresh() {
+  if (refreshing.value) return
+  refreshing.value = true
+  try {
+    const { data, error } = await refreshPrompt()
+    if (error) {
+      console.error('刷新失败:', error)
+      return
+    }
+    // 重新加载快照和历史版本
+    selectedHistory.value = ''
+    historySnapshot.value = null
+    const { data: promptData } = await fetchPrompt()
+    if (promptData) snapshot.value = promptData
+    const { data: histData } = await fetchPromptHistory()
+    if (histData?.versions) historyVersions.value = histData.versions
+  } finally {
+    refreshing.value = false
+  }
+}
+
+async function copyPrompt() {
+  try {
+    await navigator.clipboard.writeText(currentPromptText.value)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch (err) {
+    console.error('复制失败:', err)
+  }
+}
 
 onMounted(async () => {
   const { data, error: err } = await fetchPrompt()
@@ -136,17 +195,53 @@ onMounted(async () => {
     return
   }
   snapshot.value = data
+
+  // 加载历史版本列表
+  const { data: histData } = await fetchPromptHistory()
+  if (histData?.versions) {
+    historyVersions.value = histData.versions
+  }
 })
+
+// 当前展示的数据（当前版本或历史版本）
+const activeData = computed(() => {
+  return historySnapshot.value || snapshot.value
+})
+
+const currentVisionChars = computed(() => activeData.value?.vision_prompt?.char_count || 0)
+const currentFeedbackChars = computed(() => activeData.value?.feedback_prompt?.char_count || 0)
+
+async function onHistoryChange() {
+  if (!selectedHistory.value) {
+    historySnapshot.value = null
+    return
+  }
+  const { data, error } = await fetchPromptHistoryFile(selectedHistory.value)
+  if (error) {
+    console.error('加载历史版本失败:', error)
+    return
+  }
+  historySnapshot.value = data
+}
+
+function formatHistoryLabel(v) {
+  const date = v.saved_at ? new Date(v.saved_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : v.file.slice(0, 8)
+  const changes = []
+  if (v.changes?.vision_changed) changes.push('视觉')
+  if (v.changes?.feedback_changed) changes.push('文案')
+  const changeLabel = changes.length > 0 ? ` [${changes.join('+')}]` : ''
+  return `${date}${changeLabel}`
+}
 
 // ═══════════════════════════════════════════════
 // Prompt 文本
 // ═══════════════════════════════════════════════
 
 const currentPromptText = computed(() => {
-  if (!snapshot.value) return ''
+  if (!activeData.value) return ''
   return activeTab.value === 'vision'
-    ? snapshot.value.vision_prompt.full_text
-    : snapshot.value.feedback_prompt.full_text
+    ? activeData.value.vision_prompt.full_text
+    : activeData.value.feedback_prompt.full_text
 })
 
 const searchMatches = computed(() => {
@@ -318,6 +413,52 @@ const highlightedModelOutput = computed(() => {
   border-color: var(--accent-blue);
 }
 
+.history-select {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  font-family: var(--font-sans);
+  outline: none;
+  cursor: pointer;
+  max-width: 180px;
+}
+
+.history-select:focus {
+  border-color: var(--accent-blue);
+}
+
+.prompt-toolbar {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.refresh-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-green);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  transition: opacity 0.12s;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .view-toggle {
   display: inline-flex;
   background: var(--bg-base);
@@ -367,6 +508,23 @@ const highlightedModelOutput = computed(() => {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+}
+
+.copy-prompt-btn {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--accent-blue);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: all 0.12s;
+}
+
+.copy-prompt-btn:hover {
+  border-color: var(--accent-blue);
 }
 
 .section-label.output-label {

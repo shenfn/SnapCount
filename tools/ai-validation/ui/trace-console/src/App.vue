@@ -8,6 +8,7 @@
       :view-mode="viewMode"
       @update:current-run-id="onRunChange"
       @update:view-mode="viewMode = $event"
+      @open-upload="uploadPanelOpen = true"
     />
 
     <!-- 无批次时 -->
@@ -94,6 +95,13 @@
       :artifacts="currentTrace?.artifacts || {}"
       @close="artifactModalOpen = false"
     />
+
+    <!-- 上传面板 -->
+    <UploadPanel
+      :open="uploadPanelOpen"
+      @close="uploadPanelOpen = false"
+      @completed="onUploadCompleted"
+    />
   </div>
 </template>
 
@@ -106,6 +114,7 @@ import EmptyState from './components/EmptyState.vue'
 import NodeDrawer from './components/NodeDrawer.vue'
 import ArtifactModal from './components/ArtifactModal.vue'
 import UserOutputPanel from './components/UserOutputPanel.vue'
+import UploadPanel from './components/UploadPanel.vue'
 import { fetchRuns, fetchSummary, fetchTraces, fetchTrace } from './lib/api.js'
 import { normalizeTrace } from './lib/traceNormalizer.js'
 
@@ -127,6 +136,7 @@ const artifactModalOpen = ref(false)
 const activeArtifactKey = ref('')
 const traceLoading = ref(false)
 const traceError = ref('')
+const uploadPanelOpen = ref(false)
 
 // 当前选中的 step 对象
 const selectedStep = computed(() => {
@@ -231,6 +241,21 @@ function onNodeSelect(stepId) {
 function onViewArtifact(artifactRef) {
   activeArtifactKey.value = artifactRef
   artifactModalOpen.value = true
+}
+
+// 上传完成 - 切换到新批次并选中结果
+async function onUploadCompleted({ runId, caseKey }) {
+  uploadPanelOpen.value = false
+  // 切换到新批次
+  if (runId && runId !== currentRunId.value) {
+    currentRunId.value = runId
+    // 等待批次数据加载
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+  // 选中新 trace
+  if (caseKey) {
+    onCaseSelect(caseKey)
+  }
 }
 </script>
 

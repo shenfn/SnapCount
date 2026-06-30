@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-28T16:04:05.159Z",
+  "generated_at": "2026-06-29T00:41:13.519Z",
   "source_file": "supabase/functions/ingest-receipt/prompts.ts",
   "version": "platform-v3-builtins",
   "vision_prompt": {

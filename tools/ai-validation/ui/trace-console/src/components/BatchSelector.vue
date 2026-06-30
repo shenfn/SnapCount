@@ -7,16 +7,15 @@
     >
       <option value="" disabled>选择批次...</option>
       <option v-for="run in runs" :key="run.run_id" :value="run.run_id">
-        {{ run.run_id }}
-        <template v-if="run.total_cases != null">
-          ({{ run.success_cases }}/{{ run.total_cases }})
-        </template>
+        {{ formatRunLabel(run) }}
       </option>
     </select>
   </div>
 </template>
 
 <script setup>
+import { formatRunLabel } from '../lib/formatters.js'
+
 defineProps({
   modelValue: { type: String, default: '' },
   runs: { type: Array, default: () => [] },
