@@ -186,3 +186,53 @@ export async function fetchUploadStatus(jobId) {
 export function fetchHealth() {
   return request(`${API_BASE}/health`)
 }
+
+// ═══════════════════════════════════════════════
+// 点评相关 API
+// ═══════════════════════════════════════════════
+
+/**
+ * 保存点评
+ * @param {string} runId
+ * @param {string} caseKey - 如 "food/2026-06-27/001-meal-tray"
+ * @param {Object} payload - { ratings, issue_tags, notes, suggested_action, mode, sim_snapshot? }
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export async function saveReview(runId, caseKey, payload) {
+  try {
+    const encodedCaseKey = encodeURIComponent(caseKey)
+    const res = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/reviews/${encodedCaseKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      return { data: null, error: errBody.error || `HTTP ${res.status}` }
+    }
+    const data = await res.json()
+    return { data, error: null }
+  } catch (err) {
+    return { data: null, error: err.message }
+  }
+}
+
+/**
+ * 读取单个点评
+ * @param {string} runId
+ * @param {string} caseKey
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export function fetchReview(runId, caseKey) {
+  const encodedCaseKey = encodeURIComponent(caseKey)
+  return request(`${API_BASE}/runs/${encodeURIComponent(runId)}/reviews/${encodedCaseKey}`)
+}
+
+/**
+ * 列出批次内全部点评摘要
+ * @param {string} runId
+ * @returns {Promise<{data: {reviews: Array}|null, error: string|null}>}
+ */
+export function fetchReviews(runId) {
+  return request(`${API_BASE}/runs/${encodeURIComponent(runId)}/reviews`)
+}
