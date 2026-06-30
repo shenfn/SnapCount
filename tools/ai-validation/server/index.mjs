@@ -284,6 +284,17 @@ app.get('/api/runs/:runId/traces', async (req, res) => {
     for (const relPath of traceFiles) {
       const fullPath = path.join(runDir, relPath)
       const { data, error } = await safeReadJson(fullPath)
+      // 检查同目录是否存在 review.json
+      const reviewPath = fullPath.replace(/\.trace\.json$/, '.review.json')
+      let hasReview = false
+      let reviewRatings = null
+      if (existsSync(reviewPath)) {
+        const { data: reviewData } = await safeReadJson(reviewPath)
+        if (reviewData && reviewData.ratings) {
+          hasReview = true
+          reviewRatings = reviewData.ratings
+        }
+      }
       if (error || !data) {
         // 解析失败的 trace 也列出，标记错误
         traces.push({
@@ -297,6 +308,8 @@ app.get('/api/runs/:runId/traces', async (req, res) => {
           has_ai_feedback: false,
           image_relative_path: null,
           parse_error: error,
+          has_review: hasReview,
+          review_ratings: reviewRatings,
         })
         continue
       }
@@ -315,6 +328,8 @@ app.get('/api/runs/:runId/traces', async (req, res) => {
           (o) => o.output_type === 'app_ai_feedback'
         ) || false,
         image_relative_path: data.case?.image_relative_path || null,
+        has_review: hasReview,
+        review_ratings: reviewRatings,
       })
     }
 
@@ -363,6 +378,151 @@ app.get('/api/runs/:runId/traces/:caseKey(*)', async (req, res) => {
     res.json(data)
   } catch (err) {
     sendError(res, 500, 'Failed to read trace', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
+// 路由：POST /api/runs/:runId/reviews/:caseKey - 保存点评
+// ═══════════════════════════════════════════════
+// 请求体：review-v1 对象（不含 reviewed_at / case_key / run_id，由服务端补）
+// 落盘到 test-results/<run-id>/<caseKey>.review.json
+// ═══════════════════════════════════════════════
+
+const VALID_ISSUE_TAGS = new Set([
+  'wrong_domain', 'wrong_amount', 'wrong_date', 'wrong_category',
+  'missing_key_field', 'ai_feedback_too_generic', 'ai_feedback_too_exaggerated',
+  'ai_feedback_wrong_tone', 'hallucination', 'model_timeout', 'parse_failure', 'other',
+])
+
+app.post('/api/runs/:runId/reviews/:caseKey(*)', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const { runId, caseKey } = req.params
+    if (!/^[a-zA-Z0-9_-]+$/.test(runId)) {
+      return sendError(res, 400, 'Invalid runId')
+    }
+    if (!caseKey || caseKey.includes('..') || path.isAbsolute(caseKey)) {
+      return sendError(res, 400, 'Invalid caseKey')
+    }
+
+    const body = req.body || {}
+    // 校验 ratings
+    const ratings = body.ratings || {}
+    const ra = Number(ratings.recognition_accuracy)
+    const fq = Number(ratings.feedback_quality)
+    if (!Number.isInteger(ra) || ra < 1 || ra > 5) {
+      return sendError(res, 400, 'Invalid ratings.recognition_accuracy', 'must be integer 1-5')
+    }
+    if (!Number.isInteger(fq) || fq < 1 || fq > 5) {
+      return sendError(res, 400, 'Invalid ratings.feedback_quality', 'must be integer 1-5')
+    }
+    // 校验 issue_tags
+    const issueTags = Array.isArray(body.issue_tags) ? body.issue_tags : []
+    for (const tag of issueTags) {
+      if (!VALID_ISSUE_TAGS.has(tag)) {
+        return sendError(res, 400, 'Invalid issue_tag', `"${tag}" is not a valid tag`)
+      }
+    }
+
+    const runDir = path.join(TEST_RESULTS_DIR, runId)
+    const reviewPath = path.resolve(runDir, caseKey + '.review.json')
+    if (!reviewPath.startsWith(runDir + path.sep) && reviewPath !== path.join(runDir, caseKey + '.review.json')) {
+      return sendError(res, 400, 'Invalid caseKey path')
+    }
+
+    // 确保父目录存在
+    await mkdir(path.dirname(reviewPath), { recursive: true })
+
+    const review = {
+      schema_version: 'review-v1',
+      case_key: caseKey,
+      run_id: runId,
+      reviewed_at: new Date().toISOString(),
+      mode: body.mode || 'trace',
+      ratings: { recognition_accuracy: ra, feedback_quality: fq },
+      issue_tags: issueTags,
+      notes: typeof body.notes === 'string' ? body.notes.slice(0, 2000) : '',
+      suggested_action: typeof body.suggested_action === 'string' ? body.suggested_action.slice(0, 500) : '',
+      sim_snapshot: body.sim_snapshot || null,
+    }
+
+    await writeFile(reviewPath, JSON.stringify(review, null, 2), 'utf-8')
+
+    res.json({ ok: true, path: path.relative(TEST_RESULTS_DIR, reviewPath), reviewed_at: review.reviewed_at })
+  } catch (err) {
+    sendError(res, 500, 'Failed to save review', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
+// 路由：GET /api/runs/:runId/reviews/:caseKey - 读取单个点评
+// ═══════════════════════════════════════════════
+
+app.get('/api/runs/:runId/reviews/:caseKey(*)', async (req, res) => {
+  try {
+    const { runId, caseKey } = req.params
+    if (!/^[a-zA-Z0-9_-]+$/.test(runId)) {
+      return sendError(res, 400, 'Invalid runId')
+    }
+    if (!caseKey || caseKey.includes('..') || path.isAbsolute(caseKey)) {
+      return sendError(res, 400, 'Invalid caseKey')
+    }
+
+    const runDir = path.join(TEST_RESULTS_DIR, runId)
+    const reviewPath = path.resolve(runDir, caseKey + '.review.json')
+    if (!reviewPath.startsWith(runDir + path.sep) && reviewPath !== path.join(runDir, caseKey + '.review.json')) {
+      return sendError(res, 400, 'Invalid caseKey path')
+    }
+
+    if (!existsSync(reviewPath)) {
+      return sendError(res, 404, 'Review not found')
+    }
+
+    const { data, error } = await safeReadJson(reviewPath)
+    if (error) {
+      return sendError(res, 500, 'Failed to parse review', error)
+    }
+
+    res.json(data)
+  } catch (err) {
+    sendError(res, 500, 'Failed to read review', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
+// 路由：GET /api/runs/:runId/reviews - 列出全部点评摘要
+// ═══════════════════════════════════════════════
+
+app.get('/api/runs/:runId/reviews', async (req, res) => {
+  try {
+    const { runId } = req.params
+    if (!/^[a-zA-Z0-9_-]+$/.test(runId)) {
+      return sendError(res, 400, 'Invalid runId')
+    }
+
+    const runDir = path.join(TEST_RESULTS_DIR, runId)
+    if (!existsSync(runDir)) {
+      return res.json({ reviews: [] })
+    }
+
+    const reviewFiles = await findFilesRecursive(runDir, '.review.json')
+    const reviews = []
+    for (const relPath of reviewFiles) {
+      const fullPath = path.join(runDir, relPath)
+      const { data, error } = await safeReadJson(fullPath)
+      if (error || !data) continue
+      reviews.push({
+        case_key: data.case_key || relPath.replace(/\.review\.json$/, ''),
+        reviewed_at: data.reviewed_at || null,
+        ratings: data.ratings || null,
+        issue_tags: data.issue_tags || [],
+        mode: data.mode || 'trace',
+        file: relPath,
+      })
+    }
+
+    res.json({ reviews })
+  } catch (err) {
+    sendError(res, 500, 'Failed to list reviews', err.message)
   }
 })
 
@@ -562,7 +722,7 @@ const simulateJobs = new Map()
 
 app.post('/api/local-simulate', express.json({ limit: '20mb' }), async (req, res) => {
   try {
-    const { mode, imageBase64, existingPath } = req.body
+    const { mode, imageBase64, existingPath, noVisionThinking } = req.body
 
     let imagePath = ''
 
@@ -603,7 +763,7 @@ app.post('/api/local-simulate', express.json({ limit: '20mb' }), async (req, res
       result: null,
     })
 
-    runLocalSimulate(jobId, imagePath)
+    runLocalSimulate(jobId, imagePath, noVisionThinking === true)
 
     res.json({ jobId })
   } catch (err) {
@@ -634,14 +794,16 @@ app.get('/api/local-simulate/:jobId/status', (req, res) => {
 // 异步执行本地模拟
 // ═══════════════════════════════════════════════
 
-async function runLocalSimulate(jobId, imagePath) {
+async function runLocalSimulate(jobId, imagePath, noVisionThinking) {
   const job = simulateJobs.get(jobId)
   const scriptPath = path.join(__dirname, 'local-simulate.mjs')
   const relativeImagePath = path.relative(PROJECT_ROOT, imagePath).replace(/\\/g, '/')
 
   // 用 tsx 执行（需要 TS 支持）
   const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx')
-  const child = spawn(tsxPath, [scriptPath, '--image', relativeImagePath], {
+  const args = [scriptPath, '--image', relativeImagePath]
+  if (noVisionThinking) args.push('--no-vision-thinking')
+  const child = spawn(tsxPath, args, {
     cwd: PROJECT_ROOT,
     env: { ...process.env, ...envLocal },
     shell: true,
