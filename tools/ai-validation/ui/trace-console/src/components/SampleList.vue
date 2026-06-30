@@ -52,6 +52,7 @@
             <span>{{ formatDuration(t.elapsed_ms) }}</span>
             <span v-if="t.has_ai_feedback" class="feedback-dot" title="有 AI 反馈">AI</span>
             <span v-if="t.parse_error" class="error-dot" :title="t.parse_error">解析失败</span>
+            <span v-if="t.has_review" class="review-dot" :title="reviewTitle(t)">评 {{ reviewScore(t) }}</span>
           </div>
         </div>
       </div>
@@ -105,6 +106,16 @@ function statusColor(status) {
 
 function statusLabel(status) {
   return getStatusLabel(status)
+}
+
+function reviewScore(t) {
+  if (!t.review_ratings) return '-'
+  return `${t.review_ratings.recognition_accuracy}/${t.review_ratings.feedback_quality}`
+}
+
+function reviewTitle(t) {
+  if (!t.review_ratings) return '已点评'
+  return `识别准度 ${t.review_ratings.recognition_accuracy}/5，文案质量 ${t.review_ratings.feedback_quality}/5`
 }
 
 function onThumbError(e) {
@@ -283,6 +294,15 @@ function openImage(trace) {
 .error-dot {
   background: rgba(248, 81, 73, 0.15);
   color: var(--accent-red);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.review-dot {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--accent-green);
   padding: 0 4px;
   border-radius: 3px;
   font-size: 10px;
