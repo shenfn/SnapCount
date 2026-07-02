@@ -3202,8 +3202,8 @@ Deno.serve(async (req) => {
         // 收集该用户所有图片路径
         const pathsToDelete: string[] = [];
         const buckets: Array<{ table: string; col: string }> = [
-          { table: "transactions", col: "image_path" },
-          { table: "income_records", col: "image_path" },
+          { table: "transactions", col: "image_url" },
+          { table: "income_records", col: "image_url" },
           { table: "data_records", col: "source_image_path" },
           { table: "staging_records", col: "image_path" },
           { table: "ai_recognition_logs", col: "image_url" },
