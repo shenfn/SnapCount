@@ -110,6 +110,60 @@ function clipForDebug(value: unknown, max = 6000): string | null {
   return text.length > max ? `${text.slice(0, max)}...[truncated ${text.length - max} chars]` : text;
 }
 
+// ── 隐私脱敏工具 ──────────────────────────────────────────────────
+// 对文本中的身份证号、手机号、银行卡号、邮箱做正则脱敏
+function sanitizeText(text: string): string {
+  if (!text || typeof text !== "string") return text;
+  let result = text;
+  // 身份证号（18位，最后一位可能是X）
+  result = result.replace(/\b\d{17}[\dXx]\b/g, (m) =>
+    m.slice(0, 3) + "***********" + m.slice(-4));
+  // 手机号（1开头，11位）
+  result = result.replace(/\b1[3-9]\d{9}\b/g, (m) =>
+    m.slice(0, 3) + "****" + m.slice(-4));
+  // 银行卡号（16-19位连续数字，非手机号/身份证场景）
+  result = result.replace(/\b\d{16,19}\b/g, (m) =>
+    "****".repeat(3) + m.slice(-4));
+  // 邮箱
+  result = result.replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, (m) => {
+    const atIdx = m.indexOf("@");
+    if (atIdx <= 1) return m;
+    return m[0] + "***" + m.slice(atIdx);
+  });
+  return result;
+}
+
+// 递归脱敏：遍历对象/数组的所有字符串值
+function sanitizeSensitiveData(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return sanitizeText(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map(sanitizeSensitiveData);
+  if (typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      result[k] = sanitizeSensitiveData(v);
+    }
+    return result;
+  }
+  return value;
+}
+
+// 隐私配置接口
+interface PrivacyConfig {
+  aiLogsEnabled: boolean;
+  promptOptimizationEnabled: boolean;
+  keepSourceImages: boolean;
+  imageRetentionDays: number;
+}
+
+const DEFAULT_PRIVACY_CONFIG: PrivacyConfig = {
+  aiLogsEnabled: false,
+  promptOptimizationEnabled: false,
+  keepSourceImages: true,
+  imageRetentionDays: -1,
+};
+
 async function sha256Short(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
   const hash = await crypto.subtle.digest("SHA-256", data);
@@ -1464,7 +1518,31 @@ function selectVisionProvidersForImage(
 async function writeAiLog(
   supabase: ReturnType<typeof createClient>,
   payload: Record<string, unknown>,
+  privacyConfig: PrivacyConfig = DEFAULT_PRIVACY_CONFIG,
 ): Promise<string | null> {
+  // 隐私控制：用户关闭 AI 日志记录时不写任何日志
+  if (!privacyConfig.aiLogsEnabled) return null;
+
+  // 隐私控制：prompt_optimization_enabled=false 时不写入 raw_response
+  if (!privacyConfig.promptOptimizationEnabled) {
+    payload.raw_response = null;
+  } else {
+    // 开启时也要脱敏后再写入
+    if (payload.raw_response && typeof payload.raw_response === "string") {
+      payload.raw_response = sanitizeText(payload.raw_response);
+    }
+  }
+
+  // ai_response 始终脱敏后写入
+  if (payload.ai_response) {
+    payload.ai_response = sanitizeSensitiveData(payload.ai_response);
+  }
+
+  // error_message 脱敏
+  if (payload.error_message && typeof payload.error_message === "string") {
+    payload.error_message = sanitizeText(payload.error_message);
+  }
+
   const { data, error } = await supabase.from("ai_recognition_logs")
     .insert(payload)
     .select("id")
@@ -2516,6 +2594,7 @@ async function createStagingRecord(
     timeContext?: unknown;
     testMeta?: TestMeta | null;
   },
+  privacyConfig: PrivacyConfig = DEFAULT_PRIVACY_CONFIG,
 ): Promise<{ id: string } | null> {
   const detectedDomainKey = isBuiltinDomain(payload.ai.domain_key)
     ? payload.ai.domain_key
@@ -2543,14 +2622,18 @@ async function createStagingRecord(
     detected_domain_name: detectedDomainName,
     confidence: payload.ai.confidence ?? 0,
     ai_summary: summaryParts.join(" · ") || "截图已进入中转站，等待确认",
-    extracted_json: {
+    extracted_json: sanitizeSensitiveData({
       ...payload.ai,
       time_context: payload.timeContext ?? null,
       ai_feedback: (payload.ai as Record<string, unknown>).ai_feedback ?? null,
       ...(payload.testMeta ? { test_meta: payload.testMeta } : {}),
-    },
+    }),
     companion_message: payload.ai.companion_message ?? null,
-    raw_text: payload.dispatcher?.raw_text ?? null,
+    // 隐私控制：prompt_optimization_enabled=false 时不清空 raw_text（中转站需要用于路由判断）
+    // 但做脱敏处理
+    raw_text: privacyConfig.promptOptimizationEnabled
+      ? sanitizeText(payload.dispatcher?.raw_text ?? "") || null
+      : null,
     routing_candidates: payload.dispatcher?.candidate_domains?.length
       ? payload.dispatcher.candidate_domains
       : detectedDomainKey
@@ -3072,8 +3155,10 @@ Deno.serve(async (req) => {
     const startedAt = Date.now();
     const timings = makeTimings();
     const traceId = requestTraceId;
+    // 隐私配置：默认最严格，用户查询后覆盖
+    let privacyConfig: PrivacyConfig = { ...DEFAULT_PRIVACY_CONFIG };
     const writeTraceAiLog = async (payload: Record<string, unknown>): Promise<string | null> => {
-      const aiLogId = await writeAiLog(supabase, payload);
+      const aiLogId = await writeAiLog(supabase, payload, privacyConfig);
       if (aiLogId) lastAiLogId = aiLogId;
       return aiLogId;
     };
@@ -3149,9 +3234,16 @@ Deno.serve(async (req) => {
     // 取值 auto 表示跟随平台默认；其它强制指定 provider 优先
     if (userId) {
       const { data: prefRow } = await supabase.from("user_configs")
-        .select("vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, qwen_screenshot_enable_thinking, qwen_photo_enable_thinking, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note")
+        .select("vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, qwen_screenshot_enable_thinking, qwen_photo_enable_thinking, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note, ai_logs_enabled, prompt_optimization_enabled, keep_source_images, image_retention_days")
         .eq("user_id", userId)
         .maybeSingle();
+      // 读取隐私配置
+      privacyConfig = {
+        aiLogsEnabled: prefRow?.ai_logs_enabled ?? false,
+        promptOptimizationEnabled: prefRow?.prompt_optimization_enabled ?? false,
+        keepSourceImages: prefRow?.keep_source_images ?? true,
+        imageRetentionDays: prefRow?.image_retention_days ?? -1,
+      };
       const userPref = prefRow?.screenshot_vision_primary ?? prefRow?.vision_primary;
       photoVisionPrimary = prefRow?.photo_vision_primary ?? "qwen";
       companionSettings = {
@@ -3368,7 +3460,9 @@ Deno.serve(async (req) => {
     let duplicateRefId: string | null = perceptualDupRefId;
 
     // 3. 上传到 Storage（重试模式跳过，图片已存在）
-    const path = isRetry ? (retryImagePath!) : `${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
+    // 隐私控制：keep_source_images=false 时上传到 tmp/ 临时路径，由清理逻辑定期删除
+    const storagePath = isRetry ? (retryImagePath!) : `${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
+    const path = (!isRetry && !privacyConfig.keepSourceImages) ? `tmp/${storagePath}` : storagePath;
     let uploadedNewObject = false;
     if (!isRetry) {
       const { error: upErr } = await supabase.storage.from(BUCKET_NAME)
@@ -3779,7 +3873,7 @@ Deno.serve(async (req) => {
         userId,
         timeContext,
         testMeta,
-      });
+      }, privacyConfig);
       const aiLogId = await writeTraceAiLog({
         image_hash: hash,
         perceptual_hash: perceptualHash,
@@ -3862,7 +3956,7 @@ Deno.serve(async (req) => {
           userId,
           timeContext,
           testMeta,
-        });
+        }, privacyConfig);
         const aiLogId = await writeTraceAiLog({
           image_hash: hash,
           perceptual_hash: perceptualHash,
