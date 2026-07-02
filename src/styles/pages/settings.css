@@ -291,6 +291,136 @@
   }
 }
 
+/* 图片留存期限选择器 */
+.retention-selector {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.retention-btn {
+  border: 1px solid rgba(26, 26, 24, 0.1);
+  border-radius: 10px;
+  background: rgba(247, 248, 246, 0.92);
+  color: var(--text3);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.retention-btn.active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.retention-btn:active {
+  transform: scale(0.96);
+}
+
+/* 留存切换弹窗 */
+.retention-modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 24px;
+}
+
+.retention-modal {
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 360px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.retention-modal-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text1);
+  margin-bottom: 8px;
+}
+
+.retention-modal-desc {
+  font-size: 14px;
+  color: var(--text3);
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.retention-modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.retention-modal-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 2px solid rgba(26, 26, 24, 0.08);
+  border-radius: 12px;
+  background: rgba(247, 248, 246, 0.92);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.retention-modal-option.selected {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.retention-modal-option-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text1);
+}
+
+.retention-modal-option-desc {
+  font-size: 13px;
+  color: var(--text3);
+}
+
+.retention-modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.retention-modal-btn {
+  padding: 10px 24px;
+  border-radius: 10px;
+  border: none;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.retention-modal-btn.cancel {
+  background: rgba(26, 26, 24, 0.06);
+  color: var(--text2);
+}
+
+.retention-modal-btn.confirm {
+  background: var(--primary);
+  color: #fff;
+}
+
+.retention-modal-btn:active {
+  transform: scale(0.96);
+}
+
 .export-preview {
   margin: 16px 20px 0;
   padding: 14px 16px;

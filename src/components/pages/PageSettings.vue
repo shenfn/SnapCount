@@ -282,20 +282,36 @@
         <div class="settings-item-icon warn">志</div>
         <div class="settings-item-content">
           <div class="settings-item-title">AI 日志记录</div>
-          <div class="settings-item-sub">保留识别摘要，便于排查问题与优化 Prompt</div>
+          <div class="settings-item-sub">保留识别摘要，便于排查问题</div>
         </div>
         <div class="settings-toggle" :class="{ active: store.settingsState.aiLogsEnabled }" @click.stop="store.toggleSetting('aiLogsEnabled')">
           <div class="toggle-knob"></div>
         </div>
       </div>
       <div class="settings-item">
+        <div class="settings-item-icon info">优</div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">Prompt 优化参与</div>
+          <div class="settings-item-sub">分享模型原始输出帮助优化识别效果（默认关闭）</div>
+        </div>
+        <div class="settings-toggle" :class="{ active: store.settingsState.promptOptimizationEnabled }" @click.stop="store.toggleSetting('promptOptimizationEnabled')">
+          <div class="toggle-knob"></div>
+        </div>
+      </div>
+      <div class="settings-item">
         <div class="settings-item-icon info">图</div>
         <div class="settings-item-content">
-          <div class="settings-item-title">原图保留</div>
-          <div class="settings-item-sub">默认保留截图原图，便于回溯与重新识别</div>
+          <div class="settings-item-title">截图原图留存</div>
+          <div class="settings-item-sub">{{ retentionDescription }}</div>
         </div>
-        <div class="settings-toggle" :class="{ active: store.settingsState.keepSourceImages }" @click.stop="store.toggleSetting('keepSourceImages')">
-          <div class="toggle-knob"></div>
+        <div class="retention-selector">
+          <button
+            v-for="opt in retentionOptions"
+            :key="opt.value"
+            class="retention-btn"
+            :class="{ active: currentRetentionValue === opt.value }"
+            @click.stop="onRetentionClick(opt.value)"
+          >{{ opt.label }}</button>
         </div>
       </div>
       <div class="settings-item" @click="store.showFlash('当前使用 Supabase 新加坡节点')">
@@ -328,11 +344,41 @@
     </div>
 
     <div class="spacer"></div>
+
+    <!-- 图片留存切换弹窗 -->
+    <div v-if="retentionModal.show" class="retention-modal-mask" @click.self="cancelRetentionModal">
+      <div class="retention-modal">
+        <div class="retention-modal-title">{{ retentionModal.title }}</div>
+        <div class="retention-modal-desc">{{ retentionModal.desc }}</div>
+        <div v-if="retentionModal.type === 'choice'" class="retention-modal-options">
+          <button
+            class="retention-modal-option"
+            :class="{ selected: retentionModal.choice === 'now' }"
+            @click="retentionModal.choice = 'now'"
+          >
+            <span class="retention-modal-option-title">立即清理</span>
+            <span class="retention-modal-option-desc">已有的原图将被全部删除</span>
+          </button>
+          <button
+            class="retention-modal-option"
+            :class="{ selected: retentionModal.choice === 'defer' }"
+            @click="retentionModal.choice = 'defer'"
+          >
+            <span class="retention-modal-option-title">按新期限清理</span>
+            <span class="retention-modal-option-desc">保留 {{ retentionModal.deferDays }} 天后自动删除</span>
+          </button>
+        </div>
+        <div class="retention-modal-actions">
+          <button class="retention-modal-btn cancel" @click="cancelRetentionModal">取消</button>
+          <button class="retention-modal-btn confirm" @click="confirmRetentionModal">确认</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
+import { ref, inject, onMounted, onUnmounted, watch, computed, reactive } from 'vue'
 import { sb } from '../../lib/supabase'
 
 const store = inject('store')
@@ -345,6 +391,128 @@ const aiInsightProvider = ref('auto')
 const companionPersona = ref('observer')
 const companionMemoryStrength = ref('balanced')
 const companionExpressionStyle = ref('plain')
+
+// ── 截图原图留存（四档选择器） ──
+// 数据库层映射：不保留 → keep_source_images=false, image_retention_days=7
+//              其他 → keep_source_images=true, image_retention_days=对应值
+const retentionOptions = [
+  { label: '不保留', value: 0 },
+  { label: '7天', value: 7 },
+  { label: '30天', value: 30 },
+  { label: '永久', value: -1 },
+]
+
+// 当前选中值（从 store 两个字段计算）
+const currentRetentionValue = computed(() => {
+  if (!store.settingsState.keepSourceImages) return 0
+  return store.settingsState.imageRetentionDays
+})
+
+// 副标题描述
+const retentionDescription = computed(() => {
+  const labels = { 0: '新截图识别后不保留原图', 7: '新截图保留 7 天后自动清理', 30: '新截图保留 30 天后自动清理', [-1]: '新截图永久保留，不自动清理' }
+  return labels[currentRetentionValue.value] ?? ''
+})
+
+// ── 留存切换弹窗 ──
+const retentionModal = reactive({
+  show: false,
+  type: 'confirm',      // 'confirm' 确认型 | 'choice' 选择型
+  title: '',
+  desc: '',
+  newValue: 0,           // 用户要切到的新值
+  oldValue: -1,          // 切换前的旧值
+  deferDays: 7,          // 选择型弹窗中"按新期限清理"的天数
+  choice: 'defer',       // 'now' 立即清理 | 'defer' 按新期限
+})
+
+function onRetentionClick(newValue) {
+  if (newValue === currentRetentionValue.value) return
+  const oldValue = currentRetentionValue.value
+
+  // 从永久切换到有限期限 → 选择型弹窗
+  if (oldValue === -1 && newValue !== -1) {
+    const deferDays = newValue === 0 ? 7 : newValue
+    retentionModal.show = true
+    retentionModal.type = 'choice'
+    retentionModal.title = '已有原图如何处理？'
+    retentionModal.desc = `你正在将留存策略从"永久"改为"${newValue === 0 ? '不保留' : newValue + '天'}"`
+    retentionModal.newValue = newValue
+    retentionModal.oldValue = oldValue
+    retentionModal.deferDays = deferDays
+    retentionModal.choice = 'defer'
+    return
+  }
+
+  // 从有限期限切换到永久 → 确认型
+  if (oldValue !== -1 && newValue === -1) {
+    retentionModal.show = true
+    retentionModal.type = 'confirm'
+    retentionModal.title = '切换为永久保留'
+    retentionModal.desc = '新截图将永久保留。已有原图也将永久保留，不再自动清理。'
+    retentionModal.newValue = newValue
+    retentionModal.oldValue = oldValue
+    return
+  }
+
+  // 有限期限之间的切换（含 0 ↔ 7 ↔ 30） → 确认型
+  const newLabel = newValue === 0 ? '不保留' : newValue + '天'
+  const oldLabel = oldValue === 0 ? '不保留' : oldValue + '天'
+  retentionModal.show = true
+  retentionModal.type = 'confirm'
+  retentionModal.title = `留存策略：${oldLabel} → ${newLabel}`
+  if (newValue === 0) {
+    retentionModal.desc = `新截图识别后不保留原图。已有原图将按原期限(${oldValue === 0 ? '7' : oldValue}天)继续清理。`
+  } else {
+    retentionModal.desc = `新截图将保留 ${newValue} 天后自动清理。已有原图将按新期限 ${newValue} 天继续清理。`
+  }
+  retentionModal.newValue = newValue
+  retentionModal.oldValue = oldValue
+}
+
+function cancelRetentionModal() {
+  retentionModal.show = false
+}
+
+async function confirmRetentionModal() {
+  const { newValue, choice } = retentionModal
+
+  // 数据库层映射
+  const keepSource = newValue !== 0
+  const retentionDays = newValue === 0 ? 7 : newValue  // 不保留时设 7 天兜底
+
+  retentionModal.show = false
+
+  // 保存到数据库
+  await store.setRetention(keepSource, retentionDays)
+
+  // 选择型弹窗 + 用户选了"立即清理" → 调用清理接口
+  if (retentionModal.type === 'choice' && choice === 'now') {
+    store.showFlash('正在清理已有原图...')
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const token = session?.access_token
+      if (!token) return
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ingest-receipt`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'cleanup_all_images' }),
+      })
+      if (resp.ok) {
+        store.showFlash('✓ 已有原图已清理')
+      } else {
+        store.showFlash('⚠️ 清理请求失败，将按期限自动清理')
+      }
+    } catch (e) {
+      store.showFlash('⚠️ 清理请求失败，将按期限自动清理')
+    }
+  }
+}
+
 const companionCustomNote = ref('')
 const companionCustomNoteSaved = ref('')
 

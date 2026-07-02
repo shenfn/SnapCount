@@ -3162,6 +3162,100 @@ Deno.serve(async (req) => {
       if (aiLogId) lastAiLogId = aiLogId;
       return aiLogId;
     };
+
+    // ── action 类请求拦截（非图片上传，JSON body）──
+    const contentType = req.headers.get("Content-Type") || "";
+    if (contentType.includes("application/json")) {
+      const jsonBody = await req.json().catch(() => ({}));
+      const action = jsonBody?.action;
+
+      if (action === "cleanup_all_images") {
+        // 身份校验：仅 JWT
+        const authHeader = req.headers.get("Authorization") || "";
+        const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+        if (!bearerToken) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const anonKey = getEnvOptional("ANON_PUBLIC_KEY");
+        if (!anonKey || bearerToken === anonKey) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        // 解析 user_id
+        let actionUserId: string | null = null;
+        try {
+          const userClient = createClient(getEnv("SUPABASE_URL"), anonKey, {
+            global: { headers: { Authorization: authHeader } },
+          });
+          const { data: { user: jwtUser }, error: jwtErr } = await userClient.auth.getUser();
+          if (!jwtErr && jwtUser) actionUserId = jwtUser.id;
+        } catch { /* ignore */ }
+        if (!actionUserId) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        // 收集该用户所有图片路径
+        const pathsToDelete: string[] = [];
+        const buckets: Array<{ table: string; col: string }> = [
+          { table: "transactions", col: "image_path" },
+          { table: "income_records", col: "image_path" },
+          { table: "data_records", col: "source_image_path" },
+          { table: "staging_records", col: "image_path" },
+          { table: "ai_recognition_logs", col: "image_url" },
+        ];
+        for (const { table, col } of buckets) {
+          const { data: rows } = await supabase.from(table)
+            .select(col)
+            .eq("user_id", actionUserId)
+            .not(col, "is", null);
+          if (rows) {
+            for (const row of rows) {
+              const p = row[col];
+              if (p && typeof p === "string" && p.length > 0) pathsToDelete.push(p);
+            }
+          }
+        }
+
+        // 删除 Storage 文件（批量，每次最多 100 个）
+        let deletedCount = 0;
+        for (let i = 0; i < pathsToDelete.length; i += 100) {
+          const batch = pathsToDelete.slice(i, i + 100);
+          const { error: delErr } = await supabase.storage.from(BUCKET_NAME).remove(batch);
+          if (!delErr) deletedCount += batch.length;
+        }
+
+        // 清空数据库中的图片路径引用
+        for (const { table, col } of buckets) {
+          await supabase.from(table)
+            .update({ [col]: null })
+            .eq("user_id", actionUserId)
+            .not(col, "is", null);
+        }
+
+        // 写入清理队列记录（便于审计）
+        if (pathsToDelete.length > 0) {
+          await supabase.from("image_cleanup_queue").insert(
+            pathsToDelete.map((p) => ({
+              bucket_path: p,
+              user_id: actionUserId,
+              status: "done",
+            }))
+          ).catch(() => { /* 队列写入失败不影响主流程 */ });
+        }
+
+        return new Response(JSON.stringify({
+          status: "ok",
+          deleted: deletedCount,
+          total: pathsToDelete.length,
+        }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+      }
+    }
+
     // 1. 接收图片（multipart/form-data，字段名 image）
     const form = await req.formData();
     responseMode = normalizeResponseMode(form.get("response_mode")) === "text" ? "text" : responseMode;

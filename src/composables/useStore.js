@@ -42,6 +42,8 @@ export function useStore() {
   const USER_SETTING_FIELDS = {
     aiLogsEnabled: 'ai_logs_enabled',
     keepSourceImages: 'keep_source_images',
+    promptOptimizationEnabled: 'prompt_optimization_enabled',
+    imageRetentionDays: 'image_retention_days',
     companionEnabled: 'companion_enabled',
     companionMemoryEnabled: 'companion_memory_enabled',
   }
@@ -193,8 +195,10 @@ export function useStore() {
   })
 
   const settingsState = reactive({
-    aiLogsEnabled: true,
+    aiLogsEnabled: false,
     keepSourceImages: true,
+    promptOptimizationEnabled: false,
+    imageRetentionDays: -1,
     companionEnabled: true,
     companionMemoryEnabled: true,
   })
@@ -422,8 +426,10 @@ export function useStore() {
     detailRecord.value = null
     activeDomainId.value = null
     pageHistory.value = []
-    settingsState.aiLogsEnabled = true
+    settingsState.aiLogsEnabled = false
     settingsState.keepSourceImages = true
+    settingsState.promptOptimizationEnabled = false
+    settingsState.imageRetentionDays = -1
     settingsState.companionEnabled = true
     settingsState.companionMemoryEnabled = true
     Object.keys(actionState).forEach((key) => {
@@ -448,22 +454,26 @@ export function useStore() {
 
   async function loadUserSettings() {
     if (!currentUserId.value) {
-      settingsState.aiLogsEnabled = true
+      settingsState.aiLogsEnabled = false
       settingsState.keepSourceImages = true
+      settingsState.promptOptimizationEnabled = false
+      settingsState.imageRetentionDays = -1
       settingsState.companionEnabled = true
       settingsState.companionMemoryEnabled = true
       return
     }
     const { data, error } = await sb.from('user_configs')
-      .select('ai_logs_enabled, keep_source_images, companion_enabled, companion_memory_enabled')
+      .select('ai_logs_enabled, keep_source_images, prompt_optimization_enabled, image_retention_days, companion_enabled, companion_memory_enabled')
       .eq('user_id', currentUserId.value)
       .maybeSingle()
     if (error) {
       console.warn('加载用户设置失败:', error.message)
       return
     }
-    settingsState.aiLogsEnabled = data?.ai_logs_enabled ?? true
+    settingsState.aiLogsEnabled = data?.ai_logs_enabled ?? false
     settingsState.keepSourceImages = data?.keep_source_images ?? true
+    settingsState.promptOptimizationEnabled = data?.prompt_optimization_enabled ?? false
+    settingsState.imageRetentionDays = data?.image_retention_days ?? -1
     settingsState.companionEnabled = data?.companion_enabled ?? true
     settingsState.companionMemoryEnabled = data?.companion_memory_enabled ?? true
   }
@@ -3431,6 +3441,63 @@ export function useStore() {
     }
   }
 
+  // 用于非布尔设置项（如 imageRetentionDays）
+  async function setSetting(key, value) {
+    if (!(key in settingsState)) return
+    if (!currentUserId.value) {
+      showFlash('请先登录')
+      return
+    }
+    if (isActionPending('settings')) return
+    const field = USER_SETTING_FIELDS[key]
+    if (!field) return
+    const prev = settingsState[key]
+    settingsState[key] = value
+    try {
+      await runLockedAction('settings', async () => {
+        const { error } = await sb.from('user_configs').upsert({
+          user_id: currentUserId.value,
+          [field]: value,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' })
+        if (error) throw error
+      })
+      showFlash('✓ 已保存')
+    } catch (e) {
+      settingsState[key] = prev
+      showFlash('⚠️ 设置保存失败：' + humanizeDbError(e))
+    }
+  }
+
+  // 同时更新 keep_source_images 和 image_retention_days 两个字段
+  async function setRetention(keepSource, retentionDays) {
+    if (!currentUserId.value) {
+      showFlash('请先登录')
+      return
+    }
+    if (isActionPending('settings')) return
+    const prevKeep = settingsState.keepSourceImages
+    const prevDays = settingsState.imageRetentionDays
+    settingsState.keepSourceImages = keepSource
+    settingsState.imageRetentionDays = retentionDays
+    try {
+      await runLockedAction('settings', async () => {
+        const { error } = await sb.from('user_configs').upsert({
+          user_id: currentUserId.value,
+          keep_source_images: keepSource,
+          image_retention_days: retentionDays,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' })
+        if (error) throw error
+      })
+      showFlash('✓ 留存策略已更新')
+    } catch (e) {
+      settingsState.keepSourceImages = prevKeep
+      settingsState.imageRetentionDays = prevDays
+      showFlash('⚠️ 设置保存失败：' + humanizeDbError(e))
+    }
+  }
+
   async function confirmDelete() {
     const { type, id, imagePath } = deleteConfirm
     deleteConfirm.open = false
@@ -3547,7 +3614,7 @@ export function useStore() {
     discardStagingRecord, retryStagingRecord, archiveStagingRecord,
     openDomainPage, openDayDetail, showMoreDailyCards, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
     navigateTo, goBack,
-    settingsState, toggleSetting, loadUserSettings,
+    settingsState, toggleSetting, setSetting, setRetention, loadUserSettings,
     actionState, isActionPending,
     refreshIfStale,
   }
