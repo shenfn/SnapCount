@@ -35,12 +35,13 @@
           <strong>这是进阶功能</strong>——不配置也能在 App 内手动记账和查看数据。
         </p>
 
-        <div class="welcome-shortcut-link">
-          <a href="https://www.icloud.com/shortcuts/f3e30fbf2b6d4cba80622a2d92dbf478" target="_blank" rel="noopener">
-            📲 点击导入芥子快捷指令 →
-          </a>
+        <div class="welcome-vision" style="margin-bottom:16px">
+          💡 当前快捷指令配置需要几个步骤，但 <strong>iOS 原生 App 即将上架 AppStore</strong>，届时无需配置 Token 即可一键使用。
         </div>
 
+        <ol class="welcome-steps-list">
+          <li><strong>先复制你的专属 Token</strong>（下方点击复制，稍后要填入快捷指令）</li>
+        </ol>
         <div class="welcome-token-box">
           <div class="welcome-token-label">你的专属上传 Token（点击复制）</div>
           <div v-if="uploadToken" class="welcome-token-value" @click="copyToken">
@@ -50,9 +51,17 @@
           <div v-else class="welcome-token-loading">登录后在「设置」页面查看</div>
         </div>
 
-        <ol class="welcome-steps-list">
-          <li>点击上方链接导入快捷指令到 iPhone</li>
-          <li>打开快捷指令 App → 找到 <code>upload_token</code> 字段 → 粘贴上方 Token</li>
+        <ol class="welcome-steps-list" start="2" style="margin-top:16px">
+          <li><strong>导入快捷指令</strong>（点击下方链接，在 iPhone 上打开）</li>
+        </ol>
+        <div class="welcome-shortcut-link">
+          <a href="https://www.icloud.com/shortcuts/f3e30fbf2b6d4cba80622a2d92dbf478" target="_blank" rel="noopener">
+            📲 点击导入芥子快捷指令 →
+          </a>
+        </div>
+
+        <ol class="welcome-steps-list" start="3" style="margin-top:16px">
+          <li>打开快捷指令 App → 找到 <code>upload_token</code> 字段 → <strong>粘贴刚才复制的 Token</strong></li>
           <li><strong>绑定触发方式</strong>（二选一）：</li>
         </ol>
         <div class="welcome-sub-options">
@@ -68,9 +77,6 @@
 
         <p class="welcome-tip">
           ⚠️ 首次执行可能因网络波动超时，重新执行即可。绑定后在订单页面触发就能自动识别截图。
-        </p>
-        <p class="welcome-vision" style="margin-top:12px">
-          💡 iOS 原生 App 即将上架 AppStore，届时无需配置 Token 即可使用。
         </p>
       </div>
 

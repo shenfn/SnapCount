@@ -203,7 +203,7 @@ body::after {
 .demo-running { flex: 1; display: flex; flex-direction: column; }
 .demo-preview { display: flex; gap: 24px; margin-bottom: 28px; align-items: center; }
 .demo-preview-img {
-  width: 72px; height: 128px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border); flex-shrink: 0; box-shadow: var(--shadow-sm);
+  width: 72px; height: 128px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border); flex-shrink: 0; box-shadow: var(--shadow-sm); cursor: zoom-in;
 }
 .demo-preview-info { flex: 1; }
 .demo-preview-name { font-size: 15px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
@@ -235,6 +235,13 @@ body::after {
 .demo-result { flex: 1; display: flex; flex-direction: column; gap: 16px; animation: resultFadeIn 0.6s ease; }
 @keyframes resultFadeIn { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
 /* 结果区截图 */
+/* 图片放大模态层 */
+.img-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: none; align-items: center; justify-content: center; padding: 32px; cursor: zoom-out; }
+.img-modal.open { display: flex; animation: modalFadeIn 0.25s ease; }
+@keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.img-modal img { max-width: 100%; max-height: 100%; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+.img-modal-hint { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.6); font-size: 13px; }
+
 .result-screenshot { display: flex; gap: 16px; align-items: center; padding: 12px; background: var(--paper); border: 1px solid var(--border); border-radius: 12px; }
 .result-screenshot img { width: 60px; height: 106px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); flex-shrink: 0; }
 .result-screenshot-hint { font-size: 12px; color: var(--moss); line-height: 1.5; }
@@ -525,6 +532,12 @@ body::after {
   </div>
 </footer>
 
+<!-- 图片放大模态层 -->
+<div class="img-modal" id="imgModal" onclick="closeImgModal()">
+  <img id="imgModalImg" src="" alt="放大查看">
+  <div class="img-modal-hint">点击任意位置关闭</div>
+</div>
+
 <script>
 /* ═══════════════════════════════════════════════
    预设案例数据
@@ -599,12 +612,12 @@ const CASES = [
     thumb: '🍔',
     image: IMG_URLS.food,
     steps: [
-      { name: '上传与身份验证', realMs: 12000, showMs: 1000 },
-      { name: '图片哈希与去重',  realMs: 500,   showMs: 500 },
-      { name: 'AI 视觉识别',     realMs: 8200,  showMs: 3000 },
-      { name: '结构化与校验',    realMs: 100,   showMs: 400 },
-      { name: '生成伴随文案',    realMs: 2200,  showMs: 900 },
-      { name: '归档入账',        realMs: 600,   showMs: 500 },
+      { name: '上传与身份验证', realMs: 2380,  showMs: 1000 },
+      { name: '图片哈希与去重',  realMs: 580,   showMs: 500 },
+      { name: 'AI 视觉识别',     realMs: 11200, showMs: 3000 },
+      { name: '结构化与校验',    realMs: 320,   showMs: 400 },
+      { name: '生成伴随文案',    realMs: 1850,  showMs: 900 },
+      { name: '归档入账',        realMs: 690,   showMs: 500 },
     ],
     result: {
       domain: 'food',
@@ -642,12 +655,12 @@ const CASES = [
     thumb: '📖',
     image: IMG_URLS.reading,
     steps: [
-      { name: '上传与身份验证', realMs: 6226,  showMs: 1000 },
-      { name: '图片哈希与去重',  realMs: 500,   showMs: 500 },
-      { name: 'AI 视觉识别',     realMs: 7800,  showMs: 2600 },
-      { name: '结构化与校验',    realMs: 100,   showMs: 400 },
-      { name: '生成伴随文案',    realMs: 2000,  showMs: 800 },
-      { name: '归档入账',        realMs: 600,   showMs: 500 },
+      { name: '上传与身份验证', realMs: 2100,  showMs: 1000 },
+      { name: '图片哈希与去重',  realMs: 520,   showMs: 500 },
+      { name: 'AI 视觉识别',     realMs: 6800,  showMs: 2600 },
+      { name: '结构化与校验',    realMs: 280,   showMs: 400 },
+      { name: '生成伴随文案',    realMs: 1600,  showMs: 800 },
+      { name: '归档入账',        realMs: 550,   showMs: 500 },
     ],
     result: {
       domain: 'reading',
@@ -679,12 +692,12 @@ const CASES = [
     thumb: '💸',
     image: IMG_URLS.expense,
     steps: [
-      { name: '上传与身份验证', realMs: 14000, showMs: 1000 },
-      { name: '图片哈希与去重',  realMs: 500,   showMs: 500 },
-      { name: 'AI 视觉识别',     realMs: 6500,  showMs: 2400 },
-      { name: '结构化与校验',    realMs: 100,   showMs: 400 },
-      { name: '记忆关联与文案',  realMs: 1800,  showMs: 1200 },
-      { name: '归档入账',        realMs: 500,   showMs: 500 },
+      { name: '上传与身份验证', realMs: 1950,  showMs: 1000 },
+      { name: '图片哈希与去重',  realMs: 480,   showMs: 500 },
+      { name: 'AI 视觉识别',     realMs: 5600,  showMs: 2400 },
+      { name: '结构化与校验',    realMs: 240,   showMs: 400 },
+      { name: '记忆关联与文案',  realMs: 2100,  showMs: 1200 },
+      { name: '归档入账',        realMs: 520,   showMs: 500 },
     ],
     result: {
       domain: 'expense',
@@ -728,6 +741,16 @@ CASES.forEach((c) => {
   caseList.appendChild(el);
 });
 
+/* 图片放大 */
+function openImgModal(src) {
+  var modal = document.getElementById('imgModal');
+  document.getElementById('imgModalImg').src = src;
+  modal.classList.add('open');
+}
+function closeImgModal() {
+  document.getElementById('imgModal').classList.remove('open');
+}
+
 /* 演示回放逻辑 */
 const demoMain = document.getElementById('demoMain');
 let running = false;
@@ -743,7 +766,7 @@ function runCase(caseData) {
   demoMain.innerHTML =
     '<div class="demo-running">' +
       '<div class="demo-preview">' +
-          '<img class="demo-preview-img" src="' + caseData.image + '" alt="截图" onerror="imgFallback(this,\'' + caseData.icon + '\')">' +
+          '<img class="demo-preview-img" src="' + caseData.image + '" alt="截图" onclick="openImgModal(\'' + caseData.image + '\')" onerror="imgFallback(this,\'' + caseData.icon + '\')">' +
           '<div class="demo-preview-info">' +
             '<div class="demo-preview-name">' + caseData.name + '</div>' +
             '<div class="demo-preview-meta">' + caseData.domain + ' · 正在识别...</div>' +
@@ -832,7 +855,7 @@ function showResult(caseData) {
   demoMain.innerHTML =
     '<div class="demo-result">' +
       '<div class="result-screenshot">' +
-        '<img src="' + caseData.image + '" alt="截图" onerror="imgFallback(this,\'' + caseData.icon + '\')">' +
+        '<img src="' + caseData.image + '" alt="截图" onclick="openImgModal(\'' + caseData.image + '\')" onerror="imgFallback(this,\'' + caseData.icon + '\')" style="cursor:zoom-in">' +
         '<div class="result-screenshot-hint">实际用户截图<br>AI 识别结果如下</div>' +
       '</div>' +
       '<div class="result-badge ' + r.domain + '">' + r.icon + ' ' + r.badge + '</div>' +
