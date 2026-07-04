@@ -570,6 +570,48 @@ function imgFallback(el, emoji) {
 
 const CASES = [
   {
+    id: 'expense',
+    icon: '💸',
+    name: '支付成功截图',
+    domain: '消费域',
+    thumb: '💸',
+    image: IMG_URLS.expense,
+    steps: [
+      { name: '上传与身份验证', realMs: 1950,  showMs: 1000 },
+      { name: '图片哈希与去重',  realMs: 480,   showMs: 500 },
+      { name: 'AI 视觉识别',     realMs: 5600,  showMs: 2400 },
+      { name: '结构化与校验',    realMs: 240,   showMs: 400 },
+      { name: '记忆关联与文案',  realMs: 2100,  showMs: 1200 },
+      { name: '归档入账',        realMs: 520,   showMs: 500 },
+    ],
+    result: {
+      domain: 'expense',
+      badge: '周末换口味',
+      icon: '💸',
+      fields: [
+        { label: '记录类型', value: '支出' },
+        { label: '金额', value: '¥ 15.24', isAmount: true },
+        { label: '商家', value: '甬上嫂子家（宝树店）' },
+        { label: '分类', value: '餐饮' },
+        { label: '支付方式', value: '支付宝' },
+      ],
+      companion: '15.24元吃甬上嫂子家，这周换口味了。',
+      memory: {
+        title: '记忆关联',
+        emotion: '昨天还在嗦粉，今天改吃宁波菜，味蕾想换个频道',
+        analysis: '本周第3笔餐饮消费，均价从30降到15，预算控制不错',
+        detail: '结合记忆：昨日（7/2）记录有杀猪粉、益禾堂等，今日（7/3）记录为甬上嫂子家，属不同商户且金额更低。',
+      },
+      feedback: {
+        badge: '周末换口味',
+        emotion: '昨天还在嗦粉，今天改吃宁波菜，味蕾想换个频道',
+        utility: '本周第3笔餐饮消费，均价从30降到15，预算控制不错',
+        detail: '结合记忆：昨日（7/2）记录有杀猪粉、益禾堂等，今日（7/3）记录为甬上嫂子家，属不同商户且金额更低。',
+      },
+      notification: '💸 周末换口味\n甬上嫂子家（宝树店） ¥15.24\n分类：餐饮 · 支付宝\n💸 已归档到支出记录',
+    }
+  },
+  {
     id: 'cycling',
     icon: '🚴',
     name: '骑行记录截图',
@@ -687,49 +729,7 @@ const CASES = [
       },
       notification: '📚 碎片续航\n目标5分钟你读了4分半，剩下的30秒是留给思考还是发呆？\n这次5分钟，后面看连续性更有意义。\n📚 已归档到阅读记录',
     }
-  },
-  {
-    id: 'expense',
-    icon: '💸',
-    name: '支付成功截图',
-    domain: '消费域',
-    thumb: '💸',
-    image: IMG_URLS.expense,
-    steps: [
-      { name: '上传与身份验证', realMs: 1950,  showMs: 1000 },
-      { name: '图片哈希与去重',  realMs: 480,   showMs: 500 },
-      { name: 'AI 视觉识别',     realMs: 5600,  showMs: 2400 },
-      { name: '结构化与校验',    realMs: 240,   showMs: 400 },
-      { name: '记忆关联与文案',  realMs: 2100,  showMs: 1200 },
-      { name: '归档入账',        realMs: 520,   showMs: 500 },
-    ],
-    result: {
-      domain: 'expense',
-      badge: '周末换口味',
-      icon: '💸',
-      fields: [
-        { label: '记录类型', value: '支出' },
-        { label: '金额', value: '¥ 15.24', isAmount: true },
-        { label: '商家', value: '甬上嫂子家（宝树店）' },
-        { label: '分类', value: '餐饮' },
-        { label: '支付方式', value: '支付宝' },
-      ],
-      companion: '15.24元吃甬上嫂子家，这周换口味了。',
-      memory: {
-        title: '记忆关联',
-        emotion: '昨天还在嗦粉，今天改吃宁波菜，味蕾想换个频道',
-        analysis: '本周第3笔餐饮消费，均价从30降到15，预算控制不错',
-        detail: '结合记忆：昨日（7/2）记录有杀猪粉、益禾堂等，今日（7/3）记录为甬上嫂子家，属不同商户且金额更低。',
-      },
-      feedback: {
-        badge: '周末换口味',
-        emotion: '昨天还在嗦粉，今天改吃宁波菜，味蕾想换个频道',
-        utility: '本周第3笔餐饮消费，均价从30降到15，预算控制不错',
-        detail: '结合记忆：昨日（7/2）记录有杀猪粉、益禾堂等，今日（7/3）记录为甬上嫂子家，属不同商户且金额更低。',
-      },
-      notification: '💸 周末换口味\n甬上嫂子家（宝树店） ¥15.24\n分类：餐饮 · 支付宝\n💸 已归档到支出记录',
-    }
-  },
+  }
 ];
 
 /* 渲染案例列表 */
