@@ -1,7 +1,7 @@
 {
-  "name": "随手账",
-  "short_name": "随手账",
-  "description": "个人收支管理 PWA",
+  "name": "芥子",
+  "short_name": "芥子",
+  "description": "Personal AI Memory — 从截图记账出发，把散落的个人数据重新连接",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F7F6F3",

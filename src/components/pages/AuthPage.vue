@@ -1,9 +1,9 @@
 <template>
   <div class="page active">
     <div class="auth-hero">
-      <div class="auth-logo">数</div>
-      <div class="auth-title">随手账</div>
-      <div class="auth-subtitle">AI 自动记账，截图即入账</div>
+      <div class="auth-logo">芥</div>
+      <div class="auth-title">芥子</div>
+      <div class="auth-subtitle">芥子纳须弥 · 从聊天AI走向人生AI</div>
     </div>
 
     <div class="auth-tabs">
@@ -34,7 +34,7 @@
     </form>
 
     <p class="auth-footer">
-      当前为内测版本。注册即表示你同意数据仅用于提供记账服务，不会公开或出售给第三方。
+      芥子 · Personal AI Memory。注册即表示你同意数据仅用于提供个人数据管理服务，不会公开或出售给第三方。
     </p>
   </div>
 </template>
