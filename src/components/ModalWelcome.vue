@@ -53,7 +53,7 @@
           <li>导入快捷指令 → 填入 Token</li>
         </ol>
         <div class="welcome-shortcut-link">
-          <a href="https://www.icloud.com/shortcuts/a9cb2d1634284976b870c6e21bc1e2de" target="_blank" rel="noopener">
+          <a href="https://www.icloud.com/shortcuts/60be42007bee43ff850d53106813b351" target="_blank" rel="noopener">
             📲 导入快捷指令 →
           </a>
         </div>
