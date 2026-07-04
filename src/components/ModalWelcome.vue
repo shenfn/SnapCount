@@ -57,9 +57,10 @@
             📲 导入快捷指令 →
           </a>
         </div>
-        <a href="https://b23.tv/Cqb66kU" target="_blank" rel="noopener" style="display:block;text-align:center;font-size:13px;color:#5F5B53;margin-top:10px;text-decoration:none;">
-          📹 看不懂？观看视频教程 →
-        </a>
+        <div style="display:flex;gap:16px;justify-content:center;margin-top:10px;">
+          <a href="https://b23.tv/Cqb66kU" target="_blank" rel="noopener" style="font-size:13px;color:#5F5B53;text-decoration:none;">📹 B站教程</a>
+          <a href="https://v.douyin.com/AZiAN5YL_EY/" target="_blank" rel="noopener" style="font-size:13px;color:#5F5B53;text-decoration:none;">📱 抖音教程</a>
+        </div>
 
         <ol class="welcome-steps-list" start="3" style="margin-top:12px">
           <li>绑定触发方式：<strong>辅助触控</strong>或<strong>操作按钮</strong></li>
