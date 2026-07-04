@@ -1,22 +1,56 @@
-# SnapCount · 个人数据平台
+# 芥子 · Personal AI Memory
 
-> **一张截图，记一笔账。** 基于 AI 视觉识别的 PWA，把微信/支付宝等消费截图一键沉淀成结构化数据，并以"多数据域"架构向记账之外的个人数据管理场景扩展（运动、睡眠、阅读等）。
+> **芥子纳须弥——AI 不应该只记住一次聊天，它应该记住你的人生。**
+
+从截图记账出发，把散落的个人数据重新连接。消费、运动、睡眠、饮食、阅读——所有生活数据在同一套架构里联动，从聊天 AI 走向人生 AI。
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Stack](https://img.shields.io/badge/Stack-Vue3_%7C_Supabase_%7C_Cloudflare-green.svg)](#-技术架构)
 [![PWA](https://img.shields.io/badge/PWA-Ready-purple.svg)](#-部署指南)
+[![TRAE](https://img.shields.io/badge/TRAE-AI创造力大赛-orange.svg)](https://www.trae.cn/ai-creativity)
+
+**[🌐 在线体验](https://snapflow.me)** · **[📱 iOS 快捷指令](https://www.icloud.com/shortcuts/f3e30fbf2b6d4cba80622a2d92dbf478)**
 
 ---
 
 ## ✨ 核心特性
 
-- **📸 截图即记账**：iOS 快捷指令一键上传截图 → AI 识别商家/金额/支付方式 → 自动入账
-- **🧠 AI 识别可控**：识别结果进入"待补全"队列，置信度不够时回落到人工确认（绝不污染数据）
-- **🔒 多用户 + RLS**：每个用户的账单/收入/数据完全隔离，`auth.uid() = user_id` 行级安全策略
-- **🔀 多数据域扩展**：记账只是起点。运动、睡眠、阅读等数据域基于统一 `data_records` 架构，可持续扩展
-- **🔁 去重 & 幂等**：pHash + dHash + 文本哈希三重去重，快捷指令重传同一张截图也不会重复记账
-- **⚡ PWA 体验**：下拉刷新、后台切回自动刷新、离线友好、支持添加到主屏
-- **💰 自部署低成本**：Supabase + Cloudflare 全免费额度即可长期运行个人级使用
+- **📸 截图即数据**：iOS 快捷指令一键上传截图 → AI 视觉识别 → 自动结构化入库
+- **🧠 AI 记忆与陪伴**：基于长期积累的个人数据，AI 提供跨记录的记忆关联与陪伴文案
+- **🔀 多数据域联动**：消费、运动、睡眠、饮食、阅读、钱包——同一套 `data_records` 架构持续扩展
+- **🔒 多用户 + RLS**：每个用户的数据完全隔离，`auth.uid() = user_id` 行级安全策略
+- **🔁 去重 & 幂等**：pHash + dHash + 文本哈希三重去重，重传同一张截图不会重复入账
+- **⚡ PWA 体验**：下拉刷新、离线友好、支持添加到主屏
+
+---
+
+## 🎯 真实识别案例
+
+以下均为真实用户截图识别结果：
+
+### 运动域 · 骑行记录
+
+![骑行记录](docs/cases/cycling.jpg)
+
+AI 识别出户外骑行 9.79km、42 分钟、消耗 359kcal、平均心率 141，生成伴随文案："平均心率141的有氧骑行，巩固体能的基础课。"
+
+### 饮食域 · 食物拍照识别
+
+![食物识别](docs/cases/food.jpg)
+
+AI 逐道识别出火鸡面配鸡腿、炸鸡块、花刀香肠、奶酪块、小番茄，估算总热量约 2770kcal，生成营养分析反馈。
+
+### 阅读域 · 阅读进度
+
+![阅读记录](docs/cases/reading.jpg)
+
+AI 识别出《被讨厌的勇气》阅读 4 分 30 秒，达成 5 分钟目标的 90%，生成"碎片续航"反馈文案。
+
+### 消费域 · 支付记录（含 AI 记忆关联）
+
+![消费记录](docs/cases/expense.jpg)
+
+AI 识别出甬上嫂子家 ¥15.24，并**关联昨日记忆**："昨天还在嗦粉，今天改吃宁波菜，味蕾想换个频道"——从"甬上"推断宁波菜，关联 7/2 的杀猪粉和益禾堂记录。
 
 ---
 
@@ -25,21 +59,20 @@
 ```
  ┌─────────────────┐        ┌──────────────────────────────┐
  │  iOS Shortcuts  │ ──📸──▶│  Supabase Edge Function      │
- └─────────────────┘        │  ingest-receipt              │
-                            │                              │
- ┌─────────────────┐        │  1. 存原图到 Storage         │
- │  PWA (Vue 3)    │◀──🔄──▶│  2. pHash/文本去重           │
- │  Cloudflare     │        │  3. 调用 Moonshot Vision     │
- │  Pages          │        │  4. 结构化入库 transactions  │
- └────────┬────────┘        │     / income_records         │
-          │                 │     / data_records           │
+ │  / PWA 上传     │        │  ingest-receipt              │
+ └─────────────────┘        │                              │
+                            │  1. JWT 鉴权 / upload_token  │
+ ┌─────────────────┐        │  2. pHash/文本去重           │
+ │  PWA (Vue 3)    │◀──🔄──▶│  3. 域路由分发               │
+ │  Cloudflare     │        │  4. AI 视觉识别              │
+ │  Pages          │        │  5. 记忆关联 + 伴随文案      │
+ └────────┬────────┘        │  6. 结构化入库               │
           │                 └──────────────┬───────────────┘
           │                                │
           ▼                                ▼
  ┌─────────────────────────────────────────────────┐
  │  Cloudflare Worker (supabase-proxy)             │
  │  反向代理 api.snapflow.me → *.supabase.co       │
- │  注入 anon key + CORS                           │
  └────────────────────┬────────────────────────────┘
                       ▼
            ┌─────────────────────┐
@@ -51,7 +84,7 @@
 
 **前端**：Vue 3 + Vite · Composition API · PWA
 **后端**：Supabase（Postgres + Edge Functions + Storage + Auth + RLS）
-**AI**：Moonshot / Qwen / MiMo / 自建 OpenAI 兼容 Vision 中转站（可替换为其他 Vision 模型）
+**AI**：Qwen / Moonshot / 自建 OpenAI 兼容 Vision 中转站（可替换为其他 Vision 模型）
 **托管**：Cloudflare Pages（静态）+ Cloudflare Worker（反向代理）
 
 ---
@@ -63,7 +96,7 @@
 - Node.js 18+ 和 npm
 - 一个 Supabase 项目（[免费注册](https://supabase.com)）
 - 一个 Cloudflare 账号（可选，用于反代和 Pages 托管）
-- 一个 Moonshot API Key（[申请](https://platform.moonshot.cn)）或其他 Vision 模型 key
+- 一个 Vision 模型 API Key（Qwen / Moonshot 等）
 
 ### 1. 克隆与依赖
 
@@ -75,8 +108,6 @@ npm install
 
 ### 2. 配置环境变量
 
-复制示例文件并填入真实值：
-
 ```bash
 cp .env.example .env.local
 # 编辑 .env.local，填入 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY
@@ -84,14 +115,10 @@ cp .env.example .env.local
 
 ### 3. 初始化 Supabase 数据库
 
-安装 [Supabase CLI](https://supabase.com/docs/guides/cli)，然后：
-
 ```bash
 supabase link --project-ref <your-project-ref>
 supabase db push   # 推送 supabase/migrations/ 下的所有迁移文件
 ```
-
-迁移文件包含完整的表结构、RLS 策略和索引（见 `supabase/migrations/`）。
 
 ### 4. 部署 Edge Function
 
@@ -99,53 +126,32 @@ supabase db push   # 推送 supabase/migrations/ 下的所有迁移文件
 # 设置 secrets（一次性）
 supabase secrets set SUPABASE_URL="https://<your-project-ref>.supabase.co"
 supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
-supabase secrets set MOONSHOT_API_KEY="<your-moonshot-key>"
-supabase secrets set QWEN_API_KEY="<your-qwen-key>"             # 可选，启用 Qwen 视觉识别
-supabase secrets set QWEN_MODEL="qwen3.6-flash"                 # 可选，截图/账户识别默认快速模型
-supabase secrets set QWEN_PHOTO_MODEL="qwen3.7-plus"            # 可选，拍照识别默认质量模型
-supabase secrets set QWEN_PHOTO_ENABLE_THINKING="true"          # 可选，拍照质量优先
-supabase secrets set RELAY_API_KEY="<your-relay-key>"           # 可选
-supabase secrets set RELAY_ENDPOINT="http://47.76.157.150:8317/v1/chat/completions"  # 可选
-supabase secrets set RELAY_MODEL="gpt-5.4"                     # 可选
+supabase secrets set QWEN_API_KEY="<your-qwen-key>"
+supabase secrets set QWEN_MODEL="qwen3.6-flash"
+supabase secrets set QWEN_PHOTO_MODEL="qwen3.7-plus"
 
 # 部署
 supabase functions deploy ingest-receipt --no-verify-jwt
 supabase functions deploy generate-insights --no-verify-jwt
 ```
 
-### 5.（可选）部署 Cloudflare Worker 反代
-
-把 `cloudflare-worker/supabase-proxy.js` 部署到 Cloudflare Workers，在 Settings → Variables 中设置：
-
-- `SUPABASE_URL` = `https://<your-project-ref>.supabase.co`
-- `SUPABASE_ANON_KEY` = `<your-anon-key>`
-
-绑定自定义域名后，把 `.env.local` 里的 `VITE_SUPABASE_URL` 改为你的 Worker 域名。
-
-### 6. 本地开发 / 构建
+### 5. 本地开发 / 构建
 
 ```bash
 npm run dev      # 本地开发
 npm run build    # 构建 dist/
-npm run preview  # 预览生产构建
 ```
-
-### 7.（可选）托管到 Cloudflare Pages
-
-在 Pages 绑定 GitHub 仓库，构建命令 `npm run build`，输出目录 `dist/`。
 
 ---
 
-## 📱 iOS 快捷指令使用
+## 📱 iOS 快捷指令
 
-1. 在设置页获取你的 `upload_token`
-2. 将以下快捷指令动作串起来：
-   - 获取剪贴板/截图
-   - POST `https://<your-endpoint>/functions/v1/ingest-receipt`（multipart/form-data）
-   - 附带 `upload_token` 字段
-3. 返回 JSON 中的 `notification` 字段可直接用作系统通知文案
+1. [点击导入芥子快捷指令](https://www.icloud.com/shortcuts/f3e30fbf2b6d4cba80622a2d92dbf478)
+2. 在 App 设置页复制你的 `upload_token`
+3. 打开快捷指令 App → 找到 `upload_token` 字段 → 粘贴 Token
+4. 绑定触发方式（辅助触控 / 操作按钮）
 
-完整快捷指令模板与参数说明会在后续补齐到 Wiki。若你迫切需要，可在应用内"设置 → 快捷指令接入"页查看当前步骤文案。
+配置完成后，在任意页面触发快捷指令即可自动上传截图识别。
 
 ---
 
@@ -156,19 +162,18 @@ SnapCount/
 ├── src/                      Vue 3 前端
 │   ├── components/
 │   │   ├── pages/            各页面（Home / Pending / Report / Settings ...）
-│   │   └── Modal*.vue        各操作弹窗（支出/收入/待补全 ...）
-│   ├── composables/          Vue 组合式逻辑（核心在 useStore.js）
+│   │   └── Modal*.vue        各操作弹窗
+│   ├── composables/          Vue 组合式逻辑
 │   ├── lib/supabase.js       Supabase 客户端
-│   ├── styles/               样式
-│   └── utils/                工具函数
+│   └── styles/               样式
 ├── supabase/
-│   ├── migrations/           数据库迁移（001 ~ 011）
+│   ├── migrations/           数据库迁移
 │   └── functions/
 │       └── ingest-receipt/   截图识别 Edge Function
-├── cloudflare-worker/
-│   └── supabase-proxy.js     Cloudflare Worker 反向代理
+├── docs/cases/               案例截图（README 引用）
+├── cloudflare-worker/        Cloudflare Worker 反向代理
 ├── public/                   静态资源
-├── scripts/                  运维脚本（如查看 AI 日志）
+├── landing.html              芥子落地页（初赛体验入口）
 └── .env.example              环境变量示例
 ```
 
@@ -176,27 +181,25 @@ SnapCount/
 
 ## 🗺️ Roadmap
 
+**已上线**
 - [x] 截图识别支出 / 收入
-- [x] 待补全队列 + 人工确认
-- [x] 多数据域架构（运动 / 睡眠）
+- [x] 多数据域架构（运动 / 睡眠 / 饮食 / 阅读 / 钱包）
+- [x] AI 记忆关联与陪伴文案
 - [x] iOS 快捷指令集成
-- [x] 多用户 + RLS
+- [x] 多用户 + RLS 行级安全
 - [x] PWA + 下拉刷新
-- [ ] 阅读数据域
-- [ ] 预算管理与月度报告
-- [ ] 多 AI Provider（Gemini / GPT-4V）
-- [ ] 用户自定义数据域（AI 生成 schema）
-- [ ] 数据导出（CSV / JSON）
+- [x] 数据导出（CSV / JSON）
 
----
+**开发中**
+- [ ] 篇章域：长文本记录与阅读笔记联动
+- [ ] 信息捕获归档：截图 → AI 自动分类归档（类似 Cubox 但零摩擦）
+- [ ] 多截图上下文关联：连续截图让 AI 分析关联关系
 
-## 🤝 贡献
-
-欢迎提 Issue 与 Pull Request。提交代码前请确认：
-
-- 遵循项目既有代码风格（Vue 3 Composition API + `<script setup>`）
-- 不引入未经讨论的新依赖
-- 不在代码中硬编码任何 secret
+**规划中**
+- [ ] iOS 原生 App（AppStore 上架，免 token 配置）
+- [ ] 数据域模板市场：用户自定义数据域 + AI 辅助建库 + 社区发布
+- [ ] 跨域数据分析与个人画像生成
+- [ ] 主动式异步补全：AI 主动提醒缺失数据
 
 ---
 
@@ -204,19 +207,12 @@ SnapCount/
 
 **AGPL-3.0-or-later** — 详见 [LICENSE](./LICENSE)。
 
-### 协议说明
-
-- **个人使用、学习、修改、分发**：完全自由，遵守 AGPL 义务即可
-- **基于本项目提供网络服务**：必须将你的修改以 AGPL 同等协议开源给服务的使用者
-- **闭源商用 / 去除 AGPL 反向共享义务**：需向作者获得单独授权
-
-若你计划将本项目用于商业产品，请通过 GitHub Issue 或邮件与作者联系商业授权事宜。
-
 ---
 
 ## 🙏 致谢
 
 - [Supabase](https://supabase.com) — 全栈 BaaS
-- [Moonshot](https://platform.moonshot.cn) — Kimi Vision API
+- [Qwen](https://help.aliyun.com/zh/model-studio/) — 通义千问视觉模型
 - [Cloudflare](https://cloudflare.com) — Pages + Workers
 - [Vue](https://vuejs.org) — 前端框架
+- [TRAE](https://www.trae.cn) — AI 创造力大赛

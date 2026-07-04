@@ -10,41 +10,48 @@
 
       <!-- Step 1: 是什么 -->
       <div v-if="step === 1" class="welcome-body">
-        <div class="welcome-icon">📊</div>
-        <h2 class="welcome-title">欢迎来到随手账</h2>
+        <div class="welcome-icon">🌱</div>
+        <h2 class="welcome-title">欢迎来到芥子</h2>
         <p class="welcome-desc">
-          随手账是一个 <strong>AI 驱动的个人数据平台</strong>，从记账出发，帮你把生活中的截图自动变成结构化数据。
+          芥子是一个 <strong>AI 驱动的个人数据平台</strong>，从记账出发，帮你把生活中的截图自动变成结构化数据。
         </p>
         <ul class="welcome-list">
           <li>📸 截图发给快捷指令 → AI 自动识别金额、分类</li>
           <li>📥 进入「待处理」确认后归档</li>
           <li>📈 首页查看本月消费汇总与趋势</li>
-          <li>🗂 未来支持运动、睡眠、阅读等更多数据域</li>
+          <li>🗂 已支持运动、睡眠、饮食、钱包等更多数据域</li>
         </ul>
         <p class="welcome-vision">
-          目标：成为你的<strong>全品类个人生活记录仪</strong>，而不只是一个记账 App。
+          芥子纳须弥——成为你的<strong>全品类个人生活记录仪</strong>，从聊天 AI 走向人生 AI。
         </p>
       </div>
 
       <!-- Step 2: 快捷指令配置 -->
       <div v-if="step === 2" class="welcome-body">
         <div class="welcome-icon">⚡</div>
-        <h2 class="welcome-title">配置快捷指令</h2>
+        <h2 class="welcome-title">快捷指令 + AI 记忆</h2>
         <p class="welcome-desc">
-          随手账通过 <strong>iOS 快捷指令</strong> 接收截图。配置一次，之后一键记账。
+          芥子通过 <strong>iOS 快捷指令</strong> 实现一键截图记账，AI 还会基于长期数据提供记忆与陪伴。<br>
+          <strong>这是进阶功能</strong>——不配置也能在 App 内手动记账和查看数据。
         </p>
 
+        <div class="welcome-shortcut-link">
+          <a href="https://www.icloud.com/shortcuts/f3e30fbf2b6d4cba80622a2d92dbf478" target="_blank" rel="noopener">
+            📲 点击导入芥子快捷指令 →
+          </a>
+        </div>
+
         <div class="welcome-token-box">
-          <div class="welcome-token-label">你的专属上传 Token（稍后在设置中复制）</div>
+          <div class="welcome-token-label">你的专属上传 Token（点击复制）</div>
           <div v-if="uploadToken" class="welcome-token-value" @click="copyToken">
             {{ uploadToken }}
-            <span class="welcome-token-copy">点击复制</span>
+            <span class="welcome-token-copy">📋 复制</span>
           </div>
           <div v-else class="welcome-token-loading">登录后在「设置」页面查看</div>
         </div>
 
         <ol class="welcome-steps-list">
-          <li>点击下方链接导入快捷指令</li>
+          <li>点击上方链接导入快捷指令到 iPhone</li>
           <li>打开快捷指令 App → 找到 <code>upload_token</code> 字段 → 粘贴上方 Token</li>
           <li><strong>绑定触发方式</strong>（二选一）：</li>
         </ol>
@@ -61,6 +68,9 @@
 
         <p class="welcome-tip">
           ⚠️ 首次执行可能因网络波动超时，重新执行即可。绑定后在订单页面触发就能自动识别截图。
+        </p>
+        <p class="welcome-vision" style="margin-top:12px">
+          💡 iOS 原生 App 即将上架 AppStore，届时无需配置 Token 即可使用。
         </p>
       </div>
 
@@ -81,6 +91,9 @@
 
         <p class="welcome-vision">
           💡 上传数据后如果首页没刷新，把 App 从后台划掉重新进入即可。
+        </p>
+        <p class="welcome-vision" style="margin-top:8px">
+          📌 <strong>体验分层</strong>：登录即可查看数据 · 配置快捷指令享一键记账+AI记忆 · AppStore 原生版即将上线
         </p>
       </div>
 
@@ -236,6 +249,27 @@ function copyToken() {
   text-align: left;
   line-height: 1.6;
   margin-top: 4px;
+}
+
+.welcome-shortcut-link {
+  background: #F4FBF7;
+  border: 1.5px solid #2D6A4F;
+  border-radius: 12px;
+  padding: 14px;
+  margin: 12px 0;
+  text-align: center;
+}
+
+.welcome-shortcut-link a {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2D6A4F;
+  text-decoration: none;
+  display: block;
+}
+
+.welcome-shortcut-link a:active {
+  opacity: 0.7;
 }
 
 .welcome-token-box {
