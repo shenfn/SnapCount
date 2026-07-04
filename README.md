@@ -9,7 +9,7 @@
 [![PWA](https://img.shields.io/badge/PWA-Ready-purple.svg)](#-部署指南)
 [![TRAE](https://img.shields.io/badge/TRAE-AI创造力大赛-orange.svg)](https://www.trae.cn/ai-creativity)
 
-**[🌐 在线体验](https://snapflow.me)** · **[📱 iOS 快捷指令](https://www.icloud.com/shortcuts/f3e30fbf2b6d4cba80622a2d92dbf478)**
+**[🌐 在线体验](https://snapflow.me)** · **[📱 iOS 快捷指令](https://www.icloud.com/shortcuts/a9cb2d1634284976b870c6e21bc1e2de)**
 
 ---
 
@@ -146,7 +146,7 @@ npm run build    # 构建 dist/
 
 ## 📱 iOS 快捷指令
 
-1. [点击导入芥子快捷指令](https://www.icloud.com/shortcuts/f3e30fbf2b6d4cba80622a2d92dbf478)
+1. [点击导入芥子快捷指令](https://www.icloud.com/shortcuts/a9cb2d1634284976b870c6e21bc1e2de)
 2. 在 App 设置页复制你的 `upload_token`
 3. 打开快捷指令 App → 找到 `upload_token` 字段 → 粘贴 Token
 4. 绑定触发方式（辅助触控 / 操作按钮）

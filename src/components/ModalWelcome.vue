@@ -29,55 +29,38 @@
       <!-- Step 2: 快捷指令配置 -->
       <div v-if="step === 2" class="welcome-body">
         <div class="welcome-icon">⚡</div>
-        <h2 class="welcome-title">快捷指令 + AI 记忆</h2>
+        <h2 class="welcome-title">一键截图记账</h2>
         <p class="welcome-desc">
-          芥子通过 <strong>iOS 快捷指令</strong> 实现一键截图记账，AI 还会基于长期数据提供记忆与陪伴。<br>
-          <strong>这是进阶功能</strong>——不配置也能在 App 内手动记账和查看数据。
+          配置快捷指令后，截图即可自动记账。不配置也能在 App 内手动记账。
+        </p>
+        <p class="welcome-vision" style="margin-bottom:16px">
+          💡 AppStore 原生版即将上线，届时免配置直接使用。
         </p>
 
-        <div class="welcome-vision" style="margin-bottom:16px">
-          💡 当前快捷指令配置需要几个步骤，但 <strong>iOS 原生 App 即将上架 AppStore</strong>，届时无需配置 Token 即可一键使用。
-        </div>
-
         <ol class="welcome-steps-list">
-          <li><strong>先复制你的专属 Token</strong>（下方点击复制，稍后要填入快捷指令）</li>
+          <li>复制下方 Token</li>
         </ol>
         <div class="welcome-token-box">
-          <div class="welcome-token-label">你的专属上传 Token（点击复制）</div>
           <div v-if="uploadToken" class="welcome-token-value" @click="copyToken">
             {{ uploadToken }}
             <span class="welcome-token-copy">📋 复制</span>
           </div>
           <div v-else class="welcome-token-loading">登录后在「设置」页面查看</div>
+          <div v-if="copyTip" class="welcome-copy-tip">{{ copyTip }}</div>
         </div>
 
-        <ol class="welcome-steps-list" start="2" style="margin-top:16px">
-          <li><strong>导入快捷指令</strong>（点击下方链接，在 iPhone 上打开）</li>
+        <ol class="welcome-steps-list" start="2" style="margin-top:12px">
+          <li>导入快捷指令 → 填入 Token</li>
         </ol>
         <div class="welcome-shortcut-link">
-          <a href="https://www.icloud.com/shortcuts/f3e30fbf2b6d4cba80622a2d92dbf478" target="_blank" rel="noopener">
-            📲 点击导入芥子快捷指令 →
+          <a href="https://www.icloud.com/shortcuts/a9cb2d1634284976b870c6e21bc1e2de" target="_blank" rel="noopener">
+            📲 导入快捷指令 →
           </a>
         </div>
 
-        <ol class="welcome-steps-list" start="3" style="margin-top:16px">
-          <li>打开快捷指令 App → 找到 <code>upload_token</code> 字段 → <strong>粘贴刚才复制的 Token</strong></li>
-          <li><strong>绑定触发方式</strong>（二选一）：</li>
+        <ol class="welcome-steps-list" start="3" style="margin-top:12px">
+          <li>绑定触发方式：<strong>辅助触控</strong>或<strong>操作按钮</strong></li>
         </ol>
-        <div class="welcome-sub-options">
-          <div class="welcome-sub-option">
-            <strong>辅助触控</strong>
-            <span>设置 → 辅助触控 → 开启 → 自定义操作 → 绑定快捷指令</span>
-          </div>
-          <div class="welcome-sub-option">
-            <strong>操作按钮</strong>
-            <span>设置 → 操作按钮 → 选择快捷指令</span>
-          </div>
-        </div>
-
-        <p class="welcome-tip">
-          ⚠️ 首次执行可能因网络波动超时，重新执行即可。绑定后在订单页面触发就能自动识别截图。
-        </p>
       </div>
 
       <!-- Step 3: 开始使用 -->
@@ -127,6 +110,7 @@ const store = inject('store')
 const visible = ref(false)
 const step = ref(1)
 const uploadToken = ref('')
+const copyTip = ref('')
 
 onMounted(async () => {
   if (localStorage.getItem(STORAGE_KEY)) return
@@ -152,9 +136,36 @@ function trySkip() {
 
 function copyToken() {
   if (!uploadToken.value) return
-  navigator.clipboard?.writeText(uploadToken.value)
-    .then(() => store.showFlash('✓ Token 已复制到剪贴板'))
-    .catch(() => store.showFlash('⚠ 复制失败，请手动选择'))
+  const text = uploadToken.value
+  // 优先用 Clipboard API，降级用 execCommand（兼容 iOS Safari）
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(() => showCopyTip('✓ 已复制'))
+      .catch(() => fallbackCopy(text))
+  } else {
+    fallbackCopy(text)
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  try {
+    document.execCommand('copy')
+    showCopyTip('✓ 已复制')
+  } catch {
+    showCopyTip('⚠ 复制失败，请手动选择')
+  }
+  document.body.removeChild(ta)
+}
+
+function showCopyTip(msg) {
+  copyTip.value = msg
+  setTimeout(() => { copyTip.value = '' }, 2000)
 }
 </script>
 
@@ -283,6 +294,7 @@ function copyToken() {
   border: 1.5px solid #B7DFC8;
   border-radius: 12px;
   padding: 14px;
+  position: relative;
   margin: 12px 0 16px;
   text-align: left;
 }
@@ -311,6 +323,27 @@ function copyToken() {
   font-size: 11px;
   color: #2D6A4F;
   font-family: 'PingFang SC', system-ui, sans-serif;
+}
+
+.welcome-copy-tip {
+  position: absolute;
+  top: -36px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2D6A4F;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 16px;
+  border-radius: 8px;
+  white-space: nowrap;
+  z-index: 9000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  animation: tipPop 0.25s ease;
+}
+@keyframes tipPop {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 .welcome-token-loading {
