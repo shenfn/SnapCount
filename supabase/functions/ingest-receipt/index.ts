@@ -1601,6 +1601,12 @@ interface AiRawDebugPayload {
     fallback_used?: boolean | null;
     feedback_used?: boolean | null;
     ai_feedback?: AIFeedback | null;
+    voice?: {
+      enabled: boolean;
+      error?: string | null;
+      signals?: string[];
+      number_violations?: string[];
+    } | null;
   } | null;
   notification?: {
     final?: string | null;
@@ -1653,6 +1659,7 @@ function buildAiRawDebug(payload: AiRawDebugPayload): string {
       fallback_used: payload.companion.fallback_used ?? null,
       feedback_used: payload.companion.feedback_used ?? null,
       ai_feedback: payload.companion.ai_feedback ?? null,
+      voice: payload.companion.voice ?? null,
     } : null,
     notification: payload.notification ? {
       final: clipForDebug(payload.notification.final, 3000),
@@ -1991,6 +1998,8 @@ function financeCompanionLine(ai: AIResult): string | null {
   const leaksOtherDomain = /(运动|骑行|跑步|睡眠|饮食记录|热量|蛋白|碳水|外婆家|老婆大人)/.test(text)
     && !/(餐饮|food|美食|饭|餐|外卖)/i.test(financeText);
   if (leaksOtherDomain) return null;
+  if (/(?:第|连续|连着)\s*[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)) return null;
+  if (/(?:这周|本周|本月|近\s*\d+\s*天|30\s*天).{0,16}[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)) return null;
   if (/(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text)) return null;
   return text;
 }
@@ -3887,6 +3896,12 @@ Deno.serve(async (req) => {
     let companionFeedbackUsed = false;
     let companionMessage: string | null = null;
     let aiFeedback: AIFeedback | null = null;
+    let companionVoiceDebug: {
+      enabled: boolean;
+      error?: string | null;
+      signals?: string[];
+      number_violations?: string[];
+    } | null = null;
     const companionDebug = () => ({
       model_raw: modelRawCompanion,
       normalized: normalizedCompanion,
@@ -3897,6 +3912,7 @@ Deno.serve(async (req) => {
       fallback_used: companionFallbackUsed,
       feedback_used: companionFeedbackUsed,
       ai_feedback: aiFeedback,
+      voice: companionVoiceDebug,
     });
     const rawDebug = (options: {
       dispatcher?: DispatcherResult | null;
@@ -4260,6 +4276,12 @@ Deno.serve(async (req) => {
           if (_voiceCall.duration_ms > 0) {
             console.log(`[feedback] voice ${builtinKey} ok=${!_voiceCall.error} signals=${_voiceCall.signals.map((s) => s.kind).join(",") || "none"} duration=${_voiceCall.duration_ms}ms`);
           }
+          companionVoiceDebug = {
+            enabled: true,
+            error: _voiceCall.error ?? null,
+            signals: _voiceCall.signals.map((s) => s.kind),
+            number_violations: _voiceCall.number_violations ?? [],
+          };
           if (_voiceCall.ai_feedback) {
             aiFeedback = _voiceCall.ai_feedback as AIFeedback;
             companionFeedbackUsed = true;
@@ -4269,7 +4291,7 @@ Deno.serve(async (req) => {
           }
         }
         if (!aiFeedback) {
-          aiFeedback = buildBuiltinAIFeedback(builtinKey, built, timeContext, companionMessage);
+          aiFeedback = buildBuiltinAIFeedback(builtinKey, built, timeContext, voiceSignalsEnabled ? null : companionMessage);
           if (aiFeedback) {
             companionFeedbackUsed = true;
             companionMessage = aiFeedback.emotion_line;
@@ -4804,6 +4826,14 @@ Deno.serve(async (req) => {
       if (_secondCall.duration_ms > 0) {
         console.log(`[feedback] second_call expense ok=${!_secondCall.error} duration=${_secondCall.duration_ms}ms`);
       }
+      if (voiceSignalsEnabled) {
+        companionVoiceDebug = {
+          enabled: true,
+          error: _secondCall.error ?? null,
+          signals: _secondCall.signals.map((s) => s.kind),
+          number_violations: _secondCall.number_violations ?? [],
+        };
+      }
       // 如果二次调用成功产出有效反馈，优先使用；否则回退到规则生成
       if (_secondCall.ai_feedback) {
         aiFeedback = _secondCall.ai_feedback as AIFeedback;
@@ -4816,7 +4846,12 @@ Deno.serve(async (req) => {
         ai.companion_message = companionMessage;
         aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
       } else {
-        aiFeedback = buildExpenseAIFeedback(ai, normalizedAmount, timeContext, possibleDuplicate);
+        aiFeedback = buildExpenseAIFeedback(
+          voiceSignalsEnabled ? { ...ai, companion_message: null } : ai,
+          normalizedAmount,
+          timeContext,
+          possibleDuplicate,
+        );
         if (aiFeedback) {
           companionFeedbackUsed = true;
           companionMessage = aiFeedback.emotion_line;
@@ -4969,7 +5004,3 @@ Deno.serve(async (req) => {
     }, { mode: responseMode, status: 500 });
   }
 });
-
-
-
-
