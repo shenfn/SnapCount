@@ -35,13 +35,17 @@ const PROMPTS_TS_PATH = path.resolve(PROJECT_ROOT, 'supabase', 'functions', 'ing
 const args = process.argv.slice(2)
 let imagePath = ''
 let noVisionThinking = false
+let visionModelArg = null
+let feedbackModelArg = null
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--image' && args[i + 1]) imagePath = args[i + 1]
   if (args[i] === '--no-vision-thinking') noVisionThinking = true
+  if (args[i] === '--vision-model' && args[i + 1]) visionModelArg = args[i + 1]
+  if (args[i] === '--feedback-model' && args[i + 1]) feedbackModelArg = args[i + 1]
 }
 
 if (!imagePath) {
-  console.error('Usage: npx tsx local-simulate.mjs --image <path> [--no-vision-thinking]')
+  console.error('Usage: npx tsx local-simulate.mjs --image <path> [--no-vision-thinking] [--vision-model <model>] [--feedback-model <model>]')
   process.exit(1)
 }
 
@@ -83,10 +87,12 @@ if (!QWEN_API_KEY) {
 }
 
 const QWEN_ENDPOINT = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
-// 和 EF 保持一致：截图用 qwen3.6-flash，照片用 qwen3.7-plus，文案用 qwen3.6-flash
-const QWEN_SCREENSHOT_MODEL = envLocal.QWEN_MODEL || 'qwen3.6-flash'
-const QWEN_PHOTO_MODEL = envLocal.QWEN_PHOTO_MODEL || 'qwen3.7-plus'
-const QWEN_FEEDBACK_MODEL = envLocal.FEEDBACK_TEXT_MODEL || QWEN_SCREENSHOT_MODEL
+// 和 EF 保持一致：截图用 qwen3.6-flash，照片用 qwen3.7-plus
+// 文案默认用 qwen-plus（文本能力强于 flash），可被命令行参数覆盖
+const DEFAULT_VISION_MODEL = envLocal.QWEN_MODEL || 'qwen3.6-flash'
+const DEFAULT_FEEDBACK_MODEL = envLocal.FEEDBACK_TEXT_MODEL || 'qwen-plus'
+const QWEN_SCREENSHOT_MODEL = visionModelArg || DEFAULT_VISION_MODEL
+const QWEN_FEEDBACK_MODEL = feedbackModelArg || DEFAULT_FEEDBACK_MODEL
 
 // ═══════════════════════════════════════════════
 // 加载 prompts.ts
@@ -153,6 +159,10 @@ async function callVision(imageBase64, mime, promptText, useThinking) {
     max_completion_tokens: 4096,
     enable_thinking: useThinking,
   }
+  // 关闭 thinking 时显式设置 thinking_budget=0（部分模型要求）
+  if (!useThinking) {
+    body.thinking_budget = 0
+  }
 
   const resp = await fetch(QWEN_ENDPOINT, {
     method: 'POST',
@@ -166,17 +176,25 @@ async function callVision(imageBase64, mime, promptText, useThinking) {
 
   if (!resp.ok) {
     const txt = await resp.text()
+    // 友好提示：部分模型（如 qwen3.7-plus）不支持关闭 thinking
+    if (resp.status === 400 && txt.includes('thinking_budget') && !useThinking) {
+      throw new Error(`模型 ${QWEN_SCREENSHOT_MODEL} 不支持关闭深度思考，请取消勾选「极速模式」或切换为 qwen3.6-flash`)
+    }
     throw new Error(`Vision API error ${resp.status}: ${txt}`)
   }
 
   const data = await resp.json()
   const message = data?.choices?.[0]?.message ?? {}
+  const finishReason = data?.choices?.[0]?.finish_reason ?? null
   const rawText = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? {})
+  const reasoningText = typeof message.reasoning_content === 'string' ? message.reasoning_content : null
   const parsed = extractJsonFromText(rawText)
   return {
     rawText,
+    reasoningText,
     parsed,
     parse_ok: parsed !== null,
+    finishReason,
     usage: data?.usage || null,
   }
 }
@@ -250,8 +268,11 @@ try {
     vision_output: {
       model: QWEN_SCREENSHOT_MODEL,
       raw_text: visionResult.rawText,
+      reasoning_text: visionResult.reasoningText,
       parsed: visionResult.parsed,
       parse_ok: visionResult.parse_ok,
+      finish_reason: visionResult.finishReason,
+      truncated: visionResult.finishReason === 'length',
       usage: visionResult.usage,
     },
     feedback_prompt: null,

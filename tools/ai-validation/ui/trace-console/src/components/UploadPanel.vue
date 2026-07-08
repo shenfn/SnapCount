@@ -10,6 +10,12 @@
     </div>
 
     <div class="panel-body">
+      <!-- 远程模式账号提示 -->
+      <div class="remote-account-banner" v-if="mode === 'remote' && accountLabel">
+        当前使用账号：<strong>{{ accountLabel }}</strong>
+        <span class="banner-hint">上传将走真实 EF，使用该账号的 upload_token</span>
+      </div>
+
       <!-- ═══ 空闲状态：选择图片 ═══ -->
       <template v-if="status === 'idle'">
         <!-- 模式切换 -->
@@ -77,6 +83,22 @@
           </label>
         </div>
 
+        <!-- 模型选择（仅本地模拟模式） -->
+        <div class="model-select-row" v-if="simulateMode">
+          <div class="model-select-item">
+            <label class="model-label">视觉模型</label>
+            <select v-model="visionModel" class="model-select">
+              <option v-for="opt in VISION_MODEL_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            </select>
+          </div>
+          <div class="model-select-item">
+            <label class="model-label">文案模型</label>
+            <select v-model="feedbackModel" class="model-select">
+              <option v-for="opt in FEEDBACK_MODEL_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            </select>
+          </div>
+        </div>
+
         <!-- 上传按钮 -->
         <button
           class="start-btn"
@@ -114,62 +136,61 @@
         </div>
       </template>
 
-      <!-- ═══ 本地模拟完成 ═══ -->
+      <!-- ═══ 本地模拟完成 - 结构化展示 ═══ -->
       <template v-else-if="status === 'done' && simulateMode">
         <div class="sim-result-area">
           <div class="result-icon">✅</div>
           <div class="result-title">模拟完成（{{ Math.round(elapsed / 1000) }}s）</div>
 
+          <!-- 原图预览 - 方便对比模型输出和图片细节 -->
+          <div class="sim-section" v-if="previewUrl">
+            <div class="sim-section-title">原图 <span class="sim-section-hint">点击图片放大/缩小</span></div>
+            <img
+              :src="previewUrl"
+              class="sim-preview-img"
+              :class="{ enlarged: previewEnlarged }"
+              @click="previewEnlarged = !previewEnlarged"
+            />
+          </div>
+
           <!-- 解析状态 -->
           <div class="sim-section">
             <div class="sim-section-title">
               解析状态
-              <span class="parse-badge" :class="simResult?.vision_output?.parse_ok ? 'ok' : 'fail'">
-                {{ simResult?.vision_output?.parse_ok ? '视觉OK' : '视觉解析失败' }}
+              <span class="parse-badge" :class="simResult?.vision_output?.parsed ? 'ok' : 'fail'">
+                {{ simResult?.vision_output?.parsed ? '视觉OK' : (simResult?.vision_output?.truncated ? '思考截断' : '视觉解析失败') }}
               </span>
-              <span v-if="simResult?.feedback_output" class="parse-badge" :class="simResult?.feedback_output?.parse_ok ? 'ok' : 'fail'">
-                {{ simResult?.feedback_output?.parse_ok ? '文案OK' : '文案解析失败' }}
+              <span v-if="simResult?.vision_output?.truncated" class="parse-badge warn">
+                {{ simResult?.vision_output?.usage?.completion_tokens || '?' }} tokens 已用完
               </span>
-              <span v-if="simResult?.vision_thinking_enabled === false" class="parse-badge warn">极速模式</span>
+              <span v-if="simResult?.feedback_output?.parsed" class="parse-badge ok">文案OK</span>
             </div>
           </div>
 
-          <!-- 视觉识别输出 - 结构化展示 -->
+          <!-- 视觉识别输出 -->
           <div class="sim-section">
             <div class="sim-section-title">视觉识别输出 <span class="sim-model">{{ simResult?.vision_output?.model || '' }}</span></div>
-            <template v-if="simResult?.vision_output?.parse_ok && simResult?.vision_output?.parsed">
+            <template v-if="simResult?.vision_output?.parsed">
               <div class="field-grid">
-                <div class="field-item">
+                <div class="field-item" v-if="simResult.vision_output.parsed.record_type">
                   <span class="field-label">record_type</span>
-                  <span class="field-value" :class="simResult.vision_output.parsed.record_type">{{ simResult.vision_output.parsed.record_type || '-' }}</span>
+                  <span class="field-value">{{ simResult.vision_output.parsed.record_type }}</span>
                 </div>
-                <div class="field-item">
+                <div class="field-item" v-if="simResult.vision_output.parsed.domain_key">
                   <span class="field-label">domain_key</span>
-                  <span class="field-value">{{ simResult.vision_output.parsed.domain_key || '-' }}</span>
+                  <span class="field-value">{{ simResult.vision_output.parsed.domain_key }}</span>
                 </div>
-                <div class="field-item">
+                <div class="field-item" v-if="simResult.vision_output.parsed.amount != null">
                   <span class="field-label">amount</span>
-                  <span class="field-value">{{ simResult.vision_output.parsed.amount ?? '-' }}</span>
-                </div>
-                <div class="field-item">
-                  <span class="field-label">merchant_name</span>
-                  <span class="field-value">{{ simResult.vision_output.parsed.merchant_name || '-' }}</span>
-                </div>
-                <div class="field-item">
-                  <span class="field-label">occurred_at</span>
-                  <span class="field-value">{{ simResult.vision_output.parsed.occurred_at || '-' }}</span>
-                </div>
-                <div class="field-item">
-                  <span class="field-label">confidence</span>
-                  <span class="field-value">{{ simResult.vision_output.parsed.confidence ?? '-' }}</span>
+                  <span class="field-value">{{ simResult.vision_output.parsed.amount }}</span>
                 </div>
                 <div class="field-item" v-if="simResult.vision_output.parsed.title">
                   <span class="field-label">title</span>
                   <span class="field-value">{{ simResult.vision_output.parsed.title }}</span>
                 </div>
-                <div class="field-item" v-if="simResult.vision_output.parsed.companion_message">
-                  <span class="field-label">companion_message</span>
-                  <span class="field-value">{{ simResult.vision_output.parsed.companion_message }}</span>
+                <div class="field-item" v-if="simResult.vision_output.parsed.confidence != null">
+                  <span class="field-label">confidence</span>
+                  <span class="field-value">{{ simResult.vision_output.parsed.confidence }}</span>
                 </div>
               </div>
               <details class="raw-json-details">
@@ -179,16 +200,33 @@
             </template>
             <template v-else>
               <div class="parse-error-box">
-                <div class="parse-error-label">JSON 解析失败，原始输出：</div>
-                <pre class="sim-json error">{{ simResult?.vision_output?.raw_text?.slice(0, 2000) || '无输出' }}</pre>
+                <!-- 截断提示 -->
+                <div class="parse-error-label" v-if="simResult?.vision_output?.truncated">
+                  ⚠️ 模型思考过程过长（{{ simResult?.vision_output?.finish_reason }}），用完了 {{ simResult?.vision_output?.usage?.completion_tokens || '?' }} token 配额，JSON 答案未输出。
+                  <br />建议：关闭深度思考（极速模式），或换用更简单的图片测试。
+                </div>
+                <div class="parse-error-label" v-else>JSON 解析失败，原始输出：</div>
+
+                <!-- 思考过程（如果单独存在） -->
+                <details class="raw-json-details" v-if="simResult?.vision_output?.reasoning_text">
+                  <summary>模型思考过程（{{ simResult.vision_output.reasoning_text.length }} 字）</summary>
+                  <pre class="sim-json">{{ simResult.vision_output.reasoning_text.slice(0, 3000) }}</pre>
+                </details>
+
+                <!-- 原始输出 -->
+                <details class="raw-json-details" v-if="simResult?.vision_output?.raw_text">
+                  <summary>message.content 原始输出</summary>
+                  <pre class="sim-json error">{{ simResult.vision_output.raw_text.slice(0, 2000) }}</pre>
+                </details>
+                <pre class="sim-json error" v-if="!simResult?.vision_output?.reasoning_text && !simResult?.vision_output?.raw_text">无输出</pre>
               </div>
             </template>
           </div>
 
-          <!-- 文案生成输出 - 结构化展示 -->
+          <!-- 文案生成输出 -->
           <div class="sim-section" v-if="simResult?.feedback_output">
             <div class="sim-section-title">文案生成输出 <span class="sim-model">{{ simResult?.feedback_output?.model || '' }}</span></div>
-            <template v-if="simResult?.feedback_output?.parse_ok && simResult?.feedback_output?.parsed">
+            <template v-if="simResult?.feedback_output?.parsed">
               <div class="field-grid">
                 <div class="field-item" v-if="simResult.feedback_output.parsed.companion_message">
                   <span class="field-label">companion_message</span>
@@ -209,10 +247,6 @@
                 <div class="field-item" v-if="simResult.feedback_output.parsed.ai_feedback?.utility_line">
                   <span class="field-label">utility_line</span>
                   <span class="field-value">{{ simResult.feedback_output.parsed.ai_feedback.utility_line }}</span>
-                </div>
-                <div class="field-item" v-if="simResult.feedback_output.parsed.ai_feedback?.detail_reason">
-                  <span class="field-label">detail_reason</span>
-                  <span class="field-value">{{ simResult.feedback_output.parsed.ai_feedback.detail_reason }}</span>
                 </div>
               </div>
               <details class="raw-json-details">
@@ -241,17 +275,21 @@
             </div>
           </div>
 
-          <!-- 点评面板 -->
+          <!-- 点评面板 - 使用 server 返回的真实 caseKey，确保和 trace.json 路径一致 -->
           <ReviewPanel
-            v-if="simCaseKey"
+            v-if="resultCaseKey"
+            :open="true"
             :run-id="runId"
-            :case-key="simCaseKey"
+            :case-key="resultCaseKey"
             mode="local-simulate"
             :sim-snapshot="simSnapshot"
             @saved="onReviewSaved"
           />
 
-          <button class="result-btn" @click="reset">再次模拟</button>
+          <div class="sim-actions">
+            <button class="result-btn" @click="onViewResult">查看结果</button>
+            <button class="reset-btn" @click="reset">再次模拟</button>
+          </div>
         </div>
       </template>
 
@@ -283,9 +321,18 @@ import ReviewPanel from './ReviewPanel.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  accountKey: { type: String, default: '' },
+  accounts: { type: Array, default: () => [] },
+  mode: { type: String, default: 'local' }, // 'local' | 'remote'
 })
 
-const emit = defineEmits(['close', 'completed'])
+const emit = defineEmits(['close', 'completed', 'simulated'])
+
+// 远程模式：当前账号标签
+const accountLabel = computed(() => {
+  const acc = props.accounts.find(a => a.key === props.accountKey)
+  return acc?.label || ''
+})
 
 // 状态
 const status = ref('idle') // idle | running | done | error
@@ -301,7 +348,25 @@ const progressStep = ref('starting')
 const errorMsg = ref('')
 const resultCaseKey = ref('')
 const simResult = ref(null)
+const previewEnlarged = ref(false)
 const noVisionThinking = ref(false)
+const visionModel = ref('')
+const feedbackModel = ref('')
+
+// 模型选项
+const VISION_MODEL_OPTIONS = [
+  { value: '', label: '默认（qwen3.6-flash）' },
+  { value: 'qwen3.6-flash', label: 'qwen3.6-flash（快速）' },
+  { value: 'qwen3.7-plus', label: 'qwen3.7-plus（质量）' },
+  { value: 'qwen-vl-plus', label: 'qwen-vl-plus（经典）' },
+  { value: 'qwen-vl-max', label: 'qwen-vl-max（最强）' },
+]
+const FEEDBACK_MODEL_OPTIONS = [
+  { value: '', label: '默认（qwen-plus）' },
+  { value: 'qwen-plus', label: 'qwen-plus（推荐）' },
+  { value: 'qwen3.6-flash', label: 'qwen3.6-flash（快速）' },
+  { value: 'qwen-max', label: 'qwen-max（最强）' },
+]
 
 // 默认 runId
 const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -401,6 +466,10 @@ async function startUpload() {
 // 线上上传
 async function startOnlineUpload() {
   const payload = { ...selectedFileData.value, runId: runId.value }
+  // 远程模式：传入 accountKey，使用该账号的 upload_token
+  if (props.mode === 'remote' && props.accountKey) {
+    payload.accountKey = props.accountKey
+  }
   const { data, error } = await uploadTest(payload)
   if (error) {
     status.value = 'error'
@@ -413,7 +482,12 @@ async function startOnlineUpload() {
 
 // 本地模拟
 async function startSimulate() {
-  const payload = { ...selectedFileData.value, noVisionThinking: noVisionThinking.value }
+  const payload = {
+    ...selectedFileData.value,
+    noVisionThinking: noVisionThinking.value,
+    visionModel: visionModel.value || null,
+    feedbackModel: feedbackModel.value || null,
+  }
   const { data, error } = await localSimulate(payload)
   if (error) {
     status.value = 'error'
@@ -449,10 +523,18 @@ function startPolling(jobId, isSimulate) {
       stopElapsedTimer()
       status.value = 'done'
       if (isSimulate) {
+        // 本地模拟完成：保留面板展示结果和点评
+        // simResult 用于即时展示，runId/caseKey 用于静默落盘
+        // 不 emit completed，不关闭面板，让用户在面板内点评
         simResult.value = data.result
-      } else {
         resultCaseKey.value = data.traceCaseKey
-        emit('completed', { runId: data.runId, caseKey: data.traceCaseKey })
+        if (data.runId) runId.value = data.runId
+        // 通知 App.vue 已有新 trace（静默刷新批次列表，但不跳转）
+        emit('simulated', { runId: data.runId, caseKey: data.traceCaseKey })
+      } else {
+        // 线上验证完成：也保留面板，用户点"查看结果"才跳转
+        resultCaseKey.value = data.traceCaseKey
+        emit('simulated', { runId: data.runId, caseKey: data.traceCaseKey })
       }
     } else if (data.status === 'error') {
       stopPolling()
@@ -480,14 +562,15 @@ function stopElapsedTimer() {
 // 操作
 // ═══════════════════════════════════════════════
 
-// 本地模拟的 caseKey（用于点评）
+// 本地模拟的 caseKey（用于点评）— 追加时间戳防覆盖，支持同一张图多次对比
 const simCaseKey = computed(() => {
   if (!simResult.value?.vision_output?.parsed) return ''
   const parsed = simResult.value.vision_output.parsed
   const domain = parsed.domain_key || parsed.record_type || 'uncertain'
   const fileName = selectedFileName.value.replace(/\.[^.]+$/, '') || 'unknown'
   const dateStr = new Date().toISOString().slice(0, 10)
-  return `single/${domain}/${dateStr}/${fileName}`
+  const timeStr = new Date().toTimeString().slice(0, 8).replace(/:/g, '')
+  return `single/${domain}/${dateStr}/${fileName}-${timeStr}`
 })
 
 // 点评快照（精简版，只存关键字段摘要）
@@ -501,6 +584,7 @@ const simSnapshot = computed(() => {
     vision_parse_ok: simResult.value.vision_output?.parse_ok ?? false,
     vision_thinking_enabled: simResult.value.vision_thinking_enabled !== false,
     feedback_model: simResult.value.feedback_output?.model || '',
+    image_file_name: selectedFileName.value || '',
     vision_parsed_summary: vp ? {
       record_type: vp.record_type || null,
       domain_key: vp.domain_key || null,
@@ -535,6 +619,7 @@ function reset() {
   errorMsg.value = ''
   resultCaseKey.value = ''
   simResult.value = null
+  previewEnlarged.value = false
   elapsed.value = 0
 }
 
@@ -566,6 +651,17 @@ onUnmounted(() => { stopPolling(); stopElapsedTimer() })
   border: 1px solid var(--border); cursor: pointer; font-family: var(--font-sans);
 }
 .panel-body { padding: var(--space-lg); overflow-y: auto; flex: 1; }
+
+/* 远程模式账号提示 */
+.remote-account-banner {
+  font-size: 12px; color: var(--text-secondary);
+  background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: var(--radius-md); padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-md); display: flex; align-items: center; gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+.remote-account-banner strong { color: #a78bfa; }
+.remote-account-banner .banner-hint { font-size: 10px; color: var(--text-muted); }
 
 /* 模式切换 */
 .mode-toggle { display: flex; flex-direction: column; gap: var(--space-xs); margin-bottom: var(--space-md); }
@@ -664,6 +760,45 @@ onUnmounted(() => { stopPolling(); stopElapsedTimer() })
 .sim-json.error { border-color: var(--accent-red); color: var(--accent-red); }
 .token-info { display: flex; gap: var(--space-md); font-size: 11px; color: var(--text-muted); }
 
+/* 原图预览 */
+.sim-preview-img {
+  width: 100%; max-height: 200px; object-fit: contain;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  cursor: zoom-in; transition: max-height 0.2s;
+}
+.sim-preview-img.enlarged { max-height: none; cursor: zoom-out; }
+.sim-section-hint { font-size: 10px; font-weight: 400; color: var(--text-muted); }
+
+/* 字段网格 */
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xs); margin-bottom: var(--space-sm); }
+.field-item { display: flex; flex-direction: column; gap: 2px; background: var(--bg-hover); padding: var(--space-xs) var(--space-sm); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.field-label { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+.field-value { font-size: 12px; color: var(--text-primary); word-break: break-all; }
+
+/* 解析状态徽章 */
+.parse-badge { font-size: 10px; padding: 1px 6px; border-radius: var(--radius-sm); font-family: var(--font-sans); font-weight: 600; }
+.parse-badge.ok { background: rgba(63,185,80,0.15); color: var(--accent-green); border: 1px solid rgba(63,185,80,0.3); }
+.parse-badge.fail { background: rgba(248,81,73,0.15); color: var(--accent-red); border: 1px solid rgba(248,81,73,0.3); }
+.parse-badge.warn { background: rgba(210,153,34,0.15); color: var(--accent-yellow); border: 1px solid rgba(210,153,34,0.3); }
+
+/* 原始 JSON 折叠 */
+.raw-json-details { margin-top: var(--space-xs); }
+.raw-json-details summary { font-size: 11px; color: var(--text-muted); cursor: pointer; padding: var(--space-xs) 0; }
+.raw-json-details summary:hover { color: var(--accent-blue); }
+
+/* 解析错误框 */
+.parse-error-box { }
+.parse-error-label { font-size: 11px; color: var(--accent-red); margin-bottom: var(--space-xs); }
+
+/* 操作按钮组 */
+.sim-actions { display: flex; gap: var(--space-sm); justify-content: center; margin-top: var(--space-lg); }
+.reset-btn {
+  font-size: 13px; padding: 6px 18px; border-radius: var(--radius-md);
+  background: var(--bg-hover); color: var(--text-primary);
+  border: 1px solid var(--border); cursor: pointer; font-family: var(--font-sans); font-weight: 600;
+}
+.reset-btn:hover { border-color: var(--accent-blue); }
+
 /* thinking 开关 */
 .thinking-toggle { margin-top: var(--space-sm); }
 .thinking-option {
@@ -671,6 +806,24 @@ onUnmounted(() => { stopPolling(); stopElapsedTimer() })
   font-size: 11px; color: var(--text-secondary); cursor: pointer;
 }
 .thinking-option input { cursor: pointer; }
+
+/* 模型选择 */
+.model-select-row {
+  display: flex; gap: var(--space-md); margin-top: var(--space-sm);
+}
+.model-select-item {
+  display: flex; flex-direction: column; gap: 2px; flex: 1;
+}
+.model-label {
+  font-size: 10px; color: var(--text-muted);
+}
+.model-select {
+  background: var(--bg-hover); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 4px 8px; font-size: 11px; font-family: var(--font-sans);
+  outline: none; cursor: pointer;
+}
+.model-select:focus { border-color: var(--accent-blue); }
 
 /* 解析状态徽标 */
 .parse-badge {

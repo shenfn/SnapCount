@@ -1,0 +1,10 @@
+{
+  "test": {
+    "label": "测试账号",
+    "upload_token": "your-test-account-upload-token-here"
+  },
+  "test2": {
+    "label": "your-email@example.com",
+    "upload_token": "your-real-account-upload-token-here"
+  }
+}

@@ -1,27 +1,38 @@
 /**
  * ═══════════════════════════════════════════════
- * AI 识别链路追踪台 - 本地文件读取服务
+ * AI 识别链路追踪台 - 本地服务
  * ═══════════════════════════════════════════════
  *
  * 职责：
- *   只读本地 test-results/ 和 test-cases/ 目录，为追踪台前端提供数据 API。
+ *   1. 只读本地 test-results/ 和 test-cases/ 目录，为追踪台前端提供数据 API。
+ *   2. 远程模式：通过 Supabase service_role 只读查询真实账号的 AI 识别记录。
+ *   3. 上传测试：通过 upload_token 向远程 EF 发起真实识别请求。
  *
  * 安全约束：
  *   - 只监听 127.0.0.1:5181，不暴露外网
- *   - 图片接口只允许 test-cases/ 目录
- *   - 路径安全校验：拒绝 .. 和绝对路径
- *   - 不读取任何 .env 文件，不需要任何密钥
- *   - 不执行任何线上调用
+ *   - 本地图片接口只允许 test-cases/ 目录，路径安全校验拒绝 .. 和绝对路径
+ *   - service_role key 仅在服务端使用，不出现在任何 API 响应或前端代码中
+ *   - 远程查询全部为只读 .select()，禁止 insert/update/delete
+ *   - 远程写操作仅限上传测试（通过 upload_token 调 EF）
+ *   - 账号配置 accounts.json 不入 Git，只存 upload_token，不存 user_id
  *
  * API 路由：
- *   GET  /api/runs                              列出所有批次
+ *   GET  /api/runs                              列出所有本地批次
  *   GET  /api/runs/:runId/summary               读取批次 summary.json
  *   GET  /api/runs/:runId/traces                列出批次内所有 trace 摘要
  *   GET  /api/runs/:runId/traces/:caseKey       读取单个完整 trace.json
- *   GET  /api/images?path=<relative-path>       读取测试图片（仅限 test-cases/）
+ *   GET  /api/images?path=<relative-path>       读取本地测试图片（仅限 test-cases/）
  *   GET  /api/prompt                            返回完整 prompt 快照
  *   POST /api/upload-test                       上传图片执行测试（返回 jobId）
  *   GET  /api/upload-test/:jobId/status         轮询上传任务状态
+ *
+ *   GET  /api/accounts                          列出可用账号（仅 key + label）
+ *   GET  /api/remote/accounts/:accountKey/days  查询远程账号有记录的日期列表
+ *   GET  /api/remote/accounts/:accountKey/days/:date/traces  查询某天的记录列表
+ *   GET  /api/remote/accounts/:accountKey/days/:date/traces/:logId  查询单条记录详情
+ *   GET  /api/remote/images?logId=...           下载远程图片（按 logId 校验归属）
+ *   GET  /api/remote/accounts/:accountKey/memory  查询 companion 记忆上下文
+ *
  *   GET  /api/health                            健康检查
  */
 
@@ -32,6 +43,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
+import { createClient } from '@supabase/supabase-js'
+import WebSocket from 'ws'  // Node.js 20 无原生 WebSocket，需手动提供
+import { buildTraceFromAiLog, toShanghaiDate, parseRawDebug } from '../lib/trace-builder.mjs'
 
 const require = createRequire(import.meta.url)
 
@@ -382,6 +396,45 @@ app.get('/api/runs/:runId/traces/:caseKey(*)', async (req, res) => {
 })
 
 // ═══════════════════════════════════════════════
+// 远程点评：自动缓存图片到本地
+// 点评远程记录时，把对应图片下载到 test-results/<run-id>/_images/
+// 这样离线分析时能直接从本地读取，不用再请求远程
+// ═══════════════════════════════════════════════
+async function cacheRemoteImageForReview(review, traceSnapshot) {
+  if (!supabaseAdmin || !traceSnapshot) return
+
+  // 从 trace 快照中提取 logId 和 image_url
+  const logId = traceSnapshot.trace_id || traceSnapshot.ai_log_id
+  const imageUrl = traceSnapshot.case?.image_relative_path || traceSnapshot.case?.image_url
+  if (!logId || !imageUrl) return
+
+  // 从 image_url 下载图片（Supabase Storage 私有桶）
+  const { data, error } = await supabaseAdmin.storage
+    .from('receipt-images')
+    .download(imageUrl)
+
+  if (error || !data) {
+    console.warn(`[review] 下载图片失败: ${imageUrl}`, error?.message)
+    return
+  }
+
+  // 保存到点评同目录下的 _images 子目录
+  const runDir = path.join(TEST_RESULTS_DIR, review.run_id)
+  const imageDir = path.join(runDir, '_images')
+  await mkdir(imageDir, { recursive: true })
+
+  // 文件名用 logId + 原始扩展名
+  const ext = path.extname(imageUrl) || '.jpg'
+  const localImagePath = path.join(imageDir, `${logId}${ext}`)
+  const buffer = Buffer.from(await data.arrayBuffer())
+  await writeFile(localImagePath, buffer)
+
+  // 在 review 中记录本地图片路径
+  review.local_image_path = path.relative(TEST_RESULTS_DIR, localImagePath)
+  console.log(`[review] 图片已缓存: ${review.local_image_path}`)
+}
+
+// ═══════════════════════════════════════════════
 // 路由：POST /api/runs/:runId/reviews/:caseKey - 保存点评
 // ═══════════════════════════════════════════════
 // 请求体：review-v1 对象（不含 reviewed_at / case_key / run_id，由服务端补）
@@ -443,6 +496,17 @@ app.post('/api/runs/:runId/reviews/:caseKey(*)', express.json({ limit: '1mb' }),
       notes: typeof body.notes === 'string' ? body.notes.slice(0, 2000) : '',
       suggested_action: typeof body.suggested_action === 'string' ? body.suggested_action.slice(0, 500) : '',
       sim_snapshot: body.sim_snapshot || null,
+      trace_snapshot: body.trace_snapshot || null,
+    }
+
+    // 远程模式：点评时自动缓存对应图片到本地
+    // 这样离线分析时能直接从本地读取图片，不用再请求远程
+    if (runId.startsWith('remote-') && body.trace_snapshot) {
+      try {
+        await cacheRemoteImageForReview(review, body.trace_snapshot)
+      } catch (imgErr) {
+        console.warn('[review] 缓存远程图片失败（不影响点评保存）:', imgErr.message)
+      }
     }
 
     await writeFile(reviewPath, JSON.stringify(review, null, 2), 'utf-8')
@@ -722,7 +786,7 @@ const simulateJobs = new Map()
 
 app.post('/api/local-simulate', express.json({ limit: '20mb' }), async (req, res) => {
   try {
-    const { mode, imageBase64, existingPath, noVisionThinking } = req.body
+    const { mode, imageBase64, existingPath, noVisionThinking, visionModel, feedbackModel } = req.body
 
     let imagePath = ''
 
@@ -763,7 +827,7 @@ app.post('/api/local-simulate', express.json({ limit: '20mb' }), async (req, res
       result: null,
     })
 
-    runLocalSimulate(jobId, imagePath, noVisionThinking === true)
+    runLocalSimulate(jobId, imagePath, noVisionThinking === true, visionModel || null, feedbackModel || null)
 
     res.json({ jobId })
   } catch (err) {
@@ -787,6 +851,8 @@ app.get('/api/local-simulate/:jobId/status', (req, res) => {
     output: job.output.slice(-10),
     error: job.error,
     result: job.result,
+    runId: job.runId || null,
+    traceCaseKey: job.traceCaseKey || null,
   })
 })
 
@@ -794,7 +860,7 @@ app.get('/api/local-simulate/:jobId/status', (req, res) => {
 // 异步执行本地模拟
 // ═══════════════════════════════════════════════
 
-async function runLocalSimulate(jobId, imagePath, noVisionThinking) {
+async function runLocalSimulate(jobId, imagePath, noVisionThinking, visionModel, feedbackModel) {
   const job = simulateJobs.get(jobId)
   const scriptPath = path.join(__dirname, 'local-simulate.mjs')
   const relativeImagePath = path.relative(PROJECT_ROOT, imagePath).replace(/\\/g, '/')
@@ -803,6 +869,8 @@ async function runLocalSimulate(jobId, imagePath, noVisionThinking) {
   const tsxPath = path.join(__dirname, 'node_modules', '.bin', 'tsx')
   const args = [scriptPath, '--image', relativeImagePath]
   if (noVisionThinking) args.push('--no-vision-thinking')
+  if (visionModel) args.push('--vision-model', visionModel)
+  if (feedbackModel) args.push('--feedback-model', feedbackModel)
   const child = spawn(tsxPath, args, {
     cwd: PROJECT_ROOT,
     env: { ...process.env, ...envLocal },
@@ -824,7 +892,7 @@ async function runLocalSimulate(jobId, imagePath, noVisionThinking) {
     }
   })
 
-  child.on('close', (code) => {
+  child.on('close', async (code) => {
     if (code !== 0) {
       job.status = 'error'
       job.step = 'failed'
@@ -835,14 +903,249 @@ async function runLocalSimulate(jobId, imagePath, noVisionThinking) {
     try {
       const result = JSON.parse(stdoutData.trim())
       job.result = result
+
+      // 生成 trace.json、移动图片、更新 summary
+      job.step = 'saving'
+      const traceInfo = await saveSimResultAsTrace(result, imagePath)
+      job.traceCaseKey = traceInfo.caseKey
+      job.runId = traceInfo.runId
+
       job.status = 'done'
       job.step = 'completed'
     } catch (err) {
       job.status = 'error'
       job.step = 'parse-failed'
-      job.error = `结果解析失败: ${err.message}`
+      job.error = `结果解析或保存失败: ${err.message}`
     }
   })
+}
+
+// ═══════════════════════════════════════════════
+// 本地模拟结果保存为 trace.json
+// ═══════════════════════════════════════════════
+
+async function saveSimResultAsTrace(result, originalImagePath) {
+  const visionParsed = result.vision_output?.parsed || {}
+  const feedbackParsed = result.feedback_output?.parsed || {}
+  const elapsedMs = result.elapsed_ms || 0
+
+  // 获取域
+  const domain = visionParsed.domain_key
+    || visionParsed.record_type
+    || 'uncertain'
+  const domainDir = (domain && domain !== 'uncertain' && domain !== 'unknown') ? domain : 'uncertain'
+
+  // 生成 runId
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const runId = `manual-sim-${today}`
+  const dateStr = new Date().toISOString().slice(0, 10)
+
+  // 移动图片（如果在 _pending 下）
+  const pendingDir = path.join(PROJECT_ROOT, 'test-cases', '_pending')
+  let finalImagePath = originalImagePath
+  let finalRelativePath = path.relative(PROJECT_ROOT, originalImagePath).replace(/\\/g, '/')
+
+  if (originalImagePath.startsWith(pendingDir)) {
+    const finalDir = path.join(PROJECT_ROOT, 'test-cases', domainDir, dateStr)
+    if (!existsSync(finalDir)) {
+      await mkdir(finalDir, { recursive: true })
+    }
+    const fileName = path.basename(originalImagePath)
+    const finalAbsPath = path.join(finalDir, fileName)
+    await rename(originalImagePath, finalAbsPath)
+    finalImagePath = finalAbsPath
+    finalRelativePath = path.relative(PROJECT_ROOT, finalAbsPath).replace(/\\/g, '/')
+  }
+
+  // 生成 trace.json
+  const timestamp = Date.now()
+  const traceDir = path.join(TEST_RESULTS_DIR, runId, 'single', domainDir, dateStr)
+  if (!existsSync(traceDir)) {
+    await mkdir(traceDir, { recursive: true })
+  }
+  const traceFileBase = `${timestamp}`
+  const traceFilePath = path.join(traceDir, `${traceFileBase}.trace.json`)
+  const caseKey = `single/${domainDir}/${dateStr}/${traceFileBase}`
+
+  // 构造 trace 数据（和线上 EF 的 trace.json 结构兼容）
+  const traceData = {
+    trace_id: `sim-${timestamp}`,
+    run_id: runId,
+    status: 'done',
+    created_at: new Date().toISOString(),
+    is_local_sim: true,
+    case: {
+      test_run_id: runId,
+      test_case_domain: domainDir,
+      test_case_date: dateStr,
+      test_case_file: finalRelativePath,
+      image_relative_path: finalRelativePath,
+      mode: 'local-simulate',
+    },
+    model_context: {
+      vision_mode: 'screenshot',
+      model_provider: 'qwen',
+      model_name: result.vision_output?.model || 'qwen3.6-flash',
+      feedback_model: result.feedback_output?.model || 'qwen3.6-flash',
+    },
+    steps: [
+      {
+        step_id: 'upload_request',
+        name: '本地模拟启动',
+        status: 'success',
+        duration_ms: elapsedMs,
+        input_snapshot: {
+          image: finalRelativePath,
+          mode: 'local-simulate',
+        },
+        output_snapshot: {
+          status: 'done',
+        },
+        user_visible: false,
+        visibility_level: 'L1',
+      },
+      {
+        step_id: 'prompt_build',
+        name: 'Prompt 构造',
+        status: 'success',
+        duration_ms: null,
+        input_snapshot: {},
+        output_snapshot: {
+          prompt_version: 'local-simulate',
+          prompt_snapshot_available: true,
+        },
+        user_visible: false,
+        visibility_level: 'L2',
+        artifact_refs: ['prompt'],
+      },
+      {
+        step_id: 'model_call',
+        name: '视觉识别调用',
+        status: 'success',
+        duration_ms: null,
+        input_snapshot: {
+          model: result.vision_output?.model || 'qwen3.6-flash',
+          temperature: 0.1,
+          enable_thinking: true,
+        },
+        output_snapshot: {
+          has_raw_text: !!result.vision_output?.raw_text,
+          has_extracted_json: !!visionParsed,
+          finish_reason: 'stop',
+        },
+        user_visible: false,
+        visibility_level: 'L2',
+        artifact_refs: ['model_raw'],
+      },
+      {
+        step_id: 'model_parse',
+        name: '模型解析',
+        status: 'success',
+        duration_ms: null,
+        input_snapshot: {},
+        output_snapshot: {
+          extracted_json_available: !!visionParsed,
+          record_type: visionParsed.record_type || null,
+          domain_key: visionParsed.domain_key || null,
+          title: visionParsed.title || null,
+          confidence: visionParsed.confidence || null,
+        },
+        user_visible: false,
+        visibility_level: 'L2',
+        artifact_refs: ['model_raw.extracted_json'],
+      },
+      {
+        step_id: 'companion_feedback',
+        name: '伴随文案 / AI 反馈',
+        status: 'success',
+        duration_ms: null,
+        input_snapshot: {},
+        output_snapshot: {
+          final: feedbackParsed.companion_message || null,
+          has_ai_feedback: !!feedbackParsed.ai_feedback,
+        },
+        user_visible: true,
+        visibility_level: 'L0',
+        artifact_refs: ['companion'],
+      },
+    ],
+    user_visible_outputs: [
+      {
+        output_type: 'app_companion_message',
+        label: 'App 伴随文案',
+        value: feedbackParsed.companion_message || '',
+        source_step: 'companion_feedback',
+        user_visible: true,
+      },
+      ...(feedbackParsed.ai_feedback ? [{
+        output_type: 'app_ai_feedback',
+        label: 'App AI 弹窗反馈',
+        value: feedbackParsed.ai_feedback,
+        source_step: 'companion_feedback',
+        user_visible: true,
+      }] : []),
+    ],
+    artifacts: {
+      model_raw: {
+        text: result.vision_output?.raw_text || '',
+        extracted_json: visionParsed,
+        usage: result.vision_output?.usage || null,
+      },
+      companion: {
+        final: feedbackParsed.companion_message || '',
+        ai_feedback: feedbackParsed.ai_feedback || null,
+      },
+      prompt: {
+        version: 'local-simulate',
+        vision_full_text: result.vision_prompt || '',
+        feedback_full_text: result.feedback_prompt || '',
+      },
+    },
+  }
+
+  await writeFile(traceFilePath, JSON.stringify(traceData, null, 2), 'utf-8')
+
+  // 更新 summary.json
+  await updateSimSummary(runId)
+
+  return { caseKey, runId, domain: domainDir }
+}
+
+// ═══════════════════════════════════════════════
+// 更新本地模拟批次的 summary.json
+// ═══════════════════════════════════════════════
+
+async function updateSimSummary(runId) {
+  const runDir = path.join(TEST_RESULTS_DIR, runId)
+  const summaryPath = path.join(runDir, 'summary.json')
+
+  // 统计当前批次的 trace 数量
+  const traceFiles = await findFilesRecursive(runDir, '.trace.json')
+  let successCount = 0
+  let feedbackCount = 0
+
+  for (const relPath of traceFiles) {
+    const { data } = await safeReadJson(path.join(runDir, relPath))
+    if (data) {
+      if (data.status === 'done') successCount++
+      if (data.user_visible_outputs?.some(o => o.output_type === 'app_ai_feedback')) feedbackCount++
+    }
+  }
+
+  const summary = {
+    run_id: runId,
+    generated_at: new Date().toISOString(),
+    response_mode: 'json',
+    capture_kind: 'local-simulate',
+    source_app: 'trace-console',
+    total_cases: traceFiles.length,
+    success_cases: successCount,
+    failed_cases: traceFiles.length - successCount,
+    ai_feedback_cases: feedbackCount,
+    dry_run: false,
+  }
+
+  await writeFile(summaryPath, JSON.stringify(summary, null, 2), 'utf-8')
 }
 
 // ═══════════════════════════════════════════════
@@ -851,13 +1154,16 @@ async function runLocalSimulate(jobId, imagePath, noVisionThinking) {
 // 接收图片（base64）或已有路径，spawn 脚本执行，返回 jobId
 //
 // 请求体 JSON:
-//   { mode: 'paste' | 'file', imageBase64?: string, existingPath?: string, runId?: string }
+//   { mode: 'paste' | 'file', imageBase64?: string, existingPath?: string, runId?: string, accountKey?: string }
+//
+// accountKey 可选，指定后使用该账号的 upload_token 执行测试（如 'test' / 'test2'）
+// 未指定时脚本使用默认测试账号 token
 //
 // 流程:
 //   1. paste 模式：保存到 test-cases/_pending/<timestamp>.png
 //   2. file 模式 + existingPath 在 test-cases 下：直接用原路径
 //   3. file 模式 + existingPath 不在 test-cases 下：复制到 _pending
-//   4. spawn 脚本执行
+//   4. spawn 脚本执行（带 --upload-token 如有 accountKey）
 //   5. 完成后从 trace 读取域，移动图片到 test-cases/<domain>/<date>/
 //   6. 更新 trace 中的路径字段
 // ═══════════════════════════════════════════════
@@ -866,10 +1172,19 @@ const uploadJobs = new Map()
 
 app.post('/api/upload-test', express.json({ limit: '20mb' }), async (req, res) => {
   try {
-    const { mode, imageBase64, existingPath, runId } = req.body
+    const { mode, imageBase64, existingPath, runId, accountKey } = req.body
 
     if (!mode || (mode !== 'paste' && mode !== 'file')) {
       return sendError(res, 400, 'Invalid mode', 'mode must be "paste" or "file"')
+    }
+
+    // 解析 accountKey → upload_token（可选）
+    let uploadToken = null
+    if (accountKey) {
+      if (!accountsConfig || !accountsConfig[accountKey]) {
+        return sendError(res, 400, 'Invalid accountKey', `账号 ${accountKey} 不存在`)
+      }
+      uploadToken = accountsConfig[accountKey].upload_token
     }
 
     // 生成默认 runId
@@ -939,7 +1254,7 @@ app.post('/api/upload-test', express.json({ limit: '20mb' }), async (req, res) =
     })
 
     // 异步执行脚本
-    runTestScript(jobId, imagePath, finalRunId)
+    runTestScript(jobId, imagePath, finalRunId, uploadToken)
 
     res.json({ jobId, runId: finalRunId })
   } catch (err) {
@@ -999,10 +1314,100 @@ function loadEnvLocal() {
 const envLocal = loadEnvLocal()
 
 // ═══════════════════════════════════════════════
+// Supabase 客户端 & 账号解析（远程模式）
+// ═══════════════════════════════════════════════
+
+const SUPABASE_URL = envLocal.VITE_SUPABASE_URL || envLocal.SUPABASE_URL || null
+const SUPABASE_SERVICE_ROLE_KEY = envLocal.SUPABASE_SERVICE_ROLE_KEY || null
+
+let supabaseAdmin = null
+if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+  supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    // Node.js 20 无原生 WebSocket，传入 ws 作为 realtime transport
+    // 我们只用 PostgREST + Storage，不订阅 realtime 频道，但构造函数仍需要 WebSocket 实现
+    realtime: { transport: WebSocket },
+  })
+} else {
+  console.warn('[远程模式] 未找到 SUPABASE_URL 或 SUPABASE_SERVICE_ROLE_KEY，远程查询功能不可用')
+}
+
+/**
+ * 加载账号配置文件
+ * @returns {Object|null} 账号配置
+ */
+function loadAccounts() {
+  const accountsPath = path.join(__dirname, 'accounts.json')
+  if (!existsSync(accountsPath)) {
+    return null
+  }
+  try {
+    const content = require('fs').readFileSync(accountsPath, 'utf-8')
+    return JSON.parse(content)
+  } catch (err) {
+    console.error('[账号配置] 解析失败:', err.message)
+    return null
+  }
+}
+
+const accountsConfig = loadAccounts()
+
+// 账号解析缓存：accountKey → { user_id, label, upload_token, resolved_at }
+const accountCache = new Map()
+const ACCOUNT_CACHE_TTL = 5 * 60 * 1000 // 5 分钟
+
+/**
+ * 通过 upload_token 解析账号的 user_id
+ * 使用 service_role 查询 user_configs 表，结果缓存 5 分钟
+ * @param {string} accountKey - 账号 key（如 'test' / 'test2'）
+ * @returns {Promise<{user_id: string, label: string, upload_token: string}|null>}
+ */
+async function resolveAccount(accountKey) {
+  if (!accountsConfig || !accountsConfig[accountKey]) {
+    return null
+  }
+  const account = accountsConfig[accountKey]
+
+  // 检查缓存
+  const cached = accountCache.get(accountKey)
+  if (cached && Date.now() - cached.resolved_at < ACCOUNT_CACHE_TTL) {
+    return cached
+  }
+
+  if (!supabaseAdmin) {
+    throw new Error('Supabase 客户端未初始化，无法解析账号')
+  }
+
+  // 通过 upload_token 查 user_configs 表获取 user_id
+  const { data, error } = await supabaseAdmin
+    .from('user_configs')
+    .select('user_id, is_active')
+    .eq('upload_token', account.upload_token)
+    .eq('is_active', true)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`查询 user_configs 失败: ${error.message}`)
+  }
+  if (!data || data.length === 0) {
+    throw new Error(`upload_token 无效或已停用: ${accountKey}`)
+  }
+
+  const resolved = {
+    user_id: data[0].user_id,
+    label: account.label,
+    upload_token: account.upload_token,
+    resolved_at: Date.now(),
+  }
+  accountCache.set(accountKey, resolved)
+  return resolved
+}
+
+// ═══════════════════════════════════════════════
 // 异步执行测试脚本
 // ═══════════════════════════════════════════════
 
-async function runTestScript(jobId, imagePath, runId) {
+async function runTestScript(jobId, imagePath, runId, uploadToken = null) {
   const job = uploadJobs.get(jobId)
   const scriptPath = path.join(PROJECT_ROOT, 'scripts', 'test-ingest-receipt.mjs')
   const relativeImagePath = path.relative(PROJECT_ROOT, imagePath).replace(/\\/g, '/')
@@ -1010,7 +1415,13 @@ async function runTestScript(jobId, imagePath, runId) {
   // 合并环境变量：process.env + .env.local（.env.local 优先）
   const childEnv = { ...process.env, ...envLocal }
 
-  const child = spawn('node', [scriptPath, '--image', relativeImagePath, '--run-id', runId], {
+  // 构建命令参数：--upload-token 仅在指定账号时传入
+  const scriptArgs = [scriptPath, '--image', relativeImagePath, '--run-id', runId]
+  if (uploadToken) {
+    scriptArgs.push('--upload-token', uploadToken)
+  }
+
+  const child = spawn('node', scriptArgs, {
     cwd: PROJECT_ROOT,
     env: childEnv,
     shell: false,
@@ -1174,6 +1585,331 @@ async function findTraceByImagePath(dir, targetPath) {
 }
 
 // ═══════════════════════════════════════════════
+// 远程模式：账号列表 & 查询 API
+// ═══════════════════════════════════════════════
+
+/**
+ * GET /api/accounts - 列出可用账号（仅 key + label，不含 token）
+ */
+app.get('/api/accounts', (req, res) => {
+  if (!accountsConfig) {
+    return sendError(res, 500, 'Accounts config not found', 'accounts.json 不存在，请参考 accounts.example.json 创建')
+  }
+  const list = Object.entries(accountsConfig).map(([key, val]) => ({
+    key,
+    label: val.label || key,
+  }))
+  res.json({ accounts: list })
+})
+
+/**
+ * 计算上海时区某天的 UTC 时间范围
+ * Shanghai = UTC+8，无夏令时
+ * @param {string} dateStr - YYYY-MM-DD
+ * @returns {{startUtc: string, endUtc: string}}
+ */
+function shanghaiDateToUtcRange(dateStr) {
+  const start = new Date(dateStr + 'T00:00:00+08:00')
+  const end = new Date(dateStr + 'T23:59:59+08:00')
+  return {
+    startUtc: start.toISOString(),
+    endUtc: end.toISOString(),
+  }
+}
+
+/**
+ * 判断图片状态
+ * @param {string|null} imageUrl
+ * @returns {'available'|'no_image_url'|'expired'}
+ */
+function determineImageStatus(imageUrl) {
+  if (!imageUrl) return 'no_image_url'
+  if (imageUrl.startsWith('tmp/')) return 'expired'
+  return 'available'
+}
+
+/**
+ * GET /api/remote/accounts/:accountKey/days - 查询有记录的日期列表
+ * 拉取最近 500 条记录，在 Node 里按 Asia/Shanghai 分组
+ */
+app.get('/api/remote/accounts/:accountKey/days', async (req, res) => {
+  try {
+    const account = await resolveAccount(req.params.accountKey)
+    if (!account) {
+      return sendError(res, 404, 'Account not found', `账号 ${req.params.accountKey} 不存在`)
+    }
+    if (!supabaseAdmin) {
+      return sendError(res, 503, 'Supabase not initialized', 'service_role key 未配置')
+    }
+
+    // 兼容历史记录：EF 修复前的记录 user_id 为 null，同时匹配 null
+    const { data, error } = await supabaseAdmin
+      .from('ai_recognition_logs')
+      .select('created_at, status')
+      .or(`user_id.eq.${account.user_id},user_id.is.null`)
+      .order('created_at', { ascending: false })
+      .limit(500)
+
+    if (error) {
+      return sendError(res, 502, 'Supabase query failed', error.message)
+    }
+
+    // 在 Node 里按 Asia/Shanghai 日期分组
+    const dayMap = new Map()
+    for (const row of data || []) {
+      const date = toShanghaiDate(row.created_at)
+      if (!dayMap.has(date)) {
+        dayMap.set(date, { date, count: 0, success: 0, error: 0 })
+      }
+      const day = dayMap.get(date)
+      day.count++
+      if (row.status === 'success') day.success++
+      else if (row.status === 'error' || row.status === 'ai_error' || row.status === 'db_error') day.error++
+    }
+
+    const days = Array.from(dayMap.values()).sort((a, b) => b.date.localeCompare(a.date))
+    res.json({ days })
+  } catch (err) {
+    sendError(res, 500, 'Remote query failed', err.message)
+  }
+})
+
+/**
+ * GET /api/remote/accounts/:accountKey/days/:date/traces - 查询某天的记录列表
+ * date 格式：YYYY-MM-DD（上海时区）
+ */
+app.get('/api/remote/accounts/:accountKey/days/:date/traces', async (req, res) => {
+  try {
+    const { accountKey, date } = req.params
+    const account = await resolveAccount(accountKey)
+    if (!account) {
+      return sendError(res, 404, 'Account not found', `账号 ${accountKey} 不存在`)
+    }
+
+    // 验证日期格式
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return sendError(res, 400, 'Invalid date', '日期格式应为 YYYY-MM-DD')
+    }
+
+    const { startUtc, endUtc } = shanghaiDateToUtcRange(date)
+
+    const { data, error } = await supabaseAdmin
+      .from('ai_recognition_logs')
+      .select('id, created_at, image_url, image_type, record_type, status, confidence, duration_ms, model_name, target_table, target_id, raw_response, ai_response')
+      .or(`user_id.eq.${account.user_id},user_id.is.null`)
+      .gte('created_at', startUtc)
+      .lte('created_at', endUtc)
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    if (error) {
+      return sendError(res, 502, 'Supabase query failed', error.message)
+    }
+
+    // 查询本地是否有点评
+    const runId = `remote-${date}`
+    const reviewsDir = path.join(TEST_RESULTS_DIR, runId)
+    const reviewedCaseKeys = new Set()
+    if (existsSync(reviewsDir)) {
+      const reviewFiles = await findFilesRecursive(reviewsDir, '.review.json')
+      for (const rf of reviewFiles) {
+        const { data: reviewData } = await safeReadJson(path.join(reviewsDir, rf))
+        if (reviewData?.case_key) {
+          reviewedCaseKeys.add(reviewData.case_key)
+        }
+      }
+    }
+
+    const traces = (data || []).map(row => {
+      const caseKey = `remote/${date}/${row.id}`
+      // record_type 可能为 null（EF 修复前的历史记录），从 raw_response 中补取
+      let recordType = row.record_type
+      let imageType = row.image_type
+      if (!recordType || !imageType) {
+        const rawDebug = parseRawDebug(row.raw_response)
+        const aiResp = rawDebug || row.ai_response
+        if (aiResp) {
+          if (!recordType) recordType = aiResp.record_type || aiResp.domain_key || null
+          if (!imageType) imageType = aiResp.image_type || null
+        }
+      }
+      return {
+        case_key: caseKey,
+        trace_id: row.id,
+        ai_log_id: row.id,
+        file: null,
+        domain: recordType || 'unknown',
+        record_type: recordType || null,
+        image_type: imageType || null,
+        date,
+        status: row.status,
+        elapsed_ms: row.duration_ms ?? null,
+        has_ai_feedback: false,
+        image_relative_path: row.image_url || null,
+        image_status: determineImageStatus(row.image_url),
+        has_review: reviewedCaseKeys.has(caseKey),
+        review_ratings: null,
+        is_remote: true,
+      }
+    })
+
+    res.json({ traces })
+  } catch (err) {
+    sendError(res, 500, 'Remote query failed', err.message)
+  }
+})
+
+/**
+ * GET /api/remote/accounts/:accountKey/days/:date/traces/:logId - 查询单条记录详情
+ * 返回 trace 兼容格式（支持三级降级）
+ */
+app.get('/api/remote/accounts/:accountKey/days/:date/traces/:logId', async (req, res) => {
+  try {
+    const { accountKey, date, logId } = req.params
+    const account = await resolveAccount(accountKey)
+    if (!account) {
+      return sendError(res, 404, 'Account not found', `账号 ${accountKey} 不存在`)
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('ai_recognition_logs')
+      .select('*')
+      .eq('id', logId)
+      .or(`user_id.eq.${account.user_id},user_id.is.null`)
+      .limit(1)
+
+    if (error) {
+      return sendError(res, 502, 'Supabase query failed', error.message)
+    }
+    if (!data || data.length === 0) {
+      return sendError(res, 404, 'Record not found', `logId ${logId} 不存在或不属于该账号`)
+    }
+
+    const logRow = data[0]
+    const trace = buildTraceFromAiLog(logRow, { runId: `remote-${date}`, dateStr: date, accountKey })
+
+    // 查询本地点评
+    const caseKey = `remote/${date}/${logId}`
+    const reviewPath = path.join(TEST_RESULTS_DIR, `remote-${date}`, 'single', logRow.record_type || 'unknown', date, `${logId}.review.json`)
+    if (existsSync(reviewPath)) {
+      const { data: reviewData } = await safeReadJson(reviewPath)
+      if (reviewData) {
+        trace.review = reviewData
+      }
+    }
+
+    res.json(trace)
+  } catch (err) {
+    sendError(res, 500, 'Remote query failed', err.message)
+  }
+})
+
+/**
+ * GET /api/remote/images?logId=...&accountKey=... - 下载远程图片
+ * 按 logId 查询 image_url，校验 user_id 归属后从 Storage 下载
+ */
+app.get('/api/remote/images', async (req, res) => {
+  try {
+    const { logId, accountKey } = req.query
+    if (!logId || !accountKey) {
+      return sendError(res, 400, 'Missing parameters', '需要 logId 和 accountKey')
+    }
+
+    const account = await resolveAccount(accountKey)
+    if (!account) {
+      return sendError(res, 404, 'Account not found', `账号 ${accountKey} 不存在`)
+    }
+
+    // 按 logId 查询，校验归属（兼容历史 null user_id 记录）
+    const { data, error } = await supabaseAdmin
+      .from('ai_recognition_logs')
+      .select('image_url, user_id')
+      .eq('id', logId)
+      .or(`user_id.eq.${account.user_id},user_id.is.null`)
+      .limit(1)
+
+    if (error) {
+      return sendError(res, 502, 'Supabase query failed', error.message)
+    }
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: '图片记录不存在或不属于该账号', reason: 'not_found' })
+    }
+
+    const imageUrl = data[0].image_url
+    if (!imageUrl) {
+      return res.status(404).json({ error: '原图未保留', reason: 'no_image_url' })
+    }
+    if (imageUrl.startsWith('tmp/')) {
+      // tmp/ 路径可能已被清理，尝试下载但允许 404
+    }
+
+    // 本地缓存
+    const cacheDir = path.join(TEST_CASES_DIR, '_remote_cache')
+    if (!existsSync(cacheDir)) {
+      await mkdir(cacheDir, { recursive: true })
+    }
+    const ext = path.extname(imageUrl) || '.jpg'
+    const cachePath = path.join(cacheDir, `${logId}${ext}`)
+
+    // 如果已缓存，直接返回
+    if (existsSync(cachePath)) {
+      const buffer = await readFile(cachePath)
+      const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+      res.setHeader('Content-Type', mime)
+      res.setHeader('Cache-Control', 'private, max-age=3600')
+      return res.end(buffer)
+    }
+
+    // 从 Supabase Storage 下载
+    const { data: fileData, error: downloadError } = await supabaseAdmin
+      .storage
+      .from('receipt-images')
+      .download(imageUrl)
+
+    if (downloadError) {
+      return res.status(404).json({ error: '图片下载失败', reason: imageUrl.startsWith('tmp/') ? 'expired' : 'not_found', detail: downloadError.message })
+    }
+
+    // 缓存到本地
+    const buffer = Buffer.from(await fileData.arrayBuffer())
+    await writeFile(cachePath, buffer)
+
+    const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+    res.setHeader('Content-Type', mime)
+    res.setHeader('Cache-Control', 'private, max-age=3600')
+    res.end(buffer)
+  } catch (err) {
+    sendError(res, 500, 'Image download failed', err.message)
+  }
+})
+
+/**
+ * GET /api/remote/accounts/:accountKey/memory - 查询 companion 记忆上下文
+ */
+app.get('/api/remote/accounts/:accountKey/memory', async (req, res) => {
+  try {
+    const account = await resolveAccount(req.params.accountKey)
+    if (!account) {
+      return sendError(res, 404, 'Account not found', `账号 ${req.params.accountKey} 不存在`)
+    }
+    if (!supabaseAdmin) {
+      return sendError(res, 503, 'Supabase not initialized', 'service_role key 未配置')
+    }
+
+    const { data, error } = await supabaseAdmin
+      .rpc('get_companion_context', { p_user_id: account.user_id })
+
+    if (error) {
+      return sendError(res, 502, 'RPC call failed', error.message)
+    }
+
+    res.json(data || { settings: { enabled: false }, short_term: {}, long_term: [] })
+  } catch (err) {
+    sendError(res, 500, 'Memory query failed', err.message)
+  }
+})
+
+// ═══════════════════════════════════════════════
 // 健康检查
 // ═══════════════════════════════════════════════
 
@@ -1185,6 +1921,8 @@ app.get('/api/health', (req, res) => {
     project_root: PROJECT_ROOT,
     test_results_exists: existsSync(TEST_RESULTS_DIR),
     test_cases_exists: existsSync(TEST_CASES_DIR),
+    remote_enabled: Boolean(supabaseAdmin),
+    accounts_loaded: Boolean(accountsConfig),
   })
 })
 
@@ -1200,15 +1938,22 @@ app.listen(PORT, HOST, () => {
   console.log(`  项目根目录: ${PROJECT_ROOT}`)
   console.log(`  test-results: ${existsSync(TEST_RESULTS_DIR) ? '存在' : '不存在'}`)
   console.log(`  test-cases:   ${existsSync(TEST_CASES_DIR) ? '存在' : '不存在'}`)
+  console.log(`  远程模式:     ${supabaseAdmin ? '可用' : '不可用（未配置 service_role key）'}`)
+  console.log(`  账号配置:     ${accountsConfig ? Object.keys(accountsConfig).length + ' 个' : '未加载'}`)
   console.log('═══════════════════════════════════════════════')
   console.log('')
   console.log('可用接口:')
-  console.log(`  GET http://${HOST}:${PORT}/api/health`)
-  console.log(`  GET http://${HOST}:${PORT}/api/runs`)
-  console.log(`  GET http://${HOST}:${PORT}/api/runs/:runId/summary`)
-  console.log(`  GET http://${HOST}:${PORT}/api/runs/:runId/traces`)
-  console.log(`  GET http://${HOST}:${PORT}/api/runs/:runId/traces/:caseKey`)
-  console.log(`  GET http://${HOST}:${PORT}/api/images?path=test-cases/...`)
+  console.log(`  GET  /api/health`)
+  console.log(`  GET  /api/accounts                          列出可用账号`)
+  console.log(`  GET  /api/runs                              列出本地批次`)
+  console.log(`  GET  /api/runs/:runId/traces/:caseKey       读取本地 trace`)
+  console.log(`  GET  /api/images?path=...                   读取本地图片`)
+  console.log(`  POST /api/upload-test                       上传测试`)
+  console.log(`  GET  /api/remote/accounts/:key/days          远程日期列表`)
+  console.log(`  GET  /api/remote/accounts/:key/days/:date/traces       远程记录列表`)
+  console.log(`  GET  /api/remote/accounts/:key/days/:date/traces/:logId 远程记录详情`)
+  console.log(`  GET  /api/remote/images?logId=...           下载远程图片`)
+  console.log(`  GET  /api/remote/accounts/:key/memory       查询记忆上下文`)
   console.log('')
 })
 

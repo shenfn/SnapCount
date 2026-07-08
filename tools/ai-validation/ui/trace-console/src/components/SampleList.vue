@@ -4,6 +4,11 @@
     <div class="panel-header">
       <span class="header-title">样本列表</span>
       <span class="header-count">{{ traces.length }} 张</span>
+      <button
+        v-if="traces.length > 0"
+        class="review-history-btn"
+        @click="$emit('open-reviews')"
+      >点评记录</button>
     </div>
 
     <!-- 筛选按钮 -->
@@ -27,15 +32,17 @@
         @click="$emit('select', t.case_key)"
       >
         <!-- 缩略图（点击放大，阻止冒泡避免触发样本选择） -->
-        <div class="thumb-wrapper" @click.stop="t.image_relative_path ? openImage(t) : null">
+        <div class="thumb-wrapper" @click.stop="resolveImageUrl(t) ? openImage(t) : null">
           <img
-            v-if="t.image_relative_path"
-            :src="imageUrl(t.image_relative_path)"
+            v-if="resolveImageUrl(t)"
+            :src="resolveImageUrl(t)"
             class="thumb"
             loading="lazy"
             @error="onThumbError"
           />
-          <div v-else class="thumb-placeholder">—</div>
+          <div v-else class="thumb-placeholder" :title="imageStatusTitle(t)">
+            {{ imageStatusIcon(t) }}
+          </div>
         </div>
 
         <!-- 样本信息 -->
@@ -74,7 +81,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { imageUrl } from '../lib/api.js'
+import { imageUrl, remoteImageUrl } from '../lib/api.js'
 import { formatDuration, getStatusColor, getStatusLabel } from '../lib/formatters.js'
 import { extractFilterOptions } from '../lib/traceNormalizer.js'
 import ImageViewer from './ImageViewer.vue'
@@ -82,9 +89,10 @@ import ImageViewer from './ImageViewer.vue'
 const props = defineProps({
   traces: { type: Array, default: () => [] },
   selectedCaseKey: { type: String, default: '' },
+  accountKey: { type: String, default: '' },
 })
 
-defineEmits(['select'])
+defineEmits(['select', 'open-reviews'])
 
 const activeFilter = ref('all')
 const viewerOpen = ref(false)
@@ -122,9 +130,36 @@ function onThumbError(e) {
   e.target.style.display = 'none'
 }
 
+// 统一解析图片 URL：本地走 imageUrl，远程走 remoteImageUrl
+function resolveImageUrl(t) {
+  if (t.is_remote) {
+    if (t.image_status === 'available' && t.trace_id) {
+      return remoteImageUrl(t.trace_id, props.accountKey)
+    }
+    return null // no_image_url / expired / not_found
+  }
+  return t.image_relative_path ? imageUrl(t.image_relative_path) : null
+}
+
+// 图片不可用时的图标
+function imageStatusIcon(t) {
+  if (t.image_status === 'expired') return '⏰'
+  if (t.image_status === 'no_image_url') return '📭'
+  if (t.image_status === 'not_found') return '❓'
+  return '—'
+}
+
+// 图片不可用时的提示
+function imageStatusTitle(t) {
+  if (t.image_status === 'expired') return '图片已过期（临时存储已清理）'
+  if (t.image_status === 'no_image_url') return '无图片 URL'
+  if (t.image_status === 'not_found') return '图片未找到'
+  return '无图片'
+}
+
 // 打开图片放大查看
 function openImage(trace) {
-  viewerSrc.value = imageUrl(trace.image_relative_path)
+  viewerSrc.value = resolveImageUrl(trace)
   viewerFileName.value = trace.file || ''
   viewerOpen.value = true
 }
@@ -157,6 +192,25 @@ function openImage(trace) {
 .header-count {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.review-history-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--accent-blue);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+
+.review-history-btn:hover {
+  border-color: var(--accent-blue);
+  background: rgba(88,166,255,0.08);
 }
 
 .filter-section {

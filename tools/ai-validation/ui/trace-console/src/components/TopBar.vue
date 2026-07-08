@@ -3,6 +3,19 @@
     <span class="title">AI 识别链路追踪台</span>
     <span class="version-tag">V0.5</span>
 
+    <!-- 数据源切换 + 账号选择 -->
+    <AccountSelector
+      :mode="mode"
+      :accounts="accounts"
+      :account-key="accountKey"
+      @update:mode="$emit('update:mode', $event)"
+      @update:account-key="$emit('update:accountKey', $event)"
+      @open-memory="$emit('open-memory')"
+    />
+
+    <!-- 远程模式标识 -->
+    <span class="remote-badge" v-if="mode === 'remote'">远程</span>
+
     <BatchSelector
       :model-value="currentRunId"
       :runs="runs"
@@ -24,6 +37,11 @@
 
     <div class="spacer"></div>
 
+    <!-- 刷新按钮（远程模式：刷新当前日期 traces；本地模式：刷新批次列表） -->
+    <button class="refresh-btn-top" @click="$emit('refresh')" title="刷新当前列表">
+      🔄 刷新
+    </button>
+
     <button class="upload-btn" @click="$emit('open-upload')">
       <span class="upload-icon">+</span> 上传测试
     </button>
@@ -44,15 +62,19 @@
 <script setup>
 import { computed } from 'vue'
 import BatchSelector from './BatchSelector.vue'
+import AccountSelector from './AccountSelector.vue'
 
 const props = defineProps({
   runs: { type: Array, default: () => [] },
   currentRunId: { type: String, default: '' },
   summary: { type: Object, default: null },
   viewMode: { type: String, default: 'dev' },
+  mode: { type: String, default: 'local' }, // 'local' | 'remote'
+  accounts: { type: Array, default: () => [] },
+  accountKey: { type: String, default: '' },
 })
 
-defineEmits(['update:currentRunId', 'update:viewMode', 'open-upload'])
+defineEmits(['update:currentRunId', 'update:viewMode', 'open-upload', 'update:mode', 'update:accountKey', 'open-memory', 'refresh'])
 
 // 统计数据：优先从 summary.json 获取，回退从 traces 列表计算
 const totalCount = computed(() => {
@@ -104,6 +126,35 @@ const duplicateCount = computed(() => {
   background: rgba(88, 166, 255, 0.15);
   color: var(--accent-blue);
   white-space: nowrap;
+}
+
+.remote-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.refresh-btn-top {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+
+.refresh-btn-top:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+  border-color: var(--accent-blue);
 }
 
 .stats {

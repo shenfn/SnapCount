@@ -84,6 +84,12 @@ local-only/
 本地私有/
 archive/
 
+# 账号配置（含 upload_token，不入 Git）
+tools/ai-validation/server/accounts.json
+
+# 远程图片缓存目录
+test-cases/_remote_cache/
+
 # 本地原型/设计稿（不入主仓库）
 多域联动分析.html
 *_原型*.html

@@ -236,3 +236,65 @@ export function fetchReview(runId, caseKey) {
 export function fetchReviews(runId) {
   return request(`${API_BASE}/runs/${encodeURIComponent(runId)}/reviews`)
 }
+
+// ═══════════════════════════════════════════════
+// 远程模式 API（只读查询线上数据）
+// ═══════════════════════════════════════════════
+
+/**
+ * 列出可用账号
+ * @returns {Promise<{data: {accounts: Array}|null, error: string|null}>}
+ */
+export function fetchAccounts() {
+  return request(`${API_BASE}/accounts`)
+}
+
+/**
+ * 查询远程日期列表（有记录的天）
+ * @param {string} accountKey - 账号 key（如 'test2'）
+ * @returns {Promise<{data: {days: Array}|null, error: string|null}>}
+ */
+export function fetchRemoteDays(accountKey) {
+  return request(`${API_BASE}/remote/accounts/${encodeURIComponent(accountKey)}/days`)
+}
+
+/**
+ * 查询某天的远程记录列表
+ * @param {string} accountKey
+ * @param {string} date - YYYY-MM-DD（北京时间）
+ * @returns {Promise<{data: {traces: Array}|null, error: string|null}>}
+ */
+export function fetchRemoteTraces(accountKey, date) {
+  return request(`${API_BASE}/remote/accounts/${encodeURIComponent(accountKey)}/days/${encodeURIComponent(date)}/traces`)
+}
+
+/**
+ * 查询单条远程记录详情
+ * @param {string} accountKey
+ * @param {string} date - YYYY-MM-DD
+ * @param {string} logId - AI 日志 ID
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export function fetchRemoteTraceDetail(accountKey, date, logId) {
+  const base = `${API_BASE}/remote/accounts/${encodeURIComponent(accountKey)}/days/${encodeURIComponent(date)}/traces/${encodeURIComponent(logId)}`
+  return request(base)
+}
+
+/**
+ * 生成远程图片 URL
+ * @param {string} logId - AI 日志 ID
+ * @param {string} accountKey
+ * @returns {string} 完整的图片请求 URL
+ */
+export function remoteImageUrl(logId, accountKey) {
+  return `${API_BASE}/remote/images?logId=${encodeURIComponent(logId)}&accountKey=${encodeURIComponent(accountKey)}`
+}
+
+/**
+ * 查询记忆上下文
+ * @param {string} accountKey
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export function fetchRemoteMemory(accountKey) {
+  return request(`${API_BASE}/remote/accounts/${encodeURIComponent(accountKey)}/memory`)
+}
