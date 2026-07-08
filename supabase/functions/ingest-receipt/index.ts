@@ -4,7 +4,14 @@
 import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
-import { PROMPT, buildPrompt, buildFeedbackPrompt } from "./prompts.ts";
+import { PROMPT, buildPrompt, buildFeedbackPrompt, buildVoicePrompt } from "./prompts.ts";
+import {
+  loadDomainProfiles,
+  selectSignals,
+  validateVoiceNumbers,
+  parsePaceMinutes,
+} from "./signals.ts";
+import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
 import type { TimeContext } from "./time.ts";
 
@@ -2891,6 +2898,203 @@ interface PromptContextLike {
   recentCompanionLines?: string[];
 }
 
+// ============================================================
+// 信号驱动 Voice 层:事实(画像) → 信号(代码) → 语言(模型)
+// 数字闭环:validateVoiceNumbers 违规即弃用整份 AI 文案,退回规则渲染
+// ============================================================
+
+function isLateNightLocal(clientLocalTime: string | null | undefined): boolean {
+  if (!clientLocalTime) return false;
+  const m = clientLocalTime.match(/\s(\d{2}):/);
+  return m ? Number(m[1]) >= 21 : false;
+}
+
+function buildCurrentFactsFor(
+  domainKey: string,
+  ai: AIResult,
+  builtPayload: Record<string, unknown> | null,
+  normalizedAmount: number | null,
+  clientLocalTime: string | null,
+): CurrentFacts {
+  const p = builtPayload ?? {};
+  const late = isLateNightLocal(clientLocalTime);
+  if (domainKey === "expense") {
+    return {
+      amount: normalizedAmount,
+      merchant: ai.merchant_name ?? null,
+      category: ai.category ?? null,
+      isLateNight: late,
+    };
+  }
+  if (domainKey === "sleep") {
+    return {
+      hours: normalizeNumber(p.sleep_hours) ?? (normalizeNumber(p.sleep_minutes) !== null ? normalizeNumber(p.sleep_minutes)! / 60 : null),
+      score: normalizeNumber(p.quality_score),
+    };
+  }
+  if (domainKey === "sport") {
+    return {
+      sportType: normalizeString(p.sport_type),
+      durationMin: normalizeNumber(p.duration_minutes),
+      distanceKm: normalizeNumber(p.distance_km),
+      paceMin: parsePaceMinutes(p.avg_pace),
+    };
+  }
+  if (domainKey === "food") {
+    const dishes = Array.isArray(p.dishes) ? p.dishes : [];
+    return {
+      mealType: normalizeString(p.meal_type),
+      kcal: normalizeNumber(p.total_calorie_kcal),
+      dishNames: dishes
+        .map((d) => d && typeof d === "object" ? normalizeString((d as Record<string, unknown>).name) : null)
+        .filter((n): n is string => !!n),
+      isLateNight: late,
+    };
+  }
+  if (domainKey === "reading") {
+    return {
+      bookName: normalizeString(p.book_name),
+      readingMinutes: normalizeNumber(p.reading_minutes),
+      progressPercent: normalizeNumber(p.progress_percent),
+    };
+  }
+  if (domainKey === "wallet") {
+    return {
+      recordKind: normalizeString(p.record_kind),
+      accountName: normalizeString(p.account_name),
+      walletAmount: normalizeNumber(p.amount),
+    };
+  }
+  return {};
+}
+
+// Voice prompt 用的记录字段白名单:识别字段全集会带入无关信息(签约/广告等),只给必要项
+function voiceRecordFacts(
+  domainKey: string,
+  ai: AIResult,
+  builtPayload: Record<string, unknown> | null,
+  normalizedAmount: number | null,
+): Record<string, unknown> {
+  if (domainKey === "expense" || domainKey === "income") {
+    return {
+      record_type: domainKey,
+      amount: normalizedAmount ?? ai.amount ?? null,
+      merchant_name: ai.merchant_name ?? null,
+      source_name: ai.source_name ?? null,
+      category: ai.category ?? null,
+      platform: ai.platform ?? null,
+      occurred_at: ai.occurred_at ?? null,
+    };
+  }
+  return {
+    record_type: domainKey,
+    title: ai.title ?? null,
+    summary: ai.summary ?? null,
+    payload: builtPayload ?? null,
+    occurred_at: ai.occurred_at ?? null,
+  };
+}
+
+interface VoiceCallResult extends FeedbackCallResult {
+  signals: DomainSignal[];
+  number_violations?: string[];
+}
+
+async function generateVoiceFeedback(opts: {
+  ai: AIResult;
+  domainKey: string;
+  builtPayload?: Record<string, unknown> | null;
+  normalizedAmount?: number | null;
+  domainProfiles: DomainProfilesMap;
+  timingSignal: AIFeedback["timing_signal"] | null;
+  clientLocalTime: string | null;
+  weekday: string | null;
+  persona?: string | null;
+  expressionStyle?: string | null;
+  customNote?: string | null;
+  recentCompanionLines?: string[];
+  textProvider: ProviderConfig | null;
+}): Promise<VoiceCallResult> {
+  const startedAt = Date.now();
+  const cur = buildCurrentFactsFor(
+    opts.domainKey, opts.ai, opts.builtPayload ?? null,
+    opts.normalizedAmount ?? null, opts.clientLocalTime,
+  );
+  const signals = selectSignals(opts.domainKey, opts.domainProfiles, cur);
+  if (!opts.textProvider) {
+    return { companion_message: null, ai_feedback: null, raw_text: null, duration_ms: 0, error: "no_text_provider", signals };
+  }
+  const recordFacts = voiceRecordFacts(opts.domainKey, opts.ai, opts.builtPayload ?? null, opts.normalizedAmount ?? null);
+  try {
+    const promptText = buildVoicePrompt({
+      clientLocalTime: opts.clientLocalTime,
+      weekday: opts.weekday,
+      domainKey: opts.domainKey,
+      recordFacts,
+      signals: signals.map((s) => ({ kind: s.kind, fact: s.fact })),
+      persona: opts.persona ?? null,
+      expressionStyle: opts.expressionStyle ?? null,
+      customNote: opts.customNote ?? null,
+      recentCompanionLines: opts.recentCompanionLines ?? [],
+    });
+    const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.8);
+    const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
+    // 数字闭环校验:文案中的数字必须可追溯到信号或本条记录
+    const check = validateVoiceNumbers(
+      [
+        normalized.companion_message,
+        normalized.ai_feedback?.emotion_line ?? null,
+        normalized.ai_feedback?.utility_line ?? null,
+        normalized.ai_feedback?.detail_reason ?? null,
+      ],
+      signals,
+      JSON.stringify(recordFacts),
+    );
+    if (!check.ok) {
+      console.warn(`[voice] number validation failed (${opts.domainKey}):`, check.violations.join(" | "));
+      return {
+        companion_message: null, ai_feedback: null, raw_text: rawText,
+        duration_ms: Date.now() - startedAt, error: "number_validation_failed",
+        signals, number_violations: check.violations,
+      };
+    }
+    return {
+      companion_message: normalized.companion_message,
+      ai_feedback: normalized.ai_feedback,
+      raw_text: rawText,
+      duration_ms: Date.now() - startedAt,
+      signals,
+    };
+  } catch (err) {
+    return {
+      companion_message: null, ai_feedback: null, raw_text: null,
+      duration_ms: Date.now() - startedAt,
+      error: err instanceof Error ? err.message : String(err),
+      signals,
+    };
+  }
+}
+
+// 归档成功后 fire-and-forget 刷新该域画像(单用户单域全量重算,毫秒级)
+function fireAndForgetProfileRefresh(
+  supabase: ReturnType<typeof createClient>,
+  userId: string | null,
+  domainKey: string,
+): void {
+  if (!userId) return;
+  if (!["expense", "sleep", "sport", "food", "reading", "wallet"].includes(domainKey)) return;
+  const task = supabase.rpc("refresh_domain_profile", { p_user_id: userId, p_domain_key: domainKey })
+    .then(({ error }: { error: { message: string } | null }) => {
+      if (error) console.warn(`[profile] refresh ${domainKey} failed:`, error.message);
+    });
+  try {
+    // deno-lint-ignore no-explicit-any
+    (globalThis as any).EdgeRuntime?.waitUntil?.(task) ?? task;
+  } catch {
+    // waitUntil 不可用时 task 已在事件循环中,尽力而为
+  }
+}
+
 // 通用 OpenAI-compatible Vision 调用（Moonshot / MiMo 都走这个）
 async function callOpenAICompatibleVision(
   imageBytes: Uint8Array,
@@ -3148,6 +3352,9 @@ Deno.serve(async (req) => {
     return visionProviders[0] ?? null;
   })();
 
+  // 信号驱动 Voice 层开关:默认开;设 VOICE_SIGNALS_ENABLED=false 回退旧记忆注入链路
+  const voiceSignalsEnabled = (Deno.env.get("VOICE_SIGNALS_ENABLED") ?? "true") !== "false";
+
   const requestTraceId = crypto.randomUUID();
   let lastAiLogId: string | null = null;
 
@@ -3158,7 +3365,10 @@ Deno.serve(async (req) => {
     // 隐私配置：默认最严格，用户查询后覆盖
     let privacyConfig: PrivacyConfig = { ...DEFAULT_PRIVACY_CONFIG };
     const writeTraceAiLog = async (payload: Record<string, unknown>): Promise<string | null> => {
-      const aiLogId = await writeAiLog(supabase, payload, privacyConfig);
+      // 统一注入 user_id，确保所有 AI 日志都能按用户隔离查询
+      // userId 在下方身份校验流程中赋值（JWT 或 upload_token 反查），闭包按引用捕获
+      const enrichedPayload = userId ? { ...payload, user_id: userId } : payload;
+      const aiLogId = await writeAiLog(supabase, enrichedPayload, privacyConfig);
       if (aiLogId) lastAiLogId = aiLogId;
       return aiLogId;
     };
@@ -3322,6 +3532,8 @@ Deno.serve(async (req) => {
       settings: DEFAULT_COMPANION_SETTINGS,
       memory: null,
     });
+    // 信号层画像:与 companion context 并行加载,零额外等待
+    let domainProfilesPromise: Promise<DomainProfilesMap> = Promise.resolve({});
     let photoVisionPrimary: string | null = "qwen";
 
     // 用户级 AI 引擎偏好：覆盖 VISION_PRIMARY env
@@ -3371,6 +3583,7 @@ Deno.serve(async (req) => {
         }
       }
       companionContextPromise = loadCompanionContext(supabase, userId, companionSettings);
+      domainProfilesPromise = loadDomainProfiles(supabase, userId);
     }
 
     const stagingRetryId = normalizeString(form.get("staging_record_id"));
@@ -3443,6 +3656,12 @@ Deno.serve(async (req) => {
       { settings: companionSettings, memory: null },
       "companion_context",
     );
+    const domainProfiles = await withTimeoutFallback(
+      domainProfilesPromise,
+      COMPANION_CONTEXT_TIMEOUT_MS,
+      {} as DomainProfilesMap,
+      "domain_profiles",
+    );
     companionSettings = companionContext.settings;
     timings.mark("companion_context");
     const visionPrompt = buildPrompt({
@@ -3465,10 +3684,13 @@ Deno.serve(async (req) => {
     let perceptualDistance: number | null = null;
     let perceptualDupRefId: string | null = null;
     if (perceptualHash) {
-      const { data: recentLogs } = await supabase
+      // 感知哈希查重必须按用户隔离,否则 A 用户的截图会命中 B 用户的记录
+      let phQuery = supabase
         .from("ai_recognition_logs")
         .select("id,perceptual_hash")
-        .not("perceptual_hash", "is", null)
+        .not("perceptual_hash", "is", null);
+      if (userId) phQuery = phQuery.eq("user_id", userId);
+      const { data: recentLogs } = await phQuery
         .order("created_at", { ascending: false })
         .limit(30);
       for (const item of recentLogs || []) {
@@ -3889,6 +4111,7 @@ Deno.serve(async (req) => {
             amount: normalizedAmount,
             occurredAt,
           });
+          fireAndForgetProfileRefresh(supabase, userId, recordType);
           return respondShortcut(withTraceMeta({
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
@@ -4017,12 +4240,42 @@ Deno.serve(async (req) => {
       const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : (occurredAt ?? new Date().toISOString());
       const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
       if (shouldAutoArchive && built && companionSettings.enabled) {
-        aiFeedback = buildBuiltinAIFeedback(builtinKey, built, timeContext, companionMessage);
-        if (aiFeedback) {
-          companionFeedbackUsed = true;
-          companionMessage = aiFeedback.emotion_line;
-          ai.companion_message = companionMessage;
-          aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+        // 信号驱动 Voice 层优先:个人画像信号 → 模型翻译;失败/违规 → 规则渲染兜底
+        if (voiceSignalsEnabled) {
+          const _voiceCall = await generateVoiceFeedback({
+            ai,
+            domainKey: builtinKey,
+            builtPayload: built.payload,
+            normalizedAmount: null,
+            domainProfiles,
+            timingSignal: timingSignalFor(builtinKey, timeContext),
+            clientLocalTime,
+            weekday: _weekdayCN,
+            persona: companionSettings.persona,
+            expressionStyle: companionSettings.expressionStyle,
+            customNote: companionSettings.customNote,
+            recentCompanionLines: [],
+            textProvider,
+          });
+          if (_voiceCall.duration_ms > 0) {
+            console.log(`[feedback] voice ${builtinKey} ok=${!_voiceCall.error} signals=${_voiceCall.signals.map((s) => s.kind).join(",") || "none"} duration=${_voiceCall.duration_ms}ms`);
+          }
+          if (_voiceCall.ai_feedback) {
+            aiFeedback = _voiceCall.ai_feedback as AIFeedback;
+            companionFeedbackUsed = true;
+            companionMessage = _voiceCall.companion_message ?? aiFeedback.emotion_line;
+            ai.companion_message = companionMessage;
+            aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+          }
+        }
+        if (!aiFeedback) {
+          aiFeedback = buildBuiltinAIFeedback(builtinKey, built, timeContext, companionMessage);
+          if (aiFeedback) {
+            companionFeedbackUsed = true;
+            companionMessage = aiFeedback.emotion_line;
+            ai.companion_message = companionMessage;
+            aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+          }
         }
       }
       if (!companionMessage && built) {
@@ -4177,6 +4430,7 @@ Deno.serve(async (req) => {
         amount: null,
         occurredAt: fallbackOccurredAt,
       });
+      fireAndForgetProfileRefresh(supabase, userId, builtinKey);
 
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
       const _domainDoneNotif = `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`;
@@ -4511,26 +4765,42 @@ Deno.serve(async (req) => {
     const status = isComplete && (ai.confidence ?? 0) >= 0.7 ? "done" : "pending";
     const isLargeTransport = ai.category === "transport" && (normalizedAmount ?? 0) >= 200;
     if (status === "done" && companionSettings.enabled) {
-      // 第二次调用：用高 temperature 纯文本模型生成陪伴文案 + 即时反馈
-      const _secondCall = await regenerateFeedbackWithSecondCall({
-        ai,
-        domainKey: "expense",
-        builtPayload: null,
-        timeContext,
-        timingSignal: timingSignalFor("expense", timeContext),
-        promptCtx: {
+      // 第二次调用:信号驱动 Voice 层(事实→信号→语言);VOICE_SIGNALS_ENABLED=false 可回退旧链路
+      const _secondCall = voiceSignalsEnabled
+        ? await generateVoiceFeedback({
+          ai,
+          domainKey: "expense",
+          builtPayload: null,
+          normalizedAmount,
+          domainProfiles,
+          timingSignal: timingSignalFor("expense", timeContext),
           clientLocalTime,
           weekday: _weekdayCN,
-          memoryEnabled: companionSettings.memoryEnabled,
-          memoryStrength: companionSettings.memoryStrength,
-          expressionStyle: companionSettings.expressionStyle,
           persona: companionSettings.persona,
+          expressionStyle: companionSettings.expressionStyle,
           customNote: companionSettings.customNote,
-          memory: companionContext.memory,
           recentCompanionLines: [],
-        },
-        textProvider,
-      });
+          textProvider,
+        })
+        : await regenerateFeedbackWithSecondCall({
+          ai,
+          domainKey: "expense",
+          builtPayload: null,
+          timeContext,
+          timingSignal: timingSignalFor("expense", timeContext),
+          promptCtx: {
+            clientLocalTime,
+            weekday: _weekdayCN,
+            memoryEnabled: companionSettings.memoryEnabled,
+            memoryStrength: companionSettings.memoryStrength,
+            expressionStyle: companionSettings.expressionStyle,
+            persona: companionSettings.persona,
+            customNote: companionSettings.customNote,
+            memory: companionContext.memory,
+            recentCompanionLines: [],
+          },
+          textProvider,
+        });
       if (_secondCall.duration_ms > 0) {
         console.log(`[feedback] second_call expense ok=${!_secondCall.error} duration=${_secondCall.duration_ms}ms`);
       }
@@ -4659,6 +4929,7 @@ Deno.serve(async (req) => {
       amount: normalizedAmount,
       occurredAt,
     });
+    fireAndForgetProfileRefresh(supabase, userId, "expense");
 
     const _eDoneSum = await summarizeTodaySpend(supabase, userId);
     const _merchantPart = ai.merchant_name ? ` · ${ai.merchant_name}` : "";

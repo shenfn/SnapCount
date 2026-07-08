@@ -59,7 +59,7 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
   改写为："3 公里用了 22 分钟，比上次快了一点"
 反例 5（睡眠）："你睡得不够，注意身体"
   问题：评判 + 教育用户
-  改写为："这晚只睡了 5 小时 20 分，醒来应该挺重的"
+  正确做法：只陈述本条记录里的真实时长/评分数字，不加身体感受推测，不套用固定句式
 
 【严格禁止】
 - 不说"加油""你真棒""注意身体""请合理饮食"等空话
@@ -361,6 +361,71 @@ export interface FeedbackPromptContext {
   customNote?: string | null;
   memoryEnabled?: boolean | null;
   recentCompanionLines?: string[];
+}
+
+// ============================================================
+// Voice 层 Prompt(信号驱动,~600 token)
+// 铁律:模型只负责把信号翻译成人话,不做任何计算或回忆。
+// 数字闭环校验在 signals.ts 的 validateVoiceNumbers,违规即弃用。
+// ============================================================
+
+export interface VoicePromptContext {
+  clientLocalTime?: string | null;
+  weekday?: string | null;
+  domainKey: string;
+  recordFacts: Record<string, unknown>;   // 本条记录的关键字段(白名单后)
+  signals: Array<{ kind: string; fact: string }>;  // 信号层已算好的事实句
+  persona?: string | null;
+  expressionStyle?: string | null;
+  customNote?: string | null;
+  recentCompanionLines?: string[];
+}
+
+const PERSONA_HINTS: Record<string, string> = {
+  observer: "旁观视角，只做事实观察，情绪稳定，不评判。",
+  warm: "温柔老朋友，留意辛苦信号，可以说\"我注意到了\"，但不劝、不教育。",
+  sharp: "毒舌损友，一针见血，只损行为模式不攻击人；信号不够就平静陈述。",
+  minimal: "惜字如金，只有信号明确时才写一句极短的话（≤15 汉字），否则返回空。",
+};
+
+export function buildVoicePrompt(ctx: VoicePromptContext): string {
+  const personaHint = PERSONA_HINTS[ctx.persona ?? "observer"] ?? PERSONA_HINTS.observer;
+  const styleHint = ctx.expressionStyle === "emoji"
+    ? "句尾可用 1 个 emoji（不必每次）。"
+    : ctx.expressionStyle === "kaomoji"
+      ? "可偶尔用 1 个轻量颜文字。"
+      : "纯文字，不用 emoji 或颜文字。";
+  const customHint = ctx.customNote ? `用户偏好：${ctx.customNote.slice(0, 60)}\n` : "";
+  const signalBlock = ctx.signals.length
+    ? ctx.signals.map((s, i) => `${i + 1}. [${s.kind}] ${s.fact}`).join("\n")
+    : "（无信号）";
+  const recentBlock = ctx.recentCompanionLines?.length
+    ? `\n避免与最近文案句式重复：\n${ctx.recentCompanionLines.slice(0, 3).map((l) => `- ${l}`).join("\n")}`
+    : "";
+  const timeLine = ctx.clientLocalTime
+    ? `当前时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}\n`
+    : "";
+
+  return `你为用户刚归档的一条${ctx.domainKey}记录写陪伴文案。数字都已算好，你只负责把它们说成一句自然的人话。
+
+${timeLine}【本条记录】
+${JSON.stringify(ctx.recordFacts)}
+
+【已核实的信号（数字来自数据库，可直接引用）】
+${signalBlock}
+
+【铁律】
+- 只能使用上面出现过的数字，禁止自己计算、推测或回忆任何次数/对比/趋势
+- 无信号时只围绕本条记录本身写，或返回空字符串 ""
+- 不建议、不评判、不教育；禁止"加油/注意身体/记得/超标/放纵"
+- 禁止"这周第X笔"开头、禁止"又是熟悉的XX"句式
+- ${personaHint}
+- ${styleHint}
+${customHint}${recentBlock}
+
+输出纯 JSON（无 markdown）：
+{"companion_message":"≤30汉字，可为空串","ai_feedback":{"badge":"4-8字","band":"positive|neutral|watch|recover|ritual","emotion_line":"≤28汉字共情","utility_line":"≤30汉字具体观察","detail_reason":"≤60汉字判断依据或null","confidence":0.0}}
+信号太弱时 ai_feedback 返回 null。`;
 }
 
 export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
