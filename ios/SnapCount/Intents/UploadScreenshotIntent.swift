@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import UniformTypeIdentifiers
 
 struct UploadScreenshotIntent: AppIntent {
     static var title: LocalizedStringResource = "上传到芥子"
@@ -10,16 +11,25 @@ struct UploadScreenshotIntent: AppIntent {
     var image: IntentFile?
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard image != nil else {
+        guard let image else {
             return .result(dialog: "请选择一张截图或照片。")
         }
 
-        let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
-        guard uploadToken?.isEmpty == false else {
+        guard let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken),
+              !uploadToken.isEmpty else {
             return .result(dialog: "请先打开芥子登录。")
         }
 
-        return .result(dialog: "已读取到芥子登录凭据，下一阶段接入后端上传。")
+        do {
+            let imageData = try await image.data(contentType: .image)
+            let message = try await SnapCountUploadService().uploadShortcutImage(
+                data: imageData,
+                uploadToken: uploadToken
+            )
+            return .result(dialog: "\(message)")
+        } catch {
+            return .result(dialog: "上传失败：\(error.localizedDescription)")
+        }
     }
 }
 
