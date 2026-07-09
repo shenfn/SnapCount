@@ -20,16 +20,20 @@ struct UploadScreenshotIntent: AppIntent {
             return .result(dialog: "请先打开芥子登录。")
         }
 
-        do {
-            let imageData = try await image.data(contentType: .image)
-            let message = try await SnapCountUploadService().uploadShortcutImage(
-                data: imageData,
-                uploadToken: uploadToken
-            )
-            return .result(dialog: "\(message)")
-        } catch {
-            return .result(dialog: "上传失败：\(error.localizedDescription)")
+        if #available(iOS 18.0, *) {
+            do {
+                let imageData = try await image.data(contentType: .image)
+                let message = try await SnapCountUploadService().uploadShortcutImage(
+                    data: imageData,
+                    uploadToken: uploadToken
+                )
+                return .result(dialog: "\(message)")
+            } catch {
+                return .result(dialog: "上传失败：\(error.localizedDescription)")
+            }
         }
+
+        return .result(dialog: "快捷指令图片上传需要 iOS 18 或更高版本。")
     }
 }
 
