@@ -38,14 +38,20 @@ final class SnapCountUploadService {
         )
     }
 
-    func uploadNativeImage(data: Data, uploadToken: String) async throws -> String {
+    func uploadNativeImage(
+        data: Data,
+        uploadToken: String,
+        captureKind: String = "photo_library",
+        filename: String = "native-upload.jpg",
+        mimeType: String = "image/jpeg"
+    ) async throws -> String {
         try await uploadImage(
             data: data,
             uploadToken: uploadToken,
             sourceApp: "ios_native",
-            captureKind: "photo_library",
-            filename: "native-upload.jpg",
-            mimeType: "image/jpeg"
+            captureKind: captureKind,
+            filename: filename,
+            mimeType: mimeType
         )
     }
 

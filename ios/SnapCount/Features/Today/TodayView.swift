@@ -3,6 +3,7 @@ import PhotosUI
 
 struct TodayView: View {
     @State private var showUploadSheet = false
+    @State private var showCameraPicker = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var isUploading = false
     @State private var uploadMessage: String?
@@ -27,14 +28,33 @@ struct TodayView: View {
         .navigationTitle("芥子")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .sheet(isPresented: $showUploadSheet) {
-            UploadEntrySheet(selectedPhoto: $selectedPhoto, isUploading: isUploading)
+            UploadEntrySheet(
+                selectedPhoto: $selectedPhoto,
+                isUploading: isUploading,
+                onCamera: openCamera
+            )
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(isPresented: $showCameraPicker) {
+            CameraPicker { data in
+                showCameraPicker = false
+                Task {
+                    await uploadImageData(
+                        data,
+                        captureKind: "camera",
+                        filename: "camera-capture.jpg"
+                    )
+                }
+            } onCancel: {
+                showCameraPicker = false
+            }
+            .ignoresSafeArea()
         }
         .onChange(of: selectedPhoto) { _, newValue in
             guard let newValue else { return }
             Task {
-                await upload(photo: newValue)
+                await uploadPhotoLibraryItem(newValue)
             }
         }
     }
@@ -100,23 +120,51 @@ struct TodayView: View {
         }
     }
 
-    private func upload(photo: PhotosPickerItem) async {
+    private func openCamera() {
+        showUploadSheet = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            showCameraPicker = true
+        }
+    }
+
+    private func uploadPhotoLibraryItem(_ photo: PhotosPickerItem) async {
+        do {
+            guard let data = try await photo.loadTransferable(type: Data.self) else {
+                throw NativeUploadError.emptyImage
+            }
+            await uploadImageData(
+                data,
+                captureKind: "photo_library",
+                filename: "photo-library-upload.jpg"
+            )
+        } catch {
+            uploadMessage = "上传失败：\(error.localizedDescription)"
+            uploadMessageIsError = true
+            selectedPhoto = nil
+            isUploading = false
+        }
+    }
+
+    private func uploadImageData(
+        _ data: Data,
+        captureKind: String,
+        filename: String
+    ) async {
         isUploading = true
         uploadMessage = "正在上传并等待 AI 识别结果。"
         uploadMessageIsError = false
         showUploadSheet = false
 
         do {
-            guard let data = try await photo.loadTransferable(type: Data.self) else {
-                throw NativeUploadError.emptyImage
-            }
             guard let uploadToken = try KeychainStore.shared.string(for: KeychainKeys.uploadToken),
                   !uploadToken.isEmpty else {
                 throw NativeUploadError.missingUploadToken
             }
             let message = try await SnapCountUploadService().uploadNativeImage(
                 data: data,
-                uploadToken: uploadToken
+                uploadToken: uploadToken,
+                captureKind: captureKind,
+                filename: filename
             )
             uploadMessage = message
             uploadMessageIsError = false
@@ -156,6 +204,7 @@ private struct MetricTile: View {
 private struct UploadEntrySheet: View {
     @Binding var selectedPhoto: PhotosPickerItem?
     let isUploading: Bool
+    let onCamera: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -164,12 +213,12 @@ private struct UploadEntrySheet: View {
                     Label("选择照片", systemImage: "photo")
                 }
                 Button {
+                    onCamera()
                 } label: {
                     Label("拍摄照片", systemImage: "camera")
                 }
-                .disabled(true)
                 Section {
-                    Text(isUploading ? "正在上传并等待 AI 识别结果。" : "相机入口下一阶段接入；当前先验证相册选图上传。")
+                    Text(isUploading ? "正在上传并等待 AI 识别结果。" : "可以拍照或从相册选择图片，上传后由 AI 识别为个人记录。")
                         .foregroundStyle(.secondary)
                 }
             }
