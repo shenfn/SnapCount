@@ -28,6 +28,35 @@ final class SnapCountUploadService {
     }
 
     func uploadShortcutImage(data: Data, uploadToken: String) async throws -> String {
+        try await uploadImage(
+            data: data,
+            uploadToken: uploadToken,
+            sourceApp: "ios_app_intent",
+            captureKind: "screenshot",
+            filename: "shortcut-screenshot.png",
+            mimeType: "image/png"
+        )
+    }
+
+    func uploadNativeImage(data: Data, uploadToken: String) async throws -> String {
+        try await uploadImage(
+            data: data,
+            uploadToken: uploadToken,
+            sourceApp: "ios_native",
+            captureKind: "photo_library",
+            filename: "native-upload.jpg",
+            mimeType: "image/jpeg"
+        )
+    }
+
+    private func uploadImage(
+        data: Data,
+        uploadToken: String,
+        sourceApp: String,
+        captureKind: String,
+        filename: String,
+        mimeType: String
+    ) async throws -> String {
         guard !AppConfig.supabaseURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
             throw SnapCountUploadServiceError.missingConfig
         }
@@ -39,14 +68,14 @@ final class SnapCountUploadService {
         let boundary = "Boundary-\(UUID().uuidString)"
         var multipart = MultipartFormData(boundary: boundary)
         multipart.appendField(name: "upload_token", value: uploadToken)
-        multipart.appendField(name: "source_app", value: "ios_app_intent")
-        multipart.appendField(name: "capture_kind", value: "screenshot")
+        multipart.appendField(name: "source_app", value: sourceApp)
+        multipart.appendField(name: "capture_kind", value: captureKind)
         multipart.appendField(name: "response_mode", value: "text")
         multipart.appendField(name: "client_captured_at", value: ISO8601DateFormatter().string(from: Date()))
         multipart.appendFile(
             name: "image",
-            filename: "shortcut-screenshot.png",
-            mimeType: "image/png",
+            filename: filename,
+            mimeType: mimeType,
             data: data
         )
 
