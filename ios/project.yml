@@ -1,0 +1,60 @@
+name: SnapCount
+
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: zh-Hans
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: G6592SL596
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: 5.9
+
+targets:
+  SnapCount:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: SnapCount
+        excludes:
+          - Info.plist
+    info:
+      path: SnapCount/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiezi.app
+        PRODUCT_NAME: SnapCount
+        INFOPLIST_FILE: SnapCount/Info.plist
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: G6592SL596
+
+  SnapCountTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: SnapCountTests
+    dependencies:
+      - target: SnapCount
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiezi.app.tests
+        DEVELOPMENT_TEAM: G6592SL596
+
+schemes:
+  SnapCount:
+    build:
+      targets:
+        SnapCount: all
+    test:
+      targets:
+        - SnapCountTests
+    run:
+      config: Debug
+    archive:
+      config: Release
