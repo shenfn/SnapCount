@@ -47,9 +47,12 @@ jobs:
           if [ "$STATUS" -ne 0 ]; then
             echo "---- xcodebuild tail ----"
             tail -n 250 "$LOG_PATH"
-            echo "---- extracted errors ----"
-            grep -E "error:|fatal error:|Command .* failed|BUILD FAILED" "$LOG_PATH" | tail -n 80 | while IFS= read -r line; do
-              echo "::error::$line"
+            echo "---- xcodebuild tail annotations ----"
+            tail -n 80 "$LOG_PATH" | while IFS= read -r line; do
+              line="${line//'%'/'%25'}"
+              line="${line//$'\n'/'%0A'}"
+              line="${line//$'\r'/'%0D'}"
+              echo "::error title=xcodebuild tail::$line"
             done
             exit "$STATUS"
           fi
