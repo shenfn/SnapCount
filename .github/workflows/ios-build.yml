@@ -30,7 +30,10 @@ jobs:
 
       - name: Build for simulator
         working-directory: ios
+        shell: bash
         run: |
+          set -o pipefail
+          LOG_PATH="$RUNNER_TEMP/xcodebuild.log"
           xcodebuild \
             -project SnapCount.xcodeproj \
             -scheme SnapCount \
@@ -39,7 +42,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             SNAPCOUNT_SUPABASE_URL="${{ secrets.IOS_SUPABASE_URL }}" \
             SNAPCOUNT_SUPABASE_ANON_KEY="${{ secrets.IOS_SUPABASE_ANON_KEY }}" \
-            build
+            build 2>&1 | tee "$LOG_PATH"
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "---- xcodebuild tail ----"
+            tail -n 250 "$LOG_PATH"
+            echo "---- extracted errors ----"
+            grep -E "error:|fatal error:|Command .* failed|BUILD FAILED" "$LOG_PATH" | tail -n 80 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$STATUS"
+          fi
 
       - name: Show available destinations on failure help
         if: always()
