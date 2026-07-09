@@ -4,6 +4,19 @@ struct RootView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
+        Group {
+            if appState.isBootstrapping {
+                ProgressView()
+                    .tint(JieziTheme.mint)
+            } else if appState.isSignedIn {
+                tabRoot
+            } else {
+                LoginView()
+            }
+        }
+    }
+
+    private var tabRoot: some View {
         TabView(selection: $appState.selectedTab) {
             NavigationStack {
                 TodayView()

@@ -11,13 +11,23 @@ struct SettingsView: View {
                     HStack {
                         Label("登录状态", systemImage: "person.crop.circle")
                         Spacer()
-                        Text(appState.isSignedIn ? "已登录" : "未登录")
+                        Text(appState.currentUserEmail.isEmpty ? "已登录" : appState.currentUserEmail)
                             .foregroundStyle(.secondary)
+                    }
+                    Button(role: .destructive) {
+                        appState.signOut()
+                    } label: {
+                        Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 }
 
                 Section("原生能力") {
-                    Label("Keychain 凭据同步", systemImage: "key")
+                    HStack {
+                        Label("Keychain 凭据同步", systemImage: "key")
+                        Spacer()
+                        Text(appState.hasUploadToken ? "已同步" : "未同步")
+                            .foregroundStyle(.secondary)
+                    }
                     Label("App Intents / Shortcuts", systemImage: "wand.and.stars")
                     Label("相册与相机上传", systemImage: "photo.on.rectangle")
                 }

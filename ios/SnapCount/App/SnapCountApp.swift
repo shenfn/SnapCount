@@ -8,6 +8,9 @@ struct SnapCountApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
+                .task {
+                    appState.bootstrap()
+                }
         }
     }
 }

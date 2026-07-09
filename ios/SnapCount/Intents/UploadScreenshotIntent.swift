@@ -14,7 +14,12 @@ struct UploadScreenshotIntent: AppIntent {
             return .result(dialog: "请选择一张截图或照片。")
         }
 
-        return .result(dialog: "芥子原生上传通道已就绪，下一阶段接入登录凭据和后端上传。")
+        let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+        guard uploadToken?.isEmpty == false else {
+            return .result(dialog: "请先打开芥子登录。")
+        }
+
+        return .result(dialog: "已读取到芥子登录凭据，下一阶段接入后端上传。")
     }
 }
 
