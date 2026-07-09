@@ -2,6 +2,12 @@ name: iOS Build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - codex/ios-swiftui-native-app
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-build.yml"
 
 jobs:
   build:
