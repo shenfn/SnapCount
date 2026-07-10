@@ -8,6 +8,7 @@ struct TodayView: View {
     @State private var isUploading = false
     @State private var uploadMessage: String?
     @State private var uploadMessageIsError = false
+    @State private var showUploadResult = false
 
     var body: some View {
         ZStack {
@@ -69,6 +70,11 @@ struct TodayView: View {
                 showPhotoLibraryPicker = false
             }
         }
+        .alert(uploadMessageIsError ? "上传失败" : "上传完成", isPresented: $showUploadResult) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(uploadMessage ?? "")
+        }
     }
 
     private var header: some View {
@@ -93,6 +99,15 @@ struct TodayView: View {
                     .foregroundStyle(JieziTheme.muted)
                 PrimaryActionButton(title: "上传截图或照片", systemImage: "photo.on.rectangle.angled") {
                     showUploadOptions = true
+                }
+                .disabled(isUploading)
+                if isUploading {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("正在等待 AI 识别结果")
+                            .font(.footnote)
+                            .foregroundStyle(JieziTheme.muted)
+                    }
                 }
                 if let uploadMessage {
                     Text(uploadMessage)
@@ -191,9 +206,11 @@ struct TodayView: View {
             uploadMessage = message
             uploadMessageIsError = false
             await appState.refreshDashboard()
+            showUploadResult = true
         } catch {
             uploadMessage = "上传失败：\(error.localizedDescription)"
             uploadMessageIsError = true
+            showUploadResult = true
         }
 
         isUploading = false

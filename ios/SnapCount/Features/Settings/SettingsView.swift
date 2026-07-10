@@ -30,11 +30,10 @@ struct SettingsView: View {
                         Text(appState.hasUploadToken ? "已同步" : "未同步")
                             .foregroundStyle(.secondary)
                     }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("App Intents / Shortcuts", systemImage: "wand.and.stars")
-                        Text("快捷指令里搜索“上传到芥子”。上一步传入截图或照片，芥子会自动读取 Keychain，不需要手动填写 upload_token。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    NavigationLink {
+                        ShortcutSetupView()
+                    } label: {
+                        Label("快捷指令设置", systemImage: "wand.and.stars")
                     }
                     Button {
                         appState.verifyShortcutCredential()
@@ -58,15 +57,6 @@ struct SettingsView: View {
                     } label: {
                         Label("打开快捷指令 App", systemImage: "arrow.up.forward.app")
                     }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("推荐配置")
-                            .font(.subheadline.weight(.semibold))
-                        Text("1. 新建快捷指令，添加“截屏”或“选择照片”。")
-                        Text("2. 添加“上传到芥子”，图片参数选择上一步结果。")
-                        Text("3. 先运行“检查芥子凭据”，确认不需要手动 token。")
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
                     Label("相册与相机上传", systemImage: "photo.on.rectangle")
                 }
 
@@ -81,5 +71,90 @@ struct SettingsView: View {
         }
         .navigationTitle("设置")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+    }
+}
+
+private struct ShortcutSetupView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        ZStack {
+            JieziTheme.pageBackground.ignoresSafeArea()
+            List {
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: appState.hasUploadToken ? "key.fill" : "key.slash")
+                            .font(.title2)
+                            .foregroundStyle(appState.hasUploadToken ? JieziTheme.mint : JieziTheme.coral)
+                            .frame(width: 38, height: 38)
+                            .background(.thinMaterial, in: Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(appState.hasUploadToken ? "凭据已同步" : "凭据未同步")
+                                .font(.headline)
+                            Text(appState.hasUploadToken ? "快捷指令会自动读取 Keychain，不需要填写 upload_token。" : "请先返回 App 登录一次，再配置快捷指令。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+
+                    Button {
+                        appState.verifyShortcutCredential()
+                    } label: {
+                        Label("重新检查凭据", systemImage: "arrow.clockwise")
+                    }
+                }
+
+                Section("推荐快捷指令") {
+                    ShortcutStepRow(index: 1, title: "添加截屏或选择照片", detail: "截图自动化、操作按钮或手动快捷指令都可以，只要输出是一张图片。")
+                    ShortcutStepRow(index: 2, title: "添加上传到芥子", detail: "在动作搜索里输入“上传到芥子”，图片参数选择上一步结果。")
+                    ShortcutStepRow(index: 3, title: "运行检查芥子凭据", detail: "确认弹出“凭据已同步”后，就不用再手动维护 upload_token。")
+                }
+
+                Section {
+                    Button {
+                        UIPasteboard.general.string = "上传到芥子"
+                    } label: {
+                        Label("复制动作名称", systemImage: "doc.on.doc")
+                    }
+                    Button {
+                        if let url = URL(string: "shortcuts://") {
+                            openURL(url)
+                        }
+                    } label: {
+                        Label("打开快捷指令 App", systemImage: "arrow.up.forward.app")
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+        }
+        .navigationTitle("快捷指令")
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+    }
+}
+
+private struct ShortcutStepRow: View {
+    let index: Int
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(index)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(JieziTheme.mint, in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

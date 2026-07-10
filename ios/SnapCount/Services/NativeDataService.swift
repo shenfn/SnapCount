@@ -25,6 +25,7 @@ struct DashboardSnapshot {
     var pendingCount = 0
     var monthCount = 0
     var recentRecords: [NativeRecordSummary] = []
+    var stagingRecords: [NativeStagingRecord] = []
 }
 
 struct NativeRecordSummary: Identifiable {
@@ -32,6 +33,21 @@ struct NativeRecordSummary: Identifiable {
     let title: String
     let subtitle: String
     let value: String
+    let systemImage: String
+}
+
+struct NativeStagingRecord: Identifiable {
+    let id: String
+    let title: String
+    let summary: String
+    let status: String
+    let statusLabel: String
+    let recordTypeLabel: String
+    let createdAtLabel: String
+    let occurredAtLabel: String?
+    let confidencePercent: Int?
+    let lastErrorMessage: String?
+    let retryCount: Int
     let systemImage: String
 }
 
@@ -78,6 +94,9 @@ final class NativeDataService {
             universal: universalRows,
             staging: stagingRows
         )
+        snapshot.stagingRecords = stagingRows
+            .filter { !["discarded", "archived", "assigned"].contains($0.status ?? "") }
+            .map(stagingRecord)
         return snapshot
     }
 
@@ -125,7 +144,7 @@ final class NativeDataService {
             [StagingRow].self,
             path: "rest/v1/staging_records",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,status,detected_domain_name,ai_summary"),
+                URLQueryItem(name: "select", value: "id,created_at,status,detected_domain_key,detected_domain_name,record_type,occurred_at,confidence,ai_summary,last_error_message,retry_count"),
                 URLQueryItem(name: "order", value: "created_at.desc"),
                 URLQueryItem(name: "limit", value: "30")
             ],
@@ -210,6 +229,25 @@ final class NativeDataService {
         return Array((txItems + incomeItems + universalItems + stagingItems).prefix(16))
     }
 
+    private func stagingRecord(_ row: StagingRow) -> NativeStagingRecord {
+        let status = row.status ?? "unassigned"
+        let title = row.detectedDomainName ?? domainName(row.detectedDomainKey)
+        return NativeStagingRecord(
+            id: row.id,
+            title: title,
+            summary: row.aiSummary ?? row.lastErrorMessage ?? "这条截图需要你打开收件箱确认或补全。",
+            status: status,
+            statusLabel: stagingStatusLabel(status),
+            recordTypeLabel: recordTypeLabel(row.recordType),
+            createdAtLabel: dateTimeLabel(row.createdAt) ?? "最近上传",
+            occurredAtLabel: dateTimeLabel(row.occurredAt),
+            confidencePercent: row.confidence.map { max(0, min(100, Int(($0 * 100).rounded()))) },
+            lastErrorMessage: row.lastErrorMessage,
+            retryCount: row.retryCount ?? 0,
+            systemImage: stagingSystemImage(status)
+        )
+    }
+
     private func currency(_ amount: Double?) -> String {
         guard let amount else { return "" }
         return "¥\(String(format: "%.2f", amount))"
@@ -220,9 +258,46 @@ final class NativeDataService {
         case "sport": return "运动记录"
         case "sleep": return "睡眠记录"
         case "reading": return "阅读记录"
+        case "food": return "饮食记录"
+        case "income": return "收入记录"
         case "expense": return "消费记录"
         default: return "数据记录"
         }
+    }
+
+    private func recordTypeLabel(_ type: String?) -> String {
+        switch type {
+        case "expense": return "消费截图"
+        case "income": return "收入截图"
+        case "transfer": return "转账截图"
+        case "repayment": return "还款截图"
+        case "photo": return "照片识别"
+        default: return "截图识别"
+        }
+    }
+
+    private func stagingStatusLabel(_ status: String) -> String {
+        switch status {
+        case "routing_failed", "unrouted", "unassigned": return "待分类"
+        case "pending_review", "routed", "extracted": return "待确认"
+        case "ai_error", "failed", "extraction_failed", "schema_failed": return "识别失败"
+        case "confirmed": return "已确认"
+        default: return "待处理"
+        }
+    }
+
+    private func stagingSystemImage(_ status: String) -> String {
+        switch status {
+        case "ai_error", "failed", "extraction_failed", "schema_failed": return "exclamationmark.triangle"
+        case "routing_failed", "unrouted", "unassigned": return "questionmark.folder"
+        case "pending_review", "routed", "extracted": return "checklist"
+        default: return "tray"
+        }
+    }
+
+    private func dateTimeLabel(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return String(value.prefix(16)).replacingOccurrences(of: "T", with: " ")
     }
 
     private func localDateString(_ date: Date) -> String {
@@ -297,14 +372,26 @@ private struct StagingRow: Decodable {
     let id: String
     let createdAt: String?
     let status: String?
+    let detectedDomainKey: String?
     let detectedDomainName: String?
+    let recordType: String?
+    let occurredAt: String?
+    let confidence: Double?
     let aiSummary: String?
+    let lastErrorMessage: String?
+    let retryCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
         case createdAt = "created_at"
         case status
+        case detectedDomainKey = "detected_domain_key"
         case detectedDomainName = "detected_domain_name"
+        case recordType = "record_type"
+        case occurredAt = "occurred_at"
+        case confidence
         case aiSummary = "ai_summary"
+        case lastErrorMessage = "last_error_message"
+        case retryCount = "retry_count"
     }
 }
