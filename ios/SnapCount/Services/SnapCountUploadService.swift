@@ -9,7 +9,7 @@ enum SnapCountUploadServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingConfig:
-            return "缺少 iOS Supabase 配置，请先配置 IOS_SUPABASE_URL 和 IOS_SUPABASE_ANON_KEY。"
+            return "缺少 iOS 上传配置，请先配置 IOS_SUPABASE_URL、IOS_SUPABASE_FUNCTIONS_URL 和 IOS_SUPABASE_ANON_KEY。"
         case .invalidURL:
             return "上传地址无效"
         case .invalidResponse:
@@ -33,8 +33,8 @@ final class SnapCountUploadService {
             uploadToken: uploadToken,
             sourceApp: "ios_app_intent",
             captureKind: "screenshot",
-            filename: "shortcut-screenshot.png",
-            mimeType: "image/png"
+            filename: "shortcut-screenshot.jpg",
+            mimeType: "image/jpeg"
         )
     }
 
@@ -63,10 +63,10 @@ final class SnapCountUploadService {
         filename: String,
         mimeType: String
     ) async throws -> String {
-        guard !AppConfig.supabaseURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
+        guard !AppConfig.supabaseFunctionsURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
             throw SnapCountUploadServiceError.missingConfig
         }
-        guard let baseURL = URL(string: AppConfig.supabaseURL) else {
+        guard let baseURL = URL(string: AppConfig.supabaseFunctionsURL) else {
             throw SnapCountUploadServiceError.invalidURL
         }
 

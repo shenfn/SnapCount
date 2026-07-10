@@ -22,7 +22,8 @@ struct UploadScreenshotIntent: AppIntent {
 
         if #available(iOS 18.0, *) {
             do {
-                let imageData = try await image.data(contentType: .image)
+                let rawImageData = try await image.data(contentType: .image)
+                let imageData = try ImageUploadPreprocessor.jpegData(from: rawImageData)
                 let message = try await SnapCountUploadService().uploadShortcutImage(
                     data: imageData,
                     uploadToken: uploadToken

@@ -33,7 +33,7 @@ struct CameraPicker: UIViewControllerRepresentable {
             didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
         ) {
             guard let image = info[.originalImage] as? UIImage,
-                  let data = image.normalizedForUpload().jpegData(compressionQuality: 0.82) else {
+                  let data = try? ImageUploadPreprocessor.jpegData(from: image) else {
                 onCancel()
                 return
             }
@@ -44,28 +44,6 @@ struct CameraPicker: UIViewControllerRepresentable {
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             onCancel()
-        }
-    }
-}
-
-private extension UIImage {
-    func normalizedForUpload(maxDimension: CGFloat = 1800) -> UIImage {
-        let longest = max(size.width, size.height)
-        guard longest > maxDimension else { return fixedOrientation() }
-
-        let scale = maxDimension / longest
-        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        return renderer.image { _ in
-            fixedOrientation().draw(in: CGRect(origin: .zero, size: targetSize))
-        }
-    }
-
-    func fixedOrientation() -> UIImage {
-        guard imageOrientation != .up else { return self }
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }

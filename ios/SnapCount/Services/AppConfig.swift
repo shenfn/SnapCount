@@ -8,6 +8,14 @@ enum AppConfig {
         return value(for: "SupabaseURL")
     }
 
+    static var supabaseFunctionsURL: String {
+        if !GeneratedAppConfig.supabaseFunctionsURL.isEmpty {
+            return GeneratedAppConfig.supabaseFunctionsURL
+        }
+        let configured = value(for: "SupabaseFunctionsURL")
+        return configured.isEmpty ? supabaseURL : configured
+    }
+
     static var supabaseAnonKey: String {
         if !GeneratedAppConfig.supabaseAnonKey.isEmpty {
             return GeneratedAppConfig.supabaseAnonKey

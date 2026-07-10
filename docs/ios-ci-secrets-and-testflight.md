@@ -14,14 +14,15 @@
 
 ## 2. 需要配置的 Secrets
 
-### 2.1 iOS Build 可选 Secrets
+### 2.1 iOS Build 必须 Secrets
 
 | Secret | 用途 | 是否首轮必须 |
 |---|---|---:|
-| `IOS_SUPABASE_URL` | 写入 iOS App 的 Supabase URL | 否 |
-| `IOS_SUPABASE_ANON_KEY` | 写入 iOS App 的 Supabase anon key | 否 |
+| `IOS_SUPABASE_URL` | iOS App 登录、读数据使用的后端地址。生产建议保持 `https://api.snapflow.me` | 是 |
+| `IOS_SUPABASE_ANON_KEY` | iOS App Supabase anon key | 是 |
+| `IOS_SUPABASE_FUNCTIONS_URL` | iOS App 上传识别函数地址。可不配置，默认回退到 `IOS_SUPABASE_URL` | 否 |
 
-当前原生 App 还没接真实登录和上传，所以这两个 Secret 可以后置。
+当前原生 App 已接入真实登录、数据读取、图片上传和 App Intents。`IOS_SUPABASE_URL` 不建议全局改成 Supabase 直连地址，否则登录和读数据也会绕过 `api.snapflow.me`。如果只想排查上传识别链路，可以单独配置 `IOS_SUPABASE_FUNCTIONS_URL`。
 
 ### 2.2 TestFlight 必须 Secrets
 
@@ -35,6 +36,7 @@
 | `APPLE_API_KEY_ID` | App Store Connect API Key ID |
 | `APPLE_API_ISSUER_ID` | App Store Connect Issuer ID |
 | `IOS_SUPABASE_URL` | iOS App 后端地址 |
+| `IOS_SUPABASE_FUNCTIONS_URL` | 可选，iOS 上传识别函数地址；不配置时沿用 `IOS_SUPABASE_URL` |
 | `IOS_SUPABASE_ANON_KEY` | iOS App Supabase anon key |
 
 ## 3. Windows PowerShell Base64 命令

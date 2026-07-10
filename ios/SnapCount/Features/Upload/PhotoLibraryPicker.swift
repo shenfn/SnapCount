@@ -47,37 +47,16 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
             provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
                 DispatchQueue.main.async {
                     guard let data,
-                          let image = UIImage(data: data),
-                          let uploadData = image.normalizedForLibraryUpload().jpegData(compressionQuality: 0.84) else {
+                          let uploadData = try? ImageUploadPreprocessor.jpegData(
+                            from: data,
+                            compressionQuality: 0.84
+                          ) else {
                         self.onCancel()
                         return
                     }
                     self.onImageData(uploadData)
                 }
             }
-        }
-    }
-}
-
-private extension UIImage {
-    func normalizedForLibraryUpload(maxDimension: CGFloat = 1800) -> UIImage {
-        let oriented = fixedOrientation()
-        let longest = max(oriented.size.width, oriented.size.height)
-        guard longest > maxDimension else { return oriented }
-
-        let scale = maxDimension / longest
-        let targetSize = CGSize(width: oriented.size.width * scale, height: oriented.size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        return renderer.image { _ in
-            oriented.draw(in: CGRect(origin: .zero, size: targetSize))
-        }
-    }
-
-    func fixedOrientation() -> UIImage {
-        guard imageOrientation != .up else { return self }
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }

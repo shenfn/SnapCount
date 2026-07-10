@@ -40,6 +40,7 @@ targets:
         NSPhotoLibraryUsageDescription: 用于选择截图或照片，并上传给 AI 识别为个人记录。
         NSPhotoLibraryAddUsageDescription: 用于在你主动保存图片时写入相册。
         SupabaseURL: $(SNAPCOUNT_SUPABASE_URL)
+        SupabaseFunctionsURL: $(SNAPCOUNT_SUPABASE_FUNCTIONS_URL)
         SupabaseAnonKey: $(SNAPCOUNT_SUPABASE_ANON_KEY)
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
