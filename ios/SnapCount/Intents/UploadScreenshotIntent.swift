@@ -1,13 +1,12 @@
 import AppIntents
 import Foundation
-import UniformTypeIdentifiers
 
 struct UploadScreenshotIntent: AppIntent {
     static var title: LocalizedStringResource = "上传 JPEG 到芥子"
     static var description = IntentDescription("接收快捷指令上一部生成的 JPEG 图像，并上传给芥子进行 AI 识别。")
     static var openAppWhenRun = false
 
-    @Parameter(title: "JPEG 图像", supportedContentTypes: [.jpeg, .image])
+    @Parameter(title: "JPEG 图像")
     var image: IntentFile?
 
     static var parameterSummary: some ParameterSummary {
