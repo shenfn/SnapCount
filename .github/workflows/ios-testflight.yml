@@ -41,15 +41,15 @@ jobs:
           }
           SWIFT
 
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate --spec project.yml
+
       - name: Set TestFlight build number
         working-directory: ios
         run: |
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_id }}" SnapCount/Info.plist
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" SnapCount/Info.plist
-
-      - name: Generate Xcode project
-        working-directory: ios
-        run: xcodegen generate --spec project.yml
 
       - name: Install signing certificate and profile
         env:
