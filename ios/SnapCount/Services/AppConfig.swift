@@ -5,14 +5,14 @@ enum AppConfig {
         if !GeneratedAppConfig.supabaseURL.isEmpty {
             return GeneratedAppConfig.supabaseURL
         }
-        value(for: "SupabaseURL")
+        return value(for: "SupabaseURL")
     }
 
     static var supabaseAnonKey: String {
         if !GeneratedAppConfig.supabaseAnonKey.isEmpty {
             return GeneratedAppConfig.supabaseAnonKey
         }
-        value(for: "SupabaseAnonKey")
+        return value(for: "SupabaseAnonKey")
     }
 
     private static func value(for key: String) -> String {
