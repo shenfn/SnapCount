@@ -84,7 +84,7 @@ final class AppState: ObservableObject {
         dashboardMessage = nil
 
         do {
-            let session = try requireSession()
+            let session = try await validSession()
             dashboard = try await dataService.fetchDashboard(accessToken: session.accessToken)
         } catch {
             dashboardMessage = error.localizedDescription
@@ -103,6 +103,28 @@ final class AppState: ObservableObject {
         guard let json = String(data: data, encoding: .utf8) else { return }
         try keychain.setString(json, for: KeychainKeys.authSession)
         try keychain.setString(uploadToken, for: KeychainKeys.uploadToken)
+    }
+
+    private func save(session: SupabaseAuthSession) throws {
+        let data = try JSONEncoder().encode(session)
+        guard let json = String(data: data, encoding: .utf8) else { return }
+        try keychain.setString(json, for: KeychainKeys.authSession)
+    }
+
+    private func validSession() async throws -> SupabaseAuthSession {
+        let session = try requireSession()
+        guard let refreshToken = session.refreshToken, !refreshToken.isEmpty else {
+            return session
+        }
+
+        do {
+            let refreshed = try await authService.refreshSession(refreshToken: refreshToken)
+            try save(session: refreshed)
+            apply(session: refreshed)
+            return refreshed
+        } catch {
+            return session
+        }
     }
 
     private func requireSession() throws -> SupabaseAuthSession {

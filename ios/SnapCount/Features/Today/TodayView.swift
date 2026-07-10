@@ -1,11 +1,10 @@
 import SwiftUI
-import PhotosUI
 
 struct TodayView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var showUploadSheet = false
+    @State private var showUploadOptions = false
     @State private var showCameraPicker = false
-    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var showPhotoLibraryPicker = false
     @State private var isUploading = false
     @State private var uploadMessage: String?
     @State private var uploadMessageIsError = false
@@ -32,14 +31,14 @@ struct TodayView: View {
         }
         .navigationTitle("芥子")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .sheet(isPresented: $showUploadSheet) {
-            UploadEntrySheet(
-                selectedPhoto: $selectedPhoto,
-                isUploading: isUploading,
-                onCamera: openCamera
-            )
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
+        .confirmationDialog("上传", isPresented: $showUploadOptions, titleVisibility: .visible) {
+            Button("选择照片") {
+                showPhotoLibraryPicker = true
+            }
+            Button("拍摄照片") {
+                openCamera()
+            }
+            Button("取消", role: .cancel) {}
         }
         .fullScreenCover(isPresented: $showCameraPicker) {
             CameraPicker { data in
@@ -56,10 +55,18 @@ struct TodayView: View {
             }
             .ignoresSafeArea()
         }
-        .onChange(of: selectedPhoto) { _, newValue in
-            guard let newValue else { return }
-            Task {
-                await uploadPhotoLibraryItem(newValue)
+        .sheet(isPresented: $showPhotoLibraryPicker) {
+            PhotoLibraryPicker { data in
+                showPhotoLibraryPicker = false
+                Task {
+                    await uploadImageData(
+                        data,
+                        captureKind: "photo_library",
+                        filename: "photo-library-upload.jpg"
+                    )
+                }
+            } onCancel: {
+                showPhotoLibraryPicker = false
             }
         }
     }
@@ -85,7 +92,7 @@ struct TodayView: View {
                     .font(.subheadline)
                     .foregroundStyle(JieziTheme.muted)
                 PrimaryActionButton(title: "上传截图或照片", systemImage: "photo.on.rectangle.angled") {
-                    showUploadSheet = true
+                    showUploadOptions = true
                 }
                 if let uploadMessage {
                     Text(uploadMessage)
@@ -158,28 +165,7 @@ struct TodayView: View {
     }
 
     private func openCamera() {
-        showUploadSheet = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            showCameraPicker = true
-        }
-    }
-
-    private func uploadPhotoLibraryItem(_ photo: PhotosPickerItem) async {
-        do {
-            guard let data = try await photo.loadTransferable(type: Data.self) else {
-                throw NativeUploadError.emptyImage
-            }
-            await uploadImageData(
-                data,
-                captureKind: "photo_library",
-                filename: "photo-library-upload.jpg"
-            )
-        } catch {
-            uploadMessage = "上传失败：\(error.localizedDescription)"
-            uploadMessageIsError = true
-            selectedPhoto = nil
-            isUploading = false
-        }
+        showCameraPicker = true
     }
 
     private func uploadImageData(
@@ -190,7 +176,6 @@ struct TodayView: View {
         isUploading = true
         uploadMessage = "正在上传并等待 AI 识别结果。"
         uploadMessageIsError = false
-        showUploadSheet = false
 
         do {
             guard let uploadToken = try KeychainStore.shared.string(for: KeychainKeys.uploadToken),
@@ -211,7 +196,6 @@ struct TodayView: View {
             uploadMessageIsError = true
         }
 
-        selectedPhoto = nil
         isUploading = false
     }
 }
@@ -267,33 +251,6 @@ private struct MetricTile: View {
                     .foregroundStyle(JieziTheme.muted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-private struct UploadEntrySheet: View {
-    @Binding var selectedPhoto: PhotosPickerItem?
-    let isUploading: Bool
-    let onCamera: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            List {
-                PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                    Label("选择照片", systemImage: "photo")
-                }
-                Button {
-                    onCamera()
-                } label: {
-                    Label("拍摄照片", systemImage: "camera")
-                }
-                Section {
-                    Text(isUploading ? "正在上传并等待 AI 识别结果。" : "可以拍照或从相册选择图片，上传后由 AI 识别为个人记录。")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("上传")
-            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

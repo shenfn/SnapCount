@@ -45,6 +45,22 @@ final class SupabaseAuthService {
         return try await decoded(SupabaseAuthSession.self, from: request)
     }
 
+    func refreshSession(refreshToken: String) async throws -> SupabaseAuthSession {
+        let baseURL = try requireBaseURL()
+        let url = baseURL.appendingPathComponent("auth/v1/token")
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "grant_type", value: "refresh_token")]
+        guard let requestURL = components?.url else { throw SupabaseAuthServiceError.invalidURL }
+
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = "POST"
+        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(["refresh_token": refreshToken])
+
+        return try await decoded(SupabaseAuthSession.self, from: request)
+    }
+
     func fetchUploadToken(userId: String, accessToken: String) async throws -> String {
         let baseURL = try requireBaseURL()
         let url = baseURL.appendingPathComponent("rest/v1/user_configs")
