@@ -12,7 +12,7 @@ on:
 jobs:
   build:
     name: Build SwiftUI app
-    runs-on: macos-latest
+    runs-on: macos-26
 
     steps:
       - name: Checkout

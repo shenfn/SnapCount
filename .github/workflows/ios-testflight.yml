@@ -12,7 +12,7 @@ on:
 jobs:
   testflight:
     name: Archive and upload
-    runs-on: macos-latest
+    runs-on: macos-26
 
     steps:
       - name: Checkout
