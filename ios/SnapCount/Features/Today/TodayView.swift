@@ -171,7 +171,7 @@ struct TodayView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("快捷指令怎么用")
                         .font(.headline)
-                    Text("打开快捷指令 App，新建快捷指令：先添加“截屏”或“选择照片”，再添加“上传到芥子”，把图片传给它。Keychain 凭据会在后台自动使用。")
+                    Text("打开快捷指令 App，在芥子资料库里使用“识别截图并记录”或“识别拍照并记录”。如果前面有“转换为 JPEG”，把“转换后的图像”传给芥子即可。")
                         .font(.subheadline)
                         .foregroundStyle(JieziTheme.muted)
                 }

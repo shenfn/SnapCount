@@ -28,13 +28,18 @@ final class SnapCountUploadService {
         self.session = session
     }
 
-    func uploadShortcutImage(data: Data, uploadToken: String) async throws -> String {
+    func uploadShortcutImage(
+        data: Data,
+        uploadToken: String,
+        captureKind: String = "screenshot",
+        filename: String = "shortcut-screenshot.jpg"
+    ) async throws -> String {
         try await uploadImage(
             data: data,
             uploadToken: uploadToken,
             sourceApp: "ios_app_intent",
-            captureKind: "screenshot",
-            filename: "shortcut-screenshot.jpg",
+            captureKind: captureKind,
+            filename: filename,
             mimeType: "image/jpeg"
         )
     }

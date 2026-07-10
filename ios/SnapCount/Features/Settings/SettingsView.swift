@@ -46,7 +46,7 @@ struct SettingsView: View {
                             .foregroundStyle(appState.hasUploadToken ? .secondary : JieziTheme.coral)
                     }
                     Button {
-                        UIPasteboard.general.string = "上传到芥子"
+                        UIPasteboard.general.string = "识别截图并记录"
                     } label: {
                         Label("复制动作名称", systemImage: "doc.on.doc")
                     }
@@ -107,12 +107,19 @@ private struct ShortcutSetupView: View {
                     }
                 }
 
-                Section("推荐快捷指令") {
-                    ShortcutStepRow(index: 1, title: "添加一键截图快捷指令", detail: "模板会把“截屏”连接到“上传到芥子”，核心上传逻辑由 App 内置。")
+                Section("系统内置动作") {
+                    ShortcutActionRow(title: "识别截图并记录", detail: "接收“截屏”或“转换后的 JPEG 图像”，上传到芥子 AI 识别。", systemImage: "sparkles.rectangle.stack")
+                    ShortcutActionRow(title: "识别拍照并记录", detail: "接收快捷指令相机拍摄的照片，按拍照链路上传识别。", systemImage: "camera.viewfinder")
+                    ShortcutActionRow(title: "打开快速捕获", detail: "适合绑定操作按钮：直接打开芥子的拍照 / 相册上传入口。", systemImage: "bolt.fill")
+                    ShortcutActionRow(title: "检查芥子凭据", detail: "确认登录后 Keychain 凭据可被快捷指令自动读取。", systemImage: "key.viewfinder")
+                }
+
+                Section("一键截图模板") {
+                    ShortcutStepRow(index: 1, title: "快捷指令流程", detail: "推荐顺序：截屏 -> 可选转换 JPEG -> 识别截图并记录 -> 显示结果。")
                     Button {
                         openShortcutTemplate()
                     } label: {
-                        Label("添加快捷指令", systemImage: "square.and.arrow.down")
+                        Label("打开快捷指令 App", systemImage: "arrow.up.forward.app")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -122,13 +129,13 @@ private struct ShortcutSetupView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    ShortcutStepRow(index: 2, title: "绑定操作按钮", detail: "前往“设置 -> 操作按钮 -> 快捷指令”，选择刚添加的“一键截图上传”。")
-                    ShortcutStepRow(index: 3, title: "先检查凭据", detail: "运行“检查芥子凭据”，确认不需要手动维护 upload_token。")
+                    ShortcutStepRow(index: 2, title: "压缩建议", detail: "如果在快捷指令里压缩，建议长边保留 1200 以上；640 容易让小字识别变差。")
+                    ShortcutStepRow(index: 3, title: "绑定操作按钮", detail: "想要不选图的入口，优先绑定“打开快速捕获”；想要截屏上传，则绑定你创建的一键截图模板。")
                 }
 
                 Section {
                     Button {
-                        UIPasteboard.general.string = "上传到芥子"
+                        UIPasteboard.general.string = "识别截图并记录"
                     } label: {
                         Label("复制动作名称", systemImage: "doc.on.doc")
                     }
@@ -153,10 +160,35 @@ private struct ShortcutSetupView: View {
             return
         }
 
-        setupMessage = "当前构建还没有内置模板链接。我会先打开快捷指令 App，你可以搜索“上传到芥子”手动连接“截屏”动作。"
+        setupMessage = "当前构建还没有配置新版模板链接。我会先打开快捷指令 App，你可以搜索“识别截图并记录”，把“转换后的图像”接给它。"
         if let url = URL(string: "shortcuts://") {
             openURL(url)
         }
+    }
+}
+
+private struct ShortcutActionRow: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(JieziTheme.mint)
+                .frame(width: 28, height: 28)
+                .background(.thinMaterial, in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
