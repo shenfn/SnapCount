@@ -37,16 +37,42 @@ struct UploadScreenshotIntent: AppIntent {
     }
 }
 
+struct CheckShortcutCredentialIntent: AppIntent {
+    static var title: LocalizedStringResource = "检查芥子凭据"
+    static var description = IntentDescription("检查芥子是否已经把快捷指令上传所需凭据同步到 Keychain。")
+    static var openAppWhenRun = false
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken),
+              !uploadToken.isEmpty else {
+            return .result(dialog: "未找到芥子上传凭据。请先打开芥子并登录。")
+        }
+
+        return .result(dialog: "芥子凭据已同步。快捷指令上传时会自动读取，不需要手动填写 upload_token。")
+    }
+}
+
 struct SnapCountShortcutsProvider: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: UploadScreenshotIntent(),
-            phrases: [
-                "上传到\(.applicationName)",
-                "用\(.applicationName)记录截图"
-            ],
-            shortTitle: "上传截图",
-            systemImageName: "sparkles.rectangle.stack"
-        )
+        [
+            AppShortcut(
+                intent: UploadScreenshotIntent(),
+                phrases: [
+                    "上传到\(.applicationName)",
+                    "用\(.applicationName)记录截图"
+                ],
+                shortTitle: "上传截图",
+                systemImageName: "sparkles.rectangle.stack"
+            ),
+            AppShortcut(
+                intent: CheckShortcutCredentialIntent(),
+                phrases: [
+                    "检查\(.applicationName)凭据",
+                    "检查\(.applicationName)快捷指令"
+                ],
+                shortTitle: "检查凭据",
+                systemImageName: "key.viewfinder"
+            )
+        ]
     }
 }

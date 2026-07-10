@@ -14,6 +14,7 @@ final class AppState: ObservableObject {
     @Published var dashboard = DashboardSnapshot()
     @Published var dashboardMessage: String?
     @Published var isLoadingDashboard = false
+    @Published var shortcutCredentialMessage: String?
 
     private let authService = SupabaseAuthService()
     private let dataService = NativeDataService()
@@ -31,6 +32,7 @@ final class AppState: ObservableObject {
                 }
             }
             hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
+            updateShortcutCredentialMessage()
         } catch {
             authMessage = error.localizedDescription
             authMessageIsError = true
@@ -53,6 +55,7 @@ final class AppState: ObservableObject {
             apply(session: session)
             hasUploadToken = true
             authMessage = "已登录，快捷指令凭据已同步。"
+            updateShortcutCredentialMessage()
             await refreshDashboard()
         } catch {
             authMessage = error.localizedDescription
@@ -75,7 +78,17 @@ final class AppState: ObservableObject {
         hasUploadToken = false
         dashboard = DashboardSnapshot()
         dashboardMessage = nil
+        shortcutCredentialMessage = nil
         selectedTab = .today
+    }
+
+    func verifyShortcutCredential() {
+        do {
+            hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
+            updateShortcutCredentialMessage()
+        } catch {
+            shortcutCredentialMessage = error.localizedDescription
+        }
     }
 
     func refreshDashboard() async {
@@ -96,6 +109,12 @@ final class AppState: ObservableObject {
     private func apply(session: SupabaseAuthSession) {
         isSignedIn = true
         currentUserEmail = session.user.email ?? ""
+    }
+
+    private func updateShortcutCredentialMessage() {
+        shortcutCredentialMessage = hasUploadToken
+            ? "已同步。快捷指令会自动读取 Keychain，不需要手动填写 upload_token。"
+            : "未同步。请先登录芥子。"
     }
 
     private func save(session: SupabaseAuthSession, uploadToken: String) throws {
