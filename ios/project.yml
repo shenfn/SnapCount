@@ -24,6 +24,36 @@ targets:
           - Info.plist
     info:
       path: SnapCount/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleDisplayName: 芥子
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: SnapCount
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        LSRequiresIPhoneOS: true
+        NSCameraUsageDescription: 用于拍摄账单、食物、运动等截图或照片，并上传给 AI 识别为个人记录。
+        NSPhotoLibraryUsageDescription: 用于选择截图或照片，并上传给 AI 识别为个人记录。
+        NSPhotoLibraryAddUsageDescription: 用于在你主动保存图片时写入相册。
+        SupabaseURL: $(SNAPCOUNT_SUPABASE_URL)
+        SupabaseAnonKey: $(SNAPCOUNT_SUPABASE_ANON_KEY)
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UILaunchStoryboardName: LaunchScreen
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jiezi.app
