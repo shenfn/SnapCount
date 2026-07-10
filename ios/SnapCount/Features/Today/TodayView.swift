@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 
 struct TodayView: View {
+    @EnvironmentObject private var appState: AppState
     @State private var showUploadSheet = false
     @State private var showCameraPicker = false
     @State private var selectedPhoto: PhotosPickerItem?
@@ -18,11 +19,15 @@ struct TodayView: View {
                     header
                     capturePanel
                     rhythmPanel
+                    recentPanel
                     shortcutPanel
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 18)
                 .padding(.bottom, 32)
+            }
+            .refreshable {
+                await appState.refreshDashboard()
             }
         }
         .navigationTitle("芥子")
@@ -76,7 +81,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Label("快速捕获", systemImage: "camera.viewfinder")
                     .font(.title3.weight(.semibold))
-                Text("首版会接入拍照、相册选图和快捷指令上传。现在这层先用来验证原生导航、玻璃材质和系统弹层。")
+                Text("拍照、相册和快捷指令都会上传到同一条 AI 识别链路。")
                     .font(.subheadline)
                     .foregroundStyle(JieziTheme.muted)
                 PrimaryActionButton(title: "上传截图或照片", systemImage: "photo.on.rectangle.angled") {
@@ -94,9 +99,41 @@ struct TodayView: View {
 
     private var rhythmPanel: some View {
         HStack(spacing: 12) {
-            MetricTile(title: "今日", value: "0", caption: "等待接入")
-            MetricTile(title: "待处理", value: "0", caption: "收件箱")
-            MetricTile(title: "本月", value: "0", caption: "记录")
+            MetricTile(title: "今日", value: "\(appState.dashboard.todayCount)", caption: "新记录")
+            MetricTile(title: "待处理", value: "\(appState.dashboard.pendingCount)", caption: "收件箱")
+            MetricTile(title: "本月", value: "\(appState.dashboard.monthCount)", caption: "总记录")
+        }
+    }
+
+    private var recentPanel: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("最近记录", systemImage: "clock")
+                        .font(.headline)
+                    Spacer()
+                    if appState.isLoadingDashboard {
+                        ProgressView()
+                    }
+                }
+
+                if let message = appState.dashboardMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(JieziTheme.coral)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if appState.dashboard.recentRecords.isEmpty {
+                    Text("这个原生版本刚接入数据读取。下拉刷新，或上传一张图片后再查看。")
+                        .font(.subheadline)
+                        .foregroundStyle(JieziTheme.muted)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(appState.dashboard.recentRecords.prefix(5)) { item in
+                            NativeRecordRow(item: item)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -110,9 +147,9 @@ struct TodayView: View {
                     .background(.thinMaterial, in: Circle())
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("App Intents 已进入首版范围")
+                    Text("快捷指令怎么用")
                         .font(.headline)
-                    Text("快捷指令会把截图作为输入交给芥子，由原生 Intent 直接上传到现有 ingest-receipt。")
+                    Text("打开快捷指令 App，新建快捷指令：先添加“截屏”或“选择照片”，再添加“上传到芥子”，把图片传给它。Keychain 凭据会在后台自动使用。")
                         .font(.subheadline)
                         .foregroundStyle(JieziTheme.muted)
                 }
@@ -168,6 +205,7 @@ struct TodayView: View {
             )
             uploadMessage = message
             uploadMessageIsError = false
+            await appState.refreshDashboard()
         } catch {
             uploadMessage = "上传失败：\(error.localizedDescription)"
             uploadMessageIsError = true
@@ -175,6 +213,38 @@ struct TodayView: View {
 
         selectedPhoto = nil
         isUploading = false
+    }
+}
+
+private struct NativeRecordRow: View {
+    let item: NativeRecordSummary
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: item.systemImage)
+                .font(.body.weight(.medium))
+                .foregroundStyle(JieziTheme.mint)
+                .frame(width: 30, height: 30)
+                .background(.thinMaterial, in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text(item.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.muted)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            if !item.value.isEmpty {
+                Text(item.value)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+            }
+        }
     }
 }
 

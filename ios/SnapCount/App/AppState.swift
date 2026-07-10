@@ -11,8 +11,12 @@ final class AppState: ObservableObject {
     @Published var authMessage: String?
     @Published var authMessageIsError = false
     @Published var hasUploadToken = false
+    @Published var dashboard = DashboardSnapshot()
+    @Published var dashboardMessage: String?
+    @Published var isLoadingDashboard = false
 
     private let authService = SupabaseAuthService()
+    private let dataService = NativeDataService()
     private let keychain = KeychainStore.shared
 
     func bootstrap() {
@@ -22,6 +26,9 @@ final class AppState: ObservableObject {
                let data = sessionJSON.data(using: .utf8),
                let session = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) {
                 apply(session: session)
+                Task {
+                    await refreshDashboard()
+                }
             }
             hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
         } catch {
@@ -46,6 +53,7 @@ final class AppState: ObservableObject {
             apply(session: session)
             hasUploadToken = true
             authMessage = "已登录，快捷指令凭据已同步。"
+            await refreshDashboard()
         } catch {
             authMessage = error.localizedDescription
             authMessageIsError = true
@@ -65,7 +73,24 @@ final class AppState: ObservableObject {
         isSignedIn = false
         currentUserEmail = ""
         hasUploadToken = false
+        dashboard = DashboardSnapshot()
+        dashboardMessage = nil
         selectedTab = .today
+    }
+
+    func refreshDashboard() async {
+        guard !isLoadingDashboard else { return }
+        isLoadingDashboard = true
+        dashboardMessage = nil
+
+        do {
+            let session = try requireSession()
+            dashboard = try await dataService.fetchDashboard(accessToken: session.accessToken)
+        } catch {
+            dashboardMessage = error.localizedDescription
+        }
+
+        isLoadingDashboard = false
     }
 
     private func apply(session: SupabaseAuthSession) {
@@ -78,6 +103,15 @@ final class AppState: ObservableObject {
         guard let json = String(data: data, encoding: .utf8) else { return }
         try keychain.setString(json, for: KeychainKeys.authSession)
         try keychain.setString(uploadToken, for: KeychainKeys.uploadToken)
+    }
+
+    private func requireSession() throws -> SupabaseAuthSession {
+        guard let sessionJSON = try keychain.string(for: KeychainKeys.authSession),
+              let data = sessionJSON.data(using: .utf8),
+              let session = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) else {
+            throw NativeDataServiceError.missingSession
+        }
+        return session
     }
 }
 

@@ -28,7 +28,12 @@ struct SettingsView: View {
                         Text(appState.hasUploadToken ? "已同步" : "未同步")
                             .foregroundStyle(.secondary)
                     }
-                    Label("App Intents / Shortcuts", systemImage: "wand.and.stars")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("App Intents / Shortcuts", systemImage: "wand.and.stars")
+                        Text("打开快捷指令 App，创建：截屏或选择照片 -> 上传到芥子。这里显示“已同步”后，快捷指令会自动读取 Keychain 里的上传凭据，不需要你再填 token。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     Label("相册与相机上传", systemImage: "photo.on.rectangle")
                 }
 
