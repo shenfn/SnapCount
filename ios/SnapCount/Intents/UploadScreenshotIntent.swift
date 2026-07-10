@@ -54,26 +54,25 @@ struct CheckShortcutCredentialIntent: AppIntent {
 }
 
 struct SnapCountShortcutsProvider: AppShortcutsProvider {
+    @AppShortcutsBuilder
     static var appShortcuts: [AppShortcut] {
-        [
-            AppShortcut(
-                intent: UploadScreenshotIntent(),
-                phrases: [
-                    "上传到\(.applicationName)",
-                    "用\(.applicationName)记录截图"
-                ],
-                shortTitle: "上传截图",
-                systemImageName: "sparkles.rectangle.stack"
-            ),
-            AppShortcut(
-                intent: CheckShortcutCredentialIntent(),
-                phrases: [
-                    "检查\(.applicationName)凭据",
-                    "检查\(.applicationName)快捷指令"
-                ],
-                shortTitle: "检查凭据",
-                systemImageName: "key.viewfinder"
-            )
-        ]
+        AppShortcut(
+            intent: UploadScreenshotIntent(),
+            phrases: [
+                "上传到\(.applicationName)",
+                "用\(.applicationName)记录截图"
+            ],
+            shortTitle: "上传截图",
+            systemImageName: "sparkles.rectangle.stack"
+        )
+        AppShortcut(
+            intent: CheckShortcutCredentialIntent(),
+            phrases: [
+                "检查\(.applicationName)凭据",
+                "检查\(.applicationName)快捷指令"
+            ],
+            shortTitle: "检查凭据",
+            systemImageName: "key.viewfinder"
+        )
     }
 }
