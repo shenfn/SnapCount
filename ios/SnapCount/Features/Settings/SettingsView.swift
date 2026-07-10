@@ -46,7 +46,7 @@ struct SettingsView: View {
                             .foregroundStyle(appState.hasUploadToken ? .secondary : JieziTheme.coral)
                     }
                     Button {
-                        UIPasteboard.general.string = "识别截图并记录"
+                        UIPasteboard.general.string = "上传 JPEG 到芥子"
                     } label: {
                         Label("复制动作名称", systemImage: "doc.on.doc")
                     }
@@ -108,14 +108,12 @@ private struct ShortcutSetupView: View {
                 }
 
                 Section("系统内置动作") {
-                    ShortcutActionRow(title: "识别截图并记录", detail: "接收“截屏”或“转换后的 JPEG 图像”，上传到芥子 AI 识别。", systemImage: "sparkles.rectangle.stack")
-                    ShortcutActionRow(title: "识别拍照并记录", detail: "接收快捷指令相机拍摄的照片，按拍照链路上传识别。", systemImage: "camera.viewfinder")
-                    ShortcutActionRow(title: "打开快速捕获", detail: "适合绑定操作按钮：直接打开芥子的拍照 / 相册上传入口。", systemImage: "bolt.fill")
+                    ShortcutActionRow(title: "上传 JPEG 到芥子", detail: "接收上一部“转换为 JPEG”的结果。点击动作里的 JPEG 图像槽，选择“转换后的图像”。", systemImage: "square.and.arrow.up")
                     ShortcutActionRow(title: "检查芥子凭据", detail: "确认登录后 Keychain 凭据可被快捷指令自动读取。", systemImage: "key.viewfinder")
                 }
 
                 Section("一键截图模板") {
-                    ShortcutStepRow(index: 1, title: "快捷指令流程", detail: "推荐顺序：截屏 -> 可选转换 JPEG -> 识别截图并记录 -> 显示结果。")
+                    ShortcutStepRow(index: 1, title: "快捷指令流程", detail: "推荐顺序：截屏 / 拍照 -> 调整大小 -> 转换 JPEG -> 上传 JPEG 到芥子 -> 显示结果。")
                     Button {
                         openShortcutTemplate()
                     } label: {
@@ -130,12 +128,12 @@ private struct ShortcutSetupView: View {
                             .foregroundStyle(.secondary)
                     }
                     ShortcutStepRow(index: 2, title: "压缩建议", detail: "如果在快捷指令里压缩，建议长边保留 1200 以上；640 容易让小字识别变差。")
-                    ShortcutStepRow(index: 3, title: "绑定操作按钮", detail: "想要不选图的入口，优先绑定“打开快速捕获”；想要截屏上传，则绑定你创建的一键截图模板。")
+                    ShortcutStepRow(index: 3, title: "凭据处理", detail: "快捷指令里不放 token。芥子会从 Keychain 自动读取登录后同步的上传凭据。")
                 }
 
                 Section {
                     Button {
-                        UIPasteboard.general.string = "识别截图并记录"
+                        UIPasteboard.general.string = "上传 JPEG 到芥子"
                     } label: {
                         Label("复制动作名称", systemImage: "doc.on.doc")
                     }
@@ -160,7 +158,7 @@ private struct ShortcutSetupView: View {
             return
         }
 
-        setupMessage = "当前构建还没有配置新版模板链接。我会先打开快捷指令 App，你可以搜索“识别截图并记录”，把“转换后的图像”接给它。"
+        setupMessage = "当前构建还没有配置新版模板链接。我会先打开快捷指令 App，你可以搜索“上传 JPEG 到芥子”，把“转换后的图像”接给它。"
         if let url = URL(string: "shortcuts://") {
             openURL(url)
         }

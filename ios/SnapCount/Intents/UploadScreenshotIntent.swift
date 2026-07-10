@@ -3,16 +3,20 @@ import Foundation
 import UniformTypeIdentifiers
 
 struct UploadScreenshotIntent: AppIntent {
-    static var title: LocalizedStringResource = "识别截图并记录"
-    static var description = IntentDescription("接收快捷指令上一部传入的截图或 JPEG 图像，并上传给芥子进行 AI 识别。")
+    static var title: LocalizedStringResource = "上传 JPEG 到芥子"
+    static var description = IntentDescription("接收快捷指令上一部生成的 JPEG 图像，并上传给芥子进行 AI 识别。")
     static var openAppWhenRun = false
 
-    @Parameter(title: "截图或 JPEG 图像")
+    @Parameter(title: "JPEG 图像", supportedContentTypes: [.jpeg, .image])
     var image: IntentFile?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("上传 \(\.$image) 到芥子")
+    }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard let image else {
-            return .result(dialog: "请把“截屏”或“转换后的图像”传给芥子。")
+            return .result(dialog: "请把“转换后的图像”或上一部 JPEG 变量传给芥子。")
         }
 
         guard let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken),
@@ -28,7 +32,7 @@ struct UploadScreenshotIntent: AppIntent {
                     data: imageData,
                     uploadToken: uploadToken,
                     captureKind: "screenshot",
-                    filename: "shortcut-screenshot.jpg"
+                    filename: "shortcut-jpeg.jpg"
                 )
                 return .result(dialog: "\(message)")
             } catch {
@@ -37,54 +41,6 @@ struct UploadScreenshotIntent: AppIntent {
         }
 
         return .result(dialog: "快捷指令图片上传需要 iOS 18 或更高版本。")
-    }
-}
-
-struct UploadCameraPhotoIntent: AppIntent {
-    static var title: LocalizedStringResource = "识别拍照并记录"
-    static var description = IntentDescription("接收快捷指令相机拍摄或相册传入的照片，并上传给芥子进行 AI 识别。")
-    static var openAppWhenRun = false
-
-    @Parameter(title: "照片或 JPEG 图像")
-    var image: IntentFile?
-
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let image else {
-            return .result(dialog: "请把“拍摄的照片”或“转换后的图像”传给芥子。")
-        }
-
-        guard let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken),
-              !uploadToken.isEmpty else {
-            return .result(dialog: "请先打开芥子登录。")
-        }
-
-        if #available(iOS 18.0, *) {
-            do {
-                let rawImageData = try await image.data(contentType: .image)
-                let imageData = try ImageUploadPreprocessor.jpegData(from: rawImageData)
-                let message = try await SnapCountUploadService().uploadShortcutImage(
-                    data: imageData,
-                    uploadToken: uploadToken,
-                    captureKind: "camera",
-                    filename: "shortcut-camera.jpg"
-                )
-                return .result(dialog: "\(message)")
-            } catch {
-                return .result(dialog: "上传失败：\(error.localizedDescription)")
-            }
-        }
-
-        return .result(dialog: "快捷指令图片上传需要 iOS 18 或更高版本。")
-    }
-}
-
-struct OpenQuickCaptureIntent: AppIntent {
-    static var title: LocalizedStringResource = "打开快速捕获"
-    static var description = IntentDescription("打开芥子的快速捕获入口，用于拍照或从相册选择截图。")
-    static var openAppWhenRun = true
-
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        return .result(dialog: "已打开芥子快速捕获。")
     }
 }
 
@@ -109,29 +65,11 @@ struct SnapCountShortcutsProvider: AppShortcutsProvider {
         AppShortcut(
             intent: UploadScreenshotIntent(),
             phrases: [
-                "用\(.applicationName)识别截图",
-                "用\(.applicationName)记录截图"
+                "用\(.applicationName)上传 JPEG",
+                "用\(.applicationName)记录 JPEG"
             ],
-            shortTitle: "识别截图",
-            systemImageName: "sparkles.rectangle.stack"
-        )
-        AppShortcut(
-            intent: UploadCameraPhotoIntent(),
-            phrases: [
-                "用\(.applicationName)识别拍照",
-                "用\(.applicationName)记录照片"
-            ],
-            shortTitle: "识别拍照",
-            systemImageName: "camera.viewfinder"
-        )
-        AppShortcut(
-            intent: OpenQuickCaptureIntent(),
-            phrases: [
-                "打开\(.applicationName)快速捕获",
-                "用\(.applicationName)快速记录"
-            ],
-            shortTitle: "快速捕获",
-            systemImageName: "bolt.fill"
+            shortTitle: "上传 JPEG",
+            systemImageName: "square.and.arrow.up"
         )
         AppShortcut(
             intent: CheckShortcutCredentialIntent(),
