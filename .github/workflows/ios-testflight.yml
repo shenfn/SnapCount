@@ -96,6 +96,7 @@ jobs:
             DEVELOPMENT_TEAM="G6592SL596" \
             PRODUCT_BUNDLE_IDENTIFIER="com.jiezi.app" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            INFOPLIST_KEY_CFBundleVersion="${{ github.run_number }}" \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
             SNAPCOUNT_SUPABASE_URL="${{ secrets.IOS_SUPABASE_URL }}" \
