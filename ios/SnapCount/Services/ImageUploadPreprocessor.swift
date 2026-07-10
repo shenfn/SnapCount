@@ -18,8 +18,8 @@ enum ImageUploadPreprocessorError: LocalizedError {
 enum ImageUploadPreprocessor {
     static func jpegData(
         from image: UIImage,
-        maxDimension: CGFloat = 1800,
-        compressionQuality: CGFloat = 0.82
+        maxDimension: CGFloat = 1440,
+        compressionQuality: CGFloat = 0.78
     ) throws -> Data {
         let normalized = image.normalizedForUpload(maxDimension: maxDimension)
         guard let data = normalized.jpegData(compressionQuality: compressionQuality) else {
@@ -30,8 +30,8 @@ enum ImageUploadPreprocessor {
 
     static func jpegData(
         from data: Data,
-        maxDimension: CGFloat = 1800,
-        compressionQuality: CGFloat = 0.82
+        maxDimension: CGFloat = 1440,
+        compressionQuality: CGFloat = 0.78
     ) throws -> Data {
         guard let image = UIImage(data: data) else {
             throw ImageUploadPreprocessorError.unreadableImage

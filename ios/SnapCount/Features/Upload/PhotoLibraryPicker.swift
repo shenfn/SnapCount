@@ -47,10 +47,7 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
             provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
                 DispatchQueue.main.async {
                     guard let data,
-                          let uploadData = try? ImageUploadPreprocessor.jpegData(
-                            from: data,
-                            compressionQuality: 0.84
-                          ) else {
+                          let uploadData = try? ImageUploadPreprocessor.jpegData(from: data) else {
                         self.onCancel()
                         return
                     }

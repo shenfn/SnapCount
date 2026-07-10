@@ -30,6 +30,7 @@ jobs:
           IOS_SUPABASE_URL: ${{ secrets.IOS_SUPABASE_URL }}
           IOS_SUPABASE_FUNCTIONS_URL: ${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}
           IOS_SUPABASE_ANON_KEY: ${{ secrets.IOS_SUPABASE_ANON_KEY }}
+          IOS_SHORTCUT_TEMPLATE_URL: ${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}
         run: |
           test -n "$IOS_SUPABASE_URL"
           test -n "$IOS_SUPABASE_ANON_KEY"
@@ -41,6 +42,7 @@ jobs:
               static let supabaseURL = "$IOS_SUPABASE_URL"
               static let supabaseFunctionsURL = "$IOS_SUPABASE_FUNCTIONS_URL"
               static let supabaseAnonKey = "$IOS_SUPABASE_ANON_KEY"
+              static let shortcutTemplateURL = "$IOS_SHORTCUT_TEMPLATE_URL"
           }
           SWIFT
 
@@ -63,6 +65,7 @@ jobs:
             SNAPCOUNT_SUPABASE_URL="${{ secrets.IOS_SUPABASE_URL }}" \
             SNAPCOUNT_SUPABASE_FUNCTIONS_URL="${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}" \
             SNAPCOUNT_SUPABASE_ANON_KEY="${{ secrets.IOS_SUPABASE_ANON_KEY }}" \
+            SNAPCOUNT_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}" \
             build 2>&1 | tee "$LOG_PATH"
           STATUS=${PIPESTATUS[0]}
           if [ "$STATUS" -ne 0 ]; then

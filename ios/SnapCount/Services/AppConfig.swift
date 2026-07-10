@@ -23,6 +23,13 @@ enum AppConfig {
         return value(for: "SupabaseAnonKey")
     }
 
+    static var shortcutTemplateURL: String {
+        if !GeneratedAppConfig.shortcutTemplateURL.isEmpty {
+            return GeneratedAppConfig.shortcutTemplateURL
+        }
+        return value(for: "ShortcutTemplateURL")
+    }
+
     private static func value(for key: String) -> String {
         guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else {
             return ""

@@ -22,6 +22,7 @@ enum SnapCountUploadServiceError: LocalizedError {
 
 final class SnapCountUploadService {
     private let session: URLSession
+    private let decoder = JSONDecoder()
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -98,10 +99,33 @@ final class SnapCountUploadService {
 
         let text = String(data: responseData, encoding: .utf8) ?? ""
         guard (200..<300).contains(http.statusCode) else {
-            throw SnapCountUploadServiceError.requestFailed(text.isEmpty ? "上传失败：HTTP \(http.statusCode)" : text)
+            throw SnapCountUploadServiceError.requestFailed(
+                displayErrorMessage(from: responseData, fallback: text, statusCode: http.statusCode)
+            )
         }
         return text.isEmpty ? "截图已上传，打开芥子查看结果。" : text
     }
+
+    private func displayErrorMessage(from data: Data, fallback: String, statusCode: Int) -> String {
+        if let payload = try? decoder.decode(UploadErrorPayload.self, from: data) {
+            if payload.code == "WORKER_RESOURCE_LIMIT" {
+                return "AI 识别资源不足。请重试一次，或换一张更清晰、范围更小的截图。"
+            }
+            if let message = payload.message, !message.isEmpty {
+                return message
+            }
+            if let error = payload.error, !error.isEmpty {
+                return error
+            }
+        }
+        return fallback.isEmpty ? "上传失败：HTTP \(statusCode)" : fallback
+    }
+}
+
+private struct UploadErrorPayload: Decodable {
+    let code: String?
+    let message: String?
+    let error: String?
 }
 
 private struct MultipartFormData {

@@ -21,6 +21,7 @@
 | `IOS_SUPABASE_URL` | iOS App 登录、读数据使用的后端地址。生产建议保持 `https://api.snapflow.me` | 是 |
 | `IOS_SUPABASE_ANON_KEY` | iOS App Supabase anon key | 是 |
 | `IOS_SUPABASE_FUNCTIONS_URL` | iOS App 上传识别函数地址。可不配置，默认回退到 `IOS_SUPABASE_URL` | 否 |
+| `IOS_SHORTCUT_TEMPLATE_URL` | iCloud 快捷指令模板链接，用于 App 内“一键添加快捷指令”。可后置 | 否 |
 
 当前原生 App 已接入真实登录、数据读取、图片上传和 App Intents。`IOS_SUPABASE_URL` 不建议全局改成 Supabase 直连地址，否则登录和读数据也会绕过 `api.snapflow.me`。如果只想排查上传识别链路，可以单独配置 `IOS_SUPABASE_FUNCTIONS_URL`。
 
@@ -38,6 +39,7 @@
 | `IOS_SUPABASE_URL` | iOS App 后端地址 |
 | `IOS_SUPABASE_FUNCTIONS_URL` | 可选，iOS 上传识别函数地址；不配置时沿用 `IOS_SUPABASE_URL` |
 | `IOS_SUPABASE_ANON_KEY` | iOS App Supabase anon key |
+| `IOS_SHORTCUT_TEMPLATE_URL` | 可选，预置快捷指令模板链接 |
 
 ## 3. Windows PowerShell Base64 命令
 

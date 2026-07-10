@@ -62,7 +62,7 @@ struct TodayView: View {
                 Task {
                     await uploadImageData(
                         data,
-                        captureKind: "photo_library",
+                        captureKind: "screenshot",
                         filename: "photo-library-upload.jpg"
                     )
                 }

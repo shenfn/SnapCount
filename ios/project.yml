@@ -42,6 +42,7 @@ targets:
         SupabaseURL: $(SNAPCOUNT_SUPABASE_URL)
         SupabaseFunctionsURL: $(SNAPCOUNT_SUPABASE_FUNCTIONS_URL)
         SupabaseAnonKey: $(SNAPCOUNT_SUPABASE_ANON_KEY)
+        ShortcutTemplateURL: $(SNAPCOUNT_SHORTCUT_TEMPLATE_URL)
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen:

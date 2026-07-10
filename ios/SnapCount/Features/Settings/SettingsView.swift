@@ -77,6 +77,7 @@ struct SettingsView: View {
 private struct ShortcutSetupView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.openURL) private var openURL
+    @State private var setupMessage: String?
 
     var body: some View {
         ZStack {
@@ -107,9 +108,22 @@ private struct ShortcutSetupView: View {
                 }
 
                 Section("推荐快捷指令") {
-                    ShortcutStepRow(index: 1, title: "添加截屏或选择照片", detail: "截图自动化、操作按钮或手动快捷指令都可以，只要输出是一张图片。")
-                    ShortcutStepRow(index: 2, title: "添加上传到芥子", detail: "在动作搜索里输入“上传到芥子”，图片参数选择上一步结果。")
-                    ShortcutStepRow(index: 3, title: "运行检查芥子凭据", detail: "确认弹出“凭据已同步”后，就不用再手动维护 upload_token。")
+                    ShortcutStepRow(index: 1, title: "添加一键截图快捷指令", detail: "模板会把“截屏”连接到“上传到芥子”，核心上传逻辑由 App 内置。")
+                    Button {
+                        openShortcutTemplate()
+                    } label: {
+                        Label("添加快捷指令", systemImage: "square.and.arrow.down")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(JieziTheme.gold)
+                    if let setupMessage {
+                        Text(setupMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ShortcutStepRow(index: 2, title: "绑定操作按钮", detail: "前往“设置 -> 操作按钮 -> 快捷指令”，选择刚添加的“一键截图上传”。")
+                    ShortcutStepRow(index: 3, title: "先检查凭据", detail: "运行“检查芥子凭据”，确认不需要手动维护 upload_token。")
                 }
 
                 Section {
@@ -131,6 +145,18 @@ private struct ShortcutSetupView: View {
         }
         .navigationTitle("快捷指令")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+    }
+
+    private func openShortcutTemplate() {
+        if let url = URL(string: AppConfig.shortcutTemplateURL), !AppConfig.shortcutTemplateURL.isEmpty {
+            openURL(url)
+            return
+        }
+
+        setupMessage = "当前构建还没有内置模板链接。我会先打开快捷指令 App，你可以搜索“上传到芥子”手动连接“截屏”动作。"
+        if let url = URL(string: "shortcuts://") {
+            openURL(url)
+        }
     }
 }
 
