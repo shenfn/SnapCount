@@ -24,6 +24,23 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Generate app config
+        working-directory: ios
+        env:
+          IOS_SUPABASE_URL: ${{ secrets.IOS_SUPABASE_URL }}
+          IOS_SUPABASE_ANON_KEY: ${{ secrets.IOS_SUPABASE_ANON_KEY }}
+        run: |
+          test -n "$IOS_SUPABASE_URL"
+          test -n "$IOS_SUPABASE_ANON_KEY"
+          cat > SnapCount/Services/GeneratedAppConfig.swift <<SWIFT
+          import Foundation
+
+          enum GeneratedAppConfig {
+              static let supabaseURL = "$IOS_SUPABASE_URL"
+              static let supabaseAnonKey = "$IOS_SUPABASE_ANON_KEY"
+          }
+          SWIFT
+
       - name: Generate Xcode project
         working-directory: ios
         run: xcodegen generate --spec project.yml
