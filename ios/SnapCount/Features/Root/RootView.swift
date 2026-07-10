@@ -24,13 +24,13 @@ struct RootView: View {
             .tabItem { Label(AppTab.today.title, systemImage: AppTab.today.systemImage) }
             .tag(AppTab.today)
 
-            NavigationStack {
+            NavigationStack(path: $appState.inboxPath) {
                 InboxView()
             }
             .tabItem { Label(AppTab.inbox.title, systemImage: AppTab.inbox.systemImage) }
             .tag(AppTab.inbox)
 
-            NavigationStack {
+            NavigationStack(path: $appState.recordsPath) {
                 RecordsView()
             }
             .tabItem { Label(AppTab.records.title, systemImage: AppTab.records.systemImage) }
@@ -49,5 +49,11 @@ struct RootView: View {
             .tag(AppTab.settings)
         }
         .tint(JieziTheme.mint)
+        .onChange(of: appState.selectedTab) { tab in
+            guard [.today, .inbox, .records].contains(tab) else { return }
+            Task {
+                await appState.refreshDashboardIfStale()
+            }
+        }
     }
 }

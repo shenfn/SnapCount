@@ -4,6 +4,7 @@ import SwiftUI
 struct SnapCountApp: App {
     @UIApplicationDelegateAdaptor(AppNotificationDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -20,6 +21,12 @@ struct SnapCountApp: App {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .snapCountShortcutNotificationRoute)) { notification in
                     appState.handleShortcutNotificationRoute(notification.userInfo?["route"] as? String)
+                }
+                .onChange(of: scenePhase) { phase in
+                    guard phase == .active else { return }
+                    Task {
+                        await appState.refreshDashboardIfStale(minInterval: 1, force: true)
+                    }
                 }
         }
     }

@@ -30,6 +30,28 @@ struct SettingsView: View {
                         Text(appState.hasUploadToken ? "已同步" : "未同步")
                             .foregroundStyle(.secondary)
                     }
+                    HStack {
+                        Label("上传结果通知", systemImage: "bell.badge")
+                        Spacer()
+                        Text(appState.notificationPermissionStatusText)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Toggle(isOn: Binding(
+                        get: { appState.shortcutNotificationsEnabled },
+                        set: { appState.setShortcutNotificationsEnabled($0) }
+                    )) {
+                        Label("快捷指令完成后通知", systemImage: "bell")
+                    }
+                    Toggle(isOn: Binding(
+                        get: { appState.shortcutResultCardEnabled },
+                        set: { appState.setShortcutResultCardEnabled($0) }
+                    )) {
+                        Label("快捷指令结果卡片", systemImage: "rectangle.on.rectangle")
+                    }
+                    Text("推荐使用通知：上传完成后点通知回到芥子。结果卡片适合作为通知关闭时的兜底确认。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     NavigationLink {
                         ShortcutSetupView()
                     } label: {
@@ -46,6 +68,13 @@ struct SettingsView: View {
                         }
                     } label: {
                         Label("开启上传结果通知", systemImage: "bell.badge")
+                    }
+                    Button {
+                        Task {
+                            await appState.sendTestShortcutNotification()
+                        }
+                    } label: {
+                        Label("发送测试通知", systemImage: "bell.and.waves.left.and.right")
                     }
                     if let message = appState.shortcutCredentialMessage {
                         Text(message)
@@ -140,8 +169,8 @@ private struct ShortcutSetupView: View {
                             .foregroundStyle(.secondary)
                     }
                     ShortcutStepRow(index: 2, title: "压缩建议", detail: "如果在快捷指令里压缩，建议长边保留 1200 以上；640 容易让小字识别变差。")
-                    ShortcutStepRow(index: 3, title: "显示结果", detail: "最后的“显示”动作选择“上传 JPEG 到芥子”的结果，展示后端返回的识别摘要。")
-                    ShortcutStepRow(index: 4, title: "结果通知", detail: "在芥子里开启通知权限后，上传完成会弹出系统通知；点击通知会回到芥子。")
+                    ShortcutStepRow(index: 3, title: "结果通知", detail: "推荐开启。上传完成会弹出系统通知；点击通知会回到芥子。")
+                    ShortcutStepRow(index: 4, title: "显示结果", detail: "可选兜底。如果你喜欢通知优先，可以在设置里关闭结果卡片，并在快捷指令模板里删掉“显示结果”。")
                     ShortcutStepRow(index: 5, title: "凭据处理", detail: "快捷指令里不放 token。芥子会从 Keychain 自动读取登录后同步的上传凭据。")
                 }
 
@@ -152,6 +181,13 @@ private struct ShortcutSetupView: View {
                         }
                     } label: {
                         Label("开启上传结果通知", systemImage: "bell.badge")
+                    }
+                    Button {
+                        Task {
+                            await appState.sendTestShortcutNotification()
+                        }
+                    } label: {
+                        Label("发送测试通知", systemImage: "bell.and.waves.left.and.right")
                     }
                     Button {
                         UIPasteboard.general.string = "上传 JPEG 到芥子"

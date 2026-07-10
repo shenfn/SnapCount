@@ -13,16 +13,16 @@ struct UploadScreenshotIntent: AppIntent {
         Summary("上传 \(\.$image) 到芥子")
     }
 
-    func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
+    func perform() async throws -> some IntentResult & ReturnsValue<String> {
         guard let image else {
             let message = "请把“转换后的图像”或上一部 JPEG 变量传给芥子。"
-            return .result(value: message, dialog: "\(message)")
+            return .result(value: message)
         }
 
         guard let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken),
               !uploadToken.isEmpty else {
             let message = "请先打开芥子登录。"
-            return .result(value: message, dialog: "\(message)")
+            return .result(value: message)
         }
 
         if #available(iOS 18.0, *) {
@@ -36,15 +36,16 @@ struct UploadScreenshotIntent: AppIntent {
                     filename: "shortcut-jpeg.jpg"
                 )
                 await ShortcutNotificationService.shared.notifyUploadResult(result)
-                return .result(value: result.displayText, dialog: "\(result.displayText)")
+                let value = ShortcutFeedbackPreferences.resultCardEnabled ? result.displayText : result.compactDisplayText
+                return .result(value: value)
             } catch {
                 let message = "上传失败：\(error.localizedDescription)"
-                return .result(value: message, dialog: "\(message)")
+                return .result(value: message)
             }
         }
 
         let message = "快捷指令图片上传需要 iOS 18 或更高版本。"
-        return .result(value: message, dialog: "\(message)")
+        return .result(value: message)
     }
 }
 

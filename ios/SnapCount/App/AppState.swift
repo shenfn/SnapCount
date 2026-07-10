@@ -16,10 +16,21 @@ final class AppState: ObservableObject {
     @Published var isLoadingDashboard = false
     @Published var shortcutCredentialMessage: String?
     @Published var notificationPermissionMessage: String?
+    @Published var notificationPermissionStatusText = "检查中"
+    @Published var shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
+    @Published var shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
+    @Published var inboxPath: [String] = []
+    @Published var recordsPath: [String] = []
+    @Published var selectedRecordDetail: NativeRecordDetail?
+    @Published var recordDetailMessage: String?
+    @Published var isSavingRecordDetail = false
+    @Published var isDeletingRecordDetail = false
 
     private let authService = SupabaseAuthService()
     private let dataService = NativeDataService()
     private let keychain = KeychainStore.shared
+    private var hasAskedNotificationPermissionThisSession = false
+    private var lastDashboardRefreshAt: Date?
 
     func bootstrap() {
         defer { isBootstrapping = false }
@@ -30,10 +41,14 @@ final class AppState: ObservableObject {
                 apply(session: session)
                 Task {
                     await refreshDashboard()
+                    await requestShortcutNotificationPermissionIfNeeded()
                 }
             }
             hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
             updateShortcutCredentialMessage()
+            Task {
+                await refreshNotificationPermissionStatus()
+            }
         } catch {
             authMessage = error.localizedDescription
             authMessageIsError = true
@@ -58,6 +73,7 @@ final class AppState: ObservableObject {
             authMessage = "已登录，快捷指令凭据已同步。"
             updateShortcutCredentialMessage()
             await refreshDashboard()
+            await requestShortcutNotificationPermissionIfNeeded()
         } catch {
             authMessage = error.localizedDescription
             authMessageIsError = true
@@ -81,6 +97,7 @@ final class AppState: ObservableObject {
         dashboardMessage = nil
         shortcutCredentialMessage = nil
         selectedTab = .today
+        lastDashboardRefreshAt = nil
     }
 
     func verifyShortcutCredential() {
@@ -96,6 +113,7 @@ final class AppState: ObservableObject {
         guard !isLoadingDashboard else { return }
         isLoadingDashboard = true
         dashboardMessage = nil
+        lastDashboardRefreshAt = Date()
 
         do {
             let session = try await validSession()
@@ -105,6 +123,16 @@ final class AppState: ObservableObject {
         }
 
         isLoadingDashboard = false
+    }
+
+    func refreshDashboardIfStale(minInterval: TimeInterval = 3, force: Bool = false) async {
+        guard isSignedIn else { return }
+        if !force,
+           let lastDashboardRefreshAt,
+           Date().timeIntervalSince(lastDashboardRefreshAt) < minInterval {
+            return
+        }
+        await refreshDashboard()
     }
 
     func handleDeepLink(_ url: URL) {
@@ -128,11 +156,23 @@ final class AppState: ObservableObject {
     }
 
     func handleShortcutNotificationRoute(_ route: String?) {
-        switch route {
+        let parts = (route ?? "")
+            .split(separator: "/")
+            .map(String.init)
+        let target = parts.first
+        let detailPath = parts.dropFirst().joined(separator: "/")
+
+        switch target {
         case "inbox":
             selectedTab = .inbox
+            if !detailPath.isEmpty {
+                inboxPath = [detailPath]
+            }
         case "records":
             selectedTab = .records
+            if !detailPath.isEmpty {
+                recordsPath = [detailPath]
+            }
         case "settings":
             selectedTab = .settings
         default:
@@ -145,11 +185,132 @@ final class AppState: ObservableObject {
         }
     }
 
+    func discardStagingRecord(_ record: NativeStagingRecord) async {
+        do {
+            let session = try await validSession()
+            try await dataService.discardStagingRecord(id: record.id, accessToken: session.accessToken)
+            inboxPath.removeAll()
+            await refreshDashboard()
+        } catch {
+            dashboardMessage = error.localizedDescription
+        }
+    }
+
+    func retryStagingRecord(_ record: NativeStagingRecord) async {
+        do {
+            let session = try await validSession()
+            _ = try await dataService.retryStagingRecord(id: record.id, accessToken: session.accessToken)
+            inboxPath.removeAll()
+            await refreshDashboard()
+        } catch {
+            dashboardMessage = error.localizedDescription
+        }
+    }
+
+    func archiveStagingRecord(_ record: NativeStagingRecord, domainKey: String) async {
+        do {
+            let session = try await validSession()
+            let reference = try await dataService.archiveStagingRecord(record, domainKey: domainKey, accessToken: session.accessToken)
+            inboxPath.removeAll()
+            await refreshDashboard()
+            selectedTab = .records
+            recordsPath = [reference]
+        } catch {
+            dashboardMessage = error.localizedDescription
+        }
+    }
+
+    func loadRecordDetail(reference: String) async {
+        recordDetailMessage = nil
+        selectedRecordDetail = nil
+        do {
+            let session = try await validSession()
+            selectedRecordDetail = try await dataService.fetchRecordDetail(reference: reference, accessToken: session.accessToken)
+        } catch {
+            recordDetailMessage = error.localizedDescription
+        }
+    }
+
+    func saveRecordDetail(_ draft: NativeRecordEditDraft) async -> Bool {
+        guard !isSavingRecordDetail else { return false }
+        isSavingRecordDetail = true
+        recordDetailMessage = nil
+        defer { isSavingRecordDetail = false }
+
+        do {
+            let session = try await validSession()
+            let reference = try await dataService.saveRecordDetail(draft, accessToken: session.accessToken)
+            await refreshDashboard()
+            recordsPath = [reference]
+            await loadRecordDetail(reference: reference)
+            return true
+        } catch {
+            recordDetailMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func deleteRecord(reference: String) async -> Bool {
+        guard !isDeletingRecordDetail else { return false }
+        isDeletingRecordDetail = true
+        recordDetailMessage = nil
+        defer { isDeletingRecordDetail = false }
+
+        do {
+            let session = try await validSession()
+            try await dataService.deleteRecord(reference: reference, accessToken: session.accessToken)
+            selectedRecordDetail = nil
+            recordsPath.removeAll()
+            await refreshDashboard()
+            return true
+        } catch {
+            recordDetailMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func requestShortcutNotificationPermission() async {
         let granted = await ShortcutNotificationService.shared.requestAuthorization()
+        ShortcutFeedbackPreferences.applyNotificationAuthorization(granted: granted)
+        syncShortcutFeedbackPreferences()
+        await refreshNotificationPermissionStatus()
         notificationPermissionMessage = granted
             ? "已开启。快捷指令上传完成后，芥子会弹出结果通知，点击通知可回到 App。"
             : "未开启。请在系统设置里允许芥子通知，快捷指令仍会在“显示结果”里展示摘要。"
+    }
+
+    func requestShortcutNotificationPermissionIfNeeded() async {
+        guard !hasAskedNotificationPermissionThisSession else { return }
+        hasAskedNotificationPermissionThisSession = true
+
+        let status = await ShortcutNotificationService.shared.authorizationStatus()
+        guard status == .notDetermined else { return }
+        await requestShortcutNotificationPermission()
+    }
+
+    func refreshNotificationPermissionStatus() async {
+        notificationPermissionStatusText = await ShortcutNotificationService.shared.authorizationStatusText()
+    }
+
+    func sendTestShortcutNotification() async {
+        await ShortcutNotificationService.shared.sendTestNotification()
+        await refreshNotificationPermissionStatus()
+        notificationPermissionMessage = "已发送测试通知。如果没有声音，请检查静音键、专注模式，以及系统设置里的“声音”开关。"
+    }
+
+    func setShortcutNotificationsEnabled(_ enabled: Bool) {
+        ShortcutFeedbackPreferences.notificationsEnabled = enabled
+        syncShortcutFeedbackPreferences()
+    }
+
+    func setShortcutResultCardEnabled(_ enabled: Bool) {
+        ShortcutFeedbackPreferences.resultCardEnabled = enabled
+        syncShortcutFeedbackPreferences()
+    }
+
+    func syncShortcutFeedbackPreferences() {
+        shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
+        shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
     }
 
     private func apply(session: SupabaseAuthSession) {

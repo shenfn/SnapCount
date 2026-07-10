@@ -175,10 +175,12 @@ final class SnapCountUploadService {
 
 struct ShortcutUploadResult {
     let displayText: String
+    let notificationText: String
     let route: String
 
-    init(displayText: String, route: String = "today") {
+    init(displayText: String, notificationText: String? = nil, route: String = "today") {
         self.displayText = displayText
+        self.notificationText = notificationText ?? displayText
         self.route = route
     }
 
@@ -188,8 +190,12 @@ struct ShortcutUploadResult {
             ?? payload.message
             ?? payload.error
             ?? "截图已上传，打开芥子查看结果。"
-        displayText = text
-        route = payload.route
+        notificationText = text
+        displayText = ShortcutUploadResult.shortcutDisplayText(
+            notificationText: text,
+            payload: payload
+        )
+        route = payload.routePath
     }
 
     var notificationTitle: String {
@@ -204,10 +210,48 @@ struct ShortcutUploadResult {
     }
 
     var notificationBody: String {
-        let compact = displayText
+        let compact = notificationText
             .split(whereSeparator: \.isNewline)
             .joined(separator: " ")
         return compact.count > 160 ? "\(compact.prefix(157))..." : compact
+    }
+
+    var compactDisplayText: String {
+        "已发送到芥子。推荐点击通知回到 App 查看。"
+    }
+
+    private static func shortcutDisplayText(notificationText: String, payload: ShortcutUploadPayload) -> String {
+        var lines: [String] = [notificationText]
+
+        if let companion = payload.companionMessage,
+           !companion.isEmpty,
+           !notificationText.contains(companion) {
+            lines.append(companion)
+        }
+
+        if let utility = payload.aiFeedback?.utilityLine,
+           !utility.isEmpty,
+           !lines.contains(where: { $0.contains(utility) }) {
+            lines.append("观察：\(utility)")
+        }
+
+        if let reason = payload.aiFeedback?.detailReason,
+           !reason.isEmpty,
+           !lines.contains(where: { $0.contains(reason) }) {
+            lines.append("依据：\(reason)")
+        }
+
+        switch payload.route {
+        case "inbox":
+            lines.append("状态：需要打开芥子收件箱确认")
+        case "records":
+            lines.append("状态：已归档到芥子记录")
+        default:
+            lines.append("状态：已发送到芥子")
+        }
+
+        lines.append("提示：点通知可回到芥子；这张卡片只负责确认。")
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -219,6 +263,8 @@ struct ShortcutUploadPayload: Decodable {
     let notification: String?
     let message: String?
     let error: String?
+    let companionMessage: String?
+    let aiFeedback: ShortcutAIFeedback?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -228,6 +274,8 @@ struct ShortcutUploadPayload: Decodable {
         case notification
         case message
         case error
+        case companionMessage = "companion_message"
+        case aiFeedback = "ai_feedback"
     }
 
     var route: String {
@@ -242,6 +290,27 @@ struct ShortcutUploadPayload: Decodable {
                 return "today"
             }
         }
+    }
+
+    var routePath: String {
+        guard let id, !id.isEmpty else { return route }
+        guard route == "records" else { return "\(route)/\(id)" }
+        let kind = recordType ?? "data"
+        return "\(route)/\(kind)/\(id)"
+    }
+}
+
+struct ShortcutAIFeedback: Decodable {
+    let badge: String?
+    let emotionLine: String?
+    let utilityLine: String?
+    let detailReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case badge
+        case emotionLine = "emotion_line"
+        case utilityLine = "utility_line"
+        case detailReason = "detail_reason"
     }
 }
 
