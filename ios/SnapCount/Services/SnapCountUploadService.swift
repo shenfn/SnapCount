@@ -44,6 +44,30 @@ final class SnapCountUploadService {
         )
     }
 
+    func uploadShortcutImageResult(
+        data: Data,
+        uploadToken: String,
+        captureKind: String = "screenshot",
+        filename: String = "shortcut-screenshot.jpg"
+    ) async throws -> ShortcutUploadResult {
+        let responseData = try await uploadImageResponse(
+            data: data,
+            uploadToken: uploadToken,
+            sourceApp: "ios_app_intent",
+            captureKind: captureKind,
+            filename: filename,
+            mimeType: "image/jpeg",
+            responseMode: "json"
+        )
+
+        if let payload = try? decoder.decode(ShortcutUploadPayload.self, from: responseData) {
+            return ShortcutUploadResult(payload: payload)
+        }
+
+        let text = String(data: responseData, encoding: .utf8) ?? ""
+        return ShortcutUploadResult(displayText: text.isEmpty ? "截图已上传，打开芥子查看结果。" : text)
+    }
+
     func uploadNativeImage(
         data: Data,
         uploadToken: String,
@@ -69,6 +93,28 @@ final class SnapCountUploadService {
         filename: String,
         mimeType: String
     ) async throws -> String {
+        let responseData = try await uploadImageResponse(
+            data: data,
+            uploadToken: uploadToken,
+            sourceApp: sourceApp,
+            captureKind: captureKind,
+            filename: filename,
+            mimeType: mimeType,
+            responseMode: "text"
+        )
+        let text = String(data: responseData, encoding: .utf8) ?? ""
+        return text.isEmpty ? "截图已上传，打开芥子查看结果。" : text
+    }
+
+    private func uploadImageResponse(
+        data: Data,
+        uploadToken: String,
+        sourceApp: String,
+        captureKind: String,
+        filename: String,
+        mimeType: String,
+        responseMode: String
+    ) async throws -> Data {
         guard !AppConfig.supabaseFunctionsURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
             throw SnapCountUploadServiceError.missingConfig
         }
@@ -82,7 +128,7 @@ final class SnapCountUploadService {
         multipart.appendField(name: "upload_token", value: uploadToken)
         multipart.appendField(name: "source_app", value: sourceApp)
         multipart.appendField(name: "capture_kind", value: captureKind)
-        multipart.appendField(name: "response_mode", value: "text")
+        multipart.appendField(name: "response_mode", value: responseMode)
         multipart.appendField(name: "client_captured_at", value: ISO8601DateFormatter().string(from: Date()))
         multipart.appendFile(
             name: "image",
@@ -108,7 +154,7 @@ final class SnapCountUploadService {
                 displayErrorMessage(from: responseData, fallback: text, statusCode: http.statusCode)
             )
         }
-        return text.isEmpty ? "截图已上传，打开芥子查看结果。" : text
+        return responseData
     }
 
     private func displayErrorMessage(from data: Data, fallback: String, statusCode: Int) -> String {
@@ -124,6 +170,78 @@ final class SnapCountUploadService {
             }
         }
         return fallback.isEmpty ? "上传失败：HTTP \(statusCode)" : fallback
+    }
+}
+
+struct ShortcutUploadResult {
+    let displayText: String
+    let route: String
+
+    init(displayText: String, route: String = "today") {
+        self.displayText = displayText
+        self.route = route
+    }
+
+    init(payload: ShortcutUploadPayload) {
+        let text = payload.notificationText
+            ?? payload.notification
+            ?? payload.message
+            ?? payload.error
+            ?? "截图已上传，打开芥子查看结果。"
+        displayText = text
+        route = payload.route
+    }
+
+    var notificationTitle: String {
+        switch route {
+        case "inbox":
+            return "芥子需要你确认"
+        case "records":
+            return "芥子已记录"
+        default:
+            return "芥子已收到"
+        }
+    }
+
+    var notificationBody: String {
+        let compact = displayText
+            .split(whereSeparator: \.isNewline)
+            .joined(separator: " ")
+        return compact.count > 160 ? "\(compact.prefix(157))..." : compact
+    }
+}
+
+struct ShortcutUploadPayload: Decodable {
+    let id: String?
+    let status: String?
+    let recordType: String?
+    let notificationText: String?
+    let notification: String?
+    let message: String?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case recordType = "record_type"
+        case notificationText = "notification_text"
+        case notification
+        case message
+        case error
+    }
+
+    var route: String {
+        switch status {
+        case "staging", "pending", "retry_failed":
+            return "inbox"
+        default:
+            switch recordType {
+            case "expense", "income", "sport", "sleep", "reading", "food", "wallet":
+                return "records"
+            default:
+                return "today"
+            }
+        }
     }
 }
 

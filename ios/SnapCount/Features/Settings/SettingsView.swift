@@ -40,10 +40,22 @@ struct SettingsView: View {
                     } label: {
                         Label("检查快捷指令凭据", systemImage: "key.viewfinder")
                     }
+                    Button {
+                        Task {
+                            await appState.requestShortcutNotificationPermission()
+                        }
+                    } label: {
+                        Label("开启上传结果通知", systemImage: "bell.badge")
+                    }
                     if let message = appState.shortcutCredentialMessage {
                         Text(message)
                             .font(.footnote)
                             .foregroundStyle(appState.hasUploadToken ? .secondary : JieziTheme.coral)
+                    }
+                    if let message = appState.notificationPermissionMessage {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                     Button {
                         UIPasteboard.general.string = "上传 JPEG 到芥子"
@@ -113,7 +125,7 @@ private struct ShortcutSetupView: View {
                 }
 
                 Section("一键截图模板") {
-                    ShortcutStepRow(index: 1, title: "快捷指令流程", detail: "推荐顺序：截屏 / 拍照 -> 调整大小 -> 转换 JPEG -> 上传 JPEG 到芥子 -> 显示结果。")
+                    ShortcutStepRow(index: 1, title: "快捷指令流程", detail: "推荐顺序：截屏 / 拍照 -> 调整大小 -> 转换 JPEG -> 上传 JPEG 到芥子 -> 显示上传结果。")
                     Button {
                         openShortcutTemplate()
                     } label: {
@@ -128,10 +140,19 @@ private struct ShortcutSetupView: View {
                             .foregroundStyle(.secondary)
                     }
                     ShortcutStepRow(index: 2, title: "压缩建议", detail: "如果在快捷指令里压缩，建议长边保留 1200 以上；640 容易让小字识别变差。")
-                    ShortcutStepRow(index: 3, title: "凭据处理", detail: "快捷指令里不放 token。芥子会从 Keychain 自动读取登录后同步的上传凭据。")
+                    ShortcutStepRow(index: 3, title: "显示结果", detail: "最后的“显示”动作选择“上传 JPEG 到芥子”的结果，展示后端返回的识别摘要。")
+                    ShortcutStepRow(index: 4, title: "结果通知", detail: "在芥子里开启通知权限后，上传完成会弹出系统通知；点击通知会回到芥子。")
+                    ShortcutStepRow(index: 5, title: "凭据处理", detail: "快捷指令里不放 token。芥子会从 Keychain 自动读取登录后同步的上传凭据。")
                 }
 
                 Section {
+                    Button {
+                        Task {
+                            await appState.requestShortcutNotificationPermission()
+                        }
+                    } label: {
+                        Label("开启上传结果通知", systemImage: "bell.badge")
+                    }
                     Button {
                         UIPasteboard.general.string = "上传 JPEG 到芥子"
                     } label: {

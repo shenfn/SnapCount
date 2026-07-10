@@ -15,6 +15,7 @@ final class AppState: ObservableObject {
     @Published var dashboardMessage: String?
     @Published var isLoadingDashboard = false
     @Published var shortcutCredentialMessage: String?
+    @Published var notificationPermissionMessage: String?
 
     private let authService = SupabaseAuthService()
     private let dataService = NativeDataService()
@@ -104,6 +105,51 @@ final class AppState: ObservableObject {
         }
 
         isLoadingDashboard = false
+    }
+
+    func handleDeepLink(_ url: URL) {
+        guard url.scheme == "jiezi" else { return }
+
+        switch url.host {
+        case "inbox":
+            selectedTab = .inbox
+        case "records", "record":
+            selectedTab = .records
+        case "settings":
+            selectedTab = .settings
+        default:
+            selectedTab = .today
+        }
+
+        guard isSignedIn else { return }
+        Task {
+            await refreshDashboard()
+        }
+    }
+
+    func handleShortcutNotificationRoute(_ route: String?) {
+        switch route {
+        case "inbox":
+            selectedTab = .inbox
+        case "records":
+            selectedTab = .records
+        case "settings":
+            selectedTab = .settings
+        default:
+            selectedTab = .today
+        }
+
+        guard isSignedIn else { return }
+        Task {
+            await refreshDashboard()
+        }
+    }
+
+    func requestShortcutNotificationPermission() async {
+        let granted = await ShortcutNotificationService.shared.requestAuthorization()
+        notificationPermissionMessage = granted
+            ? "已开启。快捷指令上传完成后，芥子会弹出结果通知，点击通知可回到 App。"
+            : "未开启。请在系统设置里允许芥子通知，快捷指令仍会在“显示结果”里展示摘要。"
     }
 
     private func apply(session: SupabaseAuthSession) {

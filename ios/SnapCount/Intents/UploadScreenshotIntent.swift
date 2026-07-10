@@ -13,33 +13,38 @@ struct UploadScreenshotIntent: AppIntent {
         Summary("上传 \(\.$image) 到芥子")
     }
 
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
         guard let image else {
-            return .result(dialog: "请把“转换后的图像”或上一部 JPEG 变量传给芥子。")
+            let message = "请把“转换后的图像”或上一部 JPEG 变量传给芥子。"
+            return .result(value: message, dialog: "\(message)")
         }
 
         guard let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken),
               !uploadToken.isEmpty else {
-            return .result(dialog: "请先打开芥子登录。")
+            let message = "请先打开芥子登录。"
+            return .result(value: message, dialog: "\(message)")
         }
 
         if #available(iOS 18.0, *) {
             do {
                 let rawImageData = try await image.data(contentType: .image)
                 let imageData = try ImageUploadPreprocessor.jpegData(from: rawImageData)
-                let message = try await SnapCountUploadService().uploadShortcutImage(
+                let result = try await SnapCountUploadService().uploadShortcutImageResult(
                     data: imageData,
                     uploadToken: uploadToken,
                     captureKind: "screenshot",
                     filename: "shortcut-jpeg.jpg"
                 )
-                return .result(dialog: "\(message)")
+                await ShortcutNotificationService.shared.notifyUploadResult(result)
+                return .result(value: result.displayText, dialog: "\(result.displayText)")
             } catch {
-                return .result(dialog: "上传失败：\(error.localizedDescription)")
+                let message = "上传失败：\(error.localizedDescription)"
+                return .result(value: message, dialog: "\(message)")
             }
         }
 
-        return .result(dialog: "快捷指令图片上传需要 iOS 18 或更高版本。")
+        let message = "快捷指令图片上传需要 iOS 18 或更高版本。"
+        return .result(value: message, dialog: "\(message)")
     }
 }
 
