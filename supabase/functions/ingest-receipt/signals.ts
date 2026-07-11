@@ -166,11 +166,16 @@ function expenseSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
     if (curTotal !== null && prevTotal !== null && prevTotal >= 50) {
       const ratio = (curTotal - prevTotal) / prevTotal;
       if (Math.abs(ratio) >= 0.4) {
+        // 衍生数全部预先算好喂给模型;否则模型自己加减,算出的数必被闭环校验拦下
+        const diff = Math.round(Math.abs(curTotal - prevTotal) * 100) / 100;
+        const inclTotal = cur.amount !== null && cur.amount !== undefined
+          ? Math.round((curTotal + cur.amount) * 100) / 100
+          : null;
         const nums: number[] = [];
-        pushNums(nums, curTotal, prevTotal);
+        pushNums(nums, curTotal, prevTotal, diff, inclTotal);
         out.push({
           kind: "week_velocity", priority: 3,
-          fact: `本周截至今天已消费 ${curTotal} 元,上周同期 ${prevTotal} 元(${ratio > 0 ? "明显放开" : "明显收着"})`,
+          fact: `本周已消费 ${curTotal} 元(不含本笔)${inclTotal !== null ? `,加上本笔共 ${inclTotal} 元` : ""};上周同期 ${prevTotal} 元,相差 ${diff} 元(${ratio > 0 ? "明显放开" : "明显收着"})`,
           numbers: nums,
         });
       }
@@ -507,11 +512,14 @@ export function extractDigitNumbers(text: string): number[] {
 export interface NumberValidationResult {
   ok: boolean;
   violations: string[];
+  /** 与入参 generatedTexts 对齐:该下标文本存在违规 */
+  badIndexes: number[];
 }
 
 // allowedSources:信号 fact 文本 + 本条记录字段 JSON。数字宽松匹配(整数/一位小数视为同数)。
 // 计数表达("第X次/连续X天")单独用严格白名单 countNumbers:
 // 只有计数类信号显式声明的数才能进计数表达,防止金额/时长取整后泄漏放行幻觉计数。
+// 逐句校验:只标记违规的那条文本,调用方可保留其余合规字段(不整体丢弃)。
 export function validateVoiceNumbers(
   generatedTexts: Array<string | null | undefined>,
   signals: DomainSignal[],
@@ -532,14 +540,17 @@ export function validateVoiceNumbers(
   for (const n of extractDigitNumbers(recordFactsJson)) addNum(n);
 
   const violations: string[] = [];
+  const badIndexes: number[] = [];
 
-  for (const text of generatedTexts) {
-    if (!text) continue;
+  generatedTexts.forEach((text, idx) => {
+    if (!text) return;
+    let bad = false;
     // 1) 裸数字必须在允许集内
     for (const n of extractDigitNumbers(text)) {
       const keys = [String(n), String(Math.round(n)), String(Math.round(n * 10) / 10)];
       if (!keys.some((k) => allowed.has(k))) {
         violations.push(`数字 ${n} 不在信号/记录允许集内: "${text.slice(0, 40)}"`);
+        bad = true;
       }
     }
     // 2) "第X次/笔/顿/天/晚" 计数表达:数值必须来自计数信号显式声明
@@ -547,10 +558,13 @@ export function validateVoiceNumbers(
       const n = cnToNumber(m[1]);
       if (countAllowed.size === 0) {
         violations.push(`计数表达 "${m[0]}" 无计数信号支撑`);
+        bad = true;
       } else if (n !== null && !countAllowed.has(String(n))) {
         violations.push(`计数 "${m[0]}" 数值不可追溯到计数信号`);
+        bad = true;
       }
     }
-  }
-  return { ok: violations.length === 0, violations };
+    if (bad) badIndexes.push(idx);
+  });
+  return { ok: violations.length === 0, violations, badIndexes };
 }

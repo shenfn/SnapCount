@@ -335,6 +335,10 @@ function buildTraceSteps({ payload, parsed, summary, aiLog, rawDebug }) {
         disabled: rawDebug?.companion?.disabled ?? null,
         fallback_used: rawDebug?.companion?.fallback_used ?? null,
         feedback_used: rawDebug?.companion?.feedback_used ?? null,
+        voice_enabled: rawDebug?.companion?.voice?.enabled ?? null,
+        voice_error: rawDebug?.companion?.voice?.error ?? null,
+        voice_signals: rawDebug?.companion?.voice?.signals ?? null,
+        voice_number_violations: rawDebug?.companion?.voice?.number_violations ?? null,
       },
       output_snapshot: {
         final: rawDebug?.companion?.final || summary.companion_message || null,
