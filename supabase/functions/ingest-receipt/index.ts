@@ -2056,6 +2056,7 @@ function buildSignalFallbackAIFeedback(
     streak: "连续阅读",
     liability_delta: "负债变化",
     due_reminder: "还款临近",
+    record_acknowledge: "记录已归档",
   };
   const bandByKind: Record<string, AIFeedback["band"]> = {
     unusual_amount: "watch",
@@ -3020,6 +3021,7 @@ function buildCurrentFactsFor(
       amount: normalizedAmount,
       merchant: ai.merchant_name ?? null,
       category: ai.category ?? null,
+      platform: ai.platform ?? null,
       isLateNight: late,
     };
   }

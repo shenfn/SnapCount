@@ -85,6 +85,7 @@ export interface CurrentFacts {
   amount?: number | null;
   merchant?: string | null;
   category?: string | null;
+  platform?: string | null;
   isLateNight?: boolean;
   // sleep
   hours?: number | null;
@@ -195,6 +196,25 @@ function expenseSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
       });
     }
   }
+  // 默认信号：所有条件信号未命中时，基于本条记录产出
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    if (cur.amount !== null && cur.amount !== undefined) {
+      parts.push(`本笔支出 ${cur.amount} 元`);
+      nums.push(cur.amount);
+    }
+    if (cur.merchant) parts.push(`商户「${cur.merchant}」`);
+    if (cur.category) parts.push(`分类 ${cur.category}`);
+    if (cur.platform) parts.push(`支付方式 ${cur.platform}`);
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
+      });
+    }
+  }
   return out;
 }
 
@@ -253,6 +273,21 @@ function sleepSignals(profile: Record<string, unknown>, cur: CurrentFacts): Doma
       });
     }
   }
+  // 默认信号
+  if (out.length === 0 && cur.hours !== null && cur.hours !== undefined) {
+    const h = Math.round(cur.hours * 100) / 100;
+    const parts: string[] = [`本晚睡眠 ${h} 小时`];
+    const nums: number[] = [h];
+    if (cur.score !== null && cur.score !== undefined) {
+      parts.push(`评分 ${cur.score}`);
+      nums.push(cur.score);
+    }
+    out.push({
+      kind: "record_acknowledge", priority: 99,
+      fact: parts.join("，"),
+      numbers: nums,
+    });
+  }
   return out;
 }
 
@@ -300,6 +335,31 @@ function sportSignals(profile: Record<string, unknown>, cur: CurrentFacts): Doma
         fact: `算上本次,这是本自然周第 ${sessions + 1} 次运动;你近4周平均每周 ${spw} 次`,
         numbers: [sessions + 1, spw, 4],
         countNumbers: [sessions + 1],
+      });
+    }
+  }
+  // 默认信号
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    if (cur.sportType) parts.push(`本次${cur.sportType}运动`);
+    if (cur.durationMin !== null && cur.durationMin !== undefined) {
+      parts.push(`${cur.durationMin} 分钟`);
+      nums.push(cur.durationMin);
+    }
+    if (cur.distanceKm !== null && cur.distanceKm !== undefined) {
+      parts.push(`距离 ${cur.distanceKm} 公里`);
+      nums.push(cur.distanceKm);
+    }
+    if (cur.paceMin !== null && cur.paceMin !== undefined) {
+      parts.push(`配速 ${cur.paceMin} 分钟/公里`);
+      nums.push(cur.paceMin);
+    }
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
       });
     }
   }
@@ -352,6 +412,27 @@ function foodSignals(profile: Record<string, unknown>, cur: CurrentFacts): Domai
       countNumbers: [lateSnack, lateSnack + 1],
     });
   }
+  // 默认信号
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    const label = cur.mealType ? (MEAL_LABELS[cur.mealType] ?? cur.mealType) : null;
+    if (label) parts.push(`本次${label}`);
+    if (cur.kcal !== null && cur.kcal !== undefined) {
+      parts.push(`约 ${cur.kcal} 千卡`);
+      nums.push(cur.kcal);
+    }
+    if (cur.dishNames?.length) {
+      parts.push(`菜品：${cur.dishNames.join("、")}`);
+    }
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
+      });
+    }
+  }
   return out;
 }
 
@@ -403,6 +484,27 @@ function readingSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
       });
     }
   }
+  // 默认信号
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    if (cur.bookName) parts.push(`本次阅读《${cur.bookName}》`);
+    if (cur.readingMinutes !== null && cur.readingMinutes !== undefined) {
+      parts.push(`${cur.readingMinutes} 分钟`);
+      nums.push(cur.readingMinutes);
+    }
+    if (cur.progressPercent !== null && cur.progressPercent !== undefined) {
+      parts.push(`进度 ${cur.progressPercent}%`);
+      nums.push(cur.progressPercent);
+    }
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
+      });
+    }
+  }
   return out;
 }
 
@@ -448,6 +550,24 @@ function walletSignals(profile: Record<string, unknown>, cur: CurrentFacts): Dom
         });
         break; // 只提最近的一笔
       }
+    }
+  }
+  // 默认信号
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    if (cur.accountName) parts.push(`本次记录「${cur.accountName}」`);
+    if (cur.recordKind) parts.push(cur.recordKind);
+    if (cur.walletAmount !== null && cur.walletAmount !== undefined) {
+      parts.push(`金额 ${cur.walletAmount} 元`);
+      nums.push(cur.walletAmount);
+    }
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
+      });
     }
   }
   return out;
@@ -530,6 +650,8 @@ export function validateVoiceNumbers(
   const addNum = (n: number) => {
     allowed.add(String(n));
     allowed.add(String(Math.round(n)));
+    allowed.add(String(Math.floor(n)));
+    allowed.add(String(Math.ceil(n)));
     allowed.add(String(Math.round(n * 10) / 10));
   };
   for (const s of signals) {
