@@ -38,6 +38,18 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    func testDayRecordGroupFiltersByPWAKinds() {
+        let records = [
+            NativeDayRecord(id: "expense-1", reference: "tx-1", dateKey: "2026-07-12", kind: .expense, domainKey: "expense", title: "早餐", subtitle: "微信 · 餐饮", value: "¥12.00", timeLabel: "08:00", systemImage: "creditcard"),
+            NativeDayRecord(id: "sport-1", reference: "data-1", dateKey: "2026-07-12", kind: .sport, domainKey: "sport", title: "骑行", subtitle: "30 分钟", value: "", timeLabel: "07:00", systemImage: "figure.run")
+        ]
+        let group = NativeDayRecordGroup(dateKey: "2026-07-12", records: records)
+
+        XCTAssertEqual(group.records(for: .expense).map(\.reference), ["tx-1"])
+        XCTAssertEqual(group.records(for: .sport).map(\.reference), ["data-1"])
+        XCTAssertEqual(group.availableKinds, [.all, .expense, .sport])
+    }
+
 
 }
 

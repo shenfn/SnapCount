@@ -9,6 +9,7 @@ struct DashboardSnapshot {
     var todayExpense = 0.0
     var todayIncome = 0.0
     var dailySummaries: [NativeDailySummary] = []
+    var dayRecordGroups: [NativeDayRecordGroup] = []
     var loadWarnings: [String] = []
     var recordDetails: [String: NativeRecordDetail] = [:]
     var recentRecords: [NativeRecordSummary] = []
@@ -216,6 +217,14 @@ final class NativeDataService {
             .filter { $0.incomeDate == today }
             .reduce(0) { $0 + ($1.amount ?? 0) }
         snapshot.dailySummaries = dailySummaries(
+            transactions: txRows,
+            incomes: incomeRows,
+            universal: universalRows,
+            staging: stagingRows,
+            monthPrefix: monthPrefix
+        )
+
+        snapshot.dayRecordGroups = dayRecordGroups(
             transactions: txRows,
             incomes: incomeRows,
             universal: universalRows,
@@ -880,6 +889,38 @@ final class NativeDataService {
                 recordCount: dayTransactions.count + dayIncomes.count + dayUniversal.count + dayStaging.count
             )
         }
+    }
+
+    private func dayRecordGroups(
+        transactions: [TransactionRow], incomes: [IncomeRow], universal: [DataRecordRow], staging: [StagingRow], monthPrefix: String
+    ) -> [NativeDayRecordGroup] {
+        var records: [NativeDayRecord] = []
+        transactions.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.forEach { row in
+            guard let dateKey = row.transactionDate else { return }
+            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "tx-\(row.id)", dateKey: dateKey, kind: row.status == "pending" ? .staging : .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: row.transactionTime, systemImage: row.status == "pending" ? "clock" : "creditcard"))
+        }
+        incomes.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.forEach { row in
+            guard let dateKey = row.incomeDate else { return }
+            records.append(NativeDayRecord(id: "income-\(row.id)", reference: "income-\(row.id)", dateKey: dateKey, kind: .income, domainKey: "income", title: row.sourceName ?? "收入记录", subtitle: row.category ?? "收入", value: "+\(currency(row.amount))", timeLabel: nil, systemImage: "arrow.down.circle"))
+        }
+        universal.filter { ($0.occurredAt ?? $0.createdAt)?.hasPrefix(monthPrefix) == true }.forEach { row in
+            guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
+            let kind = NativeDayRecordKind(rawValue: row.domainKey ?? "") ?? .all
+            records.append(NativeDayRecord(id: "data-\(row.id)", reference: "data-\(row.id)", dateKey: dateOnly(sourceDate), kind: kind, domainKey: row.domainKey, title: row.title ?? row.summary ?? domainName(row.domainKey), subtitle: row.summary ?? domainName(row.domainKey), value: "", timeLabel: timeOnly(sourceDate), systemImage: kind == .all ? "sparkles" : kind.systemImage))
+        }
+        staging.filter { !["discarded", "archived", "assigned", "confirmed"].contains($0.status ?? "") && ($0.occurredAt ?? $0.createdAt)?.hasPrefix(monthPrefix) == true }.forEach { row in
+            guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
+            records.append(NativeDayRecord(id: "staging-\(row.id)", reference: "staging-\(row.id)", dateKey: dateOnly(sourceDate), kind: .staging, domainKey: row.detectedDomainKey, title: row.detectedDomainName ?? domainName(row.detectedDomainKey), subtitle: row.aiSummary ?? row.lastErrorMessage ?? "待处理截图", value: row.recordType == "income" ? "+ 待确认" : row.recordType == "expense" ? "- 待确认" : "待分类", timeLabel: timeOnly(sourceDate), systemImage: stagingSystemImage(row.status ?? "unassigned")))
+        }
+        let groups = Dictionary(grouping: records) { $0.dateKey }
+        return groups.keys.sorted(by: >).map { dateKey in NativeDayRecordGroup(dateKey: dateKey, records: (groups[dateKey] ?? []).sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }) }
+    }
+
+    private func timeOnly(_ value: String) -> String? {
+        guard value.count >= 16 else { return nil }
+        let start = value.index(value.startIndex, offsetBy: 11)
+        let end = value.index(start, offsetBy: 5)
+        return String(value[start..<end])
     }
 
     private func cachedRecordDetails(
