@@ -107,11 +107,12 @@
 - 快捷指令与 `SnapCountUploadService` multipart 上传链路未改动。
 - A2 结构 Build：`29191520710`。
 - A2 结构 TestFlight：`29191520722`。
-- 归档域契约复审发现 key 搬迁回归，已恢复 `sport`、`reading`、`food` 与原图标，并增加契约测试；最终验收以修复提交对应工作流为准。
+- 归档域契约复审发现 key 搬迁回归，已在 `50d5a0c` 恢复 `sport`、`reading`、`food` 与原图标，并增加契约测试。`r`n- 最终 iOS Build：`29191827847`。`r`n- 最终 TestFlight：`29191827841`。
 
 ## 下一步
 
 1. 开始 B1 用户隔离的只读启动快照。
 2. 在 Repository 下接入本地 Snapshot Store，不修改 SwiftUI 页面。
 3. 保持后台全量校准与四数据域独立容错。
+
 
