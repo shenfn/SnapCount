@@ -27,3 +27,8 @@ struct NativeDayRecordGroup: Identifiable {
     func records(for kind: NativeDayRecordKind) -> [NativeDayRecord] { kind == .all ? records : records.filter { $0.kind == kind } }
     var availableKinds: [NativeDayRecordKind] { let present = Set(records.map(\.kind)); return [.all] + NativeDayRecordKind.allCases.filter { $0 != .all && present.contains($0) } }
 }
+
+struct NativeDayDetailRoute: Hashable {
+    let dateKey: String
+    let kind: NativeDayRecordKind
+}

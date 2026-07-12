@@ -18,8 +18,11 @@ struct RootView: View {
 
     private var tabRoot: some View {
         TabView(selection: $appState.selectedTab) {
-            NavigationStack {
+            NavigationStack(path: $appState.todayPath) {
                 TodayView()
+                    .navigationDestination(for: NativeDayDetailRoute.self) { route in
+                        DayDetailView(route: route)
+                    }
             }
             .tabItem { Label(AppTab.today.title, systemImage: AppTab.today.systemImage) }
             .tag(AppTab.today)

@@ -19,6 +19,7 @@ final class AppState: ObservableObject {
     @Published var notificationPermissionStatusText = "检查中"
     @Published var shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
     @Published var shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
+    @Published var todayPath: [NativeDayDetailRoute] = []
     @Published var inboxPath: [String] = []
     @Published var recordsPath: [String] = []
     @Published var selectedRecordDetail: NativeRecordDetail?
@@ -187,6 +188,16 @@ final class AppState: ObservableObject {
             return
         }
         await refreshDashboard()
+    }
+
+    func openDayRecord(_ record: NativeDayRecord) {
+        if record.kind == .staging {
+            selectedTab = .inbox
+            inboxPath = [String(record.reference.dropFirst("staging-".count))]
+        } else {
+            selectedTab = .records
+            recordsPath = [record.reference]
+        }
     }
 
     func handleDeepLink(_ url: URL) {
