@@ -1,25 +1,5 @@
 import Foundation
 
-enum NativeDataServiceError: LocalizedError {
-    case missingConfig
-    case invalidURL
-    case missingSession
-    case requestFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .missingConfig:
-            return "缺少 iOS Supabase 配置。"
-        case .invalidURL:
-            return "数据接口地址无效。"
-        case .missingSession:
-            return "登录状态已失效，请重新登录。"
-        case .requestFailed(let message):
-            return message
-        }
-    }
-}
-
 struct DashboardSnapshot {
     var todayCount = 0
     var pendingCount = 0
@@ -173,15 +153,14 @@ private func capture<Value>(_ operation: () async throws -> Value) async -> Nati
 }
 
 final class NativeDataService {
-    private let session: URLSession
-    private let decoder = JSONDecoder()
+    private let remoteClient: SupabaseRemoteClientProtocol
     private let imageURLProvider: SupabaseImageURLProvider
 
     init(
-        session: URLSession = .shared,
+        remoteClient: SupabaseRemoteClientProtocol = SupabaseRemoteClient(),
         imageURLProvider: SupabaseImageURLProvider = .shared
     ) {
-        self.session = session
+        self.remoteClient = remoteClient
         self.imageURLProvider = imageURLProvider
     }
 
@@ -696,26 +675,12 @@ final class NativeDataService {
         queryItems: [URLQueryItem],
         accessToken: String
     ) async throws -> T {
-        guard let baseURL = URL(string: AppConfig.supabaseURL) else {
-            throw NativeDataServiceError.invalidURL
-        }
-        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        components?.queryItems = queryItems
-        guard let url = components?.url else {
-            throw NativeDataServiceError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await session.data(for: request)
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(statusCode) else {
-            let text = String(data: data, encoding: .utf8) ?? "HTTP \(statusCode)"
-            throw NativeDataServiceError.requestFailed(text)
-        }
-        return try decoder.decode(type, from: data)
+        try await remoteClient.get(
+            type,
+            path: path,
+            queryItems: queryItems,
+            accessToken: accessToken
+        )
     }
 
     private func patch(
@@ -724,24 +689,12 @@ final class NativeDataService {
         body: [String: AnyCodable],
         accessToken: String
     ) async throws {
-        guard let baseURL = URL(string: AppConfig.supabaseURL) else {
-            throw NativeDataServiceError.invalidURL
-        }
-        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        components?.queryItems = queryItems
-        guard let url = components?.url else {
-            throw NativeDataServiceError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "PATCH"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
-        request.httpBody = try JSONEncoder().encode(body)
-
-        try await emptyResponse(for: request)
+        try await remoteClient.patch(
+            path: path,
+            queryItems: queryItems,
+            body: body,
+            accessToken: accessToken
+        )
     }
 
     private func delete(
@@ -749,22 +702,11 @@ final class NativeDataService {
         queryItems: [URLQueryItem],
         accessToken: String
     ) async throws {
-        guard let baseURL = URL(string: AppConfig.supabaseURL) else {
-            throw NativeDataServiceError.invalidURL
-        }
-        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        components?.queryItems = queryItems
-        guard let url = components?.url else {
-            throw NativeDataServiceError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
-
-        try await emptyResponse(for: request)
+        try await remoteClient.delete(
+            path: path,
+            queryItems: queryItems,
+            accessToken: accessToken
+        )
     }
 
     private func postJSON<T: Decodable>(
@@ -774,23 +716,13 @@ final class NativeDataService {
         body: [String: AnyCodable],
         accessToken: String
     ) async throws -> T {
-        guard let baseURL = URL(string: AppConfig.supabaseURL) else {
-            throw NativeDataServiceError.invalidURL
-        }
-        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        components?.queryItems = queryItems
-        guard let url = components?.url else {
-            throw NativeDataServiceError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
-        request.httpBody = try JSONEncoder().encode(body)
-        return try decoder.decode(type, from: try await dataResponse(for: request))
+        try await remoteClient.post(
+            type,
+            path: path,
+            queryItems: queryItems,
+            body: body,
+            accessToken: accessToken
+        )
     }
 
     private func rpc<T: Decodable>(
@@ -799,9 +731,9 @@ final class NativeDataService {
         body: [String: AnyCodable],
         accessToken: String
     ) async throws -> T {
-        try await postJSON(
+        try await remoteClient.rpc(
             type,
-            path: "rest/v1/rpc/\(name)",
+            name: name,
             body: body,
             accessToken: accessToken
         )
@@ -812,49 +744,16 @@ final class NativeDataService {
         fields: [String: String],
         accessToken: String
     ) async throws -> Data {
-        guard let baseURL = URL(string: AppConfig.supabaseFunctionsURL.isEmpty ? AppConfig.supabaseURL : AppConfig.supabaseFunctionsURL) else {
-            throw NativeDataServiceError.invalidURL
-        }
-
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
-        for (name, value) in fields {
-            body.append(Data("--\(boundary)\r\n".utf8))
-            body.append(Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8))
-            body.append(Data("\(value)\r\n".utf8))
-        }
-        body.append(Data("--\(boundary)--\r\n".utf8))
-
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
-        request.httpMethod = "POST"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = body
-
-        return try await dataResponse(for: request)
+        try await remoteClient.postMultipart(
+            path: path,
+            fields: fields,
+            accessToken: accessToken
+        )
     }
 
     private func signedImageURLMap(paths: [String], accessToken: String) async throws -> [String: URL] {
         _ = accessToken
         return try await imageURLProvider.signedURLMap(paths: paths)
-    }
-
-    private func dataResponse(for request: URLRequest) async throws -> Data {
-        let (data, response) = try await session.data(for: request)
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(statusCode) else {
-            if let payload = try? decoder.decode(SupabaseErrorPayload.self, from: data) {
-                throw NativeDataServiceError.requestFailed(payload.displayMessage)
-            }
-            let text = String(data: data, encoding: .utf8) ?? "HTTP \(statusCode)"
-            throw NativeDataServiceError.requestFailed(text)
-        }
-        return data
-    }
-
-    private func emptyResponse(for request: URLRequest) async throws {
-        _ = try await dataResponse(for: request)
     }
 
     private func fetchDataDomain(key: String, accessToken: String) async throws -> DataDomainRow {
