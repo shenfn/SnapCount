@@ -27,6 +27,10 @@ final class AppState: ObservableObject {
     @Published var recordDetailMessage: String?
     @Published var isSavingRecordDetail = false
     @Published var isDeletingRecordDetail = false
+    @Published var accounts: [NativeAccount] = []
+    @Published var selectedAccountDetail: NativeAccountDetail?
+    @Published var accountMessage: String?
+    @Published var isLoadingAccounts = false
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -34,6 +38,7 @@ final class AppState: ObservableObject {
     private let inboxRepository: InboxRepositoryProtocol
     private let domainRepository: DomainRepositoryProtocol
     private let snapshotStore: DashboardSnapshotStoreProtocol
+    private let accountRepository: AccountRepositoryProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
@@ -44,13 +49,15 @@ final class AppState: ObservableObject {
         recordRepository: RecordRepositoryProtocol = RecordRepository(),
         inboxRepository: InboxRepositoryProtocol = InboxRepository(),
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
-        snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore()
+        snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
+        accountRepository: AccountRepositoryProtocol = AccountRepository()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
         self.inboxRepository = inboxRepository
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore
+        self.accountRepository = accountRepository
     }
 
     func bootstrap() {
@@ -221,6 +228,27 @@ final class AppState: ObservableObject {
             return
         }
         await refreshDashboard()
+    }
+
+    func loadAccounts() async {
+        guard !isLoadingAccounts else { return }
+        isLoadingAccounts = true
+        accountMessage = nil
+        defer { isLoadingAccounts = false }
+        do {
+            let session = try await validSession()
+            accounts = try await accountRepository.fetchAccounts(accessToken: session.accessToken)
+        } catch {
+            accountMessage = error.localizedDescription
+        }
+    }
+
+    func loadAccountDetail(_ account: NativeAccount) async {
+        selectedAccountDetail = nil
+        accountMessage = nil
+        let session = try? await validSession()
+        guard let session else { accountMessage = "登录状态已失效，请重新登录。"; return }
+        selectedAccountDetail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
     }
 
     func prefetchRecordDetails(_ references: [String]) {
@@ -501,6 +529,8 @@ final class AppState: ObservableObject {
         isSignedIn = false
         currentUserEmail = ""
         dashboard = DashboardSnapshot()
+        accounts = []
+        selectedAccountDetail = nil
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today
