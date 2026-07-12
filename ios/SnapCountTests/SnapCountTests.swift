@@ -27,6 +27,17 @@ final class SnapCountTests: XCTestCase {
         XCTAssertFalse(result.displayText.isEmpty)
     }
 
+    func testInboxArchiveDomainsPreservePWAContract() {
+        XCTAssertEqual(
+            InboxArchiveDomains.all.map(\.id),
+            ["expense", "income", "sport", "sleep", "reading", "food", "wallet"]
+        )
+        XCTAssertEqual(
+            InboxArchiveDomains.all.map(\.systemImage),
+            ["creditcard", "arrow.down.circle", "figure.run", "moon", "book", "fork.knife", "wallet.pass"]
+        )
+    }
+
 
 }
 

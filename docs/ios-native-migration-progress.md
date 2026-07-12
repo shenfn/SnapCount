@@ -105,8 +105,9 @@
 - 公共错误类型已迁为 `SupabaseRemoteError`，旧错误别名已删除。
 - `NativeDataService` 当前仅作为三个 Remote Service / Repository 的内部兼容实现，页面和状态层不再依赖它；后续 PostgREST 分模块迁移时可以逐仓库替换，不需要再次修改 UI。
 - 快捷指令与 `SnapCountUploadService` multipart 上传链路未改动。
-- 最终 iOS Build：`29191520710`。
-- 最终 TestFlight：以提交 `92b2bd0` 对应工作流结果为准。
+- A2 结构 Build：`29191520710`。
+- A2 结构 TestFlight：`29191520722`。
+- 归档域契约复审发现 key 搬迁回归，已恢复 `sport`、`reading`、`food` 与原图标，并增加契约测试；最终验收以修复提交对应工作流为准。
 
 ## 下一步
 
