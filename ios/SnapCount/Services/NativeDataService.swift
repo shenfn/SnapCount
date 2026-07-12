@@ -154,6 +154,7 @@ private func capture<Value>(_ operation: () async throws -> Value) async -> Nati
 
 final class NativeDataService {
     private let remoteClient: SupabaseRemoteClientProtocol
+    private let decoder = JSONDecoder()
     private let imageURLProvider: SupabaseImageURLProvider
 
     init(
@@ -1459,3 +1460,4 @@ private extension Array {
         indices.contains(index) ? self[index] : nil
     }
 }
+
