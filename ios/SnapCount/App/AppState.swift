@@ -59,8 +59,10 @@ final class AppState: ObservableObject {
             apply(session: session)
             hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
             updateShortcutCredentialMessage()
-            await refreshDashboard()
-            await requestShortcutNotificationPermissionIfNeeded()
+            Task {
+                await refreshDashboard()
+                await requestShortcutNotificationPermissionIfNeeded()
+            }
         } catch {
             if isInvalidRefreshSessionError(error) {
                 invalidateSession(message: "登录状态已失效，请重新登录。")
@@ -137,12 +139,14 @@ final class AppState: ObservableObject {
                 let snapshot = try await dataService.fetchDashboard(accessToken: session.accessToken)
                 dashboard = snapshot
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
+                prefetchDashboardImages(snapshot)
             } catch {
                 guard isExpiredJWTError(error) else { throw error }
                 session = try await validSession(forceRefresh: true)
                 let snapshot = try await dataService.fetchDashboard(accessToken: session.accessToken)
                 dashboard = snapshot
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
+                prefetchDashboardImages(snapshot)
             }
         } catch {
             if isInvalidRefreshSessionError(error) {
@@ -153,6 +157,14 @@ final class AppState: ObservableObject {
         }
 
         isLoadingDashboard = false
+    }
+
+    private func prefetchDashboardImages(_ snapshot: DashboardSnapshot) {
+        let urls = snapshot.recordDetails.values.compactMap(\.imageURL)
+            + snapshot.stagingRecords.compactMap(\.imageURL)
+        Task {
+            await RemoteImageRepository.shared.prefetch(urls)
+        }
     }
 
     func refreshDashboardIfStale(minInterval: TimeInterval = 3, force: Bool = false) async {

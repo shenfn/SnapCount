@@ -163,21 +163,13 @@ private struct RecordDetailView: View {
             NavigationStack {
                 ZStack {
                     Color.black.ignoresSafeArea()
-                    AsyncImage(url: route.url) { phase in
-                        switch phase {
-                        case .empty:
-                            ProgressView()
-                                .tint(.white)
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFit()
-                        case .failure:
-                            Label("截图文件不可用", systemImage: "photo.badge.exclamationmark")
-                                .foregroundStyle(.white)
-                        @unknown default:
-                            EmptyView()
-                        }
+                    CachedRemoteImage(url: route.url) { image in
+                        image.resizable().scaledToFit()
+                    } placeholder: {
+                        ProgressView().tint(.white)
+                    } failure: {
+                        Label("截图文件不可用", systemImage: "photo.badge.exclamationmark")
+                            .foregroundStyle(.white)
                     }
                     .padding()
                 }
@@ -218,32 +210,26 @@ private struct RecordImagePreview: View {
     let url: URL
 
     var body: some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .empty:
-                ProgressView()
-                    .frame(maxWidth: .infinity, minHeight: 180)
-            case .success(let image):
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(alignment: .bottomTrailing) {
-                        Label("查看大图", systemImage: "arrow.up.left.and.arrow.down.right")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .padding(10)
-                    }
-            case .failure:
-                Label("截图文件不可用或已删除", systemImage: "photo.badge.exclamationmark")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            @unknown default:
-                EmptyView()
-            }
+        CachedRemoteImage(url: url) { image in
+            image
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    Label("查看大图", systemImage: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(10)
+                }
+        } placeholder: {
+            ProgressView().frame(maxWidth: .infinity, minHeight: 180)
+        } failure: {
+            Label("截图文件不可用或已删除", systemImage: "photo.badge.exclamationmark")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 }
