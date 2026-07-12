@@ -24,8 +24,23 @@ struct DashboardSnapshot {
     var todayCount = 0
     var pendingCount = 0
     var monthCount = 0
+    var monthExpense = 0.0
+    var monthIncome = 0.0
+    var todayExpense = 0.0
+    var todayIncome = 0.0
+    var dailySummaries: [NativeDailySummary] = []
     var recentRecords: [NativeRecordSummary] = []
     var stagingRecords: [NativeStagingRecord] = []
+}
+
+struct NativeDailySummary: Identifiable {
+    let dateKey: String
+    let expense: Double
+    let income: Double
+    let pendingCount: Int
+    let recordCount: Int
+
+    var id: String { dateKey }
 }
 
 struct NativeRecordSummary: Identifiable {
@@ -178,6 +193,26 @@ final class NativeDataService {
             txRows.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.count +
             incomeRows.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.count +
             universalRows.filter { ($0.occurredAt ?? $0.createdAt)?.hasPrefix(monthPrefix) == true }.count
+
+        snapshot.monthExpense = txRows
+            .filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }
+            .reduce(0) { $0 + ($1.amount ?? 0) }
+        snapshot.monthIncome = incomeRows
+            .filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }
+            .reduce(0) { $0 + ($1.amount ?? 0) }
+        snapshot.todayExpense = txRows
+            .filter { $0.transactionDate == today }
+            .reduce(0) { $0 + ($1.amount ?? 0) }
+        snapshot.todayIncome = incomeRows
+            .filter { $0.incomeDate == today }
+            .reduce(0) { $0 + ($1.amount ?? 0) }
+        snapshot.dailySummaries = dailySummaries(
+            transactions: txRows,
+            incomes: incomeRows,
+            universal: universalRows,
+            staging: stagingRows,
+            monthPrefix: monthPrefix
+        )
 
         snapshot.recentRecords = recentRecords(
             transactions: txRows,
@@ -789,12 +824,12 @@ final class NativeDataService {
         if let absoluteURL = URL(string: value), absoluteURL.scheme != nil {
             return absoluteURL
         }
-        guard let baseURL = URL(string: AppConfig.supabaseURL) else { return nil }
+        let base = AppConfig.supabaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let normalizedPath = value.hasPrefix("/") ? String(value.dropFirst()) : value
         let storagePath = normalizedPath.hasPrefix("storage/v1/")
             ? normalizedPath
             : "storage/v1/\(normalizedPath)"
-        return baseURL.appendingPathComponent(storagePath)
+        return URL(string: "\(base)/\(storagePath)")
     }
 
     private func dataResponse(for request: URLRequest) async throws -> Data {
@@ -900,6 +935,34 @@ final class NativeDataService {
             ],
             accessToken: accessToken
         )
+    }
+
+    private func dailySummaries(
+        transactions: [TransactionRow],
+        incomes: [IncomeRow],
+        universal: [DataRecordRow],
+        staging: [StagingRow],
+        monthPrefix: String
+    ) -> [NativeDailySummary] {
+        var dates = Set<String>()
+        transactions.compactMap(\.transactionDate).filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
+        incomes.compactMap(\.incomeDate).filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
+        universal.compactMap { ($0.occurredAt ?? $0.createdAt).map(dateOnly) }.filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
+        staging.compactMap { ($0.occurredAt ?? $0.createdAt).map(dateOnly) }.filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
+
+        return dates.sorted(by: >).map { date in
+            let dayTransactions = transactions.filter { $0.transactionDate == date }
+            let dayIncomes = incomes.filter { $0.incomeDate == date }
+            let dayUniversal = universal.filter { ($0.occurredAt ?? $0.createdAt).map(dateOnly) == date }
+            let dayStaging = staging.filter { ($0.occurredAt ?? $0.createdAt).map(dateOnly) == date && !["discarded", "archived", "assigned"].contains($0.status ?? "") }
+            return NativeDailySummary(
+                dateKey: date,
+                expense: dayTransactions.reduce(0) { $0 + ($1.amount ?? 0) },
+                income: dayIncomes.reduce(0) { $0 + ($1.amount ?? 0) },
+                pendingCount: dayTransactions.filter { $0.status == "pending" }.count + dayStaging.count,
+                recordCount: dayTransactions.count + dayIncomes.count + dayUniversal.count + dayStaging.count
+            )
+        }
     }
 
     private func recentRecords(
