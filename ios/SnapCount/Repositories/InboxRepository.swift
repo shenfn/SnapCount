@@ -13,7 +13,7 @@ enum InboxArchiveDomains {
 
 protocol InboxRepositoryProtocol {
     func discard(id: String, accessToken: String) async throws
-    func retry(id: String, accessToken: String) async throws -> NativeStagingRecord
+    func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String
 }
 
@@ -28,7 +28,7 @@ final class InboxRepository: InboxRepositoryProtocol {
         try await remoteService.discardStagingRecord(id: id, accessToken: accessToken)
     }
 
-    func retry(id: String, accessToken: String) async throws -> NativeStagingRecord {
+    func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult {
         try await remoteService.retryStagingRecord(id: id, accessToken: accessToken)
     }
 
