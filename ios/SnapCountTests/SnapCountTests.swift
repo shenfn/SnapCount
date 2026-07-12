@@ -57,6 +57,22 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    func testRecordQueryFiltersMonthKindAndPendingItems() {
+        let groups = [
+            NativeDayRecordGroup(dateKey: "2026-07-12", records: [
+                NativeDayRecord(id: "expense-1", reference: "tx-1", dateKey: "2026-07-12", kind: .expense, domainKey: "expense", title: "午餐", subtitle: "餐饮", value: "¥20.00", timeLabel: nil, systemImage: "creditcard"),
+                NativeDayRecord(id: "staging-1", reference: "staging-1", dateKey: "2026-07-12", kind: .staging, domainKey: nil, title: "待处理", subtitle: "", value: "", timeLabel: nil, systemImage: "tray")
+            ]),
+            NativeDayRecordGroup(dateKey: "2026-06-30", records: [
+                NativeDayRecord(id: "expense-2", reference: "tx-2", dateKey: "2026-06-30", kind: .expense, domainKey: "expense", title: "晚餐", subtitle: "餐饮", value: "¥30.00", timeLabel: nil, systemImage: "creditcard")
+            ])
+        ]
+
+        let result = NativeRecordQuery(monthKey: "2026-07", kind: .expense).groups(from: groups)
+        XCTAssertEqual(result.map(\.dateKey), ["2026-07-12"])
+        XCTAssertEqual(result.flatMap(\.records).map(\.reference), ["tx-1"])
+    }
+
 
 }
 
