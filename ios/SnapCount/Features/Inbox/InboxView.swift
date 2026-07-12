@@ -252,7 +252,7 @@ private struct StagingRecordDetailView: View {
                 }
 
                 Section {
-                    ForEach(NativeDataService.archiveDomains) { domain in
+                    ForEach(InboxArchiveDomains.all) { domain in
                         Button {
                             selectedArchiveDomain = domain
                             showArchiveConfirm = true

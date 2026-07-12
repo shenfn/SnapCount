@@ -27,15 +27,22 @@ final class AppState: ObservableObject {
     @Published var isDeletingRecordDetail = false
 
     private let authService = SupabaseAuthService()
-    private let dataService = NativeDataService()
     private let dashboardRepository: DashboardRepositoryProtocol
+    private let recordRepository: RecordRepositoryProtocol
+    private let inboxRepository: InboxRepositoryProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
 
-    init(dashboardRepository: DashboardRepositoryProtocol = DashboardRepository()) {
+    init(
+        dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
+        recordRepository: RecordRepositoryProtocol = RecordRepository(),
+        inboxRepository: InboxRepositoryProtocol = InboxRepository()
+    ) {
         self.dashboardRepository = dashboardRepository
+        self.recordRepository = recordRepository
+        self.inboxRepository = inboxRepository
     }
 
     func bootstrap() {
@@ -235,7 +242,7 @@ final class AppState: ObservableObject {
     func discardStagingRecord(_ record: NativeStagingRecord) async {
         do {
             let session = try await validSession()
-            try await dataService.discardStagingRecord(id: record.id, accessToken: session.accessToken)
+            try await inboxRepository.discard(id: record.id, accessToken: session.accessToken)
             inboxPath.removeAll()
             await refreshDashboard()
         } catch {
@@ -246,7 +253,7 @@ final class AppState: ObservableObject {
     func retryStagingRecord(_ record: NativeStagingRecord) async {
         do {
             let session = try await validSession()
-            _ = try await dataService.retryStagingRecord(id: record.id, accessToken: session.accessToken)
+            _ = try await inboxRepository.retry(id: record.id, accessToken: session.accessToken)
             inboxPath.removeAll()
             await refreshDashboard()
         } catch {
@@ -257,7 +264,7 @@ final class AppState: ObservableObject {
     func archiveStagingRecord(_ record: NativeStagingRecord, domainKey: String) async {
         do {
             let session = try await validSession()
-            let reference = try await dataService.archiveStagingRecord(record, domainKey: domainKey, accessToken: session.accessToken)
+            let reference = try await inboxRepository.archive(record, domainKey: domainKey, accessToken: session.accessToken)
             inboxPath.removeAll()
             await refreshDashboard()
             selectedTab = .records
@@ -278,7 +285,7 @@ final class AppState: ObservableObject {
         }
         do {
             let session = try await validSession()
-            let detail = try await dataService.fetchRecordDetail(reference: reference, accessToken: session.accessToken)
+            let detail = try await recordRepository.fetchDetail(reference: reference, accessToken: session.accessToken)
             recordDetailCache[reference] = detail
             selectedRecordDetail = detail
         } catch {
@@ -294,7 +301,7 @@ final class AppState: ObservableObject {
 
         do {
             let session = try await validSession()
-            let reference = try await dataService.saveRecordDetail(draft, accessToken: session.accessToken)
+            let reference = try await recordRepository.saveDetail(draft, accessToken: session.accessToken)
             await refreshDashboard()
             recordsPath = [reference]
             recordDetailCache.removeValue(forKey: reference)
@@ -314,7 +321,7 @@ final class AppState: ObservableObject {
 
         do {
             let session = try await validSession()
-            try await dataService.deleteRecord(reference: reference, accessToken: session.accessToken)
+            try await recordRepository.delete(reference: reference, accessToken: session.accessToken)
             recordDetailCache.removeValue(forKey: reference)
             selectedRecordDetail = nil
             recordsPath.removeAll()
