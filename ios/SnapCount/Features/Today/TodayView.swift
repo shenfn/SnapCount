@@ -180,7 +180,7 @@ struct TodayView: View {
         isUploading = true
         defer { isUploading = false }
         do {
-            guard let uploadToken = try KeychainStore.shared.string(for: KeychainKeys.uploadToken), !uploadToken.isEmpty else { throw NativeUploadError.missingUploadToken }
+            guard let uploadToken = try KeychainStore.shared.string(for: KeychainKeys.uploadToken), !uploadToken.isEmpty else { throw SnapCountUploadServiceError.requestFailed("登录凭据未同步，请重新登录") }
             uploadMessage = try await SnapCountUploadService().uploadNativeImage(data: data, uploadToken: uploadToken, captureKind: captureKind, filename: filename)
             uploadMessageIsError = false
             await appState.refreshDashboard()
