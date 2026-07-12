@@ -2,12 +2,6 @@ name: iOS TestFlight
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - codex/ios-swiftui-native-app
-    paths:
-      - "ios/**"
-      - ".github/workflows/ios-testflight.yml"
 
 jobs:
   testflight:
