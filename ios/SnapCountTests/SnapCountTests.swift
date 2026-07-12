@@ -73,6 +73,12 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(result.flatMap(\.records).map(\.reference), ["tx-1"])
     }
 
+    func testDomainRepositoryProtocolSupportsStubInjection() async throws {
+        let repository: DomainRepositoryProtocol = DomainRepositoryStub()
+        let domains = try await repository.fetchDefinitions(accessToken: "test-token")
+        XCTAssertEqual(domains.map(\.id), ["sport"])
+    }
+
 
 }
 
@@ -110,5 +116,12 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
 
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {
         URL(string: "https://example.com/receipt.jpg")!
+    }
+}
+
+
+private struct DomainRepositoryStub: DomainRepositoryProtocol {
+    func fetchDefinitions(accessToken: String) async throws -> [NativeDomainDefinition] {
+        [NativeDomainDefinition(id: "sport", name: "运动记录", description: "", icon: "🏃", isSystem: true, schema: [:], display: [:], recordCount: 0)]
     }
 }

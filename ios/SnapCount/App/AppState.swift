@@ -31,6 +31,7 @@ final class AppState: ObservableObject {
     private let dashboardRepository: DashboardRepositoryProtocol
     private let recordRepository: RecordRepositoryProtocol
     private let inboxRepository: InboxRepositoryProtocol
+    private let domainRepository: DomainRepositoryProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
@@ -39,11 +40,13 @@ final class AppState: ObservableObject {
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
         recordRepository: RecordRepositoryProtocol = RecordRepository(),
-        inboxRepository: InboxRepositoryProtocol = InboxRepository()
+        inboxRepository: InboxRepositoryProtocol = InboxRepository(),
+        domainRepository: DomainRepositoryProtocol = DomainRepository()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
         self.inboxRepository = inboxRepository
+        self.domainRepository = domainRepository
     }
 
     func bootstrap() {
@@ -149,14 +152,16 @@ final class AppState: ObservableObject {
         do {
             var session = try await validSession()
             do {
-                let snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
+                var snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
+                snapshot.domains = await resolvedDomains(accessToken: session.accessToken, snapshot: snapshot)
                 dashboard = snapshot
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
                 prefetchDashboardImages(snapshot)
             } catch {
                 guard isExpiredJWTError(error) else { throw error }
                 session = try await validSession(forceRefresh: true)
-                let snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
+                var snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
+                snapshot.domains = await resolvedDomains(accessToken: session.accessToken, snapshot: snapshot)
                 dashboard = snapshot
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
                 prefetchDashboardImages(snapshot)
@@ -171,6 +176,14 @@ final class AppState: ObservableObject {
 
         isLoadingDashboard = false
     }
+
+    private func resolvedDomains(accessToken: String, snapshot: DashboardSnapshot) async -> [NativeDomainDefinition] {
+        let counts = Dictionary(grouping: snapshot.dayRecordGroups.flatMap(\.records).filter { $0.kind != .staging }) { $0.domainKey ?? $0.kind.rawValue }.mapValues(\.count)
+        let definitions = (try? await domainRepository.fetchDefinitions(accessToken: accessToken)) ?? Self.fallbackDomains
+        return definitions.map { domain in NativeDomainDefinition(id: domain.id, name: domain.name, description: domain.description, icon: domain.icon, isSystem: domain.isSystem, schema: domain.schema, display: domain.display, recordCount: counts[domain.id] ?? 0) }
+    }
+
+    private static let fallbackDomains = InboxArchiveDomains.all.map { NativeDomainDefinition(id: $0.id, name: $0.title, description: "", icon: "", isSystem: true, schema: [:], display: [:], recordCount: 0) }
 
     private func prefetchDashboardImages(_ snapshot: DashboardSnapshot) {
         let urls = snapshot.recordDetails.values.compactMap(\.imageURL)

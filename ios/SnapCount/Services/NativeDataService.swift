@@ -14,6 +14,7 @@ struct DashboardSnapshot {
     var recordDetails: [String: NativeRecordDetail] = [:]
     var recentRecords: [NativeRecordSummary] = []
     var stagingRecords: [NativeStagingRecord] = []
+    var domains: [NativeDomainDefinition] = []
 }
 
 struct NativeDailySummary: Identifiable {
