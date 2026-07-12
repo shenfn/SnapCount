@@ -105,6 +105,11 @@ final class SnapCountTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    func testFinancialContractPreservesPWAKeys() {
+        XCTAssertEqual(NativeAccountType.allCases.map(\.rawValue), ["cash", "wallet_balance", "debit_card", "credit_card", "credit_line", "other"])
+        XCTAssertEqual(NativeRepaymentStatus.allCases.map(\.rawValue), ["pending", "due_today", "overdue_unconfirmed", "partial_paid", "minimum_paid", "paid", "ignored", "carried_over", "historical_unconfirmed"])
+    }
+
 }
 
 private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
