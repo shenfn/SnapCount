@@ -175,9 +175,14 @@ private func capture<Value>(_ operation: () async throws -> Value) async -> Nati
 final class NativeDataService {
     private let session: URLSession
     private let decoder = JSONDecoder()
+    private let imageURLProvider: SupabaseImageURLProvider
 
-    init(session: URLSession = .shared) {
+    init(
+        session: URLSession = .shared,
+        imageURLProvider: SupabaseImageURLProvider = .shared
+    ) {
         self.session = session
+        self.imageURLProvider = imageURLProvider
     }
 
     func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
@@ -831,43 +836,8 @@ final class NativeDataService {
     }
 
     private func signedImageURLMap(paths: [String], accessToken: String) async throws -> [String: URL] {
-        let uniquePaths = Array(Set(paths.filter { !$0.isEmpty && !$0.hasPrefix("https://") }))
-        var out: [String: URL] = [:]
-        paths.filter { $0.hasPrefix("https://") }.forEach { out[$0] = URL(string: $0) }
-        guard !uniquePaths.isEmpty else { return out }
-
-        guard let baseURL = URL(string: AppConfig.supabaseURL) else {
-            throw NativeDataServiceError.invalidURL
-        }
-        let url = baseURL.appendingPathComponent("storage/v1/object/sign/receipt-images")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(SignedURLRequest(paths: uniquePaths, expiresIn: 3600))
-
-        let rows = try decoder.decode([SignedURLResponse].self, from: try await dataResponse(for: request))
-        for (index, row) in rows.enumerated() {
-            let path = row.path ?? uniquePaths[safe: index] ?? ""
-            let signed = row.signedURL ?? row.signedUrl
-            if let signed, let url = resolvedSignedImageURL(signed), !path.isEmpty {
-                out[path] = url
-            }
-        }
-        return out
-    }
-
-    private func resolvedSignedImageURL(_ value: String) -> URL? {
-        if let absoluteURL = URL(string: value), absoluteURL.scheme != nil {
-            return absoluteURL
-        }
-        let base = AppConfig.supabaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let normalizedPath = value.hasPrefix("/") ? String(value.dropFirst()) : value
-        let storagePath = normalizedPath.hasPrefix("storage/v1/")
-            ? normalizedPath
-            : "storage/v1/\(normalizedPath)"
-        return URL(string: "\(base)/\(storagePath)")
+        _ = accessToken
+        return try await imageURLProvider.signedURLMap(paths: paths)
     }
 
     private func dataResponse(for request: URLRequest) async throws -> Data {
@@ -1487,23 +1457,6 @@ private struct DataDomainRow: Decodable {
     let id: String
     let key: String
     let version: String?
-}
-
-private struct SignedURLRequest: Encodable {
-    let paths: [String]
-    let expiresIn: Int
-}
-
-private struct SignedURLResponse: Decodable {
-    let path: String?
-    let signedURL: String?
-    let signedUrl: String?
-
-    enum CodingKeys: String, CodingKey {
-        case path
-        case signedURL = "signedURL"
-        case signedUrl = "signedUrl"
-    }
 }
 
 struct AnyCodable: Codable {
