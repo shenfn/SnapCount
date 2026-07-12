@@ -63,6 +63,7 @@ struct RecordsView: View {
         }
         .navigationTitle("记录")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbar { NavigationLink { DomainsView() } label: { Label("数据域", systemImage: "square.stack.3d.up") } }
         .navigationDestination(for: String.self) { reference in RecordDetailView(reference: reference) }
         .onChange(of: availableKinds) { kinds in if !kinds.contains(selectedKind) { selectedKind = .all } }
         .task(id: prefetchKey) {
