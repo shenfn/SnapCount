@@ -167,7 +167,7 @@ final class NativeDataService {
 
     func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
         guard !AppConfig.supabaseURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
-            throw NativeDataServiceError.missingConfig
+            throw SupabaseRemoteError.missingConfig
         }
 
         async let transactionsResult = capture { try await self.fetchTransactions(accessToken: accessToken) }
@@ -182,7 +182,7 @@ final class NativeDataService {
         let stagingRows = staging.value ?? []
         let errors = [transactions.error, incomes.error, universal.error, staging.error].compactMap { $0 }
         if errors.count == 4 {
-            throw NativeDataServiceError.requestFailed(errors.map(\.localizedDescription).joined(separator: "；"))
+            throw SupabaseRemoteError.requestFailed(errors.map(\.localizedDescription).joined(separator: "；"))
         }
         let today = localDateString(Date())
         let monthPrefix = String(today.prefix(7))
@@ -460,7 +460,7 @@ final class NativeDataService {
                 ],
                 accessToken: accessToken
             )
-            guard let row = rows.first else { throw NativeDataServiceError.requestFailed("记录不存在或已被删除") }
+            guard let row = rows.first else { throw SupabaseRemoteError.requestFailed("记录不存在或已被删除") }
             let signedURLs = try? await signedImageURLMap(paths: [row.imageURL].compactMap { $0 }, accessToken: accessToken)
             let imageURL = signedURLs?[row.imageURL ?? ""]
             return NativeRecordDetail(
@@ -505,7 +505,7 @@ final class NativeDataService {
                 ],
                 accessToken: accessToken
             )
-            guard let row = rows.first else { throw NativeDataServiceError.requestFailed("记录不存在或已被删除") }
+            guard let row = rows.first else { throw SupabaseRemoteError.requestFailed("记录不存在或已被删除") }
             let signedURLs = try? await signedImageURLMap(paths: [row.imageURL].compactMap { $0 }, accessToken: accessToken)
             let imageURL = signedURLs?[row.imageURL ?? ""]
             return NativeRecordDetail(
@@ -548,7 +548,7 @@ final class NativeDataService {
                 ],
                 accessToken: accessToken
             )
-            guard let row = rows.first else { throw NativeDataServiceError.requestFailed("记录不存在或已被删除") }
+            guard let row = rows.first else { throw SupabaseRemoteError.requestFailed("记录不存在或已被删除") }
             let signedURLs = try? await signedImageURLMap(paths: [row.sourceImagePath].compactMap { $0 }, accessToken: accessToken)
             let imageURL = signedURLs?[row.sourceImagePath ?? ""]
             let payloadRows = (row.payloadJSONB ?? [:])
@@ -585,7 +585,7 @@ final class NativeDataService {
     func saveRecordDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String {
         let amount = parseAmount(draft.amountText)
         guard amount > 0 else {
-            throw NativeDataServiceError.requestFailed("金额必须大于 0")
+            throw SupabaseRemoteError.requestFailed("金额必须大于 0")
         }
         let recordDate = draft.recordDate.isEmpty ? localDateString(Date()) : draft.recordDate
 
@@ -638,7 +638,7 @@ final class NativeDataService {
             return "income/\(response.id)"
 
         default:
-            throw NativeDataServiceError.requestFailed("当前记录类型暂不支持原生编辑")
+            throw SupabaseRemoteError.requestFailed("当前记录类型暂不支持原生编辑")
         }
     }
 
@@ -666,7 +666,7 @@ final class NativeDataService {
                 accessToken: accessToken
             )
         default:
-            throw NativeDataServiceError.requestFailed("当前记录类型暂不支持删除")
+            throw SupabaseRemoteError.requestFailed("当前记录类型暂不支持删除")
         }
     }
 
@@ -770,7 +770,7 @@ final class NativeDataService {
             accessToken: accessToken
         )
         guard let row = rows.first else {
-            throw NativeDataServiceError.requestFailed("数据域未就绪：\(key)")
+            throw SupabaseRemoteError.requestFailed("数据域未就绪：\(key)")
         }
         return row
     }
@@ -802,7 +802,7 @@ final class NativeDataService {
             accessToken: accessToken
         )
         guard let row = rows.first else {
-            throw NativeDataServiceError.requestFailed("归档成功但没有返回记录 ID")
+            throw SupabaseRemoteError.requestFailed("归档成功但没有返回记录 ID")
         }
         return row
     }
@@ -1105,18 +1105,6 @@ final class NativeDataService {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
     }
-}
-
-extension NativeDataService {
-    static let archiveDomains: [NativeArchiveDomain] = [
-        NativeArchiveDomain(id: "expense", title: "消费", systemImage: "creditcard"),
-        NativeArchiveDomain(id: "income", title: "收入", systemImage: "arrow.down.circle"),
-        NativeArchiveDomain(id: "sport", title: "运动", systemImage: "figure.run"),
-        NativeArchiveDomain(id: "sleep", title: "睡眠", systemImage: "moon"),
-        NativeArchiveDomain(id: "reading", title: "阅读", systemImage: "book"),
-        NativeArchiveDomain(id: "food", title: "饮食", systemImage: "fork.knife"),
-        NativeArchiveDomain(id: "wallet", title: "钱包", systemImage: "wallet.pass")
-    ]
 }
 
 private struct TransactionRow: Decodable {
@@ -1460,4 +1448,3 @@ private extension Array {
         indices.contains(index) ? self[index] : nil
     }
 }
-

@@ -20,7 +20,6 @@ enum SupabaseRemoteError: LocalizedError {
     }
 }
 
-typealias NativeDataServiceError = SupabaseRemoteError
 
 protocol SupabaseRemoteClientProtocol {
     func get<T: Decodable>(

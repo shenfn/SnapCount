@@ -444,7 +444,7 @@ final class AppState: ObservableObject {
         guard let sessionJSON = try keychain.string(for: KeychainKeys.authSession),
               let data = sessionJSON.data(using: .utf8),
               let session = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) else {
-            throw NativeDataServiceError.missingSession
+            throw SupabaseRemoteError.missingSession
         }
         return session
     }

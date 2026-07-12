@@ -33,7 +33,7 @@ actor SupabaseImageURLProvider {
 
         guard !unresolvedPaths.isEmpty else { return result }
         guard let client = SupabaseClientProvider.client else {
-            throw NativeDataServiceError.missingConfig
+            throw SupabaseRemoteError.missingConfig
         }
 
         for path in unresolvedPaths {
