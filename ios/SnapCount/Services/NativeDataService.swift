@@ -77,6 +77,7 @@ struct NativeDetailRow: Identifiable {
 
 struct NativeStagingRecord: Identifiable {
     let id: String
+    let dateKey: String
     let title: String
     let summary: String
     let status: String
@@ -1037,6 +1038,7 @@ final class NativeDataService {
         let title = row.detectedDomainName ?? domainName(row.detectedDomainKey)
         return NativeStagingRecord(
             id: row.id,
+            dateKey: String((row.occurredAt ?? row.createdAt ?? "").prefix(10)),
             title: title,
             summary: row.aiSummary ?? row.lastErrorMessage ?? "这条截图需要你打开收件箱确认或补全。",
             status: status,
