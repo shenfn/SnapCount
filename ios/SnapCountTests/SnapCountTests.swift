@@ -50,6 +50,13 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(group.availableKinds, [.all, .expense, .sport])
     }
 
+    func testDayRecordKindsPreservePWADomainKeys() {
+        XCTAssertEqual(
+            NativeDayRecordKind.allCases.map(\.rawValue),
+            ["all", "expense", "income", "sport", "sleep", "food", "reading", "wallet", "staging"]
+        )
+    }
+
 
 }
 
