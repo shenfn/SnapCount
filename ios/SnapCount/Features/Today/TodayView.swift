@@ -16,6 +16,7 @@ struct TodayView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     header
+                    dashboardStatus
                     metricStrip
                     captureButton
                     dailySection
@@ -48,6 +49,30 @@ struct TodayView: View {
         .alert(uploadMessageIsError ? "上传失败" : "上传完成", isPresented: $showUploadResult) {
             Button("好", role: .cancel) {}
         } message: { Text(uploadMessage ?? "") }
+    }
+
+    @ViewBuilder
+    private var dashboardStatus: some View {
+        if appState.isLoadingDashboard && appState.dashboard.monthCount == 0 {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("正在同步 PWA 数据")
+            }
+            .font(.subheadline)
+            .foregroundStyle(JieziTheme.muted)
+        } else if let message = appState.dashboardMessage {
+            Button { Task { await appState.refreshDashboard() } } label: {
+                Label("数据加载失败，点此重试：\(message)", systemImage: "arrow.clockwise")
+                    .font(.footnote)
+                    .foregroundStyle(JieziTheme.coral)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+        } else if !appState.dashboard.loadWarnings.isEmpty {
+            Text("部分数据域暂未同步，已显示可用数据")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.gold)
+        }
     }
 
     private var header: some View {

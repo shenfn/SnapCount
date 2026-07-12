@@ -29,6 +29,7 @@ struct DashboardSnapshot {
     var todayExpense = 0.0
     var todayIncome = 0.0
     var dailySummaries: [NativeDailySummary] = []
+    var loadWarnings: [String] = []
     var recentRecords: [NativeRecordSummary] = []
     var stagingRecords: [NativeStagingRecord] = []
 }
@@ -157,6 +158,19 @@ struct NativeRecordEditDraft: Identifiable, Equatable {
     }
 }
 
+private struct NativeFetchResult<Value> {
+    let value: Value?
+    let error: Error?
+}
+
+private func capture<Value>(_ operation: () async throws -> Value) async -> NativeFetchResult<Value> {
+    do {
+        return NativeFetchResult(value: try await operation(), error: nil)
+    } catch {
+        return NativeFetchResult(value: nil, error: error)
+    }
+}
+
 final class NativeDataService {
     private let session: URLSession
     private let decoder = JSONDecoder()
@@ -170,16 +184,25 @@ final class NativeDataService {
             throw NativeDataServiceError.missingConfig
         }
 
-        async let transactions = fetchTransactions(accessToken: accessToken)
-        async let incomes = fetchIncomes(accessToken: accessToken)
-        async let universal = fetchUniversalRecords(accessToken: accessToken)
-        async let staging = fetchStagingRecords(accessToken: accessToken)
+        async let transactionsResult = capture { try await self.fetchTransactions(accessToken: accessToken) }
+        async let incomesResult = capture { try await self.fetchIncomes(accessToken: accessToken) }
+        async let universalResult = capture { try await self.fetchUniversalRecords(accessToken: accessToken) }
+        async let stagingResult = capture { try await self.fetchStagingRecords(accessToken: accessToken) }
 
-        let (txRows, incomeRows, universalRows, stagingRows) = try await (transactions, incomes, universal, staging)
+        let (transactions, incomes, universal, staging) = await (transactionsResult, incomesResult, universalResult, stagingResult)
+        let txRows = transactions.value ?? []
+        let incomeRows = incomes.value ?? []
+        let universalRows = universal.value ?? []
+        let stagingRows = staging.value ?? []
+        let errors = [transactions.error, incomes.error, universal.error, staging.error].compactMap { $0 }
+        if errors.count == 4 {
+            throw NativeDataServiceError.requestFailed(errors.map(\.localizedDescription).joined(separator: "；"))
+        }
         let today = localDateString(Date())
         let monthPrefix = String(today.prefix(7))
 
         var snapshot = DashboardSnapshot()
+        snapshot.loadWarnings = errors.map(\.localizedDescription)
         snapshot.todayCount =
             txRows.filter { $0.transactionDate == today }.count +
             incomeRows.filter { $0.incomeDate == today }.count +
