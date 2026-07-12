@@ -32,6 +32,7 @@ final class AppState: ObservableObject {
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
+    private var sessionRefreshTask: Task<SupabaseAuthSession, Error>?
 
     func bootstrap() {
         defer { isBootstrapping = false }
@@ -350,17 +351,29 @@ final class AppState: ObservableObject {
 
     private func validSession() async throws -> SupabaseAuthSession {
         let session = try requireSession()
-        guard let refreshToken = session.refreshToken, !refreshToken.isEmpty else {
+        if let expiresAt = session.expirationEpoch, TimeInterval(expiresAt) > Date().timeIntervalSince1970 + 60 {
             return session
         }
+        guard let refreshToken = session.refreshToken, !refreshToken.isEmpty else {
+            throw NativeDataServiceError.missingSession
+        }
+        if let sessionRefreshTask {
+            return try await sessionRefreshTask.value
+        }
+
+        let task = Task { [authService] in
+            try await authService.refreshSession(refreshToken: refreshToken)
+        }
+        sessionRefreshTask = task
+        defer { sessionRefreshTask = nil }
 
         do {
-            let refreshed = try await authService.refreshSession(refreshToken: refreshToken)
+            let refreshed = try await task.value
             try save(session: refreshed)
             apply(session: refreshed)
             return refreshed
         } catch {
-            return session
+            throw SupabaseAuthServiceError.requestFailed("登录状态已过期，请重新登录。\(error.localizedDescription)")
         }
     }
 
