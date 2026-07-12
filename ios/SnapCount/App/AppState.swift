@@ -31,6 +31,7 @@ final class AppState: ObservableObject {
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
+    private var recordDetailCache: [String: NativeRecordDetail] = [:]
 
     func bootstrap() {
         defer { isBootstrapping = false }
@@ -220,12 +221,20 @@ final class AppState: ObservableObject {
         }
     }
 
-    func loadRecordDetail(reference: String) async {
+    func loadRecordDetail(reference: String, force: Bool = false) async {
         recordDetailMessage = nil
-        selectedRecordDetail = nil
+        if !force, let cached = recordDetailCache[reference] {
+            selectedRecordDetail = cached
+            return
+        }
+        if selectedRecordDetail?.id != reference {
+            selectedRecordDetail = nil
+        }
         do {
             let session = try await validSession()
-            selectedRecordDetail = try await dataService.fetchRecordDetail(reference: reference, accessToken: session.accessToken)
+            let detail = try await dataService.fetchRecordDetail(reference: reference, accessToken: session.accessToken)
+            recordDetailCache[reference] = detail
+            selectedRecordDetail = detail
         } catch {
             recordDetailMessage = error.localizedDescription
         }
@@ -242,7 +251,8 @@ final class AppState: ObservableObject {
             let reference = try await dataService.saveRecordDetail(draft, accessToken: session.accessToken)
             await refreshDashboard()
             recordsPath = [reference]
-            await loadRecordDetail(reference: reference)
+            recordDetailCache.removeValue(forKey: reference)
+            await loadRecordDetail(reference: reference, force: true)
             return true
         } catch {
             recordDetailMessage = error.localizedDescription
@@ -259,6 +269,7 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             try await dataService.deleteRecord(reference: reference, accessToken: session.accessToken)
+            recordDetailCache.removeValue(forKey: reference)
             selectedRecordDetail = nil
             recordsPath.removeAll()
             await refreshDashboard()

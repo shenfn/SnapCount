@@ -778,11 +778,23 @@ final class NativeDataService {
         for (index, row) in rows.enumerated() {
             let path = row.path ?? uniquePaths[safe: index] ?? ""
             let signed = row.signedURL ?? row.signedUrl
-            if let signed, let url = URL(string: signed), !path.isEmpty {
+            if let signed, let url = resolvedSignedImageURL(signed), !path.isEmpty {
                 out[path] = url
             }
         }
         return out
+    }
+
+    private func resolvedSignedImageURL(_ value: String) -> URL? {
+        if let absoluteURL = URL(string: value), absoluteURL.scheme != nil {
+            return absoluteURL
+        }
+        guard let baseURL = URL(string: AppConfig.supabaseURL) else { return nil }
+        let normalizedPath = value.hasPrefix("/") ? String(value.dropFirst()) : value
+        let storagePath = normalizedPath.hasPrefix("storage/v1/")
+            ? normalizedPath
+            : "storage/v1/\(normalizedPath)"
+        return baseURL.appendingPathComponent(storagePath)
     }
 
     private func dataResponse(for request: URLRequest) async throws -> Data {
