@@ -618,3 +618,51 @@ flowchart TD
 - GitHub iOS Build 成功。
 - TestFlight 上传成功。
 - 用户完成真机截图或操作复核。
+
+
+## 13. 2026-07-12 Supabase Swift SDK 渐进迁移决策
+
+### 13.1 决策结论
+
+iOS 长期数据访问地基采用官方 `supabase-swift`，不继续扩建自制 Supabase 客户端。当前已经完成的 JWT 自动续期、错误分类、完整记录缓存和手写 `URLSession` 服务作为过渡与回滚方案保留，不能一次性删除。
+
+选择官方 SDK 的原因：
+
+- PWA 已使用官方 `supabase-js`，原生端采用同一厂商维护的协议客户端更容易保持 Auth、PostgREST、Storage 和 Functions 行为一致。
+- iOS 后续需要迁移账户、动态数据域、报告、AI 洞察、设置和数据迁移，继续手写会让 `NativeDataService` 演变成难以维护的自制 SDK。
+- JWT 到期是正常安全机制；用户不应感知续期。会话刷新、Refresh Token 轮换、Auth 状态变化和并发控制应优先交由官方 Auth 客户端维护。
+- 后续 Apple 登录、手机号 OTP 和账号身份绑定更适合建立在官方 Auth API 上。
+
+### 13.2 渐进迁移顺序
+
+1. **Auth**：引入 SDK，接管登录、会话恢复、自动刷新和 Auth 状态变化。
+2. **Storage**：迁移私有图片签名 URL、下载和未来清理接口，保留内存 URL 缓存。
+3. **PostgREST**：按 Dashboard、Records、Domains、Accounts、Insights、Settings/DataMigration 的顺序逐模块迁移。
+4. **Functions**：优先迁移 JSON Edge Function；现有稳定的 multipart 图片上传识别链路暂不改动。
+
+每个阶段只替换一个职责域，旧实现保留到新实现通过 Build、TestFlight 和真机验证后再删除。
+
+### 13.3 必须保留的现有能力
+
+- `upload_token` 继续写入现有 Keychain，供 App Intent 和快捷指令读取。
+- `SnapCountUploadService` 的 multipart 图片识别上传暂时保留，避免影响已经在使用的快捷指令链路。
+- 图片预处理、通知反馈、快捷指令 Intent 和现有深链接不因 SDK 迁移改变。
+- “芥青微光”主题和 PWA 业务规则不属于 SDK 迁移范围。
+
+### 13.4 会话迁移策略
+
+- 首次启用 SDK 时尝试读取现有 Keychain 会话并建立兼容迁移。
+- 如果官方 SDK 无法安全接管旧 Refresh Token，会明确要求用户重新登录一次，不伪造或静默丢失会话。
+- SDK 会话存储必须评估 Keychain 适配，不把敏感 Refresh Token 降级为普通明文配置。
+- SDK 登录成功后必须继续同步 `upload_token` 到 App Intent 使用的 Keychain Key。
+- 用户退出登录时同时清理 SDK 会话、旧兼容会话和 Upload Token。
+
+### 13.5 回滚和验收
+
+每个 SDK 迁移批次必须满足：
+
+- 旧 URLSession 服务仍可通过功能开关或小范围代码回退。
+- 不允许 Auth 和数据请求在同一页面混用两个不同用户会话。
+- JWT 自动续期、断网恢复、Refresh Token 失效、退出登录和重装恢复均需测试。
+- GitHub iOS Build 与 TestFlight 成功。
+- 真机验证登录、后台恢复、超过 Access Token 有效期后的继续使用、快捷指令上传和图片查看。
