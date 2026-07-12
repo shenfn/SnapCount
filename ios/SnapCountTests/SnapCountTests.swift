@@ -95,6 +95,16 @@ final class SnapCountTests: XCTestCase {
     }
 
 
+    func testDashboardSnapshotStoreIsolatesUsers() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = DashboardSnapshotStore(directory: directory)
+        let snapshot = DashboardSnapshot(todayCount: 2, pendingCount: 1)
+        try store.save(snapshot, userId: "user-a")
+        XCTAssertEqual(try store.load(userId: "user-a")?.dashboardSnapshot.todayCount, 2)
+        XCTAssertNil(try store.load(userId: "user-b"))
+        try? FileManager.default.removeItem(at: directory)
+    }
+
 }
 
 private struct DashboardRepositoryStub: DashboardRepositoryProtocol {

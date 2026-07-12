@@ -32,6 +32,7 @@ final class AppState: ObservableObject {
     private let recordRepository: RecordRepositoryProtocol
     private let inboxRepository: InboxRepositoryProtocol
     private let domainRepository: DomainRepositoryProtocol
+    private let snapshotStore: DashboardSnapshotStoreProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
@@ -41,12 +42,14 @@ final class AppState: ObservableObject {
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
         recordRepository: RecordRepositoryProtocol = RecordRepository(),
         inboxRepository: InboxRepositoryProtocol = InboxRepository(),
-        domainRepository: DomainRepositoryProtocol = DomainRepository()
+        domainRepository: DomainRepositoryProtocol = DomainRepository(),
+        snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
         self.inboxRepository = inboxRepository
         self.domainRepository = domainRepository
+        self.snapshotStore = snapshotStore
     }
 
     func bootstrap() {
@@ -73,6 +76,7 @@ final class AppState: ObservableObject {
             }
             try save(session: session)
             apply(session: session)
+            restoreDashboardSnapshot(userId: session.user.id)
             hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
             updateShortcutCredentialMessage()
             Task {
@@ -155,6 +159,7 @@ final class AppState: ObservableObject {
                 var snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
                 snapshot.domains = await resolvedDomains(accessToken: session.accessToken, snapshot: snapshot)
                 dashboard = snapshot
+                try? snapshotStore.save(snapshot, userId: session.user.id)
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
                 prefetchDashboardImages(snapshot)
             } catch {
@@ -163,6 +168,7 @@ final class AppState: ObservableObject {
                 var snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
                 snapshot.domains = await resolvedDomains(accessToken: session.accessToken, snapshot: snapshot)
                 dashboard = snapshot
+                try? snapshotStore.save(snapshot, userId: session.user.id)
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
                 prefetchDashboardImages(snapshot)
             }
@@ -175,6 +181,12 @@ final class AppState: ObservableObject {
         }
 
         isLoadingDashboard = false
+    }
+
+    private func restoreDashboardSnapshot(userId: String) {
+        guard let persisted = try? snapshotStore.load(userId: userId) else { return }
+        dashboard = persisted.dashboardSnapshot
+        lastDashboardRefreshAt = persisted.savedAt
     }
 
     private func resolvedDomains(accessToken: String, snapshot: DashboardSnapshot) async -> [NativeDomainDefinition] {
