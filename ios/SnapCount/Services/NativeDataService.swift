@@ -30,6 +30,7 @@ struct DashboardSnapshot {
     var todayIncome = 0.0
     var dailySummaries: [NativeDailySummary] = []
     var loadWarnings: [String] = []
+    var recordDetails: [String: NativeRecordDetail] = [:]
     var recentRecords: [NativeRecordSummary] = []
     var stagingRecords: [NativeStagingRecord] = []
 }
@@ -243,6 +244,20 @@ final class NativeDataService {
             universal: universalRows,
             staging: stagingRows
         )
+
+        let visibleTransactionRows = Array(txRows.prefix(8))
+        let visibleIncomeRows = Array(incomeRows.prefix(4))
+        let visibleUniversalRows = Array(universalRows.prefix(6))
+        let recordImagePaths = visibleTransactionRows.compactMap(\.imageURL)
+            + visibleIncomeRows.compactMap(\.imageURL)
+            + visibleUniversalRows.compactMap(\.sourceImagePath)
+        let recordSignedURLs = (try? await signedImageURLMap(paths: recordImagePaths, accessToken: accessToken)) ?? [:]
+        snapshot.recordDetails = cachedRecordDetails(
+            transactions: visibleTransactionRows,
+            incomes: visibleIncomeRows,
+            universal: visibleUniversalRows,
+            signedURLs: recordSignedURLs
+        )
         snapshot.stagingRecords = stagingRows
             .filter { !["discarded", "archived", "assigned"].contains($0.status ?? "") }
             .map { stagingRecord($0, signedImageURL: nil) }
@@ -266,7 +281,7 @@ final class NativeDataService {
             [TransactionRow].self,
             path: "rest/v1/transactions",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,transaction_date,type,amount,merchant_name,category,status"),
+                URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,account_id"),
                 URLQueryItem(name: "order", value: "created_at.desc"),
                 URLQueryItem(name: "limit", value: "80")
             ],
@@ -279,7 +294,7 @@ final class NativeDataService {
             [IncomeRow].self,
             path: "rest/v1/income_records",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name"),
+                URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id"),
                 URLQueryItem(name: "order", value: "created_at.desc"),
                 URLQueryItem(name: "limit", value: "40")
             ],
@@ -292,7 +307,7 @@ final class NativeDataService {
             [DataRecordRow].self,
             path: "rest/v1/data_records",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary"),
+                URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash"),
                 URLQueryItem(name: "order", value: "created_at.desc"),
                 URLQueryItem(name: "limit", value: "40")
             ],
@@ -988,6 +1003,51 @@ final class NativeDataService {
         }
     }
 
+    private func cachedRecordDetails(
+        transactions: [TransactionRow],
+        incomes: [IncomeRow],
+        universal: [DataRecordRow],
+        signedURLs: [String: URL]
+    ) -> [String: NativeRecordDetail] {
+        var details: [String: NativeRecordDetail] = [:]
+        transactions.forEach { row in
+            let reference = "tx-\(row.id)"
+            details[reference] = NativeRecordDetail(
+                id: reference, rawId: row.id, kind: "expense",
+                title: row.merchantName ?? "消费记录", subtitle: row.transactionDate ?? row.createdAt ?? "", value: currency(row.amount),
+                detailRows: [
+                    NativeDetailRow(label: "平台", value: row.platform ?? "未填写"),
+                    NativeDetailRow(label: "分类", value: row.category ?? "未填写"),
+                    NativeDetailRow(label: "支付方式", value: row.paymentMethod ?? "未填写"),
+                    NativeDetailRow(label: "状态", value: row.status ?? ""),
+                    NativeDetailRow(label: "来源", value: row.source ?? "")
+                ].filter { !$0.value.isEmpty },
+                imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: row.imageURL != nil && signedURLs[row.imageURL ?? ""] == nil, imagePath: row.imageURL, imageHash: row.imageHash,
+                amount: row.amount, merchantName: row.merchantName, platform: row.platform, category: row.category, paymentMethod: row.paymentMethod, recordDate: row.transactionDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: row.status == "pending" ? "clock" : "creditcard"
+            )
+        }
+        incomes.forEach { row in
+            let reference = "income-\(row.id)"
+            details[reference] = NativeRecordDetail(
+                id: reference, rawId: row.id, kind: "income", title: row.sourceName ?? "收入记录", subtitle: row.incomeDate ?? row.createdAt ?? "", value: "+\(currency(row.amount))",
+                detailRows: [NativeDetailRow(label: "收入类型", value: row.category ?? "未填写"), NativeDetailRow(label: "来源", value: row.source ?? "")].filter { !$0.value.isEmpty },
+                imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: row.imageURL != nil && signedURLs[row.imageURL ?? ""] == nil, imagePath: row.imageURL, imageHash: row.imageHash,
+                amount: row.amount, merchantName: row.sourceName, platform: nil, category: row.category, paymentMethod: nil, recordDate: row.incomeDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: "arrow.down.circle"
+            )
+        }
+        universal.forEach { row in
+            let reference = "data-\(row.id)"
+            let payloadRows = (row.payloadJSONB ?? [:]).filter { !$0.value.displayValue.isEmpty }.sorted { $0.key < $1.key }.prefix(12).map { NativeDetailRow(label: $0.key, value: $0.value.displayValue) }
+            details[reference] = NativeRecordDetail(
+                id: reference, rawId: row.id, kind: "data", title: row.title ?? domainName(row.domainKey), subtitle: row.occurredAt ?? row.createdAt ?? "", value: "",
+                detailRows: [NativeDetailRow(label: "摘要", value: row.summary ?? "")].filter { !$0.value.isEmpty } + payloadRows,
+                imageURL: signedURLs[row.sourceImagePath ?? ""], imageLoadError: row.sourceImagePath != nil && signedURLs[row.sourceImagePath ?? ""] == nil, imagePath: row.sourceImagePath, imageHash: row.sourceImageHash,
+                amount: nil, merchantName: nil, platform: nil, category: row.domainKey, paymentMethod: nil, recordDate: row.occurredAt.map(dateOnly), note: row.summary, companionMessage: row.payloadJSONB?.string("companion_message"), accountId: nil, systemImage: "sparkles"
+            )
+        }
+        return details
+    }
+
     private func recentRecords(
         transactions: [TransactionRow],
         incomes: [IncomeRow],
@@ -1193,21 +1253,39 @@ private struct TransactionRow: Decodable {
     let id: String
     let createdAt: String?
     let transactionDate: String?
+    let transactionTime: String?
     let type: String?
     let amount: Double?
     let merchantName: String?
+    let platform: String?
     let category: String?
+    let paymentMethod: String?
     let status: String?
+    let source: String?
+    let imageURL: String?
+    let imageHash: String?
+    let companionMessage: String?
+    let note: String?
+    let accountId: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case createdAt = "created_at"
         case transactionDate = "transaction_date"
+        case transactionTime = "transaction_time"
         case type
         case amount
         case merchantName = "merchant_name"
+        case platform
         case category
+        case paymentMethod = "payment_method"
         case status
+        case source
+        case imageURL = "image_url"
+        case imageHash = "image_hash"
+        case companionMessage = "companion_message"
+        case note
+        case accountId = "account_id"
     }
 }
 
@@ -1218,6 +1296,12 @@ private struct IncomeRow: Decodable {
     let amount: Double?
     let category: String?
     let sourceName: String?
+    let source: String?
+    let imageURL: String?
+    let imageHash: String?
+    let companionMessage: String?
+    let note: String?
+    let accountId: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1226,6 +1310,12 @@ private struct IncomeRow: Decodable {
         case amount
         case category
         case sourceName = "source_name"
+        case source
+        case imageURL = "image_url"
+        case imageHash = "image_hash"
+        case companionMessage = "companion_message"
+        case note
+        case accountId = "account_id"
     }
 }
 
@@ -1236,6 +1326,9 @@ private struct DataRecordRow: Decodable {
     let domainKey: String?
     let title: String?
     let summary: String?
+    let payloadJSONB: [String: AnyCodable]?
+    let sourceImagePath: String?
+    let sourceImageHash: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1244,6 +1337,9 @@ private struct DataRecordRow: Decodable {
         case domainKey = "domain_key"
         case title
         case summary
+        case payloadJSONB = "payload_jsonb"
+        case sourceImagePath = "source_image_path"
+        case sourceImageHash = "source_image_hash"
     }
 }
 

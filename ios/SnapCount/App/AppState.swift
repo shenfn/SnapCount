@@ -120,11 +120,15 @@ final class AppState: ObservableObject {
         do {
             var session = try await validSession()
             do {
-                dashboard = try await dataService.fetchDashboard(accessToken: session.accessToken)
+                let snapshot = try await dataService.fetchDashboard(accessToken: session.accessToken)
+                dashboard = snapshot
+                recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
             } catch {
                 guard isExpiredJWTError(error) else { throw error }
                 session = try await validSession(forceRefresh: true)
-                dashboard = try await dataService.fetchDashboard(accessToken: session.accessToken)
+                let snapshot = try await dataService.fetchDashboard(accessToken: session.accessToken)
+                dashboard = snapshot
+                recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
             }
         } catch {
             if isInvalidRefreshSessionError(error) {

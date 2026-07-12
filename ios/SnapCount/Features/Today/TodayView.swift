@@ -156,30 +156,34 @@ struct TodayView: View {
     }
 
     private func dailyCard(_ day: NativeDailySummary) -> some View {
-        Button {
-            appState.selectedTab = .records
-            appState.recordsPath.removeAll()
-        } label: {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text(String(day.dateKey.suffix(5))).font(.system(size: 26, weight: .black, design: .rounded)).monospacedDigit()
-                    Spacer()
-                    Text(weekday(day.dateKey)).font(.headline).foregroundStyle(JieziTheme.muted)
-                }
-                Divider().overlay(JieziTheme.muted.opacity(0.2))
-                if day.expense > 0 { summaryRow(color: JieziTheme.coral, title: "支出", value: money(day.expense)) }
-                if day.income > 0 { summaryRow(color: JieziTheme.brand, title: "收入", value: money(day.income, signed: true)) }
-                if day.pendingCount > 0 { summaryRow(color: JieziTheme.gold, title: "待处理", value: "\(day.pendingCount)条") }
-                if day.expense == 0 && day.income == 0 && day.pendingCount == 0 {
-                    summaryRow(color: JieziTheme.muted, title: "记录", value: "\(day.recordCount)条")
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(String(day.dateKey.suffix(5)))
+                    .font(.system(size: 26, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                Spacer()
+                Text(weekday(day.dateKey))
+                    .font(.headline)
+                    .foregroundStyle(JieziTheme.muted)
             }
-            .foregroundStyle(JieziTheme.ink)
-            .padding(20)
-            .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 24).stroke(JieziTheme.brand.opacity(0.06)))
+            Divider().overlay(JieziTheme.muted.opacity(0.2))
+            if day.expense > 0 {
+                summaryRow(color: JieziTheme.coral, title: "支出", value: money(day.expense))
+            }
+            if day.income > 0 {
+                summaryRow(color: JieziTheme.brand, title: "收入", value: money(day.income, signed: true))
+            }
+            if day.pendingCount > 0 {
+                summaryRow(color: JieziTheme.gold, title: "待处理", value: "\(day.pendingCount)条")
+            }
+            if day.expense == 0 && day.income == 0 && day.pendingCount == 0 {
+                summaryRow(color: JieziTheme.muted, title: "记录", value: "\(day.recordCount)条")
+            }
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(JieziTheme.ink)
+        .padding(20)
+        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(JieziTheme.brand.opacity(0.06)))
     }
 
     private func summaryRow(color: Color, title: String, value: String) -> some View {
