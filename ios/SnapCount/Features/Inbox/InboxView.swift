@@ -2,65 +2,57 @@ import SwiftUI
 
 struct InboxView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var filter: InboxFilter = .all
+    @State private var filter: NativeInboxFilter = .all
 
-    private var records: [NativeStagingRecord] {
-        switch filter {
-        case .all:
-            return appState.dashboard.stagingRecords
-        case .routing:
-            return appState.dashboard.stagingRecords.filter { ["routing_failed", "unrouted", "unassigned"].contains($0.status) }
-        case .review:
-            return appState.dashboard.stagingRecords.filter { ["pending_review", "routed", "extracted"].contains($0.status) }
-        case .failed:
-            return appState.dashboard.stagingRecords.filter { ["ai_error", "failed", "extraction_failed", "schema_failed"].contains($0.status) }
-        }
+    private var allItems: [NativeInboxItem] {
+        NativeInboxPresentation.items(
+            pendingExpenses: appState.dashboard.pendingExpenses,
+            stagingRecords: appState.dashboard.stagingRecords
+        )
+    }
+
+    private var sections: [NativeInboxSection] {
+        NativeInboxPresentation.sections(
+            from: NativeInboxPresentation.filtered(allItems, by: filter),
+            today: Self.dateKey(daysFromToday: 0),
+            yesterday: Self.dateKey(daysFromToday: -1)
+        )
     }
 
     var body: some View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
             List {
-                Section {
-                    pendingSummary
-                }
+                Section { pendingSummary }
 
-                if appState.dashboard.stagingRecords.isEmpty {
+                if allItems.isEmpty {
                     ContentUnavailableView(
                         "暂无待处理记录",
                         systemImage: "checkmark.circle",
-                        description: Text("上传后的不确定识别结果会先进入这里。")
+                        description: Text("待补全账单和不确定的 AI 识别结果会显示在这里。")
                     )
                 } else {
-                    Section {
-                        filterPicker
-                    }
+                    Section { filterPicker }
 
-                    if records.isEmpty {
+                    if sections.isEmpty {
                         ContentUnavailableView(
                             "当前筛选为空",
                             systemImage: "line.3.horizontal.decrease.circle",
-                            description: Text("换一个状态查看其他待处理截图。")
+                            description: Text("换一个状态查看其他待处理记录。")
                         )
                     } else {
-                        Section("中转站") {
-                            ForEach(records) { record in
-                                NavigationLink {
-                                    StagingRecordDetailView(record: record)
-                                } label: {
-                                    StagingRecordRow(record: record)
-                                }
+                        ForEach(sections) { section in
+                            Section(section.title) {
+                                ForEach(section.items) { item in inboxRow(item) }
                             }
                         }
                     }
                 }
             }
             .scrollContentBackground(.hidden)
-            .refreshable {
-                await appState.refreshDashboard()
-            }
+            .refreshable { await appState.refreshDashboard() }
         }
-        .navigationTitle("收件箱")
+        .navigationTitle("中转站")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .navigationDestination(for: String.self) { id in
             if let record = appState.dashboard.stagingRecords.first(where: { $0.id == id }) {
@@ -75,18 +67,30 @@ struct InboxView: View {
         }
     }
 
+    @ViewBuilder
+    private func inboxRow(_ item: NativeInboxItem) -> some View {
+        if let pending = item.pendingExpense {
+            Button { appState.openPendingExpense(pending) } label: {
+                NativeInboxItemRow(item: item)
+            }
+            .buttonStyle(.plain)
+        } else if let record = item.stagingRecord {
+            NavigationLink(value: record.id) { NativeInboxItemRow(item: item) }
+        }
+    }
+
     private var pendingSummary: some View {
         HStack(spacing: 12) {
-            Image(systemName: appState.dashboard.pendingCount == 0 ? "checkmark.circle.fill" : "tray.full.fill")
+            Image(systemName: allItems.isEmpty ? "checkmark.circle.fill" : "tray.full.fill")
                 .font(.title2)
-                .foregroundStyle(appState.dashboard.pendingCount == 0 ? JieziTheme.mint : JieziTheme.gold)
+                .foregroundStyle(allItems.isEmpty ? JieziTheme.mint : JieziTheme.gold)
                 .frame(width: 36, height: 36)
                 .background(.thinMaterial, in: Circle())
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(appState.dashboard.pendingCount == 0 ? "收件箱已清空" : "\(appState.dashboard.pendingCount) 条待处理")
+                Text(allItems.isEmpty ? "中转站已清空" : "\(allItems.count) 条待处理")
                     .font(.headline)
-                Text("待分类、待确认和识别失败的截图会显示在这里。")
+                Text("待补全、待分类、待确认和识别失败的记录统一在这里处理。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -95,30 +99,36 @@ struct InboxView: View {
     }
 
     private var filterPicker: some View {
-        Picker("状态", selection: $filter) {
-            ForEach(InboxFilter.allCases) { item in
-                Text(item.title).tag(item)
-            }
+        Picker("筛选", selection: $filter) {
+            ForEach(NativeInboxFilter.allCases) { item in Text(item.title).tag(item) }
         }
-        .pickerStyle(.segmented)
+        .pickerStyle(.menu)
+    }
+
+    private static func dateKey(daysFromToday: Int) -> String {
+        let date = Calendar.current.date(byAdding: .day, value: daysFromToday, to: Date()) ?? Date()
+        return date.formatted(.iso8601.year().month().day())
     }
 }
 
-private enum InboxFilter: String, CaseIterable, Identifiable {
-    case all
-    case routing
-    case review
-    case failed
+private struct NativeInboxItemRow: View {
+    let item: NativeInboxItem
 
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all: return "全部"
-        case .routing: return "待分类"
-        case .review: return "待确认"
-        case .failed: return "失败"
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.systemImage)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(item.kind == .pendingExpense ? JieziTheme.gold : JieziTheme.brand)
+                .frame(width: 34, height: 34)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Text(item.statusLabel).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
         }
+        .contentShape(Rectangle())
     }
 }
 

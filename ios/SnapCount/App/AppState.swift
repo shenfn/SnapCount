@@ -220,6 +220,12 @@ final class AppState: ObservableObject {
         }
     }
 
+    func openPendingExpense(_ pending: NativePendingExpense) {
+        selectedTab = .records
+        recordsPath = [pending.reference]
+        Task { await loadRecordDetail(reference: pending.reference) }
+    }
+
     func handleDeepLink(_ url: URL) {
         guard url.scheme == "jiezi" else { return }
 
