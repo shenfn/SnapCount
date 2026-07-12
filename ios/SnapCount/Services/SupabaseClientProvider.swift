@@ -6,6 +6,13 @@ enum SupabaseClientProvider {
         guard let url = URL(string: AppConfig.supabaseURL), !AppConfig.supabaseAnonKey.isEmpty else {
             return nil
         }
-        return SupabaseClient(supabaseURL: url, supabaseKey: AppConfig.supabaseAnonKey)
+        let options = SupabaseClientOptions(
+            auth: .init(
+                storageKey: "jiezi.auth.session",
+                autoRefreshToken: true,
+                emitLocalSessionAsInitialSession: true
+            )
+        )
+        return SupabaseClient(supabaseURL: url, supabaseKey: AppConfig.supabaseAnonKey, options: options)
     }()
 }

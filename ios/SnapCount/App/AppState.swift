@@ -32,28 +32,42 @@ final class AppState: ObservableObject {
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
-    private var sessionRefreshTask: Task<SupabaseAuthSession, Error>?
 
     func bootstrap() {
-        defer { isBootstrapping = false }
+        Task {
+            await restoreAuthentication()
+            isBootstrapping = false
+            await refreshNotificationPermissionStatus()
+        }
+    }
+
+    private func restoreAuthentication() async {
         do {
-            if let sessionJSON = try keychain.string(for: KeychainKeys.authSession),
-               let data = sessionJSON.data(using: .utf8),
-               let session = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) {
-                apply(session: session)
-                Task {
-                    await refreshDashboard()
-                    await requestShortcutNotificationPermissionIfNeeded()
+            let session: SupabaseAuthSession
+            do {
+                session = try await authService.currentSession()
+            } catch {
+                guard let legacy = try? requireSession(),
+                      let refreshToken = legacy.refreshToken, !refreshToken.isEmpty else {
+                    hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
+                    updateShortcutCredentialMessage()
+                    return
                 }
+                session = try await authService.restoreSession(accessToken: legacy.accessToken, refreshToken: refreshToken)
             }
+            try save(session: session)
+            apply(session: session)
             hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
             updateShortcutCredentialMessage()
-            Task {
-                await refreshNotificationPermissionStatus()
-            }
+            await refreshDashboard()
+            await requestShortcutNotificationPermissionIfNeeded()
         } catch {
-            authMessage = error.localizedDescription
-            authMessageIsError = true
+            if isInvalidRefreshSessionError(error) {
+                invalidateSession(message: "登录状态已失效，请重新登录。")
+            } else {
+                authMessage = error.localizedDescription
+                authMessageIsError = true
+            }
         }
     }
 
@@ -85,21 +99,21 @@ final class AppState: ObservableObject {
     }
 
     func signOut() {
-        do {
-            try keychain.remove(KeychainKeys.authSession)
-            try keychain.remove(KeychainKeys.uploadToken)
-        } catch {
-            authMessage = error.localizedDescription
-            authMessageIsError = true
+        Task {
+            try? await authService.signOut()
+            do {
+                try keychain.remove(KeychainKeys.authSession)
+                try keychain.remove(KeychainKeys.uploadToken)
+            } catch {
+                authMessage = error.localizedDescription
+                authMessageIsError = true
+            }
+            invalidateSession(message: "")
+            authMessage = nil
+            authMessageIsError = false
+            hasUploadToken = false
+            shortcutCredentialMessage = nil
         }
-        isSignedIn = false
-        currentUserEmail = ""
-        hasUploadToken = false
-        dashboard = DashboardSnapshot()
-        dashboardMessage = nil
-        shortcutCredentialMessage = nil
-        selectedTab = .today
-        lastDashboardRefreshAt = nil
     }
 
     func verifyShortcutCredential() {
@@ -364,31 +378,16 @@ final class AppState: ObservableObject {
     }
 
     private func validSession(forceRefresh: Bool = false) async throws -> SupabaseAuthSession {
-        let session = try requireSession()
-        if !forceRefresh, let expiresAt = session.expirationEpoch, TimeInterval(expiresAt) > Date().timeIntervalSince1970 + 60 {
-            return session
-        }
-        guard let refreshToken = session.refreshToken, !refreshToken.isEmpty else {
-            throw NativeDataServiceError.missingSession
-        }
-        if let sessionRefreshTask {
-            return try await sessionRefreshTask.value
-        }
-
-        let task = Task { [authService] in
-            try await authService.refreshSession(refreshToken: refreshToken)
-        }
-        sessionRefreshTask = task
-        defer { sessionRefreshTask = nil }
-
-        do {
-            let refreshed = try await task.value
+        if forceRefresh {
+            let refreshed = try await authService.refreshSession()
             try save(session: refreshed)
             apply(session: refreshed)
             return refreshed
-        } catch {
-            throw error
         }
+        let session = try await authService.currentSession()
+        try save(session: session)
+        apply(session: session)
+        return session
     }
 
     private func isExpiredJWTError(_ error: Error) -> Bool {
@@ -415,8 +414,6 @@ final class AppState: ObservableObject {
         authMessage = message
         authMessageIsError = true
         lastDashboardRefreshAt = nil
-        sessionRefreshTask?.cancel()
-        sessionRefreshTask = nil
     }
 
     private func requireSession() throws -> SupabaseAuthSession {

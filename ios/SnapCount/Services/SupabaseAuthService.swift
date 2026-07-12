@@ -1,4 +1,5 @@
 import Foundation
+import Supabase
 
 enum SupabaseAuthServiceError: LocalizedError {
     case missingConfig
@@ -23,42 +24,32 @@ enum SupabaseAuthServiceError: LocalizedError {
 final class SupabaseAuthService {
     private let session: URLSession
     private let decoder = JSONDecoder()
-    private let encoder = JSONEncoder()
 
     init(session: URLSession = .shared) {
         self.session = session
     }
 
     func signIn(email: String, password: String) async throws -> SupabaseAuthSession {
-        let baseURL = try requireBaseURL()
-        let url = baseURL.appendingPathComponent("auth/v1/token")
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.queryItems = [URLQueryItem(name: "grant_type", value: "password")]
-        guard let requestURL = components?.url else { throw SupabaseAuthServiceError.invalidURL }
-
-        var request = URLRequest(url: requestURL)
-        request.httpMethod = "POST"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(["email": email, "password": password])
-
-        return try await decoded(SupabaseAuthSession.self, from: request)
+        let session = try await requireClient().auth.signIn(email: email, password: password)
+        return mapped(session)
     }
 
-    func refreshSession(refreshToken: String) async throws -> SupabaseAuthSession {
-        let baseURL = try requireBaseURL()
-        let url = baseURL.appendingPathComponent("auth/v1/token")
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.queryItems = [URLQueryItem(name: "grant_type", value: "refresh_token")]
-        guard let requestURL = components?.url else { throw SupabaseAuthServiceError.invalidURL }
+    func restoreSession(accessToken: String, refreshToken: String) async throws -> SupabaseAuthSession {
+        let session = try await requireClient().auth.setSession(accessToken: accessToken, refreshToken: refreshToken)
+        return mapped(session)
+    }
 
-        var request = URLRequest(url: requestURL)
-        request.httpMethod = "POST"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(["refresh_token": refreshToken])
+    func currentSession() async throws -> SupabaseAuthSession {
+        mapped(try await requireClient().auth.session)
+    }
 
-        return try await decoded(SupabaseAuthSession.self, from: request)
+    func refreshSession(refreshToken: String? = nil) async throws -> SupabaseAuthSession {
+        let session = try await requireClient().auth.refreshSession(refreshToken: refreshToken)
+        return mapped(session)
+    }
+
+    func signOut() async throws {
+        try await requireClient().auth.signOut(scope: .local)
     }
 
     func fetchUploadToken(userId: String, accessToken: String) async throws -> String {
@@ -77,11 +68,26 @@ final class SupabaseAuthService {
         request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
-        let rows = try await decoded([UserConfigRow].self, from: request)
+        let (data, response) = try await session.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(statusCode) else {
+            if let payload = try? decoder.decode(SupabaseErrorPayload.self, from: data) {
+                throw SupabaseAuthServiceError.requestFailed(payload.displayMessage)
+            }
+            throw SupabaseAuthServiceError.requestFailed(String(data: data, encoding: .utf8) ?? "HTTP \(statusCode)")
+        }
+        let rows = try decoder.decode([UserConfigRow].self, from: data)
         guard let token = rows.first?.uploadToken, !token.isEmpty else {
             throw SupabaseAuthServiceError.emptyUploadToken
         }
         return token
+    }
+
+    private func requireClient() throws -> SupabaseClient {
+        guard let client = SupabaseClientProvider.client else {
+            throw SupabaseAuthServiceError.missingConfig
+        }
+        return client
     }
 
     private func requireBaseURL() throws -> URL {
@@ -94,16 +100,14 @@ final class SupabaseAuthService {
         return url
     }
 
-    private func decoded<T: Decodable>(_ type: T.Type, from request: URLRequest) async throws -> T {
-        let (data, response) = try await session.data(for: request)
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(statusCode) else {
-            if let payload = try? decoder.decode(SupabaseErrorPayload.self, from: data) {
-                throw SupabaseAuthServiceError.requestFailed(payload.displayMessage)
-            }
-            let text = String(data: data, encoding: .utf8) ?? "HTTP \(statusCode)"
-            throw SupabaseAuthServiceError.requestFailed(text)
-        }
-        return try decoder.decode(T.self, from: data)
+    private func mapped(_ session: Session) -> SupabaseAuthSession {
+        SupabaseAuthSession(
+            accessToken: session.accessToken,
+            refreshToken: session.refreshToken,
+            expiresIn: Int(session.expiresIn),
+            expiresAt: Int(session.expiresAt),
+            tokenType: session.tokenType,
+            user: SupabaseUser(id: session.user.id.uuidString.lowercased(), email: session.user.email)
+        )
     }
 }
