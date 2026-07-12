@@ -79,6 +79,14 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(domains.map(\.id), ["sport"])
     }
 
+    func testDomainPresentationUsesUniversalDomainRecords() {
+        let definition = NativeDomainDefinition(id: "sport", name: "运动记录", description: "", icon: "🏃", isSystem: true, schema: [:], display: [:], recordCount: 1)
+        let record = NativeDayRecord(id: "sport-1", reference: "data-1", dateKey: "2026-07-12", kind: .sport, domainKey: "sport", title: "骑行", subtitle: "30 分钟", value: "", timeLabel: nil, systemImage: "figure.run")
+        let presentation = NativeDomainPresentationAdapter.presentation(for: definition, groups: [NativeDayRecordGroup(dateKey: "2026-07-12", records: [record])])
+        XCTAssertEqual(presentation.recentRecords.map(\.reference), ["data-1"])
+        XCTAssertEqual(presentation.metrics.first?.value, "1 条")
+    }
+
 
 }
 
