@@ -12,7 +12,7 @@ struct TodayView: View {
 
     var body: some View {
         ZStack {
-            JieziTheme.pageBackground.ignoresSafeArea()
+            JieziPageBackground()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {

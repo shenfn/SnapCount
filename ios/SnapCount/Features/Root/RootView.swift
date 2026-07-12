@@ -48,7 +48,9 @@ struct RootView: View {
             .tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage) }
             .tag(AppTab.settings)
         }
-        .tint(JieziTheme.mint)
+        .tint(JieziTheme.brand)
+        .toolbarBackground(JieziTheme.paper.opacity(0.94), for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .onChange(of: appState.selectedTab) { tab in
             guard [.today, .inbox, .records].contains(tab) else { return }
             Task {
