@@ -14,6 +14,7 @@ final class AppState: ObservableObject {
     @Published var dashboard = DashboardSnapshot()
     @Published var dashboardMessage: String?
     @Published var isLoadingDashboard = false
+    @Published var isShowingCachedDashboard = false
     @Published var shortcutCredentialMessage: String?
     @Published var notificationPermissionMessage: String?
     @Published var notificationPermissionStatusText = "检查中"
@@ -121,6 +122,7 @@ final class AppState: ObservableObject {
     }
 
     func signOut() {
+        let userId = try? requireSession().user.id
         Task {
             try? await authService.signOut()
             do {
@@ -130,6 +132,7 @@ final class AppState: ObservableObject {
                 authMessage = error.localizedDescription
                 authMessageIsError = true
             }
+            if let userId { try? snapshotStore.remove(userId: userId) }
             invalidateSession(message: "")
             authMessage = nil
             authMessageIsError = false
@@ -159,6 +162,7 @@ final class AppState: ObservableObject {
                 var snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
                 snapshot.domains = await resolvedDomains(accessToken: session.accessToken, snapshot: snapshot)
                 dashboard = snapshot
+                isShowingCachedDashboard = false
                 try? snapshotStore.save(snapshot, userId: session.user.id)
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
                 prefetchDashboardImages(snapshot)
@@ -168,6 +172,7 @@ final class AppState: ObservableObject {
                 var snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
                 snapshot.domains = await resolvedDomains(accessToken: session.accessToken, snapshot: snapshot)
                 dashboard = snapshot
+                isShowingCachedDashboard = false
                 try? snapshotStore.save(snapshot, userId: session.user.id)
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
                 prefetchDashboardImages(snapshot)
@@ -176,7 +181,9 @@ final class AppState: ObservableObject {
             if isInvalidRefreshSessionError(error) {
                 invalidateSession(message: "登录状态已失效，请重新登录。")
             } else {
-                dashboardMessage = error.localizedDescription
+                dashboardMessage = isShowingCachedDashboard
+                    ? "网络同步暂时失败，正在展示上次保存的数据。"
+                    : error.localizedDescription
             }
         }
 
@@ -186,6 +193,7 @@ final class AppState: ObservableObject {
     private func restoreDashboardSnapshot(userId: String) {
         guard let persisted = try? snapshotStore.load(userId: userId) else { return }
         dashboard = persisted.dashboardSnapshot
+        isShowingCachedDashboard = true
         lastDashboardRefreshAt = persisted.savedAt
     }
 
@@ -494,6 +502,7 @@ final class AppState: ObservableObject {
         currentUserEmail = ""
         dashboard = DashboardSnapshot()
         dashboardMessage = nil
+        isShowingCachedDashboard = false
         selectedTab = .today
         authMessage = message
         authMessageIsError = true

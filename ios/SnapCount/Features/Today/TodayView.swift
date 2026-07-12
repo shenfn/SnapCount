@@ -60,6 +60,10 @@ struct TodayView: View {
             }
             .font(.subheadline)
             .foregroundStyle(JieziTheme.muted)
+        } else if appState.isShowingCachedDashboard {
+            Text(appState.dashboardMessage ?? "正在展示本地数据，芥子会在后台同步最新内容。")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.gold)
         } else if let message = appState.dashboardMessage {
             Button { Task { await appState.refreshDashboard() } } label: {
                 Label("数据加载失败，点此重试：\(message)", systemImage: "arrow.clockwise")
