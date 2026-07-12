@@ -28,10 +28,15 @@ final class AppState: ObservableObject {
 
     private let authService = SupabaseAuthService()
     private let dataService = NativeDataService()
+    private let dashboardRepository: DashboardRepositoryProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
+
+    init(dashboardRepository: DashboardRepositoryProtocol = DashboardRepository()) {
+        self.dashboardRepository = dashboardRepository
+    }
 
     func bootstrap() {
         Task {
@@ -136,14 +141,14 @@ final class AppState: ObservableObject {
         do {
             var session = try await validSession()
             do {
-                let snapshot = try await dataService.fetchDashboard(accessToken: session.accessToken)
+                let snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
                 dashboard = snapshot
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
                 prefetchDashboardImages(snapshot)
             } catch {
                 guard isExpiredJWTError(error) else { throw error }
                 session = try await validSession(forceRefresh: true)
-                let snapshot = try await dataService.fetchDashboard(accessToken: session.accessToken)
+                let snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
                 dashboard = snapshot
                 recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
                 prefetchDashboardImages(snapshot)
