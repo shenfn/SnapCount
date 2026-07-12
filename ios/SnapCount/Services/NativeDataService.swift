@@ -492,6 +492,8 @@ final class NativeDataService {
                     NativeDetailRow(label: "平台", value: row.platform ?? "未填写"),
                     NativeDetailRow(label: "分类", value: row.category ?? "未填写"),
                     NativeDetailRow(label: "支付方式", value: row.paymentMethod ?? "未填写"),
+                    NativeDetailRow(label: "交易时间", value: row.transactionTime ?? ""),
+                    NativeDetailRow(label: "关联账户", value: row.accountId ?? "未绑定"),
                     NativeDetailRow(label: "状态", value: row.status ?? "done"),
                     NativeDetailRow(label: "来源", value: row.source ?? ""),
                     NativeDetailRow(label: "备注", value: row.note ?? "")
@@ -535,7 +537,9 @@ final class NativeDataService {
                 value: "+\(currency(row.amount))",
                 detailRows: [
                     NativeDetailRow(label: "收入类型", value: row.category ?? "other"),
-                    NativeDetailRow(label: "来源", value: row.source ?? ""),
+                    NativeDetailRow(label: "来源名称", value: row.sourceName ?? ""),
+                    NativeDetailRow(label: "记录来源", value: row.source ?? ""),
+                    NativeDetailRow(label: "关联账户", value: row.accountId ?? "未绑定"),
                     NativeDetailRow(label: "备注", value: row.note ?? ""),
                     NativeDetailRow(label: "AI 陪伴", value: row.companionMessage ?? "")
                 ].filter { !$0.value.isEmpty },
@@ -581,7 +585,11 @@ final class NativeDataService {
                 title: row.title ?? domainName(row.domainKey),
                 subtitle: row.occurredAt ?? row.createdAt ?? "",
                 value: "",
-                detailRows: [NativeDetailRow(label: "摘要", value: row.summary ?? "")].filter { !$0.value.isEmpty } + payloadRows,
+                detailRows: [
+                    NativeDetailRow(label: "数据域", value: domainName(row.domainKey)),
+                    NativeDetailRow(label: "领域 Key", value: row.domainKey ?? ""),
+                    NativeDetailRow(label: "摘要", value: row.summary ?? "")
+                ].filter { !$0.value.isEmpty } + payloadRows,
                 imageURL: imageURL,
                 imageLoadError: row.sourceImagePath != nil && imageURL == nil,
                 imagePath: row.sourceImagePath,

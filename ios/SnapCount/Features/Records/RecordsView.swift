@@ -65,7 +65,12 @@ struct RecordsView: View {
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .navigationDestination(for: String.self) { reference in RecordDetailView(reference: reference) }
         .onChange(of: availableKinds) { kinds in if !kinds.contains(selectedKind) { selectedKind = .all } }
+        .task(id: prefetchKey) {
+            appState.prefetchRecordDetails(groups.flatMap(\.records).map(\.reference))
+        }
     }
+
+    private var prefetchKey: String { "\(selectedMonthKey):\(selectedKind.rawValue):\(groups.count)" }
 
     private var monthTitle: String {
         let parts = selectedMonthKey.split(separator: "-")

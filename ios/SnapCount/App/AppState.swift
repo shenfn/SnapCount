@@ -190,6 +190,13 @@ final class AppState: ObservableObject {
         await refreshDashboard()
     }
 
+    func prefetchRecordDetails(_ references: [String]) {
+        let missing = references.filter { recordDetailCache[$0] == nil }.prefix(4)
+        for reference in missing {
+            Task { await loadRecordDetail(reference: reference) }
+        }
+    }
+
     func openDayRecord(_ record: NativeDayRecord) {
         if record.kind == .staging {
             selectedTab = .inbox
