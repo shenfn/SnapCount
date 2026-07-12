@@ -189,6 +189,11 @@ private struct StagingRecordDetailView: View {
     let record: NativeStagingRecord
     @State private var showDiscardConfirm = false
     @State private var selectedArchiveDomain: NativeArchiveDomain?
+
+    private var archiveDomains: [NativeArchiveDomain] {
+        let domains = appState.dashboard.domains.map { NativeArchiveDomain(id: $0.id, title: $0.shortName, systemImage: $0.systemImage) }
+        return domains.isEmpty ? InboxArchiveDomains.all : domains
+    }
     @State private var showArchiveConfirm = false
     @State private var imagePreview: StagingImagePreviewRoute?
     @State private var resolvedImageURL: URL?
@@ -281,7 +286,7 @@ private struct StagingRecordDetailView: View {
                 }
 
                 Section {
-                    ForEach(InboxArchiveDomains.all) { domain in
+                    ForEach(archiveDomains) { domain in
                         Button {
                             selectedArchiveDomain = domain
                             showArchiveConfirm = true
