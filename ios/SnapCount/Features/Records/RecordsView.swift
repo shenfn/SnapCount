@@ -2,69 +2,90 @@ import SwiftUI
 
 struct RecordsView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var selectedKind: NativeDayRecordKind = .all
+    @State private var selectedMonthKey = RecordsView.currentMonthKey
+
+    private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: selectedKind) }
+    private var groups: [NativeDayRecordGroup] { query.groups(from: appState.dashboard.dayRecordGroups) }
+    private var availableKinds: [NativeDayRecordKind] { query.availableKinds(from: appState.dashboard.dayRecordGroups) }
 
     var body: some View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
             List {
-                Section("概览") {
+                Section {
                     HStack {
-                        Label("本月记录", systemImage: "calendar")
+                        Button { shiftMonth(-1) } label: { Image(systemName: "chevron.left") }
                         Spacer()
-                        Text("\(appState.dashboard.monthCount)")
-                            .monospacedDigit()
-                    }
-                    HStack {
-                        Label("今日记录", systemImage: "sun.max")
+                        Text(monthTitle).font(.headline.monospacedDigit())
                         Spacer()
-                        Text("\(appState.dashboard.todayCount)")
-                            .monospacedDigit()
+                        Button { shiftMonth(1) } label: { Image(systemName: "chevron.right") }
+                            .disabled(selectedMonthKey >= Self.currentMonthKey)
                     }
+                    Picker("数据域", selection: $selectedKind) {
+                        ForEach(availableKinds) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
                 }
 
-                if !appState.dashboard.recentRecords.isEmpty {
-                    Section("最近") {
-                        ForEach(appState.dashboard.recentRecords) { item in
-                            NavigationLink(value: item.id) {
-                                Label {
-                                    HStack {
-                                        VStack(alignment: .leading) {
-                                            Text(item.title)
-                                            Text(item.subtitle)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
+                if groups.isEmpty {
+                    ContentUnavailableView("本月还没有记录", systemImage: "doc.text.magnifyingglass", description: Text("截图识别或手动记录后，会按日期出现在这里。"))
+                        .listRowBackground(Color.clear)
+                } else {
+                    ForEach(groups) { group in
+                        Section(dayTitle(group.dateKey)) {
+                            ForEach(group.records) { item in
+                                NavigationLink(value: item.reference) {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: item.systemImage)
+                                            .foregroundStyle(JieziTheme.mint)
+                                            .frame(width: 34, height: 34)
+                                            .background(JieziTheme.brand.opacity(0.08), in: Circle())
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(item.title).font(.headline)
+                                            Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                                         }
                                         Spacer()
-                                        Text(item.value)
-                                            .foregroundStyle(.secondary)
+                                        VStack(alignment: .trailing, spacing: 3) {
+                                            Text(item.value).font(.subheadline.monospacedDigit())
+                                            Text(item.timeLabel ?? "全天").font(.caption2).foregroundStyle(.secondary)
+                                        }
                                     }
-                                } icon: {
-                                    Image(systemName: item.systemImage)
+                                    .padding(.vertical, 4)
                                 }
                             }
                         }
                     }
                 }
-
-                Section("数据域") {
-                    Label("消费", systemImage: "creditcard")
-                    Label("饮食", systemImage: "fork.knife")
-                    Label("运动", systemImage: "figure.run")
-                    Label("睡眠", systemImage: "moon")
-                    Label("阅读", systemImage: "book")
-                }
             }
             .scrollContentBackground(.hidden)
-            .refreshable {
-                await appState.refreshDashboard()
-            }
+            .refreshable { await appState.refreshDashboard() }
         }
         .navigationTitle("记录")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .navigationDestination(for: String.self) { reference in
-            RecordDetailView(reference: reference)
-        }
+        .navigationDestination(for: String.self) { reference in RecordDetailView(reference: reference) }
+        .onChange(of: availableKinds) { kinds in if !kinds.contains(selectedKind) { selectedKind = .all } }
     }
+
+    private var monthTitle: String {
+        let parts = selectedMonthKey.split(separator: "-")
+        guard parts.count == 2 else { return selectedMonthKey }
+        return "\(parts[0])年\(Int(parts[1]) ?? 0)月"
+    }
+
+    private func dayTitle(_ dateKey: String) -> String { String(dateKey.suffix(5)) }
+
+    private func shiftMonth(_ offset: Int) {
+        guard let date = Self.monthFormatter.date(from: selectedMonthKey),
+              let shifted = Calendar(identifier: .gregorian).date(byAdding: .month, value: offset, to: date) else { return }
+        selectedMonthKey = Self.monthFormatter.string(from: shifted)
+        selectedKind = .all
+    }
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM"; return formatter
+    }()
+    private static var currentMonthKey: String { monthFormatter.string(from: Date()) }
 }
 
 private struct RecordDetailView: View {
