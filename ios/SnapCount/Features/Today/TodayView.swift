@@ -156,8 +156,9 @@ struct TodayView: View {
     }
 
     private func dailyCard(_ day: NativeDailySummary) -> some View {
-        NavigationLink(value: NativeDayDetailRoute(dateKey: day.dateKey, kind: .all)) {
-            VStack(alignment: .leading, spacing: 14) {
+        let group = appState.dashboard.dayRecordGroups.first { $0.dateKey == day.dateKey }
+        return VStack(alignment: .leading, spacing: 14) {
+            NavigationLink(value: NativeDayDetailRoute(dateKey: day.dateKey, kind: .all)) {
                 HStack {
                     Text(String(day.dateKey.suffix(5)))
                         .font(.system(size: 26, weight: .black, design: .rounded))
@@ -166,25 +167,49 @@ struct TodayView: View {
                     Text(weekday(day.dateKey))
                         .font(.headline)
                         .foregroundStyle(JieziTheme.muted)
-                }
-                Divider().overlay(JieziTheme.muted.opacity(0.2))
-                if day.expense > 0 {
-                    summaryRow(color: JieziTheme.coral, title: "支出", value: money(day.expense))
-                }
-                if day.income > 0 {
-                    summaryRow(color: JieziTheme.brand, title: "收入", value: money(day.income, signed: true))
-                }
-                if day.pendingCount > 0 {
-                    summaryRow(color: JieziTheme.gold, title: "待处理", value: "\(day.pendingCount)条")
-                }
-                if day.expense == 0 && day.income == 0 && day.pendingCount == 0 {
-                    summaryRow(color: JieziTheme.muted, title: "记录", value: "\(day.recordCount)条")
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                        .foregroundStyle(JieziTheme.muted)
                 }
             }
-            .foregroundStyle(JieziTheme.ink)
-            .padding(20)
-            .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 24).stroke(JieziTheme.brand.opacity(0.06)))
+            .buttonStyle(.plain)
+
+            Divider().overlay(JieziTheme.muted.opacity(0.2))
+            if day.expense > 0 {
+                daySummaryLink(dateKey: day.dateKey, kind: .expense, color: JieziTheme.coral, title: "支出", value: money(day.expense))
+            }
+            if day.income > 0 {
+                daySummaryLink(dateKey: day.dateKey, kind: .income, color: JieziTheme.brand, title: "收入", value: money(day.income, signed: true))
+            }
+            ForEach(group?.availableKinds.filter { ![.all, .expense, .income, .staging].contains($0) } ?? []) { kind in
+                daySummaryLink(dateKey: day.dateKey, kind: kind, color: JieziTheme.mint, title: kind.title, value: "\(group?.records(for: kind).count ?? 0)条")
+            }
+            if day.pendingCount > 0 {
+                Button {
+                    appState.selectedTab = .inbox
+                } label: {
+                    summaryRow(color: JieziTheme.gold, title: "待处理", value: "\(day.pendingCount)条")
+                }
+                .buttonStyle(.plain)
+            }
+            if day.recordCount == 0 && day.pendingCount == 0 {
+                summaryRow(color: JieziTheme.muted, title: "记录", value: "0条")
+            }
+        }
+        .foregroundStyle(JieziTheme.ink)
+        .padding(20)
+        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(JieziTheme.brand.opacity(0.06)))
+    }
+
+    private func daySummaryLink(dateKey: String, kind: NativeDayRecordKind, color: Color, title: String, value: String) -> some View {
+        NavigationLink(value: NativeDayDetailRoute(dateKey: dateKey, kind: kind)) {
+            HStack {
+                summaryRow(color: color, title: title, value: value)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.bold())
+                    .foregroundStyle(JieziTheme.muted)
+            }
         }
         .buttonStyle(.plain)
     }
