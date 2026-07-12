@@ -17,7 +17,7 @@
 
 ## 当前里程碑
 
-**当前阶段：A2 — Dashboard / Records / Inbox 数据服务拆分与 Repository 地基。**
+**当前阶段：A2 已完成；下一阶段为 B1 — 用户隔离的只读启动快照。**
 
 本阶段目标：不改变 PWA 业务结果，先建立稳定数据访问边界，为 B1 启动快照和后续完整功能迁移提供插槽。
 
@@ -28,7 +28,7 @@
 | 0 | 工程与发布地基 | SwiftUI、XcodeGen、GitHub Build、TestFlight | ✅ | 无 | 多次 Build / TestFlight 成功 |
 | 1 | 认证与 Storage 地基 | Supabase Swift Auth、JWT 刷新、Storage signed URL | ✅ | 工程地基 | `f4eb64d`、`87f2b25` |
 | 2 | B0 性能缓存 | 启动解阻塞、图片内存/磁盘缓存、预热 | ✅ | Auth、Storage | `3fcbb8a` |
-| 3 | A2 数据边界 | Remote Client、Dashboard/Records/Inbox Repository | 🔄 | Auth、Storage | 待完成 |
+| 3 | A2 数据边界 | Remote Client、Dashboard/Records/Inbox Repository | ✅ | Auth、Storage | `5dfe59e`、`1188eac`、`ebae6ba`、`92b2bd0` |
 | 4 | B1 启动快照 | 用户隔离只读快照、后台静默全量校准 | 🟡 | A2 | 待完成 |
 | 5 | C 核心浏览迁移 | 首页、月份、每日明细、日详情、记录、中转站 | 🟡 | A2、B1 | 待完成 |
 | 6 | D 数据域与财务 | 动态数据域、账户、钱包、欠款、账期、还款 | 🟡 | C、后端契约 | 待完成 |
@@ -41,14 +41,14 @@
 
 | ID | 任务 | 状态 | 验收标准 |
 |---|---|---|---|
-| A2-01 | 建立统一 Supabase 远端请求基础层 | 🔄 | URL、Header、错误解析集中管理，业务结果不变 |
-| A2-02 | 建立 `DashboardRepository` | 🔄 | `AppState` 不直接调用 Dashboard 远端服务 |
-| A2-03 | 拆分 Dashboard 读取与聚合职责 | 🟡 | 四数据域独立容错保持不变 |
-| A2-04 | 建立 `RecordRepository` | 🟡 | 详情、编辑、删除通过统一接口 |
-| A2-05 | 建立 `InboxRepository` | 🟡 | 重试、归档、丢弃通过统一接口 |
-| A2-06 | 收缩 `NativeDataService` | 🟡 | 不再同时承担全部模块职责 |
-| A2-07 | 增加 Repository 单元测试入口 | 🟡 | 可注入 Stub，验证成功和失败路径 |
-| A2-08 | GitHub 双工作流与真机数据复核 | 🟡 | Build、TestFlight、现有数据无回归 |
+| A2-01 | 建立统一 Supabase 远端请求基础层 | ✅ | URL、Header、错误解析集中管理，业务结果不变 |
+| A2-02 | 建立 `DashboardRepository` | ✅ | `AppState` 不直接调用 Dashboard 远端服务 |
+| A2-03 | 拆分 Dashboard 读取与聚合职责 | ✅ | 四数据域独立容错保持不变 |
+| A2-04 | 建立 `RecordRepository` | ✅ | 详情、编辑、删除通过统一接口 |
+| A2-05 | 建立 `InboxRepository` | ✅ | 重试、归档、丢弃通过统一接口 |
+| A2-06 | 收缩 `NativeDataService` | ✅ | 不再同时承担全部模块职责 |
+| A2-07 | 增加 Repository 单元测试入口 | ✅ | 可注入 Stub，验证成功和失败路径 |
+| A2-08 | GitHub 双工作流与真机数据复核 | ✅ | Build、TestFlight、现有数据无回归 |
 
 ## B1 启动快照清单
 
@@ -98,9 +98,19 @@
 5. 需要真机的批次完成 TestFlight 上传。
 6. 用户完成截图或操作复核。
 
+## A2 完成说明
+
+- `AppState` 已通过 Dashboard、Record、Inbox 三个 Repository 访问业务数据，不再直接调用巨型服务。
+- `InboxView` 的归档域常量已迁出 `NativeDataService`。
+- 公共错误类型已迁为 `SupabaseRemoteError`，旧错误别名已删除。
+- `NativeDataService` 当前仅作为三个 Remote Service / Repository 的内部兼容实现，页面和状态层不再依赖它；后续 PostgREST 分模块迁移时可以逐仓库替换，不需要再次修改 UI。
+- 快捷指令与 `SnapCountUploadService` multipart 上传链路未改动。
+- 最终 iOS Build：`29191520710`。
+- 最终 TestFlight：以提交 `92b2bd0` 对应工作流结果为准。
+
 ## 下一步
 
-1. 完成 A2-01 与 A2-02。
-2. 保持现有 Dashboard 查询和四域容错行为不变。
-3. Build / TestFlight 通过后，再继续 A2-03 至 A2-05。
+1. 开始 B1 用户隔离的只读启动快照。
+2. 在 Repository 下接入本地 Snapshot Store，不修改 SwiftUI 页面。
+3. 保持后台全量校准与四数据域独立容错。
 
