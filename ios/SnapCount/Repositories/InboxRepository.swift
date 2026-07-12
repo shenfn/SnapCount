@@ -16,6 +16,7 @@ protocol InboxRepositoryProtocol {
     func discard(id: String, accessToken: String) async throws
     func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String
+    func resolveImageURL(path: String, accessToken: String) async throws -> URL
 }
 
 final class InboxRepository: InboxRepositoryProtocol {
@@ -35,5 +36,9 @@ final class InboxRepository: InboxRepositoryProtocol {
 
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
         try await remoteService.archiveStagingRecord(record, domainKey: domainKey, accessToken: accessToken)
+    }
+
+    func resolveImageURL(path: String, accessToken: String) async throws -> URL {
+        try await remoteService.resolveImageURL(path: path, accessToken: accessToken)
     }
 }

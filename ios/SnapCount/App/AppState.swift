@@ -267,11 +267,22 @@ final class AppState: ObservableObject {
             let reference = try await inboxRepository.archive(record, domainKey: domainKey, accessToken: session.accessToken)
             inboxPath.removeAll()
             await refreshDashboard()
+            recordDetailCache.removeValue(forKey: reference)
+            selectedRecordDetail = nil
+            await loadRecordDetail(reference: reference, force: true)
             selectedTab = .records
             recordsPath = [reference]
         } catch {
             dashboardMessage = error.localizedDescription
         }
+    }
+
+    func resolveStagingImageURL(for record: NativeStagingRecord) async throws -> URL {
+        guard let imagePath = record.imagePath, !imagePath.isEmpty else {
+            throw SupabaseRemoteError.requestFailed("这条记录没有可查看的截图")
+        }
+        let session = try await validSession()
+        return try await inboxRepository.resolveImageURL(path: imagePath, accessToken: session.accessToken)
     }
 
     func loadRecordDetail(reference: String, force: Bool = false) async {

@@ -72,4 +72,8 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
         "expense:record-1"
     }
+
+    func resolveImageURL(path: String, accessToken: String) async throws -> URL {
+        URL(string: "https://example.com/receipt.jpg")!
+    }
 }

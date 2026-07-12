@@ -181,6 +181,9 @@ private struct StagingRecordDetailView: View {
     @State private var selectedArchiveDomain: NativeArchiveDomain?
     @State private var showArchiveConfirm = false
     @State private var imagePreview: StagingImagePreviewRoute?
+    @State private var resolvedImageURL: URL?
+    @State private var isResolvingImage = false
+    @State private var imageResolutionMessage: String?
 
     var body: some View {
         ZStack {
@@ -199,7 +202,7 @@ private struct StagingRecordDetailView: View {
                     .padding(.vertical, 6)
                 }
 
-                if let imageURL = record.imageURL {
+                if let imageURL = resolvedImageURL ?? record.imageURL {
                     Section("截图原图") {
                         Button {
                             imagePreview = StagingImagePreviewRoute(url: imageURL)
@@ -208,9 +211,25 @@ private struct StagingRecordDetailView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                } else if record.imageLoadError {
+                } else if record.imagePath != nil {
                     Section("截图原图") {
-                        unavailableImageView
+                        if isResolvingImage {
+                            ProgressView("正在加载截图…")
+                                .frame(maxWidth: .infinity, minHeight: 120)
+                        } else {
+                            Button {
+                                Task { await resolveImage() }
+                            } label: {
+                                VStack(spacing: 8) {
+                                    unavailableImageView
+                                    Text(imageResolutionMessage ?? "点此重新加载")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 120)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
 
@@ -323,6 +342,23 @@ private struct StagingRecordDetailView: View {
                     }
                 }
             }
+        }
+        .task(id: record.id) {
+            if record.imageURL == nil, record.imagePath != nil {
+                await resolveImage()
+            }
+        }
+    }
+
+    private func resolveImage() async {
+        guard !isResolvingImage else { return }
+        isResolvingImage = true
+        imageResolutionMessage = nil
+        defer { isResolvingImage = false }
+        do {
+            resolvedImageURL = try await appState.resolveStagingImageURL(for: record)
+        } catch {
+            imageResolutionMessage = error.localizedDescription
         }
     }
 

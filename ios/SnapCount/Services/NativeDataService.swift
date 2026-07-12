@@ -427,6 +427,15 @@ final class NativeDataService {
         return targetReference
     }
 
+    func resolveImageURL(path: String, accessToken: String) async throws -> URL {
+        await imageURLProvider.invalidate(path: path)
+        let urls = try await signedImageURLMap(paths: [path], accessToken: accessToken)
+        guard let url = urls[path] else {
+            throw SupabaseRemoteError.requestFailed("截图文件暂时无法访问")
+        }
+        return url
+    }
+
     func fetchRecordDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
         let parts = reference.split(separator: "/").map(String.init)
         let kind: String
