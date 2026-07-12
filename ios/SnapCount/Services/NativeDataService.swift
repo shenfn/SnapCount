@@ -14,6 +14,7 @@ struct DashboardSnapshot {
     var recordDetails: [String: NativeRecordDetail] = [:]
     var recentRecords: [NativeRecordSummary] = []
     var stagingRecords: [NativeStagingRecord] = []
+    var pendingExpenses: [NativePendingExpense] = []
     var domains: [NativeDomainDefinition] = []
 }
 
@@ -195,6 +196,11 @@ final class NativeDataService {
             txRows.filter { $0.transactionDate == today }.count +
             incomeRows.filter { $0.incomeDate == today }.count +
             universalRows.filter { ($0.occurredAt ?? $0.createdAt)?.hasPrefix(today) == true }.count
+
+        snapshot.pendingExpenses = txRows.filter { $0.status == "pending" }.compactMap { row in
+            guard let dateKey = row.transactionDate else { return nil }
+            return NativePendingExpense(id: row.id, title: row.merchantName ?? "待补全消费", amount: row.amount ?? 0, dateKey: dateKey, reference: "tx-\(row.id)")
+        }
 
         snapshot.pendingCount =
             txRows.filter { $0.status == "pending" }.count +

@@ -87,6 +87,13 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(presentation.metrics.first?.value, "1 条")
     }
 
+    func testUnifiedInboxItemDistinguishesPendingExpenseAndStaging() {
+        let pending = NativePendingExpense(id: "tx-1", title: "待补全消费", amount: 20, dateKey: "2026-07-12", reference: "tx-1")
+        let item = NativeInboxItem(id: "pending-tx-1", kind: .pendingExpense, dateKey: pending.dateKey, title: pending.title, subtitle: "¥20.00", status: "pending", statusLabel: "待补全", systemImage: "clock", pendingExpense: pending, stagingRecord: nil)
+        XCTAssertEqual(item.kind, .pendingExpense)
+        XCTAssertNil(item.stagingRecord)
+    }
+
 
 }
 
