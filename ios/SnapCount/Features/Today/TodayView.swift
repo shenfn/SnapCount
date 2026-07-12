@@ -13,7 +13,7 @@ struct TodayView: View {
     @State private var showUploadResult = false
 
     private var enabledWidgets: [HomeWidget] {
-        HomeWidget.decode(widgetConfiguration).filter(.isEnabled)
+        HomeWidget.decode(widgetConfiguration).filter(\.isEnabled)
     }
 
     var body: some View {
@@ -420,7 +420,7 @@ private struct NativeFlowRow: View {
 }
 
 private struct HomeWidgetManager: View {
-    @Environment(.dismiss) private var dismiss
+    @Environment(\.dismiss) private var dismiss
     @Binding var configuration: String
     @State private var widgets: [HomeWidget]
 
