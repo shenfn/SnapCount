@@ -118,10 +118,20 @@ final class AppState: ObservableObject {
         lastDashboardRefreshAt = Date()
 
         do {
-            let session = try await validSession()
-            dashboard = try await dataService.fetchDashboard(accessToken: session.accessToken)
+            var session = try await validSession()
+            do {
+                dashboard = try await dataService.fetchDashboard(accessToken: session.accessToken)
+            } catch {
+                guard isExpiredJWTError(error) else { throw error }
+                session = try await validSession(forceRefresh: true)
+                dashboard = try await dataService.fetchDashboard(accessToken: session.accessToken)
+            }
         } catch {
-            dashboardMessage = error.localizedDescription
+            if isInvalidRefreshSessionError(error) {
+                invalidateSession(message: "登录状态已失效，请重新登录。")
+            } else {
+                dashboardMessage = error.localizedDescription
+            }
         }
 
         isLoadingDashboard = false
@@ -349,9 +359,9 @@ final class AppState: ObservableObject {
         try keychain.setString(json, for: KeychainKeys.authSession)
     }
 
-    private func validSession() async throws -> SupabaseAuthSession {
+    private func validSession(forceRefresh: Bool = false) async throws -> SupabaseAuthSession {
         let session = try requireSession()
-        if let expiresAt = session.expirationEpoch, TimeInterval(expiresAt) > Date().timeIntervalSince1970 + 60 {
+        if !forceRefresh, let expiresAt = session.expirationEpoch, TimeInterval(expiresAt) > Date().timeIntervalSince1970 + 60 {
             return session
         }
         guard let refreshToken = session.refreshToken, !refreshToken.isEmpty else {
@@ -373,8 +383,36 @@ final class AppState: ObservableObject {
             apply(session: refreshed)
             return refreshed
         } catch {
-            throw SupabaseAuthServiceError.requestFailed("登录状态已过期，请重新登录。\(error.localizedDescription)")
+            throw error
         }
+    }
+
+    private func isExpiredJWTError(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("pgrst303") || message.contains("jwt expired")
+    }
+
+    private func isInvalidRefreshSessionError(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("invalid refresh token")
+            || message.contains("refresh token not found")
+            || message.contains("refresh_token_not_found")
+            || message.contains("already used")
+            || message.contains("session_not_found")
+    }
+
+    private func invalidateSession(message: String) {
+        try? keychain.remove(KeychainKeys.authSession)
+        isSignedIn = false
+        currentUserEmail = ""
+        dashboard = DashboardSnapshot()
+        dashboardMessage = nil
+        selectedTab = .today
+        authMessage = message
+        authMessageIsError = true
+        lastDashboardRefreshAt = nil
+        sessionRefreshTask?.cancel()
+        sessionRefreshTask = nil
     }
 
     private func requireSession() throws -> SupabaseAuthSession {
