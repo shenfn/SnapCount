@@ -322,12 +322,9 @@ struct TodayView: View {
 
     private static var greeting: String {
         switch Calendar.current.component(.hour, from: Date()) {
-        case 5..<11: return "早上好，
-今天也由芥子接住。"
-        case 11..<18: return "下午好，
-让生活自然沉淀。"
-        default: return "晚上好，
-今天的痕迹都在这里。"
+        case 5..<11: return "早上好，\n今天也由芥子接住。"
+        case 11..<18: return "下午好，\n让生活自然沉淀。"
+        default: return "晚上好，\n今天的痕迹都在这里。"
         }
     }
 }
