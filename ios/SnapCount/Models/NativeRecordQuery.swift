@@ -13,7 +13,7 @@ struct NativeRecordQuery {
     }
 
     func availableKinds(from source: [NativeDayRecordGroup]) -> [NativeDayRecordKind] {
-        let present = Set(source.flatMap(.records).filter { $0.kind != .staging }.map(.kind))
+        let present = Set(source.flatMap(\.records).filter { $0.kind != .staging }.map(\.kind))
         return [.all] + NativeDayRecordKind.allCases.filter { $0 != .all && $0 != .staging && present.contains($0) }
     }
 }
