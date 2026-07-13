@@ -24,7 +24,8 @@
     </div>
     <div v-if="reviewable" class="ai-feedback-review">
       <div class="ai-feedback-review-title">点评这条反馈</div>
-      <div v-if="reviewState === 'submitted'" class="ai-feedback-review-success">已记录，会用于后续表达调整</div>
+      <div v-if="reviewState === 'syncing'" class="ai-feedback-review-success">已收到，正在后台更新偏好…</div>
+      <div v-else-if="reviewState === 'submitted'" class="ai-feedback-review-success">已记录，会用于后续表达调整</div>
       <template v-else>
         <div class="ai-feedback-review-options">
           <button

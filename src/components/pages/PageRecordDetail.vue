@@ -102,6 +102,7 @@
 
       <AiFeedbackCard
         v-if="aiFeedback"
+        :key="`ai-feedback-${record.id}`"
         :feedback="aiFeedback"
         reviewable
         :review-state="feedbackReviewState"
@@ -141,8 +142,16 @@ const store = inject('store')
 
 const record = computed(() => store.detailRecord.value)
 const bindingAccount = ref(false)
-const feedbackReviewState = ref('')
-const feedbackReviewSubmitting = ref(false)
+const feedbackReviewStates = ref({})
+const feedbackReviewState = computed(() => {
+  const recordId = record.value?.id
+  return recordId ? feedbackReviewStates.value[recordId] || '' : ''
+})
+const feedbackReviewSubmitting = computed(() => feedbackReviewState.value === 'syncing')
+
+function setFeedbackReviewState(recordId, state) {
+  feedbackReviewStates.value = { ...feedbackReviewStates.value, [recordId]: state }
+}
 const deleteType = computed(() => {
   if (record.value?.kind === 'income') return 'income'
   if (record.value?.kind === 'universal') return 'universal'
@@ -212,18 +221,18 @@ const companionMessage = computed(() => {
 const aiSummary = computed(() => getRecordAiSummary(store, record.value, domainLabel.value))
 
 async function submitFeedbackReview({ choice, freeText }) {
-  if (!record.value?.id || feedbackReviewSubmitting.value) return
-  feedbackReviewSubmitting.value = true
-  feedbackReviewState.value = ""
+  const recordId = record.value?.id
+  if (!recordId || feedbackReviewStates.value[recordId] === 'syncing') return
+  setFeedbackReviewState(recordId, 'syncing')
+  store.showFlash('点评已收到，正在后台更新偏好')
   try {
-    await store.submitExpressionFeedback({ recordId: record.value.id, choice, freeText })
-    feedbackReviewState.value = "submitted"
-    store.showFlash("点评已记录")
+    await store.submitExpressionFeedback({ recordId, choice, freeText })
+    setFeedbackReviewState(recordId, 'submitted')
+    if (record.value?.id === recordId) store.showFlash('点评已生效')
   } catch (error) {
     console.warn("提交 AI 点评失败:", error)
-    feedbackReviewState.value = "error"
-  } finally {
-    feedbackReviewSubmitting.value = false
+    setFeedbackReviewState(recordId, 'error')
+    if (record.value?.id === recordId) store.showFlash('点评提交失败，请重试')
   }
 }
 

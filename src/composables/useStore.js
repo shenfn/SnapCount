@@ -3569,6 +3569,7 @@ export function useStore() {
     if (!token) throw new Error("登录状态已失效，请重新登录")
     const response = await fetch(`${SUPABASE_URL}/functions/v1/ingest-receipt`, {
       method: "POST",
+      keepalive: true,
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`,
