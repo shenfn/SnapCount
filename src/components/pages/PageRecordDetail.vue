@@ -100,7 +100,14 @@
         </div>
       </div>
 
-      <AiFeedbackCard v-if="aiFeedback" :feedback="aiFeedback" />
+      <AiFeedbackCard
+        v-if="aiFeedback"
+        :feedback="aiFeedback"
+        reviewable
+        :review-state="feedbackReviewState"
+        :submitting="feedbackReviewSubmitting"
+        @submit-review="submitFeedbackReview"
+      />
 
       <div v-if="companionMessage" class="record-detail-companion">
         <div class="record-detail-companion-mark">💬</div>
@@ -134,6 +141,8 @@ const store = inject('store')
 
 const record = computed(() => store.detailRecord.value)
 const bindingAccount = ref(false)
+const feedbackReviewState = ref('')
+const feedbackReviewSubmitting = ref(false)
 const deleteType = computed(() => {
   if (record.value?.kind === 'income') return 'income'
   if (record.value?.kind === 'universal') return 'universal'
@@ -201,6 +210,22 @@ const companionMessage = computed(() => {
   return text
 })
 const aiSummary = computed(() => getRecordAiSummary(store, record.value, domainLabel.value))
+
+async function submitFeedbackReview({ choice, freeText }) {
+  if (!record.value?.id || feedbackReviewSubmitting.value) return
+  feedbackReviewSubmitting.value = true
+  feedbackReviewState.value = ""
+  try {
+    await store.submitExpressionFeedback({ recordId: record.value.id, choice, freeText })
+    feedbackReviewState.value = "submitted"
+    store.showFlash("点评已记录")
+  } catch (error) {
+    console.warn("提交 AI 点评失败:", error)
+    feedbackReviewState.value = "error"
+  } finally {
+    feedbackReviewSubmitting.value = false
+  }
+}
 
 async function bindRecommendedAccount() {
   if (!record.value) return

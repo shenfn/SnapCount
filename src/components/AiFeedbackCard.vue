@@ -22,6 +22,30 @@
     <div v-if="timingLabel" class="ai-feedback-meta">
       <span>{{ timingLabel }}</span>
     </div>
+    <div v-if="reviewable" class="ai-feedback-review">
+      <div class="ai-feedback-review-title">点评这条反馈</div>
+      <div v-if="reviewState === 'submitted'" class="ai-feedback-review-success">已记录，会用于后续表达调整</div>
+      <template v-else>
+        <div class="ai-feedback-review-options">
+          <button
+            v-for="choice in reviewChoices"
+            :key="choice.value"
+            type="button"
+            class="ai-feedback-review-chip"
+            :class="{ active: selectedChoice === choice.value }"
+            :disabled="submitting"
+            @click="selectedChoice = choice.value"
+          >{{ choice.label }}</button>
+        </div>
+        <template v-if="selectedChoice">
+          <textarea v-model="reviewText" class="ai-feedback-review-text" maxlength="500" placeholder="可以补充原因（选填）"></textarea>
+          <button type="button" class="ai-feedback-review-submit" :disabled="submitting" @click="submitReview">
+            {{ submitting ? '提交中…' : '提交点评' }}
+          </button>
+        </template>
+        <div v-if="reviewState === 'error'" class="ai-feedback-review-error">提交失败，请稍后重试</div>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -32,9 +56,28 @@ const props = defineProps({
   feedback: { type: Object, default: null },
   compact: { type: Boolean, default: false },
   kicker: { type: String, default: 'AI 即时反馈' },
+  reviewable: { type: Boolean, default: false },
+  reviewState: { type: String, default: '' },
+  submitting: { type: Boolean, default: false },
 })
 
+const emit = defineEmits(['submit-review'])
+
 const showReason = ref(false)
+const selectedChoice = ref('')
+const reviewText = ref('')
+const reviewChoices = [
+  { value: 'incorrect', label: '说得不对' },
+  { value: 'not_helpful', label: '没什么帮助' },
+  { value: 'repetitive', label: '有点重复' },
+  { value: 'style_dislike', label: '表达不喜欢' },
+  { value: 'other', label: '其他' },
+]
+
+function submitReview() {
+  if (!selectedChoice.value || props.submitting) return
+  emit('submit-review', { choice: selectedChoice.value, freeText: reviewText.value.trim() })
+}
 
 const bandClass = computed(() => {
   const band = props.feedback?.band
@@ -218,4 +261,19 @@ const timingLabel = computed(() => props.feedback?.timing_signal?.label || '')
   font-weight: 700;
   color: var(--primary);
 }
+.ai-feedback-review {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(33, 79, 61, 0.1);
+}
+.ai-feedback-review-title { font-size: 12px; font-weight: 800; color: var(--text2); }
+.ai-feedback-review-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.ai-feedback-review-chip { border: 1px solid rgba(33,79,61,.14); border-radius: 999px; padding: 7px 10px; background: rgba(255,255,255,.72); color: var(--text1); font-size: 12px; cursor: pointer; }
+.ai-feedback-review-chip.active { border-color: var(--primary); background: rgba(33,79,61,.1); color: var(--primary); font-weight: 800; }
+.ai-feedback-review-text { width: 100%; min-height: 72px; margin-top: 10px; padding: 10px 12px; resize: vertical; border: 1px solid rgba(33,79,61,.14); border-radius: 12px; background: rgba(255,255,255,.78); color: var(--text); font: inherit; box-sizing: border-box; }
+.ai-feedback-review-submit { margin-top: 8px; border: 0; border-radius: 12px; padding: 9px 14px; background: var(--primary); color: white; font-weight: 800; cursor: pointer; }
+.ai-feedback-review-submit:disabled, .ai-feedback-review-chip:disabled { opacity: .55; cursor: default; }
+.ai-feedback-review-success { margin-top: 8px; color: var(--primary); font-size: 13px; font-weight: 700; }
+.ai-feedback-review-error { margin-top: 8px; color: #b45309; font-size: 12px; }
+
 </style>
