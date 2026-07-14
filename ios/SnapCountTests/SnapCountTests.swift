@@ -154,4 +154,19 @@ private struct DomainRepositoryStub: DomainRepositoryProtocol {
     func fetchDefinitions(accessToken: String) async throws -> [NativeDomainDefinition] {
         [NativeDomainDefinition(id: "sport", name: "运动记录", description: "", icon: "🏃", isSystem: true, schema: [:], display: [:], recordCount: 0)]
     }
+
+    func testAccountTypeNormalizationMatchesPWAAdapter() {
+        XCTAssertEqual(NativeAccountType.normalized("wechat"), .walletBalance)
+        XCTAssertEqual(NativeAccountType.normalized("bank_card"), .debitCard)
+        XCTAssertEqual(NativeAccountType.normalized("huabei"), .creditLine)
+        XCTAssertEqual(NativeAccountType.normalized("unknown"), .other)
+    }
+
+    func testAccountDraftRejectsInvalidLiabilityDays() {
+        var draft = NativeAccountDraft()
+        draft.name = "信用账户"
+        draft.type = .creditCard
+        draft.billDayText = "32"
+        XCTAssertEqual(draft.validationMessage, "账单日必须是 1-31 之间的整数")
+    }
 }
