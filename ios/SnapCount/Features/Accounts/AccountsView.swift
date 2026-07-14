@@ -54,10 +54,17 @@ struct AccountsView: View {
         }
         .navigationTitle("账户与钱包")
         .toolbar {
-            Button {
-                editDraft = NativeAccountDraft()
-            } label: {
-                Label("新建账户", systemImage: "plus")
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                NavigationLink {
+                    UnboundRecordsView()
+                } label: {
+                    Label("未绑定记录", systemImage: "link.badge.plus")
+                }
+                Button {
+                    editDraft = NativeAccountDraft()
+                } label: {
+                    Label("新建账户", systemImage: "plus")
+                }
             }
         }
         .navigationDestination(for: String.self) { id in
