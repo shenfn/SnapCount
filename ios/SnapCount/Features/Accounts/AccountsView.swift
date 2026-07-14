@@ -125,11 +125,18 @@ private struct AccountDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let accountId: String
     @State private var editDraft: NativeAccountDraft?
+    @State private var repaymentCycle: NativeRepaymentCycle?
     @State private var showArchiveConfirmation = false
 
     private var account: NativeAccount? { appState.accounts.first { $0.id == accountId } }
     private var detail: NativeAccountDetail? {
         appState.selectedAccountDetail?.account.id == accountId ? appState.selectedAccountDetail : nil
+    }
+    private var currentCycle: NativeRepaymentCycle? {
+        detail?.repaymentCycles.first { $0.cycleMonth == Self.currentMonthKey }
+    }
+    private var debitAccounts: [NativeAccount] {
+        appState.accounts.filter { !$0.isArchived && !$0.type.isLiability && $0.id != accountId }
     }
 
     var body: some View {
@@ -154,6 +161,27 @@ private struct AccountDetailView: View {
                             LabeledContent("账单日", value: account.billDay.map { "每月\($0)日" } ?? "未设置")
                             LabeledContent("还款日", value: account.paymentDueDay.map { "每月\($0)日" } ?? "未设置")
                             LabeledContent("自动确认", value: account.autoConfirmRepayment ? "已开启" : "需手动确认")
+                        }
+
+                        if let currentCycle {
+                            Section("本期账单") {
+                                LabeledContent("账单月份", value: currentCycle.cycleMonth)
+                                LabeledContent("应还金额", value: "¥\(amount(currentCycle.statementAmount))")
+                                LabeledContent("剩余待还", value: "¥\(amount(currentCycle.remainingAmount))")
+                                LabeledContent("当前状态", value: currentCycle.status.title)
+                                if let dueDate = currentCycle.dueDate {
+                                    LabeledContent("还款日", value: dueDate)
+                                }
+                                if currentCycle.status.allowsManualRepayment {
+                                    Button {
+                                        repaymentCycle = currentCycle
+                                    } label: {
+                                        Label("确认本期还款", systemImage: "checkmark.circle")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .disabled(appState.isSubmittingRepayment)
+                                }
+                            }
                         }
                     }
 
@@ -225,6 +253,9 @@ private struct AccountDetailView: View {
                     if let message = appState.accountMessage {
                         Section { Text(message).foregroundStyle(JieziTheme.coral) }
                     }
+                    if let message = appState.repaymentMessage {
+                        Section { Text(message).foregroundStyle(JieziTheme.brand) }
+                    }
                 }
                 .scrollContentBackground(.hidden)
                 .navigationTitle(account.title)
@@ -241,6 +272,13 @@ private struct AccountDetailView: View {
                     }
                 }
                 .sheet(item: $editDraft) { draft in AccountEditSheet(draft: draft) }
+                .sheet(item: $repaymentCycle) { cycle in
+                    RepaymentConfirmationSheet(
+                        account: account,
+                        cycle: cycle,
+                        debitAccounts: debitAccounts
+                    )
+                }
                 .confirmationDialog(
                     account.isArchived ? "恢复这个账户？" : "归档这个账户？",
                     isPresented: $showArchiveConfirmation,
@@ -265,6 +303,165 @@ private struct AccountDetailView: View {
     private func amount(_ value: Double) -> String { String(format: "%.2f", value) }
     private func activeNet(_ entries: [NativeAccountEntry]) -> Double {
         entries.filter { !$0.isVoided }.reduce(0) { $0 + ($1.direction == "in" ? $1.amount : -$1.amount) }
+    }
+
+    private static let monthKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM"
+        return formatter
+    }()
+
+    private static var currentMonthKey: String {
+        monthKeyFormatter.string(from: Date())
+    }
+}
+
+private struct RepaymentConfirmationSheet: View {
+    private enum Mode: String, CaseIterable, Identifiable {
+        case full
+        case partial
+
+        var id: String { rawValue }
+        var title: String { self == .full ? "还清本期" : "记录部分还款" }
+    }
+
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    let account: NativeAccount
+    let cycle: NativeRepaymentCycle
+    let debitAccounts: [NativeAccount]
+    @State private var mode: Mode = .full
+    @State private var partialAmountText = ""
+    @State private var debitAccountId: String?
+
+    init(account: NativeAccount, cycle: NativeRepaymentCycle, debitAccounts: [NativeAccount]) {
+        self.account = account
+        self.cycle = cycle
+        self.debitAccounts = debitAccounts
+        _debitAccountId = State(initialValue: cycle.autoDebitAccountId ?? account.autoDebitAccountId)
+    }
+
+    private var repaymentAmount: Double {
+        if mode == .partial {
+            return max(Double(partialAmountText.replacingOccurrences(of: ",", with: ".")) ?? 0, 0)
+        }
+        if cycle.remainingAmount > 0 { return cycle.remainingAmount }
+        if cycle.statementAmount > 0 { return cycle.statementAmount }
+        return max(account.currentBalance, 0)
+    }
+
+    private var repaymentStatus: NativeRepaymentStatus {
+        if mode == .full { return .paid }
+        return NativeRepaymentCalculator.status(
+            paidAmount: repaymentAmount,
+            remainingAmount: cycle.remainingAmount,
+            minimumPaymentAmount: cycle.minPaymentAmount
+        )
+    }
+
+    private var overpaymentAmount: Double {
+        NativeRepaymentCalculator.overpayment(
+            paidAmount: repaymentAmount,
+            currentBalance: account.currentBalance
+        )
+    }
+
+    private var liabilityDecrease: Double {
+        max(repaymentAmount - overpaymentAmount, 0)
+    }
+
+    private var debitAccount: NativeAccount? {
+        debitAccounts.first { $0.id == debitAccountId }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("还款方式", selection: $mode) {
+                        ForEach(Mode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if mode == .partial {
+                        TextField("本次还款金额", text: $partialAmountText)
+                            .keyboardType(.decimalPad)
+                    } else {
+                        LabeledContent("本次还款", value: "¥\(amount(repaymentAmount))")
+                    }
+                } header: {
+                    Text("\(cycle.cycleMonth) 账单")
+                } footer: {
+                    Text("当前剩余 ¥\(amount(cycle.remainingAmount))，确认后由服务端原子更新账单、余额和流水。")
+                }
+
+                Section("扣款账户") {
+                    Picker("同步扣款", selection: $debitAccountId) {
+                        Text("不关联扣款账户").tag(String?.none)
+                        ForEach(debitAccounts) { account in
+                            Text(account.title).tag(String?.some(account.id))
+                        }
+                    }
+                    if debitAccount == nil {
+                        Text("仅减少当前欠款，不记录其他账户扣款。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("本次影响") {
+                    LabeledContent(account.title, value: "-¥\(amount(liabilityDecrease))")
+                    if let debitAccount {
+                        LabeledContent(debitAccount.title, value: "-¥\(amount(repaymentAmount))")
+                    }
+                    if overpaymentAmount > 0 {
+                        LabeledContent("待确认溢缴", value: "¥\(amount(overpaymentAmount))")
+                            .foregroundStyle(JieziTheme.coral)
+                    }
+                    LabeledContent("账单状态", value: repaymentStatus.title)
+                }
+
+                if let message = appState.repaymentMessage {
+                    Section { Text(message).foregroundStyle(JieziTheme.coral) }
+                }
+            }
+            .navigationTitle("确认还款")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                        .disabled(appState.isSubmittingRepayment)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        if appState.isSubmittingRepayment { ProgressView() } else { Text("确认") }
+                    }
+                    .disabled(appState.isSubmittingRepayment || repaymentAmount <= 0)
+                }
+            }
+        }
+    }
+
+    private func submit() async {
+        let note = mode == .partial ? "手动记录部分还款" : "手动确认已还清"
+        if await appState.confirmRepayment(
+            cycle: cycle,
+            paidAmount: repaymentAmount,
+            debitAccountId: debitAccountId,
+            status: repaymentStatus,
+            note: note
+        ) {
+            dismiss()
+        }
+    }
+
+    private func amount(_ value: Double) -> String {
+        String(format: "%.2f", value)
     }
 }
 
