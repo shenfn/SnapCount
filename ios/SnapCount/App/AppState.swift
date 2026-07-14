@@ -32,6 +32,11 @@ final class AppState: ObservableObject {
     @Published var accountMessage: String?
     @Published var isLoadingAccounts = false
     @Published var isSavingAccount = false
+    @Published var unboundRecords: [NativeUnboundRecord] = []
+    @Published var unboundRecordsMessage: String?
+    @Published var unboundBindingMessage: String?
+    @Published var isLoadingUnboundRecords = false
+    @Published var isBindingUnboundRecords = false
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -40,6 +45,7 @@ final class AppState: ObservableObject {
     private let domainRepository: DomainRepositoryProtocol
     private let snapshotStore: DashboardSnapshotStoreProtocol
     private let accountRepository: AccountRepositoryProtocol
+    private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
@@ -51,7 +57,8 @@ final class AppState: ObservableObject {
         inboxRepository: InboxRepositoryProtocol = InboxRepository(),
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
         snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
-        accountRepository: AccountRepositoryProtocol = AccountRepository()
+        accountRepository: AccountRepositoryProtocol = AccountRepository(),
+        unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
@@ -59,6 +66,7 @@ final class AppState: ObservableObject {
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore
         self.accountRepository = accountRepository
+        self.unboundRecordRepository = unboundRecordRepository
     }
 
     func bootstrap() {
@@ -303,6 +311,97 @@ final class AppState: ObservableObject {
             accountMessage = error.localizedDescription
             return false
         }
+    }
+
+    func loadUnboundRecords(monthKey: String) async {
+        guard !isLoadingUnboundRecords else { return }
+        isLoadingUnboundRecords = true
+        unboundRecordsMessage = nil
+        defer { isLoadingUnboundRecords = false }
+
+        do {
+            let session = try await validSession()
+            unboundRecords = try await unboundRecordRepository.fetch(
+                monthKey: monthKey,
+                accessToken: session.accessToken
+            )
+        } catch {
+            unboundRecordsMessage = error.localizedDescription
+        }
+    }
+
+    func bindUnboundRecord(
+        _ record: NativeUnboundRecord,
+        accountId: String,
+        monthKey: String
+    ) async -> Bool {
+        guard !isBindingUnboundRecords else { return false }
+        isBindingUnboundRecords = true
+        unboundBindingMessage = nil
+        defer { isBindingUnboundRecords = false }
+
+        do {
+            let session = try await validSession()
+            try await unboundRecordRepository.bind(
+                record,
+                accountId: accountId,
+                accessToken: session.accessToken
+            )
+            unboundRecords.removeAll { $0.id == record.id && $0.kind == record.kind }
+            await refreshAfterAccountBinding(monthKey: monthKey)
+            unboundBindingMessage = "已补绑账户并生成流水"
+            return true
+        } catch {
+            unboundBindingMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func batchBindUnboundRecords(
+        _ candidates: [NativeUnboundBindingCandidate],
+        monthKey: String
+    ) async -> Bool {
+        guard !isBindingUnboundRecords, !candidates.isEmpty else { return false }
+        isBindingUnboundRecords = true
+        unboundBindingMessage = nil
+        defer { isBindingUnboundRecords = false }
+
+        do {
+            let session = try await validSession()
+            var successCount = 0
+            var failureCount = 0
+            for candidate in candidates {
+                do {
+                    try await unboundRecordRepository.bind(
+                        candidate.record,
+                        accountId: candidate.recommendation.account.id,
+                        accessToken: session.accessToken
+                    )
+                    successCount += 1
+                } catch {
+                    failureCount += 1
+                }
+            }
+            await refreshAfterAccountBinding(monthKey: monthKey)
+            unboundBindingMessage = failureCount == 0
+                ? "已批量补绑 \(successCount) 条记录"
+                : "已补绑 \(successCount) 条，\(failureCount) 条失败"
+            return successCount > 0
+        } catch {
+            unboundBindingMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func openUnboundRecord(_ record: NativeUnboundRecord) {
+        selectedTab = .records
+        recordsPath = [record.reference]
+    }
+
+    private func refreshAfterAccountBinding(monthKey: String) async {
+        await loadAccounts()
+        await loadUnboundRecords(monthKey: monthKey)
+        await refreshDashboard()
     }
 
     func prefetchRecordDetails(_ references: [String]) {
@@ -586,6 +685,9 @@ final class AppState: ObservableObject {
         dashboard = DashboardSnapshot()
         accounts = []
         selectedAccountDetail = nil
+        unboundRecords = []
+        unboundRecordsMessage = nil
+        unboundBindingMessage = nil
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today
