@@ -453,6 +453,7 @@ final class AppState: ObservableObject {
             let session = try await validSession()
             let reference = try await recordRepository.saveDetail(draft, accessToken: session.accessToken)
             await refreshDashboard()
+            await loadAccounts()
             recordsPath = [reference]
             recordDetailCache.removeValue(forKey: reference)
             await loadRecordDetail(reference: reference, force: true)

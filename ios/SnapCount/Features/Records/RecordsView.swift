@@ -267,6 +267,7 @@ private struct RecordImagePreview: View {
 }
 
 private struct RecordEditSheet: View {
+    @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var draft: NativeRecordEditDraft
     @State private var message: String?
@@ -302,17 +303,21 @@ private struct RecordEditSheet: View {
                     }
                 }
 
+                Section("账户") {
+                    Picker("绑定账户", selection: $draft.accountId) {
+                        Text("不绑定账户").tag(String?.none)
+                        ForEach(accountCandidates) { account in
+                            Text(account.title).tag(String?.some(account.id))
+                        }
+                    }
+                    Text("保存后由服务端原子更新记录与账户流水，不会在客户端直接修改余额。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("备注") {
                     TextField("备注", text: $draft.note, axis: .vertical)
                         .lineLimit(3...6)
-                }
-
-                if draft.accountId != nil {
-                    Section {
-                        Label("会保留当前账户绑定，并同步更新账户流水。", systemImage: "link")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
                 if let message {
@@ -322,6 +327,9 @@ private struct RecordEditSheet: View {
                             .foregroundStyle(JieziTheme.coral)
                     }
                 }
+            }
+            .task {
+                if appState.accounts.isEmpty { await appState.loadAccounts() }
             }
             .navigationTitle("编辑记录")
             .navigationBarTitleDisplayMode(.inline)
@@ -348,6 +356,10 @@ private struct RecordEditSheet: View {
                 }
             }
         }
+    }
+
+    private var accountCandidates: [NativeAccount] {
+        appState.accounts.filter { !$0.isArchived || $0.id == draft.accountId }
     }
 
     private func save() async {
