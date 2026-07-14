@@ -169,4 +169,41 @@ private struct DomainRepositoryStub: DomainRepositoryProtocol {
         draft.billDayText = "32"
         XCTAssertEqual(draft.validationMessage, "账单日必须是 1-31 之间的整数")
     }
+
+    func testAccountRecommendationMatchesPWAExpenseRules() {
+        let account = NativeAccount(
+            id: "wechat", name: "微信零钱", type: .walletBalance, institution: "微信", last4: "",
+            currency: "CNY", initialBalance: 0, currentBalance: 100, snapshotBalance: nil,
+            snapshotAt: nil, sourceRecordTable: "", sourceRecordId: "", billDay: nil,
+            paymentDueDay: nil, autoDebitAccountId: nil, autoConfirmRepayment: false,
+            gracePeriodDays: 0, lastReconciledAt: nil, isDefaultExpense: false,
+            isDefaultIncome: false, isArchived: false, sortOrder: 0
+        )
+        let record = NativeUnboundRecord(
+            id: "tx-1", kind: .expense, title: "早餐", amount: 12, date: "2026-07-14",
+            time: nil, platform: "微信", category: "餐饮", paymentMethod: "微信支付",
+            note: nil, source: nil, imagePath: nil, imageHash: nil, companionMessage: nil
+        )
+        XCTAssertEqual(
+            NativeAccountRecommendationEngine.recommendation(for: record, accounts: [account])?.account.id,
+            "wechat"
+        )
+    }
+
+    func testArchivedAccountIsNeverRecommended() {
+        let account = NativeAccount(
+            id: "default", name: "默认卡", type: .debitCard, institution: "", last4: "",
+            currency: "CNY", initialBalance: 0, currentBalance: 0, snapshotBalance: nil,
+            snapshotAt: nil, sourceRecordTable: "", sourceRecordId: "", billDay: nil,
+            paymentDueDay: nil, autoDebitAccountId: nil, autoConfirmRepayment: false,
+            gracePeriodDays: 0, lastReconciledAt: nil, isDefaultExpense: true,
+            isDefaultIncome: false, isArchived: true, sortOrder: 0
+        )
+        let record = NativeUnboundRecord(
+            id: "tx-1", kind: .expense, title: "支出", amount: 10, date: "2026-07-14",
+            time: nil, platform: nil, category: nil, paymentMethod: nil,
+            note: nil, source: nil, imagePath: nil, imageHash: nil, companionMessage: nil
+        )
+        XCTAssertNil(NativeAccountRecommendationEngine.recommendation(for: record, accounts: [account]))
+    }
 }
