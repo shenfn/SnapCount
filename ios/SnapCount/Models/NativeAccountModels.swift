@@ -18,8 +18,41 @@ enum NativeAccountType: String, Codable, CaseIterable {
 }
 
 enum NativeRepaymentStatus: String, Codable, CaseIterable {
-    case pending, dueToday = "due_today", overdueUnconfirmed = "overdue_unconfirmed", partialPaid = "partial_paid", minimumPaid = "minimum_paid", paid, ignored, carriedOver = "carried_over", historicalUnconfirmed = "historical_unconfirmed"
-    var title: String { switch self { case .pending:return "待还";case .dueToday:return "今日到期";case .overdueUnconfirmed:return "逾期未确认";case .partialPaid:return "部分已还";case .minimumPaid:return "已还最低";case .paid:return "已还清";case .ignored:return "已忽略";case .carriedOver:return "已结转";case .historicalUnconfirmed:return "历史待确认" } }
+    case draftEstimated = "draft_estimated"
+    case pending
+    case dueToday = "due_today"
+    case overdueUnconfirmed = "overdue_unconfirmed"
+    case partialPaid = "partial_paid"
+    case minimumPaid = "minimum_paid"
+    case paid
+    case ignored
+    case carriedOver = "carried_over"
+    case historicalUnconfirmed = "historical_unconfirmed"
+    case reconciled
+    case replaced
+    case reopened
+
+    var title: String {
+        switch self {
+        case .draftEstimated: return "系统估算"
+        case .pending: return "待还"
+        case .dueToday: return "今日到期"
+        case .overdueUnconfirmed: return "逾期未确认"
+        case .partialPaid: return "部分已还"
+        case .minimumPaid: return "已还最低"
+        case .paid: return "已还清"
+        case .ignored: return "已忽略"
+        case .carriedOver: return "已结转"
+        case .historicalUnconfirmed: return "历史待确认"
+        case .reconciled: return "已对账"
+        case .replaced: return "已被替代"
+        case .reopened: return "重新估算中"
+        }
+    }
+
+    var allowsManualRepayment: Bool {
+        [.pending, .dueToday, .overdueUnconfirmed, .partialPaid, .carriedOver].contains(self)
+    }
 }
 
 struct NativeAccount: Identifiable {
@@ -34,6 +67,22 @@ struct NativeAccountEntry: Identifiable { let id:String;let accountId:String;let
 struct NativeRepaymentCycle: Identifiable { let id:String;let accountId:String;let cycleMonth:String;let statementStartDate:String?;let statementEndDate:String?;let dueDate:String?;let statementAmount:Double;let paidAmount:Double;let remainingAmount:Double;let carriedOverAmount:Double;let originalStatementAmount:Double?;let minPaymentAmount:Double?;let refundAppliedAmount:Double;let status:NativeRepaymentStatus;let autoDebitAccountId:String?;let autoConfirmRepayment:Bool;let source:String;let evidenceRecordId:String?;let confidence:Double?;let note:String;let confirmedAt:String? }
 struct NativeLiabilityPayment: Identifiable { let id:String;let accountId:String;let statementId:String?;let debitAccountId:String?;let amount:Double;let overpaymentAmount:Double;let paidAt:String;let source:String;let evidenceRecordId:String?;let status:String;let note:String }
 struct NativeAccountDetail { let account:NativeAccount;let entries:[NativeAccountEntry];let repaymentCycles:[NativeRepaymentCycle];let payments:[NativeLiabilityPayment] }
+
+enum NativeRepaymentCalculator {
+    static func status(
+        paidAmount: Double,
+        remainingAmount: Double,
+        minimumPaymentAmount: Double?
+    ) -> NativeRepaymentStatus {
+        if paidAmount >= remainingAmount { return .paid }
+        if let minimumPaymentAmount, paidAmount >= minimumPaymentAmount { return .minimumPaid }
+        return .partialPaid
+    }
+
+    static func overpayment(paidAmount: Double, currentBalance: Double) -> Double {
+        max(paidAmount - currentBalance, 0)
+    }
+}
 
 struct NativeAccountDraft: Identifiable, Equatable {
     let accountId: String?

@@ -5,6 +5,16 @@ protocol AccountRepositoryProtocol {
     func fetchDetail(account:NativeAccount, accessToken:String) async -> NativeAccountDetail
     func save(_ draft: NativeAccountDraft, userId: String, accessToken: String) async throws -> [NativeAccount]
     func setArchived(accountId: String, archived: Bool, accessToken: String) async throws -> [NativeAccount]
+    func ensureRepaymentCycles(monthKey: String, accessToken: String) async throws
+    func confirmRepayment(
+        cycleId: String,
+        paidAmount: Double,
+        debitAccountId: String?,
+        status: NativeRepaymentStatus,
+        note: String,
+        accessToken: String
+    ) async throws -> NativeRepaymentCycle
+    func revokePayment(paymentId: String, accessToken: String) async throws -> NativeRepaymentCycle?
 }
 
 final class AccountRepository: AccountRepositoryProtocol {
@@ -92,6 +102,58 @@ final class AccountRepository: AccountRepositoryProtocol {
             accessToken: accessToken
         )
         return try await fetchAccounts(accessToken: accessToken)
+    }
+
+    func ensureRepaymentCycles(monthKey: String, accessToken: String) async throws {
+        _ = try await remoteClient.rpc(
+            [RepaymentCycleRow].self,
+            name: "ensure_liability_repayment_cycles",
+            body: ["p_cycle_month": AnyCodable(monthKey)],
+            accessToken: accessToken
+        )
+    }
+
+    func confirmRepayment(
+        cycleId: String,
+        paidAmount: Double,
+        debitAccountId: String?,
+        status: NativeRepaymentStatus,
+        note: String,
+        accessToken: String
+    ) async throws -> NativeRepaymentCycle {
+        guard paidAmount > 0 else {
+            throw SupabaseRemoteError.requestFailed("请输入有效的还款金额")
+        }
+        let row = try await remoteClient.rpc(
+            RepaymentCycleRow.self,
+            name: "set_repayment_cycle_paid_amount",
+            body: [
+                "p_cycle_id": AnyCodable(cycleId),
+                "p_paid_amount": AnyCodable(paidAmount),
+                "p_paid_at": AnyCodable(ISO8601DateFormatter().string(from: Date())),
+                "p_debit_account_id": AnyCodable(nullableString(debitAccountId)),
+                "p_status": AnyCodable(status.rawValue),
+                "p_note": AnyCodable(note)
+            ],
+            accessToken: accessToken
+        )
+        guard let cycle = row.native else {
+            throw SupabaseRemoteError.requestFailed("服务端返回了无法识别的还款状态")
+        }
+        return cycle
+    }
+
+    func revokePayment(paymentId: String, accessToken: String) async throws -> NativeRepaymentCycle? {
+        let row = try await remoteClient.rpc(
+            RepaymentCycleRow?.self,
+            name: "revoke_liability_payment",
+            body: [
+                "p_payment_id": AnyCodable(paymentId),
+                "p_reason": AnyCodable("用户撤销还款")
+            ],
+            accessToken: accessToken
+        )
+        return row?.native
     }
 
     private func unsetOtherDefaults(column: String, userId: String, keepId: String, accessToken: String) async throws {

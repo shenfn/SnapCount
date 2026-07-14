@@ -107,52 +107,29 @@ final class SnapCountTests: XCTestCase {
 
     func testFinancialContractPreservesPWAKeys() {
         XCTAssertEqual(NativeAccountType.allCases.map(\.rawValue), ["cash", "wallet_balance", "debit_card", "credit_card", "credit_line", "other"])
-        XCTAssertEqual(NativeRepaymentStatus.allCases.map(\.rawValue), ["pending", "due_today", "overdue_unconfirmed", "partial_paid", "minimum_paid", "paid", "ignored", "carried_over", "historical_unconfirmed"])
+        XCTAssertEqual(
+            NativeRepaymentStatus.allCases.map(\.rawValue),
+            ["draft_estimated", "pending", "due_today", "overdue_unconfirmed", "partial_paid", "minimum_paid", "paid", "ignored", "carried_over", "historical_unconfirmed", "reconciled", "replaced", "reopened"]
+        )
     }
 
-}
-
-private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
-    let snapshot: DashboardSnapshot
-
-    func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
-        snapshot
-    }
-}
-
-
-private struct RecordRepositoryStub: RecordRepositoryProtocol {
-    func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
-        throw SupabaseRemoteError.requestFailed("unused")
-    }
-
-    func saveDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String {
-        "expense:record-1"
+    func testRepaymentCalculatorMatchesPWAStatusRules() {
+        XCTAssertEqual(
+            NativeRepaymentCalculator.status(paidAmount: 100, remainingAmount: 100, minimumPaymentAmount: 20),
+            .paid
+        )
+        XCTAssertEqual(
+            NativeRepaymentCalculator.status(paidAmount: 20, remainingAmount: 100, minimumPaymentAmount: 20),
+            .minimumPaid
+        )
+        XCTAssertEqual(
+            NativeRepaymentCalculator.status(paidAmount: 10, remainingAmount: 100, minimumPaymentAmount: 20),
+            .partialPaid
+        )
     }
 
-    func delete(reference: String, accessToken: String) async throws {}
-}
-
-private struct InboxRepositoryStub: InboxRepositoryProtocol {
-    func discard(id: String, accessToken: String) async throws {}
-
-    func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult {
-        ShortcutUploadResult(displayText: "已重新识别")
-    }
-
-    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
-        "expense:record-1"
-    }
-
-    func resolveImageURL(path: String, accessToken: String) async throws -> URL {
-        URL(string: "https://example.com/receipt.jpg")!
-    }
-}
-
-
-private struct DomainRepositoryStub: DomainRepositoryProtocol {
-    func fetchDefinitions(accessToken: String) async throws -> [NativeDomainDefinition] {
-        [NativeDomainDefinition(id: "sport", name: "运动记录", description: "", icon: "🏃", isSystem: true, schema: [:], display: [:], recordCount: 0)]
+    func testRepaymentOverpaymentUsesCurrentLiabilityBalance() {
+        XCTAssertEqual(NativeRepaymentCalculator.overpayment(paidAmount: 120, currentBalance: 100), 20)
     }
 
     func testAccountTypeNormalizationMatchesPWAAdapter() {
@@ -205,5 +182,50 @@ private struct DomainRepositoryStub: DomainRepositoryProtocol {
             note: nil, source: nil, imagePath: nil, imageHash: nil, companionMessage: nil
         )
         XCTAssertNil(NativeAccountRecommendationEngine.recommendation(for: record, accounts: [account]))
+    }
+
+}
+
+private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
+    let snapshot: DashboardSnapshot
+
+    func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
+        snapshot
+    }
+}
+
+
+private struct RecordRepositoryStub: RecordRepositoryProtocol {
+    func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
+        throw SupabaseRemoteError.requestFailed("unused")
+    }
+
+    func saveDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String {
+        "expense:record-1"
+    }
+
+    func delete(reference: String, accessToken: String) async throws {}
+}
+
+private struct InboxRepositoryStub: InboxRepositoryProtocol {
+    func discard(id: String, accessToken: String) async throws {}
+
+    func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult {
+        ShortcutUploadResult(displayText: "已重新识别")
+    }
+
+    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
+        "expense:record-1"
+    }
+
+    func resolveImageURL(path: String, accessToken: String) async throws -> URL {
+        URL(string: "https://example.com/receipt.jpg")!
+    }
+}
+
+
+private struct DomainRepositoryStub: DomainRepositoryProtocol {
+    func fetchDefinitions(accessToken: String) async throws -> [NativeDomainDefinition] {
+        [NativeDomainDefinition(id: "sport", name: "运动记录", description: "", icon: "🏃", isSystem: true, schema: [:], display: [:], recordCount: 0)]
     }
 }
