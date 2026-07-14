@@ -62,6 +62,7 @@ final class AccountRepository: AccountRepositoryProtocol {
             let rows = try await remoteClient.post(
                 [AccountRow].self,
                 path: "rest/v1/accounts",
+                queryItems: [],
                 body: body,
                 accessToken: accessToken
             )
