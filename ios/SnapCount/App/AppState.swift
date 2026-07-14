@@ -31,6 +31,7 @@ final class AppState: ObservableObject {
     @Published var selectedAccountDetail: NativeAccountDetail?
     @Published var accountMessage: String?
     @Published var isLoadingAccounts = false
+    @Published var isSavingAccount = false
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -249,6 +250,59 @@ final class AppState: ObservableObject {
         let session = try? await validSession()
         guard let session else { accountMessage = "登录状态已失效，请重新登录。"; return }
         selectedAccountDetail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
+    }
+
+    func saveAccount(_ draft: NativeAccountDraft) async -> Bool {
+        guard !isSavingAccount else { return false }
+        isSavingAccount = true
+        accountMessage = nil
+        defer { isSavingAccount = false }
+
+        do {
+            let session = try await validSession()
+            accounts = try await accountRepository.save(
+                draft,
+                userId: session.user.id,
+                accessToken: session.accessToken
+            )
+            if let accountId = draft.accountId,
+               let account = accounts.first(where: { $0.id == accountId }) {
+                selectedAccountDetail = await accountRepository.fetchDetail(
+                    account: account,
+                    accessToken: session.accessToken
+                )
+            }
+            return true
+        } catch {
+            accountMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func setAccountArchived(_ account: NativeAccount, archived: Bool) async -> Bool {
+        guard !isSavingAccount else { return false }
+        isSavingAccount = true
+        accountMessage = nil
+        defer { isSavingAccount = false }
+
+        do {
+            let session = try await validSession()
+            accounts = try await accountRepository.setArchived(
+                accountId: account.id,
+                archived: archived,
+                accessToken: session.accessToken
+            )
+            if let updated = accounts.first(where: { $0.id == account.id }) {
+                selectedAccountDetail = await accountRepository.fetchDetail(
+                    account: updated,
+                    accessToken: session.accessToken
+                )
+            }
+            return true
+        } catch {
+            accountMessage = error.localizedDescription
+            return false
+        }
     }
 
     func prefetchRecordDetails(_ references: [String]) {
