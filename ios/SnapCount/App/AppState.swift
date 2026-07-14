@@ -32,6 +32,8 @@ final class AppState: ObservableObject {
     @Published var accountMessage: String?
     @Published var isLoadingAccounts = false
     @Published var isSavingAccount = false
+    @Published var isSubmittingRepayment = false
+    @Published var repaymentMessage: String?
     @Published var unboundRecords: [NativeUnboundRecord] = []
     @Published var unboundRecordsMessage: String?
     @Published var unboundBindingMessage: String?
@@ -257,7 +259,81 @@ final class AppState: ObservableObject {
         accountMessage = nil
         let session = try? await validSession()
         guard let session else { accountMessage = "登录状态已失效，请重新登录。"; return }
+        if account.type.isLiability {
+            try? await accountRepository.ensureRepaymentCycles(
+                monthKey: Self.currentMonthKey,
+                accessToken: session.accessToken
+            )
+        }
         selectedAccountDetail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
+    }
+
+    func confirmRepayment(
+        cycle: NativeRepaymentCycle,
+        paidAmount: Double,
+        debitAccountId: String?,
+        status: NativeRepaymentStatus,
+        note: String
+    ) async -> Bool {
+        guard !isSubmittingRepayment else { return false }
+        isSubmittingRepayment = true
+        repaymentMessage = nil
+        defer { isSubmittingRepayment = false }
+
+        do {
+            let session = try await validSession()
+            _ = try await accountRepository.confirmRepayment(
+                cycleId: cycle.id,
+                paidAmount: paidAmount,
+                debitAccountId: debitAccountId,
+                status: status,
+                note: note,
+                accessToken: session.accessToken
+            )
+            await refreshAfterRepayment(accountId: cycle.accountId, session: session)
+            repaymentMessage = debitAccountId == nil
+                ? "已确认还款"
+                : "已确认还款并记录扣款"
+            return true
+        } catch {
+            repaymentMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func revokeLiabilityPayment(
+        payment: NativeLiabilityPayment,
+        accountId: String
+    ) async -> Bool {
+        guard !isSubmittingRepayment else { return false }
+        isSubmittingRepayment = true
+        repaymentMessage = nil
+        defer { isSubmittingRepayment = false }
+
+        do {
+            let session = try await validSession()
+            _ = try await accountRepository.revokePayment(
+                paymentId: payment.id,
+                accessToken: session.accessToken
+            )
+            await refreshAfterRepayment(accountId: accountId, session: session)
+            repaymentMessage = "已撤销还款"
+            return true
+        } catch {
+            repaymentMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func refreshAfterRepayment(accountId: String, session: SupabaseAuthSession) async {
+        await loadAccounts()
+        if let account = accounts.first(where: { $0.id == accountId }) {
+            selectedAccountDetail = await accountRepository.fetchDetail(
+                account: account,
+                accessToken: session.accessToken
+            )
+        }
+        await refreshDashboard()
     }
 
     func saveAccount(_ draft: NativeAccountDraft) async -> Bool {
@@ -685,6 +761,7 @@ final class AppState: ObservableObject {
         dashboard = DashboardSnapshot()
         accounts = []
         selectedAccountDetail = nil
+        repaymentMessage = nil
         unboundRecords = []
         unboundRecordsMessage = nil
         unboundBindingMessage = nil
@@ -703,6 +780,17 @@ final class AppState: ObservableObject {
             throw SupabaseRemoteError.missingSession
         }
         return session
+    }
+
+    private static let monthKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM"
+        return formatter
+    }()
+
+    private static var currentMonthKey: String {
+        monthKeyFormatter.string(from: Date())
     }
 }
 
