@@ -21,6 +21,25 @@ final class SnapCountTests: XCTestCase {
         try await repository.delete(reference: "expense:record-1", accessToken: "test-token")
     }
 
+    func testManualExpensePreservesPWAValidationAndCategoryKeys() {
+        var draft = NativeManualRecordDraft()
+        draft.amountText = "28.50"
+        draft.category = "food"
+        XCTAssertNil(draft.validationMessage(domain: nil))
+        XCTAssertEqual(draft.amount, 28.5)
+        XCTAssertEqual(NativeManualRecordDraft.expenseCategories.map(\.id), ["food", "shopping", "transport", "entertainment", "life", "health", "education", "other"])
+    }
+
+    func testManualUniversalPayloadUsesPWADomainKeys() {
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
+        draft.primaryValueText = "45"
+        draft.dimension = "骑行"
+        let payload = draft.universalPayload(domain: nil)
+        XCTAssertEqual(payload.double("duration_minutes"), 45)
+        XCTAssertEqual(payload.string("sport_type"), "骑行")
+        XCTAssertEqual(payload.string("source_app"), "manual")
+    }
+
     func testInboxRepositoryProtocolSupportsStubInjection() async throws {
         let repository = InboxRepositoryStub()
         let result = try await repository.retry(id: "staging-1", accessToken: "test-token")
@@ -300,6 +319,10 @@ private struct RecordRepositoryStub: RecordRepositoryProtocol {
     }
 
     func saveDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String {
+        "expense:record-1"
+    }
+
+    func create(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?, userId: String, accessToken: String) async throws -> String {
         "expense:record-1"
     }
 

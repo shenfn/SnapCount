@@ -932,6 +932,93 @@ final class NativeDataService {
         return groups.keys.sorted(by: >).map { dateKey in NativeDayRecordGroup(dateKey: dateKey, records: (groups[dateKey] ?? []).sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }) }
     }
 
+    func createManualRecord(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?,
+        userId: String,
+        accessToken: String
+    ) async throws -> String {
+        if let validationMessage = draft.validationMessage(domain: domain) {
+            throw SupabaseRemoteError.requestFailed(validationMessage)
+        }
+
+        switch draft.kind {
+        case .expense:
+            let amount = draft.amount ?? 0
+            let response = try await rpc(
+                RPCRecordResponse.self,
+                name: "save_transaction_with_account",
+                body: [
+                    "p_id": AnyCodable(NSNull()),
+                    "p_amount": AnyCodable(amount),
+                    "p_merchant_name": AnyCodable(emptyAsNull(draft.title) ?? "\(draft.platform)消费"),
+                    "p_platform": AnyCodable(draft.platform),
+                    "p_category": AnyCodable(draft.category),
+                    "p_payment_method": AnyCodable(draft.paymentMethod),
+                    "p_transaction_date": AnyCodable(draft.dateKey),
+                    "p_transaction_time": AnyCodable(nullable(draft.timeKey)),
+                    "p_note": AnyCodable(nullable(emptyAsNull(draft.note))),
+                    "p_is_large_transport": AnyCodable(draft.category == "transport" && amount >= 200),
+                    "p_transport_type": AnyCodable(nullable(draft.category == "transport" && amount >= 200 ? "交通" : nil)),
+                    "p_source": AnyCodable("manual"),
+                    "p_image_url": AnyCodable(NSNull()),
+                    "p_image_hash": AnyCodable(NSNull()),
+                    "p_companion_message": AnyCodable(NSNull()),
+                    "p_account_id": AnyCodable(nullable(draft.accountId))
+                ],
+                accessToken: accessToken
+            )
+            return "expense/\(response.id)"
+
+        case .income:
+            let response = try await rpc(
+                RPCRecordResponse.self,
+                name: "save_income_with_account",
+                body: [
+                    "p_id": AnyCodable(NSNull()),
+                    "p_category": AnyCodable(draft.category),
+                    "p_source_name": AnyCodable(emptyAsNull(draft.title) ?? "收入记录"),
+                    "p_amount": AnyCodable(draft.amount ?? 0),
+                    "p_income_date": AnyCodable(draft.dateKey),
+                    "p_note": AnyCodable(nullable(emptyAsNull(draft.note))),
+                    "p_source": AnyCodable("manual"),
+                    "p_image_url": AnyCodable(NSNull()),
+                    "p_image_hash": AnyCodable(NSNull()),
+                    "p_companion_message": AnyCodable(NSNull()),
+                    "p_account_id": AnyCodable(nullable(draft.accountId))
+                ],
+                accessToken: accessToken
+            )
+            return "income/\(response.id)"
+
+        case .universal:
+            let domainRow = try await fetchDataDomain(key: draft.domainKey, accessToken: accessToken)
+            let rows = try await postJSON(
+                [InsertedRecordResponse].self,
+                path: "rest/v1/data_records",
+                queryItems: [URLQueryItem(name: "select", value: "id")],
+                body: [
+                    "domain_id": AnyCodable(domainRow.id),
+                    "domain_key": AnyCodable(domainRow.key),
+                    "domain_version": AnyCodable(domainRow.version ?? "1.0"),
+                    "occurred_at": AnyCodable(draft.occurredAt),
+                    "title": AnyCodable(draft.resolvedTitle(domain: domain)),
+                    "summary": AnyCodable(draft.resolvedSummary(domain: domain)),
+                    "payload_jsonb": AnyCodable(draft.universalPayload(domain: domain).mapValues(\.value)),
+                    "source": AnyCodable("manual"),
+                    "source_image_path": AnyCodable(NSNull()),
+                    "source_image_hash": AnyCodable(NSNull()),
+                    "user_id": AnyCodable(userId)
+                ],
+                accessToken: accessToken
+            )
+            guard let row = rows.first else {
+                throw SupabaseRemoteError.requestFailed("记录已保存，但没有返回记录 ID")
+            }
+            return "data/\(row.id)"
+        }
+    }
+
     private func timeOnly(_ value: String) -> String? {
         guard value.count >= 16 else { return nil }
         let start = value.index(value.startIndex, offsetBy: 11)

@@ -2,6 +2,7 @@ import Foundation
 
 protocol RecordRepositoryProtocol {
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail
+    func create(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?, userId: String, accessToken: String) async throws -> String
     func saveDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String
     func delete(reference: String, accessToken: String) async throws
 }
@@ -15,6 +16,10 @@ final class RecordRepository: RecordRepositoryProtocol {
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
         try await remoteService.fetchRecordDetail(reference: reference, accessToken: accessToken)
+    }
+
+    func create(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?, userId: String, accessToken: String) async throws -> String {
+        try await remoteService.createManualRecord(draft, domain: domain, userId: userId, accessToken: accessToken)
     }
 
     func saveDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String {
