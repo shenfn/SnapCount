@@ -33,7 +33,7 @@ struct CameraPicker: UIViewControllerRepresentable {
             didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
         ) {
             guard let image = info[.originalImage] as? UIImage,
-                  let data = try? ImageUploadPreprocessor.jpegData(from: image) else {
+                  let data = try? ImageUploadPreprocessor.cameraJPEGData(from: image) else {
                 onCancel()
                 return
             }

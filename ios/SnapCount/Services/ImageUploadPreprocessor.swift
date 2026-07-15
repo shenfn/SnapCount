@@ -16,6 +16,20 @@ enum ImageUploadPreprocessorError: LocalizedError {
 }
 
 enum ImageUploadPreprocessor {
+    static func cameraJPEGData(from image: UIImage) throws -> Data {
+        let primary = try jpegData(
+            from: image,
+            maxDimension: 960,
+            compressionQuality: 0.62
+        )
+        guard primary.count > 900_000 else { return primary }
+        return try jpegData(
+            from: image,
+            maxDimension: 768,
+            compressionQuality: 0.52
+        )
+    }
+
     static func jpegData(
         from image: UIImage,
         maxDimension: CGFloat = 1440,

@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import SnapCount
 
 final class SnapCountTests: XCTestCase {
@@ -52,6 +53,20 @@ final class SnapCountTests: XCTestCase {
 
         XCTAssertNil(reused.recordDetails[detail.id]?.imageURL)
         XCTAssertEqual(reused.recordDetails[detail.id]?.imageLoadError, false)
+    }
+
+    func testCameraUploadUsesSmallerPhotoPreset() throws {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1_800, height: 1_200))
+        let source = renderer.image { context in
+            UIColor.systemGreen.setFill()
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: 1_800, height: 1_200))
+        }
+
+        let data = try ImageUploadPreprocessor.cameraJPEGData(from: source)
+        let compressed = try XCTUnwrap(UIImage(data: data))
+
+        XCTAssertLessThanOrEqual(max(compressed.size.width, compressed.size.height), 960.5)
+        XCTAssertLessThan(data.count, 900_000)
     }
 
     func testRecordRepositoryProtocolSupportsStubInjection() async throws {
