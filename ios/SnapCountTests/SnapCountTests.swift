@@ -194,6 +194,29 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(snapshot.confidence, 0.93)
     }
 
+    func testInsightMaturityPreservesPWAThresholds() {
+        XCTAssertEqual(NativeMaturityStage.resolve(days: 0).key, .seed)
+        XCTAssertEqual(NativeMaturityStage.resolve(days: 3).key, .sprout)
+        XCTAssertEqual(NativeMaturityStage.resolve(days: 7).key, .growing)
+        XCTAssertEqual(NativeMaturityStage.resolve(days: 14).key, .mature)
+        XCTAssertEqual(NativeMaturityStage.resolve(days: 30).key, .rich)
+    }
+
+    func testInsightSnapshotAggregatesDailyDomainSummary() {
+        let rows = [
+            makeInsightDay(date: "2026-07-14", expense: 30, income: 100, sleep: 480, food: 1200),
+            makeInsightDay(date: "2026-07-15", expense: 20, income: 0, sleep: 420, food: 900)
+        ]
+        let snapshot = NativeInsightSnapshot(range: .fourteen, rows: rows)
+
+        XCTAssertEqual(snapshot.activeDays, 2)
+        XCTAssertEqual(snapshot.expenseTotal, 50)
+        XCTAssertEqual(snapshot.incomeTotal, 100)
+        XCTAssertEqual(snapshot.netBalance, 50)
+        XCTAssertEqual(snapshot.averageSleepHours, 7.5)
+        XCTAssertEqual(snapshot.foodCalories, 2100)
+    }
+
     func testAccountTypeNormalizationMatchesPWAAdapter() {
         XCTAssertEqual(NativeAccountType.normalized("wechat"), .walletBalance)
         XCTAssertEqual(NativeAccountType.normalized("bank_card"), .debitCard)
@@ -313,5 +336,21 @@ private func makeRepaymentCycle(accountId: String, amount: Double, dueDate: Stri
         minPaymentAmount: 30, refundAppliedAmount: 0, status: .pending,
         autoDebitAccountId: nil, autoConfirmRepayment: false, source: "screenshot",
         evidenceRecordId: nil, confidence: 0.95, note: "", confirmedAt: nil
+    )
+}
+
+private func makeInsightDay(
+    date: String,
+    expense: Double,
+    income: Double,
+    sleep: Double,
+    food: Double
+) -> NativeDailyDomainSummary {
+    NativeDailyDomainSummary(
+        date: date, expenseTotal: expense, expenseCount: expense > 0 ? 1 : 0,
+        incomeTotal: income, incomeCount: income > 0 ? 1 : 0,
+        sleepMinutes: sleep, sleepScoreAverage: nil, sleepCount: sleep > 0 ? 1 : 0,
+        sportMinutes: 0, sportCount: 0, readingMinutes: 0, readingCount: 0,
+        foodCalories: food, foodMeals: food > 0 ? 1 : 0, hasAnyData: true
     )
 }
