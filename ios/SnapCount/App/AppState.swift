@@ -50,6 +50,10 @@ final class AppState: ObservableObject {
     @Published var insightsSnapshot: NativeInsightSnapshot?
     @Published var isLoadingInsights = false
     @Published var insightsMessage: String?
+    @Published var aiInsight: NativeAIInsight?
+    @Published var isLoadingAIInsight = false
+    @Published var aiInsightMessage: String?
+    @Published var aiInsightIsCached = false
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -619,8 +623,64 @@ final class AppState: ObservableObject {
                 accessToken: session.accessToken
             )
             insightsLoadedAt = Date()
+            Task { await loadLatestAIInsight(range: range) }
         } catch {
             insightsMessage = error.localizedDescription
+        }
+    }
+
+    func loadLatestAIInsight(range: NativeInsightRange) async {
+        do {
+            let session = try await validSession()
+            let latest = try await insightsRepository.fetchLatestAIInsight(
+                range: range,
+                accessToken: session.accessToken
+            )
+            guard insightsSnapshot?.range == range else { return }
+            aiInsight = latest
+            aiInsightIsCached = latest != nil
+            aiInsightMessage = nil
+        } catch {
+            guard insightsSnapshot?.range == range else { return }
+            aiInsightMessage = nil
+        }
+    }
+
+    func generateAIInsight(
+        range: NativeInsightRange,
+        question: String,
+        force: Bool = false
+    ) async -> Bool {
+        guard !isLoadingAIInsight else { return false }
+        let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty else {
+            aiInsightMessage = "请输入你想分析的问题"
+            return false
+        }
+        guard insightsSnapshot?.range == range, insightsSnapshot?.rows.isEmpty == false else {
+            aiInsightMessage = "当前范围没有可分析的数据"
+            return false
+        }
+
+        isLoadingAIInsight = true
+        aiInsightMessage = nil
+        defer { isLoadingAIInsight = false }
+
+        do {
+            let session = try await validSession()
+            let response = try await insightsRepository.generateAIInsight(
+                range: range,
+                force: force,
+                question: question,
+                accessToken: session.accessToken
+            )
+            guard insightsSnapshot?.range == range else { return false }
+            aiInsight = response.insight.scoped(to: range)
+            aiInsightIsCached = response.cached
+            return true
+        } catch {
+            aiInsightMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -994,6 +1054,9 @@ final class AppState: ObservableObject {
         insightsSnapshot = nil
         insightsMessage = nil
         insightsLoadedAt = nil
+        aiInsight = nil
+        aiInsightMessage = nil
+        aiInsightIsCached = false
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today
