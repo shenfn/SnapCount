@@ -44,8 +44,8 @@ struct NativeRecordDetail: Identifiable {
     let subtitle: String
     let value: String
     let detailRows: [NativeDetailRow]
-    let imageURL: URL?
-    let imageLoadError: Bool
+    var imageURL: URL?
+    var imageLoadError: Bool
     let imagePath: String?
     let imageHash: String?
     let amount: Double?
@@ -91,8 +91,8 @@ struct NativeStagingRecord: Identifiable {
     let retryCount: Int
     let systemImage: String
     let imagePath: String?
-    let imageURL: URL?
-    let imageLoadError: Bool
+    var imageURL: URL?
+    var imageLoadError: Bool
     let recordType: String
     let domainKey: String?
     let domainName: String?
@@ -171,6 +171,11 @@ final class NativeDataService {
     }
 
     func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
+        let snapshot = try await fetchDashboardCore(accessToken: accessToken)
+        return (try? await hydrateDashboardImages(snapshot, accessToken: accessToken)) ?? snapshot
+    }
+
+    func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot {
         guard !AppConfig.supabaseURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
             throw SupabaseRemoteError.missingConfig
         }
@@ -251,32 +256,24 @@ final class NativeDataService {
         let visibleTransactionRows = Array(txRows.prefix(8))
         let visibleIncomeRows = Array(incomeRows.prefix(4))
         let visibleUniversalRows = Array(universalRows.prefix(6))
-        let recordImagePaths = visibleTransactionRows.compactMap(\.imageURL)
-            + visibleIncomeRows.compactMap(\.imageURL)
-            + visibleUniversalRows.compactMap(\.sourceImagePath)
-        let recordSignedURLs = (try? await signedImageURLMap(paths: recordImagePaths, accessToken: accessToken)) ?? [:]
         snapshot.recordDetails = cachedRecordDetails(
             transactions: visibleTransactionRows,
             incomes: visibleIncomeRows,
             universal: visibleUniversalRows,
-            signedURLs: recordSignedURLs
+            signedURLs: [:]
         )
         snapshot.stagingRecords = stagingRows
             .filter { !["discarded", "archived", "assigned"].contains($0.status ?? "") }
             .map { stagingRecord($0, signedImageURL: nil) }
-
-        let signedURLs = try? await signedImageURLMap(
-            paths: stagingRows.compactMap(\.imagePath),
-            accessToken: accessToken
-        )
-        if let signedURLs {
-            snapshot.stagingRecords = stagingRows
-                .filter { !["discarded", "archived", "assigned"].contains($0.status ?? "") }
-                .map { row in
-                    stagingRecord(row, signedImageURL: signedURLs[row.imagePath ?? ""])
-                }
-        }
         return snapshot
+    }
+
+    func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot {
+        let paths = snapshot.recordDetails.values.compactMap(\.imagePath)
+            + snapshot.stagingRecords.compactMap(\.imagePath)
+        guard !paths.isEmpty else { return snapshot }
+        let signedURLs = try await signedImageURLMap(paths: paths, accessToken: accessToken)
+        return snapshot.applyingSignedImageURLs(signedURLs)
     }
 
     private func fetchTransactions(accessToken: String) async throws -> [TransactionRow] {
@@ -1059,7 +1056,7 @@ final class NativeDataService {
                     NativeDetailRow(label: "状态", value: row.status ?? ""),
                     NativeDetailRow(label: "来源", value: row.source ?? "")
                 ].filter { !$0.value.isEmpty },
-                imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: row.imageURL != nil && signedURLs[row.imageURL ?? ""] == nil, imagePath: row.imageURL, imageHash: row.imageHash,
+                imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: false, imagePath: row.imageURL, imageHash: row.imageHash,
                 amount: row.amount, merchantName: row.merchantName, platform: row.platform, category: row.category, paymentMethod: row.paymentMethod, recordDate: row.transactionDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: row.status == "pending" ? "clock" : "creditcard", payload: nil
             )
         }
@@ -1068,7 +1065,7 @@ final class NativeDataService {
             details[reference] = NativeRecordDetail(
                 id: reference, rawId: row.id, kind: "income", title: row.sourceName ?? "收入记录", subtitle: row.incomeDate ?? row.createdAt ?? "", value: "+\(currency(row.amount))",
                 detailRows: [NativeDetailRow(label: "收入类型", value: row.category ?? "未填写"), NativeDetailRow(label: "来源", value: row.source ?? "")].filter { !$0.value.isEmpty },
-                imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: row.imageURL != nil && signedURLs[row.imageURL ?? ""] == nil, imagePath: row.imageURL, imageHash: row.imageHash,
+                imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: false, imagePath: row.imageURL, imageHash: row.imageHash,
                 amount: row.amount, merchantName: row.sourceName, platform: nil, category: row.category, paymentMethod: nil, recordDate: row.incomeDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: "arrow.down.circle", payload: nil
             )
         }
@@ -1078,7 +1075,7 @@ final class NativeDataService {
             details[reference] = NativeRecordDetail(
                 id: reference, rawId: row.id, kind: "data", title: row.title ?? domainName(row.domainKey), subtitle: row.occurredAt ?? row.createdAt ?? "", value: "",
                 detailRows: [NativeDetailRow(label: "摘要", value: row.summary ?? "")].filter { !$0.value.isEmpty } + payloadRows,
-                imageURL: signedURLs[row.sourceImagePath ?? ""], imageLoadError: row.sourceImagePath != nil && signedURLs[row.sourceImagePath ?? ""] == nil, imagePath: row.sourceImagePath, imageHash: row.sourceImageHash,
+                imageURL: signedURLs[row.sourceImagePath ?? ""], imageLoadError: false, imagePath: row.sourceImagePath, imageHash: row.sourceImageHash,
                 amount: nil, merchantName: nil, platform: nil, category: row.domainKey, paymentMethod: nil, recordDate: row.occurredAt.map(dateOnly), note: row.summary, companionMessage: row.payloadJSONB?.string("companion_message"), accountId: nil, systemImage: "sparkles", payload: row.payloadJSONB
             )
         }
@@ -1153,7 +1150,7 @@ final class NativeDataService {
             systemImage: stagingSystemImage(status),
             imagePath: row.imagePath,
             imageURL: signedImageURL,
-            imageLoadError: row.imagePath != nil && signedImageURL == nil,
+            imageLoadError: false,
             recordType: row.recordType ?? "uncertain",
             domainKey: row.detectedDomainKey,
             domainName: row.detectedDomainName,
@@ -1595,6 +1592,27 @@ extension Dictionary where Key == String, Value == AnyCodable {
         if let number = value as? NSNumber { return number.doubleValue }
         if let string = value as? String { return Double(string) }
         return nil
+    }
+}
+
+extension DashboardSnapshot {
+    func applyingSignedImageURLs(_ signedURLs: [String: URL]) -> DashboardSnapshot {
+        var snapshot = self
+        snapshot.recordDetails = recordDetails.mapValues { detail in
+            guard let path = detail.imagePath else { return detail }
+            var hydrated = detail
+            hydrated.imageURL = signedURLs[path]
+            hydrated.imageLoadError = signedURLs[path] == nil
+            return hydrated
+        }
+        snapshot.stagingRecords = stagingRecords.map { record in
+            guard let path = record.imagePath else { return record }
+            var hydrated = record
+            hydrated.imageURL = signedURLs[path]
+            hydrated.imageLoadError = signedURLs[path] == nil
+            return hydrated
+        }
+        return snapshot
     }
 }
 

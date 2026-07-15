@@ -2,10 +2,14 @@ import Foundation
 
 protocol DashboardRepositoryProtocol {
     func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot
+    func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot
+    func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot
 }
 
 protocol DashboardRemoteServiceProtocol {
     func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot
+    func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot
+    func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot
 }
 
 final class DashboardRemoteService: DashboardRemoteServiceProtocol {
@@ -18,6 +22,14 @@ final class DashboardRemoteService: DashboardRemoteServiceProtocol {
     func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
         try await legacyService.fetchDashboard(accessToken: accessToken)
     }
+
+    func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot {
+        try await legacyService.fetchDashboardCore(accessToken: accessToken)
+    }
+
+    func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot {
+        try await legacyService.hydrateDashboardImages(snapshot, accessToken: accessToken)
+    }
 }
 
 final class DashboardRepository: DashboardRepositoryProtocol {
@@ -29,5 +41,13 @@ final class DashboardRepository: DashboardRepositoryProtocol {
 
     func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
         try await remoteService.fetchDashboard(accessToken: accessToken)
+    }
+
+    func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot {
+        try await remoteService.fetchDashboardCore(accessToken: accessToken)
+    }
+
+    func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot {
+        try await remoteService.hydrateDashboardImages(snapshot, accessToken: accessToken)
     }
 }

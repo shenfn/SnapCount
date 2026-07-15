@@ -16,6 +16,27 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(snapshot.todayCount, 3)
     }
 
+    func testDashboardImageHydrationPreservesCoreData() {
+        let imageURL = URL(string: "https://example.com/receipt.jpg")!
+        let detail = NativeRecordDetail(
+            id: "tx-1", rawId: "1", kind: "expense", title: "早餐", subtitle: "2026-07-15",
+            value: "¥12.00", detailRows: [], imageURL: nil, imageLoadError: false,
+            imagePath: "user/receipt.jpg", imageHash: nil, amount: 12, merchantName: "早餐",
+            platform: nil, category: "food", paymentMethod: nil, recordDate: "2026-07-15",
+            note: nil, companionMessage: nil, accountId: nil, systemImage: "creditcard", payload: nil
+        )
+        var core = DashboardSnapshot(todayCount: 1)
+        core.recordDetails[detail.id] = detail
+
+        let hydrated = core.applyingSignedImageURLs(["user/receipt.jpg": imageURL])
+
+        XCTAssertEqual(hydrated.todayCount, 1)
+        XCTAssertEqual(hydrated.recordDetails[detail.id]?.title, "早餐")
+        XCTAssertEqual(hydrated.recordDetails[detail.id]?.imageURL, imageURL)
+        XCTAssertEqual(hydrated.recordDetails[detail.id]?.imageLoadError, false)
+        XCTAssertNil(core.recordDetails[detail.id]?.imageURL)
+    }
+
     func testRecordRepositoryProtocolSupportsStubInjection() async throws {
         let repository: RecordRepositoryProtocol = RecordRepositoryStub()
         try await repository.delete(reference: "expense:record-1", accessToken: "test-token")
@@ -350,6 +371,14 @@ private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
     let snapshot: DashboardSnapshot
 
     func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
+        snapshot
+    }
+
+    func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot {
+        snapshot
+    }
+
+    func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot {
         snapshot
     }
 }
