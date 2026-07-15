@@ -1,9 +1,20 @@
 import SwiftUI
 import Charts
+import Foundation
 
 struct InsightsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var range: NativeInsightRange = .fourteen
+    @State private var question = "这个月钱够不够花？每天最好控制在多少钱，还能不能存下钱？"
+
+    private let quickQuestions = [
+        "这个月钱够不够花？",
+        "每天还能花多少？",
+        "最近哪里花多了？",
+        "为什么最近睡眠变差了？",
+        "饮食和睡眠有什么关系？",
+        "接下来 7 天怎么调整？"
+    ]
 
     var body: some View {
         ZStack {
@@ -31,6 +42,7 @@ struct InsightsView: View {
                         } else {
                             summarySection(snapshot)
                             maturitySection(snapshot)
+                            aiInsightSection(snapshot)
                             financeChart(snapshot)
                             dailySection(snapshot)
                         }
@@ -48,6 +60,156 @@ struct InsightsView: View {
         .navigationTitle("分析")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .task(id: range) { await appState.loadInsights(range: range) }
+    }
+
+    @ViewBuilder
+    private func aiInsightSection(_ snapshot: NativeInsightSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("AI 解读").font(.title3.bold())
+                Spacer()
+                if let insight = visibleAIInsight {
+                    Text(appState.aiInsightIsCached ? "缓存" : "刚生成")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !insight.parsedPayload.modeLabel.isEmpty {
+                        Text(insight.parsedPayload.modeLabel)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(JieziTheme.brand)
+                    }
+                }
+            }
+
+            TextEditor(text: $question)
+                .frame(minHeight: 84)
+                .padding(8)
+                .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(JieziTheme.brand.opacity(0.15)))
+
+            HStack {
+                Menu {
+                    ForEach(quickQuestions, id: \.self) { item in
+                        Button(item) {
+                            question = item
+                            appState.aiInsight = nil
+                            appState.aiInsightIsCached = false
+                        }
+                    }
+                } label: {
+                    Label("常用问题", systemImage: "text.bubble")
+                }
+
+                Spacer()
+
+                Button {
+                    Task {
+                        _ = await appState.generateAIInsight(
+                            range: range,
+                            question: question
+                        )
+                    }
+                } label: {
+                    if appState.isLoadingAIInsight {
+                        ProgressView()
+                    } else {
+                        Label("生成解读", systemImage: "sparkles")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(appState.isLoadingAIInsight || snapshot.rows.isEmpty)
+            }
+
+            if appState.isLoadingAIInsight {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("AI 正在阅读你的数据…").font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            } else if let insight = visibleAIInsight {
+                aiInsightContent(insight)
+                Button {
+                    Task {
+                        _ = await appState.generateAIInsight(
+                            range: range,
+                            question: question,
+                            force: true
+                        )
+                    }
+                } label: {
+                    Label(appState.aiInsightIsCached ? "强制刷新" : "重新生成", systemImage: "arrow.clockwise")
+                }
+                .disabled(appState.isLoadingAIInsight)
+            }
+
+            if let message = appState.aiInsightMessage {
+                Text(message).font(.footnote).foregroundStyle(JieziTheme.coral)
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func aiInsightContent(_ insight: NativeAIInsight) -> some View {
+        let payload = insight.parsedPayload
+        VStack(alignment: .leading, spacing: 12) {
+            if !payload.headline.isEmpty {
+                Text(payload.headline).font(.headline)
+            }
+            if !payload.question.isEmpty {
+                Text("你问：\(payload.question)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if !insight.contentMarkdown.isEmpty {
+                markdown(insight.contentMarkdown)
+                    .font(.subheadline)
+            } else {
+                if !payload.answer.isEmpty {
+                    Text(payload.answer).font(.subheadline)
+                }
+                insightList("观察", payload.observations)
+                insightList("规律", payload.patterns)
+                insightList("风险", payload.risks)
+                insightList("建议", payload.suggestions)
+                insightList("接下来 7 天", payload.actionPlan)
+                insightList("还不确定", payload.uncertainty)
+                if !payload.encouragement.isEmpty {
+                    Text(payload.encouragement)
+                        .font(.subheadline)
+                        .foregroundStyle(JieziTheme.brand)
+                }
+            }
+            insightList("可以继续补充", payload.followupQuestions)
+        }
+    }
+
+    @ViewBuilder
+    private func insightList(_ title: String, _ items: [String]) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.subheadline.weight(.semibold))
+                ForEach(items.indices, id: \.self) { index in
+                    HStack(alignment: .top, spacing: 7) {
+                        Circle().fill(JieziTheme.brand).frame(width: 5, height: 5).padding(.top, 6)
+                        Text(items[index]).font(.subheadline)
+                    }
+                }
+            }
+        }
+    }
+
+    private var visibleAIInsight: NativeAIInsight? {
+        guard let insight = appState.aiInsight,
+              insight.daysRange == range.rawValue else {
+            return nil
+        }
+        return insight
+    }
+
+    private func markdown(_ value: String) -> Text {
+        guard let attributed = try? AttributedString(markdown: value) else { return Text(value) }
+        return Text(attributed)
     }
 
     @ViewBuilder
