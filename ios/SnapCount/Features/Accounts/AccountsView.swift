@@ -126,7 +126,10 @@ private struct AccountDetailView: View {
     let accountId: String
     @State private var editDraft: NativeAccountDraft?
     @State private var repaymentCycle: NativeRepaymentCycle?
+    @State private var paymentToRevoke: NativeLiabilityPayment?
     @State private var showArchiveConfirmation = false
+    @State private var showRevokeConfirmation = false
+    @State private var showVoidedPayments = false
 
     private var account: NativeAccount? { appState.accounts.first { $0.id == accountId } }
     private var detail: NativeAccountDetail? {
@@ -229,18 +232,26 @@ private struct AccountDetailView: View {
 
                     if let payments = detail?.payments, !payments.isEmpty {
                         Section("还款记录") {
-                            ForEach(payments) { payment in
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(payment.status == "voided" ? "已撤销还款" : "已确认还款").font(.subheadline)
-                                        Text(payment.paidAt + (payment.note.isEmpty ? "" : " · \(payment.note)"))
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
+                            ForEach(payments.filter { $0.status != "voided" }) { payment in
+                                if payment.status == "confirmed" {
+                                    RepaymentPaymentRow(payment: payment) {
+                                        paymentToRevoke = payment
+                                        showRevokeConfirmation = true
                                     }
-                                    Spacer()
-                                    Text("¥\(amount(payment.amount))")
-                                        .strikethrough(payment.status == "voided")
-                                        .foregroundStyle(payment.status == "voided" ? .secondary : JieziTheme.brand)
+                                } else {
+                                    RepaymentPaymentRow(payment: payment)
+                                }
+                            }
+
+                            let voidedPayments = payments.filter { $0.status == "voided" }
+                            if !voidedPayments.isEmpty {
+                                DisclosureGroup(
+                                    "已作废还款（\(voidedPayments.count)）",
+                                    isExpanded: $showVoidedPayments
+                                ) {
+                                    ForEach(voidedPayments) { payment in
+                                        RepaymentPaymentRow(payment: payment)
+                                    }
                                 }
                             }
                         }
@@ -293,6 +304,23 @@ private struct AccountDetailView: View {
                 } message: {
                     Text(account.isArchived ? "恢复后可重新作为记录绑定候选。" : "归档不会删除历史流水，也不会修改当前余额。")
                 }
+                .confirmationDialog(
+                    "撤销这笔还款？",
+                    isPresented: $showRevokeConfirmation,
+                    titleVisibility: .visible,
+                    presenting: paymentToRevoke
+                ) { payment in
+                    Button("确认撤销", role: .destructive) {
+                        Task {
+                            if await appState.revokeLiabilityPayment(payment: payment, accountId: account.id) {
+                                paymentToRevoke = nil
+                            }
+                        }
+                    }
+                    Button("取消", role: .cancel) { paymentToRevoke = nil }
+                } message: { payment in
+                    Text("金额 ¥\(amount(payment.amount))。撤销后会作废关联流水，恢复账单待还金额，并恢复相关账户余额。")
+                }
                 .task(id: account.id) { await appState.loadAccountDetail(account) }
             } else {
                 ContentUnavailableView("账户不存在", systemImage: "wallet.pass", description: Text("它可能已被其他设备删除。"))
@@ -314,6 +342,59 @@ private struct AccountDetailView: View {
 
     private static var currentMonthKey: String {
         monthKeyFormatter.string(from: Date())
+    }
+}
+
+private struct RepaymentPaymentRow: View {
+    let payment: NativeLiabilityPayment
+    var onRevoke: (() -> Void)?
+
+    init(payment: NativeLiabilityPayment, onRevoke: (() -> Void)? = nil) {
+        self.payment = payment
+        self.onRevoke = onRevoke
+    }
+
+    private var isVoided: Bool { payment.status == "voided" }
+    private var sourceTitle: String {
+        switch payment.source {
+        case "screenshot": return "截图确认还款"
+        case "auto": return "自动确认还款"
+        case "manual": return "手动确认还款"
+        default: return "还款记录"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isVoided ? "已作废 · \(sourceTitle)" : sourceTitle)
+                    .font(.subheadline.weight(.medium))
+                Text(payment.paidAt + (payment.note.isEmpty ? "" : " · \(payment.note)"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if payment.overpaymentAmount > 0 {
+                    Text("待确认溢缴 ¥\(amount(payment.overpaymentAmount))")
+                        .font(.caption2)
+                        .foregroundStyle(JieziTheme.coral)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("¥\(amount(payment.amount))")
+                    .font(.subheadline.monospacedDigit())
+                    .strikethrough(isVoided)
+                    .foregroundStyle(isVoided ? .secondary : JieziTheme.brand)
+                if let onRevoke, !isVoided {
+                    Button("撤销", role: .destructive, action: onRevoke)
+                        .font(.caption)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func amount(_ value: Double) -> String {
+        String(format: "%.2f", value)
     }
 }
 
