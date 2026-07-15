@@ -50,6 +50,14 @@ protocol SupabaseRemoteClientProtocol {
         accessToken: String
     ) async throws -> T
 
+    func upsert<T: Decodable>(
+        _ type: T.Type,
+        path: String,
+        queryItems: [URLQueryItem],
+        body: [String: AnyCodable],
+        accessToken: String
+    ) async throws -> T
+
     func rpc<T: Decodable>(
         _ type: T.Type,
         name: String,
@@ -129,6 +137,22 @@ final class SupabaseRemoteClient: SupabaseRemoteClientProtocol {
         authorize(&request, accessToken: accessToken)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        request.httpBody = try encoder.encode(body)
+        return try decoder.decode(type, from: try await dataResponse(for: request))
+    }
+
+    func upsert<T: Decodable>(
+        _ type: T.Type,
+        path: String,
+        queryItems: [URLQueryItem],
+        body: [String: AnyCodable],
+        accessToken: String
+    ) async throws -> T {
+        var request = URLRequest(url: try url(path: path, queryItems: queryItems))
+        request.httpMethod = "POST"
+        authorize(&request, accessToken: accessToken)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("resolution=merge-duplicates,return=representation", forHTTPHeaderField: "Prefer")
         request.httpBody = try encoder.encode(body)
         return try decoder.decode(type, from: try await dataResponse(for: request))
     }

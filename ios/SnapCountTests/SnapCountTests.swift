@@ -163,6 +163,37 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue((candidate?.score ?? 0) >= 0.9)
     }
 
+    func testWalletSnapshotDerivesPWAAccountAndCycleFields() {
+        let snapshot = NativeWalletSnapshot(
+            id: "wallet-1",
+            title: "花呗账单",
+            summary: "本月待还",
+            occurredAt: "2026-07-14T10:00:00Z",
+            createdAt: "2026-07-14T10:01:00Z",
+            payload: [
+                "record_kind": AnyCodable("liability_snapshot"),
+                "account_name": AnyCodable("支付宝花呗"),
+                "account_type": AnyCodable("huabei"),
+                "snapshot_balance": AnyCodable(520.0),
+                "due_date": AnyCodable("2026-07-20"),
+                "bill_day": AnyCodable(2),
+                "confidence": AnyCodable(0.93)
+            ],
+            imagePath: "receipts/wallet-1.jpg",
+            imageHash: "hash",
+            linkedAccountId: nil,
+            kind: .liability,
+            balance: 520,
+            snapshotAt: "2026-07-14T10:00:00Z"
+        )
+
+        XCTAssertEqual(snapshot.accountType, .creditLine)
+        XCTAssertEqual(snapshot.cycleMonth, "2026-07")
+        XCTAssertEqual(snapshot.paymentDueDay, 20)
+        XCTAssertEqual(snapshot.billDay, 2)
+        XCTAssertEqual(snapshot.confidence, 0.93)
+    }
+
     func testAccountTypeNormalizationMatchesPWAAdapter() {
         XCTAssertEqual(NativeAccountType.normalized("wechat"), .walletBalance)
         XCTAssertEqual(NativeAccountType.normalized("bank_card"), .debitCard)
