@@ -110,8 +110,9 @@ struct RecordsView: View {
     private static var currentMonthKey: String { monthFormatter.string(from: Date()) }
 }
 
-private struct RecordDetailView: View {
+struct RecordDetailView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     let reference: String
     @State private var imagePreview: ImagePreviewRoute?
     @State private var editDraft: NativeRecordEditDraft?
@@ -241,7 +242,9 @@ private struct RecordDetailView: View {
         .confirmationDialog("删除这条记录？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
             Button("删除", role: .destructive) {
                 Task {
-                    _ = await appState.deleteRecord(reference: reference)
+                    if await appState.deleteRecord(reference: reference) {
+                        dismiss()
+                    }
                 }
             }
             Button("取消", role: .cancel) {}

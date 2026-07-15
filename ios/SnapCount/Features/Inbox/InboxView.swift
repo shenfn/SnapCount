@@ -29,6 +29,18 @@ struct InboxView: View {
                     Section { Text(message).foregroundStyle(JieziTheme.brand) }
                 }
 
+                if let message = appState.inboxActionMessage {
+                    Section {
+                        Label(
+                            message,
+                            systemImage: appState.inboxActionRecordId == nil
+                                ? (appState.inboxActionMessageIsError ? "exclamationmark.circle" : "checkmark.circle")
+                                : "hourglass"
+                        )
+                        .foregroundStyle(appState.inboxActionMessageIsError ? JieziTheme.coral : JieziTheme.brand)
+                    }
+                }
+
                 if allItems.isEmpty {
                     ContentUnavailableView(
                         "暂无待处理记录",
@@ -62,14 +74,19 @@ struct InboxView: View {
         .navigationTitle("中转站")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .navigationDestination(for: NativeInboxRoute.self) { route in
-            if let record = appState.dashboard.stagingRecords.first(where: { $0.id == route.recordId }) {
-                StagingRecordDetailView(record: record)
-            } else {
-                ContentUnavailableView(
-                    "记录不在中转站",
-                    systemImage: "checkmark.circle",
-                    description: Text("它可能已经归档、销毁，或下拉刷新后状态发生了变化。")
-                )
+            switch route {
+            case .staging(let recordId):
+                if let record = appState.dashboard.stagingRecords.first(where: { $0.id == recordId }) {
+                    StagingRecordDetailView(record: record)
+                } else {
+                    ContentUnavailableView(
+                        "记录不在中转站",
+                        systemImage: "checkmark.circle",
+                        description: Text("它可能已经归档、销毁，或下拉刷新后状态发生了变化。")
+                    )
+                }
+            case .record(let reference):
+                RecordDetailView(reference: reference)
             }
         }
         .task { await appState.loadInboxRepaymentCandidates() }
@@ -83,7 +100,7 @@ struct InboxView: View {
             }
             .buttonStyle(.plain)
         } else if let record = item.stagingRecord {
-            NavigationLink(value: NativeInboxRoute(recordId: record.id)) {
+            NavigationLink(value: NativeInboxRoute.staging(recordId: record.id)) {
                 NativeInboxItemRow(
                     item: item,
                     repaymentCandidate: appState.repaymentCandidates[record.id]
@@ -246,7 +263,9 @@ private struct StagingRecordDetailView: View {
                         Button {
                             imagePreview = StagingImagePreviewRoute(url: imageURL)
                         } label: {
-                            StagingImagePreview(url: imageURL)
+                            StagingImagePreview(url: imageURL) {
+                                Task { await resolveImage() }
+                            }
                         }
                         .buttonStyle(.plain)
                     }
@@ -335,6 +354,18 @@ private struct StagingRecordDetailView: View {
                     Section { Text(message).foregroundStyle(JieziTheme.brand) }
                 }
 
+                if let message = appState.inboxActionMessage {
+                    Section {
+                        Label(
+                            message,
+                            systemImage: appState.inboxActionRecordId == nil
+                                ? (appState.inboxActionMessageIsError ? "exclamationmark.circle" : "checkmark.circle")
+                                : "hourglass"
+                        )
+                        .foregroundStyle(appState.inboxActionMessageIsError ? JieziTheme.coral : JieziTheme.brand)
+                    }
+                }
+
                 Section {
                     ForEach(archiveDomains) { domain in
                         Button {
@@ -343,19 +374,26 @@ private struct StagingRecordDetailView: View {
                         } label: {
                             Label("归档到\(domain.title)", systemImage: domain.systemImage)
                         }
+                        .disabled(appState.inboxActionRecordId != nil)
                     }
                     Button {
                         Task {
                             await appState.retryStagingRecord(record)
                         }
                     } label: {
-                        Label("重试识别", systemImage: "arrow.clockwise")
+                        if appState.inboxActionRecordId == record.id {
+                            ProgressView("处理中…")
+                        } else {
+                            Label("重试识别", systemImage: "arrow.clockwise")
+                        }
                     }
+                    .disabled(appState.inboxActionRecordId != nil)
                     Button(role: .destructive) {
                         showDiscardConfirm = true
                     } label: {
                         Label("销毁这条截图", systemImage: "trash")
                     }
+                    .disabled(appState.inboxActionRecordId != nil)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -407,8 +445,13 @@ private struct StagingRecordDetailView: View {
                     } placeholder: {
                         ProgressView().tint(.white)
                     } failure: {
-                        Label("截图文件不可用", systemImage: "photo.badge.exclamationmark")
-                            .foregroundStyle(.white)
+                        Button {
+                            imagePreview = nil
+                            Task { await resolveImage() }
+                        } label: {
+                            Label("截图加载失败，点此重试", systemImage: "arrow.clockwise")
+                                .foregroundStyle(.white)
+                        }
                     }
                     .padding()
                 }
@@ -449,6 +492,7 @@ private struct StagingRecordDetailView: View {
 
 private struct StagingImagePreview: View {
     let url: URL
+    let onRetry: () -> Void
 
     var body: some View {
         CachedRemoteImage(url: url) { image in
@@ -468,9 +512,13 @@ private struct StagingImagePreview: View {
         } placeholder: {
             ProgressView().frame(maxWidth: .infinity, minHeight: 180)
         } failure: {
-            Label("截图文件不可用或已删除", systemImage: "photo.badge.exclamationmark")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            Button(action: onRetry) {
+                Label("截图加载失败，点此重新签名", systemImage: "arrow.clockwise")
+                    .font(.footnote)
+                    .foregroundStyle(JieziTheme.brand)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            }
+            .buttonStyle(.plain)
         }
     }
 }

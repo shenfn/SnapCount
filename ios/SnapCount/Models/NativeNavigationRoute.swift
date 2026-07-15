@@ -1,7 +1,8 @@
 import Foundation
 
-struct NativeInboxRoute: Hashable {
-    let recordId: String
+enum NativeInboxRoute: Hashable {
+    case staging(recordId: String)
+    case record(reference: String)
 }
 
 struct NativeRecordRoute: Hashable {

@@ -40,6 +40,9 @@ final class AppState: ObservableObject {
     @Published var repaymentCandidates: [String: NativeRepaymentCandidate] = [:]
     @Published var stagingRepaymentId: String?
     @Published var inboxFinanceMessage: String?
+    @Published var inboxActionRecordId: String?
+    @Published var inboxActionMessage: String?
+    @Published var inboxActionMessageIsError = false
     @Published var unboundRecords: [NativeUnboundRecord] = []
     @Published var unboundRecordsMessage: String?
     @Published var unboundBindingMessage: String?
@@ -910,7 +913,7 @@ final class AppState: ObservableObject {
     func openDayRecord(_ record: NativeDayRecord) {
         if record.reference.hasPrefix("staging-") {
             selectedTab = .inbox
-            inboxPath = NavigationPath([NativeInboxRoute(recordId: String(record.reference.dropFirst("staging-".count)))])
+            inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: String(record.reference.dropFirst("staging-".count)))])
         } else {
             selectedTab = .records
             recordsPath = NavigationPath([NativeRecordRoute(reference: record.reference)])
@@ -918,8 +921,8 @@ final class AppState: ObservableObject {
     }
 
     func openPendingExpense(_ pending: NativePendingExpense) {
-        selectedTab = .records
-        recordsPath = NavigationPath([NativeRecordRoute(reference: pending.reference)])
+        selectedTab = .inbox
+        inboxPath = NavigationPath([NativeInboxRoute.record(reference: pending.reference)])
         Task { await loadRecordDetail(reference: pending.reference) }
     }
 
@@ -954,7 +957,7 @@ final class AppState: ObservableObject {
         case "inbox":
             selectedTab = .inbox
             if !detailPath.isEmpty {
-                inboxPath = NavigationPath([NativeInboxRoute(recordId: detailPath)])
+                inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: detailPath)])
             }
         case "records":
             selectedTab = .records
@@ -974,40 +977,67 @@ final class AppState: ObservableObject {
     }
 
     func discardStagingRecord(_ record: NativeStagingRecord) async {
+        guard inboxActionRecordId == nil else { return }
+        inboxActionRecordId = record.id
+        inboxActionMessage = "正在销毁截图…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
         do {
             let session = try await validSession()
             try await inboxRepository.discard(id: record.id, accessToken: session.accessToken)
             inboxPath = NavigationPath()
             await refreshDashboard()
+            inboxActionMessage = "已销毁这条待处理截图"
         } catch {
-            dashboardMessage = error.localizedDescription
+            inboxActionMessage = "销毁失败：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
         }
     }
 
     func retryStagingRecord(_ record: NativeStagingRecord) async {
+        guard inboxActionRecordId == nil else { return }
+        inboxActionRecordId = record.id
+        inboxActionMessage = "正在重新识别…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
         do {
             let session = try await validSession()
-            _ = try await inboxRepository.retry(id: record.id, accessToken: session.accessToken)
-            inboxPath = NavigationPath()
+            let result = try await inboxRepository.retry(id: record.id, accessToken: session.accessToken)
             await refreshDashboard()
+            let remainsInInbox = dashboard.stagingRecords.contains { $0.id == record.id }
+            if !remainsInInbox {
+                inboxPath = NavigationPath()
+            }
+            inboxActionMessage = remainsInInbox
+                ? "重新识别完成，仍需确认或选择归档域"
+                : "重新识别成功，记录已自动归档"
+            if result.route.hasPrefix("inbox") {
+                inboxActionMessage = "重新识别完成，仍需确认或选择归档域"
+            }
         } catch {
-            dashboardMessage = error.localizedDescription
+            inboxActionMessage = "重新识别失败：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
         }
     }
 
     func archiveStagingRecord(_ record: NativeStagingRecord, domainKey: String) async {
+        guard inboxActionRecordId == nil else { return }
+        inboxActionRecordId = record.id
+        let domainTitle = dashboard.domains.first(where: { $0.id == domainKey })?.shortName
+            ?? InboxArchiveDomains.all.first(where: { $0.id == domainKey })?.title
+            ?? domainKey
+        inboxActionMessage = "正在归档到\(domainTitle)…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
         do {
             let session = try await validSession()
-            let reference = try await inboxRepository.archive(record, domainKey: domainKey, accessToken: session.accessToken)
+            _ = try await inboxRepository.archive(record, domainKey: domainKey, accessToken: session.accessToken)
             inboxPath = NavigationPath()
             await refreshDashboard()
-            recordDetailCache.removeValue(forKey: reference)
-            selectedRecordDetail = nil
-            await loadRecordDetail(reference: reference, force: true)
-            selectedTab = .records
-            recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
+            inboxActionMessage = "已归档到\(domainTitle)"
         } catch {
-            dashboardMessage = error.localizedDescription
+            inboxActionMessage = "归档失败：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
         }
     }
 
@@ -1049,7 +1079,6 @@ final class AppState: ObservableObject {
             let reference = try await recordRepository.saveDetail(draft, accessToken: session.accessToken)
             await refreshDashboard()
             await loadAccounts()
-            recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
             recordDetailCache.removeValue(forKey: reference)
             await loadRecordDetail(reference: reference, force: true)
             return true
@@ -1191,6 +1220,9 @@ final class AppState: ObservableObject {
         repaymentCandidates = [:]
         stagingRepaymentId = nil
         inboxFinanceMessage = nil
+        inboxActionRecordId = nil
+        inboxActionMessage = nil
+        inboxActionMessageIsError = false
         unboundRecords = []
         unboundRecordsMessage = nil
         unboundBindingMessage = nil

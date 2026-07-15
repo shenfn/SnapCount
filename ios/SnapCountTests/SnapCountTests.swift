@@ -162,6 +162,13 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNil(item.stagingRecord)
     }
 
+    func testInboxRoutesKeepStagingAndPendingRecordsDistinct() {
+        XCTAssertNotEqual(
+            NativeInboxRoute.staging(recordId: "same-id"),
+            NativeInboxRoute.record(reference: "same-id")
+        )
+    }
+
 
     func testDashboardSnapshotStoreIsolatesUsers() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
