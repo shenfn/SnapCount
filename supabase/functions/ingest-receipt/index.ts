@@ -111,6 +111,13 @@ function getEnvBoolean(key: string, defaultValue: boolean): boolean {
   return !["0", "false", "no", "off"].includes(v.trim().toLowerCase());
 }
 
+function getEnvInteger(key: string, defaultValue: number, min: number, max: number): number {
+  const raw = getEnvOptional(key);
+  if (raw === null) return defaultValue;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : defaultValue;
+}
+
 function clipForDebug(value: unknown, max = 6000): string | null {
   if (value === null || value === undefined) return null;
   const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -3155,15 +3162,31 @@ async function callOpenAICompatibleVision(
   // - Moonshot 只认 Authorization Bearer
   // - xiaomimimo.com 文档 curl 示例用 api-key，Python SDK 实测 Authorization 也通
   // 两个 header 并存对双方均无副作用
-  const resp = await fetch(config.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${config.apiKey}`,
-      "api-key": config.apiKey,
-    },
-    body: JSON.stringify(body),
-  });
+  const timeoutMs = config.enableThinking === true
+    ? getEnvInteger("VISION_THINKING_TIMEOUT_MS", 20_000, 8_000, 45_000)
+    : getEnvInteger("VISION_PROVIDER_TIMEOUT_MS", 15_000, 5_000, 30_000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let resp: Response;
+  try {
+    resp = await fetch(config.endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${config.apiKey}`,
+        "api-key": config.apiKey,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${config.name} timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!resp.ok) {
     const txt = await resp.text();
     throw new Error(`${config.name} API error ${resp.status}: ${txt}`);
