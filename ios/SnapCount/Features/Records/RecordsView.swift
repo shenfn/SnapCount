@@ -113,6 +113,7 @@ private struct RecordDetailView: View {
     let reference: String
     @State private var imagePreview: ImagePreviewRoute?
     @State private var editDraft: NativeRecordEditDraft?
+    @State private var universalEditDetail: NativeRecordDetail?
     @State private var showDeleteConfirm = false
 
     var body: some View {
@@ -180,7 +181,11 @@ private struct RecordDetailView: View {
             if let detail = appState.selectedRecordDetail {
                 if detail.isEditable {
                     Button {
-                        editDraft = NativeRecordEditDraft(detail: detail)
+                        if detail.kind == "data" {
+                            universalEditDetail = detail
+                        } else {
+                            editDraft = NativeRecordEditDraft(detail: detail)
+                        }
                     } label: {
                         Label("编辑", systemImage: "square.and.pencil")
                     }
@@ -227,6 +232,9 @@ private struct RecordDetailView: View {
             RecordEditSheet(draft: draft) { savedDraft in
                 await appState.saveRecordDetail(savedDraft)
             }
+        }
+        .sheet(item: $universalEditDetail) { detail in
+            ManualRecordSheet(editing: detail)
         }
         .confirmationDialog("删除这条记录？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
             Button("删除", role: .destructive) {

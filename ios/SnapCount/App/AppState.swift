@@ -1139,7 +1139,7 @@ final class AppState: ObservableObject {
 
         do {
             let session = try await validSession()
-            _ = try await recordRepository.create(
+            let reference = try await recordRepository.create(
                 draft,
                 domain: domain,
                 userId: session.user.id,
@@ -1149,7 +1149,11 @@ final class AppState: ObservableObject {
             if draft.kind != .universal || draft.domainKey == "wallet" {
                 await loadAccounts()
             }
-            manualRecordMessage = "记录已保存"
+            if draft.existingRawId != nil {
+                recordDetailCache.removeValue(forKey: reference)
+                await loadRecordDetail(reference: reference, force: true)
+            }
+            manualRecordMessage = draft.existingRawId == nil ? "记录已保存" : "记录已更新"
             return true
         } catch {
             manualRecordMessage = error.localizedDescription

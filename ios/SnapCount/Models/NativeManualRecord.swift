@@ -105,7 +105,7 @@ struct NativeManualDomainMetadata: Equatable {
     }
 }
 
-struct NativeManualRecordDraft: Equatable {
+struct NativeManualRecordDraft {
     var kind: NativeManualRecordKind = .expense
     var domainKey = "sport"
     var amountText = ""
@@ -124,6 +124,44 @@ struct NativeManualRecordDraft: Equatable {
     var walletAccountType = "wechat"
     var walletDueDate = ""
     var walletBillDay = ""
+    var existingRawId: String?
+    var originalPayload: [String: AnyCodable] = [:]
+    var imagePath: String?
+    var imageHash: String?
+
+    init(kind: NativeManualRecordKind = .expense, domainKey: String = "sport") {
+        self.kind = kind
+        self.domainKey = domainKey
+    }
+
+    init(detail: NativeRecordDetail) {
+        self.init(kind: .universal, domainKey: detail.category ?? "sport")
+        existingRawId = detail.rawId
+        originalPayload = detail.payload ?? [:]
+        title = detail.title
+        note = detail.note ?? ""
+        imagePath = detail.imagePath
+        imageHash = detail.imageHash
+        if let recordDate = detail.recordDate, let parsedDate = Self.dateFormatter.date(from: recordDate) {
+            date = parsedDate
+        }
+        if detail.subtitle.count >= 16 {
+            let start = detail.subtitle.index(detail.subtitle.startIndex, offsetBy: 11)
+            let availableLength = detail.subtitle.distance(from: start, to: detail.subtitle.endIndex)
+            let end = detail.subtitle.index(start, offsetBy: min(8, availableLength))
+            let timeText = String(detail.subtitle[start..<end])
+            if let parsedTime = Self.timeFormatter.date(from: timeText.count == 5 ? timeText + ":00" : timeText) {
+                time = parsedTime
+                includesTime = true
+            }
+        }
+        if domainKey == "wallet" {
+            walletRecordKind = originalPayload.string("record_kind") ?? "cash_snapshot"
+            walletAccountType = originalPayload.string("account_type") ?? "other"
+            walletDueDate = originalPayload.string("due_date") ?? ""
+            walletBillDay = originalPayload.double("bill_day").map { String(Int($0)) } ?? ""
+        }
+    }
 
     var amount: Double? { positiveNumber(amountText) }
     var primaryValue: Double? { positiveNumber(primaryValueText) }
@@ -151,14 +189,15 @@ struct NativeManualRecordDraft: Equatable {
         let metadata = NativeManualDomainMetadata.resolve(domain)
         let value = primaryValue ?? 0
         let cleanDimension = dimension.trimmingCharacters(in: .whitespacesAndNewlines)
-        var payload: [String: AnyCodable] = [
-            metadata.primaryKey: AnyCodable(value),
-            metadata.dimensionKey: AnyCodable(cleanDimension),
-            "source_app": AnyCodable("manual")
-        ]
+        var payload = originalPayload
+        payload[metadata.primaryKey] = AnyCodable(value)
+        payload[metadata.dimensionKey] = AnyCodable(cleanDimension)
+        payload["source_app"] = AnyCodable("manual")
 
         if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             payload["note"] = AnyCodable(note.trimmingCharacters(in: .whitespacesAndNewlines))
+        } else {
+            payload["note"] = AnyCodable(NSNull())
         }
         if domainKey == "sleep" {
             payload["sleep_minutes"] = AnyCodable(Int(value.rounded()))

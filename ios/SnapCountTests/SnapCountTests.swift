@@ -40,6 +40,17 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(payload.string("source_app"), "manual")
     }
 
+    func testManualUniversalEditPreservesUnknownPayloadFields() {
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
+        draft.existingRawId = "record-1"
+        draft.originalPayload = ["distance_km": AnyCodable(12.5)]
+        draft.primaryValueText = "60"
+        draft.dimension = "骑行"
+        let payload = draft.universalPayload(domain: nil)
+        XCTAssertEqual(payload.double("distance_km"), 12.5)
+        XCTAssertEqual(payload.double("duration_minutes"), 60)
+    }
+
     func testInboxRepositoryProtocolSupportsStubInjection() async throws {
         let repository = InboxRepositoryStub()
         let result = try await repository.retry(id: "staging-1", accessToken: "test-token")

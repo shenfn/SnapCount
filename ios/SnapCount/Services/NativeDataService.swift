@@ -58,9 +58,10 @@ struct NativeRecordDetail: Identifiable {
     let companionMessage: String?
     let accountId: String?
     let systemImage: String
+    let payload: [String: AnyCodable]?
 
     var isEditable: Bool {
-        kind == "expense" || kind == "income"
+        kind == "expense" || kind == "income" || kind == "data"
     }
 
     var isDeletable: Bool {
@@ -519,7 +520,8 @@ final class NativeDataService {
                 note: row.note,
                 companionMessage: row.companionMessage,
                 accountId: row.accountId,
-                systemImage: "creditcard"
+                systemImage: "creditcard",
+                payload: nil
             )
 
         case "income":
@@ -564,7 +566,8 @@ final class NativeDataService {
                 note: row.note,
                 companionMessage: row.companionMessage,
                 accountId: row.accountId,
-                systemImage: "arrow.down.circle"
+                systemImage: "arrow.down.circle",
+                payload: nil
             )
 
         default:
@@ -611,7 +614,8 @@ final class NativeDataService {
                 note: row.summary,
                 companionMessage: row.payloadJSONB?.string("companion_message"),
                 accountId: nil,
-                systemImage: "sparkles"
+                systemImage: "sparkles",
+                payload: row.payloadJSONB
             )
         }
     }
@@ -993,23 +997,33 @@ final class NativeDataService {
 
         case .universal:
             let domainRow = try await fetchDataDomain(key: draft.domainKey, accessToken: accessToken)
+            let body: [String: AnyCodable] = [
+                "domain_id": AnyCodable(domainRow.id),
+                "domain_key": AnyCodable(domainRow.key),
+                "domain_version": AnyCodable(domainRow.version ?? "1.0"),
+                "occurred_at": AnyCodable(draft.occurredAt),
+                "title": AnyCodable(draft.resolvedTitle(domain: domain)),
+                "summary": AnyCodable(draft.resolvedSummary(domain: domain)),
+                "payload_jsonb": AnyCodable(draft.universalPayload(domain: domain).mapValues(\.value)),
+                "source": AnyCodable("manual"),
+                "source_image_path": AnyCodable(nullable(draft.imagePath)),
+                "source_image_hash": AnyCodable(nullable(draft.imageHash)),
+                "user_id": AnyCodable(userId)
+            ]
+            if let existingRawId = draft.existingRawId {
+                try await patch(
+                    path: "rest/v1/data_records",
+                    queryItems: [URLQueryItem(name: "id", value: "eq.\(existingRawId)")],
+                    body: body,
+                    accessToken: accessToken
+                )
+                return "data/\(existingRawId)"
+            }
             let rows = try await postJSON(
                 [InsertedRecordResponse].self,
                 path: "rest/v1/data_records",
                 queryItems: [URLQueryItem(name: "select", value: "id")],
-                body: [
-                    "domain_id": AnyCodable(domainRow.id),
-                    "domain_key": AnyCodable(domainRow.key),
-                    "domain_version": AnyCodable(domainRow.version ?? "1.0"),
-                    "occurred_at": AnyCodable(draft.occurredAt),
-                    "title": AnyCodable(draft.resolvedTitle(domain: domain)),
-                    "summary": AnyCodable(draft.resolvedSummary(domain: domain)),
-                    "payload_jsonb": AnyCodable(draft.universalPayload(domain: domain).mapValues(\.value)),
-                    "source": AnyCodable("manual"),
-                    "source_image_path": AnyCodable(NSNull()),
-                    "source_image_hash": AnyCodable(NSNull()),
-                    "user_id": AnyCodable(userId)
-                ],
+                body: body,
                 accessToken: accessToken
             )
             guard let row = rows.first else {
@@ -1046,7 +1060,7 @@ final class NativeDataService {
                     NativeDetailRow(label: "来源", value: row.source ?? "")
                 ].filter { !$0.value.isEmpty },
                 imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: row.imageURL != nil && signedURLs[row.imageURL ?? ""] == nil, imagePath: row.imageURL, imageHash: row.imageHash,
-                amount: row.amount, merchantName: row.merchantName, platform: row.platform, category: row.category, paymentMethod: row.paymentMethod, recordDate: row.transactionDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: row.status == "pending" ? "clock" : "creditcard"
+                amount: row.amount, merchantName: row.merchantName, platform: row.platform, category: row.category, paymentMethod: row.paymentMethod, recordDate: row.transactionDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: row.status == "pending" ? "clock" : "creditcard", payload: nil
             )
         }
         incomes.forEach { row in
@@ -1055,7 +1069,7 @@ final class NativeDataService {
                 id: reference, rawId: row.id, kind: "income", title: row.sourceName ?? "收入记录", subtitle: row.incomeDate ?? row.createdAt ?? "", value: "+\(currency(row.amount))",
                 detailRows: [NativeDetailRow(label: "收入类型", value: row.category ?? "未填写"), NativeDetailRow(label: "来源", value: row.source ?? "")].filter { !$0.value.isEmpty },
                 imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: row.imageURL != nil && signedURLs[row.imageURL ?? ""] == nil, imagePath: row.imageURL, imageHash: row.imageHash,
-                amount: row.amount, merchantName: row.sourceName, platform: nil, category: row.category, paymentMethod: nil, recordDate: row.incomeDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: "arrow.down.circle"
+                amount: row.amount, merchantName: row.sourceName, platform: nil, category: row.category, paymentMethod: nil, recordDate: row.incomeDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: "arrow.down.circle", payload: nil
             )
         }
         universal.forEach { row in
@@ -1065,7 +1079,7 @@ final class NativeDataService {
                 id: reference, rawId: row.id, kind: "data", title: row.title ?? domainName(row.domainKey), subtitle: row.occurredAt ?? row.createdAt ?? "", value: "",
                 detailRows: [NativeDetailRow(label: "摘要", value: row.summary ?? "")].filter { !$0.value.isEmpty } + payloadRows,
                 imageURL: signedURLs[row.sourceImagePath ?? ""], imageLoadError: row.sourceImagePath != nil && signedURLs[row.sourceImagePath ?? ""] == nil, imagePath: row.sourceImagePath, imageHash: row.sourceImageHash,
-                amount: nil, merchantName: nil, platform: nil, category: row.domainKey, paymentMethod: nil, recordDate: row.occurredAt.map(dateOnly), note: row.summary, companionMessage: row.payloadJSONB?.string("companion_message"), accountId: nil, systemImage: "sparkles"
+                amount: nil, merchantName: nil, platform: nil, category: row.domainKey, paymentMethod: nil, recordDate: row.occurredAt.map(dateOnly), note: row.summary, companionMessage: row.payloadJSONB?.string("companion_message"), accountId: nil, systemImage: "sparkles", payload: row.payloadJSONB
             )
         }
         return details

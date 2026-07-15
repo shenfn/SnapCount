@@ -3,8 +3,12 @@ import SwiftUI
 struct ManualRecordSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var draft = NativeManualRecordDraft()
+    @State private var draft: NativeManualRecordDraft
     @State private var localMessage: String?
+
+    init(editing detail: NativeRecordDetail? = nil) {
+        _draft = State(initialValue: detail.map { NativeManualRecordDraft(detail: $0) } ?? NativeManualRecordDraft())
+    }
 
     private var universalDomains: [NativeDomainDefinition] {
         appState.dashboard.domains.filter { !["expense", "income"].contains($0.id) }
@@ -25,13 +29,19 @@ struct ManualRecordSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Picker("记录类型", selection: $draft.kind) {
-                        ForEach(NativeManualRecordKind.allCases) { kind in
-                            Text(kind.title).tag(kind)
+                if draft.existingRawId == nil {
+                    Section {
+                        Picker("记录类型", selection: $draft.kind) {
+                            ForEach(NativeManualRecordKind.allCases) { kind in
+                                Text(kind.title).tag(kind)
+                            }
                         }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
+                } else {
+                    Section {
+                        LabeledContent("记录类型", value: selectedDomain?.shortName ?? "数据域")
+                    }
                 }
 
                 switch draft.kind {
@@ -58,7 +68,7 @@ struct ManualRecordSheet: View {
                     }
                 }
             }
-            .navigationTitle("手动记录")
+            .navigationTitle(draft.existingRawId == nil ? "手动记录" : "编辑记录")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -82,7 +92,11 @@ struct ManualRecordSheet: View {
         .task {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
             normalizeDomainSelection()
-            applyDefaultAccount()
+            if draft.existingRawId == nil {
+                applyDefaultAccount()
+            } else {
+                hydrateUniversalFields()
+            }
         }
         .onChange(of: draft.kind) { _ in
             localMessage = nil
@@ -206,6 +220,12 @@ struct ManualRecordSheet: View {
         if draft.dimension.isEmpty {
             draft.dimension = NativeManualDomainMetadata.resolve(selectedDomain).defaultDimension
         }
+    }
+
+    private func hydrateUniversalFields() {
+        let resolvedMetadata = NativeManualDomainMetadata.resolve(selectedDomain)
+        draft.primaryValueText = draft.originalPayload.double(resolvedMetadata.primaryKey).map { String($0) } ?? draft.primaryValueText
+        draft.dimension = draft.originalPayload.string(resolvedMetadata.dimensionKey) ?? draft.dimension
     }
 
     private func applyDefaultAccount() {
