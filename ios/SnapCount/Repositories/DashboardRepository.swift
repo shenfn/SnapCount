@@ -1,13 +1,11 @@
 import Foundation
 
 protocol DashboardRepositoryProtocol {
-    func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot
     func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot
     func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot
 }
 
 protocol DashboardRemoteServiceProtocol {
-    func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot
     func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot
     func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot
 }
@@ -17,10 +15,6 @@ final class DashboardRemoteService: DashboardRemoteServiceProtocol {
 
     init(legacyService: NativeDataService = NativeDataService()) {
         self.legacyService = legacyService
-    }
-
-    func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
-        try await legacyService.fetchDashboard(accessToken: accessToken)
     }
 
     func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot {
@@ -37,10 +31,6 @@ final class DashboardRepository: DashboardRepositoryProtocol {
 
     init(remoteService: DashboardRemoteServiceProtocol = DashboardRemoteService()) {
         self.remoteService = remoteService
-    }
-
-    func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
-        try await remoteService.fetchDashboard(accessToken: accessToken)
     }
 
     func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot {

@@ -170,11 +170,6 @@ final class NativeDataService {
         self.imageURLProvider = imageURLProvider
     }
 
-    func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
-        let snapshot = try await fetchDashboardCore(accessToken: accessToken)
-        return (try? await hydrateDashboardImages(snapshot, accessToken: accessToken)) ?? snapshot
-    }
-
     func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot {
         guard !AppConfig.supabaseURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
             throw SupabaseRemoteError.missingConfig
@@ -1596,20 +1591,23 @@ extension Dictionary where Key == String, Value == AnyCodable {
 }
 
 extension DashboardSnapshot {
-    func applyingSignedImageURLs(_ signedURLs: [String: URL]) -> DashboardSnapshot {
+    func applyingSignedImageURLs(
+        _ signedURLs: [String: URL],
+        markMissingAsFailure: Bool = true
+    ) -> DashboardSnapshot {
         var snapshot = self
         snapshot.recordDetails = recordDetails.mapValues { detail in
             guard let path = detail.imagePath else { return detail }
             var hydrated = detail
             hydrated.imageURL = signedURLs[path]
-            hydrated.imageLoadError = signedURLs[path] == nil
+            hydrated.imageLoadError = markMissingAsFailure && signedURLs[path] == nil
             return hydrated
         }
         snapshot.stagingRecords = stagingRecords.map { record in
             guard let path = record.imagePath else { return record }
             var hydrated = record
             hydrated.imageURL = signedURLs[path]
-            hydrated.imageLoadError = signedURLs[path] == nil
+            hydrated.imageLoadError = markMissingAsFailure && signedURLs[path] == nil
             return hydrated
         }
         return snapshot

@@ -72,6 +72,8 @@ final class AppState: ObservableObject {
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
     private var insightsLoadedAt: Date?
+    private var dashboardRefreshGeneration = 0
+    private var dashboardSupplementTask: Task<Void, Never>?
 
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
@@ -231,31 +233,24 @@ final class AppState: ObservableObject {
 
     func refreshDashboard() async {
         guard !isLoadingDashboard else { return }
+        dashboardRefreshGeneration += 1
+        let generation = dashboardRefreshGeneration
+        dashboardSupplementTask?.cancel()
         isLoadingDashboard = true
         dashboardMessage = nil
         lastDashboardRefreshAt = Date()
+        defer {
+            if generation == dashboardRefreshGeneration {
+                isLoadingDashboard = false
+            }
+        }
 
         do {
-            var session = try await validSession()
-            do {
-                var snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
-                snapshot.domains = await resolvedDomains(accessToken: session.accessToken, snapshot: snapshot)
-                dashboard = snapshot
-                isShowingCachedDashboard = false
-                try? snapshotStore.save(snapshot, userId: session.user.id)
-                recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
-                prefetchDashboardImages(snapshot)
-            } catch {
-                guard isExpiredJWTError(error) else { throw error }
-                session = try await validSession(forceRefresh: true)
-                var snapshot = try await dashboardRepository.fetchDashboard(accessToken: session.accessToken)
-                snapshot.domains = await resolvedDomains(accessToken: session.accessToken, snapshot: snapshot)
-                dashboard = snapshot
-                isShowingCachedDashboard = false
-                try? snapshotStore.save(snapshot, userId: session.user.id)
-                recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
-                prefetchDashboardImages(snapshot)
-            }
+            let (fetchedSnapshot, session) = try await fetchDashboardCoreWithValidSession()
+            guard generation == dashboardRefreshGeneration else { return }
+            let snapshot = preparedCoreSnapshot(fetchedSnapshot)
+            publishDashboard(snapshot, userId: session.user.id)
+            scheduleDashboardSupplement(snapshot, session: session, generation: generation)
         } catch {
             if isInvalidRefreshSessionError(error) {
                 invalidateSession(message: "登录状态已失效，请重新登录。")
@@ -266,7 +261,76 @@ final class AppState: ObservableObject {
             }
         }
 
-        isLoadingDashboard = false
+    }
+
+    private func fetchDashboardCoreWithValidSession() async throws -> (DashboardSnapshot, SupabaseAuthSession) {
+        var session = try await validSession()
+        do {
+            return (try await dashboardRepository.fetchDashboardCore(accessToken: session.accessToken), session)
+        } catch {
+            guard isExpiredJWTError(error) else { throw error }
+            session = try await validSession(forceRefresh: true)
+            return (try await dashboardRepository.fetchDashboardCore(accessToken: session.accessToken), session)
+        }
+    }
+
+    private func preparedCoreSnapshot(_ snapshot: DashboardSnapshot) -> DashboardSnapshot {
+        var cachedImageURLs: [String: URL] = [:]
+        for detail in dashboard.recordDetails.values {
+            if let path = detail.imagePath, let url = detail.imageURL { cachedImageURLs[path] = url }
+        }
+        for record in dashboard.stagingRecords {
+            if let path = record.imagePath, let url = record.imageURL { cachedImageURLs[path] = url }
+        }
+        for detail in recordDetailCache.values {
+            if let path = detail.imagePath, let url = detail.imageURL { cachedImageURLs[path] = url }
+        }
+
+        var prepared = snapshot.applyingSignedImageURLs(
+            cachedImageURLs,
+            markMissingAsFailure: false
+        )
+        let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+        prepared.domains = domainsWithUpdatedCounts(definitions, snapshot: prepared)
+        return prepared
+    }
+
+    private func publishDashboard(_ snapshot: DashboardSnapshot, userId: String) {
+        dashboard = snapshot
+        isShowingCachedDashboard = false
+        try? snapshotStore.save(snapshot, userId: userId)
+        recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
+    }
+
+    private func scheduleDashboardSupplement(
+        _ snapshot: DashboardSnapshot,
+        session: SupabaseAuthSession,
+        generation: Int
+    ) {
+        dashboardSupplementTask = Task { [weak self] in
+            guard let self else { return }
+            async let resolvedDomains = self.resolvedDomains(
+                accessToken: session.accessToken,
+                snapshot: snapshot
+            )
+            async let hydratedSnapshot = try? self.dashboardRepository.hydrateDashboardImages(
+                snapshot,
+                accessToken: session.accessToken
+            )
+            let (domains, hydrated) = await (resolvedDomains, hydratedSnapshot)
+            guard !Task.isCancelled,
+                  self.isSignedIn,
+                  generation == self.dashboardRefreshGeneration else { return }
+
+            var supplemented = hydrated ?? snapshot
+            supplemented.domains = domains
+            self.publishDashboard(supplemented, userId: session.user.id)
+            if let selectedId = self.selectedRecordDetail?.id,
+               let selected = supplemented.recordDetails[selectedId] {
+                self.selectedRecordDetail = selected
+            }
+            self.prefetchDashboardImages(supplemented)
+        }
     }
 
     private func restoreDashboardSnapshot(userId: String) {
@@ -295,9 +359,29 @@ final class AppState: ObservableObject {
     }
 
     private func resolvedDomains(accessToken: String, snapshot: DashboardSnapshot) async -> [NativeDomainDefinition] {
-        let counts = Dictionary(grouping: snapshot.dayRecordGroups.flatMap(\.records).filter { $0.kind != .staging }) { $0.domainKey ?? $0.kind.rawValue }.mapValues(\.count)
         let definitions = (try? await domainRepository.fetchDefinitions(accessToken: accessToken)) ?? Self.fallbackDomains
-        return definitions.map { domain in NativeDomainDefinition(id: domain.id, name: domain.name, description: domain.description, icon: domain.icon, isSystem: domain.isSystem, schema: domain.schema, display: domain.display, recordCount: counts[domain.id] ?? 0) }
+        return domainsWithUpdatedCounts(definitions, snapshot: snapshot)
+    }
+
+    private func domainsWithUpdatedCounts(
+        _ definitions: [NativeDomainDefinition],
+        snapshot: DashboardSnapshot
+    ) -> [NativeDomainDefinition] {
+        let counts = Dictionary(
+            grouping: snapshot.dayRecordGroups.flatMap(\.records).filter { $0.kind != .staging }
+        ) { $0.domainKey ?? $0.kind.rawValue }.mapValues(\.count)
+        return definitions.map { domain in
+            NativeDomainDefinition(
+                id: domain.id,
+                name: domain.name,
+                description: domain.description,
+                icon: domain.icon,
+                isSystem: domain.isSystem,
+                schema: domain.schema,
+                display: domain.display,
+                recordCount: counts[domain.id] ?? 0
+            )
+        }
     }
 
     private static let fallbackDomains = InboxArchiveDomains.all.map { NativeDomainDefinition(id: $0.id, name: $0.title, description: "", icon: "", isSystem: true, schema: [:], display: [:], recordCount: 0) }
@@ -1091,6 +1175,10 @@ final class AppState: ObservableObject {
     }
 
     private func invalidateSession(message: String) {
+        dashboardRefreshGeneration += 1
+        dashboardSupplementTask?.cancel()
+        dashboardSupplementTask = nil
+        isLoadingDashboard = false
         try? keychain.remove(KeychainKeys.authSession)
         isSignedIn = false
         currentUserEmail = ""

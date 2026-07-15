@@ -11,7 +11,7 @@ final class SnapCountTests: XCTestCase {
         let expected = DashboardSnapshot(todayCount: 3)
         let repository = DashboardRepositoryStub(snapshot: expected)
 
-        let snapshot = try await repository.fetchDashboard(accessToken: "test-token")
+        let snapshot = try await repository.fetchDashboardCore(accessToken: "test-token")
 
         XCTAssertEqual(snapshot.todayCount, 3)
     }
@@ -35,6 +35,23 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(hydrated.recordDetails[detail.id]?.imageURL, imageURL)
         XCTAssertEqual(hydrated.recordDetails[detail.id]?.imageLoadError, false)
         XCTAssertNil(core.recordDetails[detail.id]?.imageURL)
+    }
+
+    func testDashboardCanReuseImagesWithoutMarkingNewPathsAsFailed() {
+        let detail = NativeRecordDetail(
+            id: "tx-1", rawId: "1", kind: "expense", title: "早餐", subtitle: "2026-07-15",
+            value: "¥12.00", detailRows: [], imageURL: nil, imageLoadError: false,
+            imagePath: "user/new.jpg", imageHash: nil, amount: 12, merchantName: "早餐",
+            platform: nil, category: "food", paymentMethod: nil, recordDate: "2026-07-15",
+            note: nil, companionMessage: nil, accountId: nil, systemImage: "creditcard", payload: nil
+        )
+        var core = DashboardSnapshot()
+        core.recordDetails[detail.id] = detail
+
+        let reused = core.applyingSignedImageURLs([:], markMissingAsFailure: false)
+
+        XCTAssertNil(reused.recordDetails[detail.id]?.imageURL)
+        XCTAssertEqual(reused.recordDetails[detail.id]?.imageLoadError, false)
     }
 
     func testRecordRepositoryProtocolSupportsStubInjection() async throws {
@@ -369,10 +386,6 @@ final class SnapCountTests: XCTestCase {
 
 private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
     let snapshot: DashboardSnapshot
-
-    func fetchDashboard(accessToken: String) async throws -> DashboardSnapshot {
-        snapshot
-    }
 
     func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot {
         snapshot
