@@ -34,6 +34,9 @@ final class AppState: ObservableObject {
     @Published var isSavingAccount = false
     @Published var isSubmittingRepayment = false
     @Published var repaymentMessage: String?
+    @Published var repaymentCandidates: [String: NativeRepaymentCandidate] = [:]
+    @Published var stagingRepaymentId: String?
+    @Published var inboxFinanceMessage: String?
     @Published var unboundRecords: [NativeUnboundRecord] = []
     @Published var unboundRecordsMessage: String?
     @Published var unboundBindingMessage: String?
@@ -321,6 +324,83 @@ final class AppState: ObservableObject {
             return true
         } catch {
             repaymentMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func loadInboxRepaymentCandidates() async {
+        let stagingRecords = dashboard.stagingRecords
+        guard !stagingRecords.isEmpty else {
+            repaymentCandidates = [:]
+            return
+        }
+
+        do {
+            let session = try await validSession()
+            try? await accountRepository.ensureRepaymentCycles(
+                monthKey: Self.currentMonthKey,
+                accessToken: session.accessToken
+            )
+            async let accountRows = accountRepository.fetchAccounts(accessToken: session.accessToken)
+            async let cycleRows = accountRepository.fetchOpenRepaymentCycles(accessToken: session.accessToken)
+            let (loadedAccounts, cycles) = try await (accountRows, cycleRows)
+            accounts = loadedAccounts
+            repaymentCandidates = Dictionary(
+                uniqueKeysWithValues: stagingRecords.compactMap { record in
+                    NativeRepaymentCandidateEngine.candidate(
+                        for: record,
+                        accounts: loadedAccounts,
+                        cycles: cycles
+                    ).map { (record.id, $0) }
+                }
+            )
+            inboxFinanceMessage = nil
+        } catch {
+            repaymentCandidates = [:]
+            inboxFinanceMessage = "还款候选暂时无法匹配：\(error.localizedDescription)"
+        }
+    }
+
+    func confirmStagingRepayment(_ record: NativeStagingRecord) async -> Bool {
+        guard stagingRepaymentId == nil,
+              let candidate = repaymentCandidates[record.id] else {
+            return false
+        }
+        stagingRepaymentId = record.id
+        inboxFinanceMessage = nil
+        defer { stagingRepaymentId = nil }
+
+        do {
+            let session = try await validSession()
+            _ = try await accountRepository.confirmRepayment(
+                cycleId: candidate.cycle.id,
+                paidAmount: candidate.amount,
+                debitAccountId: candidate.cycle.autoDebitAccountId ?? candidate.account.autoDebitAccountId,
+                status: .paid,
+                note: "根据还款截图确认已还清",
+                accessToken: session.accessToken
+            )
+            do {
+                try await inboxRepository.resolveRepayment(
+                    id: record.id,
+                    cycleId: candidate.cycle.id,
+                    accessToken: session.accessToken
+                )
+            } catch {
+                await loadAccounts()
+                await refreshDashboard()
+                inboxFinanceMessage = "还款已确认，但中转站归档失败：\(error.localizedDescription)"
+                return false
+            }
+
+            repaymentCandidates.removeValue(forKey: record.id)
+            inboxPath.removeAll()
+            await loadAccounts()
+            await refreshDashboard()
+            inboxFinanceMessage = "已根据截图确认还款"
+            return true
+        } catch {
+            inboxFinanceMessage = error.localizedDescription
             return false
         }
     }
@@ -762,6 +842,9 @@ final class AppState: ObservableObject {
         accounts = []
         selectedAccountDetail = nil
         repaymentMessage = nil
+        repaymentCandidates = [:]
+        stagingRepaymentId = nil
+        inboxFinanceMessage = nil
         unboundRecords = []
         unboundRecordsMessage = nil
         unboundBindingMessage = nil
