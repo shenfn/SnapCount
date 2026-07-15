@@ -39,7 +39,7 @@ struct DayDetailView: View {
     private var summary: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(String(route.dateKey.suffix(5))).font(.system(size: 32, weight: .black, design: .rounded))
-            Text("(selectedKind.title) · (records.count) 条记录").foregroundStyle(JieziTheme.muted)
+            Text("\(selectedKind.title) · \(records.count) 条记录").foregroundStyle(JieziTheme.muted)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(22).background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 24))
     }
 

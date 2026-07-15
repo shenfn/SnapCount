@@ -36,7 +36,7 @@ struct RecordsView: View {
                     ForEach(groups) { group in
                         Section(dayTitle(group.dateKey)) {
                             ForEach(group.records) { item in
-                                NavigationLink(value: item.reference) {
+                                NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
                                     HStack(spacing: 12) {
                                         Image(systemName: item.systemImage)
                                             .foregroundStyle(JieziTheme.mint)
@@ -75,7 +75,9 @@ struct RecordsView: View {
                 NavigationLink { DomainsView() } label: { Label("数据域", systemImage: "square.stack.3d.up") }
             }
         }
-        .navigationDestination(for: String.self) { reference in RecordDetailView(reference: reference) }
+        .navigationDestination(for: NativeRecordRoute.self) { route in
+            RecordDetailView(reference: route.reference)
+        }
         .onChange(of: availableKinds) { kinds in if !kinds.contains(selectedKind) { selectedKind = .all } }
         .task(id: prefetchKey) {
             appState.prefetchRecordDetails(groups.flatMap(\.records).map(\.reference))

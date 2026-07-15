@@ -21,8 +21,8 @@ final class AppState: ObservableObject {
     @Published var shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
     @Published var shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
     @Published var todayPath: [NativeDayDetailRoute] = []
-    @Published var inboxPath: [String] = []
-    @Published var recordsPath: [String] = []
+    @Published var inboxPath = NavigationPath()
+    @Published var recordsPath = NavigationPath()
     @Published var selectedRecordDetail: NativeRecordDetail?
     @Published var recordDetailMessage: String?
     @Published var isSavingRecordDetail = false
@@ -572,7 +572,7 @@ final class AppState: ObservableObject {
             }
 
             repaymentCandidates.removeValue(forKey: record.id)
-            inboxPath.removeAll()
+            inboxPath = NavigationPath()
             await loadAccounts()
             await refreshDashboard()
             inboxFinanceMessage = "已根据截图确认还款"
@@ -885,12 +885,12 @@ final class AppState: ObservableObject {
 
     func openUnboundRecord(_ record: NativeUnboundRecord) {
         selectedTab = .records
-        recordsPath = [record.reference]
+        recordsPath = NavigationPath([NativeRecordRoute(reference: record.reference)])
     }
 
     func openWalletSnapshot(_ snapshot: NativeWalletSnapshot) {
         selectedTab = .records
-        recordsPath = ["data-\(snapshot.id)"]
+        recordsPath = NavigationPath([NativeRecordRoute(reference: "data-\(snapshot.id)")])
         Task { await loadRecordDetail(reference: "data-\(snapshot.id)") }
     }
 
@@ -908,18 +908,18 @@ final class AppState: ObservableObject {
     }
 
     func openDayRecord(_ record: NativeDayRecord) {
-        if record.kind == .staging {
+        if record.reference.hasPrefix("staging-") {
             selectedTab = .inbox
-            inboxPath = [String(record.reference.dropFirst("staging-".count))]
+            inboxPath = NavigationPath([NativeInboxRoute(recordId: String(record.reference.dropFirst("staging-".count)))])
         } else {
             selectedTab = .records
-            recordsPath = [record.reference]
+            recordsPath = NavigationPath([NativeRecordRoute(reference: record.reference)])
         }
     }
 
     func openPendingExpense(_ pending: NativePendingExpense) {
         selectedTab = .records
-        recordsPath = [pending.reference]
+        recordsPath = NavigationPath([NativeRecordRoute(reference: pending.reference)])
         Task { await loadRecordDetail(reference: pending.reference) }
     }
 
@@ -954,12 +954,12 @@ final class AppState: ObservableObject {
         case "inbox":
             selectedTab = .inbox
             if !detailPath.isEmpty {
-                inboxPath = [detailPath]
+                inboxPath = NavigationPath([NativeInboxRoute(recordId: detailPath)])
             }
         case "records":
             selectedTab = .records
             if !detailPath.isEmpty {
-                recordsPath = [detailPath]
+                recordsPath = NavigationPath([NativeRecordRoute(reference: detailPath)])
             }
         case "settings":
             selectedTab = .settings
@@ -977,7 +977,7 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             try await inboxRepository.discard(id: record.id, accessToken: session.accessToken)
-            inboxPath.removeAll()
+            inboxPath = NavigationPath()
             await refreshDashboard()
         } catch {
             dashboardMessage = error.localizedDescription
@@ -988,7 +988,7 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             _ = try await inboxRepository.retry(id: record.id, accessToken: session.accessToken)
-            inboxPath.removeAll()
+            inboxPath = NavigationPath()
             await refreshDashboard()
         } catch {
             dashboardMessage = error.localizedDescription
@@ -999,13 +999,13 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             let reference = try await inboxRepository.archive(record, domainKey: domainKey, accessToken: session.accessToken)
-            inboxPath.removeAll()
+            inboxPath = NavigationPath()
             await refreshDashboard()
             recordDetailCache.removeValue(forKey: reference)
             selectedRecordDetail = nil
             await loadRecordDetail(reference: reference, force: true)
             selectedTab = .records
-            recordsPath = [reference]
+            recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
         } catch {
             dashboardMessage = error.localizedDescription
         }
@@ -1049,7 +1049,7 @@ final class AppState: ObservableObject {
             let reference = try await recordRepository.saveDetail(draft, accessToken: session.accessToken)
             await refreshDashboard()
             await loadAccounts()
-            recordsPath = [reference]
+            recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
             recordDetailCache.removeValue(forKey: reference)
             await loadRecordDetail(reference: reference, force: true)
             return true
@@ -1070,7 +1070,8 @@ final class AppState: ObservableObject {
             try await recordRepository.delete(reference: reference, accessToken: session.accessToken)
             recordDetailCache.removeValue(forKey: reference)
             selectedRecordDetail = nil
-            recordsPath.removeAll()
+            recordsPath = NavigationPath()
+            await loadAccounts()
             await refreshDashboard()
             return true
         } catch {

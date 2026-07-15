@@ -61,8 +61,8 @@ struct InboxView: View {
         }
         .navigationTitle("中转站")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .navigationDestination(for: String.self) { id in
-            if let record = appState.dashboard.stagingRecords.first(where: { $0.id == id }) {
+        .navigationDestination(for: NativeInboxRoute.self) { route in
+            if let record = appState.dashboard.stagingRecords.first(where: { $0.id == route.recordId }) {
                 StagingRecordDetailView(record: record)
             } else {
                 ContentUnavailableView(
@@ -83,7 +83,7 @@ struct InboxView: View {
             }
             .buttonStyle(.plain)
         } else if let record = item.stagingRecord {
-            NavigationLink(value: record.id) {
+            NavigationLink(value: NativeInboxRoute(recordId: record.id)) {
                 NativeInboxItemRow(
                     item: item,
                     repaymentCandidate: appState.repaymentCandidates[record.id]

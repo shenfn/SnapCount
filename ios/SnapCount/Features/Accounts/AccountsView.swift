@@ -31,7 +31,7 @@ struct AccountsView: View {
                 if !archivedAccounts.isEmpty {
                     Section("已归档") {
                         ForEach(archivedAccounts) { account in
-                            NavigationLink(value: account.id) {
+                            NavigationLink(value: NativeAccountRoute(accountId: account.id)) {
                                 AccountRowView(account: account)
                                     .foregroundStyle(.secondary)
                             }
@@ -67,8 +67,8 @@ struct AccountsView: View {
                 }
             }
         }
-        .navigationDestination(for: String.self) { id in
-            if let account = appState.accounts.first(where: { $0.id == id }) {
+        .navigationDestination(for: NativeAccountRoute.self) { route in
+            if let account = appState.accounts.first(where: { $0.id == route.accountId }) {
                 AccountDetailView(accountId: account.id)
             }
         }
@@ -85,7 +85,7 @@ struct AccountsView: View {
         if !accounts.isEmpty {
             Section(title) {
                 ForEach(accounts) { account in
-                    NavigationLink(value: account.id) {
+                    NavigationLink(value: NativeAccountRoute(accountId: account.id)) {
                         AccountRowView(account: account)
                     }
                 }

@@ -909,7 +909,7 @@ final class NativeDataService {
         var records: [NativeDayRecord] = []
         transactions.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let dateKey = row.transactionDate else { return }
-            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "tx-\(row.id)", dateKey: dateKey, kind: row.status == "pending" ? .staging : .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: row.transactionTime, systemImage: row.status == "pending" ? "clock" : "creditcard"))
+            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "tx-\(row.id)", dateKey: dateKey, kind: .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: row.transactionTime, systemImage: row.status == "pending" ? "clock" : "creditcard"))
         }
         incomes.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let dateKey = row.incomeDate else { return }
