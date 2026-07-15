@@ -1496,6 +1496,15 @@ function looksLikePhotoCaptureKind(value: string | null): boolean {
   );
 }
 
+function looksLikeCameraCaptureKind(value: string | null): boolean {
+  const text = normalizeComparableText(value);
+  return Boolean(text) && (
+    text.includes("camera") ||
+    text.includes("拍照") ||
+    text.includes("相机")
+  );
+}
+
 function shouldUsePhotoQualityVision(params: {
   captureKind: string | null;
   rawText: string | null;
@@ -3793,7 +3802,9 @@ Deno.serve(async (req) => {
     const sourceApp = normalizeText(form.get("source_app") ?? form.get("app_name"));
     const captureKind = normalizeText(form.get("capture_kind") ?? form.get("capture_type") ?? form.get("image_source") ?? form.get("media_type"));
     const clientCapturedAt = form.get("client_captured_at") ?? form.get("client_upload_at") ?? form.get("shortcut_time") ?? form.get("captured_at");
-    const imageAnalysis = analyzeImage(bytes, mime);
+    const imageAnalysis = looksLikeCameraCaptureKind(captureKind)
+      ? { features: imageFeaturesFromDecoded(null, mime), perceptualHash: null }
+      : analyzeImage(bytes, mime);
     const imageFeatures = imageAnalysis.features;
     const perceptualHash = imageAnalysis.perceptualHash;
 
