@@ -188,6 +188,24 @@ private struct AccountDetailView: View {
                         }
                     }
 
+                    if let sourceSnapshot = appState.selectedAccountSourceSnapshot {
+                        Section("来源快照") {
+                            LabeledContent("识别账户", value: sourceSnapshot.accountName)
+                            LabeledContent("快照余额", value: "¥\(amount(sourceSnapshot.balance))")
+                            LabeledContent("快照时间", value: sourceSnapshot.snapshotAt)
+                            if !sourceSnapshot.summary.isEmpty {
+                                Text(sourceSnapshot.summary)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Button {
+                                appState.openWalletSnapshot(sourceSnapshot)
+                            } label: {
+                                Label("查看来源截图", systemImage: "photo")
+                            }
+                        }
+                    }
+
                     if let cycles = detail?.repaymentCycles, !cycles.isEmpty {
                         Section("还款计划") {
                             ForEach(cycles) { cycle in

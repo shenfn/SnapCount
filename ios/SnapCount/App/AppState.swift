@@ -283,6 +283,17 @@ final class AppState: ObservableObject {
                 id: account.sourceRecordId,
                 accessToken: session.accessToken
             )
+            let reference = "data-\(account.sourceRecordId)"
+            if recordDetailCache[reference] == nil,
+               let detail = try? await recordRepository.fetchDetail(
+                   reference: reference,
+                   accessToken: session.accessToken
+               ) {
+                recordDetailCache[reference] = detail
+                if let imageURL = detail.imageURL {
+                    Task { await RemoteImageRepository.shared.prefetch([imageURL]) }
+                }
+            }
         }
     }
 
