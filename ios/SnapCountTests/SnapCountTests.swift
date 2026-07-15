@@ -250,6 +250,37 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(payload.modeLabel, "现金流分析")
     }
 
+    func testHomeWidgetPreferencesRestoreMissingPWAKeys() {
+        let configuration = [
+            NativeHomeWidgetConfiguration(key: .today, isEnabled: false, order: 8),
+            NativeHomeWidgetConfiguration(key: .finance, isEnabled: true, order: 1)
+        ]
+        let normalized = NativeHomeWidgetPreferences.normalized(configuration)
+        XCTAssertEqual(normalized.map(\.key), [.finance, .today, .pending, .domains, .daily])
+        XCTAssertEqual(normalized.first(where: { $0.key == .today })?.isEnabled, false)
+        XCTAssertEqual(normalized.map(\.order), [0, 1, 2, 3, 4])
+    }
+
+    func testHomeFinanceUsesRealAccountBalances() {
+        let cash = NativeAccount(
+            id: "cash", name: "零钱", type: .walletBalance, institution: "", last4: "", currency: "CNY",
+            initialBalance: 0, currentBalance: 800, snapshotBalance: nil, snapshotAt: nil,
+            sourceRecordTable: "", sourceRecordId: "", billDay: nil, paymentDueDay: nil,
+            autoDebitAccountId: nil, autoConfirmRepayment: false, gracePeriodDays: 0,
+            lastReconciledAt: nil, isDefaultExpense: true, isDefaultIncome: false,
+            isArchived: false, sortOrder: 0
+        )
+        let liability = makeLiabilityAccount(id: "credit", name: "花呗")
+        let summary = NativeHomeFinanceSummary.make(
+            accounts: [cash, liability],
+            dashboard: DashboardSnapshot(todayExpense: 30, todayIncome: 100)
+        )
+        XCTAssertEqual(summary.availableCash, 800)
+        XCTAssertEqual(summary.liabilityTotal, 320)
+        XCTAssertEqual(summary.netWorthEstimate, 480)
+        XCTAssertEqual(summary.todayIncome - summary.todayExpense, 70)
+    }
+
     func testAccountTypeNormalizationMatchesPWAAdapter() {
         XCTAssertEqual(NativeAccountType.normalized("wechat"), .walletBalance)
         XCTAssertEqual(NativeAccountType.normalized("bank_card"), .debitCard)
