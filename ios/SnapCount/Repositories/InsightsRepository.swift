@@ -74,7 +74,7 @@ final class InsightsRepository: InsightsRepositoryProtocol {
     ) async throws -> NativeAIInsightResponse {
         try await remoteClient.postFunction(
             NativeAIInsightResponse.self,
-            path: "generate-insights",
+            path: "functions/v1/generate-insights",
             body: [
                 "days": AnyCodable(range.rawValue),
                 "force": AnyCodable(force),
