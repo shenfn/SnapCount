@@ -27,6 +27,8 @@ final class AppState: ObservableObject {
     @Published var recordDetailMessage: String?
     @Published var isSavingRecordDetail = false
     @Published var isDeletingRecordDetail = false
+    @Published var isCreatingManualRecord = false
+    @Published var manualRecordMessage: String?
     @Published var accounts: [NativeAccount] = []
     @Published var selectedAccountDetail: NativeAccountDetail?
     @Published var selectedAccountSourceSnapshot: NativeWalletSnapshot?
@@ -1072,6 +1074,32 @@ final class AppState: ObservableObject {
             throw SupabaseRemoteError.missingSession
         }
         return session
+    }
+
+    func createManualRecord(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?) async -> Bool {
+        guard !isCreatingManualRecord else { return false }
+        isCreatingManualRecord = true
+        manualRecordMessage = nil
+        defer { isCreatingManualRecord = false }
+
+        do {
+            let session = try await validSession()
+            _ = try await recordRepository.create(
+                draft,
+                domain: domain,
+                userId: session.user.id,
+                accessToken: session.accessToken
+            )
+            await refreshDashboard()
+            if draft.kind != .universal || draft.domainKey == "wallet" {
+                await loadAccounts()
+            }
+            manualRecordMessage = "记录已保存"
+            return true
+        } catch {
+            manualRecordMessage = error.localizedDescription
+            return false
+        }
     }
 
     private static let monthKeyFormatter: DateFormatter = {

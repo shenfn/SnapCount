@@ -5,6 +5,7 @@ struct TodayView: View {
     @State private var showUploadOptions = false
     @State private var showCameraPicker = false
     @State private var showPhotoLibraryPicker = false
+    @State private var showManualRecordSheet = false
     @State private var isUploading = false
     @State private var uploadMessage: String?
     @State private var uploadMessageIsError = false
@@ -29,6 +30,7 @@ struct TodayView: View {
         }
         .navigationBarHidden(true)
         .confirmationDialog("留下此刻", isPresented: $showUploadOptions, titleVisibility: .visible) {
+            Button("手动记录") { showManualRecordSheet = true }
             Button("从相册选择") { showPhotoLibraryPicker = true }
             Button("拍摄照片") { showCameraPicker = true }
             Button("取消", role: .cancel) {}
@@ -45,6 +47,9 @@ struct TodayView: View {
                 showPhotoLibraryPicker = false
                 Task { await uploadImageData(data, captureKind: "screenshot", filename: "photo-library-upload.jpg") }
             } onCancel: { showPhotoLibraryPicker = false }
+        }
+        .sheet(isPresented: $showManualRecordSheet) {
+            ManualRecordSheet()
         }
         .alert(uploadMessageIsError ? "上传失败" : "上传完成", isPresented: $showUploadResult) {
             Button("好", role: .cancel) {}

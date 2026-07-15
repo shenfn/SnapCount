@@ -4,6 +4,7 @@ struct RecordsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedKind: NativeDayRecordKind = .all
     @State private var selectedMonthKey = RecordsView.currentMonthKey
+    @State private var showManualRecordSheet = false
 
     private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: selectedKind) }
     private var groups: [NativeDayRecordGroup] { query.groups(from: appState.dashboard.dayRecordGroups) }
@@ -65,6 +66,11 @@ struct RecordsView: View {
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    showManualRecordSheet = true
+                } label: {
+                    Label("新增记录", systemImage: "plus")
+                }
                 NavigationLink { AccountsView() } label: { Label("账户", systemImage: "wallet.pass") }
                 NavigationLink { DomainsView() } label: { Label("数据域", systemImage: "square.stack.3d.up") }
             }
@@ -73,6 +79,9 @@ struct RecordsView: View {
         .onChange(of: availableKinds) { kinds in if !kinds.contains(selectedKind) { selectedKind = .all } }
         .task(id: prefetchKey) {
             appState.prefetchRecordDetails(groups.flatMap(\.records).map(\.reference))
+        }
+        .sheet(isPresented: $showManualRecordSheet) {
+            ManualRecordSheet()
         }
     }
 
