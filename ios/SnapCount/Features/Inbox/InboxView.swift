@@ -25,6 +25,10 @@ struct InboxView: View {
             List {
                 Section { pendingSummary }
 
+                if let message = appState.inboxFinanceMessage {
+                    Section { Text(message).foregroundStyle(JieziTheme.brand) }
+                }
+
                 if allItems.isEmpty {
                     ContentUnavailableView(
                         "暂无待处理记录",
@@ -50,7 +54,10 @@ struct InboxView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .refreshable { await appState.refreshDashboard() }
+            .refreshable {
+                await appState.refreshDashboard()
+                await appState.loadInboxRepaymentCandidates()
+            }
         }
         .navigationTitle("中转站")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
@@ -65,17 +72,23 @@ struct InboxView: View {
                 )
             }
         }
+        .task { await appState.loadInboxRepaymentCandidates() }
     }
 
     @ViewBuilder
     private func inboxRow(_ item: NativeInboxItem) -> some View {
         if let pending = item.pendingExpense {
             Button { appState.openPendingExpense(pending) } label: {
-                NativeInboxItemRow(item: item)
+                NativeInboxItemRow(item: item, repaymentCandidate: nil)
             }
             .buttonStyle(.plain)
         } else if let record = item.stagingRecord {
-            NavigationLink(value: record.id) { NativeInboxItemRow(item: item) }
+            NavigationLink(value: record.id) {
+                NativeInboxItemRow(
+                    item: item,
+                    repaymentCandidate: appState.repaymentCandidates[record.id]
+                )
+            }
         }
     }
 
@@ -113,6 +126,7 @@ struct InboxView: View {
 
 private struct NativeInboxItemRow: View {
     let item: NativeInboxItem
+    let repaymentCandidate: NativeRepaymentCandidate?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -124,6 +138,12 @@ private struct NativeInboxItemRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                 Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                if let repaymentCandidate {
+                    Text("可能是 \(repaymentCandidate.account.name) \(repaymentCandidate.cycle.cycleMonth) 还款")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(JieziTheme.brand)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 8)
             Text(item.statusLabel).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
@@ -189,10 +209,14 @@ private struct StagingRecordDetailView: View {
     let record: NativeStagingRecord
     @State private var showDiscardConfirm = false
     @State private var selectedArchiveDomain: NativeArchiveDomain?
+    @State private var showRepaymentConfirm = false
 
     private var archiveDomains: [NativeArchiveDomain] {
         let domains = appState.dashboard.domains.map { NativeArchiveDomain(id: $0.id, title: $0.shortName, systemImage: $0.systemImage) }
         return domains.isEmpty ? InboxArchiveDomains.all : domains
+    }
+    private var repaymentCandidate: NativeRepaymentCandidate? {
+        appState.repaymentCandidates[record.id]
     }
     @State private var showArchiveConfirm = false
     @State private var imagePreview: StagingImagePreviewRoute?
@@ -285,6 +309,32 @@ private struct StagingRecordDetailView: View {
                     }
                 }
 
+                if let candidate = repaymentCandidate {
+                    Section("可能是还款截图") {
+                        LabeledContent("匹配账户", value: candidate.account.title)
+                        LabeledContent("账单月份", value: candidate.cycle.cycleMonth)
+                        LabeledContent("确认金额", value: String(format: "¥%.2f", candidate.amount))
+                        Text(candidate.reason)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            showRepaymentConfirm = true
+                        } label: {
+                            if appState.stagingRepaymentId == record.id {
+                                ProgressView().frame(maxWidth: .infinity)
+                            } else {
+                                Label("确认还款", systemImage: "checkmark.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .disabled(appState.stagingRepaymentId != nil)
+                    }
+                }
+
+                if let message = appState.inboxFinanceMessage {
+                    Section { Text(message).foregroundStyle(JieziTheme.brand) }
+                }
+
                 Section {
                     ForEach(archiveDomains) { domain in
                         Button {
@@ -334,6 +384,19 @@ private struct StagingRecordDetailView: View {
             Button("取消", role: .cancel) {}
         } message: { domain in
             Text("芥子会按 PWA 的同一套规则，把这条中转站记录转入\(domain.title)域。")
+        }
+        .confirmationDialog(
+            "确认把这张截图作为还款证据？",
+            isPresented: $showRepaymentConfirm,
+            titleVisibility: .visible,
+            presenting: repaymentCandidate
+        ) { _ in
+            Button("确认还款") {
+                Task { _ = await appState.confirmStagingRepayment(record) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: { candidate in
+            Text("账单：\(candidate.account.name) \(candidate.cycle.cycleMonth)；金额：¥\(String(format: "%.2f", candidate.amount))。确认后会更新欠款、扣款账户和账户流水。")
         }
         .sheet(item: $imagePreview) { route in
             NavigationStack {
