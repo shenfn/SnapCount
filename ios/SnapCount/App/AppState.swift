@@ -29,6 +29,7 @@ final class AppState: ObservableObject {
     @Published var isDeletingRecordDetail = false
     @Published var accounts: [NativeAccount] = []
     @Published var selectedAccountDetail: NativeAccountDetail?
+    @Published var selectedAccountSourceSnapshot: NativeWalletSnapshot?
     @Published var accountMessage: String?
     @Published var isLoadingAccounts = false
     @Published var isSavingAccount = false
@@ -42,6 +43,10 @@ final class AppState: ObservableObject {
     @Published var unboundBindingMessage: String?
     @Published var isLoadingUnboundRecords = false
     @Published var isBindingUnboundRecords = false
+    @Published var walletSnapshots: [NativeWalletSnapshot] = []
+    @Published var isLoadingWalletSnapshots = false
+    @Published var walletSnapshotActionId: String?
+    @Published var walletSnapshotMessage: String?
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -51,6 +56,7 @@ final class AppState: ObservableObject {
     private let snapshotStore: DashboardSnapshotStoreProtocol
     private let accountRepository: AccountRepositoryProtocol
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
+    private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
@@ -63,7 +69,8 @@ final class AppState: ObservableObject {
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
         snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
-        unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository()
+        unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
+        walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
@@ -72,6 +79,7 @@ final class AppState: ObservableObject {
         self.snapshotStore = snapshotStore
         self.accountRepository = accountRepository
         self.unboundRecordRepository = unboundRecordRepository
+        self.walletSnapshotRepository = walletSnapshotRepository
     }
 
     func bootstrap() {
@@ -259,6 +267,7 @@ final class AppState: ObservableObject {
 
     func loadAccountDetail(_ account: NativeAccount) async {
         selectedAccountDetail = nil
+        selectedAccountSourceSnapshot = nil
         accountMessage = nil
         let session = try? await validSession()
         guard let session else { accountMessage = "登录状态已失效，请重新登录。"; return }
@@ -269,6 +278,12 @@ final class AppState: ObservableObject {
             )
         }
         selectedAccountDetail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
+        if account.sourceRecordTable == "data_records", !account.sourceRecordId.isEmpty {
+            selectedAccountSourceSnapshot = try? await walletSnapshotRepository.fetch(
+                id: account.sourceRecordId,
+                accessToken: session.accessToken
+            )
+        }
     }
 
     func confirmRepayment(
@@ -549,9 +564,91 @@ final class AppState: ObservableObject {
         }
     }
 
+    func loadWalletSnapshots() async {
+        guard !isLoadingWalletSnapshots else { return }
+        isLoadingWalletSnapshots = true
+        walletSnapshotMessage = nil
+        defer { isLoadingWalletSnapshots = false }
+
+        do {
+            let session = try await validSession()
+            async let snapshotRows = walletSnapshotRepository.fetchUnlinked(accessToken: session.accessToken)
+            async let accountRows = accountRepository.fetchAccounts(accessToken: session.accessToken)
+            let (loadedSnapshots, loadedAccounts) = try await (snapshotRows, accountRows)
+            walletSnapshots = loadedSnapshots
+            accounts = loadedAccounts
+        } catch {
+            walletSnapshotMessage = error.localizedDescription
+        }
+    }
+
+    func createAccountFromWalletSnapshot(_ snapshot: NativeWalletSnapshot) async -> Bool {
+        guard walletSnapshotActionId == nil else { return false }
+        walletSnapshotActionId = snapshot.id
+        walletSnapshotMessage = nil
+        defer { walletSnapshotActionId = nil }
+
+        do {
+            let session = try await validSession()
+            let result = try await walletSnapshotRepository.createAccount(
+                from: snapshot,
+                userId: session.user.id,
+                accessToken: session.accessToken
+            )
+            await refreshAfterWalletSnapshotLink()
+            walletSnapshotMessage = result.warnings.isEmpty
+                ? "已从快照创建账户"
+                : result.warnings.joined(separator: "；")
+            return true
+        } catch {
+            walletSnapshotMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func linkWalletSnapshot(
+        _ snapshot: NativeWalletSnapshot,
+        to account: NativeAccount
+    ) async -> Bool {
+        guard walletSnapshotActionId == nil else { return false }
+        walletSnapshotActionId = snapshot.id
+        walletSnapshotMessage = nil
+        defer { walletSnapshotActionId = nil }
+
+        do {
+            let session = try await validSession()
+            let result = try await walletSnapshotRepository.link(
+                snapshot,
+                to: account,
+                userId: session.user.id,
+                accessToken: session.accessToken
+            )
+            await refreshAfterWalletSnapshotLink()
+            walletSnapshotMessage = result.warnings.isEmpty
+                ? "已关联账户"
+                : result.warnings.joined(separator: "；")
+            return true
+        } catch {
+            walletSnapshotMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func refreshAfterWalletSnapshotLink() async {
+        await loadAccounts()
+        await loadWalletSnapshots()
+        await refreshDashboard()
+    }
+
     func openUnboundRecord(_ record: NativeUnboundRecord) {
         selectedTab = .records
         recordsPath = [record.reference]
+    }
+
+    func openWalletSnapshot(_ snapshot: NativeWalletSnapshot) {
+        selectedTab = .records
+        recordsPath = ["data-\(snapshot.id)"]
+        Task { await loadRecordDetail(reference: "data-\(snapshot.id)") }
     }
 
     private func refreshAfterAccountBinding(monthKey: String) async {
@@ -841,6 +938,7 @@ final class AppState: ObservableObject {
         dashboard = DashboardSnapshot()
         accounts = []
         selectedAccountDetail = nil
+        selectedAccountSourceSnapshot = nil
         repaymentMessage = nil
         repaymentCandidates = [:]
         stagingRepaymentId = nil
@@ -848,6 +946,9 @@ final class AppState: ObservableObject {
         unboundRecords = []
         unboundRecordsMessage = nil
         unboundBindingMessage = nil
+        walletSnapshots = []
+        walletSnapshotActionId = nil
+        walletSnapshotMessage = nil
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today

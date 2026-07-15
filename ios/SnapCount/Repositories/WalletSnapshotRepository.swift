@@ -2,6 +2,7 @@ import Foundation
 
 protocol WalletSnapshotRepositoryProtocol {
     func fetchUnlinked(accessToken: String) async throws -> [NativeWalletSnapshot]
+    func fetch(id: String, accessToken: String) async throws -> NativeWalletSnapshot?
     func createAccount(
         from snapshot: NativeWalletSnapshot,
         userId: String,
@@ -36,6 +37,20 @@ final class WalletSnapshotRepository: WalletSnapshotRepositoryProtocol {
             accessToken: accessToken
         )
         return rows.compactMap(\.native)
+    }
+
+    func fetch(id: String, accessToken: String) async throws -> NativeWalletSnapshot? {
+        let rows = try await remoteClient.get(
+            [WalletSnapshotRow].self,
+            path: "rest/v1/data_records",
+            queryItems: [
+                URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at"),
+                URLQueryItem(name: "id", value: "eq.\(id)"),
+                URLQueryItem(name: "limit", value: "1")
+            ],
+            accessToken: accessToken
+        )
+        return rows.first?.native
     }
 
     func createAccount(
