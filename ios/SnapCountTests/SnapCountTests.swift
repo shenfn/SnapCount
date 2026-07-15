@@ -132,6 +132,37 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(NativeRepaymentCalculator.overpayment(paidAmount: 120, currentBalance: 100), 20)
     }
 
+    func testRepaymentCandidateMatchesPWAAmountAndAccountRules() {
+        let account = makeLiabilityAccount(id: "credit-1", name: "支付宝花呗")
+        let cycle = makeRepaymentCycle(accountId: account.id, amount: 320, dueDate: "2026-07-15")
+        let record = NativeStagingRecord(
+            id: "staging-1", dateKey: "2026-07-14", title: "花呗已还清", summary: "支付宝花呗还款",
+            status: "pending_review", statusLabel: "待确认", recordTypeLabel: "钱包快照",
+            createdAtLabel: "2026-07-14", occurredAtLabel: "2026-07-14", confidencePercent: 95,
+            lastErrorMessage: nil, retryCount: 0, systemImage: "wallet.pass", imagePath: nil,
+            imageURL: nil, imageLoadError: false, recordType: "wallet_snapshot", domainKey: "wallet",
+            domainName: "钱包", extracted: [
+                "payload_jsonb": AnyCodable([
+                    "record_kind": "liability_snapshot",
+                    "account_snapshot_kind": "liability",
+                    "status": "paid",
+                    "account_name": "支付宝花呗",
+                    "snapshot_balance": 320.0
+                ])
+            ], companionMessage: nil, targetRecordId: nil, imageHash: nil
+        )
+
+        let candidate = NativeRepaymentCandidateEngine.candidate(
+            for: record,
+            accounts: [account],
+            cycles: [cycle]
+        )
+
+        XCTAssertEqual(candidate?.account.id, account.id)
+        XCTAssertEqual(candidate?.amount, 320)
+        XCTAssertTrue((candidate?.score ?? 0) >= 0.9)
+    }
+
     func testAccountTypeNormalizationMatchesPWAAdapter() {
         XCTAssertEqual(NativeAccountType.normalized("wechat"), .walletBalance)
         XCTAssertEqual(NativeAccountType.normalized("bank_card"), .debitCard)
@@ -218,6 +249,8 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
         "expense:record-1"
     }
 
+    func resolveRepayment(id: String, cycleId: String, accessToken: String) async throws {}
+
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {
         URL(string: "https://example.com/receipt.jpg")!
     }
@@ -228,4 +261,26 @@ private struct DomainRepositoryStub: DomainRepositoryProtocol {
     func fetchDefinitions(accessToken: String) async throws -> [NativeDomainDefinition] {
         [NativeDomainDefinition(id: "sport", name: "运动记录", description: "", icon: "🏃", isSystem: true, schema: [:], display: [:], recordCount: 0)]
     }
+}
+
+private func makeLiabilityAccount(id: String, name: String) -> NativeAccount {
+    NativeAccount(
+        id: id, name: name, type: .creditLine, institution: "支付宝", last4: "", currency: "CNY",
+        initialBalance: 320, currentBalance: 320, snapshotBalance: nil, snapshotAt: nil,
+        sourceRecordTable: "", sourceRecordId: "", billDay: 1, paymentDueDay: 15,
+        autoDebitAccountId: nil, autoConfirmRepayment: false, gracePeriodDays: 0,
+        lastReconciledAt: nil, isDefaultExpense: false, isDefaultIncome: false,
+        isArchived: false, sortOrder: 0
+    )
+}
+
+private func makeRepaymentCycle(accountId: String, amount: Double, dueDate: String) -> NativeRepaymentCycle {
+    NativeRepaymentCycle(
+        id: "cycle-1", accountId: accountId, cycleMonth: "2026-07", statementStartDate: nil,
+        statementEndDate: nil, dueDate: dueDate, statementAmount: amount, paidAmount: 0,
+        remainingAmount: amount, carriedOverAmount: 0, originalStatementAmount: amount,
+        minPaymentAmount: 30, refundAppliedAmount: 0, status: .pending,
+        autoDebitAccountId: nil, autoConfirmRepayment: false, source: "screenshot",
+        evidenceRecordId: nil, confidence: 0.95, note: "", confirmedAt: nil
+    )
 }

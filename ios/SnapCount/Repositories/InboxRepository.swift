@@ -16,14 +16,20 @@ protocol InboxRepositoryProtocol {
     func discard(id: String, accessToken: String) async throws
     func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String
+    func resolveRepayment(id: String, cycleId: String, accessToken: String) async throws
     func resolveImageURL(path: String, accessToken: String) async throws -> URL
 }
 
 final class InboxRepository: InboxRepositoryProtocol {
     private let remoteService: NativeDataService
+    private let remoteClient: SupabaseRemoteClientProtocol
 
-    init(remoteService: NativeDataService = NativeDataService()) {
+    init(
+        remoteService: NativeDataService = NativeDataService(),
+        remoteClient: SupabaseRemoteClientProtocol = SupabaseRemoteClient()
+    ) {
         self.remoteService = remoteService
+        self.remoteClient = remoteClient
     }
 
     func discard(id: String, accessToken: String) async throws {
@@ -36,6 +42,20 @@ final class InboxRepository: InboxRepositoryProtocol {
 
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
         try await remoteService.archiveStagingRecord(record, domainKey: domainKey, accessToken: accessToken)
+    }
+
+    func resolveRepayment(id: String, cycleId: String, accessToken: String) async throws {
+        try await remoteClient.patch(
+            path: "rest/v1/staging_records",
+            queryItems: [URLQueryItem(name: "id", value: "eq.\(id)")],
+            body: [
+                "status": AnyCodable("archived"),
+                "resolved_action": AnyCodable("liability_repayment_confirmed"),
+                "resolved_at": AnyCodable(ISO8601DateFormatter().string(from: Date())),
+                "target_record_id": AnyCodable(cycleId)
+            ],
+            accessToken: accessToken
+        )
     }
 
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {

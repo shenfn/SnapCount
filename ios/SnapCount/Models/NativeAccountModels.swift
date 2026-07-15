@@ -68,6 +68,120 @@ struct NativeRepaymentCycle: Identifiable { let id:String;let accountId:String;l
 struct NativeLiabilityPayment: Identifiable { let id:String;let accountId:String;let statementId:String?;let debitAccountId:String?;let amount:Double;let overpaymentAmount:Double;let paidAt:String;let source:String;let evidenceRecordId:String?;let status:String;let note:String }
 struct NativeAccountDetail { let account:NativeAccount;let entries:[NativeAccountEntry];let repaymentCycles:[NativeRepaymentCycle];let payments:[NativeLiabilityPayment] }
 
+struct NativeRepaymentCandidate: Identifiable {
+    let cycle: NativeRepaymentCycle
+    let account: NativeAccount
+    let amount: Double
+    let score: Double
+    let reason: String
+
+    var id: String { cycle.id }
+}
+
+enum NativeRepaymentCandidateEngine {
+    private static let openStatuses: [NativeRepaymentStatus] = [
+        .pending, .dueToday, .overdueUnconfirmed, .partialPaid, .minimumPaid, .carriedOver
+    ]
+
+    static func candidate(
+        for record: NativeStagingRecord,
+        accounts: [NativeAccount],
+        cycles: [NativeRepaymentCycle]
+    ) -> NativeRepaymentCandidate? {
+        let payload = payload(from: record.extracted)
+        let domainKey = record.domainKey ?? record.extracted.string("domain_key")
+        let snapshotKind = payload.string("account_snapshot_kind")
+        let recordKind = payload.string("record_kind")
+        guard domainKey == "wallet",
+              snapshotKind == "liability" || recordKind == "liability_snapshot",
+              payload.string("status") == "paid" else {
+            return nil
+        }
+
+        let extractedAmount = record.extracted.double("amount")
+            ?? payload.double("amount")
+            ?? payload.double("snapshot_balance")
+        let accountText = normalize([
+            payload.string("account_name"),
+            payload.string("institution"),
+            record.title,
+            record.summary
+        ].compactMap { $0 }.joined(separator: " "))
+
+        return cycles
+            .filter { openStatuses.contains($0.status) }
+            .compactMap { cycle -> NativeRepaymentCandidate? in
+                guard let account = accounts.first(where: { $0.id == cycle.accountId && !$0.isArchived }) else {
+                    return nil
+                }
+                let accountName = normalize("\(account.name) \(account.institution)")
+                let remaining = cycle.remainingAmount > 0 ? cycle.remainingAmount : cycle.statementAmount
+                let amount = extractedAmount.flatMap { $0 > 0 ? $0 : nil } ?? remaining
+                guard amount > 0 else { return nil }
+
+                var score = 0.35
+                var reasons: [String] = []
+                if !accountText.isEmpty, !accountName.isEmpty,
+                   accountText.contains(accountName) || accountName.contains(accountText) {
+                    score += 0.28
+                    reasons.append("账户匹配「\(account.name)」")
+                } else if !accountText.isEmpty, !accountName.isEmpty,
+                          accountText.contains(where: { accountName.contains($0) }) {
+                    score += 0.1
+                    reasons.append("账户名称部分匹配")
+                }
+
+                if let extractedAmount, extractedAmount > 0 {
+                    let difference = abs(extractedAmount - remaining)
+                    if difference < 0.01 {
+                        score += 0.32
+                        reasons.append("金额与剩余待还一致")
+                    } else if difference <= 5 {
+                        score += 0.18
+                        reasons.append("金额相差 ¥\(String(format: "%.2f", difference))")
+                    }
+                }
+
+                if let dueDate = cycle.dueDate,
+                   abs(daysBetween(record.dateKey, dueDate)) <= 3 {
+                    score += 0.15
+                    reasons.append("还款时间接近还款日")
+                }
+
+                guard score >= 0.55 else { return nil }
+                return NativeRepaymentCandidate(
+                    cycle: cycle,
+                    account: account,
+                    amount: amount,
+                    score: min(score, 0.99),
+                    reason: reasons.isEmpty ? "识别为已还款截图，需人工确认" : reasons.joined(separator: "；")
+                )
+            }
+            .sorted { $0.score > $1.score }
+            .first
+    }
+
+    private static func payload(from extracted: [String: AnyCodable]) -> [String: AnyCodable] {
+        guard let raw = extracted["payload_jsonb"]?.value as? [String: Any] else { return extracted }
+        return raw.mapValues(AnyCodable.init)
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value.lowercased().filter { !$0.isWhitespace }
+    }
+
+    private static func daysBetween(_ lhs: String, _ rhs: String) -> Int {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let left = formatter.date(from: String(lhs.prefix(10))),
+              let right = formatter.date(from: String(rhs.prefix(10))) else {
+            return 999
+        }
+        return Calendar(identifier: .gregorian).dateComponents([.day], from: right, to: left).day ?? 999
+    }
+}
+
 enum NativeRepaymentCalculator {
     static func status(
         paidAmount: Double,

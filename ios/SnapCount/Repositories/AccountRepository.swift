@@ -3,6 +3,7 @@ import Foundation
 protocol AccountRepositoryProtocol {
     func fetchAccounts(accessToken:String) async throws -> [NativeAccount]
     func fetchDetail(account:NativeAccount, accessToken:String) async -> NativeAccountDetail
+    func fetchOpenRepaymentCycles(accessToken: String) async throws -> [NativeRepaymentCycle]
     func save(_ draft: NativeAccountDraft, userId: String, accessToken: String) async throws -> [NativeAccount]
     func setArchived(accountId: String, archived: Bool, accessToken: String) async throws -> [NativeAccount]
     func ensureRepaymentCycles(monthKey: String, accessToken: String) async throws
@@ -31,6 +32,28 @@ final class AccountRepository: AccountRepositoryProtocol {
         async let cyclesResult = optionalCycles(account.id, accessToken:accessToken)
         async let paymentsResult = optionalPayments(account.id, accessToken:accessToken)
         return await NativeAccountDetail(account:account,entries:entriesResult,repaymentCycles:cyclesResult,payments:paymentsResult)
+    }
+
+    func fetchOpenRepaymentCycles(accessToken: String) async throws -> [NativeRepaymentCycle] {
+        let statuses = [
+            NativeRepaymentStatus.pending,
+            .dueToday,
+            .overdueUnconfirmed,
+            .partialPaid,
+            .minimumPaid,
+            .carriedOver
+        ].map(\.rawValue).joined(separator: ",")
+        let rows = try await remoteClient.get(
+            [RepaymentCycleRow].self,
+            path: "rest/v1/account_repayment_cycles",
+            queryItems: [
+                URLQueryItem(name: "select", value: "*"),
+                URLQueryItem(name: "status", value: "in.(\(statuses))"),
+                URLQueryItem(name: "order", value: "due_date.asc.nullslast,created_at.desc")
+            ],
+            accessToken: accessToken
+        )
+        return rows.compactMap(\.native)
     }
 
     func save(_ draft: NativeAccountDraft, userId: String, accessToken: String) async throws -> [NativeAccount] {
