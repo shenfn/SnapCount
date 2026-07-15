@@ -10,6 +10,20 @@ struct TodayView: View {
     @State private var uploadMessage: String?
     @State private var uploadMessageIsError = false
     @State private var showUploadResult = false
+    @State private var showWidgetManager = false
+    @State private var widgetConfiguration = NativeHomeWidgetPreferences.load()
+
+    private var enabledWidgets: [NativeHomeWidgetConfiguration] {
+        widgetConfiguration.filter(\.isEnabled).sorted { $0.order < $1.order }
+    }
+
+    private var financeSummary: NativeHomeFinanceSummary {
+        NativeHomeFinanceSummary.make(accounts: appState.accounts, dashboard: appState.dashboard)
+    }
+
+    private var pendingSummary: NativeHomePendingSummary {
+        NativeHomePendingSummary.make(dashboard: appState.dashboard)
+    }
 
     var body: some View {
         ZStack {
@@ -18,15 +32,24 @@ struct TodayView: View {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     header
                     dashboardStatus
-                    metricStrip
                     captureButton
-                    dailySection
+                    widgetManagerHeader
+                    if enabledWidgets.isEmpty {
+                        emptyWidgetState
+                    } else {
+                        ForEach(enabledWidgets) { widget in
+                            widgetView(widget.key)
+                        }
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 36)
             }
-            .refreshable { await appState.refreshDashboard() }
+            .refreshable {
+                await appState.refreshDashboard()
+                await appState.loadAccounts()
+            }
         }
         .navigationBarHidden(true)
         .confirmationDialog("留下此刻", isPresented: $showUploadOptions, titleVisibility: .visible) {
@@ -51,9 +74,15 @@ struct TodayView: View {
         .sheet(isPresented: $showManualRecordSheet) {
             ManualRecordSheet()
         }
+        .sheet(isPresented: $showWidgetManager) {
+            HomeWidgetManagerSheet(configuration: $widgetConfiguration)
+        }
         .alert(uploadMessageIsError ? "上传失败" : "上传完成", isPresented: $showUploadResult) {
             Button("好", role: .cancel) {}
         } message: { Text(uploadMessage ?? "") }
+        .task {
+            if appState.accounts.isEmpty { await appState.loadAccounts() }
+        }
     }
 
     @ViewBuilder
@@ -104,13 +133,218 @@ struct TodayView: View {
         }
     }
 
-    private var metricStrip: some View {
-        HStack(spacing: 10) {
-            metric(title: "净额", value: money(appState.dashboard.monthIncome - appState.dashboard.monthExpense, signed: true))
-            metric(title: "待还", value: "¥0")
-            metric(title: "今日", value: money(appState.dashboard.todayIncome - appState.dashboard.todayExpense, signed: true))
-            metric(title: "待处理", value: "\(appState.dashboard.pendingCount)条")
+    private var widgetManagerHeader: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("首页组件")
+                    .font(.headline)
+                Text("已启用 \(enabledWidgets.count) 个")
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.muted)
+            }
+            Spacer()
+            Button {
+                showWidgetManager = true
+            } label: {
+                Label("管理", systemImage: "slider.horizontal.3")
+            }
+            .buttonStyle(.bordered)
         }
+    }
+
+    private var emptyWidgetState: some View {
+        ContentUnavailableView {
+            Label("首页组件已全部隐藏", systemImage: "rectangle.stack.badge.minus")
+        } description: {
+            Text("重新选择组件后，首页会恢复你的常用信息。")
+        } actions: {
+            Button("管理组件") { showWidgetManager = true }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+    }
+
+    @ViewBuilder
+    private func widgetView(_ key: NativeHomeWidgetKey) -> some View {
+        switch key {
+        case .finance:
+            financeSection
+        case .today:
+            todaySection
+        case .pending:
+            pendingSection
+        case .domains:
+            domainsSection
+        case .daily:
+            dailySection
+        }
+    }
+
+    private var financeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "财务状态", subtitle: financeSummary.statusLabel) {
+                NavigationLink {
+                    AccountsView()
+                } label: {
+                    Label("账户", systemImage: "chevron.right")
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("净额估算")
+                            .font(.caption)
+                            .foregroundStyle(JieziTheme.muted)
+                        Text(money(financeSummary.netWorthEstimate, signed: true))
+                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                    }
+                    Spacer()
+                    Text(financeSummary.statusLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(JieziTheme.brand)
+                }
+
+                HStack(spacing: 10) {
+                    metric(title: "可用现金", value: money(financeSummary.availableCash))
+                    metric(title: "当前欠款", value: money(financeSummary.liabilityTotal))
+                }
+                HStack(spacing: 10) {
+                    metric(title: "今日收入", value: money(financeSummary.todayIncome, signed: true))
+                    metric(title: "今日支出", value: money(financeSummary.todayExpense))
+                }
+
+                if let liability = financeSummary.nearestLiability {
+                    NavigationLink {
+                        AccountsView()
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("最近待还")
+                                    .font(.caption)
+                                    .foregroundStyle(JieziTheme.muted)
+                                Text(liability.title)
+                                    .font(.headline)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text(money(liability.currentBalance))
+                                    .font(.headline.monospacedDigit())
+                                Text(liability.paymentDueDay.map { "每月 \($0) 日" } ?? "未设置还款日")
+                                    .font(.caption)
+                                    .foregroundStyle(JieziTheme.muted)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption.bold())
+                                .foregroundStyle(JieziTheme.muted)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(18)
+            .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    private var todaySection: some View {
+        let todayKey = Self.dateKeyFormatter.string(from: Date())
+        let summary = appState.dashboard.dailySummaries.first(where: { $0.dateKey == todayKey })
+            ?? NativeDailySummary(
+                dateKey: todayKey,
+                expense: appState.dashboard.todayExpense,
+                income: appState.dashboard.todayIncome,
+                pendingCount: pendingSummary.total,
+                recordCount: appState.dashboard.dayRecordGroups.first(where: { $0.dateKey == todayKey })?.records.count ?? 0
+            )
+        return VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "今日记录", subtitle: "按数据域查看今天")
+            dailyCard(summary)
+        }
+    }
+
+    private var pendingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "因缘流转", subtitle: "\(pendingSummary.total) 条待处理")
+            Button {
+                appState.selectedTab = .inbox
+            } label: {
+                VStack(spacing: 12) {
+                    pendingRow("待补全账单", count: pendingSummary.pendingExpenses, systemImage: "clock.badge.exclamationmark")
+                    pendingRow("待分类", count: pendingSummary.routing, systemImage: "questionmark.folder")
+                    pendingRow("待确认", count: pendingSummary.review, systemImage: "checklist")
+                    pendingRow("识别失败", count: pendingSummary.failed, systemImage: "exclamationmark.triangle")
+                }
+                .padding(18)
+                .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var domainsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "数据域", subtitle: "本月记录分布") {
+                NavigationLink {
+                    DomainsView()
+                } label: {
+                    Label("全部", systemImage: "chevron.right")
+                }
+            }
+
+            NavigationLink {
+                DomainsView()
+            } label: {
+                VStack(spacing: 0) {
+                    ForEach(Array(appState.dashboard.domains.prefix(5).enumerated()), id: \.element.id) { index, domain in
+                        HStack(spacing: 12) {
+                            Text(domain.icon.isEmpty ? "·" : domain.icon)
+                                .frame(width: 34, height: 34)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(domain.shortName)
+                                    .font(.headline)
+                                Text(domain.description)
+                                    .font(.caption)
+                                    .foregroundStyle(JieziTheme.muted)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Text("\(domain.recordCount) 条")
+                                .font(.subheadline.monospacedDigit())
+                        }
+                        .padding(.vertical, 11)
+                        if index < min(appState.dashboard.domains.count, 5) - 1 {
+                            Divider()
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func sectionHeader<Accessory: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder accessory: () -> Accessory
+    ) -> some View {
+        HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.title3.bold())
+                Text(subtitle).font(.subheadline).foregroundStyle(JieziTheme.muted)
+            }
+            Spacer()
+            accessory()
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(JieziTheme.brand)
+        }
+    }
+
+    private func sectionHeader(title: String, subtitle: String) -> some View {
+        sectionHeader(title: title, subtitle: subtitle) { EmptyView() }
     }
 
     private func metric(title: String, value: String) -> some View {
@@ -119,8 +353,7 @@ struct TodayView: View {
             Text(value).font(.headline.monospacedDigit()).foregroundStyle(JieziTheme.ink).lineLimit(1).minimumScaleFactor(0.72)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.vertical, 4)
     }
 
     private var captureButton: some View {
@@ -132,7 +365,7 @@ struct TodayView: View {
                     .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(isUploading ? "正在识别" : "留下此刻").font(.headline)
-                    Text("拍照或从相册选择图片").font(.subheadline).opacity(0.72)
+                    Text("拍照、选择图片或手动记录").font(.subheadline).opacity(0.72)
                 }
                 Spacer()
                 Image(systemName: "plus").font(.title2)
@@ -147,13 +380,12 @@ struct TodayView: View {
 
     private var dailySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("每日明细").font(.title3.bold())
-                    Text("按日期汇总本月所有数据").font(.subheadline).foregroundStyle(JieziTheme.muted)
+            sectionHeader(title: "每日明细", subtitle: "按日期汇总本月所有数据") {
+                NavigationLink {
+                    InsightsView()
+                } label: {
+                    Label("报告", systemImage: "chevron.right")
                 }
-                Spacer()
-                Text("报告 ›").font(.headline).foregroundStyle(JieziTheme.brand)
             }
 
             if appState.dashboard.dailySummaries.isEmpty {
@@ -232,6 +464,23 @@ struct TodayView: View {
         }
     }
 
+    private func pendingRow(_ title: String, count: Int, systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .foregroundStyle(count > 0 ? JieziTheme.gold : JieziTheme.muted)
+                .frame(width: 28)
+            Text(title)
+                .foregroundStyle(JieziTheme.ink)
+            Spacer()
+            Text("\(count)")
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(JieziTheme.ink)
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundStyle(JieziTheme.muted)
+        }
+    }
+
     private func money(_ value: Double, signed: Bool = false) -> String {
         let prefix = signed && value > 0 ? "+" : ""
         return "\(prefix)¥\(Int(value.rounded()))"
@@ -269,4 +518,77 @@ struct TodayView: View {
     private static let weekdayFormatter: DateFormatter = {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "EEE"; return formatter
     }()
+}
+
+private struct HomeWidgetManagerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var configuration: [NativeHomeWidgetConfiguration]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("首页组件") {
+                    ForEach(configuration.indices, id: \.self) { index in
+                        HStack(spacing: 12) {
+                            Image(systemName: configuration[index].key.systemImage)
+                                .foregroundStyle(JieziTheme.mint)
+                                .frame(width: 30)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(configuration[index].key.title)
+                                    .font(.headline)
+                                Text(configuration[index].key.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Toggle("", isOn: $configuration[index].isEnabled)
+                                .labelsHidden()
+                            Button {
+                                move(index, offset: -1)
+                            } label: {
+                                Image(systemName: "arrow.up")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(index == 0)
+                            .accessibilityLabel("上移\(configuration[index].key.title)")
+                            Button {
+                                move(index, offset: 1)
+                            } label: {
+                                Image(systemName: "arrow.down")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(index == configuration.count - 1)
+                            .accessibilityLabel("下移\(configuration[index].key.title)")
+                        }
+                        .padding(.vertical, 5)
+                    }
+                }
+
+                Section {
+                    Button("恢复默认") {
+                        configuration = NativeHomeWidgetPreferences.defaults
+                    }
+                }
+            }
+            .navigationTitle("管理首页")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .onChange(of: configuration) { value in
+            NativeHomeWidgetPreferences.save(value)
+        }
+    }
+
+    private func move(_ index: Int, offset: Int) {
+        let destination = index + offset
+        guard configuration.indices.contains(index), configuration.indices.contains(destination) else { return }
+        configuration.swapAt(index, destination)
+        configuration = configuration.enumerated().map { order, item in
+            NativeHomeWidgetConfiguration(key: item.key, isEnabled: item.isEnabled, order: order)
+        }
+    }
 }
