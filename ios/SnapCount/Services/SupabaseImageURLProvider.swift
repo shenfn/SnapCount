@@ -36,8 +36,9 @@ actor SupabaseImageURLProvider {
             throw SupabaseRemoteError.missingConfig
         }
 
-        for path in unresolvedPaths {
-            let url = try await createSignedURL(path: path, client: client)
+        let signedURLs = try await createSignedURLs(paths: unresolvedPaths, client: client)
+        for signedURL in signedURLs {
+            guard case let .success(path, url) = signedURL else { continue }
             result[path] = url
             cache[path] = CacheEntry(url: url, expiresAt: now.addingTimeInterval(cacheLifetime))
         }
@@ -48,16 +49,16 @@ actor SupabaseImageURLProvider {
         cache[path] = nil
     }
 
-    private func createSignedURL(path: String, client: SupabaseClient) async throws -> URL {
+    private func createSignedURLs(paths: [String], client: SupabaseClient) async throws -> [SignedURLResult] {
         do {
             return try await client.storage
                 .from(bucket)
-                .createSignedURL(path: path, expiresIn: signedURLLifetime)
+                .createSignedURLs(paths: paths, expiresIn: signedURLLifetime)
         } catch {
             try await Task.sleep(for: .milliseconds(250))
             return try await client.storage
                 .from(bucket)
-                .createSignedURL(path: path, expiresIn: signedURLLifetime)
+                .createSignedURLs(paths: paths, expiresIn: signedURLLifetime)
         }
     }
 }
