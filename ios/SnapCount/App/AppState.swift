@@ -47,6 +47,9 @@ final class AppState: ObservableObject {
     @Published var isLoadingWalletSnapshots = false
     @Published var walletSnapshotActionId: String?
     @Published var walletSnapshotMessage: String?
+    @Published var insightsSnapshot: NativeInsightSnapshot?
+    @Published var isLoadingInsights = false
+    @Published var insightsMessage: String?
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -57,10 +60,12 @@ final class AppState: ObservableObject {
     private let accountRepository: AccountRepositoryProtocol
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
+    private let insightsRepository: InsightsRepositoryProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
+    private var insightsLoadedAt: Date?
 
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
@@ -70,7 +75,8 @@ final class AppState: ObservableObject {
         snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
-        walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository()
+        walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
+        insightsRepository: InsightsRepositoryProtocol = InsightsRepository()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
@@ -80,6 +86,7 @@ final class AppState: ObservableObject {
         self.accountRepository = accountRepository
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
+        self.insightsRepository = insightsRepository
     }
 
     func bootstrap() {
@@ -593,6 +600,30 @@ final class AppState: ObservableObject {
         }
     }
 
+    func loadInsights(range: NativeInsightRange, force: Bool = false) async {
+        if !force,
+           insightsSnapshot?.range == range,
+           let insightsLoadedAt,
+           Date().timeIntervalSince(insightsLoadedAt) < 60 {
+            return
+        }
+        guard !isLoadingInsights else { return }
+        isLoadingInsights = true
+        insightsMessage = nil
+        defer { isLoadingInsights = false }
+
+        do {
+            let session = try await validSession()
+            insightsSnapshot = try await insightsRepository.fetchDailySummary(
+                range: range,
+                accessToken: session.accessToken
+            )
+            insightsLoadedAt = Date()
+        } catch {
+            insightsMessage = error.localizedDescription
+        }
+    }
+
     func createAccountFromWalletSnapshot(_ snapshot: NativeWalletSnapshot) async -> Bool {
         guard walletSnapshotActionId == nil else { return false }
         walletSnapshotActionId = snapshot.id
@@ -960,6 +991,9 @@ final class AppState: ObservableObject {
         walletSnapshots = []
         walletSnapshotActionId = nil
         walletSnapshotMessage = nil
+        insightsSnapshot = nil
+        insightsMessage = nil
+        insightsLoadedAt = nil
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today
