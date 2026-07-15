@@ -4,6 +4,7 @@ struct LoginView: View {
     @EnvironmentObject private var appState: AppState
     @State private var email = ""
     @State private var password = ""
+    @State private var mode: AuthMode = .signIn
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -45,6 +46,13 @@ struct LoginView: View {
 
     private var form: some View {
         VStack(spacing: 14) {
+            Picker("账号操作", selection: $mode) {
+                ForEach(AuthMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
             VStack(spacing: 0) {
                 LoginField(icon: "envelope") {
                     TextField("邮箱", text: $email)
@@ -62,10 +70,10 @@ struct LoginView: View {
 
                 LoginField(icon: "lock") {
                     SecureField("密码", text: $password)
-                        .textContentType(.password)
+                        .textContentType(mode == .signIn ? .password : .newPassword)
                         .focused($focusedField, equals: .password)
                         .submitLabel(.go)
-                        .onSubmit { signIn() }
+                        .onSubmit { submit() }
                 }
             }
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -74,7 +82,7 @@ struct LoginView: View {
                     .stroke(.white.opacity(0.45), lineWidth: 1)
             }
 
-            Button(action: signIn) {
+            Button(action: submit) {
                 HStack(spacing: 8) {
                     if appState.isSigningIn {
                         ProgressView()
@@ -82,7 +90,7 @@ struct LoginView: View {
                     } else {
                         Image(systemName: "arrow.forward.circle.fill")
                     }
-                    Text(appState.isSigningIn ? "登录中" : "登录")
+                    Text(appState.isSigningIn ? "处理中" : mode.actionTitle)
                         .fontWeight(.semibold)
                 }
                 .font(.headline)
@@ -92,9 +100,20 @@ struct LoginView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.white)
             .background(JieziTheme.mint, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .opacity(appState.isSigningIn || email.isEmpty || password.isEmpty ? 0.55 : 1)
-            .disabled(appState.isSigningIn || email.isEmpty || password.isEmpty)
+            .opacity(canSubmit ? 1 : 0.55)
+            .disabled(!canSubmit)
+
+            Text(mode == .signIn ? "还没有账号？切换到注册即可创建。" : "密码至少 6 位。注册即表示你同意芥子的隐私政策与服务协议。")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var canSubmit: Bool {
+        !appState.isSigningIn
+            && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && password.count >= 6
     }
 
     @ViewBuilder
@@ -111,10 +130,25 @@ struct LoginView: View {
         }
     }
 
-    private func signIn() {
+    private func submit() {
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
-            await appState.signIn(email: email, password: password)
+            switch mode {
+            case .signIn:
+                await appState.signIn(email: cleanEmail, password: password)
+            case .signUp:
+                await appState.signUp(email: cleanEmail, password: password)
+            }
         }
+    }
+
+    private enum AuthMode: String, CaseIterable, Identifiable {
+        case signIn
+        case signUp
+
+        var id: String { rawValue }
+        var title: String { self == .signIn ? "登录" : "注册" }
+        var actionTitle: String { self == .signIn ? "登录" : "创建账号" }
     }
 
     private enum Field {

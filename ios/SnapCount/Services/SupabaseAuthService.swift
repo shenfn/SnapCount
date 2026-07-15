@@ -21,6 +21,11 @@ enum SupabaseAuthServiceError: LocalizedError {
     }
 }
 
+enum SupabaseSignUpResult {
+    case signedIn(SupabaseAuthSession)
+    case confirmationRequired(email: String)
+}
+
 final class SupabaseAuthService {
     private let session: URLSession
     private let decoder = JSONDecoder()
@@ -32,6 +37,14 @@ final class SupabaseAuthService {
     func signIn(email: String, password: String) async throws -> SupabaseAuthSession {
         let session = try await requireClient().auth.signIn(email: email, password: password)
         return mapped(session)
+    }
+
+    func signUp(email: String, password: String) async throws -> SupabaseSignUpResult {
+        let response = try await requireClient().auth.signUp(email: email, password: password)
+        if let session = response.session {
+            return .signedIn(mapped(session))
+        }
+        return .confirmationRequired(email: response.user.email ?? email)
     }
 
     func restoreSession(accessToken: String, refreshToken: String) async throws -> SupabaseAuthSession {

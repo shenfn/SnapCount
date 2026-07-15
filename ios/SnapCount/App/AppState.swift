@@ -163,6 +163,43 @@ final class AppState: ObservableObject {
         isSigningIn = false
     }
 
+    func signUp(email: String, password: String) async {
+        guard !isSigningIn else { return }
+        isSigningIn = true
+        authMessage = nil
+        authMessageIsError = false
+        defer { isSigningIn = false }
+
+        do {
+            let result = try await authService.signUp(email: email, password: password)
+            switch result {
+            case .confirmationRequired(let address):
+                authMessage = "注册成功。请前往 \(address) 完成邮箱确认，然后返回登录。"
+                authMessageIsError = false
+
+            case .signedIn(let session):
+                let uploadToken = try? await fetchUploadTokenAfterRegistration(session: session)
+                if let uploadToken, !uploadToken.isEmpty {
+                    try save(session: session, uploadToken: uploadToken)
+                    hasUploadToken = true
+                } else {
+                    try save(session: session)
+                    hasUploadToken = false
+                }
+                apply(session: session)
+                authMessage = hasUploadToken
+                    ? "注册成功，快捷指令凭据已同步。"
+                    : "注册成功。上传凭据正在生成，可稍后在设置中重新检查。"
+                updateShortcutCredentialMessage()
+                await refreshDashboard()
+                await requestShortcutNotificationPermissionIfNeeded()
+            }
+        } catch {
+            authMessage = error.localizedDescription
+            authMessageIsError = true
+        }
+    }
+
     func signOut() {
         let userId = try? requireSession().user.id
         Task {
@@ -237,6 +274,24 @@ final class AppState: ObservableObject {
         dashboard = persisted.dashboardSnapshot
         isShowingCachedDashboard = true
         lastDashboardRefreshAt = persisted.savedAt
+    }
+
+    private func fetchUploadTokenAfterRegistration(session: SupabaseAuthSession) async throws -> String {
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                return try await authService.fetchUploadToken(
+                    userId: session.user.id,
+                    accessToken: session.accessToken
+                )
+            } catch {
+                lastError = error
+                if attempt < 2 {
+                    try await Task.sleep(for: .milliseconds(500))
+                }
+            }
+        }
+        throw lastError ?? SupabaseAuthServiceError.emptyUploadToken
     }
 
     private func resolvedDomains(accessToken: String, snapshot: DashboardSnapshot) async -> [NativeDomainDefinition] {
