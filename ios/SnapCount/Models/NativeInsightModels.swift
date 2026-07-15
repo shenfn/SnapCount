@@ -144,3 +144,88 @@ struct NativeInsightSnapshot {
         }
     }
 }
+
+struct NativeAIInsight: Decodable, Identifiable {
+    let remoteId: String?
+    let generatedAt: String
+    let daysRange: Int?
+    let maturityStage: String?
+    let activeDays: Int?
+    let contentMarkdown: String
+    let payload: [String: AnyCodable]
+    let status: String?
+
+    var id: String { remoteId ?? generatedAt }
+    var parsedPayload: NativeAIInsightPayload { NativeAIInsightPayload(payload) }
+
+    func scoped(to range: NativeInsightRange) -> NativeAIInsight {
+        NativeAIInsight(
+            remoteId: remoteId,
+            generatedAt: generatedAt,
+            daysRange: daysRange ?? range.rawValue,
+            maturityStage: maturityStage,
+            activeDays: activeDays,
+            contentMarkdown: contentMarkdown,
+            payload: payload,
+            status: status
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case remoteId = "id"
+        case generatedAt = "generated_at"
+        case daysRange = "days_range"
+        case maturityStage = "maturity_stage"
+        case activeDays = "active_days"
+        case contentMarkdown = "content_md"
+        case payload = "payload_jsonb"
+        case status
+    }
+}
+
+struct NativeAIInsightPayload {
+    let headline: String
+    let question: String
+    let answer: String
+    let observations: [String]
+    let patterns: [String]
+    let risks: [String]
+    let suggestions: [String]
+    let actionPlan: [String]
+    let uncertainty: [String]
+    let encouragement: String
+    let followupQuestions: [String]
+    let modeLabel: String
+
+    init(_ payload: [String: AnyCodable]) {
+        headline = payload.string("headline") ?? ""
+        question = payload.string("question") ?? ""
+        answer = payload.string("answer") ?? ""
+        observations = Self.strings(payload["observations"])
+        patterns = Self.strings(payload["patterns"])
+        risks = Self.strings(payload["risks"])
+        suggestions = Self.strings(payload["suggestions"])
+        actionPlan = Self.strings(payload["action_plan"])
+        uncertainty = Self.strings(payload["uncertainty"])
+        encouragement = payload.string("encouragement") ?? ""
+        followupQuestions = Self.strings(payload["followup_questions"])
+        if let route = payload["route"]?.value as? [String: Any],
+           let label = route["mode_label"] as? String {
+            modeLabel = label
+        } else if let route = payload["route"]?.value as? [String: String] {
+            modeLabel = route["mode_label"] ?? ""
+        } else {
+            modeLabel = payload.string("mode_label") ?? ""
+        }
+    }
+
+    private static func strings(_ value: AnyCodable?) -> [String] {
+        guard let values = value?.value as? [Any] else { return [] }
+        return values.compactMap { $0 as? String }.filter { !$0.isEmpty }
+    }
+}
+
+struct NativeAIInsightResponse: Decodable {
+    let cached: Bool
+    let insight: NativeAIInsight
+}

@@ -217,6 +217,20 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(snapshot.foodCalories, 2100)
     }
 
+    func testAIInsightPayloadParsesStructuredLists() {
+        let payload = NativeAIInsightPayload([
+            "headline": AnyCodable("近两周收支稳定"),
+            "observations": AnyCodable(["消费集中在周末", "睡眠逐步改善"]),
+            "action_plan": AnyCodable(["设置每日预算"]),
+            "route": AnyCodable(["mode_label": "现金流分析"])
+        ])
+
+        XCTAssertEqual(payload.headline, "近两周收支稳定")
+        XCTAssertEqual(payload.observations.count, 2)
+        XCTAssertEqual(payload.actionPlan, ["设置每日预算"])
+        XCTAssertEqual(payload.modeLabel, "现金流分析")
+    }
+
     func testAccountTypeNormalizationMatchesPWAAdapter() {
         XCTAssertEqual(NativeAccountType.normalized("wechat"), .walletBalance)
         XCTAssertEqual(NativeAccountType.normalized("bank_card"), .debitCard)

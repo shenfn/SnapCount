@@ -70,6 +70,13 @@ protocol SupabaseRemoteClientProtocol {
         fields: [String: String],
         accessToken: String
     ) async throws -> Data
+
+    func postFunction<T: Decodable>(
+        _ type: T.Type,
+        path: String,
+        body: [String: AnyCodable],
+        accessToken: String
+    ) async throws -> T
 }
 
 final class SupabaseRemoteClient: SupabaseRemoteClientProtocol {
@@ -199,6 +206,27 @@ final class SupabaseRemoteClient: SupabaseRemoteClientProtocol {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
         return try await dataResponse(for: request)
+    }
+
+    func postFunction<T: Decodable>(
+        _ type: T.Type,
+        path: String,
+        body: [String: AnyCodable],
+        accessToken: String
+    ) async throws -> T {
+        guard let baseURL = URL(
+            string: AppConfig.supabaseFunctionsURL.isEmpty
+                ? AppConfig.supabaseURL
+                : AppConfig.supabaseFunctionsURL
+        ) else {
+            throw SupabaseRemoteError.invalidURL
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        authorize(&request, accessToken: accessToken)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        return try decoder.decode(type, from: try await dataResponse(for: request))
     }
 
     private func url(path: String, queryItems: [URLQueryItem]) throws -> URL {
