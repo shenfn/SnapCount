@@ -297,8 +297,9 @@ function decodeImage(bytes: Uint8Array, mime: string): { data: Uint8Array; width
   }
 }
 
-function computePerceptualHash(bytes: Uint8Array, mime: string): string | null {
-  const img = decodeImage(bytes, mime);
+function computePerceptualHashFromDecoded(
+  img: { data: Uint8Array; width: number; height: number } | null,
+): string | null {
   if (!img || img.width <= 0 || img.height <= 0) return null;
   const samples: number[] = [];
   for (let y = 0; y < 8; y++) {
@@ -322,8 +323,10 @@ function computePerceptualHash(bytes: Uint8Array, mime: string): string | null {
   return hex;
 }
 
-function getImageFeatures(bytes: Uint8Array, mime: string): ImageFeatures {
-  const img = decodeImage(bytes, mime);
+function imageFeaturesFromDecoded(
+  img: { data: Uint8Array; width: number; height: number } | null,
+  mime: string,
+): ImageFeatures {
   if (!img || img.width <= 0 || img.height <= 0) {
     return {
       width: null,
@@ -351,6 +354,17 @@ function getImageFeatures(bytes: Uint8Array, mime: string): ImageFeatures {
     is_tiny_image: img.width < 320 || img.height < 320,
     likely_phone_screenshot: img.height >= 1000 && img.width >= 600 && ratio >= 1.5 && ratio <= 2.4,
     mime,
+  };
+}
+
+function analyzeImage(bytes: Uint8Array, mime: string): {
+  features: ImageFeatures;
+  perceptualHash: string | null;
+} {
+  const decoded = decodeImage(bytes, mime);
+  return {
+    features: imageFeaturesFromDecoded(decoded, mime),
+    perceptualHash: computePerceptualHashFromDecoded(decoded),
   };
 }
 
@@ -3756,7 +3770,9 @@ Deno.serve(async (req) => {
     const sourceApp = normalizeText(form.get("source_app") ?? form.get("app_name"));
     const captureKind = normalizeText(form.get("capture_kind") ?? form.get("capture_type") ?? form.get("image_source") ?? form.get("media_type"));
     const clientCapturedAt = form.get("client_captured_at") ?? form.get("client_upload_at") ?? form.get("shortcut_time") ?? form.get("captured_at");
-    const imageFeatures = getImageFeatures(bytes, mime);
+    const imageAnalysis = analyzeImage(bytes, mime);
+    const imageFeatures = imageAnalysis.features;
+    const perceptualHash = imageAnalysis.perceptualHash;
 
     // 时间锚点：以请求接收时间为基准，附带北京时区换算；陪伴文案 prompt 需要本地时间感
     const now = new Date();
@@ -3802,7 +3818,6 @@ Deno.serve(async (req) => {
 
     // 2. 计算 hash 去重
     const hash = retryImageHash || await sha256(buf);
-    const perceptualHash = computePerceptualHash(bytes, mime);
     timings.mark("hash");
     let perceptualDistance: number | null = null;
     let perceptualDupRefId: string | null = null;
