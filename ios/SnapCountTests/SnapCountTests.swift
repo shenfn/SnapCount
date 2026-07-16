@@ -145,6 +145,22 @@ final class SnapCountTests: XCTestCase {
         XCTAssertFalse(result.displayText.isEmpty)
     }
 
+    func testPendingResolutionRequiresPWAExpenseFields() {
+        let detail = NativeRecordDetail(
+            id: "tx-1", rawId: "1", kind: "expense", title: "待补全", subtitle: "2026-07-16",
+            value: "¥12.00", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil,
+            imageHash: nil, amount: 12, merchantName: nil, platform: nil, category: nil,
+            paymentMethod: nil, recordDate: "2026-07-16", note: nil, companionMessage: nil,
+            accountId: nil, systemImage: "clock", payload: nil
+        )
+        var draft = NativePendingResolutionDraft(detail: detail)
+        XCTAssertEqual(draft.validationMessage, "请选择消费渠道")
+        draft.platform = "微信"
+        draft.category = "food"
+        draft.paymentMethod = "微信支付"
+        XCTAssertNil(draft.validationMessage)
+    }
+
     func testInboxArchiveDomainsPreservePWAContract() {
         XCTAssertEqual(
             InboxArchiveDomains.all.map(\.id),
@@ -490,6 +506,8 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {
         URL(string: "https://example.com/receipt.jpg")!
     }
+
+    func confirmPending(_ draft: NativePendingResolutionDraft, accessToken: String) async throws {}
 }
 
 

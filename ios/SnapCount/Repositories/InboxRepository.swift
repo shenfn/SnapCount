@@ -18,6 +18,7 @@ protocol InboxRepositoryProtocol {
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String
     func resolveRepayment(id: String, cycleId: String, accessToken: String) async throws
     func resolveImageURL(path: String, accessToken: String) async throws -> URL
+    func confirmPending(_ draft: NativePendingResolutionDraft, accessToken: String) async throws
 }
 
 final class InboxRepository: InboxRepositoryProtocol {
@@ -60,5 +61,31 @@ final class InboxRepository: InboxRepositoryProtocol {
 
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {
         try await remoteService.resolveImageURL(path: path, accessToken: accessToken)
+    }
+
+    func confirmPending(_ draft: NativePendingResolutionDraft, accessToken: String) async throws {
+        guard let amount = draft.amount else {
+            throw SupabaseRemoteError.requestFailed("金额格式不正确")
+        }
+        func nullable(_ value: String?) -> Any {
+            guard let value, !value.isEmpty else { return NSNull() }
+            return value
+        }
+        _ = try await remoteClient.rpc(
+            AnyCodable.self,
+            name: "confirm_pending_transaction_with_account",
+            body: [
+                "p_pending_id": AnyCodable(draft.pendingId),
+                "p_entry_type": AnyCodable(draft.kind.rawValue),
+                "p_amount": AnyCodable(amount),
+                "p_merchant_or_source_name": AnyCodable(nullable(draft.merchantOrSourceName)),
+                "p_platform": AnyCodable(nullable(draft.kind == .expense ? draft.platform : nil)),
+                "p_category": AnyCodable(nullable(draft.kind == .expense ? draft.category : nil)),
+                "p_payment_method": AnyCodable(nullable(draft.kind == .expense ? draft.paymentMethod : nil)),
+                "p_income_category": AnyCodable(nullable(draft.kind == .income ? draft.incomeCategory : nil)),
+                "p_account_id": AnyCodable(nullable(draft.accountId))
+            ],
+            accessToken: accessToken
+        )
     }
 }

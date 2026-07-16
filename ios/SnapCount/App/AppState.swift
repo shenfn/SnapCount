@@ -44,6 +44,8 @@ final class AppState: ObservableObject {
     @Published var inboxActionRecordId: String?
     @Published var inboxActionMessage: String?
     @Published var inboxActionMessageIsError = false
+    @Published var isConfirmingPendingRecord = false
+    @Published var pendingResolutionMessage: String?
     @Published var unboundRecords: [NativeUnboundRecord] = []
     @Published var unboundRecordsMessage: String?
     @Published var unboundBindingMessage: String?
@@ -1109,6 +1111,31 @@ final class AppState: ObservableObject {
             return true
         } catch {
             recordDetailMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func confirmPendingRecord(_ draft: NativePendingResolutionDraft) async -> Bool {
+        guard !isConfirmingPendingRecord else { return false }
+        if let validationMessage = draft.validationMessage {
+            pendingResolutionMessage = validationMessage
+            return false
+        }
+        isConfirmingPendingRecord = true
+        pendingResolutionMessage = "正在保存…"
+        defer { isConfirmingPendingRecord = false }
+        do {
+            let session = try await validSession()
+            try await inboxRepository.confirmPending(draft, accessToken: session.accessToken)
+            recordDetailCache.removeValue(forKey: "tx-\(draft.pendingId)")
+            selectedRecordDetail = nil
+            await loadAccounts()
+            await refreshDashboard()
+            inboxPath = NavigationPath()
+            pendingResolutionMessage = draft.kind == .income ? "收入已记录" : "支出已补全"
+            return true
+        } catch {
+            pendingResolutionMessage = "保存失败：\(error.localizedDescription)"
             return false
         }
     }
