@@ -153,6 +153,13 @@ struct RecordDetailView: View {
                             rows: NativeRecordDetailPresentationAdapter.extractedRows(for: detail)
                         )
 
+                        if let binding = NativeRecordDetailPresentationAdapter.accountBinding(
+                            for: detail,
+                            accounts: appState.accounts
+                        ) {
+                            accountBindingSection(binding, detail: detail)
+                        }
+
                         let dishes = NativeRecordDetailPresentationAdapter.foodDishes(for: detail)
                         if !dishes.isEmpty {
                             foodDishesSection(dishes)
@@ -326,6 +333,7 @@ struct RecordDetailView: View {
                         if let calories = dish.calories { Text("\(Int(calories.rounded())) kcal").font(.caption.monospacedDigit()) }
                     }
                     HStack(spacing: 12) {
+                        if let estimatedGrams = dish.estimatedGrams { Text("约 \(estimatedGrams, specifier: "%.0f")g") }
                         if let protein = dish.protein { Text("蛋白 \(protein, specifier: "%.1f")g") }
                         if let carbs = dish.carbs { Text("碳水 \(carbs, specifier: "%.1f")g") }
                         if let fat = dish.fat { Text("脂肪 \(fat, specifier: "%.1f")g") }
@@ -339,6 +347,56 @@ struct RecordDetailView: View {
         }
         .padding(16)
         .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func accountBindingSection(
+        _ binding: NativeRecordAccountBindingPresentation,
+        detail: NativeRecordDetail
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: accountBindingIcon(binding.status))
+                .font(.body.weight(.bold))
+                .foregroundStyle(accountBindingColor(binding.status))
+                .frame(width: 36, height: 36)
+                .background(accountBindingColor(binding.status).opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 5) {
+                Text("账户绑定").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                Text(binding.title).font(.subheadline.weight(.semibold))
+                Text(binding.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if let account = binding.recommendedAccount {
+                Button("一键绑定") {
+                    Task {
+                        var draft = NativeRecordEditDraft(detail: detail)
+                        draft.accountId = account.id
+                        _ = await appState.saveRecordDetail(draft)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(JieziTheme.brand)
+                .disabled(appState.isSavingRecordDetail)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(accountBindingColor(binding.status).opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func accountBindingIcon(_ status: NativeRecordAccountBindingStatus) -> String {
+        switch status {
+        case .bound: return "checkmark.circle.fill"
+        case .recommended: return "sparkles"
+        case .unbound: return "link.badge.plus"
+        }
+    }
+
+    private func accountBindingColor(_ status: NativeRecordAccountBindingStatus) -> Color {
+        switch status {
+        case .bound: return JieziTheme.brand
+        case .recommended: return JieziTheme.gold
+        case .unbound: return JieziTheme.coral
+        }
     }
 
     private func companionSection(_ message: String) -> some View {

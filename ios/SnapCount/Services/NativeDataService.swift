@@ -65,6 +65,7 @@ struct NativeRecordDetail: Identifiable {
     var domainKey: String? = nil
     var source: String? = nil
     var status: String? = nil
+    var domainVersion: String? = nil
     var aiFeedback: NativeAIFeedback? = nil
     var aiSummary: String? = nil
 
@@ -587,7 +588,7 @@ final class NativeDataService {
                 [DataRecordDetailRow].self,
                 path: "rest/v1/data_records",
                 queryItems: [
-                    URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
+                    URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,domain_version,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
                     URLQueryItem(name: "id", value: "eq.\(id)"),
                     URLQueryItem(name: "limit", value: "1")
                 ],
@@ -632,6 +633,7 @@ final class NativeDataService {
                 occurredAt: row.occurredAt,
                 domainKey: row.domainKey,
                 source: row.source,
+                domainVersion: row.domainVersion,
                 aiFeedback: NativeAIFeedback(payload: row.payloadJSONB?.dictionary("ai_feedback")),
                 aiSummary: row.summary
             )
@@ -1477,6 +1479,7 @@ private struct DataRecordDetailRow: Decodable {
     let createdAt: String?
     let occurredAt: String?
     let domainKey: String?
+    let domainVersion: String?
     let title: String?
     let summary: String?
     let payloadJSONB: [String: AnyCodable]?
@@ -1489,6 +1492,7 @@ private struct DataRecordDetailRow: Decodable {
         case createdAt = "created_at"
         case occurredAt = "occurred_at"
         case domainKey = "domain_key"
+        case domainVersion = "domain_version"
         case title
         case summary
         case payloadJSONB = "payload_jsonb"

@@ -92,7 +92,7 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(feedback.timingLabel, "晚间记录")
     }
 
-    func testRecordDetailPresentationUsesDomainSpecificFields() {
+    func testRecordDetailPresentationUsesDomainSpecificFields() throws {
         let detail = NativeRecordDetail(
             id: "data/food-1", rawId: "food-1", kind: "data", title: "午餐", subtitle: "2026-07-16",
             value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
@@ -100,14 +100,44 @@ final class SnapCountTests: XCTestCase {
             recordDate: "2026-07-16", note: "清淡午餐", companionMessage: nil, accountId: nil,
             systemImage: "fork.knife", payload: [
                 "meal_type": AnyCodable("lunch"),
-                "total_calories": AnyCodable(520),
-                "dishes": AnyCodable([["name": "米饭", "calories": 220]])
-            ], domainKey: "food"
+                "total_calorie_kcal": AnyCodable(520),
+                "dishes": AnyCodable([["name": "米饭", "calorie_kcal": 220, "estimated_grams": 150]])
+            ], domainKey: "food", source: "staging", domainVersion: "1.0"
         )
 
         let rows = NativeRecordDetailPresentationAdapter.extractedRows(for: detail)
         XCTAssertEqual(rows.first(where: { $0.label == "餐次" })?.value, "午餐")
-        XCTAssertEqual(NativeRecordDetailPresentationAdapter.foodDishes(for: detail).first?.name, "米饭")
+        XCTAssertEqual(rows.first(where: { $0.label == "总热量" })?.value, "520 千卡（估算）")
+        XCTAssertEqual(rows.first(where: { $0.label == "来源类型" })?.value, "中转站归档")
+        let dish = try XCTUnwrap(NativeRecordDetailPresentationAdapter.foodDishes(for: detail).first)
+        XCTAssertEqual(dish.name, "米饭")
+        XCTAssertEqual(dish.calories, 220)
+        XCTAssertEqual(dish.estimatedGrams, 150)
+    }
+
+    func testRecordDetailReusesPWAAccountRecommendation() throws {
+        let account = NativeAccount(
+            id: "wechat-1", name: "微信零钱", type: .walletBalance, institution: "微信", last4: "", currency: "CNY",
+            initialBalance: 100, currentBalance: 80, snapshotBalance: nil, snapshotAt: nil,
+            sourceRecordTable: "", sourceRecordId: "", billDay: nil, paymentDueDay: nil,
+            autoDebitAccountId: nil, autoConfirmRepayment: false, gracePeriodDays: 0,
+            lastReconciledAt: nil, isDefaultExpense: true, isDefaultIncome: false,
+            isArchived: false, sortOrder: 0
+        )
+        let detail = NativeRecordDetail(
+            id: "tx-1", rawId: "1", kind: "expense", title: "早餐", subtitle: "2026-07-16",
+            value: "¥12.00", detailRows: [], imageURL: nil, imageLoadError: false,
+            imagePath: nil, imageHash: nil, amount: 12, merchantName: "早餐", platform: "微信",
+            category: "food", paymentMethod: "微信支付", recordDate: "2026-07-16",
+            note: nil, companionMessage: nil, accountId: nil, systemImage: "creditcard", payload: nil
+        )
+
+        let binding = try XCTUnwrap(
+            NativeRecordDetailPresentationAdapter.accountBinding(for: detail, accounts: [account])
+        )
+
+        XCTAssertEqual(binding.status, .recommended)
+        XCTAssertEqual(binding.recommendedAccount?.id, account.id)
     }
 
     func testManualExpensePreservesPWAValidationAndCategoryKeys() {

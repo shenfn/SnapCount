@@ -10,11 +10,25 @@ struct NativeRecordDetailSection: Identifiable {
 struct NativeFoodDish: Identifiable {
     let name: String
     let calories: Double?
+    let estimatedGrams: Double?
     let protein: Double?
     let carbs: Double?
     let fat: Double?
 
     var id: String { name }
+}
+
+enum NativeRecordAccountBindingStatus: Equatable {
+    case bound
+    case recommended
+    case unbound
+}
+
+struct NativeRecordAccountBindingPresentation {
+    let status: NativeRecordAccountBindingStatus
+    let title: String
+    let reason: String
+    let recommendedAccount: NativeAccount?
 }
 
 enum NativeRecordDetailPresentationAdapter {
@@ -69,12 +83,65 @@ enum NativeRecordDetailPresentationAdapter {
             let name = payload.string("name") ?? payload.string("dish_name") ?? "未命名菜品"
             return NativeFoodDish(
                 name: name,
-                calories: payload.double("calories") ?? payload.double("calories_kcal"),
+                calories: payload.double("calorie_kcal")
+                    ?? payload.double("calories")
+                    ?? payload.double("calories_kcal"),
+                estimatedGrams: payload.double("estimated_grams"),
                 protein: payload.double("protein_g"),
                 carbs: payload.double("carb_g"),
                 fat: payload.double("fat_g")
             )
         }
+    }
+
+    static func accountBinding(
+        for detail: NativeRecordDetail,
+        accounts: [NativeAccount]
+    ) -> NativeRecordAccountBindingPresentation? {
+        guard detail.kind == "expense" || detail.kind == "income" else { return nil }
+
+        if let accountId = detail.accountId {
+            let account = accounts.first { $0.id == accountId }
+            return NativeRecordAccountBindingPresentation(
+                status: .bound,
+                title: account.map { "已绑定到 \($0.title)" } ?? "已绑定账户",
+                reason: detail.kind == "income" ? "这笔收入已计入到账账户流水" : "这笔支出已计入出资账户流水",
+                recommendedAccount: nil
+            )
+        }
+
+        let kind: NativeUnboundRecordKind = detail.kind == "income" ? .income : .expense
+        let record = NativeUnboundRecord(
+            id: detail.rawId,
+            kind: kind,
+            title: detail.title,
+            amount: detail.amount ?? 0,
+            date: detail.recordDate ?? "",
+            time: detail.transactionTime,
+            platform: detail.platform,
+            category: detail.category,
+            paymentMethod: detail.paymentMethod,
+            note: detail.note,
+            source: detail.source,
+            imagePath: detail.imagePath,
+            imageHash: detail.imageHash,
+            companionMessage: detail.companionMessage
+        )
+        if let recommendation = NativeAccountRecommendationEngine.recommendation(for: record, accounts: accounts) {
+            return NativeRecordAccountBindingPresentation(
+                status: .recommended,
+                title: "推荐绑定到 \(recommendation.account.title)",
+                reason: recommendation.reason,
+                recommendedAccount: recommendation.account
+            )
+        }
+
+        return NativeRecordAccountBindingPresentation(
+            status: .unbound,
+            title: "尚未绑定账户",
+            reason: "编辑记录并选择账户后，会自动生成对应账户流水",
+            recommendedAccount: nil
+        )
     }
 
     static func aiSummary(for detail: NativeRecordDetail) -> String {
@@ -110,9 +177,15 @@ enum NativeRecordDetailPresentationAdapter {
             return [
                 NativeDetailRow(label: "标题", value: detail.title),
                 NativeDetailRow(label: "餐次", value: mealLabels[payload.string("meal_type") ?? ""] ?? "未分类"),
-                NativeDetailRow(label: "总热量", value: payload.double("total_calories").map { String(format: "%.0f kcal", $0) } ?? "--"),
+                NativeDetailRow(
+                    label: "总热量",
+                    value: (payload.double("total_calorie_kcal") ?? payload.double("total_calories"))
+                        .map { String(format: "%.0f 千卡（估算）", $0) } ?? "--"
+                ),
                 NativeDetailRow(label: "菜品数", value: "\(payload.array("dishes")?.count ?? 0) 道"),
                 NativeDetailRow(label: "记录日期", value: detail.recordDate ?? "--"),
+                NativeDetailRow(label: "模板版本", value: detail.domainVersion ?? "1.0"),
+                NativeDetailRow(label: "来源类型", value: sourceLabel(for: detail)),
                 NativeDetailRow(label: "估算依据", value: payload.string("confidence_note") ?? "无"),
                 NativeDetailRow(label: "备注", value: payload.string("note") ?? detail.note ?? "无")
             ]
@@ -126,6 +199,8 @@ enum NativeRecordDetailPresentationAdapter {
                 NativeDetailRow(label: "入睡时间", value: payload.string("sleep_start_at") ?? "--"),
                 NativeDetailRow(label: "醒来时间", value: payload.string("wake_at") ?? "--"),
                 NativeDetailRow(label: "发生日期", value: detail.recordDate ?? "--"),
+                NativeDetailRow(label: "模板版本", value: detail.domainVersion ?? "1.0"),
+                NativeDetailRow(label: "来源类型", value: sourceLabel(for: detail)),
                 NativeDetailRow(label: "备注", value: payload.string("note") ?? detail.note ?? "无")
             ]
         case "sport":
@@ -135,6 +210,8 @@ enum NativeRecordDetailPresentationAdapter {
                 NativeDetailRow(label: "距离", value: payload.double("distance_km").map { String(format: "%.2f km", $0) } ?? "--"),
                 NativeDetailRow(label: "消耗热量", value: payload.double("calories_kcal").map { String(format: "%.0f kcal", $0) } ?? "--"),
                 NativeDetailRow(label: "发生日期", value: detail.recordDate ?? "--"),
+                NativeDetailRow(label: "模板版本", value: detail.domainVersion ?? "1.0"),
+                NativeDetailRow(label: "来源类型", value: sourceLabel(for: detail)),
                 NativeDetailRow(label: "备注", value: payload.string("note") ?? detail.note ?? "无")
             ]
         case "reading":
@@ -143,6 +220,8 @@ enum NativeRecordDetailPresentationAdapter {
                 NativeDetailRow(label: "阅读时长", value: durationLabel(payload.double("duration_minutes"))),
                 NativeDetailRow(label: "阅读页数", value: payload.double("pages_read").map { "\(Int($0.rounded())) 页" } ?? "--"),
                 NativeDetailRow(label: "发生日期", value: detail.recordDate ?? "--"),
+                NativeDetailRow(label: "模板版本", value: detail.domainVersion ?? "1.0"),
+                NativeDetailRow(label: "来源类型", value: sourceLabel(for: detail)),
                 NativeDetailRow(label: "备注", value: payload.string("note") ?? detail.note ?? "无")
             ]
         default:
