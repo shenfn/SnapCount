@@ -6,8 +6,11 @@ struct ManualRecordSheet: View {
     @State private var draft: NativeManualRecordDraft
     @State private var localMessage: String?
 
-    init(editing detail: NativeRecordDetail? = nil) {
-        _draft = State(initialValue: detail.map { NativeManualRecordDraft(detail: $0) } ?? NativeManualRecordDraft())
+    init(editing detail: NativeRecordDetail? = nil, kind: NativeManualRecordKind = .expense, domainKey: String = "sport") {
+        _draft = State(
+            initialValue: detail.map { NativeManualRecordDraft(detail: $0) }
+                ?? NativeManualRecordDraft(kind: kind, domainKey: domainKey)
+        )
     }
 
     private var universalDomains: [NativeDomainDefinition] {

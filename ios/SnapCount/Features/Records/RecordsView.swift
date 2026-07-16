@@ -129,7 +129,9 @@ struct RecordDetailView: View {
                             Button {
                                 imagePreview = ImagePreviewRoute(url: imageURL)
                             } label: {
-                                RecordImagePreview(url: imageURL)
+                                RecordImagePreview(url: imageURL) {
+                                    Task { await appState.loadRecordDetail(reference: reference, force: true) }
+                                }
                             }
                             .buttonStyle(.plain)
                         } else if detail.imageLoadError {
@@ -224,8 +226,13 @@ struct RecordDetailView: View {
                     } placeholder: {
                         ProgressView().tint(.white)
                     } failure: {
-                        Label("截图文件不可用", systemImage: "photo.badge.exclamationmark")
-                            .foregroundStyle(.white)
+                        Button {
+                            imagePreview = nil
+                            Task { await appState.loadRecordDetail(reference: reference, force: true) }
+                        } label: {
+                            Label("截图加载失败，点此重试", systemImage: "arrow.clockwise")
+                                .foregroundStyle(.white)
+                        }
                     }
                     .padding()
                 }
@@ -261,9 +268,15 @@ struct RecordDetailView: View {
     }
 
     private var unavailableImageView: some View {
-        Label("截图文件不可用或已删除", systemImage: "photo.badge.exclamationmark")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
+        Button {
+            Task { await appState.loadRecordDetail(reference: reference, force: true) }
+        } label: {
+            Label("截图文件不可用，点此重新加载", systemImage: "arrow.clockwise")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.brand)
+                .frame(maxWidth: .infinity, minHeight: 88)
+        }
+        .buttonStyle(.plain)
     }
 
     private func recordHeader(_ detail: NativeRecordDetail) -> some View {
@@ -383,6 +396,7 @@ struct RecordDetailView: View {
 
 private struct RecordImagePreview: View {
     let url: URL
+    let onRetry: () -> Void
 
     var body: some View {
         CachedRemoteImage(url: url) { image in
@@ -402,9 +416,13 @@ private struct RecordImagePreview: View {
         } placeholder: {
             ProgressView().frame(maxWidth: .infinity, minHeight: 180)
         } failure: {
-            Label("截图文件不可用或已删除", systemImage: "photo.badge.exclamationmark")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            Button(action: onRetry) {
+                Label("截图加载失败，点此重试", systemImage: "arrow.clockwise")
+                    .font(.footnote)
+                    .foregroundStyle(JieziTheme.brand)
+                    .frame(maxWidth: .infinity, minHeight: 140)
+            }
+            .buttonStyle(.plain)
         }
     }
 }

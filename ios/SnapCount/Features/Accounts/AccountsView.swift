@@ -120,7 +120,7 @@ private struct AccountRowView: View {
     }
 }
 
-private struct AccountDetailView: View {
+struct AccountDetailView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     let accountId: String
@@ -564,7 +564,7 @@ private struct RepaymentConfirmationSheet: View {
     }
 }
 
-private struct AccountEditSheet: View {
+struct AccountEditSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var draft: NativeAccountDraft

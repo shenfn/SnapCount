@@ -128,6 +128,26 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(payload.string("source_app"), "manual")
     }
 
+    func testManualWalletSnapshotPreservesPWAPayloadContract() {
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "wallet")
+        draft.primaryValueText = "4620"
+        draft.dimension = "支付宝花呗"
+        draft.walletRecordKind = "liability_snapshot"
+        draft.walletAccountType = "credit_line"
+        draft.walletDueDate = "2026-07-20"
+        draft.walletBillDay = "20"
+
+        let payload = draft.universalPayload(domain: nil)
+
+        XCTAssertEqual(payload.double("snapshot_balance"), 4620)
+        XCTAssertEqual(payload.string("account_name"), "支付宝花呗")
+        XCTAssertEqual(payload.string("record_kind"), "liability_snapshot")
+        XCTAssertEqual(payload.string("account_snapshot_kind"), "liability")
+        XCTAssertEqual(payload.string("account_type"), "credit_line")
+        XCTAssertEqual(payload.string("due_date"), "2026-07-20")
+        XCTAssertEqual(payload.double("bill_day"), 20)
+    }
+
     func testManualUniversalEditPreservesUnknownPayloadFields() {
         var draft = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
         draft.existingRawId = "record-1"

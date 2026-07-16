@@ -35,6 +35,9 @@ struct DomainsView: View {
                 DomainDetailView(domain: domain)
             }
         }
+        .navigationDestination(for: NativeRecordRoute.self) { route in
+            RecordDetailView(reference: route.reference)
+        }
     }
 }
 
@@ -42,8 +45,14 @@ private struct DomainDetailView: View {
     @EnvironmentObject private var appState: AppState
     let domain: NativeDomainDefinition
     @State private var snapshotForAccountPicker: NativeWalletSnapshot?
+    @State private var accountDraft: NativeAccountDraft?
+    @State private var showWalletRecordSheet = false
     private var presentation: NativeDomainPresentation { NativeDomainPresentationAdapter.presentation(for: domain, dashboard: appState.dashboard) }
     private var activeAccounts: [NativeAccount] { appState.accounts.filter { !$0.isArchived } }
+    private var assetAccounts: [NativeAccount] { activeAccounts.filter { !$0.type.isLiability } }
+    private var liabilityAccounts: [NativeAccount] { activeAccounts.filter(\.type.isLiability) }
+    private var unboundExpenses: [NativeUnboundRecord] { appState.unboundRecords.filter { $0.kind == .expense } }
+    private var unboundIncomes: [NativeUnboundRecord] { appState.unboundRecords.filter { $0.kind == .income } }
 
     var body: some View {
         ZStack {
@@ -51,11 +60,16 @@ private struct DomainDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     domainHero
-                    if domain.id == "wallet" { walletSnapshotSection }
+                    if domain.id == "wallet" {
+                        walletActionRow
+                        walletAccountSection
+                        walletUnboundSection
+                    }
                     metricGrid
                     trendSection
                     distributionSection
                     recentRecordsSection
+                    if domain.id == "wallet" { walletSnapshotSection }
                 }.padding(16)
             }
             .refreshable {
@@ -68,8 +82,142 @@ private struct DomainDetailView: View {
         .sheet(item: $snapshotForAccountPicker) { snapshot in
             WalletSnapshotAccountPicker(snapshot: snapshot, accounts: activeAccounts)
         }
+        .sheet(item: $accountDraft) { draft in
+            AccountEditSheet(draft: draft)
+        }
+        .sheet(isPresented: $showWalletRecordSheet) {
+            ManualRecordSheet(kind: .universal, domainKey: "wallet")
+        }
+        .navigationDestination(for: NativeAccountRoute.self) { route in
+            if activeAccounts.contains(where: { $0.id == route.accountId }) {
+                AccountDetailView(accountId: route.accountId)
+            }
+        }
         .task(id: domain.id) {
-            if domain.id == "wallet" { await appState.loadWalletSnapshots() }
+            if domain.id == "wallet" {
+                async let accounts: Void = appState.loadAccounts()
+                async let snapshots: Void = appState.loadWalletSnapshots()
+                async let unbound: Void = appState.loadUnboundRecords(monthKey: Self.currentMonthKey)
+                _ = await (accounts, snapshots, unbound)
+            }
+        }
+    }
+
+    private var walletActionRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                accountDraft = NativeAccountDraft()
+            } label: {
+                Label("新建账户", systemImage: "plus")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(JieziTheme.brand)
+
+            Button {
+                showWalletRecordSheet = true
+            } label: {
+                Label("添加快照", systemImage: "wallet.pass")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(JieziTheme.brand)
+        }
+    }
+
+    private var walletAccountSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("账户与钱包").font(.title3.bold())
+            walletAccountGroup(title: "资产账户", accounts: assetAccounts, emptyText: "还没有资产账户")
+            walletAccountGroup(title: "负债与待还", accounts: liabilityAccounts, emptyText: "还没有负债账户")
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func walletAccountGroup(title: String, accounts: [NativeAccount], emptyText: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.caption.weight(.bold)).foregroundStyle(.secondary)
+            if accounts.isEmpty {
+                Text(emptyText).font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                ForEach(accounts) { account in
+                    NavigationLink(value: NativeAccountRoute(accountId: account.id)) {
+                        HStack(spacing: 12) {
+                            Image(systemName: account.type.systemImage)
+                                .foregroundStyle(account.type.isLiability ? JieziTheme.coral : JieziTheme.brand)
+                                .frame(width: 34, height: 34)
+                                .background((account.type.isLiability ? JieziTheme.coral : JieziTheme.brand).opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 5) {
+                                    Text(account.title).font(.subheadline.weight(.semibold))
+                                    if account.isDefaultExpense { accountTag("默认支出", color: JieziTheme.coral) }
+                                    if account.isDefaultIncome { accountTag("默认收入", color: JieziTheme.brand) }
+                                }
+                                Text([account.type.title, account.institution].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(String(format: "¥%.2f", account.currentBalance))
+                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(account.type.isLiability ? JieziTheme.coral : JieziTheme.ink)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func accountTag(_ title: String, color: Color) -> some View {
+        Text(title)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    @ViewBuilder
+    private var walletUnboundSection: some View {
+        let total = unboundExpenses.count + unboundIncomes.count
+        if total > 0 {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("未绑定账户的记录（\(total)）").font(.headline)
+                        Text("补绑后会自动生成账户流水").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    NavigationLink {
+                        UnboundRecordsView()
+                    } label: {
+                        Text("去补全").font(.subheadline.weight(.semibold))
+                    }
+                }
+                ForEach((unboundExpenses + unboundIncomes).prefix(6)) { record in
+                    Button { appState.openUnboundRecord(record) } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(record.title).font(.subheadline.weight(.semibold)).foregroundStyle(JieziTheme.ink)
+                                Text("\(record.date) · \(record.kind.title) · 点击补绑账户")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(String(format: "%@¥%.2f", record.kind == .expense ? "-" : "+", record.amount))
+                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(record.kind == .expense ? JieziTheme.coral : JieziTheme.brand)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(16)
+            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -204,7 +352,7 @@ private struct DomainDetailView: View {
                 ContentUnavailableView("\(domain.name)暂无记录", systemImage: domain.systemImage)
             } else {
                 ForEach(presentation.recentRecords) { record in
-                    Button { appState.openDayRecord(record) } label: {
+                    NavigationLink(value: NativeRecordRoute(reference: record.reference)) {
                         HStack(spacing: 12) {
                             Image(systemName: record.systemImage)
                                 .foregroundStyle(JieziTheme.brand)
@@ -221,7 +369,6 @@ private struct DomainDetailView: View {
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                     Divider()
                 }
             }
@@ -286,6 +433,17 @@ private struct DomainDetailView: View {
                 }
             }
         }
+    }
+
+    private static let monthKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM"
+        return formatter
+    }()
+
+    private static var currentMonthKey: String {
+        monthKeyFormatter.string(from: Date())
     }
 }
 
