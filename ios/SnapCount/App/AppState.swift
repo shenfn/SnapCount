@@ -27,6 +27,7 @@ final class AppState: ObservableObject {
     @Published var recordDetailMessage: String?
     @Published var isSavingRecordDetail = false
     @Published var isDeletingRecordDetail = false
+    @Published var recordFeedbackState: NativeAIFeedbackReviewState = .idle
     @Published var isCreatingManualRecord = false
     @Published var manualRecordMessage: String?
     @Published var accounts: [NativeAccount] = []
@@ -1051,6 +1052,9 @@ final class AppState: ObservableObject {
 
     func loadRecordDetail(reference: String, force: Bool = false) async {
         recordDetailMessage = nil
+        if selectedRecordDetail?.id != reference {
+            recordFeedbackState = .idle
+        }
         if !force, let cached = recordDetailCache[reference] {
             selectedRecordDetail = cached
             return
@@ -1106,6 +1110,24 @@ final class AppState: ObservableObject {
         } catch {
             recordDetailMessage = error.localizedDescription
             return false
+        }
+    }
+
+    func submitRecordFeedback(choice: NativeAIFeedbackReviewChoice, freeText: String) async {
+        if case .submitting = recordFeedbackState { return }
+        guard let detail = selectedRecordDetail else { return }
+        recordFeedbackState = .submitting
+        do {
+            let session = try await validSession()
+            try await recordRepository.submitFeedback(
+                recordId: detail.rawId,
+                choice: choice,
+                freeText: freeText,
+                accessToken: session.accessToken
+            )
+            recordFeedbackState = .submitted
+        } catch {
+            recordFeedbackState = .failed(error.localizedDescription)
         }
     }
 

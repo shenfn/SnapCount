@@ -72,6 +72,41 @@ final class SnapCountTests: XCTestCase {
     func testRecordRepositoryProtocolSupportsStubInjection() async throws {
         let repository: RecordRepositoryProtocol = RecordRepositoryStub()
         try await repository.delete(reference: "expense:record-1", accessToken: "test-token")
+        try await repository.submitFeedback(recordId: "record-1", choice: .notHelpful, freeText: "", accessToken: "test-token")
+    }
+
+    func testAIFeedbackParsesPWAFields() throws {
+        let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "icon": AnyCodable("✨"),
+            "badge": AnyCodable("今天很稳"),
+            "band": AnyCodable("positive"),
+            "emotion_line": AnyCodable("记录已经落下。"),
+            "utility_line": AnyCodable("继续保持当前节奏。"),
+            "detail_reason": AnyCodable("金额和分类完整。"),
+            "timing_signal": AnyCodable(["label": AnyCodable("晚间记录")])
+        ]))
+
+        XCTAssertEqual(feedback.badge, "今天很稳")
+        XCTAssertEqual(feedback.bandLabel, "正向")
+        XCTAssertEqual(feedback.timingLabel, "晚间记录")
+    }
+
+    func testRecordDetailPresentationUsesDomainSpecificFields() {
+        let detail = NativeRecordDetail(
+            id: "data/food-1", rawId: "food-1", kind: "data", title: "午餐", subtitle: "2026-07-16",
+            value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: nil, merchantName: nil, platform: nil, category: "food", paymentMethod: nil,
+            recordDate: "2026-07-16", note: "清淡午餐", companionMessage: nil, accountId: nil,
+            systemImage: "fork.knife", payload: [
+                "meal_type": AnyCodable("lunch"),
+                "total_calories": AnyCodable(520),
+                "dishes": AnyCodable([["name": "米饭", "calories": 220]])
+            ], domainKey: "food"
+        )
+
+        let rows = NativeRecordDetailPresentationAdapter.extractedRows(for: detail)
+        XCTAssertEqual(rows.first(where: { $0.label == "餐次" })?.value, "午餐")
+        XCTAssertEqual(NativeRecordDetailPresentationAdapter.foodDishes(for: detail).first?.name, "米饭")
     }
 
     func testManualExpensePreservesPWAValidationAndCategoryKeys() {
@@ -433,6 +468,8 @@ private struct RecordRepositoryStub: RecordRepositoryProtocol {
     }
 
     func delete(reference: String, accessToken: String) async throws {}
+
+    func submitFeedback(recordId: String, choice: NativeAIFeedbackReviewChoice, freeText: String, accessToken: String) async throws {}
 }
 
 private struct InboxRepositoryStub: InboxRepositoryProtocol {

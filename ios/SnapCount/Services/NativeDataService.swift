@@ -59,6 +59,14 @@ struct NativeRecordDetail: Identifiable {
     let accountId: String?
     let systemImage: String
     let payload: [String: AnyCodable]?
+    var createdAt: String? = nil
+    var occurredAt: String? = nil
+    var transactionTime: String? = nil
+    var domainKey: String? = nil
+    var source: String? = nil
+    var status: String? = nil
+    var aiFeedback: NativeAIFeedback? = nil
+    var aiSummary: String? = nil
 
     var isEditable: Bool {
         kind == "expense" || kind == "income" || kind == "data"
@@ -276,7 +284,7 @@ final class NativeDataService {
             [TransactionRow].self,
             path: "rest/v1/transactions",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,account_id"),
+                URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
                 URLQueryItem(name: "order", value: "created_at.desc"),
                 URLQueryItem(name: "limit", value: "80")
             ],
@@ -289,7 +297,7 @@ final class NativeDataService {
             [IncomeRow].self,
             path: "rest/v1/income_records",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id"),
+                URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
                 URLQueryItem(name: "order", value: "created_at.desc"),
                 URLQueryItem(name: "limit", value: "40")
             ],
@@ -302,7 +310,7 @@ final class NativeDataService {
             [DataRecordRow].self,
             path: "rest/v1/data_records",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash"),
+                URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
                 URLQueryItem(name: "order", value: "created_at.desc"),
                 URLQueryItem(name: "limit", value: "40")
             ],
@@ -473,7 +481,7 @@ final class NativeDataService {
                 [TransactionDetailRow].self,
                 path: "rest/v1/transactions",
                 queryItems: [
-                    URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,account_id"),
+                    URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
                     URLQueryItem(name: "id", value: "eq.\(id)"),
                     URLQueryItem(name: "limit", value: "1")
                 ],
@@ -513,7 +521,14 @@ final class NativeDataService {
                 companionMessage: row.companionMessage,
                 accountId: row.accountId,
                 systemImage: "creditcard",
-                payload: nil
+                payload: nil,
+                createdAt: row.createdAt,
+                occurredAt: row.transactionDate,
+                transactionTime: row.transactionTime,
+                domainKey: "expense",
+                source: row.source,
+                status: row.status,
+                aiFeedback: NativeAIFeedback(payload: row.aiFeedback)
             )
 
         case "income":
@@ -521,7 +536,7 @@ final class NativeDataService {
                 [IncomeDetailRow].self,
                 path: "rest/v1/income_records",
                 queryItems: [
-                    URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id"),
+                    URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
                     URLQueryItem(name: "id", value: "eq.\(id)"),
                     URLQueryItem(name: "limit", value: "1")
                 ],
@@ -559,7 +574,12 @@ final class NativeDataService {
                 companionMessage: row.companionMessage,
                 accountId: row.accountId,
                 systemImage: "arrow.down.circle",
-                payload: nil
+                payload: nil,
+                createdAt: row.createdAt,
+                occurredAt: row.incomeDate,
+                domainKey: "income",
+                source: row.source,
+                aiFeedback: NativeAIFeedback(payload: row.aiFeedback)
             )
 
         default:
@@ -567,7 +587,7 @@ final class NativeDataService {
                 [DataRecordDetailRow].self,
                 path: "rest/v1/data_records",
                 queryItems: [
-                    URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash"),
+                    URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
                     URLQueryItem(name: "id", value: "eq.\(id)"),
                     URLQueryItem(name: "limit", value: "1")
                 ],
@@ -607,7 +627,13 @@ final class NativeDataService {
                 companionMessage: row.payloadJSONB?.string("companion_message"),
                 accountId: nil,
                 systemImage: "sparkles",
-                payload: row.payloadJSONB
+                payload: row.payloadJSONB,
+                createdAt: row.createdAt,
+                occurredAt: row.occurredAt,
+                domainKey: row.domainKey,
+                source: row.source,
+                aiFeedback: NativeAIFeedback(payload: row.payloadJSONB?.dictionary("ai_feedback")),
+                aiSummary: row.summary
             )
         }
     }
@@ -1052,7 +1078,10 @@ final class NativeDataService {
                     NativeDetailRow(label: "来源", value: row.source ?? "")
                 ].filter { !$0.value.isEmpty },
                 imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: false, imagePath: row.imageURL, imageHash: row.imageHash,
-                amount: row.amount, merchantName: row.merchantName, platform: row.platform, category: row.category, paymentMethod: row.paymentMethod, recordDate: row.transactionDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: row.status == "pending" ? "clock" : "creditcard", payload: nil
+                amount: row.amount, merchantName: row.merchantName, platform: row.platform, category: row.category, paymentMethod: row.paymentMethod, recordDate: row.transactionDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: row.status == "pending" ? "clock" : "creditcard", payload: nil,
+                createdAt: row.createdAt, occurredAt: row.transactionDate, transactionTime: row.transactionTime,
+                domainKey: "expense", source: row.source, status: row.status,
+                aiFeedback: NativeAIFeedback(payload: row.aiFeedback)
             )
         }
         incomes.forEach { row in
@@ -1061,7 +1090,9 @@ final class NativeDataService {
                 id: reference, rawId: row.id, kind: "income", title: row.sourceName ?? "收入记录", subtitle: row.incomeDate ?? row.createdAt ?? "", value: "+\(currency(row.amount))",
                 detailRows: [NativeDetailRow(label: "收入类型", value: row.category ?? "未填写"), NativeDetailRow(label: "来源", value: row.source ?? "")].filter { !$0.value.isEmpty },
                 imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: false, imagePath: row.imageURL, imageHash: row.imageHash,
-                amount: row.amount, merchantName: row.sourceName, platform: nil, category: row.category, paymentMethod: nil, recordDate: row.incomeDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: "arrow.down.circle", payload: nil
+                amount: row.amount, merchantName: row.sourceName, platform: nil, category: row.category, paymentMethod: nil, recordDate: row.incomeDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: "arrow.down.circle", payload: nil,
+                createdAt: row.createdAt, occurredAt: row.incomeDate, domainKey: "income", source: row.source,
+                aiFeedback: NativeAIFeedback(payload: row.aiFeedback)
             )
         }
         universal.forEach { row in
@@ -1071,7 +1102,9 @@ final class NativeDataService {
                 id: reference, rawId: row.id, kind: "data", title: row.title ?? domainName(row.domainKey), subtitle: row.occurredAt ?? row.createdAt ?? "", value: "",
                 detailRows: [NativeDetailRow(label: "摘要", value: row.summary ?? "")].filter { !$0.value.isEmpty } + payloadRows,
                 imageURL: signedURLs[row.sourceImagePath ?? ""], imageLoadError: false, imagePath: row.sourceImagePath, imageHash: row.sourceImageHash,
-                amount: nil, merchantName: nil, platform: nil, category: row.domainKey, paymentMethod: nil, recordDate: row.occurredAt.map(dateOnly), note: row.summary, companionMessage: row.payloadJSONB?.string("companion_message"), accountId: nil, systemImage: "sparkles", payload: row.payloadJSONB
+                amount: nil, merchantName: nil, platform: nil, category: row.domainKey, paymentMethod: nil, recordDate: row.occurredAt.map(dateOnly), note: row.summary, companionMessage: row.payloadJSONB?.string("companion_message"), accountId: nil, systemImage: "sparkles", payload: row.payloadJSONB,
+                createdAt: row.createdAt, occurredAt: row.occurredAt, domainKey: row.domainKey, source: row.source,
+                aiFeedback: NativeAIFeedback(payload: row.payloadJSONB?.dictionary("ai_feedback")), aiSummary: row.summary
             )
         }
         return details
@@ -1285,6 +1318,7 @@ private struct TransactionRow: Decodable {
     let companionMessage: String?
     let note: String?
     let accountId: String?
+    let aiFeedback: [String: AnyCodable]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1304,6 +1338,7 @@ private struct TransactionRow: Decodable {
         case companionMessage = "companion_message"
         case note
         case accountId = "account_id"
+        case aiFeedback = "ai_feedback"
     }
 }
 
@@ -1320,6 +1355,7 @@ private struct IncomeRow: Decodable {
     let companionMessage: String?
     let note: String?
     let accountId: String?
+    let aiFeedback: [String: AnyCodable]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1334,6 +1370,7 @@ private struct IncomeRow: Decodable {
         case companionMessage = "companion_message"
         case note
         case accountId = "account_id"
+        case aiFeedback = "ai_feedback"
     }
 }
 
@@ -1347,6 +1384,7 @@ private struct DataRecordRow: Decodable {
     let payloadJSONB: [String: AnyCodable]?
     let sourceImagePath: String?
     let sourceImageHash: String?
+    let source: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1358,6 +1396,7 @@ private struct DataRecordRow: Decodable {
         case payloadJSONB = "payload_jsonb"
         case sourceImagePath = "source_image_path"
         case sourceImageHash = "source_image_hash"
+        case source
     }
 }
 
@@ -1378,6 +1417,7 @@ private struct TransactionDetailRow: Decodable {
     let companionMessage: String?
     let note: String?
     let accountId: String?
+    let aiFeedback: [String: AnyCodable]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1396,6 +1436,7 @@ private struct TransactionDetailRow: Decodable {
         case companionMessage = "companion_message"
         case note
         case accountId = "account_id"
+        case aiFeedback = "ai_feedback"
     }
 }
 
@@ -1412,6 +1453,7 @@ private struct IncomeDetailRow: Decodable {
     let companionMessage: String?
     let note: String?
     let accountId: String?
+    let aiFeedback: [String: AnyCodable]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1426,6 +1468,7 @@ private struct IncomeDetailRow: Decodable {
         case companionMessage = "companion_message"
         case note
         case accountId = "account_id"
+        case aiFeedback = "ai_feedback"
     }
 }
 
@@ -1439,6 +1482,7 @@ private struct DataRecordDetailRow: Decodable {
     let payloadJSONB: [String: AnyCodable]?
     let sourceImagePath: String?
     let sourceImageHash: String?
+    let source: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1450,6 +1494,7 @@ private struct DataRecordDetailRow: Decodable {
         case payloadJSONB = "payload_jsonb"
         case sourceImagePath = "source_image_path"
         case sourceImageHash = "source_image_hash"
+        case source
     }
 }
 
@@ -1587,6 +1632,17 @@ extension Dictionary where Key == String, Value == AnyCodable {
         if let number = value as? NSNumber { return number.doubleValue }
         if let string = value as? String { return Double(string) }
         return nil
+    }
+
+    func dictionary(_ key: String) -> [String: AnyCodable]? {
+        guard let value = self[key]?.value else { return nil }
+        if let dictionary = value as? [String: AnyCodable] { return dictionary }
+        if let dictionary = value as? [String: Any] { return dictionary.mapValues(AnyCodable.init) }
+        return nil
+    }
+
+    func array(_ key: String) -> [Any]? {
+        self[key]?.value as? [Any]
     }
 }
 
