@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 struct DomainsView: View {
@@ -41,7 +42,7 @@ private struct DomainDetailView: View {
     @EnvironmentObject private var appState: AppState
     let domain: NativeDomainDefinition
     @State private var snapshotForAccountPicker: NativeWalletSnapshot?
-    private var presentation: NativeDomainPresentation { NativeDomainPresentationAdapter.presentation(for: domain, groups: appState.dashboard.dayRecordGroups) }
+    private var presentation: NativeDomainPresentation { NativeDomainPresentationAdapter.presentation(for: domain, dashboard: appState.dashboard) }
     private var activeAccounts: [NativeAccount] { appState.accounts.filter { !$0.isArchived } }
 
     var body: some View {
@@ -49,11 +50,12 @@ private struct DomainDetailView: View {
             JieziTheme.pageBackground.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 10) { Text(domain.icon.isEmpty ? domain.shortName : domain.icon).font(.system(size: 42)); Text(domain.name).font(.largeTitle.bold()); Text(domain.description).foregroundStyle(JieziTheme.muted); Text("DOMAIN WORKSPACE").font(.caption.bold()).foregroundStyle(JieziTheme.brand) }.frame(maxWidth: .infinity, alignment: .leading).padding(22).background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 24))
-                    HStack { ForEach(presentation.metrics) { metric in VStack(alignment: .leading, spacing: 5) { Text(metric.label).font(.caption).foregroundStyle(JieziTheme.muted); Text(metric.value).font(.headline.monospacedDigit()) }.frame(maxWidth: .infinity, alignment: .leading) } }.padding(18).background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 20))
+                    domainHero
                     if domain.id == "wallet" { walletSnapshotSection }
-                    Text("最近记录").font(.title3.bold())
-                    if presentation.recentRecords.isEmpty { ContentUnavailableView("这个数据域还没有记录", systemImage: domain.systemImage) } else { ForEach(presentation.recentRecords) { record in Button { appState.openDayRecord(record) } label: { HStack { Image(systemName: record.systemImage).frame(width: 34); VStack(alignment: .leading) { Text(record.title).font(.headline); Text(record.subtitle).font(.caption).foregroundStyle(.secondary) }; Spacer(); Text(record.value).font(.subheadline.monospacedDigit()) }.padding(15).background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 16)) }.buttonStyle(.plain) } }
+                    metricGrid
+                    trendSection
+                    distributionSection
+                    recentRecordsSection
                 }.padding(16)
             }
             .refreshable {
@@ -69,6 +71,163 @@ private struct DomainDetailView: View {
         .task(id: domain.id) {
             if domain.id == "wallet" { await appState.loadWalletSnapshots() }
         }
+    }
+
+    private var domainHero: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                Text(domain.icon.isEmpty ? domain.shortName : domain.icon)
+                    .font(.system(size: 38))
+                    .frame(width: 52, height: 52)
+                    .background(JieziTheme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                Spacer()
+                Text(domain.isSystem ? "系统内置" : "自定义")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(JieziTheme.brand)
+            }
+            Text(domain.name).font(.title.bold())
+            if !domain.description.isEmpty {
+                Text(domain.description).font(.subheadline).foregroundStyle(JieziTheme.muted)
+            }
+            HStack {
+                Text("DOMAIN WORKSPACE")
+                Spacer()
+                Text("\(domain.recordCount) 条记录")
+            }
+            .font(.caption.weight(.bold))
+            .foregroundStyle(JieziTheme.brand)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var metricGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            ForEach(presentation.metrics) { metric in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(metric.label).font(.caption).foregroundStyle(JieziTheme.muted)
+                    Text(metric.value).font(.title3.weight(.bold).monospacedDigit())
+                }
+                .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
+                .padding(14)
+                .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private var trendSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("趋势").font(.headline)
+                Spacer()
+                Text(presentation.trendScope).font(.caption).foregroundStyle(.secondary)
+            }
+            if presentation.recentRecords.isEmpty {
+                Text("有记录后会显示本周趋势")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            } else {
+                Chart(presentation.trend) { point in
+                    LineMark(
+                        x: .value("星期", point.label),
+                        y: .value(presentation.trendIsCurrency ? "金额" : "记录", point.value)
+                    )
+                    .foregroundStyle(JieziTheme.brand)
+                    .interpolationMethod(.catmullRom)
+                    AreaMark(
+                        x: .value("星期", point.label),
+                        y: .value(presentation.trendIsCurrency ? "金额" : "记录", point.value)
+                    )
+                    .foregroundStyle(JieziTheme.brand.opacity(0.1))
+                    .interpolationMethod(.catmullRom)
+                    PointMark(
+                        x: .value("星期", point.label),
+                        y: .value(presentation.trendIsCurrency ? "金额" : "记录", point.value)
+                    )
+                    .foregroundStyle(JieziTheme.brand)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine().foregroundStyle(JieziTheme.line)
+                        AxisValueLabel {
+                            if let number = value.as(Double.self) {
+                                Text(presentation.trendIsCurrency ? "¥\(Int(number))" : "\(Int(number))")
+                            }
+                        }
+                    }
+                }
+                .frame(height: 180)
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var distributionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("维度分布").font(.headline)
+                Spacer()
+                if !presentation.distribution.isEmpty {
+                    Text("Top \(presentation.distribution.count)").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if presentation.distribution.isEmpty {
+                Text("有记录后会生成分类、来源或状态分布")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+            } else {
+                ForEach(presentation.distribution) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(item.name).font(.subheadline)
+                            Spacer()
+                            Text(item.displayValue).font(.caption.weight(.semibold).monospacedDigit())
+                        }
+                        ProgressView(value: item.fraction)
+                            .tint(JieziTheme.brand)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var recentRecordsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("最近记录").font(.headline)
+            if presentation.recentRecords.isEmpty {
+                ContentUnavailableView("\(domain.name)暂无记录", systemImage: domain.systemImage)
+            } else {
+                ForEach(presentation.recentRecords) { record in
+                    Button { appState.openDayRecord(record) } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: record.systemImage)
+                                .foregroundStyle(JieziTheme.brand)
+                                .frame(width: 34, height: 34)
+                                .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(record.title).font(.subheadline.weight(.semibold)).foregroundStyle(JieziTheme.ink)
+                                Text(record.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer()
+                            if !record.value.isEmpty {
+                                Text(record.value).font(.caption.weight(.semibold).monospacedDigit()).foregroundStyle(JieziTheme.ink)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                }
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
