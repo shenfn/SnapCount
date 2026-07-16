@@ -86,7 +86,7 @@ struct InboxView: View {
                     )
                 }
             case .record(let reference):
-                RecordDetailView(reference: reference)
+                PendingExpenseResolutionView(reference: reference)
             }
         }
         .task { await appState.loadInboxRepaymentCandidates() }
@@ -95,10 +95,9 @@ struct InboxView: View {
     @ViewBuilder
     private func inboxRow(_ item: NativeInboxItem) -> some View {
         if let pending = item.pendingExpense {
-            Button { appState.openPendingExpense(pending) } label: {
+            NavigationLink(value: NativeInboxRoute.record(reference: pending.reference)) {
                 NativeInboxItemRow(item: item, repaymentCandidate: nil)
             }
-            .buttonStyle(.plain)
         } else if let record = item.stagingRecord {
             NavigationLink(value: NativeInboxRoute.staging(recordId: record.id)) {
                 NativeInboxItemRow(
@@ -138,6 +137,204 @@ struct InboxView: View {
     private static func dateKey(daysFromToday: Int) -> String {
         let date = Calendar.current.date(byAdding: .day, value: daysFromToday, to: Date()) ?? Date()
         return date.formatted(.iso8601.year().month().day())
+    }
+}
+
+private struct PendingExpenseResolutionView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    let reference: String
+    @State private var draft: NativePendingResolutionDraft?
+    @State private var showDeleteConfirm = false
+
+    private var detail: NativeRecordDetail? {
+        guard appState.selectedRecordDetail?.id == reference else { return nil }
+        return appState.selectedRecordDetail
+    }
+
+    var body: some View {
+        ZStack {
+            JieziTheme.pageBackground.ignoresSafeArea()
+            if let detail, let draftBinding = Binding($draft) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        header(detail)
+                        if let feedback = detail.aiFeedback {
+                            NativeAIFeedbackCard(feedback: feedback, compact: true)
+                        }
+                        imageSection(detail)
+                        amountSection(draftBinding)
+                        typeSection(draftBinding)
+                        fieldSection(draftBinding)
+                        accountSection(draftBinding)
+                        if let message = appState.pendingResolutionMessage {
+                            Label(message, systemImage: message.hasPrefix("保存失败") ? "exclamationmark.circle" : "info.circle")
+                                .font(.footnote)
+                                .foregroundStyle(message.hasPrefix("保存失败") ? JieziTheme.coral : JieziTheme.brand)
+                        }
+                        Button {
+                            Task { _ = await appState.confirmPendingRecord(draftBinding.wrappedValue) }
+                        } label: {
+                            if appState.isConfirmingPendingRecord {
+                                ProgressView().tint(.white).frame(maxWidth: .infinity)
+                            } else {
+                                Label("确认保存", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(JieziTheme.brand)
+                        .controlSize(.large)
+                        .disabled(appState.isConfirmingPendingRecord || draftBinding.wrappedValue.validationMessage != nil)
+
+                        Button(role: .destructive) { showDeleteConfirm = true } label: {
+                            Label("删除此账单", systemImage: "trash").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(16)
+                }
+            } else if let message = appState.recordDetailMessage {
+                ContentUnavailableView("无法读取待补全账单", systemImage: "exclamationmark.triangle", description: Text(message))
+            } else {
+                ProgressView("正在读取识别结果")
+            }
+        }
+        .navigationTitle("补充账单信息")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: reference) {
+            appState.pendingResolutionMessage = nil
+            await appState.loadRecordDetail(reference: reference)
+            if let detail = appState.selectedRecordDetail, detail.id == reference {
+                draft = NativePendingResolutionDraft(detail: detail)
+            }
+        }
+        .confirmationDialog("删除这条待补全账单？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            Button("删除", role: .destructive) {
+                Task {
+                    if await appState.deleteRecord(reference: reference) { dismiss() }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        }
+    }
+
+    private func header(_ detail: NativeRecordDetail) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(JieziTheme.gold)
+                .frame(width: 40, height: 40)
+                .background(JieziTheme.gold.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(detail.title).font(.headline)
+                Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("待补全").font(.caption.weight(.bold)).foregroundStyle(JieziTheme.gold)
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func imageSection(_ detail: NativeRecordDetail) -> some View {
+        if let imageURL = detail.imageURL {
+            CachedRemoteImage(url: imageURL) { image in
+                image.resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: 240)
+            } placeholder: {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 160)
+            } failure: {
+                Label("截图文件不可用", systemImage: "photo.badge.exclamationmark")
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            }
+            .padding(8)
+            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func amountSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("金额").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text(draft.wrappedValue.kind == .income ? "+¥" : "-¥")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(draft.wrappedValue.kind == .income ? JieziTheme.brand : JieziTheme.coral)
+                TextField("0.00", text: draft.amountText)
+                    .keyboardType(.decimalPad)
+                    .font(.title2.weight(.bold).monospacedDigit())
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func typeSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("记录类型").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+            Picker("记录类型", selection: draft.kind) {
+                ForEach(NativePendingEntryKind.allCases) { kind in Text(kind.title).tag(kind) }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func fieldSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(draft.wrappedValue.kind == .income ? "收入字段" : "消费字段").font(.headline)
+            TextField(draft.wrappedValue.kind == .income ? "来源名称（可选）" : "商家名称（可选）", text: draft.merchantOrSourceName)
+                .textFieldStyle(.roundedBorder)
+            if draft.wrappedValue.kind == .expense {
+                optionMenu("消费渠道", selection: draft.platform, options: NativeManualRecordDraft.expensePlatforms)
+                optionMenu("消费分类", selection: draft.category, options: NativeManualRecordDraft.expenseCategories)
+                optionMenu("支付方式", selection: draft.paymentMethod, options: NativeManualRecordDraft.expensePayments)
+            } else {
+                optionMenu("收入类型", selection: draft.incomeCategory, options: NativeManualRecordDraft.incomeCategories)
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func optionMenu(_ title: String, selection: Binding<String>, options: [NativeManualRecordOption]) -> some View {
+        Menu {
+            ForEach(options) { option in
+                Button(option.title) { selection.wrappedValue = option.id }
+            }
+        } label: {
+            HStack {
+                Text(title).foregroundStyle(JieziTheme.ink)
+                Spacer()
+                Text(options.first(where: { $0.id == selection.wrappedValue })?.title ?? "请选择")
+                    .foregroundStyle(selection.wrappedValue.isEmpty ? .secondary : JieziTheme.brand)
+                Image(systemName: "chevron.up.chevron.down").font(.caption)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func accountSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(draft.wrappedValue.kind == .income ? "到账账户" : "出资账户").font(.headline)
+            Menu {
+                Button("暂不绑定") { draft.accountId.wrappedValue = nil }
+                ForEach(appState.accounts.filter { !$0.isArchived }) { account in
+                    Button(account.title) { draft.accountId.wrappedValue = account.id }
+                }
+            } label: {
+                HStack {
+                    Text(draft.wrappedValue.accountId.flatMap { id in appState.accounts.first(where: { $0.id == id })?.title } ?? "暂不绑定")
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down").font(.caption)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -235,6 +432,10 @@ private struct StagingRecordDetailView: View {
     private var repaymentCandidate: NativeRepaymentCandidate? {
         appState.repaymentCandidates[record.id]
     }
+    private var aiFeedback: NativeAIFeedback? {
+        NativeAIFeedback(payload: record.extracted.dictionary("ai_feedback"))
+            ?? NativeAIFeedback(payload: record.extracted.dictionary("payload_jsonb")?.dictionary("ai_feedback"))
+    }
     @State private var showArchiveConfirm = false
     @State private var imagePreview: StagingImagePreviewRoute?
     @State private var resolvedImageURL: URL?
@@ -244,159 +445,36 @@ private struct StagingRecordDetailView: View {
     var body: some View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
-            List {
-                Section {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label(record.statusLabel, systemImage: record.systemImage)
-                            .font(.headline)
-                        Text(record.title)
-                            .font(.title3.weight(.semibold))
-                        Text(record.summary)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    stagingHeader
+                    stagingImageSection
+                    if let aiFeedback {
+                        NativeAIFeedbackCard(feedback: aiFeedback, compact: true)
                     }
-                    .padding(.vertical, 6)
+                    recognitionSection
+                    if let companionMessage = record.companionMessage, !companionMessage.isEmpty {
+                        companionSection(companionMessage)
+                    }
+                    if !record.extractedDisplayItems.isEmpty {
+                        extractedSection
+                    }
+                    if let message = record.lastErrorMessage, !message.isEmpty {
+                        errorSection(message)
+                    }
+                    if let candidate = repaymentCandidate {
+                        repaymentSection(candidate)
+                    }
+                    if let message = appState.inboxFinanceMessage {
+                        statusMessage(message, isError: false)
+                    }
+                    if let message = appState.inboxActionMessage {
+                        statusMessage(message, isError: appState.inboxActionMessageIsError)
+                    }
+                    stagingActions
                 }
-
-                if let imageURL = resolvedImageURL ?? record.imageURL {
-                    Section("截图原图") {
-                        Button {
-                            imagePreview = StagingImagePreviewRoute(url: imageURL)
-                        } label: {
-                            StagingImagePreview(url: imageURL) {
-                                Task { await resolveImage() }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                } else if record.imagePath != nil {
-                    Section("截图原图") {
-                        if isResolvingImage {
-                            ProgressView("正在加载截图…")
-                                .frame(maxWidth: .infinity, minHeight: 120)
-                        } else {
-                            Button {
-                                Task { await resolveImage() }
-                            } label: {
-                                VStack(spacing: 8) {
-                                    unavailableImageView
-                                    Text(imageResolutionMessage ?? "点此重新加载")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, minHeight: 120)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-
-                Section("识别信息") {
-                    LabeledContent("类型", value: record.recordTypeLabel)
-                    LabeledContent("上传时间", value: record.createdAtLabel)
-                    if let occurredAtLabel = record.occurredAtLabel {
-                        LabeledContent("记录时间", value: occurredAtLabel)
-                    }
-                    if let confidence = record.confidencePercent {
-                        LabeledContent("置信度", value: "\(confidence)%")
-                    }
-                    if record.retryCount > 0 {
-                        LabeledContent("重试次数", value: "\(record.retryCount)")
-                    }
-                }
-
-                if let companionMessage = record.companionMessage, !companionMessage.isEmpty {
-                    Section("AI 陪伴") {
-                        Text(companionMessage)
-                            .font(.subheadline)
-                    }
-                }
-
-                if !record.extracted.isEmpty {
-                    Section("AI 提取字段") {
-                        ForEach(record.extractedDisplayItems, id: \.key) { item in
-                            LabeledContent(item.key, value: item.value)
-                        }
-                    }
-                }
-
-                if let message = record.lastErrorMessage, !message.isEmpty {
-                    Section("错误信息") {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(JieziTheme.coral)
-                    }
-                }
-
-                if let candidate = repaymentCandidate {
-                    Section("可能是还款截图") {
-                        LabeledContent("匹配账户", value: candidate.account.title)
-                        LabeledContent("账单月份", value: candidate.cycle.cycleMonth)
-                        LabeledContent("确认金额", value: String(format: "¥%.2f", candidate.amount))
-                        Text(candidate.reason)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Button {
-                            showRepaymentConfirm = true
-                        } label: {
-                            if appState.stagingRepaymentId == record.id {
-                                ProgressView().frame(maxWidth: .infinity)
-                            } else {
-                                Label("确认还款", systemImage: "checkmark.circle")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .disabled(appState.stagingRepaymentId != nil)
-                    }
-                }
-
-                if let message = appState.inboxFinanceMessage {
-                    Section { Text(message).foregroundStyle(JieziTheme.brand) }
-                }
-
-                if let message = appState.inboxActionMessage {
-                    Section {
-                        Label(
-                            message,
-                            systemImage: appState.inboxActionRecordId == nil
-                                ? (appState.inboxActionMessageIsError ? "exclamationmark.circle" : "checkmark.circle")
-                                : "hourglass"
-                        )
-                        .foregroundStyle(appState.inboxActionMessageIsError ? JieziTheme.coral : JieziTheme.brand)
-                    }
-                }
-
-                Section {
-                    ForEach(archiveDomains) { domain in
-                        Button {
-                            selectedArchiveDomain = domain
-                            showArchiveConfirm = true
-                        } label: {
-                            Label("归档到\(domain.title)", systemImage: domain.systemImage)
-                        }
-                        .disabled(appState.inboxActionRecordId != nil)
-                    }
-                    Button {
-                        Task {
-                            await appState.retryStagingRecord(record)
-                        }
-                    } label: {
-                        if appState.inboxActionRecordId == record.id {
-                            ProgressView("处理中…")
-                        } else {
-                            Label("重试识别", systemImage: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(appState.inboxActionRecordId != nil)
-                    Button(role: .destructive) {
-                        showDiscardConfirm = true
-                    } label: {
-                        Label("销毁这条截图", systemImage: "trash")
-                    }
-                    .disabled(appState.inboxActionRecordId != nil)
-                }
+                .padding(16)
             }
-            .scrollContentBackground(.hidden)
         }
         .navigationTitle("待处理详情")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
@@ -471,6 +549,177 @@ private struct StagingRecordDetailView: View {
         }
     }
 
+    private var stagingHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(record.statusLabel, systemImage: record.systemImage)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(statusColor)
+                Spacer()
+                if let confidence = record.confidencePercent {
+                    Text("置信度 \(confidence)%").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                }
+            }
+            Text(record.title).font(.title3.weight(.bold))
+            Text(record.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var stagingImageSection: some View {
+        if let imageURL = resolvedImageURL ?? record.imageURL {
+            Button { imagePreview = StagingImagePreviewRoute(url: imageURL) } label: {
+                StagingImagePreview(url: imageURL) { Task { await resolveImage() } }
+                    .padding(8)
+                    .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        } else if record.imagePath != nil {
+            Button { Task { await resolveImage() } } label: {
+                VStack(spacing: 8) {
+                    if isResolvingImage { ProgressView("正在加载截图…") }
+                    else {
+                        unavailableImageView
+                        Text(imageResolutionMessage ?? "点此重新加载").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 120)
+                .padding(8)
+                .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var recognitionSection: some View {
+        detailCard("识别信息", rows: [
+            ("类型", record.recordTypeLabel),
+            ("上传时间", record.createdAtLabel),
+            ("记录时间", record.occurredAtLabel ?? ""),
+            ("置信度", record.confidencePercent.map { "\($0)%" } ?? ""),
+            ("重试次数", record.retryCount > 0 ? "\(record.retryCount)" : "")
+        ].filter { !$0.1.isEmpty })
+    }
+
+    private var extractedSection: some View {
+        detailCard("AI 提取字段", rows: record.extractedDisplayItems.map { ($0.key, $0.value) })
+    }
+
+    private func companionSection(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "quote.bubble.fill").foregroundStyle(JieziTheme.brand)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("AI 陪伴").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                Text(message).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(JieziTheme.brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func errorSection(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("错误信息", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(JieziTheme.coral)
+            Text(message).font(.footnote).foregroundStyle(JieziTheme.coral).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(JieziTheme.coral.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func repaymentSection(_ candidate: NativeRepaymentCandidate) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("可能是还款截图").font(.headline)
+            detailRow("匹配账户", candidate.account.title)
+            detailRow("账单月份", candidate.cycle.cycleMonth)
+            detailRow("确认金额", String(format: "¥%.2f", candidate.amount))
+            Text(candidate.reason).font(.footnote).foregroundStyle(.secondary)
+            Button { showRepaymentConfirm = true } label: {
+                if appState.stagingRepaymentId == record.id { ProgressView().frame(maxWidth: .infinity) }
+                else { Label("确认还款", systemImage: "checkmark.circle").frame(maxWidth: .infinity) }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(JieziTheme.brand)
+            .disabled(appState.stagingRepaymentId != nil)
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func statusMessage(_ message: String, isError: Bool) -> some View {
+        Label(message, systemImage: isError ? "exclamationmark.circle" : "checkmark.circle")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(isError ? JieziTheme.coral : JieziTheme.brand)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background((isError ? JieziTheme.coral : JieziTheme.brand).opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var stagingActions: some View {
+        VStack(spacing: 10) {
+            Menu {
+                ForEach(archiveDomains) { domain in
+                    Button {
+                        selectedArchiveDomain = domain
+                        showArchiveConfirm = true
+                    } label: {
+                        Label("归档到\(domain.title)", systemImage: domain.systemImage)
+                    }
+                }
+            } label: {
+                Label("选择归档数据域", systemImage: "tray.and.arrow.down.fill").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(JieziTheme.brand)
+            .controlSize(.large)
+
+            Button { Task { await appState.retryStagingRecord(record) } } label: {
+                if appState.inboxActionRecordId == record.id { ProgressView("处理中…").frame(maxWidth: .infinity) }
+                else { Label("重新识别", systemImage: "arrow.clockwise").frame(maxWidth: .infinity) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+            Button(role: .destructive) { showDiscardConfirm = true } label: {
+                Label("销毁这条截图", systemImage: "trash").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(appState.inboxActionRecordId != nil)
+        }
+        .disabled(appState.inboxActionRecordId != nil)
+    }
+
+    private func detailCard(_ title: String, rows: [(String, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title).font(.headline).padding(.bottom, 10)
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                detailRow(row.0, row.1).padding(.vertical, 8)
+                if index < rows.count - 1 { Divider() }
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline).multilineTextAlignment(.trailing)
+        }
+    }
+
+    private var statusColor: Color {
+        switch record.status {
+        case "ai_error", "failed", "extraction_failed", "schema_failed": return JieziTheme.coral
+        case "routing_failed", "unrouted", "unassigned": return JieziTheme.gold
+        default: return JieziTheme.brand
+        }
+    }
+
     private func resolveImage() async {
         guard !isResolvingImage else { return }
         isResolvingImage = true
@@ -530,7 +779,11 @@ private struct StagingImagePreviewRoute: Identifiable {
 
 private extension NativeStagingRecord {
     var extractedDisplayItems: [(key: String, value: String)] {
-        extracted
+        let nestedPayload = extracted.dictionary("payload_jsonb") ?? [:]
+        let visibleExtracted = extracted.filter {
+            !["ai_feedback", "companion_message", "payload_jsonb"].contains($0.key)
+        }
+        return visibleExtracted.merging(nestedPayload) { current, _ in current }
             .filter { !$0.value.displayValue.isEmpty }
             .sorted { $0.key < $1.key }
             .prefix(18)
