@@ -88,9 +88,21 @@ PWA 对照入口：
 - 普通 iOS Build `29473649385`：钱包域与详情恢复通过。
 - Build + Tests `29475276215`：37 项测试全部通过，验证相机真实像素压缩和钱包快照字段修复。
 - 最终功能 Build + Tests `29476245540`：App 编译与 38 项测试全部通过，覆盖账户绑定和 PWA 饮食字段兼容。
+- 目标分支最终 Build + Tests `29476841932`：`codex/ios-swiftui-native-app` 上 App 编译与 38 项测试全部通过。
 - `SnapCountTests` 当前覆盖 38 项契约，包括领域 key、记录展示、钱包快照、详情账户推荐、还款状态、中转站分型、首页财务值、缓存隔离和图片压缩。
 
-## 6. TestFlight 前置条件
+## 6. TestFlight 发布结果
+
+- 工作流：`iOS TestFlight`，运行 `29477438407`。
+- GitHub workflow 序号：`64`。
+- IPA 实际 `CFBundleVersion`：`29477438407`。
+- Archive、IPA 导出、Apple 上传和 IPA artifact 均成功。
+- Apple 上传日志：`UPLOAD SUCCEEDED with no errors`。
+- IPA artifact：`SnapCount-ipa`，artifact ID `8367179672`。
+
+Apple 上传成功后仍需要等待 App Store Connect 处理，TestFlight 客户端出现新版本的时间不由 GitHub Actions 控制。
+
+## 7. TestFlight 前置条件
 
 只有以下条件全部满足后才触发一次 `iOS TestFlight`：
 
@@ -100,7 +112,7 @@ PWA 对照入口：
 4. 完成基线分支合并并复核最终 diff；
 5. 确认本阶段没有第二个待合并业务提交。
 
-## 7. 仍需真机确认
+## 8. 仍需真机确认
 
 自动测试不能替代以下真机项目：
 
