@@ -19,7 +19,9 @@ struct DomainsView: View {
                         .listRowBackground(Color.clear)
                 } else {
                     ForEach(domains) { domain in
-                        NavigationLink(value: NativeDomainRoute(domainId: domain.id)) {
+                        NavigationLink {
+                            DomainDetailView(domain: domain)
+                        } label: {
                             HStack(spacing: 14) {
                                 Text(domain.icon.isEmpty ? "·" : domain.icon).font(.title2).frame(width: 42, height: 42).background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
                                 VStack(alignment: .leading, spacing: 4) { Text(domain.name).font(.headline); Text("本月 \(domain.recordCount) 条\(domain.isSystem ? " · 系统内置" : "")").font(.caption).foregroundStyle(.secondary); if !domain.description.isEmpty { Text(domain.description).font(.caption2).foregroundStyle(.secondary).lineLimit(2) } }
@@ -30,14 +32,6 @@ struct DomainsView: View {
             }.scrollContentBackground(.hidden).searchable(text: $searchText, prompt: "搜索数据域")
         }
         .navigationTitle("数据域")
-        .navigationDestination(for: NativeDomainRoute.self) { route in
-            if let domain = appState.dashboard.domains.first(where: { $0.id == route.domainId }) {
-                DomainDetailView(domain: domain)
-            }
-        }
-        .navigationDestination(for: NativeRecordRoute.self) { route in
-            RecordDetailView(reference: route.reference)
-        }
     }
 }
 
@@ -88,11 +82,6 @@ private struct DomainDetailView: View {
         .sheet(isPresented: $showWalletRecordSheet) {
             ManualRecordSheet(kind: .universal, domainKey: "wallet")
         }
-        .navigationDestination(for: NativeAccountRoute.self) { route in
-            if activeAccounts.contains(where: { $0.id == route.accountId }) {
-                AccountDetailView(accountId: route.accountId)
-            }
-        }
         .task(id: domain.id) {
             if domain.id == "wallet" {
                 async let accounts: Void = appState.loadAccounts()
@@ -142,7 +131,9 @@ private struct DomainDetailView: View {
                 Text(emptyText).font(.subheadline).foregroundStyle(.secondary)
             } else {
                 ForEach(accounts) { account in
-                    NavigationLink(value: NativeAccountRoute(accountId: account.id)) {
+                    NavigationLink {
+                        AccountDetailView(accountId: account.id)
+                    } label: {
                         HStack(spacing: 12) {
                             Image(systemName: account.type.systemImage)
                                 .foregroundStyle(account.type.isLiability ? JieziTheme.coral : JieziTheme.brand)
@@ -352,7 +343,9 @@ private struct DomainDetailView: View {
                 ContentUnavailableView("\(domain.name)暂无记录", systemImage: domain.systemImage)
             } else {
                 ForEach(presentation.recentRecords) { record in
-                    NavigationLink(value: NativeRecordRoute(reference: record.reference)) {
+                    NavigationLink {
+                        RecordDetailView(reference: record.reference)
+                    } label: {
                         HStack(spacing: 12) {
                             Image(systemName: record.systemImage)
                                 .foregroundStyle(JieziTheme.brand)
