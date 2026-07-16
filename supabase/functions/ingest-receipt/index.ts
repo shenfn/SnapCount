@@ -17,12 +17,9 @@ import type { TimeContext } from "./time.ts";
 
 const MOONSHOT_MODEL    = "moonshot-v1-8k-vision-preview";
 const MOONSHOT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
-// MiMo 默认值（可被环境变量 MIMO_ENDPOINT / MIMO_MODEL 覆盖）
-// 申请到 MiMo Vision 额度后，至少需要在 Supabase secrets 中设置 MIMO_API_KEY 才会启用 fallback
-// MiMo 默认值对应 xiaomimimo.com 套餐（OpenAI 兼容协议）
-// mimo-v2-omni 是多模态版；图像识别仅 mimo-v2.5 / mimo-v2-omni 支持
+// MiMo 仅在同时显式配置 API Key 与已验证模型时启用。
+// 不再使用默认模型名，避免无效 fallback 延长整条识别链路。
 const MIMO_DEFAULT_ENDPOINT = "https://api.xiaomimimo.com/v1/chat/completions";
-const MIMO_DEFAULT_MODEL    = "mimo-v2-omni";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
 // 截图/账单链路默认走 3.6 Flash 保持速度；拍照链路单独升到 3.7 Plus 质量优先。
@@ -3134,13 +3131,16 @@ async function callOpenAICompatibleVision(
 ): Promise<VisionProviderResult> {
   const base64 = toBase64(imageBytes);
   const dataUrl = `data:${mime};base64,${base64}`;
+  const effectivePrompt = config.name === "moonshot"
+    ? compactMoonshotVisionPrompt()
+    : promptText;
   const body: Record<string, unknown> = {
     model: config.model,
     messages: [{
       role: "user",
       content: [
         { type: "image_url", image_url: { url: dataUrl } },
-        { type: "text", text: promptText },
+        { type: "text", text: effectivePrompt },
       ],
     }],
     temperature: 0.1,
@@ -3214,6 +3214,13 @@ async function callOpenAICompatibleVision(
     finishReason,
     reasoningText,
   };
+}
+
+function compactMoonshotVisionPrompt(): string {
+  return `请识别图片中的个人记录，只输出 JSON，不要 markdown。无法确认的字段返回 null，不要猜测日期或金额。
+字段：image_type, record_type, domain_key, title, summary, amount, merchant_name, platform, category, payment_method, income_category, source_name, occurred_at, order_finished_at, confidence, payload_jsonb。
+domain_key 只允许 expense、income、sport、sleep、reading、food、wallet 或 null。
+消费写 amount、merchant_name、platform、category、payment_method；收入写 amount、source_name、income_category；其它领域的业务字段写入 payload_jsonb。confidence 为 0 到 1。`;
 }
 
 // 多 Provider 优雅降级：按顺序尝试，第一个成功即返回；全部失败则抛聚合错误
@@ -3334,9 +3341,10 @@ Deno.serve(async (req) => {
     };
 
     const mimoKey = getEnvOptional("MIMO_API_KEY");
-    const mimoProvider: ProviderConfig | null = mimoKey ? {
+    const mimoModel = getEnvOptional("MIMO_MODEL");
+    const mimoProvider: ProviderConfig | null = mimoKey && mimoModel ? {
       name: "mimo",
-      model: getEnvOptional("MIMO_MODEL") ?? MIMO_DEFAULT_MODEL,
+      model: mimoModel,
       endpoint: getEnvOptional("MIMO_ENDPOINT") ?? MIMO_DEFAULT_ENDPOINT,
       apiKey: mimoKey,
     } : null;
