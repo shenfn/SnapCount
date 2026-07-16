@@ -25,10 +25,10 @@ const MIMO_DEFAULT_ENDPOINT = "https://api.xiaomimimo.com/v1/chat/completions";
 const MIMO_DEFAULT_MODEL    = "mimo-v2-omni";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
-// 截图/账单链路默认走 3.6 Flash 保持速度；拍照链路单独升到 3.7 Plus 质量优先。
+// 截图与拍照默认走 3.6 Flash；识别质量通过提示词和中转站补全保证，不以长时间思考阻塞上传。
 const QWEN_DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 const QWEN_DEFAULT_MODEL    = "qwen3.6-flash";
-const QWEN_PHOTO_DEFAULT_MODEL = "qwen3.7-plus";
+const QWEN_PHOTO_DEFAULT_MODEL = "qwen3.6-flash";
 
 // 自建 OpenAI 兼容中转站（支持视觉模型时可直接复用）
 const RELAY_DEFAULT_ENDPOINT = "http://47.76.157.150:8317/v1/chat/completions";
@@ -50,6 +50,7 @@ interface ProviderConfig {
   enableThinking?: boolean;
   photoModel?: string;
   photoEnableThinking?: boolean;
+  requestTimeoutMs?: number;
 }
 
 interface VisionAttempt {
@@ -1534,6 +1535,32 @@ function selectVisionProvidersForImage(
   },
 ): ProviderConfig[] {
   if (!shouldUsePhotoQualityVision(params)) return providers;
+  if (looksLikeCameraCaptureKind(params.captureKind)) {
+    const cameraProviders = providers
+      .filter((provider) => provider.name === "qwen" || provider.name === "moonshot")
+      .map((provider) => provider.name === "qwen"
+        ? { ...provider, enableThinking: false }
+        : provider);
+    const requestedPrimary = params.photoPrimary && params.photoPrimary !== "auto"
+      ? params.photoPrimary
+      : "qwen";
+    const preferred = cameraProviders.some((provider) => provider.name === requestedPrimary)
+      ? requestedPrimary
+      : cameraProviders.some((provider) => provider.name === "qwen")
+      ? "qwen"
+      : cameraProviders[0]?.name;
+    const preferredIdx = cameraProviders.findIndex((provider) => provider.name === preferred);
+    if (preferredIdx > 0) {
+      const [picked] = cameraProviders.splice(preferredIdx, 1);
+      cameraProviders.unshift(picked);
+    }
+    return cameraProviders
+      .slice(0, 2)
+      .map((provider, index) => ({
+        ...provider,
+        requestTimeoutMs: index === 0 ? 15_000 : 8_000,
+      }));
+  }
   const photoProviders = providers.map((p) => p.name === "qwen"
     ? {
       ...p,
@@ -3275,7 +3302,7 @@ async function callOpenAICompatibleVision(
   if (config.name === "moonshot") {
     body.response_format = { type: "json_object" };
   }
-  // Qwen3.7 Plus 走质量优先，默认保留思考；MiMo/Relay 沿用快速识别策略。
+  // Qwen 是否思考由链路配置决定；MiMo/Relay 固定走快速识别策略。
   if (config.name === "qwen") {
     body.enable_thinking = config.enableThinking !== false;
   } else if (config.name === "mimo" || config.name === "relay") {
@@ -3285,9 +3312,9 @@ async function callOpenAICompatibleVision(
   // - Moonshot 只认 Authorization Bearer
   // - xiaomimimo.com 文档 curl 示例用 api-key，Python SDK 实测 Authorization 也通
   // 两个 header 并存对双方均无副作用
-  const timeoutMs = config.enableThinking === true
+  const timeoutMs = config.requestTimeoutMs ?? (config.enableThinking === true
     ? getEnvInteger("VISION_THINKING_TIMEOUT_MS", 20_000, 8_000, 45_000)
-    : getEnvInteger("VISION_PROVIDER_TIMEOUT_MS", 15_000, 5_000, 30_000);
+    : getEnvInteger("VISION_PROVIDER_TIMEOUT_MS", 15_000, 5_000, 30_000));
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let resp: Response;
@@ -3472,7 +3499,7 @@ Deno.serve(async (req) => {
       apiKey: qwenKey,
       enableThinking: getEnvBoolean("QWEN_ENABLE_THINKING", false),
       photoModel: getEnvOptional("QWEN_PHOTO_MODEL") ?? QWEN_PHOTO_DEFAULT_MODEL,
-      photoEnableThinking: getEnvBoolean("QWEN_PHOTO_ENABLE_THINKING", true),
+      photoEnableThinking: getEnvBoolean("QWEN_PHOTO_ENABLE_THINKING", false),
     } : null;
 
     const relayKey = getEnvOptional("RELAY_API_KEY");
