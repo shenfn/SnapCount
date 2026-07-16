@@ -122,61 +122,68 @@ struct RecordDetailView: View {
     var body: some View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
-            List {
-                if let detail = appState.selectedRecordDetail {
-                    Section {
-                        HStack(spacing: 12) {
-                            Image(systemName: detail.systemImage)
-                                .font(.title3.weight(.semibold))
-                                .foregroundStyle(JieziTheme.mint)
-                                .frame(width: 38, height: 38)
-                                .background(.thinMaterial, in: Circle())
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(detail.title)
-                                    .font(.headline)
-                                Text(detail.subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if !detail.value.isEmpty {
-                                Text(detail.value)
-                                    .font(.headline.monospacedDigit())
-                            }
-                        }
-                    }
-
-                    if let imageURL = detail.imageURL {
-                        Section("截图原图") {
+            if let detail = appState.selectedRecordDetail {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        if let imageURL = detail.imageURL {
                             Button {
                                 imagePreview = ImagePreviewRoute(url: imageURL)
                             } label: {
                                 RecordImagePreview(url: imageURL)
                             }
                             .buttonStyle(.plain)
-                        }
-                    } else if detail.imageLoadError {
-                        Section("截图原图") {
+                        } else if detail.imageLoadError {
                             unavailableImageView
                         }
-                    }
 
-                    Section("记录字段") {
-                        ForEach(detail.detailRows) { row in
-                            LabeledContent(row.label, value: row.value)
+                        recordHeader(detail)
+
+                        detailSection(
+                            title: "基本信息",
+                            rows: NativeRecordDetailPresentationAdapter.basicRows(
+                                for: detail,
+                                accountName: accountName(for: detail)
+                            )
+                        )
+
+                        detailSection(
+                            title: "抽取字段",
+                            rows: NativeRecordDetailPresentationAdapter.extractedRows(for: detail)
+                        )
+
+                        let dishes = NativeRecordDetailPresentationAdapter.foodDishes(for: detail)
+                        if !dishes.isEmpty {
+                            foodDishesSection(dishes)
                         }
+
+                        if let feedback = detail.aiFeedback {
+                            NativeAIFeedbackCard(
+                                feedback: feedback,
+                                reviewable: true,
+                                reviewState: appState.recordFeedbackState
+                            ) { choice, text in
+                                Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                            }
+                        }
+
+                        if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
+                            companionSection(companionMessage)
+                        }
+
+                        summarySection(NativeRecordDetailPresentationAdapter.aiSummary(for: detail))
+                        actionSection(detail)
                     }
-                } else if let message = appState.recordDetailMessage {
-                    ContentUnavailableView(
-                        "无法读取记录",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text(message)
-                    )
-                } else {
-                    ProgressView("正在读取记录")
+                    .padding(16)
                 }
+            } else if let message = appState.recordDetailMessage {
+                ContentUnavailableView(
+                    "无法读取记录",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(message)
+                )
+            } else {
+                ProgressView("正在读取记录")
             }
-            .scrollContentBackground(.hidden)
         }
         .navigationTitle("记录详情")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
@@ -257,6 +264,120 @@ struct RecordDetailView: View {
         Label("截图文件不可用或已删除", systemImage: "photo.badge.exclamationmark")
             .font(.footnote)
             .foregroundStyle(.secondary)
+    }
+
+    private func recordHeader(_ detail: NativeRecordDetail) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: detail.systemImage)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(JieziTheme.brand)
+                .frame(width: 40, height: 40)
+                .background(JieziTheme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(detail.title).font(.headline)
+                Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !detail.value.isEmpty {
+                Text(detail.value).font(.headline.monospacedDigit())
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func detailSection(title: String, rows: [NativeDetailRow]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title).font(.headline).padding(.bottom, 12)
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                HStack(alignment: .top, spacing: 16) {
+                    Text(row.label).font(.subheadline).foregroundStyle(.secondary).frame(width: 82, alignment: .leading)
+                    Text(row.value).font(.subheadline).frame(maxWidth: .infinity, alignment: .trailing).multilineTextAlignment(.trailing)
+                }
+                .padding(.vertical, 10)
+                if index < rows.count - 1 { Divider() }
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func foodDishesSection(_ dishes: [NativeFoodDish]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("菜品明细").font(.headline)
+            ForEach(dishes) { dish in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(dish.name).font(.subheadline.weight(.semibold))
+                        Spacer()
+                        if let calories = dish.calories { Text("\(Int(calories.rounded())) kcal").font(.caption.monospacedDigit()) }
+                    }
+                    HStack(spacing: 12) {
+                        if let protein = dish.protein { Text("蛋白 \(protein, specifier: "%.1f")g") }
+                        if let carbs = dish.carbs { Text("碳水 \(carbs, specifier: "%.1f")g") }
+                        if let fat = dish.fat { Text("脂肪 \(fat, specifier: "%.1f")g") }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .background(JieziTheme.brand.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func companionSection(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "quote.bubble.fill").foregroundStyle(JieziTheme.brand)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("AI 陪伴").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                Text(message).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(JieziTheme.brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func summarySection(_ summary: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("AI 摘要").font(.headline)
+            Text(summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func actionSection(_ detail: NativeRecordDetail) -> some View {
+        HStack(spacing: 12) {
+            if detail.isEditable {
+                Button {
+                    if detail.kind == "data" { universalEditDetail = detail }
+                    else { editDraft = NativeRecordEditDraft(detail: detail) }
+                } label: {
+                    Label(detail.status == "pending" ? "补充信息" : "编辑", systemImage: "square.and.pencil")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(JieziTheme.brand)
+            }
+            if detail.isDeletable {
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("删除", systemImage: "trash").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func accountName(for detail: NativeRecordDetail) -> String? {
+        guard let accountId = detail.accountId else { return nil }
+        return appState.accounts.first(where: { $0.id == accountId })?.title ?? accountId
     }
 }
 
