@@ -64,8 +64,9 @@ final class SnapCountTests: XCTestCase {
 
         let data = try ImageUploadPreprocessor.cameraJPEGData(from: source)
         let compressed = try XCTUnwrap(UIImage(data: data))
+        let compressedPixels = try XCTUnwrap(compressed.cgImage)
 
-        XCTAssertLessThanOrEqual(max(compressed.size.width, compressed.size.height), 960.5)
+        XCTAssertLessThanOrEqual(max(compressedPixels.width, compressedPixels.height), 960)
         XCTAssertLessThan(data.count, 900_000)
     }
 

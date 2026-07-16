@@ -30,8 +30,11 @@ struct NativeManualDomainMetadata: Equatable {
     let defaultDimension: String
     let maximumValue: Double
 
-    static func resolve(_ definition: NativeDomainDefinition?) -> NativeManualDomainMetadata {
-        let domainKey = definition?.id ?? "sport"
+    static func resolve(
+        _ definition: NativeDomainDefinition?,
+        fallbackDomainKey: String = "sport"
+    ) -> NativeManualDomainMetadata {
+        let domainKey = definition?.id ?? fallbackDomainKey
         let primaryKey = definition?.display.string("primary_fact")
             ?? firstSchemaKey(definition?.schema, group: "facts")
             ?? fallbackPrimaryKey(domainKey)
@@ -175,7 +178,7 @@ struct NativeManualRecordDraft {
             guard let amount, amount <= 999_999.99 else { return "请输入有效金额（0.01 ~ 999999.99）" }
             guard !category.isEmpty else { return "请选择收入类型" }
         case .universal:
-            let metadata = NativeManualDomainMetadata.resolve(domain)
+            let metadata = NativeManualDomainMetadata.resolve(domain, fallbackDomainKey: domainKey)
             guard let primaryValue, primaryValue <= metadata.maximumValue else { return "请输入有效(metadata.primaryLabel)" }
             guard !dimension.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "请填写(metadata.dimensionLabel)" }
             if domainKey == "wallet", walletRecordKind == "liability_snapshot", !walletBillDay.isEmpty {
@@ -186,7 +189,7 @@ struct NativeManualRecordDraft {
     }
 
     func universalPayload(domain: NativeDomainDefinition?) -> [String: AnyCodable] {
-        let metadata = NativeManualDomainMetadata.resolve(domain)
+        let metadata = NativeManualDomainMetadata.resolve(domain, fallbackDomainKey: domainKey)
         let value = primaryValue ?? 0
         let cleanDimension = dimension.trimmingCharacters(in: .whitespacesAndNewlines)
         var payload = originalPayload
@@ -218,13 +221,15 @@ struct NativeManualRecordDraft {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleanTitle.isEmpty { return cleanTitle }
         let cleanDimension = dimension.trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleanDimension.isEmpty ? NativeManualDomainMetadata.resolve(domain).defaultTitle : cleanDimension
+        return cleanDimension.isEmpty
+            ? NativeManualDomainMetadata.resolve(domain, fallbackDomainKey: domainKey).defaultTitle
+            : cleanDimension
     }
 
     func resolvedSummary(domain: NativeDomainDefinition?) -> String {
         let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleanNote.isEmpty { return cleanNote }
-        let metadata = NativeManualDomainMetadata.resolve(domain)
+        let metadata = NativeManualDomainMetadata.resolve(domain, fallbackDomainKey: domainKey)
         return "\(metadata.dimensionLabel)：\(dimension.trimmingCharacters(in: .whitespacesAndNewlines))"
     }
 

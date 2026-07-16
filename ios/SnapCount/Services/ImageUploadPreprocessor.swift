@@ -61,12 +61,25 @@ enum ImageUploadPreprocessor {
 private extension UIImage {
     func normalizedForUpload(maxDimension: CGFloat) -> UIImage {
         let oriented = fixedOrientation()
-        let longest = max(oriented.size.width, oriented.size.height)
-        guard longest > maxDimension else { return oriented }
+        let sourceSize = CGSize(
+            width: oriented.size.width * oriented.scale,
+            height: oriented.size.height * oriented.scale
+        )
+        let longest = max(sourceSize.width, sourceSize.height)
+        let targetSize: CGSize
+        if longest > maxDimension {
+            let resizeRatio = maxDimension / longest
+            targetSize = CGSize(
+                width: sourceSize.width * resizeRatio,
+                height: sourceSize.height * resizeRatio
+            )
+        } else {
+            targetSize = sourceSize
+        }
 
-        let scale = maxDimension / longest
-        let targetSize = CGSize(width: oriented.size.width * scale, height: oriented.size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
         return renderer.image { _ in
             oriented.draw(in: CGRect(origin: .zero, size: targetSize))
         }
@@ -74,9 +87,12 @@ private extension UIImage {
 
     func fixedOrientation() -> UIImage {
         guard imageOrientation != .up else { return self }
-        let renderer = UIGraphicsImageRenderer(size: size)
+        let pixelSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
         return renderer.image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
+            draw(in: CGRect(origin: .zero, size: pixelSize))
         }
     }
 }

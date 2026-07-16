@@ -22,7 +22,7 @@ struct ManualRecordSheet: View {
     }
 
     private var metadata: NativeManualDomainMetadata {
-        NativeManualDomainMetadata.resolve(selectedDomain)
+        NativeManualDomainMetadata.resolve(selectedDomain, fallbackDomainKey: draft.domainKey)
     }
 
     private var accountCandidates: [NativeAccount] {
@@ -107,7 +107,10 @@ struct ManualRecordSheet: View {
             applyDefaultAccount()
         }
         .onChange(of: draft.domainKey) { _ in
-            let fallback = NativeManualDomainMetadata.resolve(selectedDomain).defaultDimension
+            let fallback = NativeManualDomainMetadata.resolve(
+                selectedDomain,
+                fallbackDomainKey: draft.domainKey
+            ).defaultDimension
             if draft.dimension.isEmpty { draft.dimension = fallback }
         }
     }
@@ -221,12 +224,18 @@ struct ManualRecordSheet: View {
             draft.domainKey = universalDomains.first?.id ?? "sport"
         }
         if draft.dimension.isEmpty {
-            draft.dimension = NativeManualDomainMetadata.resolve(selectedDomain).defaultDimension
+            draft.dimension = NativeManualDomainMetadata.resolve(
+                selectedDomain,
+                fallbackDomainKey: draft.domainKey
+            ).defaultDimension
         }
     }
 
     private func hydrateUniversalFields() {
-        let resolvedMetadata = NativeManualDomainMetadata.resolve(selectedDomain)
+        let resolvedMetadata = NativeManualDomainMetadata.resolve(
+            selectedDomain,
+            fallbackDomainKey: draft.domainKey
+        )
         draft.primaryValueText = draft.originalPayload.double(resolvedMetadata.primaryKey).map { String($0) } ?? draft.primaryValueText
         draft.dimension = draft.originalPayload.string(resolvedMetadata.dimensionKey) ?? draft.dimension
     }
