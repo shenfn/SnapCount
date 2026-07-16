@@ -152,6 +152,10 @@ struct InboxView: View {
         }
     }
 
+    private func filterCount(_ filter: NativeInboxFilter) -> Int {
+        NativeInboxPresentation.filtered(allItems, by: filter).count
+    }
+
     private static func dateKey(daysFromToday: Int) -> String {
         let date = Calendar.current.date(byAdding: .day, value: daysFromToday, to: Date()) ?? Date()
         return date.formatted(.iso8601.year().month().day())
@@ -234,10 +238,6 @@ private struct PendingExpenseResolutionView: View {
             }
             Button("取消", role: .cancel) {}
         }
-    }
-
-    private func filterCount(_ filter: NativeInboxFilter) -> Int {
-        NativeInboxPresentation.filtered(allItems, by: filter).count
     }
 
     private func header(_ detail: NativeRecordDetail) -> some View {
