@@ -97,9 +97,9 @@ PWA 中转站不会把 `time_context`、`record_type`、`image_type`、Provider 
 |---|---|
 | `git diff --check` | 通过 |
 | PWA `npm run build` | 通过；仅有既有大 chunk 和 vConsole eval 警告 |
-| iOS 单元测试 | 等待 GitHub `iOS Build` |
-| iOS Simulator Build | 等待 GitHub `iOS Build` |
-| Edge Function 部署 | 等待代码推送并手动触发一次部署 |
+| iOS 单元测试 | 通过，GitHub run `29514527654` |
+| iOS Simulator Build | 通过，GitHub run `29514527654` |
+| Edge Function 部署 | 通过，GitHub run `29514206365` |
 | TestFlight | 本批最终 Build 通过后仅触发一次 |
 
 ## 真机验收清单
