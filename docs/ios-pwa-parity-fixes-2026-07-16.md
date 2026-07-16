@@ -100,7 +100,7 @@ PWA 中转站不会把 `time_context`、`record_type`、`image_type`、Provider 
 | iOS 单元测试 | 通过，GitHub run `29514527654` |
 | iOS Simulator Build | 通过，GitHub run `29514527654` |
 | Edge Function 部署 | 通过，GitHub run `29514206365` |
-| TestFlight | 本批最终 Build 通过后仅触发一次 |
+| TestFlight | 上传成功，build `29515035237`，GitHub run `29515035237` |
 
 ## 真机验收清单
 
