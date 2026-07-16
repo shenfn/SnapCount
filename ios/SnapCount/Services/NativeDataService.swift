@@ -359,7 +359,12 @@ final class NativeDataService {
         return ShortcutUploadResult(displayText: text.isEmpty ? "已重新识别，打开芥子查看结果。" : text)
     }
 
-    func archiveStagingRecord(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
+    func archiveStagingRecord(
+        _ record: NativeStagingRecord,
+        domainKey: String,
+        userId: String,
+        accessToken: String
+    ) async throws -> String {
         let payload = record.archivePayload
         let occurredAt = payload.string("occurred_at")
             ?? payload.string("order_finished_at")
@@ -371,12 +376,15 @@ final class NativeDataService {
 
         switch domainKey {
         case "expense":
+            guard let amount = payload.double("amount"), amount > 0 else {
+                throw SupabaseRemoteError.requestFailed("未识别到有效金额，请先重新识别或补全后再归档到消费")
+            }
             let response = try await rpc(
                 RPCRecordResponse.self,
                 name: "save_transaction_with_account",
                 body: [
                     "p_id": AnyCodable(NSNull()),
-                    "p_amount": AnyCodable(max(payload.double("amount") ?? 0.01, 0.01)),
+                    "p_amount": AnyCodable(amount),
                     "p_merchant_name": AnyCodable(payload.string("merchant_name") ?? payload.string("source_name") ?? record.title),
                     "p_platform": AnyCodable(payload.string("platform") ?? "截图识别"),
                     "p_category": AnyCodable(payload.string("category") ?? "其他"),
@@ -399,6 +407,9 @@ final class NativeDataService {
             targetReference = "expense/\(response.id)"
 
         case "income":
+            guard let amount = payload.double("amount"), amount > 0 else {
+                throw SupabaseRemoteError.requestFailed("未识别到有效金额，请先重新识别或补全后再归档到收入")
+            }
             let response = try await rpc(
                 RPCRecordResponse.self,
                 name: "save_income_with_account",
@@ -406,7 +417,7 @@ final class NativeDataService {
                     "p_id": AnyCodable(NSNull()),
                     "p_category": AnyCodable(payload.string("income_category") ?? "other"),
                     "p_source_name": AnyCodable(payload.string("source_name") ?? payload.string("merchant_name") ?? record.title),
-                    "p_amount": AnyCodable(max(payload.double("amount") ?? 0.01, 0.01)),
+                    "p_amount": AnyCodable(amount),
                     "p_income_date": AnyCodable(dateOnly(occurredAt)),
                     "p_note": AnyCodable(record.summary),
                     "p_source": AnyCodable("ai_scan"),
@@ -428,6 +439,7 @@ final class NativeDataService {
                 record: record,
                 payload: payload,
                 occurredAt: occurredAt,
+                userId: userId,
                 accessToken: accessToken
             )
             targetRecordId = inserted.id
@@ -441,6 +453,7 @@ final class NativeDataService {
             targetDomainId: targetDomainId,
             domainKey: domainKey,
             payload: payload,
+            userId: userId,
             accessToken: accessToken
         )
         return targetReference
@@ -838,25 +851,22 @@ final class NativeDataService {
         record: NativeStagingRecord,
         payload: [String: AnyCodable],
         occurredAt: String,
+        userId: String,
         accessToken: String
     ) async throws -> InsertedRecordResponse {
         let rows = try await postJSON(
             [InsertedRecordResponse].self,
             path: "rest/v1/data_records",
             queryItems: [URLQueryItem(name: "select", value: "id")],
-            body: [
-                "domain_id": AnyCodable(domain.id),
-                "domain_key": AnyCodable(domain.key),
-                "domain_version": AnyCodable(domain.version ?? "1.0"),
-                "occurred_at": AnyCodable(occurredAt),
-                "title": AnyCodable(payload.string("title") ?? payload.string("summary") ?? record.title),
-                "summary": AnyCodable(record.summary),
-                "payload_jsonb": AnyCodable(payload.mapValues(\.value)),
-                "source": AnyCodable("staging"),
-                "source_image_path": AnyCodable(nullable(record.imagePath)),
-                "source_image_hash": AnyCodable(nullable(record.imageHash)),
-                "staging_record_id": AnyCodable(record.id)
-            ],
+            body: Self.dataRecordArchiveBody(
+                domainId: domain.id,
+                domainKey: domain.key,
+                domainVersion: domain.version,
+                record: record,
+                payload: payload,
+                occurredAt: occurredAt,
+                userId: userId
+            ),
             accessToken: accessToken
         )
         guard let row = rows.first else {
@@ -865,12 +875,40 @@ final class NativeDataService {
         return row
     }
 
+    static func dataRecordArchiveBody(
+        domainId: String,
+        domainKey: String,
+        domainVersion: String?,
+        record: NativeStagingRecord,
+        payload: [String: AnyCodable],
+        occurredAt: String,
+        userId: String
+    ) -> [String: AnyCodable] {
+        let imagePath: Any = record.imagePath.map { $0 as Any } ?? NSNull()
+        let imageHash: Any = record.imageHash.map { $0 as Any } ?? NSNull()
+        return [
+            "domain_id": AnyCodable(domainId),
+            "domain_key": AnyCodable(domainKey),
+            "domain_version": AnyCodable(domainVersion ?? "1.0"),
+            "occurred_at": AnyCodable(occurredAt),
+            "title": AnyCodable(payload.string("title") ?? payload.string("summary") ?? record.title),
+            "summary": AnyCodable(record.summary),
+            "payload_jsonb": AnyCodable(payload.mapValues(\.value)),
+            "source": AnyCodable("staging"),
+            "source_image_path": AnyCodable(imagePath),
+            "source_image_hash": AnyCodable(imageHash),
+            "staging_record_id": AnyCodable(record.id),
+            "user_id": AnyCodable(userId)
+        ]
+    }
+
     private func finishStagingArchive(
         record: NativeStagingRecord,
         targetRecordId: String,
         targetDomainId: String?,
         domainKey: String,
         payload: [String: AnyCodable],
+        userId: String,
         accessToken: String
     ) async throws {
         try await patch(
@@ -897,7 +935,8 @@ final class NativeDataService {
                 "corrected_domain_key": AnyCodable(domainKey),
                 "action": AnyCodable("archive"),
                 "confidence": AnyCodable(nullable(record.confidencePercent.map { Double($0) / 100.0 })),
-                "payload_jsonb": AnyCodable(payload.mapValues(\.value))
+                "payload_jsonb": AnyCodable(payload.mapValues(\.value)),
+                "user_id": AnyCodable(userId)
             ],
             accessToken: accessToken
         )

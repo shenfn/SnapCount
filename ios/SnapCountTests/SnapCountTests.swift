@@ -281,6 +281,99 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNil(item.stagingRecord)
     }
 
+    func testUniversalArchiveBodyCarriesAuthenticatedUserForRLS() {
+        let record = NativeStagingRecord(
+            id: "staging-1", dateKey: "2026-07-16", title: "骑行记录", summary: "骑行 30 分钟",
+            status: "pending_review", statusLabel: "待确认", recordTypeLabel: "运动",
+            createdAtLabel: "2026-07-16", occurredAtLabel: "2026-07-16", confidencePercent: 92,
+            lastErrorMessage: nil, retryCount: 0, systemImage: "figure.run", imagePath: "user/ride.jpg",
+            imageURL: nil, imageLoadError: false, recordType: "sport", domainKey: "sport",
+            domainName: "运动", extracted: ["duration_minutes": AnyCodable(30)], companionMessage: nil,
+            targetRecordId: nil, imageHash: "hash-1"
+        )
+
+        let body = NativeDataService.dataRecordArchiveBody(
+            domainId: "domain-sport",
+            domainKey: "sport",
+            domainVersion: "1.0",
+            record: record,
+            payload: record.extracted,
+            occurredAt: "2026-07-16T08:00:00+08:00",
+            userId: "user-1"
+        )
+
+        XCTAssertEqual(body.string("user_id"), "user-1")
+        XCTAssertEqual(body.string("domain_key"), "sport")
+        XCTAssertEqual(body.string("staging_record_id"), record.id)
+    }
+
+    func testStagingPresentationHidesInternalTimeContext() {
+        let record = NativeStagingRecord(
+            id: "staging-1", dateKey: "2026-07-16", title: "骑行记录", summary: "骑行 30 分钟",
+            status: "pending_review", statusLabel: "待确认", recordTypeLabel: "运动",
+            createdAtLabel: "2026-07-16", occurredAtLabel: "2026-07-16", confidencePercent: 92,
+            lastErrorMessage: nil, retryCount: 0, systemImage: "figure.run", imagePath: nil,
+            imageURL: nil, imageLoadError: false, recordType: "sport", domainKey: "sport",
+            domainName: "运动", extracted: [
+                "duration_minutes": AnyCodable(30),
+                "time_context": AnyCodable(["reference_time": "2026-07-16T03:07:21Z"])
+            ], companionMessage: nil, targetRecordId: nil, imageHash: nil
+        )
+
+        let fields = NativeStagingDetailPresentation.fields(for: record)
+
+        XCTAssertEqual(fields.map(\.label), ["时长"])
+        XCTAssertEqual(fields.first?.value, "30 分钟")
+    }
+
+    func testStagingPresentationSupportsPWALegacyDomainFields() {
+        let record = NativeStagingRecord(
+            id: "staging-2", dateKey: "2026-07-16", title: "阅读记录", summary: "阅读",
+            status: "pending_review", statusLabel: "待确认", recordTypeLabel: "阅读",
+            createdAtLabel: "2026-07-16", occurredAtLabel: nil, confidencePercent: 90,
+            lastErrorMessage: nil, retryCount: 0, systemImage: "book", imagePath: nil,
+            imageURL: nil, imageLoadError: false, recordType: "reading", domainKey: "reading",
+            domainName: "阅读", extracted: [
+                "reading_minutes": AnyCodable(45),
+                "pages_read": AnyCodable(20)
+            ], companionMessage: nil, targetRecordId: nil, imageHash: nil
+        )
+
+        let fields = NativeStagingDetailPresentation.fields(for: record)
+
+        XCTAssertEqual(fields.first(where: { $0.label == "阅读时长" })?.value, "45 分钟")
+        XCTAssertEqual(fields.first(where: { $0.label == "阅读页数" })?.value, "20 页")
+    }
+
+    func testStagingErrorSummaryHidesProviderStack() {
+        let message = "All vision providers failed -> qwen timed out after 20000ms | moonshot token limit"
+        XCTAssertEqual(
+            NativeStagingDetailPresentation.errorSummary(message),
+            "识别内容超过模型处理上限，请重新识别。"
+        )
+    }
+
+    func testNativeSettingsDefaultsMatchPWAVisionRoutes() {
+        let settings = NativeUserSettings()
+
+        XCTAssertEqual(settings.screenshotVisionPrimary, "auto")
+        XCTAssertEqual(settings.photoVisionPrimary, "qwen")
+        XCTAssertEqual(settings.qwenScreenshotModel, "qwen3.6-flash")
+        XCTAssertEqual(settings.qwenPhotoModel, "qwen3.7-plus")
+        XCTAssertFalse(settings.qwenScreenshotThinking)
+        XCTAssertTrue(settings.qwenPhotoThinking)
+        XCTAssertEqual(Set(NativeSettingsOptions.visionProviders.map(\.id)), Set(["auto", "qwen", "moonshot", "mimo", "relay"]))
+    }
+
+    func testSettingsRepositoryProtocolSupportsStubInjection() async throws {
+        let repository: SettingsRepositoryProtocol = SettingsRepositoryStub()
+
+        let settings = try await repository.fetch(userId: "user-1", accessToken: "test-token")
+
+        XCTAssertEqual(settings.companionPersona, "warm")
+        XCTAssertEqual(settings.qwenPhotoModel, "qwen3.7-plus")
+    }
+
     func testInboxRoutesKeepStagingAndPendingRecordsDistinct() {
         XCTAssertNotEqual(
             NativeInboxRoute.staging(recordId: "same-id"),
@@ -548,7 +641,7 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
         ShortcutUploadResult(displayText: "已重新识别")
     }
 
-    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
+    func archive(_ record: NativeStagingRecord, domainKey: String, userId: String, accessToken: String) async throws -> String {
         "expense:record-1"
     }
 
@@ -566,6 +659,22 @@ private struct DomainRepositoryStub: DomainRepositoryProtocol {
     func fetchDefinitions(accessToken: String) async throws -> [NativeDomainDefinition] {
         [NativeDomainDefinition(id: "sport", name: "运动记录", description: "", icon: "🏃", isSystem: true, schema: [:], display: [:], recordCount: 0)]
     }
+}
+
+private struct SettingsRepositoryStub: SettingsRepositoryProtocol {
+    func fetch(userId: String, accessToken: String) async throws -> NativeUserSettings {
+        var settings = NativeUserSettings()
+        settings.companionPersona = "warm"
+        return settings
+    }
+
+    func update(userId: String, values: [String: AnyCodable], accessToken: String) async throws {}
+
+    func export(_ request: NativeDataExportRequest, accessToken: String) async throws -> NativeExportedFile {
+        NativeExportedFile(url: URL(fileURLWithPath: "/tmp/jiezi.csv"))
+    }
+
+    func cleanupSourceImages(accessToken: String) async throws {}
 }
 
 private func makeLiabilityAccount(id: String, name: String) -> NativeAccount {

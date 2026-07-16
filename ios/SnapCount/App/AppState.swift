@@ -4,6 +4,7 @@ import SwiftUI
 final class AppState: ObservableObject {
     @Published var selectedTab: AppTab = .today
     @Published var isSignedIn = false
+    @Published var currentUserId = ""
     @Published var currentUserEmail = ""
     @Published var lastShortcutMessage: String?
     @Published var isBootstrapping = true
@@ -62,6 +63,11 @@ final class AppState: ObservableObject {
     @Published var isLoadingAIInsight = false
     @Published var aiInsightMessage: String?
     @Published var aiInsightIsCached = false
+    @Published var userSettings = NativeUserSettings()
+    @Published var settingsMessage: String?
+    @Published var isLoadingSettings = false
+    @Published var isSavingSettings = false
+    @Published var isExportingData = false
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -73,6 +79,7 @@ final class AppState: ObservableObject {
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private let insightsRepository: InsightsRepositoryProtocol
+    private let settingsRepository: SettingsRepositoryProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
@@ -90,7 +97,8 @@ final class AppState: ObservableObject {
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
-        insightsRepository: InsightsRepositoryProtocol = InsightsRepository()
+        insightsRepository: InsightsRepositoryProtocol = InsightsRepository(),
+        settingsRepository: SettingsRepositoryProtocol = SettingsRepository()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
@@ -101,6 +109,7 @@ final class AppState: ObservableObject {
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
         self.insightsRepository = insightsRepository
+        self.settingsRepository = settingsRepository
     }
 
     func bootstrap() {
@@ -1034,7 +1043,12 @@ final class AppState: ObservableObject {
         defer { inboxActionRecordId = nil }
         do {
             let session = try await validSession()
-            _ = try await inboxRepository.archive(record, domainKey: domainKey, accessToken: session.accessToken)
+            _ = try await inboxRepository.archive(
+                record,
+                domainKey: domainKey,
+                userId: session.user.id,
+                accessToken: session.accessToken
+            )
             inboxPath = NavigationPath()
             await refreshDashboard()
             inboxActionMessage = "已归档到\(domainTitle)"
@@ -1158,6 +1172,145 @@ final class AppState: ObservableObject {
         }
     }
 
+    func loadUserSettings() async {
+        guard !isLoadingSettings else { return }
+        isLoadingSettings = true
+        settingsMessage = nil
+        defer { isLoadingSettings = false }
+        do {
+            let session = try await validSession()
+            userSettings = try await settingsRepository.fetch(
+                userId: session.user.id,
+                accessToken: session.accessToken
+            )
+        } catch {
+            settingsMessage = error.localizedDescription
+        }
+    }
+
+    func setCompanionEnabled(_ enabled: Bool) async {
+        await updateSettings(["companion_enabled": AnyCodable(enabled)]) { $0.companionEnabled = enabled }
+    }
+
+    func setCompanionMemoryEnabled(_ enabled: Bool) async {
+        await updateSettings(["companion_memory_enabled": AnyCodable(enabled)]) { $0.companionMemoryEnabled = enabled }
+    }
+
+    func setCompanionPersona(_ value: String) async {
+        await updateSettings(["companion_persona": AnyCodable(value)]) { $0.companionPersona = value }
+    }
+
+    func setCompanionMemoryStrength(_ value: String) async {
+        await updateSettings(["companion_memory_strength": AnyCodable(value)]) { $0.companionMemoryStrength = value }
+    }
+
+    func setCompanionExpressionStyle(_ value: String) async {
+        await updateSettings(["companion_expression_style": AnyCodable(value)]) { $0.companionExpressionStyle = value }
+    }
+
+    func setCompanionCustomNote(_ value: String) async {
+        let value = String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        await updateSettings(["companion_custom_note": AnyCodable(value)]) { $0.companionCustomNote = value }
+    }
+
+    func setInsightProvider(_ value: String) async {
+        await updateSettings(["ai_insight_provider": AnyCodable(value)]) { $0.aiInsightProvider = value }
+    }
+
+    func setVisionProvider(_ value: String, forPhoto: Bool) async {
+        let key = forPhoto ? "photo_vision_primary" : "screenshot_vision_primary"
+        var values = [key: AnyCodable(value)]
+        if !forPhoto { values["vision_primary"] = AnyCodable(value) }
+        await updateSettings(values) {
+            if forPhoto { $0.photoVisionPrimary = value }
+            else { $0.screenshotVisionPrimary = value }
+        }
+    }
+
+    func setQwenModel(_ value: String, forPhoto: Bool) async {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = forPhoto ? "qwen3.7-plus" : "qwen3.6-flash"
+        let model = trimmed.isEmpty ? fallback : trimmed
+        let key = forPhoto ? "qwen_photo_model" : "qwen_screenshot_model"
+        await updateSettings([key: AnyCodable(model)]) {
+            if forPhoto { $0.qwenPhotoModel = model }
+            else { $0.qwenScreenshotModel = model }
+        }
+    }
+
+    func setQwenThinking(_ enabled: Bool, forPhoto: Bool) async {
+        let key = forPhoto ? "qwen_photo_enable_thinking" : "qwen_screenshot_enable_thinking"
+        await updateSettings([key: AnyCodable(enabled)]) {
+            if forPhoto { $0.qwenPhotoThinking = enabled }
+            else { $0.qwenScreenshotThinking = enabled }
+        }
+    }
+
+    func setAILogsEnabled(_ enabled: Bool) async {
+        await updateSettings(["ai_logs_enabled": AnyCodable(enabled)]) { $0.aiLogsEnabled = enabled }
+    }
+
+    func setPromptOptimizationEnabled(_ enabled: Bool) async {
+        await updateSettings(["prompt_optimization_enabled": AnyCodable(enabled)]) { $0.promptOptimizationEnabled = enabled }
+    }
+
+    func setImageRetention(days: Int, cleanupExisting: Bool = false) async {
+        let keepImages = days != 0
+        let retentionDays = keepImages ? days : 7
+        await updateSettings([
+            "keep_source_images": AnyCodable(keepImages),
+            "image_retention_days": AnyCodable(retentionDays)
+        ]) {
+            $0.keepSourceImages = keepImages
+            $0.imageRetentionDays = retentionDays
+        }
+        guard cleanupExisting, settingsMessage == nil else { return }
+        do {
+            let session = try await validSession()
+            try await settingsRepository.cleanupSourceImages(accessToken: session.accessToken)
+            settingsMessage = "已有原图已清理"
+        } catch {
+            settingsMessage = "留存设置已保存，但清理已有原图失败：\(error.localizedDescription)"
+        }
+    }
+
+    func exportData(_ request: NativeDataExportRequest) async -> NativeExportedFile? {
+        guard !isExportingData else { return nil }
+        isExportingData = true
+        settingsMessage = nil
+        defer { isExportingData = false }
+        do {
+            let session = try await validSession()
+            return try await settingsRepository.export(request, accessToken: session.accessToken)
+        } catch {
+            settingsMessage = "导出失败：\(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    private func updateSettings(
+        _ values: [String: AnyCodable],
+        apply: (inout NativeUserSettings) -> Void
+    ) async {
+        guard !isSavingSettings else { return }
+        let previous = userSettings
+        apply(&userSettings)
+        isSavingSettings = true
+        settingsMessage = nil
+        defer { isSavingSettings = false }
+        do {
+            let session = try await validSession()
+            try await settingsRepository.update(
+                userId: session.user.id,
+                values: values,
+                accessToken: session.accessToken
+            )
+        } catch {
+            userSettings = previous
+            settingsMessage = "设置保存失败：\(error.localizedDescription)"
+        }
+    }
+
     func requestShortcutNotificationPermission() async {
         let granted = await ShortcutNotificationService.shared.requestAuthorization()
         ShortcutFeedbackPreferences.applyNotificationAuthorization(granted: granted)
@@ -1204,6 +1357,7 @@ final class AppState: ObservableObject {
 
     private func apply(session: SupabaseAuthSession) {
         isSignedIn = true
+        currentUserId = session.user.id
         currentUserEmail = session.user.email ?? ""
     }
 
@@ -1260,6 +1414,7 @@ final class AppState: ObservableObject {
         isLoadingDashboard = false
         try? keychain.remove(KeychainKeys.authSession)
         isSignedIn = false
+        currentUserId = ""
         currentUserEmail = ""
         dashboard = DashboardSnapshot()
         accounts = []
@@ -1284,6 +1439,8 @@ final class AppState: ObservableObject {
         aiInsight = nil
         aiInsightMessage = nil
         aiInsightIsCached = false
+        userSettings = NativeUserSettings()
+        settingsMessage = nil
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today
