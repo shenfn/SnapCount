@@ -81,6 +81,33 @@ jobs:
             exit "$STATUS"
           fi
 
+      - name: Run unit tests
+        working-directory: ios
+        shell: bash
+        run: |
+          set -o pipefail
+          SIMULATOR_UDID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+          test -n "$SIMULATOR_UDID"
+          LOG_PATH="$RUNNER_TEMP/xcodebuild-tests.log"
+          xcodebuild \
+            -project SnapCount.xcodeproj \
+            -scheme SnapCount \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            CODE_SIGNING_ALLOWED=NO \
+            SNAPCOUNT_SUPABASE_URL="${{ secrets.IOS_SUPABASE_URL }}" \
+            SNAPCOUNT_SUPABASE_FUNCTIONS_URL="${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}" \
+            SNAPCOUNT_SUPABASE_ANON_KEY="${{ secrets.IOS_SUPABASE_ANON_KEY }}" \
+            SNAPCOUNT_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}" \
+            -only-testing:SnapCountTests \
+            test 2>&1 | tee "$LOG_PATH"
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "---- xcodebuild test tail ----"
+            tail -n 250 "$LOG_PATH"
+            exit "$STATUS"
+          fi
+
       - name: Show available destinations on failure help
         if: always()
         working-directory: ios
