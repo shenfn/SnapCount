@@ -372,101 +372,28 @@ final class NativeDataService {
     func archiveStagingRecord(
         _ record: NativeStagingRecord,
         domainKey: String,
-        userId: String,
         accessToken: String
     ) async throws -> String {
         let payload = record.archivePayload
         let occurredAt = payload.string("occurred_at")
             ?? payload.string("order_finished_at")
             ?? ISO8601DateFormatter().string(from: Date())
-
-        let targetRecordId: String
-        let targetDomainId: String?
-        let targetReference: String
-
-        switch domainKey {
-        case "expense":
-            guard let amount = payload.double("amount"), amount > 0 else {
-                throw SupabaseRemoteError.requestFailed("未识别到有效金额，请先重新识别或补全后再归档到消费")
-            }
-            let response = try await rpc(
-                RPCRecordResponse.self,
-                name: "save_transaction_with_account",
-                body: [
-                    "p_id": AnyCodable(NSNull()),
-                    "p_amount": AnyCodable(amount),
-                    "p_merchant_name": AnyCodable(payload.string("merchant_name") ?? payload.string("source_name") ?? record.title),
-                    "p_platform": AnyCodable(payload.string("platform") ?? "截图识别"),
-                    "p_category": AnyCodable(payload.string("category") ?? "其他"),
-                    "p_payment_method": AnyCodable(payload.string("payment_method") ?? "未知"),
-                    "p_transaction_date": AnyCodable(dateOnly(occurredAt)),
-                    "p_transaction_time": AnyCodable(NSNull()),
-                    "p_note": AnyCodable(record.summary),
-                    "p_is_large_transport": AnyCodable(false),
-                    "p_transport_type": AnyCodable(NSNull()),
-                    "p_source": AnyCodable("ai_scan"),
-                    "p_image_url": AnyCodable(nullable(record.imagePath)),
-                    "p_image_hash": AnyCodable(nullable(record.imageHash)),
-                    "p_companion_message": AnyCodable(nullable(record.companionMessage)),
-                    "p_account_id": AnyCodable(NSNull())
-                ],
-                accessToken: accessToken
-            )
-            targetRecordId = response.id
-            targetDomainId = nil
-            targetReference = "expense/\(response.id)"
-
-        case "income":
-            guard let amount = payload.double("amount"), amount > 0 else {
-                throw SupabaseRemoteError.requestFailed("未识别到有效金额，请先重新识别或补全后再归档到收入")
-            }
-            let response = try await rpc(
-                RPCRecordResponse.self,
-                name: "save_income_with_account",
-                body: [
-                    "p_id": AnyCodable(NSNull()),
-                    "p_category": AnyCodable(payload.string("income_category") ?? "other"),
-                    "p_source_name": AnyCodable(payload.string("source_name") ?? payload.string("merchant_name") ?? record.title),
-                    "p_amount": AnyCodable(amount),
-                    "p_income_date": AnyCodable(dateOnly(occurredAt)),
-                    "p_note": AnyCodable(record.summary),
-                    "p_source": AnyCodable("ai_scan"),
-                    "p_image_url": AnyCodable(nullable(record.imagePath)),
-                    "p_image_hash": AnyCodable(nullable(record.imageHash)),
-                    "p_companion_message": AnyCodable(nullable(record.companionMessage)),
-                    "p_account_id": AnyCodable(NSNull())
-                ],
-                accessToken: accessToken
-            )
-            targetRecordId = response.id
-            targetDomainId = nil
-            targetReference = "income/\(response.id)"
-
-        default:
-            let domain = try await fetchDataDomain(key: domainKey, accessToken: accessToken)
-            let inserted = try await insertDataRecord(
-                domain: domain,
-                record: record,
-                payload: payload,
-                occurredAt: occurredAt,
-                userId: userId,
-                accessToken: accessToken
-            )
-            targetRecordId = inserted.id
-            targetDomainId = domain.id
-            targetReference = "data/\(inserted.id)"
+        if ["expense", "income"].contains(domainKey), !(payload.double("amount").map { $0 > 0 } ?? false) {
+            let title = domainKey == "expense" ? "消费" : "收入"
+            throw SupabaseRemoteError.requestFailed("未识别到有效金额，请先重新识别或补全后再归档到\(title)")
         }
-
-        try await finishStagingArchive(
-            record: record,
-            targetRecordId: targetRecordId,
-            targetDomainId: targetDomainId,
-            domainKey: domainKey,
-            payload: payload,
-            userId: userId,
+        let response = try await rpc(
+            ArchiveStagingRPCResponse.self,
+            name: "archive_staging_record",
+            body: Self.stagingArchiveRPCBody(
+                record: record,
+                domainKey: domainKey,
+                payload: payload,
+                occurredAt: occurredAt
+            ),
             accessToken: accessToken
         )
-        return targetReference
+        return response.targetReference
     }
 
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {
@@ -843,100 +770,35 @@ final class NativeDataService {
         return row
     }
 
-    private func insertDataRecord(
-        domain: DataDomainRow,
+    static func stagingArchiveRPCBody(
         record: NativeStagingRecord,
-        payload: [String: AnyCodable],
-        occurredAt: String,
-        userId: String,
-        accessToken: String
-    ) async throws -> InsertedRecordResponse {
-        let rows = try await postJSON(
-            [InsertedRecordResponse].self,
-            path: "rest/v1/data_records",
-            queryItems: [URLQueryItem(name: "select", value: "id")],
-            body: Self.dataRecordArchiveBody(
-                domainId: domain.id,
-                domainKey: domain.key,
-                domainVersion: domain.version,
-                record: record,
-                payload: payload,
-                occurredAt: occurredAt,
-                userId: userId
-            ),
-            accessToken: accessToken
-        )
-        guard let row = rows.first else {
-            throw SupabaseRemoteError.requestFailed("归档成功但没有返回记录 ID")
-        }
-        return row
-    }
-
-    static func dataRecordArchiveBody(
-        domainId: String,
         domainKey: String,
-        domainVersion: String?,
-        record: NativeStagingRecord,
         payload: [String: AnyCodable],
-        occurredAt: String,
-        userId: String
+        occurredAt: String
     ) -> [String: AnyCodable] {
-        let imagePath: Any = record.imagePath.map { $0 as Any } ?? NSNull()
-        let imageHash: Any = record.imageHash.map { $0 as Any } ?? NSNull()
+        let amount: Any = payload.double("amount").map { $0 as Any } ?? NSNull()
+        let accountId: Any = payload.string("account_id").map { $0 as Any } ?? NSNull()
+        let recordTime: Any = payload.string("transaction_time").map { $0 as Any } ?? NSNull()
+        let platform: Any = payload.string("platform").map { $0 as Any } ?? NSNull()
+        let category: Any = payload.string("category").map { $0 as Any } ?? NSNull()
+        let paymentMethod: Any = payload.string("payment_method").map { $0 as Any } ?? NSNull()
+        let incomeCategory: Any = payload.string("income_category").map { $0 as Any } ?? NSNull()
         return [
-            "domain_id": AnyCodable(domainId),
-            "domain_key": AnyCodable(domainKey),
-            "domain_version": AnyCodable(domainVersion ?? "1.0"),
-            "occurred_at": AnyCodable(occurredAt),
-            "title": AnyCodable(payload.string("title") ?? payload.string("summary") ?? record.title),
-            "summary": AnyCodable(record.summary),
-            "payload_jsonb": AnyCodable(payload.mapValues(\.value)),
-            "source": AnyCodable("staging"),
-            "source_image_path": AnyCodable(imagePath),
-            "source_image_hash": AnyCodable(imageHash),
-            "staging_record_id": AnyCodable(record.id),
-            "user_id": AnyCodable(userId)
+            "p_staging_id": AnyCodable(record.id),
+            "p_domain_key": AnyCodable(domainKey),
+            "p_amount": AnyCodable(amount),
+            "p_title": AnyCodable(payload.string("title") ?? payload.string("merchant_name") ?? payload.string("source_name") ?? record.title),
+            "p_platform": AnyCodable(platform),
+            "p_category": AnyCodable(category),
+            "p_payment_method": AnyCodable(paymentMethod),
+            "p_income_category": AnyCodable(incomeCategory),
+            "p_record_date": AnyCodable(String(occurredAt.prefix(10))),
+            "p_record_time": AnyCodable(recordTime),
+            "p_occurred_at": AnyCodable(occurredAt),
+            "p_summary": AnyCodable(record.summary),
+            "p_payload": AnyCodable(payload.mapValues(\.value)),
+            "p_account_id": AnyCodable(accountId)
         ]
-    }
-
-    private func finishStagingArchive(
-        record: NativeStagingRecord,
-        targetRecordId: String,
-        targetDomainId: String?,
-        domainKey: String,
-        payload: [String: AnyCodable],
-        userId: String,
-        accessToken: String
-    ) async throws {
-        try await patch(
-            path: "rest/v1/staging_records",
-            queryItems: [URLQueryItem(name: "id", value: "eq.\(record.id)")],
-            body: [
-                "status": AnyCodable("archived"),
-                "target_domain_id": AnyCodable(nullable(targetDomainId)),
-                "target_record_id": AnyCodable(targetRecordId),
-                "resolved_action": AnyCodable("archived"),
-                "resolved_at": AnyCodable(ISO8601DateFormatter().string(from: Date()))
-            ],
-            accessToken: accessToken
-        )
-
-        _ = try? await postJSON(
-            [InsertedRecordResponse].self,
-            path: "rest/v1/user_routing_feedback",
-            queryItems: [URLQueryItem(name: "select", value: "id")],
-            body: [
-                "staging_record_id": AnyCodable(record.id),
-                "image_hash": AnyCodable(nullable(record.imageHash)),
-                "original_domain_key": AnyCodable(nullable(record.domainKey)),
-                "corrected_domain_key": AnyCodable(domainKey),
-                "action": AnyCodable("archive"),
-                "confidence": AnyCodable(nullable(record.confidencePercent.map { Double($0) / 100.0 })),
-                "payload_jsonb": AnyCodable(payload.mapValues(\.value)),
-                "user_id": AnyCodable(userId)
-            ],
-            accessToken: accessToken
-        )
     }
 
     private func dailySummaries(
@@ -1577,6 +1439,18 @@ private struct StagingRow: Decodable {
 
 private struct RPCRecordResponse: Decodable {
     let id: String
+}
+
+private struct ArchiveStagingRPCResponse: Decodable {
+    let targetRecordId: String
+    let targetReference: String
+    let idempotentRetry: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case targetRecordId = "target_record_id"
+        case targetReference = "target_reference"
+        case idempotentRetry = "idempotent_retry"
+    }
 }
 
 private struct InsertedRecordResponse: Decodable {

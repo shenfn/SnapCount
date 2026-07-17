@@ -354,7 +354,7 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNil(item.stagingRecord)
     }
 
-    func testUniversalArchiveBodyCarriesAuthenticatedUserForRLS() {
+    func testAtomicArchiveBodyUsesStagingIdentityAndDomain() {
         let record = NativeStagingRecord(
             id: "staging-1", dateKey: "2026-07-16", title: "骑行记录", summary: "骑行 30 分钟",
             status: "pending_review", statusLabel: "待确认", recordTypeLabel: "运动",
@@ -365,19 +365,17 @@ final class SnapCountTests: XCTestCase {
             targetRecordId: nil, imageHash: "hash-1"
         )
 
-        let body = NativeDataService.dataRecordArchiveBody(
-            domainId: "domain-sport",
-            domainKey: "sport",
-            domainVersion: "1.0",
+        let body = NativeDataService.stagingArchiveRPCBody(
             record: record,
+            domainKey: "sport",
             payload: record.extracted,
-            occurredAt: "2026-07-16T08:00:00+08:00",
-            userId: "user-1"
+            occurredAt: "2026-07-16T08:00:00+08:00"
         )
 
-        XCTAssertEqual(body.string("user_id"), "user-1")
-        XCTAssertEqual(body.string("domain_key"), "sport")
-        XCTAssertEqual(body.string("staging_record_id"), record.id)
+        XCTAssertEqual(body.string("p_staging_id"), record.id)
+        XCTAssertEqual(body.string("p_domain_key"), "sport")
+        XCTAssertEqual(body.string("p_record_date"), "2026-07-16")
+        XCTAssertNil(body["user_id"])
     }
 
     func testStagingPresentationHidesInternalTimeContext() {
@@ -714,7 +712,7 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
         ShortcutUploadResult(displayText: "已重新识别")
     }
 
-    func archive(_ record: NativeStagingRecord, domainKey: String, userId: String, accessToken: String) async throws -> String {
+    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
         "expense:record-1"
     }
 

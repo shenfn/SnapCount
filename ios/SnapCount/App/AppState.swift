@@ -1075,7 +1075,6 @@ final class AppState: ObservableObject {
             _ = try await inboxRepository.archive(
                 record,
                 domainKey: domainKey,
-                userId: session.user.id,
                 accessToken: session.accessToken
             )
             inboxPath = NavigationPath()
