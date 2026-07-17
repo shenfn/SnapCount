@@ -3650,6 +3650,7 @@ Deno.serve(async (req) => {
       const { data: stagingRow } = await supabase.from("staging_records")
         .select("id,image_path,image_hash,retry_count")
         .eq("id", stagingRetryId)
+        .eq("user_id", userId)
         .maybeSingle();
       if (!stagingRow || !stagingRow.image_path) {
         return respondShortcut({ error: "Staging record not found or missing image" }, { mode: responseMode, status: 404 });
@@ -3759,7 +3760,7 @@ Deno.serve(async (req) => {
     }
     timings.mark("perceptual_lookup");
     const { data: txDup } = await supabase
-      .from("transactions").select("id").eq("image_hash", hash).maybeSingle();
+      .from("transactions").select("id").eq("image_hash", hash).eq("user_id", userId).maybeSingle();
     if (txDup) {
       const aiLogId = await writeTraceAiLog({
         image_hash: hash,
@@ -3780,7 +3781,7 @@ Deno.serve(async (req) => {
       }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
     }
     const { data: incDup } = await supabase
-      .from("income_records").select("id").eq("image_hash", hash).maybeSingle();
+      .from("income_records").select("id").eq("image_hash", hash).eq("user_id", userId).maybeSingle();
     if (incDup) {
       const aiLogId = await writeTraceAiLog({
         image_hash: hash,
@@ -3801,7 +3802,7 @@ Deno.serve(async (req) => {
       }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
     }
     const { data: dataDup } = await supabase
-      .from("data_records").select("id,domain_key").eq("source_image_hash", hash).maybeSingle();
+      .from("data_records").select("id,domain_key").eq("source_image_hash", hash).eq("user_id", userId).maybeSingle();
     timings.mark("dup_check");
     if (dataDup) {
       const aiLogId = await writeTraceAiLog({
@@ -3832,7 +3833,7 @@ Deno.serve(async (req) => {
 
     // 3. 上传到 Storage（重试模式跳过，图片已存在）
     // 隐私控制：keep_source_images=false 时上传到 tmp/ 临时路径，由清理逻辑定期删除
-    const storagePath = isRetry ? (retryImagePath!) : `${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
+    const storagePath = isRetry ? (retryImagePath!) : `${userId}/${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
     const path = (!isRetry && !privacyConfig.keepSourceImages) ? `tmp/${storagePath}` : storagePath;
     let uploadedNewObject = false;
     if (!isRetry) {
@@ -4016,8 +4017,9 @@ Deno.serve(async (req) => {
 
     // 重试模式：处理结果后直接返回
     if (isRetry && stagingRetryId) {
-      const retryResult = aiOk && (recordType !== "uncertain") && (ai.confidence ?? 0) >= 0.5;
-      const retryCount = (await supabase.from("staging_records").select("retry_count").eq("id", stagingRetryId).maybeSingle())?.data?.retry_count ?? 0;
+      const hasRequiredFinancialAmount = !["expense", "income"].includes(recordType) || normalizedAmount !== null;
+      const retryResult = aiOk && (recordType !== "uncertain") && hasRequiredFinancialAmount && (ai.confidence ?? 0) >= 0.5;
+      const retryCount = (await supabase.from("staging_records").select("retry_count").eq("id", stagingRetryId).eq("user_id", userId).maybeSingle())?.data?.retry_count ?? 0;
       const retryOccurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
       const retryOccurredAt = retryOccurredDateTime?.iso ?? null;
       const retryTimeContext = buildTimeContext({
@@ -4055,7 +4057,7 @@ Deno.serve(async (req) => {
         if (recordType === "income") {
           const incomeCat = ["salary","bonus","freelance","investment","reimbursement","other"].includes(ai.income_category ?? "") ? ai.income_category! : "other";
           const { data: incRow } = await supabase.from("income_records").insert({
-            amount: normalizedAmount ?? 0.01, category: incomeCat,
+            amount: normalizedAmount, category: incomeCat,
             source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
             income_date: recordDate, image_url: path, image_hash: hash, user_id: userId || null, source: "ai_scan",
             account_id: autoBoundAccount?.id ?? null,
@@ -4107,7 +4109,7 @@ Deno.serve(async (req) => {
           // expense
           const isComplete = normalizedAmount !== null && ai.platform !== null && ai.category !== null && ai.payment_method !== null;
           const { data: txRow } = await supabase.from("transactions").insert({
-            type: "expense", amount: normalizedAmount ?? 0.01,
+            type: "expense", amount: normalizedAmount,
             merchant_name: ai.merchant_name, platform: ai.platform, category: ai.category,
             payment_method: ai.payment_method, status: isComplete ? "done" : "pending",
             image_url: path, image_hash: hash,
@@ -4143,7 +4145,7 @@ Deno.serve(async (req) => {
             status: "archived", resolved_at: now.toISOString(), resolved_action: "archived",
             target_record_id: archivedId, retry_count: retryCount + 1,
             ai_summary: ai.record_type ? `重试成功 → ${domainNameFromKey(ai.record_type) ?? ai.record_type}` : "重试成功",
-          }).eq("id", stagingRetryId);
+          }).eq("id", stagingRetryId).eq("user_id", userId);
 
           const aiLogId = await writeTraceAiLog({
             image_hash: hash, image_url: path, image_type: ai.image_type,
@@ -4191,7 +4193,7 @@ Deno.serve(async (req) => {
         last_error_type: !aiOk ? "AI_PROVIDER_ERROR" : "RETRY_STILL_UNCERTAIN",
         last_error_message: aiErrorMessage || `重试后仍无法确定（record_type=${recordType}, confidence=${ai.confidence ?? 0}）`,
         ai_summary: ai.record_type ? `重试 → ${ai.record_type} (confidence: ${ai.confidence ?? 0})` : "重试失败",
-      }).eq("id", stagingRetryId);
+      }).eq("id", stagingRetryId).eq("user_id", userId);
 
       const aiLogId = await writeTraceAiLog({
         image_hash: hash, image_url: path, image_type: ai.image_type,
@@ -4236,7 +4238,8 @@ Deno.serve(async (req) => {
     const recordDate = occurredDateTime?.date ?? today;
     const recordTime = occurredDateTime?.time ?? nowTime;
 
-    if (!aiOk || (!builtinKey && recordType === "uncertain") || (!builtinKey && (ai.confidence ?? 0) < 0.35 && normalizedAmount === null)) {
+    const missingFinancialAmount = !builtinKey && ["expense", "income"].includes(recordType) && normalizedAmount === null;
+    if (!aiOk || missingFinancialAmount || (!builtinKey && recordType === "uncertain") || (!builtinKey && (ai.confidence ?? 0) < 0.35 && normalizedAmount === null)) {
       const stagingStatus = !aiOk ? "ai_error" : "routing_failed";
       const staging = await createStagingRecord(supabase, {
         status: stagingStatus,
@@ -4801,6 +4804,7 @@ Deno.serve(async (req) => {
       const duplicateDate = recordDate;
       let dupQuery = supabase.from("transactions")
         .select("id,transaction_time")
+        .eq("user_id", userId)
         .eq("transaction_date", duplicateDate)
         .eq("payment_method", ai.payment_method)
         .gte("amount", (normalizedAmount - 0.01).toFixed(2))
@@ -4910,7 +4914,7 @@ Deno.serve(async (req) => {
     // 6. 写入数据库
     const { data: row, error: insErr } = await supabase.from("transactions").insert({
       type: "expense",
-      amount: normalizedAmount ?? 0.01,
+      amount: normalizedAmount,
       merchant_name: ai.merchant_name,
       platform: ai.platform,
       category: ai.category,
