@@ -28,10 +28,21 @@ final class AccountRepository: AccountRepositoryProtocol {
     }
 
     func fetchDetail(account:NativeAccount, accessToken:String) async -> NativeAccountDetail {
-        async let entriesResult = optionalEntries(account.id, accessToken:accessToken)
-        async let cyclesResult = optionalCycles(account.id, accessToken:accessToken)
-        async let paymentsResult = optionalPayments(account.id, accessToken:accessToken)
-        return await NativeAccountDetail(account:account,entries:entriesResult,repaymentCycles:cyclesResult,payments:paymentsResult)
+        async let entriesResult = section { try await self.fetchEntries(account.id, accessToken:accessToken) }
+        async let cyclesResult = section { try await self.fetchCycles(account.id, accessToken:accessToken) }
+        async let paymentsResult = section { try await self.fetchPayments(account.id, accessToken:accessToken) }
+        let (entries, cycles, payments) = await (entriesResult, cyclesResult, paymentsResult)
+        var errors: [NativeAccountDetailSection: String] = [:]
+        if let error = entries.error { errors[.entries] = error }
+        if let error = cycles.error { errors[.repaymentCycles] = error }
+        if let error = payments.error { errors[.payments] = error }
+        return NativeAccountDetail(
+            account: account,
+            entries: entries.value ?? [],
+            repaymentCycles: cycles.value ?? [],
+            payments: payments.value ?? [],
+            loadErrors: errors
+        )
     }
 
     func fetchOpenRepaymentCycles(accessToken: String) async throws -> [NativeRepaymentCycle] {
@@ -202,18 +213,31 @@ final class AccountRepository: AccountRepositoryProtocol {
         return value
     }
 
-    private func optionalEntries(_ accountId:String,accessToken:String) async -> [NativeAccountEntry] {
-        let rows = try? await remoteClient.get([AccountEntryRow].self,path:"rest/v1/account_entries",queryItems:[URLQueryItem(name:"select",value:"*"),URLQueryItem(name:"account_id",value:"eq.\(accountId)"),URLQueryItem(name:"order",value:"occurred_at.desc,created_at.desc"),URLQueryItem(name:"limit",value:"50")],accessToken:accessToken)
-        return (rows ?? []).map(\.native)
+    private func fetchEntries(_ accountId:String,accessToken:String) async throws -> [NativeAccountEntry] {
+        let rows = try await remoteClient.get([AccountEntryRow].self,path:"rest/v1/account_entries",queryItems:[URLQueryItem(name:"select",value:"*"),URLQueryItem(name:"account_id",value:"eq.\(accountId)"),URLQueryItem(name:"order",value:"occurred_at.desc,created_at.desc"),URLQueryItem(name:"limit",value:"50")],accessToken:accessToken)
+        return rows.map(\.native)
     }
-    private func optionalCycles(_ accountId:String,accessToken:String) async -> [NativeRepaymentCycle] {
-        let rows = try? await remoteClient.get([RepaymentCycleRow].self,path:"rest/v1/account_repayment_cycles",queryItems:[URLQueryItem(name:"select",value:"*"),URLQueryItem(name:"account_id",value:"eq.\(accountId)"),URLQueryItem(name:"order",value:"due_date.desc.nullslast,created_at.desc"),URLQueryItem(name:"limit",value:"24")],accessToken:accessToken)
-        return (rows ?? []).compactMap(\.native)
+    private func fetchCycles(_ accountId:String,accessToken:String) async throws -> [NativeRepaymentCycle] {
+        let rows = try await remoteClient.get([RepaymentCycleRow].self,path:"rest/v1/account_repayment_cycles",queryItems:[URLQueryItem(name:"select",value:"*"),URLQueryItem(name:"account_id",value:"eq.\(accountId)"),URLQueryItem(name:"order",value:"due_date.desc.nullslast,created_at.desc"),URLQueryItem(name:"limit",value:"24")],accessToken:accessToken)
+        return rows.compactMap(\.native)
     }
-    private func optionalPayments(_ accountId:String,accessToken:String) async -> [NativeLiabilityPayment] {
-        let rows = try? await remoteClient.get([LiabilityPaymentRow].self,path:"rest/v1/liability_payments",queryItems:[URLQueryItem(name:"select",value:"*"),URLQueryItem(name:"account_id",value:"eq.\(accountId)"),URLQueryItem(name:"order",value:"paid_at.desc,created_at.desc"),URLQueryItem(name:"limit",value:"30")],accessToken:accessToken)
-        return (rows ?? []).map(\.native)
+    private func fetchPayments(_ accountId:String,accessToken:String) async throws -> [NativeLiabilityPayment] {
+        let rows = try await remoteClient.get([LiabilityPaymentRow].self,path:"rest/v1/liability_payments",queryItems:[URLQueryItem(name:"select",value:"*"),URLQueryItem(name:"account_id",value:"eq.\(accountId)"),URLQueryItem(name:"order",value:"paid_at.desc,created_at.desc"),URLQueryItem(name:"limit",value:"30")],accessToken:accessToken)
+        return rows.map(\.native)
     }
+
+    private func section<Value>(_ operation: () async throws -> Value) async -> AccountDetailSectionResult<Value> {
+        do {
+            return AccountDetailSectionResult(value: try await operation(), error: nil)
+        } catch {
+            return AccountDetailSectionResult(value: nil, error: error.localizedDescription)
+        }
+    }
+}
+
+private struct AccountDetailSectionResult<Value> {
+    let value: Value?
+    let error: String?
 }
 
 private struct AccountRow:Decodable {

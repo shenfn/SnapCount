@@ -220,13 +220,19 @@ struct AccountDetailView: View {
                                 }
                             }
                         }
+                    } else if let message = detail?.loadError(for: .repaymentCycles), account.type.isLiability {
+                        accountLoadErrorSection(title: "还款计划", message: message, account: account)
                     }
 
                     if let detail {
                         Section("账户概览") {
                             LabeledContent("初始余额", value: "¥\(amount(account.initialBalance))")
-                            LabeledContent("有效流水", value: "\(detail.entries.filter { !$0.isVoided }.count) 条")
-                            LabeledContent("有效净额", value: String(format: "%+.2f", activeNet(detail.entries)))
+                            if detail.loadError(for: .entries) == nil {
+                                LabeledContent("有效流水", value: "\(detail.entries.filter { !$0.isVoided }.count) 条")
+                                LabeledContent("有效净额", value: String(format: "%+.2f", activeNet(detail.entries)))
+                            } else {
+                                LabeledContent("账户流水", value: "加载失败")
+                            }
                         }
                     }
 
@@ -245,6 +251,8 @@ struct AccountDetailView: View {
                                 }
                             }
                         }
+                    } else if let message = detail?.loadError(for: .entries) {
+                        accountLoadErrorSection(title: "账户流水", message: message, account: account)
                     }
 
                     if let payments = detail?.payments, !payments.isEmpty {
@@ -272,6 +280,8 @@ struct AccountDetailView: View {
                                 }
                             }
                         }
+                    } else if let message = detail?.loadError(for: .payments), account.type.isLiability {
+                        accountLoadErrorSection(title: "还款记录", message: message, account: account)
                     }
 
                     if detail == nil {
@@ -348,6 +358,18 @@ struct AccountDetailView: View {
     private func amount(_ value: Double) -> String { String(format: "%.2f", value) }
     private func activeNet(_ entries: [NativeAccountEntry]) -> Double {
         entries.filter { !$0.isVoided }.reduce(0) { $0 + ($1.direction == "in" ? $1.amount : -$1.amount) }
+    }
+
+    @ViewBuilder
+    private func accountLoadErrorSection(title: String, message: String, account: NativeAccount) -> some View {
+        Section(title) {
+            Label(message, systemImage: "exclamationmark.triangle")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.coral)
+            Button("重新加载") {
+                Task { await appState.loadAccountDetail(account) }
+            }
+        }
     }
 
     private static let monthKeyFormatter: DateFormatter = {

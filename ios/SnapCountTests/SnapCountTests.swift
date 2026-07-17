@@ -706,6 +706,27 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNil(NativeAccountRecommendationEngine.recommendation(for: record, accounts: [account]))
     }
 
+    func testAccountDetailKeepsSectionErrorsSeparateFromEmptyData() {
+        let account = NativeAccount(
+            id: "wallet", name: "微信零钱", type: .walletBalance, institution: "微信", last4: "",
+            currency: "CNY", initialBalance: 0, currentBalance: 0, snapshotBalance: nil,
+            snapshotAt: nil, sourceRecordTable: "", sourceRecordId: "", billDay: nil,
+            paymentDueDay: nil, autoDebitAccountId: nil, autoConfirmRepayment: false,
+            gracePeriodDays: 0, lastReconciledAt: nil, isDefaultExpense: false,
+            isDefaultIncome: false, isArchived: false, sortOrder: 0
+        )
+        let detail = NativeAccountDetail(
+            account: account,
+            entries: [],
+            repaymentCycles: [],
+            payments: [],
+            loadErrors: [.entries: "网络不可用"]
+        )
+
+        XCTAssertEqual(detail.loadError(for: .entries), "网络不可用")
+        XCTAssertNil(detail.loadError(for: .payments))
+    }
+
 }
 
 private struct DashboardRepositoryStub: DashboardRepositoryProtocol {

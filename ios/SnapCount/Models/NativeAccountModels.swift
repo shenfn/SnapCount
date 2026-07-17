@@ -66,7 +66,22 @@ struct NativeAccount: Identifiable {
 struct NativeAccountEntry: Identifiable { let id:String;let accountId:String;let direction:String;let amount:Double;let entryType:String;let sourceTable:String;let sourceId:String;let occurredAt:String;let note:String;let isVoided:Bool;let voidedReason:String }
 struct NativeRepaymentCycle: Identifiable { let id:String;let accountId:String;let cycleMonth:String;let statementStartDate:String?;let statementEndDate:String?;let dueDate:String?;let statementAmount:Double;let paidAmount:Double;let remainingAmount:Double;let carriedOverAmount:Double;let originalStatementAmount:Double?;let minPaymentAmount:Double?;let refundAppliedAmount:Double;let status:NativeRepaymentStatus;let autoDebitAccountId:String?;let autoConfirmRepayment:Bool;let source:String;let evidenceRecordId:String?;let confidence:Double?;let note:String;let confirmedAt:String? }
 struct NativeLiabilityPayment: Identifiable { let id:String;let accountId:String;let statementId:String?;let debitAccountId:String?;let amount:Double;let overpaymentAmount:Double;let paidAt:String;let source:String;let evidenceRecordId:String?;let status:String;let note:String }
-struct NativeAccountDetail { let account:NativeAccount;let entries:[NativeAccountEntry];let repaymentCycles:[NativeRepaymentCycle];let payments:[NativeLiabilityPayment] }
+enum NativeAccountDetailSection: Hashable {
+    case entries
+    case repaymentCycles
+    case payments
+}
+struct NativeAccountDetail {
+    let account:NativeAccount
+    let entries:[NativeAccountEntry]
+    let repaymentCycles:[NativeRepaymentCycle]
+    let payments:[NativeLiabilityPayment]
+    let loadErrors:[NativeAccountDetailSection:String]
+
+    func loadError(for section: NativeAccountDetailSection) -> String? {
+        loadErrors[section]
+    }
+}
 
 struct NativeRepaymentCandidate: Identifiable {
     let cycle: NativeRepaymentCycle
