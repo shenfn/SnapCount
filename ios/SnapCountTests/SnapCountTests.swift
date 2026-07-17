@@ -688,6 +688,10 @@ private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
 
 
 private struct RecordRepositoryStub: RecordRepositoryProtocol {
+    func fetchGroups(monthKey: String, accessToken: String) async throws -> [NativeDayRecordGroup] {
+        []
+    }
+
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
         throw SupabaseRemoteError.requestFailed("unused")
     }

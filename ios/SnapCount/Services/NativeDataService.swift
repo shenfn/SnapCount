@@ -194,9 +194,10 @@ final class NativeDataService {
             throw SupabaseRemoteError.missingConfig
         }
 
-        async let transactionsResult = capture { try await self.fetchTransactions(accessToken: accessToken) }
-        async let incomesResult = capture { try await self.fetchIncomes(accessToken: accessToken) }
-        async let universalResult = capture { try await self.fetchUniversalRecords(accessToken: accessToken) }
+        let monthRange = try monthRange(for: localDateString(Date()).prefix(7).description)
+        async let transactionsResult = capture { try await self.fetchTransactions(in: monthRange, accessToken: accessToken) }
+        async let incomesResult = capture { try await self.fetchIncomes(in: monthRange, accessToken: accessToken) }
+        async let universalResult = capture { try await self.fetchUniversalRecords(in: monthRange, accessToken: accessToken) }
         async let stagingResult = capture { try await self.fetchStagingRecords(accessToken: accessToken) }
 
         let (transactions, incomes, universal, staging) = await (transactionsResult, incomesResult, universalResult, stagingResult)
@@ -290,43 +291,106 @@ final class NativeDataService {
         return snapshot.applyingSignedImageURLs(signedURLs)
     }
 
-    private func fetchTransactions(accessToken: String) async throws -> [TransactionRow] {
-        try await decoded(
+    func fetchRecordGroups(monthKey: String, accessToken: String) async throws -> [NativeDayRecordGroup] {
+        let range = try monthRange(for: monthKey)
+        async let transactions = fetchTransactions(in: range, accessToken: accessToken)
+        async let incomes = fetchIncomes(in: range, accessToken: accessToken)
+        async let universal = fetchUniversalRecords(in: range, accessToken: accessToken)
+        let (transactionRows, incomeRows, universalRows) = try await (transactions, incomes, universal)
+        return dayRecordGroups(
+            transactions: transactionRows,
+            incomes: incomeRows,
+            universal: universalRows,
+            staging: [],
+            monthPrefix: monthKey
+        )
+    }
+
+    private func fetchTransactions(in range: MonthRange, accessToken: String) async throws -> [TransactionRow] {
+        try await pagedRows(
             [TransactionRow].self,
             path: "rest/v1/transactions",
             queryItems: [
                 URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
-                URLQueryItem(name: "order", value: "created_at.desc"),
-                URLQueryItem(name: "limit", value: "80")
+                URLQueryItem(name: "transaction_date", value: "gte.\(range.startDate)"),
+                URLQueryItem(name: "transaction_date", value: "lte.\(range.endDate)"),
+                URLQueryItem(name: "order", value: "transaction_date.desc,transaction_time.desc.nullslast,created_at.desc")
             ],
             accessToken: accessToken
         )
     }
 
-    private func fetchIncomes(accessToken: String) async throws -> [IncomeRow] {
-        try await decoded(
+    private func fetchIncomes(in range: MonthRange, accessToken: String) async throws -> [IncomeRow] {
+        try await pagedRows(
             [IncomeRow].self,
             path: "rest/v1/income_records",
             queryItems: [
                 URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
-                URLQueryItem(name: "order", value: "created_at.desc"),
-                URLQueryItem(name: "limit", value: "40")
+                URLQueryItem(name: "income_date", value: "gte.\(range.startDate)"),
+                URLQueryItem(name: "income_date", value: "lte.\(range.endDate)"),
+                URLQueryItem(name: "order", value: "income_date.desc,created_at.desc")
             ],
             accessToken: accessToken
         )
     }
 
-    private func fetchUniversalRecords(accessToken: String) async throws -> [DataRecordRow] {
-        try await decoded(
+    private func fetchUniversalRecords(in range: MonthRange, accessToken: String) async throws -> [DataRecordRow] {
+        try await pagedRows(
             [DataRecordRow].self,
             path: "rest/v1/data_records",
             queryItems: [
                 URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
-                URLQueryItem(name: "order", value: "created_at.desc"),
-                URLQueryItem(name: "limit", value: "40")
+                URLQueryItem(name: "occurred_at", value: "gte.\(range.startTimestamp)"),
+                URLQueryItem(name: "occurred_at", value: "lte.\(range.endTimestamp)"),
+                URLQueryItem(name: "order", value: "occurred_at.desc.nullslast,created_at.desc")
             ],
             accessToken: accessToken
         )
+    }
+
+    private func pagedRows<Row: Decodable>(
+        _ type: [Row].Type,
+        path: String,
+        queryItems: [URLQueryItem],
+        accessToken: String,
+        pageSize: Int = 500
+    ) async throws -> [Row] {
+        var rows: [Row] = []
+        var offset = 0
+        while true {
+            let page = try await decoded(
+                type,
+                path: path,
+                queryItems: queryItems + [
+                    URLQueryItem(name: "limit", value: String(pageSize)),
+                    URLQueryItem(name: "offset", value: String(offset))
+                ],
+                accessToken: accessToken
+            )
+            rows.append(contentsOf: page)
+            guard page.count == pageSize else { return rows }
+            offset += pageSize
+        }
+    }
+
+    private struct MonthRange {
+        let startDate: String
+        let endDate: String
+        var startTimestamp: String { "\(startDate)T00:00:00+08:00" }
+        var endTimestamp: String { "\(endDate)T23:59:59+08:00" }
+    }
+
+    private func monthRange(for monthKey: String) throws -> MonthRange {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let firstDate = formatter.date(from: "\(monthKey)-01"),
+              let nextMonth = formatter.calendar.date(byAdding: .month, value: 1, to: firstDate),
+              let lastDate = formatter.calendar.date(byAdding: .day, value: -1, to: nextMonth) else {
+            throw SupabaseRemoteError.requestFailed("月份格式无效")
+        }
+        return MonthRange(startDate: formatter.string(from: firstDate), endDate: formatter.string(from: lastDate))
     }
 
     private func fetchStagingRecords(accessToken: String) async throws -> [StagingRow] {

@@ -31,6 +31,9 @@ final class AppState: ObservableObject {
     @Published var recordFeedbackState: NativeAIFeedbackReviewState = .idle
     @Published var isCreatingManualRecord = false
     @Published var manualRecordMessage: String?
+    @Published var recordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
+    @Published var recordMonthMessages: [String: String] = [:]
+    @Published var loadingRecordMonthKey: String?
     @Published var accounts: [NativeAccount] = []
     @Published var selectedAccountDetail: NativeAccountDetail?
     @Published var selectedAccountSourceSnapshot: NativeWalletSnapshot?
@@ -424,6 +427,36 @@ final class AppState: ObservableObject {
             return
         }
         await refreshDashboard()
+    }
+
+    func recordGroups(monthKey: String) -> [NativeDayRecordGroup] {
+        if monthKey == Self.currentMonthKey {
+            return dashboard.dayRecordGroups
+        }
+        return recordMonthGroups[monthKey] ?? []
+    }
+
+    func loadRecordMonth(_ monthKey: String, force: Bool = false) async {
+        guard monthKey != Self.currentMonthKey else {
+            if force { await refreshDashboard() }
+            return
+        }
+        guard force || recordMonthGroups[monthKey] == nil else { return }
+        guard loadingRecordMonthKey != monthKey else { return }
+        loadingRecordMonthKey = monthKey
+        recordMonthMessages.removeValue(forKey: monthKey)
+        defer {
+            if loadingRecordMonthKey == monthKey { loadingRecordMonthKey = nil }
+        }
+        do {
+            let session = try await validSession()
+            recordMonthGroups[monthKey] = try await recordRepository.fetchGroups(
+                monthKey: monthKey,
+                accessToken: session.accessToken
+            )
+        } catch {
+            recordMonthMessages[monthKey] = error.localizedDescription
+        }
     }
 
     func loadAccounts() async {
@@ -1485,6 +1518,9 @@ final class AppState: ObservableObject {
         inboxPath = NavigationPath()
         recordsPath = NavigationPath()
         selectedRecordDetail = nil
+        recordMonthGroups = [:]
+        recordMonthMessages = [:]
+        loadingRecordMonthKey = nil
         recordDetailCache.removeAll()
         activeRecordReference = nil
         prefetchingRecordReferences.removeAll()

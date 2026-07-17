@@ -7,8 +7,10 @@ struct RecordsView: View {
     @State private var showManualRecordSheet = false
 
     private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: selectedKind) }
-    private var groups: [NativeDayRecordGroup] { query.groups(from: appState.dashboard.dayRecordGroups) }
-    private var availableKinds: [NativeDayRecordKind] { query.availableKinds(from: appState.dashboard.dayRecordGroups) }
+    private var monthGroups: [NativeDayRecordGroup] { appState.recordGroups(monthKey: selectedMonthKey) }
+    private var groups: [NativeDayRecordGroup] { query.groups(from: monthGroups) }
+    private var availableKinds: [NativeDayRecordKind] { query.availableKinds(from: monthGroups) }
+    private var isLoadingMonth: Bool { appState.loadingRecordMonthKey == selectedMonthKey }
 
     var body: some View {
         ZStack {
@@ -29,7 +31,22 @@ struct RecordsView: View {
                     .pickerStyle(.segmented)
                 }
 
-                if groups.isEmpty {
+                if isLoadingMonth && monthGroups.isEmpty {
+                    ProgressView("正在加载本月记录…")
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                } else if let message = appState.recordMonthMessages[selectedMonthKey],
+                          selectedMonthKey != Self.currentMonthKey,
+                          monthGroups.isEmpty {
+                    ContentUnavailableView {
+                        Label("本月记录加载失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                    } description: {
+                        Text(message)
+                    } actions: {
+                        Button("重新加载") { Task { await appState.loadRecordMonth(selectedMonthKey, force: true) } }
+                    }
+                    .listRowBackground(Color.clear)
+                } else if groups.isEmpty {
                     ContentUnavailableView("本月还没有记录", systemImage: "doc.text.magnifyingglass", description: Text("截图识别或手动记录后，会按日期出现在这里。"))
                         .listRowBackground(Color.clear)
                 } else {
@@ -60,7 +77,7 @@ struct RecordsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .refreshable { await appState.refreshDashboard() }
+            .refreshable { await appState.loadRecordMonth(selectedMonthKey, force: true) }
         }
         .navigationTitle("记录")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
@@ -81,6 +98,9 @@ struct RecordsView: View {
         .onChange(of: availableKinds) { kinds in if !kinds.contains(selectedKind) { selectedKind = .all } }
         .task(id: prefetchKey) {
             appState.prefetchRecordDetails(groups.flatMap(\.records).map(\.reference))
+        }
+        .task(id: selectedMonthKey) {
+            await appState.loadRecordMonth(selectedMonthKey)
         }
         .sheet(isPresented: $showManualRecordSheet) {
             ManualRecordSheet()

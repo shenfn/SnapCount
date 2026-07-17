@@ -1,6 +1,7 @@
 import Foundation
 
 protocol RecordRepositoryProtocol {
+    func fetchGroups(monthKey: String, accessToken: String) async throws -> [NativeDayRecordGroup]
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail
     func create(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?, userId: String, accessToken: String) async throws -> String
     func saveDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String
@@ -18,6 +19,10 @@ final class RecordRepository: RecordRepositoryProtocol {
     ) {
         self.remoteService = remoteService
         self.remoteClient = remoteClient
+    }
+
+    func fetchGroups(monthKey: String, accessToken: String) async throws -> [NativeDayRecordGroup] {
+        try await remoteService.fetchRecordGroups(monthKey: monthKey, accessToken: accessToken)
     }
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
