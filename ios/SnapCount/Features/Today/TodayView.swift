@@ -11,6 +11,8 @@ struct TodayView: View {
     @State private var uploadMessageIsError = false
     @State private var showUploadResult = false
     @State private var showWidgetManager = false
+    @State private var showDatePicker = false
+    @State private var selectedDate = Date()
     @State private var widgetConfiguration = NativeHomeWidgetPreferences.load()
 
     private var enabledWidgets: [NativeHomeWidgetConfiguration] {
@@ -23,6 +25,37 @@ struct TodayView: View {
 
     private var pendingSummary: NativeHomePendingSummary {
         NativeHomePendingSummary.make(dashboard: appState.dashboard)
+    }
+
+    private var selectedDateKey: String {
+        Self.dateKeyFormatter.string(from: selectedDate)
+    }
+
+    private var selectedMonthKey: String {
+        String(selectedDateKey.prefix(7))
+    }
+
+    private var selectedMonthGroups: [NativeDayRecordGroup] {
+        appState.recordGroups(monthKey: selectedMonthKey)
+    }
+
+    private var selectedDayGroup: NativeDayRecordGroup? {
+        selectedMonthGroups.first { $0.dateKey == selectedDateKey }
+    }
+
+    private var selectedDaySummary: NativeDailySummary {
+        if let summary = appState.dashboard.dailySummaries.first(where: { $0.dateKey == selectedDateKey }) {
+            return summary
+        }
+        return summary(from: selectedDayGroup, dateKey: selectedDateKey)
+    }
+
+    private var selectedMonthSummaries: [NativeDailySummary] {
+        if selectedMonthKey == Self.currentMonthKey, !appState.dashboard.dailySummaries.isEmpty {
+            return appState.dashboard.dailySummaries
+        }
+        let summaries = selectedMonthGroups.map { summary(from: $0, dateKey: $0.dateKey) }
+        return summaries.isEmpty ? [selectedDaySummary] : summaries
     }
 
     var body: some View {
@@ -77,11 +110,34 @@ struct TodayView: View {
         .sheet(isPresented: $showWidgetManager) {
             HomeWidgetManagerSheet(configuration: $widgetConfiguration)
         }
+        .sheet(isPresented: $showDatePicker) {
+            NavigationStack {
+                DatePicker(
+                    "选择日期",
+                    selection: $selectedDate,
+                    in: ...Date(),
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+                .padding()
+                .navigationTitle("选择日期")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { showDatePicker = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
         .alert(uploadMessageIsError ? "上传失败" : "上传完成", isPresented: $showUploadResult) {
             Button("好", role: .cancel) {}
         } message: { Text(uploadMessage ?? "") }
         .task {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
+        }
+        .task(id: selectedMonthKey) {
+            await appState.loadRecordMonth(selectedMonthKey)
         }
     }
 
@@ -119,18 +175,18 @@ struct TodayView: View {
                 Text("个人数据平台")
                     .font(.system(size: 32, weight: .bold))
                     .foregroundStyle(JieziTheme.ink)
-                Text(Self.fullDateFormatter.string(from: Date()))
+                Text(Self.fullDateFormatter.string(from: selectedDate))
                     .font(.subheadline)
                     .foregroundStyle(JieziTheme.muted)
             }
             Spacer()
-            NavigationLink {
-                RecordsView()
+            Button {
+                showDatePicker = true
             } label: {
                 HStack(spacing: 7) {
-                    Text(Self.monthFormatter.string(from: Date()))
+                    Text(Self.monthFormatter.string(from: selectedDate))
                         .font(.headline)
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "calendar")
                         .font(.caption.bold())
                 }
                 .foregroundStyle(JieziTheme.ink)
@@ -140,7 +196,7 @@ struct TodayView: View {
                 .overlay(Capsule().stroke(JieziTheme.brand.opacity(0.08)))
             }
             .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.96))
-            .accessibilityLabel("查看\(Self.monthFormatter.string(from: Date()))记录")
+            .accessibilityLabel("选择首页日期")
         }
     }
 
@@ -260,18 +316,9 @@ struct TodayView: View {
     }
 
     private var todaySection: some View {
-        let todayKey = Self.dateKeyFormatter.string(from: Date())
-        let summary = appState.dashboard.dailySummaries.first(where: { $0.dateKey == todayKey })
-            ?? NativeDailySummary(
-                dateKey: todayKey,
-                expense: appState.dashboard.todayExpense,
-                income: appState.dashboard.todayIncome,
-                pendingCount: pendingSummary.total,
-                recordCount: appState.dashboard.dayRecordGroups.first(where: { $0.dateKey == todayKey })?.records.count ?? 0
-            )
         return VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "今日记录", subtitle: "按数据域查看今天")
-            dailyCard(summary)
+            sectionHeader(title: selectedDateKey == Self.todayKey ? "今日记录" : "当天记录", subtitle: "按数据域查看所选日期")
+            dailyCard(selectedDaySummary)
         }
     }
 
@@ -391,24 +438,28 @@ struct TodayView: View {
 
     private var dailySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "每日明细", subtitle: "按日期汇总本月所有数据") {
-                NavigationLink {
-                    InsightsView()
+            sectionHeader(title: "因缘流转", subtitle: "按日期汇总\(NativeMonthKey.title(selectedMonthKey))") {
+                Button {
+                    showDatePicker = true
                 } label: {
-                    Label("报告", systemImage: "chevron.right")
+                    Label("选日期", systemImage: "calendar")
                 }
             }
 
-            if appState.dashboard.dailySummaries.isEmpty {
-                dailyCard(NativeDailySummary(dateKey: Self.dateKeyFormatter.string(from: Date()), expense: 0, income: 0, pendingCount: appState.dashboard.pendingCount, recordCount: 0))
-            } else {
-                ForEach(appState.dashboard.dailySummaries) { dailyCard($0) }
-            }
+            JieziMonthSwitcher(
+                title: NativeMonthKey.title(selectedMonthKey),
+                selectionToken: selectedMonthKey,
+                canAdvance: selectedMonthKey < Self.currentMonthKey,
+                onPrevious: { shiftSelectedMonth(-1) },
+                onNext: { shiftSelectedMonth(1) }
+            )
+
+            ForEach(selectedMonthSummaries) { dailyCard($0) }
         }
     }
 
     private func dailyCard(_ day: NativeDailySummary) -> some View {
-        let group = appState.dashboard.dayRecordGroups.first { $0.dateKey == day.dateKey }
+        let group = appState.recordGroups(monthKey: String(day.dateKey.prefix(7))).first { $0.dateKey == day.dateKey }
         return NavigationLink(value: NativeDayDetailRoute(dateKey: day.dateKey, kind: .all)) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
@@ -469,6 +520,38 @@ struct TodayView: View {
         }
     }
 
+    private func summary(from group: NativeDayRecordGroup?, dateKey: String) -> NativeDailySummary {
+        let records = group?.records ?? []
+        let pendingCount = records.filter { $0.kind == .staging }.count
+        return NativeDailySummary(
+            dateKey: dateKey,
+            expense: amountTotal(in: records, kind: .expense),
+            income: amountTotal(in: records, kind: .income),
+            pendingCount: pendingCount,
+            recordCount: records.count
+        )
+    }
+
+    private func amountTotal(in records: [NativeDayRecord], kind: NativeDayRecordKind) -> Double {
+        records.filter { $0.kind == kind }.reduce(0) { partial, record in
+            partial + numericAmount(record.value)
+        }
+    }
+
+    private func numericAmount(_ value: String) -> Double {
+        let cleaned = value
+            .replacingOccurrences(of: "¥", with: "")
+            .replacingOccurrences(of: "+", with: "")
+            .replacingOccurrences(of: ",", with: "")
+        return Double(cleaned) ?? 0
+    }
+
+    private func shiftSelectedMonth(_ offset: Int) {
+        guard let shiftedMonth = NativeMonthKey.shifted(selectedMonthKey, by: offset),
+              let shiftedDate = Self.dateKeyFormatter.date(from: "\(shiftedMonth)-01") else { return }
+        selectedDate = shiftedDate
+    }
+
     private func pendingRow(_ title: String, count: Int, systemImage: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
@@ -523,6 +606,8 @@ struct TodayView: View {
     private static let weekdayFormatter: DateFormatter = {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "EEE"; return formatter
     }()
+    private static var todayKey: String { dateKeyFormatter.string(from: Date()) }
+    private static var currentMonthKey: String { NativeMonthKey.current() }
 }
 
 private struct HomeWidgetManagerSheet: View {

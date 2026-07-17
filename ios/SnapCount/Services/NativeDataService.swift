@@ -405,21 +405,35 @@ final class NativeDataService {
     private struct MonthRange {
         let startDate: String
         let endDate: String
-        var startTimestamp: String { "\(startDate)T00:00:00+08:00" }
-        var endTimestamp: String { "\(endDate)T23:59:59+08:00" }
+        let startTimestamp: String
+        let endTimestamp: String
     }
 
     private func monthRange(for monthKey: String) throws -> MonthRange {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         guard let firstDate = formatter.date(from: "\(monthKey)-01"),
-              let nextMonth = formatter.calendar.date(byAdding: .month, value: 1, to: firstDate),
-              let lastDate = formatter.calendar.date(byAdding: .day, value: -1, to: nextMonth) else {
+              let nextMonth = calendar.date(byAdding: .month, value: 1, to: firstDate),
+              let lastDate = calendar.date(byAdding: .day, value: -1, to: nextMonth) else {
             throw SupabaseRemoteError.requestFailed("月份格式无效")
         }
-        return MonthRange(startDate: formatter.string(from: firstDate), endDate: formatter.string(from: lastDate))
+        let endOfLastDate = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: lastDate) ?? lastDate
+        let timestampFormatter = DateFormatter()
+        timestampFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timestampFormatter.calendar = Calendar(identifier: .gregorian)
+        timestampFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        timestampFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        return MonthRange(
+            startDate: formatter.string(from: firstDate),
+            endDate: formatter.string(from: lastDate),
+            startTimestamp: timestampFormatter.string(from: firstDate),
+            endTimestamp: timestampFormatter.string(from: endOfLastDate)
+        )
     }
 
     private func fetchStagingRecords(accessToken: String) async throws -> [StagingRow] {

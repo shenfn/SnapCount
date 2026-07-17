@@ -480,11 +480,21 @@ private struct RecordImagePreview: View {
         CachedRemoteImage(url: url) { image in
             image
                 .resizable()
-                .scaledToFit()
+                .scaledToFill()
                 .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .frame(height: 156)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(alignment: .topLeading) {
+                    Label("原始图片", systemImage: "photo")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(10)
+                }
                 .overlay(alignment: .bottomTrailing) {
-                    Label("查看大图", systemImage: "arrow.up.left.and.arrow.down.right")
+                    Label("大图", systemImage: "arrow.up.left.and.arrow.down.right")
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -492,13 +502,13 @@ private struct RecordImagePreview: View {
                         .padding(10)
                 }
         } placeholder: {
-            ProgressView().frame(maxWidth: .infinity, minHeight: 180)
+            ProgressView().frame(maxWidth: .infinity, minHeight: 128)
         } failure: {
             Button(action: onRetry) {
                 Label("截图加载失败，点此重试", systemImage: "arrow.clockwise")
                     .font(.footnote)
                     .foregroundStyle(JieziTheme.brand)
-                    .frame(maxWidth: .infinity, minHeight: 140)
+                    .frame(maxWidth: .infinity, minHeight: 128)
             }
             .buttonStyle(.plain)
         }

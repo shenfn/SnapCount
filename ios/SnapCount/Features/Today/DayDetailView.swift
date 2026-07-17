@@ -10,8 +10,11 @@ struct DayDetailView: View {
         _selectedKind = State(initialValue: route.kind)
     }
 
-    private var group: NativeDayRecordGroup? { appState.dashboard.dayRecordGroups.first { $0.dateKey == route.dateKey } }
+    private var group: NativeDayRecordGroup? {
+        appState.recordGroups(monthKey: monthKey).first { $0.dateKey == route.dateKey }
+    }
     private var records: [NativeDayRecord] { group?.records(for: selectedKind) ?? [] }
+    private var monthKey: String { String(route.dateKey.prefix(7)) }
 
     var body: some View {
         ZStack {
@@ -34,6 +37,9 @@ struct DayDetailView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: monthKey) {
+            await appState.loadRecordMonth(monthKey)
+        }
     }
 
     @ViewBuilder
