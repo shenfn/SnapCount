@@ -397,13 +397,33 @@ final class SnapCountTests: XCTestCase {
     }
 
     func testDomainPresentationUsesUniversalDomainRecords() {
-        let definition = NativeDomainDefinition(id: "sport", name: "运动记录", description: "", icon: "🏃", isSystem: true, schema: [:], display: [:], recordCount: 1)
-        let record = NativeDayRecord(id: "sport-1", reference: "data-1", dateKey: "2026-07-12", kind: .sport, domainKey: "sport", title: "骑行", subtitle: "30 分钟", value: "", timeLabel: nil, systemImage: "figure.run")
+        let definition = NativeDomainDefinition(
+            id: "sport", name: "运动记录", description: "", icon: "🏃", isSystem: true,
+            schema: [
+                "facts": AnyCodable([["key": "duration_minutes", "label": "运动时长", "unit": "分钟"]]),
+                "dimensions": AnyCodable([["key": "sport_type", "label": "运动类型"]])
+            ],
+            display: ["primary_fact": AnyCodable("duration_minutes"), "primary_dimension": AnyCodable("sport_type")],
+            recordCount: 1
+        )
+        let reference = "data/1"
+        let record = NativeDayRecord(id: "sport-1", reference: reference, dateKey: "2026-07-12", kind: .sport, domainKey: "sport", title: "骑行", subtitle: "30 分钟", value: "", timeLabel: nil, systemImage: "figure.run")
         var dashboard = DashboardSnapshot()
         dashboard.dayRecordGroups = [NativeDayRecordGroup(dateKey: "2026-07-12", records: [record])]
+        dashboard.recordDetails[reference] = NativeRecordDetail(
+            id: reference, rawId: "1", kind: "data", title: "骑行", subtitle: "2026-07-12",
+            value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: nil, merchantName: nil, platform: nil, category: "sport", paymentMethod: nil,
+            recordDate: "2026-07-12", note: nil, companionMessage: nil, accountId: nil,
+            systemImage: "figure.run", payload: ["duration_minutes": AnyCodable(60), "sport_type": AnyCodable("骑行")],
+            domainKey: "sport"
+        )
         let presentation = NativeDomainPresentationAdapter.presentation(for: definition, dashboard: dashboard)
-        XCTAssertEqual(presentation.recentRecords.map(\.reference), ["data-1"])
-        XCTAssertEqual(presentation.metrics.first?.value, "1")
+        XCTAssertEqual(presentation.recentRecords.map(\.reference), [reference])
+        XCTAssertEqual(presentation.metrics.first?.label, "本月总运动时长")
+        XCTAssertEqual(presentation.metrics.first?.value, "1 小时 0 分钟")
+        XCTAssertEqual(presentation.distribution.first?.name, "骑行")
+        XCTAssertEqual(presentation.recentRecords.first?.value, "1 小时 0 分钟")
     }
 
     func testUnifiedInboxItemDistinguishesPendingExpenseAndStaging() {
