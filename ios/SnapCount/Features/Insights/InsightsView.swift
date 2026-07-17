@@ -62,7 +62,9 @@ struct InsightsView: View {
                                 summarySection(snapshot)
                                 maturitySection(snapshot)
                                 aiInsightSection(snapshot)
+                                sleepFoodChart(snapshot)
                                 financeChart(snapshot)
+                                foodCaloriesChart(snapshot)
                                 dailySection(snapshot)
                             }
                         } else if let message = appState.insightsMessage {
@@ -313,6 +315,110 @@ struct InsightsView: View {
                     }
                 }
                 .frame(width: max(CGFloat(snapshot.rows.count) * 36, 340), height: 220)
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func sleepFoodChart(_ snapshot: NativeInsightSnapshot) -> some View {
+        let rows = snapshot.rows.filter { $0.sleepMinutes > 0 || $0.foodCalories > 0 }
+        let maxSleep = rows.map(\.sleepMinutes).max() ?? 0
+        let maxFood = rows.map(\.foodCalories).max() ?? 0
+        let overlapDays = rows.filter { $0.sleepMinutes > 0 && $0.foodCalories > 0 }.count
+
+        VStack(alignment: .leading, spacing: 10) {
+            Text("睡眠时长 × 饮食热量").font(.title3.bold())
+            if rows.isEmpty {
+                Text("等睡眠和饮食都有记录后，这里会显示两种节奏的变化。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 100, alignment: .leading)
+            } else {
+                Chart {
+                    ForEach(rows) { row in
+                        LineMark(
+                            x: .value("日期", row.date),
+                            y: .value("相对睡眠", maxSleep > 0 ? row.sleepMinutes / maxSleep : 0)
+                        )
+                        .foregroundStyle(by: .value("系列", "睡眠"))
+                        .symbol(by: .value("系列", "睡眠"))
+
+                        LineMark(
+                            x: .value("日期", row.date),
+                            y: .value("相对饮食", maxFood > 0 ? row.foodCalories / maxFood : 0)
+                        )
+                        .foregroundStyle(by: .value("系列", "饮食"))
+                        .symbol(by: .value("系列", "饮食"))
+                    }
+                }
+                .chartForegroundStyleScale([
+                    "睡眠": JieziTheme.brand,
+                    "饮食": JieziTheme.gold
+                ])
+                .chartYScale(domain: 0...1)
+                .chartYAxis {
+                    AxisMarks(values: [0, 0.5, 1]) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let ratio = value.as(Double.self) {
+                                Text("\(Int(ratio * 100))%")
+                            }
+                        }
+                    }
+                }
+                .frame(height: 220)
+
+                Text(overlapDays > 0
+                    ? "\(overlapDays) 天同时有睡眠和饮食数据；两条线按各自峰值归一化，仅用于观察同向变化。"
+                    : "两类数据还没有落在同一天，暂时不能观察联动。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func foodCaloriesChart(_ snapshot: NativeInsightSnapshot) -> some View {
+        let rows = snapshot.rows.filter { $0.foodCalories > 0 }
+        VStack(alignment: .leading, spacing: 10) {
+            Text("饮食热量趋势").font(.title3.bold())
+            if rows.isEmpty {
+                Text("记录 3 餐以上后，这里会逐步形成热量曲线。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 90, alignment: .leading)
+            } else {
+                Chart(rows) { row in
+                    AreaMark(
+                        x: .value("日期", row.date),
+                        y: .value("热量", row.foodCalories)
+                    )
+                    .foregroundStyle(JieziTheme.gold.opacity(0.16))
+                    LineMark(
+                        x: .value("日期", row.date),
+                        y: .value("热量", row.foodCalories)
+                    )
+                    .foregroundStyle(JieziTheme.gold)
+                    .symbol(.circle)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let calories = value.as(Double.self) {
+                                Text("\(Int(calories))")
+                            }
+                        }
+                    }
+                }
+                .frame(height: 200)
+                Text("接入运动消耗后可继续演化为热量平衡。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(16)
