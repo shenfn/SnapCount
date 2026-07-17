@@ -287,13 +287,10 @@ final class NativeDataService {
             staging: stagingRows
         )
 
-        let visibleTransactionRows = Array(txRows.prefix(8))
-        let visibleIncomeRows = Array(incomeRows.prefix(4))
-        let visibleUniversalRows = Array(universalRows.prefix(6))
         snapshot.recordDetails = cachedRecordDetails(
-            transactions: visibleTransactionRows,
-            incomes: visibleIncomeRows,
-            universal: visibleUniversalRows,
+            transactions: txRows,
+            incomes: incomeRows,
+            universal: universalRows,
             signedURLs: [:]
         )
         snapshot.stagingRecords = stagingRows
@@ -303,25 +300,38 @@ final class NativeDataService {
     }
 
     func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot {
-        let paths = snapshot.recordDetails.values.compactMap(\.imagePath)
+        let visibleReferences = Set(snapshot.recentRecords.map { NativeRecordReference($0.id).canonicalValue })
+        let paths = snapshot.recordDetails.compactMap { reference, detail in
+            visibleReferences.contains(NativeRecordReference(reference).canonicalValue)
+                ? detail.imagePath
+                : nil
+        }
             + snapshot.stagingRecords.compactMap(\.imagePath)
         guard !paths.isEmpty else { return snapshot }
         let signedURLs = try await signedImageURLMap(paths: paths, accessToken: accessToken)
-        return snapshot.applyingSignedImageURLs(signedURLs)
+        return snapshot.applyingSignedImageURLs(signedURLs, markMissingAsFailure: false)
     }
 
-    func fetchRecordGroups(monthKey: String, accessToken: String) async throws -> [NativeDayRecordGroup] {
+    func fetchRecordMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
         let range = try monthRange(for: monthKey)
         async let transactions = fetchTransactions(in: range, accessToken: accessToken)
         async let incomes = fetchIncomes(in: range, accessToken: accessToken)
         async let universal = fetchUniversalRecords(in: range, accessToken: accessToken)
         let (transactionRows, incomeRows, universalRows) = try await (transactions, incomes, universal)
-        return dayRecordGroups(
-            transactions: transactionRows,
-            incomes: incomeRows,
-            universal: universalRows,
-            staging: [],
-            monthPrefix: monthKey
+        return NativeRecordMonthSnapshot(
+            groups: dayRecordGroups(
+                transactions: transactionRows,
+                incomes: incomeRows,
+                universal: universalRows,
+                staging: [],
+                monthPrefix: monthKey
+            ),
+            details: cachedRecordDetails(
+                transactions: transactionRows,
+                incomes: incomeRows,
+                universal: universalRows,
+                signedURLs: [:]
+            )
         )
     }
 

@@ -1,5 +1,10 @@
 import Foundation
 
+struct NativeRecordMonthSnapshot {
+    let groups: [NativeDayRecordGroup]
+    let details: [String: NativeRecordDetail]
+}
+
 struct NativeRecordQuery {
     var monthKey: String
     var kind: NativeDayRecordKind = .all

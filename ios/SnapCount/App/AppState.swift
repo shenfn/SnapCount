@@ -451,10 +451,14 @@ final class AppState: ObservableObject {
         }
         do {
             let session = try await validSession()
-            recordMonthGroups[monthKey] = try await recordRepository.fetchGroups(
+            let month = try await recordRepository.fetchMonth(
                 monthKey: monthKey,
                 accessToken: session.accessToken
             )
+            recordMonthGroups[monthKey] = month.groups
+            for (reference, detail) in month.details {
+                recordDetailCache[NativeRecordReference(reference).canonicalValue] = detail
+            }
         } catch {
             recordMonthMessages[monthKey] = error.localizedDescription
         }
@@ -960,7 +964,11 @@ final class AppState: ObservableObject {
     func prefetchRecordDetails(_ references: [String]) {
         let missing = references
             .map { NativeRecordReference($0).canonicalValue }
-            .filter { recordDetailCache[$0] == nil && !prefetchingRecordReferences.contains($0) }
+            .filter { reference in
+                guard !prefetchingRecordReferences.contains(reference) else { return false }
+                guard let cached = recordDetailCache[reference] else { return true }
+                return cached.imagePath != nil && cached.imageURL == nil && !cached.imageLoadError
+            }
             .prefix(4)
         for reference in missing {
             Task { await prefetchRecordDetail(reference: reference) }
@@ -968,8 +976,11 @@ final class AppState: ObservableObject {
     }
 
     private func prefetchRecordDetail(reference: String) async {
-        guard recordDetailCache[reference] == nil,
-              !prefetchingRecordReferences.contains(reference) else { return }
+        if let cached = recordDetailCache[reference],
+           cached.imagePath == nil || cached.imageURL != nil || cached.imageLoadError {
+            return
+        }
+        guard !prefetchingRecordReferences.contains(reference) else { return }
         let generation = userStateGeneration
         prefetchingRecordReferences.insert(reference)
         defer { prefetchingRecordReferences.remove(reference) }
@@ -1138,7 +1149,9 @@ final class AppState: ObservableObject {
         }
         if !force, let cached = recordDetailCache[canonicalReference] {
             selectedRecordDetail = cached
-            return
+            if cached.imagePath == nil || cached.imageURL != nil || cached.imageLoadError {
+                return
+            }
         }
         if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
             selectedRecordDetail = nil

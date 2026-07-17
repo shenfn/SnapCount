@@ -768,8 +768,8 @@ private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
 
 
 private struct RecordRepositoryStub: RecordRepositoryProtocol {
-    func fetchGroups(monthKey: String, accessToken: String) async throws -> [NativeDayRecordGroup] {
-        []
+    func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
+        NativeRecordMonthSnapshot(groups: [], details: [:])
     }
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
