@@ -13,7 +13,7 @@ final class SnapCountTests: XCTestCase {
         let state = AppState()
         state.selectedTab = .records
         state.dashboard = DashboardSnapshot(todayCount: 3)
-        state.todayPath = [NativeDayDetailRoute(dateKey: "2026-07-17", kind: .all)]
+        state.todayPath.append(NativeDayDetailRoute(dateKey: "2026-07-17", kind: .all))
         state.inboxPath.append(NativeInboxRoute.staging(recordId: "staging-1"))
         state.recordsPath.append(NativeRecordRoute(reference: "expense/record-1"))
         state.selectedRecordDetail = NativeRecordDetail(
@@ -81,6 +81,13 @@ final class SnapCountTests: XCTestCase {
 
         XCTAssertNil(reused.recordDetails[detail.id]?.imageURL)
         XCTAssertEqual(reused.recordDetails[detail.id]?.imageLoadError, false)
+    }
+
+    func testMonthKeyShiftHandlesYearBoundary() {
+        XCTAssertEqual(NativeMonthKey.shifted("2026-01", by: -1), "2025-12")
+        XCTAssertEqual(NativeMonthKey.shifted("2025-12", by: 1), "2026-01")
+        XCTAssertEqual(NativeMonthKey.title("2026-07"), "2026年7月")
+        XCTAssertNil(NativeMonthKey.shifted("2026-13", by: 1))
     }
 
     func testDashboardPartialFailurePreservesFailedSectionOnly() {

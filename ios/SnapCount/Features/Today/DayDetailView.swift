@@ -26,14 +26,25 @@ struct DayDetailView: View {
                     }
                     Text("当天明细").font(.title3.bold())
                     if records.isEmpty { ContentUnavailableView("这一天还没有记录", systemImage: "calendar", description: Text("有截图、手动记录或钱包快照后，会自动出现在这里。")) }
-                    ForEach(records) { record in
-                        Button { appState.openDayRecord(record) } label: { row(record) }.buttonStyle(.plain)
-                    }
+                    ForEach(records) { recordLink(record) }
                 }.padding(16)
             }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder
+    private func recordLink(_ record: NativeDayRecord) -> some View {
+        if record.kind == .staging || record.reference.hasPrefix("staging-") {
+            Button { appState.openDayRecord(record) } label: { row(record) }
+                .buttonStyle(JieziPressableButtonStyle())
+        } else {
+            NavigationLink(value: NativeRecordRoute(reference: record.reference)) {
+                row(record)
+            }
+            .buttonStyle(JieziPressableButtonStyle())
+        }
     }
 
     private var summary: some View {

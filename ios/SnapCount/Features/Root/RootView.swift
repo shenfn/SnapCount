@@ -23,6 +23,9 @@ struct RootView: View {
                     .navigationDestination(for: NativeDayDetailRoute.self) { route in
                         DayDetailView(route: route)
                     }
+                    .navigationDestination(for: NativeRecordRoute.self) { route in
+                        RecordDetailView(reference: route.reference)
+                    }
             }
             .tabItem { Label(AppTab.today.title, systemImage: AppTab.today.systemImage) }
             .tag(AppTab.today)

@@ -124,12 +124,23 @@ struct TodayView: View {
                     .foregroundStyle(JieziTheme.muted)
             }
             Spacer()
-            Text(Self.monthFormatter.string(from: Date()))
-                .font(.headline)
+            NavigationLink {
+                RecordsView()
+            } label: {
+                HStack(spacing: 7) {
+                    Text(Self.monthFormatter.string(from: Date()))
+                        .font(.headline)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                }
+                .foregroundStyle(JieziTheme.ink)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .frame(minHeight: 44)
                 .background(.white.opacity(0.82), in: Capsule())
                 .overlay(Capsule().stroke(JieziTheme.brand.opacity(0.08)))
+            }
+            .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.96))
+            .accessibilityLabel("查看\(Self.monthFormatter.string(from: Date()))记录")
         }
     }
 
@@ -398,8 +409,8 @@ struct TodayView: View {
 
     private func dailyCard(_ day: NativeDailySummary) -> some View {
         let group = appState.dashboard.dayRecordGroups.first { $0.dateKey == day.dateKey }
-        return VStack(alignment: .leading, spacing: 14) {
-            NavigationLink(value: NativeDayDetailRoute(dateKey: day.dateKey, kind: .all)) {
+        return NavigationLink(value: NativeDayDetailRoute(dateKey: day.dateKey, kind: .all)) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text(String(day.dateKey.suffix(5)))
                         .font(.system(size: 26, weight: .black, design: .rounded))
@@ -412,47 +423,41 @@ struct TodayView: View {
                         .font(.caption.bold())
                         .foregroundStyle(JieziTheme.muted)
                 }
-            }
-            .buttonStyle(.plain)
-
-            Divider().overlay(JieziTheme.muted.opacity(0.2))
-            if day.expense > 0 {
-                daySummaryLink(dateKey: day.dateKey, kind: .expense, color: JieziTheme.coral, title: "支出", value: money(day.expense))
-            }
-            if day.income > 0 {
-                daySummaryLink(dateKey: day.dateKey, kind: .income, color: JieziTheme.brand, title: "收入", value: money(day.income, signed: true))
-            }
-            ForEach(group?.availableKinds.filter { ![.all, .expense, .income, .staging].contains($0) } ?? []) { kind in
-                daySummaryLink(dateKey: day.dateKey, kind: kind, color: JieziTheme.mint, title: kind.title, value: "\(group?.records(for: kind).count ?? 0)条")
-            }
-            if day.pendingCount > 0 {
-                Button {
-                    appState.selectedTab = .inbox
-                } label: {
-                    summaryRow(color: JieziTheme.gold, title: "待处理", value: "\(day.pendingCount)条")
+                Divider().overlay(JieziTheme.muted.opacity(0.2))
+                if day.expense > 0 {
+                    daySummaryRow(color: JieziTheme.coral, title: "支出", value: money(day.expense))
                 }
-                .buttonStyle(.plain)
+                if day.income > 0 {
+                    daySummaryRow(color: JieziTheme.brand, title: "收入", value: money(day.income, signed: true))
+                }
+                ForEach(group?.availableKinds.filter { ![.all, .expense, .income, .staging].contains($0) } ?? []) { kind in
+                    daySummaryRow(color: JieziTheme.mint, title: kind.title, value: "\(group?.records(for: kind).count ?? 0)条")
+                }
+                if day.pendingCount > 0 {
+                    daySummaryRow(color: JieziTheme.gold, title: "待处理", value: "\(day.pendingCount)条")
+                }
+                if day.recordCount == 0 && day.pendingCount == 0 {
+                    summaryRow(color: JieziTheme.muted, title: "记录", value: "0条")
+                }
             }
-            if day.recordCount == 0 && day.pendingCount == 0 {
-                summaryRow(color: JieziTheme.muted, title: "记录", value: "0条")
-            }
+            .foregroundStyle(JieziTheme.ink)
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 24).stroke(JieziTheme.brand.opacity(0.06)))
         }
-        .foregroundStyle(JieziTheme.ink)
-        .padding(20)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24).stroke(JieziTheme.brand.opacity(0.06)))
+        .buttonStyle(JieziPressableButtonStyle())
+        .accessibilityHint("打开当天全部记录")
     }
 
-    private func daySummaryLink(dateKey: String, kind: NativeDayRecordKind, color: Color, title: String, value: String) -> some View {
-        NavigationLink(value: NativeDayDetailRoute(dateKey: dateKey, kind: kind)) {
-            HStack {
-                summaryRow(color: color, title: title, value: value)
-                Image(systemName: "chevron.right")
-                    .font(.caption2.bold())
-                    .foregroundStyle(JieziTheme.muted)
-            }
+    private func daySummaryRow(color: Color, title: String, value: String) -> some View {
+        HStack {
+            summaryRow(color: color, title: title, value: value)
+            Image(systemName: "chevron.right")
+                .font(.caption2.bold())
+                .foregroundStyle(JieziTheme.muted)
         }
-        .buttonStyle(.plain)
     }
 
     private func summaryRow(color: Color, title: String, value: String) -> some View {

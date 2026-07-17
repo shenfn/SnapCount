@@ -109,14 +109,13 @@ struct UnboundRecordsView: View {
     }
 
     private var monthPicker: some View {
-        HStack {
-            Button { shiftMonth(-1) } label: { Image(systemName: "chevron.left") }
-            Spacer()
-            Text(monthTitle).font(.headline.monospacedDigit())
-            Spacer()
-            Button { shiftMonth(1) } label: { Image(systemName: "chevron.right") }
-                .disabled(selectedMonthKey >= Self.currentMonthKey)
-        }
+        JieziMonthSwitcher(
+            title: monthTitle,
+            selectionToken: selectedMonthKey,
+            canAdvance: selectedMonthKey < Self.currentMonthKey,
+            onPrevious: { shiftMonth(-1) },
+            onNext: { shiftMonth(1) }
+        )
     }
 
     private func unboundRow(_ record: NativeUnboundRecord) -> some View {
@@ -186,24 +185,15 @@ struct UnboundRecordsView: View {
     }
 
     private var monthTitle: String {
-        let parts = selectedMonthKey.split(separator: "-")
-        guard parts.count == 2 else { return selectedMonthKey }
-        return "\(parts[0])年\(Int(parts[1]) ?? 0)月"
+        NativeMonthKey.title(selectedMonthKey)
     }
 
     private func shiftMonth(_ offset: Int) {
-        guard let date = Self.monthFormatter.date(from: selectedMonthKey),
-              let shifted = Calendar(identifier: .gregorian).date(byAdding: .month, value: offset, to: date) else { return }
-        selectedMonthKey = Self.monthFormatter.string(from: shifted)
+        guard let shifted = NativeMonthKey.shifted(selectedMonthKey, by: offset) else { return }
+        selectedMonthKey = shifted
     }
 
-    private static let monthFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM"
-        return formatter
-    }()
-    private static var currentMonthKey: String { monthFormatter.string(from: Date()) }
+    private static var currentMonthKey: String { NativeMonthKey.current() }
 }
 
 private enum UnboundRecordFilter: String, CaseIterable, Identifiable {

@@ -21,7 +21,7 @@ final class AppState: ObservableObject {
     @Published var notificationPermissionStatusText = "检查中"
     @Published var shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
     @Published var shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
-    @Published var todayPath: [NativeDayDetailRoute] = []
+    @Published var todayPath = NavigationPath()
     @Published var inboxPath = NavigationPath()
     @Published var recordsPath = NavigationPath()
     @Published var selectedRecordDetail: NativeRecordDetail?
@@ -1550,7 +1550,7 @@ final class AppState: ObservableObject {
         dashboardSupplementTask = nil
         isLoadingDashboard = false
         dashboard = DashboardSnapshot()
-        todayPath = []
+        todayPath = NavigationPath()
         inboxPath = NavigationPath()
         recordsPath = NavigationPath()
         selectedRecordDetail = nil

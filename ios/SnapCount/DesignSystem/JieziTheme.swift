@@ -132,6 +132,52 @@ struct PrimaryActionButton: View {
     }
 }
 
+struct JieziPressableButtonStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.985
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed ? pressedScale : 1)
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+struct JieziMonthSwitcher: View {
+    let title: String
+    let selectionToken: String
+    let canAdvance: Bool
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            monthButton(systemImage: "chevron.left", enabled: true, action: onPrevious)
+            Spacer(minLength: 12)
+            Text(title)
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(JieziTheme.ink)
+            Spacer(minLength: 12)
+            monthButton(systemImage: "chevron.right", enabled: canAdvance, action: onNext)
+        }
+        .sensoryFeedback(.selection, trigger: selectionToken)
+    }
+
+    private func monthButton(systemImage: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.subheadline.bold())
+                .frame(width: 44, height: 44)
+                .foregroundStyle(enabled ? JieziTheme.brand : JieziTheme.muted.opacity(0.3))
+                .background(.white.opacity(enabled ? 0.82 : 0.4), in: Circle())
+                .overlay(Circle().stroke(JieziTheme.brand.opacity(enabled ? 0.1 : 0.04)))
+        }
+        .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.9))
+        .disabled(!enabled)
+    }
+}
+
 extension Color {
     init(hex: String) {
         let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
