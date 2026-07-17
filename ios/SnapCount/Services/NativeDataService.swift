@@ -1,5 +1,12 @@
 import Foundation
 
+enum DashboardDataSection: Hashable {
+    case expense
+    case income
+    case universal
+    case staging
+}
+
 struct DashboardSnapshot {
     var todayCount = 0
     var pendingCount = 0
@@ -11,6 +18,7 @@ struct DashboardSnapshot {
     var dailySummaries: [NativeDailySummary] = []
     var dayRecordGroups: [NativeDayRecordGroup] = []
     var loadWarnings: [String] = []
+    var unavailableSections: Set<DashboardDataSection> = []
     var recordDetails: [String: NativeRecordDetail] = [:]
     var recentRecords: [NativeRecordSummary] = []
     var stagingRecords: [NativeStagingRecord] = []
@@ -213,7 +221,18 @@ final class NativeDataService {
         let monthPrefix = String(today.prefix(7))
 
         var snapshot = DashboardSnapshot()
-        snapshot.loadWarnings = errors.map(\.localizedDescription)
+        snapshot.unavailableSections = Set([
+            transactions.error == nil ? nil : DashboardDataSection.expense,
+            incomes.error == nil ? nil : DashboardDataSection.income,
+            universal.error == nil ? nil : DashboardDataSection.universal,
+            staging.error == nil ? nil : DashboardDataSection.staging
+        ].compactMap { $0 })
+        snapshot.loadWarnings = [
+            transactions.error.map { "消费数据暂未同步：\($0.localizedDescription)" },
+            incomes.error.map { "收入数据暂未同步：\($0.localizedDescription)" },
+            universal.error.map { "通用数据暂未同步：\($0.localizedDescription)" },
+            staging.error.map { "中转站暂未同步：\($0.localizedDescription)" }
+        ].compactMap { $0 }
         snapshot.todayCount =
             txRows.filter { $0.transactionDate == today }.count +
             incomeRows.filter { $0.incomeDate == today }.count +

@@ -83,6 +83,40 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(reused.recordDetails[detail.id]?.imageLoadError, false)
     }
 
+    func testDashboardPartialFailurePreservesFailedSectionOnly() {
+        let oldExpense = NativeDayRecord(
+            id: "expense-old", reference: "expense/old", dateKey: "2026-07-17",
+            kind: .expense, domainKey: "expense", title: "旧消费", subtitle: "",
+            value: "¥10.00", timeLabel: "08:00", systemImage: "creditcard"
+        )
+        let oldIncome = NativeDayRecord(
+            id: "income-old", reference: "income/old", dateKey: "2026-07-17",
+            kind: .income, domainKey: "income", title: "旧收入", subtitle: "",
+            value: "+¥20.00", timeLabel: nil, systemImage: "arrow.down.circle"
+        )
+        var previous = DashboardSnapshot(monthExpense: 10, monthIncome: 20)
+        previous.dayRecordGroups = [NativeDayRecordGroup(dateKey: "2026-07-17", records: [oldExpense, oldIncome])]
+        previous.dailySummaries = [NativeDailySummary(dateKey: "2026-07-17", expense: 10, income: 20, pendingCount: 0, recordCount: 2)]
+
+        let newIncome = NativeDayRecord(
+            id: "income-new", reference: "income/new", dateKey: "2026-07-17",
+            kind: .income, domainKey: "income", title: "新收入", subtitle: "",
+            value: "+¥30.00", timeLabel: nil, systemImage: "arrow.down.circle"
+        )
+        var partial = DashboardSnapshot(monthIncome: 30)
+        partial.dayRecordGroups = [NativeDayRecordGroup(dateKey: "2026-07-17", records: [newIncome])]
+        partial.dailySummaries = [NativeDailySummary(dateKey: "2026-07-17", expense: 0, income: 30, pendingCount: 0, recordCount: 1)]
+        partial.unavailableSections = [.expense]
+
+        let merged = partial.mergingUnavailableSections(from: previous)
+
+        XCTAssertEqual(merged.monthExpense, 10)
+        XCTAssertEqual(merged.monthIncome, 30)
+        XCTAssertEqual(Set(merged.dayRecordGroups.flatMap(\.records).map(\.id)), ["expense-old", "income-new"])
+        XCTAssertEqual(merged.dailySummaries.first?.expense, 10)
+        XCTAssertEqual(merged.dailySummaries.first?.income, 30)
+    }
+
     func testCameraUploadUsesSmallerPhotoPreset() throws {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1_800, height: 1_200))
         let source = renderer.image { context in

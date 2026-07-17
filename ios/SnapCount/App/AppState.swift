@@ -296,6 +296,7 @@ final class AppState: ObservableObject {
     }
 
     private func preparedCoreSnapshot(_ snapshot: DashboardSnapshot) -> DashboardSnapshot {
+        let mergedSnapshot = snapshot.mergingUnavailableSections(from: dashboard)
         var cachedImageURLs: [String: URL] = [:]
         for detail in dashboard.recordDetails.values {
             if let path = detail.imagePath, let url = detail.imageURL { cachedImageURLs[path] = url }
@@ -307,7 +308,7 @@ final class AppState: ObservableObject {
             if let path = detail.imagePath, let url = detail.imageURL { cachedImageURLs[path] = url }
         }
 
-        var prepared = snapshot.applyingSignedImageURLs(
+        var prepared = mergedSnapshot.applyingSignedImageURLs(
             cachedImageURLs,
             markMissingAsFailure: false
         )
