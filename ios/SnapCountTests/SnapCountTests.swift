@@ -222,6 +222,31 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(dish.estimatedGrams, 150)
     }
 
+    func testRecordDetailUsesCurrentPWAReadingAndSportFields() {
+        let reading = NativeRecordDetail(
+            id: "data/reading-1", rawId: "reading-1", kind: "data", title: "原则", subtitle: "2026-07-17",
+            value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: nil, merchantName: nil, platform: nil, category: "reading", paymentMethod: nil,
+            recordDate: "2026-07-17", note: nil, companionMessage: nil, accountId: nil,
+            systemImage: "book", payload: ["reading_minutes": AnyCodable(45), "pages": AnyCodable(18)],
+            domainKey: "reading"
+        )
+        let sport = NativeRecordDetail(
+            id: "data/sport-1", rawId: "sport-1", kind: "data", title: "骑行", subtitle: "2026-07-17",
+            value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: nil, merchantName: nil, platform: nil, category: "sport", paymentMethod: nil,
+            recordDate: "2026-07-17", note: nil, companionMessage: nil, accountId: nil,
+            systemImage: "figure.run", payload: ["duration_minutes": AnyCodable(30), "calories": AnyCodable(260)],
+            domainKey: "sport"
+        )
+
+        let readingRows = NativeRecordDetailPresentationAdapter.extractedRows(for: reading)
+        let sportRows = NativeRecordDetailPresentationAdapter.extractedRows(for: sport)
+        XCTAssertEqual(readingRows.first(where: { $0.label == "阅读时长" })?.value, "45 分钟")
+        XCTAssertEqual(readingRows.first(where: { $0.label == "阅读页数" })?.value, "18 页")
+        XCTAssertEqual(sportRows.first(where: { $0.label == "消耗热量" })?.value, "260 千卡")
+    }
+
     func testRecordDetailReusesPWAAccountRecommendation() throws {
         let account = NativeAccount(
             id: "wechat-1", name: "微信零钱", type: .walletBalance, institution: "微信", last4: "", currency: "CNY",

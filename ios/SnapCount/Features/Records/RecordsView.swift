@@ -174,7 +174,10 @@ struct RecordDetailView: View {
 
                         detailSection(
                             title: "抽取字段",
-                            rows: NativeRecordDetailPresentationAdapter.extractedRows(for: detail)
+                            rows: NativeRecordDetailPresentationAdapter.extractedRows(
+                                for: detail,
+                                domain: appState.dashboard.domains.first { $0.id == detail.domainKey }
+                            )
                         )
 
                         if let binding = NativeRecordDetailPresentationAdapter.accountBinding(

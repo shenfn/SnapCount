@@ -48,7 +48,10 @@ enum NativeRecordDetailPresentationAdapter {
         return rows.filter { !$0.value.isEmpty }
     }
 
-    static func extractedRows(for detail: NativeRecordDetail) -> [NativeDetailRow] {
+    static func extractedRows(
+        for detail: NativeRecordDetail,
+        domain: NativeDomainDefinition? = nil
+    ) -> [NativeDetailRow] {
         if detail.kind == "income" {
             return [
                 NativeDetailRow(label: "金额", value: detail.amount.map { String(format: "+¥%.2f", $0) } ?? "--"),
@@ -60,7 +63,7 @@ enum NativeRecordDetailPresentationAdapter {
         }
 
         if detail.kind == "data" {
-            return universalRows(for: detail)
+            return universalRows(for: detail, domain: domain)
         }
 
         return [
@@ -169,7 +172,10 @@ enum NativeRecordDetailPresentationAdapter {
         }
     }
 
-    private static func universalRows(for detail: NativeRecordDetail) -> [NativeDetailRow] {
+    private static func universalRows(
+        for detail: NativeRecordDetail,
+        domain: NativeDomainDefinition?
+    ) -> [NativeDetailRow] {
         let payload = detail.payload ?? [:]
         switch detail.domainKey {
         case "food":
@@ -190,7 +196,11 @@ enum NativeRecordDetailPresentationAdapter {
                 NativeDetailRow(label: "备注", value: payload.string("note") ?? detail.note ?? "无")
             ]
         case "sleep":
-            let minutes = payload.double("sleep_minutes") ?? payload.double("duration_minutes")
+            let minutes = durationMinutes(
+                payload: payload,
+                minuteKeys: ["sleep_minutes", "duration_minutes"],
+                hourKeys: ["sleep_hours", "duration_hours"]
+            )
             return [
                 NativeDetailRow(label: "标题", value: detail.title),
                 NativeDetailRow(label: "质量等级", value: payload.string("quality_level") ?? "未填写"),
@@ -208,7 +218,7 @@ enum NativeRecordDetailPresentationAdapter {
                 NativeDetailRow(label: "运动类型", value: payload.string("sport_type") ?? payload.string("activity_type") ?? detail.title),
                 NativeDetailRow(label: "运动时长", value: durationLabel(payload.double("duration_minutes"))),
                 NativeDetailRow(label: "距离", value: payload.double("distance_km").map { String(format: "%.2f km", $0) } ?? "--"),
-                NativeDetailRow(label: "消耗热量", value: payload.double("calories_kcal").map { String(format: "%.0f kcal", $0) } ?? "--"),
+                NativeDetailRow(label: "消耗热量", value: (payload.double("calories") ?? payload.double("calories_kcal")).map { String(format: "%.0f 千卡", $0) } ?? "--"),
                 NativeDetailRow(label: "发生日期", value: detail.recordDate ?? "--"),
                 NativeDetailRow(label: "模板版本", value: detail.domainVersion ?? "1.0"),
                 NativeDetailRow(label: "来源类型", value: sourceLabel(for: detail)),
@@ -217,15 +227,44 @@ enum NativeRecordDetailPresentationAdapter {
         case "reading":
             return [
                 NativeDetailRow(label: "书名", value: payload.string("book_name") ?? detail.title),
-                NativeDetailRow(label: "阅读时长", value: durationLabel(payload.double("duration_minutes"))),
-                NativeDetailRow(label: "阅读页数", value: payload.double("pages_read").map { "\(Int($0.rounded())) 页" } ?? "--"),
+                NativeDetailRow(label: "阅读时长", value: durationLabel(durationMinutes(
+                    payload: payload,
+                    minuteKeys: ["reading_minutes", "duration_minutes"],
+                    hourKeys: ["reading_hours", "duration_hours"]
+                ))),
+                NativeDetailRow(label: "阅读页数", value: (payload.double("pages") ?? payload.double("pages_read")).map { "\(Int($0.rounded())) 页" } ?? "--"),
+                NativeDetailRow(label: "发生日期", value: detail.recordDate ?? "--"),
+                NativeDetailRow(label: "模板版本", value: detail.domainVersion ?? "1.0"),
+                NativeDetailRow(label: "来源类型", value: sourceLabel(for: detail)),
+                NativeDetailRow(label: "备注", value: payload.string("note") ?? detail.note ?? "无")
+            ]
+        case "wallet":
+            let amount = payload.double("amount")
+                ?? payload.double("snapshot_balance")
+                ?? payload.double("current_balance")
+            return [
+                NativeDetailRow(label: "标题", value: detail.title),
+                NativeDetailRow(label: "账户/平台", value: payload.string("account_name") ?? payload.string("institution") ?? "未填写"),
+                NativeDetailRow(label: "金额", value: amount.map { String(format: "¥%.2f", $0) } ?? "--"),
+                NativeDetailRow(label: "记录类型", value: walletRecordKindLabel(payload.string("record_kind"))),
+                NativeDetailRow(label: "还款日", value: payload.string("due_date") ?? "--"),
+                NativeDetailRow(label: "关联账户", value: payload.string("linked_account_id") ?? "未绑定"),
                 NativeDetailRow(label: "发生日期", value: detail.recordDate ?? "--"),
                 NativeDetailRow(label: "模板版本", value: detail.domainVersion ?? "1.0"),
                 NativeDetailRow(label: "来源类型", value: sourceLabel(for: detail)),
                 NativeDetailRow(label: "备注", value: payload.string("note") ?? detail.note ?? "无")
             ]
         default:
-            return detail.detailRows
+            let metadata = NativeManualDomainMetadata.resolve(domain, fallbackDomainKey: detail.domainKey ?? "")
+            return [
+                NativeDetailRow(label: "标题", value: detail.title),
+                NativeDetailRow(label: metadata.dimensionLabel, value: payload.string(metadata.dimensionKey) ?? "未填写"),
+                NativeDetailRow(label: metadata.primaryLabel, value: payload.double(metadata.primaryKey).map { String(format: "%.2f", $0) } ?? "--"),
+                NativeDetailRow(label: "发生日期", value: detail.recordDate ?? "--"),
+                NativeDetailRow(label: "模板版本", value: detail.domainVersion ?? "1.0"),
+                NativeDetailRow(label: "来源类型", value: sourceLabel(for: detail)),
+                NativeDetailRow(label: "备注", value: payload.string("note") ?? detail.note ?? "无")
+            ]
         }
     }
 
@@ -261,5 +300,28 @@ enum NativeRecordDetailPresentationAdapter {
         let rounded = Int(minutes.rounded())
         if rounded >= 60 { return "\(rounded / 60) 小时 \(rounded % 60) 分钟" }
         return "\(rounded) 分钟"
+    }
+
+    private static func durationMinutes(
+        payload: [String: AnyCodable],
+        minuteKeys: [String],
+        hourKeys: [String]
+    ) -> Double? {
+        for key in minuteKeys {
+            if let value = payload.double(key) { return value }
+        }
+        for key in hourKeys {
+            if let value = payload.double(key) { return value * 60 }
+        }
+        return nil
+    }
+
+    private static func walletRecordKindLabel(_ value: String?) -> String {
+        switch value {
+        case "cash_snapshot": return "资产快照"
+        case "liability_snapshot": return "负债快照"
+        case "repayment": return "还款记录"
+        default: return value ?? "未分类"
+        }
     }
 }

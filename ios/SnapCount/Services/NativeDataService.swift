@@ -645,7 +645,7 @@ final class NativeDataService {
                 recordDate: row.occurredAt.map(dateOnly),
                 note: row.summary,
                 companionMessage: row.payloadJSONB?.string("companion_message"),
-                accountId: nil,
+                accountId: row.payloadJSONB?.string("linked_account_id"),
                 systemImage: "sparkles",
                 payload: row.payloadJSONB,
                 createdAt: row.createdAt,
@@ -1086,7 +1086,7 @@ final class NativeDataService {
                 id: reference, rawId: row.id, kind: "data", title: row.title ?? domainName(row.domainKey), subtitle: row.occurredAt ?? row.createdAt ?? "", value: "",
                 detailRows: [NativeDetailRow(label: "摘要", value: row.summary ?? "")].filter { !$0.value.isEmpty } + payloadRows,
                 imageURL: signedURLs[row.sourceImagePath ?? ""], imageLoadError: false, imagePath: row.sourceImagePath, imageHash: row.sourceImageHash,
-                amount: nil, merchantName: nil, platform: nil, category: row.domainKey, paymentMethod: nil, recordDate: row.occurredAt.map(dateOnly), note: row.summary, companionMessage: row.payloadJSONB?.string("companion_message"), accountId: nil, systemImage: "sparkles", payload: row.payloadJSONB,
+                amount: nil, merchantName: nil, platform: nil, category: row.domainKey, paymentMethod: nil, recordDate: row.occurredAt.map(dateOnly), note: row.summary, companionMessage: row.payloadJSONB?.string("companion_message"), accountId: row.payloadJSONB?.string("linked_account_id"), systemImage: "sparkles", payload: row.payloadJSONB,
                 createdAt: row.createdAt, occurredAt: row.occurredAt, domainKey: row.domainKey, source: row.source,
                 aiFeedback: NativeAIFeedback(payload: row.payloadJSONB?.dictionary("ai_feedback")), aiSummary: row.summary
             )
