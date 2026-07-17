@@ -3,7 +3,16 @@ import Charts
 import Foundation
 
 struct InsightsView: View {
+    private enum Mode: String, CaseIterable, Identifiable {
+        case report
+        case linkage
+
+        var id: String { rawValue }
+        var title: String { self == .report ? "月度报告" : "联动分析" }
+    }
+
     @EnvironmentObject private var appState: AppState
+    @State private var mode: Mode = .report
     @State private var range: NativeInsightRange = .fourteen
     @State private var question = "这个月钱够不够花？每天最好控制在多少钱，还能不能存下钱？"
 
@@ -21,45 +30,64 @@ struct InsightsView: View {
             JieziTheme.pageBackground.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Picker("分析范围", selection: $range) {
-                        ForEach(NativeInsightRange.allCases) { item in
+                    Picker("报告视图", selection: $mode) {
+                        ForEach(Mode.allCases) { item in
                             Text(item.title).tag(item)
                         }
                     }
                     .pickerStyle(.segmented)
 
-                    if appState.isLoadingInsights, appState.insightsSnapshot == nil {
-                        ProgressView("正在汇总多域数据…")
-                            .frame(maxWidth: .infinity, minHeight: 220)
-                    } else if let snapshot = appState.insightsSnapshot, snapshot.range == range {
-                        if snapshot.rows.isEmpty {
-                            ContentUnavailableView(
-                                "暂无可分析数据",
-                                systemImage: "chart.xyaxis.line",
-                                description: Text("记录消费、睡眠、饮食或运动后，这里会形成跨域日汇总。")
-                            )
-                            .frame(maxWidth: .infinity, minHeight: 240)
-                        } else {
-                            summarySection(snapshot)
-                            maturitySection(snapshot)
-                            aiInsightSection(snapshot)
-                            financeChart(snapshot)
-                            dailySection(snapshot)
+                    if mode == .report {
+                        MonthlyReportContent()
+                    } else {
+                        Picker("分析范围", selection: $range) {
+                            ForEach(NativeInsightRange.allCases) { item in
+                                Text(item.title).tag(item)
+                            }
                         }
-                    } else if let message = appState.insightsMessage {
-                        Button("加载失败，点此重试：\(message)") {
-                            Task { await appState.loadInsights(range: range, force: true) }
+                        .pickerStyle(.segmented)
+
+                        if appState.isLoadingInsights, appState.insightsSnapshot == nil {
+                            ProgressView("正在汇总多域数据…")
+                                .frame(maxWidth: .infinity, minHeight: 220)
+                        } else if let snapshot = appState.insightsSnapshot, snapshot.range == range {
+                            if snapshot.rows.isEmpty {
+                                ContentUnavailableView(
+                                    "暂无可分析数据",
+                                    systemImage: "chart.xyaxis.line",
+                                    description: Text("记录消费、睡眠、饮食或运动后，这里会形成跨域日汇总。")
+                                )
+                                .frame(maxWidth: .infinity, minHeight: 240)
+                            } else {
+                                summarySection(snapshot)
+                                maturitySection(snapshot)
+                                aiInsightSection(snapshot)
+                                financeChart(snapshot)
+                                dailySection(snapshot)
+                            }
+                        } else if let message = appState.insightsMessage {
+                            Button("加载失败，点此重试：\(message)") {
+                                Task { await appState.loadInsights(range: range, force: true) }
+                            }
+                            .foregroundStyle(JieziTheme.coral)
                         }
-                        .foregroundStyle(JieziTheme.coral)
                     }
                 }
                 .padding(16)
             }
-            .refreshable { await appState.loadInsights(range: range, force: true) }
+            .refreshable {
+                if mode == .report {
+                    await appState.refreshDashboard()
+                } else {
+                    await appState.loadInsights(range: range, force: true)
+                }
+            }
         }
-        .navigationTitle("分析")
+        .navigationTitle("报告")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .task(id: range) { await appState.loadInsights(range: range) }
+        .task(id: "\(mode.rawValue)-\(range.rawValue)") {
+            if mode == .linkage { await appState.loadInsights(range: range) }
+        }
     }
 
     @ViewBuilder
@@ -357,7 +385,7 @@ struct InsightsView: View {
     }
 }
 
-private struct InsightMetric: View {
+struct InsightMetric: View {
     let label: String
     let value: String
     let tint: Color

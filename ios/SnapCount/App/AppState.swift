@@ -87,6 +87,7 @@ final class AppState: ObservableObject {
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
+    private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
     private var activeRecordReference: String?
     private var prefetchingRecordReferences: Set<String> = []
     private var insightsLoadedAt: Date?
@@ -455,13 +456,34 @@ final class AppState: ObservableObject {
                 monthKey: monthKey,
                 accessToken: session.accessToken
             )
-            recordMonthGroups[monthKey] = month.groups
+            recordMonthDetails[monthKey] = month.details
             for (reference, detail) in month.details {
                 recordDetailCache[NativeRecordReference(reference).canonicalValue] = detail
             }
+            recordMonthGroups[monthKey] = month.groups
         } catch {
             recordMonthMessages[monthKey] = error.localizedDescription
         }
+    }
+
+    func reportSnapshot(monthKey: String) -> DashboardSnapshot {
+        if monthKey == Self.currentMonthKey { return dashboard }
+        let groups = recordMonthGroups[monthKey] ?? []
+        let details = recordMonthDetails[monthKey] ?? [:]
+        let records = groups.flatMap(\.records).filter { $0.kind != .staging }
+        var snapshot = DashboardSnapshot()
+        snapshot.dayRecordGroups = groups
+        snapshot.recordDetails = details
+        snapshot.monthCount = records.count
+        snapshot.monthExpense = details.values
+            .filter { $0.kind == "expense" }
+            .reduce(0) { $0 + ($1.amount ?? 0) }
+        snapshot.monthIncome = details.values
+            .filter { $0.kind == "income" }
+            .reduce(0) { $0 + ($1.amount ?? 0) }
+        let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+        snapshot.domains = domainsWithUpdatedCounts(definitions, snapshot: snapshot)
+        return snapshot
     }
 
     func loadAccounts() async {
@@ -1533,6 +1555,7 @@ final class AppState: ObservableObject {
         recordsPath = NavigationPath()
         selectedRecordDetail = nil
         recordMonthGroups = [:]
+        recordMonthDetails = [:]
         recordMonthMessages = [:]
         loadingRecordMonthKey = nil
         recordDetailCache.removeAll()
