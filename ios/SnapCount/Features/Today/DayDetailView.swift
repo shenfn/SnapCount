@@ -26,7 +26,9 @@ struct DayDetailView: View {
                     }
                     Text("当天明细").font(.title3.bold())
                     if records.isEmpty { ContentUnavailableView("这一天还没有记录", systemImage: "calendar", description: Text("有截图、手动记录或钱包快照后，会自动出现在这里。")) }
-                    ForEach(records) { recordLink(record) }
+                    ForEach(records) { record in
+                        recordLink(record)
+                    }
                 }.padding(16)
             }
         }
