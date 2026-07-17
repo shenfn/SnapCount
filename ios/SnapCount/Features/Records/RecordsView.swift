@@ -119,10 +119,14 @@ struct RecordDetailView: View {
     @State private var universalEditDetail: NativeRecordDetail?
     @State private var showDeleteConfirm = false
 
+    private var detail: NativeRecordDetail? {
+        appState.recordDetail(matching: reference)
+    }
+
     var body: some View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
-            if let detail = appState.selectedRecordDetail {
+            if let detail {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
                         if let imageURL = detail.imageURL {
@@ -197,7 +201,7 @@ struct RecordDetailView: View {
         .navigationTitle("记录详情")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
-            if let detail = appState.selectedRecordDetail {
+            if let detail {
                 if detail.isEditable {
                     Button {
                         if detail.kind == "data" {

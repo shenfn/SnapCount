@@ -104,6 +104,29 @@ final class SnapCountTests: XCTestCase {
         try await repository.submitFeedback(recordId: "record-1", choice: .notHelpful, freeText: "", accessToken: "test-token")
     }
 
+    func testRecordReferenceCanonicalizesLegacyAliases() {
+        XCTAssertEqual(NativeRecordReference("tx-record-1").canonicalValue, "expense/record-1")
+        XCTAssertEqual(NativeRecordReference("income-record-2").canonicalValue, "income/record-2")
+        XCTAssertEqual(NativeRecordReference("data-record-3").canonicalValue, "data/record-3")
+        XCTAssertEqual(NativeRecordReference("expense/record-1").canonicalValue, "expense/record-1")
+    }
+
+    @MainActor
+    func testRecordDetailOnlyMatchesCurrentRouteIdentity() {
+        let state = AppState()
+        state.selectedRecordDetail = NativeRecordDetail(
+            id: "expense/record-1", rawId: "record-1", kind: "expense",
+            title: "早餐", subtitle: "2026-07-17", value: "¥12.00", detailRows: [],
+            imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: 12, merchantName: "早餐", platform: "微信", category: "food",
+            paymentMethod: "微信支付", recordDate: "2026-07-17", note: nil,
+            companionMessage: nil, accountId: nil, systemImage: "creditcard", payload: nil
+        )
+
+        XCTAssertNotNil(state.recordDetail(matching: "tx-record-1"))
+        XCTAssertNil(state.recordDetail(matching: "expense/record-2"))
+    }
+
     func testAIFeedbackParsesPWAFields() throws {
         let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "icon": AnyCodable("✨"),

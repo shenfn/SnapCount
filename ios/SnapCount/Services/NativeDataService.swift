@@ -210,7 +210,7 @@ final class NativeDataService {
 
         snapshot.pendingExpenses = txRows.filter { $0.status == "pending" }.compactMap { row in
             guard let dateKey = row.transactionDate else { return nil }
-            return NativePendingExpense(id: row.id, title: row.merchantName ?? "待补全消费", amount: row.amount ?? 0, dateKey: dateKey, reference: "tx-\(row.id)")
+            return NativePendingExpense(id: row.id, title: row.merchantName ?? "待补全消费", amount: row.amount ?? 0, dateKey: dateKey, reference: "expense/\(row.id)")
         }
 
         snapshot.pendingCount =
@@ -469,25 +469,9 @@ final class NativeDataService {
     }
 
     func fetchRecordDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
-        let parts = reference.split(separator: "/").map(String.init)
-        let kind: String
-        let id: String
-        if parts.count >= 2 {
-            kind = parts[0]
-            id = parts[1]
-        } else if reference.hasPrefix("tx-") {
-            kind = "expense"
-            id = String(reference.dropFirst(3))
-        } else if reference.hasPrefix("income-") {
-            kind = "income"
-            id = String(reference.dropFirst(7))
-        } else if reference.hasPrefix("data-") {
-            kind = "data"
-            id = String(reference.dropFirst(5))
-        } else {
-            kind = "data"
-            id = reference
-        }
+        let resolved = NativeRecordReference(reference)
+        let kind = resolved.kind
+        let id = resolved.rawId
 
         switch kind {
         case "expense":
@@ -976,16 +960,16 @@ final class NativeDataService {
         var records: [NativeDayRecord] = []
         transactions.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let dateKey = row.transactionDate else { return }
-            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "tx-\(row.id)", dateKey: dateKey, kind: .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: row.transactionTime, systemImage: row.status == "pending" ? "clock" : "creditcard"))
+            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "expense/\(row.id)", dateKey: dateKey, kind: .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: row.transactionTime, systemImage: row.status == "pending" ? "clock" : "creditcard"))
         }
         incomes.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let dateKey = row.incomeDate else { return }
-            records.append(NativeDayRecord(id: "income-\(row.id)", reference: "income-\(row.id)", dateKey: dateKey, kind: .income, domainKey: "income", title: row.sourceName ?? "收入记录", subtitle: row.category ?? "收入", value: "+\(currency(row.amount))", timeLabel: nil, systemImage: "arrow.down.circle"))
+            records.append(NativeDayRecord(id: "income-\(row.id)", reference: "income/\(row.id)", dateKey: dateKey, kind: .income, domainKey: "income", title: row.sourceName ?? "收入记录", subtitle: row.category ?? "收入", value: "+\(currency(row.amount))", timeLabel: nil, systemImage: "arrow.down.circle"))
         }
         universal.filter { ($0.occurredAt ?? $0.createdAt)?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
             let kind = NativeDayRecordKind(rawValue: row.domainKey ?? "") ?? .all
-            records.append(NativeDayRecord(id: "data-\(row.id)", reference: "data-\(row.id)", dateKey: dateOnly(sourceDate), kind: kind, domainKey: row.domainKey, title: row.title ?? row.summary ?? domainName(row.domainKey), subtitle: row.summary ?? domainName(row.domainKey), value: "", timeLabel: timeOnly(sourceDate), systemImage: kind == .all ? "sparkles" : kind.systemImage))
+            records.append(NativeDayRecord(id: "data-\(row.id)", reference: "data/\(row.id)", dateKey: dateOnly(sourceDate), kind: kind, domainKey: row.domainKey, title: row.title ?? row.summary ?? domainName(row.domainKey), subtitle: row.summary ?? domainName(row.domainKey), value: "", timeLabel: timeOnly(sourceDate), systemImage: kind == .all ? "sparkles" : kind.systemImage))
         }
         staging.filter { !["discarded", "archived", "assigned", "confirmed"].contains($0.status ?? "") && ($0.occurredAt ?? $0.createdAt)?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
@@ -1107,7 +1091,7 @@ final class NativeDataService {
     ) -> [String: NativeRecordDetail] {
         var details: [String: NativeRecordDetail] = [:]
         transactions.forEach { row in
-            let reference = "tx-\(row.id)"
+            let reference = "expense/\(row.id)"
             details[reference] = NativeRecordDetail(
                 id: reference, rawId: row.id, kind: "expense",
                 title: row.merchantName ?? "消费记录", subtitle: row.transactionDate ?? row.createdAt ?? "", value: currency(row.amount),
@@ -1126,7 +1110,7 @@ final class NativeDataService {
             )
         }
         incomes.forEach { row in
-            let reference = "income-\(row.id)"
+            let reference = "income/\(row.id)"
             details[reference] = NativeRecordDetail(
                 id: reference, rawId: row.id, kind: "income", title: row.sourceName ?? "收入记录", subtitle: row.incomeDate ?? row.createdAt ?? "", value: "+\(currency(row.amount))",
                 detailRows: [NativeDetailRow(label: "收入类型", value: row.category ?? "未填写"), NativeDetailRow(label: "来源", value: row.source ?? "")].filter { !$0.value.isEmpty },
@@ -1137,7 +1121,7 @@ final class NativeDataService {
             )
         }
         universal.forEach { row in
-            let reference = "data-\(row.id)"
+            let reference = "data/\(row.id)"
             let payloadRows = (row.payloadJSONB ?? [:]).filter { !$0.value.displayValue.isEmpty }.sorted { $0.key < $1.key }.prefix(12).map { NativeDetailRow(label: $0.key, value: $0.value.displayValue) }
             details[reference] = NativeRecordDetail(
                 id: reference, rawId: row.id, kind: "data", title: row.title ?? domainName(row.domainKey), subtitle: row.occurredAt ?? row.createdAt ?? "", value: "",
@@ -1159,7 +1143,7 @@ final class NativeDataService {
     ) -> [NativeRecordSummary] {
         let txItems = transactions.prefix(8).map {
             NativeRecordSummary(
-                id: "tx-\($0.id)",
+                id: "expense/\($0.id)",
                 title: $0.merchantName ?? $0.category ?? "消费记录",
                 subtitle: $0.transactionDate ?? "最近",
                 value: currency($0.amount),
@@ -1169,7 +1153,7 @@ final class NativeDataService {
 
         let incomeItems = incomes.prefix(4).map {
             NativeRecordSummary(
-                id: "income-\($0.id)",
+                id: "income/\($0.id)",
                 title: $0.sourceName ?? "收入记录",
                 subtitle: $0.incomeDate ?? "最近",
                 value: "+\(currency($0.amount))",
@@ -1179,7 +1163,7 @@ final class NativeDataService {
 
         let universalItems = universal.prefix(6).map {
             NativeRecordSummary(
-                id: "data-\($0.id)",
+                id: "data/\($0.id)",
                 title: $0.title ?? $0.summary ?? domainName($0.domainKey),
                 subtitle: ($0.occurredAt ?? $0.createdAt) ?? "最近",
                 value: "",
@@ -1290,20 +1274,8 @@ final class NativeDataService {
     }
 
     private func resolveReference(_ reference: String) -> (kind: String, id: String) {
-        let parts = reference.split(separator: "/").map(String.init)
-        if parts.count >= 2 {
-            return (parts[0], parts[1])
-        }
-        if reference.hasPrefix("tx-") {
-            return ("expense", String(reference.dropFirst(3)))
-        }
-        if reference.hasPrefix("income-") {
-            return ("income", String(reference.dropFirst(7)))
-        }
-        if reference.hasPrefix("data-") {
-            return ("data", String(reference.dropFirst(5)))
-        }
-        return ("data", reference)
+        let resolved = NativeRecordReference(reference)
+        return (resolved.kind, resolved.rawId)
     }
 
     private func parseAmount(_ value: String) -> Double {

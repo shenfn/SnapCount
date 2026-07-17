@@ -84,8 +84,11 @@ final class AppState: ObservableObject {
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
+    private var activeRecordReference: String?
+    private var prefetchingRecordReferences: Set<String> = []
     private var insightsLoadedAt: Date?
     private var dashboardRefreshGeneration = 0
+    private var userStateGeneration = 0
     private var dashboardSupplementTask: Task<Void, Never>?
 
     init(
@@ -314,7 +317,9 @@ final class AppState: ObservableObject {
         dashboard = snapshot
         isShowingCachedDashboard = false
         try? snapshotStore.save(snapshot, userId: userId)
-        recordDetailCache.merge(snapshot.recordDetails) { _, new in new }
+        for detail in snapshot.recordDetails.values {
+            recordDetailCache[NativeRecordReference(detail.id).canonicalValue] = detail
+        }
     }
 
     private func scheduleDashboardSupplement(
@@ -341,7 +346,9 @@ final class AppState: ObservableObject {
             supplemented.domains = domains
             self.publishDashboard(supplemented, userId: session.user.id)
             if let selectedId = self.selectedRecordDetail?.id,
-               let selected = supplemented.recordDetails[selectedId] {
+               let selected = supplemented.recordDetails.values.first(where: {
+                   NativeRecordReference($0.id).canonicalValue == NativeRecordReference(selectedId).canonicalValue
+               }) {
                 self.selectedRecordDetail = selected
             }
             self.prefetchDashboardImages(supplemented)
@@ -450,7 +457,7 @@ final class AppState: ObservableObject {
                 id: account.sourceRecordId,
                 accessToken: session.accessToken
             )
-            let reference = "data-\(account.sourceRecordId)"
+            let reference = "data/\(account.sourceRecordId)"
             if recordDetailCache[reference] == nil,
                let detail = try? await recordRepository.fetchDetail(
                    reference: reference,
@@ -905,8 +912,9 @@ final class AppState: ObservableObject {
 
     func openWalletSnapshot(_ snapshot: NativeWalletSnapshot) {
         selectedTab = .records
-        recordsPath = NavigationPath([NativeRecordRoute(reference: "data-\(snapshot.id)")])
-        Task { await loadRecordDetail(reference: "data-\(snapshot.id)") }
+        let reference = "data/\(snapshot.id)"
+        recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
+        Task { await loadRecordDetail(reference: reference) }
     }
 
     private func refreshAfterAccountBinding(monthKey: String) async {
@@ -916,9 +924,30 @@ final class AppState: ObservableObject {
     }
 
     func prefetchRecordDetails(_ references: [String]) {
-        let missing = references.filter { recordDetailCache[$0] == nil }.prefix(4)
+        let missing = references
+            .map { NativeRecordReference($0).canonicalValue }
+            .filter { recordDetailCache[$0] == nil && !prefetchingRecordReferences.contains($0) }
+            .prefix(4)
         for reference in missing {
-            Task { await loadRecordDetail(reference: reference) }
+            Task { await prefetchRecordDetail(reference: reference) }
+        }
+    }
+
+    private func prefetchRecordDetail(reference: String) async {
+        guard recordDetailCache[reference] == nil,
+              !prefetchingRecordReferences.contains(reference) else { return }
+        let generation = userStateGeneration
+        prefetchingRecordReferences.insert(reference)
+        defer { prefetchingRecordReferences.remove(reference) }
+        do {
+            let session = try await validSession()
+            let detail = try await recordRepository.fetchDetail(reference: reference, accessToken: session.accessToken)
+            guard generation == userStateGeneration,
+                  isSignedIn,
+                  currentUserId == session.user.id else { return }
+            recordDetailCache[reference] = detail
+        } catch {
+            return
         }
     }
 
@@ -1067,25 +1096,41 @@ final class AppState: ObservableObject {
     }
 
     func loadRecordDetail(reference: String, force: Bool = false) async {
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        let generation = userStateGeneration
+        activeRecordReference = canonicalReference
         recordDetailMessage = nil
-        if selectedRecordDetail?.id != reference {
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
             recordFeedbackState = .idle
         }
-        if !force, let cached = recordDetailCache[reference] {
+        if !force, let cached = recordDetailCache[canonicalReference] {
             selectedRecordDetail = cached
             return
         }
-        if selectedRecordDetail?.id != reference {
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
             selectedRecordDetail = nil
         }
         do {
             let session = try await validSession()
-            let detail = try await recordRepository.fetchDetail(reference: reference, accessToken: session.accessToken)
-            recordDetailCache[reference] = detail
+            let detail = try await recordRepository.fetchDetail(reference: canonicalReference, accessToken: session.accessToken)
+            guard generation == userStateGeneration,
+                  isSignedIn,
+                  currentUserId == session.user.id else { return }
+            recordDetailCache[canonicalReference] = detail
+            guard activeRecordReference == canonicalReference else { return }
             selectedRecordDetail = detail
         } catch {
-            recordDetailMessage = error.localizedDescription
+            if activeRecordReference == canonicalReference {
+                recordDetailMessage = error.localizedDescription
+            }
         }
+    }
+
+    func recordDetail(matching reference: String) -> NativeRecordDetail? {
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        guard let detail = selectedRecordDetail,
+              NativeRecordReference(detail.id).canonicalValue == canonicalReference else { return nil }
+        return detail
     }
 
     func saveRecordDetail(_ draft: NativeRecordEditDraft) async -> Bool {
@@ -1097,10 +1142,14 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             let reference = try await recordRepository.saveDetail(draft, accessToken: session.accessToken)
+            let oldReference = NativeRecordReference(draft.reference).canonicalValue
+            let savedReference = NativeRecordReference(reference).canonicalValue
+            recordDetailCache.removeValue(forKey: oldReference)
+            recordDetailCache.removeValue(forKey: savedReference)
             await refreshDashboard()
             await loadAccounts()
-            recordDetailCache.removeValue(forKey: reference)
-            await loadRecordDetail(reference: reference, force: true)
+            recordDetailCache.removeValue(forKey: savedReference)
+            await loadRecordDetail(reference: savedReference, force: true)
             return true
         } catch {
             recordDetailMessage = error.localizedDescription
@@ -1117,7 +1166,8 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             try await recordRepository.delete(reference: reference, accessToken: session.accessToken)
-            recordDetailCache.removeValue(forKey: reference)
+            recordDetailCache.removeValue(forKey: NativeRecordReference(reference).canonicalValue)
+            activeRecordReference = nil
             selectedRecordDetail = nil
             recordsPath = NavigationPath()
             await loadAccounts()
@@ -1141,7 +1191,7 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             try await inboxRepository.confirmPending(draft, accessToken: session.accessToken)
-            recordDetailCache.removeValue(forKey: "tx-\(draft.pendingId)")
+            recordDetailCache.removeValue(forKey: "expense/\(draft.pendingId)")
             selectedRecordDetail = nil
             await loadAccounts()
             await refreshDashboard()
@@ -1427,6 +1477,7 @@ final class AppState: ObservableObject {
 
     func resetUserScopedState() {
         dashboardRefreshGeneration += 1
+        userStateGeneration += 1
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false
@@ -1436,6 +1487,8 @@ final class AppState: ObservableObject {
         recordsPath = NavigationPath()
         selectedRecordDetail = nil
         recordDetailCache.removeAll()
+        activeRecordReference = nil
+        prefetchingRecordReferences.removeAll()
         recordDetailMessage = nil
         isSavingRecordDetail = false
         isDeletingRecordDetail = false
