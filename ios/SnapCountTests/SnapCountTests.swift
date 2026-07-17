@@ -8,6 +8,34 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(AppTab.allCases.allSatisfy { !$0.title.isEmpty })
     }
 
+    @MainActor
+    func testResetUserScopedStateClearsNavigationAndDetails() {
+        let state = AppState()
+        state.selectedTab = .records
+        state.dashboard = DashboardSnapshot(todayCount: 3)
+        state.todayPath = [NativeDayDetailRoute(dateKey: "2026-07-17", kind: .all)]
+        state.inboxPath.append(NativeInboxRoute.staging(recordId: "staging-1"))
+        state.recordsPath.append(NativeRecordRoute(reference: "expense/record-1"))
+        state.selectedRecordDetail = NativeRecordDetail(
+            id: "expense/record-1", rawId: "record-1", kind: "expense",
+            title: "早餐", subtitle: "2026-07-17", value: "¥12.00", detailRows: [],
+            imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: 12, merchantName: "早餐", platform: "微信", category: "food",
+            paymentMethod: "微信支付", recordDate: "2026-07-17", note: nil,
+            companionMessage: nil, accountId: nil, systemImage: "creditcard", payload: nil
+        )
+
+        state.resetUserScopedState()
+
+        XCTAssertEqual(state.selectedTab, .today)
+        XCTAssertEqual(state.dashboard.todayCount, 0)
+        XCTAssertTrue(state.todayPath.isEmpty)
+        XCTAssertEqual(state.inboxPath.count, 0)
+        XCTAssertEqual(state.recordsPath.count, 0)
+        XCTAssertNil(state.selectedRecordDetail)
+        XCTAssertTrue(state.accounts.isEmpty)
+    }
+
     func testDashboardRepositoryProtocolSupportsStubInjection() async throws {
         let expected = DashboardSnapshot(todayCount: 3)
         let repository = DashboardRepositoryStub(snapshot: expected)

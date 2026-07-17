@@ -73,6 +73,21 @@ actor RemoteImageRepository {
         }
     }
 
+    func clear() {
+        inFlight.values.forEach { $0.cancel() }
+        inFlight.removeAll()
+        memoryCache.removeAllObjects()
+        session.configuration.urlCache?.removeAllCachedResponses()
+
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: diskDirectory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for file in files {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
     private func cachedFileURL(for url: URL) -> URL {
         let stableKey = url.host.map { "\($0)\(url.path)" } ?? url.path
         let digest = SHA256.hash(data: Data(stableKey.utf8))
@@ -102,6 +117,7 @@ struct CachedRemoteImage<Content: View, Placeholder: View, Failure: View>: View 
             }
         }
         .task(id: url) {
+            uiImage = nil
             didFail = false
             do {
                 uiImage = try await RemoteImageRepository.shared.image(for: url)

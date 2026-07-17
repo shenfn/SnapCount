@@ -1356,6 +1356,10 @@ final class AppState: ObservableObject {
     }
 
     private func apply(session: SupabaseAuthSession) {
+        if !currentUserId.isEmpty, currentUserId != session.user.id {
+            resetUserScopedState()
+            Task { await RemoteImageRepository.shared.clear() }
+        }
         isSignedIn = true
         currentUserId = session.user.id
         currentUserEmail = session.user.email ?? ""
@@ -1408,18 +1412,42 @@ final class AppState: ObservableObject {
     }
 
     private func invalidateSession(message: String) {
+        try? keychain.remove(KeychainKeys.authSession)
+        try? keychain.remove(KeychainKeys.uploadToken)
+        isSignedIn = false
+        currentUserId = ""
+        currentUserEmail = ""
+        hasUploadToken = false
+        shortcutCredentialMessage = nil
+        resetUserScopedState()
+        Task { await RemoteImageRepository.shared.clear() }
+        authMessage = message
+        authMessageIsError = !message.isEmpty
+    }
+
+    func resetUserScopedState() {
         dashboardRefreshGeneration += 1
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false
-        try? keychain.remove(KeychainKeys.authSession)
-        isSignedIn = false
-        currentUserId = ""
-        currentUserEmail = ""
         dashboard = DashboardSnapshot()
+        todayPath = []
+        inboxPath = NavigationPath()
+        recordsPath = NavigationPath()
+        selectedRecordDetail = nil
+        recordDetailCache.removeAll()
+        recordDetailMessage = nil
+        isSavingRecordDetail = false
+        isDeletingRecordDetail = false
+        recordFeedbackState = .idle
+        manualRecordMessage = nil
         accounts = []
         selectedAccountDetail = nil
         selectedAccountSourceSnapshot = nil
+        accountMessage = nil
+        isLoadingAccounts = false
+        isSavingAccount = false
+        isSubmittingRepayment = false
         repaymentMessage = nil
         repaymentCandidates = [:]
         stagingRepaymentId = nil
@@ -1431,21 +1459,25 @@ final class AppState: ObservableObject {
         unboundRecordsMessage = nil
         unboundBindingMessage = nil
         walletSnapshots = []
+        isLoadingWalletSnapshots = false
         walletSnapshotActionId = nil
         walletSnapshotMessage = nil
         insightsSnapshot = nil
+        isLoadingInsights = false
         insightsMessage = nil
         insightsLoadedAt = nil
         aiInsight = nil
+        isLoadingAIInsight = false
         aiInsightMessage = nil
         aiInsightIsCached = false
         userSettings = NativeUserSettings()
         settingsMessage = nil
+        isLoadingSettings = false
+        isSavingSettings = false
+        isExportingData = false
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today
-        authMessage = message
-        authMessageIsError = true
         lastDashboardRefreshAt = nil
     }
 
