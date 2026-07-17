@@ -127,6 +127,28 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNil(state.recordDetail(matching: "expense/record-2"))
     }
 
+    func testRecordEditDraftPreservesPWAExpenseMetadata() {
+        let detail = NativeRecordDetail(
+            id: "expense/record-1", rawId: "record-1", kind: "expense",
+            title: "高铁票", subtitle: "2026-07-17", value: "¥420.00", detailRows: [],
+            imageURL: nil, imageLoadError: false, imagePath: "user/ticket.jpg", imageHash: "hash-1",
+            amount: 420, merchantName: "铁路 12306", platform: "铁路 12306", category: "transport",
+            paymentMethod: "银行卡", recordDate: "2026-07-17", note: "出差",
+            companionMessage: "已记录行程", accountId: "card-1", systemImage: "creditcard", payload: nil,
+            transactionTime: "08:25:00", source: "manual", isLargeTransport: true, transportType: "高铁"
+        )
+
+        let draft = NativeRecordEditDraft(detail: detail)
+
+        XCTAssertEqual(draft.transactionTime, "08:25:00")
+        XCTAssertEqual(draft.source, "manual")
+        XCTAssertTrue(draft.isLargeTransport)
+        XCTAssertEqual(draft.transportType, "高铁")
+        XCTAssertEqual(draft.imagePath, "user/ticket.jpg")
+        XCTAssertEqual(draft.imageHash, "hash-1")
+        XCTAssertEqual(draft.companionMessage, "已记录行程")
+    }
+
     func testAIFeedbackParsesPWAFields() throws {
         let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "icon": AnyCodable("✨"),

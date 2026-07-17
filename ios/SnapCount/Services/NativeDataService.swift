@@ -65,6 +65,8 @@ struct NativeRecordDetail: Identifiable {
     var domainKey: String? = nil
     var source: String? = nil
     var status: String? = nil
+    var isLargeTransport: Bool = false
+    var transportType: String? = nil
     var domainVersion: String? = nil
     var aiFeedback: NativeAIFeedback? = nil
     var aiSummary: String? = nil
@@ -132,6 +134,10 @@ struct NativeRecordEditDraft: Identifiable, Equatable {
     var imageHash: String?
     var companionMessage: String?
     var accountId: String?
+    var transactionTime: String?
+    var source: String?
+    var isLargeTransport: Bool
+    var transportType: String?
 
     var id: String { reference }
 
@@ -150,6 +156,10 @@ struct NativeRecordEditDraft: Identifiable, Equatable {
         imageHash = detail.imageHash
         companionMessage = detail.companionMessage
         accountId = detail.accountId
+        transactionTime = detail.transactionTime
+        source = detail.source
+        isLargeTransport = detail.isLargeTransport
+        transportType = detail.transportType
     }
 }
 
@@ -285,7 +295,7 @@ final class NativeDataService {
             [TransactionRow].self,
             path: "rest/v1/transactions",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
+                URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
                 URLQueryItem(name: "order", value: "created_at.desc"),
                 URLQueryItem(name: "limit", value: "80")
             ],
@@ -479,7 +489,7 @@ final class NativeDataService {
                 [TransactionDetailRow].self,
                 path: "rest/v1/transactions",
                 queryItems: [
-                    URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
+                    URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
                     URLQueryItem(name: "id", value: "eq.\(id)"),
                     URLQueryItem(name: "limit", value: "1")
                 ],
@@ -526,6 +536,8 @@ final class NativeDataService {
                 domainKey: "expense",
                 source: row.source,
                 status: row.status,
+                isLargeTransport: row.isLargeTransport ?? false,
+                transportType: row.transportType,
                 aiFeedback: NativeAIFeedback(payload: row.aiFeedback)
             )
 
@@ -646,6 +658,7 @@ final class NativeDataService {
 
         switch draft.kind {
         case "expense":
+            let isLargeTransport = ["transport", "出行"].contains(draft.category) && amount >= 200
             let response = try await rpc(
                 RPCRecordResponse.self,
                 name: "save_transaction_with_account",
@@ -657,11 +670,11 @@ final class NativeDataService {
                     "p_category": AnyCodable(emptyAsNull(draft.category) ?? "其他"),
                     "p_payment_method": AnyCodable(emptyAsNull(draft.paymentMethod) ?? "未知"),
                     "p_transaction_date": AnyCodable(recordDate),
-                    "p_transaction_time": AnyCodable(NSNull()),
+                    "p_transaction_time": AnyCodable(nullable(draft.transactionTime)),
                     "p_note": AnyCodable(nullable(emptyAsNull(draft.note))),
-                    "p_is_large_transport": AnyCodable(false),
-                    "p_transport_type": AnyCodable(NSNull()),
-                    "p_source": AnyCodable("ai_scan"),
+                    "p_is_large_transport": AnyCodable(isLargeTransport),
+                    "p_transport_type": AnyCodable(nullable(isLargeTransport ? (emptyAsNull(draft.transportType) ?? "交通") : nil)),
+                    "p_source": AnyCodable(nullable(draft.source)),
                     "p_image_url": AnyCodable(nullable(draft.imagePath)),
                     "p_image_hash": AnyCodable(nullable(draft.imageHash)),
                     "p_companion_message": AnyCodable(nullable(draft.companionMessage)),
@@ -682,7 +695,7 @@ final class NativeDataService {
                     "p_amount": AnyCodable(amount),
                     "p_income_date": AnyCodable(recordDate),
                     "p_note": AnyCodable(nullable(emptyAsNull(draft.note))),
-                    "p_source": AnyCodable("ai_scan"),
+                    "p_source": AnyCodable(nullable(draft.source)),
                     "p_image_url": AnyCodable(nullable(draft.imagePath)),
                     "p_image_hash": AnyCodable(nullable(draft.imageHash)),
                     "p_companion_message": AnyCodable(nullable(draft.companionMessage)),
@@ -1106,6 +1119,7 @@ final class NativeDataService {
                 amount: row.amount, merchantName: row.merchantName, platform: row.platform, category: row.category, paymentMethod: row.paymentMethod, recordDate: row.transactionDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: row.status == "pending" ? "clock" : "creditcard", payload: nil,
                 createdAt: row.createdAt, occurredAt: row.transactionDate, transactionTime: row.transactionTime,
                 domainKey: "expense", source: row.source, status: row.status,
+                isLargeTransport: row.isLargeTransport ?? false, transportType: row.transportType,
                 aiFeedback: NativeAIFeedback(payload: row.aiFeedback)
             )
         }
@@ -1330,6 +1344,8 @@ private struct TransactionRow: Decodable {
     let imageHash: String?
     let companionMessage: String?
     let note: String?
+    let isLargeTransport: Bool?
+    let transportType: String?
     let accountId: String?
     let aiFeedback: [String: AnyCodable]?
 
@@ -1350,6 +1366,8 @@ private struct TransactionRow: Decodable {
         case imageHash = "image_hash"
         case companionMessage = "companion_message"
         case note
+        case isLargeTransport = "is_large_transport"
+        case transportType = "transport_type"
         case accountId = "account_id"
         case aiFeedback = "ai_feedback"
     }
@@ -1429,6 +1447,8 @@ private struct TransactionDetailRow: Decodable {
     let imageHash: String?
     let companionMessage: String?
     let note: String?
+    let isLargeTransport: Bool?
+    let transportType: String?
     let accountId: String?
     let aiFeedback: [String: AnyCodable]?
 
@@ -1448,6 +1468,8 @@ private struct TransactionDetailRow: Decodable {
         case imageHash = "image_hash"
         case companionMessage = "companion_message"
         case note
+        case isLargeTransport = "is_large_transport"
+        case transportType = "transport_type"
         case accountId = "account_id"
         case aiFeedback = "ai_feedback"
     }
