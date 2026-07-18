@@ -3333,6 +3333,7 @@ type ImageCleanupQueueRow = {
   bucket_path: string;
   user_id: string | null;
   attempts: number;
+  created_at: string;
 };
 
 function isUserOwnedStoragePath(path: string, userId: string): boolean {
@@ -3418,7 +3419,7 @@ async function clearImageReferences(
 
 async function processImageCleanupQueue(
   supabase: ReturnType<typeof createClient>,
-  options: { userId?: string; bucketPath?: string; limit?: number } = {},
+  options: { userId?: string; bucketPath?: string; limit?: number; force?: boolean } = {},
 ): Promise<{ processed: number; failed: number; remaining: number }> {
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
   let staleQuery = supabase.from("image_cleanup_queue")
@@ -3430,7 +3431,7 @@ async function processImageCleanupQueue(
   await staleQuery;
 
   let query = supabase.from("image_cleanup_queue")
-    .select("id,bucket_path,user_id,attempts")
+    .select("id,bucket_path,user_id,attempts,created_at")
     .in("status", ["pending", "failed"])
     .lt("attempts", 5)
     .order("created_at", { ascending: true })
@@ -3455,6 +3456,26 @@ async function processImageCleanupQueue(
 
     try {
       if (!row.user_id) throw new Error("Cleanup row has no user_id");
+      if (!options.force) {
+        const { data: config, error: configError } = await supabase.from("user_configs")
+          .select("is_active,keep_source_images,image_retention_days,updated_at")
+          .eq("user_id", row.user_id)
+          .maybeSingle();
+        if (configError) throw new Error(`Failed to verify image retention policy: ${configError.message}`);
+
+        const policyChangedAfterQueue = Boolean(
+          config?.updated_at && new Date(config.updated_at).getTime() > new Date(row.created_at).getTime()
+        );
+        const noLongerEligible = !config
+          || config.is_active !== true
+          || (config.keep_source_images === true && (config.image_retention_days ?? -1) < 0)
+          || policyChangedAfterQueue;
+        if (noLongerEligible) {
+          const { error: cancelError } = await supabase.from("image_cleanup_queue").delete().eq("id", row.id);
+          if (cancelError) throw new Error(`Failed to cancel stale image cleanup: ${cancelError.message}`);
+          continue;
+        }
+      }
       if (!/^https?:\/\//i.test(row.bucket_path)) {
         if (!isUserOwnedStoragePath(row.bucket_path, row.user_id)) {
           throw new Error(`Cleanup path does not belong to user ${row.user_id}`);
@@ -3500,7 +3521,7 @@ async function cleanupAllUserImages(
   let failed = 0;
   let remaining = 0;
   for (let batch = 0; batch < 10; batch += 1) {
-    const result = await processImageCleanupQueue(supabase, { userId, limit: 100 });
+    const result = await processImageCleanupQueue(supabase, { userId, limit: 100, force: true });
     processed += result.processed;
     failed += result.failed;
     remaining = result.remaining;
@@ -5244,6 +5265,7 @@ Deno.serve(async (req) => {
           userId,
           bucketPath: path,
           limit: 1,
+          force: true,
         });
         if (cleanup.failed > 0 || cleanup.remaining > 0) {
           console.error("Temporary source image cleanup incomplete", { userId, path, cleanup });
