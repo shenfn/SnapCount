@@ -29,6 +29,14 @@ create index if not exists idx_image_cleanup_queue_work
   on public.image_cleanup_queue (status, attempts, created_at)
   where status in ('pending', 'failed');
 
+update public.image_cleanup_queue
+set status = 'pending',
+    attempts = 0,
+    processed_at = null,
+    last_error = null,
+    updated_at = now()
+where status = 'done';
+
 create or replace function public.cleanup_expired_images()
 returns integer
 language plpgsql
