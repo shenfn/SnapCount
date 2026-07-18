@@ -3,6 +3,13 @@ import UIKit
 @testable import SnapCount
 
 final class SnapCountTests: XCTestCase {
+    func testLocalDateKeyUsesShanghaiCalendarDay() {
+        XCTAssertEqual(NativeLocalDate.dateKey("2026-07-17T16:30:00Z"), "2026-07-18")
+        XCTAssertEqual(NativeLocalDate.dateKey("2026-07-18T00:30:00+08:00"), "2026-07-18")
+        XCTAssertEqual(NativeLocalDate.dateKey("2026-07-18"), "2026-07-18")
+        XCTAssertEqual(NativeLocalDate.timeKey("2026-07-17T16:30:00Z"), "00:30")
+    }
+
     func testAppTabsHaveTitles() {
         XCTAssertEqual(AppTab.allCases.count, 5)
         XCTAssertTrue(AppTab.allCases.allSatisfy { !$0.title.isEmpty })
@@ -827,7 +834,13 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
         "expense:record-1"
     }
 
-    func resolveRepayment(id: String, cycleId: String, accessToken: String) async throws {}
+    func confirmStagingRepayment(
+        id: String,
+        cycleId: String,
+        paidAmount: Double,
+        debitAccountId: String?,
+        accessToken: String
+    ) async throws {}
 
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {
         URL(string: "https://example.com/receipt.jpg")!

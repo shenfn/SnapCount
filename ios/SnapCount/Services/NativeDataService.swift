@@ -236,7 +236,7 @@ final class NativeDataService {
         snapshot.todayCount =
             txRows.filter { $0.transactionDate == today }.count +
             incomeRows.filter { $0.incomeDate == today }.count +
-            universalRows.filter { ($0.occurredAt ?? $0.createdAt)?.hasPrefix(today) == true }.count
+            universalRows.filter { ($0.occurredAt ?? $0.createdAt).map(NativeLocalDate.dateKey) == today }.count
 
         snapshot.pendingExpenses = txRows.filter { $0.status == "pending" }.compactMap { row in
             guard let dateKey = row.transactionDate else { return nil }
@@ -250,7 +250,7 @@ final class NativeDataService {
         snapshot.monthCount =
             txRows.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.count +
             incomeRows.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.count +
-            universalRows.filter { ($0.occurredAt ?? $0.createdAt)?.hasPrefix(monthPrefix) == true }.count
+            universalRows.filter { ($0.occurredAt ?? $0.createdAt).map(NativeLocalDate.dateKey)?.hasPrefix(monthPrefix) == true }.count
 
         snapshot.monthExpense = txRows
             .filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }
@@ -899,7 +899,7 @@ final class NativeDataService {
             "p_category": AnyCodable(category),
             "p_payment_method": AnyCodable(paymentMethod),
             "p_income_category": AnyCodable(incomeCategory),
-            "p_record_date": AnyCodable(String(occurredAt.prefix(10))),
+            "p_record_date": AnyCodable(NativeLocalDate.dateKey(occurredAt)),
             "p_record_time": AnyCodable(recordTime),
             "p_occurred_at": AnyCodable(occurredAt),
             "p_summary": AnyCodable(record.summary),
@@ -948,12 +948,12 @@ final class NativeDataService {
             guard let dateKey = row.incomeDate else { return }
             records.append(NativeDayRecord(id: "income-\(row.id)", reference: "income/\(row.id)", dateKey: dateKey, kind: .income, domainKey: "income", title: row.sourceName ?? "收入记录", subtitle: row.category ?? "收入", value: "+\(currency(row.amount))", timeLabel: nil, systemImage: "arrow.down.circle"))
         }
-        universal.filter { ($0.occurredAt ?? $0.createdAt)?.hasPrefix(monthPrefix) == true }.forEach { row in
+        universal.filter { ($0.occurredAt ?? $0.createdAt).map(dateOnly)?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
             let kind = NativeDayRecordKind(rawValue: row.domainKey ?? "") ?? .all
             records.append(NativeDayRecord(id: "data-\(row.id)", reference: "data/\(row.id)", dateKey: dateOnly(sourceDate), kind: kind, domainKey: row.domainKey, title: row.title ?? row.summary ?? domainName(row.domainKey), subtitle: row.summary ?? domainName(row.domainKey), value: "", timeLabel: timeOnly(sourceDate), systemImage: kind == .all ? "sparkles" : kind.systemImage))
         }
-        staging.filter { !["discarded", "archived", "assigned", "confirmed"].contains($0.status ?? "") && ($0.occurredAt ?? $0.createdAt)?.hasPrefix(monthPrefix) == true }.forEach { row in
+        staging.filter { !["discarded", "archived", "assigned", "confirmed"].contains($0.status ?? "") && ($0.occurredAt ?? $0.createdAt).map(dateOnly)?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
             records.append(NativeDayRecord(id: "staging-\(row.id)", reference: "staging-\(row.id)", dateKey: dateOnly(sourceDate), kind: .staging, domainKey: row.detectedDomainKey, title: row.detectedDomainName ?? domainName(row.detectedDomainKey), subtitle: row.aiSummary ?? row.lastErrorMessage ?? "待处理截图", value: row.recordType == "income" ? "+ 待确认" : row.recordType == "expense" ? "- 待确认" : "待分类", timeLabel: timeOnly(sourceDate), systemImage: stagingSystemImage(row.status ?? "unassigned")))
         }
@@ -1059,10 +1059,7 @@ final class NativeDataService {
     }
 
     private func timeOnly(_ value: String) -> String? {
-        guard value.count >= 16 else { return nil }
-        let start = value.index(value.startIndex, offsetBy: 11)
-        let end = value.index(start, offsetBy: 5)
-        return String(value[start..<end])
+        NativeLocalDate.timeKey(value)
     }
 
     private func cachedRecordDetails(
@@ -1172,7 +1169,7 @@ final class NativeDataService {
         let title = row.detectedDomainName ?? domainName(row.detectedDomainKey)
         return NativeStagingRecord(
             id: row.id,
-            dateKey: String((row.occurredAt ?? row.createdAt ?? "").prefix(10)),
+            dateKey: NativeLocalDate.dateKey(row.occurredAt ?? row.createdAt ?? ""),
             title: title,
             summary: row.aiSummary ?? row.lastErrorMessage ?? "这条截图需要你打开收件箱确认或补全。",
             status: status,
@@ -1246,14 +1243,14 @@ final class NativeDataService {
 
     private func dateTimeLabel(_ value: String?) -> String? {
         guard let value, !value.isEmpty else { return nil }
-        return String(value.prefix(16)).replacingOccurrences(of: "T", with: " ")
+        if let time = NativeLocalDate.timeKey(value) {
+            return "\(NativeLocalDate.dateKey(value)) \(time)"
+        }
+        return NativeLocalDate.dateKey(value)
     }
 
     private func dateOnly(_ value: String) -> String {
-        if value.count >= 10 {
-            return String(value.prefix(10))
-        }
-        return localDateString(Date())
+        NativeLocalDate.dateKey(value)
     }
 
     private func resolveReference(_ reference: String) -> (kind: String, id: String) {
@@ -1287,12 +1284,7 @@ final class NativeDataService {
     }
 
     private func localDateString(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        NativeLocalDate.dateKey(date)
     }
 }
 
