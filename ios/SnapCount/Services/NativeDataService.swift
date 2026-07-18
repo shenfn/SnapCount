@@ -233,10 +233,13 @@ final class NativeDataService {
             universal.error.map { "通用数据暂未同步：\($0.localizedDescription)" },
             staging.error.map { "中转站暂未同步：\($0.localizedDescription)" }
         ].compactMap { $0 }
-        snapshot.todayCount =
-            txRows.filter { $0.transactionDate == today }.count +
-            incomeRows.filter { $0.incomeDate == today }.count +
-            universalRows.filter { ($0.occurredAt ?? $0.createdAt).map(NativeLocalDate.dateKey) == today }.count
+        let todayExpenseCount = txRows.filter { $0.transactionDate == today }.count
+        let todayIncomeCount = incomeRows.filter { $0.incomeDate == today }.count
+        let todayUniversalCount = universalRows.filter { row in
+            guard let sourceDate = row.occurredAt ?? row.createdAt else { return false }
+            return NativeLocalDate.dateKey(sourceDate) == today
+        }.count
+        snapshot.todayCount = todayExpenseCount + todayIncomeCount + todayUniversalCount
 
         snapshot.pendingExpenses = txRows.filter { $0.status == "pending" }.compactMap { row in
             guard let dateKey = row.transactionDate else { return nil }
@@ -247,10 +250,13 @@ final class NativeDataService {
             txRows.filter { $0.status == "pending" }.count +
             stagingRows.filter { !["discarded", "archived", "assigned"].contains($0.status ?? "") }.count
 
-        snapshot.monthCount =
-            txRows.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.count +
-            incomeRows.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.count +
-            universalRows.filter { ($0.occurredAt ?? $0.createdAt).map(NativeLocalDate.dateKey)?.hasPrefix(monthPrefix) == true }.count
+        let monthExpenseCount = txRows.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.count
+        let monthIncomeCount = incomeRows.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.count
+        let monthUniversalCount = universalRows.filter { row in
+            guard let sourceDate = row.occurredAt ?? row.createdAt else { return false }
+            return NativeLocalDate.dateKey(sourceDate).hasPrefix(monthPrefix)
+        }.count
+        snapshot.monthCount = monthExpenseCount + monthIncomeCount + monthUniversalCount
 
         snapshot.monthExpense = txRows
             .filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }
