@@ -2692,11 +2692,14 @@ async function createStagingRecord(
 
   if (error) {
     console.error("Staging insert failed:", error);
-    const { data: existing } = await supabase
+    let existingQuery = supabase
       .from("staging_records")
       .select("id")
-      .eq("image_hash", payload.imageHash)
-      .maybeSingle();
+      .eq("image_hash", payload.imageHash);
+    if (payload.userId) {
+      existingQuery = existingQuery.eq("user_id", payload.userId);
+    }
+    const { data: existing } = await existingQuery.maybeSingle();
     if (existing) return existing;
     return null;
   }
