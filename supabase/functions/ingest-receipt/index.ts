@@ -3334,6 +3334,7 @@ type ImageCleanupQueueRow = {
   user_id: string | null;
   attempts: number;
   created_at: string;
+  cleanup_reason: "retention" | "manual_cleanup" | "immediate" | "record_delete" | "account_delete";
 };
 
 function isUserOwnedStoragePath(path: string, userId: string): boolean {
@@ -3354,6 +3355,15 @@ async function authenticatedUserId(req: Request): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function authenticatedSupabaseClient(req: Request): ReturnType<typeof createClient> | null {
+  const authHeader = req.headers.get("Authorization") || "";
+  const anonKey = getEnvOptional("ANON_PUBLIC_KEY");
+  if (!authHeader.startsWith("Bearer ") || !anonKey) return null;
+  return createClient(getEnv("SUPABASE_URL"), anonKey, {
+    global: { headers: { Authorization: authHeader } },
+  });
 }
 
 function isCleanupWorkerRequest(req: Request): boolean {
@@ -3390,6 +3400,7 @@ async function enqueueImageCleanup(
   supabase: ReturnType<typeof createClient>,
   userId: string,
   paths: string[],
+  cleanupReason: ImageCleanupQueueRow["cleanup_reason"],
 ): Promise<void> {
   if (paths.length === 0) return;
   const now = new Date().toISOString();
@@ -3399,13 +3410,34 @@ async function enqueueImageCleanup(
       bucket_path: path,
       status: "pending",
       attempts: 0,
+      cleanup_reason: cleanupReason,
       last_error: null,
       processed_at: null,
+      last_attempt_at: null,
+      next_retry_at: now,
+      deleted_at: null,
       updated_at: now,
     })),
     { onConflict: "user_id,bucket_path" },
   );
   if (error) throw new Error(`Failed to enqueue image cleanup: ${error.message}`);
+}
+
+async function hasBusinessImageReference(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  path: string,
+): Promise<boolean> {
+  const businessTargets = IMAGE_REFERENCE_TARGETS.filter(({ table }) => table !== "ai_recognition_logs");
+  for (const { table, column } of businessTargets) {
+    const { count, error } = await supabase.from(table)
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq(column, path);
+    if (error) throw new Error(`Failed to verify ${table}.${column}: ${error.message}`);
+    if ((count ?? 0) > 0) return true;
+  }
+  return false;
 }
 
 async function clearImageReferences(
@@ -3428,7 +3460,12 @@ async function processImageCleanupQueue(
 ): Promise<{ processed: number; failed: number; remaining: number }> {
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
   let staleQuery = supabase.from("image_cleanup_queue")
-    .update({ status: "failed", last_error: "stale processing lease recovered", updated_at: new Date().toISOString() })
+    .update({
+      status: "failed",
+      last_error: "stale processing lease recovered",
+      next_retry_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
     .eq("status", "processing")
     .lt("updated_at", new Date(Date.now() - 15 * 60 * 1000).toISOString());
   if (options.userId) staleQuery = staleQuery.eq("user_id", options.userId);
@@ -3436,9 +3473,10 @@ async function processImageCleanupQueue(
   await staleQuery;
 
   let query = supabase.from("image_cleanup_queue")
-    .select("id,bucket_path,user_id,attempts,created_at")
+    .select("id,bucket_path,user_id,attempts,created_at,cleanup_reason")
     .in("status", ["pending", "failed"])
-    .lt("attempts", 5)
+    .lt("attempts", 8)
+    .or(`next_retry_at.is.null,next_retry_at.lte.${new Date().toISOString()}`)
     .order("created_at", { ascending: true })
     .limit(limit);
   if (options.userId) query = query.eq("user_id", options.userId);
@@ -3450,8 +3488,15 @@ async function processImageCleanupQueue(
   let failed = 0;
   for (const row of (data ?? []) as ImageCleanupQueueRow[]) {
     const attempts = row.attempts ?? 0;
+    const attemptedAt = new Date().toISOString();
     const { data: claimed, error: claimError } = await supabase.from("image_cleanup_queue")
-      .update({ status: "processing", attempts: attempts + 1, updated_at: new Date().toISOString() })
+      .update({
+        status: "processing",
+        attempts: attempts + 1,
+        last_attempt_at: attemptedAt,
+        next_retry_at: null,
+        updated_at: attemptedAt,
+      })
       .eq("id", row.id)
       .eq("attempts", attempts)
       .in("status", ["pending", "failed"])
@@ -3461,7 +3506,7 @@ async function processImageCleanupQueue(
 
     try {
       if (!row.user_id) throw new Error("Cleanup row has no user_id");
-      if (!options.force) {
+      if (!options.force && row.cleanup_reason === "retention") {
         const { data: config, error: configError } = await supabase.from("user_configs")
           .select("is_active,keep_source_images,image_retention_days,updated_at")
           .eq("user_id", row.user_id)
@@ -3481,6 +3526,11 @@ async function processImageCleanupQueue(
           continue;
         }
       }
+      if (row.cleanup_reason === "record_delete" && await hasBusinessImageReference(supabase, row.user_id, row.bucket_path)) {
+        const { error: cancelError } = await supabase.from("image_cleanup_queue").delete().eq("id", row.id);
+        if (cancelError) throw new Error(`Failed to cancel referenced image cleanup: ${cancelError.message}`);
+        continue;
+      }
       if (!/^https?:\/\//i.test(row.bucket_path)) {
         if (!isUserOwnedStoragePath(row.bucket_path, row.user_id)) {
           throw new Error(`Cleanup path does not belong to user ${row.user_id}`);
@@ -3493,15 +3543,19 @@ async function processImageCleanupQueue(
         status: "done",
         last_error: null,
         processed_at: new Date().toISOString(),
+        deleted_at: new Date().toISOString(),
+        next_retry_at: null,
         updated_at: new Date().toISOString(),
       }).eq("id", row.id);
       if (doneError) throw new Error(doneError.message);
       processed += 1;
     } catch (cleanupError) {
       failed += 1;
+      const retryDelayMinutes = Math.min(12 * 60, Math.pow(5, attempts));
       await supabase.from("image_cleanup_queue").update({
         status: "failed",
         last_error: String(cleanupError),
+        next_retry_at: new Date(Date.now() + retryDelayMinutes * 60 * 1000).toISOString(),
         updated_at: new Date().toISOString(),
       }).eq("id", row.id);
     }
@@ -3519,9 +3573,10 @@ async function processImageCleanupQueue(
 async function cleanupAllUserImages(
   supabase: ReturnType<typeof createClient>,
   userId: string,
+  cleanupReason: "manual_cleanup" | "account_delete" = "manual_cleanup",
 ): Promise<{ total: number; processed: number; failed: number; remaining: number }> {
   const paths = await collectUserImagePaths(supabase, userId);
-  await enqueueImageCleanup(supabase, userId, paths);
+  await enqueueImageCleanup(supabase, userId, paths, cleanupReason);
   let processed = 0;
   let failed = 0;
   let remaining = 0;
@@ -3664,6 +3719,68 @@ Deno.serve(async (req) => {
         });
       }
 
+      if (action === "delete_record") {
+        const actionUserId = await authenticatedUserId(req);
+        const userClient = authenticatedSupabaseClient(req);
+        if (!actionUserId || !userClient) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const reference = typeof jsonBody?.reference === "string" ? jsonBody.reference.trim() : "";
+        const referenceParts = reference.split("/", 2);
+        const recordKind = String(jsonBody?.record_kind ?? (referenceParts.length === 2 ? referenceParts[0] : "")).trim();
+        const recordId = String(jsonBody?.record_id ?? (referenceParts.length === 2 ? referenceParts[1] : "")).trim();
+        if (!recordKind || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recordId)) {
+          return new Response(JSON.stringify({ error: "记录类型或 ID 无效" }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const { data, error: deleteError } = await userClient.rpc("delete_record_with_cleanup", {
+          p_kind: recordKind,
+          p_id: recordId,
+        });
+        if (deleteError) {
+          return new Response(JSON.stringify({ error: `删除记录失败：${deleteError.message}` }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const deletion = data as { reference?: string; image_path?: string; cleanup_queued?: boolean } | null;
+        let cleanup: { processed: number; failed: number; remaining: number } | null = null;
+        let cleanupPending = false;
+        if (deletion?.cleanup_queued && deletion.image_path) {
+          try {
+            cleanup = await processImageCleanupQueue(supabase, {
+              userId: actionUserId,
+              bucketPath: deletion.image_path,
+              limit: 1,
+              force: true,
+            });
+            cleanupPending = cleanup.failed > 0 || cleanup.remaining > 0;
+          } catch (cleanupError) {
+            cleanupPending = true;
+            console.error("Record image cleanup deferred", {
+              userId: actionUserId,
+              reference: deletion.reference,
+              cleanupError,
+            });
+          }
+        }
+
+        return new Response(JSON.stringify({
+          status: "deleted",
+          reference: deletion?.reference ?? `${recordKind}/${recordId}`,
+          cleanup_queued: deletion?.cleanup_queued ?? false,
+          cleanup_pending: cleanupPending,
+          cleanup,
+        }), {
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
       if (action === "cleanup_all_images") {
         const actionUserId = await authenticatedUserId(req);
         if (!actionUserId) {
@@ -3694,7 +3811,7 @@ Deno.serve(async (req) => {
           });
         }
 
-        const cleanup = await cleanupAllUserImages(supabase, actionUserId);
+        const cleanup = await cleanupAllUserImages(supabase, actionUserId, "account_delete");
         if (cleanup.failed > 0 || cleanup.remaining > 0) {
           return new Response(JSON.stringify({
             error: "图片清理尚未完成，请稍后重试删除账户",
@@ -5265,7 +5382,7 @@ Deno.serve(async (req) => {
     if (temporaryImageCleanup) {
       const { userId, path } = temporaryImageCleanup;
       try {
-        await enqueueImageCleanup(supabase, userId, [path]);
+        await enqueueImageCleanup(supabase, userId, [path], "immediate");
         const cleanup = await processImageCleanupQueue(supabase, {
           userId,
           bucketPath: path,
