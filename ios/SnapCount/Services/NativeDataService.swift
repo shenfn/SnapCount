@@ -1663,6 +1663,23 @@ extension Dictionary where Key == String, Value == AnyCodable {
 }
 
 extension DashboardSnapshot {
+    func clearingSignedImageURLs() -> DashboardSnapshot {
+        var snapshot = self
+        snapshot.recordDetails = recordDetails.mapValues { detail in
+            var cleared = detail
+            cleared.imageURL = nil
+            cleared.imageLoadError = false
+            return cleared
+        }
+        snapshot.stagingRecords = stagingRecords.map { record in
+            var cleared = record
+            cleared.imageURL = nil
+            cleared.imageLoadError = false
+            return cleared
+        }
+        return snapshot
+    }
+
     func applyingSignedImageURLs(
         _ signedURLs: [String: URL],
         markMissingAsFailure: Bool = true

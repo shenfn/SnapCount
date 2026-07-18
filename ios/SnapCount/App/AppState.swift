@@ -1421,6 +1421,20 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             try await settingsRepository.cleanupSourceImages(accessToken: session.accessToken)
+            await RemoteImageRepository.shared.clear()
+            dashboard = dashboard.clearingSignedImageURLs()
+            recordDetailCache = recordDetailCache.mapValues { detail in
+                var cleared = detail
+                cleared.imageURL = nil
+                cleared.imageLoadError = false
+                return cleared
+            }
+            if var detail = selectedRecordDetail {
+                detail.imageURL = nil
+                detail.imageLoadError = false
+                selectedRecordDetail = detail
+            }
+            await refreshDashboard()
             settingsMessage = "已有原图已清理"
         } catch {
             settingsMessage = "留存设置已保存，但清理已有原图失败：\(error.localizedDescription)"
