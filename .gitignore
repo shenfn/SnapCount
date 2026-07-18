@@ -90,6 +90,12 @@ tools/ai-validation/server/accounts.json
 # 远程图片缓存目录
 test-cases/_remote_cache/
 
+# 本地备份与一次性备份脚本（严禁进入 GitHub）
+backups/
+scripts/backup-pre-image-cleanup.ps1
+scripts/backup-supabase-rest-tables.mjs
+scripts/backup-supabase-storage.mjs
+
 # 本地原型/设计稿（不入主仓库）
 多域联动分析.html
 *_原型*.html
