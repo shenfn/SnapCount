@@ -3356,10 +3356,15 @@ async function authenticatedUserId(req: Request): Promise<string | null> {
   }
 }
 
-function isServiceRoleRequest(req: Request): boolean {
-  const authHeader = req.headers.get("Authorization") || "";
-  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  return bearerToken.length > 0 && bearerToken === getEnv("SUPABASE_SERVICE_ROLE_KEY");
+function isCleanupWorkerRequest(req: Request): boolean {
+  const actual = req.headers.get("X-Image-Cleanup-Token") || "";
+  const expected = getEnvOptional("IMAGE_CLEANUP_WORKER_TOKEN") || "";
+  if (!actual || actual.length !== expected.length) return false;
+  let difference = 0;
+  for (let index = 0; index < actual.length; index += 1) {
+    difference |= actual.charCodeAt(index) ^ expected.charCodeAt(index);
+  }
+  return difference === 0;
 }
 
 async function collectUserImagePaths(
@@ -3648,7 +3653,7 @@ Deno.serve(async (req) => {
       const action = jsonBody?.action;
 
       if (action === "process_image_cleanup_queue") {
-        if (!isServiceRoleRequest(req)) {
+        if (!isCleanupWorkerRequest(req)) {
           return new Response(JSON.stringify({ error: "Unauthorized worker request" }), {
             status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
           });

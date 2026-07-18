@@ -3,7 +3,7 @@ begin
   if not exists (
     select 1 from vault.secrets where name = 'project_url'
   ) or not exists (
-    select 1 from vault.secrets where name = 'service_role_key'
+    select 1 from vault.secrets where name = 'image_cleanup_worker_token'
   ) then
     raise exception 'image cleanup Vault secrets are missing';
   end if;
@@ -51,6 +51,47 @@ $$;
 
 revoke execute on function public.run_verified_image_cleanup_scan() from public, anon, authenticated;
 grant execute on function public.run_verified_image_cleanup_scan() to service_role;
+
+create or replace function public.invoke_image_cleanup_worker()
+returns boolean
+language plpgsql
+security definer
+set search_path = public, extensions, net
+as $$
+declare
+  project_url text;
+  worker_token text;
+begin
+  execute 'select decrypted_secret from vault.decrypted_secrets where name = $1 limit 1'
+    into project_url
+    using 'project_url';
+  execute 'select decrypted_secret from vault.decrypted_secrets where name = $1 limit 1'
+    into worker_token
+    using 'image_cleanup_worker_token';
+
+  if nullif(project_url, '') is null or nullif(worker_token, '') is null then
+    raise warning 'image cleanup worker skipped: project URL or worker token is missing';
+    return false;
+  end if;
+
+  perform net.http_post(
+    url := rtrim(project_url, '/') || '/functions/v1/ingest-receipt',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'X-Image-Cleanup-Token', worker_token
+    ),
+    body := jsonb_build_object('action', 'process_image_cleanup_queue')
+  );
+  return true;
+exception
+  when others then
+    raise warning 'image cleanup worker invocation failed: %', sqlerrm;
+    return false;
+end;
+$$;
+
+revoke execute on function public.invoke_image_cleanup_worker() from public, anon, authenticated;
+grant execute on function public.invoke_image_cleanup_worker() to service_role;
 
 do $$
 begin
