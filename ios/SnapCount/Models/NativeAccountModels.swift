@@ -51,7 +51,7 @@ enum NativeRepaymentStatus: String, Codable, CaseIterable {
     }
 
     var allowsManualRepayment: Bool {
-        [.pending, .dueToday, .overdueUnconfirmed, .partialPaid, .carriedOver].contains(self)
+        [.pending, .dueToday, .overdueUnconfirmed, .partialPaid, .carriedOver, .historicalUnconfirmed].contains(self)
     }
 }
 

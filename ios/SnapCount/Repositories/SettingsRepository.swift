@@ -136,12 +136,24 @@ final class SettingsRepository: SettingsRepositoryProtocol {
     }
 
     private func rows(path: String, queryItems: [URLQueryItem], accessToken: String) async throws -> [[String: AnyCodable]] {
-        try await remoteClient.get(
-            [[String: AnyCodable]].self,
-            path: path,
-            queryItems: queryItems,
-            accessToken: accessToken
-        )
+        let pageSize = 1000
+        var offset = 0
+        var allRows: [[String: AnyCodable]] = []
+        while true {
+            let page = try await remoteClient.get(
+                [[String: AnyCodable]].self,
+                path: path,
+                queryItems: queryItems + [
+                    URLQueryItem(name: "limit", value: "\(pageSize)"),
+                    URLQueryItem(name: "offset", value: "\(offset)")
+                ],
+                accessToken: accessToken
+            )
+            allRows.append(contentsOf: page)
+            guard page.count == pageSize else { break }
+            offset += pageSize
+        }
+        return allRows
     }
 
     private static func dateRange(_ range: NativeExportRange) -> (String, String) {
@@ -179,14 +191,69 @@ final class SettingsRepository: SettingsRepositoryProtocol {
                 + (values["incomes"] ?? []).map { ["record_type": AnyCodable("income")].merging($0) { _, value in value } }
             columns = [("record_type", "类型"), ("transaction_date", "支出日期"), ("income_date", "收入日期"), ("amount", "金额"), ("merchant_name", "商家"), ("source_name", "来源"), ("category", "分类"), ("note", "备注")]
         case .universal:
-            rows = payload as? [[String: AnyCodable]] ?? []
-            columns = [("occurred_at", "时间"), ("domain_key", "数据域"), ("title", "标题"), ("summary", "摘要"), (request.includeFullPayload ? "payload_jsonb" : "summary", request.includeFullPayload ? "完整数据" : "关键数据")]
+            let universalRows = payload as? [[String: AnyCodable]] ?? []
+            rows = request.includeFullPayload ? universalRows : universalRows.map { row in
+                row.merging(["detail": AnyCodable(universalDetail(row))]) { _, value in value }
+            }
+            columns = [("occurred_at", "时间"), ("domain_key", "数据域"), ("title", "标题"), ("summary", "摘要"), (request.includeFullPayload ? "payload_jsonb" : "detail", request.includeFullPayload ? "完整数据" : "关键数据")]
         }
         let header = columns.map(\.1).joined(separator: ",")
         let body = rows.map { row in
             columns.map { key, _ in csvCell(row[key]?.value) }.joined(separator: ",")
         }.joined(separator: "\n")
         return "\u{FEFF}\(header)\n\(body)"
+    }
+
+    private static func universalDetail(_ row: [String: AnyCodable]) -> String {
+        let payload = row.dictionary("payload_jsonb") ?? [:]
+        switch row.string("domain_key") {
+        case "food":
+            let dishes = (payload.array("dishes") ?? []).compactMap { item -> String? in
+                (item as? [String: Any])?["name"] as? String
+            }.joined(separator: "+")
+            let meal = mealTitle(payload.string("meal_type"))
+            return [meal, dishes, numberText(payload.double("total_calorie_kcal"), suffix: "千卡")].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "·")
+        case "sleep":
+            return [
+                numberText(payload.double("sleep_hours"), suffix: "h"),
+                payload.double("quality_score").map { "评分\(String(format: "%.0f", $0))" },
+                payload.string("quality_level")
+            ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "·")
+        case "sport":
+            return [
+                payload.string("sport_type"),
+                numberText(payload.double("duration_minutes"), suffix: "分钟"),
+                numberText(payload.double("distance_km"), suffix: "km"),
+                numberText(payload.double("calories"), suffix: "千卡")
+            ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "·")
+        case "reading":
+            return [
+                payload.string("book_name"),
+                numberText(payload.double("reading_minutes"), suffix: "分钟"),
+                numberText(payload.double("pages"), suffix: "页")
+            ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "·")
+        default:
+            return payload
+                .filter { !($0.value.value is [Any]) && !($0.value.value is [String: Any]) && !($0.value.value is NSNull) }
+                .map { "\($0.key):\($0.value.displayValue)" }
+                .sorted()
+                .joined(separator: "·")
+        }
+    }
+
+    private static func mealTitle(_ value: String?) -> String? {
+        switch value {
+        case "breakfast": return "早餐"
+        case "lunch": return "午餐"
+        case "dinner": return "晚餐"
+        default: return value
+        }
+    }
+
+    private static func numberText(_ value: Double?, suffix: String) -> String? {
+        guard let value else { return nil }
+        let formatted = value.rounded() == value ? String(format: "%.0f", value) : String(format: "%.1f", value)
+        return "\(formatted)\(suffix)"
     }
 
     private static func csvCell(_ value: Any?) -> String {

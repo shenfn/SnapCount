@@ -217,6 +217,16 @@ struct AccountDetailView: View {
                                     Text("应还 ¥\(amount(cycle.statementAmount)) · 剩余 ¥\(amount(cycle.remainingAmount))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if cycle.id != currentCycle?.id,
+                                       cycle.status.allowsManualRepayment {
+                                        Button {
+                                            repaymentCycle = cycle
+                                        } label: {
+                                            Label("确认还款", systemImage: "checkmark.circle")
+                                                .font(.caption)
+                                        }
+                                        .disabled(appState.isSubmittingRepayment)
+                                    }
                                 }
                             }
                         }
