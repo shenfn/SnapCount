@@ -3320,6 +3320,159 @@ async function callKimiVision(imageBytes: Uint8Array, mime: string, apiKey: stri
   return result.ai;
 }
 
+const IMAGE_REFERENCE_TARGETS: Array<{ table: string; column: string }> = [
+  { table: "transactions", column: "image_url" },
+  { table: "income_records", column: "image_url" },
+  { table: "data_records", column: "source_image_path" },
+  { table: "staging_records", column: "image_path" },
+  { table: "ai_recognition_logs", column: "image_url" },
+];
+
+type ImageCleanupQueueRow = {
+  id: string;
+  bucket_path: string;
+  user_id: string | null;
+  attempts: number;
+};
+
+async function authenticatedUserId(req: Request): Promise<string | null> {
+  const authHeader = req.headers.get("Authorization") || "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const anonKey = getEnvOptional("ANON_PUBLIC_KEY");
+  if (!bearerToken || !anonKey || bearerToken === anonKey) return null;
+  try {
+    const userClient = createClient(getEnv("SUPABASE_URL"), anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error } = await userClient.auth.getUser();
+    return error ? null : user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isServiceRoleRequest(req: Request): boolean {
+  const authHeader = req.headers.get("Authorization") || "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  return bearerToken.length > 0 && bearerToken === getEnv("SUPABASE_SERVICE_ROLE_KEY");
+}
+
+async function collectUserImagePaths(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<string[]> {
+  const paths = new Set<string>();
+  for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
+    const { data, error } = await supabase.from(table)
+      .select(column)
+      .eq("user_id", userId)
+      .not(column, "is", null);
+    if (error) throw new Error(`Failed to collect ${table}.${column}: ${error.message}`);
+    for (const row of data ?? []) {
+      const path = row[column];
+      if (typeof path === "string" && path.length > 0) paths.add(path);
+    }
+  }
+  return [...paths];
+}
+
+async function enqueueImageCleanup(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  paths: string[],
+): Promise<void> {
+  if (paths.length === 0) return;
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("image_cleanup_queue").upsert(
+    paths.map((path) => ({
+      user_id: userId,
+      bucket_path: path,
+      status: "pending",
+      attempts: 0,
+      last_error: null,
+      processed_at: null,
+      updated_at: now,
+    })),
+    { onConflict: "user_id,bucket_path" },
+  );
+  if (error) throw new Error(`Failed to enqueue image cleanup: ${error.message}`);
+}
+
+async function clearImageReferences(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  path: string,
+): Promise<void> {
+  for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
+    const { error } = await supabase.from(table)
+      .update({ [column]: null })
+      .eq("user_id", userId)
+      .eq(column, path);
+    if (error) throw new Error(`Failed to clear ${table}.${column}: ${error.message}`);
+  }
+}
+
+async function processImageCleanupQueue(
+  supabase: ReturnType<typeof createClient>,
+  options: { userId?: string; limit?: number } = {},
+): Promise<{ processed: number; failed: number; remaining: number }> {
+  const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+  let query = supabase.from("image_cleanup_queue")
+    .select("id,bucket_path,user_id,attempts")
+    .in("status", ["pending", "failed"])
+    .lt("attempts", 5)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (options.userId) query = query.eq("user_id", options.userId);
+  const { data, error } = await query;
+  if (error) throw new Error(`Failed to read image cleanup queue: ${error.message}`);
+
+  let processed = 0;
+  let failed = 0;
+  for (const row of (data ?? []) as ImageCleanupQueueRow[]) {
+    const attempts = row.attempts ?? 0;
+    const { data: claimed, error: claimError } = await supabase.from("image_cleanup_queue")
+      .update({ status: "processing", attempts: attempts + 1, updated_at: new Date().toISOString() })
+      .eq("id", row.id)
+      .eq("attempts", attempts)
+      .in("status", ["pending", "failed"])
+      .select("id")
+      .maybeSingle();
+    if (claimError || !claimed) continue;
+
+    try {
+      if (!row.user_id) throw new Error("Cleanup row has no user_id");
+      if (!/^https?:\/\//i.test(row.bucket_path)) {
+        const { error: removeError } = await supabase.storage.from(BUCKET_NAME).remove([row.bucket_path]);
+        if (removeError) throw new Error(removeError.message);
+      }
+      await clearImageReferences(supabase, row.user_id, row.bucket_path);
+      const { error: doneError } = await supabase.from("image_cleanup_queue").update({
+        status: "done",
+        last_error: null,
+        processed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", row.id);
+      if (doneError) throw new Error(doneError.message);
+      processed += 1;
+    } catch (cleanupError) {
+      failed += 1;
+      await supabase.from("image_cleanup_queue").update({
+        status: "failed",
+        last_error: String(cleanupError),
+        updated_at: new Date().toISOString(),
+      }).eq("id", row.id);
+    }
+  }
+
+  let remainingQuery = supabase.from("image_cleanup_queue")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["pending", "failed", "processing"]);
+  if (options.userId) remainingQuery = remainingQuery.eq("user_id", options.userId);
+  const { count } = await remainingQuery;
+  return { processed, failed, remaining: count ?? 0 };
+}
+
 Deno.serve(async (req) => {
   const requestUrl = new URL(req.url);
   let responseMode: ShortcutResponseMode = requestUrl.searchParams.get("response_mode") === "text" ? "text" : "json";
@@ -3436,90 +3589,49 @@ Deno.serve(async (req) => {
       const jsonBody = await req.json().catch(() => ({}));
       const action = jsonBody?.action;
 
+      if (action === "process_image_cleanup_queue") {
+        if (!isServiceRoleRequest(req)) {
+          return new Response(JSON.stringify({ error: "Unauthorized worker request" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const result = await processImageCleanupQueue(supabase, { limit: 500 });
+        return new Response(JSON.stringify({ status: "ok", ...result }), {
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
       if (action === "cleanup_all_images") {
-        // 身份校验：仅 JWT
-        const authHeader = req.headers.get("Authorization") || "";
-        const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-        if (!bearerToken) {
-          return new Response(JSON.stringify({ error: "未授权" }), {
-            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-        const anonKey = getEnvOptional("ANON_PUBLIC_KEY");
-        if (!anonKey || bearerToken === anonKey) {
-          return new Response(JSON.stringify({ error: "未授权" }), {
-            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-        // 解析 user_id
-        let actionUserId: string | null = null;
-        try {
-          const userClient = createClient(getEnv("SUPABASE_URL"), anonKey, {
-            global: { headers: { Authorization: authHeader } },
-          });
-          const { data: { user: jwtUser }, error: jwtErr } = await userClient.auth.getUser();
-          if (!jwtErr && jwtUser) actionUserId = jwtUser.id;
-        } catch { /* ignore */ }
+        const actionUserId = await authenticatedUserId(req);
         if (!actionUserId) {
           return new Response(JSON.stringify({ error: "未授权" }), {
             status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
           });
         }
 
-        // 收集该用户所有图片路径
-        const pathsToDelete: string[] = [];
-        const buckets: Array<{ table: string; col: string }> = [
-          { table: "transactions", col: "image_url" },
-          { table: "income_records", col: "image_url" },
-          { table: "data_records", col: "source_image_path" },
-          { table: "staging_records", col: "image_path" },
-          { table: "ai_recognition_logs", col: "image_url" },
-        ];
-        for (const { table, col } of buckets) {
-          const { data: rows } = await supabase.from(table)
-            .select(col)
-            .eq("user_id", actionUserId)
-            .not(col, "is", null);
-          if (rows) {
-            for (const row of rows) {
-              const p = row[col];
-              if (p && typeof p === "string" && p.length > 0) pathsToDelete.push(p);
-            }
-          }
+        const paths = await collectUserImagePaths(supabase, actionUserId);
+        await enqueueImageCleanup(supabase, actionUserId, paths);
+        let processed = 0;
+        let failed = 0;
+        let remaining = 0;
+        for (let batch = 0; batch < 10; batch += 1) {
+          const result = await processImageCleanupQueue(supabase, { userId: actionUserId, limit: 100 });
+          processed += result.processed;
+          failed += result.failed;
+          remaining = result.remaining;
+          if (remaining === 0 || result.processed === 0) break;
         }
-
-        // 删除 Storage 文件（批量，每次最多 100 个）
-        let deletedCount = 0;
-        for (let i = 0; i < pathsToDelete.length; i += 100) {
-          const batch = pathsToDelete.slice(i, i + 100);
-          const { error: delErr } = await supabase.storage.from(BUCKET_NAME).remove(batch);
-          if (!delErr) deletedCount += batch.length;
-        }
-
-        // 清空数据库中的图片路径引用
-        for (const { table, col } of buckets) {
-          await supabase.from(table)
-            .update({ [col]: null })
-            .eq("user_id", actionUserId)
-            .not(col, "is", null);
-        }
-
-        // 写入清理队列记录（便于审计）
-        if (pathsToDelete.length > 0) {
-          await supabase.from("image_cleanup_queue").insert(
-            pathsToDelete.map((p) => ({
-              bucket_path: p,
-              user_id: actionUserId,
-              status: "done",
-            }))
-          ).catch(() => { /* 队列写入失败不影响主流程 */ });
-        }
-
+        const completed = failed === 0 && remaining === 0;
         return new Response(JSON.stringify({
-          status: "ok",
-          deleted: deletedCount,
-          total: pathsToDelete.length,
-        }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+          status: completed ? "ok" : "incomplete",
+          deleted: processed,
+          failed,
+          remaining,
+          total: paths.length,
+        }), {
+          status: completed ? 200 : 502,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
       }
     }
 
