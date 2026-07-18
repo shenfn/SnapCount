@@ -3422,6 +3422,9 @@ type ImageCleanupQueueRow = {
   attempts: number;
   created_at: string;
   cleanup_reason: ImageCleanupReason;
+  source_table: string | null;
+  source_id: string | null;
+  storage_deleted_at: string | null;
 };
 
 type ImageCleanupReason = "retention" | "manual_cleanup" | "immediate" | "record_delete" | "account_delete" | "upload_rollback";
@@ -3436,6 +3439,10 @@ type ImageCleanupResult = {
 
 function isUserOwnedStoragePath(path: string, userId: string): boolean {
   return path.startsWith(`${userId}/`) || path.startsWith(`tmp/${userId}/`);
+}
+
+function isLegacyStoragePath(path: string): boolean {
+  return /^[0-9]{4}-[0-9]{2}-[0-9]{2}\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(path);
 }
 
 async function authenticatedUserId(req: Request): Promise<string | null> {
@@ -3494,7 +3501,7 @@ async function collectUserImagePaths(
         const dynamicRow = row as unknown as Record<string, unknown>;
         const path = dynamicRow[column];
         if (typeof path !== "string" || path.length === 0) continue;
-        if (isUserOwnedStoragePath(path, userId)) paths.add(path);
+        if (isUserOwnedStoragePath(path, userId) || isLegacyStoragePath(path)) paths.add(path);
         else externalPaths.add(path);
       }
       if (rows.length < pageSize) break;
@@ -3586,6 +3593,32 @@ async function clearImageReferences(
   }
 }
 
+async function legacyStoragePathCanBeDeleted(
+  supabase: ReturnType<typeof createClient>,
+  row: ImageCleanupQueueRow,
+): Promise<boolean> {
+  if (!row.user_id) return false;
+  let hasOwnerReference = false;
+  for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await supabase.from(table)
+        .select("user_id")
+        .eq(column, row.bucket_path)
+        .range(offset, offset + 499);
+      if (error) throw new Error(`Failed to verify legacy path ownership in ${table}.${column}: ${error.message}`);
+      const references = data ?? [];
+      for (const reference of references) {
+        const referenceUserId = (reference as { user_id: string | null }).user_id;
+        if (referenceUserId !== row.user_id) return false;
+        hasOwnerReference = true;
+      }
+      if (references.length < 500) break;
+    }
+  }
+  return hasOwnerReference
+    || (row.cleanup_reason === "record_delete" && Boolean(row.source_table && row.source_id));
+}
+
 async function processImageCleanupQueue(
   supabase: ReturnType<typeof createClient>,
   options: { userId?: string; bucketPath?: string; limit?: number; force?: boolean } = {},
@@ -3616,7 +3649,7 @@ async function processImageCleanupQueue(
   if (staleError) throw new Error(`Failed to recover stale image cleanup rows: ${staleError.message}`);
 
   let query = supabase.from("image_cleanup_queue")
-    .select("id,bucket_path,user_id,attempts,created_at,cleanup_reason,bucket_name")
+    .select("id,bucket_path,user_id,attempts,created_at,cleanup_reason,bucket_name,source_table,source_id,storage_deleted_at")
     .in("status", ["pending", "failed"])
     .lt("attempts", 8)
     .or(`next_retry_at.is.null,next_retry_at.lte.${new Date().toISOString()}`)
@@ -3691,17 +3724,22 @@ async function processImageCleanupQueue(
         skippedExternal += 1;
         continue;
       }
-      if (!isUserOwnedStoragePath(row.bucket_path, row.user_id)) {
-        throw new Error(`Cleanup path does not belong to user ${row.user_id}`);
+      if (!row.storage_deleted_at && !isUserOwnedStoragePath(row.bucket_path, row.user_id)) {
+        if (!isLegacyStoragePath(row.bucket_path) || !await legacyStoragePathCanBeDeleted(supabase, row)) {
+          throw new Error(`Cleanup path ownership cannot be verified for user ${row.user_id}`);
+        }
       }
-      const { error: removeError } = await supabase.storage.from(BUCKET_NAME).remove([row.bucket_path]);
-      if (removeError) throw new Error(removeError.message);
-      const storageDeletedAt = new Date().toISOString();
-      const { error: storageAuditError } = await supabase.from("image_cleanup_queue").update({
-        storage_deleted_at: storageDeletedAt,
-        updated_at: storageDeletedAt,
-      }).eq("id", row.id);
-      if (storageAuditError) throw new Error(`Failed to record Storage deletion: ${storageAuditError.message}`);
+      let storageDeletedAt = row.storage_deleted_at;
+      if (!storageDeletedAt) {
+        const { error: removeError } = await supabase.storage.from(BUCKET_NAME).remove([row.bucket_path]);
+        if (removeError) throw new Error(removeError.message);
+        storageDeletedAt = new Date().toISOString();
+        const { error: storageAuditError } = await supabase.from("image_cleanup_queue").update({
+          storage_deleted_at: storageDeletedAt,
+          updated_at: storageDeletedAt,
+        }).eq("id", row.id);
+        if (storageAuditError) throw new Error(`Failed to record Storage deletion: ${storageAuditError.message}`);
+      }
       await clearImageReferences(supabase, row.user_id, row.bucket_path);
       const referencesClearedAt = new Date().toISOString();
       const { error: doneError } = await supabase.from("image_cleanup_queue").update({
