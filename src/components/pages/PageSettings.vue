@@ -503,6 +503,7 @@ async function confirmRetentionModal() {
         body: JSON.stringify({ action: 'cleanup_all_images' }),
       })
       if (resp.ok) {
+        await store.loadData()
         store.showFlash('✓ 已有原图已清理')
       } else {
         store.showFlash('⚠️ 清理请求失败，将按期限自动清理')

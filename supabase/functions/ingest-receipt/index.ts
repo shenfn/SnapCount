@@ -3418,7 +3418,7 @@ async function clearImageReferences(
 
 async function processImageCleanupQueue(
   supabase: ReturnType<typeof createClient>,
-  options: { userId?: string; limit?: number } = {},
+  options: { userId?: string; bucketPath?: string; limit?: number } = {},
 ): Promise<{ processed: number; failed: number; remaining: number }> {
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
   let staleQuery = supabase.from("image_cleanup_queue")
@@ -3426,6 +3426,7 @@ async function processImageCleanupQueue(
     .eq("status", "processing")
     .lt("updated_at", new Date(Date.now() - 15 * 60 * 1000).toISOString());
   if (options.userId) staleQuery = staleQuery.eq("user_id", options.userId);
+  if (options.bucketPath) staleQuery = staleQuery.eq("bucket_path", options.bucketPath);
   await staleQuery;
 
   let query = supabase.from("image_cleanup_queue")
@@ -3435,6 +3436,7 @@ async function processImageCleanupQueue(
     .order("created_at", { ascending: true })
     .limit(limit);
   if (options.userId) query = query.eq("user_id", options.userId);
+  if (options.bucketPath) query = query.eq("bucket_path", options.bucketPath);
   const { data, error } = await query;
   if (error) throw new Error(`Failed to read image cleanup queue: ${error.message}`);
 
@@ -3483,6 +3485,7 @@ async function processImageCleanupQueue(
     .select("id", { count: "exact", head: true })
     .in("status", ["pending", "failed", "processing"]);
   if (options.userId) remainingQuery = remainingQuery.eq("user_id", options.userId);
+  if (options.bucketPath) remainingQuery = remainingQuery.eq("bucket_path", options.bucketPath);
   const { count } = await remainingQuery;
   return { processed, failed, remaining: count ?? 0 };
 }
@@ -3600,6 +3603,7 @@ Deno.serve(async (req) => {
 
   const requestTraceId = crypto.randomUUID();
   let lastAiLogId: string | null = null;
+  let temporaryImageCleanup: { userId: string; path: string } | null = null;
 
   try {
     const startedAt = Date.now();
@@ -4008,9 +4012,12 @@ Deno.serve(async (req) => {
     let duplicateRefId: string | null = perceptualDupRefId;
 
     // 3. 上传到 Storage（重试模式跳过，图片已存在）
-    // 隐私控制：keep_source_images=false 时上传到 tmp/ 临时路径，由清理逻辑定期删除
+    // 隐私控制：keep_source_images=false 时仅以 tmp/ 路径完成识别，并在请求结束前删除
     const storagePath = isRetry ? (retryImagePath!) : `${userId}/${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
     const path = (!isRetry && !privacyConfig.keepSourceImages) ? `tmp/${storagePath}` : storagePath;
+    if (!privacyConfig.keepSourceImages) {
+      temporaryImageCleanup = { userId, path };
+    }
     let uploadedNewObject = false;
     if (!isRetry) {
       const { error: upErr } = await supabase.storage.from(BUCKET_NAME)
@@ -5228,5 +5235,22 @@ Deno.serve(async (req) => {
       ai_log_id: lastAiLogId,
       error: String(e),
     }, { mode: responseMode, status: 500 });
+  } finally {
+    if (temporaryImageCleanup) {
+      const { userId, path } = temporaryImageCleanup;
+      try {
+        await enqueueImageCleanup(supabase, userId, [path]);
+        const cleanup = await processImageCleanupQueue(supabase, {
+          userId,
+          bucketPath: path,
+          limit: 1,
+        });
+        if (cleanup.failed > 0 || cleanup.remaining > 0) {
+          console.error("Temporary source image cleanup incomplete", { userId, path, cleanup });
+        }
+      } catch (cleanupError) {
+        console.error("Temporary source image cleanup failed", { userId, path, cleanupError });
+      }
+    }
   }
 });
