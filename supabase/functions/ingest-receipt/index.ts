@@ -5,6 +5,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
 import { PROMPT, buildPrompt, buildFeedbackPrompt, buildVoicePrompt } from "./prompts.ts";
+import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   loadDomainProfiles,
   selectSignals,
@@ -4086,6 +4087,28 @@ Deno.serve(async (req) => {
       const jsonBody = await req.json().catch(() => ({}));
       const action = jsonBody?.action;
 
+      if (action === "submit_expression_feedback") {
+        const actionUserId = await authenticatedUserId(req);
+        if (!actionUserId) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        try {
+          const result = await submitExpressionFeedback(supabase, actionUserId, jsonBody);
+          return new Response(JSON.stringify({ ok: true, data: result }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        } catch (feedbackError) {
+          return new Response(JSON.stringify({
+            ok: false,
+            error: feedbackError instanceof Error ? feedbackError.message : String(feedbackError),
+          }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+      }
+
       if (action === "process_image_cleanup_queue") {
         if (!isCleanupWorkerRequest(req)) {
           return new Response(JSON.stringify({ error: "Unauthorized worker request" }), {
@@ -4264,6 +4287,11 @@ Deno.serve(async (req) => {
           headers: { "Content-Type": "application/json", ...corsHeaders },
         });
       }
+
+      return new Response(JSON.stringify({ error: `不支持的操作：${String(action ?? "")}` }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
 
     // 1. 接收图片（multipart/form-data，字段名 image）
