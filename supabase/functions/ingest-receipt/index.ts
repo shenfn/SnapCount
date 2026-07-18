@@ -3417,6 +3417,13 @@ async function processImageCleanupQueue(
   options: { userId?: string; limit?: number } = {},
 ): Promise<{ processed: number; failed: number; remaining: number }> {
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+  let staleQuery = supabase.from("image_cleanup_queue")
+    .update({ status: "failed", last_error: "stale processing lease recovered", updated_at: new Date().toISOString() })
+    .eq("status", "processing")
+    .lt("updated_at", new Date(Date.now() - 15 * 60 * 1000).toISOString());
+  if (options.userId) staleQuery = staleQuery.eq("user_id", options.userId);
+  await staleQuery;
+
   let query = supabase.from("image_cleanup_queue")
     .select("id,bucket_path,user_id,attempts")
     .in("status", ["pending", "failed"])
@@ -3471,6 +3478,25 @@ async function processImageCleanupQueue(
   if (options.userId) remainingQuery = remainingQuery.eq("user_id", options.userId);
   const { count } = await remainingQuery;
   return { processed, failed, remaining: count ?? 0 };
+}
+
+async function cleanupAllUserImages(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<{ total: number; processed: number; failed: number; remaining: number }> {
+  const paths = await collectUserImagePaths(supabase, userId);
+  await enqueueImageCleanup(supabase, userId, paths);
+  let processed = 0;
+  let failed = 0;
+  let remaining = 0;
+  for (let batch = 0; batch < 10; batch += 1) {
+    const result = await processImageCleanupQueue(supabase, { userId, limit: 100 });
+    processed += result.processed;
+    failed += result.failed;
+    remaining = result.remaining;
+    if (remaining === 0 || result.processed === 0) break;
+  }
+  return { total: paths.length, processed, failed, remaining };
 }
 
 Deno.serve(async (req) => {
@@ -3609,27 +3635,55 @@ Deno.serve(async (req) => {
           });
         }
 
-        const paths = await collectUserImagePaths(supabase, actionUserId);
-        await enqueueImageCleanup(supabase, actionUserId, paths);
-        let processed = 0;
-        let failed = 0;
-        let remaining = 0;
-        for (let batch = 0; batch < 10; batch += 1) {
-          const result = await processImageCleanupQueue(supabase, { userId: actionUserId, limit: 100 });
-          processed += result.processed;
-          failed += result.failed;
-          remaining = result.remaining;
-          if (remaining === 0 || result.processed === 0) break;
-        }
-        const completed = failed === 0 && remaining === 0;
+        const result = await cleanupAllUserImages(supabase, actionUserId);
+        const completed = result.failed === 0 && result.remaining === 0;
         return new Response(JSON.stringify({
           status: completed ? "ok" : "incomplete",
-          deleted: processed,
-          failed,
-          remaining,
-          total: paths.length,
+          deleted: result.processed,
+          failed: result.failed,
+          remaining: result.remaining,
+          total: result.total,
         }), {
           status: completed ? 200 : 502,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
+      if (action === "delete_account") {
+        const actionUserId = await authenticatedUserId(req);
+        if (!actionUserId) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const cleanup = await cleanupAllUserImages(supabase, actionUserId);
+        if (cleanup.failed > 0 || cleanup.remaining > 0) {
+          return new Response(JSON.stringify({
+            error: "图片清理尚未完成，请稍后重试删除账户",
+            cleanup,
+          }), {
+            status: 502, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const { error: dataError } = await supabase.rpc("delete_user_account_data", {
+          p_user_id: actionUserId,
+        });
+        if (dataError) {
+          return new Response(JSON.stringify({ error: `删除账户数据失败：${dataError.message}` }), {
+            status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const { error: authError } = await supabase.auth.admin.deleteUser(actionUserId);
+        if (authError) {
+          return new Response(JSON.stringify({ error: `删除登录账户失败：${authError.message}` }), {
+            status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        return new Response(JSON.stringify({ status: "deleted" }), {
           headers: { "Content-Type": "application/json", ...corsHeaders },
         });
       }
