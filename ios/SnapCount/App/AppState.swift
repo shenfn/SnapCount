@@ -445,6 +445,7 @@ final class AppState: ObservableObject {
         }
         guard force || recordMonthGroups[monthKey] == nil else { return }
         guard loadingRecordMonthKey != monthKey else { return }
+        let generation = userStateGeneration
         loadingRecordMonthKey = monthKey
         recordMonthMessages.removeValue(forKey: monthKey)
         defer {
@@ -452,16 +453,19 @@ final class AppState: ObservableObject {
         }
         do {
             let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             let month = try await recordRepository.fetchMonth(
                 monthKey: monthKey,
                 accessToken: session.accessToken
             )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             recordMonthDetails[monthKey] = month.details
             for (reference, detail) in month.details {
                 recordDetailCache[NativeRecordReference(reference).canonicalValue] = detail
             }
             recordMonthGroups[monthKey] = month.groups
         } catch {
+            guard generation == userStateGeneration else { return }
             recordMonthMessages[monthKey] = error.localizedDescription
         }
     }
@@ -488,41 +492,53 @@ final class AppState: ObservableObject {
 
     func loadAccounts() async {
         guard !isLoadingAccounts else { return }
+        let generation = userStateGeneration
         isLoadingAccounts = true
         accountMessage = nil
         defer { isLoadingAccounts = false }
         do {
             let session = try await validSession()
-            accounts = try await accountRepository.fetchAccounts(accessToken: session.accessToken)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let loadedAccounts = try await accountRepository.fetchAccounts(accessToken: session.accessToken)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            accounts = loadedAccounts
         } catch {
+            guard generation == userStateGeneration else { return }
             accountMessage = error.localizedDescription
         }
     }
 
     func loadAccountDetail(_ account: NativeAccount) async {
+        let generation = userStateGeneration
         selectedAccountDetail = nil
         selectedAccountSourceSnapshot = nil
         accountMessage = nil
         let session = try? await validSession()
         guard let session else { accountMessage = "登录状态已失效，请重新登录。"; return }
+        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
         if account.type.isLiability {
             try? await accountRepository.ensureRepaymentCycles(
                 monthKey: Self.currentMonthKey,
                 accessToken: session.accessToken
             )
         }
-        selectedAccountDetail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
+        let loadedDetail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
+        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+        selectedAccountDetail = loadedDetail
         if account.sourceRecordTable == "data_records", !account.sourceRecordId.isEmpty {
-            selectedAccountSourceSnapshot = try? await walletSnapshotRepository.fetch(
+            let sourceSnapshot = try? await walletSnapshotRepository.fetch(
                 id: account.sourceRecordId,
                 accessToken: session.accessToken
             )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            selectedAccountSourceSnapshot = sourceSnapshot
             let reference = "data/\(account.sourceRecordId)"
             if recordDetailCache[reference] == nil,
                let detail = try? await recordRepository.fetchDetail(
                    reference: reference,
                    accessToken: session.accessToken
                ) {
+                guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
                 recordDetailCache[reference] = detail
                 if let imageURL = detail.imageURL {
                     Task { await RemoteImageRepository.shared.prefetch([imageURL]) }
@@ -589,6 +605,7 @@ final class AppState: ObservableObject {
     }
 
     func loadInboxRepaymentCandidates() async {
+        let generation = userStateGeneration
         let stagingRecords = dashboard.stagingRecords
         guard !stagingRecords.isEmpty else {
             repaymentCandidates = [:]
@@ -604,6 +621,7 @@ final class AppState: ObservableObject {
             async let accountRows = accountRepository.fetchAccounts(accessToken: session.accessToken)
             async let cycleRows = accountRepository.fetchOpenRepaymentCycles(accessToken: session.accessToken)
             let (loadedAccounts, cycles) = try await (accountRows, cycleRows)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             accounts = loadedAccounts
             repaymentCandidates = Dictionary(
                 uniqueKeysWithValues: stagingRecords.compactMap { record in
@@ -616,6 +634,7 @@ final class AppState: ObservableObject {
             )
             inboxFinanceMessage = nil
         } catch {
+            guard generation == userStateGeneration else { return }
             repaymentCandidates = [:]
             inboxFinanceMessage = "还款候选暂时无法匹配：\(error.localizedDescription)"
         }
@@ -731,17 +750,22 @@ final class AppState: ObservableObject {
 
     func loadUnboundRecords(monthKey: String) async {
         guard !isLoadingUnboundRecords else { return }
+        let generation = userStateGeneration
         isLoadingUnboundRecords = true
         unboundRecordsMessage = nil
         defer { isLoadingUnboundRecords = false }
 
         do {
             let session = try await validSession()
-            unboundRecords = try await unboundRecordRepository.fetch(
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let records = try await unboundRecordRepository.fetch(
                 monthKey: monthKey,
                 accessToken: session.accessToken
             )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            unboundRecords = records
         } catch {
+            guard generation == userStateGeneration else { return }
             unboundRecordsMessage = error.localizedDescription
         }
     }
@@ -811,6 +835,7 @@ final class AppState: ObservableObject {
 
     func loadWalletSnapshots() async {
         guard !isLoadingWalletSnapshots else { return }
+        let generation = userStateGeneration
         isLoadingWalletSnapshots = true
         walletSnapshotMessage = nil
         defer { isLoadingWalletSnapshots = false }
@@ -820,9 +845,11 @@ final class AppState: ObservableObject {
             async let snapshotRows = walletSnapshotRepository.fetchUnlinked(accessToken: session.accessToken)
             async let accountRows = accountRepository.fetchAccounts(accessToken: session.accessToken)
             let (loadedSnapshots, loadedAccounts) = try await (snapshotRows, accountRows)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             walletSnapshots = loadedSnapshots
             accounts = loadedAccounts
         } catch {
+            guard generation == userStateGeneration else { return }
             walletSnapshotMessage = error.localizedDescription
         }
     }
@@ -835,36 +862,51 @@ final class AppState: ObservableObject {
             return
         }
         guard !isLoadingInsights else { return }
+        let generation = userStateGeneration
         isLoadingInsights = true
         insightsMessage = nil
         defer { isLoadingInsights = false }
 
         do {
             let session = try await validSession()
-            insightsSnapshot = try await insightsRepository.fetchDailySummary(
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let snapshot = try await insightsRepository.fetchDailySummary(
                 range: range,
                 accessToken: session.accessToken
             )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            insightsSnapshot = snapshot
             insightsLoadedAt = Date()
-            Task { await loadLatestAIInsight(range: range) }
+            Task { await loadLatestAIInsight(range: range, generation: generation, userId: session.user.id) }
         } catch {
+            guard generation == userStateGeneration else { return }
             insightsMessage = error.localizedDescription
         }
     }
 
-    func loadLatestAIInsight(range: NativeInsightRange) async {
+    func loadLatestAIInsight(
+        range: NativeInsightRange,
+        generation: Int? = nil,
+        userId: String? = nil
+    ) async {
+        let expectedGeneration = generation ?? userStateGeneration
         do {
             let session = try await validSession()
+            let expectedUserId = userId ?? session.user.id
+            guard isCurrentUserLoad(expectedGeneration, userId: expectedUserId),
+                  session.user.id == expectedUserId else { return }
             let latest = try await insightsRepository.fetchLatestAIInsight(
                 range: range,
                 accessToken: session.accessToken
             )
-            guard insightsSnapshot?.range == range else { return }
+            guard isCurrentUserLoad(expectedGeneration, userId: expectedUserId),
+                  insightsSnapshot?.range == range else { return }
             aiInsight = latest
             aiInsightIsCached = latest != nil
             aiInsightMessage = nil
         } catch {
-            guard insightsSnapshot?.range == range else { return }
+            guard expectedGeneration == userStateGeneration,
+                  insightsSnapshot?.range == range else { return }
             aiInsightMessage = nil
         }
     }
@@ -1292,16 +1334,21 @@ final class AppState: ObservableObject {
 
     func loadUserSettings() async {
         guard !isLoadingSettings else { return }
+        let generation = userStateGeneration
         isLoadingSettings = true
         settingsMessage = nil
         defer { isLoadingSettings = false }
         do {
             let session = try await validSession()
-            userSettings = try await settingsRepository.fetch(
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let settings = try await settingsRepository.fetch(
                 userId: session.user.id,
                 accessToken: session.accessToken
             )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            userSettings = settings
         } catch {
+            guard generation == userStateGeneration else { return }
             settingsMessage = error.localizedDescription
         }
     }
@@ -1411,6 +1458,7 @@ final class AppState: ObservableObject {
         apply: (inout NativeUserSettings) -> Void
     ) async {
         guard !isSavingSettings else { return }
+        let generation = userStateGeneration
         let previous = userSettings
         apply(&userSettings)
         isSavingSettings = true
@@ -1418,12 +1466,15 @@ final class AppState: ObservableObject {
         defer { isSavingSettings = false }
         do {
             let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             try await settingsRepository.update(
                 userId: session.user.id,
                 values: values,
                 accessToken: session.accessToken
             )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
         } catch {
+            guard generation == userStateGeneration else { return }
             userSettings = previous
             settingsMessage = "设置保存失败：\(error.localizedDescription)"
         }
@@ -1513,6 +1564,10 @@ final class AppState: ObservableObject {
         try save(session: session)
         apply(session: session)
         return session
+    }
+
+    private func isCurrentUserLoad(_ generation: Int, userId: String) -> Bool {
+        isSignedIn && generation == userStateGeneration && currentUserId == userId
     }
 
     private func isExpiredJWTError(_ error: Error) -> Bool {
