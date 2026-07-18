@@ -64,8 +64,9 @@ async function waitForQueueStatus(queueId, expectedStatus, timeoutMs = 45_000) {
   throw new Error(`Queue ${queueId} did not reach ${expectedStatus}`)
 }
 
-async function waitForDeletion(timeoutMs = 90_000) {
+async function waitForDeletion(timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs
+  let nextWorkerInvocationAt = 0
   while (Date.now() < deadline) {
     const { data, error } = await admin.from('account_deletion_requests')
       .select('status,last_error,remaining_images')
@@ -74,6 +75,10 @@ async function waitForDeletion(timeoutMs = 90_000) {
     if (error) throw new Error(error.message)
     if (data?.status === 'completed') return data
     if (data?.status === 'failed') throw new Error(`Account deletion failed: ${data.last_error}`)
+    if (Date.now() >= nextWorkerInvocationAt) {
+      await invokeWorker()
+      nextWorkerInvocationAt = Date.now() + 10_000
+    }
     await sleep(2_000)
   }
   throw new Error('Account deletion did not complete before timeout')
@@ -202,7 +207,7 @@ async function seedExpressionData() {
 
 async function testAsyncAccountDeletion() {
   await seedExpressionData()
-  const queueRows = Array.from({ length: 51 }, (_, index) => ({
+  const queueRows = Array.from({ length: 501 }, (_, index) => ({
     user_id: userId,
     bucket_path: `${userId}/tests/${runId}-delete-${index}.jpg`,
     status: 'pending',
@@ -224,7 +229,6 @@ async function testAsyncAccountDeletion() {
   })
   assert(blockedResponse.status === 410, `Expected old JWT upload to be blocked with 410, got ${blockedResponse.status}`)
 
-  await invokeWorker()
   await waitForDeletion()
 
   const { count: expressionCount, error: expressionError } = await admin.from('expression_shadow_runs')
@@ -261,7 +265,7 @@ try {
       'processing-path reference guard',
       'dead-letter transition and worker audit',
       'expression-data deletion',
-      'asynchronous account deletion with 51 queued images',
+      'asynchronous account deletion with 501 queued images',
       'old JWT upload rejection',
     ],
   }, null, 2))
