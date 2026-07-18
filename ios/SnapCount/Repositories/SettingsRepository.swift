@@ -5,7 +5,7 @@ protocol SettingsRepositoryProtocol {
     func update(userId: String, values: [String: AnyCodable], accessToken: String) async throws
     func export(_ request: NativeDataExportRequest, accessToken: String) async throws -> NativeExportedFile
     func cleanupSourceImages(accessToken: String) async throws -> NativeImageCleanupResult
-    func deleteAccount(accessToken: String) async throws
+    func deleteAccount(accessToken: String) async throws -> NativeAccountDeletionResult
 }
 
 final class SettingsRepository: SettingsRepositoryProtocol {
@@ -52,9 +52,9 @@ final class SettingsRepository: SettingsRepositoryProtocol {
         )
     }
 
-    func deleteAccount(accessToken: String) async throws {
-        _ = try await remoteClient.postFunction(
-            AnyCodable.self,
+    func deleteAccount(accessToken: String) async throws -> NativeAccountDeletionResult {
+        try await remoteClient.postFunction(
+            NativeAccountDeletionResult.self,
             path: "functions/v1/ingest-receipt",
             body: ["action": AnyCodable("delete_account")],
             accessToken: accessToken
@@ -300,6 +300,13 @@ struct NativeImageCleanupResult: Decodable, Equatable {
         case deadLetter = "dead_letter"
         case skippedExternal = "skipped_external"
     }
+}
+
+struct NativeAccountDeletionResult: Decodable, Equatable {
+    let status: String
+    let message: String?
+
+    var isPending: Bool { status == "deletion_pending" }
 }
 
 private struct SettingsRow: Decodable {

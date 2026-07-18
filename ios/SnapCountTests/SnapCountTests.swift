@@ -798,6 +798,7 @@ final class SnapCountTests: XCTestCase {
 
         XCTAssertTrue(complete.isComplete)
         XCTAssertFalse(pending.isComplete)
+        XCTAssertTrue(NativeAccountDeletionResult(status: "deletion_pending", message: nil).isPending)
     }
 
 }
@@ -896,7 +897,9 @@ private struct SettingsRepositoryStub: SettingsRepositoryProtocol {
         )
     }
 
-    func deleteAccount(accessToken: String) async throws {}
+    func deleteAccount(accessToken: String) async throws -> NativeAccountDeletionResult {
+        NativeAccountDeletionResult(status: "deleted", message: nil)
+    }
 }
 
 private func makeLiabilityAccount(id: String, name: String) -> NativeAccount {

@@ -1471,10 +1471,12 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
-            try await settingsRepository.deleteAccount(accessToken: session.accessToken)
+            let deletion = try await settingsRepository.deleteAccount(accessToken: session.accessToken)
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
             invalidateSession(message: "")
-            authMessage = "账户及其云端数据已删除"
+            authMessage = deletion.isPending
+                ? "账户删除已提交，云端原图清理完成后会自动删除全部数据"
+                : "账户及其云端数据已删除"
             return true
         } catch {
             guard generation == userStateGeneration else { return false }
