@@ -75,4 +75,6 @@ node --env-file=.env.local .worktrees/ios-pwa-parity/scripts/audit-storage-orpha
 
 ## 发布判断
 
-后端生产隔离验证已经通过。iOS 仍需 GitHub 普通 Build 和单元测试通过后，才建议触发一次 TestFlight；TestFlight 只用于验证设置页提示、退出登录、快捷指令失效和真机跨端刷新，不应重复上传。
+后端生产隔离验证已经通过。GitHub 普通 iOS Build `29642424323` 已完成模拟器编译，54 项单元测试 0 失败。
+
+建议触发一次 TestFlight，且只用于验证设置页提示、退出登录、Keychain/快捷指令旧 token 失效和真机跨端刷新。该版本通过后不应因文档或后端小改动重复上传。
