@@ -3335,6 +3335,10 @@ type ImageCleanupQueueRow = {
   attempts: number;
 };
 
+function isUserOwnedStoragePath(path: string, userId: string): boolean {
+  return path.startsWith(`${userId}/`) || path.startsWith(`tmp/${userId}/`);
+}
+
 async function authenticatedUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization") || "";
   const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
@@ -3450,6 +3454,9 @@ async function processImageCleanupQueue(
     try {
       if (!row.user_id) throw new Error("Cleanup row has no user_id");
       if (!/^https?:\/\//i.test(row.bucket_path)) {
+        if (!isUserOwnedStoragePath(row.bucket_path, row.user_id)) {
+          throw new Error(`Cleanup path does not belong to user ${row.user_id}`);
+        }
         const { error: removeError } = await supabase.storage.from(BUCKET_NAME).remove([row.bucket_path]);
         if (removeError) throw new Error(removeError.message);
       }
