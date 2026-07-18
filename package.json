@@ -11,6 +11,7 @@
     "test:receipt": "node --env-file=.env.local scripts/test-ingest-receipt.mjs",
     "cleanup:test-receipts": "node --env-file=.env.local scripts/cleanup-test-receipts.mjs",
     "test:image-cleanup": "node scripts/test-image-cleanup-lifecycle.mjs",
+    "test:expression-feedback": "node scripts/test-expression-feedback.mjs",
     "audit:storage-orphans": "node scripts/audit-storage-orphans.mjs",
     "trace:server": "node tools/ai-validation/server/index.mjs",
     "trace:ui": "cd tools/ai-validation/ui/trace-console && npm run dev",
