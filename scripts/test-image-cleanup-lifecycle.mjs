@@ -22,6 +22,7 @@ const email = `image-cleanup-${runId}@example.invalid`
 const password = `T-${crypto.randomUUID()}-a9!`
 let userId = null
 let accessToken = null
+let legacyTestPath = null
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -109,6 +110,35 @@ async function testPaginationAndExternalPaths() {
   const { payload } = await postAction('cleanup_all_images', accessToken, [200, 202])
   assert(payload.total === 501, `Expected 501 collected paths, got ${payload.total}`)
   assert(payload.skipped_external === 501, `Expected 501 skipped external paths, got ${payload.skipped_external}`)
+}
+
+async function testLegacyPathCleanup() {
+  const legacyPath = `2099-12-31/${runId}.jpg`
+  legacyTestPath = legacyPath
+  const { error: uploadError } = await admin.storage.from('receipt-images').upload(
+    legacyPath,
+    new Blob(['legacy-image-cleanup-test'], { type: 'image/jpeg' }),
+    { upsert: false },
+  )
+  if (uploadError) throw new Error(`Failed to upload legacy test object: ${uploadError.message}`)
+  const { data: logRow, error: logError } = await admin.from('ai_recognition_logs').insert({
+    user_id: userId,
+    status: 'success',
+    image_url: legacyPath,
+    image_hash: `legacy-${runId}`,
+  }).select('id').single()
+  if (logError) throw new Error(`Failed to seed legacy reference: ${logError.message}`)
+
+  const { payload } = await postAction('cleanup_all_images', accessToken, [200, 202])
+  assert(payload.deleted >= 1, `Legacy object was not processed: ${JSON.stringify(payload)}`)
+  const { data: updatedLog, error: updatedLogError } = await admin.from('ai_recognition_logs')
+    .select('image_url')
+    .eq('id', logRow.id)
+    .single()
+  if (updatedLogError) throw new Error(updatedLogError.message)
+  assert(updatedLog.image_url === null, 'Legacy database reference was not cleared')
+  const { data: objectData } = await admin.storage.from('receipt-images').download(legacyPath)
+  assert(!objectData, 'Legacy Storage object still exists after cleanup')
 }
 
 async function testProcessingWriteGuard() {
@@ -208,6 +238,7 @@ async function testAsyncAccountDeletion() {
 }
 
 async function cleanupTemporaryUser() {
+  if (legacyTestPath) await admin.storage.from('receipt-images').remove([legacyTestPath])
   if (!userId) return
   await admin.from('image_cleanup_queue').delete().eq('user_id', userId)
   await admin.from('account_deletion_requests').delete().eq('user_id', userId)
@@ -217,6 +248,7 @@ async function cleanupTemporaryUser() {
 try {
   await createTemporaryUser()
   await testPaginationAndExternalPaths()
+  await testLegacyPathCleanup()
   await testProcessingWriteGuard()
   await testDeadLetterAndWorkerAudit()
   await testAsyncAccountDeletion()
@@ -225,6 +257,7 @@ try {
     runId,
     checks: [
       '501-row pagination and external-path classification',
+      'legacy unscoped path cleanup with exclusive ownership',
       'processing-path reference guard',
       'dead-letter transition and worker audit',
       'expression-data deletion',

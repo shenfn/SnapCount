@@ -45,7 +45,8 @@ const referenceTargets = [
   ['staging_records', 'image_path'],
   ['ai_recognition_logs', 'image_url'],
 ]
-const managedPathPattern = /^(?:tmp\/)?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\//i
+const userScopedPathPattern = /^(?:tmp\/)?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\//i
+const legacyPathPattern = /^[0-9]{4}-[0-9]{2}-[0-9]{2}\/[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 function isFolder(item) {
   return !item.id && !item.metadata
@@ -86,6 +87,8 @@ async function collectStorageObjects(prefix = '', output = new Map()) {
 async function collectReferences() {
   const references = new Map()
   const external = []
+  const legacy = []
+  const unsupportedRelative = []
   for (const [table, column] of referenceTargets) {
     for (let offset = 0; ; offset += pageSize) {
       const { data, error } = await supabase.from(table)
@@ -97,10 +100,12 @@ async function collectReferences() {
         const value = row[column]
         if (typeof value !== 'string' || value.length === 0) continue
         const entry = { table, column, id: row.id, user_id: row.user_id, path: value }
-        if (/^(https?:\/\/|data:)/i.test(value) || !managedPathPattern.test(value)) {
+        if (/^(https?:\/\/|data:)/i.test(value)) {
           external.push(entry)
           continue
         }
+        if (legacyPathPattern.test(value)) legacy.push(entry)
+        else if (!userScopedPathPattern.test(value)) unsupportedRelative.push(entry)
         const current = references.get(value) ?? []
         current.push(entry)
         references.set(value, current)
@@ -108,7 +113,7 @@ async function collectReferences() {
       if (!data || data.length < pageSize) break
     }
   }
-  return { references, external }
+  return { references, external, legacy, unsupportedRelative }
 }
 
 async function collectActiveQueue() {
@@ -164,7 +169,9 @@ const summary = {
   counts: {
     storage_objects: objects.size,
     referenced_paths: referenceResult.references.size,
-    external_or_unmanaged_references: referenceResult.external.length,
+    external_references: referenceResult.external.length,
+    legacy_references: referenceResult.legacy.length,
+    unsupported_relative_references: referenceResult.unsupportedRelative.length,
     active_queue_paths: queued.size,
     orphan_candidates: orphanCandidates.length,
     queued_unreferenced_objects: queuedObjects.length,
@@ -180,7 +187,9 @@ await Promise.all([
   writeFile(path.join(outputDir, 'queued-unreferenced-objects.jsonl'), jsonLines(queuedObjects), 'utf8'),
   writeFile(path.join(outputDir, 'missing-referenced-objects.jsonl'), jsonLines(missingReferencedObjects), 'utf8'),
   writeFile(path.join(outputDir, 'missing-queued-objects.jsonl'), jsonLines(missingQueuedObjects), 'utf8'),
-  writeFile(path.join(outputDir, 'external-or-unmanaged-references.jsonl'), jsonLines(referenceResult.external), 'utf8'),
+  writeFile(path.join(outputDir, 'external-references.jsonl'), jsonLines(referenceResult.external), 'utf8'),
+  writeFile(path.join(outputDir, 'legacy-references.jsonl'), jsonLines(referenceResult.legacy), 'utf8'),
+  writeFile(path.join(outputDir, 'unsupported-relative-references.jsonl'), jsonLines(referenceResult.unsupportedRelative), 'utf8'),
 ])
 
 console.log(JSON.stringify(summary, null, 2))
