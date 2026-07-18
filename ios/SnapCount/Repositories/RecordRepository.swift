@@ -38,7 +38,18 @@ final class RecordRepository: RecordRepositoryProtocol {
     }
 
     func delete(reference: String, accessToken: String) async throws {
-        try await remoteService.deleteRecord(reference: reference, accessToken: accessToken)
+        let response = try await remoteClient.postFunction(
+            RecordDeletionResponse.self,
+            path: "functions/v1/ingest-receipt",
+            body: [
+                "action": AnyCodable("delete_record"),
+                "reference": AnyCodable(NativeRecordReference(reference).canonicalValue)
+            ],
+            accessToken: accessToken
+        )
+        guard response.status == "deleted" else {
+            throw SupabaseRemoteError.requestFailed(response.error ?? "删除记录失败")
+        }
     }
 
     func submitFeedback(recordId: String, choice: NativeAIFeedbackReviewChoice, freeText: String, accessToken: String) async throws {
@@ -62,4 +73,16 @@ final class RecordRepository: RecordRepositoryProtocol {
 private struct ExpressionFeedbackResponse: Decodable {
     let ok: Bool
     let error: String?
+}
+
+private struct RecordDeletionResponse: Decodable {
+    let status: String
+    let cleanupPending: Bool
+    let error: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case cleanupPending = "cleanup_pending"
+        case error
+    }
 }

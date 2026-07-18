@@ -3495,63 +3495,60 @@ export function useStore() {
     }
   }
 
+  async function deleteRecordThroughBackend(recordKind, recordId) {
+    const { data: { session } } = await sb.auth.getSession()
+    if (!session?.access_token) throw new Error('登录状态已失效，请重新登录')
+
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/ingest-receipt`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({
+        action: 'delete_record',
+        record_kind: recordKind,
+        record_id: recordId,
+      }),
+    })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(result.error || `删除请求失败（${response.status}）`)
+    return result
+  }
+
   async function confirmDelete() {
-    const { type, id, imagePath } = deleteConfirm
+    const { type, id } = deleteConfirm
     deleteConfirm.open = false
     try {
       if (type === 'bill') {
         if (pendingModal.open && pendingModal.bill?.id === id) closePendingModal()
-        const { error } = await sb.rpc('delete_transaction_with_account', { p_id: id })
-        if (error) throw new Error(error.message)
+        const result = await deleteRecordThroughBackend('expense', id)
         await refreshAccountsFromDB()
         if (detailRecord.value?.id === id) goBack()
         // 本地移除，避免全量刷新
         const billIdx = bills.value.findIndex(b => b.id === id)
         if (billIdx >= 0) bills.value.splice(billIdx, 1)
-        if (imagePath && !imagePath.startsWith('https://')) {
-          const { data: refs, error: refErr } = await sb.from('transactions')
-            .select('id')
-            .eq('image_url', imagePath)
-            .limit(1)
-          if (refErr) {
-            console.warn('检查截图引用失败:', refErr.message)
-          } else if (!refs || refs.length === 0) {
-            const { error: removeErr } = await sb.storage.from('receipt-images').remove([imagePath])
-            if (removeErr) console.warn('删除截图文件失败:', removeErr.message)
-          }
-        }
-        showFlash('✓ 已删除')
+        showFlash(result.cleanup_pending ? '✓ 记录已删除，原图将在后台清理' : '✓ 已删除')
       } else if (type === 'income') {
-        const { error } = await sb.rpc('delete_income_with_account', { p_id: id })
-        if (error) throw new Error(error.message)
+        const result = await deleteRecordThroughBackend('income', id)
         await refreshAccountsFromDB()
         // 本地移除
         const incIdx = incomeRecords.value.findIndex(r => r.id === id)
         if (incIdx >= 0) incomeRecords.value.splice(incIdx, 1)
         const rIncIdx = recentIncomeRecords.value.findIndex(r => r.id === id)
         if (rIncIdx >= 0) recentIncomeRecords.value.splice(rIncIdx, 1)
-        if (imagePath && !imagePath.startsWith('https://')) {
-          const { data: txRefs, error: txRefErr } = await sb.from('transactions').select('id').eq('image_url', imagePath).limit(1)
-          const { data: incRefs, error: incRefErr } = await sb.from('income_records').select('id').eq('image_url', imagePath).limit(1)
-          if (txRefErr || incRefErr) {
-            console.warn('检查收入截图引用失败:', txRefErr?.message || incRefErr?.message)
-          } else if ((!txRefs || txRefs.length === 0) && (!incRefs || incRefs.length === 0)) {
-            const { error: removeErr } = await sb.storage.from('receipt-images').remove([imagePath])
-            if (removeErr) console.warn('删除收入截图文件失败:', removeErr.message)
-          }
-        }
         if (incomeModal.open && incomeModal.id === id) closeIncomeModal()
         if (detailRecord.value?.id === id) goBack()
-        showFlash('✓ 已删除')
+        showFlash(result.cleanup_pending ? '✓ 记录已删除，原图将在后台清理' : '✓ 已删除')
       } else if (type === 'universal') {
-        const { error } = await sb.from('data_records').delete().eq('id', id)
-        if (error) throw new Error(error.message)
+        const result = await deleteRecordThroughBackend('data', id)
         // 本地移除
         const drIdx = dataRecords.value.findIndex(r => r.id === id)
         if (drIdx >= 0) dataRecords.value.splice(drIdx, 1)
         if (universalModal.open && universalModal.id === id) closeUniversalModal()
         if (detailRecord.value?.id === id) goBack()
-        showFlash('✓ 已删除')
+        showFlash(result.cleanup_pending ? '✓ 记录已删除，原图将在后台清理' : '✓ 已删除')
       }
     } catch (e) {
       showFlash('❌ 删除失败：' + e.message)

@@ -750,34 +750,6 @@ final class NativeDataService {
         }
     }
 
-    func deleteRecord(reference: String, accessToken: String) async throws {
-        let resolved = resolveReference(reference)
-        switch resolved.kind {
-        case "expense":
-            _ = try await rpc(
-                TransactionDetailRow.self,
-                name: "delete_transaction_with_account",
-                body: ["p_id": AnyCodable(resolved.id)],
-                accessToken: accessToken
-            )
-        case "income":
-            _ = try await rpc(
-                IncomeDetailRow.self,
-                name: "delete_income_with_account",
-                body: ["p_id": AnyCodable(resolved.id)],
-                accessToken: accessToken
-            )
-        case "data":
-            try await delete(
-                path: "rest/v1/data_records",
-                queryItems: [URLQueryItem(name: "id", value: "eq.\(resolved.id)")],
-                accessToken: accessToken
-            )
-        default:
-            throw SupabaseRemoteError.requestFailed("当前记录类型暂不支持删除")
-        }
-    }
-
     private func decoded<T: Decodable>(
         _ type: T.Type,
         path: String,
