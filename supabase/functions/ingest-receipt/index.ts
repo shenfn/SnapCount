@@ -3658,7 +3658,7 @@ Deno.serve(async (req) => {
             status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
           });
         }
-        const result = await processImageCleanupQueue(supabase, { limit: 500 });
+        const result = await processImageCleanupQueue(supabase, { limit: 20 });
         return new Response(JSON.stringify({ status: "ok", ...result }), {
           headers: { "Content-Type": "application/json", ...corsHeaders },
         });

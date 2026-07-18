@@ -80,7 +80,8 @@ begin
       'Content-Type', 'application/json',
       'X-Image-Cleanup-Token', worker_token
     ),
-    body := jsonb_build_object('action', 'process_image_cleanup_queue')
+    body := jsonb_build_object('action', 'process_image_cleanup_queue'),
+    timeout_milliseconds := 120000
   );
   return true;
 exception
