@@ -16,7 +16,13 @@ protocol InboxRepositoryProtocol {
     func discard(id: String, accessToken: String) async throws
     func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String
-    func resolveRepayment(id: String, cycleId: String, accessToken: String) async throws
+    func confirmStagingRepayment(
+        id: String,
+        cycleId: String,
+        paidAmount: Double,
+        debitAccountId: String?,
+        accessToken: String
+    ) async throws
     func resolveImageURL(path: String, accessToken: String) async throws -> URL
     func confirmPending(_ draft: NativePendingResolutionDraft, accessToken: String) async throws
 }
@@ -49,15 +55,27 @@ final class InboxRepository: InboxRepositoryProtocol {
         )
     }
 
-    func resolveRepayment(id: String, cycleId: String, accessToken: String) async throws {
-        try await remoteClient.patch(
-            path: "rest/v1/staging_records",
-            queryItems: [URLQueryItem(name: "id", value: "eq.\(id)")],
+    func confirmStagingRepayment(
+        id: String,
+        cycleId: String,
+        paidAmount: Double,
+        debitAccountId: String?,
+        accessToken: String
+    ) async throws {
+        guard paidAmount > 0 else {
+            throw SupabaseRemoteError.requestFailed("请输入有效的还款金额")
+        }
+        _ = try await remoteClient.rpc(
+            AnyCodable.self,
+            name: "confirm_staging_repayment",
             body: [
-                "status": AnyCodable("archived"),
-                "resolved_action": AnyCodable("liability_repayment_confirmed"),
-                "resolved_at": AnyCodable(ISO8601DateFormatter().string(from: Date())),
-                "target_record_id": AnyCodable(cycleId)
+                "p_staging_id": AnyCodable(id),
+                "p_cycle_id": AnyCodable(cycleId),
+                "p_paid_amount": AnyCodable(paidAmount),
+                "p_paid_at": AnyCodable(ISO8601DateFormatter().string(from: Date())),
+                "p_debit_account_id": AnyCodable(nullableString(debitAccountId)),
+                "p_status": AnyCodable("paid"),
+                "p_note": AnyCodable("根据还款截图确认已还清")
             ],
             accessToken: accessToken
         )
@@ -91,5 +109,10 @@ final class InboxRepository: InboxRepositoryProtocol {
             ],
             accessToken: accessToken
         )
+    }
+
+    private func nullableString(_ value: String?) -> Any {
+        guard let value, !value.isEmpty else { return NSNull() }
+        return value
     }
 }

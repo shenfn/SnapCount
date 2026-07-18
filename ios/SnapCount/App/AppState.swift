@@ -652,26 +652,13 @@ final class AppState: ObservableObject {
 
         do {
             let session = try await validSession()
-            _ = try await accountRepository.confirmRepayment(
+            try await inboxRepository.confirmStagingRepayment(
+                id: record.id,
                 cycleId: candidate.cycle.id,
                 paidAmount: candidate.amount,
                 debitAccountId: candidate.cycle.autoDebitAccountId ?? candidate.account.autoDebitAccountId,
-                status: .paid,
-                note: "根据还款截图确认已还清",
                 accessToken: session.accessToken
             )
-            do {
-                try await inboxRepository.resolveRepayment(
-                    id: record.id,
-                    cycleId: candidate.cycle.id,
-                    accessToken: session.accessToken
-                )
-            } catch {
-                await loadAccounts()
-                await refreshDashboard()
-                inboxFinanceMessage = "还款已确认，但中转站归档失败：\(error.localizedDescription)"
-                return false
-            }
 
             repaymentCandidates.removeValue(forKey: record.id)
             inboxPath = NavigationPath()

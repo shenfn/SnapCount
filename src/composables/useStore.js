@@ -1384,25 +1384,22 @@ export function useStore() {
     const ok = confirm(`确认把这张截图作为还款证据？\n账单：${candidate.account.name} ${candidate.cycle.cycleMonth}\n金额：¥${Number(candidate.amount || 0).toFixed(2)}`)
     if (!ok) return false
     return runLockedAction(`staging-repayment:${record.id}`, async () => {
-      const success = await confirmRepaymentCyclePaid(candidate.cycle, {
-        paidAmount: candidate.amount,
-        debitAccountId: candidate.cycle.autoDebitAccountId || candidate.account.autoDebitAccountId || null,
-        status: 'paid',
-        note: '根据还款截图确认已还清',
+      const { error } = await sb.rpc('confirm_staging_repayment', {
+        p_staging_id: record.id,
+        p_cycle_id: candidate.cycle.id,
+        p_paid_amount: Number(candidate.amount || 0),
+        p_paid_at: new Date().toISOString(),
+        p_debit_account_id: candidate.cycle.autoDebitAccountId || candidate.account.autoDebitAccountId || null,
+        p_status: 'paid',
+        p_note: '根据还款截图确认已还清',
       })
-      if (!success) return false
-      const { error } = await sb.from('staging_records').update({
-        status: 'archived',
-        resolved_action: 'liability_repayment_confirmed',
-        resolved_at: new Date().toISOString(),
-        target_record_id: candidate.cycle.id,
-      }).eq('id', record.id)
       if (error) {
-        showFlash('还款已确认，但中转站归档失败：' + humanizeDbError(error))
+        showFlash('还款截图确认失败：' + humanizeDbError(error))
         return false
       }
       const idx = stagingRecords.value.findIndex(item => item.id === record.id)
       if (idx >= 0) stagingRecords.value.splice(idx, 1)
+      await refreshAccountsFromDB()
       showFlash('✓ 已根据截图确认还款')
       return true
     })
