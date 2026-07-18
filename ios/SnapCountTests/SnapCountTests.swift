@@ -798,7 +798,28 @@ final class SnapCountTests: XCTestCase {
 
         XCTAssertTrue(complete.isComplete)
         XCTAssertFalse(pending.isComplete)
-        XCTAssertTrue(NativeAccountDeletionResult(status: "deletion_pending", message: nil).isPending)
+        XCTAssertEqual(complete.displayMessage, "已删除 3 张云端原图，跳过 1 个外部链接")
+        XCTAssertEqual(pending.displayMessage, "已删除 2 张云端原图，剩余 1 张将在后台重试")
+        XCTAssertEqual(
+            NativeImageCleanupResult(
+                status: "ok", deleted: 0, queued: 0, failed: 0, deadLetter: 0,
+                remaining: 0, skippedExternal: 0, total: 0
+            ).displayMessage,
+            "没有需要清理的云端原图"
+        )
+
+        let accountCleanup = NativeAccountDeletionCleanupResult(
+            total: 4, queued: 4, processed: 3, failed: 1,
+            deadLetter: 0, skippedExternal: 0, remaining: 1
+        )
+        let deletion = NativeAccountDeletionResult(
+            status: "deletion_pending", message: nil, cleanup: accountCleanup
+        )
+        XCTAssertTrue(deletion.isPending)
+        XCTAssertEqual(
+            deletion.displayMessage,
+            "账户删除已提交；已删除 3 张云端原图，剩余 1 张将在后台清理，完成后自动删除账户"
+        )
     }
 
 }
@@ -898,7 +919,7 @@ private struct SettingsRepositoryStub: SettingsRepositoryProtocol {
     }
 
     func deleteAccount(accessToken: String) async throws -> NativeAccountDeletionResult {
-        NativeAccountDeletionResult(status: "deleted", message: nil)
+        NativeAccountDeletionResult(status: "deleted", message: nil, cleanup: nil)
     }
 }
 

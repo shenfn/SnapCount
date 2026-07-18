@@ -70,6 +70,7 @@ final class AppState: ObservableObject {
     @Published var settingsMessage: String?
     @Published var isLoadingSettings = false
     @Published var isSavingSettings = false
+    @Published var isCleaningSourceImages = false
     @Published var isExportingData = false
     @Published var isDeletingAccount = false
 
@@ -1418,6 +1419,10 @@ final class AppState: ObservableObject {
             $0.imageRetentionDays = retentionDays
         }
         guard cleanupExisting, settingsMessage == nil else { return }
+        guard !isCleaningSourceImages else { return }
+        isCleaningSourceImages = true
+        settingsMessage = "正在清理已有云端原图…"
+        defer { isCleaningSourceImages = false }
         do {
             let session = try await validSession()
             let cleanup = try await settingsRepository.cleanupSourceImages(accessToken: session.accessToken)
@@ -1435,13 +1440,7 @@ final class AppState: ObservableObject {
                 selectedRecordDetail = detail
             }
             await refreshDashboard()
-            if cleanup.isComplete {
-                settingsMessage = cleanup.skippedExternal > 0
-                    ? "已清理 \(cleanup.deleted) 张原图，跳过 \(cleanup.skippedExternal) 个外部链接"
-                    : "已有原图已清理（\(cleanup.deleted) 张）"
-            } else {
-                settingsMessage = "已清理 \(cleanup.deleted) 张，剩余 \(cleanup.remaining) 张将在后台重试"
-            }
+            settingsMessage = cleanup.displayMessage
         } catch {
             settingsMessage = "留存设置已保存，但清理已有原图失败：\(error.localizedDescription)"
         }
@@ -1474,9 +1473,8 @@ final class AppState: ObservableObject {
             let deletion = try await settingsRepository.deleteAccount(accessToken: session.accessToken)
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
             invalidateSession(message: "")
-            authMessage = deletion.isPending
-                ? "账户删除已提交，云端原图清理完成后会自动删除全部数据"
-                : "账户及其云端数据已删除"
+            authMessage = deletion.displayMessage
+            authMessageIsError = false
             return true
         } catch {
             guard generation == userStateGeneration else { return false }
@@ -1686,6 +1684,7 @@ final class AppState: ObservableObject {
         settingsMessage = nil
         isLoadingSettings = false
         isSavingSettings = false
+        isCleaningSourceImages = false
         isExportingData = false
         isDeletingAccount = false
         dashboardMessage = nil

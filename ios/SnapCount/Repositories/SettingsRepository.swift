@@ -295,6 +295,23 @@ struct NativeImageCleanupResult: Decodable, Equatable {
         status == "ok" && failed == 0 && deadLetter == 0 && remaining == 0
     }
 
+    var displayMessage: String {
+        if total == 0 {
+            return "没有需要清理的云端原图"
+        }
+
+        var details: [String] = []
+        if deleted > 0 { details.append("已删除 \(deleted) 张云端原图") }
+        if skippedExternal > 0 { details.append("跳过 \(skippedExternal) 个外部链接") }
+        if remaining > 0 { details.append("剩余 \(remaining) 张将在后台重试") }
+        if deadLetter > 0 { details.append("其中 \(deadLetter) 张需要稍后重新处理") }
+
+        if details.isEmpty {
+            return isComplete ? "云端原图清理完成" : "原图清理已提交后台处理"
+        }
+        return details.joined(separator: "，")
+    }
+
     private enum CodingKeys: String, CodingKey {
         case status, deleted, queued, failed, remaining, total
         case deadLetter = "dead_letter"
@@ -305,8 +322,37 @@ struct NativeImageCleanupResult: Decodable, Equatable {
 struct NativeAccountDeletionResult: Decodable, Equatable {
     let status: String
     let message: String?
+    let cleanup: NativeAccountDeletionCleanupResult?
 
     var isPending: Bool { status == "deletion_pending" }
+
+    var displayMessage: String {
+        guard let cleanup else {
+            return isPending
+                ? "账户删除已提交，云端原图清理完成后会自动删除全部数据"
+                : "账户及其云端数据已删除"
+        }
+        if isPending {
+            return "账户删除已提交；已删除 \(cleanup.processed) 张云端原图，剩余 \(cleanup.remaining) 张将在后台清理，完成后自动删除账户"
+        }
+        return "账户及其云端数据已删除；已删除 \(cleanup.processed) 张云端原图，跳过 \(cleanup.skippedExternal) 个外部链接"
+    }
+}
+
+struct NativeAccountDeletionCleanupResult: Decodable, Equatable {
+    let total: Int
+    let queued: Int
+    let processed: Int
+    let failed: Int
+    let deadLetter: Int
+    let skippedExternal: Int
+    let remaining: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case total, queued, processed, failed, remaining
+        case deadLetter = "deadLetter"
+        case skippedExternal = "skippedExternal"
+    }
 }
 
 private struct SettingsRow: Decodable {

@@ -364,6 +364,17 @@ private struct PrivacySettingsView: View {
                 retentionButton("保留 30 天", value: 30)
                 retentionButton("永久保留", value: -1)
                 Text(appState.userSettings.retentionDescription).font(.footnote).foregroundStyle(.secondary)
+                if appState.isCleaningSourceImages {
+                    ProgressView("正在清理已有云端原图")
+                }
+                if let message = appState.settingsMessage {
+                    Label(
+                        message,
+                        systemImage: message.contains("失败") ? "exclamationmark.circle" : "checkmark.circle"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(message.contains("失败") ? JieziTheme.coral : .secondary)
+                }
             }
             Section("数据存储") {
                 LabeledContent("服务节点", value: "Supabase 新加坡")
@@ -371,7 +382,7 @@ private struct PrivacySettingsView: View {
             }
         }
         .navigationTitle("隐私与留存")
-        .disabled(appState.isSavingSettings)
+        .disabled(appState.isSavingSettings || appState.isCleaningSourceImages)
         .confirmationDialog(retentionDialogTitle, isPresented: $showRetentionConfirmation, titleVisibility: .visible) {
             if let pendingRetention {
                 Button(retentionPrimaryActionTitle) {
