@@ -5,6 +5,8 @@ struct LoginView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var mode: AuthMode = .signIn
+    @State private var acceptedTerms = false
+    @State private var legalDocument: LegalDocumentKind?
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -23,6 +25,9 @@ struct LoginView: View {
                 .padding(.bottom, 32)
             }
             .scrollDismissesKeyboard(.interactively)
+        }
+        .sheet(item: $legalDocument) { document in
+            NavigationStack { LegalDocumentView(kind: document) }
         }
     }
 
@@ -103,6 +108,10 @@ struct LoginView: View {
             .opacity(canSubmit ? 1 : 0.55)
             .disabled(!canSubmit)
 
+            if mode == .signUp {
+                legalConsent
+            }
+
             Text(mode == .signIn ? "还没有账号？切换到注册即可创建。" : "密码至少 6 位。注册即表示你同意芥子的隐私政策与服务协议。")
                 .font(.footnote)
                 .foregroundStyle(JieziTheme.muted)
@@ -114,6 +123,26 @@ struct LoginView: View {
         !appState.isSigningIn
             && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && password.count >= 6
+            && (mode == .signIn || acceptedTerms)
+    }
+
+    private var legalConsent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Toggle("", isOn: $acceptedTerms)
+                .labelsHidden()
+                .tint(JieziTheme.mint)
+            Text("我已阅读并同意")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+            Button("服务协议") { legalDocument = .terms }
+                .font(.footnote.weight(.semibold))
+            Text("和")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+            Button("隐私政策") { legalDocument = .privacy }
+                .font(.footnote.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder

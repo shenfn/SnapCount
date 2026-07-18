@@ -857,6 +857,8 @@ private struct SettingsRepositoryStub: SettingsRepositoryProtocol {
     }
 
     func cleanupSourceImages(accessToken: String) async throws {}
+
+    func deleteAccount(accessToken: String) async throws {}
 }
 
 private func makeLiabilityAccount(id: String, name: String) -> NativeAccount {

@@ -71,6 +71,7 @@ final class AppState: ObservableObject {
     @Published var isLoadingSettings = false
     @Published var isSavingSettings = false
     @Published var isExportingData = false
+    @Published var isDeletingAccount = false
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -1453,6 +1454,28 @@ final class AppState: ObservableObject {
         }
     }
 
+    func deleteAccount() async -> Bool {
+        guard !isDeletingAccount else { return false }
+        let generation = userStateGeneration
+        isDeletingAccount = true
+        settingsMessage = nil
+        defer { isDeletingAccount = false }
+
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
+            try await settingsRepository.deleteAccount(accessToken: session.accessToken)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
+            invalidateSession(message: "")
+            authMessage = "账户及其云端数据已删除"
+            return true
+        } catch {
+            guard generation == userStateGeneration else { return false }
+            settingsMessage = "账户删除失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
     private func updateSettings(
         _ values: [String: AnyCodable],
         apply: (inout NativeUserSettings) -> Void
@@ -1655,6 +1678,7 @@ final class AppState: ObservableObject {
         isLoadingSettings = false
         isSavingSettings = false
         isExportingData = false
+        isDeletingAccount = false
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today

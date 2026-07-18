@@ -5,6 +5,7 @@ protocol SettingsRepositoryProtocol {
     func update(userId: String, values: [String: AnyCodable], accessToken: String) async throws
     func export(_ request: NativeDataExportRequest, accessToken: String) async throws -> NativeExportedFile
     func cleanupSourceImages(accessToken: String) async throws
+    func deleteAccount(accessToken: String) async throws
 }
 
 final class SettingsRepository: SettingsRepositoryProtocol {
@@ -47,6 +48,15 @@ final class SettingsRepository: SettingsRepositoryProtocol {
             AnyCodable.self,
             path: "functions/v1/ingest-receipt",
             body: ["action": AnyCodable("cleanup_all_images")],
+            accessToken: accessToken
+        )
+    }
+
+    func deleteAccount(accessToken: String) async throws {
+        _ = try await remoteClient.postFunction(
+            AnyCodable.self,
+            path: "functions/v1/ingest-receipt",
+            body: ["action": AnyCodable("delete_account")],
             accessToken: accessToken
         )
     }

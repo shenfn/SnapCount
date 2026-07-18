@@ -3,6 +3,7 @@ import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var showDeleteAccountConfirmation = false
 
     var body: some View {
         ZStack {
@@ -95,6 +96,25 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("账户与安全") {
+                    NavigationLink {
+                        LegalDocumentView(kind: .privacy)
+                    } label: {
+                        Label("隐私政策", systemImage: "hand.raised")
+                    }
+                    NavigationLink {
+                        LegalDocumentView(kind: .terms)
+                    } label: {
+                        Label("服务协议", systemImage: "doc.text")
+                    }
+                    Button(role: .destructive) {
+                        showDeleteAccountConfirmation = true
+                    } label: {
+                        Label("删除账户及全部数据", systemImage: "person.crop.circle.badge.xmark")
+                    }
+                    .disabled(appState.isDeletingAccount)
+                }
+
                 Section {
                     Button(role: .destructive) {
                         appState.signOut()
@@ -103,7 +123,7 @@ struct SettingsView: View {
                     }
                 }
 
-                if appState.isLoadingSettings || appState.isSavingSettings {
+                if appState.isLoadingSettings || appState.isSavingSettings || appState.isDeletingAccount {
                     Section { ProgressView(appState.isLoadingSettings ? "正在同步设置" : "正在保存设置") }
                 }
                 if let message = appState.settingsMessage {
@@ -119,6 +139,14 @@ struct SettingsView: View {
         }
         .navigationTitle("设置")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .alert("永久删除账户？", isPresented: $showDeleteAccountConfirmation) {
+            Button("删除账户及全部数据", role: .destructive) {
+                Task { _ = await appState.deleteAccount() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这会删除云端记录、账户流水、AI 识别数据和原图，且无法恢复。")
+        }
         .task { await appState.loadUserSettings() }
     }
 
