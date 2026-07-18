@@ -1420,7 +1420,7 @@ final class AppState: ObservableObject {
         guard cleanupExisting, settingsMessage == nil else { return }
         do {
             let session = try await validSession()
-            try await settingsRepository.cleanupSourceImages(accessToken: session.accessToken)
+            let cleanup = try await settingsRepository.cleanupSourceImages(accessToken: session.accessToken)
             await RemoteImageRepository.shared.clear()
             dashboard = dashboard.clearingSignedImageURLs()
             recordDetailCache = recordDetailCache.mapValues { detail in
@@ -1435,7 +1435,13 @@ final class AppState: ObservableObject {
                 selectedRecordDetail = detail
             }
             await refreshDashboard()
-            settingsMessage = "已有原图已清理"
+            if cleanup.isComplete {
+                settingsMessage = cleanup.skippedExternal > 0
+                    ? "已清理 \(cleanup.deleted) 张原图，跳过 \(cleanup.skippedExternal) 个外部链接"
+                    : "已有原图已清理（\(cleanup.deleted) 张）"
+            } else {
+                settingsMessage = "已清理 \(cleanup.deleted) 张，剩余 \(cleanup.remaining) 张将在后台重试"
+            }
         } catch {
             settingsMessage = "留存设置已保存，但清理已有原图失败：\(error.localizedDescription)"
         }

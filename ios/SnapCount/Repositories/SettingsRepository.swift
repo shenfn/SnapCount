@@ -4,7 +4,7 @@ protocol SettingsRepositoryProtocol {
     func fetch(userId: String, accessToken: String) async throws -> NativeUserSettings
     func update(userId: String, values: [String: AnyCodable], accessToken: String) async throws
     func export(_ request: NativeDataExportRequest, accessToken: String) async throws -> NativeExportedFile
-    func cleanupSourceImages(accessToken: String) async throws
+    func cleanupSourceImages(accessToken: String) async throws -> NativeImageCleanupResult
     func deleteAccount(accessToken: String) async throws
 }
 
@@ -43,9 +43,9 @@ final class SettingsRepository: SettingsRepositoryProtocol {
         )
     }
 
-    func cleanupSourceImages(accessToken: String) async throws {
-        _ = try await remoteClient.postFunction(
-            AnyCodable.self,
+    func cleanupSourceImages(accessToken: String) async throws -> NativeImageCleanupResult {
+        try await remoteClient.postFunction(
+            NativeImageCleanupResult.self,
             path: "functions/v1/ingest-receipt",
             body: ["action": AnyCodable("cleanup_all_images")],
             accessToken: accessToken
@@ -278,6 +278,27 @@ final class SettingsRepository: SettingsRepositoryProtocol {
             return groups.mapValues { $0.map { $0.mapValues(\.value) } }
         }
         return value
+    }
+}
+
+struct NativeImageCleanupResult: Decodable, Equatable {
+    let status: String
+    let deleted: Int
+    let queued: Int
+    let failed: Int
+    let deadLetter: Int
+    let remaining: Int
+    let skippedExternal: Int
+    let total: Int
+
+    var isComplete: Bool {
+        status == "ok" && failed == 0 && deadLetter == 0 && remaining == 0
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status, deleted, queued, failed, remaining, total
+        case deadLetter = "dead_letter"
+        case skippedExternal = "skipped_external"
     }
 }
 

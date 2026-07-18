@@ -786,6 +786,20 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNil(detail.loadError(for: .payments))
     }
 
+    func testImageCleanupResultDistinguishesCompleteAndPending() {
+        let complete = NativeImageCleanupResult(
+            status: "ok", deleted: 3, queued: 3, failed: 0, deadLetter: 0,
+            remaining: 0, skippedExternal: 1, total: 4
+        )
+        let pending = NativeImageCleanupResult(
+            status: "pending", deleted: 2, queued: 3, failed: 1, deadLetter: 0,
+            remaining: 1, skippedExternal: 0, total: 3
+        )
+
+        XCTAssertTrue(complete.isComplete)
+        XCTAssertFalse(pending.isComplete)
+    }
+
 }
 
 private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
@@ -869,7 +883,18 @@ private struct SettingsRepositoryStub: SettingsRepositoryProtocol {
         NativeExportedFile(url: URL(fileURLWithPath: "/tmp/jiezi.csv"))
     }
 
-    func cleanupSourceImages(accessToken: String) async throws {}
+    func cleanupSourceImages(accessToken: String) async throws -> NativeImageCleanupResult {
+        NativeImageCleanupResult(
+            status: "ok",
+            deleted: 0,
+            queued: 0,
+            failed: 0,
+            deadLetter: 0,
+            remaining: 0,
+            skippedExternal: 0,
+            total: 0
+        )
+    }
 
     func deleteAccount(accessToken: String) async throws {}
 }

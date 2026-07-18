@@ -502,14 +502,21 @@ async function confirmRetentionModal() {
         },
         body: JSON.stringify({ action: 'cleanup_all_images' }),
       })
-      if (resp.ok) {
+      const result = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        store.showFlash(`⚠️ 清理请求失败：${result.error || '稍后自动重试'}`)
+      } else if (result.status === 'ok') {
         await store.loadData()
-        store.showFlash('✓ 已有原图已清理')
+        const skipped = Number(result.skipped_external || 0)
+        store.showFlash(skipped > 0
+          ? `✓ 已清理 ${result.deleted || 0} 张，跳过 ${skipped} 个外部链接`
+          : `✓ 已有原图已清理（${result.deleted || 0} 张）`)
       } else {
-        store.showFlash('⚠️ 清理请求失败，将按期限自动清理')
+        await store.loadData()
+        store.showFlash(`⚠️ 已清理 ${result.deleted || 0} 张，剩余 ${result.remaining || 0} 张将在后台重试`)
       }
     } catch (e) {
-      store.showFlash('⚠️ 清理请求失败，将按期限自动清理')
+      store.showFlash('⚠️ 清理请求失败，请稍后重试')
     }
   }
 }
