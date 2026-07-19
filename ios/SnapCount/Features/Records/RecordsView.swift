@@ -480,10 +480,10 @@ private struct RecordImagePreview: View {
         CachedRemoteImage(url: url) { image in
             image
                 .resizable()
-                .scaledToFill()
+                .scaledToFit()
                 .frame(maxWidth: .infinity)
-                .frame(height: 156)
-                .clipped()
+                .frame(maxHeight: 280)
+                .background(JieziTheme.pageBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     Label("原始图片", systemImage: "photo")
