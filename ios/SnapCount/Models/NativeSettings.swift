@@ -5,9 +5,9 @@ struct NativeUserSettings: Equatable {
     var screenshotVisionPrimary = "auto"
     var photoVisionPrimary = "qwen"
     var qwenScreenshotModel = "qwen3.6-flash"
-    var qwenPhotoModel = "qwen3.7-plus"
+    var qwenPhotoModel = "qwen3.6-flash"
     var qwenScreenshotThinking = false
-    var qwenPhotoThinking = true
+    var qwenPhotoThinking = false
     var aiInsightProvider = "auto"
     var companionEnabled = true
     var companionMemoryEnabled = true
@@ -46,11 +46,8 @@ struct NativeSettingsOption: Identifiable, Hashable {
 
 enum NativeSettingsOptions {
     static let visionProviders = [
-        NativeSettingsOption(id: "auto", title: "自动（推荐）", detail: "平台自动调度，异常时自动降级"),
-        NativeSettingsOption(id: "qwen", title: "阿里云通义千问", detail: "截图速度优先，拍照质量优先"),
-        NativeSettingsOption(id: "moonshot", title: "Moonshot Kimi", detail: "财务截图兼容路线"),
-        NativeSettingsOption(id: "mimo", title: "小米 MiMo（实验）", detail: "仅在服务端配置可用模型后参与调度"),
-        NativeSettingsOption(id: "relay", title: "自建中转站 Vision", detail: "使用自建 OpenAI 兼容网关")
+        NativeSettingsOption(id: "auto", title: "自动（推荐）", detail: "根据截图或拍照链路选择 Qwen 模型"),
+        NativeSettingsOption(id: "qwen", title: "阿里云百炼 Qwen", detail: "仅使用已配置的 3.6 / 3.7 模型")
     ]
 
     static let qwenModels = [
@@ -59,9 +56,8 @@ enum NativeSettingsOptions {
     ]
 
     static let insightProviders = [
-        NativeSettingsOption(id: "auto", title: "自动", detail: "优先速度并自动降级"),
-        NativeSettingsOption(id: "moonshot", title: "快速分析", detail: "适合日常联动分析"),
-        NativeSettingsOption(id: "relay", title: "深度分析", detail: "使用自建模型进行更深入解读")
+        NativeSettingsOption(id: "auto", title: "自动", detail: "使用 Qwen 完成路由和联动分析"),
+        NativeSettingsOption(id: "qwen", title: "阿里云百炼 Qwen", detail: "固定使用 Qwen 分析链路")
     ]
 
     static let personas = [
@@ -82,6 +78,18 @@ enum NativeSettingsOptions {
         NativeSettingsOption(id: "emoji", title: "Emoji", detail: "偶尔加入贴切表情"),
         NativeSettingsOption(id: "kaomoji", title: "颜文字", detail: "偶尔使用轻量颜文字")
     ]
+
+    static func normalizedVisionProvider(_ value: String, fallback: String = "auto") -> String {
+        visionProviders.contains(where: { $0.id == value }) ? value : fallback
+    }
+
+    static func normalizedQwenModel(_ value: String, fallback: String = "qwen3.6-flash") -> String {
+        qwenModels.contains(where: { $0.id == value }) ? value : fallback
+    }
+
+    static func normalizedInsightProvider(_ value: String) -> String {
+        insightProviders.contains(where: { $0.id == value }) ? value : "auto"
+    }
 }
 
 enum NativeExportContent: String, CaseIterable, Identifiable, Hashable {

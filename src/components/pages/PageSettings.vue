@@ -386,7 +386,7 @@ const uploadToken = ref('')
 const screenshotVisionPrimary = ref('auto')
 const photoVisionPrimary = ref('qwen')
 const qwenScreenshotModel = ref('qwen3.6-flash')
-const qwenPhotoModel = ref('qwen3.7-plus')
+const qwenPhotoModel = ref('qwen3.6-flash')
 const aiInsightProvider = ref('auto')
 const companionPersona = ref('observer')
 const companionMemoryStrength = ref('balanced')
@@ -844,39 +844,26 @@ const visionOptions = [
   {
     value: 'auto',
     label: '自动（推荐）',
-    desc: '平台自动调度，速度与稳定性更均衡，异常时会自动降级。',
+    desc: '根据截图或拍照链路选择对应的 Qwen 模型。',
     iconText: 'A',
     toneClass: 'primary',
   },
   {
     value: 'qwen',
-    label: '阿里云通义千问',
-    desc: '截图默认快速模型，拍照可切质量模型。',
+    label: '阿里云百炼 Qwen',
+    desc: '仅使用 3.6 Flash 或 3.7 Plus。',
     iconText: 'Q',
     toneClass: 'success',
   },
-  {
-    value: 'moonshot',
-    label: 'Moonshot Kimi',
-    desc: '财务场景验证较充分，速度中等。',
-    iconText: 'K',
-    toneClass: 'info',
-  },
-  {
-    value: 'mimo',
-    label: '小米 MiMo（实验）',
-    desc: '多模态试验中，速度较慢，准确率待继续验证。',
-    iconText: 'M',
-    toneClass: 'warn',
-  },
-  {
-    value: 'relay',
-    label: '自建中转站 Vision',
-    desc: '走自建 OpenAI 兼容网关，适合对比速度与识图效果。',
-    iconText: 'R',
-    toneClass: 'info',
-  },
 ]
+
+function normalizeVisionProvider(value, fallback = 'auto') {
+  return visionOptions.some(option => option.value === value) ? value : fallback
+}
+
+function normalizeQwenModel(value) {
+  return ['qwen3.6-flash', 'qwen3.7-plus'].includes(value) ? value : 'qwen3.6-flash'
+}
 
 function providerLabel(value) {
   return visionOptions.find(o => o.value === value)?.label.replace('（推荐）', '') || value || '自动'
@@ -896,10 +883,10 @@ function routeSummary(route) {
 
 function applyVisionConfig(cfg) {
   if (!cfg) return
-  screenshotVisionPrimary.value = cfg.screenshot_vision_primary || cfg.vision_primary || 'auto'
-  photoVisionPrimary.value = cfg.photo_vision_primary || 'qwen'
-  qwenScreenshotModel.value = cfg.qwen_screenshot_model || 'qwen3.6-flash'
-  qwenPhotoModel.value = cfg.qwen_photo_model || 'qwen3.7-plus'
+  screenshotVisionPrimary.value = normalizeVisionProvider(cfg.screenshot_vision_primary || cfg.vision_primary)
+  photoVisionPrimary.value = normalizeVisionProvider(cfg.photo_vision_primary, 'qwen')
+  qwenScreenshotModel.value = normalizeQwenModel(cfg.qwen_screenshot_model)
+  qwenPhotoModel.value = normalizeQwenModel(cfg.qwen_photo_model)
 }
 
 async function refreshVisionSummary() {
@@ -923,25 +910,22 @@ const insightModelOptions = [
   {
     value: 'auto',
     label: '自动（推荐）',
-    desc: '跟随后端默认分析模型，速度通常更稳。',
+    desc: '使用 Qwen 完成路由和联动分析。',
     iconText: 'A',
     toneClass: 'primary',
   },
   {
-    value: 'moonshot',
-    label: 'Moonshot 分析',
-    desc: '当前稳定方案，整体响应通常更快。',
-    iconText: 'K',
+    value: 'qwen',
+    label: '阿里云百炼 Qwen',
+    desc: '固定使用 Qwen 分析链路。',
+    iconText: 'Q',
     toneClass: 'success',
   },
-  {
-    value: 'relay',
-    label: '自建中转站分析',
-    desc: '使用自建 OpenAI 兼容模型，适合追求更深一层的分析。',
-    iconText: 'R',
-    toneClass: 'warn',
-  },
 ]
+
+function normalizeInsightProvider(value) {
+  return insightModelOptions.some(option => option.value === value) ? value : 'auto'
+}
 
 const companionPersonaOptions = [
   {
@@ -1034,7 +1018,7 @@ onMounted(async () => {
     if (cfg) {
       uploadToken.value = cfg.upload_token || ''
       applyVisionConfig(cfg)
-      aiInsightProvider.value = cfg.ai_insight_provider || 'auto'
+      aiInsightProvider.value = normalizeInsightProvider(cfg.ai_insight_provider)
       companionPersona.value = cfg.companion_persona || 'observer'
       companionMemoryStrength.value = cfg.companion_memory_strength || 'balanced'
       companionExpressionStyle.value = cfg.companion_expression_style || 'plain'

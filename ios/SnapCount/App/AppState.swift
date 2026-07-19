@@ -1387,23 +1387,23 @@ final class AppState: ObservableObject {
     }
 
     func setInsightProvider(_ value: String) async {
-        await updateSettings(["ai_insight_provider": AnyCodable(value)]) { $0.aiInsightProvider = value }
+        let provider = NativeSettingsOptions.normalizedInsightProvider(value)
+        await updateSettings(["ai_insight_provider": AnyCodable(provider)]) { $0.aiInsightProvider = provider }
     }
 
     func setVisionProvider(_ value: String, forPhoto: Bool) async {
+        let provider = NativeSettingsOptions.normalizedVisionProvider(value, fallback: forPhoto ? "qwen" : "auto")
         let key = forPhoto ? "photo_vision_primary" : "screenshot_vision_primary"
-        var values = [key: AnyCodable(value)]
-        if !forPhoto { values["vision_primary"] = AnyCodable(value) }
+        var values = [key: AnyCodable(provider)]
+        if !forPhoto { values["vision_primary"] = AnyCodable(provider) }
         await updateSettings(values) {
-            if forPhoto { $0.photoVisionPrimary = value }
-            else { $0.screenshotVisionPrimary = value }
+            if forPhoto { $0.photoVisionPrimary = provider }
+            else { $0.screenshotVisionPrimary = provider }
         }
     }
 
     func setQwenModel(_ value: String, forPhoto: Bool) async {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = forPhoto ? "qwen3.7-plus" : "qwen3.6-flash"
-        let model = trimmed.isEmpty ? fallback : trimmed
+        let model = NativeSettingsOptions.normalizedQwenModel(value)
         let key = forPhoto ? "qwen_photo_model" : "qwen_screenshot_model"
         await updateSettings([key: AnyCodable(model)]) {
             if forPhoto { $0.qwenPhotoModel = model }

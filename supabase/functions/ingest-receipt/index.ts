@@ -16,28 +16,19 @@ import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
 import type { TimeContext } from "./time.ts";
 
-const MOONSHOT_MODEL    = "moonshot-v1-8k-vision-preview";
-const MOONSHOT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
-// MiMo 仅在同时显式配置 API Key 与已验证模型时启用。
-// 不再使用默认模型名，避免无效 fallback 延长整条识别链路。
-const MIMO_DEFAULT_ENDPOINT = "https://api.xiaomimimo.com/v1/chat/completions";
-
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
-// 截图/账单链路默认走 3.6 Flash 保持速度；拍照链路单独升到 3.7 Plus 质量优先。
+// 默认使用 3.6 Flash 控制上传耗时，用户可显式切换到 3.7 Plus。
 const QWEN_DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 const QWEN_DEFAULT_MODEL    = "qwen3.6-flash";
-const QWEN_PHOTO_DEFAULT_MODEL = "qwen3.7-plus";
-
-// 自建 OpenAI 兼容中转站（支持视觉模型时可直接复用）
-const RELAY_DEFAULT_ENDPOINT = "http://47.76.157.150:8317/v1/chat/completions";
-const RELAY_DEFAULT_MODEL    = "gpt-5.4";
+const QWEN_PHOTO_DEFAULT_MODEL = "qwen3.6-flash";
+const QWEN_ALLOWED_MODELS = new Set(["qwen3.6-flash", "qwen3.7-plus"]);
 const BUCKET_NAME       = "receipt-images";
 
-// Vision Provider 抽象：用于多 Provider 优雅降级（Moonshot 主 → MiMo 备）
-type ProviderName = "moonshot" | "mimo" | "qwen" | "relay";
+type ProviderName = "qwen";
 
-function isProviderName(value: string): value is ProviderName {
-  return value === "moonshot" || value === "mimo" || value === "qwen" || value === "relay";
+function normalizeQwenModel(value: string | null | undefined, fallback: string): string {
+  const normalized = value?.trim();
+  return normalized && QWEN_ALLOWED_MODELS.has(normalized) ? normalized : fallback;
 }
 
 interface ProviderConfig {
@@ -97,7 +88,7 @@ function getEnv(key: string): string {
   return v;
 }
 
-// 可选 secret：缺失时返回 null 而不抛错（用于 MiMo 这类 fallback provider）
+// 可选 secret：缺失时返回 null，由调用方使用 Qwen 默认配置。
 function getEnvOptional(key: string): string | null {
   const v = Deno.env.get(key);
   return v && v.length > 0 ? v : null;
@@ -1614,7 +1605,7 @@ function selectVisionProvidersForImage(
     ? {
       ...p,
       model: p.photoModel ?? QWEN_PHOTO_DEFAULT_MODEL,
-      enableThinking: p.photoEnableThinking ?? true,
+      enableThinking: p.photoEnableThinking ?? false,
     }
     : p);
 
@@ -2838,15 +2829,8 @@ async function callTextOnlyJsonGeneration(
     temperature,
     max_completion_tokens: 1024,
   };
-  if (config.name === "moonshot") {
-    body.response_format = { type: "json_object" };
-  }
-  if (config.name === "qwen") {
-    // 文案调用不需要思考，关掉以加速
-    body.enable_thinking = false;
-  } else if (config.name === "mimo" || config.name === "relay") {
-    body.enable_thinking = false;
-  }
+  // 文案调用不需要思考，关掉以加速。
+  body.enable_thinking = false;
   const resp = await fetch(config.endpoint, {
     method: "POST",
     headers: {
@@ -3213,7 +3197,7 @@ function fireAndForgetProfileRefresh(
   }
 }
 
-// 通用 OpenAI-compatible Vision 调用（Moonshot / MiMo 都走这个）
+// Qwen OpenAI-compatible Vision 调用。
 async function callOpenAICompatibleVision(
   imageBytes: Uint8Array,
   mime: string,
@@ -3222,37 +3206,20 @@ async function callOpenAICompatibleVision(
 ): Promise<VisionProviderResult> {
   const base64 = toBase64(imageBytes);
   const dataUrl = `data:${mime};base64,${base64}`;
-  const effectivePrompt = config.name === "moonshot"
-    ? compactMoonshotVisionPrompt()
-    : promptText;
   const body: Record<string, unknown> = {
     model: config.model,
     messages: [{
       role: "user",
       content: [
         { type: "image_url", image_url: { url: dataUrl } },
-        { type: "text", text: effectivePrompt },
+        { type: "text", text: promptText },
       ],
     }],
     temperature: 0.1,
     // JSON 实际只需 ~500 token；Qwen 思考模式需要额外预算给 reasoning_content。
-    max_completion_tokens: config.name === "qwen" && config.enableThinking !== false ? 4096 : 1024,
+    max_completion_tokens: config.enableThinking !== false ? 4096 : 1024,
   };
-  // response_format 是 OpenAI 扩展，部分兼容服务不支持会 400
-  // 仅 Moonshot 已验证支持；其它 provider 依赖 extractJson 兜底从 markdown / 文本中抽 JSON
-  if (config.name === "moonshot") {
-    body.response_format = { type: "json_object" };
-  }
-  // Qwen3.7 Plus 走质量优先，默认保留思考；MiMo/Relay 沿用快速识别策略。
-  if (config.name === "qwen") {
-    body.enable_thinking = config.enableThinking !== false;
-  } else if (config.name === "mimo" || config.name === "relay") {
-    body.enable_thinking = false;
-  }
-  // 同时附带 Authorization Bearer 与 api-key header：
-  // - Moonshot 只认 Authorization Bearer
-  // - xiaomimimo.com 文档 curl 示例用 api-key，Python SDK 实测 Authorization 也通
-  // 两个 header 并存对双方均无副作用
+  body.enable_thinking = config.enableThinking !== false;
   const timeoutMs = config.enableThinking === true
     ? getEnvInteger("VISION_THINKING_TIMEOUT_MS", 20_000, 8_000, 45_000)
     : getEnvInteger("VISION_PROVIDER_TIMEOUT_MS", 15_000, 5_000, 30_000);
@@ -3265,7 +3232,6 @@ async function callOpenAICompatibleVision(
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${config.apiKey}`,
-        "api-key": config.apiKey,
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -3307,15 +3273,7 @@ async function callOpenAICompatibleVision(
   };
 }
 
-function compactMoonshotVisionPrompt(): string {
-  return `请识别图片中的个人记录，只输出 JSON，不要 markdown。无法确认的字段返回 null，不要猜测日期或金额。
-字段：image_type, record_type, domain_key, title, summary, amount, merchant_name, platform, category, payment_method, income_category, source_name, occurred_at, order_finished_at, confidence, payload_jsonb。
-domain_key 只允许 expense、income、sport、sleep、reading、food、wallet 或 null。
-消费写 amount、merchant_name、platform、category、payment_method；收入写 amount、source_name、income_category；其它领域的业务字段写入 payload_jsonb。confidence 为 0 到 1。`;
-}
-
-// 多 Provider 优雅降级：按顺序尝试，第一个成功即返回；全部失败则抛聚合错误
-// 错误码语义：429 / 5xx / 网络错误 = 服务端临时问题，应快速降级到下一个 provider
+// 保留 attempts 结构，便于记录 Qwen 调用失败的耗时和错误上下文。
 async function callVisionWithFallback(
   imageBytes: Uint8Array,
   mime: string,
@@ -3341,9 +3299,6 @@ async function callVisionWithFallback(
         duration_ms: Date.now() - startedAt,
         raw_text_preview: clipForDebug(result.rawText, 600) ?? undefined,
       });
-      if (attempts.length > 1) {
-        console.warn(`[vision] succeeded on fallback provider=${cfg.name} after ${attempts.length - 1} failure(s)`);
-      }
       return {
         ai: result.ai,
         provider: cfg.name,
@@ -3379,7 +3334,6 @@ async function callVisionWithFallback(
         raw_text_preview: clipForDebug(errWithDebug.rawText, 600) ?? undefined,
       });
       console.warn(`[vision-fallback] provider=${cfg.name} failed: ${errMsg}`);
-      // 继续尝试下一个 provider
     }
   }
   // 全部失败：抛带聚合信息的错误
@@ -3395,17 +3349,6 @@ async function callVisionWithFallback(
     reasoningText: lastReasoningText,
   });
   throw err;
-}
-
-// 兼容保留：现有代码仍可调用 callKimiVision（内部走通用接口）
-async function callKimiVision(imageBytes: Uint8Array, mime: string, apiKey: string): Promise<AIResult> {
-  const result = await callOpenAICompatibleVision(imageBytes, mime, {
-    name: "moonshot",
-    model: MOONSHOT_MODEL,
-    endpoint: MOONSHOT_ENDPOINT,
-    apiKey,
-  });
-  return result.ai;
 }
 
 const IMAGE_REFERENCE_TARGETS: Array<{ table: string; column: string }> = [
@@ -3984,80 +3927,29 @@ Deno.serve(async (req) => {
   try {
     supabase = createClient(getEnv("SUPABASE_URL"), getEnv("SUPABASE_SERVICE_ROLE_KEY"));
 
-    // 准备所有可用 provider
-    const moonshotKey = getEnv("MOONSHOT_API_KEY");
-    const moonshotProvider: ProviderConfig = {
-      name: "moonshot",
-      model: MOONSHOT_MODEL,
-      endpoint: MOONSHOT_ENDPOINT,
-      apiKey: moonshotKey,
-    };
-
-    const mimoKey = getEnvOptional("MIMO_API_KEY");
-    const mimoModel = getEnvOptional("MIMO_MODEL");
-    const mimoProvider: ProviderConfig | null = mimoKey && mimoModel ? {
-      name: "mimo",
-      model: mimoModel,
-      endpoint: getEnvOptional("MIMO_ENDPOINT") ?? MIMO_DEFAULT_ENDPOINT,
-      apiKey: mimoKey,
-    } : null;
-
-    const qwenKey = getEnvOptional("QWEN_API_KEY");
-    const qwenProvider: ProviderConfig | null = qwenKey ? {
+    const qwenProvider: ProviderConfig = {
       name: "qwen",
-      model: getEnvOptional("QWEN_MODEL") ?? QWEN_DEFAULT_MODEL,
+      model: normalizeQwenModel(getEnvOptional("QWEN_MODEL"), QWEN_DEFAULT_MODEL),
       endpoint: getEnvOptional("QWEN_ENDPOINT") ?? QWEN_DEFAULT_ENDPOINT,
-      apiKey: qwenKey,
+      apiKey: getEnv("QWEN_API_KEY"),
       enableThinking: getEnvBoolean("QWEN_ENABLE_THINKING", false),
-      photoModel: getEnvOptional("QWEN_PHOTO_MODEL") ?? QWEN_PHOTO_DEFAULT_MODEL,
-      photoEnableThinking: getEnvBoolean("QWEN_PHOTO_ENABLE_THINKING", true),
-    } : null;
-
-    const relayKey = getEnvOptional("RELAY_API_KEY");
-    const relayProvider: ProviderConfig | null = relayKey ? {
-      name: "relay",
-      model: getEnvOptional("RELAY_MODEL") ?? RELAY_DEFAULT_MODEL,
-      endpoint: getEnvOptional("RELAY_ENDPOINT") ?? RELAY_DEFAULT_ENDPOINT,
-      apiKey: relayKey,
-    } : null;
-
-    // 主备顺序：通过 VISION_PRIMARY env 决定首选 provider，其它 provider 按固定后备顺序拼接
-    // 取值: moonshot (默认) | qwen | mimo | relay
-    const primary = (getEnvOptional("VISION_PRIMARY") ?? "moonshot").toLowerCase();
-    const allProviders: ProviderConfig[] = [moonshotProvider];
-    if (qwenProvider) allProviders.push(qwenProvider);
-    if (mimoProvider) allProviders.push(mimoProvider);
-    if (relayProvider) allProviders.push(relayProvider);
-    // 把 primary 对应的 provider 移到首位（如果存在）
-    const primaryIdx = allProviders.findIndex((p) => p.name === primary);
-    if (primaryIdx > 0) {
-      const [picked] = allProviders.splice(primaryIdx, 1);
-      allProviders.unshift(picked);
-    }
-    visionProviders = allProviders;
+      photoModel: normalizeQwenModel(getEnvOptional("QWEN_PHOTO_MODEL"), QWEN_PHOTO_DEFAULT_MODEL),
+      photoEnableThinking: getEnvBoolean("QWEN_PHOTO_ENABLE_THINKING", false),
+    };
+    visionProviders = [qwenProvider];
   } catch (e) {
     return respondShortcut({ error: `Secret config error: ${String(e)}` }, { mode: responseMode, status: 500 });
   }
 
-  // 二次调用（文案专用）provider：默认沿用主 vision provider 的密钥，
-  // 但可通过 FEEDBACK_TEXT_PROVIDER / FEEDBACK_TEXT_MODEL / FEEDBACK_TEXT_ENDPOINT 单独覆盖，
-  // 以便接更便宜的纯文本模型。文案调用关闭 enableThinking，固定 temperature=0.85
-  const textProvider: ProviderConfig | null = (() => {
-    const overrideName = (Deno.env.get("FEEDBACK_TEXT_PROVIDER") || "").toLowerCase();
-    const overrideKey = Deno.env.get("FEEDBACK_TEXT_API_KEY");
-    const overrideModel = Deno.env.get("FEEDBACK_TEXT_MODEL");
-    const overrideEndpoint = Deno.env.get("FEEDBACK_TEXT_ENDPOINT");
-    if (overrideName && isProviderName(overrideName) && overrideKey && overrideModel && overrideEndpoint) {
-      return {
-        name: overrideName,
-        model: overrideModel,
-        endpoint: overrideEndpoint,
-        apiKey: overrideKey,
-        enableThinking: false,
-      };
+  // 二次文案调用仍使用 Qwen，只允许单独覆盖 Qwen API Key 和白名单模型。
+  const textProvider: ProviderConfig | null = visionProviders[0]
+    ? {
+      ...visionProviders[0],
+      apiKey: Deno.env.get("FEEDBACK_TEXT_API_KEY") || visionProviders[0].apiKey,
+      model: normalizeQwenModel(Deno.env.get("FEEDBACK_TEXT_MODEL"), visionProviders[0].model),
+      enableThinking: false,
     }
-    return visionProviders[0] ?? null;
-  })();
+    : null;
 
   // 信号驱动 Voice 层开关:默认开;设 VOICE_SIGNALS_ENABLED=false 回退旧记忆注入链路
   const voiceSignalsEnabled = (Deno.env.get("VOICE_SIGNALS_ENABLED") ?? "true") !== "false";
@@ -4380,7 +4272,7 @@ Deno.serve(async (req) => {
     let domainProfilesPromise: Promise<DomainProfilesMap> = Promise.resolve({});
     let photoVisionPrimary: string | null = "qwen";
 
-    // 用户级 AI 引擎偏好：覆盖 VISION_PRIMARY env
+    // 用户级 Qwen 模型偏好。
     // 取值 auto 表示跟随平台默认；其它强制指定 provider 优先
     if (userId) {
       const { data: rawPreferenceRow } = await supabase.from("user_configs")
@@ -4401,7 +4293,6 @@ Deno.serve(async (req) => {
         keepSourceImages: prefRow?.keep_source_images ?? true,
         imageRetentionDays: prefRow?.image_retention_days ?? -1,
       };
-      const userPref = prefRow?.screenshot_vision_primary ?? prefRow?.vision_primary;
       photoVisionPrimary = prefRow?.photo_vision_primary ?? "qwen";
       companionSettings = {
         enabled: prefRow?.companion_enabled ?? true,
@@ -4416,22 +4307,15 @@ Deno.serve(async (req) => {
         const qwenCfg = visionProviders[qwenIdx];
         visionProviders[qwenIdx] = {
           ...qwenCfg,
-          model: normalizeString(prefRow.qwen_screenshot_model) ?? qwenCfg.model,
+          model: normalizeQwenModel(prefRow.qwen_screenshot_model, qwenCfg.model),
           enableThinking: typeof prefRow.qwen_screenshot_enable_thinking === "boolean"
             ? prefRow.qwen_screenshot_enable_thinking
             : qwenCfg.enableThinking,
-          photoModel: normalizeString(prefRow.qwen_photo_model) ?? qwenCfg.photoModel,
+          photoModel: normalizeQwenModel(prefRow.qwen_photo_model, qwenCfg.photoModel ?? QWEN_PHOTO_DEFAULT_MODEL),
           photoEnableThinking: typeof prefRow.qwen_photo_enable_thinking === "boolean"
             ? prefRow.qwen_photo_enable_thinking
             : qwenCfg.photoEnableThinking,
         };
-      }
-      if (userPref && userPref !== "auto") {
-        const idx = visionProviders.findIndex((p) => p.name === userPref);
-        if (idx > 0) {
-          const [picked] = visionProviders.splice(idx, 1);
-          visionProviders.unshift(picked);
-        }
       }
       companionContextPromise = loadCompanionContext(supabase, userId, companionSettings);
       domainProfilesPromise = loadDomainProfiles(supabase, userId);
@@ -4648,13 +4532,13 @@ Deno.serve(async (req) => {
     }
     timings.mark("storage_upload");
 
-    // 4. 调用 Vision 识别（多 Provider 优雅降级：Moonshot 主 → MiMo 备）
+    // 4. 调用 Qwen Vision 识别。
     //    始终调用，不因低成本路由无匹配而跳过
     let ai: AIResult;
     let aiOk = true;
     let aiErrorMessage: string | null = null;
-    let aiProvider: ProviderName = "moonshot";
-    let aiModel: string = MOONSHOT_MODEL;
+    let aiProvider: ProviderName = "qwen";
+    let aiModel: string = QWEN_DEFAULT_MODEL;
     let visionAttempts: VisionAttempt[] = [];
     let visionRawText: string | null = null;
     let visionExtractedJson: string | null = null;

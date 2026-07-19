@@ -523,10 +523,12 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(settings.screenshotVisionPrimary, "auto")
         XCTAssertEqual(settings.photoVisionPrimary, "qwen")
         XCTAssertEqual(settings.qwenScreenshotModel, "qwen3.6-flash")
-        XCTAssertEqual(settings.qwenPhotoModel, "qwen3.7-plus")
+        XCTAssertEqual(settings.qwenPhotoModel, "qwen3.6-flash")
         XCTAssertFalse(settings.qwenScreenshotThinking)
-        XCTAssertTrue(settings.qwenPhotoThinking)
-        XCTAssertEqual(Set(NativeSettingsOptions.visionProviders.map(\.id)), Set(["auto", "qwen", "moonshot", "mimo", "relay"]))
+        XCTAssertFalse(settings.qwenPhotoThinking)
+        XCTAssertEqual(Set(NativeSettingsOptions.visionProviders.map(\.id)), Set(["auto", "qwen"]))
+        XCTAssertEqual(Set(NativeSettingsOptions.insightProviders.map(\.id)), Set(["auto", "qwen"]))
+        XCTAssertEqual(NativeSettingsOptions.normalizedQwenModel("custom-model"), "qwen3.6-flash")
     }
 
     func testSettingsRepositoryProtocolSupportsStubInjection() async throws {

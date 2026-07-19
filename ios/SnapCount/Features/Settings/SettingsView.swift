@@ -197,8 +197,6 @@ struct SettingsView: View {
 
 private struct VisionSettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var screenshotModel = ""
-    @State private var photoModel = ""
 
     var body: some View {
         Form {
@@ -212,8 +210,8 @@ private struct VisionSettingsView: View {
             }
             providerSection(title: "截图识别", selection: appState.userSettings.screenshotVisionPrimary, forPhoto: false)
             providerSection(title: "拍照识别", selection: appState.userSettings.photoVisionPrimary, forPhoto: true)
-            qwenSection(title: "截图 Qwen 参数", model: $screenshotModel, forPhoto: false)
-            qwenSection(title: "拍照 Qwen 参数", model: $photoModel, forPhoto: true)
+            qwenSection(title: "截图 Qwen 参数", forPhoto: false)
+            qwenSection(title: "拍照 Qwen 参数", forPhoto: true)
             Section("识别规则") {
                 Text("支付、收入、余额和账单按截图链路处理；明确来自相机或判断为真实食物照片时按拍照链路处理。")
                     .font(.footnote)
@@ -222,9 +220,6 @@ private struct VisionSettingsView: View {
         }
         .navigationTitle("识别模型配置")
         .disabled(appState.isSavingSettings)
-        .onAppear(perform: syncModels)
-        .onChange(of: appState.userSettings.qwenScreenshotModel) { _, _ in syncModels() }
-        .onChange(of: appState.userSettings.qwenPhotoModel) { _, _ in syncModels() }
     }
 
     private func providerSection(title: String, selection: String, forPhoto: Bool) -> some View {
@@ -240,25 +235,15 @@ private struct VisionSettingsView: View {
         }
     }
 
-    private func qwenSection(title: String, model: Binding<String>, forPhoto: Bool) -> some View {
+    private func qwenSection(title: String, forPhoto: Bool) -> some View {
         Section(title) {
             ForEach(NativeSettingsOptions.qwenModels) { option in
                 Button {
-                    model.wrappedValue = option.id
                     Task { await appState.setQwenModel(option.id, forPhoto: forPhoto) }
                 } label: {
                     optionRow(option, selected: currentModel(forPhoto: forPhoto) == option.id)
                 }
                 .buttonStyle(.plain)
-            }
-            TextField("Qwen 模型名称", text: model)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .onSubmit {
-                    Task { await appState.setQwenModel(model.wrappedValue, forPhoto: forPhoto) }
-                }
-            Button("保存模型名称") {
-                Task { await appState.setQwenModel(model.wrappedValue, forPhoto: forPhoto) }
             }
             Toggle(
                 forPhoto ? "拍照思考模式" : "截图思考模式",
@@ -287,10 +272,6 @@ private struct VisionSettingsView: View {
         forPhoto ? appState.userSettings.qwenPhotoThinking : appState.userSettings.qwenScreenshotThinking
     }
 
-    private func syncModels() {
-        screenshotModel = appState.userSettings.qwenScreenshotModel
-        photoModel = appState.userSettings.qwenPhotoModel
-    }
 }
 
 private struct CompanionSettingsView: View {

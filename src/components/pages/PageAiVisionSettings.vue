@@ -57,14 +57,6 @@
           <div class="settings-item-title">截图模型</div>
           <div class="settings-item-sub">默认 3.6 Flash，也可以切到 3.7 Plus 追求质量。</div>
         </div>
-        <input
-          v-model.trim="qwenScreenshotModel"
-          class="vision-model-input"
-          type="text"
-          spellcheck="false"
-          @blur="saveQwenModel('screenshot')"
-          @keydown.enter="$event.target.blur()"
-        >
       </div>
       <div class="vision-preset-row">
         <button
@@ -97,16 +89,8 @@
       <div class="vision-model-row">
         <div class="vision-model-copy">
           <div class="settings-item-title">拍照模型</div>
-          <div class="settings-item-sub">默认 3.7 Plus，食物和真实照片数据更细。</div>
+          <div class="settings-item-sub">默认 3.6 Flash；需要更细识别时可切换 3.7 Plus。</div>
         </div>
-        <input
-          v-model.trim="qwenPhotoModel"
-          class="vision-model-input"
-          type="text"
-          spellcheck="false"
-          @blur="saveQwenModel('photo')"
-          @keydown.enter="$event.target.blur()"
-        >
       </div>
       <div class="vision-preset-row">
         <button
@@ -157,9 +141,9 @@ const store = inject('store')
 const screenshotVisionPrimary = ref('auto')
 const photoVisionPrimary = ref('qwen')
 const qwenScreenshotModel = ref('qwen3.6-flash')
-const qwenPhotoModel = ref('qwen3.7-plus')
+const qwenPhotoModel = ref('qwen3.6-flash')
 const qwenScreenshotThinking = ref(false)
-const qwenPhotoThinking = ref(true)
+const qwenPhotoThinking = ref(false)
 
 const routeSections = [
   {
@@ -179,9 +163,6 @@ const routeSections = [
 const providerOptions = [
   { value: 'auto', label: '自动', iconText: 'A' },
   { value: 'qwen', label: 'Qwen', iconText: 'Q' },
-  { value: 'moonshot', label: 'Kimi', iconText: 'K' },
-  { value: 'relay', label: '中转', iconText: 'R' },
-  { value: 'mimo', label: 'MiMo', iconText: 'M' },
 ]
 
 const qwenModelPresets = [
@@ -203,6 +184,14 @@ function configErrorMessage(error) {
 
 function providerLabel(value) {
   return providerOptions.find(item => item.value === value)?.label || value || '自动'
+}
+
+function normalizeProvider(value, fallback = 'auto') {
+  return providerOptions.some(item => item.value === value) ? value : fallback
+}
+
+function normalizeQwenModel(value) {
+  return qwenModelPresets.some(item => item.value === value) ? value : 'qwen3.6-flash'
 }
 
 function routeProvider(route) {
@@ -249,19 +238,6 @@ async function updateRouteProvider(route, value) {
   if (!ok) setRouteProvider(route, prev)
 }
 
-async function saveQwenModel(route) {
-  const isPhoto = route === 'photo'
-  const fallback = isPhoto ? 'qwen3.7-plus' : 'qwen3.6-flash'
-  const value = (isPhoto ? qwenPhotoModel.value : qwenScreenshotModel.value).trim() || fallback
-  if (isPhoto) qwenPhotoModel.value = value
-  else qwenScreenshotModel.value = value
-
-  const patch = isPhoto
-    ? { qwen_photo_model: value }
-    : { qwen_screenshot_model: value }
-  await updateUserConfig(patch, `✓ ${isPhoto ? '拍照' : '截图'} Qwen 模型已保存`)
-}
-
 async function setQwenModel(route, model) {
   const isPhoto = route === 'photo'
   const prev = isPhoto ? qwenPhotoModel.value : qwenScreenshotModel.value
@@ -306,7 +282,7 @@ onMounted(async () => {
         .select('vision_primary')
         .eq('user_id', store.currentUserId.value)
         .maybeSingle()
-      screenshotVisionPrimary.value = legacy?.vision_primary || 'auto'
+      screenshotVisionPrimary.value = normalizeProvider(legacy?.vision_primary)
       photoVisionPrimary.value = 'qwen'
       store.showFlash('⚠ 需要先执行数据库迁移 060，才能保存分链路配置')
       return
@@ -314,11 +290,11 @@ onMounted(async () => {
     store.showFlash('⚠ 配置加载失败：' + configErrorMessage(error))
     return
   }
-  screenshotVisionPrimary.value = data?.screenshot_vision_primary || data?.vision_primary || 'auto'
-  photoVisionPrimary.value = data?.photo_vision_primary || 'qwen'
-  qwenScreenshotModel.value = data?.qwen_screenshot_model || 'qwen3.6-flash'
-  qwenPhotoModel.value = data?.qwen_photo_model || 'qwen3.7-plus'
+  screenshotVisionPrimary.value = normalizeProvider(data?.screenshot_vision_primary || data?.vision_primary)
+  photoVisionPrimary.value = normalizeProvider(data?.photo_vision_primary, 'qwen')
+  qwenScreenshotModel.value = normalizeQwenModel(data?.qwen_screenshot_model)
+  qwenPhotoModel.value = normalizeQwenModel(data?.qwen_photo_model)
   qwenScreenshotThinking.value = data?.qwen_screenshot_enable_thinking ?? false
-  qwenPhotoThinking.value = data?.qwen_photo_enable_thinking ?? true
+  qwenPhotoThinking.value = data?.qwen_photo_enable_thinking ?? false
 })
 </script>

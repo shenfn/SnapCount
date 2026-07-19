@@ -7,7 +7,7 @@
 //   2. 查询 daily_domain_summary
 //   3. 计算 maturity + data_hash
 //   4. 若 force=false 且最近 cache（30 分钟内）的 data_hash 命中，直接返回
-//   5. 否则调 Moonshot v1-32k 文本模型生成洞察
+//   5. 否则调用阿里云百炼 Qwen 生成洞察
 //   6. 写入 ai_insights 缓存并返回
 // ════════════════════════════════════════════════════════════════════
 
@@ -15,10 +15,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { MODE_GUIDES, SAFETY_RULES, WRITING_RULES, buildDomainHeuristics } from "./prompts.ts";
 
-const MOONSHOT_TEXT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
-const MOONSHOT_TEXT_MODEL    = "moonshot-v1-32k";
-const RELAY_TEXT_ENDPOINT    = "http://47.76.157.150:8317/v1/chat/completions";
-const RELAY_TEXT_MODEL       = "gpt-5.4";
+const QWEN_TEXT_ENDPOINT     = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
+const QWEN_ROUTER_MODEL      = "qwen3.6-flash";
+const QWEN_ANALYSIS_MODEL    = "qwen3.7-plus";
+const QWEN_ALLOWED_MODELS    = new Set([QWEN_ROUTER_MODEL, QWEN_ANALYSIS_MODEL]);
 const PROMPT_VERSION         = "insights-v3-freeform-advisor";
 const CACHE_TTL_MS           = 30 * 60 * 1000; // 30 分钟内同 hash 不重复调用
 const DEFAULT_QUESTION       = "请综合分析我最近的生活状态，重点指出最值得关注的变化和接下来 7 天的行动建议。";
@@ -66,36 +66,33 @@ function getOptionalEnv(key: string, fallback: string): string {
   return Deno.env.get(key) || fallback;
 }
 
-type InsightProviderName = "auto" | "moonshot" | "relay";
+type InsightProviderName = "auto" | "qwen";
 
 interface TextProviderConfig {
-  provider: Exclude<InsightProviderName, "auto">;
+  provider: "qwen";
   apiKey: string;
   endpoint: string;
   model: string;
 }
 
-function getMoonshotTextProvider(): TextProviderConfig {
+function normalizeQwenModel(value: string | null | undefined, fallback: string): string {
+  const normalized = value?.trim();
+  return normalized && QWEN_ALLOWED_MODELS.has(normalized) ? normalized : fallback;
+}
+
+function getQwenTextProvider(model: string): TextProviderConfig {
   return {
-    provider: "moonshot",
-    apiKey: Deno.env.get("AI_ANALYSIS_API_KEY") || getEnv("MOONSHOT_API_KEY"),
-    endpoint: getOptionalEnv("AI_ANALYSIS_ENDPOINT", MOONSHOT_TEXT_ENDPOINT),
-    model: getOptionalEnv("AI_ANALYSIS_MODEL", getOptionalEnv("AI_MODEL", MOONSHOT_TEXT_MODEL)),
+    provider: "qwen",
+    apiKey: getEnv("QWEN_API_KEY"),
+    endpoint: getOptionalEnv("QWEN_ENDPOINT", QWEN_TEXT_ENDPOINT),
+    model,
   };
 }
 
-function getRelayTextProvider(): TextProviderConfig {
-  return {
-    provider: "relay",
-    apiKey: getEnv("RELAY_API_KEY"),
-    endpoint: getOptionalEnv("RELAY_ENDPOINT", RELAY_TEXT_ENDPOINT),
-    model: getOptionalEnv("RELAY_MODEL", RELAY_TEXT_MODEL),
-  };
-}
-
-function getAnalysisProviderByPreference(pref: string | null | undefined): TextProviderConfig {
-  if (pref === "relay") return getRelayTextProvider();
-  return getMoonshotTextProvider();
+function getAnalysisProviderByPreference(_pref: string | null | undefined): TextProviderConfig {
+  return getQwenTextProvider(
+    normalizeQwenModel(Deno.env.get("QWEN_ANALYSIS_MODEL"), QWEN_ANALYSIS_MODEL),
+  );
 }
 
 // ───────────── 数据指纹（用于缓存命中） ─────────────
@@ -479,6 +476,7 @@ async function callChatJson(apiKey: string, endpoint: string, model: string, pro
       temperature,
       max_tokens: maxTokens,
       response_format: { type: "json_object" },
+      enable_thinking: false,
     }),
   });
 
@@ -531,9 +529,7 @@ Deno.serve(async (req: Request) => {
         .select("ai_insight_provider")
         .eq("user_id", userId)
         .maybeSingle();
-      if (cfg?.ai_insight_provider === "moonshot" || cfg?.ai_insight_provider === "relay") {
-        insightProviderPref = cfg.ai_insight_provider;
-      }
+      if (cfg?.ai_insight_provider === "qwen") insightProviderPref = "qwen";
     }
 
     // 2. 解析请求
@@ -670,9 +666,12 @@ Deno.serve(async (req: Request) => {
     }
 
     // 6. 调用 AI
-    const routerApiKey = Deno.env.get("AI_ROUTER_API_KEY") || getEnv("MOONSHOT_API_KEY");
-    const routerEndpoint = getOptionalEnv("AI_ROUTER_ENDPOINT", MOONSHOT_TEXT_ENDPOINT);
-    const routerModel = getOptionalEnv("AI_ROUTER_MODEL", getOptionalEnv("AI_MODEL", MOONSHOT_TEXT_MODEL));
+    const routerProvider = getQwenTextProvider(
+      normalizeQwenModel(Deno.env.get("QWEN_ROUTER_MODEL"), QWEN_ROUTER_MODEL),
+    );
+    const routerApiKey = routerProvider.apiKey;
+    const routerEndpoint = routerProvider.endpoint;
+    const routerModel = routerProvider.model;
     const analysisProvider = getAnalysisProviderByPreference(insightProviderPref);
     const analysisApiKey = analysisProvider.apiKey;
     const analysisEndpoint = analysisProvider.endpoint;
