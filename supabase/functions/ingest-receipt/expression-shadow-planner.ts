@@ -32,6 +32,7 @@ export interface ShadowExpenseTransaction {
 }
 
 export interface ShadowGenericRecord {
+  [key: string]: unknown;
   id: string; occurred_at: string; amount?: number | string | null; source_name?: string | null;
   title?: string | null; summary?: string | null; payload?: Record<string, unknown>; source_type?: string;
 }
