@@ -18,6 +18,7 @@ export const DEFAULT_IMPORTANCE = {
   merchant_daily_activity_span: 0.58,
   merchant_daily_vs_active_day_median: 0.88,
   merchant_week_to_date_vs_previous_week_same_period: 0.92,
+  expense_category_week_to_date_vs_previous_week_same_period: 0.92,
   income_current_amount: 0.75,
   income_month_total_count: 0.85,
   income_source_month_pattern: 0.78,

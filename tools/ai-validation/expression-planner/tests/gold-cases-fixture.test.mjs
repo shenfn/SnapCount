@@ -6,11 +6,11 @@ const fixtureUrl = new URL('../fixtures/gold-cases.public.v0.1.json', import.met
 const fixtureText = await readFile(fixtureUrl, 'utf8')
 const fixture = JSON.parse(fixtureText)
 
-test('public gold cases contain six synthetic regression scenarios', () => {
+test('public gold cases contain seven synthetic regression scenarios', () => {
   assert.equal(fixture.schema_version, 'expression-planner-public-gold-cases-v0.1')
   assert.equal(fixture.privacy.classification, 'public_synthetic')
   assert.equal(fixture.privacy.contains_real_user_data, false)
-  assert.equal(fixture.cases.length, 6)
+  assert.equal(fixture.cases.length, 7)
 })
 
 test('every public gold case defines an input and expected layer', () => {

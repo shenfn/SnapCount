@@ -47,3 +47,51 @@ test('does not invent an insight from a single isolated expense', () => {
   assert.equal(plan.selected.length, 0)
   assert.equal(plan.shortcut_plan.silent, true)
 })
+
+test('keeps category comparisons isolated and reflects pending coverage', () => {
+  const currentFood = Array.from({ length: 13 }, (_, index) => ({
+    id: `current-food-${index}`,
+    transaction_date: index === 12 ? '2026-07-19' : `2026-07-${String(13 + (index % 6)).padStart(2, '0')}`,
+    transaction_time: index === 12 ? '11:24:00' : '10:00:00',
+    amount: 10,
+    category: 'food',
+    merchant_name: `Current Food ${index}`,
+    status: 'done',
+  }))
+  const previousFood = Array.from({ length: 10 }, (_, index) => ({
+    id: `previous-food-${index}`,
+    transaction_date: `2026-07-${String(6 + (index % 6)).padStart(2, '0')}`,
+    transaction_time: '10:00:00',
+    amount: 10,
+    category: 'food',
+    merchant_name: `Previous Food ${index}`,
+    status: 'done',
+  }))
+  const pendingFood = Array.from({ length: 12 }, (_, index) => ({
+    id: `pending-food-${index}`,
+    transaction_date: index < 7 ? '2026-07-17' : '2026-07-10',
+    transaction_time: '10:00:00',
+    amount: 20,
+    category: 'food',
+    merchant_name: index === 0 ? null : `Pending Food ${index}`,
+    status: 'pending',
+  }))
+  const unrelated = [
+    { id: 'rent', transaction_date: '2026-07-15', transaction_time: '19:42:00', amount: 1300, category: 'life', merchant_name: 'Housing', status: 'done' },
+    { id: 'other-large', transaction_date: '2026-07-15', transaction_time: '18:30:00', amount: 900, category: 'other', merchant_name: 'Other', status: 'done' },
+  ]
+
+  const plan = buildExpressionShadowPlan({
+    transactions: [...currentFood, ...previousFood, ...pendingFood, ...unrelated],
+    currentRecordId: 'current-food-12',
+  })
+  const categoryComparison = plan.candidates.find(candidate => candidate.claim.semantic_key === 'expense_category_week_to_date_vs_previous_week_same_period')
+
+  assert.equal(categoryComparison.claim.structured_value.current_period.total, 130)
+  assert.equal(categoryComparison.claim.structured_value.baseline_period.total, 100)
+  assert.equal(categoryComparison.claim.structured_value.pending_review_count, 12)
+  assert.equal(categoryComparison.quality.data_coverage, 0.66)
+  assert.equal(categoryComparison.eligibility.surface_eligibility.shortcut_notification.eligible, false)
+  assert.ok(categoryComparison.eligibility.surface_eligibility.shortcut_notification.blocked_reasons.includes('data_coverage_below_surface_threshold'))
+  assert.equal(plan.plan_summary.pwa_pending_ai_card.selected[0].semantic_key, 'expense_category_week_to_date_vs_previous_week_same_period')
+})

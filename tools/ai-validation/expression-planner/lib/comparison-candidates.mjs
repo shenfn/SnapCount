@@ -42,10 +42,13 @@ function recordEvidence(records) {
   return records.map(record => ({
     source_type: 'transaction',
     source_id: record.id,
+    ledger_status: record.fact_contract?.fact_status ?? 'confirmed',
     fields: {
       amount: Number(record.amount),
       transaction_date: record.transaction_date,
       occurred_at: record.occurred_at,
+      category: record.category ?? null,
+      comparison_cohort: record.fact_contract?.comparison_cohort ?? null,
     },
   }))
 }
@@ -157,4 +160,105 @@ export function generateComparisonCandidates({ records, currentDayEvents, entity
   }
 
   return candidates
+}
+
+function categoryLabel(category) {
+  return ({
+    food: '餐饮', shopping: '购物', transport: '出行', entertainment: '娱乐',
+    life: '生活', health: '健康', education: '教育', other: '其他',
+  })[category] ?? category
+}
+
+function inTimeRange(record, startAt, endAt) {
+  const occurredAt = new Date(record.occurred_at).getTime()
+  return Number.isFinite(occurredAt) && occurredAt >= startAt && occurredAt <= endAt
+}
+
+function average(total, count) {
+  return count > 0 ? roundMoney(total / count) : null
+}
+
+function comparisonDriver(current, baseline) {
+  const countDelta = current.count - baseline.count
+  const averageDelta = roundMoney(current.average - baseline.average)
+  if (countDelta > 0 && averageDelta <= 0) return 'record_frequency'
+  if (countDelta <= 0 && averageDelta > 0) return 'average_amount'
+  return 'mixed'
+}
+
+export function generateCategoryComparisonCandidates({ records, currentRecord }) {
+  const category = currentRecord?.category
+  const cohort = currentRecord?.fact_contract?.comparison_cohort
+  if (!category || !cohort?.startsWith('expense.category.')) return []
+
+  const currentAt = new Date(currentRecord.occurred_at).getTime()
+  if (!Number.isFinite(currentAt)) return []
+  const currentWeekStartDate = startOfWeek(currentRecord.transaction_date)
+  const currentWeekStartAt = new Date(`${currentWeekStartDate}T00:00:00+08:00`).getTime()
+  const previousWeekStartAt = currentWeekStartAt - 7 * 86400000
+  const previousCutoffAt = currentAt - 7 * 86400000
+
+  const sameCohort = records.filter(record => record.fact_contract?.comparison_cohort === cohort)
+  const confirmed = sameCohort.filter(record => record.fact_contract?.comparison_scope === 'include')
+  const pending = sameCohort.filter(record => record.fact_contract?.comparison_scope === 'pending_review')
+  const currentRecords = confirmed.filter(record => inTimeRange(record, currentWeekStartAt, currentAt))
+  const previousRecords = confirmed.filter(record => inTimeRange(record, previousWeekStartAt, previousCutoffAt))
+  if (!currentRecords.length || !previousRecords.length) return []
+
+  const currentPending = pending.filter(record => inTimeRange(record, currentWeekStartAt, currentAt))
+  const previousPending = pending.filter(record => inTimeRange(record, previousWeekStartAt, previousCutoffAt))
+  const current = summarizeAmounts(currentRecords)
+  const baseline = summarizeAmounts(previousRecords)
+  current.average = average(current.total, current.count)
+  baseline.average = average(baseline.total, baseline.count)
+  const pendingCount = currentPending.length + previousPending.length
+  const confirmedCount = current.count + baseline.count
+  const dataCoverage = roundMoney(confirmedCount / (confirmedCount + pendingCount))
+  const totalDelta = roundMoney(current.total - baseline.total)
+  const countDelta = current.count - baseline.count
+  const averageDelta = roundMoney(current.average - baseline.average)
+  const driver = comparisonDriver(current, baseline)
+  const label = categoryLabel(category)
+  const driverText = driver === 'record_frequency'
+    ? `总额增加主要来自记录笔数增加，单笔均价反而${averageDelta < 0 ? `下降 ${Math.abs(averageDelta)} 元` : '没有上升'}`
+    : driver === 'average_amount'
+      ? `变化主要来自单笔均价上升 ${averageDelta} 元`
+      : '笔数和单笔金额共同影响了总额变化'
+
+  return [comparisonCandidate({
+    id: `comparison:${cohort}:week-over-week-same-time:${currentRecord.transaction_date}`,
+    semanticKey: 'expense_category_week_to_date_vs_previous_week_same_period',
+    dimension: 'category_period_comparison',
+    value: {
+      comparison_cohort: cohort,
+      category,
+      current_period: { start: currentWeekStartDate, end_at: currentRecord.occurred_at, ...current },
+      baseline_period: { start: addDays(currentWeekStartDate, -7), end_at: new Date(previousCutoffAt).toISOString(), ...baseline },
+      delta: {
+        count: countDelta,
+        total: totalDelta,
+        average: averageDelta,
+        count_percent: signedPercent(current.count, baseline.count),
+        total_percent: signedPercent(current.total, baseline.total),
+        average_percent: signedPercent(current.average, baseline.average),
+      },
+      driver,
+      pending_review_count: pendingCount,
+    },
+    text: `本周截至现在，已确认${label} ${current.count} 笔、${current.total} 元；上周同期 ${baseline.count} 笔、${baseline.total} 元。${driverText}`,
+    evidence: [...recordEvidence(currentRecords), ...recordEvidence(previousRecords)],
+    numbers: [
+      { value: current.count, meaning: 'current_category_record_count', derivation: 'count(current_period_confirmed_category_records)' },
+      { value: current.total, meaning: 'current_category_total', derivation: 'sum(current_period_confirmed_category_records.amount)' },
+      { value: baseline.count, meaning: 'baseline_category_record_count', derivation: 'count(previous_period_confirmed_category_records)' },
+      { value: baseline.total, meaning: 'baseline_category_total', derivation: 'sum(previous_period_confirmed_category_records.amount)' },
+      { value: dataCoverage, meaning: 'category_data_coverage', derivation: 'confirmed_count/(confirmed_count+pending_review_count)' },
+    ],
+    quality: {
+      confidence: roundMoney(0.75 + 0.2 * dataCoverage),
+      sample_count: confirmedCount,
+      data_coverage: dataCoverage,
+      pending_review_count: pendingCount,
+    },
+  })]
 }
