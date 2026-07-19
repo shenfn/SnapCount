@@ -3555,6 +3555,31 @@ export function useStore() {
     }
   }
 
+  async function submitExpressionFeedback({ recordId, choice, freeText = "" }) {
+    if (!recordId || !choice) throw new Error("缺少点评信息")
+    const { data: sessionData, error: sessionError } = await sb.auth.getSession()
+    if (sessionError) throw sessionError
+    const token = sessionData?.session?.access_token
+    if (!token) throw new Error("登录状态已失效，请重新登录")
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/ingest-receipt`, {
+      method: "POST",
+      keepalive: true,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "apikey": SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({
+        action: "submit_expression_feedback",
+        record_id: recordId,
+        primary_choice: choice,
+        free_text: freeText,
+      }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "点评提交失败")
+    return payload.data
+  }
   return {
     currentYear, currentMonth, currentPage, monthLabel,
     pageHistory, pageScrollPositions, currentUserId, currentUserEmail, isLoggedIn,
@@ -3610,6 +3635,6 @@ export function useStore() {
     navigateTo, goBack,
     settingsState, toggleSetting, setSetting, setRetention, loadUserSettings,
     actionState, isActionPending,
-    refreshIfStale,
+    refreshIfStale, submitExpressionFeedback,
   }
 }

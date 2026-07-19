@@ -1,10 +1,9 @@
 <template>
-  <!-- 遮罩（半透明，不完全挡住链路） -->
-  <div class="review-mask" :class="{ on: open }" @click="$emit('close')"></div>
+  <!-- 浮动模式：遮罩 -->
+  <div v-if="!embedded" class="review-mask" :class="{ on: open }" @click="$emit('close')"></div>
 
-  <!-- 抽屉 -->
-  <div class="review-drawer" :class="{ open: open }">
-    <!-- 头部 -->
+  <!-- 浮动模式：抽屉 -->
+  <div v-if="!embedded" class="review-drawer" :class="{ open: open }">
     <div class="drawer-header">
       <span class="drawer-title">点评</span>
       <span class="review-status" v-if="reviewState === 'loading'">加载中...</span>
@@ -12,137 +11,52 @@
       <span class="review-status dirty" v-else-if="reviewState === 'dirty'">未保存</span>
       <button class="close-btn" @click="$emit('close')">收起</button>
     </div>
-
-    <!-- 内容区 -->
     <div class="drawer-body" v-if="open">
-      <!-- 图片预览 -->
-      <div class="image-section" v-if="imageUrl">
-        <div class="section-label">识别图片</div>
-        <div class="image-wrapper" @click="imageExpanded = !imageExpanded">
-          <img
-            :src="imageUrl"
-            class="preview-image"
-            :class="{ expanded: imageExpanded }"
-            loading="lazy"
-            @error="onImageError"
-          />
-        </div>
-        <div class="image-hint" v-if="!imageExpanded">点击放大</div>
-      </div>
-      <div class="image-section empty" v-else>
-        <div class="section-label">识别图片</div>
-        <div class="no-image">无图片</div>
-      </div>
+      <ReviewBody
+        :image-url="imageUrl"
+        :ratings="ratings"
+        :issue-tags="issueTags"
+        :notes="notes"
+        :suggested-action="suggestedAction"
+        :review-state="reviewState"
+        :issue-tag-options="ISSUE_TAG_OPTIONS"
+        :image-expanded="imageExpanded"
+        @rating="onRatingInput"
+        @toggle-tag="toggleTag"
+        @update:notes="notes = $event; markDirty()"
+        @update:suggested-action="suggestedAction = $event; markDirty()"
+        @toggle-image="imageExpanded = !imageExpanded"
+        @save="onSave"
+      />
+    </div>
+  </div>
 
-      <!-- 评分区 -->
-      <div class="rating-section">
-        <div class="rating-row">
-          <span class="rating-label">识别准确度</span>
-          <input
-            type="range"
-            class="rating-slider"
-            min="0"
-            max="5"
-            step="1"
-            :value="ratings.recognition_accuracy"
-            @input="onRatingInput('recognition_accuracy', $event)"
-          />
-          <div class="star-display">
-            <span
-              v-for="n in 5"
-              :key="`ra-${n}`"
-              class="star"
-              :class="{ filled: ratings.recognition_accuracy >= n }"
-            >★</span>
-          </div>
-          <span class="rating-value">{{ ratings.recognition_accuracy || '未评分' }}</span>
-        </div>
-        <div class="rating-row">
-          <span class="rating-label">文案质量</span>
-          <input
-            type="range"
-            class="rating-slider"
-            min="0"
-            max="5"
-            step="1"
-            :value="ratings.feedback_quality"
-            @input="onRatingInput('feedback_quality', $event)"
-          />
-          <div class="star-display">
-            <span
-              v-for="n in 5"
-              :key="`fq-${n}`"
-              class="star"
-              :class="{ filled: ratings.feedback_quality >= n }"
-            >★</span>
-          </div>
-          <span class="rating-value">{{ ratings.feedback_quality || '未评分' }}</span>
-        </div>
-      </div>
-
-      <!-- 问题标签 -->
-      <div class="tag-section">
-        <span class="section-label">问题标签（可多选）</span>
-        <div class="tag-list">
-          <label
-            v-for="tag in ISSUE_TAG_OPTIONS"
-            :key="tag.value"
-            class="tag-checkbox"
-            :class="{ active: issueTags.includes(tag.value) }"
-          >
-            <input
-              type="checkbox"
-              :checked="issueTags.includes(tag.value)"
-              @change="toggleTag(tag.value)"
-            />
-            <span class="tag-box"></span>
-            <span class="tag-label">{{ tag.label }}</span>
-          </label>
-        </div>
-      </div>
-
-      <!-- 点评备注 -->
-      <div class="text-section">
-        <div class="section-head">
-          <span class="section-label">点评备注</span>
-          <span class="char-counter">{{ notes.length }}/2000</span>
-        </div>
-        <textarea
-          v-model="notes"
-          class="notes-input"
-          placeholder="记录你的感受，比如哪里不够好、缺什么"
-          maxlength="2000"
-          rows="4"
-          @input="markDirty()"
-        ></textarea>
-      </div>
-
-      <!-- 改进建议 -->
-      <div class="text-section">
-        <div class="section-head">
-          <span class="section-label">改进建议（可选）</span>
-          <span class="char-counter">{{ suggestedAction.length }}/500</span>
-        </div>
-        <textarea
-          v-model="suggestedAction"
-          class="action-input"
-          placeholder="希望 AI 怎么改进"
-          maxlength="500"
-          rows="2"
-          @input="markDirty()"
-        ></textarea>
-      </div>
-
-      <!-- 操作按钮 -->
-      <div class="action-row">
-        <button
-          class="save-btn"
-          :disabled="!canSave || reviewState === 'saving'"
-          @click="onSave"
-        >
-          {{ saveBtnText }}
-        </button>
-      </div>
+  <!-- 内嵌模式：可折叠块 -->
+  <div v-else class="review-embedded" :class="{ collapsed: !embeddedOpen }">
+    <div class="embedded-header" @click="embeddedOpen = !embeddedOpen">
+      <span class="embedded-title">点评</span>
+      <span class="review-status" v-if="reviewState === 'loading'">加载中...</span>
+      <span class="review-status saved" v-else-if="reviewState === 'saved'">已保存 ✓</span>
+      <span class="review-status dirty" v-else-if="reviewState === 'dirty'">未保存</span>
+      <span class="embedded-toggle">{{ embeddedOpen ? '收起 ▲' : '展开 ▼' }}</span>
+    </div>
+    <div class="embedded-body" v-show="embeddedOpen">
+      <ReviewBody
+        :image-url="imageUrl"
+        :ratings="ratings"
+        :issue-tags="issueTags"
+        :notes="notes"
+        :suggested-action="suggestedAction"
+        :review-state="reviewState"
+        :issue-tag-options="ISSUE_TAG_OPTIONS"
+        :image-expanded="imageExpanded"
+        @rating="onRatingInput"
+        @toggle-tag="toggleTag"
+        @update:notes="notes = $event; markDirty()"
+        @update:suggested-action="suggestedAction = $event; markDirty()"
+        @toggle-image="imageExpanded = !imageExpanded"
+        @save="onSave"
+      />
     </div>
   </div>
 </template>
@@ -150,6 +64,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { saveReview, fetchReview, imageUrl as buildImageUrl, remoteImageUrl } from '../lib/api.js'
+import ReviewBody from './ReviewBody.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -159,6 +74,7 @@ const props = defineProps({
   simSnapshot: { type: Object, default: null },
   traceSnapshot: { type: Object, default: null },
   accountKey: { type: String, default: '' },
+  embedded: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close', 'saved'])
@@ -183,6 +99,7 @@ const ISSUE_TAG_OPTIONS = [
 const reviewState = ref('idle')
 const imageExpanded = ref(false)
 const imageError = ref(false)
+const embeddedOpen = ref(true)
 
 // 表单数据
 const ratings = ref({ recognition_accuracy: 0, feedback_quality: 0 })
@@ -234,6 +151,14 @@ watch(() => props.open, async (isOpen) => {
 // caseKey 变化时（切换 trace）重新加载
 watch(() => props.caseKey, async (newKey) => {
   if (props.open && newKey && newKey !== lastLoadedKey.value) {
+    imageError.value = false
+    await loadReview()
+  }
+})
+
+// embedded 模式：caseKey 变化时重新加载
+watch(() => props.embedded ? props.caseKey : null, async (newKey) => {
+  if (newKey && newKey !== lastLoadedKey.value) {
     imageError.value = false
     await loadReview()
   }
@@ -590,4 +515,38 @@ async function onSave() {
 }
 .save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .save-btn:hover:not(:disabled) { opacity: 0.9; }
+
+/* ═══ 内嵌模式（UploadPanel 用） ═══ */
+.review-embedded {
+  margin-top: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.embedded-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-hover);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
+.embedded-header:hover { background: var(--bg-active); }
+.embedded-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-blue);
+}
+.embedded-toggle {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.embedded-body {
+  padding: var(--space-md);
+}
 </style>

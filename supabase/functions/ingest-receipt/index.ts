@@ -39,6 +39,7 @@ interface ProviderConfig {
   enableThinking?: boolean;
   photoModel?: string;
   photoEnableThinking?: boolean;
+  requestTimeoutMs?: number;
 }
 
 interface VisionAttempt {
@@ -232,6 +233,7 @@ interface RecognitionReferenceRow extends IdRow {
   target_table: string | null;
   target_id: string | null;
   record_type: string | null;
+  created_at: string | null;
   ai_response?: unknown;
 }
 
@@ -1572,6 +1574,15 @@ function looksLikePhotoCaptureKind(value: string | null): boolean {
   );
 }
 
+function looksLikeCameraCaptureKind(value: string | null): boolean {
+  const text = normalizeComparableText(value);
+  return Boolean(text) && (
+    text.includes("camera") ||
+    text.includes("拍照") ||
+    text.includes("相机")
+  );
+}
+
 function shouldUsePhotoQualityVision(params: {
   captureKind: string | null;
   rawText: string | null;
@@ -1601,6 +1612,16 @@ function selectVisionProvidersForImage(
   },
 ): ProviderConfig[] {
   if (!shouldUsePhotoQualityVision(params)) return providers;
+  if (looksLikeCameraCaptureKind(params.captureKind)) {
+    const qwen = providers[0];
+    if (!qwen) return [];
+    return [{
+      ...qwen,
+      model: qwen.photoModel ?? QWEN_PHOTO_DEFAULT_MODEL,
+      enableThinking: false,
+      requestTimeoutMs: 15_000,
+    }];
+  }
   const photoProviders = providers.map((p) => p.name === "qwen"
     ? {
       ...p,
@@ -2054,7 +2075,18 @@ function buildBuiltinCompanionFallback(
 function compactFeedbackText(value: string | null | undefined, max = 42): string | null {
   const text = normalizeString(value)?.replace(/[\r\n]+/g, " ").trim();
   if (!text) return null;
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  return text.length > max ? clipAtNaturalBoundary(text, max) : text;
+}
+
+// 超长文案在标点处收尾,避免"看来你是真…"这种句中截断
+function clipAtNaturalBoundary(text: string, max: number): string {
+  const head = text.slice(0, max);
+  let cut = -1;
+  for (const p of ["。", "！", "？", "；", "，", ","]) {
+    cut = Math.max(cut, head.lastIndexOf(p));
+  }
+  if (cut >= Math.floor(max * 0.5)) return `${head.slice(0, cut)}。`;
+  return `${head.slice(0, max - 1)}…`;
 }
 
 function feedbackNotification(
@@ -2078,6 +2110,19 @@ function feedbackNotification(
   return lines.join("\n");
 }
 
+function expenseCategoryLabel(category: string | null): string | null {
+  if (!category) return null;
+  const key = category.toLowerCase();
+  if (["food", "餐饮", "美食"].includes(key)) return "餐饮";
+  if (["transport", "交通"].includes(key)) return "交通";
+  if (["shopping", "购物"].includes(key)) return "购物";
+  if (["life", "生活"].includes(key)) return "生活";
+  if (["entertainment", "娱乐"].includes(key)) return "娱乐";
+  if (["medical", "health", "医疗", "健康"].includes(key)) return "健康";
+  if (key === "other") return "其他";
+  return category;
+}
+
 function timingSignalFor(domainKey: string, timeContext: TimeContext | null): AIFeedback["timing_signal"] {
   if (!timeContext || timeContext.delta_minutes === null || timeContext.delta_minutes < 0) return null;
   const delta = timeContext.delta_minutes;
@@ -2099,6 +2144,68 @@ function financeCompanionLine(ai: AIResult): string | null {
   if (/(?:这周|本周|本月|近\s*\d+\s*天|30\s*天).{0,16}[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)) return null;
   if (/(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text)) return null;
   return text;
+}
+
+function buildSignalFallbackAIFeedback(
+  domainKey: string,
+  signals: DomainSignal[],
+  timingSignal: AIFeedback["timing_signal"] | null,
+): AIFeedback | null {
+  const signal = signals[0];
+  if (!signal) return null;
+  const fact = compactFeedbackText(signal.fact, 34) ?? signal.fact;
+  const badgeByKind: Record<string, string> = {
+    merchant_repeat: "本周复现",
+    unusual_amount: "金额偏高",
+    week_velocity: "周节奏变化",
+    late_night_spend: "夜间消费",
+    vs_baseline_normal: "正常水位",
+    vs_baseline_below: "低于常态",
+    vs_baseline_above: "更充足",
+    consecutive_short: "连续偏短",
+    pace_vs_self: "和自己比",
+    rhythm_return: "重新接上",
+    weekly_progress: "本周节奏",
+    meal_vs_baseline: "和常态比",
+    dish_ritual: "常点出现",
+    late_snack_streak: "夜间加餐",
+    book_switch: "换书记录",
+    progress_momentum: "进度推进",
+    streak: "连续阅读",
+    liability_delta: "负债变化",
+    due_reminder: "还款临近",
+    record_acknowledge: "记录已归档",
+  };
+  const bandByKind: Record<string, AIFeedback["band"]> = {
+    unusual_amount: "watch",
+    week_velocity: "watch",
+    late_night_spend: "watch",
+    vs_baseline_below: "watch",
+    consecutive_short: "watch",
+    late_snack_streak: "watch",
+    due_reminder: "watch",
+    vs_baseline_above: "positive",
+    pace_vs_self: "positive",
+    rhythm_return: "positive",
+    weekly_progress: "positive",
+    progress_momentum: "positive",
+    streak: "positive",
+  };
+  return {
+    version: "feedback-v1",
+    domain_key: domainKey,
+    badge: badgeByKind[signal.kind] ?? "个人信号",
+    icon: domainKey === "sleep" ? "🌙" : domainKey === "sport" ? "🏃" : domainKey === "food" ? "🍱" : domainKey === "reading" ? "📚" : domainKey === "wallet" ? "💳" : "💸",
+    band: bandByKind[signal.kind] ?? "neutral",
+    tone: "signal_fallback",
+    emotion_line: fact,
+    utility_line: null,
+    detail_reason: signal.fact,
+    internal_score: 68,
+    confidence: 0.7,
+    source: "rule",
+    timing_signal: timingSignal,
+  };
 }
 
 function buildBuiltinAIFeedback(
@@ -2359,9 +2466,10 @@ function buildExpenseAIFeedback(
   if (amount === null || (ai.confidence ?? 0) < 0.7) return null;
   const timingSignal = timingSignalFor("expense", timeContext);
   const category = normalizeString(ai.category);
+  const categoryLabel = expenseCategoryLabel(category);
   const merchant = normalizeString(ai.merchant_name);
   const aiLine = financeCompanionLine(ai);
-  const financeText = `${merchant ?? ""} ${category ?? ""} ${ai.platform ?? ""} ${ai.payment_method ?? ""}`;
+  const financeText = `${merchant ?? ""} ${category ?? ""} ${ai.platform ?? ""}`;
   const isRepayment = includesAny(financeText, ["还款", "待还", "信贷", "花呗", "白条", "月付", "信用卡"]).length > 0;
   const isRentLike = includesAny(financeText, ["房租", "租房", "公寓", "房东", "滨江叔叔"]).length > 0
     || (amount >= 1000 && category !== null && includesAny(category, ["life", "生活", "housing", "rent"]).length > 0);
@@ -2424,15 +2532,17 @@ function buildExpenseAIFeedback(
     return {
       version: "feedback-v1",
       domain_key: "expense",
-      badge: "小额渗漏",
+      badge: categoryLabel === "餐饮" ? "小额餐饮" : "小额支出",
       icon: "💸",
-      band: "watch",
-      tone: "soft_watch",
-      emotion_line: aiLine ?? "金额不大，但小额最容易在月底失踪。",
-      utility_line: category ? `先把${category}归好类，后面看频率。` : "先看见它，就已经少漏一笔。",
+      band: "neutral",
+      tone: "quiet_accounting",
+      emotion_line: aiLine ?? (merchant
+        ? `${merchant} ${fmtYuan(amount)}，这笔小额已落账。`
+        : `${fmtYuan(amount)} 的小额支出已落账。`),
+      utility_line: categoryLabel ? `分类记到${categoryLabel}，后面看一周频率。` : "先把这笔收住，后面再看频率。",
       detail_reason: `本笔支出 ${fmtYuan(amount)}，属于小额消费，价值在于频率追踪。`,
-      internal_score: 58,
-      confidence: 0.68,
+      internal_score: 62,
+      confidence: 0.7,
       source: aiLine ? "hybrid" : "rule",
       timing_signal: timingSignal,
     };
@@ -2862,7 +2972,7 @@ function clipChineseLen(value: unknown, max: number): string | null {
   const trimmed = value.replace(/[\r\n]+/g, " ").trim();
   if (!trimmed) return null;
   if (trimmed.length <= max) return trimmed;
-  return `${trimmed.slice(0, max - 1)}…`;
+  return clipAtNaturalBoundary(trimmed, max);
 }
 
 const ALLOWED_BANDS = new Set(["positive", "neutral", "watch", "recover", "ritual"]);
@@ -3025,6 +3135,7 @@ function buildCurrentFactsFor(
       amount: normalizedAmount,
       merchant: ai.merchant_name ?? null,
       category: ai.category ?? null,
+      platform: ai.platform ?? null,
       isLateNight: late,
     };
   }
@@ -3154,10 +3265,34 @@ async function generateVoiceFeedback(opts: {
     );
     if (!check.ok) {
       console.warn(`[voice] number validation failed (${opts.domainKey}):`, check.violations.join(" | "));
+      // 逐句抢救:只丢弃违规句,保留合规句。badIndexes 与上方数组下标对齐:
+      // [0]=companion_message, [1]=emotion_line, [2]=utility_line, [3]=detail_reason
+      const bad = new Set(check.badIndexes);
+      const companion = bad.has(0) ? null : normalized.companion_message;
+      let aiFeedback = normalized.ai_feedback;
+      if (aiFeedback) {
+        if (bad.has(1)) {
+          // emotion_line 是卡片主文案,违规则整卡放弃,交给信号兜底
+          aiFeedback = null;
+        } else {
+          aiFeedback = {
+            ...aiFeedback,
+            utility_line: bad.has(2) ? null : aiFeedback.utility_line,
+            detail_reason: bad.has(3) ? null : aiFeedback.detail_reason,
+          };
+        }
+      }
+      // 有存活内容时不设 error(调用方据此判断是否走兜底),但保留 number_violations 供 trace 观察
+      if (!companion && !aiFeedback) {
+        return {
+          companion_message: null, ai_feedback: null, raw_text: rawText,
+          duration_ms: Date.now() - startedAt, error: "number_validation_failed",
+          signals, number_violations: check.violations,
+        };
+      }
       return {
-        companion_message: null, ai_feedback: null, raw_text: rawText,
-        duration_ms: Date.now() - startedAt, error: "number_validation_failed",
-        signals, number_violations: check.violations,
+        companion_message: companion, ai_feedback: aiFeedback, raw_text: rawText,
+        duration_ms: Date.now() - startedAt, signals, number_violations: check.violations,
       };
     }
     return {
@@ -3220,9 +3355,9 @@ async function callOpenAICompatibleVision(
     max_completion_tokens: config.enableThinking !== false ? 4096 : 1024,
   };
   body.enable_thinking = config.enableThinking !== false;
-  const timeoutMs = config.enableThinking === true
+  const timeoutMs = config.requestTimeoutMs ?? (config.enableThinking === true
     ? getEnvInteger("VISION_THINKING_TIMEOUT_MS", 20_000, 8_000, 45_000)
-    : getEnvInteger("VISION_PROVIDER_TIMEOUT_MS", 15_000, 5_000, 30_000);
+    : getEnvInteger("VISION_PROVIDER_TIMEOUT_MS", 15_000, 5_000, 30_000));
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let resp: Response;
@@ -4370,7 +4505,9 @@ Deno.serve(async (req) => {
     const sourceApp = normalizeText(form.get("source_app") ?? form.get("app_name"));
     const captureKind = normalizeText(form.get("capture_kind") ?? form.get("capture_type") ?? form.get("image_source") ?? form.get("media_type"));
     const clientCapturedAt = form.get("client_captured_at") ?? form.get("client_upload_at") ?? form.get("shortcut_time") ?? form.get("captured_at");
-    const imageAnalysis = analyzeImage(bytes, mime);
+    const imageAnalysis = looksLikeCameraCaptureKind(captureKind)
+      ? { features: imageFeaturesFromDecoded(null, mime), perceptualHash: null }
+      : analyzeImage(bytes, mime);
     const imageFeatures = imageAnalysis.features;
     const perceptualHash = imageAnalysis.perceptualHash;
 
@@ -5002,8 +5139,9 @@ Deno.serve(async (req) => {
       const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
       if (shouldAutoArchive && built && companionSettings.enabled) {
         // 信号驱动 Voice 层优先:个人画像信号 → 模型翻译;失败/违规 → 规则渲染兜底
+        let _voiceCall: VoiceCallResult | null = null;
         if (voiceSignalsEnabled) {
-          const _voiceCall = await generateVoiceFeedback({
+          _voiceCall = await generateVoiceFeedback({
             ai,
             domainKey: builtinKey,
             builtPayload: built.payload,
@@ -5033,14 +5171,31 @@ Deno.serve(async (req) => {
             companionMessage = _voiceCall.companion_message ?? aiFeedback.emotion_line;
             ai.companion_message = companionMessage;
             aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+          } else if (_voiceCall.companion_message) {
+            // ai_feedback 被逐句抢救丢弃,但 companion_message 存活,保留它
+            companionMessage = _voiceCall.companion_message;
+            ai.companion_message = companionMessage;
+            aiWithTimeContext = { ...ai, time_context: timeContext };
+          } else {
+            // Voice 完全失败,清除视觉模型文案防止幻觉数字泄漏
+            companionMessage = null;
+            ai.companion_message = null;
           }
+        }
+        if (!aiFeedback) {
+          aiFeedback = voiceSignalsEnabled
+            ? buildSignalFallbackAIFeedback(builtinKey, _voiceCall?.signals ?? [], timingSignalFor(builtinKey, timeContext))
+            : null;
         }
         if (!aiFeedback) {
           aiFeedback = buildBuiltinAIFeedback(builtinKey, built, timeContext, voiceSignalsEnabled ? null : companionMessage);
           if (aiFeedback) {
             companionFeedbackUsed = true;
-            companionMessage = aiFeedback.emotion_line;
-            ai.companion_message = companionMessage;
+            // 仅当 companionMessage 未从 Voice 存活时才用规则兜底的 emotion_line
+            if (!companionMessage) {
+              companionMessage = aiFeedback.emotion_line;
+              ai.companion_message = companionMessage;
+            }
             aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
           }
         }
@@ -5224,7 +5379,7 @@ Deno.serve(async (req) => {
       if (duplicateKind === "perceptual_hash" && duplicateRefId) {
         const { data: rawReferenceLog } = await supabase
           .from("ai_recognition_logs")
-          .select("id,target_table,target_id,record_type")
+          .select("id,target_table,target_id,record_type,created_at")
           .eq("id", duplicateRefId)
           .maybeSingle();
         const refLog = rawReferenceLog as RecognitionReferenceRow | null;
@@ -5243,7 +5398,20 @@ Deno.serve(async (req) => {
             ? currentSource === refSource
             : currentSource === refSource || currentSource === "截图识别收入" || refSource === "截图识别收入";
 
-          if (refIncome && isSameAmount(refIncome.amount, normalizedAmount) && sourceMatches) {
+          // 时间维度校验：同金额同来源但时间间隔 > 10 分钟 → 不是同一笔
+          let incomeTimeMatch = true;
+          const refCreated = refLog?.created_at ? new Date(refLog.created_at).getTime() : null;
+          const curOccurred = occurredAt ? new Date(occurredAt).getTime() : null;
+          const curOrderFinished = orderFinishedAt ? new Date(orderFinishedAt).getTime() : null;
+          const nowMs2 = Date.now();
+          if (refCreated) {
+            const curTime = curOccurred || curOrderFinished || nowMs2;
+            if (Math.abs(curTime - refCreated) > 10 * 60 * 1000) {
+              incomeTimeMatch = false;
+            }
+          }
+
+          if (refIncome && isSameAmount(refIncome.amount, normalizedAmount) && sourceMatches && incomeTimeMatch) {
             const aiLogId = await writeTraceAiLog({
               image_hash: hash,
               perceptual_hash: perceptualHash,
@@ -5446,7 +5614,7 @@ Deno.serve(async (req) => {
     if (duplicateKind === "perceptual_hash" && duplicateRefId && normalizedAmount !== null) {
       const { data: rawReferenceLog } = await supabase
         .from("ai_recognition_logs")
-        .select("id,target_table,target_id,record_type,ai_response")
+        .select("id,target_table,target_id,record_type,ai_response,created_at")
         .eq("id", duplicateRefId)
         .maybeSingle();
       const refLog = rawReferenceLog as RecognitionReferenceRow | null;
@@ -5466,7 +5634,31 @@ Deno.serve(async (req) => {
           ? currentMerchant === refMerchant
           : !currentMerchant && !refMerchant;
 
-        if (amountMatch && merchantMatch && refLog.target_id) {
+        // 时间维度校验：即使同金额同商户，如果交易时间间隔 > 10 分钟，视为不同笔订单
+        let timeMatch = true; // 默认无时间信息时不拦截（保守策略：宁可不拦截也不误杀）
+        if (amountMatch && merchantMatch) {
+          const refCreatedAt = refLog.created_at ? new Date(refLog.created_at).getTime() : null;
+          const currentOccurredAt = occurredAt ? new Date(occurredAt).getTime() : null;
+          const currentOrderFinishedAt = orderFinishedAt ? new Date(orderFinishedAt).getTime() : null;
+          const nowMs = Date.now();
+
+          // 优先用 occurred_at / order_finished_at 判断，没有则用 refLog 的 created_at 和当前时间
+          if (currentOccurredAt && refCreatedAt) {
+            // 如果当前记录的交易时间和被匹配记录的创建时间相差 > 10 分钟，不是同一笔
+            if (Math.abs(currentOccurredAt - refCreatedAt) > 10 * 60 * 1000) {
+              timeMatch = false;
+            }
+          } else if (currentOrderFinishedAt && refCreatedAt) {
+            if (Math.abs(currentOrderFinishedAt - refCreatedAt) > 10 * 60 * 1000) {
+              timeMatch = false;
+            }
+          } else if (refCreatedAt && (nowMs - refCreatedAt) > 10 * 60 * 1000) {
+            // 没有交易时间信息，但被匹配记录已经是 10 分钟前的 → 大概率不是同一笔
+            timeMatch = false;
+          }
+        }
+
+        if (amountMatch && merchantMatch && timeMatch && refLog.target_id) {
           const aiLogId = await writeTraceAiLog({
             image_hash: hash, perceptual_hash: perceptualHash, perceptual_distance: perceptualDistance,
             image_url: path, image_type: ai.image_type, record_type: "expense",
@@ -5595,18 +5787,42 @@ Deno.serve(async (req) => {
         ai.companion_message = companionMessage;
         aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
       } else {
+        // Voice 未产出 ai_feedback(完全失败或逐句抢救只存活 companion)
+        // 先回收存活的 companion_message,防止视觉模型幻觉文案残留
+        if (_secondCall.companion_message) {
+          companionMessage = _secondCall.companion_message;
+          ai.companion_message = companionMessage;
+        } else if (voiceSignalsEnabled) {
+          // Voice 完全失败,清除视觉模型文案防止幻觉数字泄漏
+          companionMessage = null;
+          ai.companion_message = null;
+        }
+        aiFeedback = voiceSignalsEnabled
+          ? buildSignalFallbackAIFeedback(
+            "expense",
+            (_secondCall as VoiceCallResult).signals,
+            timingSignalFor("expense", timeContext),
+          )
+          : null;
+      }
+      if (!aiFeedback) {
         aiFeedback = buildExpenseAIFeedback(
           voiceSignalsEnabled ? { ...ai, companion_message: null } : ai,
           normalizedAmount,
           timeContext,
           possibleDuplicate,
         );
-        if (aiFeedback) {
-          companionFeedbackUsed = true;
+      }
+      // aiWithTimeContext 在上方已初始化(非 null),原 `if (!aiWithTimeContext)` 为死代码。
+      // 改为:Voice 未产出 ai_feedback 时,确保规则兜底的 aiFeedback 写入上下文。
+      if (!_secondCall.ai_feedback && aiFeedback) {
+        companionFeedbackUsed = true;
+        // companionMessage 未从 Voice 存活时,用规则兜底的 emotion_line
+        if (!companionMessage) {
           companionMessage = aiFeedback.emotion_line;
           ai.companion_message = companionMessage;
-          aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
         }
+        aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
       }
     }
 

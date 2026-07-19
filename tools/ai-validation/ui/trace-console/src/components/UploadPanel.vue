@@ -275,9 +275,10 @@
             </div>
           </div>
 
-          <!-- 点评面板 - 使用 server 返回的真实 caseKey，确保和 trace.json 路径一致 -->
+          <!-- 点评面板 - 内嵌模式，可折叠 -->
           <ReviewPanel
             v-if="resultCaseKey"
+            embedded
             :open="true"
             :run-id="runId"
             :case-key="resultCaseKey"

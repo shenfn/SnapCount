@@ -85,6 +85,7 @@ export interface CurrentFacts {
   amount?: number | null;
   merchant?: string | null;
   category?: string | null;
+  platform?: string | null;
   isLateNight?: boolean;
   // sleep
   hours?: number | null;
@@ -166,11 +167,16 @@ function expenseSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
     if (curTotal !== null && prevTotal !== null && prevTotal >= 50) {
       const ratio = (curTotal - prevTotal) / prevTotal;
       if (Math.abs(ratio) >= 0.4) {
+        // 衍生数全部预先算好喂给模型;否则模型自己加减,算出的数必被闭环校验拦下
+        const diff = Math.round(Math.abs(curTotal - prevTotal) * 100) / 100;
+        const inclTotal = cur.amount !== null && cur.amount !== undefined
+          ? Math.round((curTotal + cur.amount) * 100) / 100
+          : null;
         const nums: number[] = [];
-        pushNums(nums, curTotal, prevTotal);
+        pushNums(nums, curTotal, prevTotal, diff, inclTotal);
         out.push({
           kind: "week_velocity", priority: 3,
-          fact: `本周截至今天已消费 ${curTotal} 元,上周同期 ${prevTotal} 元(${ratio > 0 ? "明显放开" : "明显收着"})`,
+          fact: `本周已消费 ${curTotal} 元(不含本笔)${inclTotal !== null ? `,加上本笔共 ${inclTotal} 元` : ""};上周同期 ${prevTotal} 元,相差 ${diff} 元(${ratio > 0 ? "明显放开" : "明显收着"})`,
           numbers: nums,
         });
       }
@@ -187,6 +193,25 @@ function expenseSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
         fact: `今天已有 ${lateCount} 笔 21 点后的消费(含本笔)`,
         numbers: [lateCount, 21],
         countNumbers: [lateCount],
+      });
+    }
+  }
+  // 默认信号：所有条件信号未命中时，基于本条记录产出
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    if (cur.amount !== null && cur.amount !== undefined) {
+      parts.push(`本笔支出 ${cur.amount} 元`);
+      nums.push(cur.amount);
+    }
+    if (cur.merchant) parts.push(`商户「${cur.merchant}」`);
+    if (cur.category) parts.push(`分类 ${cur.category}`);
+    if (cur.platform) parts.push(`支付方式 ${cur.platform}`);
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
       });
     }
   }
@@ -248,6 +273,21 @@ function sleepSignals(profile: Record<string, unknown>, cur: CurrentFacts): Doma
       });
     }
   }
+  // 默认信号
+  if (out.length === 0 && cur.hours !== null && cur.hours !== undefined) {
+    const h = Math.round(cur.hours * 100) / 100;
+    const parts: string[] = [`本晚睡眠 ${h} 小时`];
+    const nums: number[] = [h];
+    if (cur.score !== null && cur.score !== undefined) {
+      parts.push(`评分 ${cur.score}`);
+      nums.push(cur.score);
+    }
+    out.push({
+      kind: "record_acknowledge", priority: 99,
+      fact: parts.join("，"),
+      numbers: nums,
+    });
+  }
   return out;
 }
 
@@ -295,6 +335,31 @@ function sportSignals(profile: Record<string, unknown>, cur: CurrentFacts): Doma
         fact: `算上本次,这是本自然周第 ${sessions + 1} 次运动;你近4周平均每周 ${spw} 次`,
         numbers: [sessions + 1, spw, 4],
         countNumbers: [sessions + 1],
+      });
+    }
+  }
+  // 默认信号
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    if (cur.sportType) parts.push(`本次${cur.sportType}运动`);
+    if (cur.durationMin !== null && cur.durationMin !== undefined) {
+      parts.push(`${cur.durationMin} 分钟`);
+      nums.push(cur.durationMin);
+    }
+    if (cur.distanceKm !== null && cur.distanceKm !== undefined) {
+      parts.push(`距离 ${cur.distanceKm} 公里`);
+      nums.push(cur.distanceKm);
+    }
+    if (cur.paceMin !== null && cur.paceMin !== undefined) {
+      parts.push(`配速 ${cur.paceMin} 分钟/公里`);
+      nums.push(cur.paceMin);
+    }
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
       });
     }
   }
@@ -347,6 +412,27 @@ function foodSignals(profile: Record<string, unknown>, cur: CurrentFacts): Domai
       countNumbers: [lateSnack, lateSnack + 1],
     });
   }
+  // 默认信号
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    const label = cur.mealType ? (MEAL_LABELS[cur.mealType] ?? cur.mealType) : null;
+    if (label) parts.push(`本次${label}`);
+    if (cur.kcal !== null && cur.kcal !== undefined) {
+      parts.push(`约 ${cur.kcal} 千卡`);
+      nums.push(cur.kcal);
+    }
+    if (cur.dishNames?.length) {
+      parts.push(`菜品：${cur.dishNames.join("、")}`);
+    }
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
+      });
+    }
+  }
   return out;
 }
 
@@ -398,6 +484,27 @@ function readingSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
       });
     }
   }
+  // 默认信号
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    if (cur.bookName) parts.push(`本次阅读《${cur.bookName}》`);
+    if (cur.readingMinutes !== null && cur.readingMinutes !== undefined) {
+      parts.push(`${cur.readingMinutes} 分钟`);
+      nums.push(cur.readingMinutes);
+    }
+    if (cur.progressPercent !== null && cur.progressPercent !== undefined) {
+      parts.push(`进度 ${cur.progressPercent}%`);
+      nums.push(cur.progressPercent);
+    }
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
+      });
+    }
+  }
   return out;
 }
 
@@ -443,6 +550,24 @@ function walletSignals(profile: Record<string, unknown>, cur: CurrentFacts): Dom
         });
         break; // 只提最近的一笔
       }
+    }
+  }
+  // 默认信号
+  if (out.length === 0) {
+    const parts: string[] = [];
+    const nums: number[] = [];
+    if (cur.accountName) parts.push(`本次记录「${cur.accountName}」`);
+    if (cur.recordKind) parts.push(cur.recordKind);
+    if (cur.walletAmount !== null && cur.walletAmount !== undefined) {
+      parts.push(`金额 ${cur.walletAmount} 元`);
+      nums.push(cur.walletAmount);
+    }
+    if (parts.length > 0) {
+      out.push({
+        kind: "record_acknowledge", priority: 99,
+        fact: parts.join("，"),
+        numbers: nums,
+      });
     }
   }
   return out;
@@ -507,11 +632,14 @@ export function extractDigitNumbers(text: string): number[] {
 export interface NumberValidationResult {
   ok: boolean;
   violations: string[];
+  /** 与入参 generatedTexts 对齐:该下标文本存在违规 */
+  badIndexes: number[];
 }
 
 // allowedSources:信号 fact 文本 + 本条记录字段 JSON。数字宽松匹配(整数/一位小数视为同数)。
 // 计数表达("第X次/连续X天")单独用严格白名单 countNumbers:
 // 只有计数类信号显式声明的数才能进计数表达,防止金额/时长取整后泄漏放行幻觉计数。
+// 逐句校验:只标记违规的那条文本,调用方可保留其余合规字段(不整体丢弃)。
 export function validateVoiceNumbers(
   generatedTexts: Array<string | null | undefined>,
   signals: DomainSignal[],
@@ -522,6 +650,8 @@ export function validateVoiceNumbers(
   const addNum = (n: number) => {
     allowed.add(String(n));
     allowed.add(String(Math.round(n)));
+    allowed.add(String(Math.floor(n)));
+    allowed.add(String(Math.ceil(n)));
     allowed.add(String(Math.round(n * 10) / 10));
   };
   for (const s of signals) {
@@ -532,14 +662,17 @@ export function validateVoiceNumbers(
   for (const n of extractDigitNumbers(recordFactsJson)) addNum(n);
 
   const violations: string[] = [];
+  const badIndexes: number[] = [];
 
-  for (const text of generatedTexts) {
-    if (!text) continue;
+  generatedTexts.forEach((text, idx) => {
+    if (!text) return;
+    let bad = false;
     // 1) 裸数字必须在允许集内
     for (const n of extractDigitNumbers(text)) {
       const keys = [String(n), String(Math.round(n)), String(Math.round(n * 10) / 10)];
       if (!keys.some((k) => allowed.has(k))) {
         violations.push(`数字 ${n} 不在信号/记录允许集内: "${text.slice(0, 40)}"`);
+        bad = true;
       }
     }
     // 2) "第X次/笔/顿/天/晚" 计数表达:数值必须来自计数信号显式声明
@@ -547,10 +680,13 @@ export function validateVoiceNumbers(
       const n = cnToNumber(m[1]);
       if (countAllowed.size === 0) {
         violations.push(`计数表达 "${m[0]}" 无计数信号支撑`);
+        bad = true;
       } else if (n !== null && !countAllowed.has(String(n))) {
         violations.push(`计数 "${m[0]}" 数值不可追溯到计数信号`);
+        bad = true;
       }
     }
-  }
-  return { ok: violations.length === 0, violations };
+    if (bad) badIndexes.push(idx);
+  });
+  return { ok: violations.length === 0, violations, badIndexes };
 }
