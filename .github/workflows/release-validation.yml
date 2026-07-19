@@ -1,6 +1,9 @@
 name: Release Validation
 
 on:
+  push:
+    branches:
+      - "codex/release-*"
   pull_request:
     branches:
       - main
