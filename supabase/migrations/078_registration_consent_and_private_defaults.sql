@@ -10,6 +10,10 @@ comment on column public.user_configs.legal_consent_at is
 comment on column public.user_configs.sensitive_data_consent_at is
   'Time when the user separately accepted sensitive-data processing and the disclosed storage/AI route.';
 
+update public.user_configs
+set ai_logs_enabled = false
+where ai_logs_enabled is distinct from false;
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -46,7 +50,7 @@ begin
 end;
 $$;
 
-revoke execute on function public.handle_new_user() from anon;
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created

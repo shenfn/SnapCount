@@ -1,5 +1,5 @@
--- Production AI contract: only Alibaba Cloud Bailian Qwen is available.
--- Keep auto as a route/model policy, not as a cross-provider fallback.
+-- Normalize production AI settings without rejecting values written by older clients.
+-- The Qwen-only constraints remain deferred until those clients are retired.
 
 update public.user_configs
    set vision_primary = case when vision_primary = 'qwen' then 'qwen' else 'auto' end,
@@ -24,28 +24,6 @@ alter table public.user_configs
   alter column qwen_screenshot_enable_thinking set default false,
   alter column qwen_photo_enable_thinking set default false,
   alter column ai_insight_provider set default 'auto';
-
-alter table public.user_configs
-  drop constraint if exists user_configs_vision_primary_check,
-  drop constraint if exists user_configs_screenshot_vision_primary_check,
-  drop constraint if exists user_configs_photo_vision_primary_check,
-  drop constraint if exists user_configs_qwen_screenshot_model_check,
-  drop constraint if exists user_configs_qwen_photo_model_check,
-  drop constraint if exists user_configs_ai_insight_provider_check;
-
-alter table public.user_configs
-  add constraint user_configs_vision_primary_check
-    check (vision_primary in ('auto', 'qwen')),
-  add constraint user_configs_screenshot_vision_primary_check
-    check (screenshot_vision_primary in ('auto', 'qwen')),
-  add constraint user_configs_photo_vision_primary_check
-    check (photo_vision_primary in ('auto', 'qwen')),
-  add constraint user_configs_qwen_screenshot_model_check
-    check (qwen_screenshot_model in ('qwen3.6-flash', 'qwen3.7-plus')),
-  add constraint user_configs_qwen_photo_model_check
-    check (qwen_photo_model in ('qwen3.6-flash', 'qwen3.7-plus')),
-  add constraint user_configs_ai_insight_provider_check
-    check (ai_insight_provider in ('auto', 'qwen'));
 
 comment on column public.user_configs.vision_primary is
   'Legacy recognition route. auto and qwen both use the production Qwen provider.';
