@@ -87,6 +87,10 @@ archive/
 # 账号配置（含 upload_token，不入 Git）
 tools/ai-validation/server/accounts.json
 
+# Expression Planner 本地真实数据配置（公共空配置另行提交）
+tools/ai-validation/expression-planner/configs/entity-aliases.v0.1.json
+tools/ai-validation/expression-planner/configs/event-overrides.v0.1.json
+
 # 远程图片缓存目录
 test-cases/_remote_cache/
 
