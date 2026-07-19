@@ -1,5 +1,4 @@
--- Deferred production migration.
--- Move this file into supabase/migrations only after all legacy clients are retired.
+-- 延后执行模板：所有旧客户端退役后，用当时的新时间戳创建正式迁移。
 
 alter table public.user_configs
   drop constraint if exists user_configs_vision_primary_check,

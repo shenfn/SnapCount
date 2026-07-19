@@ -1,5 +1,5 @@
+-- 延后执行模板：新客户端和两个 Edge Function 稳定后，用当时的新时间戳创建正式迁移。
 -- Normalize production AI settings without rejecting values written by older clients.
--- The Qwen-only constraints remain deferred until those clients are retired.
 
 update public.user_configs
    set vision_primary = case when vision_primary = 'qwen' then 'qwen' else 'auto' end,

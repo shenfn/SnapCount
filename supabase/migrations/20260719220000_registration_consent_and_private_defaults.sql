@@ -1,3 +1,5 @@
+-- 注册同意字段、隐私默认值和 handle_new_user 权限收紧。
+
 alter table public.user_configs
   alter column ai_logs_enabled set default false,
   add column if not exists legal_consent_at timestamptz,
