@@ -96,6 +96,24 @@
         "mmr_required": false,
         "root_layer": "selection"
       }
+    },
+    {
+      "case_id": "synthetic-food-category-isolation-001",
+      "source_case": "gold-food-category-isolation-001",
+      "input": {
+        "current_food_total": 35,
+        "previous_food_total": 30,
+        "unrelated_fixed_housing_expense": 1300,
+        "pending_food_record_count": 2
+      },
+      "expected": {
+        "comparison_cohort": "expense.category.food",
+        "current_period_total": 35,
+        "excluded_from_food_total": ["unrelated_fixed_housing_expense"],
+        "data_coverage_reflects_pending": true,
+        "required_candidate": "expense_category_week_to_date_vs_previous_week_same_period",
+        "root_layer": "candidate"
+      }
     }
   ]
 }

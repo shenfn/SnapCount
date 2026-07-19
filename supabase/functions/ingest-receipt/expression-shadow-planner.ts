@@ -9,7 +9,9 @@ import merchantAliasConfig from "../../../tools/ai-validation/expression-planner
 // @ts-ignore See note above.
 import { generateFactCandidates } from "../../../tools/ai-validation/expression-planner/lib/fact-candidates.mjs";
 // @ts-ignore See note above.
-import { generateComparisonCandidates } from "../../../tools/ai-validation/expression-planner/lib/comparison-candidates.mjs";
+import { generateCategoryComparisonCandidates, generateComparisonCandidates } from "../../../tools/ai-validation/expression-planner/lib/comparison-candidates.mjs";
+// @ts-ignore See note above.
+import { buildExpenseFactContract } from "../../../tools/ai-validation/expression-planner/lib/expense-fact-contract.mjs";
 // @ts-ignore See note above.
 import { generateIncomeCandidates, generateBuiltinDomainCandidates } from "../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs";
 // @ts-ignore See note above.
@@ -45,14 +47,16 @@ function occurredAtOf(row: ShadowExpenseTransaction): string {
   return row.transaction_date ? `${row.transaction_date}T${row.transaction_time || "12:00:00"}+08:00` : row.created_at || new Date().toISOString();
 }
 function toRecord(row: ShadowExpenseTransaction, aliasMap: Map<string, unknown>) {
+  const category = normalizeExpenseCategory(row.category);
   return { id: row.id, transaction_date: row.transaction_date, occurred_at: occurredAtOf(row), amount: numberOrNull(row.amount),
-    merchant: resolveMerchant(row.merchant_name, aliasMap), category: normalizeExpenseCategory(row.category), platform: row.platform ?? null, payment_method: row.payment_method ?? null };
+    merchant: resolveMerchant(row.merchant_name, aliasMap), category, platform: row.platform ?? null, payment_method: row.payment_method ?? null,
+    status: row.status ?? null, fact_contract: buildExpenseFactContract({ status: row.status, category }) };
 }
 function toFactEvent(record: ReturnType<typeof toRecord>) {
   return { event_id: `transaction:${record.id}`, source_type: "transaction", ledger_status: "confirmed_transaction", trust_level: "confirmed",
-    count_in_facts: record.amount !== null, event_at: record.occurred_at, event_time_source: "transaction_time", event_time_confidence: 0.95,
+    count_in_facts: record.amount !== null && record.fact_contract.expense_total_scope === "include", event_at: record.occurred_at, event_time_source: "transaction_time", event_time_confidence: 0.95,
     known_at: record.occurred_at, amount: record.amount, merchant: record.merchant, category: record.category, platform: record.platform,
-    payment_method: record.payment_method, target_table: "transactions", target_id: record.id };
+    payment_method: record.payment_method, fact_contract: record.fact_contract, target_table: "transactions", target_id: record.id };
 }
 
 function finalizePlan(domainKey: string, currentRecord: Record<string, unknown>, candidates: Record<string, unknown>[], options: ShadowPlannerOptions, coveredSemanticKeys: string[] = []) {
@@ -71,20 +75,22 @@ function finalizePlan(domainKey: string, currentRecord: Record<string, unknown>,
 }
 
 export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
-  const records = input.transactions.filter(row => row.status !== "pending").map(row => toRecord(row, MERCHANT_ALIAS_MAP)).filter(row => row.amount !== null && row.merchant.entity_id);
-  const currentRecord = records.find(row => row.id === input.currentRecordId) ?? null;
+  const allRecords = input.transactions.map(row => toRecord(row, MERCHANT_ALIAS_MAP)).filter(row => row.amount !== null);
+  const currentRecord = allRecords.find(row => row.id === input.currentRecordId) ?? null;
   if (!currentRecord) return { status: "skipped", reason: "current_expense_record_missing", changes_user_output: false };
+  const records = allRecords.filter(row => row.fact_contract.fact_status === "confirmed" && row.merchant.entity_id);
   const localDate = currentRecord.transaction_date; const entityId = currentRecord.merchant.entity_id;
   const currentOccurredAt = new Date(currentRecord.occurred_at).getTime();
   const priorMerchants = records
     .filter(row => row.id !== currentRecord.id && new Date(row.occurred_at).getTime() < currentOccurredAt)
     .map(row => row.merchant);
   const merchantObservation = summarizeMerchantObservation(currentRecord.merchant, priorMerchants);
-  const currentDayEvents = records.filter(row => row.transaction_date === localDate).map(toFactEvent);
+  const currentDayEvents = entityId ? records.filter(row => row.transaction_date === localDate).map(toFactEvent) : [];
   const currentEntityDayCount = currentDayEvents.filter(event => event.merchant.entity_id === entityId).length;
-  let factCandidates = generateFactCandidates(currentDayEvents, { entityId, localDate, timeZone: "Asia/Shanghai" });
+  let factCandidates = entityId ? generateFactCandidates(currentDayEvents, { entityId, localDate, timeZone: "Asia/Shanghai" }) : [];
   if (currentEntityDayCount <= 1) factCandidates = factCandidates.filter((candidate: Record<string, unknown>) => !["merchant_daily_count_total", "merchant_daily_amount_structure", "merchant_daily_activity_span"].includes((candidate.claim as Record<string, unknown>)?.semantic_key as string));
-  const comparisonCandidates = generateComparisonCandidates({ records, currentDayEvents, entityId, localDate });
+  const comparisonCandidates = entityId ? generateComparisonCandidates({ records, currentDayEvents, entityId, localDate }) : [];
+  const categoryComparisonCandidates = generateCategoryComparisonCandidates({ records: allRecords, currentRecord });
   return finalizePlan("expense", {
     id: currentRecord.id,
     entity_id: entityId,
@@ -94,8 +100,9 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
     transaction_date: localDate,
     amount: currentRecord.amount,
     category: currentRecord.category,
+    fact_contract: currentRecord.fact_contract,
     occurred_at: currentRecord.occurred_at,
-  }, [...factCandidates, ...comparisonCandidates], input);
+  }, [...factCandidates, ...comparisonCandidates, ...categoryComparisonCandidates], input);
 }
 
 export function buildGenericExpressionShadowPlan(input: GenericPlannerInput) {
