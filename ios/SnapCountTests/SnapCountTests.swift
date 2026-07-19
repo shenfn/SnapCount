@@ -537,7 +537,7 @@ final class SnapCountTests: XCTestCase {
         let settings = try await repository.fetch(userId: "user-1", accessToken: "test-token")
 
         XCTAssertEqual(settings.companionPersona, "warm")
-        XCTAssertEqual(settings.qwenPhotoModel, "qwen3.7-plus")
+        XCTAssertEqual(settings.qwenPhotoModel, "qwen3.6-flash")
     }
 
     func testInboxRoutesKeepStagingAndPendingRecordsDistinct() {
