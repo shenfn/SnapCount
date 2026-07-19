@@ -2,14 +2,6 @@ name: iOS Build
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - codex/ios-swiftui-native-app
-      - codex/ios-parity-fixes-2
-      - codex/release-integration
-    paths:
-      - "ios/**"
-      - ".github/workflows/ios-build.yml"
   pull_request:
     branches:
       - main
