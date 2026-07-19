@@ -103,6 +103,41 @@
   color: var(--text3);
 }
 
+.auth-consent-list {
+  display: grid;
+  gap: 12px;
+  padding: 4px 2px;
+}
+
+.auth-consent-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  color: var(--text2);
+  font-size: 13px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.auth-consent-row input {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--primary);
+}
+
+.auth-consent-row a {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.auth-consent-row:has(input:focus-visible) {
+  border-radius: 6px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .auth-error {
   font-size: 13px;
   color: var(--danger);

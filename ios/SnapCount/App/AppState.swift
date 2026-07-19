@@ -189,15 +189,34 @@ final class AppState: ObservableObject {
         isSigningIn = false
     }
 
-    func signUp(email: String, password: String) async {
+    func signUp(
+        email: String,
+        password: String,
+        acceptedTerms: Bool,
+        acceptedSensitiveData: Bool
+    ) async {
         guard !isSigningIn else { return }
+        guard acceptedTerms else {
+            authMessage = "请先阅读并同意服务协议与隐私政策"
+            authMessageIsError = true
+            return
+        }
+        guard acceptedSensitiveData else {
+            authMessage = "请确认同意处理主动提交的敏感数据及跨境存储说明"
+            authMessageIsError = true
+            return
+        }
         isSigningIn = true
         authMessage = nil
         authMessageIsError = false
         defer { isSigningIn = false }
 
         do {
-            let result = try await authService.signUp(email: email, password: password)
+            let result = try await authService.signUp(
+                email: email,
+                password: password,
+                consent: .current()
+            )
             switch result {
             case .confirmationRequired(let address):
                 authMessage = "注册成功。请前往 \(address) 完成邮箱确认，然后返回登录。"

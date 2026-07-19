@@ -823,6 +823,36 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testRegistrationRequiresBothConsentSteps() async {
+        let state = AppState()
+        await state.signUp(
+            email: "new-user@example.com",
+            password: "123456",
+            acceptedTerms: false,
+            acceptedSensitiveData: false
+        )
+        XCTAssertEqual(state.authMessage, "请先阅读并同意服务协议与隐私政策")
+        XCTAssertTrue(state.authMessageIsError)
+        XCTAssertFalse(state.isSigningIn)
+
+        await state.signUp(
+            email: "new-user@example.com",
+            password: "123456",
+            acceptedTerms: true,
+            acceptedSensitiveData: false
+        )
+        XCTAssertEqual(state.authMessage, "请确认同意处理主动提交的敏感数据及跨境存储说明")
+        XCTAssertFalse(state.isSigningIn)
+    }
+
+    func testRegistrationConsentUsesCurrentLegalVersions() {
+        let consent = NativeRegistrationConsent.current(at: Date(timeIntervalSince1970: 0))
+        XCTAssertEqual(consent.termsVersion, "2026-07-19")
+        XCTAssertEqual(consent.privacyVersion, "2026-07-19")
+        XCTAssertEqual(consent.legalAcceptedAt, consent.sensitiveDataAcceptedAt)
+    }
+
 }
 
 private struct DashboardRepositoryStub: DashboardRepositoryProtocol {

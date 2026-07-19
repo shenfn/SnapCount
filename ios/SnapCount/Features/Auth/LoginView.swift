@@ -6,6 +6,7 @@ struct LoginView: View {
     @State private var password = ""
     @State private var mode: AuthMode = .signIn
     @State private var acceptedTerms = false
+    @State private var acceptedSensitiveData = false
     @State private var legalDocument: LegalDocumentKind?
     @FocusState private var focusedField: Field?
 
@@ -123,24 +124,33 @@ struct LoginView: View {
         !appState.isSigningIn
             && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && password.count >= 6
-            && (mode == .signIn || acceptedTerms)
+            && (mode == .signIn || (acceptedTerms && acceptedSensitiveData))
     }
 
     private var legalConsent: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Toggle("", isOn: $acceptedTerms)
-                .labelsHidden()
-                .tint(JieziTheme.mint)
-            Text("我已阅读并同意")
-                .font(.footnote)
-                .foregroundStyle(JieziTheme.muted)
-            Button("服务协议") { legalDocument = .terms }
-                .font(.footnote.weight(.semibold))
-            Text("和")
-                .font(.footnote)
-                .foregroundStyle(JieziTheme.muted)
-            Button("隐私政策") { legalDocument = .privacy }
-                .font(.footnote.weight(.semibold))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 8) {
+                Toggle("", isOn: $acceptedTerms)
+                    .labelsHidden()
+                    .tint(JieziTheme.mint)
+                Text("我已阅读并同意")
+                    .font(.footnote)
+                    .foregroundStyle(JieziTheme.muted)
+                Button("服务协议") { legalDocument = .terms }
+                    .font(.footnote.weight(.semibold))
+                Text("和")
+                    .font(.footnote)
+                    .foregroundStyle(JieziTheme.muted)
+                Button("隐私政策") { legalDocument = .privacy }
+                    .font(.footnote.weight(.semibold))
+            }
+            Toggle(isOn: $acceptedSensitiveData) {
+                Text("我同意处理主动提交的财务、睡眠等敏感数据，并知悉数据存储于新加坡、图片会发送至阿里云百炼 Qwen 完成识别。")
+                    .font(.footnote)
+                    .foregroundStyle(JieziTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .tint(JieziTheme.mint)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -166,7 +176,12 @@ struct LoginView: View {
             case .signIn:
                 await appState.signIn(email: cleanEmail, password: password)
             case .signUp:
-                await appState.signUp(email: cleanEmail, password: password)
+                await appState.signUp(
+                    email: cleanEmail,
+                    password: password,
+                    acceptedTerms: acceptedTerms,
+                    acceptedSensitiveData: acceptedSensitiveData
+                )
             }
         }
     }

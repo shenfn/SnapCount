@@ -6,6 +6,7 @@ enum LegalDocumentKind: String, Identifiable {
 
     var id: String { rawValue }
     var title: String { self == .privacy ? "隐私政策" : "服务协议" }
+    var version: String { "2026-07-19" }
 
     var content: String {
         switch self {
@@ -56,6 +57,23 @@ enum LegalDocumentKind: String, Identifiable {
             若你对本协议有疑问，请通过芥子产品支持渠道联系我们。
             """
         }
+    }
+}
+
+struct NativeRegistrationConsent: Equatable {
+    let legalAcceptedAt: String
+    let sensitiveDataAcceptedAt: String
+    let termsVersion: String
+    let privacyVersion: String
+
+    static func current(at date: Date = Date()) -> NativeRegistrationConsent {
+        let acceptedAt = ISO8601DateFormatter().string(from: date)
+        return NativeRegistrationConsent(
+            legalAcceptedAt: acceptedAt,
+            sensitiveDataAcceptedAt: acceptedAt,
+            termsVersion: LegalDocumentKind.terms.version,
+            privacyVersion: LegalDocumentKind.privacy.version
+        )
     }
 }
 

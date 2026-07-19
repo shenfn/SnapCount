@@ -39,8 +39,21 @@ final class SupabaseAuthService {
         return mapped(session)
     }
 
-    func signUp(email: String, password: String) async throws -> SupabaseSignUpResult {
-        let response = try await requireClient().auth.signUp(email: email, password: password)
+    func signUp(
+        email: String,
+        password: String,
+        consent: NativeRegistrationConsent
+    ) async throws -> SupabaseSignUpResult {
+        let response = try await requireClient().auth.signUp(
+            email: email,
+            password: password,
+            data: [
+                "legal_consent_at": .string(consent.legalAcceptedAt),
+                "sensitive_data_consent_at": .string(consent.sensitiveDataAcceptedAt),
+                "terms_version": .string(consent.termsVersion),
+                "privacy_version": .string(consent.privacyVersion)
+            ]
+        )
         if let session = response.session {
             return .signedIn(mapped(session))
         }
