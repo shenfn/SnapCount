@@ -13,13 +13,38 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - "ios/**"
-      - ".github/workflows/ios-build.yml"
 
 jobs:
+  changes:
+    name: Detect iOS changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      ios: ${{ steps.diff.outputs.ios }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect iOS paths
+        id: diff
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- ios .github/workflows/ios-build.yml; then
+            echo "ios=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: Build SwiftUI app
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.ios == 'true')
     runs-on: macos-26
 
     steps:
@@ -124,3 +149,33 @@ jobs:
             -project SnapCount.xcodeproj \
             -scheme SnapCount \
             -showdestinations || true
+
+  gate:
+    name: iOS Build Gate
+    if: always() && github.event_name == 'pull_request'
+    needs:
+      - changes
+      - build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require iOS build when relevant
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          IOS_CHANGED: ${{ needs.changes.outputs.ios }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "iOS path detection failed with result: $CHANGES_RESULT"
+            exit 1
+          fi
+          if [ "$IOS_CHANGED" = "false" ]; then
+            echo "No iOS changes; macOS build is not required."
+            exit 0
+          fi
+          if [ "$BUILD_RESULT" != "success" ]; then
+            echo "iOS changes require a successful build; result: $BUILD_RESULT"
+            exit 1
+          fi
+          echo "iOS build passed."
