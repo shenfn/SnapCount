@@ -20,7 +20,11 @@ struct TodayView: View {
     }
 
     private var financeSummary: NativeHomeFinanceSummary {
-        NativeHomeFinanceSummary.make(accounts: appState.accounts, dashboard: appState.dashboard)
+        NativeHomeFinanceSummary.make(
+            accounts: appState.accounts,
+            dayExpense: selectedDaySummary.expense,
+            dayIncome: selectedDaySummary.income
+        )
     }
 
     private var pendingSummary: NativeHomePendingSummary {
@@ -249,7 +253,7 @@ struct TodayView: View {
 
     private var financeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "财务状态", subtitle: financeSummary.statusLabel) {
+            sectionHeader(title: "财务状态", subtitle: financeScopeLabel) {
                 NavigationLink {
                     AccountsView()
                 } label: {
@@ -278,8 +282,8 @@ struct TodayView: View {
                     metric(title: "当前欠款", value: money(financeSummary.liabilityTotal))
                 }
                 HStack(spacing: 10) {
-                    metric(title: "今日收入", value: money(financeSummary.todayIncome, signed: true))
-                    metric(title: "今日支出", value: money(financeSummary.todayExpense))
+                    metric(title: selectedDateKey == Self.todayKey ? "今日收入" : "所选日收入", value: money(financeSummary.dayIncome, signed: true))
+                    metric(title: selectedDateKey == Self.todayKey ? "今日支出" : "所选日支出", value: money(financeSummary.dayExpense))
                 }
 
                 if let liability = financeSummary.nearestLiability {
@@ -320,6 +324,12 @@ struct TodayView: View {
             sectionHeader(title: selectedDateKey == Self.todayKey ? "今日记录" : "当天记录", subtitle: "按数据域查看所选日期")
             dailyCard(selectedDaySummary)
         }
+    }
+
+    private var financeScopeLabel: String {
+        selectedDateKey == Self.todayKey
+            ? "账户状态实时 · 今日收支"
+            : "账户状态实时 · \(Self.monthDayFormatter.string(from: selectedDate))收支"
     }
 
     private var pendingSection: some View {
@@ -605,6 +615,9 @@ struct TodayView: View {
     }()
     private static let weekdayFormatter: DateFormatter = {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "EEE"; return formatter
+    }()
+    private static let monthDayFormatter: DateFormatter = {
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "M月d日"; return formatter
     }()
     private static var todayKey: String { dateKeyFormatter.string(from: Date()) }
     private static var currentMonthKey: String { NativeMonthKey.current() }

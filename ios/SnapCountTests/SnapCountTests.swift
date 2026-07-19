@@ -705,12 +705,13 @@ final class SnapCountTests: XCTestCase {
         let liability = makeLiabilityAccount(id: "credit", name: "花呗")
         let summary = NativeHomeFinanceSummary.make(
             accounts: [cash, liability],
-            dashboard: DashboardSnapshot(todayExpense: 30, todayIncome: 100)
+            dayExpense: 30,
+            dayIncome: 100
         )
         XCTAssertEqual(summary.availableCash, 800)
         XCTAssertEqual(summary.liabilityTotal, 320)
         XCTAssertEqual(summary.netWorthEstimate, 480)
-        XCTAssertEqual(summary.todayIncome - summary.todayExpense, 70)
+        XCTAssertEqual(summary.dayIncome - summary.dayExpense, 70)
     }
 
     func testAccountTypeNormalizationMatchesPWAAdapter() {

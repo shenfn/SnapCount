@@ -98,8 +98,8 @@ struct NativeHomeFinanceSummary {
     let liabilityTotal: Double
     let netWorthEstimate: Double
     let nearestLiability: NativeAccount?
-    let todayExpense: Double
-    let todayIncome: Double
+    let dayExpense: Double
+    let dayIncome: Double
 
     var statusLabel: String {
         if availableCash == 0, liabilityTotal == 0 { return "缺少钱包快照" }
@@ -108,7 +108,11 @@ struct NativeHomeFinanceSummary {
         return "短期现金安全"
     }
 
-    static func make(accounts: [NativeAccount], dashboard: DashboardSnapshot) -> NativeHomeFinanceSummary {
+    static func make(
+        accounts: [NativeAccount],
+        dayExpense: Double,
+        dayIncome: Double
+    ) -> NativeHomeFinanceSummary {
         let activeAccounts = accounts.filter { !$0.isArchived }
         let availableCash = activeAccounts
             .filter { !$0.type.isLiability }
@@ -124,8 +128,8 @@ struct NativeHomeFinanceSummary {
             liabilityTotal: liabilityTotal,
             netWorthEstimate: availableCash - liabilityTotal,
             nearestLiability: nearestLiability,
-            todayExpense: dashboard.todayExpense,
-            todayIncome: dashboard.todayIncome
+            dayExpense: dayExpense,
+            dayIncome: dayIncome
         )
     }
 }
