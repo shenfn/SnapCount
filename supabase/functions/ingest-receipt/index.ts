@@ -13,6 +13,7 @@ import {
 } from "./signals.ts";
 import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
+import { scheduleExpressionShadowCapture } from "./expression-shadow.ts";
 import type { TimeContext } from "./time.ts";
 
 const MOONSHOT_MODEL    = "moonshot-v1-8k-vision-preview";
@@ -3782,6 +3783,18 @@ Deno.serve(async (req) => {
       domainProfilesPromise = loadDomainProfiles(supabase, userId);
     }
 
+    const respondWithExpressionShadow = (
+      payload: Record<string, unknown>,
+      options: { mode: ShortcutResponseMode; status?: number },
+    ): Response => {
+      scheduleExpressionShadowCapture(supabase, {
+        userId,
+        payload,
+        responseMode: options.mode,
+      });
+      return respondShortcut(payload, options);
+    };
+
     const stagingRetryId = normalizeString(form.get("staging_record_id"));
     let file = form.get("image") as File | null;
     let retryImageBytes: Uint8Array | null = null;
@@ -3917,7 +3930,7 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       });
       const _spendSum = await summarizeTodaySpend(supabase, userId);
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "duplicate", id: txDup.id, record_type: "expense",
         message: "该截图已记账",
         notification: `🔁 该截图已记账过\n${todaySpendLine(_spendSum)}`,
@@ -3938,7 +3951,7 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       });
       const _incSum = await summarizeMonthIncome(supabase, userId);
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "duplicate", id: incDup.id, record_type: "income",
         message: "该收入截图已记录",
         notification: `🔁 该收入截图已记录过\n${monthIncomeLine(_incSum)}`,
@@ -3961,7 +3974,7 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
         prompt_version: promptVersion,
       });
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
         message: "该截图已归档",
         notification: `🔁 该截图已归档过 · ${domainNameFromKey(dataDup.domain_key) ?? dataDup.domain_key}`,
@@ -4318,7 +4331,7 @@ Deno.serve(async (req) => {
             occurredAt,
           });
           fireAndForgetProfileRefresh(supabase, userId, recordType);
-          return respondShortcut(withTraceMeta({
+          return respondWithExpressionShadow(withTraceMeta({
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
             notification: aiFeedback ? feedbackNotification(aiFeedback, _retryNotif) : withCompanion(_retryNotif),
@@ -4354,7 +4367,7 @@ Deno.serve(async (req) => {
         prompt_version: promptVersion,
       });
 
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "staging", staging_status: "retry_failed",
         message: "⚠ 重试仍未确定，请手动选择数据域归档",
         notification: withCompanion("⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档"),
@@ -4428,7 +4441,7 @@ Deno.serve(async (req) => {
       const _stgPrimary = !aiOk
         ? "❌ AI 识别失败，已进入待处理"
         : `⚠️ ${_stgAmtPart}请打开 App 补全`;
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "staging",
         staging_status: stagingStatus,
         id: staging?.id ?? null,
@@ -4565,7 +4578,7 @@ Deno.serve(async (req) => {
         const _bNotif = domain
           ? `⚠️ 已识别为${_bDomainName}\n请打开 App 确认后归档`
           : `⚠️ 未找到对应数据域\n已进入待处理`;
-        return respondShortcut(withTraceMeta({
+        return respondWithExpressionShadow(withTraceMeta({
           status: "staging",
           staging_status: domain ? "pending_review" : "routing_failed",
           id: staging?.id ?? null,
@@ -4664,7 +4677,7 @@ Deno.serve(async (req) => {
 
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
       const _domainDoneNotif = `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`;
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: builtinKey,
@@ -4747,7 +4760,7 @@ Deno.serve(async (req) => {
               if (removeErr) console.error("Cleanup duplicate income image failed:", removeErr);
             }
             const _iSum2 = await summarizeMonthIncome(supabase, userId);
-            return respondShortcut(withTraceMeta({
+            return respondWithExpressionShadow(withTraceMeta({
               status: "duplicate",
               id: refIncome.id,
               record_type: "income",
@@ -4902,7 +4915,7 @@ Deno.serve(async (req) => {
       const _iDoneSum = await summarizeMonthIncome(supabase, userId);
       const _iSourceLabel = sourceName && sourceName !== "截图识别收入" ? ` · ${sourceName}` : "";
       const _incomeNotif = `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`;
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: "income",
@@ -4980,7 +4993,7 @@ Deno.serve(async (req) => {
             if (removeErr) console.error("Cleanup duplicate expense image failed:", removeErr);
           }
           const _eDupSum = await summarizeTodaySpend(supabase, userId);
-          return respondShortcut(withTraceMeta({
+          return respondWithExpressionShadow(withTraceMeta({
             status: "duplicate", id: refLog.target_id, record_type: "expense",
             ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
             notification: withCompanion(`🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`),
@@ -5244,7 +5257,7 @@ Deno.serve(async (req) => {
       _ePrimary = `⚠️ ${_ePrimary.replace(/^[💸⚠️]\s*/, "")} · 疑似 3 分钟内重复`;
     }
     const _expenseNotif = `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`;
-    return respondShortcut(withTraceMeta({
+    return respondWithExpressionShadow(withTraceMeta({
       status: row.status,
       id: row.id,
       ai_ok: aiOk,
