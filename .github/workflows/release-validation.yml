@@ -1,0 +1,59 @@
+name: Release Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: PWA, Edge, migrations, and Shadow
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install PWA dependencies
+        run: npm ci
+
+      - name: Build PWA
+        run: npm run build
+
+      - name: Install trace console dependencies
+        working-directory: tools/ai-validation/ui/trace-console
+        run: npm ci
+
+      - name: Build trace console
+        working-directory: tools/ai-validation/ui/trace-console
+        run: npm run build
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Check Edge Functions
+        run: |
+          deno check --no-lock --node-modules-dir=auto supabase/functions/generate-insights/index.ts
+          deno check --no-lock --node-modules-dir=auto supabase/functions/ingest-receipt/index.ts
+
+      - name: Run Shadow Planner tests
+        run: node --test tools/ai-validation/expression-planner/tests/*.test.mjs
+
+      - name: Validate migration versions
+        run: node scripts/check-migration-versions.mjs
