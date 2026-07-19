@@ -26,7 +26,7 @@
         </label>
         <label class="auth-consent-row">
           <input v-model="acceptedSensitiveData" type="checkbox">
-          <span>我同意处理主动提交的财务、睡眠等敏感数据，并知悉数据存储于新加坡、图片会发送至阿里云百炼 Qwen 完成识别。</span>
+          <span>我同意处理主动提交的财务、睡眠等敏感数据，并知悉主要数据存储于新加坡、图片会传输至阿里云百炼中国内地接口完成 Qwen 识别。</span>
         </label>
       </div>
 

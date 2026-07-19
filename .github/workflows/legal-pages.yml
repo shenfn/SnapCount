@@ -1,0 +1,59 @@
+name: Deploy Legal Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "public/legal.html"
+      - "public/legal.css"
+      - "public/privacy.html"
+      - "public/terms.html"
+      - "public/support.html"
+      - ".github/workflows/legal-pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: legal-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Prepare legal site
+        shell: bash
+        run: |
+          mkdir -p _legal_site
+          cp public/legal.html _legal_site/index.html
+          cp public/legal.html _legal_site/legal.html
+          cp public/legal.css _legal_site/legal.css
+          cp public/privacy.html _legal_site/privacy.html
+          cp public/terms.html _legal_site/terms.html
+          cp public/support.html _legal_site/support.html
+          touch _legal_site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _legal_site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
