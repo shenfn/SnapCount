@@ -5,6 +5,14 @@ on:
   push:
     branches:
       - codex/ios-swiftui-native-app
+      - codex/ios-parity-fixes-2
+      - codex/release-integration
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-build.yml"
+  pull_request:
+    branches:
+      - main
     paths:
       - "ios/**"
       - ".github/workflows/ios-build.yml"
