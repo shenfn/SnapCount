@@ -1,0 +1,162 @@
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    name: Archive and upload
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate app config
+        working-directory: ios
+        env:
+          IOS_SUPABASE_URL: ${{ secrets.IOS_SUPABASE_URL }}
+          IOS_SUPABASE_FUNCTIONS_URL: ${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}
+          IOS_SUPABASE_ANON_KEY: ${{ secrets.IOS_SUPABASE_ANON_KEY }}
+          IOS_SHORTCUT_TEMPLATE_URL: ${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}
+        run: |
+          test -n "$IOS_SUPABASE_URL"
+          test -n "$IOS_SUPABASE_ANON_KEY"
+          IOS_SUPABASE_FUNCTIONS_URL="${IOS_SUPABASE_FUNCTIONS_URL:-$IOS_SUPABASE_URL}"
+          cat > SnapCount/Services/GeneratedAppConfig.swift <<SWIFT
+          import Foundation
+
+          enum GeneratedAppConfig {
+              static let supabaseURL = "$IOS_SUPABASE_URL"
+              static let supabaseFunctionsURL = "$IOS_SUPABASE_FUNCTIONS_URL"
+              static let supabaseAnonKey = "$IOS_SUPABASE_ANON_KEY"
+              static let shortcutTemplateURL = "$IOS_SHORTCUT_TEMPLATE_URL"
+          }
+          SWIFT
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate --spec project.yml
+
+      - name: Set TestFlight build number
+        working-directory: ios
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_id }}" SnapCount/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" SnapCount/Info.plist
+
+      - name: Install signing certificate and profile
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/build_certificate.p12"
+          PP_PATH="$RUNNER_TEMP/build_pp.mobileprovision"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERTIFICATE_PATH"
+          echo -n "$PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          security cms -D -i "$PP_PATH" > "$PROFILE_PLIST"
+          test -s "$PROFILE_PLIST"
+          UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$PROFILE_PLIST")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PROFILE_PLIST")
+          cp "$PP_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          echo "PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+
+      - name: Prepare App Store Connect API key
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          mkdir -p "$HOME/private_keys"
+          echo -n "$APPLE_API_KEY_BASE64" | base64 --decode -o "$HOME/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
+
+      - name: Archive
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -project SnapCount.xcodeproj \
+            -scheme SnapCount \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/SnapCount.xcarchive" \
+            DEVELOPMENT_TEAM="G6592SL596" \
+            PRODUCT_BUNDLE_IDENTIFIER="com.jiezi.app" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            INFOPLIST_KEY_CFBundleVersion="${{ github.run_number }}" \
+            SNAPCOUNT_SUPABASE_URL="${{ secrets.IOS_SUPABASE_URL }}" \
+            SNAPCOUNT_SUPABASE_FUNCTIONS_URL="${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}" \
+            SNAPCOUNT_SUPABASE_ANON_KEY="${{ secrets.IOS_SUPABASE_ANON_KEY }}" \
+            SNAPCOUNT_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}" \
+            archive
+
+      - name: Create export options
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>G6592SL596</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.jiezi.app</key>
+              <string>$PROFILE_NAME</string>
+            </dict>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Export IPA
+        run: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/SnapCount.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Upload to TestFlight
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          IPA_PATH=$(find "$RUNNER_TEMP/export" -name "*.ipa" -print -quit)
+          test -n "$IPA_PATH"
+          APP_PLIST="$RUNNER_TEMP/AppInfo.plist"
+          unzip -p "$IPA_PATH" "Payload/SnapCount.app/Info.plist" > "$APP_PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PLIST"
+          xcrun altool \
+            --upload-app \
+            --type ios \
+            --file "$IPA_PATH" \
+            --apiKey "$APPLE_API_KEY_ID" \
+            --apiIssuer "$APPLE_API_ISSUER_ID"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnapCount-ipa
+          path: ${{ runner.temp }}/export/*.ipa

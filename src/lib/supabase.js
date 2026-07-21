@@ -4,10 +4,14 @@ import { toFriendlyNetworkError, NetworkErrorCode } from './networkError.js'
 // 生产环境应设为 Cloudflare Worker 地址 https://api.snapflow.me，
 // 避免前端直连 Supabase 新加坡节点（国内移动网络不稳定）。
 // 本地开发可设为 Supabase 直连地址。
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const CONFIGURED_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+const USE_DEV_PROXY = import.meta.env.DEV
+  && import.meta.env.VITE_SUPABASE_DEV_PROXY !== 'false'
+  && typeof window !== 'undefined'
+const SUPABASE_URL = USE_DEV_PROXY ? window.location.origin : CONFIGURED_SUPABASE_URL
 
-if (!SUPABASE_URL) {
+if (!CONFIGURED_SUPABASE_URL) {
   throw new Error('Missing VITE_SUPABASE_URL in environment (set to https://api.snapflow.me for production)')
 }
 if (!SUPABASE_ANON_KEY) {

@@ -1,0 +1,173 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  changes:
+    name: Detect iOS changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      ios: ${{ steps.diff.outputs.ios }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect iOS paths
+        id: diff
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- ios .github/workflows/ios-build.yml; then
+            echo "ios=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build SwiftUI app
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.ios == 'true')
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate app config
+        working-directory: ios
+        env:
+          IOS_SUPABASE_URL: ${{ secrets.IOS_SUPABASE_URL }}
+          IOS_SUPABASE_FUNCTIONS_URL: ${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}
+          IOS_SUPABASE_ANON_KEY: ${{ secrets.IOS_SUPABASE_ANON_KEY }}
+          IOS_SHORTCUT_TEMPLATE_URL: ${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}
+        run: |
+          test -n "$IOS_SUPABASE_URL"
+          test -n "$IOS_SUPABASE_ANON_KEY"
+          IOS_SUPABASE_FUNCTIONS_URL="${IOS_SUPABASE_FUNCTIONS_URL:-$IOS_SUPABASE_URL}"
+          cat > SnapCount/Services/GeneratedAppConfig.swift <<SWIFT
+          import Foundation
+
+          enum GeneratedAppConfig {
+              static let supabaseURL = "$IOS_SUPABASE_URL"
+              static let supabaseFunctionsURL = "$IOS_SUPABASE_FUNCTIONS_URL"
+              static let supabaseAnonKey = "$IOS_SUPABASE_ANON_KEY"
+              static let shortcutTemplateURL = "$IOS_SHORTCUT_TEMPLATE_URL"
+          }
+          SWIFT
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate --spec project.yml
+
+      - name: Build for simulator
+        working-directory: ios
+        shell: bash
+        run: |
+          set -o pipefail
+          LOG_PATH="$RUNNER_TEMP/xcodebuild.log"
+          xcodebuild \
+            -project SnapCount.xcodeproj \
+            -scheme SnapCount \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            SNAPCOUNT_SUPABASE_URL="${{ secrets.IOS_SUPABASE_URL }}" \
+            SNAPCOUNT_SUPABASE_FUNCTIONS_URL="${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}" \
+            SNAPCOUNT_SUPABASE_ANON_KEY="${{ secrets.IOS_SUPABASE_ANON_KEY }}" \
+            SNAPCOUNT_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}" \
+            build 2>&1 | tee "$LOG_PATH"
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "---- xcodebuild tail ----"
+            tail -n 250 "$LOG_PATH"
+            echo "---- xcodebuild tail annotations ----"
+            tail -n 80 "$LOG_PATH" | while IFS= read -r line; do
+              line="${line//'%'/'%25'}"
+              line="${line//$'\n'/'%0A'}"
+              line="${line//$'\r'/'%0D'}"
+              echo "::error title=xcodebuild tail::$line"
+            done
+            exit "$STATUS"
+          fi
+
+      - name: Run unit tests
+        working-directory: ios
+        shell: bash
+        run: |
+          set -o pipefail
+          SIMULATOR_UDID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+          test -n "$SIMULATOR_UDID"
+          LOG_PATH="$RUNNER_TEMP/xcodebuild-tests.log"
+          xcodebuild \
+            -project SnapCount.xcodeproj \
+            -scheme SnapCount \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            CODE_SIGNING_ALLOWED=NO \
+            SNAPCOUNT_SUPABASE_URL="${{ secrets.IOS_SUPABASE_URL }}" \
+            SNAPCOUNT_SUPABASE_FUNCTIONS_URL="${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}" \
+            SNAPCOUNT_SUPABASE_ANON_KEY="${{ secrets.IOS_SUPABASE_ANON_KEY }}" \
+            SNAPCOUNT_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}" \
+            -only-testing:SnapCountTests \
+            test 2>&1 | tee "$LOG_PATH"
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "---- xcodebuild test tail ----"
+            tail -n 250 "$LOG_PATH"
+            exit "$STATUS"
+          fi
+
+      - name: Show available destinations on failure help
+        if: always()
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -project SnapCount.xcodeproj \
+            -scheme SnapCount \
+            -showdestinations || true
+
+  gate:
+    name: iOS Build Gate
+    if: always() && github.event_name == 'pull_request'
+    needs:
+      - changes
+      - build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require iOS build when relevant
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          IOS_CHANGED: ${{ needs.changes.outputs.ios }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "iOS path detection failed with result: $CHANGES_RESULT"
+            exit 1
+          fi
+          if [ "$IOS_CHANGED" = "false" ]; then
+            echo "No iOS changes; macOS build is not required."
+            exit 0
+          fi
+          if [ "$BUILD_RESULT" != "success" ]; then
+            echo "iOS changes require a successful build; result: $BUILD_RESULT"
+            exit 1
+          fi
+          echo "iOS build passed."

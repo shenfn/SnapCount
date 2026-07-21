@@ -37,8 +37,8 @@ export const incomeCatMap = {
 
 export const catCodeMap = {
   food: '餐饮', shopping: '购物', transport: '出行',
-  entertainment: '娱乐', life: '生活', health: '生活',
-  education: '其他', other: '其他',
+  entertainment: '娱乐', life: '生活', health: '健康',
+  education: '教育', other: '其他',
 }
 
 export const payAliasMap = {

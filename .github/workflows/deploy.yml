@@ -7,6 +7,16 @@ on:
       - main
     paths:
       - "supabase/functions/**"
+      - "src/domains/**"
+      - "tools/ai-validation/expression-planner/**"
+      - ".github/workflows/deploy.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-production-functions
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -19,7 +29,15 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.109.1
+
+      - name: Deploy generate-insights function
+        run: |
+          supabase functions deploy generate-insights \
+            --no-verify-jwt \
+            --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
       - name: Deploy ingest-receipt function
         run: |
@@ -28,3 +46,25 @@ jobs:
             --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Verify deployed functions
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          supabase functions list --project-ref "$SUPABASE_PROJECT_ID"
+
+          for function_name in generate-insights ingest-receipt; do
+            response_file="$RUNNER_TEMP/${function_name}-health.json"
+            status_code=$(curl --silent --show-error \
+              --output "$response_file" \
+              --write-out "%{http_code}" \
+              "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/${function_name}")
+            if [ "$status_code" != "405" ]; then
+              cat "$response_file"
+              echo "Expected ${function_name} to return 405 for GET, received ${status_code}."
+              exit 1
+            fi
+          done

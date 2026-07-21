@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="芥子 App 隐私政策">
+  <title>芥子 App 隐私政策</title>
+  <link rel="stylesheet" href="./legal.css">
+</head>
+<body>
+<main>
+  <nav><a href="./legal.html">法律与支持</a><a href="./terms.html">服务协议</a><a href="./support.html">用户支持</a></nav>
+  <h1>芥子 App 隐私政策</h1>
+  <p class="meta">版本与生效日期：2026-07-19</p>
+  <p class="summary">芥子是由尹良超（个人开发者，以下简称“运营者”）提供的个人生活记录与数据整理工具。本政策说明芥子如何处理你的信息。</p>
+
+  <h2>1. 适用范围</h2>
+  <p>本政策适用于芥子 iOS App、PWA 及其共享后端。芥子不提供投资、信贷、支付、医疗诊断或治疗服务，AI 输出仅用于辅助整理个人记录。</p>
+
+  <h2>2. 我们处理的信息</h2>
+  <ul>
+    <li><strong>账户信息：</strong>邮箱地址、用户 ID、登录会话和快捷指令上传凭据。密码由 Supabase Auth 处理，运营者不保存明文密码。</li>
+    <li><strong>用户主动提交的内容：</strong>相机照片、相册图片、截图、OCR 文本、备注，以及消费、收入、账户、钱包、运动、睡眠、饮食和阅读记录。</li>
+    <li><strong>敏感或高度私密信息：</strong>你主动记录的金额、账户余额、负债、还款、睡眠和其他生活状态。芥子不会在你未主动提交时读取这些内容。</li>
+    <li><strong>设置与反馈：</strong>原图留存策略、AI 设置、陪伴偏好、表达反馈和你主动提交的问题说明。</li>
+    <li><strong>必要的运行信息：</strong>请求时间、处理耗时、错误信息、记录标识、图片精确哈希、不可逆的图片感知指纹和模型调用状态。两类图片指纹仅用于同一账户内识别完全相同或疑似相似的图片，不能用于还原原图。AI 原始输出与额外调试日志默认关闭，仅在你主动开启相应设置时用于排查和改进。</li>
+  </ul>
+
+  <h2>3. 使用目的</h2>
+  <p>这些信息用于身份验证、图片识别、记录归档、统计展示、账户与还款管理、AI 洞察、数据导出、故障排查、安全防护、删除请求和用户支持。我们不会出售你的个人信息，也不会将其用于与芥子功能无关的广告画像。</p>
+
+  <h2>4. 服务商与数据位置</h2>
+  <ul>
+    <li><strong>Supabase：</strong>用于身份验证、PostgreSQL 数据库、Edge Functions 和 Storage。当前项目区域为新加坡（ap-southeast-1），结构化记录及按你设置保留的原图存储于该区域。</li>
+    <li><strong>阿里云百炼 Qwen：</strong>用于图片识别、文案生成和联动分析。芥子当前接入阿里云百炼中国内地 OpenAI 兼容接口，仅使用 Qwen 3.6 Flash 和 Qwen 3.7 Plus。处理时会发送你主动选择的图片、必要提示词和完成当前功能所需的上下文。</li>
+    <li><strong>GitHub Pages：</strong>仅用于托管本政策、服务协议和支持页面，不承载芥子用户记录。</li>
+  </ul>
+  <p>第三方服务商会依据其服务条款和隐私规则处理数据。我们不会声称第三方“绝不留存”或“绝不用于改进服务”；其具体保留与使用规则以运营者购买的 API 服务条款和对应服务商政策为准。</p>
+
+  <h2>5. 跨境传输</h2>
+  <p>芥子的主要数据存储在新加坡。为完成 Qwen 推理，相关图片和必要上下文会从新加坡或你的设备传输至阿里云百炼当前的中国内地接口。因此，使用 AI 识别功能会发生跨区域数据处理。注册时，芥子会就敏感数据处理和该数据路径单独取得你的确认。</p>
+
+  <h2>6. 保存期限与原图留存</h2>
+  <ul>
+    <li>结构化记录、与记录关联的图片哈希或感知指纹以及账户配置，通常保存至你主动删除相应记录或删除账户。</li>
+    <li>原图可选择“不保留”“保留 7 天”“保留 30 天”或“永久保留”。选择不保留时，识别完成后会提交删除；选择定期保留时，到期后进入自动清理队列。网络或存储服务失败时任务会重试，设置页会显示可用的清理结果。</li>
+    <li>AI 日志默认关闭。关闭设置会停止新增可选 AI 日志，但不会自动删除此前已生成的日志；已有日志可随相关数据或账户删除。</li>
+    <li>安全日志和服务商备份可能在必要且受限的周期内保留，随后按服务商的备份轮换机制覆盖；这些副本不用于日常产品功能。</li>
+  </ul>
+
+  <h2>7. 你的权利</h2>
+  <p>你可以在应用内查看、更正、导出和删除记录，调整图片留存与 AI 日志设置，并从“设置”发起删除账户。账户删除会先清理云端原图和业务数据；如果存储清理未完成，应用会提示失败或重试，而不会把未完成状态冒充为已全部删除。你也可以通过联系邮箱提出访问、更正、导出、撤回同意或删除请求。</p>
+
+  <h2>8. 安全措施</h2>
+  <p>芥子采用 HTTPS 传输、Supabase 行级权限隔离、短时效签名图片地址、服务端密钥隔离、清理队列重试和账户级数据删除等措施。没有任何系统能保证绝对安全；发生可能影响你权益的安全事件时，运营者会依适用法律采取补救并提供必要通知。</p>
+
+  <h2>9. 未成年人</h2>
+  <p>芥子不专门面向未满 18 周岁的未成年人。未成年人应在监护人阅读并同意本政策后使用。若运营者发现未经适当授权收集了未成年人信息，将在核实后删除。</p>
+
+  <h2>10. 政策更新</h2>
+  <p>数据类型、服务商、处理地区或重要功能发生实质变化时，运营者会更新版本日期，并通过应用内提示、注册确认或本页面通知。需要重新取得同意时，会在继续相关处理前再次确认。</p>
+
+  <h2>11. 联系方式</h2>
+  <div class="contact">
+    运营者：尹良超（个人开发者）<br>
+    邮箱：<a href="mailto:yinliangchao2222@163.com">yinliangchao2222@163.com</a>
+  </div>
+  <p>运营者会在合理期限内核实并处理隐私请求；适用法律另有规定的，从其规定。</p>
+
+  <hr class="language-divider">
+  <h1 lang="en">Jiezi App Privacy Policy</h1>
+  <p class="meta" lang="en">Version and effective date: 2026-07-19</p>
+  <div lang="en">
+    <p>Jiezi is a personal life-record and data-organization tool operated by Yin Liangchao, an individual developer.</p>
+    <h2>Information and purposes</h2>
+    <p>We process account email and identifiers, content you submit (including images, OCR text, financial, account, wallet, exercise, sleep, diet and reading records), settings, feedback, and necessary request/error metadata. We use this information to authenticate users, recognize images, organize records, provide statistics and AI insights, export data, troubleshoot issues, secure the service, and process deletion requests. We do not sell personal information.</p>
+    <h2>Service providers and international processing</h2>
+    <p>Supabase provides authentication, database, Edge Functions and Storage in Singapore (ap-southeast-1). Images and necessary context selected for AI features are sent to Alibaba Cloud Bailian Qwen through the currently configured mainland China endpoint. Only Qwen 3.6 Flash and Qwen 3.7 Plus are used. Provider retention and processing are governed by the applicable API agreement and provider policy.</p>
+    <h2>Retention and controls</h2>
+    <p>Structured records remain until you delete them or delete your account. Source images can be set to no retention, 7 days, 30 days, or permanent retention. Failed storage deletions are retried and are not represented as completed. AI logs are off by default. You may access, correct, export, or delete records and request account deletion in Settings.</p>
+    <h2>Children, security and contact</h2>
+    <p>Jiezi is not directed to users under 18. We use HTTPS, row-level access controls, short-lived signed image URLs, secret isolation, and deletion retries, but no system is absolutely secure. For privacy requests, contact Yin Liangchao at <a href="mailto:yinliangchao2222@163.com">yinliangchao2222@163.com</a>. Mandatory rights under applicable local law remain unaffected.</p>
+  </div>
+</main>
+</body>
+</html>

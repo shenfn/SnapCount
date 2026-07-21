@@ -5,6 +5,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
 import { PROMPT, buildPrompt, buildFeedbackPrompt, buildVoicePrompt } from "./prompts.ts";
+import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   loadDomainProfiles,
   selectSignals,
@@ -13,33 +14,27 @@ import {
 } from "./signals.ts";
 import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
+import { scheduleExpressionShadowCapture } from "./expression-shadow.ts";
 import type { TimeContext } from "./time.ts";
-
-const MOONSHOT_MODEL    = "moonshot-v1-8k-vision-preview";
-const MOONSHOT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
-// MiMo 默认值（可被环境变量 MIMO_ENDPOINT / MIMO_MODEL 覆盖）
-// 申请到 MiMo Vision 额度后，至少需要在 Supabase secrets 中设置 MIMO_API_KEY 才会启用 fallback
-// MiMo 默认值对应 xiaomimimo.com 套餐（OpenAI 兼容协议）
-// mimo-v2-omni 是多模态版；图像识别仅 mimo-v2.5 / mimo-v2-omni 支持
-const MIMO_DEFAULT_ENDPOINT = "https://api.xiaomimimo.com/v1/chat/completions";
-const MIMO_DEFAULT_MODEL    = "mimo-v2-omni";
+import {
+  findLikelyFinancialDuplicate,
+  type FinancialPerceptualCandidate,
+  type RankedPerceptualCandidate,
+} from "./duplicate-review.ts";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
-// 截图与拍照默认走 3.6 Flash；识别质量通过提示词和中转站补全保证，不以长时间思考阻塞上传。
+// 默认使用 3.6 Flash 控制上传耗时，用户可显式切换到 3.7 Plus。
 const QWEN_DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 const QWEN_DEFAULT_MODEL    = "qwen3.6-flash";
 const QWEN_PHOTO_DEFAULT_MODEL = "qwen3.6-flash";
-
-// 自建 OpenAI 兼容中转站（支持视觉模型时可直接复用）
-const RELAY_DEFAULT_ENDPOINT = "http://47.76.157.150:8317/v1/chat/completions";
-const RELAY_DEFAULT_MODEL    = "gpt-5.4";
+const QWEN_ALLOWED_MODELS = new Set(["qwen3.6-flash", "qwen3.7-plus"]);
 const BUCKET_NAME       = "receipt-images";
 
-// Vision Provider 抽象：用于多 Provider 优雅降级（Moonshot 主 → MiMo 备）
-type ProviderName = "moonshot" | "mimo" | "qwen" | "relay";
+type ProviderName = "qwen";
 
-function isProviderName(value: string): value is ProviderName {
-  return value === "moonshot" || value === "mimo" || value === "qwen" || value === "relay";
+function normalizeQwenModel(value: string | null | undefined, fallback: string): string {
+  const normalized = value?.trim();
+  return normalized && QWEN_ALLOWED_MODELS.has(normalized) ? normalized : fallback;
 }
 
 interface ProviderConfig {
@@ -100,7 +95,7 @@ function getEnv(key: string): string {
   return v;
 }
 
-// 可选 secret：缺失时返回 null 而不抛错（用于 MiMo 这类 fallback provider）
+// 可选 secret：缺失时返回 null，由调用方使用 Qwen 默认配置。
 function getEnvOptional(key: string): string | null {
   const v = Deno.env.get(key);
   return v && v.length > 0 ? v : null;
@@ -170,6 +165,123 @@ interface PrivacyConfig {
   promptOptimizationEnabled: boolean;
   keepSourceImages: boolean;
   imageRetentionDays: number;
+}
+
+interface DomainLookupRow {
+  id: string;
+  key: string;
+  version: string | null;
+}
+
+interface DomainRouteRow {
+  key: string;
+  name: string;
+  routing_json: Record<string, unknown> | null;
+}
+
+interface RetentionConfigRow {
+  is_active: boolean | null;
+  keep_source_images: boolean | null;
+  image_retention_days: number | null;
+  updated_at: string | null;
+}
+
+interface UploadTokenConfigRow {
+  user_id: string;
+}
+
+interface UserPreferenceRow {
+  is_active: boolean | null;
+  vision_primary: string | null;
+  screenshot_vision_primary: string | null;
+  photo_vision_primary: string | null;
+  qwen_screenshot_model: string | null;
+  qwen_photo_model: string | null;
+  qwen_screenshot_enable_thinking: boolean | null;
+  qwen_photo_enable_thinking: boolean | null;
+  companion_enabled: boolean | null;
+  companion_memory_enabled: boolean | null;
+  companion_persona: string | null;
+  companion_memory_strength: string | null;
+  companion_expression_style: string | null;
+  companion_custom_note: string | null;
+  ai_logs_enabled: boolean | null;
+  prompt_optimization_enabled: boolean | null;
+  keep_source_images: boolean | null;
+  image_retention_days: number | null;
+}
+
+interface StagingRetryRow {
+  id: string;
+  image_path: string | null;
+  image_hash: string | null;
+  retry_count: number | null;
+}
+
+interface IdRow {
+  id: string;
+}
+
+interface DataDuplicateRow extends IdRow {
+  domain_key: string | null;
+}
+
+interface StagingDuplicateRow extends IdRow {
+  record_type: string | null;
+  status: string | null;
+}
+
+interface TransactionPerceptualRow extends IdRow {
+  perceptual_hash: string | null;
+  amount: string | number | null;
+  merchant_name: string | null;
+  platform: string | null;
+  payment_method: string | null;
+  transaction_date: string | null;
+  transaction_time: string | null;
+  created_at: string | null;
+}
+
+interface IncomePerceptualRow extends IdRow {
+  perceptual_hash: string | null;
+  amount: string | number | null;
+  source_name: string | null;
+  income_date: string | null;
+  created_at: string | null;
+}
+
+interface StagingPerceptualRow extends IdRow {
+  perceptual_hash: string | null;
+  record_type: string | null;
+  occurred_at: string | null;
+  order_finished_at: string | null;
+  created_at: string | null;
+  extracted_json: unknown;
+}
+
+interface PerceptualLogRow extends IdRow {
+  perceptual_hash: string | null;
+  target_table: string | null;
+  target_id: string | null;
+  record_type: string | null;
+  occurred_at: string | null;
+  order_finished_at: string | null;
+  created_at: string | null;
+  ai_response: unknown;
+}
+
+interface FinancialPerceptualLookupResult {
+  candidates: FinancialPerceptualCandidate[];
+  financeColumnsAvailable: boolean;
+}
+
+interface TransactionCandidateRow extends IdRow {
+  transaction_time: string | null;
+}
+
+interface InsertedRecordRow extends IdRow {
+  status?: string;
+  [key: string]: unknown;
 }
 
 const DEFAULT_PRIVACY_CONFIG: PrivacyConfig = {
@@ -252,6 +364,7 @@ function withTraceMeta(payload: Record<string, unknown>, trace: TraceResponseMet
 // 最终落盘到 ai_recognition_logs.raw_response.timings，便于在 Dashboard 排查慢请求
 interface Timings {
   mark(label: string): void;
+  record(label: string, durationMs: number): void;
   snapshot(): Record<string, number>;
   total(): number;
 }
@@ -267,6 +380,9 @@ function makeTimings(): Timings {
       data[label] = (data[label] ?? 0) + (now - last);
       last = now;
     },
+    record(label: string, durationMs: number) {
+      data[label] = (data[label] ?? 0) + Math.max(0, Math.round(durationMs));
+    },
     snapshot() {
       return { ...data, total: Date.now() - startedAt };
     },
@@ -281,21 +397,11 @@ async function sha256(buf: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function hammingDistanceHex(a: string | null, b: string | null): number | null {
-  if (!a || !b || a.length !== b.length) return null;
-  let distance = 0;
-  for (let i = 0; i < a.length; i++) {
-    const xor = parseInt(a[i], 16) ^ parseInt(b[i], 16);
-    distance += xor.toString(2).replace(/0/g, "").length;
-  }
-  return distance;
-}
-
 function decodeImage(bytes: Uint8Array, mime: string): { data: Uint8Array; width: number; height: number } | null {
   try {
     if (mime.includes("png")) {
       const img = decodePng(bytes);
-      return { data: img.data, width: img.width, height: img.height };
+      return { data: Uint8Array.from(img.data), width: img.width, height: img.height };
     }
     const img = jpeg.decode(bytes, { useTArray: true });
     return { data: img.data, width: img.width, height: img.height };
@@ -1355,7 +1461,7 @@ async function getDomainByKey(
   userId?: string | null,
 ): Promise<{ id: string; key: string; version?: string | null } | null> {
   // 1. 优先查系统共享域（is_system=true AND user_id IS NULL）
-  const { data: systemDomain, error: sysErr } = await supabase
+  const { data: rawSystemDomain, error: sysErr } = await supabase
     .from("data_domains")
     .select("id,key,version")
     .eq("key", key)
@@ -1364,11 +1470,12 @@ async function getDomainByKey(
     .is("user_id", null)
     .maybeSingle();
   if (sysErr) console.error("Domain lookup (system) failed:", sysErr);
+  const systemDomain = rawSystemDomain as DomainLookupRow | null;
   if (systemDomain) return systemDomain;
 
   // 2. 系统域没有，查当前用户的私有域
   if (userId) {
-    const { data: userDomain, error: userErr } = await supabase
+    const { data: rawUserDomain, error: userErr } = await supabase
       .from("data_domains")
       .select("id,key,version")
       .eq("key", key)
@@ -1376,6 +1483,7 @@ async function getDomainByKey(
       .eq("user_id", userId)
       .maybeSingle();
     if (userErr) console.error("Domain lookup (user) failed:", userErr);
+    const userDomain = rawUserDomain as DomainLookupRow | null;
     if (userDomain) return userDomain;
   }
 
@@ -1401,7 +1509,8 @@ async function runLowCostDispatcher(
     .eq("is_system", true)
     .is("user_id", null);
 
-  let userDomains: typeof systemDomains = [];
+  const typedSystemDomains = (systemDomains ?? []) as DomainRouteRow[];
+  let userDomains: DomainRouteRow[] = [];
   if (params.userId) {
     const { data: uDomains, error: uErr } = await supabase
       .from("data_domains")
@@ -1409,11 +1518,11 @@ async function runLowCostDispatcher(
       .eq("status", "active")
       .eq("user_id", params.userId);
     if (uErr) console.error("Dispatcher user domain load failed:", uErr);
-    userDomains = uDomains || [];
+    userDomains = (uDomains ?? []) as DomainRouteRow[];
   }
 
   if (sysErr) console.error("Dispatcher system domain load failed:", sysErr);
-  const domains = [...(systemDomains || []), ...userDomains];
+  const domains = [...typedSystemDomains, ...userDomains];
 
   const candidates: DispatcherCandidate[] = [];
   const seenKeys = new Set<string>();
@@ -1536,36 +1645,20 @@ function selectVisionProvidersForImage(
 ): ProviderConfig[] {
   if (!shouldUsePhotoQualityVision(params)) return providers;
   if (looksLikeCameraCaptureKind(params.captureKind)) {
-    const cameraProviders = providers
-      .filter((provider) => provider.name === "qwen" || provider.name === "moonshot")
-      .map((provider) => provider.name === "qwen"
-        ? { ...provider, enableThinking: false }
-        : provider);
-    const requestedPrimary = params.photoPrimary && params.photoPrimary !== "auto"
-      ? params.photoPrimary
-      : "qwen";
-    const preferred = cameraProviders.some((provider) => provider.name === requestedPrimary)
-      ? requestedPrimary
-      : cameraProviders.some((provider) => provider.name === "qwen")
-      ? "qwen"
-      : cameraProviders[0]?.name;
-    const preferredIdx = cameraProviders.findIndex((provider) => provider.name === preferred);
-    if (preferredIdx > 0) {
-      const [picked] = cameraProviders.splice(preferredIdx, 1);
-      cameraProviders.unshift(picked);
-    }
-    return cameraProviders
-      .slice(0, 2)
-      .map((provider, index) => ({
-        ...provider,
-        requestTimeoutMs: index === 0 ? 15_000 : 8_000,
-      }));
+    const qwen = providers[0];
+    if (!qwen) return [];
+    return [{
+      ...qwen,
+      model: qwen.photoModel ?? QWEN_PHOTO_DEFAULT_MODEL,
+      enableThinking: false,
+      requestTimeoutMs: 15_000,
+    }];
   }
   const photoProviders = providers.map((p) => p.name === "qwen"
     ? {
       ...p,
       model: p.photoModel ?? QWEN_PHOTO_DEFAULT_MODEL,
-      enableThinking: p.photoEnableThinking ?? true,
+      enableThinking: p.photoEnableThinking ?? false,
     }
     : p);
 
@@ -1741,15 +1834,6 @@ function normalizeAmount(value: unknown): number | null {
     }
   }
   return null;
-}
-
-function normalizeName(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
-}
-
-function isSameAmount(a: number | string | null | undefined, b: number | null): boolean {
-  const left = normalizeAmount(a);
-  return left !== null && b !== null && Math.abs(left - b) <= 0.01;
 }
 
 // 通知摘要相关 helpers ─────────────────────────────────────────
@@ -2739,6 +2823,195 @@ async function rememberCompanionSignals(
   await Promise.all(writes);
 }
 
+function storedJsonObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function transactionOccurredAt(date: string | null, time: string | null): string | null {
+  if (!date || !time) return null;
+  const normalizedTime = time.length === 5 ? `${time}:00` : time.slice(0, 8);
+  return `${date}T${normalizedTime}+08:00`;
+}
+
+async function loadRecentFinancialPerceptualCandidates(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  excludedStagingId: string | null,
+): Promise<FinancialPerceptualLookupResult> {
+  const activeStagingStatuses = [
+    "unassigned",
+    "assigned",
+    "failed",
+    "unrouted",
+    "routed",
+    "routing_failed",
+    "extracted",
+    "pending_review",
+    "extraction_failed",
+    "schema_failed",
+    "ai_error",
+  ];
+
+  let stagingQuery = supabase
+    .from("staging_records")
+    .select("id,perceptual_hash,record_type,occurred_at,order_finished_at,created_at,extracted_json")
+    .eq("user_id", userId)
+    .not("perceptual_hash", "is", null)
+    .in("record_type", ["expense", "income"])
+    .in("status", activeStagingStatuses)
+    .order("created_at", { ascending: false })
+    .limit(60);
+  if (excludedStagingId) stagingQuery = stagingQuery.neq("id", excludedStagingId);
+
+  const [transactionResult, incomeResult, stagingResult, legacyLogResult] = await Promise.all([
+    supabase
+      .from("transactions")
+      .select("id,perceptual_hash,amount,merchant_name,platform,payment_method,transaction_date,transaction_time,created_at")
+      .eq("user_id", userId)
+      .not("perceptual_hash", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(60),
+    supabase
+      .from("income_records")
+      .select("id,perceptual_hash,amount,source_name,income_date,created_at")
+      .eq("user_id", userId)
+      .not("perceptual_hash", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(60),
+    stagingQuery,
+    supabase
+      .from("ai_recognition_logs")
+      .select("id,perceptual_hash,target_table,target_id,record_type,occurred_at,order_finished_at,created_at,ai_response")
+      .eq("user_id", userId)
+      .not("perceptual_hash", "is", null)
+      .not("target_id", "is", null)
+      .in("target_table", ["transactions", "income_records"])
+      .in("record_type", ["expense", "income"])
+      .order("created_at", { ascending: false })
+      .limit(60),
+  ]);
+
+  const financeColumnsAvailable = !transactionResult.error && !incomeResult.error;
+  if (transactionResult.error || incomeResult.error) {
+    console.warn("Finance perceptual columns unavailable; continuing without persisted fingerprints", {
+      transaction_error: transactionResult.error?.code ?? null,
+      income_error: incomeResult.error?.code ?? null,
+    });
+  }
+  if (stagingResult.error) {
+    console.warn("Staging perceptual lookup failed; continuing without staging candidates", {
+      code: stagingResult.error.code ?? null,
+    });
+  }
+  if (legacyLogResult.error) {
+    console.warn("Legacy perceptual lookup failed; continuing without AI-log candidates", {
+      code: legacyLogResult.error.code ?? null,
+    });
+  }
+
+  const candidates: FinancialPerceptualCandidate[] = [];
+  for (const row of (transactionResult.data ?? []) as TransactionPerceptualRow[]) {
+    candidates.push({
+      id: `transactions:${row.id}`,
+      perceptualHash: row.perceptual_hash,
+      recordType: "expense",
+      referenceTable: "transactions",
+      referenceId: row.id,
+      amount: normalizeAmount(row.amount),
+      merchantOrSource: row.merchant_name,
+      platform: row.platform,
+      paymentMethod: row.payment_method,
+      occurredAt: transactionOccurredAt(row.transaction_date, row.transaction_time),
+      occurredDate: row.transaction_date,
+      timePrecision: row.transaction_time ? "datetime" : row.transaction_date ? "date" : "none",
+      createdAt: row.created_at,
+    });
+  }
+
+  for (const row of (incomeResult.data ?? []) as IncomePerceptualRow[]) {
+    candidates.push({
+      id: `income_records:${row.id}`,
+      perceptualHash: row.perceptual_hash,
+      recordType: "income",
+      referenceTable: "income_records",
+      referenceId: row.id,
+      amount: normalizeAmount(row.amount),
+      merchantOrSource: row.source_name,
+      occurredDate: row.income_date,
+      timePrecision: row.income_date ? "date" : "none",
+      createdAt: row.created_at,
+    });
+  }
+
+  for (const row of (stagingResult.data ?? []) as StagingPerceptualRow[]) {
+    if (row.record_type !== "expense" && row.record_type !== "income") continue;
+    const ai = storedJsonObject(row.extracted_json);
+    const occurredAt = row.occurred_at || row.order_finished_at
+      || normalizeString(ai.occurred_at) || normalizeString(ai.order_finished_at);
+    candidates.push({
+      id: `staging_records:${row.id}`,
+      perceptualHash: row.perceptual_hash,
+      recordType: row.record_type,
+      referenceTable: "staging_records",
+      referenceId: row.id,
+      amount: normalizeAmount(ai.amount),
+      merchantOrSource: normalizeString(row.record_type === "income" ? ai.source_name : ai.merchant_name),
+      platform: normalizeString(ai.platform),
+      paymentMethod: normalizeString(ai.payment_method),
+      occurredAt,
+      occurredDate: occurredAt?.slice(0, 10) ?? null,
+      timePrecision: occurredAt ? "datetime" : "none",
+      createdAt: row.created_at,
+    });
+  }
+
+  const seenReferences = new Set(candidates.map((candidate) => `${candidate.referenceTable}:${candidate.referenceId}`));
+  for (const row of (legacyLogResult.data ?? []) as PerceptualLogRow[]) {
+    const recordType = row.record_type === "income" ? "income" : row.record_type === "expense" ? "expense" : null;
+    const referenceTable = row.target_table === "income_records"
+      ? "income_records"
+      : row.target_table === "transactions"
+        ? "transactions"
+        : null;
+    if (!recordType || !referenceTable || !row.target_id) continue;
+    const referenceKey = `${referenceTable}:${row.target_id}`;
+    if (seenReferences.has(referenceKey)) continue;
+
+    const ai = storedJsonObject(row.ai_response);
+    const occurredAt = row.occurred_at || row.order_finished_at
+      || normalizeString(ai.occurred_at) || normalizeString(ai.order_finished_at);
+    candidates.push({
+      id: `ai_recognition_logs:${row.id}`,
+      perceptualHash: row.perceptual_hash,
+      recordType,
+      referenceTable,
+      referenceId: row.target_id,
+      amount: normalizeAmount(ai.amount),
+      merchantOrSource: normalizeString(recordType === "income" ? ai.source_name : ai.merchant_name),
+      platform: normalizeString(ai.platform),
+      paymentMethod: normalizeString(ai.payment_method),
+      occurredAt,
+      occurredDate: occurredAt?.slice(0, 10) ?? null,
+      timePrecision: occurredAt ? "datetime" : "none",
+      createdAt: row.created_at,
+    });
+    seenReferences.add(referenceKey);
+  }
+
+  return { candidates, financeColumnsAvailable };
+}
+
 async function createStagingRecord(
   supabase: ReturnType<typeof createClient>,
   payload: {
@@ -2755,6 +3028,13 @@ async function createStagingRecord(
     userId?: string | null;
     timeContext?: unknown;
     testMeta?: TestMeta | null;
+    duplicateReview?: {
+      kind: "perceptual_hash";
+      distance: number;
+      referenceTable: string;
+      referenceId: string;
+      recordType: "expense" | "income";
+    } | null;
   },
   privacyConfig: PrivacyConfig = DEFAULT_PRIVACY_CONFIG,
 ): Promise<{ id: string } | null> {
@@ -2765,7 +3045,11 @@ async function createStagingRecord(
       : null;
   const detectedDomainName = domainNameFromKey(detectedDomainKey);
   const summaryParts = [
-    payload.ai.record_type && payload.ai.record_type !== "uncertain" ? `疑似${detectedDomainName}` : "无法确定数据域",
+    payload.duplicateReview
+      ? "疑似与已有记录重复"
+      : payload.ai.record_type && payload.ai.record_type !== "uncertain"
+        ? `疑似${detectedDomainName}`
+        : "无法确定数据域",
     payload.ai.amount ? `金额 ${payload.ai.amount}` : null,
     payload.ai.merchant_name || payload.ai.source_name || payload.ai.title || null,
   ].filter(Boolean);
@@ -2787,7 +3071,9 @@ async function createStagingRecord(
     extracted_json: sanitizeSensitiveData({
       ...payload.ai,
       time_context: payload.timeContext ?? null,
-      ai_feedback: (payload.ai as Record<string, unknown>).ai_feedback ?? null,
+      ai_feedback: (payload.ai as unknown as Record<string, unknown>).ai_feedback ?? null,
+      review_reason: payload.duplicateReview ? "possible_duplicate" : null,
+      duplicate_review: payload.duplicateReview ?? null,
       ...(payload.testMeta ? { test_meta: payload.testMeta } : {}),
     }),
     companion_message: payload.ai.companion_message ?? null,
@@ -2805,6 +3091,8 @@ async function createStagingRecord(
       error_type: payload.errorType ?? null,
       time_context: payload.timeContext ?? null,
       missing_fields: [],
+      review_reason: payload.duplicateReview ? "possible_duplicate" : null,
+      duplicate_review: payload.duplicateReview ?? null,
       dispatcher: payload.dispatcher ? {
         source_app: payload.dispatcher.source_app,
         image_features: payload.dispatcher.image_features,
@@ -2820,15 +3108,18 @@ async function createStagingRecord(
 
   if (error) {
     console.error("Staging insert failed:", error);
-    const { data: existing } = await supabase
+    let existingQuery = supabase
       .from("staging_records")
       .select("id")
-      .eq("image_hash", payload.imageHash)
-      .maybeSingle();
-    if (existing) return existing;
+      .eq("image_hash", payload.imageHash);
+    if (payload.userId) {
+      existingQuery = existingQuery.eq("user_id", payload.userId);
+    }
+    const { data: existing } = await existingQuery.maybeSingle();
+    if (existing) return existing as IdRow;
     return null;
   }
-  return data;
+  return data as IdRow;
 }
 
 // 把 Uint8Array 转成 base64（避免大图时 String.fromCharCode 栈溢出）
@@ -2875,15 +3166,8 @@ async function callTextOnlyJsonGeneration(
     temperature,
     max_completion_tokens: 1024,
   };
-  if (config.name === "moonshot") {
-    body.response_format = { type: "json_object" };
-  }
-  if (config.name === "qwen") {
-    // 文案调用不需要思考，关掉以加速
-    body.enable_thinking = false;
-  } else if (config.name === "mimo" || config.name === "relay") {
-    body.enable_thinking = false;
-  }
+  // 文案调用不需要思考，关掉以加速。
+  body.enable_thinking = false;
   const resp = await fetch(config.endpoint, {
     method: "POST",
     headers: {
@@ -2894,8 +3178,8 @@ async function callTextOnlyJsonGeneration(
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`${config.name} text API error ${resp.status}: ${txt}`);
+    await resp.body?.cancel();
+    throw new Error(`${config.name} text API error ${resp.status}`);
   }
   const data = await resp.json();
   const message = data?.choices?.[0]?.message ?? {};
@@ -2905,7 +3189,7 @@ async function callTextOnlyJsonGeneration(
   try {
     parsed = JSON.parse(extracted) as Record<string, unknown>;
   } catch (parseError) {
-    throw new Error(`Failed to parse feedback JSON: ${String(parseError)} | raw=${rawText.slice(0, 300)}`);
+    throw new Error(`Failed to parse feedback JSON: ${String(parseError)}`);
   }
   return { rawText, parsed };
 }
@@ -3207,7 +3491,7 @@ async function generateVoiceFeedback(opts: {
       JSON.stringify(recordFacts),
     );
     if (!check.ok) {
-      console.warn(`[voice] number validation failed (${opts.domainKey}):`, check.violations.join(" | "));
+      console.warn(`[voice] number validation failed domain=${opts.domainKey} count=${check.violations.length}`);
       // 逐句抢救:只丢弃违规句,保留合规句。badIndexes 与上方数组下标对齐:
       // [0]=companion_message, [1]=emotion_line, [2]=utility_line, [3]=detail_reason
       const bad = new Set(check.badIndexes);
@@ -3275,7 +3559,7 @@ function fireAndForgetProfileRefresh(
   }
 }
 
-// 通用 OpenAI-compatible Vision 调用（Moonshot / MiMo 都走这个）
+// Qwen OpenAI-compatible Vision 调用。
 async function callOpenAICompatibleVision(
   imageBytes: Uint8Array,
   mime: string,
@@ -3295,23 +3579,9 @@ async function callOpenAICompatibleVision(
     }],
     temperature: 0.1,
     // JSON 实际只需 ~500 token；Qwen 思考模式需要额外预算给 reasoning_content。
-    max_completion_tokens: config.name === "qwen" && config.enableThinking !== false ? 4096 : 1024,
+    max_completion_tokens: config.enableThinking !== false ? 4096 : 1024,
   };
-  // response_format 是 OpenAI 扩展，部分兼容服务不支持会 400
-  // 仅 Moonshot 已验证支持；其它 provider 依赖 extractJson 兜底从 markdown / 文本中抽 JSON
-  if (config.name === "moonshot") {
-    body.response_format = { type: "json_object" };
-  }
-  // Qwen 是否思考由链路配置决定；MiMo/Relay 固定走快速识别策略。
-  if (config.name === "qwen") {
-    body.enable_thinking = config.enableThinking !== false;
-  } else if (config.name === "mimo" || config.name === "relay") {
-    body.enable_thinking = false;
-  }
-  // 同时附带 Authorization Bearer 与 api-key header：
-  // - Moonshot 只认 Authorization Bearer
-  // - xiaomimimo.com 文档 curl 示例用 api-key，Python SDK 实测 Authorization 也通
-  // 两个 header 并存对双方均无副作用
+  body.enable_thinking = config.enableThinking !== false;
   const timeoutMs = config.requestTimeoutMs ?? (config.enableThinking === true
     ? getEnvInteger("VISION_THINKING_TIMEOUT_MS", 20_000, 8_000, 45_000)
     : getEnvInteger("VISION_PROVIDER_TIMEOUT_MS", 15_000, 5_000, 30_000));
@@ -3324,7 +3594,6 @@ async function callOpenAICompatibleVision(
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${config.apiKey}`,
-        "api-key": config.apiKey,
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -3338,8 +3607,8 @@ async function callOpenAICompatibleVision(
     clearTimeout(timeout);
   }
   if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`${config.name} API error ${resp.status}: ${txt}`);
+    await resp.body?.cancel();
+    throw new Error(`${config.name} API error ${resp.status}`);
   }
   const data = await resp.json();
   const message = data?.choices?.[0]?.message ?? {};
@@ -3366,8 +3635,7 @@ async function callOpenAICompatibleVision(
   };
 }
 
-// 多 Provider 优雅降级：按顺序尝试，第一个成功即返回；全部失败则抛聚合错误
-// 错误码语义：429 / 5xx / 网络错误 = 服务端临时问题，应快速降级到下一个 provider
+// 保留 attempts 结构，便于记录 Qwen 调用失败的耗时和错误上下文。
 async function callVisionWithFallback(
   imageBytes: Uint8Array,
   mime: string,
@@ -3393,9 +3661,6 @@ async function callVisionWithFallback(
         duration_ms: Date.now() - startedAt,
         raw_text_preview: clipForDebug(result.rawText, 600) ?? undefined,
       });
-      if (attempts.length > 1) {
-        console.warn(`[vision] succeeded on fallback provider=${cfg.name} after ${attempts.length - 1} failure(s)`);
-      }
       return {
         ai: result.ai,
         provider: cfg.name,
@@ -3431,7 +3696,6 @@ async function callVisionWithFallback(
         raw_text_preview: clipForDebug(errWithDebug.rawText, 600) ?? undefined,
       });
       console.warn(`[vision-fallback] provider=${cfg.name} failed: ${errMsg}`);
-      // 继续尝试下一个 provider
     }
   }
   // 全部失败：抛带聚合信息的错误
@@ -3449,15 +3713,789 @@ async function callVisionWithFallback(
   throw err;
 }
 
-// 兼容保留：现有代码仍可调用 callKimiVision（内部走通用接口）
-async function callKimiVision(imageBytes: Uint8Array, mime: string, apiKey: string): Promise<AIResult> {
-  const result = await callOpenAICompatibleVision(imageBytes, mime, {
-    name: "moonshot",
-    model: MOONSHOT_MODEL,
-    endpoint: MOONSHOT_ENDPOINT,
-    apiKey,
+const IMAGE_REFERENCE_TARGETS: Array<{ table: string; column: string }> = [
+  { table: "transactions", column: "image_url" },
+  { table: "income_records", column: "image_url" },
+  { table: "data_records", column: "source_image_path" },
+  { table: "staging_records", column: "image_path" },
+  { table: "ai_recognition_logs", column: "image_url" },
+];
+
+type ImageCleanupQueueRow = {
+  id: string;
+  bucket_path: string;
+  user_id: string | null;
+  attempts: number;
+  created_at: string;
+  cleanup_reason: ImageCleanupReason;
+  source_table: string | null;
+  source_id: string | null;
+  storage_deleted_at: string | null;
+};
+
+type ImageCleanupReason = "retention" | "manual_cleanup" | "immediate" | "record_delete" | "account_delete" | "upload_rollback";
+
+type ImageCleanupResult = {
+  processed: number;
+  failed: number;
+  deadLetter: number;
+  skippedExternal: number;
+  remaining: number;
+};
+
+function isUserOwnedStoragePath(path: string, userId: string): boolean {
+  return path.startsWith(`${userId}/`) || path.startsWith(`tmp/${userId}/`);
+}
+
+function isLegacyStoragePath(path: string): boolean {
+  return /^[0-9]{4}-[0-9]{2}-[0-9]{2}\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(path);
+}
+
+function normalizeManagedStoragePath(value: string): string | null {
+  const raw = value.trim();
+  if (!raw || /^data:/i.test(raw)) return null;
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw);
+      if (parsed.origin !== new URL(getEnv("SUPABASE_URL")).origin) return null;
+      const prefixes = [
+        `/storage/v1/object/sign/${BUCKET_NAME}/`,
+        `/storage/v1/object/authenticated/${BUCKET_NAME}/`,
+        `/storage/v1/object/public/${BUCKET_NAME}/`,
+      ];
+      const prefix = prefixes.find((candidate) => parsed.pathname.startsWith(candidate));
+      if (!prefix) return null;
+      return decodeURIComponent(parsed.pathname.slice(prefix.length)) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  return raw.split(/[?#]/, 1)[0]?.trim() || null;
+}
+
+async function collectNormalizedReferenceIds(
+  supabase: ReturnType<typeof createClient>,
+  table: string,
+  column: string,
+  userId: string,
+  path: string,
+): Promise<string[]> {
+  const ids: string[] = [];
+  let lastId: string | null = null;
+  for (;;) {
+    let query = supabase.from(table)
+      .select(`id,${column}`)
+      .eq("user_id", userId)
+      .ilike(column, "http%")
+      .order("id", { ascending: true })
+      .limit(500);
+    if (lastId) query = query.gt("id", lastId);
+    const { data, error } = await query;
+    if (error) throw new Error(`Failed to inspect managed URL references in ${table}.${column}: ${error.message}`);
+    const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const value = row[column];
+      if (typeof row.id === "string"
+        && typeof value === "string"
+        && normalizeManagedStoragePath(value) === path) {
+        ids.push(row.id);
+      }
+    }
+    if (rows.length < 500) break;
+    const nextId = rows.at(-1)?.id;
+    if (typeof nextId !== "string" || nextId === lastId) {
+      throw new Error(`Reference pagination did not advance for ${table}.${column}`);
+    }
+    lastId = nextId;
+  }
+  return ids;
+}
+
+async function collectUserScopedStoragePaths(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<string[]> {
+  const paths = new Set<string>();
+  const directories = [userId, `tmp/${userId}`];
+  const visited = new Set<string>();
+  while (directories.length > 0) {
+    const directory = directories.shift();
+    if (!directory || visited.has(directory)) continue;
+    visited.add(directory);
+    if (visited.size > 10_000) throw new Error("Storage directory traversal limit exceeded");
+
+    for (let offset = 0; ; offset += 1_000) {
+      const { data, error } = await supabase.storage.from(BUCKET_NAME).list(directory, {
+        limit: 1_000,
+        offset,
+        sortBy: { column: "name", order: "asc" },
+      });
+      if (error) throw new Error(`Failed to list user Storage objects: ${error.message}`);
+      const entries = (data ?? []) as unknown as Array<Record<string, unknown>>;
+      for (const entry of entries) {
+        if (typeof entry.name !== "string" || entry.name.length === 0) continue;
+        const entryPath = `${directory}/${entry.name}`;
+        const isFile = typeof entry.id === "string" || entry.metadata != null;
+        if (isFile) paths.add(entryPath);
+        else directories.push(entryPath);
+      }
+      if (entries.length < 1_000) break;
+    }
+  }
+  return [...paths];
+}
+
+async function authenticatedUserId(req: Request): Promise<string | null> {
+  const authHeader = req.headers.get("Authorization") || "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const anonKey = getEnvOptional("ANON_PUBLIC_KEY");
+  if (!bearerToken || !anonKey || bearerToken === anonKey) return null;
+  try {
+    const userClient = createClient(getEnv("SUPABASE_URL"), anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error } = await userClient.auth.getUser();
+    return error ? null : user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function authenticatedSupabaseClient(req: Request): ReturnType<typeof createClient> | null {
+  const authHeader = req.headers.get("Authorization") || "";
+  const anonKey = getEnvOptional("ANON_PUBLIC_KEY");
+  if (!authHeader.startsWith("Bearer ") || !anonKey) return null;
+  return createClient(getEnv("SUPABASE_URL"), anonKey, {
+    global: { headers: { Authorization: authHeader } },
   });
-  return result.ai;
+}
+
+function isCleanupWorkerRequest(req: Request): boolean {
+  const actual = req.headers.get("X-Image-Cleanup-Token") || "";
+  const expected = getEnvOptional("IMAGE_CLEANUP_WORKER_TOKEN") || "";
+  if (!actual || actual.length !== expected.length) return false;
+  let difference = 0;
+  for (let index = 0; index < actual.length; index += 1) {
+    difference |= actual.charCodeAt(index) ^ expected.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
+async function collectUserImagePaths(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<{ ownedPaths: string[]; skippedExternal: number }> {
+  const paths = new Set<string>();
+  const externalPaths = new Set<string>();
+  const pageSize = 500;
+  for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
+    let lastId: string | null = null;
+    for (;;) {
+      let query = supabase.from(table)
+        .select(`id,${column}`)
+        .eq("user_id", userId)
+        .not(column, "is", null)
+        .order("id", { ascending: true })
+        .limit(pageSize);
+      if (lastId) query = query.gt("id", lastId);
+      const { data, error } = await query;
+      if (error) throw new Error(`Failed to collect ${table}.${column}: ${error.message}`);
+      const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+      for (const row of rows) {
+        const rawPath = row[column];
+        if (typeof rawPath !== "string" || rawPath.length === 0) continue;
+        const normalizedPath = normalizeManagedStoragePath(rawPath);
+        if (normalizedPath
+          && (isUserOwnedStoragePath(normalizedPath, userId) || isLegacyStoragePath(normalizedPath))) {
+          paths.add(normalizedPath);
+        } else {
+          externalPaths.add(rawPath);
+        }
+      }
+      if (rows.length < pageSize) break;
+      const nextId = rows.at(-1)?.id;
+      if (typeof nextId !== "string" || nextId === lastId) {
+        throw new Error(`Image path pagination did not advance for ${table}.${column}`);
+      }
+      lastId = nextId;
+    }
+  }
+  for (const storagePath of await collectUserScopedStoragePaths(supabase, userId)) {
+    paths.add(storagePath);
+  }
+  return { ownedPaths: [...paths], skippedExternal: externalPaths.size };
+}
+
+async function enqueueImageCleanup(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  paths: string[],
+  cleanupReason: ImageCleanupReason,
+): Promise<void> {
+  if (paths.length === 0) return;
+  const uniquePaths = [...new Set(paths)];
+  for (let offset = 0; offset < uniquePaths.length; offset += 200) {
+    const batch = uniquePaths.slice(offset, offset + 200);
+    const now = new Date().toISOString();
+    const { error: retryError } = await supabase.from("image_cleanup_queue").update({
+      status: "pending",
+      attempts: 0,
+      cleanup_reason: cleanupReason,
+      last_error: null,
+      processed_at: null,
+      last_attempt_at: null,
+      next_retry_at: now,
+      deleted_at: null,
+      storage_deleted_at: null,
+      references_cleared_at: null,
+      updated_at: now,
+    })
+      .eq("user_id", userId)
+      .in("bucket_path", batch)
+      .in("status", ["failed", "dead_letter", "done", "skipped_external"]);
+    if (retryError) throw new Error(`Failed to requeue image cleanup: ${retryError.message}`);
+
+    const { error: pendingError } = await supabase.from("image_cleanup_queue").update({
+      cleanup_reason: cleanupReason,
+      next_retry_at: now,
+      updated_at: now,
+    })
+      .eq("user_id", userId)
+      .in("bucket_path", batch)
+      .eq("status", "pending");
+    if (pendingError) throw new Error(`Failed to reprioritize image cleanup: ${pendingError.message}`);
+
+    const { error: insertError } = await supabase.from("image_cleanup_queue").upsert(
+      batch.map((path) => ({
+        user_id: userId,
+        bucket_name: BUCKET_NAME,
+        bucket_path: path,
+        status: "pending",
+        attempts: 0,
+        cleanup_reason: cleanupReason,
+        last_error: null,
+        processed_at: null,
+        last_attempt_at: null,
+        next_retry_at: now,
+        deleted_at: null,
+        storage_deleted_at: null,
+        references_cleared_at: null,
+        updated_at: now,
+      })),
+      { onConflict: "user_id,bucket_path", ignoreDuplicates: true },
+    );
+    if (insertError) throw new Error(`Failed to enqueue image cleanup: ${insertError.message}`);
+  }
+}
+
+async function cleanupUploadedObjectOrQueue(
+  supabase: ReturnType<typeof createClient>,
+  userId: string | null,
+  path: string,
+): Promise<void> {
+  if (!userId || !isUserOwnedStoragePath(path, userId)) return;
+  try {
+    await enqueueImageCleanup(supabase, userId, [path], "upload_rollback");
+    const result = await processImageCleanupQueue(supabase, {
+      userId,
+      bucketPath: path,
+      limit: 1,
+      force: true,
+    });
+    if (result.failed > 0 || result.deadLetter > 0 || result.remaining > 0) {
+      console.error("Uploaded image rollback deferred", { result });
+    }
+  } catch (cleanupError) {
+    console.error("Failed to queue uploaded image rollback", { error: String(cleanupError) });
+  }
+}
+
+async function hasBusinessImageReference(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  path: string,
+): Promise<boolean> {
+  const normalizedPath = normalizeManagedStoragePath(path);
+  if (!normalizedPath) return false;
+  const businessTargets = IMAGE_REFERENCE_TARGETS.filter(({ table }) => table !== "ai_recognition_logs");
+  for (const { table, column } of businessTargets) {
+    const { count, error } = await supabase.from(table)
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq(column, normalizedPath);
+    if (error) throw new Error(`Failed to verify ${table}.${column}: ${error.message}`);
+    if ((count ?? 0) > 0) return true;
+    if ((await collectNormalizedReferenceIds(supabase, table, column, userId, normalizedPath)).length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function clearImageReferences(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  path: string,
+): Promise<void> {
+  const normalizedPath = normalizeManagedStoragePath(path);
+  if (!normalizedPath) throw new Error("Managed Storage path is invalid");
+  for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
+    const { error } = await supabase.from(table)
+      .update({ [column]: null })
+      .eq("user_id", userId)
+      .eq(column, normalizedPath);
+    if (error) throw new Error(`Failed to clear ${table}.${column}: ${error.message}`);
+    const signedReferenceIds = await collectNormalizedReferenceIds(
+      supabase,
+      table,
+      column,
+      userId,
+      normalizedPath,
+    );
+    for (let offset = 0; offset < signedReferenceIds.length; offset += 100) {
+      const { error: signedReferenceError } = await supabase.from(table)
+        .update({ [column]: null })
+        .eq("user_id", userId)
+        .in("id", signedReferenceIds.slice(offset, offset + 100));
+      if (signedReferenceError) {
+        throw new Error(`Failed to clear managed URL references in ${table}.${column}: ${signedReferenceError.message}`);
+      }
+    }
+  }
+}
+
+async function legacyStoragePathCanBeDeleted(
+  supabase: ReturnType<typeof createClient>,
+  row: ImageCleanupQueueRow,
+): Promise<boolean> {
+  if (!row.user_id) return false;
+  const normalizedPath = normalizeManagedStoragePath(row.bucket_path);
+  if (!normalizedPath) return false;
+  let hasOwnerReference = false;
+  for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
+    let lastId: string | null = null;
+    for (;;) {
+      let query = supabase.from(table)
+        .select(`id,user_id,${column}`)
+        .not(column, "is", null)
+        .order("id", { ascending: true })
+        .limit(500);
+      if (lastId) query = query.gt("id", lastId);
+      const { data, error } = await query;
+      if (error) throw new Error(`Failed to verify legacy path ownership in ${table}.${column}: ${error.message}`);
+      const references = (data ?? []) as unknown as Array<Record<string, unknown>>;
+      for (const reference of references) {
+        const referencePath = reference[column];
+        if (typeof referencePath !== "string"
+          || normalizeManagedStoragePath(referencePath) !== normalizedPath) continue;
+        const referenceUserId = typeof reference.user_id === "string" ? reference.user_id : null;
+        if (referenceUserId !== row.user_id) return false;
+        hasOwnerReference = true;
+      }
+      if (references.length < 500) break;
+      const nextId = references.at(-1)?.id;
+      if (typeof nextId !== "string" || nextId === lastId) {
+        throw new Error(`Legacy ownership pagination did not advance for ${table}.${column}`);
+      }
+      lastId = nextId;
+    }
+  }
+  return hasOwnerReference
+    || (row.cleanup_reason === "record_delete" && Boolean(row.source_table && row.source_id));
+}
+
+async function processImageCleanupQueue(
+  supabase: ReturnType<typeof createClient>,
+  options: { userId?: string; bucketPath?: string; limit?: number; force?: boolean } = {},
+): Promise<ImageCleanupResult> {
+  const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+  const { error: accountRetryError } = await supabase.from("image_cleanup_queue").update({
+    status: "failed",
+    attempts: 0,
+    next_retry_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  })
+    .eq("status", "dead_letter")
+    .eq("cleanup_reason", "account_delete")
+    .lt("updated_at", new Date(Date.now() - 60 * 60 * 1000).toISOString());
+  if (accountRetryError) throw new Error(`Failed to recover account deletion dead letters: ${accountRetryError.message}`);
+  let staleQuery = supabase.from("image_cleanup_queue")
+    .update({
+      status: "failed",
+      last_error: "stale processing lease recovered",
+      next_retry_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("status", "processing")
+    .lt("updated_at", new Date(Date.now() - 15 * 60 * 1000).toISOString());
+  if (options.userId) staleQuery = staleQuery.eq("user_id", options.userId);
+  if (options.bucketPath) staleQuery = staleQuery.eq("bucket_path", options.bucketPath);
+  const { error: staleError } = await staleQuery;
+  if (staleError) throw new Error(`Failed to recover stale image cleanup rows: ${staleError.message}`);
+
+  let query = supabase.from("image_cleanup_queue")
+    .select("id,bucket_path,user_id,attempts,created_at,cleanup_reason,bucket_name,source_table,source_id,storage_deleted_at")
+    .in("status", ["pending", "failed"])
+    .lt("attempts", 8)
+    .or(`next_retry_at.is.null,next_retry_at.lte.${new Date().toISOString()}`)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (options.userId) query = query.eq("user_id", options.userId);
+  if (options.bucketPath) query = query.eq("bucket_path", options.bucketPath);
+  const { data, error } = await query;
+  if (error) throw new Error(`Failed to read image cleanup queue: ${error.message}`);
+
+  let processed = 0;
+  let failed = 0;
+  let deadLetter = 0;
+  let skippedExternal = 0;
+  for (const row of (data ?? []) as ImageCleanupQueueRow[]) {
+    const attempts = row.attempts ?? 0;
+    const attemptedAt = new Date().toISOString();
+    const { data: claimed, error: claimError } = await supabase.from("image_cleanup_queue")
+      .update({
+        status: "processing",
+        attempts: attempts + 1,
+        last_attempt_at: attemptedAt,
+        next_retry_at: null,
+        updated_at: attemptedAt,
+      })
+      .eq("id", row.id)
+      .eq("attempts", attempts)
+      .in("status", ["pending", "failed"])
+      .select("id")
+      .maybeSingle();
+    if (claimError) throw new Error(`Failed to claim image cleanup row: ${claimError.message}`);
+    if (!claimed) continue;
+
+    try {
+      if (!row.user_id) throw new Error("Cleanup row has no user_id");
+      if (!options.force && row.cleanup_reason === "retention") {
+        const { data: rawConfig, error: configError } = await supabase.from("user_configs")
+          .select("is_active,keep_source_images,image_retention_days,updated_at")
+          .eq("user_id", row.user_id)
+          .maybeSingle();
+        if (configError) throw new Error(`Failed to verify image retention policy: ${configError.message}`);
+        const config = rawConfig as RetentionConfigRow | null;
+
+        const policyChangedAfterQueue = Boolean(
+          config?.updated_at && new Date(config.updated_at).getTime() > new Date(row.created_at).getTime()
+        );
+        const noLongerEligible = !config
+          || config.is_active !== true
+          || (config.keep_source_images === true && (config.image_retention_days ?? -1) < 0)
+          || policyChangedAfterQueue;
+        if (noLongerEligible) {
+          const { error: cancelError } = await supabase.from("image_cleanup_queue").delete().eq("id", row.id);
+          if (cancelError) throw new Error(`Failed to cancel stale image cleanup: ${cancelError.message}`);
+          continue;
+        }
+      }
+      if (["record_delete", "upload_rollback"].includes(row.cleanup_reason)
+        && await hasBusinessImageReference(supabase, row.user_id, row.bucket_path)) {
+        const { error: cancelError } = await supabase.from("image_cleanup_queue").delete().eq("id", row.id);
+        if (cancelError) throw new Error(`Failed to cancel referenced image cleanup: ${cancelError.message}`);
+        continue;
+      }
+      if (/^(https?:\/\/|data:)/i.test(row.bucket_path)) {
+        const { error: skippedError } = await supabase.from("image_cleanup_queue").update({
+          status: "skipped_external",
+          last_error: "external URL is not managed by Supabase Storage",
+          processed_at: new Date().toISOString(),
+          next_retry_at: null,
+          updated_at: new Date().toISOString(),
+        }).eq("id", row.id);
+        if (skippedError) throw new Error(skippedError.message);
+        skippedExternal += 1;
+        continue;
+      }
+      if (!row.storage_deleted_at && !isUserOwnedStoragePath(row.bucket_path, row.user_id)) {
+        if (!isLegacyStoragePath(row.bucket_path) || !await legacyStoragePathCanBeDeleted(supabase, row)) {
+          throw new Error("Cleanup path ownership cannot be verified");
+        }
+      }
+      let storageDeletedAt = row.storage_deleted_at;
+      if (!storageDeletedAt) {
+        const { error: removeError } = await supabase.storage.from(BUCKET_NAME).remove([row.bucket_path]);
+        if (removeError) throw new Error(removeError.message);
+        storageDeletedAt = new Date().toISOString();
+        const { error: storageAuditError } = await supabase.from("image_cleanup_queue").update({
+          storage_deleted_at: storageDeletedAt,
+          updated_at: storageDeletedAt,
+        }).eq("id", row.id);
+        if (storageAuditError) throw new Error(`Failed to record Storage deletion: ${storageAuditError.message}`);
+      }
+      await clearImageReferences(supabase, row.user_id, row.bucket_path);
+      const referencesClearedAt = new Date().toISOString();
+      const { error: doneError } = await supabase.from("image_cleanup_queue").update({
+        status: "done",
+        last_error: null,
+        processed_at: referencesClearedAt,
+        deleted_at: storageDeletedAt,
+        references_cleared_at: referencesClearedAt,
+        next_retry_at: null,
+        updated_at: referencesClearedAt,
+      }).eq("id", row.id);
+      if (doneError) throw new Error(doneError.message);
+      processed += 1;
+    } catch (cleanupError) {
+      failed += 1;
+      const nextAttempt = attempts + 1;
+      const exhausted = nextAttempt >= 8;
+      const retryDelayMinutes = Math.min(12 * 60, Math.pow(5, attempts));
+      const { error: failureUpdateError } = await supabase.from("image_cleanup_queue").update({
+        status: exhausted ? "dead_letter" : "failed",
+        last_error: String(cleanupError),
+        next_retry_at: exhausted ? null : new Date(Date.now() + retryDelayMinutes * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", row.id);
+      if (failureUpdateError) throw new Error(`Failed to persist cleanup failure: ${failureUpdateError.message}`);
+      if (exhausted) deadLetter += 1;
+    }
+  }
+
+  let remainingQuery = supabase.from("image_cleanup_queue")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["pending", "failed", "processing", "dead_letter"]);
+  if (options.userId) remainingQuery = remainingQuery.eq("user_id", options.userId);
+  if (options.bucketPath) remainingQuery = remainingQuery.eq("bucket_path", options.bucketPath);
+  const { count, error: remainingError } = await remainingQuery;
+  if (remainingError) throw new Error(`Failed to count remaining image cleanup rows: ${remainingError.message}`);
+  if (count === null) throw new Error("Image cleanup remaining count was unavailable");
+  let deadLetterQuery = supabase.from("image_cleanup_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "dead_letter");
+  if (options.userId) deadLetterQuery = deadLetterQuery.eq("user_id", options.userId);
+  if (options.bucketPath) deadLetterQuery = deadLetterQuery.eq("bucket_path", options.bucketPath);
+  const { count: deadLetterCount, error: deadLetterError } = await deadLetterQuery;
+  if (deadLetterError) throw new Error(`Failed to count dead-letter image cleanup rows: ${deadLetterError.message}`);
+  if (deadLetterCount === null) throw new Error("Image cleanup dead-letter count was unavailable");
+  return { processed, failed, deadLetter: Math.max(deadLetter, deadLetterCount), skippedExternal, remaining: count };
+}
+
+async function cleanupAllUserImages(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  cleanupReason: "manual_cleanup" | "account_delete" = "manual_cleanup",
+  options: { maxBatches?: number; batchSize?: number } = {},
+): Promise<{ total: number; queued: number; processed: number; failed: number; deadLetter: number; skippedExternal: number; remaining: number }> {
+  const collected = await collectUserImagePaths(supabase, userId);
+  await enqueueImageCleanup(supabase, userId, collected.ownedPaths, cleanupReason);
+  let processed = 0;
+  let failed = 0;
+  let deadLetter = 0;
+  let remaining = 0;
+  const maxBatches = Math.min(Math.max(options.maxBatches ?? 10, 1), 20);
+  const batchSize = Math.min(Math.max(options.batchSize ?? 100, 1), 200);
+  for (let batch = 0; batch < maxBatches; batch += 1) {
+    const result = await processImageCleanupQueue(supabase, { userId, limit: batchSize, force: true });
+    processed += result.processed;
+    failed += result.failed;
+    deadLetter = result.deadLetter;
+    remaining = result.remaining;
+    if (remaining === 0 || result.processed === 0) break;
+  }
+  return {
+    total: collected.ownedPaths.length + collected.skippedExternal,
+    queued: collected.ownedPaths.length,
+    processed,
+    failed,
+    deadLetter,
+    skippedExternal: collected.skippedExternal,
+    remaining,
+  };
+}
+
+async function updateAccountDeletionRequest(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  values: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await supabase.from("account_deletion_requests")
+    .update({ ...values, updated_at: new Date().toISOString() })
+    .eq("user_id", userId);
+  if (error) throw new Error(`Failed to update account deletion request: ${error.message}`);
+}
+
+async function prepareAccountDeletion(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  batchSize: number,
+): Promise<Awaited<ReturnType<typeof cleanupAllUserImages>>> {
+  const updatedAt = new Date().toISOString();
+  const { error: deactivateError } = await supabase.from("user_configs").update({
+    is_active: false,
+    upload_token: null,
+    updated_at: updatedAt,
+  }).eq("user_id", userId);
+  if (deactivateError) {
+    throw new Error(`Failed to deactivate account credentials: ${deactivateError.message}`);
+  }
+
+  const cleanup = await cleanupAllUserImages(
+    supabase,
+    userId,
+    "account_delete",
+    { maxBatches: 1, batchSize },
+  );
+  await updateAccountDeletionRequest(supabase, userId, {
+    status: "cleaning",
+    total_images: cleanup.total,
+    deleted_images: cleanup.processed,
+    remaining_images: cleanup.remaining,
+    skipped_external: cleanup.skippedExternal,
+    last_error: null,
+    next_retry_at: null,
+  });
+  return cleanup;
+}
+
+async function finalizeAccountDeletion(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<boolean> {
+  try {
+    await updateAccountDeletionRequest(supabase, userId, {
+      status: "deleting",
+      last_error: null,
+      next_retry_at: null,
+    });
+    const { error: dataError } = await supabase.rpc("delete_user_account_data", { p_user_id: userId });
+    if (dataError) throw new Error(`删除账户数据失败：${dataError.message}`);
+
+    const { count: postDeleteQueueCount, error: postDeleteQueueError } = await supabase
+      .from("image_cleanup_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .in("status", ["pending", "failed", "processing", "dead_letter"]);
+    if (postDeleteQueueError || postDeleteQueueCount === null) {
+      throw new Error("Unable to verify image cleanup after deleting account data");
+    }
+    if (postDeleteQueueCount > 0) {
+      await updateAccountDeletionRequest(supabase, userId, {
+        status: "cleaning",
+        remaining_images: postDeleteQueueCount,
+        next_retry_at: new Date().toISOString(),
+      });
+      return false;
+    }
+
+    const { error: authError } = await supabase.auth.admin.deleteUser(userId);
+    if (authError && !/not found/i.test(authError.message)) {
+      throw new Error(`删除登录账户失败：${authError.message}`);
+    }
+
+    await updateAccountDeletionRequest(supabase, userId, {
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      remaining_images: 0,
+      last_error: null,
+      next_retry_at: null,
+    });
+    return true;
+  } catch (deletionError) {
+    const { data: existing } = await supabase.from("account_deletion_requests")
+      .select("attempts")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const attempts = Number(existing?.attempts ?? 0) + 1;
+    await updateAccountDeletionRequest(supabase, userId, {
+      status: "failed",
+      attempts,
+      last_error: String(deletionError),
+      next_retry_at: new Date(Date.now() + Math.min(12 * 60, Math.pow(5, attempts - 1)) * 60 * 1000).toISOString(),
+    }).catch((requestError) => {
+      console.error("Failed to persist account deletion failure", {
+        error_type: requestError instanceof Error ? requestError.name : typeof requestError,
+      });
+    });
+    console.error("Account deletion finalization failed", {
+      error_type: deletionError instanceof Error ? deletionError.name : typeof deletionError,
+    });
+    return false;
+  }
+}
+
+async function finalizeReadyAccountDeletions(
+  supabase: ReturnType<typeof createClient>,
+): Promise<{ completed: number; failed: number }> {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase.from("account_deletion_requests")
+    .select("user_id,status")
+    .in("status", ["requested", "cleaning", "deleting", "failed"])
+    .or(`next_retry_at.is.null,next_retry_at.lte.${now}`)
+    .order("requested_at", { ascending: true })
+    .limit(1);
+  if (error) throw new Error(`Failed to read pending account deletions: ${error.message}`);
+
+  let completed = 0;
+  let failed = 0;
+  for (const row of data ?? []) {
+    const userId = String(row.user_id);
+    let status = String(row.status);
+    try {
+      if (status === "requested") {
+        await prepareAccountDeletion(supabase, userId, 100);
+        status = "cleaning";
+      } else {
+        const cleanup = await cleanupAllUserImages(
+          supabase,
+          userId,
+          "account_delete",
+          { maxBatches: 1, batchSize: 100 },
+        );
+        if (status === "deleting" && (cleanup.queued > 0 || cleanup.remaining > 0)) {
+          status = "cleaning";
+        }
+        await updateAccountDeletionRequest(supabase, userId, {
+          status,
+          remaining_images: cleanup.remaining,
+          skipped_external: cleanup.skippedExternal,
+          last_error: null,
+          next_retry_at: null,
+        });
+      }
+    } catch (cleanupError) {
+      failed += 1;
+      await updateAccountDeletionRequest(supabase, userId, {
+        status: String(row.status) === "requested" ? "requested" : "failed",
+        last_error: String(cleanupError),
+        next_retry_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      }).catch(() => undefined);
+      continue;
+    }
+    const { count, error: queueError } = await supabase.from("image_cleanup_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .in("status", ["pending", "failed", "processing", "dead_letter"]);
+    if (queueError || count === null) {
+      failed += 1;
+      console.error("Failed to verify account deletion queue", {
+        error_code: queueError?.code ?? null,
+      });
+      continue;
+    }
+    if (count > 0) continue;
+    if (status !== "deleting") {
+      await updateAccountDeletionRequest(supabase, userId, {
+        status: "deleting",
+        remaining_images: 0,
+        last_error: null,
+        next_retry_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      });
+      continue;
+    }
+    if (await finalizeAccountDeletion(supabase, userId)) completed += 1;
+    else failed += 1;
+  }
+
+  await supabase.from("account_deletion_requests")
+    .delete()
+    .eq("status", "completed")
+    .lt("completed_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+  return { completed, failed };
 }
 
 Deno.serve(async (req) => {
@@ -3474,85 +4512,36 @@ Deno.serve(async (req) => {
   try {
     supabase = createClient(getEnv("SUPABASE_URL"), getEnv("SUPABASE_SERVICE_ROLE_KEY"));
 
-    // 准备所有可用 provider
-    const moonshotKey = getEnv("MOONSHOT_API_KEY");
-    const moonshotProvider: ProviderConfig = {
-      name: "moonshot",
-      model: MOONSHOT_MODEL,
-      endpoint: MOONSHOT_ENDPOINT,
-      apiKey: moonshotKey,
-    };
-
-    const mimoKey = getEnvOptional("MIMO_API_KEY");
-    const mimoProvider: ProviderConfig | null = mimoKey ? {
-      name: "mimo",
-      model: getEnvOptional("MIMO_MODEL") ?? MIMO_DEFAULT_MODEL,
-      endpoint: getEnvOptional("MIMO_ENDPOINT") ?? MIMO_DEFAULT_ENDPOINT,
-      apiKey: mimoKey,
-    } : null;
-
-    const qwenKey = getEnvOptional("QWEN_API_KEY");
-    const qwenProvider: ProviderConfig | null = qwenKey ? {
+    const qwenProvider: ProviderConfig = {
       name: "qwen",
-      model: getEnvOptional("QWEN_MODEL") ?? QWEN_DEFAULT_MODEL,
+      model: normalizeQwenModel(getEnvOptional("QWEN_MODEL"), QWEN_DEFAULT_MODEL),
       endpoint: getEnvOptional("QWEN_ENDPOINT") ?? QWEN_DEFAULT_ENDPOINT,
-      apiKey: qwenKey,
+      apiKey: getEnv("QWEN_API_KEY"),
       enableThinking: getEnvBoolean("QWEN_ENABLE_THINKING", false),
-      photoModel: getEnvOptional("QWEN_PHOTO_MODEL") ?? QWEN_PHOTO_DEFAULT_MODEL,
+      photoModel: normalizeQwenModel(getEnvOptional("QWEN_PHOTO_MODEL"), QWEN_PHOTO_DEFAULT_MODEL),
       photoEnableThinking: getEnvBoolean("QWEN_PHOTO_ENABLE_THINKING", false),
-    } : null;
-
-    const relayKey = getEnvOptional("RELAY_API_KEY");
-    const relayProvider: ProviderConfig | null = relayKey ? {
-      name: "relay",
-      model: getEnvOptional("RELAY_MODEL") ?? RELAY_DEFAULT_MODEL,
-      endpoint: getEnvOptional("RELAY_ENDPOINT") ?? RELAY_DEFAULT_ENDPOINT,
-      apiKey: relayKey,
-    } : null;
-
-    // 主备顺序：通过 VISION_PRIMARY env 决定首选 provider，其它 provider 按固定后备顺序拼接
-    // 取值: moonshot (默认) | qwen | mimo | relay
-    const primary = (getEnvOptional("VISION_PRIMARY") ?? "moonshot").toLowerCase();
-    const allProviders: ProviderConfig[] = [moonshotProvider];
-    if (qwenProvider) allProviders.push(qwenProvider);
-    if (mimoProvider) allProviders.push(mimoProvider);
-    if (relayProvider) allProviders.push(relayProvider);
-    // 把 primary 对应的 provider 移到首位（如果存在）
-    const primaryIdx = allProviders.findIndex((p) => p.name === primary);
-    if (primaryIdx > 0) {
-      const [picked] = allProviders.splice(primaryIdx, 1);
-      allProviders.unshift(picked);
-    }
-    visionProviders = allProviders;
+    };
+    visionProviders = [qwenProvider];
   } catch (e) {
     return respondShortcut({ error: `Secret config error: ${String(e)}` }, { mode: responseMode, status: 500 });
   }
 
-  // 二次调用（文案专用）provider：默认沿用主 vision provider 的密钥，
-  // 但可通过 FEEDBACK_TEXT_PROVIDER / FEEDBACK_TEXT_MODEL / FEEDBACK_TEXT_ENDPOINT 单独覆盖，
-  // 以便接更便宜的纯文本模型。文案调用关闭 enableThinking，固定 temperature=0.85
-  const textProvider: ProviderConfig | null = (() => {
-    const overrideName = (Deno.env.get("FEEDBACK_TEXT_PROVIDER") || "").toLowerCase();
-    const overrideKey = Deno.env.get("FEEDBACK_TEXT_API_KEY");
-    const overrideModel = Deno.env.get("FEEDBACK_TEXT_MODEL");
-    const overrideEndpoint = Deno.env.get("FEEDBACK_TEXT_ENDPOINT");
-    if (overrideName && isProviderName(overrideName) && overrideKey && overrideModel && overrideEndpoint) {
-      return {
-        name: overrideName,
-        model: overrideModel,
-        endpoint: overrideEndpoint,
-        apiKey: overrideKey,
-        enableThinking: false,
-      };
+  // 二次文案调用仍使用 Qwen，只允许单独覆盖 Qwen API Key 和白名单模型。
+  const textProvider: ProviderConfig | null = visionProviders[0]
+    ? {
+      ...visionProviders[0],
+      apiKey: Deno.env.get("FEEDBACK_TEXT_API_KEY") || visionProviders[0].apiKey,
+      model: normalizeQwenModel(Deno.env.get("FEEDBACK_TEXT_MODEL"), visionProviders[0].model),
+      enableThinking: false,
     }
-    return visionProviders[0] ?? null;
-  })();
+    : null;
 
   // 信号驱动 Voice 层开关:默认开;设 VOICE_SIGNALS_ENABLED=false 回退旧记忆注入链路
   const voiceSignalsEnabled = (Deno.env.get("VOICE_SIGNALS_ENABLED") ?? "true") !== "false";
 
   const requestTraceId = crypto.randomUUID();
   let lastAiLogId: string | null = null;
+  let temporaryImageCleanup: { userId: string; path: string } | null = null;
 
   try {
     const startedAt = Date.now();
@@ -3575,91 +4564,209 @@ Deno.serve(async (req) => {
       const jsonBody = await req.json().catch(() => ({}));
       const action = jsonBody?.action;
 
-      if (action === "cleanup_all_images") {
-        // 身份校验：仅 JWT
-        const authHeader = req.headers.get("Authorization") || "";
-        const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-        if (!bearerToken) {
+      if (action === "submit_expression_feedback") {
+        const actionUserId = await authenticatedUserId(req);
+        if (!actionUserId) {
           return new Response(JSON.stringify({ error: "未授权" }), {
             status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
           });
         }
-        const anonKey = getEnvOptional("ANON_PUBLIC_KEY");
-        if (!anonKey || bearerToken === anonKey) {
-          return new Response(JSON.stringify({ error: "未授权" }), {
-            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
-          });
-        }
-        // 解析 user_id
-        let actionUserId: string | null = null;
         try {
-          const userClient = createClient(getEnv("SUPABASE_URL"), anonKey, {
-            global: { headers: { Authorization: authHeader } },
+          const result = await submitExpressionFeedback(supabase, actionUserId, jsonBody);
+          return new Response(JSON.stringify({ ok: true, data: result }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders },
           });
-          const { data: { user: jwtUser }, error: jwtErr } = await userClient.auth.getUser();
-          if (!jwtErr && jwtUser) actionUserId = jwtUser.id;
-        } catch { /* ignore */ }
+        } catch (feedbackError) {
+          return new Response(JSON.stringify({
+            ok: false,
+            error: feedbackError instanceof Error ? feedbackError.message : String(feedbackError),
+          }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+      }
+
+      if (action === "process_image_cleanup_queue") {
+        if (!isCleanupWorkerRequest(req)) {
+          return new Response(JSON.stringify({ error: "Unauthorized worker request" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const { data: workerRun, error: workerRunError } = await supabase.from("image_cleanup_worker_runs")
+          .insert({ status: "running", invocation_source: "scheduled" })
+          .select("id")
+          .single();
+        if (workerRunError || !workerRun) {
+          throw new Error(`Failed to create cleanup worker run: ${workerRunError?.message ?? "missing run id"}`);
+        }
+        const workerRunId = String(workerRun.id);
+        try {
+          const accountDeletions = await finalizeReadyAccountDeletions(supabase);
+          const result = await processImageCleanupQueue(supabase, { limit: 50 });
+          const { error: completeRunError } = await supabase.from("image_cleanup_worker_runs").update({
+            status: "succeeded",
+            completed_at: new Date().toISOString(),
+            processed: result.processed,
+            failed: result.failed,
+            remaining: result.remaining,
+          }).eq("id", workerRunId);
+          if (completeRunError) throw new Error(`Failed to complete cleanup worker run: ${completeRunError.message}`);
+          return new Response(JSON.stringify({ status: "ok", ...result, account_deletions: accountDeletions }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        } catch (workerError) {
+          await supabase.from("image_cleanup_worker_runs").update({
+            status: "failed",
+            completed_at: new Date().toISOString(),
+            error_message: String(workerError),
+          }).eq("id", workerRunId);
+          throw workerError;
+        }
+      }
+
+      if (action === "delete_record") {
+        const actionUserId = await authenticatedUserId(req);
+        const userClient = authenticatedSupabaseClient(req);
+        if (!actionUserId || !userClient) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const reference = typeof jsonBody?.reference === "string" ? jsonBody.reference.trim() : "";
+        const referenceParts = reference.split("/", 2);
+        const recordKind = String(jsonBody?.record_kind ?? (referenceParts.length === 2 ? referenceParts[0] : "")).trim();
+        const recordId = String(jsonBody?.record_id ?? (referenceParts.length === 2 ? referenceParts[1] : "")).trim();
+        if (!recordKind || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recordId)) {
+          return new Response(JSON.stringify({ error: "记录类型或 ID 无效" }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const { data, error: deleteError } = await userClient.rpc("delete_record_with_cleanup", {
+          p_kind: recordKind,
+          p_id: recordId,
+        });
+        if (deleteError) {
+          return new Response(JSON.stringify({ error: `删除记录失败：${deleteError.message}` }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const deletion = data as { reference?: string; image_path?: string; cleanup_queued?: boolean } | null;
+        let cleanup: { processed: number; failed: number; remaining: number } | null = null;
+        let cleanupPending = false;
+        if (deletion?.cleanup_queued && deletion.image_path) {
+          try {
+            cleanup = await processImageCleanupQueue(supabase, {
+              userId: actionUserId,
+              bucketPath: deletion.image_path,
+              limit: 1,
+              force: true,
+            });
+            cleanupPending = cleanup.failed > 0 || cleanup.remaining > 0;
+          } catch (cleanupError) {
+            cleanupPending = true;
+            console.error("Record image cleanup deferred", {
+              error_type: cleanupError instanceof Error ? cleanupError.name : typeof cleanupError,
+            });
+          }
+        }
+
+        return new Response(JSON.stringify({
+          status: "deleted",
+          reference: deletion?.reference ?? `${recordKind}/${recordId}`,
+          cleanup_queued: deletion?.cleanup_queued ?? false,
+          cleanup_pending: cleanupPending,
+          cleanup,
+        }), {
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
+      if (action === "cleanup_all_images") {
+        const actionUserId = await authenticatedUserId(req);
         if (!actionUserId) {
           return new Response(JSON.stringify({ error: "未授权" }), {
             status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
           });
         }
 
-        // 收集该用户所有图片路径
-        const pathsToDelete: string[] = [];
-        const buckets: Array<{ table: string; col: string }> = [
-          { table: "transactions", col: "image_url" },
-          { table: "income_records", col: "image_url" },
-          { table: "data_records", col: "source_image_path" },
-          { table: "staging_records", col: "image_path" },
-          { table: "ai_recognition_logs", col: "image_url" },
-        ];
-        for (const { table, col } of buckets) {
-          const { data: rows } = await supabase.from(table)
-            .select(col)
-            .eq("user_id", actionUserId)
-            .not(col, "is", null);
-          if (rows) {
-            for (const row of rows) {
-              const p = row[col];
-              if (p && typeof p === "string" && p.length > 0) pathsToDelete.push(p);
-            }
+        const result = await cleanupAllUserImages(supabase, actionUserId);
+        const completed = result.failed === 0 && result.deadLetter === 0 && result.remaining === 0;
+        return new Response(JSON.stringify({
+          status: completed ? "ok" : "pending",
+          deleted: result.processed,
+          queued: result.queued,
+          failed: result.failed,
+          dead_letter: result.deadLetter,
+          remaining: result.remaining,
+          skipped_external: result.skippedExternal,
+          total: result.total,
+        }), {
+          status: completed ? 200 : 202,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
+      if (action === "delete_account") {
+        const actionUserId = await authenticatedUserId(req);
+        if (!actionUserId) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const requestedAt = new Date().toISOString();
+        const { error: requestError } = await supabase.from("account_deletion_requests").upsert({
+          user_id: actionUserId,
+          status: "requested",
+          requested_at: requestedAt,
+          updated_at: requestedAt,
+          completed_at: null,
+          attempts: 0,
+          next_retry_at: null,
+          last_error: null,
+        }, { onConflict: "user_id" });
+        if (requestError) {
+          throw new Error(`Failed to create account deletion request: ${requestError.message}`);
+        }
+
+        let cleanup: Awaited<ReturnType<typeof cleanupAllUserImages>>;
+        try {
+          cleanup = await prepareAccountDeletion(supabase, actionUserId, 50);
+        } catch (setupError) {
+          await updateAccountDeletionRequest(supabase, actionUserId, {
+            status: "requested",
+            last_error: String(setupError),
+            next_retry_at: null,
+          }).catch(() => undefined);
+          throw setupError;
+        }
+
+        if (cleanup.remaining === 0 && cleanup.deadLetter === 0) {
+          const completed = await finalizeAccountDeletion(supabase, actionUserId);
+          if (completed) {
+            return new Response(JSON.stringify({ status: "deleted", cleanup }), {
+              headers: { "Content-Type": "application/json", ...corsHeaders },
+            });
           }
         }
 
-        // 删除 Storage 文件（批量，每次最多 100 个）
-        let deletedCount = 0;
-        for (let i = 0; i < pathsToDelete.length; i += 100) {
-          const batch = pathsToDelete.slice(i, i + 100);
-          const { error: delErr } = await supabase.storage.from(BUCKET_NAME).remove(batch);
-          if (!delErr) deletedCount += batch.length;
-        }
-
-        // 清空数据库中的图片路径引用
-        for (const { table, col } of buckets) {
-          await supabase.from(table)
-            .update({ [col]: null })
-            .eq("user_id", actionUserId)
-            .not(col, "is", null);
-        }
-
-        // 写入清理队列记录（便于审计）
-        if (pathsToDelete.length > 0) {
-          await supabase.from("image_cleanup_queue").insert(
-            pathsToDelete.map((p) => ({
-              bucket_path: p,
-              user_id: actionUserId,
-              status: "done",
-            }))
-          ).catch(() => { /* 队列写入失败不影响主流程 */ });
-        }
-
         return new Response(JSON.stringify({
-          status: "ok",
-          deleted: deletedCount,
-          total: pathsToDelete.length,
-        }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+          status: "deletion_pending",
+          message: "账户删除已提交，剩余云端原图将在后台清理，完成后自动删除账户。",
+          cleanup,
+        }), {
+          status: 202,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
       }
+
+      return new Response(JSON.stringify({ error: `不支持的操作：${String(action ?? "")}` }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
 
     // 1. 接收图片（multipart/form-data，字段名 image）
@@ -3706,12 +4813,13 @@ Deno.serve(async (req) => {
       // 没有 JWT，尝试 upload_token 反查
       const uploadToken = normalizeString(form.get("upload_token"));
       if (uploadToken) {
-        const { data: cfg } = await supabase.from("user_configs")
+        const { data: rawConfig } = await supabase.from("user_configs")
           .select("user_id")
           .eq("upload_token", uploadToken)
           .eq("is_active", true)
           .maybeSingle();
-        if (cfg) userId = cfg.user_id;
+        const config = rawConfig as UploadTokenConfigRow | null;
+        if (config) userId = config.user_id;
       }
 
       // 既没有有效 JWT，也没有有效 upload_token，拒绝请求
@@ -3723,6 +4831,21 @@ Deno.serve(async (req) => {
       }
     }
 
+    const { count: deletionRequestCount, error: deletionRequestError } = await supabase
+      .from("account_deletion_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .in("status", ["requested", "cleaning", "deleting", "failed"]);
+    if (deletionRequestError) {
+      throw new Error(`Failed to verify account deletion state: ${deletionRequestError.message}`);
+    }
+    if ((deletionRequestCount ?? 0) > 0) {
+      return respondShortcut(
+        { error: "账户已停用或正在删除，不能继续上传" },
+        { mode: responseMode, status: 410 },
+      );
+    }
+
     let companionSettings: CompanionSettings = DEFAULT_COMPANION_SETTINGS;
     let companionContextPromise: Promise<CompanionContext> = Promise.resolve({
       settings: DEFAULT_COMPANION_SETTINGS,
@@ -3732,13 +4855,20 @@ Deno.serve(async (req) => {
     let domainProfilesPromise: Promise<DomainProfilesMap> = Promise.resolve({});
     let photoVisionPrimary: string | null = "qwen";
 
-    // 用户级 AI 引擎偏好：覆盖 VISION_PRIMARY env
+    // 用户级 Qwen 模型偏好。
     // 取值 auto 表示跟随平台默认；其它强制指定 provider 优先
     if (userId) {
-      const { data: prefRow } = await supabase.from("user_configs")
-        .select("vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, qwen_screenshot_enable_thinking, qwen_photo_enable_thinking, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note, ai_logs_enabled, prompt_optimization_enabled, keep_source_images, image_retention_days")
+      const { data: rawPreferenceRow } = await supabase.from("user_configs")
+        .select("is_active, vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, qwen_screenshot_enable_thinking, qwen_photo_enable_thinking, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note, ai_logs_enabled, prompt_optimization_enabled, keep_source_images, image_retention_days")
         .eq("user_id", userId)
         .maybeSingle();
+      const prefRow = rawPreferenceRow as UserPreferenceRow | null;
+      if (prefRow?.is_active === false) {
+        return respondShortcut(
+          { error: "账户已停用或正在删除，不能继续上传" },
+          { mode: responseMode, status: 410 },
+        );
+      }
       // 读取隐私配置
       privacyConfig = {
         aiLogsEnabled: prefRow?.ai_logs_enabled ?? false,
@@ -3746,7 +4876,6 @@ Deno.serve(async (req) => {
         keepSourceImages: prefRow?.keep_source_images ?? true,
         imageRetentionDays: prefRow?.image_retention_days ?? -1,
       };
-      const userPref = prefRow?.screenshot_vision_primary ?? prefRow?.vision_primary;
       photoVisionPrimary = prefRow?.photo_vision_primary ?? "qwen";
       companionSettings = {
         enabled: prefRow?.companion_enabled ?? true,
@@ -3761,26 +4890,31 @@ Deno.serve(async (req) => {
         const qwenCfg = visionProviders[qwenIdx];
         visionProviders[qwenIdx] = {
           ...qwenCfg,
-          model: normalizeString(prefRow.qwen_screenshot_model) ?? qwenCfg.model,
+          model: normalizeQwenModel(prefRow.qwen_screenshot_model, qwenCfg.model),
           enableThinking: typeof prefRow.qwen_screenshot_enable_thinking === "boolean"
             ? prefRow.qwen_screenshot_enable_thinking
             : qwenCfg.enableThinking,
-          photoModel: normalizeString(prefRow.qwen_photo_model) ?? qwenCfg.photoModel,
+          photoModel: normalizeQwenModel(prefRow.qwen_photo_model, qwenCfg.photoModel ?? QWEN_PHOTO_DEFAULT_MODEL),
           photoEnableThinking: typeof prefRow.qwen_photo_enable_thinking === "boolean"
             ? prefRow.qwen_photo_enable_thinking
             : qwenCfg.photoEnableThinking,
         };
       }
-      if (userPref && userPref !== "auto") {
-        const idx = visionProviders.findIndex((p) => p.name === userPref);
-        if (idx > 0) {
-          const [picked] = visionProviders.splice(idx, 1);
-          visionProviders.unshift(picked);
-        }
-      }
       companionContextPromise = loadCompanionContext(supabase, userId, companionSettings);
       domainProfilesPromise = loadDomainProfiles(supabase, userId);
     }
+
+    const respondWithExpressionShadow = (
+      payload: Record<string, unknown>,
+      options: { mode: ShortcutResponseMode; status?: number },
+    ): Response => {
+      scheduleExpressionShadowCapture(supabase, {
+        userId,
+        payload,
+        responseMode: options.mode,
+      });
+      return respondShortcut(payload, options);
+    };
 
     const stagingRetryId = normalizeString(form.get("staging_record_id"));
     let file = form.get("image") as File | null;
@@ -3789,10 +4923,12 @@ Deno.serve(async (req) => {
     let retryImagePath: string | null = null;
     let retryImageHash: string | null = null;
     if (stagingRetryId && !file) {
-      const { data: stagingRow } = await supabase.from("staging_records")
+      const { data: rawStagingRow } = await supabase.from("staging_records")
         .select("id,image_path,image_hash,retry_count")
         .eq("id", stagingRetryId)
+        .eq("user_id", userId)
         .maybeSingle();
+      const stagingRow = rawStagingRow as StagingRetryRow | null;
       if (!stagingRow || !stagingRow.image_path) {
         return respondShortcut({ error: "Staging record not found or missing image" }, { mode: responseMode, status: 404 });
       }
@@ -3816,7 +4952,7 @@ Deno.serve(async (req) => {
     let mime: string;
     if (retryImageBytes) {
       bytes = retryImageBytes;
-      buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      buf = Uint8Array.from(bytes).buffer;
       mime = retryImageMime;
     } else {
       buf = await file!.arrayBuffer();
@@ -3850,6 +4986,162 @@ Deno.serve(async (req) => {
       : chinaNow;
     const _weekdayCN = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][referenceLocal.getUTCDay()];
     const clientLocalTime = `${referenceLocal.toISOString().slice(0, 10)} ${String(referenceLocal.getUTCHours()).padStart(2, '0')}:${String(referenceLocal.getUTCMinutes()).padStart(2, '0')}`;
+
+    // 2. 计算 hash 去重
+    const hash = retryImageHash || await sha256(buf);
+    timings.mark("hash");
+    let perceptualDistance: number | null = null;
+    let perceptualMatch: RankedPerceptualCandidate | null = null;
+    const perceptualCandidatesPromise = perceptualHash
+      ? withTimeoutFallback(
+        loadRecentFinancialPerceptualCandidates(supabase, userId!, stagingRetryId),
+        900,
+        { candidates: [], financeColumnsAvailable: false } as FinancialPerceptualLookupResult,
+        "perceptual_lookup",
+      )
+      : Promise.resolve({ candidates: [], financeColumnsAvailable: false } as FinancialPerceptualLookupResult);
+
+    let stagingDuplicateBuilder = supabase
+      .from("staging_records")
+      .select("id,record_type,status")
+      .eq("image_hash", hash)
+      .eq("user_id", userId)
+      .in("status", [
+        "unassigned",
+        "assigned",
+        "failed",
+        "unrouted",
+        "routed",
+        "routing_failed",
+        "extracted",
+        "pending_review",
+        "extraction_failed",
+        "schema_failed",
+        "ai_error",
+      ]);
+    if (stagingRetryId) stagingDuplicateBuilder = stagingDuplicateBuilder.neq("id", stagingRetryId);
+    const stagingDuplicateQuery = stagingDuplicateBuilder.limit(1).maybeSingle();
+
+    const [transactionDuplicateResult, incomeDuplicateResult, dataDuplicateResult, stagingDuplicateResult] = await Promise.all([
+      supabase
+        .from("transactions")
+        .select("id")
+        .eq("image_hash", hash)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("income_records")
+        .select("id")
+        .eq("image_hash", hash)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("data_records")
+        .select("id,domain_key")
+        .eq("source_image_hash", hash)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle(),
+      stagingDuplicateQuery,
+    ]);
+    const exactLookupError = transactionDuplicateResult.error
+      || incomeDuplicateResult.error
+      || dataDuplicateResult.error
+      || stagingDuplicateResult.error;
+    if (exactLookupError) {
+      throw new Error(`Exact duplicate check failed: ${exactLookupError.message}`);
+    }
+    timings.mark("dup_check");
+
+    const txDup = transactionDuplicateResult.data as IdRow | null;
+    if (txDup) {
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: null,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: "expense",
+        target_table: "transactions",
+        target_id: txDup.id,
+        duration_ms: Date.now() - startedAt,
+      });
+      const _spendSum = await summarizeTodaySpend(supabase, userId);
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "duplicate", id: txDup.id, record_type: "expense",
+        message: "该截图已记账",
+        notification: `🔁 该截图已记账过\n${todaySpendLine(_spendSum)}`,
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
+    }
+    const incDup = incomeDuplicateResult.data as IdRow | null;
+    if (incDup) {
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: null,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: "income",
+        target_table: "income_records",
+        target_id: incDup.id,
+        duration_ms: Date.now() - startedAt,
+      });
+      const _incSum = await summarizeMonthIncome(supabase, userId);
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "duplicate", id: incDup.id, record_type: "income",
+        message: "该收入截图已记录",
+        notification: `🔁 该收入截图已记录过\n${monthIncomeLine(_incSum)}`,
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
+    }
+    const dataDup = dataDuplicateResult.data as DataDuplicateRow | null;
+    if (dataDup) {
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: null,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: dataDup.domain_key,
+        target_table: "data_records",
+        target_id: dataDup.id,
+        data_record_id: dataDup.id,
+        duration_ms: Date.now() - startedAt,
+        prompt_version: promptVersion,
+      });
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
+        message: "该截图已归档",
+        notification: `🔁 该截图已归档过 · ${domainNameFromKey(dataDup.domain_key) ?? dataDup.domain_key}`,
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
+    }
+
+    const stagingDup = stagingDuplicateResult.data as StagingDuplicateRow | null;
+    if (stagingDup) {
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: null,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: stagingDup.record_type ?? "uncertain",
+        target_table: "staging_records",
+        target_id: stagingDup.id,
+        staging_record_id: stagingDup.id,
+        duration_ms: Date.now() - startedAt,
+        prompt_version: promptVersion,
+      });
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "duplicate",
+        staging_status: stagingDup.status,
+        id: stagingDup.id,
+        record_type: stagingDup.record_type ?? "uncertain",
+        message: "该截图已在待处理中",
+        notification: "🔁 该截图已在中转站等待处理",
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
+    }
+
     const companionContext = await withTimeoutFallback(
       companionContextPromise,
       COMPANION_CONTEXT_TIMEOUT_MS,
@@ -3877,125 +5169,48 @@ Deno.serve(async (req) => {
     });
     const visionPromptHash = await sha256Short(visionPrompt);
 
-    // 2. 计算 hash 去重
-    const hash = retryImageHash || await sha256(buf);
-    timings.mark("hash");
-    let perceptualDistance: number | null = null;
-    let perceptualDupRefId: string | null = null;
-    if (perceptualHash) {
-      // 感知哈希查重必须按用户隔离,否则 A 用户的截图会命中 B 用户的记录
-      let phQuery = supabase
-        .from("ai_recognition_logs")
-        .select("id,perceptual_hash")
-        .not("perceptual_hash", "is", null);
-      if (userId) phQuery = phQuery.eq("user_id", userId);
-      const { data: recentLogs } = await phQuery
-        .order("created_at", { ascending: false })
-        .limit(30);
-      for (const item of recentLogs || []) {
-        const distance = hammingDistanceHex(perceptualHash, item.perceptual_hash);
-        if (distance !== null && distance <= 5) {
-          perceptualDistance = distance;
-          perceptualDupRefId = item.id;
-          break;
-        }
-      }
-    }
-    timings.mark("perceptual_lookup");
-    const { data: txDup } = await supabase
-      .from("transactions").select("id").eq("image_hash", hash).maybeSingle();
-    if (txDup) {
-      const aiLogId = await writeTraceAiLog({
-        image_hash: hash,
-        perceptual_hash: perceptualHash,
-        perceptual_distance: perceptualDistance,
-        duplicate_kind: "exact_hash",
-        status: "duplicate",
-        record_type: "expense",
-        target_table: "transactions",
-        target_id: txDup.id,
-        duration_ms: Date.now() - startedAt,
-      });
-      const _spendSum = await summarizeTodaySpend(supabase, userId);
-      return respondShortcut(withTraceMeta({
-        status: "duplicate", id: txDup.id, record_type: "expense",
-        message: "该截图已记账",
-        notification: `🔁 该截图已记账过\n${todaySpendLine(_spendSum)}`,
-      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
-    }
-    const { data: incDup } = await supabase
-      .from("income_records").select("id").eq("image_hash", hash).maybeSingle();
-    if (incDup) {
-      const aiLogId = await writeTraceAiLog({
-        image_hash: hash,
-        perceptual_hash: perceptualHash,
-        perceptual_distance: perceptualDistance,
-        duplicate_kind: "exact_hash",
-        status: "duplicate",
-        record_type: "income",
-        target_table: "income_records",
-        target_id: incDup.id,
-        duration_ms: Date.now() - startedAt,
-      });
-      const _incSum = await summarizeMonthIncome(supabase, userId);
-      return respondShortcut(withTraceMeta({
-        status: "duplicate", id: incDup.id, record_type: "income",
-        message: "该收入截图已记录",
-        notification: `🔁 该收入截图已记录过\n${monthIncomeLine(_incSum)}`,
-      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
-    }
-    const { data: dataDup } = await supabase
-      .from("data_records").select("id,domain_key").eq("source_image_hash", hash).maybeSingle();
-    timings.mark("dup_check");
-    if (dataDup) {
-      const aiLogId = await writeTraceAiLog({
-        image_hash: hash,
-        perceptual_hash: perceptualHash,
-        perceptual_distance: perceptualDistance,
-        duplicate_kind: "exact_hash",
-        status: "duplicate",
-        record_type: dataDup.domain_key,
-        target_table: "data_records",
-        target_id: dataDup.id,
-        data_record_id: dataDup.id,
-        duration_ms: Date.now() - startedAt,
-        prompt_version: promptVersion,
-      });
-      return respondShortcut(withTraceMeta({
-        status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
-        message: "该截图已归档",
-        notification: `🔁 该截图已归档过 · ${domainNameFromKey(dataDup.domain_key) ?? dataDup.domain_key}`,
-      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
-    }
-
     const dispatcher = await runLowCostDispatcher(supabase, { rawText, sourceApp, imageFeatures, userId });
     timings.mark("dispatcher");
-    let duplicateKind: string | null = perceptualDupRefId ? "perceptual_hash" : null;
-    let duplicateRefTable: string | null = perceptualDupRefId ? "ai_recognition_logs" : null;
-    let duplicateRefId: string | null = perceptualDupRefId;
+    let duplicateKind: string | null = null;
+    let duplicateRefTable: string | null = null;
+    let duplicateRefId: string | null = null;
 
     // 3. 上传到 Storage（重试模式跳过，图片已存在）
-    // 隐私控制：keep_source_images=false 时上传到 tmp/ 临时路径，由清理逻辑定期删除
-    const storagePath = isRetry ? (retryImagePath!) : `${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
+    // 隐私控制：keep_source_images=false 时仅以 tmp/ 路径完成识别，并在请求结束前删除
+    const storagePath = isRetry ? (retryImagePath!) : `${userId}/${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
     const path = (!isRetry && !privacyConfig.keepSourceImages) ? `tmp/${storagePath}` : storagePath;
+    if (!privacyConfig.keepSourceImages) {
+      temporaryImageCleanup = { userId, path };
+    }
     let uploadedNewObject = false;
-    if (!isRetry) {
+    const storageUploadPromise = (async () => {
+      const uploadStartedAt = Date.now();
+      if (isRetry) {
+        return { uploaded: false, error: null as Error | null, durationMs: 0 };
+      }
       const { error: upErr } = await supabase.storage.from(BUCKET_NAME)
         .upload(path, bytes, { contentType: mime, upsert: false });
       if (upErr && !upErr.message.includes("already exists")) {
-        throw new Error(`Upload failed: ${upErr.message}`);
+        return {
+          uploaded: false,
+          error: new Error(`Upload failed: ${upErr.message}`),
+          durationMs: Date.now() - uploadStartedAt,
+        };
       }
-      uploadedNewObject = !upErr;
-    }
-    timings.mark("storage_upload");
+      return {
+        uploaded: !upErr,
+        error: null as Error | null,
+        durationMs: Date.now() - uploadStartedAt,
+      };
+    })();
 
-    // 4. 调用 Vision 识别（多 Provider 优雅降级：Moonshot 主 → MiMo 备）
+    // 4. 调用 Qwen Vision 识别。
     //    始终调用，不因低成本路由无匹配而跳过
     let ai: AIResult;
     let aiOk = true;
     let aiErrorMessage: string | null = null;
-    let aiProvider: ProviderName = "moonshot";
-    let aiModel: string = MOONSHOT_MODEL;
+    let aiProvider: ProviderName = "qwen";
+    let aiModel: string = QWEN_DEFAULT_MODEL;
     let visionAttempts: VisionAttempt[] = [];
     let visionRawText: string | null = null;
     let visionExtractedJson: string | null = null;
@@ -4062,9 +5277,19 @@ Deno.serve(async (req) => {
         aiModel = lastAttempt.model;
       }
       ai = { image_type: "other", record_type: "uncertain", domain_key: null, title: null, summary: null, amount: null, merchant_name: null, platform: null, category: null, payment_method: null, income_category: null, source_name: null, occurred_at: null, order_finished_at: null, payload_jsonb: null, confidence: 0 };
-      console.error("All vision providers failed:", e);
+      console.error("All vision providers failed", {
+        providers: visionAttempts.map((attempt) => ({
+          provider: attempt.provider,
+          model: attempt.model,
+          duration_ms: attempt.duration_ms,
+        })),
+      });
     }
     timings.mark("vision_total");
+    const storageUpload = await storageUploadPromise;
+    timings.record("storage_upload", storageUpload.durationMs);
+    if (storageUpload.error) throw storageUpload.error;
+    uploadedNewObject = storageUpload.uploaded;
     // 慢请求采样：vision 阶段 > 5s 时打印 warn，方便从函数日志直接搜
     const _visionMs = timings.snapshot().vision_total ?? 0;
     if (_visionMs > 5000) {
@@ -4153,6 +5378,8 @@ Deno.serve(async (req) => {
       ai.record_type = builtinKey;
       ai.domain_key = builtinKey;
     }
+    const perceptualLookup = await perceptualCandidatesPromise;
+    const perceptualStorageAvailable = perceptualLookup.financeColumnsAvailable && Boolean(perceptualHash);
     const accountHint = !builtinKey ? buildAccountHint(ai, recordType) : null;
     const userAccounts = !builtinKey ? await loadUserAccounts(supabase, userId) : [];
     const accountCandidates = !builtinKey ? rankAccountCandidates(userAccounts, accountHint) : [];
@@ -4160,8 +5387,14 @@ Deno.serve(async (req) => {
 
     // 重试模式：处理结果后直接返回
     if (isRetry && stagingRetryId) {
-      const retryResult = aiOk && (recordType !== "uncertain") && (ai.confidence ?? 0) >= 0.5;
-      const retryCount = (await supabase.from("staging_records").select("retry_count").eq("id", stagingRetryId).maybeSingle())?.data?.retry_count ?? 0;
+      const hasRequiredFinancialAmount = !["expense", "income"].includes(recordType) || normalizedAmount !== null;
+      const retryResult = aiOk && (recordType !== "uncertain") && hasRequiredFinancialAmount && (ai.confidence ?? 0) >= 0.5;
+      const retryCountRow = (await supabase.from("staging_records")
+        .select("retry_count")
+        .eq("id", stagingRetryId)
+        .eq("user_id", userId)
+        .maybeSingle()).data as { retry_count: number | null } | null;
+      const retryCount = retryCountRow?.retry_count ?? 0;
       const retryOccurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
       const retryOccurredAt = retryOccurredDateTime?.iso ?? null;
       const retryTimeContext = buildTimeContext({
@@ -4198,14 +5431,17 @@ Deno.serve(async (req) => {
 
         if (recordType === "income") {
           const incomeCat = ["salary","bonus","freelance","investment","reimbursement","other"].includes(ai.income_category ?? "") ? ai.income_category! : "other";
-          const { data: incRow } = await supabase.from("income_records").insert({
-            amount: normalizedAmount ?? 0.01, category: incomeCat,
+          const { data: rawIncomeRow } = await supabase.from("income_records").insert({
+            amount: normalizedAmount, category: incomeCat,
             source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
-            income_date: recordDate, image_url: path, image_hash: hash, user_id: userId || null, source: "ai_scan",
+            income_date: recordDate, image_url: path, image_hash: hash,
+            ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
+            user_id: userId || null, source: "ai_scan",
             account_id: autoBoundAccount?.id ?? null,
             companion_message: companionMessage,
             ai_feedback: aiFeedback,
           }).select("id").single();
+          const incRow = rawIncomeRow as IdRow | null;
           if (incRow) {
             if (autoBoundAccount && normalizedAmount !== null) {
               try {
@@ -4220,6 +5456,7 @@ Deno.serve(async (req) => {
                 });
               } catch (entryError) {
                 await supabase.from("income_records").delete().eq("id", incRow.id);
+                if (uploadedNewObject) await cleanupUploadedObjectOrQueue(supabase, userId, path);
                 throw entryError;
               }
             }
@@ -4240,26 +5477,29 @@ Deno.serve(async (req) => {
               ai.companion_message = companionMessage;
               aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
             }
-            const { data: drRow } = await supabase.from("data_records").insert({
+            const { data: rawDataRow } = await supabase.from("data_records").insert({
               domain_id: domain.id, domain_key: builtinKey, domain_version: domain.version ?? "1.0",
               occurred_at: occurredAt, title: built.title, summary: built.summary,
               payload_jsonb: withTestMeta({ ...built.payload, time_context: timeContext, companion_message: companionMessage, ai_feedback: aiFeedback }, testMeta), user_id: userId || null, source: "ai_scan", source_image_path: path, source_image_hash: hash,
             }).select("id").single();
-            if (drRow) { archivedTo = "data_records"; archivedId = drRow.id; }
+            const dataRow = rawDataRow as IdRow | null;
+            if (dataRow) { archivedTo = "data_records"; archivedId = dataRow.id; }
           }
         } else {
           // expense
           const isComplete = normalizedAmount !== null && ai.platform !== null && ai.category !== null && ai.payment_method !== null;
-          const { data: txRow } = await supabase.from("transactions").insert({
-            type: "expense", amount: normalizedAmount ?? 0.01,
+          const { data: rawTransactionRow } = await supabase.from("transactions").insert({
+            type: "expense", amount: normalizedAmount,
             merchant_name: ai.merchant_name, platform: ai.platform, category: ai.category,
             payment_method: ai.payment_method, status: isComplete ? "done" : "pending",
             image_url: path, image_hash: hash,
+            ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
             transaction_date: recordDate, transaction_time: recordTime, user_id: userId || null, source: "ai_scan",
             account_id: autoBoundAccount?.id ?? null,
             companion_message: companionMessage,
             ai_feedback: aiFeedback,
           }).select("id").single();
+          const txRow = rawTransactionRow as IdRow | null;
           if (txRow) {
             if (autoBoundAccount && normalizedAmount !== null) {
               try {
@@ -4274,6 +5514,7 @@ Deno.serve(async (req) => {
                 });
               } catch (entryError) {
                 await supabase.from("transactions").delete().eq("id", txRow.id);
+                if (uploadedNewObject) await cleanupUploadedObjectOrQueue(supabase, userId, path);
                 throw entryError;
               }
             }
@@ -4287,7 +5528,7 @@ Deno.serve(async (req) => {
             status: "archived", resolved_at: now.toISOString(), resolved_action: "archived",
             target_record_id: archivedId, retry_count: retryCount + 1,
             ai_summary: ai.record_type ? `重试成功 → ${domainNameFromKey(ai.record_type) ?? ai.record_type}` : "重试成功",
-          }).eq("id", stagingRetryId);
+          }).eq("id", stagingRetryId).eq("user_id", userId);
 
           const aiLogId = await writeTraceAiLog({
             image_hash: hash, image_url: path, image_type: ai.image_type,
@@ -4318,7 +5559,7 @@ Deno.serve(async (req) => {
             occurredAt,
           });
           fireAndForgetProfileRefresh(supabase, userId, recordType);
-          return respondShortcut(withTraceMeta({
+          return respondWithExpressionShadow(withTraceMeta({
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
             notification: aiFeedback ? feedbackNotification(aiFeedback, _retryNotif) : withCompanion(_retryNotif),
@@ -4335,7 +5576,7 @@ Deno.serve(async (req) => {
         last_error_type: !aiOk ? "AI_PROVIDER_ERROR" : "RETRY_STILL_UNCERTAIN",
         last_error_message: aiErrorMessage || `重试后仍无法确定（record_type=${recordType}, confidence=${ai.confidence ?? 0}）`,
         ai_summary: ai.record_type ? `重试 → ${ai.record_type} (confidence: ${ai.confidence ?? 0})` : "重试失败",
-      }).eq("id", stagingRetryId);
+      }).eq("id", stagingRetryId).eq("user_id", userId);
 
       const aiLogId = await writeTraceAiLog({
         image_hash: hash, image_url: path, image_type: ai.image_type,
@@ -4354,7 +5595,7 @@ Deno.serve(async (req) => {
         prompt_version: promptVersion,
       });
 
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "staging", staging_status: "retry_failed",
         message: "⚠ 重试仍未确定，请手动选择数据域归档",
         notification: withCompanion("⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档"),
@@ -4380,7 +5621,31 @@ Deno.serve(async (req) => {
     const recordDate = occurredDateTime?.date ?? today;
     const recordTime = occurredDateTime?.time ?? nowTime;
 
-    if (!aiOk || (!builtinKey && recordType === "uncertain") || (!builtinKey && (ai.confidence ?? 0) < 0.35 && normalizedAmount === null)) {
+    if (!isRetry && perceptualHash && (recordType === "expense" || recordType === "income")) {
+      const currentOccurredAt = occurredAt
+        || (recordType === "expense" ? transactionOccurredAt(recordDate, recordTime) : null);
+      perceptualMatch = findLikelyFinancialDuplicate(perceptualHash, {
+        recordType,
+        amount: normalizedAmount,
+        merchantOrSource: recordType === "income"
+          ? ai.source_name ?? ai.merchant_name ?? "截图识别收入"
+          : ai.merchant_name ?? null,
+        platform: ai.platform ?? null,
+        paymentMethod: ai.payment_method ?? null,
+        occurredAt: currentOccurredAt,
+        occurredDate: recordDate,
+        timePrecision: currentOccurredAt ? "datetime" : recordDate ? "date" : "none",
+      }, perceptualLookup.candidates);
+      if (perceptualMatch) {
+        perceptualDistance = perceptualMatch.distance;
+        duplicateKind = "perceptual_hash";
+        duplicateRefTable = perceptualMatch.referenceTable;
+        duplicateRefId = perceptualMatch.referenceId;
+      }
+    }
+
+    const missingFinancialAmount = !builtinKey && ["expense", "income"].includes(recordType) && normalizedAmount === null;
+    if (!aiOk || missingFinancialAmount || (!builtinKey && recordType === "uncertain") || (!builtinKey && (ai.confidence ?? 0) < 0.35 && normalizedAmount === null)) {
       const stagingStatus = !aiOk ? "ai_error" : "routing_failed";
       const staging = await createStagingRecord(supabase, {
         status: stagingStatus,
@@ -4428,7 +5693,7 @@ Deno.serve(async (req) => {
       const _stgPrimary = !aiOk
         ? "❌ AI 识别失败，已进入待处理"
         : `⚠️ ${_stgAmtPart}请打开 App 补全`;
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "staging",
         staging_status: stagingStatus,
         id: staging?.id ?? null,
@@ -4565,7 +5830,7 @@ Deno.serve(async (req) => {
         const _bNotif = domain
           ? `⚠️ 已识别为${_bDomainName}\n请打开 App 确认后归档`
           : `⚠️ 未找到对应数据域\n已进入待处理`;
-        return respondShortcut(withTraceMeta({
+        return respondWithExpressionShadow(withTraceMeta({
           status: "staging",
           staging_status: domain ? "pending_review" : "routing_failed",
           id: staging?.id ?? null,
@@ -4578,7 +5843,7 @@ Deno.serve(async (req) => {
         }, responseTraceMeta(aiLogId)), { mode: responseMode });
       }
 
-      const { data: row, error: dataErr } = await supabase.from("data_records").insert({
+      const { data: rawDataRow, error: dataErr } = await supabase.from("data_records").insert({
         domain_id: domain.id,
         domain_key: builtinKey,
         domain_version: domain.version ?? "1.0",
@@ -4618,11 +5883,11 @@ Deno.serve(async (req) => {
           prompt_version: promptVersion,
         });
         if (uploadedNewObject) {
-          const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
-          if (removeErr) console.error("Cleanup uploaded data record image failed:", removeErr);
+          await cleanupUploadedObjectOrQueue(supabase, userId, path);
         }
         throw new Error(`Data record insert failed: ${dataErr.message}`);
       }
+      const row = rawDataRow as InsertedRecordRow;
 
       const aiLogId = await writeTraceAiLog({
         image_hash: hash,
@@ -4664,7 +5929,7 @@ Deno.serve(async (req) => {
 
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
       const _domainDoneNotif = `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`;
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: builtinKey,
@@ -4678,88 +5943,83 @@ Deno.serve(async (req) => {
       }, responseTraceMeta(aiLogId)), { mode: responseMode });
     }
 
+    if (perceptualMatch && (recordType === "expense" || recordType === "income")) {
+      const duplicateReview = {
+        kind: "perceptual_hash" as const,
+        distance: perceptualMatch.distance,
+        referenceTable: perceptualMatch.referenceTable,
+        referenceId: perceptualMatch.referenceId,
+        recordType,
+      };
+      const staging = await createStagingRecord(supabase, {
+        status: "pending_review",
+        imagePath: path,
+        imageHash: hash,
+        perceptualHash,
+        ai,
+        occurredAt,
+        orderFinishedAt,
+        errorType: "POSSIBLE_DUPLICATE",
+        errorMessage: "图片和已有记录相似，请确认是否为同一笔",
+        dispatcher,
+        userId,
+        timeContext,
+        testMeta,
+        duplicateReview,
+      }, privacyConfig);
+      if (!staging) throw new Error("Failed to create possible-duplicate review record");
+
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: perceptualMatch.distance,
+        image_url: path,
+        image_type: ai.image_type,
+        record_type: recordType,
+        occurred_at: occurredAt,
+        order_finished_at: orderFinishedAt,
+        duplicate_kind: "perceptual_hash",
+        duplicate_ref_table: perceptualMatch.referenceTable,
+        duplicate_ref_id: perceptualMatch.referenceId,
+        target_table: "staging_records",
+        target_id: staging.id,
+        staging_record_id: staging.id,
+        status: "pending",
+        confidence: ai.confidence ?? 0,
+        duration_ms: Date.now() - startedAt,
+        ai_response: aiWithTimeContext,
+        error_message: null,
+        model_provider: aiProvider,
+        model_name: aiModel,
+        raw_response: rawDebug({ dispatcher }),
+        prompt_version: promptVersion,
+      });
+
+      const retainedEvidenceMessage = privacyConfig.keepSourceImages
+        ? "图片已保留并等待确认"
+        : "文字事实已保留，原图会按你的设置删除";
+
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "staging",
+        staging_status: "pending_review",
+        id: staging.id,
+        record_type: recordType,
+        ai_ok: aiOk,
+        possible_duplicate: true,
+        duplicate_ref_table: perceptualMatch.referenceTable,
+        duplicate_ref_id: perceptualMatch.referenceId,
+        message: `发现相似记录，${retainedEvidenceMessage}`,
+        notification: withCompanion(`⚠️ 这张图可能和已有记录重复\n${retainedEvidenceMessage}`),
+        time_context: timeContext,
+        companion_message: companionMessage,
+      }, responseTraceMeta(aiLogId)), { mode: responseMode });
+    }
+
     if (recordType === "income" && normalizedAmount !== null && (ai.confidence ?? 0) >= 0.7) {
       const incomeCategory = ["salary", "bonus", "freelance", "investment", "reimbursement", "other"].includes(ai.income_category ?? "")
         ? ai.income_category
         : "other";
       const sourceName = ai.source_name ?? ai.merchant_name ?? "截图识别收入";
-
-      if (duplicateKind === "perceptual_hash" && duplicateRefId) {
-        const { data: refLog } = await supabase
-          .from("ai_recognition_logs")
-          .select("id,target_table,target_id,record_type")
-          .eq("id", duplicateRefId)
-          .maybeSingle();
-
-        if (refLog?.record_type === "income" && refLog.target_table === "income_records" && refLog.target_id) {
-          const { data: refIncome } = await supabase
-            .from("income_records")
-            .select("id,amount,source_name")
-            .eq("id", refLog.target_id)
-            .maybeSingle();
-
-          const currentSource = normalizeName(sourceName);
-          const refSource = normalizeName(refIncome?.source_name);
-          const sourceMatches = currentSource && refSource
-            ? currentSource === refSource
-            : currentSource === refSource || currentSource === "截图识别收入" || refSource === "截图识别收入";
-
-          // 时间维度校验：同金额同来源但时间间隔 > 10 分钟 → 不是同一笔
-          let incomeTimeMatch = true;
-          const refCreated = refLog?.created_at ? new Date(refLog.created_at).getTime() : null;
-          const curOccurred = occurredAt ? new Date(occurredAt).getTime() : null;
-          const curOrderFinished = orderFinishedAt ? new Date(orderFinishedAt).getTime() : null;
-          const nowMs2 = Date.now();
-          if (refCreated) {
-            const curTime = curOccurred || curOrderFinished || nowMs2;
-            if (Math.abs(curTime - refCreated) > 10 * 60 * 1000) {
-              incomeTimeMatch = false;
-            }
-          }
-
-          if (refIncome && isSameAmount(refIncome.amount, normalizedAmount) && sourceMatches && incomeTimeMatch) {
-            const aiLogId = await writeTraceAiLog({
-              image_hash: hash,
-              perceptual_hash: perceptualHash,
-              perceptual_distance: perceptualDistance,
-              image_url: path,
-              image_type: ai.image_type,
-              record_type: "income",
-              occurred_at: occurredAt,
-              order_finished_at: orderFinishedAt,
-              duplicate_kind: duplicateKind,
-              duplicate_ref_table: duplicateRefTable,
-              duplicate_ref_id: duplicateRefId,
-              target_table: "income_records",
-              target_id: refIncome.id,
-              status: "duplicate",
-              confidence: ai.confidence ?? 0,
-              duration_ms: Date.now() - startedAt,
-              ai_response: aiWithTimeContext,
-              error_message: aiErrorMessage,
-              model_provider: aiProvider,
-              model_name: aiModel,
-              raw_response: rawDebug(),
-              prompt_version: promptVersion,
-            });
-            if (uploadedNewObject) {
-              const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
-              if (removeErr) console.error("Cleanup duplicate income image failed:", removeErr);
-            }
-            const _iSum2 = await summarizeMonthIncome(supabase, userId);
-            return respondShortcut(withTraceMeta({
-              status: "duplicate",
-              id: refIncome.id,
-              record_type: "income",
-              ai_ok: aiOk,
-              message: "该收入截图疑似已记录",
-              notification: withCompanion(`🔁 该收入疑似已记录过\n${monthIncomeLine(_iSum2)}`),
-              time_context: timeContext,
-              companion_message: companionMessage,
-            }, responseTraceMeta(aiLogId)), { mode: responseMode });
-          }
-        }
-      }
 
       if (companionSettings.enabled) {
         const _secondCallIncome = await regenerateFeedbackWithSecondCall({
@@ -4801,13 +6061,14 @@ Deno.serve(async (req) => {
         }
       }
 
-      const { data: row, error: incErr } = await supabase.from("income_records").insert({
+      const { data: rawIncomeRow, error: incErr } = await supabase.from("income_records").insert({
         amount: normalizedAmount,
         category: incomeCategory,
         source_name: sourceName,
         income_date: recordDate,
         image_url: path,
         image_hash: hash,
+        ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
         user_id: userId || null,
         source: "ai_scan",
         account_id: autoBoundAccount?.id ?? null,
@@ -4841,11 +6102,11 @@ Deno.serve(async (req) => {
           prompt_version: promptVersion,
         });
         if (uploadedNewObject) {
-          const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
-          if (removeErr) console.error("Cleanup uploaded income image failed:", removeErr);
+          await cleanupUploadedObjectOrQueue(supabase, userId, path);
         }
         throw new Error(`Income insert failed: ${incErr.message}`);
       }
+      const row = rawIncomeRow as InsertedRecordRow;
 
       if (row && autoBoundAccount) {
         try {
@@ -4860,6 +6121,7 @@ Deno.serve(async (req) => {
           });
         } catch (entryError) {
           await supabase.from("income_records").delete().eq("id", row.id);
+          if (uploadedNewObject) await cleanupUploadedObjectOrQueue(supabase, userId, path);
           throw entryError;
         }
       }
@@ -4902,7 +6164,7 @@ Deno.serve(async (req) => {
       const _iDoneSum = await summarizeMonthIncome(supabase, userId);
       const _iSourceLabel = sourceName && sourceName !== "截图识别收入" ? ` · ${sourceName}` : "";
       const _incomeNotif = `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`;
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: "income",
@@ -4916,81 +6178,6 @@ Deno.serve(async (req) => {
       }, responseTraceMeta(aiLogId)), { mode: responseMode });
     }
 
-    // 4.5 感知哈希去重：同一笔支出（同金额+同商家）的相似截图 → 拦截
-    if (duplicateKind === "perceptual_hash" && duplicateRefId && normalizedAmount !== null) {
-      const { data: refLog } = await supabase
-        .from("ai_recognition_logs")
-        .select("id,target_table,target_id,record_type,ai_response")
-        .eq("id", duplicateRefId)
-        .maybeSingle();
-
-      if (refLog && refLog.record_type === "expense") {
-        let refAmount: number | null = null;
-        let refMerchant: string | null = null;
-        try {
-          const refAi = typeof refLog.ai_response === "string" ? JSON.parse(refLog.ai_response) : (refLog.ai_response || {});
-          refAmount = normalizeAmount(refAi.amount);
-          refMerchant = (refAi.merchant_name || "").trim();
-        } catch {}
-
-        const currentMerchant = (ai.merchant_name || "").trim();
-        const amountMatch = refAmount !== null && normalizedAmount !== null && Math.abs(refAmount - normalizedAmount) <= 0.01;
-        const merchantMatch = currentMerchant && refMerchant
-          ? currentMerchant === refMerchant
-          : !currentMerchant && !refMerchant;
-
-        // 时间维度校验：即使同金额同商户，如果交易时间间隔 > 10 分钟，视为不同笔订单
-        let timeMatch = true; // 默认无时间信息时不拦截（保守策略：宁可不拦截也不误杀）
-        if (amountMatch && merchantMatch) {
-          const refCreatedAt = refLog.created_at ? new Date(refLog.created_at).getTime() : null;
-          const currentOccurredAt = occurredAt ? new Date(occurredAt).getTime() : null;
-          const currentOrderFinishedAt = orderFinishedAt ? new Date(orderFinishedAt).getTime() : null;
-          const nowMs = Date.now();
-
-          // 优先用 occurred_at / order_finished_at 判断，没有则用 refLog 的 created_at 和当前时间
-          if (currentOccurredAt && refCreatedAt) {
-            // 如果当前记录的交易时间和被匹配记录的创建时间相差 > 10 分钟，不是同一笔
-            if (Math.abs(currentOccurredAt - refCreatedAt) > 10 * 60 * 1000) {
-              timeMatch = false;
-            }
-          } else if (currentOrderFinishedAt && refCreatedAt) {
-            if (Math.abs(currentOrderFinishedAt - refCreatedAt) > 10 * 60 * 1000) {
-              timeMatch = false;
-            }
-          } else if (refCreatedAt && (nowMs - refCreatedAt) > 10 * 60 * 1000) {
-            // 没有交易时间信息，但被匹配记录已经是 10 分钟前的 → 大概率不是同一笔
-            timeMatch = false;
-          }
-        }
-
-        if (amountMatch && merchantMatch && timeMatch && refLog.target_id) {
-          const aiLogId = await writeTraceAiLog({
-            image_hash: hash, perceptual_hash: perceptualHash, perceptual_distance: perceptualDistance,
-            image_url: path, image_type: ai.image_type, record_type: "expense",
-            occurred_at: occurredAt, order_finished_at: orderFinishedAt,
-            duplicate_kind: duplicateKind, duplicate_ref_table: duplicateRefTable, duplicate_ref_id: duplicateRefId,
-            target_table: "transactions", target_id: refLog.target_id, status: "duplicate",
-            confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
-            ai_response: aiWithTimeContext, model_provider: aiProvider, model_name: aiModel,
-            raw_response: rawDebug(),
-            prompt_version: promptVersion,
-          });
-          if (uploadedNewObject) {
-            const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
-            if (removeErr) console.error("Cleanup duplicate expense image failed:", removeErr);
-          }
-          const _eDupSum = await summarizeTodaySpend(supabase, userId);
-          return respondShortcut(withTraceMeta({
-            status: "duplicate", id: refLog.target_id, record_type: "expense",
-            ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
-            notification: withCompanion(`🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`),
-            time_context: timeContext,
-            companion_message: companionMessage,
-          }, responseTraceMeta(aiLogId)), { mode: responseMode });
-        }
-      }
-    }
-
     // 5. 业务层疑似重复检测：3 分钟内同金额+同支付+同商家 → 标记 possible_duplicate
     //    不阻断入库，允许用户真实的重复消费，仅在响应中提示
     let possibleDuplicate = false;
@@ -5000,6 +6187,7 @@ Deno.serve(async (req) => {
       const duplicateDate = recordDate;
       let dupQuery = supabase.from("transactions")
         .select("id,transaction_time")
+        .eq("user_id", userId)
         .eq("transaction_date", duplicateDate)
         .eq("payment_method", ai.payment_method)
         .gte("amount", (normalizedAmount - 0.01).toFixed(2))
@@ -5012,7 +6200,7 @@ Deno.serve(async (req) => {
         dupQuery = dupQuery.eq("merchant_name", ai.merchant_name);
       }
       const { data: candidates } = await dupQuery.limit(5);
-      const dup = (candidates || []).find((item) => {
+      const dup = ((candidates ?? []) as TransactionCandidateRow[]).find((item) => {
         if (!occurredAt || !item.transaction_time) return true;
         const current = new Date(occurredAt);
         const existing = new Date(`${duplicateDate}T${item.transaction_time}`);
@@ -5072,11 +6260,12 @@ Deno.serve(async (req) => {
         console.log(`[feedback] second_call expense ok=${!_secondCall.error} duration=${_secondCall.duration_ms}ms`);
       }
       if (voiceSignalsEnabled) {
+        const voiceCall = _secondCall as VoiceCallResult;
         companionVoiceDebug = {
           enabled: true,
-          error: _secondCall.error ?? null,
-          signals: _secondCall.signals.map((s) => s.kind),
-          number_violations: _secondCall.number_violations ?? [],
+          error: voiceCall.error ?? null,
+          signals: voiceCall.signals.map((signal) => signal.kind),
+          number_violations: voiceCall.number_violations ?? [],
         };
       }
       // 如果二次调用成功产出有效反馈，优先使用；否则回退到规则生成
@@ -5102,7 +6291,11 @@ Deno.serve(async (req) => {
           ai.companion_message = null;
         }
         aiFeedback = voiceSignalsEnabled
-          ? buildSignalFallbackAIFeedback("expense", _secondCall.signals, timingSignalFor("expense", timeContext))
+          ? buildSignalFallbackAIFeedback(
+            "expense",
+            (_secondCall as VoiceCallResult).signals,
+            timingSignalFor("expense", timeContext),
+          )
           : null;
       }
       if (!aiFeedback) {
@@ -5127,9 +6320,9 @@ Deno.serve(async (req) => {
     }
 
     // 6. 写入数据库
-    const { data: row, error: insErr } = await supabase.from("transactions").insert({
+    const { data: rawTransactionRow, error: insErr } = await supabase.from("transactions").insert({
       type: "expense",
-      amount: normalizedAmount ?? 0.01,
+      amount: normalizedAmount,
       merchant_name: ai.merchant_name,
       platform: ai.platform,
       category: ai.category,
@@ -5137,6 +6330,7 @@ Deno.serve(async (req) => {
       status: normalizedAmount === null ? "pending" : status,
       image_url: path,
       image_hash: hash,
+      ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
       user_id: userId || null,
       is_large_transport: isLargeTransport,
       transaction_date: recordDate,
@@ -5172,11 +6366,11 @@ Deno.serve(async (req) => {
         prompt_version: promptVersion,
       });
       if (uploadedNewObject) {
-        const { error: removeErr } = await supabase.storage.from(BUCKET_NAME).remove([path]);
-        if (removeErr) console.error("Cleanup uploaded image failed:", removeErr);
+        await cleanupUploadedObjectOrQueue(supabase, userId, path);
       }
       throw new Error(`DB insert failed: ${insErr.message}`);
     }
+    const row = rawTransactionRow as InsertedRecordRow;
 
     if (row && autoBoundAccount && normalizedAmount !== null) {
       try {
@@ -5191,6 +6385,7 @@ Deno.serve(async (req) => {
         });
       } catch (entryError) {
         await supabase.from("transactions").delete().eq("id", row.id);
+        if (uploadedNewObject) await cleanupUploadedObjectOrQueue(supabase, userId, path);
         throw entryError;
       }
     }
@@ -5244,7 +6439,7 @@ Deno.serve(async (req) => {
       _ePrimary = `⚠️ ${_ePrimary.replace(/^[💸⚠️]\s*/, "")} · 疑似 3 分钟内重复`;
     }
     const _expenseNotif = `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`;
-    return respondShortcut(withTraceMeta({
+    return respondWithExpressionShadow(withTraceMeta({
       status: row.status,
       id: row.id,
       ai_ok: aiOk,
@@ -5261,11 +6456,34 @@ Deno.serve(async (req) => {
     }, responseTraceMeta(aiLogId)), { mode: responseMode });
 
   } catch (e) {
-    console.error(e);
+    console.error("Ingest request failed", {
+      trace_id: requestTraceId,
+      error_type: e instanceof Error ? e.name : typeof e,
+    });
     return respondShortcut({
       trace_id: requestTraceId,
       ai_log_id: lastAiLogId,
       error: String(e),
     }, { mode: responseMode, status: 500 });
+  } finally {
+    if (temporaryImageCleanup) {
+      const { userId, path } = temporaryImageCleanup;
+      try {
+        await enqueueImageCleanup(supabase, userId, [path], "immediate");
+        const cleanup = await processImageCleanupQueue(supabase, {
+          userId,
+          bucketPath: path,
+          limit: 1,
+          force: true,
+        });
+        if (cleanup.failed > 0 || cleanup.remaining > 0) {
+          console.error("Temporary source image cleanup incomplete", { cleanup });
+        }
+      } catch (cleanupError) {
+        console.error("Temporary source image cleanup failed", {
+          error_type: cleanupError instanceof Error ? cleanupError.name : typeof cleanupError,
+        });
+      }
+    }
   }
 });

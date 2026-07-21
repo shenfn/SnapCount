@@ -1,0 +1,94 @@
+name: Release Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: PWA, Edge, migrations, and Shadow
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: security-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install PWA dependencies
+        run: npm ci
+
+      - name: Build PWA
+        run: npm run build
+
+      - name: Install trace console dependencies
+        working-directory: tools/ai-validation/ui/trace-console
+        run: npm ci
+
+      - name: Build trace console
+        working-directory: tools/ai-validation/ui/trace-console
+        run: npm run build
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.3
+
+      - name: Check Edge Functions
+        run: |
+          deno check --no-lock --node-modules-dir=auto supabase/functions/generate-insights/index.ts
+          deno check --no-lock --node-modules-dir=auto supabase/functions/ingest-receipt/index.ts
+
+      - name: Test receipt duplicate review
+        run: deno test --no-lock supabase/functions/ingest-receipt/duplicate-review_test.ts
+
+      - name: Run Shadow Planner tests
+        run: node --test tools/ai-validation/expression-planner/tests/*.test.mjs
+
+      - name: Validate migration versions
+        run: node scripts/check-migration-versions.mjs
+
+      - name: Validate adaptive finance options
+        run: npm run test:finance-options
+
+      - name: Validate receipt duplicate review contracts
+        run: npm run check:receipt-dedup
+
+      - name: Validate security contracts
+        run: npm run check:security-contracts
+
+      - name: Execute security migrations
+        env:
+          PGURL: postgresql://postgres:security-test@localhost:5432/postgres
+        run: |
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/security-migration-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260719220000_registration_consent_and_private_defaults.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260720100000_harden_privileged_rpcs_and_receipt_storage.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260721110000_user_finance_vocabulary.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260721190000_finance_perceptual_duplicate_review.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-security-migration.sql

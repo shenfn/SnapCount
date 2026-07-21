@@ -1,0 +1,119 @@
+{
+  "schema_version": "expression-planner-public-gold-cases-v0.1",
+  "privacy": {
+    "classification": "public_synthetic",
+    "contains_real_user_data": false
+  },
+  "cases": [
+    {
+      "case_id": "synthetic-repayment-scope-001",
+      "source_case": "gold-expense-repayment-scope-001",
+      "input": {
+        "record_type": "expense",
+        "amount": 900,
+        "merchant_name": "Example Credit Repayment",
+        "confirmed_business_kind": "liability_repayment"
+      },
+      "expected": {
+        "fact_status": "confirmed",
+        "spend_eligibility": "exclude",
+        "required_candidate": "liability_repayment_recorded",
+        "forbidden_candidates": ["expense_outlier", "merchant_week_to_date_vs_previous_week_same_period"],
+        "root_layer": "fact"
+      }
+    },
+    {
+      "case_id": "synthetic-transfer-ambiguous-001",
+      "source_case": "gold-transfer-direction-ambiguous-001",
+      "input": {
+        "record_type": "transfer",
+        "amount": 1300,
+        "counterparty": "Example Person",
+        "direction": "unknown"
+      },
+      "expected": {
+        "fact_status": "ambiguous",
+        "spend_eligibility": "pending_review",
+        "required_candidate": "transfer_direction_question",
+        "forbidden_candidates": ["expense_trend", "income_trend"],
+        "root_layer": "fact"
+      }
+    },
+    {
+      "case_id": "synthetic-sleep-duplicate-001",
+      "source_case": "gold-sleep-duplicate-natural-key-001",
+      "input": {
+        "records": [
+          { "id": "sleep-a", "occurred_at": "2030-01-01T08:00:00+08:00", "sleep_hours": 6.5 },
+          { "id": "sleep-b", "occurred_at": "2030-01-01T08:00:00+08:00", "sleep_hours": 6.5 }
+        ]
+      },
+      "expected": {
+        "canonical_record_count": 1,
+        "duplicate_status": "duplicate",
+        "forbidden_candidates": ["duplicate_sleep_current_metric"],
+        "root_layer": "fact"
+      }
+    },
+    {
+      "case_id": "synthetic-time-authority-unknown-001",
+      "source_case": "gold-time-authority-unknown-001",
+      "input": {
+        "record_type": "food",
+        "time_context": "unknown",
+        "captured_at": "2030-01-01T21:00:00+08:00"
+      },
+      "expected": {
+        "time_authority": "unknown",
+        "allowed_time_expressions": [],
+        "forbidden_time_expressions": ["下午三点", "晚餐", "夜宵"],
+        "root_layer": "fact"
+      }
+    },
+    {
+      "case_id": "synthetic-food-calorie-candidate-001",
+      "source_case": "gold-food-calorie-candidate-001",
+      "input": {
+        "record_type": "food",
+        "payload": { "total_calorie_kcal": 600 }
+      },
+      "expected": {
+        "required_candidate": "food_current_metric",
+        "forbidden_candidates": ["meal_frequency_without_history"],
+        "root_layer": "candidate"
+      }
+    },
+    {
+      "case_id": "synthetic-weekly-repetition-001",
+      "source_case": "gold-weekly-comparison-repetition-001",
+      "input": {
+        "semantic_key": "merchant_week_to_date_vs_previous_week_same_period",
+        "confirmed_exposure_count": 4,
+        "alternative_dimensions": ["amount_structure", "personal_baseline"]
+      },
+      "expected": {
+        "freshness_decreases": true,
+        "mmr_required": false,
+        "root_layer": "selection"
+      }
+    },
+    {
+      "case_id": "synthetic-food-category-isolation-001",
+      "source_case": "gold-food-category-isolation-001",
+      "input": {
+        "current_food_total": 35,
+        "previous_food_total": 30,
+        "unrelated_fixed_housing_expense": 1300,
+        "pending_food_record_count": 2
+      },
+      "expected": {
+        "comparison_cohort": "expense.category.food",
+        "current_period_total": 35,
+        "excluded_from_food_total": ["unrelated_fixed_housing_expense"],
+        "data_coverage_reflects_pending": true,
+        "required_candidate": "expense_category_week_to_date_vs_previous_week_same_period",
+        "root_layer": "candidate"
+      }
+    }
+  ]
+}

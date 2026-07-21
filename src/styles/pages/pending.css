@@ -263,3 +263,1287 @@
   gap: 6px;
   margin-top: 10px;
 }
+
+body.verdict-open {
+  overflow: hidden;
+}
+
+.pending-verdict-page {
+  background:
+    radial-gradient(circle at 88% 2%, rgba(220, 191, 116, 0.14), transparent 26%),
+    linear-gradient(180deg, #f5f1e7 0%, #efeadc 100%);
+}
+
+.pending-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 28px 20px 8px;
+}
+
+.pending-hero .page-title,
+.pending-hero .page-subtitle {
+  padding: 0;
+}
+
+.pending-hero .page-title {
+  color: #202a27;
+  font-family: "Songti SC", "STSong", var(--font);
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.pending-hero .page-subtitle {
+  margin: 4px 0 0;
+  color: #6e7773;
+}
+
+.pending-select-toggle {
+  min-width: 48px;
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: #426e63;
+  font: 600 14px/1 var(--font);
+  cursor: pointer;
+}
+
+.pending-filter-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px 20px 16px;
+  scrollbar-width: none;
+}
+
+.pending-filter-row::-webkit-scrollbar,
+.verdict-domain-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.pending-filter-chip {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(66, 110, 99, 0.11);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  color: #4a5652;
+  font: 600 12px/1 var(--font);
+  cursor: pointer;
+}
+
+.pending-filter-chip span {
+  margin-left: 3px;
+  color: #7c8581;
+  font-family: var(--font-num);
+}
+
+.pending-filter-chip.active {
+  border-color: #426e63;
+  background: #426e63;
+  color: #fff;
+}
+
+.pending-filter-chip.active span {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.pending-empty-state {
+  display: flex;
+  min-height: 54vh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 44px 20px 92px;
+  text-align: center;
+}
+
+.pending-empty-orbit {
+  position: relative;
+  width: 136px;
+  height: 136px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(66, 110, 99, 0.11);
+  border-radius: 50%;
+}
+
+.pending-empty-orbit::before,
+.pending-empty-orbit::after,
+.pending-empty-orbit span {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(66, 110, 99, 0.28);
+  content: "";
+}
+
+.pending-empty-orbit::before {
+  top: 14px;
+  left: 64px;
+}
+
+.pending-empty-orbit::after {
+  right: 20px;
+  bottom: 26px;
+}
+
+.pending-empty-orbit span {
+  bottom: 30px;
+  left: 64px;
+  width: 8px;
+  height: 8px;
+  background: #dcbf74;
+}
+
+.pending-empty-state .empty-title {
+  color: #202a27;
+  font-family: "Songti SC", "STSong", var(--font);
+  font-size: 18px;
+}
+
+.pending-empty-state .empty-desc {
+  color: #6e7773;
+  font-size: 13px;
+}
+
+.pending-film-groups {
+  padding: 0 20px 22px;
+}
+
+.pending-film-group + .pending-film-group {
+  margin-top: 20px;
+}
+
+.pending-film-group .pending-date-label {
+  padding: 0 2px 9px;
+  color: #6e7773;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.pending-film-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pending-film-card {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(66, 110, 99, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 8px 20px rgba(32, 42, 39, 0.08);
+  color: #202a27;
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.pending-film-card:active {
+  transform: scale(0.985);
+}
+
+.pending-film-card.selected {
+  border-color: #426e63;
+  box-shadow: 0 0 0 2px rgba(66, 110, 99, 0.18), 0 8px 20px rgba(32, 42, 39, 0.08);
+}
+
+.pending-film-visual {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: #e7e4d9;
+}
+
+.pending-film-visual > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pending-film-note {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px 16px;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 21px, rgba(66, 110, 99, 0.07) 21px 22px),
+    linear-gradient(180deg, #f8f4e9, #f0ead8);
+  color: #4a524e;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.pending-film-note > span:last-child {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+.pending-film-note-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(66, 110, 99, 0.14);
+  border-radius: 50%;
+  color: #426e63;
+  font-weight: 800;
+}
+
+.pending-film-state {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  max-width: calc(100% - 48px);
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(245, 241, 231, 0.88);
+  backdrop-filter: blur(10px);
+  color: #426e63;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-film-state i,
+.verdict-stage-state i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pending-film-state.route,
+.verdict-stage-state.route {
+  color: #426e63;
+}
+
+.pending-film-state.review,
+.verdict-stage-state.review {
+  color: #8a6d2f;
+}
+
+.pending-film-state.retry,
+.verdict-stage-state.retry {
+  color: #b76555;
+}
+
+.pending-film-state.repair,
+.verdict-stage-state.repair {
+  color: #202a27;
+}
+
+.pending-film-select {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background: rgba(32, 42, 39, 0.35);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pending-film-select.checked {
+  background: #426e63;
+}
+
+.pending-film-scrim {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  min-height: 56px;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 18px 10px 9px;
+  background: linear-gradient(180deg, transparent, rgba(23, 49, 45, 0.7));
+  color: #fff;
+}
+
+.pending-film-scrim strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.pending-film-scrim small {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 10px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.pending-film-caption {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px 10px;
+}
+
+.pending-film-caption strong,
+.pending-film-caption span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-film-caption strong {
+  font-size: 12px;
+}
+
+.pending-film-caption span {
+  flex: 0 1 auto;
+  color: #7c8581;
+  font-size: 10px;
+}
+
+.pending-verdict-page .batch-select-all {
+  display: block;
+  width: calc(100% - 40px);
+  margin: 0 20px 12px;
+  border: 1px solid rgba(66, 110, 99, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  color: #426e63;
+  text-align: center;
+}
+
+.verdict-stage {
+  position: fixed;
+  z-index: 1400;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  background: rgba(23, 49, 45, 0.42);
+}
+
+.verdict-stage-shell {
+  width: min(100%, 520px);
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background:
+    radial-gradient(circle at 86% 4%, rgba(220, 191, 116, 0.13), transparent 25%),
+    linear-gradient(180deg, #efeada 0%, #e9e3d2 100%);
+  color: #202a27;
+}
+
+.verdict-stage-topbar {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 8px;
+  background: rgba(239, 234, 218, 0.88);
+  backdrop-filter: blur(16px);
+}
+
+.verdict-icon-button,
+.verdict-page-button {
+  display: grid;
+  border: 0;
+  place-items: center;
+  background: rgba(66, 110, 99, 0.09);
+  color: #426e63;
+  cursor: pointer;
+}
+
+.verdict-icon-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  font: 400 24px/1 var(--font);
+}
+
+.verdict-stage-state {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verdict-stage-counter {
+  color: #6e7773;
+  font: 600 12px/1 var(--font-num);
+}
+
+.verdict-photo-stage {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  height: clamp(320px, 52dvh, 620px);
+  min-height: 0;
+  padding: 10px 10px 8px;
+}
+
+.verdict-page-button {
+  width: 34px;
+  height: 42px;
+  border-radius: 8px;
+  font: 300 30px/1 var(--font);
+}
+
+.verdict-page-button:disabled {
+  opacity: 0.2;
+}
+
+.verdict-photo {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(66, 110, 99, 0.13);
+  border-radius: 8px;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 16px 32px rgba(32, 42, 39, 0.14);
+  cursor: zoom-in;
+}
+
+.verdict-photo > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: opacity 180ms ease;
+}
+
+.verdict-photo.is-loading > img {
+  opacity: 0;
+}
+
+.verdict-image-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  background: #f8f6ef;
+  color: #6e7773;
+  font-size: 11px;
+}
+
+.verdict-image-loading i {
+  width: 26px;
+  height: 26px;
+  border: 2px solid rgba(66, 110, 99, 0.18);
+  border-top-color: #426e63;
+  border-radius: 50%;
+  animation: pending-image-spin 700ms linear infinite;
+}
+
+@keyframes pending-image-spin {
+  to { transform: rotate(360deg); }
+}
+
+.verdict-photo-fallback {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 23px, rgba(66, 110, 99, 0.07) 23px 24px),
+    #f8f4e9;
+  color: #4a524e;
+  font-size: 13px;
+  line-height: 1.65;
+  text-align: center;
+}
+
+.verdict-photo-fallback b {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(66, 110, 99, 0.15);
+  border-radius: 50%;
+  place-items: center;
+  color: #426e63;
+}
+
+.verdict-stage-info {
+  padding: 8px 26px 12px;
+}
+
+.verdict-stage-info > strong {
+  display: block;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.verdict-stage-guidance {
+  margin: 5px 0 0;
+  color: #59635f;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.verdict-value-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 10px 11px;
+  border-left: 3px solid #426e63;
+  background: rgba(66, 110, 99, 0.07);
+}
+
+.verdict-value-note strong {
+  color: #31584e;
+  font-size: 11px;
+}
+
+.verdict-value-note span {
+  color: #59635f;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.verdict-stage-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+  color: #6e7773;
+  font-size: 11px;
+}
+
+.verdict-assurance {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.verdict-assurance i {
+  width: 5px;
+  height: 5px;
+  border: 1px solid rgba(32, 42, 39, 0.35);
+  border-radius: 50%;
+}
+
+.verdict-assurance i.on {
+  background: rgba(32, 42, 39, 0.55);
+}
+
+.verdict-stage-error {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: rgba(183, 101, 85, 0.09);
+  color: #9b4f42;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.verdict-repayment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 26px 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(66, 110, 99, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.verdict-repayment div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.verdict-repayment strong {
+  font-size: 12px;
+}
+
+.verdict-repayment span {
+  overflow: hidden;
+  color: #6e7773;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verdict-repayment button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #426e63;
+  color: #fff;
+  font: 700 11px/1 var(--font);
+}
+
+.verdict-stage-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 0 26px 12px;
+}
+
+.verdict-stage-actions button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 8px;
+  font-family: var(--font);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.verdict-stage-actions button:disabled,
+.verdict-domain-strip button:disabled,
+.verdict-repayment button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.verdict-accept-button {
+  background: #426e63;
+  box-shadow: 0 8px 18px rgba(66, 110, 99, 0.2);
+  color: #fff;
+  font-size: 14px;
+}
+
+.verdict-accept-button span {
+  margin-right: 6px;
+}
+
+.verdict-minor-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.verdict-minor-actions button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: rgba(66, 110, 99, 0.08);
+  color: #426e63;
+  font-size: 10px;
+}
+
+.verdict-minor-actions button span {
+  font-size: 17px;
+}
+
+.verdict-minor-actions button.danger {
+  background: rgba(183, 101, 85, 0.09);
+  color: #b76555;
+}
+
+.verdict-domain-strip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 0 26px calc(24px + env(safe-area-inset-bottom, 0px));
+  scrollbar-width: none;
+}
+
+.verdict-domain-strip > span {
+  flex: 0 0 auto;
+  color: #6e7773;
+  font-size: 11px;
+}
+
+.verdict-domain-strip button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid rgba(66, 110, 99, 0.13);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.48);
+  color: #426e63;
+  font: 600 11px/1 var(--font);
+}
+
+.verdict-domain-strip button.current {
+  border-color: #426e63;
+  background: rgba(66, 110, 99, 0.11);
+}
+
+@media (max-width: 360px) {
+  .pending-film-grid {
+    gap: 9px;
+  }
+
+  .pending-film-groups {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .verdict-photo-stage {
+    grid-template-columns: 28px minmax(0, 1fr) 28px;
+    gap: 5px;
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .verdict-page-button {
+    width: 28px;
+  }
+
+  .verdict-stage-actions,
+  .verdict-stage-info,
+  .verdict-domain-strip {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .verdict-stage-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .verdict-repayment {
+    margin-right: 18px;
+    margin-left: 18px;
+  }
+}
+
+/* Evidence-first variants: the card carries either an image or readable facts. */
+.pending-film-card.is-fact-card {
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.pending-film-note {
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 44px 14px 14px;
+  text-align: left;
+}
+
+.pending-film-note-kicker {
+  color: #8a6d2f;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.pending-film-note-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #202a27;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.pending-film-note-heading .pending-film-note-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+}
+
+.pending-film-note-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #4a524e;
+  font-size: 12px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.pending-film-note > span.pending-film-facts {
+  display: grid;
+  gap: 5px;
+  margin-top: auto;
+  padding-top: 8px;
+  overflow: visible;
+  border-top: 1px solid rgba(66, 110, 99, 0.11);
+  -webkit-line-clamp: unset;
+}
+
+.pending-film-facts > span {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pending-film-facts small {
+  flex: 0 0 auto;
+  color: #7c8581;
+  font-size: 10px;
+}
+
+.pending-film-facts b {
+  min-width: 0;
+  overflow: hidden;
+  color: #202a27;
+  font-size: 11px;
+  font-weight: 650;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-film-note > span.pending-film-note-error {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid rgba(183, 101, 85, 0.16);
+  color: #9b4f42;
+  font-size: 10px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.pending-film-caption {
+  min-height: 68px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 5px;
+}
+
+.pending-film-caption > strong {
+  overflow: hidden;
+  color: #202a27;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-film-caption .pending-film-caption-domain {
+  color: #426e63;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.pending-film-caption .pending-time-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  color: #7c8581;
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.pending-film-caption .pending-time-stack > span {
+  display: flex;
+  min-width: 0;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-time-stack i,
+.verdict-time-stack i {
+  flex: 0 0 auto;
+  color: #a0a7a3;
+  font-style: normal;
+}
+
+.pending-bill-section {
+  margin: 4px 20px 22px;
+}
+
+.pending-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 2px 10px;
+}
+
+.pending-section-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pending-section-heading span {
+  color: #8a6d2f;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.pending-section-heading h2 {
+  margin: 0;
+  color: #202a27;
+  font-family: "Songti SC", "STSong", var(--font);
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.pending-section-heading > strong {
+  color: #426e63;
+  font: 700 18px/1 var(--font-num);
+}
+
+.pending-bill-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pending-bill-group .pending-date-label {
+  padding: 0 2px 9px;
+}
+
+.pending-bill-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.pending-bill-facts > span {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(66, 110, 99, 0.09);
+  color: #477b4a;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.pending-bill-facts > span.missing {
+  background: rgba(220, 191, 116, 0.22);
+  color: #8a6d2f;
+}
+
+.pending-bill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pending-bill-film-card {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(66, 110, 99, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 20px rgba(32, 42, 39, 0.07);
+  color: #202a27;
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.pending-bill-film-card:active {
+  transform: scale(0.985);
+}
+
+.pending-bill-visual {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: #e7e4d9;
+}
+
+.pending-bill-visual > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.pending-bill-fact-note {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 44px 14px 14px;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 21px, rgba(66, 110, 99, 0.07) 21px 22px),
+    linear-gradient(180deg, #f8f4e9, #f0ead8);
+}
+
+.pending-bill-fact-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid rgba(183, 101, 85, 0.2);
+  border-radius: 8px;
+  background: rgba(183, 101, 85, 0.08);
+  color: #a54735;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pending-bill-fact-note > strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #202a27;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.pending-bill-fact-note > b {
+  color: #a54735;
+  font: 700 16px/1 var(--font-num);
+}
+
+.pending-bill-fact-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: auto;
+}
+
+.pending-bill-fact-lines > span {
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: rgba(66, 110, 99, 0.08);
+  color: #4a6b62;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.pending-bill-film-caption {
+  display: flex;
+  min-height: 112px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px 10px;
+}
+
+.pending-bill-film-title {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.pending-bill-film-title strong {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: #202a27;
+  font-size: 12px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.pending-bill-film-title b {
+  flex: 0 0 auto;
+  color: #a54735;
+  font: 700 11px/1.35 var(--font-num);
+}
+
+.pending-bill-film-caption .pending-time-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  color: #7c8581;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.pending-bill-film-caption .pending-time-stack > span {
+  display: flex;
+  min-width: 0;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-bill-film-caption .pending-bill-facts {
+  margin-top: auto;
+}
+
+.verdict-fact-sheet {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 24px 20px;
+  border: 1px solid rgba(66, 110, 99, 0.12);
+  border-radius: 8px;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 25px, rgba(66, 110, 99, 0.07) 25px 26px),
+    linear-gradient(180deg, #f8f4e9, #f0ead8);
+  color: #202a27;
+}
+
+.verdict-fact-kicker {
+  color: #8a6d2f;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.verdict-fact-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 17px;
+}
+
+.verdict-fact-heading > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(66, 110, 99, 0.16);
+  border-radius: 50%;
+  color: #426e63;
+  font-weight: 700;
+}
+
+.verdict-fact-sheet p {
+  margin: 0;
+  color: #4a524e;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.verdict-fact-sheet dl {
+  display: grid;
+  gap: 8px;
+  margin: auto 0 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(66, 110, 99, 0.12);
+}
+
+.verdict-fact-sheet dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.verdict-fact-sheet dt {
+  color: #7c8581;
+  font-size: 11px;
+}
+
+.verdict-fact-sheet dd {
+  min-width: 0;
+  overflow: hidden;
+  color: #202a27;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verdict-fact-empty {
+  margin-top: auto;
+  color: #7c8581;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.verdict-time-stack-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  color: #7c8581;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.verdict-time-stack-detail > span {
+  display: flex;
+  gap: 6px;
+}
+
+@media (max-width: 360px) {
+  .pending-bill-grid {
+    gap: 9px;
+  }
+
+  .pending-bill-film-caption {
+    min-height: 108px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .pending-bill-fact-note {
+    padding-right: 11px;
+    padding-left: 11px;
+  }
+
+}

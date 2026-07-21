@@ -19,9 +19,20 @@
       <input v-model="email" type="email" class="auth-input" placeholder="邮箱地址" autocomplete="email" required>
       <input v-model="password" type="password" class="auth-input" placeholder="密码（至少6位）" autocomplete="current-password" minlength="6" required>
 
+      <div v-if="mode === 'register'" class="auth-consent-list">
+        <label class="auth-consent-row">
+          <input v-model="acceptedTerms" type="checkbox">
+          <span>我已阅读并同意 <a href="/terms.html" target="_blank" rel="noopener">服务协议</a> 和 <a href="/privacy.html" target="_blank" rel="noopener">隐私政策</a></span>
+        </label>
+        <label class="auth-consent-row">
+          <input v-model="acceptedSensitiveData" type="checkbox">
+          <span>我同意处理主动提交的财务、睡眠等敏感数据，并知悉主要数据存储于新加坡、图片会传输至阿里云百炼中国内地接口完成 Qwen 识别。</span>
+        </label>
+      </div>
+
       <p v-if="errorMsg" class="auth-error">{{ errorMsg }}</p>
 
-      <button class="auth-btn" :disabled="loading">
+      <button class="auth-btn" :disabled="loading || (mode === 'register' && (!acceptedTerms || !acceptedSensitiveData))">
         {{ loading ? '处理中...' : mode === 'login' ? '登录' : '注册' }}
       </button>
 
@@ -49,6 +60,8 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const errorMsg = ref('')
+const acceptedTerms = ref(false)
+const acceptedSensitiveData = ref(false)
 const isWechatBrowser = /MicroMessenger/i.test(typeof navigator === 'undefined' ? '' : navigator.userAgent || '')
 
 // 登录态/会话恢复统一由 App.vue 的 onAuthStateChange 监听处理，
@@ -60,9 +73,22 @@ async function submit(attempt = 0) {
 
   try {
     if (mode.value === 'register') {
+      if (!acceptedTerms.value || !acceptedSensitiveData.value) {
+        errorMsg.value = '请先完成服务协议、隐私政策和敏感数据处理确认'
+        return
+      }
+      const acceptedAt = new Date().toISOString()
       const { data, error } = await sb.auth.signUp({
         email: email.value.trim(),
         password: password.value,
+        options: {
+          data: {
+            legal_consent_at: acceptedAt,
+            sensitive_data_consent_at: acceptedAt,
+            terms_version: '2026-07-19',
+            privacy_version: '2026-07-19',
+          },
+        },
       })
       if (error) throw error
 

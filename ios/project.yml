@@ -1,0 +1,105 @@
+name: SnapCount
+
+packages:
+  Supabase:
+    url: https://github.com/supabase/supabase-swift.git
+    from: 2.0.0
+
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: zh-Hans
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: G6592SL596
+    MARKETING_VERSION: 1.0
+    CURRENT_PROJECT_VERSION: 2
+    SWIFT_VERSION: 5.9
+
+targets:
+  SnapCount:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: SnapCount
+        excludes:
+          - Info.plist
+    info:
+      path: SnapCount/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleDisplayName: 芥子
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: SnapCount
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        LSRequiresIPhoneOS: true
+        NSCameraUsageDescription: 用于拍摄账单、食物、运动等截图或照片，并上传给 AI 识别为个人记录。
+        NSPhotoLibraryUsageDescription: 用于选择截图或照片，并上传给 AI 识别为个人记录。
+        NSPhotoLibraryAddUsageDescription: 用于在你主动保存图片时写入相册。
+        SupabaseURL: $(SNAPCOUNT_SUPABASE_URL)
+        SupabaseFunctionsURL: $(SNAPCOUNT_SUPABASE_FUNCTIONS_URL)
+        SupabaseAnonKey: $(SNAPCOUNT_SUPABASE_ANON_KEY)
+        ShortcutTemplateURL: $(SNAPCOUNT_SHORTCUT_TEMPLATE_URL)
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UILaunchStoryboardName: LaunchScreen
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    dependencies:
+      - package: Supabase
+        product: Supabase
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiezi.app
+        PRODUCT_NAME: SnapCount
+        INFOPLIST_FILE: SnapCount/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Apple Distribution
+        PROVISIONING_PROFILE_SPECIFIER: snapflow_appstore
+        CURRENT_PROJECT_VERSION: 2
+        DEVELOPMENT_TEAM: G6592SL596
+
+  SnapCountTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: SnapCountTests
+    dependencies:
+      - target: SnapCount
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiezi.app.tests
+        DEVELOPMENT_TEAM: G6592SL596
+
+schemes:
+  SnapCount:
+    build:
+      targets:
+        SnapCount: all
+    test:
+      targets:
+        - SnapCountTests
+    run:
+      config: Debug
+    archive:
+      config: Release

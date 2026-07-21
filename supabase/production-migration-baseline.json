@@ -1,0 +1,14 @@
+{
+  "maximumAppliedVersion": "20260716004429",
+  "legacyNumberedRanges": [
+    { "start": 1, "end": 65 },
+    { "start": 68, "end": 77 }
+  ],
+  "appliedTimestampVersions": [
+    "20260708122517",
+    "20260708123803",
+    "20260713101632",
+    "20260713130137",
+    "20260716004429"
+  ]
+}
