@@ -25,6 +25,14 @@ select public.security_test_assert(
   not has_function_privilege('authenticated', 'public.prepare_receipt_image_migration(uuid,text,text)', 'execute'),
   'migration preparation must remain service-only'
 );
+select public.security_test_assert(
+  (
+    select user_id
+    from public.ai_recognition_logs
+    where image_url like '%/2026-01-02/owner.jpg?token=legacy-unowned-log'
+  ) = '11111111-1111-4111-8111-111111111111'::uuid,
+  'unowned legacy AI logs must inherit the only known image owner'
+);
 
 select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
 select set_config('request.jwt.claim.role', 'authenticated', false);

@@ -88,6 +88,7 @@ for (const signature of [
 assert.match(sql, /create table if not exists public\.receipt_image_migration_jobs/i);
 assert.match(sql, /status in \('pending', 'copied', 'references_updated', 'done'\)/i);
 assert.match(sql, /lease_token uuid[\s\S]*lease_expires_at timestamptz/i);
+assert.match(sql, /having count\(distinct user_id\) = 1[\s\S]*update public\.ai_recognition_logs as log[\s\S]*where log\.user_id is null/i);
 assert.match(sql, /revoke all on table public\.receipt_image_migration_jobs from public, anon, authenticated, service_role/i);
 assert.match(sql, /grant select on table public\.receipt_image_migration_jobs to service_role/i);
 assert.match(sql, /status = 'pending'[\s\S]*lease_token = p_lease_token/i);
