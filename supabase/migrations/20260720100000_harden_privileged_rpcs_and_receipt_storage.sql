@@ -42,6 +42,37 @@ alter table public.receipt_image_owners enable row level security;
 revoke all on table public.receipt_image_owners from public, anon, authenticated;
 grant all on table public.receipt_image_owners to service_role;
 
+-- Older trace rows were sometimes written before user_id was attached. When the
+-- same Storage object has exactly one known owner, restore that association before
+-- enforcing the one-owner invariant. Truly multi-user paths still fail below.
+with owned_image_references as (
+  select user_id, public.normalize_receipt_image_path(image_url) as bucket_path
+  from public.transactions where user_id is not null and image_url is not null and image_url <> ''
+  union all
+  select user_id, public.normalize_receipt_image_path(image_url)
+  from public.income_records where user_id is not null and image_url is not null and image_url <> ''
+  union all
+  select user_id, public.normalize_receipt_image_path(source_image_path)
+  from public.data_records where user_id is not null and source_image_path is not null and source_image_path <> ''
+  union all
+  select user_id, public.normalize_receipt_image_path(image_path)
+  from public.staging_records where user_id is not null and image_path is not null and image_path <> ''
+  union all
+  select user_id, public.normalize_receipt_image_path(image_url)
+  from public.ai_recognition_logs where user_id is not null and image_url is not null and image_url <> ''
+), unambiguous_owners as (
+  select min(user_id::text)::uuid as user_id, bucket_path
+  from owned_image_references
+  where bucket_path is not null and bucket_path !~* '^https?://'
+  group by bucket_path
+  having count(distinct user_id) = 1
+)
+update public.ai_recognition_logs as log
+set user_id = owner.user_id
+from unambiguous_owners as owner
+where log.user_id is null
+  and public.normalize_receipt_image_path(log.image_url) = owner.bucket_path;
+
 do $$
 begin
   if exists (

@@ -229,7 +229,12 @@ insert into public.staging_records (user_id, image_path) values (
   '2026-01-03/missing-object.jpg'
 );
 
-insert into public.ai_recognition_logs (user_id, image_url) values (
-  '11111111-1111-4111-8111-111111111111',
-  'https://fixture.supabase.co/storage/v1/object/sign/receipt-images/2026-01-05/log-only.jpg?token=legacy'
-);
+insert into public.ai_recognition_logs (user_id, image_url) values
+  (
+    '11111111-1111-4111-8111-111111111111',
+    'https://fixture.supabase.co/storage/v1/object/sign/receipt-images/2026-01-05/log-only.jpg?token=legacy'
+  ),
+  (
+    null,
+    'https://fixture.supabase.co/storage/v1/object/sign/receipt-images/2026-01-02/owner.jpg?token=legacy-unowned-log'
+  );
