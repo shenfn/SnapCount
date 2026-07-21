@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { currentTestRegistrationConsent } from './lib/test-registration-consent.mjs'
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -23,6 +24,7 @@ const password = `T-${crypto.randomUUID()}-a9!`
 let userId = null
 let accessToken = null
 let legacyTestPath = null
+let lateAccountDeletionPath = null
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -64,6 +66,27 @@ async function waitForQueueStatus(queueId, expectedStatus, timeoutMs = 45_000) {
   throw new Error(`Queue ${queueId} did not reach ${expectedStatus}`)
 }
 
+async function waitForAccountDeletionStatus(expectedStatus, timeoutMs = 180_000) {
+  const deadline = Date.now() + timeoutMs
+  let nextWorkerInvocationAt = 0
+  while (Date.now() < deadline) {
+    const { data, error } = await admin.from('account_deletion_requests')
+      .select('status,last_error')
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    if (data?.status === expectedStatus) return data
+    if (data?.status === 'failed') throw new Error(`Account deletion failed: ${data.last_error}`)
+    if (!data) throw new Error(`Account deletion request disappeared before reaching ${expectedStatus}`)
+    if (Date.now() >= nextWorkerInvocationAt) {
+      await invokeWorker()
+      nextWorkerInvocationAt = Date.now() + 10_000
+    }
+    await sleep(2_000)
+  }
+  throw new Error(`Account deletion did not reach ${expectedStatus} before timeout`)
+}
+
 async function waitForDeletion(timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs
   let nextWorkerInvocationAt = 0
@@ -75,6 +98,17 @@ async function waitForDeletion(timeoutMs = 180_000) {
     if (error) throw new Error(error.message)
     if (data?.status === 'completed') return data
     if (data?.status === 'failed') throw new Error(`Account deletion failed: ${data.last_error}`)
+    if (!data) {
+      const { data: authData, error: authError } = await admin.auth.admin.getUserById(userId)
+      if (authError && !/not found|user not found/i.test(authError.message)) throw new Error(authError.message)
+      if (authError || !authData.user) return { status: 'completed', remaining_images: 0 }
+    }
+    if (data?.status === 'deleting') {
+      const { error: fastForwardError } = await admin.from('account_deletion_requests').update({
+        next_retry_at: new Date().toISOString(),
+      }).eq('user_id', userId).eq('status', 'deleting')
+      if (fastForwardError) throw new Error(`Failed to fast-forward deletion grace period: ${fastForwardError.message}`)
+    }
     if (Date.now() >= nextWorkerInvocationAt) {
       await invokeWorker()
       nextWorkerInvocationAt = Date.now() + 10_000
@@ -85,7 +119,12 @@ async function waitForDeletion(timeoutMs = 180_000) {
 }
 
 async function createTemporaryUser() {
-  const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true })
+  const { data, error } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: currentTestRegistrationConsent(),
+  })
   if (error || !data.user) throw new Error(`Failed to create test user: ${error?.message ?? 'missing user'}`)
   userId = data.user.id
   const { data: sessionData, error: signInError } = await client.auth.signInWithPassword({ email, password })
@@ -218,8 +257,11 @@ async function testAsyncAccountDeletion() {
   const { error: queueError } = await admin.from('image_cleanup_queue').insert(queueRows)
   if (queueError) throw new Error(`Failed to seed account cleanup queue: ${queueError.message}`)
 
+  const deleteStartedAt = Date.now()
   const { response, payload } = await postAction('delete_account', accessToken, [202])
+  const deleteResponseMs = Date.now() - deleteStartedAt
   assert(response.status === 202 && payload.status === 'deletion_pending', `Expected deletion_pending, got ${JSON.stringify(payload)}`)
+  assert(deleteResponseMs < 15_000, `delete_account took ${deleteResponseMs}ms instead of returning immediately`)
 
   const blockedUpload = new FormData()
   const blockedResponse = await fetch(functionUrl, {
@@ -228,6 +270,15 @@ async function testAsyncAccountDeletion() {
     body: blockedUpload,
   })
   assert(blockedResponse.status === 410, `Expected old JWT upload to be blocked with 410, got ${blockedResponse.status}`)
+
+  await waitForAccountDeletionStatus('deleting')
+  lateAccountDeletionPath = `${userId}/tests/${runId}-late-inflight.jpg`
+  const { error: lateUploadError } = await admin.storage.from('receipt-images').upload(
+    lateAccountDeletionPath,
+    new Blob(['late-inflight-account-deletion-image'], { type: 'image/jpeg' }),
+    { upsert: false },
+  )
+  if (lateUploadError) throw new Error(`Failed to seed late in-flight object: ${lateUploadError.message}`)
 
   await waitForDeletion()
 
@@ -239,10 +290,13 @@ async function testAsyncAccountDeletion() {
 
   const { data: authData, error: authError } = await admin.auth.admin.getUserById(userId)
   assert(authError || !authData.user, 'Auth user survived account deletion')
+  const { data: lateObject } = await admin.storage.from('receipt-images').download(lateAccountDeletionPath)
+  assert(!lateObject, 'Object uploaded after the first account scan survived deletion')
 }
 
 async function cleanupTemporaryUser() {
   if (legacyTestPath) await admin.storage.from('receipt-images').remove([legacyTestPath])
+  if (lateAccountDeletionPath) await admin.storage.from('receipt-images').remove([lateAccountDeletionPath])
   if (!userId) return
   await admin.from('image_cleanup_queue').delete().eq('user_id', userId)
   await admin.from('account_deletion_requests').delete().eq('user_id', userId)
@@ -266,6 +320,8 @@ try {
       'dead-letter transition and worker audit',
       'expression-data deletion',
       'asynchronous account deletion with 501 queued images',
+      'delete-account request returns within 15 seconds',
+      'final rescan removes an object uploaded after the first account scan',
       'old JWT upload rejection',
     ],
   }, null, 2))
