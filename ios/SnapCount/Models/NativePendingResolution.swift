@@ -25,7 +25,7 @@ struct NativePendingResolutionDraft {
         amountText = detail.amount.map { String(format: "%.2f", $0) } ?? ""
         merchantOrSourceName = detail.merchantName ?? ""
         platform = detail.platform ?? ""
-        category = detail.category ?? ""
+        category = NativeFinanceOptionCatalog.categoryCode(for: detail.category) ?? ""
         paymentMethod = detail.paymentMethod ?? ""
         incomeCategory = detail.kind == "income" ? (detail.category ?? "other") : "other"
         accountId = detail.accountId

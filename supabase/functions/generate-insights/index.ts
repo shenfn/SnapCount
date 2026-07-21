@@ -481,8 +481,8 @@ async function callChatJson(apiKey: string, endpoint: string, model: string, pro
   });
 
   if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error("AI 服务返回错误：" + errText.slice(0, 200));
+    await resp.body?.cancel();
+    throw new Error(`AI service returned HTTP ${resp.status}`);
   }
 
   const json = await resp.json();
@@ -501,7 +501,7 @@ function extractJson(text: string): any {
   if (a >= 0 && b > a) {
     try { return JSON.parse(text.slice(a, b + 1)); } catch {}
   }
-  throw new Error("AI 返回不是合法 JSON：" + text.slice(0, 200));
+  throw new Error("AI response was not valid JSON");
 }
 
 // ───────────── 主流程 ─────────────
@@ -691,7 +691,9 @@ Deno.serve(async (req: Request) => {
       route = routerResult.payload;
       routerUsage = routerResult.usage;
     } catch (e) {
-      console.warn("AI 路由失败，降级为全域分析:", String(e));
+      console.warn("AI router failed; using the cross-domain fallback", {
+        error_type: e instanceof Error ? e.name : typeof e,
+      });
       route = {
         primary_mode: "cross_domain_life_review",
         mode_label: "全域生活分析",
@@ -718,8 +720,8 @@ Deno.serve(async (req: Request) => {
       );
       payload = analysisResult.payload;
       analysisUsage = analysisResult.usage;
-    } catch (e) {
-      return jsonResponse({ error: String(e) }, 500);
+    } catch {
+      return jsonResponse({ error: "AI 分析暂时不可用，请稍后重试" }, 500);
     }
 
     payload.question = question;
@@ -758,7 +760,9 @@ Deno.serve(async (req: Request) => {
       stats,
     });
   } catch (e: any) {
-    console.error("[generate-insights] 异常:", e);
-    return jsonResponse({ error: String(e?.message || e) }, 500);
+    console.error("[generate-insights] request failed", {
+      error_type: e instanceof Error ? e.name : typeof e,
+    });
+    return jsonResponse({ error: "暂时无法生成洞察，请稍后重试" }, 500);
   }
 });

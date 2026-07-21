@@ -18,10 +18,13 @@ import {
 } from '../domains/universalFormAdapter'
 import {
   formatDate, formatMonthLabel, mapTransaction,
-  incomeCatMap, catCodeMap, payAliasMap,
+  incomeCatMap, payAliasMap,
   getLocalDateKey, localDateKeyOf,
 } from '../utils/helpers'
 import { isLiabilityAccount, mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
+import { normalizeFinanceOptionValue } from '../domains/financeReviewOptions'
+
+const PRIMARY_EXPENSE_CATEGORIES = new Set(['餐饮', '购物', '出行', '娱乐', '生活', '健康', '教育', '其他'])
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
 function humanizeDbError(err) {
@@ -65,6 +68,7 @@ export function useStore() {
   const processedStagingRecords = ref([])
   const dataRecords = ref([])
   const accounts = ref([])
+  const financeVocabulary = ref([])
   const repaymentCycles = ref([])
   const selectedAccount = ref(null)
   const selectedAccountEntries = ref([])
@@ -93,6 +97,9 @@ export function useStore() {
   const flashMsg = ref('')
   const flashVisible = ref(false)
   let flashTimer = null
+  const signedImageUrlCache = new Map()
+  const signedImageUrlRequests = new Map()
+  const signedImageUrlCacheLifetime = 50 * 60 * 1000
 
   const imgOverlay = reactive({ open: false, src: '' })
   const detailRecord = ref(null)
@@ -167,6 +174,7 @@ export function useStore() {
     imageUrl: null,
     imageLoadError: false,
     originalPayload: null,
+    stagingSource: null,
   })
 
   const deleteConfirm = reactive({
@@ -416,6 +424,8 @@ export function useStore() {
     stagingRecords.value = []
     processedStagingRecords.value = []
     dataRecords.value = []
+    financeVocabulary.value = []
+    financeVocabularyAvailable = true
     repaymentCycles.value = []
     selectedAccountSourceSnapshot.value = null
     loadError.value = ''
@@ -448,7 +458,8 @@ export function useStore() {
     try {
       return await task()
     } finally {
-      actionState[key] = false
+      if (key.startsWith('pendingEntry:')) delete actionState[key]
+      else actionState[key] = false
     }
   }
 
@@ -476,6 +487,93 @@ export function useStore() {
     settingsState.imageRetentionDays = data?.image_retention_days ?? -1
     settingsState.companionEnabled = data?.companion_enabled ?? true
     settingsState.companionMemoryEnabled = data?.companion_memory_enabled ?? true
+  }
+
+  let financeVocabularyAvailable = true
+
+  function isMissingFinanceVocabularyError(error) {
+    const message = String(error?.message || '')
+    return error?.code === 'PGRST205'
+      || error?.code === 'PGRST202'
+      || error?.code === '42P01'
+      || /user_finance_vocabulary|record_user_finance_vocabulary/i.test(message)
+  }
+
+  function mapFinanceVocabularyRow(row) {
+    return {
+      id: row.id,
+      kind: row.kind,
+      displayName: row.display_name,
+      normalizedName: row.normalized_name,
+      primaryCategory: row.primary_category || null,
+      linkedAccountId: row.linked_account_id || null,
+      source: row.source,
+      status: row.status,
+      usageCount: Number(row.usage_count || 0),
+      lastUsedAt: row.last_used_at,
+    }
+  }
+
+  async function loadFinanceVocabulary() {
+    if (!currentUserId.value || !financeVocabularyAvailable) {
+      financeVocabulary.value = []
+      return
+    }
+    const expectedUserId = currentUserId.value
+    const { data, error } = await sb.from('user_finance_vocabulary')
+      .select('id,kind,display_name,normalized_name,primary_category,linked_account_id,source,status,usage_count,last_used_at')
+      .eq('status', 'active')
+      .order('usage_count', { ascending: false })
+      .order('last_used_at', { ascending: false })
+      .limit(200)
+    if (error) {
+      if (isMissingFinanceVocabularyError(error)) financeVocabularyAvailable = false
+      else console.warn('加载个人财务词表失败:', error.message)
+      return
+    }
+    if (currentUserId.value !== expectedUserId) return
+    financeVocabulary.value = (data || []).map(mapFinanceVocabularyRow)
+  }
+
+  async function recordFinanceVocabulary({ kind, value, primaryCategory = null, linkedAccountId = null }) {
+    const expectedUserId = currentUserId.value
+    if (!expectedUserId || !financeVocabularyAvailable) return null
+    const displayName = normalizeFinanceOptionValue(kind, value)
+    if (!displayName) return null
+    const { data, error } = await sb.rpc('record_user_finance_vocabulary', {
+      p_kind: kind,
+      p_display_name: displayName,
+      p_primary_category: primaryCategory,
+      p_linked_account_id: linkedAccountId,
+    })
+    if (error) {
+      if (isMissingFinanceVocabularyError(error)) financeVocabularyAvailable = false
+      else console.warn('更新个人财务词表失败:', error.message)
+      return null
+    }
+    if (currentUserId.value !== expectedUserId) return null
+    if (!data) return null
+    const mapped = mapFinanceVocabularyRow(data)
+    const existingIndex = financeVocabulary.value.findIndex(item => item.id === mapped.id)
+    if (existingIndex >= 0) financeVocabulary.value[existingIndex] = mapped
+    else financeVocabulary.value.push(mapped)
+    return mapped
+  }
+
+  function learnConfirmedExpenseVocabulary({ platform, category, payment, accountId }) {
+    const normalizedCategory = normalizeFinanceOptionValue('category', category)
+    const updates = [
+      recordFinanceVocabulary({ kind: 'platform', value: platform }),
+      recordFinanceVocabulary({ kind: 'payment', value: payment, linkedAccountId: accountId }),
+    ]
+    if (PRIMARY_EXPENSE_CATEGORIES.has(normalizedCategory)) {
+      updates.push(recordFinanceVocabulary({
+        kind: 'category',
+        value: normalizedCategory,
+        primaryCategory: normalizedCategory,
+      }))
+    }
+    Promise.allSettled(updates).catch(error => console.warn('更新个人财务词表失败:', error?.message || error))
   }
 
   function mapRepaymentCycleRow(row) {
@@ -747,6 +845,7 @@ export function useStore() {
     if (attempt === 0) lastRefreshTs = Date.now()
     if (attempt === 0) {
       loadUserSettings().catch(e => console.warn('加载用户设置失败:', e?.message || e))
+      loadFinanceVocabulary().catch(e => console.warn('加载个人财务词表失败:', e?.message || e))
     }
     // Phase 1：拉取域协议（每会话一次，失败不阻断主流程）
     if (attempt === 0) loadDomainSchemas()
@@ -924,6 +1023,24 @@ export function useStore() {
 
       const isCurrentRun = () => runId === loadDataRunId
       const cycleMonth = `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`
+      const hydratePendingBillImages = async () => {
+        const pendingPaths = bills.value
+          .filter(bill => bill.status === 'pending')
+          .map(bill => bill.image_path || bill.image_url)
+          .filter(Boolean)
+        const imageUrlMap = await getSignedImageUrlMap(pendingPaths)
+        if (!isCurrentRun()) return
+        bills.value = bills.value.map(bill => {
+          if (bill.status !== 'pending') return bill
+          const imagePath = bill.image_path || bill.image_url || null
+          const imageUrl = imagePath ? imageUrlMap[imagePath] || null : null
+          return {
+            ...bill,
+            imageUrl,
+            imageLoadError: Boolean(imagePath && !imageUrl),
+          }
+        })
+      }
       const hydrateStagingImages = async () => {
         const imageUrlMap = await getSignedImageUrlMap(stagingRows.map(r => r.image_path))
         if (!isCurrentRun()) return
@@ -1001,6 +1118,7 @@ export function useStore() {
       }
 
       const supplementalLoad = Promise.allSettled([
+        hydratePendingBillImages(),
         hydrateStagingImages(),
         loadRepaymentCycles(),
         loadProcessedStaging(),
@@ -1085,12 +1203,34 @@ export function useStore() {
   async function getSignedImageUrl(raw) {
     if (!raw) return null
     if (raw.startsWith('https://')) return raw
-    const { data, error } = await sb.storage.from('receipt-images').createSignedUrl(raw, 3600)
-    if (error) {
-      console.warn('生成截图预览链接失败:', error.message, raw)
-      return null
+    const cached = signedImageUrlCache.get(raw)
+    if (cached?.expiresAt > Date.now()) return cached.url
+    if (cached) signedImageUrlCache.delete(raw)
+
+    const inFlight = signedImageUrlRequests.get(raw)
+    if (inFlight) return inFlight
+
+    const request = (async () => {
+      const { data, error } = await sb.storage.from('receipt-images').createSignedUrl(raw, 3600)
+      if (error) {
+        console.warn('生成截图预览链接失败:', error.message, raw)
+        return null
+      }
+      const url = data?.signedUrl || null
+      if (url) {
+        signedImageUrlCache.set(raw, {
+          url,
+          expiresAt: Date.now() + signedImageUrlCacheLifetime,
+        })
+      }
+      return url
+    })()
+    signedImageUrlRequests.set(raw, request)
+    try {
+      return await request
+    } finally {
+      signedImageUrlRequests.delete(raw)
     }
-    return data?.signedUrl || null
   }
 
   async function getSignedImageUrlMap(rawPaths = []) {
@@ -1098,7 +1238,14 @@ export function useStore() {
     const storagePaths = []
     rawPaths.filter(Boolean).forEach(raw => {
       if (raw.startsWith('https://')) out[raw] = raw
-      else storagePaths.push(raw)
+      else {
+        const cached = signedImageUrlCache.get(raw)
+        if (cached?.expiresAt > Date.now()) out[raw] = cached.url
+        else {
+          if (cached) signedImageUrlCache.delete(raw)
+          storagePaths.push(raw)
+        }
+      }
     })
     const uniquePaths = Array.from(new Set(storagePaths))
     if (!uniquePaths.length) return out
@@ -1110,7 +1257,13 @@ export function useStore() {
     }
     ;(data || []).forEach((item, index) => {
       const path = item.path || uniquePaths[index]
-      if (path && item.signedUrl) out[path] = item.signedUrl
+      if (path && item.signedUrl) {
+        out[path] = item.signedUrl
+        signedImageUrlCache.set(path, {
+          url: item.signedUrl,
+          expiresAt: Date.now() + signedImageUrlCacheLifetime,
+        })
+      }
     })
     return out
   }
@@ -1118,15 +1271,21 @@ export function useStore() {
   let pendingModalInitial = null
 
   async function openPendingModal(bill) {
-    pendingModal.open = true
     const rawImagePath = bill.image_path || bill.image_url || null
-    const resolvedUrl = await getSignedImageUrl(rawImagePath)
-    pendingModal.bill = { ...bill, image_path: rawImagePath, image_url: resolvedUrl, imageLoadError: !!rawImagePath && !resolvedUrl }
+    const existingImageUrl = bill.imageUrl || (rawImagePath?.startsWith('https://') ? rawImagePath : null)
+    pendingModal.bill = {
+      ...bill,
+      image_path: rawImagePath,
+      image_url: existingImageUrl,
+      imageUrl: existingImageUrl,
+      imageLoadError: false,
+      imageLoading: !!rawImagePath && !existingImageUrl,
+    }
     pendingModal.entryType = bill.type === 'income' ? 'income' : 'expense'
     pendingModal.merchantName = bill.name !== '未识别商家' ? bill.name : ''
     pendingModal.amount = String(bill.amount)
     pendingModal.platform = bill.platform !== '?' ? bill.platform : null
-    pendingModal.category = catCodeMap[bill.cat] || (bill.cat !== '?' ? bill.cat : null)
+    pendingModal.category = normalizeFinanceOptionValue('category', bill.cat) || null
     pendingModal.payment = payAliasMap[bill.payment] || (bill.payment !== '?' ? bill.payment : null)
     pendingModal.incomeCategory = 'other'
     pendingModal.accountId = resolveAccountIdForPayment({
@@ -1145,6 +1304,20 @@ export function useStore() {
       incomeCategory: pendingModal.incomeCategory,
       accountId: pendingModal.accountId,
       accountUnbound: pendingModal.accountUnbound,
+    }
+    pendingModal.open = true
+
+    if (!rawImagePath) return
+    const billId = bill.id
+    const resolvedUrl = await getSignedImageUrl(rawImagePath)
+    if (!pendingModal.open || pendingModal.bill?.id !== billId) return
+    const nextImageUrl = resolvedUrl || pendingModal.bill.image_url || null
+    pendingModal.bill = {
+      ...pendingModal.bill,
+      image_url: nextImageUrl,
+      imageUrl: nextImageUrl,
+      imageLoadError: !nextImageUrl,
+      imageLoading: false,
     }
   }
 
@@ -1177,7 +1350,9 @@ export function useStore() {
   function markPendingImageUnavailable() {
     if (!pendingModal.bill) return
     pendingModal.bill.image_url = null
+    pendingModal.bill.imageUrl = null
     pendingModal.bill.imageLoadError = true
+    pendingModal.bill.imageLoading = false
   }
 
   function buildRepaymentCandidateForStaging(record) {
@@ -1312,70 +1487,194 @@ export function useStore() {
     incomeModal.accountUnbound = incomeModalInitial.accountUnbound
   }
 
-  async function confirmEntry() {
-    return runLockedAction('pendingEntry', async () => {
-      const amt = parseFloat(pendingModal.amount)
-      if (!amt || amt <= 0 || amt > 999999.99) { showWarn('请输入有效金额（0.01 ~ 999999.99）'); return }
+  let pendingAccountRefreshPromise = null
+  let pendingAccountRefreshRequested = false
 
-      if (pendingModal.entryType === 'income') {
-        if (!pendingModal.incomeCategory) { showWarn('请选择收入类型'); return }
-        const source = pendingModal.merchantName.trim() || (incomeCatMap[pendingModal.incomeCategory]?.label || '收入')
-        const incomeAccountId = pendingModal.accountUnbound ? null : (pendingModal.accountId || defaultAccountIdForKind('income'))
-        const { error: confirmErr } = await sb.rpc('confirm_pending_transaction_with_account', {
-          p_pending_id: pendingModal.bill.id,
+  function queuePendingAccountRefresh() {
+    pendingAccountRefreshRequested = true
+    if (pendingAccountRefreshPromise) return
+
+    pendingAccountRefreshPromise = (async () => {
+      while (pendingAccountRefreshRequested) {
+        pendingAccountRefreshRequested = false
+        await refreshAccountsFromDB()
+      }
+    })().catch(error => {
+      console.warn('后台刷新账户失败:', error?.message || error)
+    }).finally(() => {
+      pendingAccountRefreshPromise = null
+      if (pendingAccountRefreshRequested) queuePendingAccountRefresh()
+    })
+  }
+
+  function syncLocalUnboundRecords() {
+    unboundRecords.value = {
+      expenses: bills.value.filter(bill => bill.status === 'done' && !bill.accountId),
+      incomes: incomeRecords.value.filter(record => !record.accountId),
+    }
+  }
+
+  function pendingEntryActionKey(pendingId) {
+    return pendingId ? `pendingEntry:${pendingId}` : ''
+  }
+
+  function isPendingEntrySaving(pendingId) {
+    const actionKey = pendingEntryActionKey(pendingId)
+    return !!actionKey && isActionPending(actionKey)
+  }
+
+  function setPendingEntryBackgroundSaving(pendingId, saving) {
+    const index = bills.value.findIndex(item => item.id === pendingId)
+    if (index >= 0) {
+      const current = bills.value[index]
+      if (!saving && current.status !== 'saving') return
+      bills.value[index] = {
+        ...current,
+        status: saving ? 'saving' : 'pending',
+        backgroundSaving: saving,
+      }
+    }
+    if (pendingModal.bill?.id === pendingId) {
+      pendingModal.bill = {
+        ...pendingModal.bill,
+        status: saving ? 'saving' : 'pending',
+        backgroundSaving: saving,
+      }
+    }
+  }
+
+  async function confirmEntry() {
+    const bill = pendingModal.bill
+    const pendingId = bill?.id
+    const actionKey = pendingEntryActionKey(pendingId)
+    if (!actionKey) return { ok: false }
+
+    try {
+      return await runLockedAction(actionKey, async () => {
+      const entryType = pendingModal.entryType
+      const amount = parseFloat(pendingModal.amount)
+      const merchantName = String(pendingModal.merchantName || '').trim()
+      const platform = pendingModal.platform
+      const category = pendingModal.category
+      const payment = pendingModal.payment
+      const incomeCategory = pendingModal.incomeCategory
+      const accountId = pendingModal.accountId
+      const accountUnbound = pendingModal.accountUnbound
+
+      if (!amount || amount <= 0 || amount > 999999.99) {
+        showWarn('请输入有效金额（0.01 ~ 999999.99）')
+        return { ok: false }
+      }
+
+      if (entryType === 'income') {
+        if (!incomeCategory) {
+          showWarn('请选择收入类型')
+          return { ok: false }
+        }
+        setPendingEntryBackgroundSaving(pendingId, true)
+        const source = merchantName || (incomeCatMap[incomeCategory]?.label || '收入')
+        const incomeAccountId = accountUnbound ? null : (accountId || defaultAccountIdForKind('income'))
+        const { data, error } = await sb.rpc('confirm_pending_transaction_with_account', {
+          p_pending_id: pendingId,
           p_entry_type: 'income',
-          p_amount: amt,
+          p_amount: amount,
           p_merchant_or_source_name: source,
           p_platform: null,
           p_category: null,
           p_payment_method: null,
-          p_income_category: pendingModal.incomeCategory,
+          p_income_category: incomeCategory,
           p_account_id: incomeAccountId,
         })
-        if (confirmErr) { showError('保存失败：' + humanizeDbError(confirmErr)); return }
+        if (error) {
+          setPendingEntryBackgroundSaving(pendingId, false)
+          showError('上一条保存失败，已放回待补充：' + humanizeDbError(error))
+          return { ok: false }
+        }
 
-        const bIdx = bills.value.findIndex(b => b.id === pendingModal.bill.id)
-        if (bIdx >= 0) bills.value.splice(bIdx, 1)
-        await refreshAccountsFromDB()
-        await loadData(0, true)
-        closePendingModal()
-        showFlash('✓ 收入已记录')
-        return
+        const billIndex = bills.value.findIndex(item => item.id === pendingId)
+        if (billIndex >= 0) bills.value.splice(billIndex, 1)
+
+        if (data?.income_record) {
+          const mappedIncome = mapIncomeRow(data.income_record)
+          const selectedMonth = `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`
+          const currentMonthRows = incomeRecords.value.filter(item => item.id !== mappedIncome.id)
+          incomeRecords.value = String(mappedIncome.dateRaw || '').slice(0, 7) === selectedMonth
+            ? [mappedIncome, ...currentMonthRows]
+            : currentMonthRows
+          recentIncomeRecords.value = [
+            mappedIncome,
+            ...recentIncomeRecords.value.filter(item => item.id !== mappedIncome.id),
+          ].slice(0, 10)
+        }
+
+        syncLocalUnboundRecords()
+        queuePendingAccountRefresh()
+        showFlash('✓ 收入已收下')
+        return { ok: true, recordType: 'income', pendingId }
       }
 
-      if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
-      const expenseAccountId = pendingModal.accountUnbound
-        ? autoAccountIdForPayment(pendingModal.payment, 'expense')
-        : (pendingModal.accountId || autoAccountIdForPayment(pendingModal.payment, 'expense') || null)
-      const { error } = await sb.rpc('confirm_pending_transaction_with_account', {
-        p_pending_id: pendingModal.bill.id,
+      if (!platform || !category || !payment) return { ok: false }
+      setPendingEntryBackgroundSaving(pendingId, true)
+      const expenseAccountId = accountUnbound
+        ? null
+        : (accountId || autoAccountIdForPayment(payment, 'expense') || null)
+      const { data, error } = await sb.rpc('confirm_pending_transaction_with_account', {
+        p_pending_id: pendingId,
         p_entry_type: 'expense',
-        p_amount: amt,
-        p_merchant_or_source_name: pendingModal.merchantName || `${pendingModal.platform}消费`,
-        p_platform: pendingModal.platform,
-        p_category: pendingModal.category,
-        p_payment_method: pendingModal.payment,
+        p_amount: amount,
+        p_merchant_or_source_name: merchantName || `${platform}消费`,
+        p_platform: platform,
+        p_category: category,
+        p_payment_method: payment,
         p_income_category: null,
         p_account_id: expenseAccountId,
       })
-      if (error) { showError('保存失败：' + humanizeDbError(error)); return }
-      await refreshAccountsFromDB()
-      // 本地更新账单状态
-      const bIdx2 = bills.value.findIndex(b => b.id === pendingModal.bill.id)
-      if (bIdx2 >= 0) {
-        bills.value[bIdx2] = {
-          ...bills.value[bIdx2],
-          platform: pendingModal.platform,
-          cat: pendingModal.category,
-          payment: pendingModal.payment,
-          name: pendingModal.merchantName || `${pendingModal.platform}消费`,
-          amount: amt,
+      if (error) {
+        setPendingEntryBackgroundSaving(pendingId, false)
+        showError('上一条保存失败，已放回待补充：' + humanizeDbError(error))
+        return { ok: false }
+      }
+
+      const billIndex = bills.value.findIndex(item => item.id === pendingId)
+      if (billIndex >= 0) {
+        const currentBill = bills.value[billIndex]
+        const confirmedBill = data?.transaction ? mapTransaction(data.transaction) : {
+          ...currentBill,
+          platform,
+          cat: category,
+          payment,
+          name: merchantName || `${platform}消费`,
+          amount,
           status: 'done',
+          accountId: expenseAccountId,
+        }
+        bills.value[billIndex] = {
+          ...currentBill,
+          ...confirmedBill,
+          imageUrl: currentBill.imageUrl || bill.image_url || null,
+          imageLoadError: currentBill.imageLoadError || false,
         }
       }
-      closePendingModal()
-      showFlash('✓ 已保存')
-    })
+
+      transportRecords.value = bills.value
+        .filter(item => normalizeFinanceOptionValue('category', item.cat) === '出行' && item.amount >= 200)
+        .map(item => ({ id: item.id, type: item.transport_type || '交通', desc: item.name, amount: item.amount, date: item.date }))
+      syncLocalUnboundRecords()
+      learnConfirmedExpenseVocabulary({
+        platform,
+        category,
+        payment,
+        accountId: expenseAccountId,
+      })
+      queuePendingAccountRefresh()
+      showFlash('✓ 账单已收下')
+      return { ok: true, recordType: 'expense', pendingId }
+      })
+    } catch (error) {
+      setPendingEntryBackgroundSaving(pendingId, false)
+      showError('上一条保存失败，已放回待补充：' + humanizeDbError(error))
+      return { ok: false }
+    }
   }
 
   async function confirmStagingRepayment(record) {
@@ -1629,9 +1928,9 @@ export function useStore() {
     expenseModal.id = record.id
     expenseModal.amount = String(record.amount || '')
     expenseModal.merchantName = record.name || ''
-    expenseModal.platform = record.platform && record.platform !== '?' ? record.platform : null
-    expenseModal.category = record.cat && record.cat !== '?' ? record.cat : null
-    expenseModal.payment = record.payment && record.payment !== '?' ? record.payment : null
+    expenseModal.platform = normalizeFinanceOptionValue('platform', record.platform) || null
+    expenseModal.category = normalizeFinanceOptionValue('category', record.cat) || null
+    expenseModal.payment = normalizeFinanceOptionValue('payment', record.payment) || null
     expenseModal.note = record.note || ''
     expenseModal.date = record.dateRaw || getLocalDateKey()
     expenseModal.time = record.time || ''
@@ -1665,7 +1964,7 @@ export function useStore() {
 
       if (expenseModal.mode === 'edit' && expenseModal.id) {
         const expenseAccountId = expenseModal.accountUnbound
-          ? autoAccountIdForPayment(expenseModal.payment, 'expense')
+          ? null
           : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
         const { error } = await sb.rpc('save_transaction_with_account', {
           p_id: expenseModal.id,
@@ -1686,6 +1985,12 @@ export function useStore() {
           p_account_id: expenseAccountId,
         })
         if (error) { showError('保存失败：' + humanizeDbError(error)); return }
+        learnConfirmedExpenseVocabulary({
+          platform: expenseModal.platform,
+          category: expenseModal.category,
+          payment: expenseModal.payment,
+          accountId: expenseAccountId,
+        })
         await refreshAccountsFromDB()
         if (currentPage.value === 'unbound-records') await loadUnboundRecords()
         closeExpenseModal()
@@ -1716,7 +2021,7 @@ export function useStore() {
       }
 
       const expenseAccountIdNew = expenseModal.accountUnbound
-        ? autoAccountIdForPayment(expenseModal.payment, 'expense')
+        ? null
         : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
       const { data: newRow, error } = await sb.rpc('save_transaction_with_account', {
         p_id: null,
@@ -1737,6 +2042,12 @@ export function useStore() {
         p_account_id: expenseAccountIdNew,
       })
       if (error) { showError('保存失败：' + humanizeDbError(error)); return }
+      learnConfirmedExpenseVocabulary({
+        platform: expenseModal.platform,
+        category: expenseModal.category,
+        payment: expenseModal.payment,
+        accountId: expenseAccountIdNew,
+      })
       await refreshAccountsFromDB()
       if (currentPage.value === 'unbound-records') await loadUnboundRecords()
       closeExpenseModal()
@@ -1769,6 +2080,7 @@ export function useStore() {
       date: universalModal.date,
       time: universalModal.time,
       imagePath: universalModal.imagePath,
+      stagingSourceId: universalModal.stagingSource?.id || null,
     }
     for (const field of meta.formFields || []) {
       base[field.model] = universalModal[field.model]
@@ -1794,12 +2106,56 @@ export function useStore() {
   function openUniversalModal(domainKey = 'sport') {
     const meta = getUniversalDomainMeta(domainKey)
     resetUniversalModal(universalModal, domainKey, meta, getLocalDateKey())
+    universalModal.stagingSource = null
     setUniversalModalInitial()
+  }
+
+  function openUniversalRepairFromStaging(record, domainKey = record?.domainKey) {
+    if (!record?.id || !domainKey) return false
+    const meta = getUniversalDomainMeta(domainKey)
+    if (!meta) return false
+
+    const extracted = record.extracted && typeof record.extracted === 'object' ? record.extracted : {}
+    const nestedPayload = extracted.payload_jsonb && typeof extracted.payload_jsonb === 'object'
+      ? extracted.payload_jsonb
+      : {}
+    const { payload_jsonb: _nested, ...directPayload } = extracted
+    const payload = { ...directPayload, ...nestedPayload }
+    const occurredAt = record.occurredAt || record.createdAt || new Date().toISOString()
+
+    resetUniversalModal(universalModal, domainKey, meta, localDateKeyOf(occurredAt) || getLocalDateKey())
+    universalModal.stagingSource = {
+      id: record.id,
+      imagePath: record.imagePath || null,
+      imageHash: record.imageHash || null,
+    }
+    universalModal.title = String(payload.title || '').trim()
+    universalModal.primaryValue = payload[meta.primaryKey] == null ? '' : String(payload[meta.primaryKey])
+    universalModal.dimension = String(payload[meta.dimensionKey] || '').trim()
+    universalModal.note = /缺少字段|置信度不足/i.test(record.summary || '') ? '' : (record.summary || '')
+    universalModal.date = localDateKeyOf(occurredAt) || getLocalDateKey()
+    universalModal.time = String(occurredAt).slice(11, 16)
+    universalModal.imagePath = record.imagePath || null
+    universalModal.imageUrl = record.imageUrl || null
+    universalModal.imageLoadError = false
+    universalModal.originalPayload = payload
+    setUniversalModalInitial()
+
+    if (!universalModal.imageUrl && universalModal.imagePath) {
+      const sourceId = record.id
+      getSignedImageUrl(universalModal.imagePath).then(url => {
+        if (universalModal.stagingSource?.id !== sourceId) return
+        universalModal.imageUrl = url
+        universalModal.imageLoadError = !url
+      })
+    }
+    return true
   }
 
   async function openUniversalEditModal(record) {
     const meta = getUniversalDomainMeta(record.domainKey)
     hydrateUniversalModalFromRecord(universalModal, record, meta)
+    universalModal.stagingSource = null
     universalModal.imageUrl = await getSignedImageUrl(universalModal.imagePath)
     universalModal.imageLoadError = !!universalModal.imagePath && !universalModal.imageUrl
     setUniversalModalInitial()
@@ -1807,6 +2163,7 @@ export function useStore() {
 
   function closeUniversalModal() {
     universalModal.open = false
+    universalModal.stagingSource = null
     universalModalInitial = null
   }
 
@@ -1816,6 +2173,37 @@ export function useStore() {
     if (validationError) {
       showWarn(validationError)
       return
+    }
+
+    const stagingSource = universalModal.stagingSource
+    if (stagingSource) {
+      const draft = buildUniversalRecordDraft(universalModal, meta)
+      const payload = {
+        ...draft.payload,
+        source_app: draft.payload.source_app === 'manual' ? '截图补全' : draft.payload.source_app,
+      }
+      const domainKey = universalModal.domainKey
+      const { data, error } = await sb.rpc('archive_staging_record', {
+        p_staging_id: stagingSource.id,
+        p_domain_key: domainKey,
+        p_title: draft.title,
+        p_record_date: universalModal.date,
+        p_record_time: universalModal.time || null,
+        p_occurred_at: draft.occurredAt,
+        p_summary: draft.summary,
+        p_payload: payload,
+      })
+      if (error) {
+        showError('保存失败：' + humanizeDbError(error))
+        return
+      }
+
+      const stagingIndex = stagingRecords.value.findIndex(item => item.id === stagingSource.id)
+      if (stagingIndex >= 0) stagingRecords.value.splice(stagingIndex, 1)
+      closeUniversalModal()
+      showFlash(`✓ 已补全并归入${getSystemDomainLabel(domainKey, '记录')}`)
+      void loadData(0, true)
+      return data
     }
 
     const { data: domainRows, error: domainErr } = await sb.from('data_domains')
@@ -3584,7 +3972,7 @@ export function useStore() {
     currentYear, currentMonth, currentPage, monthLabel,
     pageHistory, pageScrollPositions, currentUserId, currentUserEmail, isLoggedIn,
     loading, loadError, loadErrorDetail,
-    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords, accounts, repaymentCycles,
+    bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords, accounts, financeVocabulary, repaymentCycles,
     selectedAccount, selectedAccountEntries, selectedAccountPayments, selectedAccountSourceSnapshot, accountEntriesLoading,
     unboundRecords, unboundRecordsLoading, unboundRecordFilter,
     doneBills, pendingBills, filteredBills,
@@ -3616,7 +4004,7 @@ export function useStore() {
     hasIncomeChanges, resetIncomeChanges, markIncomeImageUnavailable,
     openExpenseModal, openExpenseEditModal, closeExpenseModal, confirmExpense,
     hasExpenseChanges, resetExpenseChanges, markExpenseImageUnavailable,
-    openUniversalModal, openUniversalEditModal, closeUniversalModal, confirmUniversalRecord,
+    openUniversalModal, openUniversalRepairFromStaging, openUniversalEditModal, closeUniversalModal, confirmUniversalRecord,
     createAccountFromWalletSnapshot, linkWalletSnapshotToAccount,
     accountModal, openAccountModalForCreate, openAccountModalForEdit, closeAccountModal, saveAccount, archiveAccount,
     openAccountDetail, refreshAccountDetail, loadAccountEntries, openAccountEntrySource,
@@ -3633,8 +4021,8 @@ export function useStore() {
     discardStagingRecord, retryStagingRecord, archiveStagingRecord,
     openDomainPage, openDayDetail, showMoreDailyCards, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
     navigateTo, goBack,
-    settingsState, toggleSetting, setSetting, setRetention, loadUserSettings,
-    actionState, isActionPending,
+    settingsState, toggleSetting, setSetting, setRetention, loadUserSettings, loadFinanceVocabulary,
+    actionState, isActionPending, isPendingEntrySaving,
     refreshIfStale, submitExpressionFeedback,
   }
 }

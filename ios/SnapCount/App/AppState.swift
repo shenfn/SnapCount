@@ -35,6 +35,7 @@ final class AppState: ObservableObject {
     @Published var recordMonthMessages: [String: String] = [:]
     @Published var loadingRecordMonthKey: String?
     @Published var accounts: [NativeAccount] = []
+    @Published var financeVocabulary: [NativeFinanceVocabularyEntry] = []
     @Published var selectedAccountDetail: NativeAccountDetail?
     @Published var selectedAccountSourceSnapshot: NativeWalletSnapshot?
     @Published var accountMessage: String?
@@ -85,6 +86,7 @@ final class AppState: ObservableObject {
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private let insightsRepository: InsightsRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
+    private let financeVocabularyRepository: FinanceVocabularyRepositoryProtocol
     private let keychain = KeychainStore.shared
     private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
@@ -96,6 +98,7 @@ final class AppState: ObservableObject {
     private var dashboardRefreshGeneration = 0
     private var userStateGeneration = 0
     private var dashboardSupplementTask: Task<Void, Never>?
+    private var isLoadingFinanceVocabulary = false
 
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
@@ -107,7 +110,8 @@ final class AppState: ObservableObject {
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         insightsRepository: InsightsRepositoryProtocol = InsightsRepository(),
-        settingsRepository: SettingsRepositoryProtocol = SettingsRepository()
+        settingsRepository: SettingsRepositoryProtocol = SettingsRepository(),
+        financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
@@ -119,6 +123,7 @@ final class AppState: ObservableObject {
         self.walletSnapshotRepository = walletSnapshotRepository
         self.insightsRepository = insightsRepository
         self.settingsRepository = settingsRepository
+        self.financeVocabularyRepository = financeVocabularyRepository
     }
 
     func bootstrap() {
@@ -294,6 +299,7 @@ final class AppState: ObservableObject {
             let snapshot = preparedCoreSnapshot(fetchedSnapshot)
             publishDashboard(snapshot, userId: session.user.id)
             scheduleDashboardSupplement(snapshot, session: session, generation: generation)
+            Task { [weak self] in await self?.loadFinanceVocabulary() }
         } catch {
             if isInvalidRefreshSessionError(error) {
                 invalidateSession(message: "登录状态已失效，请重新登录。")
@@ -325,6 +331,9 @@ final class AppState: ObservableObject {
         }
         for record in dashboard.stagingRecords {
             if let path = record.imagePath, let url = record.imageURL { cachedImageURLs[path] = url }
+        }
+        for expense in dashboard.pendingExpenses {
+            if let path = expense.imagePath, let url = expense.imageURL { cachedImageURLs[path] = url }
         }
         for detail in recordDetailCache.values {
             if let path = detail.imagePath, let url = detail.imageURL { cachedImageURLs[path] = url }
@@ -437,6 +446,7 @@ final class AppState: ObservableObject {
     private func prefetchDashboardImages(_ snapshot: DashboardSnapshot) {
         let urls = snapshot.recordDetails.values.compactMap(\.imageURL)
             + snapshot.stagingRecords.compactMap(\.imageURL)
+            + snapshot.pendingExpenses.compactMap(\.imageURL)
         Task {
             await RemoteImageRepository.shared.prefetch(urls)
         }
@@ -526,6 +536,84 @@ final class AppState: ObservableObject {
         } catch {
             guard generation == userStateGeneration else { return }
             accountMessage = error.localizedDescription
+        }
+    }
+
+    func loadFinanceVocabulary() async {
+        guard !isLoadingFinanceVocabulary else { return }
+        let generation = userStateGeneration
+        isLoadingFinanceVocabulary = true
+        defer { isLoadingFinanceVocabulary = false }
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let entries = try await financeVocabularyRepository.fetch(accessToken: session.accessToken)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            financeVocabulary = entries
+        } catch {
+            guard generation == userStateGeneration else { return }
+        }
+    }
+
+    private func scheduleConfirmedExpenseVocabulary(
+        platform: String,
+        category: String,
+        paymentMethod: String,
+        accountId: String?,
+        userId: String,
+        accessToken: String
+    ) {
+        let generation = userStateGeneration
+        Task { [weak self] in
+            await self?.recordConfirmedExpenseVocabulary(
+                platform: platform,
+                category: category,
+                paymentMethod: paymentMethod,
+                accountId: accountId,
+                userId: userId,
+                generation: generation,
+                accessToken: accessToken
+            )
+        }
+    }
+
+    private func recordConfirmedExpenseVocabulary(
+        platform: String,
+        category: String,
+        paymentMethod: String,
+        accountId: String?,
+        userId: String,
+        generation: Int,
+        accessToken: String
+    ) async {
+        let categoryTitle = NativeFinanceOptionCatalog.categoryTitle(for: category)
+        let requests: [(NativeFinanceVocabularyKind, String, String?, String?)] = [
+            (.platform, platform, nil, nil),
+            (.payment, paymentMethod, nil, accountId),
+            (.category, categoryTitle ?? "", categoryTitle, nil)
+        ]
+
+        for (kind, rawDisplayName, primaryCategory, linkedAccountId) in requests {
+            guard isCurrentUserLoad(generation, userId: userId) else { return }
+            let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !displayName.isEmpty else { continue }
+            do {
+                let entry = try await financeVocabularyRepository.record(
+                    kind: kind,
+                    displayName: displayName,
+                    primaryCategory: primaryCategory,
+                    linkedAccountId: linkedAccountId,
+                    accessToken: accessToken
+                )
+                guard isCurrentUserLoad(generation, userId: userId) else { return }
+                if let index = financeVocabulary.firstIndex(where: { $0.id == entry.id }) {
+                    financeVocabulary[index] = entry
+                } else {
+                    financeVocabulary.append(entry)
+                }
+            } catch {
+                continue
+            }
         }
     }
 
@@ -1309,6 +1397,16 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             try await inboxRepository.confirmPending(draft, accessToken: session.accessToken)
+            if draft.kind == .expense {
+                scheduleConfirmedExpenseVocabulary(
+                    platform: draft.platform,
+                    category: draft.category,
+                    paymentMethod: draft.paymentMethod,
+                    accountId: draft.accountId,
+                    userId: session.user.id,
+                    accessToken: session.accessToken
+                )
+            }
             recordDetailCache.removeValue(forKey: "expense/\(draft.pendingId)")
             selectedRecordDetail = nil
             await loadAccounts()
@@ -1671,6 +1769,8 @@ final class AppState: ObservableObject {
         recordFeedbackState = .idle
         manualRecordMessage = nil
         accounts = []
+        financeVocabulary = []
+        isLoadingFinanceVocabulary = false
         selectedAccountDetail = nil
         selectedAccountSourceSnapshot = nil
         accountMessage = nil
@@ -1735,6 +1835,16 @@ final class AppState: ObservableObject {
                 userId: session.user.id,
                 accessToken: session.accessToken
             )
+            if draft.kind == .expense {
+                scheduleConfirmedExpenseVocabulary(
+                    platform: draft.platform,
+                    category: draft.category,
+                    paymentMethod: draft.paymentMethod,
+                    accountId: draft.accountId,
+                    userId: session.user.id,
+                    accessToken: session.accessToken
+                )
+            }
             await refreshDashboard()
             if draft.kind != .universal || draft.domainKey == "wallet" {
                 await loadAccounts()

@@ -19,6 +19,7 @@ enum NativeManualRecordKind: String, CaseIterable, Identifiable {
 struct NativeManualRecordOption: Identifiable, Hashable {
     let id: String
     let title: String
+    var isFrequent = false
 }
 
 struct NativeManualDomainMetadata: Equatable {
@@ -271,38 +272,17 @@ struct NativeManualRecordDraft {
 }
 
 extension NativeManualRecordDraft {
-    static let expensePlatforms = [
-        NativeManualRecordOption(id: "美团", title: "美团"),
-        NativeManualRecordOption(id: "微信", title: "微信"),
-        NativeManualRecordOption(id: "线下消费", title: "线下消费"),
-        NativeManualRecordOption(id: "京东", title: "京东"),
-        NativeManualRecordOption(id: "拼多多", title: "拼多多"),
-        NativeManualRecordOption(id: "淘宝", title: "淘宝"),
-        NativeManualRecordOption(id: "抖音", title: "抖音"),
-        NativeManualRecordOption(id: "支付宝", title: "支付宝"),
-        NativeManualRecordOption(id: "其他", title: "其他")
-    ]
+    static var expensePlatforms: [NativeManualRecordOption] {
+        NativeFinanceOptionCatalog.options(kind: .platform, currentValue: nil, vocabulary: [])
+    }
 
-    static let expenseCategories = [
-        NativeManualRecordOption(id: "food", title: "餐饮"),
-        NativeManualRecordOption(id: "shopping", title: "购物"),
-        NativeManualRecordOption(id: "transport", title: "出行"),
-        NativeManualRecordOption(id: "entertainment", title: "娱乐"),
-        NativeManualRecordOption(id: "life", title: "生活"),
-        NativeManualRecordOption(id: "health", title: "健康"),
-        NativeManualRecordOption(id: "education", title: "教育"),
-        NativeManualRecordOption(id: "other", title: "其他")
-    ]
+    static var expenseCategories: [NativeManualRecordOption] {
+        NativeFinanceOptionCatalog.options(kind: .category, currentValue: nil, vocabulary: [])
+    }
 
-    static let expensePayments = [
-        NativeManualRecordOption(id: "微信支付", title: "微信支付"),
-        NativeManualRecordOption(id: "花呗", title: "花呗"),
-        NativeManualRecordOption(id: "支付宝", title: "支付宝"),
-        NativeManualRecordOption(id: "银行卡", title: "银行卡"),
-        NativeManualRecordOption(id: "京东白条", title: "京东白条"),
-        NativeManualRecordOption(id: "美团月付", title: "美团月付"),
-        NativeManualRecordOption(id: "先用后付", title: "先用后付")
-    ]
+    static var expensePayments: [NativeManualRecordOption] {
+        NativeFinanceOptionCatalog.options(kind: .payment, currentValue: nil, vocabulary: [])
+    }
 
     static let incomeCategories = [
         NativeManualRecordOption(id: "salary", title: "工资"),

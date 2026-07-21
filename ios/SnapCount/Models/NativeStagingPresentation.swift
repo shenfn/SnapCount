@@ -66,6 +66,58 @@ enum NativeStagingDetailPresentation {
         }
     }
 
+    static func actionCopy(
+        domainKey: String?,
+        status: String,
+        summary: String?,
+        errorMessage: String?,
+        extracted: [String: AnyCodable]
+    ) -> (title: String, summary: String)? {
+        let nestedPayload = extracted.dictionary("payload_jsonb") ?? [:]
+        let merged = extracted.merging(nestedPayload) { current, _ in current }
+        let combinedMessage = [summary, errorMessage].compactMap { $0 }.joined(separator: " ").lowercased()
+
+        let reviewReason = merged["review_reason"]?.value as? String
+        if reviewReason == "possible_duplicate" || combinedMessage.contains("已有记录相似") {
+            return ("这笔可能已经记过", "对照图片或文字事实，确认是新记录再收下。")
+        }
+
+        if domainKey == "reading" {
+            let bookName = (merged["book_name"]?.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let readingMinutes = (merged["reading_minutes"]?.value as? NSNumber)?.doubleValue ?? 0
+            if bookName.isEmpty || readingMinutes <= 0 || combinedMessage.contains("book_name") || combinedMessage.contains("reading_minutes") {
+                let title: String
+                if bookName.isEmpty && readingMinutes <= 0 { title = "补上书名和阅读时长" }
+                else if bookName.isEmpty { title = "还不知道是哪本书" }
+                else { title = "还不知道读了多久" }
+                return (title, "这更像一页阅读内容。补完后会归到对应书籍，并计入阅读趋势。")
+            }
+        }
+
+        if ["ai_error", "failed", "extraction_failed"].contains(status) {
+            return ("这张图还没识别成功", "可以重新识别，也可以直接选择它应该归到哪里。")
+        }
+        if ["routing_failed", "unrouted", "unassigned"].contains(status) {
+            return ("这张图想记到哪里？", "选一个最合适的分类，之后就能放进对应记录。")
+        }
+
+        let missingLabels: [(String, String)] = [
+            ("amount", "金额"), ("platform", "消费渠道"), ("category", "分类"),
+            ("payment_method", "支付方式"), ("income_category", "收入类型"),
+            ("occurred_at", "记录时间"), ("book_name", "书名"),
+            ("reading_minutes", "阅读时长"), ("sleep_minutes", "睡眠时长")
+        ]
+        if combinedMessage.contains("缺少字段") || combinedMessage.contains("missing_fields") {
+            let labels = missingLabels.compactMap { combinedMessage.contains($0.0) ? $0.1 : nil }
+            if labels.count == 1 { return ("补上\(labels[0])", "补完整后，这条记录就能继续处理。") }
+            if labels.count > 1 { return ("还差 \(labels.count) 项信息", "补上\(labels.joined(separator: "、"))后，这条记录就能继续处理。") }
+        }
+        if status == "schema_failed" {
+            return ("还需要补一项信息", "看着原图补完整，这条记录就能收下。")
+        }
+        return nil
+    }
+
     private static func resolvedValue(
         for key: String,
         in values: [String: AnyCodable]
@@ -80,6 +132,15 @@ enum NativeStagingDetailPresentation {
 
     static func errorSummary(_ message: String) -> String {
         let lowered = message.lowercased()
+        if lowered.contains("book_name") && lowered.contains("reading_minutes") {
+            return "还需要书名和阅读时长，补完后才能加入阅读记录。"
+        }
+        if lowered.contains("book_name") {
+            return "还不知道是哪本书，补上书名后就能归入阅读记录。"
+        }
+        if lowered.contains("reading_minutes") {
+            return "还不知道读了多久，补上时长后会计入阅读趋势。"
+        }
         if lowered.contains("row-level security") || lowered.contains("rls") {
             return "归档权限校验失败，请刷新登录状态后重试。"
         }

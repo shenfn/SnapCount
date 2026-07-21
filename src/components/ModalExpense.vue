@@ -44,35 +44,52 @@
       <div class="sel-section" style="margin-top:16px">
         <div class="sel-label">消费渠道</div>
         <div class="sel-grid">
-          <div v-for="p in platforms" :key="p.val" class="sel-chip"
+          <button v-for="p in platforms" :key="p.val" type="button" class="sel-chip"
             :class="{ selected: store.expenseModal.platform === p.val }"
-            @click="store.expenseModal.platform = p.val">
+            @click="selectFinanceOption('platform', p.val)">
             {{ p.label }}
             <span v-if="p.hot" class="hot-badge">常用</span>
-          </div>
+          </button>
+          <button type="button" class="sel-chip finance-custom-trigger"
+            :aria-expanded="customOptionKind === 'platform'"
+            @click="openCustomOption('platform')">＋ 自定义渠道</button>
+        </div>
+        <div v-if="customOptionKind === 'platform'" class="finance-custom-option">
+          <input v-model="customOptionValue" type="text" maxlength="30" placeholder="输入其他消费渠道"
+            aria-label="自定义消费渠道" @keydown.enter.prevent="applyCustomOption">
+          <button type="button" :disabled="!customOptionValue.trim()" @click="applyCustomOption">使用</button>
         </div>
       </div>
 
       <div class="sel-section" style="margin-top:16px">
         <div class="sel-label">消费分类</div>
         <div class="sel-grid">
-          <div v-for="c in categories" :key="c.val" class="sel-chip"
+          <button v-for="c in categories" :key="c.val" type="button" class="sel-chip"
             :class="{ selected: store.expenseModal.category === c.val }"
-            @click="store.expenseModal.category = c.val">
+            @click="selectFinanceOption('category', c.val)">
             {{ c.label }}
-          </div>
+            <span v-if="c.hot" class="hot-badge">常用</span>
+          </button>
         </div>
       </div>
 
       <div class="sel-section" style="margin-top:16px">
         <div class="sel-label">支付方式</div>
         <div class="sel-grid">
-          <div v-for="p in payments" :key="p.val" class="sel-chip"
+          <button v-for="p in payments" :key="p.val" type="button" class="sel-chip"
             :class="{ selected: store.expenseModal.payment === p.val }"
-            @click="store.expenseModal.payment = p.val">
+            @click="selectFinanceOption('payment', p.val)">
             {{ p.label }}
             <span v-if="p.hot" class="hot-badge">常用</span>
-          </div>
+          </button>
+          <button type="button" class="sel-chip finance-custom-trigger"
+            :aria-expanded="customOptionKind === 'payment'"
+            @click="openCustomOption('payment')">＋ 自定义方式</button>
+        </div>
+        <div v-if="customOptionKind === 'payment'" class="finance-custom-option">
+          <input v-model="customOptionValue" type="text" maxlength="30" placeholder="输入其他支付方式"
+            aria-label="自定义支付方式" @keydown.enter.prevent="applyCustomOption">
+          <button type="button" :disabled="!customOptionValue.trim()" @click="applyCustomOption">使用</button>
         </div>
       </div>
 
@@ -123,9 +140,10 @@
 </template>
 
 <script setup>
-import { computed, inject } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { useBottomSheet } from '../composables/useBottomSheet'
 import { getLocalDateKey } from '../utils/helpers'
+import { buildAdaptiveFinanceOptions, normalizeFinanceOptionValue } from '../domains/financeReviewOptions'
 import AccountPicker from './AccountPicker.vue'
 const store = inject('store')
 const today = getLocalDateKey()
@@ -140,35 +158,98 @@ const sheet = useBottomSheet(
 )
 const sheetEl = sheet.sheetEl
 const bodyEl = sheet.bodyEl
+const customOptionKind = ref('')
+const customOptionValue = ref('')
 
-const platforms = [
-  { val: '美团',  label: '🛵 美团',  hot: true },
-  { val: '微信',  label: '💬 微信' },
-  { val: '线下消费', label: '🏪 线下消费', hot: true },
-  { val: '京东',  label: '📦 京东' },
-  { val: '拼多多',label: '🛍 拼多多' },
-  { val: '淘宝',  label: '🧡 淘宝' },
-  { val: '抖音',  label: '🎵 抖音' },
-  { val: '支付宝',label: '💙 支付宝' },
-  { val: '其他', label: '💰 其他' },
-]
+const financeVocabulary = computed(() => store.financeVocabulary?.value || [])
+const platforms = computed(() => buildAdaptiveFinanceOptions({
+  kind: 'platform',
+  currentValue: store.expenseModal.platform,
+  vocabulary: financeVocabulary.value,
+}))
+const categories = computed(() => buildAdaptiveFinanceOptions({
+  kind: 'category',
+  currentValue: store.expenseModal.category,
+  vocabulary: financeVocabulary.value,
+}))
+const payments = computed(() => buildAdaptiveFinanceOptions({
+  kind: 'payment',
+  currentValue: store.expenseModal.payment,
+  vocabulary: financeVocabulary.value,
+}))
 
-const categories = [
-  { val: '餐饮', label: '🍜 餐饮' },
-  { val: '购物', label: '🛒 购物' },
-  { val: '出行', label: '🚗 出行' },
-  { val: '娱乐', label: '🎮 娱乐' },
-  { val: '生活', label: '🏠 生活' },
-  { val: '其他', label: '📌 其他' },
-]
+function selectFinanceOption(kind, value) {
+  const normalized = normalizeFinanceOptionValue(kind, value)
+  if (!normalized) return
+  store.expenseModal[kind] = normalized
+  customOptionKind.value = ''
+  customOptionValue.value = ''
+}
 
-const payments = [
-  { val: '微信支付', label: '💚 微信支付', hot: true },
-  { val: '花呗',    label: '🔵 花呗' },
-  { val: '支付宝',  label: '🔷 支付宝' },
-  { val: '银行卡',  label: '💳 银行卡' },
-  { val: '京东白条',label: '🟡 京东白条' },
-  { val: '美团月付',label: '🔴 美团月付' },
-  { val: '先用后付',label: '⚡ 先用后付' },
-]
+function openCustomOption(kind) {
+  if (customOptionKind.value === kind) {
+    customOptionKind.value = ''
+    customOptionValue.value = ''
+    return
+  }
+  customOptionKind.value = kind
+  customOptionValue.value = ''
+}
+
+function applyCustomOption() {
+  if (!customOptionKind.value) return
+  selectFinanceOption(customOptionKind.value, customOptionValue.value)
+}
+
+watch(() => store.expenseModal.open, open => {
+  if (!open) return
+  customOptionKind.value = ''
+  customOptionValue.value = ''
+})
 </script>
+
+<style scoped>
+.sel-grid .finance-custom-trigger {
+  border-style: dashed;
+  color: var(--primary, #426e63);
+  background: transparent;
+}
+
+.finance-custom-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.finance-custom-option input {
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid var(--border, #d9ddd8);
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: var(--text1, #202a27);
+  background: var(--surface, #fff);
+  font: inherit;
+  outline: none;
+}
+
+.finance-custom-option input:focus {
+  border-color: var(--primary, #426e63);
+  box-shadow: 0 0 0 3px rgba(66, 110, 99, 0.12);
+}
+
+.finance-custom-option button {
+  min-width: 54px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 12px;
+  color: #fff;
+  background: var(--primary, #426e63);
+  font: inherit;
+}
+
+.finance-custom-option button:disabled {
+  opacity: 0.42;
+}
+</style>

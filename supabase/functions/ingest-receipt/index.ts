@@ -16,6 +16,11 @@ import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
 import { scheduleExpressionShadowCapture } from "./expression-shadow.ts";
 import type { TimeContext } from "./time.ts";
+import {
+  findLikelyFinancialDuplicate,
+  type FinancialPerceptualCandidate,
+  type RankedPerceptualCandidate,
+} from "./duplicate-review.ts";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
 // 默认使用 3.6 Flash 控制上传耗时，用户可显式切换到 3.7 Plus。
@@ -217,25 +222,57 @@ interface IdRow {
   id: string;
 }
 
-interface PerceptualLogRow extends IdRow {
-  perceptual_hash: string | null;
-}
-
 interface DataDuplicateRow extends IdRow {
   domain_key: string | null;
 }
 
-interface IncomeReferenceRow extends IdRow {
-  amount: string | number | null;
-  source_name: string | null;
+interface StagingDuplicateRow extends IdRow {
+  record_type: string | null;
+  status: string | null;
 }
 
-interface RecognitionReferenceRow extends IdRow {
+interface TransactionPerceptualRow extends IdRow {
+  perceptual_hash: string | null;
+  amount: string | number | null;
+  merchant_name: string | null;
+  platform: string | null;
+  payment_method: string | null;
+  transaction_date: string | null;
+  transaction_time: string | null;
+  created_at: string | null;
+}
+
+interface IncomePerceptualRow extends IdRow {
+  perceptual_hash: string | null;
+  amount: string | number | null;
+  source_name: string | null;
+  income_date: string | null;
+  created_at: string | null;
+}
+
+interface StagingPerceptualRow extends IdRow {
+  perceptual_hash: string | null;
+  record_type: string | null;
+  occurred_at: string | null;
+  order_finished_at: string | null;
+  created_at: string | null;
+  extracted_json: unknown;
+}
+
+interface PerceptualLogRow extends IdRow {
+  perceptual_hash: string | null;
   target_table: string | null;
   target_id: string | null;
   record_type: string | null;
+  occurred_at: string | null;
+  order_finished_at: string | null;
   created_at: string | null;
-  ai_response?: unknown;
+  ai_response: unknown;
+}
+
+interface FinancialPerceptualLookupResult {
+  candidates: FinancialPerceptualCandidate[];
+  financeColumnsAvailable: boolean;
 }
 
 interface TransactionCandidateRow extends IdRow {
@@ -327,6 +364,7 @@ function withTraceMeta(payload: Record<string, unknown>, trace: TraceResponseMet
 // 最终落盘到 ai_recognition_logs.raw_response.timings，便于在 Dashboard 排查慢请求
 interface Timings {
   mark(label: string): void;
+  record(label: string, durationMs: number): void;
   snapshot(): Record<string, number>;
   total(): number;
 }
@@ -342,6 +380,9 @@ function makeTimings(): Timings {
       data[label] = (data[label] ?? 0) + (now - last);
       last = now;
     },
+    record(label: string, durationMs: number) {
+      data[label] = (data[label] ?? 0) + Math.max(0, Math.round(durationMs));
+    },
     snapshot() {
       return { ...data, total: Date.now() - startedAt };
     },
@@ -354,16 +395,6 @@ function makeTimings(): Timings {
 async function sha256(buf: ArrayBuffer): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", buf);
   return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function hammingDistanceHex(a: string | null, b: string | null): number | null {
-  if (!a || !b || a.length !== b.length) return null;
-  let distance = 0;
-  for (let i = 0; i < a.length; i++) {
-    const xor = parseInt(a[i], 16) ^ parseInt(b[i], 16);
-    distance += xor.toString(2).replace(/0/g, "").length;
-  }
-  return distance;
 }
 
 function decodeImage(bytes: Uint8Array, mime: string): { data: Uint8Array; width: number; height: number } | null {
@@ -1805,15 +1836,6 @@ function normalizeAmount(value: unknown): number | null {
   return null;
 }
 
-function normalizeName(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
-}
-
-function isSameAmount(a: number | string | null | undefined, b: number | null): boolean {
-  const left = normalizeAmount(a);
-  return left !== null && b !== null && Math.abs(left - b) <= 0.01;
-}
-
 // 通知摘要相关 helpers ─────────────────────────────────────────
 function fmtYuan(n: number | null | undefined): string {
   const v = Number(n ?? 0);
@@ -2801,6 +2823,195 @@ async function rememberCompanionSignals(
   await Promise.all(writes);
 }
 
+function storedJsonObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function transactionOccurredAt(date: string | null, time: string | null): string | null {
+  if (!date || !time) return null;
+  const normalizedTime = time.length === 5 ? `${time}:00` : time.slice(0, 8);
+  return `${date}T${normalizedTime}+08:00`;
+}
+
+async function loadRecentFinancialPerceptualCandidates(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  excludedStagingId: string | null,
+): Promise<FinancialPerceptualLookupResult> {
+  const activeStagingStatuses = [
+    "unassigned",
+    "assigned",
+    "failed",
+    "unrouted",
+    "routed",
+    "routing_failed",
+    "extracted",
+    "pending_review",
+    "extraction_failed",
+    "schema_failed",
+    "ai_error",
+  ];
+
+  let stagingQuery = supabase
+    .from("staging_records")
+    .select("id,perceptual_hash,record_type,occurred_at,order_finished_at,created_at,extracted_json")
+    .eq("user_id", userId)
+    .not("perceptual_hash", "is", null)
+    .in("record_type", ["expense", "income"])
+    .in("status", activeStagingStatuses)
+    .order("created_at", { ascending: false })
+    .limit(60);
+  if (excludedStagingId) stagingQuery = stagingQuery.neq("id", excludedStagingId);
+
+  const [transactionResult, incomeResult, stagingResult, legacyLogResult] = await Promise.all([
+    supabase
+      .from("transactions")
+      .select("id,perceptual_hash,amount,merchant_name,platform,payment_method,transaction_date,transaction_time,created_at")
+      .eq("user_id", userId)
+      .not("perceptual_hash", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(60),
+    supabase
+      .from("income_records")
+      .select("id,perceptual_hash,amount,source_name,income_date,created_at")
+      .eq("user_id", userId)
+      .not("perceptual_hash", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(60),
+    stagingQuery,
+    supabase
+      .from("ai_recognition_logs")
+      .select("id,perceptual_hash,target_table,target_id,record_type,occurred_at,order_finished_at,created_at,ai_response")
+      .eq("user_id", userId)
+      .not("perceptual_hash", "is", null)
+      .not("target_id", "is", null)
+      .in("target_table", ["transactions", "income_records"])
+      .in("record_type", ["expense", "income"])
+      .order("created_at", { ascending: false })
+      .limit(60),
+  ]);
+
+  const financeColumnsAvailable = !transactionResult.error && !incomeResult.error;
+  if (transactionResult.error || incomeResult.error) {
+    console.warn("Finance perceptual columns unavailable; continuing without persisted fingerprints", {
+      transaction_error: transactionResult.error?.code ?? null,
+      income_error: incomeResult.error?.code ?? null,
+    });
+  }
+  if (stagingResult.error) {
+    console.warn("Staging perceptual lookup failed; continuing without staging candidates", {
+      code: stagingResult.error.code ?? null,
+    });
+  }
+  if (legacyLogResult.error) {
+    console.warn("Legacy perceptual lookup failed; continuing without AI-log candidates", {
+      code: legacyLogResult.error.code ?? null,
+    });
+  }
+
+  const candidates: FinancialPerceptualCandidate[] = [];
+  for (const row of (transactionResult.data ?? []) as TransactionPerceptualRow[]) {
+    candidates.push({
+      id: `transactions:${row.id}`,
+      perceptualHash: row.perceptual_hash,
+      recordType: "expense",
+      referenceTable: "transactions",
+      referenceId: row.id,
+      amount: normalizeAmount(row.amount),
+      merchantOrSource: row.merchant_name,
+      platform: row.platform,
+      paymentMethod: row.payment_method,
+      occurredAt: transactionOccurredAt(row.transaction_date, row.transaction_time),
+      occurredDate: row.transaction_date,
+      timePrecision: row.transaction_time ? "datetime" : row.transaction_date ? "date" : "none",
+      createdAt: row.created_at,
+    });
+  }
+
+  for (const row of (incomeResult.data ?? []) as IncomePerceptualRow[]) {
+    candidates.push({
+      id: `income_records:${row.id}`,
+      perceptualHash: row.perceptual_hash,
+      recordType: "income",
+      referenceTable: "income_records",
+      referenceId: row.id,
+      amount: normalizeAmount(row.amount),
+      merchantOrSource: row.source_name,
+      occurredDate: row.income_date,
+      timePrecision: row.income_date ? "date" : "none",
+      createdAt: row.created_at,
+    });
+  }
+
+  for (const row of (stagingResult.data ?? []) as StagingPerceptualRow[]) {
+    if (row.record_type !== "expense" && row.record_type !== "income") continue;
+    const ai = storedJsonObject(row.extracted_json);
+    const occurredAt = row.occurred_at || row.order_finished_at
+      || normalizeString(ai.occurred_at) || normalizeString(ai.order_finished_at);
+    candidates.push({
+      id: `staging_records:${row.id}`,
+      perceptualHash: row.perceptual_hash,
+      recordType: row.record_type,
+      referenceTable: "staging_records",
+      referenceId: row.id,
+      amount: normalizeAmount(ai.amount),
+      merchantOrSource: normalizeString(row.record_type === "income" ? ai.source_name : ai.merchant_name),
+      platform: normalizeString(ai.platform),
+      paymentMethod: normalizeString(ai.payment_method),
+      occurredAt,
+      occurredDate: occurredAt?.slice(0, 10) ?? null,
+      timePrecision: occurredAt ? "datetime" : "none",
+      createdAt: row.created_at,
+    });
+  }
+
+  const seenReferences = new Set(candidates.map((candidate) => `${candidate.referenceTable}:${candidate.referenceId}`));
+  for (const row of (legacyLogResult.data ?? []) as PerceptualLogRow[]) {
+    const recordType = row.record_type === "income" ? "income" : row.record_type === "expense" ? "expense" : null;
+    const referenceTable = row.target_table === "income_records"
+      ? "income_records"
+      : row.target_table === "transactions"
+        ? "transactions"
+        : null;
+    if (!recordType || !referenceTable || !row.target_id) continue;
+    const referenceKey = `${referenceTable}:${row.target_id}`;
+    if (seenReferences.has(referenceKey)) continue;
+
+    const ai = storedJsonObject(row.ai_response);
+    const occurredAt = row.occurred_at || row.order_finished_at
+      || normalizeString(ai.occurred_at) || normalizeString(ai.order_finished_at);
+    candidates.push({
+      id: `ai_recognition_logs:${row.id}`,
+      perceptualHash: row.perceptual_hash,
+      recordType,
+      referenceTable,
+      referenceId: row.target_id,
+      amount: normalizeAmount(ai.amount),
+      merchantOrSource: normalizeString(recordType === "income" ? ai.source_name : ai.merchant_name),
+      platform: normalizeString(ai.platform),
+      paymentMethod: normalizeString(ai.payment_method),
+      occurredAt,
+      occurredDate: occurredAt?.slice(0, 10) ?? null,
+      timePrecision: occurredAt ? "datetime" : "none",
+      createdAt: row.created_at,
+    });
+    seenReferences.add(referenceKey);
+  }
+
+  return { candidates, financeColumnsAvailable };
+}
+
 async function createStagingRecord(
   supabase: ReturnType<typeof createClient>,
   payload: {
@@ -2817,6 +3028,13 @@ async function createStagingRecord(
     userId?: string | null;
     timeContext?: unknown;
     testMeta?: TestMeta | null;
+    duplicateReview?: {
+      kind: "perceptual_hash";
+      distance: number;
+      referenceTable: string;
+      referenceId: string;
+      recordType: "expense" | "income";
+    } | null;
   },
   privacyConfig: PrivacyConfig = DEFAULT_PRIVACY_CONFIG,
 ): Promise<{ id: string } | null> {
@@ -2827,7 +3045,11 @@ async function createStagingRecord(
       : null;
   const detectedDomainName = domainNameFromKey(detectedDomainKey);
   const summaryParts = [
-    payload.ai.record_type && payload.ai.record_type !== "uncertain" ? `疑似${detectedDomainName}` : "无法确定数据域",
+    payload.duplicateReview
+      ? "疑似与已有记录重复"
+      : payload.ai.record_type && payload.ai.record_type !== "uncertain"
+        ? `疑似${detectedDomainName}`
+        : "无法确定数据域",
     payload.ai.amount ? `金额 ${payload.ai.amount}` : null,
     payload.ai.merchant_name || payload.ai.source_name || payload.ai.title || null,
   ].filter(Boolean);
@@ -2850,6 +3072,8 @@ async function createStagingRecord(
       ...payload.ai,
       time_context: payload.timeContext ?? null,
       ai_feedback: (payload.ai as unknown as Record<string, unknown>).ai_feedback ?? null,
+      review_reason: payload.duplicateReview ? "possible_duplicate" : null,
+      duplicate_review: payload.duplicateReview ?? null,
       ...(payload.testMeta ? { test_meta: payload.testMeta } : {}),
     }),
     companion_message: payload.ai.companion_message ?? null,
@@ -2867,6 +3091,8 @@ async function createStagingRecord(
       error_type: payload.errorType ?? null,
       time_context: payload.timeContext ?? null,
       missing_fields: [],
+      review_reason: payload.duplicateReview ? "possible_duplicate" : null,
+      duplicate_review: payload.duplicateReview ?? null,
       dispatcher: payload.dispatcher ? {
         source_app: payload.dispatcher.source_app,
         image_features: payload.dispatcher.image_features,
@@ -2952,8 +3178,8 @@ async function callTextOnlyJsonGeneration(
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`${config.name} text API error ${resp.status}: ${txt}`);
+    await resp.body?.cancel();
+    throw new Error(`${config.name} text API error ${resp.status}`);
   }
   const data = await resp.json();
   const message = data?.choices?.[0]?.message ?? {};
@@ -2963,7 +3189,7 @@ async function callTextOnlyJsonGeneration(
   try {
     parsed = JSON.parse(extracted) as Record<string, unknown>;
   } catch (parseError) {
-    throw new Error(`Failed to parse feedback JSON: ${String(parseError)} | raw=${rawText.slice(0, 300)}`);
+    throw new Error(`Failed to parse feedback JSON: ${String(parseError)}`);
   }
   return { rawText, parsed };
 }
@@ -3265,7 +3491,7 @@ async function generateVoiceFeedback(opts: {
       JSON.stringify(recordFacts),
     );
     if (!check.ok) {
-      console.warn(`[voice] number validation failed (${opts.domainKey}):`, check.violations.join(" | "));
+      console.warn(`[voice] number validation failed domain=${opts.domainKey} count=${check.violations.length}`);
       // 逐句抢救:只丢弃违规句,保留合规句。badIndexes 与上方数组下标对齐:
       // [0]=companion_message, [1]=emotion_line, [2]=utility_line, [3]=detail_reason
       const bad = new Set(check.badIndexes);
@@ -3381,8 +3607,8 @@ async function callOpenAICompatibleVision(
     clearTimeout(timeout);
   }
   if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`${config.name} API error ${resp.status}: ${txt}`);
+    await resp.body?.cancel();
+    throw new Error(`${config.name} API error ${resp.status}`);
   }
   const data = await resp.json();
   const message = data?.choices?.[0]?.message ?? {};
@@ -3525,6 +3751,102 @@ function isLegacyStoragePath(path: string): boolean {
   return /^[0-9]{4}-[0-9]{2}-[0-9]{2}\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(path);
 }
 
+function normalizeManagedStoragePath(value: string): string | null {
+  const raw = value.trim();
+  if (!raw || /^data:/i.test(raw)) return null;
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw);
+      if (parsed.origin !== new URL(getEnv("SUPABASE_URL")).origin) return null;
+      const prefixes = [
+        `/storage/v1/object/sign/${BUCKET_NAME}/`,
+        `/storage/v1/object/authenticated/${BUCKET_NAME}/`,
+        `/storage/v1/object/public/${BUCKET_NAME}/`,
+      ];
+      const prefix = prefixes.find((candidate) => parsed.pathname.startsWith(candidate));
+      if (!prefix) return null;
+      return decodeURIComponent(parsed.pathname.slice(prefix.length)) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  return raw.split(/[?#]/, 1)[0]?.trim() || null;
+}
+
+async function collectNormalizedReferenceIds(
+  supabase: ReturnType<typeof createClient>,
+  table: string,
+  column: string,
+  userId: string,
+  path: string,
+): Promise<string[]> {
+  const ids: string[] = [];
+  let lastId: string | null = null;
+  for (;;) {
+    let query = supabase.from(table)
+      .select(`id,${column}`)
+      .eq("user_id", userId)
+      .ilike(column, "http%")
+      .order("id", { ascending: true })
+      .limit(500);
+    if (lastId) query = query.gt("id", lastId);
+    const { data, error } = await query;
+    if (error) throw new Error(`Failed to inspect managed URL references in ${table}.${column}: ${error.message}`);
+    const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const value = row[column];
+      if (typeof row.id === "string"
+        && typeof value === "string"
+        && normalizeManagedStoragePath(value) === path) {
+        ids.push(row.id);
+      }
+    }
+    if (rows.length < 500) break;
+    const nextId = rows.at(-1)?.id;
+    if (typeof nextId !== "string" || nextId === lastId) {
+      throw new Error(`Reference pagination did not advance for ${table}.${column}`);
+    }
+    lastId = nextId;
+  }
+  return ids;
+}
+
+async function collectUserScopedStoragePaths(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<string[]> {
+  const paths = new Set<string>();
+  const directories = [userId, `tmp/${userId}`];
+  const visited = new Set<string>();
+  while (directories.length > 0) {
+    const directory = directories.shift();
+    if (!directory || visited.has(directory)) continue;
+    visited.add(directory);
+    if (visited.size > 10_000) throw new Error("Storage directory traversal limit exceeded");
+
+    for (let offset = 0; ; offset += 1_000) {
+      const { data, error } = await supabase.storage.from(BUCKET_NAME).list(directory, {
+        limit: 1_000,
+        offset,
+        sortBy: { column: "name", order: "asc" },
+      });
+      if (error) throw new Error(`Failed to list user Storage objects: ${error.message}`);
+      const entries = (data ?? []) as unknown as Array<Record<string, unknown>>;
+      for (const entry of entries) {
+        if (typeof entry.name !== "string" || entry.name.length === 0) continue;
+        const entryPath = `${directory}/${entry.name}`;
+        const isFile = typeof entry.id === "string" || entry.metadata != null;
+        if (isFile) paths.add(entryPath);
+        else directories.push(entryPath);
+      }
+      if (entries.length < 1_000) break;
+    }
+  }
+  return [...paths];
+}
+
 async function authenticatedUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization") || "";
   const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
@@ -3569,23 +3891,39 @@ async function collectUserImagePaths(
   const externalPaths = new Set<string>();
   const pageSize = 500;
   for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
-    for (let offset = 0; ; offset += pageSize) {
-      const { data, error } = await supabase.from(table)
-        .select(column)
+    let lastId: string | null = null;
+    for (;;) {
+      let query = supabase.from(table)
+        .select(`id,${column}`)
         .eq("user_id", userId)
         .not(column, "is", null)
-        .range(offset, offset + pageSize - 1);
+        .order("id", { ascending: true })
+        .limit(pageSize);
+      if (lastId) query = query.gt("id", lastId);
+      const { data, error } = await query;
       if (error) throw new Error(`Failed to collect ${table}.${column}: ${error.message}`);
-      const rows = data ?? [];
+      const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
       for (const row of rows) {
-        const dynamicRow = row as unknown as Record<string, unknown>;
-        const path = dynamicRow[column];
-        if (typeof path !== "string" || path.length === 0) continue;
-        if (isUserOwnedStoragePath(path, userId) || isLegacyStoragePath(path)) paths.add(path);
-        else externalPaths.add(path);
+        const rawPath = row[column];
+        if (typeof rawPath !== "string" || rawPath.length === 0) continue;
+        const normalizedPath = normalizeManagedStoragePath(rawPath);
+        if (normalizedPath
+          && (isUserOwnedStoragePath(normalizedPath, userId) || isLegacyStoragePath(normalizedPath))) {
+          paths.add(normalizedPath);
+        } else {
+          externalPaths.add(rawPath);
+        }
       }
       if (rows.length < pageSize) break;
+      const nextId = rows.at(-1)?.id;
+      if (typeof nextId !== "string" || nextId === lastId) {
+        throw new Error(`Image path pagination did not advance for ${table}.${column}`);
+      }
+      lastId = nextId;
     }
+  }
+  for (const storagePath of await collectUserScopedStoragePaths(supabase, userId)) {
+    paths.add(storagePath);
   }
   return { ownedPaths: [...paths], skippedExternal: externalPaths.size };
 }
@@ -3597,12 +3935,11 @@ async function enqueueImageCleanup(
   cleanupReason: ImageCleanupReason,
 ): Promise<void> {
   if (paths.length === 0) return;
-  const now = new Date().toISOString();
-  const { error } = await supabase.from("image_cleanup_queue").upsert(
-    paths.map((path) => ({
-      user_id: userId,
-      bucket_name: BUCKET_NAME,
-      bucket_path: path,
+  const uniquePaths = [...new Set(paths)];
+  for (let offset = 0; offset < uniquePaths.length; offset += 200) {
+    const batch = uniquePaths.slice(offset, offset + 200);
+    const now = new Date().toISOString();
+    const { error: retryError } = await supabase.from("image_cleanup_queue").update({
       status: "pending",
       attempts: 0,
       cleanup_reason: cleanupReason,
@@ -3614,10 +3951,43 @@ async function enqueueImageCleanup(
       storage_deleted_at: null,
       references_cleared_at: null,
       updated_at: now,
-    })),
-    { onConflict: "user_id,bucket_path" },
-  );
-  if (error) throw new Error(`Failed to enqueue image cleanup: ${error.message}`);
+    })
+      .eq("user_id", userId)
+      .in("bucket_path", batch)
+      .in("status", ["failed", "dead_letter", "done", "skipped_external"]);
+    if (retryError) throw new Error(`Failed to requeue image cleanup: ${retryError.message}`);
+
+    const { error: pendingError } = await supabase.from("image_cleanup_queue").update({
+      cleanup_reason: cleanupReason,
+      next_retry_at: now,
+      updated_at: now,
+    })
+      .eq("user_id", userId)
+      .in("bucket_path", batch)
+      .eq("status", "pending");
+    if (pendingError) throw new Error(`Failed to reprioritize image cleanup: ${pendingError.message}`);
+
+    const { error: insertError } = await supabase.from("image_cleanup_queue").upsert(
+      batch.map((path) => ({
+        user_id: userId,
+        bucket_name: BUCKET_NAME,
+        bucket_path: path,
+        status: "pending",
+        attempts: 0,
+        cleanup_reason: cleanupReason,
+        last_error: null,
+        processed_at: null,
+        last_attempt_at: null,
+        next_retry_at: now,
+        deleted_at: null,
+        storage_deleted_at: null,
+        references_cleared_at: null,
+        updated_at: now,
+      })),
+      { onConflict: "user_id,bucket_path", ignoreDuplicates: true },
+    );
+    if (insertError) throw new Error(`Failed to enqueue image cleanup: ${insertError.message}`);
+  }
 }
 
 async function cleanupUploadedObjectOrQueue(
@@ -3635,10 +4005,10 @@ async function cleanupUploadedObjectOrQueue(
       force: true,
     });
     if (result.failed > 0 || result.deadLetter > 0 || result.remaining > 0) {
-      console.error("Uploaded image rollback deferred", { userId, path, result });
+      console.error("Uploaded image rollback deferred", { result });
     }
   } catch (cleanupError) {
-    console.error("Failed to queue uploaded image rollback", { userId, path, cleanupError });
+    console.error("Failed to queue uploaded image rollback", { error: String(cleanupError) });
   }
 }
 
@@ -3647,14 +4017,19 @@ async function hasBusinessImageReference(
   userId: string,
   path: string,
 ): Promise<boolean> {
+  const normalizedPath = normalizeManagedStoragePath(path);
+  if (!normalizedPath) return false;
   const businessTargets = IMAGE_REFERENCE_TARGETS.filter(({ table }) => table !== "ai_recognition_logs");
   for (const { table, column } of businessTargets) {
     const { count, error } = await supabase.from(table)
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
-      .eq(column, path);
+      .eq(column, normalizedPath);
     if (error) throw new Error(`Failed to verify ${table}.${column}: ${error.message}`);
     if ((count ?? 0) > 0) return true;
+    if ((await collectNormalizedReferenceIds(supabase, table, column, userId, normalizedPath)).length > 0) {
+      return true;
+    }
   }
   return false;
 }
@@ -3664,12 +4039,30 @@ async function clearImageReferences(
   userId: string,
   path: string,
 ): Promise<void> {
+  const normalizedPath = normalizeManagedStoragePath(path);
+  if (!normalizedPath) throw new Error("Managed Storage path is invalid");
   for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
     const { error } = await supabase.from(table)
       .update({ [column]: null })
       .eq("user_id", userId)
-      .eq(column, path);
+      .eq(column, normalizedPath);
     if (error) throw new Error(`Failed to clear ${table}.${column}: ${error.message}`);
+    const signedReferenceIds = await collectNormalizedReferenceIds(
+      supabase,
+      table,
+      column,
+      userId,
+      normalizedPath,
+    );
+    for (let offset = 0; offset < signedReferenceIds.length; offset += 100) {
+      const { error: signedReferenceError } = await supabase.from(table)
+        .update({ [column]: null })
+        .eq("user_id", userId)
+        .in("id", signedReferenceIds.slice(offset, offset + 100));
+      if (signedReferenceError) {
+        throw new Error(`Failed to clear managed URL references in ${table}.${column}: ${signedReferenceError.message}`);
+      }
+    }
   }
 }
 
@@ -3678,21 +4071,35 @@ async function legacyStoragePathCanBeDeleted(
   row: ImageCleanupQueueRow,
 ): Promise<boolean> {
   if (!row.user_id) return false;
+  const normalizedPath = normalizeManagedStoragePath(row.bucket_path);
+  if (!normalizedPath) return false;
   let hasOwnerReference = false;
   for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
-    for (let offset = 0; ; offset += 500) {
-      const { data, error } = await supabase.from(table)
-        .select("user_id")
-        .eq(column, row.bucket_path)
-        .range(offset, offset + 499);
+    let lastId: string | null = null;
+    for (;;) {
+      let query = supabase.from(table)
+        .select(`id,user_id,${column}`)
+        .not(column, "is", null)
+        .order("id", { ascending: true })
+        .limit(500);
+      if (lastId) query = query.gt("id", lastId);
+      const { data, error } = await query;
       if (error) throw new Error(`Failed to verify legacy path ownership in ${table}.${column}: ${error.message}`);
-      const references = data ?? [];
+      const references = (data ?? []) as unknown as Array<Record<string, unknown>>;
       for (const reference of references) {
-        const referenceUserId = (reference as { user_id: string | null }).user_id;
+        const referencePath = reference[column];
+        if (typeof referencePath !== "string"
+          || normalizeManagedStoragePath(referencePath) !== normalizedPath) continue;
+        const referenceUserId = typeof reference.user_id === "string" ? reference.user_id : null;
         if (referenceUserId !== row.user_id) return false;
         hasOwnerReference = true;
       }
       if (references.length < 500) break;
+      const nextId = references.at(-1)?.id;
+      if (typeof nextId !== "string" || nextId === lastId) {
+        throw new Error(`Legacy ownership pagination did not advance for ${table}.${column}`);
+      }
+      lastId = nextId;
     }
   }
   return hasOwnerReference
@@ -3806,7 +4213,7 @@ async function processImageCleanupQueue(
       }
       if (!row.storage_deleted_at && !isUserOwnedStoragePath(row.bucket_path, row.user_id)) {
         if (!isLegacyStoragePath(row.bucket_path) || !await legacyStoragePathCanBeDeleted(supabase, row)) {
-          throw new Error(`Cleanup path ownership cannot be verified for user ${row.user_id}`);
+          throw new Error("Cleanup path ownership cannot be verified");
         }
       }
       let storageDeletedAt = row.storage_deleted_at;
@@ -3958,6 +4365,23 @@ async function finalizeAccountDeletion(
     const { error: dataError } = await supabase.rpc("delete_user_account_data", { p_user_id: userId });
     if (dataError) throw new Error(`删除账户数据失败：${dataError.message}`);
 
+    const { count: postDeleteQueueCount, error: postDeleteQueueError } = await supabase
+      .from("image_cleanup_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .in("status", ["pending", "failed", "processing", "dead_letter"]);
+    if (postDeleteQueueError || postDeleteQueueCount === null) {
+      throw new Error("Unable to verify image cleanup after deleting account data");
+    }
+    if (postDeleteQueueCount > 0) {
+      await updateAccountDeletionRequest(supabase, userId, {
+        status: "cleaning",
+        remaining_images: postDeleteQueueCount,
+        next_retry_at: new Date().toISOString(),
+      });
+      return false;
+    }
+
     const { error: authError } = await supabase.auth.admin.deleteUser(userId);
     if (authError && !/not found/i.test(authError.message)) {
       throw new Error(`删除登录账户失败：${authError.message}`);
@@ -3983,9 +4407,13 @@ async function finalizeAccountDeletion(
       last_error: String(deletionError),
       next_retry_at: new Date(Date.now() + Math.min(12 * 60, Math.pow(5, attempts - 1)) * 60 * 1000).toISOString(),
     }).catch((requestError) => {
-      console.error("Failed to persist account deletion failure", { userId, requestError });
+      console.error("Failed to persist account deletion failure", {
+        error_type: requestError instanceof Error ? requestError.name : typeof requestError,
+      });
     });
-    console.error("Account deletion finalization failed", { userId, deletionError });
+    console.error("Account deletion finalization failed", {
+      error_type: deletionError instanceof Error ? deletionError.name : typeof deletionError,
+    });
     return false;
   }
 }
@@ -4006,15 +4434,25 @@ async function finalizeReadyAccountDeletions(
   let failed = 0;
   for (const row of data ?? []) {
     const userId = String(row.user_id);
+    let status = String(row.status);
     try {
-      const status = String(row.status);
       if (status === "requested") {
         await prepareAccountDeletion(supabase, userId, 100);
-      } else if (status !== "deleting") {
-        const cleanup = await processImageCleanupQueue(supabase, { userId, limit: 100, force: true });
+        status = "cleaning";
+      } else {
+        const cleanup = await cleanupAllUserImages(
+          supabase,
+          userId,
+          "account_delete",
+          { maxBatches: 1, batchSize: 100 },
+        );
+        if (status === "deleting" && (cleanup.queued > 0 || cleanup.remaining > 0)) {
+          status = "cleaning";
+        }
         await updateAccountDeletionRequest(supabase, userId, {
-          status: "cleaning",
+          status,
           remaining_images: cleanup.remaining,
+          skipped_external: cleanup.skippedExternal,
           last_error: null,
           next_retry_at: null,
         });
@@ -4034,10 +4472,21 @@ async function finalizeReadyAccountDeletions(
       .in("status", ["pending", "failed", "processing", "dead_letter"]);
     if (queueError || count === null) {
       failed += 1;
-      console.error("Failed to verify account deletion queue", { userId, queueError });
+      console.error("Failed to verify account deletion queue", {
+        error_code: queueError?.code ?? null,
+      });
       continue;
     }
     if (count > 0) continue;
+    if (status !== "deleting") {
+      await updateAccountDeletionRequest(supabase, userId, {
+        status: "deleting",
+        remaining_images: 0,
+        last_error: null,
+        next_retry_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      });
+      continue;
+    }
     if (await finalizeAccountDeletion(supabase, userId)) completed += 1;
     else failed += 1;
   }
@@ -4219,9 +4668,7 @@ Deno.serve(async (req) => {
           } catch (cleanupError) {
             cleanupPending = true;
             console.error("Record image cleanup deferred", {
-              userId: actionUserId,
-              reference: deletion.reference,
-              cleanupError,
+              error_type: cleanupError instanceof Error ? cleanupError.name : typeof cleanupError,
             });
           }
         }
@@ -4539,6 +4986,162 @@ Deno.serve(async (req) => {
       : chinaNow;
     const _weekdayCN = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][referenceLocal.getUTCDay()];
     const clientLocalTime = `${referenceLocal.toISOString().slice(0, 10)} ${String(referenceLocal.getUTCHours()).padStart(2, '0')}:${String(referenceLocal.getUTCMinutes()).padStart(2, '0')}`;
+
+    // 2. 计算 hash 去重
+    const hash = retryImageHash || await sha256(buf);
+    timings.mark("hash");
+    let perceptualDistance: number | null = null;
+    let perceptualMatch: RankedPerceptualCandidate | null = null;
+    const perceptualCandidatesPromise = perceptualHash
+      ? withTimeoutFallback(
+        loadRecentFinancialPerceptualCandidates(supabase, userId!, stagingRetryId),
+        900,
+        { candidates: [], financeColumnsAvailable: false } as FinancialPerceptualLookupResult,
+        "perceptual_lookup",
+      )
+      : Promise.resolve({ candidates: [], financeColumnsAvailable: false } as FinancialPerceptualLookupResult);
+
+    let stagingDuplicateBuilder = supabase
+      .from("staging_records")
+      .select("id,record_type,status")
+      .eq("image_hash", hash)
+      .eq("user_id", userId)
+      .in("status", [
+        "unassigned",
+        "assigned",
+        "failed",
+        "unrouted",
+        "routed",
+        "routing_failed",
+        "extracted",
+        "pending_review",
+        "extraction_failed",
+        "schema_failed",
+        "ai_error",
+      ]);
+    if (stagingRetryId) stagingDuplicateBuilder = stagingDuplicateBuilder.neq("id", stagingRetryId);
+    const stagingDuplicateQuery = stagingDuplicateBuilder.limit(1).maybeSingle();
+
+    const [transactionDuplicateResult, incomeDuplicateResult, dataDuplicateResult, stagingDuplicateResult] = await Promise.all([
+      supabase
+        .from("transactions")
+        .select("id")
+        .eq("image_hash", hash)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("income_records")
+        .select("id")
+        .eq("image_hash", hash)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("data_records")
+        .select("id,domain_key")
+        .eq("source_image_hash", hash)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle(),
+      stagingDuplicateQuery,
+    ]);
+    const exactLookupError = transactionDuplicateResult.error
+      || incomeDuplicateResult.error
+      || dataDuplicateResult.error
+      || stagingDuplicateResult.error;
+    if (exactLookupError) {
+      throw new Error(`Exact duplicate check failed: ${exactLookupError.message}`);
+    }
+    timings.mark("dup_check");
+
+    const txDup = transactionDuplicateResult.data as IdRow | null;
+    if (txDup) {
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: null,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: "expense",
+        target_table: "transactions",
+        target_id: txDup.id,
+        duration_ms: Date.now() - startedAt,
+      });
+      const _spendSum = await summarizeTodaySpend(supabase, userId);
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "duplicate", id: txDup.id, record_type: "expense",
+        message: "该截图已记账",
+        notification: `🔁 该截图已记账过\n${todaySpendLine(_spendSum)}`,
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
+    }
+    const incDup = incomeDuplicateResult.data as IdRow | null;
+    if (incDup) {
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: null,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: "income",
+        target_table: "income_records",
+        target_id: incDup.id,
+        duration_ms: Date.now() - startedAt,
+      });
+      const _incSum = await summarizeMonthIncome(supabase, userId);
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "duplicate", id: incDup.id, record_type: "income",
+        message: "该收入截图已记录",
+        notification: `🔁 该收入截图已记录过\n${monthIncomeLine(_incSum)}`,
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
+    }
+    const dataDup = dataDuplicateResult.data as DataDuplicateRow | null;
+    if (dataDup) {
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: null,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: dataDup.domain_key,
+        target_table: "data_records",
+        target_id: dataDup.id,
+        data_record_id: dataDup.id,
+        duration_ms: Date.now() - startedAt,
+        prompt_version: promptVersion,
+      });
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
+        message: "该截图已归档",
+        notification: `🔁 该截图已归档过 · ${domainNameFromKey(dataDup.domain_key) ?? dataDup.domain_key}`,
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
+    }
+
+    const stagingDup = stagingDuplicateResult.data as StagingDuplicateRow | null;
+    if (stagingDup) {
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: null,
+        duplicate_kind: "exact_hash",
+        status: "duplicate",
+        record_type: stagingDup.record_type ?? "uncertain",
+        target_table: "staging_records",
+        target_id: stagingDup.id,
+        staging_record_id: stagingDup.id,
+        duration_ms: Date.now() - startedAt,
+        prompt_version: promptVersion,
+      });
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "duplicate",
+        staging_status: stagingDup.status,
+        id: stagingDup.id,
+        record_type: stagingDup.record_type ?? "uncertain",
+        message: "该截图已在待处理中",
+        notification: "🔁 该截图已在中转站等待处理",
+      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
+    }
+
     const companionContext = await withTimeoutFallback(
       companionContextPromise,
       COMPANION_CONTEXT_TIMEOUT_MS,
@@ -4566,103 +5169,11 @@ Deno.serve(async (req) => {
     });
     const visionPromptHash = await sha256Short(visionPrompt);
 
-    // 2. 计算 hash 去重
-    const hash = retryImageHash || await sha256(buf);
-    timings.mark("hash");
-    let perceptualDistance: number | null = null;
-    let perceptualDupRefId: string | null = null;
-    if (perceptualHash) {
-      // 感知哈希查重必须按用户隔离,否则 A 用户的截图会命中 B 用户的记录
-      let phQuery = supabase
-        .from("ai_recognition_logs")
-        .select("id,perceptual_hash")
-        .not("perceptual_hash", "is", null);
-      if (userId) phQuery = phQuery.eq("user_id", userId);
-      const { data: recentLogs } = await phQuery
-        .order("created_at", { ascending: false })
-        .limit(30);
-      for (const item of (recentLogs ?? []) as PerceptualLogRow[]) {
-        const distance = hammingDistanceHex(perceptualHash, item.perceptual_hash);
-        if (distance !== null && distance <= 5) {
-          perceptualDistance = distance;
-          perceptualDupRefId = item.id;
-          break;
-        }
-      }
-    }
-    timings.mark("perceptual_lookup");
-    const { data: txDup } = await supabase
-      .from("transactions").select("id").eq("image_hash", hash).eq("user_id", userId).maybeSingle();
-    if (txDup) {
-      const aiLogId = await writeTraceAiLog({
-        image_hash: hash,
-        perceptual_hash: perceptualHash,
-        perceptual_distance: perceptualDistance,
-        duplicate_kind: "exact_hash",
-        status: "duplicate",
-        record_type: "expense",
-        target_table: "transactions",
-        target_id: txDup.id,
-        duration_ms: Date.now() - startedAt,
-      });
-      const _spendSum = await summarizeTodaySpend(supabase, userId);
-      return respondWithExpressionShadow(withTraceMeta({
-        status: "duplicate", id: txDup.id, record_type: "expense",
-        message: "该截图已记账",
-        notification: `🔁 该截图已记账过\n${todaySpendLine(_spendSum)}`,
-      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
-    }
-    const { data: incDup } = await supabase
-      .from("income_records").select("id").eq("image_hash", hash).eq("user_id", userId).maybeSingle();
-    if (incDup) {
-      const aiLogId = await writeTraceAiLog({
-        image_hash: hash,
-        perceptual_hash: perceptualHash,
-        perceptual_distance: perceptualDistance,
-        duplicate_kind: "exact_hash",
-        status: "duplicate",
-        record_type: "income",
-        target_table: "income_records",
-        target_id: incDup.id,
-        duration_ms: Date.now() - startedAt,
-      });
-      const _incSum = await summarizeMonthIncome(supabase, userId);
-      return respondWithExpressionShadow(withTraceMeta({
-        status: "duplicate", id: incDup.id, record_type: "income",
-        message: "该收入截图已记录",
-        notification: `🔁 该收入截图已记录过\n${monthIncomeLine(_incSum)}`,
-      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
-    }
-    const { data: rawDataDuplicate } = await supabase
-      .from("data_records").select("id,domain_key").eq("source_image_hash", hash).eq("user_id", userId).maybeSingle();
-    const dataDup = rawDataDuplicate as DataDuplicateRow | null;
-    timings.mark("dup_check");
-    if (dataDup) {
-      const aiLogId = await writeTraceAiLog({
-        image_hash: hash,
-        perceptual_hash: perceptualHash,
-        perceptual_distance: perceptualDistance,
-        duplicate_kind: "exact_hash",
-        status: "duplicate",
-        record_type: dataDup.domain_key,
-        target_table: "data_records",
-        target_id: dataDup.id,
-        data_record_id: dataDup.id,
-        duration_ms: Date.now() - startedAt,
-        prompt_version: promptVersion,
-      });
-      return respondWithExpressionShadow(withTraceMeta({
-        status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
-        message: "该截图已归档",
-        notification: `🔁 该截图已归档过 · ${domainNameFromKey(dataDup.domain_key) ?? dataDup.domain_key}`,
-      }, { traceId, aiLogId, captureKind, sourceApp }), { mode: responseMode });
-    }
-
     const dispatcher = await runLowCostDispatcher(supabase, { rawText, sourceApp, imageFeatures, userId });
     timings.mark("dispatcher");
-    let duplicateKind: string | null = perceptualDupRefId ? "perceptual_hash" : null;
-    let duplicateRefTable: string | null = perceptualDupRefId ? "ai_recognition_logs" : null;
-    let duplicateRefId: string | null = perceptualDupRefId;
+    let duplicateKind: string | null = null;
+    let duplicateRefTable: string | null = null;
+    let duplicateRefId: string | null = null;
 
     // 3. 上传到 Storage（重试模式跳过，图片已存在）
     // 隐私控制：keep_source_images=false 时仅以 tmp/ 路径完成识别，并在请求结束前删除
@@ -4672,15 +5183,26 @@ Deno.serve(async (req) => {
       temporaryImageCleanup = { userId, path };
     }
     let uploadedNewObject = false;
-    if (!isRetry) {
+    const storageUploadPromise = (async () => {
+      const uploadStartedAt = Date.now();
+      if (isRetry) {
+        return { uploaded: false, error: null as Error | null, durationMs: 0 };
+      }
       const { error: upErr } = await supabase.storage.from(BUCKET_NAME)
         .upload(path, bytes, { contentType: mime, upsert: false });
       if (upErr && !upErr.message.includes("already exists")) {
-        throw new Error(`Upload failed: ${upErr.message}`);
+        return {
+          uploaded: false,
+          error: new Error(`Upload failed: ${upErr.message}`),
+          durationMs: Date.now() - uploadStartedAt,
+        };
       }
-      uploadedNewObject = !upErr;
-    }
-    timings.mark("storage_upload");
+      return {
+        uploaded: !upErr,
+        error: null as Error | null,
+        durationMs: Date.now() - uploadStartedAt,
+      };
+    })();
 
     // 4. 调用 Qwen Vision 识别。
     //    始终调用，不因低成本路由无匹配而跳过
@@ -4755,9 +5277,19 @@ Deno.serve(async (req) => {
         aiModel = lastAttempt.model;
       }
       ai = { image_type: "other", record_type: "uncertain", domain_key: null, title: null, summary: null, amount: null, merchant_name: null, platform: null, category: null, payment_method: null, income_category: null, source_name: null, occurred_at: null, order_finished_at: null, payload_jsonb: null, confidence: 0 };
-      console.error("All vision providers failed:", e);
+      console.error("All vision providers failed", {
+        providers: visionAttempts.map((attempt) => ({
+          provider: attempt.provider,
+          model: attempt.model,
+          duration_ms: attempt.duration_ms,
+        })),
+      });
     }
     timings.mark("vision_total");
+    const storageUpload = await storageUploadPromise;
+    timings.record("storage_upload", storageUpload.durationMs);
+    if (storageUpload.error) throw storageUpload.error;
+    uploadedNewObject = storageUpload.uploaded;
     // 慢请求采样：vision 阶段 > 5s 时打印 warn，方便从函数日志直接搜
     const _visionMs = timings.snapshot().vision_total ?? 0;
     if (_visionMs > 5000) {
@@ -4846,6 +5378,8 @@ Deno.serve(async (req) => {
       ai.record_type = builtinKey;
       ai.domain_key = builtinKey;
     }
+    const perceptualLookup = await perceptualCandidatesPromise;
+    const perceptualStorageAvailable = perceptualLookup.financeColumnsAvailable && Boolean(perceptualHash);
     const accountHint = !builtinKey ? buildAccountHint(ai, recordType) : null;
     const userAccounts = !builtinKey ? await loadUserAccounts(supabase, userId) : [];
     const accountCandidates = !builtinKey ? rankAccountCandidates(userAccounts, accountHint) : [];
@@ -4900,7 +5434,9 @@ Deno.serve(async (req) => {
           const { data: rawIncomeRow } = await supabase.from("income_records").insert({
             amount: normalizedAmount, category: incomeCat,
             source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
-            income_date: recordDate, image_url: path, image_hash: hash, user_id: userId || null, source: "ai_scan",
+            income_date: recordDate, image_url: path, image_hash: hash,
+            ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
+            user_id: userId || null, source: "ai_scan",
             account_id: autoBoundAccount?.id ?? null,
             companion_message: companionMessage,
             ai_feedback: aiFeedback,
@@ -4957,6 +5493,7 @@ Deno.serve(async (req) => {
             merchant_name: ai.merchant_name, platform: ai.platform, category: ai.category,
             payment_method: ai.payment_method, status: isComplete ? "done" : "pending",
             image_url: path, image_hash: hash,
+            ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
             transaction_date: recordDate, transaction_time: recordTime, user_id: userId || null, source: "ai_scan",
             account_id: autoBoundAccount?.id ?? null,
             companion_message: companionMessage,
@@ -5083,6 +5620,29 @@ Deno.serve(async (req) => {
     let aiWithTimeContext: Record<string, unknown> = { ...ai, time_context: timeContext };
     const recordDate = occurredDateTime?.date ?? today;
     const recordTime = occurredDateTime?.time ?? nowTime;
+
+    if (!isRetry && perceptualHash && (recordType === "expense" || recordType === "income")) {
+      const currentOccurredAt = occurredAt
+        || (recordType === "expense" ? transactionOccurredAt(recordDate, recordTime) : null);
+      perceptualMatch = findLikelyFinancialDuplicate(perceptualHash, {
+        recordType,
+        amount: normalizedAmount,
+        merchantOrSource: recordType === "income"
+          ? ai.source_name ?? ai.merchant_name ?? "截图识别收入"
+          : ai.merchant_name ?? null,
+        platform: ai.platform ?? null,
+        paymentMethod: ai.payment_method ?? null,
+        occurredAt: currentOccurredAt,
+        occurredDate: recordDate,
+        timePrecision: currentOccurredAt ? "datetime" : recordDate ? "date" : "none",
+      }, perceptualLookup.candidates);
+      if (perceptualMatch) {
+        perceptualDistance = perceptualMatch.distance;
+        duplicateKind = "perceptual_hash";
+        duplicateRefTable = perceptualMatch.referenceTable;
+        duplicateRefId = perceptualMatch.referenceId;
+      }
+    }
 
     const missingFinancialAmount = !builtinKey && ["expense", "income"].includes(recordType) && normalizedAmount === null;
     if (!aiOk || missingFinancialAmount || (!builtinKey && recordType === "uncertain") || (!builtinKey && (ai.confidence ?? 0) < 0.35 && normalizedAmount === null)) {
@@ -5383,89 +5943,83 @@ Deno.serve(async (req) => {
       }, responseTraceMeta(aiLogId)), { mode: responseMode });
     }
 
+    if (perceptualMatch && (recordType === "expense" || recordType === "income")) {
+      const duplicateReview = {
+        kind: "perceptual_hash" as const,
+        distance: perceptualMatch.distance,
+        referenceTable: perceptualMatch.referenceTable,
+        referenceId: perceptualMatch.referenceId,
+        recordType,
+      };
+      const staging = await createStagingRecord(supabase, {
+        status: "pending_review",
+        imagePath: path,
+        imageHash: hash,
+        perceptualHash,
+        ai,
+        occurredAt,
+        orderFinishedAt,
+        errorType: "POSSIBLE_DUPLICATE",
+        errorMessage: "图片和已有记录相似，请确认是否为同一笔",
+        dispatcher,
+        userId,
+        timeContext,
+        testMeta,
+        duplicateReview,
+      }, privacyConfig);
+      if (!staging) throw new Error("Failed to create possible-duplicate review record");
+
+      const aiLogId = await writeTraceAiLog({
+        image_hash: hash,
+        perceptual_hash: perceptualHash,
+        perceptual_distance: perceptualMatch.distance,
+        image_url: path,
+        image_type: ai.image_type,
+        record_type: recordType,
+        occurred_at: occurredAt,
+        order_finished_at: orderFinishedAt,
+        duplicate_kind: "perceptual_hash",
+        duplicate_ref_table: perceptualMatch.referenceTable,
+        duplicate_ref_id: perceptualMatch.referenceId,
+        target_table: "staging_records",
+        target_id: staging.id,
+        staging_record_id: staging.id,
+        status: "pending",
+        confidence: ai.confidence ?? 0,
+        duration_ms: Date.now() - startedAt,
+        ai_response: aiWithTimeContext,
+        error_message: null,
+        model_provider: aiProvider,
+        model_name: aiModel,
+        raw_response: rawDebug({ dispatcher }),
+        prompt_version: promptVersion,
+      });
+
+      const retainedEvidenceMessage = privacyConfig.keepSourceImages
+        ? "图片已保留并等待确认"
+        : "文字事实已保留，原图会按你的设置删除";
+
+      return respondWithExpressionShadow(withTraceMeta({
+        status: "staging",
+        staging_status: "pending_review",
+        id: staging.id,
+        record_type: recordType,
+        ai_ok: aiOk,
+        possible_duplicate: true,
+        duplicate_ref_table: perceptualMatch.referenceTable,
+        duplicate_ref_id: perceptualMatch.referenceId,
+        message: `发现相似记录，${retainedEvidenceMessage}`,
+        notification: withCompanion(`⚠️ 这张图可能和已有记录重复\n${retainedEvidenceMessage}`),
+        time_context: timeContext,
+        companion_message: companionMessage,
+      }, responseTraceMeta(aiLogId)), { mode: responseMode });
+    }
+
     if (recordType === "income" && normalizedAmount !== null && (ai.confidence ?? 0) >= 0.7) {
       const incomeCategory = ["salary", "bonus", "freelance", "investment", "reimbursement", "other"].includes(ai.income_category ?? "")
         ? ai.income_category
         : "other";
       const sourceName = ai.source_name ?? ai.merchant_name ?? "截图识别收入";
-
-      if (duplicateKind === "perceptual_hash" && duplicateRefId) {
-        const { data: rawReferenceLog } = await supabase
-          .from("ai_recognition_logs")
-          .select("id,target_table,target_id,record_type,created_at")
-          .eq("id", duplicateRefId)
-          .maybeSingle();
-        const refLog = rawReferenceLog as RecognitionReferenceRow | null;
-
-        if (refLog?.record_type === "income" && refLog.target_table === "income_records" && refLog.target_id) {
-          const { data: rawReferenceIncome } = await supabase
-            .from("income_records")
-            .select("id,amount,source_name")
-            .eq("id", refLog.target_id)
-            .maybeSingle();
-          const refIncome = rawReferenceIncome as IncomeReferenceRow | null;
-
-          const currentSource = normalizeName(sourceName);
-          const refSource = normalizeName(refIncome?.source_name);
-          const sourceMatches = currentSource && refSource
-            ? currentSource === refSource
-            : currentSource === refSource || currentSource === "截图识别收入" || refSource === "截图识别收入";
-
-          // 时间维度校验：同金额同来源但时间间隔 > 10 分钟 → 不是同一笔
-          let incomeTimeMatch = true;
-          const refCreated = refLog?.created_at ? new Date(refLog.created_at).getTime() : null;
-          const curOccurred = occurredAt ? new Date(occurredAt).getTime() : null;
-          const curOrderFinished = orderFinishedAt ? new Date(orderFinishedAt).getTime() : null;
-          const nowMs2 = Date.now();
-          if (refCreated) {
-            const curTime = curOccurred || curOrderFinished || nowMs2;
-            if (Math.abs(curTime - refCreated) > 10 * 60 * 1000) {
-              incomeTimeMatch = false;
-            }
-          }
-
-          if (refIncome && isSameAmount(refIncome.amount, normalizedAmount) && sourceMatches && incomeTimeMatch) {
-            const aiLogId = await writeTraceAiLog({
-              image_hash: hash,
-              perceptual_hash: perceptualHash,
-              perceptual_distance: perceptualDistance,
-              image_url: path,
-              image_type: ai.image_type,
-              record_type: "income",
-              occurred_at: occurredAt,
-              order_finished_at: orderFinishedAt,
-              duplicate_kind: duplicateKind,
-              duplicate_ref_table: duplicateRefTable,
-              duplicate_ref_id: duplicateRefId,
-              target_table: "income_records",
-              target_id: refIncome.id,
-              status: "duplicate",
-              confidence: ai.confidence ?? 0,
-              duration_ms: Date.now() - startedAt,
-              ai_response: aiWithTimeContext,
-              error_message: aiErrorMessage,
-              model_provider: aiProvider,
-              model_name: aiModel,
-              raw_response: rawDebug(),
-              prompt_version: promptVersion,
-            });
-            if (uploadedNewObject) {
-              await cleanupUploadedObjectOrQueue(supabase, userId, path);
-            }
-            const _iSum2 = await summarizeMonthIncome(supabase, userId);
-            return respondWithExpressionShadow(withTraceMeta({
-              status: "duplicate",
-              id: refIncome.id,
-              record_type: "income",
-              ai_ok: aiOk,
-              message: "该收入截图疑似已记录",
-              notification: withCompanion(`🔁 该收入疑似已记录过\n${monthIncomeLine(_iSum2)}`),
-              time_context: timeContext,
-              companion_message: companionMessage,
-            }, responseTraceMeta(aiLogId)), { mode: responseMode });
-          }
-        }
-      }
 
       if (companionSettings.enabled) {
         const _secondCallIncome = await regenerateFeedbackWithSecondCall({
@@ -5514,6 +6068,7 @@ Deno.serve(async (req) => {
         income_date: recordDate,
         image_url: path,
         image_hash: hash,
+        ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
         user_id: userId || null,
         source: "ai_scan",
         account_id: autoBoundAccount?.id ?? null,
@@ -5621,81 +6176,6 @@ Deno.serve(async (req) => {
         ai_feedback: aiFeedback,
         data: row,
       }, responseTraceMeta(aiLogId)), { mode: responseMode });
-    }
-
-    // 4.5 感知哈希去重：同一笔支出（同金额+同商家）的相似截图 → 拦截
-    if (duplicateKind === "perceptual_hash" && duplicateRefId && normalizedAmount !== null) {
-      const { data: rawReferenceLog } = await supabase
-        .from("ai_recognition_logs")
-        .select("id,target_table,target_id,record_type,ai_response,created_at")
-        .eq("id", duplicateRefId)
-        .maybeSingle();
-      const refLog = rawReferenceLog as RecognitionReferenceRow | null;
-
-      if (refLog && refLog.record_type === "expense") {
-        let refAmount: number | null = null;
-        let refMerchant: string | null = null;
-        try {
-          const refAi = typeof refLog.ai_response === "string" ? JSON.parse(refLog.ai_response) : (refLog.ai_response || {});
-          refAmount = normalizeAmount(refAi.amount);
-          refMerchant = (refAi.merchant_name || "").trim();
-        } catch {}
-
-        const currentMerchant = (ai.merchant_name || "").trim();
-        const amountMatch = refAmount !== null && normalizedAmount !== null && Math.abs(refAmount - normalizedAmount) <= 0.01;
-        const merchantMatch = currentMerchant && refMerchant
-          ? currentMerchant === refMerchant
-          : !currentMerchant && !refMerchant;
-
-        // 时间维度校验：即使同金额同商户，如果交易时间间隔 > 10 分钟，视为不同笔订单
-        let timeMatch = true; // 默认无时间信息时不拦截（保守策略：宁可不拦截也不误杀）
-        if (amountMatch && merchantMatch) {
-          const refCreatedAt = refLog.created_at ? new Date(refLog.created_at).getTime() : null;
-          const currentOccurredAt = occurredAt ? new Date(occurredAt).getTime() : null;
-          const currentOrderFinishedAt = orderFinishedAt ? new Date(orderFinishedAt).getTime() : null;
-          const nowMs = Date.now();
-
-          // 优先用 occurred_at / order_finished_at 判断，没有则用 refLog 的 created_at 和当前时间
-          if (currentOccurredAt && refCreatedAt) {
-            // 如果当前记录的交易时间和被匹配记录的创建时间相差 > 10 分钟，不是同一笔
-            if (Math.abs(currentOccurredAt - refCreatedAt) > 10 * 60 * 1000) {
-              timeMatch = false;
-            }
-          } else if (currentOrderFinishedAt && refCreatedAt) {
-            if (Math.abs(currentOrderFinishedAt - refCreatedAt) > 10 * 60 * 1000) {
-              timeMatch = false;
-            }
-          } else if (refCreatedAt && (nowMs - refCreatedAt) > 10 * 60 * 1000) {
-            // 没有交易时间信息，但被匹配记录已经是 10 分钟前的 → 大概率不是同一笔
-            timeMatch = false;
-          }
-        }
-
-        if (amountMatch && merchantMatch && timeMatch && refLog.target_id) {
-          const aiLogId = await writeTraceAiLog({
-            image_hash: hash, perceptual_hash: perceptualHash, perceptual_distance: perceptualDistance,
-            image_url: path, image_type: ai.image_type, record_type: "expense",
-            occurred_at: occurredAt, order_finished_at: orderFinishedAt,
-            duplicate_kind: duplicateKind, duplicate_ref_table: duplicateRefTable, duplicate_ref_id: duplicateRefId,
-            target_table: "transactions", target_id: refLog.target_id, status: "duplicate",
-            confidence: ai.confidence ?? 0, duration_ms: Date.now() - startedAt,
-            ai_response: aiWithTimeContext, model_provider: aiProvider, model_name: aiModel,
-            raw_response: rawDebug(),
-            prompt_version: promptVersion,
-          });
-          if (uploadedNewObject) {
-            await cleanupUploadedObjectOrQueue(supabase, userId, path);
-          }
-          const _eDupSum = await summarizeTodaySpend(supabase, userId);
-          return respondWithExpressionShadow(withTraceMeta({
-            status: "duplicate", id: refLog.target_id, record_type: "expense",
-            ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
-            notification: withCompanion(`🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`),
-            time_context: timeContext,
-            companion_message: companionMessage,
-          }, responseTraceMeta(aiLogId)), { mode: responseMode });
-        }
-      }
     }
 
     // 5. 业务层疑似重复检测：3 分钟内同金额+同支付+同商家 → 标记 possible_duplicate
@@ -5850,6 +6330,7 @@ Deno.serve(async (req) => {
       status: normalizedAmount === null ? "pending" : status,
       image_url: path,
       image_hash: hash,
+      ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
       user_id: userId || null,
       is_large_transport: isLargeTransport,
       transaction_date: recordDate,
@@ -5975,7 +6456,10 @@ Deno.serve(async (req) => {
     }, responseTraceMeta(aiLogId)), { mode: responseMode });
 
   } catch (e) {
-    console.error(e);
+    console.error("Ingest request failed", {
+      trace_id: requestTraceId,
+      error_type: e instanceof Error ? e.name : typeof e,
+    });
     return respondShortcut({
       trace_id: requestTraceId,
       ai_log_id: lastAiLogId,
@@ -5993,10 +6477,12 @@ Deno.serve(async (req) => {
           force: true,
         });
         if (cleanup.failed > 0 || cleanup.remaining > 0) {
-          console.error("Temporary source image cleanup incomplete", { userId, path, cleanup });
+          console.error("Temporary source image cleanup incomplete", { cleanup });
         }
       } catch (cleanupError) {
-        console.error("Temporary source image cleanup failed", { userId, path, cleanupError });
+        console.error("Temporary source image cleanup failed", {
+          error_type: cleanupError instanceof Error ? cleanupError.name : typeof cleanupError,
+        });
       }
     }
   }

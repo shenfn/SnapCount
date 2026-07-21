@@ -3,6 +3,7 @@ import SwiftUI
 struct InboxView: View {
     @EnvironmentObject private var appState: AppState
     @State private var filter: NativeInboxFilter = .all
+    @State private var stageRecordId: String?
 
     private var allItems: [NativeInboxItem] {
         NativeInboxPresentation.items(
@@ -13,59 +14,91 @@ struct InboxView: View {
 
     private var sections: [NativeInboxSection] {
         NativeInboxPresentation.sections(
-            from: NativeInboxPresentation.filtered(allItems, by: filter),
+            from: filteredItems,
             today: Self.dateKey(daysFromToday: 0),
             yesterday: Self.dateKey(daysFromToday: -1)
         )
     }
 
+    private var filteredItems: [NativeInboxItem] {
+        NativeInboxPresentation.filtered(allItems, by: filter)
+    }
+
+    private var stageRecords: [NativeStagingRecord] {
+        filteredItems.compactMap(\.stagingRecord)
+    }
+
+    private var archiveDomains: [NativeArchiveDomain] {
+        let domains = appState.dashboard.domains.map {
+            NativeArchiveDomain(id: $0.id, title: $0.shortName, systemImage: $0.systemImage)
+        }
+        return domains.isEmpty ? InboxArchiveDomains.all : domains
+    }
+
+    private var stagePresented: Binding<Bool> {
+        Binding(
+            get: { stageRecordId != nil },
+            set: { if !$0 { stageRecordId = nil } }
+        )
+    }
+
     var body: some View {
         ZStack {
-            JieziTheme.pageBackground.ignoresSafeArea()
-            List {
-                Section { pendingSummary }
+            JieziPageBackground()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    pendingSummary
 
-                if let message = appState.inboxFinanceMessage {
-                    Section { Text(message).foregroundStyle(JieziTheme.brand) }
-                }
-
-                if let message = appState.inboxActionMessage {
-                    Section {
-                        Label(
-                            message,
-                            systemImage: appState.inboxActionRecordId == nil
-                                ? (appState.inboxActionMessageIsError ? "exclamationmark.circle" : "checkmark.circle")
-                                : "hourglass"
-                        )
-                        .foregroundStyle(appState.inboxActionMessageIsError ? JieziTheme.coral : JieziTheme.brand)
+                    if let message = appState.inboxFinanceMessage {
+                        messageBanner(message, isError: false, isWorking: false)
                     }
-                }
 
-                if allItems.isEmpty {
-                    ContentUnavailableView(
-                        "暂无待处理记录",
-                        systemImage: "checkmark.circle",
-                        description: Text("待补全账单和不确定的 AI 识别结果会显示在这里。")
-                    )
-                } else {
-                    Section { filterPicker }
-
-                    if sections.isEmpty {
-                        ContentUnavailableView(
-                            "当前筛选为空",
-                            systemImage: "line.3.horizontal.decrease.circle",
-                            description: Text("换一个状态查看其他待处理记录。")
+                    if let message = appState.inboxActionMessage {
+                        messageBanner(
+                            message,
+                            isError: appState.inboxActionMessageIsError,
+                            isWorking: appState.inboxActionRecordId != nil
                         )
+                    }
+
+                    if allItems.isEmpty {
+                        InboxSettledEmptyView()
                     } else {
-                        ForEach(sections) { section in
-                            Section(section.title) {
-                                ForEach(section.items) { item in inboxRow(item) }
+                        filterPicker
+
+                        if sections.isEmpty {
+                            ContentUnavailableView(
+                                "当前筛选为空",
+                                systemImage: "line.3.horizontal.decrease.circle"
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 72)
+                        } else {
+                            ForEach(sections) { section in
+                                VStack(alignment: .leading, spacing: JieziSpacing.sm) {
+                                    Text(section.title)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(JieziTheme.muted)
+                                        .padding(.leading, 2)
+
+                                    LazyVGrid(
+                                        columns: [
+                                            GridItem(.flexible(), spacing: JieziSpacing.md),
+                                            GridItem(.flexible(), spacing: JieziSpacing.md)
+                                        ],
+                                        spacing: JieziSpacing.md
+                                    ) {
+                                        ForEach(section.items) { item in inboxCell(item) }
+                                    }
+                                }
+                                .padding(.horizontal, JieziSpacing.lg)
+                                .padding(.bottom, JieziSpacing.xl)
                             }
                         }
                     }
                 }
+                .padding(.bottom, 84)
             }
-            .scrollContentBackground(.hidden)
             .refreshable {
                 await appState.refreshDashboard()
                 await appState.loadInboxRepaymentCandidates()
@@ -73,6 +106,7 @@ struct InboxView: View {
         }
         .navigationTitle("中转站")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .navigationDestination(for: NativeInboxRoute.self) { route in
             switch route {
             case .staging(let recordId):
@@ -89,47 +123,52 @@ struct InboxView: View {
                 PendingExpenseResolutionView(reference: reference)
             }
         }
+        .fullScreenCover(isPresented: stagePresented) {
+            StagingVerdictStageView(
+                records: stageRecords,
+                selection: $stageRecordId,
+                domains: archiveDomains
+            )
+            .environmentObject(appState)
+        }
         .task { await appState.loadInboxRepaymentCandidates() }
     }
 
     @ViewBuilder
-    private func inboxRow(_ item: NativeInboxItem) -> some View {
+    private func inboxCell(_ item: NativeInboxItem) -> some View {
         if let pending = item.pendingExpense {
             NavigationLink(value: NativeInboxRoute.record(reference: pending.reference)) {
-                NativeInboxItemRow(item: item, repaymentCandidate: nil)
+                NativeInboxFilmCard(item: item, repaymentCandidate: nil)
             }
+            .buttonStyle(.plain)
         } else if let record = item.stagingRecord {
-            NavigationLink(value: NativeInboxRoute.staging(recordId: record.id)) {
-                NativeInboxItemRow(
+            Button {
+                stageRecordId = record.id
+            } label: {
+                NativeInboxFilmCard(
                     item: item,
                     repaymentCandidate: appState.repaymentCandidates[record.id]
                 )
             }
+            .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
         }
     }
 
     private var pendingSummary: some View {
-        HStack(spacing: 12) {
-            Image(systemName: allItems.isEmpty ? "checkmark.circle.fill" : "tray.full.fill")
-                .font(.title2)
-                .foregroundStyle(allItems.isEmpty ? JieziTheme.mint : JieziTheme.gold)
-                .frame(width: 36, height: 36)
-                .background(.thinMaterial, in: Circle())
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(allItems.isEmpty ? "中转站已清空" : "\(allItems.count) 条待处理")
-                    .font(.headline)
-                Text("待补全、待分类、待确认和识别失败的记录统一在这里处理。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        HStack(alignment: .firstTextBaseline) {
+            Text(allItems.isEmpty ? "微尘皆已落定" : "\(allItems.count) 份证据待你裁决")
+                .font(.subheadline)
+                .foregroundStyle(JieziTheme.muted)
+            Spacer()
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, JieziSpacing.xl)
+        .padding(.top, JieziSpacing.sm)
+        .padding(.bottom, JieziSpacing.md)
     }
 
     private var filterPicker: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: JieziSpacing.sm) {
                 ForEach(NativeInboxFilter.allCases) { item in
                     Button {
                         filter = item
@@ -143,22 +182,720 @@ struct InboxView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(filter == item ? Color.white : JieziTheme.ink)
                             .padding(.horizontal, 12)
-                            .frame(height: 32)
-                            .background(filter == item ? JieziTheme.brand : JieziTheme.line.opacity(0.45), in: Capsule())
+                            .frame(height: 34)
+                            .background(
+                                filter == item ? JieziTheme.brand : Color.white.opacity(0.58),
+                                in: Capsule()
+                            )
+                            .overlay(Capsule().stroke(JieziTheme.brand.opacity(filter == item ? 0 : 0.11)))
                     }
                     .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, JieziSpacing.xl)
         }
+        .padding(.bottom, JieziSpacing.lg)
     }
 
     private func filterCount(_ filter: NativeInboxFilter) -> Int {
         NativeInboxPresentation.filtered(allItems, by: filter).count
     }
 
+    private func messageBanner(_ message: String, isError: Bool, isWorking: Bool) -> some View {
+        Label(
+            message,
+            systemImage: isWorking ? "hourglass" : (isError ? "exclamationmark.circle" : "checkmark.circle")
+        )
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(isError ? JieziTheme.coral : JieziTheme.brand)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            (isError ? JieziTheme.coral : JieziTheme.brand).opacity(0.08),
+            in: RoundedRectangle(cornerRadius: JieziRadius.card, style: .continuous)
+        )
+        .padding(.horizontal, JieziSpacing.lg)
+        .padding(.bottom, JieziSpacing.md)
+    }
+
     private static func dateKey(daysFromToday: Int) -> String {
         let date = Calendar.current.date(byAdding: .day, value: daysFromToday, to: Date()) ?? Date()
         return date.formatted(.iso8601.year().month().day())
+    }
+}
+
+private struct NativeInboxFilmCard: View {
+    let item: NativeInboxItem
+    let repaymentCandidate: NativeRepaymentCandidate?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                filmContent
+                InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
+                    .padding(8)
+            }
+            .aspectRatio(3 / 4, contentMode: .fit)
+            .clipped()
+
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(JieziTheme.ink)
+                        .lineLimit(1)
+                    if let record = item.stagingRecord {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("记录 \(record.occurredAtLabel ?? "未识别")")
+                            Text("上传 \(record.createdAtLabel)")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(JieziTheme.muted)
+                    } else if let pending = item.pendingExpense {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("记录 \(pending.occurredAtLabel ?? pending.dateKey)")
+                            Text("上传 \(pending.createdAtLabel)")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(JieziTheme.muted)
+                    }
+                }
+                Spacer(minLength: 4)
+                if repaymentCandidate != nil {
+                    Image(systemName: "creditcard.and.123")
+                        .font(.caption2)
+                        .foregroundStyle(JieziTheme.brand)
+                } else if let confidence = item.stagingRecord?.confidencePercent {
+                    Text("\(confidence)%")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(JieziTheme.muted)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+        }
+        .background(Color.white.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous)
+                .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
+        }
+        .shadow(color: JieziTheme.space.opacity(0.08), radius: 10, x: 0, y: 6)
+    }
+
+    @ViewBuilder
+    private var filmContent: some View {
+        if let url = item.stagingRecord?.imageURL ?? item.pendingExpense?.imageURL {
+            CachedRemoteImage(url: url) { image in
+                ZStack(alignment: .bottomLeading) {
+                    image.resizable().scaledToFill()
+                    LinearGradient(
+                        colors: [.clear, JieziTheme.space.opacity(0.72)],
+                        startPoint: .center,
+                        endPoint: .bottom
+                    )
+                    Text(item.subtitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .padding(10)
+                }
+            } placeholder: {
+                ProgressView().tint(JieziTheme.brand)
+            } failure: {
+                noteContent
+            }
+        } else {
+            noteContent
+        }
+    }
+
+    private var noteContent: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(hex: "F8F4E9"), Color(hex: "F0EAD8")],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            VStack(alignment: .leading, spacing: 9) {
+                Text(item.stagingRecord == nil ? "账单事实" : "文字事实")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(JieziTheme.gold)
+
+                HStack(spacing: 8) {
+                    Image(systemName: item.systemImage)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                        .frame(width: 30, height: 30)
+                        .overlay(Circle().stroke(statusColor.opacity(0.22)))
+                    Text(item.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(JieziTheme.ink)
+                        .lineLimit(2)
+                }
+
+                Text(item.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.muted)
+                    .lineLimit(4)
+
+                if let record = item.stagingRecord {
+                    let fields = Array(NativeStagingDetailPresentation.fields(for: record).prefix(3))
+                    if !fields.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(fields) { field in
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text(field.label)
+                                        .foregroundStyle(JieziTheme.muted)
+                                    Spacer(minLength: 4)
+                                    Text(field.value)
+                                        .foregroundStyle(JieziTheme.ink)
+                                        .lineLimit(1)
+                                }
+                                .font(.caption2)
+                            }
+                        }
+                        .padding(.top, 5)
+                        .overlay(alignment: .top) {
+                            Rectangle()
+                                .fill(JieziTheme.brand.opacity(0.12))
+                                .frame(height: 1)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private var statusColor: Color {
+        guard let record = item.stagingRecord else { return JieziTheme.gold }
+        switch record.status {
+        case "ai_error", "failed", "extraction_failed": return JieziTheme.coral
+        case "routing_failed", "unrouted", "unassigned": return JieziTheme.brand
+        case "schema_failed": return JieziTheme.ink
+        default: return Color(hex: "8A6D2F")
+        }
+    }
+}
+
+private struct InboxFilmStateBadge: View {
+    let label: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 5, height: 5)
+            Text(label).lineLimit(1)
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(JieziTheme.paper.opacity(0.88), in: Capsule())
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+}
+
+private struct InboxSettledEmptyView: View {
+    var body: some View {
+        VStack(spacing: JieziSpacing.lg) {
+            Canvas { context, size in
+                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                let ringRadius: CGFloat = 48
+                context.stroke(
+                    Path(ellipseIn: CGRect(
+                        x: center.x - ringRadius,
+                        y: center.y - ringRadius,
+                        width: ringRadius * 2,
+                        height: ringRadius * 2
+                    )),
+                    with: .color(JieziTheme.brand.opacity(0.1)),
+                    lineWidth: 1
+                )
+                context.fill(
+                    Path(ellipseIn: CGRect(x: center.x - 4, y: center.y + 18, width: 8, height: 8)),
+                    with: .color(JieziTheme.gold)
+                )
+            }
+            .frame(width: 150, height: 150)
+
+            VStack(spacing: JieziSpacing.sm) {
+                Text("微尘皆已落定")
+                    .font(.headline)
+                    .foregroundStyle(JieziTheme.ink)
+                Text("新的截图会在这里稍作停留")
+                    .font(.subheadline)
+                    .foregroundStyle(JieziTheme.muted)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 72)
+    }
+}
+
+private struct StagingVerdictStageView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    let records: [NativeStagingRecord]
+    @Binding var selection: String?
+    let domains: [NativeArchiveDomain]
+
+    @State private var showDiscardConfirmation = false
+    @State private var showDetail = false
+
+    private var currentIndex: Int {
+        records.firstIndex(where: { $0.id == selection }) ?? 0
+    }
+
+    private var current: NativeStagingRecord? {
+        guard !records.isEmpty else { return nil }
+        return records[min(currentIndex, records.count - 1)]
+    }
+
+    private var pageSelection: Binding<String> {
+        Binding(
+            get: { selection ?? records.first?.id ?? "" },
+            set: { selection = $0 }
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(hex: "EFEADA"), Color(hex: "EAE4D2")],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            if records.isEmpty {
+                VStack(spacing: JieziSpacing.lg) {
+                    Text("微尘皆已落定").font(.headline)
+                    Text("全部处理完毕").font(.subheadline).foregroundStyle(JieziTheme.muted)
+                    Button("回到中转站") { closeStage() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(JieziTheme.brand)
+                }
+            } else if let current {
+                VStack(spacing: 0) {
+                    stageTopBar(current)
+                    TabView(selection: pageSelection) {
+                        ForEach(records) { record in
+                            StagingStageImage(record: record)
+                                .tag(record.id)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .frame(maxHeight: .infinity)
+
+                    stageInfo(current)
+                    stageActions(current)
+                    domainStrip(current)
+                }
+            }
+        }
+        .onAppear {
+            if selection == nil { selection = records.first?.id }
+        }
+        .onChange(of: records.map(\.id)) { _, ids in
+            guard let selection else {
+                self.selection = ids.first
+                return
+            }
+            if !ids.contains(selection) { self.selection = ids.first }
+        }
+        .confirmationDialog(
+            "销毁后无法恢复",
+            isPresented: $showDiscardConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("确认销毁", role: .destructive) {
+                guard let current else { return }
+                Task {
+                    await appState.discardStagingRecord(current)
+                    finishAction(for: current.id)
+                }
+            }
+            Button("再想想", role: .cancel) {}
+        } message: {
+            Text("这条截图将从芥子中散去，不会进入任何数据域。")
+        }
+        .sheet(isPresented: $showDetail) {
+            if let current {
+                NavigationStack { StagingRecordDetailView(record: current) }
+            }
+        }
+    }
+
+    private func stageTopBar(_ record: NativeStagingRecord) -> some View {
+        HStack(spacing: JieziSpacing.md) {
+            Button { closeStage() } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 34, height: 34)
+                    .foregroundStyle(JieziTheme.brand)
+                    .background(JieziTheme.brand.opacity(0.08), in: Circle())
+            }
+            HStack(spacing: 6) {
+                Circle().fill(statusColor(for: record)).frame(width: 6, height: 6)
+                Text("\(record.statusLabel) · \(record.domainName ?? record.recordTypeLabel)")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(statusColor(for: record))
+                    .lineLimit(1)
+            }
+            Spacer()
+            Text("\(currentIndex + 1) / \(records.count)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(JieziTheme.muted)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
+    }
+
+    private func stageInfo(_ record: NativeStagingRecord) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(record.summary)
+                .font(.headline)
+                .foregroundStyle(JieziTheme.ink)
+                .lineLimit(3)
+            HStack(spacing: JieziSpacing.md) {
+                if let confidence = record.confidencePercent {
+                    HStack(spacing: 5) {
+                        ForEach(0..<3, id: \.self) { index in
+                            Circle()
+                                .fill(index < assuranceDots(confidence) ? JieziTheme.ink.opacity(0.55) : .clear)
+                                .overlay(Circle().stroke(JieziTheme.ink.opacity(0.3), lineWidth: 1))
+                                .frame(width: 5, height: 5)
+                        }
+                        Text(assuranceLabel(confidence))
+                    }
+                }
+                if record.retryCount > 0 { Text("已重试 \(record.retryCount) 次") }
+            }
+            .font(.caption)
+            .foregroundStyle(JieziTheme.muted)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("记录时间：\(record.occurredAtLabel ?? "未识别")")
+                Text("上传时间：\(record.createdAtLabel)")
+            }
+            .font(.caption2)
+            .foregroundStyle(JieziTheme.muted)
+            if let error = record.lastErrorMessage, !error.isEmpty {
+                Text(NativeStagingDetailPresentation.errorSummary(error))
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.coral)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 26)
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private func stageActions(_ record: NativeStagingRecord) -> some View {
+        VStack(spacing: JieziSpacing.sm) {
+            if let suggested = domains.first(where: { $0.id == record.domainKey }) {
+                Button {
+                    Task { await archive(record, to: suggested.id) }
+                } label: {
+                    Label("收下 · \(suggested.title)", systemImage: "arrow.down.to.line")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .background(JieziTheme.brandWash, in: RoundedRectangle(cornerRadius: JieziRadius.card, style: .continuous))
+                .disabled(appState.inboxActionRecordId != nil)
+            }
+
+            HStack(spacing: JieziSpacing.sm) {
+                stageActionButton("ellipsis.circle", title: "详情") { showDetail = true }
+                stageActionButton("arrow.clockwise", title: "重试") {
+                    Task {
+                        await appState.retryStagingRecord(record)
+                        finishAction(for: record.id)
+                    }
+                }
+                stageActionButton("trash", title: "销毁", destructive: true) {
+                    showDiscardConfirmation = true
+                }
+            }
+            .disabled(appState.inboxActionRecordId != nil)
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, JieziSpacing.md)
+    }
+
+    private func stageActionButton(
+        _ systemImage: String,
+        title: String,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: systemImage)
+                Text(title).font(.caption2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(destructive ? JieziTheme.coral : JieziTheme.brand)
+        .background(
+            (destructive ? JieziTheme.coral : JieziTheme.brand).opacity(0.08),
+            in: RoundedRectangle(cornerRadius: JieziRadius.card, style: .continuous)
+        )
+    }
+
+    private func domainStrip(_ record: NativeStagingRecord) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: JieziSpacing.sm) {
+                Text("改判到")
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.muted)
+                ForEach(domains) { domain in
+                    Button(domain.title) {
+                        Task { await archive(record, to: domain.id) }
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(domain.id == record.domainKey ? JieziTheme.brand : JieziTheme.ink)
+                    .padding(.horizontal, 11)
+                    .frame(height: 32)
+                    .background(
+                        domain.id == record.domainKey ? JieziTheme.brand.opacity(0.1) : Color.white.opacity(0.48),
+                        in: Capsule()
+                    )
+                    .overlay(Capsule().stroke(JieziTheme.brand.opacity(domain.id == record.domainKey ? 0.28 : 0.1)))
+                    .disabled(appState.inboxActionRecordId != nil)
+                }
+            }
+            .padding(.horizontal, 26)
+        }
+        .padding(.top, JieziSpacing.sm)
+        .padding(.bottom, 24)
+    }
+
+    private func archive(_ record: NativeStagingRecord, to domainId: String) async {
+        await appState.archiveStagingRecord(record, domainKey: domainId)
+        finishAction(for: record.id)
+    }
+
+    private func finishAction(for recordId: String) {
+        if appState.dashboard.stagingRecords.contains(where: { $0.id == recordId }) {
+            selection = recordId
+            return
+        }
+        let remainingIds = Set(appState.dashboard.stagingRecords.map(\.id))
+        if let next = records.first(where: { $0.id != recordId && remainingIds.contains($0.id) }) {
+            selection = next.id
+        } else {
+            closeStage()
+        }
+    }
+
+    private func closeStage() {
+        selection = nil
+        dismiss()
+    }
+
+    private func statusColor(for record: NativeStagingRecord) -> Color {
+        switch record.status {
+        case "ai_error", "failed", "extraction_failed", "schema_failed": return JieziTheme.coral
+        case "routing_failed", "unrouted", "unassigned": return JieziTheme.brand
+        default: return Color(hex: "8A6D2F")
+        }
+    }
+
+    private func assuranceDots(_ confidence: Int) -> Int {
+        if confidence >= 85 { return 3 }
+        if confidence >= 60 { return 2 }
+        return 1
+    }
+
+    private func assuranceLabel(_ confidence: Int) -> String {
+        switch assuranceDots(confidence) {
+        case 3: return "较有把握"
+        case 2: return "不太确定"
+        default: return "需要你看看"
+        }
+    }
+}
+
+private struct StagingStageImage: View {
+    @EnvironmentObject private var appState: AppState
+    let record: NativeStagingRecord
+    @State private var resolvedURL: URL?
+    @State private var isResolving = false
+    @State private var errorMessage: String?
+
+    private var imageURL: URL? { resolvedURL ?? record.imageURL }
+
+    var body: some View {
+        Group {
+            if let imageURL {
+                CachedRemoteImage(url: imageURL) { image in
+                    InboxZoomableImage {
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } placeholder: {
+                    ProgressView().tint(JieziTheme.brand)
+                } failure: {
+                    stageFallback("原图加载失败，以文字事实为准")
+                }
+            } else if isResolving {
+                ProgressView("正在加载截图…")
+            } else {
+                stageFallback(errorMessage ?? "原图未保留，以文字事实为准")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 26)
+        .task(id: record.id) {
+            guard record.imageURL == nil, record.imagePath != nil, resolvedURL == nil else { return }
+            isResolving = true
+            defer { isResolving = false }
+            do {
+                resolvedURL = try await appState.resolveStagingImageURL(for: record)
+            } catch {
+                errorMessage = NativeStagingDetailPresentation.errorSummary(error.localizedDescription)
+            }
+        }
+    }
+
+    private func stageFallback(_ message: String) -> some View {
+        StagingFactSheet(record: record, message: message)
+    }
+}
+
+private struct StagingFactSheet: View {
+    let record: NativeStagingRecord
+    let message: String
+
+    private var fields: [NativeStagingDisplayField] {
+        Array(NativeStagingDetailPresentation.fields(for: record).prefix(5))
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("文字事实")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(JieziTheme.gold)
+                HStack(spacing: 9) {
+                    Image(systemName: record.systemImage)
+                        .foregroundStyle(JieziTheme.brand)
+                        .frame(width: 34, height: 34)
+                        .overlay(Circle().stroke(JieziTheme.brand.opacity(0.18)))
+                    Text(record.domainName ?? record.recordTypeLabel)
+                        .font(.headline)
+                        .foregroundStyle(JieziTheme.ink)
+                }
+                Text(record.summary)
+                    .font(.subheadline)
+                    .foregroundStyle(JieziTheme.muted)
+                    .lineSpacing(4)
+
+                if !fields.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(fields) { field in
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(field.label)
+                                    .font(.caption)
+                                    .foregroundStyle(JieziTheme.muted)
+                                Spacer(minLength: 8)
+                                Text(field.value)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(JieziTheme.ink)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(JieziTheme.brand.opacity(0.12))
+                            .frame(height: 1)
+                    }
+                }
+
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.muted)
+                    .lineSpacing(3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+        .background(
+            LinearGradient(
+                colors: [Color(hex: "F8F4E9"), Color(hex: "F0EAD8")],
+                startPoint: .top,
+                endPoint: .bottom
+            ),
+            in: RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous)
+                .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
+        }
+    }
+}
+
+private struct InboxZoomableImage<Content: View>: View {
+    let content: Content
+    @State private var scale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @GestureState private var liveScale: CGFloat = 1
+    @GestureState private var liveOffset: CGSize = .zero
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .scaleEffect(scale * liveScale)
+            .offset(x: offset.width + liveOffset.width, y: offset.height + liveOffset.height)
+            .gesture(
+                MagnifyGesture()
+                    .updating($liveScale) { value, state, _ in state = value.magnification }
+                    .onEnded { value in
+                        scale = min(max(scale * value.magnification, 1), 3)
+                        if scale == 1 { offset = .zero }
+                    }
+            )
+            .simultaneousGesture(
+                DragGesture()
+                    .updating($liveOffset) { value, state, _ in
+                        guard scale > 1 else { return }
+                        state = value.translation
+                    }
+                    .onEnded { value in
+                        guard scale > 1 else { return }
+                        offset.width += value.translation.width
+                        offset.height += value.translation.height
+                    }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    if scale > 1 {
+                        scale = 1
+                        offset = .zero
+                    } else {
+                        scale = 1.9
+                    }
+                }
+            }
+            .clipped()
     }
 }
 
@@ -229,6 +966,7 @@ private struct PendingExpenseResolutionView: View {
             if let detail = appState.selectedRecordDetail, detail.id == reference {
                 draft = NativePendingResolutionDraft(detail: detail)
             }
+            await appState.loadFinanceVocabulary()
         }
         .confirmationDialog("删除这条待补全账单？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
             Button("删除", role: .destructive) {
@@ -308,9 +1046,21 @@ private struct PendingExpenseResolutionView: View {
             TextField(draft.wrappedValue.kind == .income ? "来源名称（可选）" : "商家名称（可选）", text: draft.merchantOrSourceName)
                 .textFieldStyle(.roundedBorder)
             if draft.wrappedValue.kind == .expense {
-                optionMenu("消费渠道", selection: draft.platform, options: NativeManualRecordDraft.expensePlatforms)
-                optionMenu("消费分类", selection: draft.category, options: NativeManualRecordDraft.expenseCategories)
-                optionMenu("支付方式", selection: draft.paymentMethod, options: NativeManualRecordDraft.expensePayments)
+                editableOptionField(
+                    "消费渠道",
+                    selection: draft.platform,
+                    options: financeOptions(kind: .platform, currentValue: draft.wrappedValue.platform)
+                )
+                optionMenu(
+                    "消费分类",
+                    selection: draft.category,
+                    options: financeOptions(kind: .category, currentValue: draft.wrappedValue.category)
+                )
+                editableOptionField(
+                    "支付方式",
+                    selection: draft.paymentMethod,
+                    options: financeOptions(kind: .payment, currentValue: draft.wrappedValue.paymentMethod)
+                )
             } else {
                 optionMenu("收入类型", selection: draft.incomeCategory, options: NativeManualRecordDraft.incomeCategories)
             }
@@ -322,7 +1072,9 @@ private struct PendingExpenseResolutionView: View {
     private func optionMenu(_ title: String, selection: Binding<String>, options: [NativeManualRecordOption]) -> some View {
         Menu {
             ForEach(options) { option in
-                Button(option.title) { selection.wrappedValue = option.id }
+                Button(option.isFrequent ? "\(option.title) · 常用" : option.title) {
+                    selection.wrappedValue = option.id
+                }
             }
         } label: {
             HStack {
@@ -335,6 +1087,45 @@ private struct PendingExpenseResolutionView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func editableOptionField(
+        _ title: String,
+        selection: Binding<String>,
+        options: [NativeManualRecordOption]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                TextField("输入或选择", text: selection)
+                    .textFieldStyle(.roundedBorder)
+                Menu {
+                    ForEach(options) { option in
+                        Button(option.isFrequent ? "\(option.title) · 常用" : option.title) {
+                            selection.wrappedValue = option.id
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("选择\(title)")
+            }
+        }
+    }
+
+    private func financeOptions(
+        kind: NativeFinanceVocabularyKind,
+        currentValue: String
+    ) -> [NativeManualRecordOption] {
+        NativeFinanceOptionCatalog.options(
+            kind: kind,
+            currentValue: currentValue,
+            vocabulary: appState.financeVocabulary
+        )
     }
 
     private func accountSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {

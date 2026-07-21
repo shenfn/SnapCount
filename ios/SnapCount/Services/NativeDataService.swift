@@ -243,7 +243,17 @@ final class NativeDataService {
 
         snapshot.pendingExpenses = txRows.filter { $0.status == "pending" }.compactMap { row in
             guard let dateKey = row.transactionDate else { return nil }
-            return NativePendingExpense(id: row.id, title: row.merchantName ?? "待补全消费", amount: row.amount ?? 0, dateKey: dateKey, reference: "expense/\(row.id)")
+            let occurredAtLabel = row.transactionTime.map { "\(dateKey) \(String($0.prefix(5)))" } ?? dateKey
+            return NativePendingExpense(
+                id: row.id,
+                title: row.merchantName ?? "待补全消费",
+                amount: row.amount ?? 0,
+                dateKey: dateKey,
+                reference: "expense/\(row.id)",
+                imagePath: row.imageURL,
+                occurredAtLabel: occurredAtLabel,
+                createdAtLabel: dateTimeLabel(row.createdAt) ?? "最近上传"
+            )
         }
 
         snapshot.pendingCount =
@@ -313,6 +323,7 @@ final class NativeDataService {
                 : nil
         }
             + snapshot.stagingRecords.compactMap(\.imagePath)
+            + snapshot.pendingExpenses.compactMap(\.imagePath)
         guard !paths.isEmpty else { return snapshot }
         let signedURLs = try await signedImageURLMap(paths: paths, accessToken: accessToken)
         return snapshot.applyingSignedImageURLs(signedURLs, markMissingAsFailure: false)
@@ -1144,12 +1155,19 @@ final class NativeDataService {
 
     private func stagingRecord(_ row: StagingRow, signedImageURL: URL?) -> NativeStagingRecord {
         let status = row.status ?? "unassigned"
-        let title = row.detectedDomainName ?? domainName(row.detectedDomainKey)
+        let fallbackTitle = row.detectedDomainName ?? domainName(row.detectedDomainKey)
+        let actionCopy = NativeStagingDetailPresentation.actionCopy(
+            domainKey: row.detectedDomainKey,
+            status: status,
+            summary: row.aiSummary,
+            errorMessage: row.lastErrorMessage,
+            extracted: row.extractedJSON ?? [:]
+        )
         return NativeStagingRecord(
             id: row.id,
             dateKey: NativeLocalDate.dateKey(row.occurredAt ?? row.createdAt ?? ""),
-            title: title,
-            summary: row.aiSummary ?? row.lastErrorMessage ?? "这条截图需要你打开收件箱确认或补全。",
+            title: actionCopy?.title ?? fallbackTitle,
+            summary: actionCopy?.summary ?? row.aiSummary ?? row.lastErrorMessage ?? "这条截图需要你打开收件箱确认或补全。",
             status: status,
             statusLabel: stagingStatusLabel(status),
             recordTypeLabel: recordTypeLabel(row.recordType),
@@ -1204,7 +1222,8 @@ final class NativeDataService {
         switch status {
         case "routing_failed", "unrouted", "unassigned": return "待分类"
         case "pending_review", "routed", "extracted": return "待确认"
-        case "ai_error", "failed", "extraction_failed", "schema_failed": return "识别失败"
+        case "schema_failed": return "待补充"
+        case "ai_error", "failed", "extraction_failed": return "识别失败"
         case "confirmed": return "已确认"
         default: return "待处理"
         }
@@ -1649,6 +1668,12 @@ extension DashboardSnapshot {
             cleared.imageLoadError = false
             return cleared
         }
+        snapshot.pendingExpenses = pendingExpenses.map { expense in
+            var cleared = expense
+            cleared.imageURL = nil
+            cleared.imageLoadError = false
+            return cleared
+        }
         return snapshot
     }
 
@@ -1667,6 +1692,13 @@ extension DashboardSnapshot {
         snapshot.stagingRecords = stagingRecords.map { record in
             guard let path = record.imagePath else { return record }
             var hydrated = record
+            hydrated.imageURL = signedURLs[path]
+            hydrated.imageLoadError = markMissingAsFailure && signedURLs[path] == nil
+            return hydrated
+        }
+        snapshot.pendingExpenses = pendingExpenses.map { expense in
+            guard let path = expense.imagePath else { return expense }
+            var hydrated = expense
             hydrated.imageURL = signedURLs[path]
             hydrated.imageLoadError = markMissingAsFailure && signedURLs[path] == nil
             return hydrated

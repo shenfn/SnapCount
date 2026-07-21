@@ -22,6 +22,7 @@ supabase.exe
 # ═══════════════════════════════════════════════
 node_modules/
 dist/
+vite.config.js.timestamp-*.mjs
 .DS_Store
 Thumbs.db
 

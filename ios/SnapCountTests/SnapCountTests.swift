@@ -31,6 +31,19 @@ final class SnapCountTests: XCTestCase {
             paymentMethod: "微信支付", recordDate: "2026-07-17", note: nil,
             companionMessage: nil, accountId: nil, systemImage: "creditcard", payload: nil
         )
+        state.financeVocabulary = [
+            NativeFinanceVocabularyEntry(
+                id: "platform-1",
+                kind: .platform,
+                displayName: "盒马",
+                primaryCategory: nil,
+                linkedAccountId: nil,
+                source: "user_confirmed",
+                status: "active",
+                usageCount: 2,
+                lastUsedAt: "2026-07-21T12:00:00Z"
+            )
+        ]
 
         state.resetUserScopedState()
 
@@ -41,6 +54,7 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(state.recordsPath.count, 0)
         XCTAssertNil(state.selectedRecordDetail)
         XCTAssertTrue(state.accounts.isEmpty)
+        XCTAssertTrue(state.financeVocabulary.isEmpty)
     }
 
     func testDashboardRepositoryProtocolSupportsStubInjection() async throws {
@@ -295,6 +309,33 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(NativeManualRecordDraft.expenseCategories.map(\.id), ["food", "shopping", "transport", "entertainment", "life", "health", "education", "other"])
     }
 
+    func testFinanceVocabularyKeepsDynamicValuesAndStablePrimaryCategories() {
+        let vocabulary = [
+            NativeFinanceVocabularyEntry(
+                id: "payment-1",
+                kind: .payment,
+                displayName: "Apple Pay",
+                primaryCategory: nil,
+                linkedAccountId: nil,
+                source: "user_confirmed",
+                status: "active",
+                usageCount: 3,
+                lastUsedAt: "2026-07-21T12:00:00Z"
+            )
+        ]
+
+        let payments = NativeFinanceOptionCatalog.options(
+            kind: .payment,
+            currentValue: "云闪付",
+            vocabulary: vocabulary
+        )
+
+        XCTAssertEqual(payments.first?.id, "云闪付")
+        XCTAssertTrue(payments.contains { $0.id == "Apple Pay" && $0.isFrequent })
+        XCTAssertEqual(NativeFinanceOptionCatalog.categoryCode(for: "交通"), "transport")
+        XCTAssertNil(NativeFinanceOptionCatalog.categoryCode(for: "咖啡"))
+    }
+
     func testManualUniversalPayloadUsesPWADomainKeys() {
         var draft = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
         draft.primaryValueText = "45"
@@ -515,6 +556,19 @@ final class SnapCountTests: XCTestCase {
             NativeStagingDetailPresentation.errorSummary(message),
             "识别内容超过模型处理上限，请重新识别。"
         )
+    }
+
+    func testPossibleDuplicateStagingUsesReviewCopy() {
+        let copy = NativeStagingDetailPresentation.actionCopy(
+            domainKey: "expense",
+            status: "pending_review",
+            summary: "疑似与已有记录重复",
+            errorMessage: "图片和已有记录相似，请确认是否为同一笔",
+            extracted: ["review_reason": AnyCodable("possible_duplicate")]
+        )
+
+        XCTAssertEqual(copy?.title, "这笔可能已经记过")
+        XCTAssertEqual(copy?.summary, "对照图片或文字事实，确认是新记录再收下。")
     }
 
     func testNativeSettingsDefaultsMatchPWAVisionRoutes() {

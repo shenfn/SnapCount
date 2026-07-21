@@ -11,26 +11,26 @@
 
       <div class="sheet-header">
         <div class="sheet-title">{{ metaTitle }}</div>
-        <div class="sheet-sub">{{ store.universalModal.mode === 'edit' ? '调整这条通用记录' : '手动验证一个内置数据域' }}</div>
+        <div class="sheet-sub">{{ sheetSubtitle }}</div>
       </div>
 
       <div class="sheet-body" ref="bodyEl">
-        <div v-if="store.universalModal.mode === 'edit'" class="thumb-wrap">
+        <div v-if="store.universalModal.imagePath" class="thumb-wrap">
           <div v-if="store.universalModal.imageUrl" style="width:100%" @click="store.openImgFull(store.universalModal.imageUrl)">
-            <img :src="store.universalModal.imageUrl"
+            <img :src="store.universalModal.imageUrl" decoding="async" fetchpriority="high"
               @error="store.markUniversalImageUnavailable()"
               style="width:100%; max-height:160px; object-fit:contain; background:#f0f0f0; display:block;">
-            <div style="text-align:center; padding:6px 0; font-size:11px; color:var(--text3);">点击放大原图</div>
+            <div style="text-align:center; padding:6px 0; font-size:11px; color:var(--text3);">原图证据 · 点击放大</div>
           </div>
           <template v-else-if="store.universalModal.imageLoadError">
             <span>!</span><span>截图文件不可用或已删除</span>
           </template>
           <template v-else>
-            <span>□</span><span>无截图预览</span>
+            <span>□</span><span>正在加载原图</span>
           </template>
         </div>
 
-        <div class="sel-section" style="margin-top:16px">
+        <div v-if="!isStagingRepair" class="sel-section" style="margin-top:16px">
           <div class="sel-label">数据域</div>
           <div class="sel-grid">
             <div
@@ -74,7 +74,7 @@
         <button class="confirm-btn"
           :disabled="isSubmitDisabled"
           @click="store.confirmUniversalRecord()">
-          确认保存
+          {{ isStagingRepair ? '补全并收下' : '确认保存' }}
         </button>
         <button v-if="store.universalModal.mode === 'edit'" class="delete-bill-btn"
           @click="store.openDeleteConfirm('universal', store.universalModal.id, store.universalModal.imagePath)">
@@ -113,7 +113,19 @@ const bodyEl = sheet.bodyEl
 
 const editableDomains = computed(() => store.domains.value.filter(domain => !['expense', 'income'].includes(domain.id)))
 const meta = computed(() => store.getUniversalDomainMeta(store.universalModal.domainKey))
-const metaTitle = computed(() => store.universalModal.mode === 'edit' ? meta.value.editTitle : meta.value.title)
+const isStagingRepair = computed(() => Boolean(store.universalModal.stagingSource))
+const activeDomain = computed(() => store.domains.value.find(domain => domain.id === store.universalModal.domainKey))
+const metaTitle = computed(() => {
+  if (isStagingRepair.value) return `补全${activeDomain.value?.shortName || '记录'}信息`
+  return store.universalModal.mode === 'edit' ? meta.value.editTitle : meta.value.title
+})
+const sheetSubtitle = computed(() => {
+  if (isStagingRepair.value && store.universalModal.domainKey === 'reading') {
+    return '补上书名和阅读时长，这页内容就能进入阅读记录'
+  }
+  if (isStagingRepair.value) return '补上必要信息后收下这张截图'
+  return store.universalModal.mode === 'edit' ? '调整这条记录' : '添加一条记录'
+})
 const formFields = computed(() => meta.value.formFields || [])
 
 const isSubmitDisabled = computed(() => formFields.value.some(field => {

@@ -29,6 +29,30 @@ struct ManualRecordSheet: View {
         appState.accounts.filter { !$0.isArchived }
     }
 
+    private var expensePlatformOptions: [NativeManualRecordOption] {
+        NativeFinanceOptionCatalog.options(
+            kind: .platform,
+            currentValue: draft.platform,
+            vocabulary: appState.financeVocabulary
+        )
+    }
+
+    private var expenseCategoryOptions: [NativeManualRecordOption] {
+        NativeFinanceOptionCatalog.options(
+            kind: .category,
+            currentValue: draft.category,
+            vocabulary: appState.financeVocabulary
+        )
+    }
+
+    private var expensePaymentOptions: [NativeManualRecordOption] {
+        NativeFinanceOptionCatalog.options(
+            kind: .payment,
+            currentValue: draft.paymentMethod,
+            vocabulary: appState.financeVocabulary
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -94,6 +118,7 @@ struct ManualRecordSheet: View {
         }
         .task {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
+            await appState.loadFinanceVocabulary()
             normalizeDomainSelection()
             if draft.existingRawId == nil {
                 applyDefaultAccount()
@@ -121,9 +146,9 @@ struct ManualRecordSheet: View {
                 TextField("金额", text: $draft.amountText)
                     .keyboardType(.decimalPad)
                 TextField("商家名称（可选）", text: $draft.title)
-                optionPicker("消费渠道", selection: $draft.platform, options: NativeManualRecordDraft.expensePlatforms)
-                optionPicker("消费分类", selection: $draft.category, options: NativeManualRecordDraft.expenseCategories)
-                optionPicker("支付方式", selection: $draft.paymentMethod, options: NativeManualRecordDraft.expensePayments)
+                editableOptionField("消费渠道", selection: $draft.platform, options: expensePlatformOptions)
+                optionPicker("消费分类", selection: $draft.category, options: expenseCategoryOptions)
+                editableOptionField("支付方式", selection: $draft.paymentMethod, options: expensePaymentOptions)
             }
             accountSection(title: "出资账户")
         }
@@ -200,6 +225,31 @@ struct ManualRecordSheet: View {
         Picker(title, selection: selection) {
             ForEach(options) { option in
                 Text(option.title).tag(option.id)
+            }
+        }
+    }
+
+    private func editableOptionField(
+        _ title: String,
+        selection: Binding<String>,
+        options: [NativeManualRecordOption]
+    ) -> some View {
+        LabeledContent(title) {
+            HStack(spacing: 8) {
+                TextField("输入或选择", text: selection)
+                    .multilineTextAlignment(.trailing)
+                Menu {
+                    ForEach(options) { option in
+                        Button(option.isFrequent ? "\(option.title) · 常用" : option.title) {
+                            selection.wrappedValue = option.id
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(JieziTheme.brand)
+                }
+                .accessibilityLabel("选择\(title)")
             }
         }
     }

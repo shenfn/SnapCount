@@ -9,6 +9,7 @@ enum NativeInboxFilter: String, CaseIterable, Identifiable {
     case all
     case pendingExpense
     case failed
+    case repair
     case routing
     case review
 
@@ -18,7 +19,8 @@ enum NativeInboxFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: return "全部"
         case .pendingExpense: return "待补全账单"
-        case .failed: return "AI 失败"
+        case .failed: return "需重试"
+        case .repair: return "待修补"
         case .routing: return "待分类"
         case .review: return "待确认"
         }
@@ -31,6 +33,35 @@ struct NativePendingExpense: Identifiable {
     let amount: Double
     let dateKey: String
     let reference: String
+    let imagePath: String?
+    var imageURL: URL?
+    var imageLoadError: Bool
+    let occurredAtLabel: String?
+    let createdAtLabel: String
+
+    init(
+        id: String,
+        title: String,
+        amount: Double,
+        dateKey: String,
+        reference: String,
+        imagePath: String? = nil,
+        imageURL: URL? = nil,
+        imageLoadError: Bool = false,
+        occurredAtLabel: String? = nil,
+        createdAtLabel: String = "最近上传"
+    ) {
+        self.id = id
+        self.title = title
+        self.amount = amount
+        self.dateKey = dateKey
+        self.reference = reference
+        self.imagePath = imagePath
+        self.imageURL = imageURL
+        self.imageLoadError = imageLoadError
+        self.occurredAtLabel = occurredAtLabel
+        self.createdAtLabel = createdAtLabel
+    }
 }
 
 struct NativeInboxItem: Identifiable {
@@ -53,7 +84,8 @@ struct NativeInboxSection: Identifiable {
 }
 
 enum NativeInboxPresentation {
-    private static let failedStatuses = ["ai_error", "failed", "extraction_failed", "schema_failed"]
+    private static let failedStatuses = ["ai_error", "failed", "extraction_failed"]
+    private static let repairStatuses = ["schema_failed"]
     private static let routingStatuses = ["routing_failed", "unrouted", "unassigned"]
     private static let reviewStatuses = ["pending_review", "routed", "extracted"]
     private static let resolvedStatuses = ["confirmed", "archived", "discarded", "assigned"]
@@ -86,6 +118,7 @@ enum NativeInboxPresentation {
         case .all: return items
         case .pendingExpense: return items.filter { $0.kind == .pendingExpense }
         case .failed: return items.filter { failedStatuses.contains($0.status) }
+        case .repair: return items.filter { repairStatuses.contains($0.status) }
         case .routing: return items.filter { routingStatuses.contains($0.status) }
         case .review: return items.filter { reviewStatuses.contains($0.status) }
         }

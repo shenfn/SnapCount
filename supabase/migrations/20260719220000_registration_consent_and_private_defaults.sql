@@ -20,12 +20,25 @@ create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
 declare
   legal_at text := new.raw_user_meta_data ->> 'legal_consent_at';
   sensitive_at text := new.raw_user_meta_data ->> 'sensitive_data_consent_at';
+  submitted_terms_version text := new.raw_user_meta_data ->> 'terms_version';
+  submitted_privacy_version text := new.raw_user_meta_data ->> 'privacy_version';
+  accepted_at timestamptz := now();
 begin
+  if legal_at is null
+    or legal_at !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+    or sensitive_at is null
+    or sensitive_at !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+    or submitted_terms_version is distinct from '2026-07-19'
+    or submitted_privacy_version is distinct from '2026-07-19'
+  then
+    raise exception 'current terms, privacy, and sensitive data consent are required';
+  end if;
+
   insert into public.user_configs (
     user_id,
     plan,
@@ -42,10 +55,10 @@ begin
     100,
     30,
     true,
-    case when legal_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' then legal_at::timestamptz else null end,
-    case when sensitive_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' then sensitive_at::timestamptz else null end,
-    nullif(new.raw_user_meta_data ->> 'terms_version', ''),
-    nullif(new.raw_user_meta_data ->> 'privacy_version', '')
+    accepted_at,
+    accepted_at,
+    '2026-07-19',
+    '2026-07-19'
   )
   on conflict (user_id) do nothing;
   return new;
