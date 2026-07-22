@@ -219,28 +219,27 @@ if (userId) {
 
 ### 任务 5：修正测试脚本默认 user_id（工具修复）
 
-**当前**：`DEFAULT_TEST_USER_ID = '0a552a27-0b64-456e-a5b3-e50e261d2e4f'`
-这是 upload_token 的值，不是 user_id
+**旧问题**：测试脚本曾把一个真实 `upload_token` 硬编码为默认 user_id。该令牌必须撤销，源码和文档不得保留明文。
 
-**修复**：改为用 upload_token 机制，不再直接传 user_id
+**修复**：测试身份必须显式使用临时 JWT 或本地 upload_token，不再提供默认身份，也不单独信任 user_id。
 
 ```javascript
-// 不再默认传 user_id，改为传 upload_token
-// Edge Function 会自动反查 user_id
-const DEFAULT_UPLOAD_TOKEN = '0a552a27-0b64-456e-a5b3-e50e261d2e4f'
+// 不提供默认身份；只读取被 Git 忽略的本地环境变量。
+const uploadToken = process.env.TEST_RECEIPT_UPLOAD_TOKEN
 ```
 
-同时修改 `executeCase` 里的表单构造逻辑：默认只传 upload_token，不传 user_id。只有显式指定 --user-id 时才传 user_id（标记为"仅限调试"）。
+同时修改 `executeCase` 的认证逻辑：优先使用临时测试账号 JWT，也可显式传 upload_token；user_id 只能与 JWT 配合做一致性校验，不能单独作为身份凭据。
 
 ```javascript
-// executeCase 表单构造
-if (context.userId && flags.userId) {
-  // 显式指定了 --user-id（仅限调试），优先传 user_id
+// user_id 只和 JWT 一起用于一致性校验。
+if (context.userId) {
   form.append('user_id', context.userId)
-} else if (context.uploadToken) {
-  // 默认走 upload_token 反查
+}
+if (!context.accessToken && context.uploadToken) {
   form.append('upload_token', context.uploadToken)
 }
+
+const authorization = `Bearer ${context.accessToken || context.anonKey}`
 ```
 
 ### 任务 6：设置页面显示 user_id（前端修复）

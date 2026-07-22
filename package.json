@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "logs:ai": "node --env-file=.env.local scripts/show-ai-logs.mjs",
     "test:receipt": "node --env-file=.env.local scripts/test-ingest-receipt.mjs",
+    "test:upload-lifecycle": "node --env-file=.env.local scripts/test-upload-lifecycle.mjs",
     "cleanup:test-receipts": "node --env-file=.env.local scripts/cleanup-test-receipts.mjs",
     "test:image-cleanup": "node --env-file=.env.local scripts/test-image-cleanup-lifecycle.mjs",
     "test:expression-feedback": "node --env-file=.env.local scripts/test-expression-feedback.mjs",

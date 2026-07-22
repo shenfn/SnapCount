@@ -3,8 +3,6 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const DEFAULT_UPLOAD_TOKEN = '0a552a27-0b64-456e-a5b3-e50e261d2e4f'
-
 const args = process.argv.slice(2)
 const flags = {}
 
@@ -35,7 +33,7 @@ function printHelp() {
 
 选项:
   --run-id <id>      指定测试批次，强烈建议必填
-  --upload-token <t> 测试账号上传 token，默认使用专用测试账号 token
+  --upload-token <t> 测试账号上传 token，也可通过 TEST_RECEIPT_UPLOAD_TOKEN 提供
   --user-id <uuid>   直接指定测试账号 user_id，仅限调试
   --limit <n>        每张表最多扫描条数，默认 500
   --execute          执行真实删除；不传时只 dry-run
@@ -91,7 +89,10 @@ async function resolveUserId(sb) {
     }
   }
 
-  const uploadToken = flags.uploadToken || process.env.TEST_RECEIPT_UPLOAD_TOKEN || DEFAULT_UPLOAD_TOKEN
+  const uploadToken = flags.uploadToken || process.env.TEST_RECEIPT_UPLOAD_TOKEN
+  if (!uploadToken) {
+    throw new Error('缺少测试身份：请设置 TEST_RECEIPT_UPLOAD_TOKEN 或使用 --user-id。')
+  }
   const { data, error } = await sb
     .from('user_configs')
     .select('user_id')

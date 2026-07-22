@@ -85,6 +85,12 @@ jobs:
       - name: Validate test registration consent metadata
         run: node --test scripts/test-registration-consent-helper.test.mjs
 
+      - name: Validate production smoke scripts
+        run: |
+          node --check scripts/test-ingest-receipt.mjs
+          node --check scripts/cleanup-test-receipts.mjs
+          node --check scripts/test-upload-lifecycle.mjs
+
       - name: Execute security migrations
         env:
           PGURL: postgresql://postgres:security-test@localhost:5432/postgres
