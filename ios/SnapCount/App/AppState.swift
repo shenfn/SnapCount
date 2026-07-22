@@ -21,6 +21,7 @@ final class AppState: ObservableObject {
     @Published var notificationPermissionStatusText = "检查中"
     @Published var shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
     @Published var shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
+    @Published var isOnboardingPresented = false
     @Published var todayPath = NavigationPath()
     @Published var inboxPath = NavigationPath()
     @Published var recordsPath = NavigationPath()
@@ -87,8 +88,8 @@ final class AppState: ObservableObject {
     private let insightsRepository: InsightsRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
     private let financeVocabularyRepository: FinanceVocabularyRepositoryProtocol
+    private let onboardingProgressStore: OnboardingProgressStore
     private let keychain = KeychainStore.shared
-    private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
     private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
@@ -99,6 +100,7 @@ final class AppState: ObservableObject {
     private var userStateGeneration = 0
     private var dashboardSupplementTask: Task<Void, Never>?
     private var isLoadingFinanceVocabulary = false
+    private var shouldDeferOnboardingForExternalRoute = false
 
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
@@ -111,7 +113,8 @@ final class AppState: ObservableObject {
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         insightsRepository: InsightsRepositoryProtocol = InsightsRepository(),
         settingsRepository: SettingsRepositoryProtocol = SettingsRepository(),
-        financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository()
+        financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository(),
+        onboardingProgressStore: OnboardingProgressStore = OnboardingProgressStore()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
@@ -124,6 +127,7 @@ final class AppState: ObservableObject {
         self.insightsRepository = insightsRepository
         self.settingsRepository = settingsRepository
         self.financeVocabularyRepository = financeVocabularyRepository
+        self.onboardingProgressStore = onboardingProgressStore
     }
 
     func bootstrap() {
@@ -131,6 +135,7 @@ final class AppState: ObservableObject {
             await restoreAuthentication()
             isBootstrapping = false
             await refreshNotificationPermissionStatus()
+            presentOnboardingIfNeeded()
         }
     }
 
@@ -155,7 +160,6 @@ final class AppState: ObservableObject {
             updateShortcutCredentialMessage()
             Task {
                 await refreshDashboard()
-                await requestShortcutNotificationPermissionIfNeeded()
             }
         } catch {
             if isInvalidRefreshSessionError(error) {
@@ -184,8 +188,8 @@ final class AppState: ObservableObject {
             hasUploadToken = true
             authMessage = "已登录，快捷指令凭据已同步。"
             updateShortcutCredentialMessage()
+            presentOnboardingIfNeeded()
             await refreshDashboard()
-            await requestShortcutNotificationPermissionIfNeeded()
         } catch {
             authMessage = error.localizedDescription
             authMessageIsError = true
@@ -241,8 +245,8 @@ final class AppState: ObservableObject {
                     ? "注册成功，快捷指令凭据已同步。"
                     : "注册成功。上传凭据正在生成，可稍后在设置中重新检查。"
                 updateShortcutCredentialMessage()
+                presentOnboardingIfNeeded()
                 await refreshDashboard()
-                await requestShortcutNotificationPermissionIfNeeded()
             }
         } catch {
             authMessage = error.localizedDescription
@@ -1174,6 +1178,8 @@ final class AppState: ObservableObject {
 
     func handleDeepLink(_ url: URL) {
         guard url.scheme == "jiezi" else { return }
+        shouldDeferOnboardingForExternalRoute = true
+        isOnboardingPresented = false
 
         switch url.host {
         case "inbox":
@@ -1193,6 +1199,8 @@ final class AppState: ObservableObject {
     }
 
     func handleShortcutNotificationRoute(_ route: String?) {
+        shouldDeferOnboardingForExternalRoute = true
+        isOnboardingPresented = false
         let parts = (route ?? "")
             .split(separator: "/")
             .map(String.init)
@@ -1668,17 +1676,37 @@ final class AppState: ObservableObject {
             : "未开启。请在系统设置里允许芥子通知，快捷指令仍会在“显示结果”里展示摘要。"
     }
 
-    func requestShortcutNotificationPermissionIfNeeded() async {
-        guard !hasAskedNotificationPermissionThisSession else { return }
-        hasAskedNotificationPermissionThisSession = true
-
-        let status = await ShortcutNotificationService.shared.authorizationStatus()
-        guard status == .notDetermined else { return }
-        await requestShortcutNotificationPermission()
-    }
-
     func refreshNotificationPermissionStatus() async {
         notificationPermissionStatusText = await ShortcutNotificationService.shared.authorizationStatusText()
+    }
+
+    func presentOnboarding() {
+        guard isSignedIn, !currentUserId.isEmpty else { return }
+        isOnboardingPresented = true
+    }
+
+    func presentOnboardingIfNeeded() {
+        guard isSignedIn,
+              !currentUserId.isEmpty,
+              !shouldDeferOnboardingForExternalRoute,
+              onboardingProgressStore.shouldPresent(for: currentUserId) else { return }
+        isOnboardingPresented = true
+    }
+
+    func finishOnboarding(skipped: Bool) {
+        guard !currentUserId.isEmpty else {
+            isOnboardingPresented = false
+            return
+        }
+        let existing = onboardingProgressStore.completion(for: currentUserId)
+        if !skipped || existing != .completed {
+            onboardingProgressStore.mark(skipped ? .skipped : .completed, for: currentUserId)
+        }
+        isOnboardingPresented = false
+    }
+
+    var onboardingStatusText: String {
+        onboardingProgressStore.completion(for: currentUserId)?.statusText ?? "尚未完成"
     }
 
     func sendTestShortcutNotification() async {
@@ -1837,6 +1865,7 @@ final class AppState: ObservableObject {
         isCleaningSourceImages = false
         isExportingData = false
         isDeletingAccount = false
+        isOnboardingPresented = false
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today

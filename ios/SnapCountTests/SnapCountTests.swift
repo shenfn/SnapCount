@@ -15,6 +15,26 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(AppTab.allCases.allSatisfy { !$0.title.isEmpty })
     }
 
+    func testOnboardingProgressIsVersionedAndUserScoped() throws {
+        let suiteName = "SnapCountTests.Onboarding.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+
+        XCTAssertTrue(store.shouldPresent(for: "user-a"))
+        XCTAssertTrue(store.shouldPresent(for: "user-b"))
+
+        store.mark(.completed, for: "user-a")
+
+        XCTAssertFalse(store.shouldPresent(for: "user-a"))
+        XCTAssertEqual(store.completion(for: "user-a"), .completed)
+        XCTAssertTrue(store.shouldPresent(for: "user-b"))
+        XCTAssertTrue(store.shouldPresent(for: "user-a", version: OnboardingProgressStore.currentVersion + 1))
+
+        store.mark(.skipped, for: "user-b")
+        XCTAssertEqual(store.completion(for: "user-b"), .skipped)
+    }
+
     @MainActor
     func testResetUserScopedStateClearsNavigationAndDetails() {
         let state = AppState()

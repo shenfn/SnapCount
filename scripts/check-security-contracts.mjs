@@ -142,6 +142,10 @@ assert.doesNotMatch(expressionShadowSource, /rendered_payload:\s*\{\s*feedback,\
 assert.doesNotMatch(expressionShadowSource, /baseline_payload:[\s\S]{0,120}notification/i);
 assert.match(ingestSource, /expression_improvement_enabled/);
 assert.match(ingestSource, /improvementConsent: privacyConfig\.expressionImprovementEnabled/);
+assert.match(ingestSource, /ai_feedback: payload\.aiFeedback \?\? null/);
+assert.doesNotMatch(ingestSource, /payload\.ai[\s\S]{0,80}\.ai_feedback[\s\S]{0,80}\?\? null/);
+assert.match(ingestSource, /validateModelTone/);
+assert.match(ingestSource, /hasModelOwnedStatisticalClaim/);
 
 assert.match(financeVocabularySql, /create table if not exists public\.user_finance_vocabulary/i);
 assert.match(financeVocabularySql, /user_id uuid not null references auth\.users\(id\) on delete cascade/i);

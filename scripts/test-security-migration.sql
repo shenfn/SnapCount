@@ -15,6 +15,26 @@ select public.security_test_assert(
 );
 
 select public.security_test_assert(
+  (
+    select companion_message is null
+      and not (extracted_json ? 'ai_feedback')
+      and not (extracted_json ? 'companion_message')
+    from public.staging_records
+    where id = '18181818-1818-4818-8818-181818181818'
+  ),
+  'unsafe staging tone and unverified feedback must be cleared'
+);
+
+select public.security_test_assert(
+  not exists (
+    select 1
+    from public.user_companion_memories
+    where id = '19191919-1919-4919-8919-191919191919'
+  ),
+  'unsafe historical statistics must not remain in companion memory'
+);
+
+select public.security_test_assert(
   not exists (
     select 1 from public.user_configs
     where expression_improvement_enabled is true

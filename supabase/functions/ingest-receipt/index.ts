@@ -9,8 +9,9 @@ import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   loadDomainProfiles,
   selectSignals,
-  validateVoiceNumbers,
+  validateModelTone,
   hasUnsupportedFinanceCompanionClaim,
+  hasModelOwnedStatisticalClaim,
   parsePaceMinutes,
 } from "./signals.ts";
 import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
@@ -3077,9 +3078,9 @@ async function createStagingRecord(
     extracted_json: sanitizeSensitiveData({
       ...payload.ai,
       time_context: payload.timeContext ?? null,
-      ai_feedback: payload.aiFeedback
-        ?? (payload.ai as unknown as Record<string, unknown>).ai_feedback
-        ?? null,
+      // 首轮视觉模型同时承担识别，未经信号层校验的反馈不得进入用户可见待处理数据。
+      ai_feedback: payload.aiFeedback ?? null,
+      companion_message: payload.companionMessage ?? payload.ai.companion_message ?? null,
       review_reason: payload.duplicateReview ? "possible_duplicate" : null,
       duplicate_review: payload.duplicateReview ?? null,
       ...(payload.testMeta ? { test_meta: payload.testMeta } : {}),
@@ -3316,6 +3317,43 @@ async function regenerateFeedbackWithSecondCall(opts: {
     });
     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.85);
     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
+    const recordFacts = voiceRecordFacts(
+      opts.domainKey,
+      opts.ai,
+      opts.builtPayload ?? null,
+      normalizeAmount(opts.ai.amount),
+    );
+    const check = validateModelTone([
+      normalized.companion_message,
+      normalized.ai_feedback?.emotion_line ?? null,
+      normalized.ai_feedback?.utility_line ?? null,
+      normalized.ai_feedback?.detail_reason ?? null,
+      normalized.ai_feedback?.badge ?? null,
+    ], JSON.stringify(recordFacts));
+    if (!check.ok) {
+      const bad = new Set(check.badIndexes);
+      const companion = bad.has(0) ? null : normalized.companion_message;
+      let aiFeedback = normalized.ai_feedback;
+      if (aiFeedback) {
+        if (bad.has(1)) {
+          aiFeedback = null;
+        } else {
+          aiFeedback = {
+            ...aiFeedback,
+            badge: bad.has(4) ? "即时反馈" : aiFeedback.badge,
+            utility_line: bad.has(2) ? null : aiFeedback.utility_line,
+            detail_reason: bad.has(3) ? null : aiFeedback.detail_reason,
+          };
+        }
+      }
+      return {
+        companion_message: companion,
+        ai_feedback: aiFeedback,
+        raw_text: rawText,
+        duration_ms: Date.now() - startedAt,
+        ...(!companion && !aiFeedback ? { error: "evidence_validation_failed" } : {}),
+      };
+    }
     return {
       companion_message: normalized.companion_message,
       ai_feedback: normalized.ai_feedback,
@@ -3346,8 +3384,8 @@ interface PromptContextLike {
 }
 
 // ============================================================
-// 信号驱动 Voice 层:事实(画像) → 信号(代码) → 语言(模型)
-// 数字闭环:validateVoiceNumbers 违规即弃用整份 AI 文案,退回规则渲染
+// 信号驱动 Voice 层:事实(画像) → 信号(代码) → 规则事实 + 模型语气
+// 模型统计断言违规即丢弃，画像数字与时间口径由规则层原样呈现。
 // ============================================================
 
 function isLateNightLocal(clientLocalTime: string | null | undefined): boolean {
@@ -3372,6 +3410,14 @@ function buildCurrentFactsFor(
       category: ai.category ?? null,
       platform: ai.platform ?? null,
       isLateNight: late,
+    };
+  }
+  if (domainKey === "income") {
+    return {
+      amount: normalizedAmount,
+      merchant: ai.source_name ?? ai.merchant_name ?? null,
+      category: ai.income_category ?? null,
+      platform: ai.platform ?? null,
     };
   }
   if (domainKey === "sleep") {
@@ -3487,52 +3533,71 @@ async function generateVoiceFeedback(opts: {
     });
     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.8);
     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
-    // 数字闭环校验:文案中的数字必须可追溯到信号或本条记录
-    const check = validateVoiceNumbers(
+    // 模型只拥有语气：画像统计数字与时间口径由规则层直接呈现。
+    const check = validateModelTone(
       [
         normalized.companion_message,
         normalized.ai_feedback?.emotion_line ?? null,
         normalized.ai_feedback?.utility_line ?? null,
         normalized.ai_feedback?.detail_reason ?? null,
+        normalized.ai_feedback?.badge ?? null,
       ],
-      signals,
       JSON.stringify(recordFacts),
     );
+    const bad = new Set(check.badIndexes);
+    const companion = bad.has(0) ? null : normalized.companion_message;
+    let modelFeedback = normalized.ai_feedback;
+    if (modelFeedback) {
+      if (bad.has(1)) {
+        modelFeedback = null;
+      } else {
+        modelFeedback = {
+          ...modelFeedback,
+          badge: bad.has(4) ? "即时反馈" : modelFeedback.badge,
+          utility_line: bad.has(2) ? null : modelFeedback.utility_line,
+          detail_reason: bad.has(3) ? null : modelFeedback.detail_reason,
+        };
+      }
+    }
+
+    const verifiedSignals = signals.filter((signal) => signal.kind !== "record_acknowledge");
+    if (verifiedSignals.length > 0) {
+      const ruleFeedback = buildSignalFallbackAIFeedback(opts.domainKey, verifiedSignals, opts.timingSignal);
+      if (ruleFeedback) {
+        const tone = companion ?? modelFeedback?.emotion_line ?? null;
+        return {
+          companion_message: tone ?? ruleFeedback.emotion_line,
+          ai_feedback: {
+            ...ruleFeedback,
+            emotion_line: tone ?? ruleFeedback.emotion_line,
+            source: tone ? "hybrid" : "rule",
+          },
+          raw_text: rawText,
+          duration_ms: Date.now() - startedAt,
+          signals,
+          ...(!check.ok ? { number_violations: check.violations } : {}),
+        };
+      }
+    }
+
     if (!check.ok) {
       console.warn(`[voice] number validation failed domain=${opts.domainKey} count=${check.violations.length}`);
-      // 逐句抢救:只丢弃违规句,保留合规句。badIndexes 与上方数组下标对齐:
-      // [0]=companion_message, [1]=emotion_line, [2]=utility_line, [3]=detail_reason
-      const bad = new Set(check.badIndexes);
-      const companion = bad.has(0) ? null : normalized.companion_message;
-      let aiFeedback = normalized.ai_feedback;
-      if (aiFeedback) {
-        if (bad.has(1)) {
-          // emotion_line 是卡片主文案,违规则整卡放弃,交给信号兜底
-          aiFeedback = null;
-        } else {
-          aiFeedback = {
-            ...aiFeedback,
-            utility_line: bad.has(2) ? null : aiFeedback.utility_line,
-            detail_reason: bad.has(3) ? null : aiFeedback.detail_reason,
-          };
-        }
-      }
       // 有存活内容时不设 error(调用方据此判断是否走兜底),但保留 number_violations 供 trace 观察
-      if (!companion && !aiFeedback) {
+      if (!companion && !modelFeedback) {
         return {
           companion_message: null, ai_feedback: null, raw_text: rawText,
-          duration_ms: Date.now() - startedAt, error: "number_validation_failed",
+          duration_ms: Date.now() - startedAt, error: "evidence_validation_failed",
           signals, number_violations: check.violations,
         };
       }
       return {
-        companion_message: companion, ai_feedback: aiFeedback, raw_text: rawText,
+        companion_message: companion, ai_feedback: modelFeedback, raw_text: rawText,
         duration_ms: Date.now() - startedAt, signals, number_violations: check.violations,
       };
     }
     return {
-      companion_message: normalized.companion_message,
-      ai_feedback: normalized.ai_feedback,
+      companion_message: companion,
+      ai_feedback: modelFeedback,
       raw_text: rawText,
       duration_ms: Date.now() - startedAt,
       signals,
@@ -5727,19 +5792,16 @@ Deno.serve(async (req) => {
       ai.record_type = builtinKey;
       ai.domain_key = builtinKey;
     }
+    if (ai.companion_message && hasModelOwnedStatisticalClaim(ai.companion_message)) {
+      ai.companion_message = null;
+    }
     ai.companion_message = sanitizeCompanionMessageForContent(ai.companion_message, ai);
     contentGuardedCompanion = ai.companion_message;
     if (ai.companion_message) {
       const evidenceDomainKey = builtinKey ?? recordType;
       const builtPayload = builtinKey ? buildBuiltinPayload(ai)?.payload ?? null : null;
-      const evidenceSignals = selectSignals(
-        evidenceDomainKey,
-        domainProfiles,
-        buildCurrentFactsFor(evidenceDomainKey, ai, builtPayload, normalizedAmount, clientLocalTime),
-      );
-      const evidenceCheck = validateVoiceNumbers(
+      const evidenceCheck = validateModelTone(
         [ai.companion_message],
-        evidenceSignals,
         JSON.stringify(voiceRecordFacts(evidenceDomainKey, ai, builtPayload, normalizedAmount)),
       );
       companionEvidenceViolations = evidenceCheck.violations;
@@ -6416,27 +6478,52 @@ Deno.serve(async (req) => {
       const sourceName = ai.source_name ?? ai.merchant_name ?? "截图识别收入";
 
       if (companionSettings.enabled) {
-        const _secondCallIncome = await regenerateFeedbackWithSecondCall({
-          ai,
-          domainKey: "income",
-          builtPayload: null,
-          timeContext,
-          timingSignal: timingSignalFor("income", timeContext),
-          promptCtx: {
+        const _secondCallIncome = voiceSignalsEnabled
+          ? await generateVoiceFeedback({
+            ai,
+            domainKey: "income",
+            builtPayload: null,
+            normalizedAmount,
+            domainProfiles,
+            timingSignal: timingSignalFor("income", timeContext),
             clientLocalTime,
             weekday: _weekdayCN,
-            memoryEnabled: companionSettings.memoryEnabled,
-            memoryStrength: companionSettings.memoryStrength,
-            expressionStyle: companionSettings.expressionStyle,
             persona: companionSettings.persona,
+            expressionStyle: companionSettings.expressionStyle,
             customNote: companionSettings.customNote,
-            memory: companionContext.memory,
             recentCompanionLines: [],
-          },
-          textProvider,
-        });
+            textProvider,
+          })
+          : await regenerateFeedbackWithSecondCall({
+            ai,
+            domainKey: "income",
+            builtPayload: null,
+            timeContext,
+            timingSignal: timingSignalFor("income", timeContext),
+            promptCtx: {
+              clientLocalTime,
+              weekday: _weekdayCN,
+              memoryEnabled: companionSettings.memoryEnabled,
+              memoryStrength: companionSettings.memoryStrength,
+              expressionStyle: companionSettings.expressionStyle,
+              persona: companionSettings.persona,
+              customNote: companionSettings.customNote,
+              memory: companionContext.memory,
+              recentCompanionLines: [],
+            },
+            textProvider,
+          });
         if (_secondCallIncome.duration_ms > 0) {
           console.log(`[feedback] second_call income ok=${!_secondCallIncome.error} duration=${_secondCallIncome.duration_ms}ms`);
+        }
+        if (voiceSignalsEnabled) {
+          const voiceCall = _secondCallIncome as VoiceCallResult;
+          companionVoiceDebug = {
+            enabled: true,
+            error: voiceCall.error ?? null,
+            signals: voiceCall.signals.map((signal) => signal.kind),
+            number_violations: voiceCall.number_violations ?? [],
+          };
         }
         if (_secondCallIncome.ai_feedback) {
           aiFeedback = _secondCallIncome.ai_feedback as AIFeedback;
@@ -6445,10 +6532,21 @@ Deno.serve(async (req) => {
           ai.companion_message = companionMessage;
           aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
         } else {
-          aiFeedback = buildIncomeAIFeedback(ai, normalizedAmount, timeContext);
+          if (_secondCallIncome.companion_message) {
+            companionMessage = _secondCallIncome.companion_message;
+            ai.companion_message = companionMessage;
+          } else if (voiceSignalsEnabled) {
+            companionMessage = null;
+            ai.companion_message = null;
+          }
+          aiFeedback = buildIncomeAIFeedback(
+            voiceSignalsEnabled ? { ...ai, companion_message: null } : ai,
+            normalizedAmount,
+            timeContext,
+          );
           if (aiFeedback) {
             companionFeedbackUsed = true;
-            companionMessage = aiFeedback.emotion_line;
+            companionMessage = companionMessage ?? aiFeedback.emotion_line;
             ai.companion_message = companionMessage;
             aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
           }

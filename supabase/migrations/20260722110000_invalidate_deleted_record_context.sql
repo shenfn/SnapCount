@@ -78,13 +78,63 @@ where m.source_table = 'data_records'
       and d.user_id = m.user_id
   );
 
-update public.transactions
-set companion_message = null
-where companion_message ~ '(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)';
+do $$
+declare
+  v_unsafe_pattern constant text := '(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道|本周|这周|上周|本月|上月|近[[:space:]]*[0-9一二两三四五六七八九十]+[天周月]|第[[:space:]]*[0-9一二两三四五六七八九十百]+[次笔顿天晚家回]|连续[[:space:]]*[0-9一二两三四五六七八九十百]+[天晚次周月]|比(昨天|之前|过去|上次|上周|上月|平时|常态|平均|中位|历史)|最近.{0,12}(总是|一直|经常|频繁|反复|又))';
+begin
+  update public.transactions
+  set companion_message = null,
+      ai_feedback = case
+        when coalesce(ai_feedback->>'source', '') = 'rule' then ai_feedback
+        else null
+      end
+  where coalesce(companion_message, '') ~ v_unsafe_pattern
+     or (
+       coalesce(ai_feedback->>'source', '') <> 'rule'
+       and coalesce(ai_feedback::text, '') ~ v_unsafe_pattern
+     );
 
-update public.income_records
-set companion_message = null
-where companion_message ~ '(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)';
+  update public.income_records
+  set companion_message = null,
+      ai_feedback = case
+        when coalesce(ai_feedback->>'source', '') = 'rule' then ai_feedback
+        else null
+      end
+  where coalesce(companion_message, '') ~ v_unsafe_pattern
+     or (
+       coalesce(ai_feedback->>'source', '') <> 'rule'
+       and coalesce(ai_feedback::text, '') ~ v_unsafe_pattern
+     );
+
+  update public.staging_records
+  set companion_message = null,
+      extracted_json = case
+        when coalesce(extracted_json->'ai_feedback'->>'source', '') = 'rule'
+          then coalesce(extracted_json, '{}'::jsonb) - 'companion_message'
+        else coalesce(extracted_json, '{}'::jsonb) - 'companion_message' - 'ai_feedback'
+      end
+  where coalesce(companion_message, '') ~ v_unsafe_pattern
+     or (
+       coalesce(extracted_json->'ai_feedback'->>'source', '') <> 'rule'
+       and coalesce(extracted_json->'ai_feedback', 'null'::jsonb)::text ~ v_unsafe_pattern
+     );
+
+  update public.data_records
+  set payload_jsonb = case
+    when coalesce(payload_jsonb->'ai_feedback'->>'source', '') = 'rule'
+      then coalesce(payload_jsonb, '{}'::jsonb) - 'companion_message'
+    else coalesce(payload_jsonb, '{}'::jsonb) - 'companion_message' - 'ai_feedback'
+  end
+  where coalesce(payload_jsonb->>'companion_message', '') ~ v_unsafe_pattern
+     or (
+       coalesce(payload_jsonb->'ai_feedback'->>'source', '') <> 'rule'
+       and coalesce(payload_jsonb->'ai_feedback', 'null'::jsonb)::text ~ v_unsafe_pattern
+     );
+
+  delete from public.user_companion_memories
+  where coalesce(content, '') ~ v_unsafe_pattern;
+end;
+$$;
 
 delete from public.user_domain_profiles p
 where p.source_count <> case p.domain_key

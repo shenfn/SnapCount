@@ -13,6 +13,19 @@ struct SettingsView: View {
                     profileHeader
                 }
 
+                Section("使用帮助") {
+                    Button {
+                        appState.presentOnboarding()
+                    } label: {
+                        settingsRow(
+                            "使用引导",
+                            detail: appState.onboardingStatusText,
+                            systemImage: "point.topleft.down.to.point.bottomright.curvepath"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 Section("数据管理") {
                     NavigationLink {
                         DataExportView()
@@ -619,24 +632,6 @@ private struct ShortcutSetupView: View {
         }
     }
 
-    private enum ShortcutTemplateKind {
-        case photo
-        case screenshot
-
-        var title: String {
-            switch self {
-            case .photo: return "拍照模板"
-            case .screenshot: return "截图模板"
-            }
-        }
-
-        var url: String {
-            switch self {
-            case .photo: return AppConfig.photoShortcutTemplateURL
-            case .screenshot: return AppConfig.screenshotShortcutTemplateURL
-            }
-        }
-    }
 }
 
 private struct ShortcutActionRow: View {

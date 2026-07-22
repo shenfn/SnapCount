@@ -156,7 +156,8 @@ create table public.user_companion_memories (
   id uuid primary key default gen_random_uuid(),
   user_id uuid,
   source_table text,
-  source_id uuid
+  source_id uuid,
+  content text
 );
 create table public.user_domain_profiles (
   id uuid primary key default gen_random_uuid(),
@@ -266,6 +267,30 @@ insert into public.transactions (id, user_id, companion_message) values (
   '17171717-1717-4717-8717-171717171717',
   '11111111-1111-4111-8111-111111111111',
   '这周第三次在示例餐厅点餐，14.8 元的小确幸。'
+);
+
+insert into public.staging_records (
+  id,
+  user_id,
+  image_path,
+  companion_message,
+  extracted_json
+) values (
+  '18181818-1818-4818-8818-181818181818',
+  '11111111-1111-4111-8111-111111111111',
+  '11111111-1111-4111-8111-111111111111/unsafe-tone.jpg',
+  '这已经是本周第50次给数字中心充值了。',
+  '{"ai_feedback":{"badge":"高频充值","detail_reason":"近30天出现50次"}}'::jsonb
+);
+
+insert into public.user_companion_memories (
+  id,
+  user_id,
+  content
+) values (
+  '19191919-1919-4919-8919-191919191919',
+  '11111111-1111-4111-8111-111111111111',
+  '这周第50次给数字中心充值'
 );
 
 insert into public.staging_records (user_id, image_path) values (
