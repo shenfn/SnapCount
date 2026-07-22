@@ -24,6 +24,31 @@ enum AppConfig {
     }
 
     static var shortcutTemplateURL: String {
+        screenshotShortcutTemplateURL
+    }
+
+    static var photoShortcutTemplateURL: String {
+        configuredURL(
+            generated: GeneratedAppConfig.photoShortcutTemplateURL,
+            infoKey: "PhotoShortcutTemplateURL"
+        )
+    }
+
+    static var screenshotShortcutTemplateURL: String {
+        configuredURL(
+            generated: GeneratedAppConfig.screenshotShortcutTemplateURL,
+            infoKey: "ScreenshotShortcutTemplateURL"
+        )
+    }
+
+    private static func configuredURL(generated: String, infoKey: String) -> String {
+        if !generated.isEmpty {
+            return generated
+        }
+        let configured = value(for: infoKey)
+        if !configured.isEmpty {
+            return configured
+        }
         if !GeneratedAppConfig.shortcutTemplateURL.isEmpty {
             return GeneratedAppConfig.shortcutTemplateURL
         }

@@ -25,9 +25,13 @@ jobs:
           IOS_SUPABASE_FUNCTIONS_URL: ${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}
           IOS_SUPABASE_ANON_KEY: ${{ secrets.IOS_SUPABASE_ANON_KEY }}
           IOS_SHORTCUT_TEMPLATE_URL: ${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}
+          IOS_PHOTO_SHORTCUT_TEMPLATE_URL: ${{ secrets.IOS_PHOTO_SHORTCUT_TEMPLATE_URL }}
+          IOS_SCREENSHOT_SHORTCUT_TEMPLATE_URL: ${{ secrets.IOS_SCREENSHOT_SHORTCUT_TEMPLATE_URL }}
         run: |
           test -n "$IOS_SUPABASE_URL"
           test -n "$IOS_SUPABASE_ANON_KEY"
+          test -n "$IOS_PHOTO_SHORTCUT_TEMPLATE_URL"
+          test -n "$IOS_SCREENSHOT_SHORTCUT_TEMPLATE_URL"
           IOS_SUPABASE_FUNCTIONS_URL="${IOS_SUPABASE_FUNCTIONS_URL:-$IOS_SUPABASE_URL}"
           cat > SnapCount/Services/GeneratedAppConfig.swift <<SWIFT
           import Foundation
@@ -37,6 +41,8 @@ jobs:
               static let supabaseFunctionsURL = "$IOS_SUPABASE_FUNCTIONS_URL"
               static let supabaseAnonKey = "$IOS_SUPABASE_ANON_KEY"
               static let shortcutTemplateURL = "$IOS_SHORTCUT_TEMPLATE_URL"
+              static let photoShortcutTemplateURL = "$IOS_PHOTO_SHORTCUT_TEMPLATE_URL"
+              static let screenshotShortcutTemplateURL = "$IOS_SCREENSHOT_SHORTCUT_TEMPLATE_URL"
           }
           SWIFT
 
@@ -106,6 +112,8 @@ jobs:
             SNAPCOUNT_SUPABASE_FUNCTIONS_URL="${{ secrets.IOS_SUPABASE_FUNCTIONS_URL }}" \
             SNAPCOUNT_SUPABASE_ANON_KEY="${{ secrets.IOS_SUPABASE_ANON_KEY }}" \
             SNAPCOUNT_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_SHORTCUT_TEMPLATE_URL }}" \
+            SNAPCOUNT_PHOTO_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_PHOTO_SHORTCUT_TEMPLATE_URL }}" \
+            SNAPCOUNT_SCREENSHOT_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_SCREENSHOT_SHORTCUT_TEMPLATE_URL }}" \
             archive
 
       - name: Create export options
