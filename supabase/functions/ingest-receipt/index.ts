@@ -3724,6 +3724,7 @@ const IMAGE_REFERENCE_TARGETS: Array<{ table: string; column: string }> = [
 type ImageCleanupQueueRow = {
   id: string;
   bucket_path: string;
+  bucket_name: string | null;
   user_id: string | null;
   attempts: number;
   created_at: string;
@@ -4066,6 +4067,219 @@ async function clearImageReferences(
   }
 }
 
+async function clearImageReferencesBatch(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  paths: string[],
+): Promise<void> {
+  const normalizedPaths = [...new Set(paths.map(normalizeManagedStoragePath).filter((path): path is string => Boolean(path)))];
+  if (normalizedPaths.length === 0) return;
+  const pathSet = new Set(normalizedPaths);
+
+  for (const { table, column } of IMAGE_REFERENCE_TARGETS) {
+    for (let offset = 0; offset < normalizedPaths.length; offset += 50) {
+      const { error: directError } = await supabase.from(table)
+        .update({ [column]: null })
+        .eq("user_id", userId)
+        .in(column, normalizedPaths.slice(offset, offset + 50));
+      if (directError) throw new Error(`Failed to batch-clear ${table}.${column}: ${directError.message}`);
+    }
+
+    const signedReferenceIds: string[] = [];
+    let lastId: string | null = null;
+    for (;;) {
+      let query = supabase.from(table)
+        .select(`id,${column}`)
+        .eq("user_id", userId)
+        .ilike(column, "http%")
+        .order("id", { ascending: true })
+        .limit(500);
+      if (lastId) query = query.gt("id", lastId);
+      const { data, error } = await query;
+      if (error) throw new Error(`Failed to inspect managed URL references in ${table}.${column}: ${error.message}`);
+      const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+      for (const row of rows) {
+        const value = row[column];
+        if (typeof row.id === "string"
+          && typeof value === "string"
+          && pathSet.has(normalizeManagedStoragePath(value) ?? "")) {
+          signedReferenceIds.push(row.id);
+        }
+      }
+      if (rows.length < 500) break;
+      const nextId = rows.at(-1)?.id;
+      if (typeof nextId !== "string" || nextId === lastId) {
+        throw new Error(`Reference pagination did not advance for ${table}.${column}`);
+      }
+      lastId = nextId;
+    }
+
+    for (let offset = 0; offset < signedReferenceIds.length; offset += 100) {
+      const { error } = await supabase.from(table)
+        .update({ [column]: null })
+        .eq("user_id", userId)
+        .in("id", signedReferenceIds.slice(offset, offset + 100));
+      if (error) throw new Error(`Failed to batch-clear managed URLs in ${table}.${column}: ${error.message}`);
+    }
+  }
+}
+
+async function claimImageCleanupRows(
+  supabase: ReturnType<typeof createClient>,
+  rows: ImageCleanupQueueRow[],
+): Promise<ImageCleanupQueueRow[]> {
+  const claimed: ImageCleanupQueueRow[] = [];
+  const rowsByAttempt = new Map<number, ImageCleanupQueueRow[]>();
+  for (const row of rows) {
+    const attempts = row.attempts ?? 0;
+    rowsByAttempt.set(attempts, [...(rowsByAttempt.get(attempts) ?? []), row]);
+  }
+
+  for (const [attempts, attemptRows] of rowsByAttempt) {
+    const attemptedAt = new Date().toISOString();
+    const { data, error } = await supabase.from("image_cleanup_queue")
+      .update({
+        status: "processing",
+        attempts: attempts + 1,
+        last_attempt_at: attemptedAt,
+        next_retry_at: null,
+        updated_at: attemptedAt,
+      })
+      .in("id", attemptRows.map((row) => row.id))
+      .eq("attempts", attempts)
+      .in("status", ["pending", "failed"])
+      .select("id,bucket_path,bucket_name,user_id,attempts,created_at,cleanup_reason,source_table,source_id,storage_deleted_at");
+    if (error) throw new Error(`Failed to claim image cleanup batch: ${error.message}`);
+    claimed.push(...((data ?? []) as ImageCleanupQueueRow[]));
+  }
+  return claimed;
+}
+
+async function failClaimedImageCleanupRows(
+  supabase: ReturnType<typeof createClient>,
+  rows: ImageCleanupQueueRow[],
+  errorMessage: string,
+): Promise<{ failed: number; deadLetter: number }> {
+  let deadLetter = 0;
+  const rowsByAttempt = new Map<number, ImageCleanupQueueRow[]>();
+  for (const row of rows) {
+    const attempts = row.attempts ?? 1;
+    rowsByAttempt.set(attempts, [...(rowsByAttempt.get(attempts) ?? []), row]);
+  }
+  for (const [attempts, attemptRows] of rowsByAttempt) {
+    const exhausted = attempts >= 8;
+    if (exhausted) deadLetter += attemptRows.length;
+    const retryDelayMinutes = Math.min(12 * 60, Math.pow(5, Math.max(0, attempts - 1)));
+    const { error } = await supabase.from("image_cleanup_queue").update({
+      status: exhausted ? "dead_letter" : "failed",
+      last_error: errorMessage,
+      next_retry_at: exhausted ? null : new Date(Date.now() + retryDelayMinutes * 60 * 1000).toISOString(),
+      updated_at: new Date().toISOString(),
+    }).in("id", attemptRows.map((row) => row.id)).eq("status", "processing");
+    if (error) throw new Error(`Failed to persist cleanup batch failure: ${error.message}`);
+  }
+  return { failed: rows.length, deadLetter };
+}
+
+async function processAccountDeletionCleanupRows(
+  supabase: ReturnType<typeof createClient>,
+  inputRows: ImageCleanupQueueRow[],
+): Promise<Omit<ImageCleanupResult, "remaining">> {
+  const claimedRows = await claimImageCleanupRows(supabase, inputRows);
+  let processed = 0;
+  let failed = 0;
+  let deadLetter = 0;
+  let skippedExternal = 0;
+
+  const externalRows = claimedRows.filter((row) => /^(https?:\/\/|data:)/i.test(row.bucket_path));
+  if (externalRows.length > 0) {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("image_cleanup_queue").update({
+      status: "skipped_external",
+      last_error: "external URL is not managed by Supabase Storage",
+      processed_at: now,
+      next_retry_at: null,
+      updated_at: now,
+    }).in("id", externalRows.map((row) => row.id)).eq("status", "processing");
+    if (error) throw new Error(`Failed to record skipped cleanup batch: ${error.message}`);
+    skippedExternal += externalRows.length;
+  }
+
+  const candidateRows = claimedRows.filter((row) => !externalRows.some((external) => external.id === row.id));
+  const legacyPaths = candidateRows
+    .filter((row) => isLegacyStoragePath(row.bucket_path))
+    .map((row) => row.bucket_path);
+  const ownedLegacyPaths = new Set<string>();
+  if (legacyPaths.length > 0) {
+    const { data, error } = await supabase.from("receipt_image_owners")
+      .select("bucket_path,user_id")
+      .eq("bucket_name", BUCKET_NAME)
+      .in("bucket_path", legacyPaths);
+    if (error) throw new Error(`Failed to verify legacy cleanup ownership: ${error.message}`);
+    for (const owner of data ?? []) {
+      const row = owner as { bucket_path?: string; user_id?: string };
+      if (row.bucket_path && row.user_id) ownedLegacyPaths.add(`${row.user_id}:${row.bucket_path}`);
+    }
+  }
+
+  const invalidRows = candidateRows.filter((row) => (
+    !row.user_id
+    || row.bucket_name !== BUCKET_NAME
+    || (!isUserOwnedStoragePath(row.bucket_path, row.user_id)
+      && !(isLegacyStoragePath(row.bucket_path) && ownedLegacyPaths.has(`${row.user_id}:${row.bucket_path}`)))
+  ));
+  if (invalidRows.length > 0) {
+    const result = await failClaimedImageCleanupRows(supabase, invalidRows, "Cleanup path ownership cannot be verified");
+    failed += result.failed;
+    deadLetter += result.deadLetter;
+  }
+
+  const invalidIds = new Set(invalidRows.map((row) => row.id));
+  const validRows = candidateRows.filter((row) => !invalidIds.has(row.id));
+  const rowsByUser = new Map<string, ImageCleanupQueueRow[]>();
+  for (const row of validRows) {
+    const userId = row.user_id!;
+    rowsByUser.set(userId, [...(rowsByUser.get(userId) ?? []), row]);
+  }
+
+  for (const [userId, userRows] of rowsByUser) {
+    try {
+      const rowsNeedingStorageDelete = userRows.filter((row) => !row.storage_deleted_at);
+      if (rowsNeedingStorageDelete.length > 0) {
+        const { error: removeError } = await supabase.storage.from(BUCKET_NAME)
+          .remove(rowsNeedingStorageDelete.map((row) => row.bucket_path));
+        if (removeError) throw new Error(removeError.message);
+        const storageDeletedAt = new Date().toISOString();
+        const { error: storageAuditError } = await supabase.from("image_cleanup_queue").update({
+          storage_deleted_at: storageDeletedAt,
+          updated_at: storageDeletedAt,
+        }).in("id", rowsNeedingStorageDelete.map((row) => row.id)).eq("status", "processing");
+        if (storageAuditError) throw new Error(`Failed to record Storage deletion batch: ${storageAuditError.message}`);
+      }
+
+      await clearImageReferencesBatch(supabase, userId, userRows.map((row) => row.bucket_path));
+      const completedAt = new Date().toISOString();
+      const { error: doneError } = await supabase.from("image_cleanup_queue").update({
+        status: "done",
+        last_error: null,
+        processed_at: completedAt,
+        deleted_at: completedAt,
+        references_cleared_at: completedAt,
+        next_retry_at: null,
+        updated_at: completedAt,
+      }).in("id", userRows.map((row) => row.id)).eq("status", "processing");
+      if (doneError) throw new Error(`Failed to complete cleanup batch: ${doneError.message}`);
+      processed += userRows.length;
+    } catch (batchError) {
+      const result = await failClaimedImageCleanupRows(supabase, userRows, String(batchError));
+      failed += result.failed;
+      deadLetter += result.deadLetter;
+    }
+  }
+
+  return { processed, failed, deadLetter, skippedExternal };
+}
+
 async function legacyStoragePathCanBeDeleted(
   supabase: ReturnType<typeof createClient>,
   row: ImageCleanupQueueRow,
@@ -4108,7 +4322,14 @@ async function legacyStoragePathCanBeDeleted(
 
 async function processImageCleanupQueue(
   supabase: ReturnType<typeof createClient>,
-  options: { userId?: string; bucketPath?: string; limit?: number; force?: boolean } = {},
+  options: {
+    userId?: string;
+    bucketPath?: string;
+    cleanupReason?: ImageCleanupReason;
+    excludeCleanupReason?: ImageCleanupReason;
+    limit?: number;
+    force?: boolean;
+  } = {},
 ): Promise<ImageCleanupResult> {
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
   const { error: accountRetryError } = await supabase.from("image_cleanup_queue").update({
@@ -4144,6 +4365,8 @@ async function processImageCleanupQueue(
     .limit(limit);
   if (options.userId) query = query.eq("user_id", options.userId);
   if (options.bucketPath) query = query.eq("bucket_path", options.bucketPath);
+  if (options.cleanupReason) query = query.eq("cleanup_reason", options.cleanupReason);
+  if (options.excludeCleanupReason) query = query.neq("cleanup_reason", options.excludeCleanupReason);
   const { data, error } = await query;
   if (error) throw new Error(`Failed to read image cleanup queue: ${error.message}`);
 
@@ -4151,7 +4374,17 @@ async function processImageCleanupQueue(
   let failed = 0;
   let deadLetter = 0;
   let skippedExternal = 0;
-  for (const row of (data ?? []) as ImageCleanupQueueRow[]) {
+  const cleanupRows = (data ?? []) as ImageCleanupQueueRow[];
+  const accountDeletionRows = cleanupRows.filter((row) => row.cleanup_reason === "account_delete");
+  if (accountDeletionRows.length > 0) {
+    const batchResult = await processAccountDeletionCleanupRows(supabase, accountDeletionRows);
+    processed += batchResult.processed;
+    failed += batchResult.failed;
+    deadLetter += batchResult.deadLetter;
+    skippedExternal += batchResult.skippedExternal;
+  }
+  const accountDeletionIds = new Set(accountDeletionRows.map((row) => row.id));
+  for (const row of cleanupRows.filter((candidate) => !accountDeletionIds.has(candidate.id))) {
     const attempts = row.attempts ?? 0;
     const attemptedAt = new Date().toISOString();
     const { data: claimed, error: claimError } = await supabase.from("image_cleanup_queue")
@@ -4261,6 +4494,8 @@ async function processImageCleanupQueue(
     .in("status", ["pending", "failed", "processing", "dead_letter"]);
   if (options.userId) remainingQuery = remainingQuery.eq("user_id", options.userId);
   if (options.bucketPath) remainingQuery = remainingQuery.eq("bucket_path", options.bucketPath);
+  if (options.cleanupReason) remainingQuery = remainingQuery.eq("cleanup_reason", options.cleanupReason);
+  if (options.excludeCleanupReason) remainingQuery = remainingQuery.neq("cleanup_reason", options.excludeCleanupReason);
   const { count, error: remainingError } = await remainingQuery;
   if (remainingError) throw new Error(`Failed to count remaining image cleanup rows: ${remainingError.message}`);
   if (count === null) throw new Error("Image cleanup remaining count was unavailable");
@@ -4269,6 +4504,8 @@ async function processImageCleanupQueue(
     .eq("status", "dead_letter");
   if (options.userId) deadLetterQuery = deadLetterQuery.eq("user_id", options.userId);
   if (options.bucketPath) deadLetterQuery = deadLetterQuery.eq("bucket_path", options.bucketPath);
+  if (options.cleanupReason) deadLetterQuery = deadLetterQuery.eq("cleanup_reason", options.cleanupReason);
+  if (options.excludeCleanupReason) deadLetterQuery = deadLetterQuery.neq("cleanup_reason", options.excludeCleanupReason);
   const { count: deadLetterCount, error: deadLetterError } = await deadLetterQuery;
   if (deadLetterError) throw new Error(`Failed to count dead-letter image cleanup rows: ${deadLetterError.message}`);
   if (deadLetterCount === null) throw new Error("Image cleanup dead-letter count was unavailable");
@@ -4322,7 +4559,6 @@ async function updateAccountDeletionRequest(
 async function prepareAccountDeletion(
   supabase: ReturnType<typeof createClient>,
   userId: string,
-  batchSize: number,
 ): Promise<Awaited<ReturnType<typeof cleanupAllUserImages>>> {
   const updatedAt = new Date().toISOString();
   const { error: deactivateError } = await supabase.from("user_configs").update({
@@ -4334,12 +4570,25 @@ async function prepareAccountDeletion(
     throw new Error(`Failed to deactivate account credentials: ${deactivateError.message}`);
   }
 
-  const cleanup = await cleanupAllUserImages(
-    supabase,
-    userId,
-    "account_delete",
-    { maxBatches: 1, batchSize },
-  );
+  const collected = await collectUserImagePaths(supabase, userId);
+  await enqueueImageCleanup(supabase, userId, collected.ownedPaths, "account_delete");
+  const { count: remaining, error: countError } = await supabase.from("image_cleanup_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("cleanup_reason", "account_delete")
+    .in("status", ["pending", "failed", "processing", "dead_letter"]);
+  if (countError || remaining === null) {
+    throw new Error(`Failed to count queued account images: ${countError?.message ?? "count unavailable"}`);
+  }
+  const cleanup = {
+    total: collected.ownedPaths.length + collected.skippedExternal,
+    queued: collected.ownedPaths.length,
+    processed: 0,
+    failed: 0,
+    deadLetter: 0,
+    skippedExternal: collected.skippedExternal,
+    remaining,
+  };
   await updateAccountDeletionRequest(supabase, userId, {
     status: "cleaning",
     total_images: cleanup.total,
@@ -4350,6 +4599,30 @@ async function prepareAccountDeletion(
     next_retry_at: null,
   });
   return cleanup;
+}
+
+async function rescanAccountDeletionImages(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<Awaited<ReturnType<typeof cleanupAllUserImages>>> {
+  const collected = await collectUserImagePaths(supabase, userId);
+  await enqueueImageCleanup(supabase, userId, collected.ownedPaths, "account_delete");
+  const { count: remaining, error: countError } = await supabase.from("image_cleanup_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .in("status", ["pending", "failed", "processing", "dead_letter"]);
+  if (countError || remaining === null) {
+    throw new Error(`Failed to count rescanned account images: ${countError?.message ?? "count unavailable"}`);
+  }
+  return {
+    total: collected.ownedPaths.length + collected.skippedExternal,
+    queued: collected.ownedPaths.length,
+    processed: 0,
+    failed: 0,
+    deadLetter: 0,
+    skippedExternal: collected.skippedExternal,
+    remaining,
+  };
 }
 
 async function finalizeAccountDeletion(
@@ -4382,18 +4655,14 @@ async function finalizeAccountDeletion(
       return false;
     }
 
+    const { error: queueDeleteError } = await supabase.from("image_cleanup_queue").delete().eq("user_id", userId);
+    if (queueDeleteError) throw new Error(`删除图片清理审计失败：${queueDeleteError.message}`);
     const { error: authError } = await supabase.auth.admin.deleteUser(userId);
     if (authError && !/not found/i.test(authError.message)) {
       throw new Error(`删除登录账户失败：${authError.message}`);
     }
-
-    await updateAccountDeletionRequest(supabase, userId, {
-      status: "completed",
-      completed_at: new Date().toISOString(),
-      remaining_images: 0,
-      last_error: null,
-      next_retry_at: null,
-    });
+    const { error: requestDeleteError } = await supabase.from("account_deletion_requests").delete().eq("user_id", userId);
+    if (requestDeleteError) throw new Error(`删除账户清理请求失败：${requestDeleteError.message}`);
     return true;
   } catch (deletionError) {
     const { data: existing } = await supabase.from("account_deletion_requests")
@@ -4420,7 +4689,7 @@ async function finalizeAccountDeletion(
 
 async function finalizeReadyAccountDeletions(
   supabase: ReturnType<typeof createClient>,
-): Promise<{ completed: number; failed: number }> {
+): Promise<{ prepared: number; completed: number; failed: number }> {
   const now = new Date().toISOString();
   const { data, error } = await supabase.from("account_deletion_requests")
     .select("user_id,status")
@@ -4432,35 +4701,34 @@ async function finalizeReadyAccountDeletions(
 
   let completed = 0;
   let failed = 0;
+  let prepared = 0;
   for (const row of data ?? []) {
     const userId = String(row.user_id);
     let status = String(row.status);
     try {
       if (status === "requested") {
-        await prepareAccountDeletion(supabase, userId, 100);
+        await prepareAccountDeletion(supabase, userId);
+        prepared += 1;
         status = "cleaning";
-      } else {
-        const cleanup = await cleanupAllUserImages(
-          supabase,
-          userId,
-          "account_delete",
-          { maxBatches: 1, batchSize: 100 },
-        );
-        if (status === "deleting" && (cleanup.queued > 0 || cleanup.remaining > 0)) {
-          status = "cleaning";
+      }
+      if (status === "deleting") {
+        const rescan = await rescanAccountDeletionImages(supabase, userId);
+        if (rescan.remaining > 0) {
+          await updateAccountDeletionRequest(supabase, userId, {
+            status: "cleaning",
+            total_images: rescan.total,
+            remaining_images: rescan.remaining,
+            skipped_external: rescan.skippedExternal,
+            last_error: null,
+            next_retry_at: new Date().toISOString(),
+          });
+          continue;
         }
-        await updateAccountDeletionRequest(supabase, userId, {
-          status,
-          remaining_images: cleanup.remaining,
-          skipped_external: cleanup.skippedExternal,
-          last_error: null,
-          next_retry_at: null,
-        });
       }
     } catch (cleanupError) {
       failed += 1;
       await updateAccountDeletionRequest(supabase, userId, {
-        status: String(row.status) === "requested" ? "requested" : "failed",
+        status: String(row.status),
         last_error: String(cleanupError),
         next_retry_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
       }).catch(() => undefined);
@@ -4478,7 +4746,7 @@ async function finalizeReadyAccountDeletions(
       continue;
     }
     if (count > 0) continue;
-    if (status !== "deleting") {
+    if (status !== "deleting" && status !== "failed") {
       await updateAccountDeletionRequest(supabase, userId, {
         status: "deleting",
         remaining_images: 0,
@@ -4495,7 +4763,7 @@ async function finalizeReadyAccountDeletions(
     .delete()
     .eq("status", "completed")
     .lt("completed_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
-  return { completed, failed };
+  return { prepared, completed, failed };
 }
 
 Deno.serve(async (req) => {
@@ -4601,8 +4869,37 @@ Deno.serve(async (req) => {
         }
         const workerRunId = String(workerRun.id);
         try {
-          const accountDeletions = await finalizeReadyAccountDeletions(supabase);
-          const result = await processImageCleanupQueue(supabase, { limit: 50 });
+          const beforeCleanup = await finalizeReadyAccountDeletions(supabase);
+          const accountCleanup = await processImageCleanupQueue(supabase, {
+            cleanupReason: "account_delete",
+            limit: 100,
+            force: true,
+          });
+          const afterCleanup = await finalizeReadyAccountDeletions(supabase);
+          const generalCleanup = await processImageCleanupQueue(supabase, {
+            excludeCleanupReason: "account_delete",
+            limit: 50,
+          });
+          const result = {
+            processed: accountCleanup.processed + generalCleanup.processed,
+            failed: accountCleanup.failed + generalCleanup.failed,
+            deadLetter: accountCleanup.deadLetter + generalCleanup.deadLetter,
+            skippedExternal: accountCleanup.skippedExternal + generalCleanup.skippedExternal,
+            remaining: accountCleanup.remaining + generalCleanup.remaining,
+          };
+          const accountDeletions = {
+            prepared: beforeCleanup.prepared + afterCleanup.prepared,
+            completed: beforeCleanup.completed + afterCleanup.completed,
+            failed: beforeCleanup.failed + afterCleanup.failed,
+          };
+          if (accountCleanup.remaining > 0 && accountCleanup.processed >= 100) {
+            const { data: continuationQueued, error: continuationError } = await supabase.rpc("invoke_image_cleanup_worker");
+            if (continuationError || continuationQueued !== true) {
+              console.warn("Account deletion continuation will rely on the next scheduled run", {
+                error_code: continuationError?.code ?? null,
+              });
+            }
+          }
           const { error: completeRunError } = await supabase.from("image_cleanup_worker_runs").update({
             status: "succeeded",
             completed_at: new Date().toISOString(),
@@ -4732,31 +5029,27 @@ Deno.serve(async (req) => {
           throw new Error(`Failed to create account deletion request: ${requestError.message}`);
         }
 
-        let cleanup: Awaited<ReturnType<typeof cleanupAllUserImages>>;
-        try {
-          cleanup = await prepareAccountDeletion(supabase, actionUserId, 50);
-        } catch (setupError) {
-          await updateAccountDeletionRequest(supabase, actionUserId, {
-            status: "requested",
-            last_error: String(setupError),
-            next_retry_at: null,
-          }).catch(() => undefined);
-          throw setupError;
+        const { error: deactivateError } = await supabase.from("user_configs").update({
+          is_active: false,
+          upload_token: null,
+          updated_at: requestedAt,
+        }).eq("user_id", actionUserId);
+        if (deactivateError) {
+          throw new Error(`Failed to deactivate account credentials: ${deactivateError.message}`);
         }
 
-        if (cleanup.remaining === 0 && cleanup.deadLetter === 0) {
-          const completed = await finalizeAccountDeletion(supabase, actionUserId);
-          if (completed) {
-            return new Response(JSON.stringify({ status: "deleted", cleanup }), {
-              headers: { "Content-Type": "application/json", ...corsHeaders },
-            });
-          }
+        const { data: workerInvoked, error: workerInvokeError } = await supabase.rpc("invoke_image_cleanup_worker");
+        if (workerInvokeError || workerInvoked !== true) {
+          console.warn("Account deletion worker will rely on the next scheduled run", {
+            error_code: workerInvokeError?.code ?? null,
+          });
         }
 
         return new Response(JSON.stringify({
           status: "deletion_pending",
           message: "账户删除已提交，剩余云端原图将在后台清理，完成后自动删除账户。",
-          cleanup,
+          cleanup: null,
+          worker_invoked: workerInvoked === true,
         }), {
           status: 202,
           headers: { "Content-Type": "application/json", ...corsHeaders },

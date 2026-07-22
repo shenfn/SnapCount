@@ -82,6 +82,9 @@ jobs:
       - name: Validate security contracts
         run: npm run check:security-contracts
 
+      - name: Validate test registration consent metadata
+        run: node --test scripts/test-registration-consent-helper.test.mjs
+
       - name: Execute security migrations
         env:
           PGURL: postgresql://postgres:security-test@localhost:5432/postgres

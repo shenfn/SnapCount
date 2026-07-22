@@ -120,6 +120,14 @@ assert.match(ingestSource, /function normalizeManagedStoragePath\(value: string\
 assert.match(ingestSource, /collectUserImagePaths[\s\S]*normalizeManagedStoragePath\(rawPath\)/);
 assert.match(ingestSource, /collectUserScopedStoragePaths[\s\S]*tmp\/\$\{userId\}/);
 assert.match(ingestSource, /offset \+= 200[\s\S]*ignoreDuplicates: true/);
+assert.match(ingestSource, /processAccountDeletionCleanupRows/);
+assert.match(ingestSource, /clearImageReferencesBatch/);
+assert.match(ingestSource, /\.remove\(rowsNeedingStorageDelete\.map/);
+assert.match(ingestSource, /cleanupReason: "account_delete"[\s\S]*limit: 100/);
+assert.match(ingestSource, /action === "delete_account"[\s\S]*invoke_image_cleanup_worker[\s\S]*cleanup: null/);
+assert.doesNotMatch(ingestSource, /action === "delete_account"[\s\S]{0,1400}await prepareAccountDeletion/);
+assert.doesNotMatch(ingestSource, /finalizeReadyAccountDeletions[\s\S]{0,2200}cleanupAllUserImages/);
+assert.match(ingestSource, /status === "deleting"[\s\S]*rescanAccountDeletionImages/);
 assert.match(ingestSource, /status: "deleting"[\s\S]*5 \* 60 \* 1000/);
 assert.match(ingestSource, /postDeleteQueueCount/);
 assert.doesNotMatch(ingestSource, /Uploaded image rollback deferred[\s\S]{0,100}userId/);

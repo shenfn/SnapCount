@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { currentTestRegistrationConsent } from './lib/test-registration-consent.mjs'
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -61,6 +62,7 @@ try {
     email,
     password,
     email_confirm: true,
+    user_metadata: currentTestRegistrationConsent(),
   })
   if (createError || !created.user) throw new Error(createError?.message || 'Failed to create user')
   userId = created.user.id
