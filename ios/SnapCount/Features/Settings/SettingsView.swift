@@ -536,16 +536,27 @@ private struct ShortcutSetupView: View {
                     ShortcutActionRow(title: "检查芥子凭据", detail: "确认登录后 Keychain 凭据可被快捷指令自动读取。", systemImage: "key.viewfinder")
                 }
 
-                Section("一键截图模板") {
-                    ShortcutStepRow(index: 1, title: "快捷指令流程", detail: "推荐顺序：截屏 / 拍照 -> 调整大小 -> 转换 JPEG -> 上传 JPEG 到芥子 -> 显示上传结果。")
-                    Button {
-                        openShortcutTemplate()
-                    } label: {
-                        Label("打开快捷指令 App", systemImage: "arrow.up.forward.app")
-                            .frame(maxWidth: .infinity)
+                Section("快捷指令模板") {
+                    ShortcutStepRow(index: 1, title: "选择记录方式", detail: "拍照和截图使用不同模板。安装后都由“上传 JPEG 到芥子”完成识别，不需要手动填写凭据。")
+                    VStack(spacing: 10) {
+                        Button {
+                            openShortcutTemplate(.photo)
+                        } label: {
+                            Label("安装拍照记录模板", systemImage: "camera.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(JieziTheme.gold)
+
+                        Button {
+                            openShortcutTemplate(.screenshot)
+                        } label: {
+                            Label("安装截图记录模板", systemImage: "rectangle.on.rectangle.angled")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(JieziTheme.mint)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(JieziTheme.gold)
                     if let setupMessage {
                         Text(setupMessage)
                             .font(.caption)
@@ -592,15 +603,34 @@ private struct ShortcutSetupView: View {
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
     }
 
-    private func openShortcutTemplate() {
-        if let url = URL(string: AppConfig.shortcutTemplateURL), !AppConfig.shortcutTemplateURL.isEmpty {
+    private func openShortcutTemplate(_ template: ShortcutTemplateKind) {
+        if let url = URL(string: template.url), !template.url.isEmpty {
             openURL(url)
             return
         }
 
-        setupMessage = "当前构建还没有配置新版模板链接。我会先打开快捷指令 App，你可以搜索“上传 JPEG 到芥子”，把“转换后的图像”接给它。"
+        setupMessage = "当前构建还没有配置\(template.title)链接。我会先打开快捷指令 App，你可以搜索“上传 JPEG 到芥子”继续手动配置。"
         if let url = URL(string: "shortcuts://") {
             openURL(url)
+        }
+    }
+
+    private enum ShortcutTemplateKind {
+        case photo
+        case screenshot
+
+        var title: String {
+            switch self {
+            case .photo: return "拍照模板"
+            case .screenshot: return "截图模板"
+            }
+        }
+
+        var url: String {
+            switch self {
+            case .photo: return AppConfig.photoShortcutTemplateURL
+            case .screenshot: return AppConfig.screenshotShortcutTemplateURL
+            }
         }
     }
 }
