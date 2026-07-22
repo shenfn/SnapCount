@@ -46,7 +46,7 @@ struct InboxView: View {
         ZStack {
             JieziPageBackground()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     pendingSummary
 
                     if let message = appState.inboxFinanceMessage {
@@ -235,7 +235,9 @@ private struct NativeInboxFilmCard: View {
                 InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
                     .padding(8)
             }
+            .frame(maxWidth: .infinity)
             .aspectRatio(3 / 4, contentMode: .fit)
+            .background(JieziTheme.paper.opacity(0.72))
             .clipped()
 
             HStack(alignment: .top, spacing: 8) {
@@ -243,7 +245,8 @@ private struct NativeInboxFilmCard: View {
                     Text(item.title)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(JieziTheme.ink)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .frame(minHeight: 32, alignment: .topLeading)
                     if let record = item.stagingRecord {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("记录 \(record.occurredAtLabel ?? "未识别")")
@@ -251,6 +254,7 @@ private struct NativeInboxFilmCard: View {
                         }
                         .font(.caption2)
                         .foregroundStyle(JieziTheme.muted)
+                        .lineLimit(1)
                     } else if let pending = item.pendingExpense {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("记录 \(pending.occurredAtLabel ?? pending.dateKey)")
@@ -258,6 +262,7 @@ private struct NativeInboxFilmCard: View {
                         }
                         .font(.caption2)
                         .foregroundStyle(JieziTheme.muted)
+                        .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 4)
@@ -273,7 +278,9 @@ private struct NativeInboxFilmCard: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, minHeight: 86, alignment: .top)
         }
+        .frame(maxWidth: .infinity)
         .background(Color.white.opacity(0.7))
         .clipShape(RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous))
         .overlay {
@@ -285,29 +292,32 @@ private struct NativeInboxFilmCard: View {
 
     @ViewBuilder
     private var filmContent: some View {
-        if let url = item.stagingRecord?.imageURL ?? item.pendingExpense?.imageURL {
-            CachedRemoteImage(url: url) { image in
-                ZStack(alignment: .bottomLeading) {
-                    image.resizable().scaledToFill()
-                    LinearGradient(
-                        colors: [.clear, JieziTheme.space.opacity(0.72)],
-                        startPoint: .center,
-                        endPoint: .bottom
-                    )
-                    Text(item.subtitle)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .padding(10)
+        Group {
+            if let url = item.stagingRecord?.imageURL ?? item.pendingExpense?.imageURL {
+                CachedRemoteImage(url: url) { image in
+                    ZStack(alignment: .bottomLeading) {
+                        image.resizable().scaledToFill()
+                        LinearGradient(
+                            colors: [.clear, JieziTheme.space.opacity(0.72)],
+                            startPoint: .center,
+                            endPoint: .bottom
+                        )
+                        Text(item.subtitle)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                            .padding(10)
+                    }
+                } placeholder: {
+                    ProgressView().tint(JieziTheme.brand)
+                } failure: {
+                    noteContent
                 }
-            } placeholder: {
-                ProgressView().tint(JieziTheme.brand)
-            } failure: {
+            } else {
                 noteContent
             }
-        } else {
-            noteContent
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var noteContent: some View {
@@ -366,6 +376,7 @@ private struct NativeInboxFilmCard: View {
             }
             .padding(16)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var statusColor: Color {
@@ -443,7 +454,7 @@ private struct StagingVerdictStageView: View {
     let domains: [NativeArchiveDomain]
 
     @State private var showDiscardConfirmation = false
-    @State private var showDetail = false
+    @State private var editorContext: StagingEditorContext?
 
     private var currentIndex: Int {
         records.firstIndex(where: { $0.id == selection }) ?? 0
@@ -520,12 +531,11 @@ private struct StagingVerdictStageView: View {
             }
             Button("再想想", role: .cancel) {}
         } message: {
-            Text("这条截图将从芥子中散去，不会进入任何数据域。")
+            Text("这条截图不会进入任何数据域，原图会在后台安全清理。")
         }
-        .sheet(isPresented: $showDetail) {
-            if let current {
-                NavigationStack { StagingRecordDetailView(record: current) }
-            }
+        .sheet(item: $editorContext) { context in
+            ManualRecordSheet(staging: context.record, domainKey: context.domainId)
+                .environmentObject(appState)
         }
     }
 
@@ -614,7 +624,10 @@ private struct StagingVerdictStageView: View {
             }
 
             HStack(spacing: JieziSpacing.sm) {
-                stageActionButton("ellipsis.circle", title: "详情") { showDetail = true }
+                stageActionButton("slider.horizontal.3", title: "调整") {
+                    let domainId = record.domainKey ?? domains.first?.id ?? "expense"
+                    editorContext = StagingEditorContext(record: record, domainId: domainId)
+                }
                 stageActionButton("arrow.clockwise", title: "重试") {
                     Task {
                         await appState.retryStagingRecord(record)
@@ -682,8 +695,9 @@ private struct StagingVerdictStageView: View {
     }
 
     private func archive(_ record: NativeStagingRecord, to domainId: String) async {
-        await appState.archiveStagingRecord(record, domainKey: domainId)
-        finishAction(for: record.id)
+        if await appState.archiveStagingRecord(record, domainKey: domainId) != nil {
+            finishAction(for: record.id)
+        }
     }
 
     private func finishAction(for recordId: String) {
@@ -725,6 +739,13 @@ private struct StagingVerdictStageView: View {
         default: return "需要你看看"
         }
     }
+}
+
+private struct StagingEditorContext: Identifiable {
+    let record: NativeStagingRecord
+    let domainId: String
+
+    var id: String { "\(record.id):\(domainId)" }
 }
 
 private struct StagingStageImage: View {
@@ -1299,6 +1320,7 @@ private struct StagingRecordRow: View {
 
 private struct StagingRecordDetailView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     let record: NativeStagingRecord
     @State private var showDiscardConfirm = false
     @State private var selectedArchiveDomain: NativeArchiveDomain?
@@ -1373,7 +1395,9 @@ private struct StagingRecordDetailView: View {
         ) { domain in
             Button("归档到\(domain.title)") {
                 Task {
-                    await appState.archiveStagingRecord(record, domainKey: domain.id)
+                    if await appState.archiveStagingRecord(record, domainKey: domain.id) != nil {
+                        dismiss()
+                    }
                 }
             }
             Button("取消", role: .cancel) {}

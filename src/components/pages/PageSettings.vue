@@ -299,6 +299,16 @@
         </div>
       </div>
       <div class="settings-item">
+        <div class="settings-item-icon primary">研</div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">参与 AI 改进</div>
+          <div class="settings-item-sub">保存 30 天的脱敏语义与评分，不含原图、金额、商户或通知原文</div>
+        </div>
+        <div class="settings-toggle" :class="{ active: store.settingsState.expressionImprovementEnabled }" @click.stop="store.toggleSetting('expressionImprovementEnabled')">
+          <div class="toggle-knob"></div>
+        </div>
+      </div>
+      <div class="settings-item">
         <div class="settings-item-icon info">图</div>
         <div class="settings-item-content">
           <div class="settings-item-title">截图原图留存</div>

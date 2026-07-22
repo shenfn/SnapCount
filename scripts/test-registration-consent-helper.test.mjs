@@ -15,5 +15,5 @@ test('test registration metadata follows the current legal contract', () => {
     privacy_version: CURRENT_PRIVACY_VERSION,
   })
   assert.equal(CURRENT_TERMS_VERSION, '2026-07-19')
-  assert.equal(CURRENT_PRIVACY_VERSION, '2026-07-19')
+  assert.equal(CURRENT_PRIVACY_VERSION, '2026-07-22')
 })

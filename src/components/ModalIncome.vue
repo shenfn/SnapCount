@@ -9,8 +9,8 @@
         <div class="sheet-handle"></div>
       </div>
       <div class="sheet-header">
-        <div class="sheet-title">{{ store.incomeModal.mode === 'edit' ? '编辑收入' : '添加收入' }}</div>
-        <div class="sheet-sub">{{ store.incomeModal.mode === 'edit' ? '调整收入信息与截图' : '手动录入收入记录' }}</div>
+        <div class="sheet-title">{{ store.incomeModal.mode === 'staging' ? '核对并收下' : (store.incomeModal.mode === 'edit' ? '编辑收入' : '添加收入') }}</div>
+        <div class="sheet-sub">{{ store.incomeModal.mode === 'staging' ? '只改需要调整的字段，确认后自动处理下一条' : (store.incomeModal.mode === 'edit' ? '调整收入信息与截图' : '手动录入收入记录') }}</div>
       </div>
 
       <div class="sheet-body" ref="bodyEl">
@@ -20,7 +20,7 @@
           placeholder="0.00" min="0.01" step="0.01">
       </div>
 
-      <div v-if="store.incomeModal.mode === 'edit'" class="thumb-wrap">
+      <div v-if="store.incomeModal.mode !== 'create'" class="thumb-wrap">
         <div v-if="store.incomeModal.imageUrl" style="width:100%" @click="store.openImgFull(store.incomeModal.imageUrl)">
           <img :src="store.incomeModal.imageUrl"
             @error="store.markIncomeImageUnavailable()"
@@ -79,7 +79,7 @@
       <div class="sheet-footer">
       <button class="confirm-btn" style="background:#1565C0"
         :disabled="!store.incomeModal.amount || !store.incomeModal.cat || !store.incomeModal.date || store.isActionPending('income')"
-        @click="store.confirmIncome()">{{ store.isActionPending('income') ? '保存中...' : '确认保存' }}</button>
+        @click="store.confirmIncome()">{{ store.isActionPending('income') ? '保存中...' : (store.incomeModal.mode === 'staging' ? '确认并收下' : '确认保存') }}</button>
       <button v-if="store.incomeModal.mode === 'edit'" class="delete-bill-btn"
         @click="store.openDeleteConfirm('income', store.incomeModal.id, store.incomeModal.imagePath)">
         删除此收入

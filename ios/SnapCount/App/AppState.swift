@@ -1232,8 +1232,9 @@ final class AppState: ObservableObject {
             let session = try await validSession()
             try await inboxRepository.discard(id: record.id, accessToken: session.accessToken)
             inboxPath = NavigationPath()
-            await refreshDashboard()
-            inboxActionMessage = "已销毁这条待处理截图"
+            removeStagingRecordLocally(record.id)
+            refreshDashboardAfterInboxMutation()
+            inboxActionMessage = "已销毁这条待处理截图，原图将在后台安全清理"
         } catch {
             inboxActionMessage = "销毁失败：\(error.localizedDescription)"
             inboxActionMessageIsError = true
@@ -1266,8 +1267,9 @@ final class AppState: ObservableObject {
         }
     }
 
-    func archiveStagingRecord(_ record: NativeStagingRecord, domainKey: String) async {
-        guard inboxActionRecordId == nil else { return }
+    @discardableResult
+    func archiveStagingRecord(_ record: NativeStagingRecord, domainKey: String) async -> String? {
+        guard inboxActionRecordId == nil else { return nil }
         inboxActionRecordId = record.id
         let domainTitle = dashboard.domains.first(where: { $0.id == domainKey })?.shortName
             ?? InboxArchiveDomains.all.first(where: { $0.id == domainKey })?.title
@@ -1277,17 +1279,42 @@ final class AppState: ObservableObject {
         defer { inboxActionRecordId = nil }
         do {
             let session = try await validSession()
-            _ = try await inboxRepository.archive(
+            let targetReference = try await inboxRepository.archive(
                 record,
                 domainKey: domainKey,
                 accessToken: session.accessToken
             )
             inboxPath = NavigationPath()
-            await refreshDashboard()
+            removeStagingRecordLocally(record.id)
+            refreshDashboardAfterInboxMutation()
             inboxActionMessage = "已归档到\(domainTitle)"
+            return targetReference
         } catch {
             inboxActionMessage = "归档失败：\(error.localizedDescription)"
             inboxActionMessageIsError = true
+            return nil
+        }
+    }
+
+    @discardableResult
+    func archiveStagingRecord(
+        _ record: NativeStagingRecord,
+        draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async -> String? {
+        let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
+        return await archiveStagingRecord(adjustedRecord, domainKey: draft.domainKey)
+    }
+
+    private func removeStagingRecordLocally(_ recordId: String) {
+        dashboard.stagingRecords.removeAll { $0.id == recordId }
+        dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
+    }
+
+    private func refreshDashboardAfterInboxMutation() {
+        Task { [weak self] in
+            await Task.yield()
+            await self?.refreshDashboard()
         }
     }
 
@@ -1523,6 +1550,10 @@ final class AppState: ObservableObject {
 
     func setPromptOptimizationEnabled(_ enabled: Bool) async {
         await updateSettings(["prompt_optimization_enabled": AnyCodable(enabled)]) { $0.promptOptimizationEnabled = enabled }
+    }
+
+    func setExpressionImprovementEnabled(_ enabled: Bool) async {
+        await updateSettings(["expression_improvement_enabled": AnyCodable(enabled)]) { $0.expressionImprovementEnabled = enabled }
     }
 
     func setImageRetention(days: Int, cleanupExisting: Bool = false) async {

@@ -10,6 +10,107 @@ end;
 $$;
 
 select public.security_test_assert(
+  (select companion_message from public.transactions where id = '17171717-1717-4717-8717-171717171717') is null,
+  'known unsupported historical finance companion text must be cleared'
+);
+
+select public.security_test_assert(
+  not exists (
+    select 1 from public.user_configs
+    where expression_improvement_enabled is true
+  ),
+  'Expression improvement must default to opt-out'
+);
+select public.security_test_assert(
+  not has_function_privilege(
+    'authenticated',
+    'public.cleanup_expression_improvement_retention()',
+    'EXECUTE'
+  ),
+  'authenticated users must not execute Expression retention cleanup directly'
+);
+select public.security_test_assert(
+  has_function_privilege(
+    'service_role',
+    'public.cleanup_expression_improvement_retention()',
+    'EXECUTE'
+  ),
+  'service role must execute Expression retention cleanup'
+);
+
+update public.user_configs
+set expression_improvement_enabled = true,
+    expression_improvement_consent_at = '2000-01-01'::timestamptz
+where user_id = '11111111-1111-4111-8111-111111111111';
+
+select public.security_test_assert(
+  (
+    select expression_improvement_consent_at > '2026-01-01'::timestamptz
+      and expression_improvement_withdrawn_at is null
+    from public.user_configs
+    where user_id = '11111111-1111-4111-8111-111111111111'
+  ),
+  'Expression improvement opt-in must use a server timestamp'
+);
+
+insert into public.expression_shadow_runs (id, user_id) values (
+  '18181818-1818-4818-8818-181818181818',
+  '11111111-1111-4111-8111-111111111111'
+);
+insert into public.expression_exposure_events (id, user_id, metadata, selection_mode) values
+  (
+    '19191919-1919-4919-8919-191919191919',
+    '11111111-1111-4111-8111-111111111111',
+    '{"source":"production_baseline"}'::jsonb,
+    'legacy_voice'
+  ),
+  (
+    '20202020-2020-4020-8020-202020202020',
+    '11111111-1111-4111-8111-111111111111',
+    '{"source":"production_baseline"}'::jsonb,
+    'legacy_voice'
+  );
+insert into public.expression_feedback_events (id, user_id, exposure_event_id) values (
+  '21212121-2121-4121-8121-212121212121',
+  '11111111-1111-4111-8111-111111111111',
+  '20202020-2020-4020-8020-202020202020'
+);
+
+update public.user_configs
+set expression_improvement_enabled = false
+where user_id = '11111111-1111-4111-8111-111111111111';
+
+select public.security_test_assert(
+  not exists (
+    select 1 from public.expression_shadow_runs
+    where id = '18181818-1818-4818-8818-181818181818'
+  ),
+  'opt-out must purge background Shadow rows immediately'
+);
+select public.security_test_assert(
+  not exists (
+    select 1 from public.expression_exposure_events
+    where id = '19191919-1919-4919-8919-191919191919'
+  ),
+  'opt-out must purge unlinked background exposure rows immediately'
+);
+select public.security_test_assert(
+  exists (
+    select 1 from public.expression_exposure_events
+    where id = '20202020-2020-4020-8020-202020202020'
+  ),
+  'opt-out must preserve exposure context linked to explicit feedback'
+);
+select public.security_test_assert(
+  (
+    select expression_improvement_withdrawn_at is not null
+    from public.user_configs
+    where user_id = '11111111-1111-4111-8111-111111111111'
+  ),
+  'Expression improvement opt-out must record a server withdrawal timestamp'
+);
+
+select public.security_test_assert(
   not has_function_privilege('anon', 'public.rebuild_sleep_profile(uuid)', 'execute'),
   'anon must not execute profile rebuilds'
 );
@@ -235,6 +336,16 @@ insert into auth.users (id, raw_user_meta_data) values (
   )
 );
 
+insert into auth.users (id, raw_user_meta_data) values (
+  '66666666-6666-4666-8666-666666666666',
+  jsonb_build_object(
+    'legal_consent_at', '2020-01-01T00:00:00Z',
+    'sensitive_data_consent_at', '2020-01-01T00:00:00Z',
+    'terms_version', '2026-07-19',
+    'privacy_version', '2026-07-22'
+  )
+);
+
 select public.security_test_assert(
   exists (
     select 1 from public.user_configs
@@ -245,6 +356,15 @@ select public.security_test_assert(
       and sensitive_data_consent_at = legal_consent_at
   ),
   'valid consent must use the server timestamp and current versions'
+);
+select public.security_test_assert(
+  exists (
+    select 1 from public.user_configs
+    where user_id = '66666666-6666-4666-8666-666666666666'
+      and privacy_version = '2026-07-22'
+      and expression_improvement_enabled is false
+  ),
+  'new privacy version must register with Expression improvement disabled'
 );
 
 select set_config('request.jwt.claim.role', 'service_role', false);
@@ -665,5 +785,189 @@ select public.security_test_assert(
 delete from public.transactions where id = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 delete from public.income_records where id = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 delete from public.staging_records where id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
+select public.security_test_assert(
+  has_function_privilege('authenticated', 'public.discard_staging_record(uuid,text)', 'EXECUTE'),
+  'authenticated users must be able to discard their own staging records'
+);
+select public.security_test_assert(
+  not has_function_privilege('anon', 'public.discard_staging_record(uuid,text)', 'EXECUTE'),
+  'anonymous users must not discard staging records'
+);
+
+insert into storage.objects (bucket_id, name) values (
+  'receipt-images',
+  '11111111-1111-4111-8111-111111111111/staging-discard.jpg'
+);
+insert into public.staging_records (
+  id,
+  user_id,
+  status,
+  image_path,
+  record_type,
+  detected_domain_key
+) values (
+  'abababab-abab-4bab-8bab-abababababab',
+  '11111111-1111-4111-8111-111111111111',
+  'pending_review',
+  '11111111-1111-4111-8111-111111111111/staging-discard.jpg',
+  'expense',
+  'expense'
+);
+
+select public.discard_staging_record(
+  'abababab-abab-4bab-8bab-abababababab',
+  'security_test'
+);
+select public.security_test_assert(
+  exists (
+    select 1
+    from public.staging_records
+    where id = 'abababab-abab-4bab-8bab-abababababab'
+      and status = 'discarded'
+      and image_path = '11111111-1111-4111-8111-111111111111/staging-discard.jpg'
+  ),
+  'discard must retain the managed image reference until Storage deletion succeeds'
+);
+select public.security_test_assert(
+  exists (
+    select 1
+    from public.image_cleanup_queue
+    where user_id = '11111111-1111-4111-8111-111111111111'
+      and bucket_path = '11111111-1111-4111-8111-111111111111/staging-discard.jpg'
+      and status = 'pending'
+      and cleanup_reason = 'record_delete'
+      and source_table = 'staging_records'
+      and source_id = 'abababab-abab-4bab-8bab-abababababab'
+  ),
+  'discard must queue the original image with its staging source identity'
+);
+
+insert into public.staging_records (
+  id,
+  user_id,
+  status,
+  record_type,
+  detected_domain_key,
+  extracted_json,
+  companion_message
+) values (
+  'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd',
+  '11111111-1111-4111-8111-111111111111',
+  'pending_review',
+  'expense',
+  'expense',
+  jsonb_build_object(
+    'ai_feedback',
+    jsonb_build_object('emotion_line', '这条反馈应被保留', 'utility_line', '可用于详情验证')
+  ),
+  '归档后的陪伴说明'
+);
+insert into public.transactions (id, user_id) values (
+  'edededed-eded-4ded-8ded-edededededed',
+  '11111111-1111-4111-8111-111111111111'
+);
+update public.staging_records
+set status = 'archived',
+    target_record_id = 'edededed-eded-4ded-8ded-edededededed'
+where id = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+select public.security_test_assert(
+  (select ai_feedback->>'emotion_line' from public.transactions where id = 'edededed-eded-4ded-8ded-edededededed') = '这条反馈应被保留',
+  'archiving must copy AI feedback into the target record'
+);
+select public.security_test_assert(
+  (select companion_message from public.transactions where id = 'edededed-eded-4ded-8ded-edededededed') = '归档后的陪伴说明',
+  'archiving must copy the companion message into the target record'
+);
+
+insert into public.staging_records (
+  id,
+  user_id,
+  status,
+  record_type,
+  detected_domain_key,
+  extracted_json,
+  companion_message
+) values (
+  'acacacac-acac-4cac-8cac-acacacacacac',
+  '11111111-1111-4111-8111-111111111111',
+  'pending_review',
+  'reading',
+  'reading',
+  jsonb_build_object(
+    'ai_feedback',
+    jsonb_build_object('emotion_line', '通用记录反馈应被保留')
+  ),
+  '通用记录陪伴说明'
+);
+insert into public.data_records (id, user_id) values (
+  'dadadada-dada-4ada-8ada-dadadadadada',
+  '11111111-1111-4111-8111-111111111111'
+);
+update public.staging_records
+set status = 'archived',
+    target_record_id = 'dadadada-dada-4ada-8ada-dadadadadada'
+where id = 'acacacac-acac-4cac-8cac-acacacacacac';
+select public.security_test_assert(
+  (select payload_jsonb->'ai_feedback'->>'emotion_line' from public.data_records where id = 'dadadada-dada-4ada-8ada-dadadadadada') = '通用记录反馈应被保留',
+  'archiving must copy AI feedback into a universal record'
+);
+select public.security_test_assert(
+  (select payload_jsonb->>'companion_message' from public.data_records where id = 'dadadada-dada-4ada-8ada-dadadadadada') = '通用记录陪伴说明',
+  'archiving must copy the companion message into a universal record'
+);
+
+insert into public.transactions (id, user_id) values (
+  '12121212-1212-4212-8212-121212121212',
+  '11111111-1111-4111-8111-111111111111'
+);
+insert into public.user_companion_memories (id, user_id, source_table, source_id) values (
+  '13131313-1313-4313-8313-131313131313',
+  '11111111-1111-4111-8111-111111111111',
+  'transactions',
+  '12121212-1212-4212-8212-121212121212'
+);
+insert into public.user_domain_profiles (id, user_id, domain_key, source_count) values (
+  '14141414-1414-4414-8414-141414141414',
+  '11111111-1111-4111-8111-111111111111',
+  'expense',
+  1
+);
+delete from public.transactions where id = '12121212-1212-4212-8212-121212121212';
+select public.security_test_assert(
+  not exists (
+    select 1 from public.user_companion_memories
+    where id = '13131313-1313-4313-8313-131313131313'
+  ),
+  'deleting a record must remove companion memory sourced only from that record'
+);
+select public.security_test_assert(
+  not exists (
+    select 1 from public.user_domain_profiles
+    where id = '14141414-1414-4414-8414-141414141414'
+  ),
+  'deleting an expense must invalidate its cached domain profile'
+);
+select public.security_test_assert(
+  not has_function_privilege(
+    'authenticated',
+    'public.invalidate_companion_context_after_record_delete()',
+    'EXECUTE'
+  ),
+  'authenticated users must not execute the context invalidation trigger directly'
+);
+
+delete from public.transactions where id = 'edededed-eded-4ded-8ded-edededededed';
+delete from public.data_records where id = 'dadadada-dada-4ada-8ada-dadadadadada';
+delete from public.staging_records where id in (
+  'abababab-abab-4bab-8bab-abababababab',
+  'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd',
+  'acacacac-acac-4cac-8cac-acacacacacac'
+);
+delete from public.image_cleanup_queue
+where bucket_path = '11111111-1111-4111-8111-111111111111/staging-discard.jpg';
+delete from storage.objects
+where bucket_id = 'receipt-images'
+  and name = '11111111-1111-4111-8111-111111111111/staging-discard.jpg';
 
 drop function public.security_test_assert(boolean, text);

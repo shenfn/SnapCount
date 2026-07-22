@@ -636,6 +636,12 @@ export interface NumberValidationResult {
   badIndexes: number[];
 }
 
+export function hasUnsupportedFinanceCompanionClaim(text: string): boolean {
+  return /(?:第|连续|连着)\s*[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)
+    || /(?:这周|本周|本月|近\s*\d+\s*天|30\s*天).{0,16}[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)
+    || /(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text);
+}
+
 // allowedSources:信号 fact 文本 + 本条记录字段 JSON。数字宽松匹配(整数/一位小数视为同数)。
 // 计数表达("第X次/连续X天")单独用严格白名单 countNumbers:
 // 只有计数类信号显式声明的数才能进计数表达,防止金额/时长取整后泄漏放行幻觉计数。

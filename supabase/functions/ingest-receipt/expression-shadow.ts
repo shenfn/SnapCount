@@ -7,6 +7,7 @@ interface ShadowCaptureInput {
   userId: string | null;
   payload: Record<string, unknown>;
   responseMode: ShortcutResponseMode;
+  improvementConsent: boolean;
   occurredAt?: string | null;
 }
 
@@ -54,15 +55,131 @@ function normalizeMode(value: string | undefined): ExpressionShadowMode {
   return SUPPORTED_MODES.has(normalized) ? normalized : "off";
 }
 
-function compactFeedback(value: unknown): Record<string, unknown> | null {
+function feedbackSignal(value: unknown): Record<string, unknown> | null {
   const feedback = objectValue(value);
   if (!feedback) return null;
   return {
-    badge: normalizeString(feedback.badge),
-    band: normalizeString(feedback.band),
-    emotion_line: normalizeString(feedback.emotion_line),
-    utility_line: normalizeString(feedback.utility_line),
+    present: true,
     confidence: typeof feedback.confidence === "number" ? feedback.confidence : null,
+  };
+}
+
+function normalizeTelemetryCode(value: unknown): string | null {
+  const normalized = normalizeString(value);
+  return normalized && /^[a-z0-9][a-z0-9_.:-]{0,127}$/i.test(normalized) ? normalized : null;
+}
+
+function stringList(value: unknown, limit = 20): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeTelemetryCode).filter((item): item is string => item !== null).slice(0, limit);
+}
+
+function numericFlags(
+  value: unknown,
+  allowedKeys: ReadonlySet<string>,
+): Record<string, number | boolean | null> {
+  const source = objectValue(value);
+  if (!source) return {};
+  const result: Record<string, number | boolean | null> = {};
+  for (const [key, item] of Object.entries(source)) {
+    if (allowedKeys.has(key) && (typeof item === "number" || typeof item === "boolean" || item === null)) {
+      result[key] = item;
+    }
+  }
+  return result;
+}
+
+const QUALITY_TELEMETRY_FIELDS = new Set([
+  "confidence",
+  "sample_count",
+  "data_coverage",
+  "importance",
+  "relevance",
+  "novelty",
+]);
+const ELIGIBILITY_TELEMETRY_FIELDS = new Set([
+  "total_candidates",
+  "claim_eligible",
+  "claim_blocked",
+]);
+
+function minimizedSurfaceEntries(value: unknown, includeScore: boolean): Record<string, unknown> {
+  const source = objectValue(value);
+  if (!source) return {};
+  return Object.fromEntries(Object.entries(source).flatMap(([rawSurface, rawEntry]) => {
+    const surface = normalizeTelemetryCode(rawSurface);
+    if (!surface) return [];
+    const entry = objectValue(rawEntry) ?? {};
+    return [[surface, {
+      eligible: entry.eligible === true,
+      ...(includeScore && typeof entry.score === "number" ? { score: entry.score } : {}),
+      ...(includeScore && typeof entry.passes_threshold === "boolean"
+        ? { passes_threshold: entry.passes_threshold }
+        : {}),
+      ...(!includeScore ? { blocked_reasons: stringList(entry.blocked_reasons, 10) } : {}),
+    }]];
+  }));
+}
+
+function minimizedPlanSummary(value: unknown): Record<string, unknown> {
+  const source = objectValue(value);
+  if (!source) return {};
+  return Object.fromEntries(Object.entries(source).flatMap(([rawSurface, rawPlan]) => {
+    const surface = normalizeTelemetryCode(rawSurface);
+    if (!surface) return [];
+    const plan = objectValue(rawPlan) ?? {};
+    const selected = Array.isArray(plan.selected)
+      ? plan.selected.slice(0, 20).map((rawItem) => {
+        const item = objectValue(rawItem) ?? {};
+        return {
+          semantic_key: normalizeTelemetryCode(item.semantic_key),
+          score: typeof item.score === "number" ? item.score : null,
+          selection_mode: normalizeTelemetryCode(item.selection_mode),
+        };
+      })
+      : [];
+    return [[surface, {
+      capacity: typeof plan.capacity === "number" ? plan.capacity : null,
+      selected_count: typeof plan.selected_count === "number" ? plan.selected_count : selected.length,
+      selected,
+      fallback_used: plan.fallback_used === true,
+      silent: plan.silent === true,
+    }]];
+  }));
+}
+
+export function minimizeExpressionShadowPlan(plan: Record<string, unknown>): Record<string, unknown> {
+  const candidates = Array.isArray(plan.candidates)
+    ? plan.candidates.slice(0, 100).map((rawCandidate, candidateIndex) => {
+      const candidate = objectValue(rawCandidate) ?? {};
+      const claim = objectValue(candidate.claim) ?? {};
+      const eligibility = objectValue(candidate.eligibility) ?? {};
+      const scoring = objectValue(candidate.scoring) ?? {};
+      return {
+        candidate_index: candidateIndex,
+        semantic_key: normalizeTelemetryCode(claim.semantic_key),
+        claim_type: normalizeTelemetryCode(candidate.claim_type),
+        dimension: normalizeTelemetryCode(candidate.dimension),
+        quality: numericFlags(candidate.quality, QUALITY_TELEMETRY_FIELDS),
+        eligibility: {
+          eligible: eligibility.eligible === true,
+          blocked_reasons: stringList(eligibility.blocked_reasons, 10),
+          surfaces: minimizedSurfaceEntries(eligibility.surface_eligibility, false),
+        },
+        scoring: { surfaces: minimizedSurfaceEntries(scoring.surfaces, true) },
+      };
+    })
+    : [];
+  return {
+    status: normalizeTelemetryCode(plan.status),
+    reason: normalizeTelemetryCode(plan.reason),
+    planner_version: normalizeTelemetryCode(plan.planner_version),
+    domain_key: normalizeTelemetryCode(plan.domain_key),
+    changes_user_output: false,
+    candidate_count: typeof plan.candidate_count === "number" ? plan.candidate_count : candidates.length,
+    candidates,
+    plan_summary: minimizedPlanSummary(plan.plan_summary),
+    eligibility_summary: numericFlags(plan.eligibility_summary, ELIGIBILITY_TELEMETRY_FIELDS),
   };
 }
 
@@ -73,20 +190,17 @@ function visibleFieldPaths(payload: Record<string, unknown>): string[] {
 }
 
 function persistedOnlyFieldPaths(payload: Record<string, unknown>): string[] {
-  return compactFeedback(payload.ai_feedback) ? ["ai_feedback"] : [];
+  return feedbackSignal(payload.ai_feedback) ? ["ai_feedback"] : [];
 }
 
-function baselinePayload(payload: Record<string, unknown>): Record<string, unknown> {
+export function buildExpressionShadowBaselinePayload(payload: Record<string, unknown>): Record<string, unknown> {
   const identity = recordIdentity(payload);
   return {
     status: normalizeString(payload.status),
     record_type: identity.recordType,
-    record_id: identity.recordId,
-    notification: normalizeString(payload.notification),
-    message: normalizeString(payload.message),
     possible_duplicate: payload.possible_duplicate === true,
     ai_ok: typeof payload.ai_ok === "boolean" ? payload.ai_ok : null,
-    ai_feedback: compactFeedback(payload.ai_feedback),
+    ai_feedback: feedbackSignal(payload.ai_feedback),
   };
 }
 
@@ -104,7 +218,6 @@ function buildCollectorResult(payload: Record<string, unknown>): Record<string, 
       structured_value: {
         record_type: identity.recordType,
         status,
-        record_id: identity.recordId,
       },
       fixed_content_covered: true,
     }],
@@ -118,13 +231,21 @@ export function getExpressionShadowMode(): ExpressionShadowMode {
   return normalizeMode(Deno.env.get("EXPRESSION_PLANNER_MODE"));
 }
 
+export function shouldCaptureExpressionShadow(
+  improvementConsent: boolean,
+  mode: ExpressionShadowMode,
+): boolean {
+  return improvementConsent && mode !== "off";
+}
+
 async function persistShadowPlan(
   supabase: ShadowDatabaseClient,
   params: { eventKey: string; collectorResult: Record<string, unknown> },
   plan: Record<string, unknown>,
 ): Promise<void> {
-  const scoreSummary = plan.status === "auto_planned"
-    ? { eligibility: plan.eligibility_summary, scoring: plan.score_summary, plans: plan.plan_summary }
+  const minimizedPlan = minimizeExpressionShadowPlan(plan);
+  const scoreSummary = minimizedPlan.status === "auto_planned"
+    ? { eligibility: minimizedPlan.eligibility_summary, plans: minimizedPlan.plan_summary }
     : {};
   const { error } = await supabase.from("expression_shadow_runs").update({
     collector_result: {
@@ -133,17 +254,16 @@ async function persistShadowPlan(
       planner_version: plan.planner_version ?? "expression-shadow-auto-v0.2",
       candidate_generation: "shared_expression_planner_completed",
     },
-    proposed_plan: plan, proposed_score_summary: scoreSummary,
+    proposed_plan: minimizedPlan, proposed_score_summary: scoreSummary,
     processed_at: new Date().toISOString(), processing_error: null,
   }).eq("event_key", params.eventKey);
   if (error) throw new Error(error.message);
 }
 
 async function persistPlannerError(supabase: ShadowDatabaseClient, eventKey: string, error: unknown): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error);
-  console.warn("[expression-shadow] planner failed:", message);
+  console.warn("[expression-shadow] planner failed", error instanceof Error ? error.name : "unknown_error");
   const { error: updateError } = await supabase.from("expression_shadow_runs")
-    .update({ processed_at: new Date().toISOString(), processing_error: message.slice(0, 500) })
+    .update({ processed_at: new Date().toISOString(), processing_error: "planner_execution_failed" })
     .eq("event_key", eventKey);
   if (updateError) console.warn("[expression-shadow] planner error persistence failed:", updateError.message);
 }
@@ -199,7 +319,7 @@ function baselineSemanticKey(recordType: string | null, badge: string): string {
     "工资到账": "income_current_amount",
     "餐饮入账": "food_expense_recorded",
   };
-  return known[badge] ?? `${recordType ?? "unknown"}_baseline_${badge.toLowerCase().replace(/\s+/g, "_").slice(0, 32)}`;
+  return known[badge] ?? `${recordType ?? "unknown"}_baseline_feedback`;
 }
 
 async function loadPlannerPersonalization(supabase: ShadowDatabaseClient, userId: string) {
@@ -227,7 +347,7 @@ async function captureBaselineExposure(
     recordType: string | null; recordId: string | null; payload: Record<string, unknown>;
   },
 ): Promise<void> {
-  const feedback = compactFeedback(params.payload.ai_feedback);
+  const feedback = objectValue(params.payload.ai_feedback);
   if (!feedback || !params.recordId) return;
   const badge = normalizeString(feedback.badge) ?? "即时反馈";
   const semanticKey = baselineSemanticKey(params.recordType, badge);
@@ -236,13 +356,17 @@ async function captureBaselineExposure(
     event_key: exposureEventKey, delivery_attempt_id: params.eventKey, occurred_at: params.occurredAt,
     user_id: params.userId, trace_id: params.traceId, ai_log_id: params.aiLogId, record_id: params.recordId,
     record_type: params.recordType, domain_key: params.recordType, entity_id: null,
-    candidate_id: `baseline:${params.recordType ?? "unknown"}:${params.recordId}:${semanticKey}`,
+    candidate_id: `baseline:${params.recordType ?? "unknown"}:${semanticKey}`,
     semantic_key: semanticKey, claim_type: "inference", dimension: "baseline_voice_feedback",
     surface: "shortcut_notification", lifecycle_state: "returned_to_shortcut", selection_mode: "legacy_voice",
     score: null, expression_plan_version: "legacy-voice-v1", render_contract_version: "shortcut-baseline-v1", scoring_version: null,
     visible_field_paths: ["rendered_feedback.badge", "rendered_feedback.emotion_line", "rendered_feedback.utility_line"],
     expandable_field_paths: [], persisted_only_field_paths: ["rendered_feedback.confidence"],
-    rendered_payload: { feedback, notification: normalizeString(params.payload.notification) },
+    rendered_payload: {
+      semantic_key: semanticKey,
+      feedback_present: true,
+      feedback_confidence: typeof feedback.confidence === "number" ? feedback.confidence : null,
+    },
     metadata: { source: "production_baseline", shadow_event_key: params.eventKey },
     simulation_only: false, counts_for_novelty: true,
   };
@@ -280,7 +404,7 @@ async function captureExpressionShadow(
     response_mode: input.responseMode,
     rollout_mode: mode,
     lifecycle_state: "returned_to_shortcut",
-    baseline_payload: baselinePayload(input.payload),
+    baseline_payload: buildExpressionShadowBaselinePayload(input.payload),
     visible_field_paths: visibleFieldPaths(input.payload),
     persisted_only_field_paths: persistedOnlyFieldPaths(input.payload),
     collector_result: collectorResult,
@@ -315,7 +439,7 @@ export function scheduleExpressionShadowCapture(
   input: ShadowCaptureInput,
 ): void {
   const mode = getExpressionShadowMode();
-  if (mode === "off") return;
+  if (!shouldCaptureExpressionShadow(input.improvementConsent, mode)) return;
   const task = captureExpressionShadow(supabase, input, mode).catch((error) => {
     console.warn("[expression-shadow] capture failed:", error instanceof Error ? error.message : String(error));
   });

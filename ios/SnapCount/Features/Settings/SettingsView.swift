@@ -338,6 +338,10 @@ private struct PrivacySettingsView: View {
                 Text("Prompt 优化开启后会保留脱敏后的模型原始输出，默认关闭。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                Toggle("参与 AI 改进", isOn: asyncToggle(appState.userSettings.expressionImprovementEnabled, appState.setExpressionImprovementEnabled))
+                Text("开启后保存 30 天的脱敏语义与评分，不含原图、金额、商户或通知原文；关闭会清理未关联点评的后台数据。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             Section("截图原图留存") {
                 retentionButton("不保留", value: 0)

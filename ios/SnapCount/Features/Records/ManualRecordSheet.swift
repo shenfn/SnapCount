@@ -5,12 +5,19 @@ struct ManualRecordSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: NativeManualRecordDraft
     @State private var localMessage: String?
+    private let stagingRecord: NativeStagingRecord?
 
     init(editing detail: NativeRecordDetail? = nil, kind: NativeManualRecordKind = .expense, domainKey: String = "sport") {
+        stagingRecord = nil
         _draft = State(
             initialValue: detail.map { NativeManualRecordDraft(detail: $0) }
                 ?? NativeManualRecordDraft(kind: kind, domainKey: domainKey)
         )
+    }
+
+    init(staging record: NativeStagingRecord, domainKey: String) {
+        stagingRecord = record
+        _draft = State(initialValue: NativeManualRecordDraft(stagingRecord: record, domainKey: domainKey))
     }
 
     private var universalDomains: [NativeDomainDefinition] {
@@ -27,6 +34,10 @@ struct ManualRecordSheet: View {
 
     private var accountCandidates: [NativeAccount] {
         appState.accounts.filter { !$0.isArchived }
+    }
+
+    private var isSaving: Bool {
+        appState.isCreatingManualRecord || (stagingRecord != nil && appState.inboxActionRecordId != nil)
     }
 
     private var expensePlatformOptions: [NativeManualRecordOption] {
@@ -56,7 +67,17 @@ struct ManualRecordSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                if draft.existingRawId == nil {
+                if let stagingRecord {
+                    stagingEvidence(stagingRecord)
+                    Section {
+                        LabeledContent(
+                            "准备归档到",
+                            value: draft.kind == .universal
+                                ? selectedDomain?.shortName ?? draft.domainKey
+                                : draft.kind.title
+                        )
+                    }
+                } else if draft.existingRawId == nil {
                     Section {
                         Picker("记录类型", selection: $draft.kind) {
                             ForEach(NativeManualRecordKind.allCases) { kind in
@@ -95,24 +116,28 @@ struct ManualRecordSheet: View {
                     }
                 }
             }
-            .navigationTitle(draft.existingRawId == nil ? "手动记录" : "编辑记录")
+            .navigationTitle(
+                stagingRecord != nil
+                    ? "核对并收下"
+                    : (draft.existingRawId == nil ? "手动记录" : "编辑记录")
+            )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
-                        .disabled(appState.isCreatingManualRecord)
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task { await save() }
                     } label: {
-                        if appState.isCreatingManualRecord {
+                        if isSaving {
                             ProgressView()
                         } else {
-                            Text("保存")
+                            Text(stagingRecord == nil ? "保存" : "收下")
                         }
                     }
-                    .disabled(appState.isCreatingManualRecord)
+                    .disabled(isSaving)
                 }
             }
         }
@@ -120,7 +145,9 @@ struct ManualRecordSheet: View {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
             await appState.loadFinanceVocabulary()
             normalizeDomainSelection()
-            if draft.existingRawId == nil {
+            if stagingRecord != nil {
+                if draft.kind == .universal { hydrateUniversalFields() }
+            } else if draft.existingRawId == nil {
                 applyDefaultAccount()
             } else {
                 hydrateUniversalFields()
@@ -229,6 +256,34 @@ struct ManualRecordSheet: View {
         }
     }
 
+    private func stagingEvidence(_ record: NativeStagingRecord) -> some View {
+        Section("识别依据") {
+            if let imageURL = record.imageURL {
+                CachedRemoteImage(url: imageURL) { image in
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: 260)
+                } placeholder: {
+                    ProgressView("正在准备原图")
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } failure: {
+                    Label("原图暂不可用，请依据文字结果核对", systemImage: "photo.badge.exclamationmark")
+                        .font(.footnote)
+                }
+            } else {
+                Label(
+                    record.imagePath == nil ? "原图未保留，请依据文字结果核对" : "原图暂不可用，请依据文字结果核对",
+                    systemImage: "doc.text.magnifyingglass"
+                )
+                .font(.footnote)
+            }
+            Text(record.summary)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func editableOptionField(
         _ title: String,
         selection: Binding<String>,
@@ -269,6 +324,7 @@ struct ManualRecordSheet: View {
     }
 
     private func normalizeDomainSelection() {
+        guard draft.kind == .universal else { return }
         guard !universalDomains.isEmpty else { return }
         if !universalDomains.contains(where: { $0.id == draft.domainKey }) {
             draft.domainKey = universalDomains.first?.id ?? "sport"
@@ -307,7 +363,13 @@ struct ManualRecordSheet: View {
             localMessage = validationMessage
             return
         }
-        if await appState.createManualRecord(draft, domain: selectedDomain) {
+        if let stagingRecord {
+            if await appState.archiveStagingRecord(stagingRecord, draft: draft, domain: selectedDomain) != nil {
+                dismiss()
+            } else {
+                localMessage = appState.inboxActionMessage ?? "归档失败，请稍后重试。"
+            }
+        } else if await appState.createManualRecord(draft, domain: selectedDomain) {
             dismiss()
         } else {
             localMessage = appState.manualRecordMessage ?? "保存失败，请稍后重试。"
