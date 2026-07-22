@@ -46,6 +46,7 @@ export function useStore() {
     aiLogsEnabled: 'ai_logs_enabled',
     keepSourceImages: 'keep_source_images',
     promptOptimizationEnabled: 'prompt_optimization_enabled',
+    expressionImprovementEnabled: 'expression_improvement_enabled',
     imageRetentionDays: 'image_retention_days',
     companionEnabled: 'companion_enabled',
     companionMemoryEnabled: 'companion_memory_enabled',
@@ -136,6 +137,7 @@ export function useStore() {
     imageLoadError: false,
     accountId: null,
     accountUnbound: false,
+    stagingSource: null,
   })
 
   const expenseModal = reactive({
@@ -155,6 +157,7 @@ export function useStore() {
     imageLoadError: false,
     accountId: null,
     accountUnbound: false,
+    stagingSource: null,
   })
 
   const universalModal = reactive({
@@ -206,6 +209,7 @@ export function useStore() {
     aiLogsEnabled: false,
     keepSourceImages: true,
     promptOptimizationEnabled: false,
+    expressionImprovementEnabled: false,
     imageRetentionDays: -1,
     companionEnabled: true,
     companionMemoryEnabled: true,
@@ -439,6 +443,7 @@ export function useStore() {
     settingsState.aiLogsEnabled = false
     settingsState.keepSourceImages = true
     settingsState.promptOptimizationEnabled = false
+    settingsState.expressionImprovementEnabled = false
     settingsState.imageRetentionDays = -1
     settingsState.companionEnabled = true
     settingsState.companionMemoryEnabled = true
@@ -468,13 +473,14 @@ export function useStore() {
       settingsState.aiLogsEnabled = false
       settingsState.keepSourceImages = true
       settingsState.promptOptimizationEnabled = false
+      settingsState.expressionImprovementEnabled = false
       settingsState.imageRetentionDays = -1
       settingsState.companionEnabled = true
       settingsState.companionMemoryEnabled = true
       return
     }
     const { data, error } = await sb.from('user_configs')
-      .select('ai_logs_enabled, keep_source_images, prompt_optimization_enabled, image_retention_days, companion_enabled, companion_memory_enabled')
+      .select('ai_logs_enabled, keep_source_images, prompt_optimization_enabled, expression_improvement_enabled, image_retention_days, companion_enabled, companion_memory_enabled')
       .eq('user_id', currentUserId.value)
       .maybeSingle()
     if (error) {
@@ -484,6 +490,7 @@ export function useStore() {
     settingsState.aiLogsEnabled = data?.ai_logs_enabled ?? false
     settingsState.keepSourceImages = data?.keep_source_images ?? true
     settingsState.promptOptimizationEnabled = data?.prompt_optimization_enabled ?? false
+    settingsState.expressionImprovementEnabled = data?.expression_improvement_enabled ?? false
     settingsState.imageRetentionDays = data?.image_retention_days ?? -1
     settingsState.companionEnabled = data?.companion_enabled ?? true
     settingsState.companionMemoryEnabled = data?.companion_memory_enabled ?? true
@@ -942,31 +949,7 @@ export function useStore() {
         console.warn('加载通用记录失败:', universalErr.message)
         dataRecords.value = []
       } else {
-        dataRecords.value = (universalRows || []).map(r => {
-          const payload = r.payload_jsonb || {}
-          return {
-            id: r.id,
-            domainId: r.domain_id,
-            domainKey: r.domain_key,
-            domainVersion: r.domain_version || '1.0',
-            occurredAt: r.occurred_at,
-            createdAt: r.created_at,
-            title: r.title,
-            summary: r.summary,
-            payload: {
-              ...payload,
-              linked_account_id: r.linked_account_id || payload.linked_account_id || null,
-              account_snapshot_kind: r.account_snapshot_kind || payload.account_snapshot_kind || null,
-              snapshot_balance: r.snapshot_balance ?? payload.snapshot_balance ?? null,
-            },
-            companionMessage: payload?.companion_message || '',
-            aiFeedback: payload?.ai_feedback || null,
-            imagePath: r.source_image_path,
-            imageHash: r.source_image_hash,
-            stagingRecordId: r.staging_record_id,
-            source: r.source || 'staging',
-          }
-        })
+        dataRecords.value = (universalRows || []).map(mapDataRecordRow)
       }
 
       const { data: accountRows, error: accountErr } = accountResult
@@ -1451,6 +1434,7 @@ export function useStore() {
       imagePath: incomeModal.imagePath,
       accountId: incomeModal.accountId,
       accountUnbound: incomeModal.accountUnbound,
+      stagingSourceId: incomeModal.stagingSource?.id || null,
     }
   }
 
@@ -1704,6 +1688,20 @@ export function useStore() {
     })
   }
 
+  function stagingArchivePayload(record) {
+    const extracted = record?.extracted && typeof record.extracted === 'object' ? record.extracted : {}
+    const nested = extracted.payload_jsonb && typeof extracted.payload_jsonb === 'object'
+      ? extracted.payload_jsonb
+      : {}
+    const { payload_jsonb: _nestedPayload, ...direct } = extracted
+    return { ...nested, ...direct }
+  }
+
+  function stagingOccurredAt(date, time = '') {
+    if (!date) return new Date().toISOString()
+    return `${date}T${time || '12:00'}:00+08:00`
+  }
+
   function openIncomeModal() {
     incomeModal.open = true
     incomeModal.mode = 'create'
@@ -1718,7 +1716,30 @@ export function useStore() {
     incomeModal.imageLoadError = false
     incomeModal.accountId = defaultAccountIdForKind('income')
     incomeModal.accountUnbound = !incomeModal.accountId
+    incomeModal.stagingSource = null
     setIncomeModalInitial()
+  }
+
+  function openIncomeStagingModal(record) {
+    if (!record?.id) return false
+    const payload = stagingArchivePayload(record)
+    const hasAccountChoice = Object.prototype.hasOwnProperty.call(payload, 'account_id')
+    incomeModal.open = true
+    incomeModal.mode = 'staging'
+    incomeModal.id = null
+    incomeModal.cat = payload.income_category || 'other'
+    incomeModal.amount = payload.amount == null ? '' : String(payload.amount)
+    incomeModal.source = payload.source_name || payload.merchant_name || payload.title || ''
+    incomeModal.note = payload.note || record.summary || ''
+    incomeModal.date = localDateKeyOf(payload.occurred_at || record.occurredAt || record.createdAt) || getLocalDateKey()
+    incomeModal.imagePath = record.imagePath || null
+    incomeModal.imageUrl = record.imageUrl || null
+    incomeModal.imageLoadError = Boolean(record.imagePath && !record.imageUrl)
+    incomeModal.accountId = hasAccountChoice ? payload.account_id || null : defaultAccountIdForKind('income')
+    incomeModal.accountUnbound = hasAccountChoice ? !payload.account_id : !incomeModal.accountId
+    incomeModal.stagingSource = record
+    setIncomeModalInitial()
+    return true
   }
 
   async function openIncomeEditModal(record) {
@@ -1735,11 +1756,13 @@ export function useStore() {
     incomeModal.imageLoadError = !!incomeModal.imagePath && !incomeModal.imageUrl
     incomeModal.accountId = record.accountId || defaultAccountIdForKind('income')
     incomeModal.accountUnbound = !incomeModal.accountId
+    incomeModal.stagingSource = null
     setIncomeModalInitial()
   }
 
   function closeIncomeModal() {
     incomeModal.open = false
+    incomeModal.stagingSource = null
     incomeModalInitial = null
   }
 
@@ -1750,6 +1773,25 @@ export function useStore() {
       if (!incomeModal.cat) { showWarn('请选择收入类型'); return }
       if (!incomeModal.date) { showWarn('请选择到账日期'); return }
       const source = incomeModal.source.trim() || (incomeCatMap[incomeModal.cat]?.label || '收入')
+      if (incomeModal.mode === 'staging' && incomeModal.stagingSource) {
+        const stagingSource = incomeModal.stagingSource
+        const result = await archiveStagingRecord(stagingSource, 'income', {
+          confirm: false,
+          payloadOverrides: {
+            amount: amt,
+            source_name: source,
+            income_category: incomeModal.cat,
+            account_id: incomeModal.accountUnbound ? null : incomeModal.accountId || null,
+            occurred_at: stagingOccurredAt(incomeModal.date),
+            note: incomeModal.note.trim() || null,
+          },
+          summaryOverride: incomeModal.note.trim() || stagingSource.summary,
+          explicitAccount: true,
+        })
+        if (!result) return null
+        closeIncomeModal()
+        return result
+      }
       if (incomeModal.mode === 'edit' && incomeModal.id) {
         const incomeAccountId = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
         const { error } = await sb.rpc('save_income_with_account', {
@@ -1856,6 +1898,7 @@ export function useStore() {
       imagePath: expenseModal.imagePath,
       accountId: expenseModal.accountId,
       accountUnbound: expenseModal.accountUnbound,
+      stagingSourceId: expenseModal.stagingSource?.id || null,
     }
   }
 
@@ -1919,7 +1962,39 @@ export function useStore() {
       kind: 'expense',
     })
     expenseModal.accountUnbound = !expenseModal.accountId
+    expenseModal.stagingSource = null
     setExpenseModalInitial()
+  }
+
+  function openExpenseStagingModal(record) {
+    if (!record?.id) return false
+    const payload = stagingArchivePayload(record)
+    const hasAccountChoice = Object.prototype.hasOwnProperty.call(payload, 'account_id')
+    expenseModal.open = true
+    expenseModal.mode = 'staging'
+    expenseModal.id = null
+    expenseModal.amount = payload.amount == null ? '' : String(payload.amount)
+    expenseModal.merchantName = payload.merchant_name || payload.title || ''
+    expenseModal.platform = normalizeFinanceOptionValue('platform', payload.platform) || payload.platform || null
+    expenseModal.category = normalizeFinanceOptionValue('category', payload.category) || payload.category || null
+    expenseModal.payment = normalizeFinanceOptionValue('payment', payload.payment_method) || payload.payment_method || null
+    expenseModal.note = payload.note || record.summary || ''
+    expenseModal.date = localDateKeyOf(payload.occurred_at || record.occurredAt || record.createdAt) || getLocalDateKey()
+    expenseModal.time = String(payload.transaction_time || payload.occurred_at || '').slice(11, 16)
+    if (!/^\d{2}:\d{2}$/.test(expenseModal.time)) expenseModal.time = String(payload.transaction_time || '').slice(0, 5)
+    expenseModal.imagePath = record.imagePath || null
+    expenseModal.imageUrl = record.imageUrl || null
+    expenseModal.imageLoadError = Boolean(record.imagePath && !record.imageUrl)
+    const inferredAccountId = resolveAccountIdForPayment({
+      existingAccountId: null,
+      paymentMethod: expenseModal.payment,
+      kind: 'expense',
+    })
+    expenseModal.accountId = hasAccountChoice ? payload.account_id || null : inferredAccountId
+    expenseModal.accountUnbound = hasAccountChoice ? !payload.account_id : !expenseModal.accountId
+    expenseModal.stagingSource = record
+    setExpenseModalInitial()
+    return true
   }
 
   async function openExpenseEditModal(record) {
@@ -1943,11 +2018,13 @@ export function useStore() {
       kind: 'expense',
     })
     expenseModal.accountUnbound = !expenseModal.accountId
+    expenseModal.stagingSource = null
     setExpenseModalInitial()
   }
 
   function closeExpenseModal() {
     expenseModal.open = false
+    expenseModal.stagingSource = null
     expenseModalInitial = null
   }
 
@@ -1961,6 +2038,29 @@ export function useStore() {
       const merchantName = expenseModal.merchantName.trim() || `${expenseModal.platform}消费`
       const isLargeTransport = expenseModal.category === '出行' && amt >= 200
       const resolvedTime = expenseModal.time || null
+
+      if (expenseModal.mode === 'staging' && expenseModal.stagingSource) {
+        const stagingSource = expenseModal.stagingSource
+        const result = await archiveStagingRecord(stagingSource, 'expense', {
+          confirm: false,
+          payloadOverrides: {
+            amount: amt,
+            merchant_name: merchantName,
+            platform: expenseModal.platform,
+            category: expenseModal.category,
+            payment_method: expenseModal.payment,
+            account_id: expenseModal.accountUnbound ? null : expenseModal.accountId || null,
+            transaction_time: resolvedTime,
+            occurred_at: stagingOccurredAt(expenseModal.date, resolvedTime),
+            note: expenseModal.note.trim() || null,
+          },
+          summaryOverride: expenseModal.note.trim() || stagingSource.summary,
+          explicitAccount: true,
+        })
+        if (!result) return null
+        closeExpenseModal()
+        return result
+      }
 
       if (expenseModal.mode === 'edit' && expenseModal.id) {
         const expenseAccountId = expenseModal.accountUnbound
@@ -2323,23 +2423,41 @@ export function useStore() {
     deleteConfirm.open = false
   }
 
-  async function discardStagingRecord(record, reason = 'user_discarded') {
-    if (!record?.id) return
-    const ok = confirm('确认销毁这条待处理截图？记录会从待处理列表移除。')
-    if (!ok) return
-    const { error } = await sb.from('staging_records').update({
-      status: 'discarded',
-      discard_reason: reason,
-      resolved_action: 'discarded',
-      resolved_at: new Date().toISOString(),
-    }).eq('id', record.id)
+  function rememberProcessedStaging(record, values) {
+    const processed = { ...record, ...values }
+    processedStagingRecords.value = [
+      processed,
+      ...processedStagingRecords.value.filter(item => item.id !== record.id),
+    ].slice(0, 30)
+    return processed
+  }
+
+  async function discardStagingRecord(record, reason = 'user_discarded', options = {}) {
+    if (!record?.id) return null
+    if (options.confirm !== false) {
+      const ok = confirm('确认销毁这条待处理截图？原图也会在后台安全清理。')
+      if (!ok) return null
+    }
+    const { data, error } = await sb.rpc('discard_staging_record', {
+      p_staging_id: record.id,
+      p_reason: reason,
+    })
     if (error) {
       showFlash('❌ 销毁失败：' + error.message)
-      return
+      return null
     }
     const idx = stagingRecords.value.findIndex(r => r.id === record.id)
     if (idx >= 0) stagingRecords.value.splice(idx, 1)
-    showFlash('✓ 已销毁')
+    rememberProcessedStaging(record, {
+      status: 'discarded',
+      resolvedAction: 'discarded',
+      resolvedAt: new Date().toISOString(),
+      discardReason: reason,
+    })
+    if (data?.cleanup_queued) showFlash('✓ 已销毁，原图已加入后台清理')
+    else if (data?.cleanup_status === 'skipped_external') showFlash('✓ 已销毁；外部图片链接不由芥子删除')
+    else showFlash('✓ 已销毁')
+    return data || { status: 'discarded' }
   }
 
   function toggleBatchMode() {
@@ -2368,19 +2486,15 @@ export function useStore() {
     const ok = confirm(`确认销毁选中的 ${ids.length} 条记录？`)
     if (!ok) return
     showFlash(`⏳ 正在销毁 ${ids.length} 条...`)
-    const { error } = await sb.from('staging_records').update({
-      status: 'discarded',
-      discard_reason: 'batch_discard',
-      resolved_action: 'discarded',
-      resolved_at: new Date().toISOString(),
-    }).in('id', ids)
-    if (error) { showFlash('❌ 批量销毁失败：' + error.message); return }
-    ids.forEach(id => {
-      const idx = stagingRecords.value.findIndex(r => r.id === id)
-      if (idx >= 0) stagingRecords.value.splice(idx, 1)
-    })
+    const records = ids.map(id => stagingRecords.value.find(record => record.id === id)).filter(Boolean)
+    const results = await Promise.allSettled(records.map(record => (
+      discardStagingRecord(record, 'batch_discard', { confirm: false })
+    )))
+    const successCount = results.filter(result => result.status === 'fulfilled' && result.value).length
     selectedStagingIds.value = new Set()
-    showFlash(`✓ 已销毁 ${ids.length} 条`)
+    showFlash(successCount === ids.length
+      ? `✓ 已销毁 ${successCount} 条，原图将在后台安全清理`
+      : `⚠ 已销毁 ${successCount}/${ids.length} 条，其余请重试`)
   }
 
   async function batchArchive(domainKey) {
@@ -2398,8 +2512,8 @@ export function useStore() {
       const record = stagingRecords.value.find(r => r.id === id)
       if (!record) continue
       try {
-        await archiveStagingRecord(record, domainKey)
-        successCount++
+        const result = await archiveStagingRecord(record, domainKey, { confirm: false })
+        if (result) successCount++
       } catch (e) {
         console.warn('批量归档单条失败:', id, e)
       }
@@ -2447,16 +2561,19 @@ export function useStore() {
     })
   }
 
-  async function archiveStagingRecord(record, domainKey) {
-    if (!record?.id || !domainKey) return
+  async function archiveStagingRecord(record, domainKey, options = {}) {
+    if (!record?.id || !domainKey) return null
     const domain = domains.value.find(item => item.id === domainKey)
-    if (!domain) return
+    if (!domain) return null
 
-    const ok = confirm(`确认把这条待处理截图归档到「${domain.name}」？`)
-    if (!ok) return
+    if (options.confirm !== false) {
+      const ok = confirm(`确认把这条待处理截图归档到「${domain.name}」？`)
+      if (!ok) return null
+    }
 
     const payload = {
       ...(record.extracted || {}),
+      ...(options.payloadOverrides || {}),
       image_type: record.imageType || null,
       record_type: record.recordType || null,
       confidence: record.confidence || 0,
@@ -2466,7 +2583,9 @@ export function useStore() {
 
     const occurredAt = payload.occurred_at || payload.order_finished_at || record.createdAt || new Date().toISOString()
     const title = buildUniversalRecordTitle(domainKey, payload, record)
-    const summary = record.summary || `${domain.name}截图归档`
+    const summary = options.summaryOverride || record.summary || `${domain.name}截图归档`
+    const companionMessage = record.companionMessage || payload.companion_message || payload.payload_jsonb?.companion_message || null
+    const aiFeedback = payload.ai_feedback || payload.payload_jsonb?.ai_feedback || null
 
     if (domainKey === 'expense') {
       const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
@@ -2486,23 +2605,32 @@ export function useStore() {
         p_source: 'ai_scan',
         p_image_url: record.imagePath || null,
         p_image_hash: record.imageHash || null,
-        p_companion_message: null,
-        p_account_id: autoAccountIdForPayment(paymentMethod, 'expense'),
+        p_companion_message: companionMessage,
+        p_account_id: options.explicitAccount
+          ? payload.account_id || null
+          : autoAccountIdForPayment(paymentMethod, 'expense'),
       })
       if (insertErr) {
         showFlash('❌ 转入支出失败：' + humanizeDbError(insertErr))
-        return
+        return null
       }
-      await finishStagingArchive(record, inserted.id, null, 'expense', payload)
+      const done = await finishStagingArchive(record, inserted.id, null, 'expense', payload)
+      if (!done) return null
       const sIdx = stagingRecords.value.findIndex(r => r.id === record.id)
       if (sIdx >= 0) stagingRecords.value.splice(sIdx, 1)
-      showFlash('✓ 已转入支出，必要时可继续补充')
-      const bill = bills.value.find(item => item.id === inserted.id)
-      if (bill) {
-        if (bill.status === 'pending') await openPendingModal(bill)
-        else await openExpenseEditModal(bill)
-      }
-      return
+      const bill = { ...mapTransaction(inserted), aiFeedback, companionMessage: companionMessage || '' }
+      const billIndex = bills.value.findIndex(item => item.id === bill.id)
+      if (billIndex >= 0) bills.value[billIndex] = bill
+      else bills.value.unshift(bill)
+      rememberProcessedStaging(record, {
+        status: 'archived',
+        domainKey: 'expense',
+        targetRecordId: inserted.id,
+        resolvedAction: 'archived',
+        resolvedAt: new Date().toISOString(),
+      })
+      showFlash('✓ 已转入支出，可在已处理中查看并编辑')
+      return { kind: 'expense', record: bill, targetRecordId: inserted.id }
     }
 
     if (domainKey === 'income') {
@@ -2517,21 +2645,35 @@ export function useStore() {
         p_source: 'ai_scan',
         p_image_url: record.imagePath || null,
         p_image_hash: record.imageHash || null,
-        p_companion_message: null,
-        p_account_id: defaultAccountIdForKind('income'),
+        p_companion_message: companionMessage,
+        p_account_id: options.explicitAccount
+          ? payload.account_id || null
+          : defaultAccountIdForKind('income'),
       })
       if (insertErr) {
         showFlash('❌ 转入收入失败：' + humanizeDbError(insertErr))
-        return
+        return null
       }
-      await finishStagingArchive(record, inserted.id, null, 'income', payload)
+      const done = await finishStagingArchive(record, inserted.id, null, 'income', payload)
+      if (!done) return null
       const sIdx2 = stagingRecords.value.findIndex(r => r.id === record.id)
       if (sIdx2 >= 0) stagingRecords.value.splice(sIdx2, 1)
-      showFlash('✓ 已转入收入')
-      const income = incomeRecords.value.find(item => item.id === inserted.id)
-        || recentIncomeRecords.value.find(item => item.id === inserted.id)
-      if (income) await openIncomeEditModal(income)
-      return
+      const income = { ...mapIncomeRow(inserted), aiFeedback, companionMessage: companionMessage || '' }
+      const incomeIndex = incomeRecords.value.findIndex(item => item.id === income.id)
+      if (incomeIndex >= 0) incomeRecords.value[incomeIndex] = income
+      else incomeRecords.value.unshift(income)
+      const recentIndex = recentIncomeRecords.value.findIndex(item => item.id === income.id)
+      if (recentIndex >= 0) recentIncomeRecords.value[recentIndex] = income
+      else recentIncomeRecords.value.unshift(income)
+      rememberProcessedStaging(record, {
+        status: 'archived',
+        domainKey: 'income',
+        targetRecordId: inserted.id,
+        resolvedAction: 'archived',
+        resolvedAt: new Date().toISOString(),
+      })
+      showFlash('✓ 已转入收入，可在已处理中查看并编辑')
+      return { kind: 'income', record: income, targetRecordId: inserted.id }
     }
 
     const { data: domainRows, error: domainErr } = await sb.from('data_domains')
@@ -2541,7 +2683,7 @@ export function useStore() {
       .limit(1)
     if (domainErr || !domainRows?.length) {
       showFlash('❌ 数据域未就绪，请先执行 007 迁移')
-      return
+      return null
     }
 
     const domainRow = domainRows[0]
@@ -2561,15 +2703,42 @@ export function useStore() {
     }).select('id').single()
     if (insertErr) {
       showFlash('❌ 归档失败：' + humanizeDbError(insertErr))
-      return
+      return null
     }
 
     const done = await finishStagingArchive(record, inserted.id, domainRow.id, domainKey, payload)
-    if (!done) return
+    if (!done) return null
 
     const sIdx3 = stagingRecords.value.findIndex(r => r.id === record.id)
     if (sIdx3 >= 0) stagingRecords.value.splice(sIdx3, 1)
-    showFlash(`✓ 已归档到${domain.name}`)
+    const targetRecord = mapDataRecordRow({
+      ...inserted,
+      domain_id: domainRow.id,
+      domain_key: domainKey,
+      domain_version: domainRow.version || '1.0',
+      occurred_at: occurredAt,
+      created_at: new Date().toISOString(),
+      title,
+      summary,
+      payload_jsonb: payload,
+      source: 'staging',
+      source_image_path: record.imagePath || null,
+      source_image_hash: record.imageHash || null,
+      staging_record_id: record.id,
+    })
+    const dataIndex = dataRecords.value.findIndex(item => item.id === targetRecord.id)
+    if (dataIndex >= 0) dataRecords.value[dataIndex] = targetRecord
+    else dataRecords.value.unshift(targetRecord)
+    rememberProcessedStaging(record, {
+      status: 'archived',
+      domainKey,
+      targetDomainId: domainRow.id,
+      targetRecordId: inserted.id,
+      resolvedAction: 'archived',
+      resolvedAt: new Date().toISOString(),
+    })
+    showFlash(`✓ 已归档到${domain.name}，可在已处理中查看并编辑`)
+    return { kind: 'universal', record: targetRecord, targetRecordId: inserted.id }
   }
 
   async function finishStagingArchive(record, targetRecordId, targetDomainId, domainKey, payload) {
@@ -2600,6 +2769,48 @@ export function useStore() {
 
   function buildUniversalRecordTitle(domainKey, payload, record) {
     return buildUniversalRecordTitleFromAdapter(domainKey, payload, record)
+  }
+
+  async function openProcessedStagingRecord(record) {
+    if (!record?.targetRecordId || record.status !== 'archived') return false
+    const targetId = record.targetRecordId
+    const localExpense = bills.value.find(item => item.id === targetId)
+    if (localExpense) {
+      await openRecordDetail('expense', localExpense)
+      return true
+    }
+    const localIncome = incomeRecords.value.find(item => item.id === targetId)
+      || recentIncomeRecords.value.find(item => item.id === targetId)
+    if (localIncome) {
+      await openRecordDetail('income', localIncome)
+      return true
+    }
+    const localUniversal = dataRecords.value.find(item => item.id === targetId)
+    if (localUniversal) {
+      await openRecordDetail('universal', localUniversal)
+      return true
+    }
+
+    const [expenseResult, incomeResult, dataResult] = await Promise.all([
+      sb.from('transactions').select('*').eq('id', targetId).maybeSingle(),
+      sb.from('income_records').select('*').eq('id', targetId).maybeSingle(),
+      sb.from('data_records').select('*').eq('id', targetId).maybeSingle(),
+    ])
+    if (expenseResult.data) {
+      await openRecordDetail('expense', mapTransaction(expenseResult.data))
+      return true
+    }
+    if (incomeResult.data) {
+      await openRecordDetail('income', mapIncomeRow(incomeResult.data))
+      return true
+    }
+    if (dataResult.data) {
+      await openRecordDetail('universal', mapDataRecordRow(dataResult.data))
+      return true
+    }
+    const error = expenseResult.error || incomeResult.error || dataResult.error
+    showFlash(error ? `记录读取失败：${humanizeDbError(error)}` : '归档后的记录已不存在')
+    return false
   }
 
   // ────────────────────────────────────────────────
@@ -3634,6 +3845,32 @@ export function useStore() {
     }
   }
 
+  function mapDataRecordRow(row) {
+    const payload = row.payload_jsonb || {}
+    return {
+      id: row.id,
+      domainId: row.domain_id,
+      domainKey: row.domain_key,
+      domainVersion: row.domain_version || '1.0',
+      occurredAt: row.occurred_at,
+      createdAt: row.created_at,
+      title: row.title,
+      summary: row.summary,
+      payload: {
+        ...payload,
+        linked_account_id: row.linked_account_id || payload.linked_account_id || null,
+        account_snapshot_kind: row.account_snapshot_kind || payload.account_snapshot_kind || null,
+        snapshot_balance: row.snapshot_balance ?? payload.snapshot_balance ?? null,
+      },
+      companionMessage: payload?.companion_message || '',
+      aiFeedback: payload?.ai_feedback || null,
+      imagePath: row.source_image_path,
+      imageHash: row.source_image_hash,
+      stagingRecordId: row.staging_record_id,
+      source: row.source || 'staging',
+    }
+  }
+
   async function loadUnboundRecords() {
     unboundRecordsLoading.value = true
     const padM = String(currentMonth.value).padStart(2, '0')
@@ -4000,9 +4237,9 @@ export function useStore() {
     openPendingModal, closePendingModal, confirmEntry, confirmStagingRepayment,
     hasPendingChanges, resetPendingChanges,
     markPendingImageUnavailable,
-    openIncomeModal, openIncomeEditModal, closeIncomeModal, confirmIncome,
+    openIncomeModal, openIncomeEditModal, openIncomeStagingModal, closeIncomeModal, confirmIncome,
     hasIncomeChanges, resetIncomeChanges, markIncomeImageUnavailable,
-    openExpenseModal, openExpenseEditModal, closeExpenseModal, confirmExpense,
+    openExpenseModal, openExpenseEditModal, openExpenseStagingModal, closeExpenseModal, confirmExpense,
     hasExpenseChanges, resetExpenseChanges, markExpenseImageUnavailable,
     openUniversalModal, openUniversalRepairFromStaging, openUniversalEditModal, closeUniversalModal, confirmUniversalRecord,
     createAccountFromWalletSnapshot, linkWalletSnapshotToAccount,
@@ -4018,7 +4255,7 @@ export function useStore() {
     getDomainRegistryStatus,
     openImgFull, closeImgFull, openDataRecordImage,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
-    discardStagingRecord, retryStagingRecord, archiveStagingRecord,
+    discardStagingRecord, retryStagingRecord, archiveStagingRecord, openProcessedStagingRecord,
     openDomainPage, openDayDetail, showMoreDailyCards, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
     navigateTo, goBack,
     settingsState, toggleSetting, setSetting, setRetention, loadUserSettings, loadFinanceVocabulary,

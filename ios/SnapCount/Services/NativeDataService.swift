@@ -467,14 +467,12 @@ final class NativeDataService {
     }
 
     func discardStagingRecord(id: String, accessToken: String) async throws {
-        try await patch(
-            path: "rest/v1/staging_records",
-            queryItems: [URLQueryItem(name: "id", value: "eq.\(id)")],
+        _ = try await rpc(
+            DiscardStagingRPCResponse.self,
+            name: "discard_staging_record",
             body: [
-                "status": AnyCodable("discarded"),
-                "discard_reason": AnyCodable("user_discarded"),
-                "resolved_action": AnyCodable("discarded"),
-                "resolved_at": AnyCodable(ISO8601DateFormatter().string(from: Date()))
+                "p_staging_id": AnyCodable(id),
+                "p_reason": AnyCodable("user_discarded")
             ],
             accessToken: accessToken
         )
@@ -1546,6 +1544,18 @@ private struct ArchiveStagingRPCResponse: Decodable {
         case targetRecordId = "target_record_id"
         case targetReference = "target_reference"
         case idempotentRetry = "idempotent_retry"
+    }
+}
+
+private struct DiscardStagingRPCResponse: Decodable {
+    let status: String
+    let cleanupStatus: String
+    let cleanupQueued: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case cleanupStatus = "cleanup_status"
+        case cleanupQueued = "cleanup_queued"
     }
 }
 

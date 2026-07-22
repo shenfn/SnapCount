@@ -9,7 +9,9 @@ import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   loadDomainProfiles,
   selectSignals,
-  validateVoiceNumbers,
+  validateModelTone,
+  hasUnsupportedFinanceCompanionClaim,
+  hasModelOwnedStatisticalClaim,
   parsePaceMinutes,
 } from "./signals.ts";
 import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
@@ -163,6 +165,7 @@ function sanitizeSensitiveData(value: unknown): unknown {
 interface PrivacyConfig {
   aiLogsEnabled: boolean;
   promptOptimizationEnabled: boolean;
+  expressionImprovementEnabled: boolean;
   keepSourceImages: boolean;
   imageRetentionDays: number;
 }
@@ -207,6 +210,7 @@ interface UserPreferenceRow {
   companion_custom_note: string | null;
   ai_logs_enabled: boolean | null;
   prompt_optimization_enabled: boolean | null;
+  expression_improvement_enabled: boolean | null;
   keep_source_images: boolean | null;
   image_retention_days: number | null;
 }
@@ -287,6 +291,7 @@ interface InsertedRecordRow extends IdRow {
 const DEFAULT_PRIVACY_CONFIG: PrivacyConfig = {
   aiLogsEnabled: false,
   promptOptimizationEnabled: false,
+  expressionImprovementEnabled: false,
   keepSourceImages: true,
   imageRetentionDays: -1,
 };
@@ -2055,6 +2060,8 @@ function sanitizeCompanionMessageForContent(message: string | null, ai: AIResult
   if (COMPANION_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(text))) return null;
 
   const recordType = ai.domain_key ?? ai.record_type;
+  if ((recordType === "expense" || recordType === "income")
+    && hasUnsupportedFinanceCompanionClaim(text)) return null;
   const allowedText = collectCompanionAllowedText(ai);
   if (recordType === "food" && ai.image_type === "food_photo") {
     const unrelatedMerchant = FOOD_MERCHANT_HINTS.find((hint) => text.includes(hint) && !allowedText.includes(hint));
@@ -2163,9 +2170,7 @@ function financeCompanionLine(ai: AIResult): string | null {
   const leaksOtherDomain = /(运动|骑行|跑步|睡眠|饮食记录|热量|蛋白|碳水|外婆家|老婆大人)/.test(text)
     && !/(餐饮|food|美食|饭|餐|外卖)/i.test(financeText);
   if (leaksOtherDomain) return null;
-  if (/(?:第|连续|连着)\s*[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)) return null;
-  if (/(?:这周|本周|本月|近\s*\d+\s*天|30\s*天).{0,16}[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)) return null;
-  if (/(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text)) return null;
+  if (hasUnsupportedFinanceCompanionClaim(text)) return null;
   return text;
 }
 
@@ -3028,6 +3033,8 @@ async function createStagingRecord(
     userId?: string | null;
     timeContext?: unknown;
     testMeta?: TestMeta | null;
+    aiFeedback?: AIFeedback | null;
+    companionMessage?: string | null;
     duplicateReview?: {
       kind: "perceptual_hash";
       distance: number;
@@ -3071,12 +3078,14 @@ async function createStagingRecord(
     extracted_json: sanitizeSensitiveData({
       ...payload.ai,
       time_context: payload.timeContext ?? null,
-      ai_feedback: (payload.ai as unknown as Record<string, unknown>).ai_feedback ?? null,
+      // 首轮视觉模型同时承担识别，未经信号层校验的反馈不得进入用户可见待处理数据。
+      ai_feedback: payload.aiFeedback ?? null,
+      companion_message: payload.companionMessage ?? payload.ai.companion_message ?? null,
       review_reason: payload.duplicateReview ? "possible_duplicate" : null,
       duplicate_review: payload.duplicateReview ?? null,
       ...(payload.testMeta ? { test_meta: payload.testMeta } : {}),
     }),
-    companion_message: payload.ai.companion_message ?? null,
+    companion_message: payload.companionMessage ?? payload.ai.companion_message ?? null,
     // 隐私控制：prompt_optimization_enabled=false 时不清空 raw_text（中转站需要用于路由判断）
     // 但做脱敏处理
     raw_text: privacyConfig.promptOptimizationEnabled
@@ -3308,6 +3317,43 @@ async function regenerateFeedbackWithSecondCall(opts: {
     });
     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.85);
     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
+    const recordFacts = voiceRecordFacts(
+      opts.domainKey,
+      opts.ai,
+      opts.builtPayload ?? null,
+      normalizeAmount(opts.ai.amount),
+    );
+    const check = validateModelTone([
+      normalized.companion_message,
+      normalized.ai_feedback?.emotion_line ?? null,
+      normalized.ai_feedback?.utility_line ?? null,
+      normalized.ai_feedback?.detail_reason ?? null,
+      normalized.ai_feedback?.badge ?? null,
+    ], JSON.stringify(recordFacts));
+    if (!check.ok) {
+      const bad = new Set(check.badIndexes);
+      const companion = bad.has(0) ? null : normalized.companion_message;
+      let aiFeedback = normalized.ai_feedback;
+      if (aiFeedback) {
+        if (bad.has(1)) {
+          aiFeedback = null;
+        } else {
+          aiFeedback = {
+            ...aiFeedback,
+            badge: bad.has(4) ? "即时反馈" : aiFeedback.badge,
+            utility_line: bad.has(2) ? null : aiFeedback.utility_line,
+            detail_reason: bad.has(3) ? null : aiFeedback.detail_reason,
+          };
+        }
+      }
+      return {
+        companion_message: companion,
+        ai_feedback: aiFeedback,
+        raw_text: rawText,
+        duration_ms: Date.now() - startedAt,
+        ...(!companion && !aiFeedback ? { error: "evidence_validation_failed" } : {}),
+      };
+    }
     return {
       companion_message: normalized.companion_message,
       ai_feedback: normalized.ai_feedback,
@@ -3338,8 +3384,8 @@ interface PromptContextLike {
 }
 
 // ============================================================
-// 信号驱动 Voice 层:事实(画像) → 信号(代码) → 语言(模型)
-// 数字闭环:validateVoiceNumbers 违规即弃用整份 AI 文案,退回规则渲染
+// 信号驱动 Voice 层:事实(画像) → 信号(代码) → 规则事实 + 模型语气
+// 模型统计断言违规即丢弃，画像数字与时间口径由规则层原样呈现。
 // ============================================================
 
 function isLateNightLocal(clientLocalTime: string | null | undefined): boolean {
@@ -3364,6 +3410,14 @@ function buildCurrentFactsFor(
       category: ai.category ?? null,
       platform: ai.platform ?? null,
       isLateNight: late,
+    };
+  }
+  if (domainKey === "income") {
+    return {
+      amount: normalizedAmount,
+      merchant: ai.source_name ?? ai.merchant_name ?? null,
+      category: ai.income_category ?? null,
+      platform: ai.platform ?? null,
     };
   }
   if (domainKey === "sleep") {
@@ -3479,52 +3533,71 @@ async function generateVoiceFeedback(opts: {
     });
     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.8);
     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
-    // 数字闭环校验:文案中的数字必须可追溯到信号或本条记录
-    const check = validateVoiceNumbers(
+    // 模型只拥有语气：画像统计数字与时间口径由规则层直接呈现。
+    const check = validateModelTone(
       [
         normalized.companion_message,
         normalized.ai_feedback?.emotion_line ?? null,
         normalized.ai_feedback?.utility_line ?? null,
         normalized.ai_feedback?.detail_reason ?? null,
+        normalized.ai_feedback?.badge ?? null,
       ],
-      signals,
       JSON.stringify(recordFacts),
     );
+    const bad = new Set(check.badIndexes);
+    const companion = bad.has(0) ? null : normalized.companion_message;
+    let modelFeedback = normalized.ai_feedback;
+    if (modelFeedback) {
+      if (bad.has(1)) {
+        modelFeedback = null;
+      } else {
+        modelFeedback = {
+          ...modelFeedback,
+          badge: bad.has(4) ? "即时反馈" : modelFeedback.badge,
+          utility_line: bad.has(2) ? null : modelFeedback.utility_line,
+          detail_reason: bad.has(3) ? null : modelFeedback.detail_reason,
+        };
+      }
+    }
+
+    const verifiedSignals = signals.filter((signal) => signal.kind !== "record_acknowledge");
+    if (verifiedSignals.length > 0) {
+      const ruleFeedback = buildSignalFallbackAIFeedback(opts.domainKey, verifiedSignals, opts.timingSignal);
+      if (ruleFeedback) {
+        const tone = companion ?? modelFeedback?.emotion_line ?? null;
+        return {
+          companion_message: tone ?? ruleFeedback.emotion_line,
+          ai_feedback: {
+            ...ruleFeedback,
+            emotion_line: tone ?? ruleFeedback.emotion_line,
+            source: tone ? "hybrid" : "rule",
+          },
+          raw_text: rawText,
+          duration_ms: Date.now() - startedAt,
+          signals,
+          ...(!check.ok ? { number_violations: check.violations } : {}),
+        };
+      }
+    }
+
     if (!check.ok) {
       console.warn(`[voice] number validation failed domain=${opts.domainKey} count=${check.violations.length}`);
-      // 逐句抢救:只丢弃违规句,保留合规句。badIndexes 与上方数组下标对齐:
-      // [0]=companion_message, [1]=emotion_line, [2]=utility_line, [3]=detail_reason
-      const bad = new Set(check.badIndexes);
-      const companion = bad.has(0) ? null : normalized.companion_message;
-      let aiFeedback = normalized.ai_feedback;
-      if (aiFeedback) {
-        if (bad.has(1)) {
-          // emotion_line 是卡片主文案,违规则整卡放弃,交给信号兜底
-          aiFeedback = null;
-        } else {
-          aiFeedback = {
-            ...aiFeedback,
-            utility_line: bad.has(2) ? null : aiFeedback.utility_line,
-            detail_reason: bad.has(3) ? null : aiFeedback.detail_reason,
-          };
-        }
-      }
       // 有存活内容时不设 error(调用方据此判断是否走兜底),但保留 number_violations 供 trace 观察
-      if (!companion && !aiFeedback) {
+      if (!companion && !modelFeedback) {
         return {
           companion_message: null, ai_feedback: null, raw_text: rawText,
-          duration_ms: Date.now() - startedAt, error: "number_validation_failed",
+          duration_ms: Date.now() - startedAt, error: "evidence_validation_failed",
           signals, number_violations: check.violations,
         };
       }
       return {
-        companion_message: companion, ai_feedback: aiFeedback, raw_text: rawText,
+        companion_message: companion, ai_feedback: modelFeedback, raw_text: rawText,
         duration_ms: Date.now() - startedAt, signals, number_violations: check.violations,
       };
     }
     return {
-      companion_message: normalized.companion_message,
-      ai_feedback: normalized.ai_feedback,
+      companion_message: companion,
+      ai_feedback: modelFeedback,
       raw_text: rawText,
       duration_ms: Date.now() - startedAt,
       signals,
@@ -3721,6 +3794,8 @@ const IMAGE_REFERENCE_TARGETS: Array<{ table: string; column: string }> = [
   { table: "ai_recognition_logs", column: "image_url" },
 ];
 
+type ImageReferenceExclusion = { table: string; id: string };
+
 type ImageCleanupQueueRow = {
   id: string;
   bucket_path: string;
@@ -3782,6 +3857,7 @@ async function collectNormalizedReferenceIds(
   column: string,
   userId: string,
   path: string,
+  exclusion?: ImageReferenceExclusion,
 ): Promise<string[]> {
   const ids: string[] = [];
   let lastId: string | null = null;
@@ -3792,6 +3868,7 @@ async function collectNormalizedReferenceIds(
       .ilike(column, "http%")
       .order("id", { ascending: true })
       .limit(500);
+    if (exclusion?.table === table) query = query.neq("id", exclusion.id);
     if (lastId) query = query.gt("id", lastId);
     const { data, error } = await query;
     if (error) throw new Error(`Failed to inspect managed URL references in ${table}.${column}: ${error.message}`);
@@ -4017,22 +4094,38 @@ async function hasBusinessImageReference(
   supabase: ReturnType<typeof createClient>,
   userId: string,
   path: string,
+  exclusion?: ImageReferenceExclusion,
 ): Promise<boolean> {
   const normalizedPath = normalizeManagedStoragePath(path);
   if (!normalizedPath) return false;
   const businessTargets = IMAGE_REFERENCE_TARGETS.filter(({ table }) => table !== "ai_recognition_logs");
   for (const { table, column } of businessTargets) {
-    const { count, error } = await supabase.from(table)
+    let query = supabase.from(table)
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq(column, normalizedPath);
+    if (exclusion?.table === table) query = query.neq("id", exclusion.id);
+    const { count, error } = await query;
     if (error) throw new Error(`Failed to verify ${table}.${column}: ${error.message}`);
     if ((count ?? 0) > 0) return true;
-    if ((await collectNormalizedReferenceIds(supabase, table, column, userId, normalizedPath)).length > 0) {
+    if ((await collectNormalizedReferenceIds(supabase, table, column, userId, normalizedPath, exclusion)).length > 0) {
       return true;
     }
   }
   return false;
+}
+
+async function clearDiscardedStagingImageReference(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  stagingId: string,
+): Promise<void> {
+  const { error } = await supabase.from("staging_records")
+    .update({ image_path: null })
+    .eq("id", stagingId)
+    .eq("user_id", userId)
+    .eq("status", "discarded");
+  if (error) throw new Error(`Failed to clear discarded staging image reference: ${error.message}`);
 }
 
 async function clearImageReferences(
@@ -4426,11 +4519,37 @@ async function processImageCleanupQueue(
           continue;
         }
       }
-      if (["record_delete", "upload_rollback"].includes(row.cleanup_reason)
-        && await hasBusinessImageReference(supabase, row.user_id, row.bucket_path)) {
-        const { error: cancelError } = await supabase.from("image_cleanup_queue").delete().eq("id", row.id);
-        if (cancelError) throw new Error(`Failed to cancel referenced image cleanup: ${cancelError.message}`);
-        continue;
+      if (["record_delete", "upload_rollback"].includes(row.cleanup_reason)) {
+        const stagingSource = row.cleanup_reason === "record_delete"
+          && row.source_table === "staging_records"
+          && Boolean(row.source_id)
+          ? { table: "staging_records", id: row.source_id! }
+          : undefined;
+        const hasOtherReference = await hasBusinessImageReference(
+          supabase,
+          row.user_id,
+          row.bucket_path,
+          stagingSource,
+        );
+        if (hasOtherReference && stagingSource) {
+          await clearDiscardedStagingImageReference(supabase, row.user_id, stagingSource.id);
+          const skippedAt = new Date().toISOString();
+          const { error: skippedError } = await supabase.from("image_cleanup_queue").update({
+            status: "skipped_shared",
+            last_error: "Storage object retained because another business record still references it",
+            processed_at: skippedAt,
+            references_cleared_at: skippedAt,
+            next_retry_at: null,
+            updated_at: skippedAt,
+          }).eq("id", row.id).eq("status", "processing");
+          if (skippedError) throw new Error(`Failed to record shared image cleanup: ${skippedError.message}`);
+          continue;
+        }
+        if (hasOtherReference) {
+          const { error: cancelError } = await supabase.from("image_cleanup_queue").delete().eq("id", row.id);
+          if (cancelError) throw new Error(`Failed to cancel referenced image cleanup: ${cancelError.message}`);
+          continue;
+        }
       }
       if (/^(https?:\/\/|data:)/i.test(row.bucket_path)) {
         const { error: skippedError } = await supabase.from("image_cleanup_queue").update({
@@ -5152,7 +5271,7 @@ Deno.serve(async (req) => {
     // 取值 auto 表示跟随平台默认；其它强制指定 provider 优先
     if (userId) {
       const { data: rawPreferenceRow } = await supabase.from("user_configs")
-        .select("is_active, vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, qwen_screenshot_enable_thinking, qwen_photo_enable_thinking, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note, ai_logs_enabled, prompt_optimization_enabled, keep_source_images, image_retention_days")
+        .select("is_active, vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, qwen_screenshot_enable_thinking, qwen_photo_enable_thinking, companion_enabled, companion_memory_enabled, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note, ai_logs_enabled, prompt_optimization_enabled, expression_improvement_enabled, keep_source_images, image_retention_days")
         .eq("user_id", userId)
         .maybeSingle();
       const prefRow = rawPreferenceRow as UserPreferenceRow | null;
@@ -5166,6 +5285,7 @@ Deno.serve(async (req) => {
       privacyConfig = {
         aiLogsEnabled: prefRow?.ai_logs_enabled ?? false,
         promptOptimizationEnabled: prefRow?.prompt_optimization_enabled ?? false,
+        expressionImprovementEnabled: prefRow?.expression_improvement_enabled ?? false,
         keepSourceImages: prefRow?.keep_source_images ?? true,
         imageRetentionDays: prefRow?.image_retention_days ?? -1,
       };
@@ -5205,6 +5325,7 @@ Deno.serve(async (req) => {
         userId,
         payload,
         responseMode: options.mode,
+        improvementConsent: privacyConfig.expressionImprovementEnabled,
       });
       return respondShortcut(payload, options);
     };
@@ -5599,6 +5720,8 @@ Deno.serve(async (req) => {
     const modelRawCompanion = typeof ai.companion_message === "string" ? ai.companion_message : null;
     let normalizedCompanion: string | null = null;
     let contentGuardedCompanion: string | null = null;
+    let evidenceGuardedCompanion: string | null = null;
+    let companionEvidenceViolations: string[] = [];
     let timeGuardedCompanion: string | null = null;
     let companionFallbackUsed = false;
     let companionFeedbackUsed = false;
@@ -5614,6 +5737,8 @@ Deno.serve(async (req) => {
       model_raw: modelRawCompanion,
       normalized: normalizedCompanion,
       content_guarded: contentGuardedCompanion,
+      evidence_guarded: evidenceGuardedCompanion,
+      evidence_violations: companionEvidenceViolations,
       time_guarded: timeGuardedCompanion,
       final: companionMessage,
       disabled: !companionSettings.enabled,
@@ -5657,10 +5782,6 @@ Deno.serve(async (req) => {
     }
     normalizedCompanion = ai.companion_message;
     if (!companionSettings.enabled) ai.companion_message = null;
-    ai.companion_message = sanitizeCompanionMessageForContent(ai.companion_message, ai);
-    contentGuardedCompanion = ai.companion_message;
-    companionMessage = ai.companion_message;
-    const withCompanion = (text: string) => companionMessage ? `${companionMessage}\n${text}` : text;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
       ? ai.domain_key
@@ -5671,6 +5792,24 @@ Deno.serve(async (req) => {
       ai.record_type = builtinKey;
       ai.domain_key = builtinKey;
     }
+    if (ai.companion_message && hasModelOwnedStatisticalClaim(ai.companion_message)) {
+      ai.companion_message = null;
+    }
+    ai.companion_message = sanitizeCompanionMessageForContent(ai.companion_message, ai);
+    contentGuardedCompanion = ai.companion_message;
+    if (ai.companion_message) {
+      const evidenceDomainKey = builtinKey ?? recordType;
+      const builtPayload = builtinKey ? buildBuiltinPayload(ai)?.payload ?? null : null;
+      const evidenceCheck = validateModelTone(
+        [ai.companion_message],
+        JSON.stringify(voiceRecordFacts(evidenceDomainKey, ai, builtPayload, normalizedAmount)),
+      );
+      companionEvidenceViolations = evidenceCheck.violations;
+      if (!evidenceCheck.ok) ai.companion_message = null;
+    }
+    evidenceGuardedCompanion = ai.companion_message;
+    companionMessage = ai.companion_message;
+    const withCompanion = (text: string) => companionMessage ? `${companionMessage}\n${text}` : text;
     const perceptualLookup = await perceptualCandidatesPromise;
     const perceptualStorageAvailable = perceptualLookup.financeColumnsAvailable && Boolean(perceptualHash);
     const accountHint = !builtinKey ? buildAccountHint(ai, recordType) : null;
@@ -6237,6 +6376,27 @@ Deno.serve(async (req) => {
     }
 
     if (perceptualMatch && (recordType === "expense" || recordType === "income")) {
+      if (companionSettings.enabled) {
+        const baseDuplicateFeedback = recordType === "expense"
+          ? buildExpenseAIFeedback(ai, normalizedAmount, timeContext, true)
+          : buildIncomeAIFeedback(ai, normalizedAmount, timeContext);
+        aiFeedback = baseDuplicateFeedback && recordType === "income"
+          ? {
+            ...baseDuplicateFeedback,
+            badge: "疑似重复",
+            band: "watch",
+            tone: "verify_gently",
+            utility_line: "轻确认：对照原图，确认这是另一笔收入再收下。",
+            detail_reason: "图片与已有收入记录相似，需要人工确认是否重复。",
+          }
+          : baseDuplicateFeedback;
+        if (aiFeedback) {
+          companionFeedbackUsed = true;
+          companionMessage = aiFeedback.emotion_line;
+          ai.companion_message = companionMessage;
+          aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
+        }
+      }
       const duplicateReview = {
         kind: "perceptual_hash" as const,
         distance: perceptualMatch.distance,
@@ -6258,6 +6418,8 @@ Deno.serve(async (req) => {
         userId,
         timeContext,
         testMeta,
+        aiFeedback,
+        companionMessage,
         duplicateReview,
       }, privacyConfig);
       if (!staging) throw new Error("Failed to create possible-duplicate review record");
@@ -6305,6 +6467,7 @@ Deno.serve(async (req) => {
         notification: withCompanion(`⚠️ 这张图可能和已有记录重复\n${retainedEvidenceMessage}`),
         time_context: timeContext,
         companion_message: companionMessage,
+        ai_feedback: aiFeedback,
       }, responseTraceMeta(aiLogId)), { mode: responseMode });
     }
 
@@ -6315,27 +6478,52 @@ Deno.serve(async (req) => {
       const sourceName = ai.source_name ?? ai.merchant_name ?? "截图识别收入";
 
       if (companionSettings.enabled) {
-        const _secondCallIncome = await regenerateFeedbackWithSecondCall({
-          ai,
-          domainKey: "income",
-          builtPayload: null,
-          timeContext,
-          timingSignal: timingSignalFor("income", timeContext),
-          promptCtx: {
+        const _secondCallIncome = voiceSignalsEnabled
+          ? await generateVoiceFeedback({
+            ai,
+            domainKey: "income",
+            builtPayload: null,
+            normalizedAmount,
+            domainProfiles,
+            timingSignal: timingSignalFor("income", timeContext),
             clientLocalTime,
             weekday: _weekdayCN,
-            memoryEnabled: companionSettings.memoryEnabled,
-            memoryStrength: companionSettings.memoryStrength,
-            expressionStyle: companionSettings.expressionStyle,
             persona: companionSettings.persona,
+            expressionStyle: companionSettings.expressionStyle,
             customNote: companionSettings.customNote,
-            memory: companionContext.memory,
             recentCompanionLines: [],
-          },
-          textProvider,
-        });
+            textProvider,
+          })
+          : await regenerateFeedbackWithSecondCall({
+            ai,
+            domainKey: "income",
+            builtPayload: null,
+            timeContext,
+            timingSignal: timingSignalFor("income", timeContext),
+            promptCtx: {
+              clientLocalTime,
+              weekday: _weekdayCN,
+              memoryEnabled: companionSettings.memoryEnabled,
+              memoryStrength: companionSettings.memoryStrength,
+              expressionStyle: companionSettings.expressionStyle,
+              persona: companionSettings.persona,
+              customNote: companionSettings.customNote,
+              memory: companionContext.memory,
+              recentCompanionLines: [],
+            },
+            textProvider,
+          });
         if (_secondCallIncome.duration_ms > 0) {
           console.log(`[feedback] second_call income ok=${!_secondCallIncome.error} duration=${_secondCallIncome.duration_ms}ms`);
+        }
+        if (voiceSignalsEnabled) {
+          const voiceCall = _secondCallIncome as VoiceCallResult;
+          companionVoiceDebug = {
+            enabled: true,
+            error: voiceCall.error ?? null,
+            signals: voiceCall.signals.map((signal) => signal.kind),
+            number_violations: voiceCall.number_violations ?? [],
+          };
         }
         if (_secondCallIncome.ai_feedback) {
           aiFeedback = _secondCallIncome.ai_feedback as AIFeedback;
@@ -6344,10 +6532,21 @@ Deno.serve(async (req) => {
           ai.companion_message = companionMessage;
           aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
         } else {
-          aiFeedback = buildIncomeAIFeedback(ai, normalizedAmount, timeContext);
+          if (_secondCallIncome.companion_message) {
+            companionMessage = _secondCallIncome.companion_message;
+            ai.companion_message = companionMessage;
+          } else if (voiceSignalsEnabled) {
+            companionMessage = null;
+            ai.companion_message = null;
+          }
+          aiFeedback = buildIncomeAIFeedback(
+            voiceSignalsEnabled ? { ...ai, companion_message: null } : ai,
+            normalizedAmount,
+            timeContext,
+          );
           if (aiFeedback) {
             companionFeedbackUsed = true;
-            companionMessage = aiFeedback.emotion_line;
+            companionMessage = companionMessage ?? aiFeedback.emotion_line;
             ai.companion_message = companionMessage;
             aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
           }

@@ -61,33 +61,57 @@ create table public.transactions (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
   user_id uuid references auth.users(id) on delete cascade,
-  image_url text
+  type text not null default 'expense',
+  transaction_date date not null default current_date,
+  image_url text,
+  companion_message text,
+  ai_feedback jsonb
 );
 
 create table public.income_records (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
   user_id uuid references auth.users(id) on delete cascade,
-  image_url text
+  image_url text,
+  companion_message text,
+  ai_feedback jsonb
 );
 
 create table public.data_records (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) on delete cascade,
-  source_image_path text
+  domain_key text,
+  occurred_at timestamptz not null default now(),
+  source_image_path text,
+  payload_jsonb jsonb not null default '{}'::jsonb
 );
 
 create table public.staging_records (
   id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   user_id uuid references auth.users(id) on delete cascade,
+  status text not null default 'pending_review',
   image_path text,
-  perceptual_hash text
+  image_hash text,
+  perceptual_hash text,
+  record_type text,
+  detected_domain_key text,
+  target_record_id uuid,
+  extracted_json jsonb not null default '{}'::jsonb,
+  companion_message text,
+  discard_reason text,
+  resolved_action text,
+  resolved_at timestamptz
 );
 
 alter table public.transactions
   add column staging_record_id uuid references public.staging_records(id) on delete set null;
 
 alter table public.income_records
+  add column staging_record_id uuid references public.staging_records(id) on delete set null;
+
+alter table public.data_records
   add column staging_record_id uuid references public.staging_records(id) on delete set null;
 
 create table public.ai_recognition_logs (
@@ -98,7 +122,10 @@ create table public.ai_recognition_logs (
 
 create table public.expression_exposure_events (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade
+  created_at timestamptz not null default now(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  metadata jsonb not null default '{}'::jsonb,
+  selection_mode text
 );
 
 create table public.expression_feedback_events (
@@ -119,13 +146,25 @@ create table public.expression_preference_snapshots (
 
 create table public.expression_shadow_runs (
   id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
   user_id uuid not null references auth.users(id) on delete cascade
 );
 
 create table public.user_routing_feedback (id uuid primary key default gen_random_uuid(), user_id uuid);
 create table public.ai_insights (id uuid primary key default gen_random_uuid(), user_id uuid);
-create table public.user_companion_memories (id uuid primary key default gen_random_uuid(), user_id uuid);
-create table public.user_domain_profiles (id uuid primary key default gen_random_uuid(), user_id uuid);
+create table public.user_companion_memories (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid,
+  source_table text,
+  source_id uuid,
+  content text
+);
+create table public.user_domain_profiles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid,
+  domain_key text,
+  source_count integer not null default 0
+);
 create table public.liability_payments (id uuid primary key default gen_random_uuid(), user_id uuid);
 create table public.account_repayment_cycles (id uuid primary key default gen_random_uuid(), user_id uuid);
 create table public.account_entries (id uuid primary key default gen_random_uuid(), user_id uuid);
@@ -223,6 +262,36 @@ insert into storage.objects (bucket_id, name) values
 insert into public.transactions (user_id, image_url) values
   ('11111111-1111-4111-8111-111111111111', 'https://fixture.supabase.co/storage/v1/object/sign/receipt-images/2026-01-02/owner.jpg?token=legacy'),
   ('22222222-2222-4222-8222-222222222222', '2026-01-01/victim.jpg');
+
+insert into public.transactions (id, user_id, companion_message) values (
+  '17171717-1717-4717-8717-171717171717',
+  '11111111-1111-4111-8111-111111111111',
+  '这周第三次在示例餐厅点餐，14.8 元的小确幸。'
+);
+
+insert into public.staging_records (
+  id,
+  user_id,
+  image_path,
+  companion_message,
+  extracted_json
+) values (
+  '18181818-1818-4818-8818-181818181818',
+  '11111111-1111-4111-8111-111111111111',
+  '11111111-1111-4111-8111-111111111111/unsafe-tone.jpg',
+  '这已经是本周第50次给数字中心充值了。',
+  '{"ai_feedback":{"badge":"高频充值","detail_reason":"近30天出现50次"}}'::jsonb
+);
+
+insert into public.user_companion_memories (
+  id,
+  user_id,
+  content
+) values (
+  '19191919-1919-4919-8919-191919191919',
+  '11111111-1111-4111-8111-111111111111',
+  '这周第50次给数字中心充值'
+);
 
 insert into public.staging_records (user_id, image_path) values (
   '11111111-1111-4111-8111-111111111111',
