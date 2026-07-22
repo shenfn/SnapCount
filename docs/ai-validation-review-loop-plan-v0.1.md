@@ -312,7 +312,7 @@ export function fetchReviews(runId) {
 - 不提交 `test-cases/`、`test-results/`、`.env*`、密钥、service role key、隐私截图。
 - **review.json 属测试结果，不提交 GitHub**（.gitignore 已忽略 test-results/）。
 - server 只监听 127.0.0.1，图片接口只允许 test-cases/，不读 .env。
-- 准回路真实上传前先 `--dry-run`，只用测试账号 `0a552a27-0b64-456e-a5b3-e50e261d2e4f`。
+- 准回路真实上传前先 `--dry-run`，只用临时测试账号 JWT 或 `.env.local` 中已轮换的测试上传令牌。
 - 改 EF / 推 main / 部署前必须经用户确认。**多 commit，少 push**。
 - 第 4 步改 `prompts.ts` 后，线上生效需重新部署 EF（用户确认），且 `npm run trace:extract-prompt` 刷新快照。
 - 测试账号不混入日常真实账号。

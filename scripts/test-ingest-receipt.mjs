@@ -4,9 +4,6 @@ import { fileURLToPath } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
 import { compactJson, summarizeResult, normalizePathForReport, buildTraceFromUploadResult } from '../tools/ai-validation/lib/trace-builder.mjs'
 
-// 默认 upload_token（用于本地测试，Edge Function 会自动反查 user_id）
-// 如需直接传 user_id，使用 --user-id 参数（仅限调试）
-const DEFAULT_UPLOAD_TOKEN = '0a552a27-0b64-456e-a5b3-e50e261d2e4f'
 const SUPPORTED_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'])
 
 const args = process.argv.slice(2)
@@ -26,6 +23,8 @@ for (let i = 0; i < args.length; i += 1) {
   else if (arg === '--user-id') flags.userId = args[++i]
   else if (arg.startsWith('--upload-token=')) flags.uploadToken = arg.slice('--upload-token='.length)
   else if (arg === '--upload-token') flags.uploadToken = args[++i]
+  else if (arg.startsWith('--access-token=')) flags.accessToken = arg.slice('--access-token='.length)
+  else if (arg === '--access-token') flags.accessToken = args[++i]
   else if (arg.startsWith('--url=')) flags.url = arg.slice('--url='.length)
   else if (arg === '--url') flags.url = args[++i]
   else if (arg.startsWith('--endpoint=')) flags.url = arg.slice('--endpoint='.length)
@@ -51,7 +50,7 @@ function printHelp() {
 
 用法:
   npm run test:receipt -- --image ./test.jpg
-  npm run test:receipt -- --image ./test.jpg --user-id <uuid>
+  npm run test:receipt -- --image ./test.jpg --access-token <jwt>
   npm run test:receipt -- --dir ./test-cases
   npm run test:receipt -- --dir ./test-cases --domain expense
   npm run test:receipt -- --dir ./test-cases --dry-run
@@ -60,8 +59,9 @@ function printHelp() {
   --image <path>         测试单张图片
   --dir <path>           批量扫描测试目录
   --domain <name>        仅跑指定域，例如 expense
-  --user-id <uuid>       指定用户 ID，默认使用测试账号
-  --upload-token <t>     使用上传 token 识别用户，可选
+  --user-id <uuid>       与 access token 同时使用时校验目标用户
+  --access-token <jwt>   使用临时测试账号的登录 JWT
+  --upload-token <t>     使用本地配置的上传 token
   --url <endpoint>       覆盖函数地址，默认读取 VITE_SUPABASE_URL/functions/v1/ingest-receipt
   --output-dir <path>    覆盖结果输出目录，默认 ./test-results
   --run-id <id>          指定测试批次 ID，默认自动生成
@@ -140,8 +140,11 @@ function resolveUserId() {
 }
 
 function resolveUploadToken() {
-  // --upload-token 显式指定，或环境变量，或默认值
-  return flags.uploadToken || process.env.TEST_RECEIPT_UPLOAD_TOKEN || DEFAULT_UPLOAD_TOKEN
+  return flags.uploadToken || process.env.TEST_RECEIPT_UPLOAD_TOKEN || null
+}
+
+function resolveAccessToken() {
+  return flags.accessToken || process.env.TEST_RECEIPT_ACCESS_TOKEN || null
 }
 
 function normalizeResponseMode() {
@@ -339,11 +342,11 @@ export async function executeCase(testCase, context) {
   form.append('test_case_domain', caseMeta.test_case_domain)
   if (caseMeta.test_case_date) form.append('test_case_date', caseMeta.test_case_date)
   form.append('test_case_file', caseMeta.test_case_file)
-  // 身份信息：--user-id 显式指定时传 user_id（仅限调试）
-  // 否则默认传 upload_token，由 Edge Function 反查 user_id
+  // user_id 只用于和 JWT 交叉校验，不能单独作为身份凭据。
   if (userId) {
     form.append('user_id', userId)
-  } else if (context.uploadToken) {
+  }
+  if (!context.accessToken && context.uploadToken) {
     form.append('upload_token', context.uploadToken)
   }
 
@@ -352,7 +355,7 @@ export async function executeCase(testCase, context) {
     method: 'POST',
     headers: {
       apikey: context.anonKey,
-      Authorization: `Bearer ${context.anonKey}`,
+      Authorization: `Bearer ${context.accessToken || context.anonKey}`,
     },
     body: form,
   })
@@ -425,6 +428,7 @@ export async function writeCaseArtifacts(payload) {
       endpoint: payload.context.endpoint,
       response_mode: payload.context.responseMode,
       user_id: payload.context.userId,
+      access_token_used: Boolean(payload.context.accessToken),
       upload_token_used: Boolean(payload.context.uploadToken),
       capture_kind: payload.context.captureKind,
       source_app: payload.context.sourceApp,
@@ -487,6 +491,7 @@ export async function writeBatchSummary(context, results) {
     endpoint: context.endpoint,
     response_mode: context.responseMode,
     user_id: context.userId,
+    access_token_used: Boolean(context.accessToken),
     upload_token_used: Boolean(context.uploadToken),
     capture_kind: context.captureKind,
     source_app: context.sourceApp,
@@ -539,6 +544,7 @@ async function main() {
   const anonKey = resolveAnonKey()
   const userId = resolveUserId()
   const uploadToken = resolveUploadToken()
+  const accessToken = resolveAccessToken()
   const responseMode = normalizeResponseMode()
   const captureKind = resolveCaptureKind()
   const sourceApp = resolveSourceApp()
@@ -547,12 +553,16 @@ async function main() {
   const outputRoot = path.resolve(flags.outputDir || 'test-results')
   const runId = flags.runId || buildDefaultRunId()
   const cases = await buildCaseList({ image: flags.image, dir: flags.dir, domain: flags.domain })
+  if (!flags.dryRun && !accessToken && !uploadToken) {
+    throw new Error('缺少测试身份：请设置 TEST_RECEIPT_ACCESS_TOKEN、TEST_RECEIPT_UPLOAD_TOKEN 或传入对应参数。')
+  }
 
   const context = {
     endpoint,
     anonKey,
     userId,
     uploadToken,
+    accessToken,
     responseMode,
     captureKind,
     sourceApp,
@@ -567,7 +577,8 @@ async function main() {
   console.log('----------------')
   console.log(`endpoint: ${endpoint}`)
   console.log(`response_mode: ${responseMode}`)
-  console.log(`user_id: ${userId || '-'} ${userId ? '(调试模式)' : ''}`)
+  console.log(`user_id: ${userId || '-'}`)
+  console.log(`access_token: ${accessToken ? '(provided)' : '-'}`)
   console.log(`upload_token: ${uploadToken ? '(provided)' : '-'}`)
   console.log(`capture_kind: ${captureKind}`)
   console.log(`source_app: ${sourceApp}`)

@@ -193,10 +193,11 @@ function buildTraceSteps({ payload, parsed, summary, aiLog, rawDebug }) {
       name: '身份解析',
       status: parsed.error && payload.httpStatus === 401 ? 'error' : 'success',
       input_snapshot: {
-        identity_source: payload.context.userId ? 'user_id' : (payload.context.uploadToken ? 'upload_token' : 'none'),
+        identity_source: payload.context.accessToken ? 'access_token' : (payload.context.uploadToken ? 'upload_token' : 'none'),
       },
       output_snapshot: {
         user_id: payload.context.userId || null,
+        access_token_used: Boolean(payload.context.accessToken),
         upload_token_used: Boolean(payload.context.uploadToken),
       },
       user_visible: false,
@@ -459,9 +460,10 @@ export function buildTraceFromUploadResult(payload) {
     },
     user_context: {
       user_id: payload.context.userId || null,
-      identity_source: payload.context.userId ? 'user_id' : (payload.context.uploadToken ? 'upload_token' : 'none'),
+      identity_source: payload.context.accessToken ? 'access_token' : (payload.context.uploadToken ? 'upload_token' : 'none'),
+      access_token_used: Boolean(payload.context.accessToken),
       upload_token_used: Boolean(payload.context.uploadToken),
-      is_test_account: Boolean(payload.context.uploadToken),
+      is_test_account: Boolean(payload.context.accessToken || payload.context.uploadToken),
     },
     request_context: {
       endpoint: payload.context.endpoint,

@@ -31,6 +31,14 @@ const imageMigrationSource = await readFile(
   path.join(repoRoot, "scripts", "migrate-legacy-signed-image-urls.mjs"),
   "utf8",
 );
+const receiptTestSource = await readFile(
+  path.join(repoRoot, "scripts", "test-ingest-receipt.mjs"),
+  "utf8",
+);
+const receiptCleanupSource = await readFile(
+  path.join(repoRoot, "scripts", "cleanup-test-receipts.mjs"),
+  "utf8",
+);
 
 for (const policy of [
   "allow_anon_select_receipt_images",
@@ -139,5 +147,9 @@ assert.doesNotMatch(imageMigrationSource, /from\("receipt_image_migration_jobs"\
 assert.match(imageMigrationSource, /claim_receipt_image_migration_job/);
 assert.match(imageMigrationSource, /mark_receipt_image_migration_copied/);
 assert.match(imageMigrationSource, /record_receipt_image_migration_error/);
+assert.doesNotMatch(receiptTestSource, /DEFAULT_UPLOAD_TOKEN|uploadToken\s*=\s*["'][0-9a-f-]{36}["']/i);
+assert.doesNotMatch(receiptCleanupSource, /DEFAULT_UPLOAD_TOKEN|uploadToken\s*=\s*["'][0-9a-f-]{36}["']/i);
+assert.match(receiptTestSource, /TEST_RECEIPT_ACCESS_TOKEN[\s\S]*TEST_RECEIPT_UPLOAD_TOKEN/);
+assert.match(receiptTestSource, /缺少测试身份/);
 
 console.log("Security migration contracts validated.");
