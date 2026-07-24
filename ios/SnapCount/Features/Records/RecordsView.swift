@@ -15,67 +15,78 @@ struct RecordsView: View {
     var body: some View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
-            List {
-                Section {
-                    JieziMonthSwitcher(
-                        title: monthTitle,
-                        selectionToken: selectedMonthKey,
-                        canAdvance: selectedMonthKey < Self.currentMonthKey,
-                        onPrevious: { shiftMonth(-1) },
-                        onNext: { shiftMonth(1) }
-                    )
-                    Picker("数据域", selection: $selectedKind) {
-                        ForEach(availableKinds) { Text($0.title).tag($0) }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: JieziSpacing.xl2) {
+                    VStack(alignment: .leading, spacing: JieziSpacing.md) {
+                        JieziMonthSwitcher(
+                            title: monthTitle,
+                            selectionToken: selectedMonthKey,
+                            canAdvance: selectedMonthKey < Self.currentMonthKey,
+                            onPrevious: { shiftMonth(-1) },
+                            onNext: { shiftMonth(1) }
+                        )
+                        Picker("数据域", selection: $selectedKind) {
+                            ForEach(availableKinds) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
-                }
+                    .jieziCard(solid: true)
 
-                if isLoadingMonth && monthGroups.isEmpty {
-                    ProgressView("正在加载本月记录…")
+                    if isLoadingMonth && monthGroups.isEmpty {
+                        ProgressView("正在加载本月记录…")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, JieziSpacing.xl5)
+                    } else if let message = appState.recordMonthMessages[selectedMonthKey],
+                              selectedMonthKey != Self.currentMonthKey,
+                              monthGroups.isEmpty {
+                        ContentUnavailableView {
+                            Label("本月记录加载失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                        } description: {
+                            Text(message)
+                        } actions: {
+                            Button("重新加载") { Task { await appState.loadRecordMonth(selectedMonthKey, force: true) } }
+                        }
                         .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
-                } else if let message = appState.recordMonthMessages[selectedMonthKey],
-                          selectedMonthKey != Self.currentMonthKey,
-                          monthGroups.isEmpty {
-                    ContentUnavailableView {
-                        Label("本月记录加载失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
-                    } description: {
-                        Text(message)
-                    } actions: {
-                        Button("重新加载") { Task { await appState.loadRecordMonth(selectedMonthKey, force: true) } }
-                    }
-                    .listRowBackground(Color.clear)
-                } else if groups.isEmpty {
-                    ContentUnavailableView("本月还没有记录", systemImage: "doc.text.magnifyingglass", description: Text("截图识别或手动记录后，会按日期出现在这里。"))
-                        .listRowBackground(Color.clear)
-                } else {
-                    ForEach(groups) { group in
-                        Section(dayTitle(group.dateKey)) {
-                            ForEach(group.records) { item in
-                                NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: item.systemImage)
-                                            .foregroundStyle(JieziTheme.mint)
-                                            .frame(width: 34, height: 34)
-                                            .background(JieziTheme.brand.opacity(0.08), in: Circle())
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(item.title).font(.headline)
-                                            Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        .padding(.vertical, JieziSpacing.xl5)
+                    } else if groups.isEmpty {
+                        JieziEmptyState(
+                            systemImage: "doc.text.magnifyingglass",
+                            title: "本月还没有记录",
+                            message: "截图识别或手动记录后，会按日期出现在这里。"
+                        )
+                    } else {
+                        ForEach(groups) { group in
+                            VStack(alignment: .leading, spacing: JieziSpacing.sm) {
+                                Text(dayTitle(group.dateKey))
+                                    .font(JieziType.sectionTitle)
+                                    .foregroundStyle(JieziTheme.ink)
+                                    .padding(.horizontal, JieziSpacing.xs)
+
+                                VStack(spacing: 0) {
+                                    ForEach(group.records) { item in
+                                        NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
+                                            recordRow(item)
                                         }
-                                        Spacer()
-                                        VStack(alignment: .trailing, spacing: 3) {
-                                            Text(item.value).font(.subheadline.monospacedDigit())
-                                            Text(item.timeLabel ?? "全天").font(.caption2).foregroundStyle(.secondary)
-                                        }
+                                        .buttonStyle(.plain)
                                     }
-                                    .padding(.vertical, 4)
+                                }
+                                .background(
+                                    JieziTheme.paper.opacity(0.72),
+                                    in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
+                                )
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
+                                        .stroke(JieziTheme.brand.opacity(0.10), lineWidth: 1)
                                 }
                             }
                         }
                     }
                 }
+                .padding(.horizontal, JieziSpacing.Semantic.page_padding)
+                .padding(.top, JieziSpacing.sm)
+                .padding(.bottom, JieziSpacing.xl5)
             }
-            .scrollContentBackground(.hidden)
+            .scrollIndicators(.hidden)
             .refreshable { await appState.loadRecordMonth(selectedMonthKey, force: true) }
         }
         .navigationTitle("记录")
@@ -113,6 +124,54 @@ struct RecordsView: View {
     }
 
     private func dayTitle(_ dateKey: String) -> String { String(dateKey.suffix(5)) }
+
+    private func recordRow(_ item: NativeDayRecord) -> some View {
+        HStack(spacing: JieziSpacing.Semantic.item_gap) {
+            Image(systemName: item.systemImage)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(JieziTheme.brand)
+                .frame(width: JieziIcon.Semantic.list_row_block, height: JieziIcon.Semantic.list_row_block)
+                .background(JieziTheme.brand.opacity(0.10), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
+
+            VStack(alignment: .leading, spacing: JieziSpacing.xxs) {
+                Text(item.title)
+                    .font(JieziType.cardTitle)
+                    .foregroundStyle(JieziTheme.ink)
+                Text(item.subtitle)
+                    .font(JieziFont.footnote)
+                    .foregroundStyle(JieziTheme.muted)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: JieziSpacing.sm)
+
+            VStack(alignment: .trailing, spacing: JieziSpacing.xxs) {
+                Text(item.value)
+                    .font(JieziType.moneyInline)
+                    .monospacedDigit()
+                    .foregroundStyle(JieziTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Text(item.timeLabel ?? "全天")
+                    .font(JieziFont.caption)
+                    .foregroundStyle(JieziTheme.muted)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(JieziFont.caption.weight(.bold))
+                .foregroundStyle(JieziTheme.muted.opacity(0.55))
+        }
+        .padding(.horizontal, JieziSpacing.Semantic.item_gap)
+        .padding(.vertical, JieziSpacing.md)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            let stroke = JieziStroke.divider()
+            Rectangle()
+                .fill(stroke.color)
+                .frame(height: stroke.width)
+                .padding(.leading, JieziIcon.Semantic.list_row_block + JieziSpacing.Semantic.item_gap * 2)
+        }
+    }
 
     private func shiftMonth(_ offset: Int) {
         guard let shifted = NativeMonthKey.shifted(selectedMonthKey, by: offset) else { return }

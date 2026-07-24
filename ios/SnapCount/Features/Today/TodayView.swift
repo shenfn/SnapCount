@@ -177,7 +177,7 @@ struct TodayView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("个人数据平台")
-                    .font(.system(size: 32, weight: .bold))
+                    .font(JieziType.display)
                     .foregroundStyle(JieziTheme.ink)
                 Text(Self.fullDateFormatter.string(from: selectedDate))
                     .font(.subheadline)
@@ -261,61 +261,61 @@ struct TodayView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("净额估算")
-                            .font(.caption)
-                            .foregroundStyle(JieziTheme.muted)
-                        Text(money(financeSummary.netWorthEstimate, signed: true))
-                            .font(.system(size: 30, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                    }
-                    Spacer()
-                    Text(financeSummary.statusLabel)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(JieziTheme.brand)
-                }
-
-                HStack(spacing: 10) {
-                    metric(title: "可用现金", value: money(financeSummary.availableCash))
-                    metric(title: "当前欠款", value: money(financeSummary.liabilityTotal))
-                }
-                HStack(spacing: 10) {
-                    metric(title: selectedDateKey == Self.todayKey ? "今日收入" : "所选日收入", value: money(financeSummary.dayIncome, signed: true))
-                    metric(title: selectedDateKey == Self.todayKey ? "今日支出" : "所选日支出", value: money(financeSummary.dayExpense))
-                }
-
-                if let liability = financeSummary.nearestLiability {
-                    NavigationLink {
-                        AccountsView()
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("最近待还")
-                                    .font(.caption)
-                                    .foregroundStyle(JieziTheme.muted)
-                                Text(liability.title)
-                                    .font(.headline)
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 3) {
-                                Text(money(liability.currentBalance))
-                                    .font(.headline.monospacedDigit())
-                                Text(liability.paymentDueDay.map { "每月 \($0) 日" } ?? "未设置还款日")
-                                    .font(.caption)
-                                    .foregroundStyle(JieziTheme.muted)
-                            }
-                            Image(systemName: "chevron.right")
-                                .font(.caption.bold())
+            JieziCard(solid: true) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("净额估算")
+                                .font(.caption)
                                 .foregroundStyle(JieziTheme.muted)
+                            Text(money(financeSummary.netWorthEstimate, signed: true))
+                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .monospacedDigit()
                         }
+                        Spacer()
+                        Text(financeSummary.statusLabel)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(JieziTheme.brand)
                     }
-                    .buttonStyle(.plain)
+
+                    HStack(spacing: 10) {
+                        metric(title: "可用现金", value: money(financeSummary.availableCash))
+                        metric(title: "当前欠款", value: money(financeSummary.liabilityTotal))
+                    }
+                    HStack(spacing: 10) {
+                        metric(title: selectedDateKey == Self.todayKey ? "今日收入" : "所选日收入", value: money(financeSummary.dayIncome, signed: true))
+                        metric(title: selectedDateKey == Self.todayKey ? "今日支出" : "所选日支出", value: money(financeSummary.dayExpense))
+                    }
+
+                    if let liability = financeSummary.nearestLiability {
+                        NavigationLink {
+                            AccountsView()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("最近待还")
+                                        .font(.caption)
+                                        .foregroundStyle(JieziTheme.muted)
+                                    Text(liability.title)
+                                        .font(.headline)
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 3) {
+                                    Text(money(liability.currentBalance))
+                                        .font(.headline.monospacedDigit())
+                                    Text(liability.paymentDueDay.map { "每月 \($0) 日" } ?? "未设置还款日")
+                                        .font(.caption)
+                                        .foregroundStyle(JieziTheme.muted)
+                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(JieziTheme.muted)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
-            .padding(18)
-            .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 
@@ -344,8 +344,7 @@ struct TodayView: View {
                     pendingRow("待确认", count: pendingSummary.review, systemImage: "checklist")
                     pendingRow("识别失败", count: pendingSummary.failed, systemImage: "exclamationmark.triangle")
                 }
-                .padding(18)
-                .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .jieziCard(solid: true)
             }
             .buttonStyle(.plain)
         }
@@ -387,8 +386,7 @@ struct TodayView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .jieziCard(solid: true)
             }
             .buttonStyle(.plain)
         }
@@ -399,15 +397,8 @@ struct TodayView: View {
         subtitle: String,
         @ViewBuilder accessory: () -> Accessory
     ) -> some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.title3.bold())
-                Text(subtitle).font(.subheadline).foregroundStyle(JieziTheme.muted)
-            }
-            Spacer()
+        JieziSectionHeader(title: title, subtitle: subtitle) {
             accessory()
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(JieziTheme.brand)
         }
     }
 
@@ -416,12 +407,7 @@ struct TodayView: View {
     }
 
     private func metric(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.caption).foregroundStyle(JieziTheme.muted)
-            Text(value).font(.headline.monospacedDigit()).foregroundStyle(JieziTheme.ink).lineLimit(1).minimumScaleFactor(0.72)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
+        JieziMetric(label: title, value: value)
     }
 
     private var captureButton: some View {
@@ -502,11 +488,9 @@ struct TodayView: View {
                 }
             }
             .foregroundStyle(JieziTheme.ink)
-            .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 24).stroke(JieziTheme.brand.opacity(0.06)))
+            .contentShape(RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous))
+            .jieziCard(solid: true)
         }
         .buttonStyle(JieziPressableButtonStyle())
         .accessibilityHint("打开当天全部记录")

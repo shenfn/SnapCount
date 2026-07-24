@@ -14,7 +14,7 @@ struct JieziEmptyState: View {
     var body: some View {
         VStack(spacing: JieziSpacing.lg) {
             ZStack {
-                let stroke = JieziStroke.goldHairline(palette)
+                let stroke = JieziStroke.gold_hairline(palette)
                 Circle()
                     .stroke(stroke.color, lineWidth: stroke.width)
                     .frame(width: 72, height: 72)

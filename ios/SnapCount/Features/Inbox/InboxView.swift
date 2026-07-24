@@ -992,8 +992,7 @@ private struct PendingExpenseResolutionView: View {
             Spacer()
             Text("待补全").font(.caption.weight(.bold)).foregroundStyle(JieziTheme.gold)
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 
     @ViewBuilder
@@ -1007,8 +1006,7 @@ private struct PendingExpenseResolutionView: View {
                 Label("截图文件不可用", systemImage: "photo.badge.exclamationmark")
                     .frame(maxWidth: .infinity, minHeight: 120)
             }
-            .padding(8)
-            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+            .jieziCard(solid: true)
         }
     }
 
@@ -1024,8 +1022,7 @@ private struct PendingExpenseResolutionView: View {
                     .font(.title2.weight(.bold).monospacedDigit())
             }
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 
     private func typeSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
@@ -1036,8 +1033,7 @@ private struct PendingExpenseResolutionView: View {
             }
             .pickerStyle(.segmented)
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 
     private func fieldSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
@@ -1065,8 +1061,7 @@ private struct PendingExpenseResolutionView: View {
                 optionMenu("收入类型", selection: draft.incomeCategory, options: NativeManualRecordDraft.incomeCategories)
             }
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 
     private func optionMenu(_ title: String, selection: Binding<String>, options: [NativeManualRecordOption]) -> some View {
@@ -1146,8 +1141,7 @@ private struct PendingExpenseResolutionView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 }
 

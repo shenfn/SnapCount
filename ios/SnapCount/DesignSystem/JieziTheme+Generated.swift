@@ -480,13 +480,13 @@ enum JieziDomainColor {
 
     static func color(for domain: String) -> Color {
         switch domain {
-        case "expense": return .expense
-        case "income": return .income
-        case "sport": return .sport
-        case "sleep": return .sleep
-        case "reading": return .reading
-        case "food": return .food
-        case "wallet": return .wallet
+        case "expense": return JieziDomainColor.expense
+        case "income": return JieziDomainColor.income
+        case "sport": return JieziDomainColor.sport
+        case "sleep": return JieziDomainColor.sleep
+        case "reading": return JieziDomainColor.reading
+        case "food": return JieziDomainColor.food
+        case "wallet": return JieziDomainColor.wallet
         default: return JieziGeneratedPalette.defaultPalette.brand
         }
     }

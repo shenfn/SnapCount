@@ -135,6 +135,7 @@ struct SettingsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .listStyle(.insetGrouped)
             .refreshable { await appState.loadUserSettings() }
         }
         .navigationTitle("设置")
@@ -219,6 +220,8 @@ private struct VisionSettingsView: View {
             }
         }
         .navigationTitle("识别模型配置")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .disabled(appState.isSavingSettings)
     }
 
@@ -299,6 +302,8 @@ private struct CompanionSettingsView: View {
             }
         }
         .navigationTitle("AI 陪伴")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .disabled(appState.isSavingSettings)
         .onAppear { customNote = appState.userSettings.companionCustomNote }
     }
@@ -321,6 +326,8 @@ private struct InsightSettingsView: View {
             }
         }
         .navigationTitle("AI 联动分析")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .disabled(appState.isSavingSettings)
     }
 }
@@ -363,6 +370,8 @@ private struct PrivacySettingsView: View {
             }
         }
         .navigationTitle("隐私与留存")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .disabled(appState.isSavingSettings || appState.isCleaningSourceImages)
         .confirmationDialog(retentionDialogTitle, isPresented: $showRetentionConfirmation, titleVisibility: .visible) {
             if let pendingRetention {
@@ -454,6 +463,8 @@ private struct DataExportView: View {
             }
         }
         .navigationTitle("数据导出")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .sheet(item: $exportedFile) { file in
             ActivityView(activityItems: [file.url])
         }
@@ -598,6 +609,7 @@ private struct ShortcutSetupView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .listStyle(.insetGrouped)
         }
         .navigationTitle("快捷指令")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
