@@ -15,6 +15,26 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(AppTab.allCases.allSatisfy { !$0.title.isEmpty })
     }
 
+    func testOnboardingProgressIsVersionedAndUserScoped() throws {
+        let suiteName = "SnapCountTests.Onboarding.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+
+        XCTAssertTrue(store.shouldPresent(for: "user-a"))
+        XCTAssertTrue(store.shouldPresent(for: "user-b"))
+
+        store.mark(.completed, for: "user-a")
+
+        XCTAssertFalse(store.shouldPresent(for: "user-a"))
+        XCTAssertEqual(store.completion(for: "user-a"), .completed)
+        XCTAssertTrue(store.shouldPresent(for: "user-b"))
+        XCTAssertTrue(store.shouldPresent(for: "user-a", version: OnboardingProgressStore.currentVersion + 1))
+
+        store.mark(.skipped, for: "user-b")
+        XCTAssertEqual(store.completion(for: "user-b"), .skipped)
+    }
+
     @MainActor
     func testResetUserScopedStateClearsNavigationAndDetails() {
         let state = AppState()
@@ -375,6 +395,49 @@ final class SnapCountTests: XCTestCase {
         let payload = draft.universalPayload(domain: nil)
         XCTAssertEqual(payload.double("distance_km"), 12.5)
         XCTAssertEqual(payload.double("duration_minutes"), 60)
+    }
+
+    func testStagingReviewDraftAppliesReadingFieldsWithoutDroppingAIMetadata() {
+        let record = NativeStagingRecord(
+            id: "staging-reading",
+            dateKey: "2026-07-22",
+            title: "补上阅读时长",
+            summary: "补完后会计入阅读趋势",
+            status: "pending_review",
+            statusLabel: "待确认",
+            recordTypeLabel: "阅读截图",
+            createdAtLabel: "2026-07-22 11:06",
+            occurredAtLabel: "2026-07-22 11:06",
+            confidencePercent: 84,
+            lastErrorMessage: nil,
+            retryCount: 0,
+            systemImage: "book",
+            imagePath: nil,
+            imageURL: nil,
+            imageLoadError: false,
+            recordType: "reading",
+            domainKey: "reading",
+            domainName: "阅读",
+            extracted: [
+                "book_name": AnyCodable("虚无元素"),
+                "ai_feedback": AnyCodable(["emotion_line": "这页内容值得留下"])
+            ],
+            companionMessage: "这页内容值得留下",
+            targetRecordId: nil,
+            imageHash: "hash"
+        )
+
+        var draft = NativeManualRecordDraft(stagingRecord: record, domainKey: "reading")
+        XCTAssertEqual(draft.dimension, "虚无元素")
+        XCTAssertTrue(draft.primaryValueText.isEmpty)
+        draft.primaryValueText = "25"
+
+        let adjusted = record.applyingArchiveDraft(draft, domain: nil)
+
+        XCTAssertEqual(adjusted.extracted.double("reading_minutes"), 25)
+        XCTAssertEqual(adjusted.extracted.string("book_name"), "虚无元素")
+        XCTAssertNotNil(adjusted.extracted["ai_feedback"])
+        XCTAssertEqual(adjusted.companionMessage, "这页内容值得留下")
     }
 
     func testInboxRepositoryProtocolSupportsStubInjection() async throws {
@@ -905,7 +968,7 @@ final class SnapCountTests: XCTestCase {
     func testRegistrationConsentUsesCurrentLegalVersions() {
         let consent = NativeRegistrationConsent.current(at: Date(timeIntervalSince1970: 0))
         XCTAssertEqual(consent.termsVersion, "2026-07-19")
-        XCTAssertEqual(consent.privacyVersion, "2026-07-19")
+        XCTAssertEqual(consent.privacyVersion, "2026-07-22")
         XCTAssertEqual(consent.legalAcceptedAt, consent.sensitiveDataAcceptedAt)
     }
 
