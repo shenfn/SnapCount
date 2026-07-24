@@ -91,8 +91,8 @@ struct InboxView: View {
                                         ForEach(section.items) { item in inboxCell(item) }
                                     }
                                 }
-                                .padding(.horizontal, JieziSpacing.lg)
-                                .padding(.bottom, JieziSpacing.xl)
+                                .padding(.horizontal, JieziSpacing.Semantic.card_padding)
+                                .padding(.bottom, JieziSpacing.xl2)
                             }
                         }
                     }
@@ -161,7 +161,7 @@ struct InboxView: View {
                 .foregroundStyle(JieziTheme.muted)
             Spacer()
         }
-        .padding(.horizontal, JieziSpacing.xl)
+        .padding(.horizontal, JieziSpacing.xl2)
         .padding(.top, JieziSpacing.sm)
         .padding(.bottom, JieziSpacing.md)
     }
@@ -192,9 +192,9 @@ struct InboxView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, JieziSpacing.xl)
+            .padding(.horizontal, JieziSpacing.xl2)
         }
-        .padding(.bottom, JieziSpacing.lg)
+        .padding(.bottom, JieziSpacing.Semantic.card_padding)
     }
 
     private func filterCount(_ filter: NativeInboxFilter) -> Int {
@@ -212,9 +212,9 @@ struct InboxView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             (isError ? JieziTheme.coral : JieziTheme.brand).opacity(0.08),
-            in: RoundedRectangle(cornerRadius: JieziRadius.card, style: .continuous)
+            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
         )
-        .padding(.horizontal, JieziSpacing.lg)
+        .padding(.horizontal, JieziSpacing.Semantic.card_padding)
         .padding(.bottom, JieziSpacing.md)
     }
 
@@ -275,9 +275,9 @@ private struct NativeInboxFilmCard: View {
             .padding(.vertical, 9)
         }
         .background(Color.white.opacity(0.7))
-        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous)
+            RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
                 .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
         }
         .shadow(color: JieziTheme.space.opacity(0.08), radius: 10, x: 0, y: 6)
@@ -399,7 +399,7 @@ private struct InboxFilmStateBadge: View {
 
 private struct InboxSettledEmptyView: View {
     var body: some View {
-        VStack(spacing: JieziSpacing.lg) {
+        VStack(spacing: JieziSpacing.Semantic.card_padding) {
             Canvas { context, size in
                 let center = CGPoint(x: size.width / 2, y: size.height / 2)
                 let ringRadius: CGFloat = 48
@@ -471,7 +471,7 @@ private struct StagingVerdictStageView: View {
             .ignoresSafeArea()
 
             if records.isEmpty {
-                VStack(spacing: JieziSpacing.lg) {
+                VStack(spacing: JieziSpacing.Semantic.card_padding) {
                     Text("微尘皆已落定").font(.headline)
                     Text("全部处理完毕").font(.subheadline).foregroundStyle(JieziTheme.muted)
                     Button("回到中转站") { closeStage() }
@@ -609,7 +609,7 @@ private struct StagingVerdictStageView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.white)
-                .background(JieziTheme.brandWash, in: RoundedRectangle(cornerRadius: JieziRadius.card, style: .continuous))
+                .background(JieziTheme.brandWash, in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
                 .disabled(appState.inboxActionRecordId != nil)
             }
 
@@ -649,7 +649,7 @@ private struct StagingVerdictStageView: View {
         .foregroundStyle(destructive ? JieziTheme.coral : JieziTheme.brand)
         .background(
             (destructive ? JieziTheme.coral : JieziTheme.brand).opacity(0.08),
-            in: RoundedRectangle(cornerRadius: JieziRadius.card, style: .continuous)
+            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
         )
     }
 
@@ -841,10 +841,10 @@ private struct StagingFactSheet: View {
                 startPoint: .top,
                 endPoint: .bottom
             ),
-            in: RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous)
+            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous)
+            RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
                 .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
         }
     }
