@@ -81,15 +81,7 @@ struct InboxView: View {
                                         .foregroundStyle(JieziTheme.muted)
                                         .padding(.leading, 2)
 
-                                    LazyVGrid(
-                                        columns: [
-                                            GridItem(.flexible(), spacing: JieziSpacing.md),
-                                            GridItem(.flexible(), spacing: JieziSpacing.md)
-                                        ],
-                                        spacing: JieziSpacing.md
-                                    ) {
-                                        ForEach(section.items) { item in inboxCell(item) }
-                                    }
+                                    inboxGrid(section.items)
                                 }
                                 .padding(.horizontal, JieziSpacing.Semantic.card_padding)
                                 .padding(.bottom, JieziSpacing.xl2)
@@ -135,22 +127,50 @@ struct InboxView: View {
     }
 
     @ViewBuilder
-    private func inboxCell(_ item: NativeInboxItem) -> some View {
+    private func inboxGrid(_ items: [NativeInboxItem]) -> some View {
+        let hasWideItem = !items.count.isMultiple(of: 2)
+        let pairedItems = hasWideItem ? Array(items.dropLast()) : items
+
+        VStack(spacing: JieziSpacing.md) {
+            if !pairedItems.isEmpty {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: JieziSpacing.md),
+                        GridItem(.flexible(), spacing: JieziSpacing.md)
+                    ],
+                    spacing: JieziSpacing.md
+                ) {
+                    ForEach(pairedItems) { item in inboxCell(item) }
+                }
+            }
+
+            if hasWideItem, let item = items.last {
+                inboxCell(item, isWide: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func inboxCell(_ item: NativeInboxItem, isWide: Bool = false) -> some View {
         if let pending = item.pendingExpense {
             NavigationLink(value: NativeInboxRoute.record(reference: pending.reference)) {
-                NativeInboxFilmCard(item: item, repaymentCandidate: nil)
+                NativeInboxFilmCard(item: item, repaymentCandidate: nil, isWide: isWide)
             }
             .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
         } else if let record = item.stagingRecord {
             Button {
                 stageRecordId = record.id
             } label: {
                 NativeInboxFilmCard(
                     item: item,
-                    repaymentCandidate: appState.repaymentCandidates[record.id]
+                    repaymentCandidate: appState.repaymentCandidates[record.id],
+                    isWide: isWide
                 )
             }
             .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -227,6 +247,7 @@ struct InboxView: View {
 private struct NativeInboxFilmCard: View {
     let item: NativeInboxItem
     let repaymentCandidate: NativeRepaymentCandidate?
+    var isWide = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -236,7 +257,7 @@ private struct NativeInboxFilmCard: View {
                     .padding(8)
             }
             .frame(maxWidth: .infinity)
-            .aspectRatio(3 / 4, contentMode: .fit)
+            .aspectRatio(isWide ? 16.0 / 9.0 : 3.0 / 4.0, contentMode: .fit)
             .background(JieziTheme.paper.opacity(0.72))
             .clipped()
 
@@ -245,8 +266,8 @@ private struct NativeInboxFilmCard: View {
                     Text(item.title)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(JieziTheme.ink)
-                        .lineLimit(2)
-                        .frame(minHeight: 32, alignment: .topLeading)
+                        .lineLimit(isWide ? 1 : 2)
+                        .frame(minHeight: isWide ? 16 : 32, alignment: .topLeading)
                     if let record = item.stagingRecord {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("记录 \(record.occurredAtLabel ?? "未识别")")
@@ -278,7 +299,7 @@ private struct NativeInboxFilmCard: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, minHeight: 86, alignment: .top)
+            .frame(maxWidth: .infinity, minHeight: isWide ? 72 : 86, alignment: .top)
         }
         .frame(maxWidth: .infinity)
         .background(Color.white.opacity(0.7))

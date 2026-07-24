@@ -589,85 +589,145 @@ private struct RecordEditSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section(draft.kind == "income" ? "收入" : "消费") {
-                    TextField(draft.kind == "income" ? "来源" : "商户", text: $draft.title)
-                    TextField("金额", text: $draft.amountText)
-                        .keyboardType(.decimalPad)
-                    TextField("日期", text: $draft.recordDate)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
+            ZStack {
+                JieziPageBackground()
+                VStack(spacing: 0) {
+                    JieziFormTopBar(
+                        title: "编辑记录",
+                        primaryTitle: "保存",
+                        isWorking: isSaving,
+                        onCancel: { dismiss() },
+                        onSubmit: { Task { await save() } }
+                    )
 
-                if draft.kind == "expense" {
-                    Section("消费字段") {
-                        TextField("平台", text: $draft.platform)
-                        TextField("分类", text: $draft.category)
-                        TextField("支付方式", text: $draft.paymentMethod)
-                    }
-                } else {
-                    Section("收入字段") {
-                        TextField("类型", text: $draft.category)
-                    }
-                }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: JieziSpacing.xl2) {
+                            primarySection
+                            classificationSection
+                            accountSection
+                            noteSection
 
-                Section("账户") {
-                    Picker("绑定账户", selection: $draft.accountId) {
-                        Text("不绑定账户").tag(String?.none)
-                        ForEach(accountCandidates) { account in
-                            Text(account.title).tag(String?.some(account.id))
+                            if let message {
+                                JieziFormMessage(message: message)
+                            }
                         }
+                        .padding(.horizontal, JieziSpacing.Semantic.page_padding)
+                        .padding(.top, JieziSpacing.Semantic.card_padding)
+                        .padding(.bottom, JieziSpacing.xl3)
                     }
-                    Text("保存后由服务端原子更新记录与账户流水，不会在客户端直接修改余额。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("备注") {
-                    TextField("备注", text: $draft.note, axis: .vertical)
-                        .lineLimit(3...6)
-                }
-
-                if let message {
-                    Section {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(JieziTheme.coral)
-                    }
+                    .scrollDismissesKeyboard(.interactively)
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 if appState.accounts.isEmpty { await appState.loadAccounts() }
             }
-            .navigationTitle("编辑记录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
-                        dismiss()
-                    }
-                    .disabled(isSaving)
+        }
+    }
+
+    private var primarySection: some View {
+        JieziFormSection(
+            title: draft.kind == "income" ? "收入信息" : "消费信息",
+            subtitle: "只修改需要纠正的字段，保存后会同步刷新详情和统计。"
+        ) {
+            JieziFormRow(
+                title: draft.kind == "income" ? "来源" : "商户",
+                systemImage: draft.kind == "income" ? "arrow.down.circle" : "storefront",
+                showsDivider: true
+            ) {
+                TextField(draft.kind == "income" ? "收入来源" : "商户名称", text: $draft.title)
+                    .jieziInputSurface()
+            }
+            JieziFormRow(title: "金额", systemImage: "yensign", showsDivider: true) {
+                TextField("0.00", text: $draft.amountText)
+                    .keyboardType(.decimalPad)
+                    .jieziInputSurface()
+            }
+            JieziFormRow(title: "日期", systemImage: "calendar") {
+                TextField("YYYY-MM-DD", text: $draft.recordDate)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .jieziInputSurface()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var classificationSection: some View {
+        if draft.kind == "expense" {
+            JieziFormSection(title: "消费字段", subtitle: "这些字段决定渠道、分类与支付统计。") {
+                JieziFormRow(title: "平台", systemImage: "shippingbox", showsDivider: true) {
+                    TextField("消费平台", text: $draft.platform)
+                        .jieziInputSurface()
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task {
-                            await save()
-                        }
-                    } label: {
-                        if isSaving {
-                            ProgressView()
-                        } else {
-                            Text("保存")
-                        }
-                    }
-                    .disabled(isSaving)
+                JieziFormRow(title: "分类", systemImage: "square.grid.2x2", showsDivider: true) {
+                    TextField("消费分类", text: $draft.category)
+                        .jieziInputSurface()
                 }
+                JieziFormRow(title: "支付方式", systemImage: "creditcard") {
+                    TextField("支付方式", text: $draft.paymentMethod)
+                        .jieziInputSurface()
+                }
+            }
+        } else {
+            JieziFormSection(title: "收入字段") {
+                JieziFormRow(title: "收入类型", systemImage: "tag") {
+                    TextField("收入类型", text: $draft.category)
+                        .jieziInputSurface()
+                }
+            }
+        }
+    }
+
+    private var accountSection: some View {
+        JieziFormSection(
+            title: "账户",
+            subtitle: "保存后由服务端原子更新记录与账户流水，不会在客户端直接修改余额。"
+        ) {
+            JieziFormRow(title: "绑定账户", systemImage: "wallet.pass") {
+                Menu {
+                    Button("不绑定账户") { draft.accountId = nil }
+                    ForEach(accountCandidates) { account in
+                        Button(account.title) { draft.accountId = account.id }
+                    }
+                } label: {
+                    selectorLabel(selectedAccountTitle)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var noteSection: some View {
+        JieziFormSection(title: "备注", subtitle: "选填，仅用于补充这条记录的背景。") {
+            JieziFormRow(title: "补充说明", systemImage: "note.text") {
+                TextField("写下一句补充说明", text: $draft.note, axis: .vertical)
+                    .lineLimit(3...6)
+                    .jieziInputSurface()
             }
         }
     }
 
     private var accountCandidates: [NativeAccount] {
         appState.accounts.filter { !$0.isArchived || $0.id == draft.accountId }
+    }
+
+    private var selectedAccountTitle: String {
+        guard let accountId = draft.accountId else { return "不绑定账户" }
+        return accountCandidates.first(where: { $0.id == accountId })?.title ?? "不绑定账户"
+    }
+
+    private func selectorLabel(_ title: String) -> some View {
+        HStack(spacing: JieziSpacing.sm) {
+            Text(title)
+                .foregroundStyle(JieziTheme.ink)
+                .lineLimit(1)
+            Spacer(minLength: JieziSpacing.sm)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(JieziTheme.brand)
+        }
+        .jieziInputSurface()
     }
 
     private func save() async {

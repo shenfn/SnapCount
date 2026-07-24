@@ -66,80 +66,45 @@ struct ManualRecordSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if let stagingRecord {
-                    stagingEvidence(stagingRecord)
-                    Section {
-                        LabeledContent(
-                            "准备归档到",
-                            value: draft.kind == .universal
-                                ? selectedDomain?.shortName ?? draft.domainKey
-                                : draft.kind.title
-                        )
-                    }
-                } else if draft.existingRawId == nil {
-                    Section {
-                        Picker("记录类型", selection: $draft.kind) {
-                            ForEach(NativeManualRecordKind.allCases) { kind in
-                                Text(kind.title).tag(kind)
+            ZStack {
+                JieziPageBackground()
+                VStack(spacing: 0) {
+                    JieziFormTopBar(
+                        title: sheetTitle,
+                        primaryTitle: stagingRecord == nil ? "保存" : "收下",
+                        isWorking: isSaving,
+                        onCancel: { dismiss() },
+                        onSubmit: { Task { await save() } }
+                    )
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: JieziSpacing.xl2) {
+                            recordContextSection
+
+                            switch draft.kind {
+                            case .expense:
+                                expenseFields
+                            case .income:
+                                incomeFields
+                            case .universal:
+                                universalFields
+                            }
+
+                            dateFields
+                            noteSection
+
+                            if let message = localMessage ?? appState.manualRecordMessage {
+                                JieziFormMessage(message: message)
                             }
                         }
-                        .pickerStyle(.segmented)
+                        .padding(.horizontal, JieziSpacing.Semantic.page_padding)
+                        .padding(.top, JieziSpacing.Semantic.card_padding)
+                        .padding(.bottom, JieziSpacing.xl3)
                     }
-                } else {
-                    Section {
-                        LabeledContent("记录类型", value: selectedDomain?.shortName ?? "数据域")
-                    }
-                }
-
-                switch draft.kind {
-                case .expense:
-                    expenseFields
-                case .income:
-                    incomeFields
-                case .universal:
-                    universalFields
-                }
-
-                dateFields
-
-                Section("备注") {
-                    TextField("补充说明", text: $draft.note, axis: .vertical)
-                        .lineLimit(2...5)
-                }
-
-                if let message = localMessage ?? appState.manualRecordMessage {
-                    Section {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(JieziTheme.coral)
-                    }
+                    .scrollDismissesKeyboard(.interactively)
                 }
             }
-            .navigationTitle(
-                stagingRecord != nil
-                    ? "核对并收下"
-                    : (draft.existingRawId == nil ? "手动记录" : "编辑记录")
-            )
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                        .disabled(isSaving)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        if isSaving {
-                            ProgressView()
-                        } else {
-                            Text(stagingRecord == nil ? "保存" : "收下")
-                        }
-                    }
-                    .disabled(isSaving)
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .task {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
@@ -167,67 +132,177 @@ struct ManualRecordSheet: View {
         }
     }
 
+    private var sheetTitle: String {
+        if stagingRecord != nil { return "核对并收下" }
+        return draft.existingRawId == nil ? "手动记录" : "编辑记录"
+    }
+
+    @ViewBuilder
+    private var recordContextSection: some View {
+        if let stagingRecord {
+            JieziFormSection(
+                title: "识别依据",
+                subtitle: stagingRecord.imageURL == nil ? "原图不可用时，可根据识别文字继续核对。" : "对照原图，只调整识别不准的内容。"
+            ) {
+                stagingEvidence(stagingRecord)
+            }
+
+            JieziFormSection(title: "归档位置") {
+                JieziFormRow(title: "准备归档到", systemImage: "tray.and.arrow.down") {
+                    Text(
+                        draft.kind == .universal
+                            ? selectedDomain?.shortName ?? draft.domainKey
+                            : draft.kind.title
+                    )
+                    .jieziInputSurface()
+                }
+            }
+        } else if draft.existingRawId == nil {
+            JieziFormSection(title: "记录类型", subtitle: "先选类型，下面只展示需要填写的字段。") {
+                JieziFormRow(title: "类型", systemImage: "square.grid.2x2") {
+                    Picker("记录类型", selection: $draft.kind) {
+                        ForEach(NativeManualRecordKind.allCases) { kind in
+                            Text(kind.title).tag(kind)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+        } else {
+            JieziFormSection(title: "记录类型") {
+                JieziFormRow(title: "当前数据域", systemImage: "square.grid.2x2") {
+                    Text(selectedDomain?.shortName ?? "数据域")
+                        .jieziInputSurface()
+                }
+            }
+        }
+    }
+
     private var expenseFields: some View {
-        Group {
-            Section("支出") {
-                TextField("金额", text: $draft.amountText)
-                    .keyboardType(.decimalPad)
-                TextField("商家名称（可选）", text: $draft.title)
-                editableOptionField("消费渠道", selection: $draft.platform, options: expensePlatformOptions)
-                optionPicker("消费分类", selection: $draft.category, options: expenseCategoryOptions)
-                editableOptionField("支付方式", selection: $draft.paymentMethod, options: expensePaymentOptions)
+        VStack(spacing: JieziSpacing.xl2) {
+            JieziFormSection(title: "消费信息", subtitle: "金额和分类会用于后续统计，识别正确的内容无需改动。") {
+                JieziFormRow(title: "金额", systemImage: "yensign", showsDivider: true) {
+                    TextField("0.00", text: $draft.amountText)
+                        .keyboardType(.decimalPad)
+                        .jieziInputSurface()
+                }
+                JieziFormRow(title: "商家", systemImage: "storefront", showsDivider: true) {
+                    TextField("商家名称（可选）", text: $draft.title)
+                        .jieziInputSurface()
+                }
+                editableOptionField(
+                    "消费渠道",
+                    selection: $draft.platform,
+                    options: expensePlatformOptions,
+                    systemImage: "shippingbox",
+                    showsDivider: true
+                )
+                optionPicker(
+                    "消费分类",
+                    selection: $draft.category,
+                    options: expenseCategoryOptions,
+                    systemImage: "square.grid.2x2",
+                    showsDivider: true
+                )
+                editableOptionField(
+                    "支付方式",
+                    selection: $draft.paymentMethod,
+                    options: expensePaymentOptions,
+                    systemImage: "creditcard"
+                )
             }
             accountSection(title: "出资账户")
         }
     }
 
     private var incomeFields: some View {
-        Group {
-            Section("收入") {
-                TextField("金额", text: $draft.amountText)
-                    .keyboardType(.decimalPad)
-                TextField("来源名称（可选）", text: $draft.title)
-                optionPicker("收入类型", selection: $draft.category, options: NativeManualRecordDraft.incomeCategories)
+        VStack(spacing: JieziSpacing.xl2) {
+            JieziFormSection(title: "收入信息") {
+                JieziFormRow(title: "金额", systemImage: "yensign", showsDivider: true) {
+                    TextField("0.00", text: $draft.amountText)
+                        .keyboardType(.decimalPad)
+                        .jieziInputSurface()
+                }
+                JieziFormRow(title: "来源", systemImage: "arrow.down.circle", showsDivider: true) {
+                    TextField("来源名称（可选）", text: $draft.title)
+                        .jieziInputSurface()
+                }
+                optionPicker(
+                    "收入类型",
+                    selection: $draft.category,
+                    options: NativeManualRecordDraft.incomeCategories,
+                    systemImage: "tag"
+                )
             }
             accountSection(title: "到账账户")
         }
     }
 
     private var universalFields: some View {
-        Group {
-            Section("数据域") {
-                Picker("数据域", selection: $draft.domainKey) {
-                    ForEach(universalDomains) { domain in
-                        Text("\(domain.icon) \(domain.shortName)").tag(domain.id)
+        VStack(spacing: JieziSpacing.xl2) {
+            JieziFormSection(title: "数据域字段", subtitle: "只填写能从原图或文字事实中确认的内容。") {
+                JieziFormRow(title: "数据域", systemImage: "square.grid.2x2", showsDivider: true) {
+                    Menu {
+                        ForEach(universalDomains) { domain in
+                            Button("\(domain.icon) \(domain.shortName)") {
+                                draft.domainKey = domain.id
+                            }
+                        }
+                    } label: {
+                        selectorLabel(selectedDomain?.shortName ?? draft.domainKey, placeholder: "选择数据域")
                     }
+                    .buttonStyle(.plain)
                 }
-                TextField("标题（可选）", text: $draft.title)
-                TextField(metadata.dimensionLabel, text: $draft.dimension)
-                TextField(metadata.primaryLabel, text: $draft.primaryValueText)
-                    .keyboardType(.decimalPad)
+                JieziFormRow(title: "标题", systemImage: "textformat", showsDivider: true) {
+                    TextField("标题（可选）", text: $draft.title)
+                        .jieziInputSurface()
+                }
+                JieziFormRow(title: metadata.dimensionLabel, systemImage: "tag", showsDivider: true) {
+                    TextField(metadata.dimensionLabel, text: $draft.dimension)
+                        .jieziInputSurface()
+                }
+                JieziFormRow(title: metadata.primaryLabel, systemImage: "number") {
+                    TextField(metadata.primaryLabel, text: $draft.primaryValueText)
+                        .keyboardType(.decimalPad)
+                        .jieziInputSurface()
+                }
             }
 
             if draft.domainKey == "wallet" {
-                Section("钱包快照") {
-                    Picker("记录类型", selection: $draft.walletRecordKind) {
-                        Text("资产余额").tag("cash_snapshot")
-                        Text("负债待还").tag("liability_snapshot")
+                JieziFormSection(title: "钱包快照") {
+                    JieziFormRow(title: "记录类型", systemImage: "wallet.pass", showsDivider: true) {
+                        Picker("记录类型", selection: $draft.walletRecordKind) {
+                            Text("资产余额").tag("cash_snapshot")
+                            Text("负债待还").tag("liability_snapshot")
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    Picker("账户类型", selection: $draft.walletAccountType) {
-                        Text("现金").tag("cash")
-                        Text("微信").tag("wechat")
-                        Text("支付宝").tag("alipay")
-                        Text("银行卡").tag("bank_card")
-                        Text("信用卡").tag("credit_card")
-                        Text("消费额度").tag("credit_line")
-                        Text("其他").tag("other")
+                    JieziFormRow(title: "账户类型", systemImage: "creditcard", showsDivider: draft.walletRecordKind == "liability_snapshot") {
+                        Picker("账户类型", selection: $draft.walletAccountType) {
+                            Text("现金").tag("cash")
+                            Text("微信").tag("wechat")
+                            Text("支付宝").tag("alipay")
+                            Text("银行卡").tag("bank_card")
+                            Text("信用卡").tag("credit_card")
+                            Text("消费额度").tag("credit_line")
+                            Text("其他").tag("other")
+                        }
+                        .pickerStyle(.menu)
+                        .tint(JieziTheme.brand)
+                        .jieziInputSurface()
                     }
                     if draft.walletRecordKind == "liability_snapshot" {
-                        TextField("还款日期（YYYY-MM-DD，可选）", text: $draft.walletDueDate)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        TextField("每月还款日（可选）", text: $draft.walletBillDay)
-                            .keyboardType(.numberPad)
+                        JieziFormRow(title: "还款日期", systemImage: "calendar", showsDivider: true) {
+                            TextField("YYYY-MM-DD（可选）", text: $draft.walletDueDate)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .jieziInputSurface()
+                        }
+                        JieziFormRow(title: "每月还款日", systemImage: "calendar.badge.clock") {
+                            TextField("日期（可选）", text: $draft.walletBillDay)
+                                .keyboardType(.numberPad)
+                                .jieziInputSurface()
+                        }
                     }
                 }
             }
@@ -235,11 +310,34 @@ struct ManualRecordSheet: View {
     }
 
     private var dateFields: some View {
-        Section("时间") {
-            DatePicker("日期", selection: $draft.date, in: ...Date(), displayedComponents: .date)
-            Toggle("记录具体时间", isOn: $draft.includesTime)
+        JieziFormSection(title: "时间") {
+            JieziFormRow(title: "日期", systemImage: "calendar", showsDivider: true) {
+                DatePicker("日期", selection: $draft.date, in: ...Date(), displayedComponents: .date)
+                    .labelsHidden()
+                    .jieziInputSurface()
+            }
+            JieziFormRow(title: "记录具体时间", systemImage: "clock", showsDivider: draft.includesTime) {
+                Toggle("记录具体时间", isOn: $draft.includesTime)
+                    .labelsHidden()
+                    .tint(JieziTheme.brand)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if draft.includesTime {
-                DatePicker("时间", selection: $draft.time, displayedComponents: .hourAndMinute)
+                JieziFormRow(title: "时间", systemImage: "clock.badge") {
+                    DatePicker("时间", selection: $draft.time, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                        .jieziInputSurface()
+                }
+            }
+        }
+    }
+
+    private var noteSection: some View {
+        JieziFormSection(title: "备注", subtitle: "选填，仅用于补充无法放进结构化字段的信息。") {
+            JieziFormRow(title: "补充说明", systemImage: "note.text") {
+                TextField("写下一句补充说明", text: $draft.note, axis: .vertical)
+                    .lineLimit(2...5)
+                    .jieziInputSurface()
             }
         }
     }
@@ -247,23 +345,33 @@ struct ManualRecordSheet: View {
     private func optionPicker(
         _ title: String,
         selection: Binding<String>,
-        options: [NativeManualRecordOption]
+        options: [NativeManualRecordOption],
+        systemImage: String,
+        showsDivider: Bool = false
     ) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(options) { option in
-                Text(option.title).tag(option.id)
+        JieziFormRow(title: title, systemImage: systemImage, showsDivider: showsDivider) {
+            Menu {
+                ForEach(options) { option in
+                    Button(option.isFrequent ? "\(option.title) · 常用" : option.title) {
+                        selection.wrappedValue = option.id
+                    }
+                }
+            } label: {
+                selectorLabel(optionTitle(selection.wrappedValue, options: options), placeholder: "请选择")
             }
+            .buttonStyle(.plain)
         }
     }
 
     private func stagingEvidence(_ record: NativeStagingRecord) -> some View {
-        Section("识别依据") {
+        VStack(alignment: .leading, spacing: JieziSpacing.md) {
             if let imageURL = record.imageURL {
                 CachedRemoteImage(url: imageURL) { image in
                     image
                         .resizable()
                         .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: 260)
+                        .frame(maxWidth: .infinity, maxHeight: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
                 } placeholder: {
                     ProgressView("正在准备原图")
                         .frame(maxWidth: .infinity, minHeight: 120)
@@ -279,20 +387,26 @@ struct ManualRecordSheet: View {
                 .font(.footnote)
             }
             Text(record.summary)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(JieziFont.footnote)
+                .foregroundStyle(JieziTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(JieziSpacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(JieziTheme.brand.opacity(0.055), in: RoundedRectangle(cornerRadius: JieziRadius.sm))
         }
+        .padding(.vertical, JieziSpacing.md)
     }
 
     private func editableOptionField(
         _ title: String,
         selection: Binding<String>,
-        options: [NativeManualRecordOption]
+        options: [NativeManualRecordOption],
+        systemImage: String,
+        showsDivider: Bool = false
     ) -> some View {
-        LabeledContent(title) {
+        JieziFormRow(title: title, systemImage: systemImage, showsDivider: showsDivider) {
             HStack(spacing: 8) {
                 TextField("输入或选择", text: selection)
-                    .multilineTextAlignment(.trailing)
                 Menu {
                     ForEach(options) { option in
                         Button(option.isFrequent ? "\(option.title) · 常用" : option.title) {
@@ -301,26 +415,52 @@ struct ManualRecordSheet: View {
                     }
                 } label: {
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption)
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(JieziTheme.brand)
+                        .frame(width: 34, height: 34)
                 }
                 .accessibilityLabel("选择\(title)")
             }
+            .jieziInputSurface()
         }
     }
 
     private func accountSection(title: String) -> some View {
-        Section(title) {
-            Picker("账户", selection: $draft.accountId) {
-                Text("暂不绑定").tag(String?.none)
-                ForEach(accountCandidates) { account in
-                    Text(account.title).tag(String?.some(account.id))
+        JieziFormSection(title: title, subtitle: "绑定后会同步生成账户流水；暂不绑定不会影响记录本身。") {
+            JieziFormRow(title: "账户", systemImage: "wallet.pass") {
+                Menu {
+                    Button("暂不绑定") { draft.accountId = nil }
+                    ForEach(accountCandidates) { account in
+                        Button(account.title) { draft.accountId = account.id }
+                    }
+                } label: {
+                    selectorLabel(selectedAccountTitle, placeholder: "暂不绑定")
                 }
+                .buttonStyle(.plain)
             }
-            Text("绑定账户后由现有原子 RPC 同步生成账户流水。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
+    }
+
+    private var selectedAccountTitle: String {
+        guard let accountId = draft.accountId else { return "暂不绑定" }
+        return accountCandidates.first(where: { $0.id == accountId })?.title ?? "暂不绑定"
+    }
+
+    private func optionTitle(_ value: String, options: [NativeManualRecordOption]) -> String {
+        options.first(where: { $0.id == value })?.title ?? value
+    }
+
+    private func selectorLabel(_ value: String, placeholder: String) -> some View {
+        HStack(spacing: JieziSpacing.sm) {
+            Text(value.isEmpty ? placeholder : value)
+                .foregroundStyle(value.isEmpty ? JieziTheme.muted : JieziTheme.ink)
+                .lineLimit(1)
+            Spacer(minLength: JieziSpacing.sm)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(JieziTheme.brand)
+        }
+        .jieziInputSurface()
     }
 
     private func normalizeDomainSelection() {
