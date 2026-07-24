@@ -395,7 +395,7 @@ struct TodayView: View {
     private func sectionHeader<Accessory: View>(
         title: String,
         subtitle: String,
-        @ViewBuilder accessory: () -> Accessory
+        @ViewBuilder accessory: @escaping () -> Accessory
     ) -> some View {
         JieziSectionHeader(title: title, subtitle: subtitle) {
             accessory()
