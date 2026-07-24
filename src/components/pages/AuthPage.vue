@@ -86,7 +86,7 @@ async function submit(attempt = 0) {
             legal_consent_at: acceptedAt,
             sensitive_data_consent_at: acceptedAt,
             terms_version: '2026-07-19',
-            privacy_version: '2026-07-19',
+            privacy_version: '2026-07-22',
           },
         },
       })

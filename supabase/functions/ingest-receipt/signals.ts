@@ -117,6 +117,46 @@ function pushNums(arr: number[], ...vals: Array<number | null | undefined>) {
   for (const v of vals) if (typeof v === "number" && Number.isFinite(v)) arr.push(v);
 }
 
+function normalizeEntityKey(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("zh-CN")
+    .replace(/[\s\u00a0\u3000·•・_\-\/\\()[\]（）【】]/g, "");
+}
+
+function mergedMerchantStats(
+  merchantStats: Record<string, unknown>,
+  merchant: string,
+): { weekCount: number | null; averageAmount: number | null } | null {
+  const normalizedMerchant = normalizeEntityKey(merchant);
+  const matches = Object.entries(merchantStats)
+    .filter(([name, value]) => normalizeEntityKey(name) === normalizedMerchant && isObj(value))
+    .map(([, value]) => value as Record<string, unknown>);
+  if (matches.length === 0) return null;
+
+  const weekCounts = matches.map((item) => num(item.week_count)).filter((value): value is number => value !== null);
+  const weekCount = weekCounts.length > 0 ? weekCounts.reduce((sum, value) => sum + value, 0) : null;
+  let weightedTotal = 0;
+  let totalWeight = 0;
+  const fallbackAverages: number[] = [];
+  for (const item of matches) {
+    const average = num(item.avg_amount);
+    if (average === null) continue;
+    fallbackAverages.push(average);
+    const weight = num(item.count_90d) ?? num(item.month_count);
+    if (weight === null || weight <= 0) continue;
+    weightedTotal += average * weight;
+    totalWeight += weight;
+  }
+  const averageAmount = totalWeight > 0
+    ? Math.round((weightedTotal / totalWeight) * 100) / 100
+    : fallbackAverages.length > 0
+      ? Math.round((fallbackAverages.reduce((sum, value) => sum + value, 0) / fallbackAverages.length) * 100) / 100
+      : null;
+
+  return { weekCount, averageAmount };
+}
+
 // ============================================================
 // 各域信号规则(与 docs/profile-schema-v1.md 一一对应)
 // ============================================================
@@ -127,16 +167,16 @@ function expenseSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
   const categoryStats = isObj(profile.category_stats) ? profile.category_stats : {};
 
   // merchant_repeat:week_count 是本周已入库真数,+1 含当前这笔;≥3 才说
-  if (cur.merchant && isObj(merchantStats[cur.merchant])) {
-    const ms = merchantStats[cur.merchant] as Record<string, unknown>;
-    const weekCount = num(ms.week_count);
+  if (cur.merchant) {
+    const merchantSummary = mergedMerchantStats(merchantStats, cur.merchant);
+    const weekCount = merchantSummary?.weekCount ?? null;
     if (weekCount !== null && weekCount + 1 >= 3) {
       const n = weekCount + 1;
       const nums: number[] = [n];
-      pushNums(nums, num(ms.avg_amount), cur.amount);
+      pushNums(nums, merchantSummary?.averageAmount, cur.amount);
       out.push({
         kind: "merchant_repeat", priority: 1,
-        fact: `本自然周(周一起算)在「${cur.merchant}」已是第 ${n} 次消费(含本笔);该店近90天平均单笔 ${num(ms.avg_amount) ?? "?"} 元`,
+        fact: `本自然周(周一起算)在「${cur.merchant}」已是第 ${n} 次消费(含本笔);该店近90天平均单笔 ${merchantSummary?.averageAmount ?? "?"} 元`,
         numbers: nums,
         countNumbers: [n],
       });
@@ -216,6 +256,24 @@ function expenseSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
     }
   }
   return out;
+}
+
+function incomeSignals(cur: CurrentFacts): DomainSignal[] {
+  const parts: string[] = [];
+  const numbers: number[] = [];
+  if (cur.amount !== null && cur.amount !== undefined) {
+    parts.push(`本笔收入 ${cur.amount} 元`);
+    numbers.push(cur.amount);
+  }
+  if (cur.merchant) parts.push(`来源「${cur.merchant}」`);
+  if (cur.category) parts.push(`类型 ${cur.category}`);
+  if (parts.length === 0) return [];
+  return [{
+    kind: "record_acknowledge",
+    priority: 99,
+    fact: parts.join("，"),
+    numbers,
+  }];
 }
 
 function sleepSignals(profile: Record<string, unknown>, cur: CurrentFacts): DomainSignal[] {
@@ -583,11 +641,11 @@ export function selectSignals(
   cur: CurrentFacts,
 ): DomainSignal[] {
   const row = profiles[domainKey];
-  if (!row || !isObj(row.profile)) return [];
-  const profile = row.profile;
+  const profile = row && isObj(row.profile) ? row.profile : {};
   let signals: DomainSignal[] = [];
   switch (domainKey) {
     case "expense": signals = expenseSignals(profile, cur); break;
+    case "income":  signals = incomeSignals(cur); break;
     case "sleep":   signals = sleepSignals(profile, cur); break;
     case "sport":   signals = sportSignals(profile, cur); break;
     case "food":    signals = foodSignals(profile, cur); break;
@@ -634,6 +692,25 @@ export interface NumberValidationResult {
   violations: string[];
   /** 与入参 generatedTexts 对齐:该下标文本存在违规 */
   badIndexes: number[];
+}
+
+export function hasUnsupportedFinanceCompanionClaim(text: string): boolean {
+  return /(?:第|连续|连着)\s*[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)
+    || /(?:这周|本周|本月|近\s*\d+\s*天|30\s*天).{0,16}[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)
+    || /(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text);
+}
+
+// 画像统计的次数、周期、趋势和比较必须由代码直接呈现。模型只能据此调整语气，
+// 不能重新表述统计事实，否则即使数字正确也可能把“近30天”改写成“本周”。
+export function hasModelOwnedStatisticalClaim(text: string): boolean {
+  const compact = text.replace(/\s+/g, "");
+  return /(?:本|这|上)(?:自然)?周|(?:本|这|上)个月|本月|上月|近(?:两|三|四|[一二两三四五六七八九十\d]+)(?:天|周|月|晚)|过去(?:两|三|四|[一二两三四五六七八九十\d]+)(?:天|周|月)/.test(compact)
+    || /(?:第|连续|连着|已有|累计)[一二两三四五六七八九十百\d]+(?:次|笔|顿|天|晚|家|周|月)/.test(compact)
+    || /[一二两三四五六七八九十百\d]+(?:次|笔|顿|天|晚|家|周|月|回)/.test(compact)
+    || /(?:比|较)(?:昨天|之前|过去|上次|上周|上月|平时|常态|平均|中位|历史)/.test(compact)
+    || /(?:平均|中位数?|四分位|百分位|历史最好|历史最高|历史最低|连续偏|反复出现|高频|常点|周节奏|月节奏)/.test(compact)
+    || /(?:今天|今晚|今早).{0,10}(?:已有|累计|第[一二两三四五六七八九十百\d]+|连续)/.test(compact)
+    || /(?:最近|近来).{0,12}(?:总是|一直|经常|频繁|反复|又)/.test(compact);
 }
 
 // allowedSources:信号 fact 文本 + 本条记录字段 JSON。数字宽松匹配(整数/一位小数视为同数)。
@@ -689,4 +766,26 @@ export function validateVoiceNumbers(
     if (bad) badIndexes.push(idx);
   });
   return { ok: violations.length === 0, violations, badIndexes };
+}
+
+export function validateModelTone(
+  generatedTexts: Array<string | null | undefined>,
+  recordFactsJson: string,
+): NumberValidationResult {
+  // 不把画像信号交给数字白名单：模型只能引用本条记录数字，画像数字由规则层原样输出。
+  const numericCheck = validateVoiceNumbers(generatedTexts, [], recordFactsJson);
+  const violations = [...numericCheck.violations];
+  const badIndexes = new Set(numericCheck.badIndexes);
+
+  generatedTexts.forEach((text, index) => {
+    if (!text || !hasModelOwnedStatisticalClaim(text)) return;
+    violations.push(`模型试图改写代码统计口径: "${text.slice(0, 40)}"`);
+    badIndexes.add(index);
+  });
+
+  return {
+    ok: violations.length === 0,
+    violations,
+    badIndexes: [...badIndexes].sort((left, right) => left - right),
+  };
 }
