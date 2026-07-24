@@ -200,7 +200,7 @@ struct RecordDetailView: View {
             JieziTheme.pageBackground.ignoresSafeArea()
             if let detail {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 16) {
                         if let imageURL = detail.imageURL {
                             Button {
                                 imagePreview = ImagePreviewRoute(url: imageURL)
