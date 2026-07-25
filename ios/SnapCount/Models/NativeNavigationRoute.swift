@@ -1,6 +1,7 @@
 import Foundation
 
 enum NativeInboxRoute: Hashable {
+    case category(filter: NativeInboxFilter)
     case staging(recordId: String)
     case record(reference: String)
 }

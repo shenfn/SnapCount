@@ -15,6 +15,34 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(AppTab.allCases.allSatisfy { !$0.title.isEmpty })
     }
 
+    func testInboxCategoriesKeepActionOrderAndHideEmptyGroups() {
+        let pending = NativePendingExpense(
+            id: "pending-1",
+            title: "待补全账单",
+            amount: 70.89,
+            dateKey: "2026-07-25",
+            reference: "pending/pending-1"
+        )
+        let item = NativeInboxItem(
+            id: "pending-pending-1",
+            kind: .pendingExpense,
+            dateKey: pending.dateKey,
+            title: pending.title,
+            subtitle: "¥70.89",
+            status: "pending",
+            statusLabel: "待补全",
+            systemImage: "creditcard",
+            pendingExpense: pending,
+            stagingRecord: nil
+        )
+
+        let categories = NativeInboxPresentation.categories(from: [item])
+
+        XCTAssertEqual(categories.map(\.filter), [.pendingExpense])
+        XCTAssertEqual(categories.first?.count, 1)
+        XCTAssertEqual(categories.first?.title, "待补全账单")
+    }
+
     func testOnboardingProgressIsVersionedAndUserScoped() throws {
         let suiteName = "SnapCountTests.Onboarding.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -831,6 +859,66 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(summary.liabilityTotal, 320)
         XCTAssertEqual(summary.netWorthEstimate, 480)
         XCTAssertEqual(summary.dayIncome - summary.dayExpense, 70)
+    }
+
+    func testHomeInsightDefaultsShowThreeFinanceAndDomainCards() {
+        XCTAssertEqual(NativeHomeInsightPreferences.financeDefaults.filter(\.isEnabled).count, 3)
+        XCTAssertEqual(NativeHomeInsightPreferences.domainDefaults.filter(\.isEnabled).count, 3)
+        XCTAssertEqual(NativeHomeInsightPreferences.maximumEnabledCards, 3)
+    }
+
+    func testHomeInsightPreferencesRestoreMissingCardsAndRemoveDuplicates() {
+        let configuration = [
+            NativeHomeFinanceCardConfiguration(key: .cashSafety, isEnabled: true, order: 2),
+            NativeHomeFinanceCardConfiguration(key: .cashSafety, isEnabled: false, order: 3),
+            NativeHomeFinanceCardConfiguration(key: .accountMix, isEnabled: true, order: 1)
+        ]
+
+        let normalized = NativeHomeInsightPreferences.normalizedFinance(configuration)
+
+        XCTAssertEqual(normalized.map(\.key), [.accountMix, .cashSafety, .spendingRhythm, .expenseStructure, .repaymentPlan])
+        XCTAssertEqual(normalized.filter(\.isEnabled).count, 2)
+        XCTAssertEqual(normalized.map(\.order), [0, 1, 2, 3, 4])
+    }
+
+    func testHomeInsightPreferencesNeverEnableMoreThanThreeCards() {
+        var configuration = NativeHomeInsightPreferences.financeDefaults.map {
+            NativeHomeFinanceCardConfiguration(key: $0.key, isEnabled: false, order: $0.order)
+        }
+        configuration = NativeHomeInsightPreferences.updatingFinance(configuration, key: .cashSafety, isEnabled: true)
+        configuration = NativeHomeInsightPreferences.updatingFinance(configuration, key: .spendingRhythm, isEnabled: true)
+        configuration = NativeHomeInsightPreferences.updatingFinance(configuration, key: .expenseStructure, isEnabled: true)
+        configuration = NativeHomeInsightPreferences.updatingFinance(configuration, key: .repaymentPlan, isEnabled: true)
+
+        XCTAssertEqual(configuration.filter(\.isEnabled).map(\.key), [.cashSafety, .spendingRhythm, .expenseStructure])
+    }
+
+    func testHomeInsightAnalyticsFillsMissingDaysWithoutChangingRecordedTotals() {
+        let records = [
+            NativeDayRecord(
+                id: "expense-1", reference: "expense/1", dateKey: "2026-07-23", kind: .expense,
+                domainKey: "expense", title: "早餐", subtitle: "", value: "¥12", timeLabel: nil, systemImage: "creditcard"
+            ),
+            NativeDayRecord(
+                id: "expense-2", reference: "expense/2", dateKey: "2026-07-25", kind: .expense,
+                domainKey: "expense", title: "晚餐", subtitle: "", value: "¥30", timeLabel: nil, systemImage: "creditcard"
+            )
+        ]
+        let snapshot = DashboardSnapshot(dayRecordGroups: [
+            NativeDayRecordGroup(dateKey: "2026-07-23", records: [records[0]]),
+            NativeDayRecordGroup(dateKey: "2026-07-25", records: [records[1]])
+        ])
+
+        let summaries = NativeHomeInsightAnalytics.recentDailySummaries(
+            from: snapshot,
+            endingAt: "2026-07-25"
+        )
+
+        XCTAssertEqual(summaries.count, 7)
+        XCTAssertEqual(summaries.first?.dateKey, "2026-07-19")
+        XCTAssertEqual(summaries[4].expense, 12)
+        XCTAssertEqual(summaries[6].expense, 30)
+        XCTAssertEqual(summaries.filter { $0.expense > 0 }.count, 2)
     }
 
     func testAccountTypeNormalizationMatchesPWAAdapter() {
