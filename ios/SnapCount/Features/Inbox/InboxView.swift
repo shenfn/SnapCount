@@ -46,7 +46,7 @@ struct InboxView: View {
         ZStack {
             JieziPageBackground()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     pendingSummary
 
                     if let message = appState.inboxFinanceMessage {
@@ -81,18 +81,10 @@ struct InboxView: View {
                                         .foregroundStyle(JieziTheme.muted)
                                         .padding(.leading, 2)
 
-                                    LazyVGrid(
-                                        columns: [
-                                            GridItem(.flexible(), spacing: JieziSpacing.md),
-                                            GridItem(.flexible(), spacing: JieziSpacing.md)
-                                        ],
-                                        spacing: JieziSpacing.md
-                                    ) {
-                                        ForEach(section.items) { item in inboxCell(item) }
-                                    }
+                                    inboxGrid(section.items)
                                 }
-                                .padding(.horizontal, JieziSpacing.lg)
-                                .padding(.bottom, JieziSpacing.xl)
+                                .padding(.horizontal, JieziSpacing.Semantic.card_padding)
+                                .padding(.bottom, JieziSpacing.xl2)
                             }
                         }
                     }
@@ -135,22 +127,50 @@ struct InboxView: View {
     }
 
     @ViewBuilder
-    private func inboxCell(_ item: NativeInboxItem) -> some View {
+    private func inboxGrid(_ items: [NativeInboxItem]) -> some View {
+        let hasWideItem = !items.count.isMultiple(of: 2)
+        let pairedItems = hasWideItem ? Array(items.dropLast()) : items
+
+        VStack(spacing: JieziSpacing.md) {
+            if !pairedItems.isEmpty {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: JieziSpacing.md),
+                        GridItem(.flexible(), spacing: JieziSpacing.md)
+                    ],
+                    spacing: JieziSpacing.md
+                ) {
+                    ForEach(pairedItems) { item in inboxCell(item) }
+                }
+            }
+
+            if hasWideItem, let item = items.last {
+                inboxCell(item, isWide: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func inboxCell(_ item: NativeInboxItem, isWide: Bool = false) -> some View {
         if let pending = item.pendingExpense {
             NavigationLink(value: NativeInboxRoute.record(reference: pending.reference)) {
-                NativeInboxFilmCard(item: item, repaymentCandidate: nil)
+                NativeInboxFilmCard(item: item, repaymentCandidate: nil, isWide: isWide)
             }
             .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
         } else if let record = item.stagingRecord {
             Button {
                 stageRecordId = record.id
             } label: {
                 NativeInboxFilmCard(
                     item: item,
-                    repaymentCandidate: appState.repaymentCandidates[record.id]
+                    repaymentCandidate: appState.repaymentCandidates[record.id],
+                    isWide: isWide
                 )
             }
             .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -161,7 +181,7 @@ struct InboxView: View {
                 .foregroundStyle(JieziTheme.muted)
             Spacer()
         }
-        .padding(.horizontal, JieziSpacing.xl)
+        .padding(.horizontal, JieziSpacing.xl2)
         .padding(.top, JieziSpacing.sm)
         .padding(.bottom, JieziSpacing.md)
     }
@@ -192,9 +212,9 @@ struct InboxView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, JieziSpacing.xl)
+            .padding(.horizontal, JieziSpacing.xl2)
         }
-        .padding(.bottom, JieziSpacing.lg)
+        .padding(.bottom, JieziSpacing.Semantic.card_padding)
     }
 
     private func filterCount(_ filter: NativeInboxFilter) -> Int {
@@ -212,9 +232,9 @@ struct InboxView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             (isError ? JieziTheme.coral : JieziTheme.brand).opacity(0.08),
-            in: RoundedRectangle(cornerRadius: JieziRadius.card, style: .continuous)
+            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
         )
-        .padding(.horizontal, JieziSpacing.lg)
+        .padding(.horizontal, JieziSpacing.Semantic.card_padding)
         .padding(.bottom, JieziSpacing.md)
     }
 
@@ -227,6 +247,7 @@ struct InboxView: View {
 private struct NativeInboxFilmCard: View {
     let item: NativeInboxItem
     let repaymentCandidate: NativeRepaymentCandidate?
+    var isWide = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -235,7 +256,9 @@ private struct NativeInboxFilmCard: View {
                 InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
                     .padding(8)
             }
-            .aspectRatio(3 / 4, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .aspectRatio(isWide ? 16.0 / 9.0 : 3.0 / 4.0, contentMode: .fit)
+            .background(JieziTheme.paper.opacity(0.72))
             .clipped()
 
             HStack(alignment: .top, spacing: 8) {
@@ -243,7 +266,8 @@ private struct NativeInboxFilmCard: View {
                     Text(item.title)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(JieziTheme.ink)
-                        .lineLimit(1)
+                        .lineLimit(isWide ? 1 : 2)
+                        .frame(minHeight: isWide ? 16 : 32, alignment: .topLeading)
                     if let record = item.stagingRecord {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("记录 \(record.occurredAtLabel ?? "未识别")")
@@ -251,6 +275,7 @@ private struct NativeInboxFilmCard: View {
                         }
                         .font(.caption2)
                         .foregroundStyle(JieziTheme.muted)
+                        .lineLimit(1)
                     } else if let pending = item.pendingExpense {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("记录 \(pending.occurredAtLabel ?? pending.dateKey)")
@@ -258,6 +283,7 @@ private struct NativeInboxFilmCard: View {
                         }
                         .font(.caption2)
                         .foregroundStyle(JieziTheme.muted)
+                        .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 4)
@@ -273,11 +299,13 @@ private struct NativeInboxFilmCard: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, minHeight: isWide ? 72 : 86, alignment: .top)
         }
+        .frame(maxWidth: .infinity)
         .background(Color.white.opacity(0.7))
-        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous)
+            RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
                 .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
         }
         .shadow(color: JieziTheme.space.opacity(0.08), radius: 10, x: 0, y: 6)
@@ -285,29 +313,32 @@ private struct NativeInboxFilmCard: View {
 
     @ViewBuilder
     private var filmContent: some View {
-        if let url = item.stagingRecord?.imageURL ?? item.pendingExpense?.imageURL {
-            CachedRemoteImage(url: url) { image in
-                ZStack(alignment: .bottomLeading) {
-                    image.resizable().scaledToFill()
-                    LinearGradient(
-                        colors: [.clear, JieziTheme.space.opacity(0.72)],
-                        startPoint: .center,
-                        endPoint: .bottom
-                    )
-                    Text(item.subtitle)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .padding(10)
+        Group {
+            if let url = item.stagingRecord?.imageURL ?? item.pendingExpense?.imageURL {
+                CachedRemoteImage(url: url) { image in
+                    ZStack(alignment: .bottomLeading) {
+                        image.resizable().scaledToFill()
+                        LinearGradient(
+                            colors: [.clear, JieziTheme.space.opacity(0.72)],
+                            startPoint: .center,
+                            endPoint: .bottom
+                        )
+                        Text(item.subtitle)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                            .padding(10)
+                    }
+                } placeholder: {
+                    ProgressView().tint(JieziTheme.brand)
+                } failure: {
+                    noteContent
                 }
-            } placeholder: {
-                ProgressView().tint(JieziTheme.brand)
-            } failure: {
+            } else {
                 noteContent
             }
-        } else {
-            noteContent
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var noteContent: some View {
@@ -366,6 +397,7 @@ private struct NativeInboxFilmCard: View {
             }
             .padding(16)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var statusColor: Color {
@@ -399,7 +431,7 @@ private struct InboxFilmStateBadge: View {
 
 private struct InboxSettledEmptyView: View {
     var body: some View {
-        VStack(spacing: JieziSpacing.lg) {
+        VStack(spacing: JieziSpacing.Semantic.card_padding) {
             Canvas { context, size in
                 let center = CGPoint(x: size.width / 2, y: size.height / 2)
                 let ringRadius: CGFloat = 48
@@ -443,7 +475,7 @@ private struct StagingVerdictStageView: View {
     let domains: [NativeArchiveDomain]
 
     @State private var showDiscardConfirmation = false
-    @State private var showDetail = false
+    @State private var editorContext: StagingEditorContext?
 
     private var currentIndex: Int {
         records.firstIndex(where: { $0.id == selection }) ?? 0
@@ -471,7 +503,7 @@ private struct StagingVerdictStageView: View {
             .ignoresSafeArea()
 
             if records.isEmpty {
-                VStack(spacing: JieziSpacing.lg) {
+                VStack(spacing: JieziSpacing.Semantic.card_padding) {
                     Text("微尘皆已落定").font(.headline)
                     Text("全部处理完毕").font(.subheadline).foregroundStyle(JieziTheme.muted)
                     Button("回到中转站") { closeStage() }
@@ -520,12 +552,11 @@ private struct StagingVerdictStageView: View {
             }
             Button("再想想", role: .cancel) {}
         } message: {
-            Text("这条截图将从芥子中散去，不会进入任何数据域。")
+            Text("这条截图不会进入任何数据域，原图会在后台安全清理。")
         }
-        .sheet(isPresented: $showDetail) {
-            if let current {
-                NavigationStack { StagingRecordDetailView(record: current) }
-            }
+        .sheet(item: $editorContext) { context in
+            ManualRecordSheet(staging: context.record, domainKey: context.domainId)
+                .environmentObject(appState)
         }
     }
 
@@ -609,12 +640,15 @@ private struct StagingVerdictStageView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.white)
-                .background(JieziTheme.brandWash, in: RoundedRectangle(cornerRadius: JieziRadius.card, style: .continuous))
+                .background(JieziTheme.brandWash, in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
                 .disabled(appState.inboxActionRecordId != nil)
             }
 
             HStack(spacing: JieziSpacing.sm) {
-                stageActionButton("ellipsis.circle", title: "详情") { showDetail = true }
+                stageActionButton("slider.horizontal.3", title: "调整") {
+                    let domainId = record.domainKey ?? domains.first?.id ?? "expense"
+                    editorContext = StagingEditorContext(record: record, domainId: domainId)
+                }
                 stageActionButton("arrow.clockwise", title: "重试") {
                     Task {
                         await appState.retryStagingRecord(record)
@@ -649,7 +683,7 @@ private struct StagingVerdictStageView: View {
         .foregroundStyle(destructive ? JieziTheme.coral : JieziTheme.brand)
         .background(
             (destructive ? JieziTheme.coral : JieziTheme.brand).opacity(0.08),
-            in: RoundedRectangle(cornerRadius: JieziRadius.card, style: .continuous)
+            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
         )
     }
 
@@ -682,8 +716,9 @@ private struct StagingVerdictStageView: View {
     }
 
     private func archive(_ record: NativeStagingRecord, to domainId: String) async {
-        await appState.archiveStagingRecord(record, domainKey: domainId)
-        finishAction(for: record.id)
+        if await appState.archiveStagingRecord(record, domainKey: domainId) != nil {
+            finishAction(for: record.id)
+        }
     }
 
     private func finishAction(for recordId: String) {
@@ -725,6 +760,13 @@ private struct StagingVerdictStageView: View {
         default: return "需要你看看"
         }
     }
+}
+
+private struct StagingEditorContext: Identifiable {
+    let record: NativeStagingRecord
+    let domainId: String
+
+    var id: String { "\(record.id):\(domainId)" }
 }
 
 private struct StagingStageImage: View {
@@ -841,10 +883,10 @@ private struct StagingFactSheet: View {
                 startPoint: .top,
                 endPoint: .bottom
             ),
-            in: RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous)
+            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous)
+            RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
                 .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
         }
     }
@@ -992,8 +1034,7 @@ private struct PendingExpenseResolutionView: View {
             Spacer()
             Text("待补全").font(.caption.weight(.bold)).foregroundStyle(JieziTheme.gold)
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 
     @ViewBuilder
@@ -1007,8 +1048,7 @@ private struct PendingExpenseResolutionView: View {
                 Label("截图文件不可用", systemImage: "photo.badge.exclamationmark")
                     .frame(maxWidth: .infinity, minHeight: 120)
             }
-            .padding(8)
-            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+            .jieziCard(solid: true)
         }
     }
 
@@ -1024,8 +1064,7 @@ private struct PendingExpenseResolutionView: View {
                     .font(.title2.weight(.bold).monospacedDigit())
             }
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 
     private func typeSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
@@ -1036,8 +1075,7 @@ private struct PendingExpenseResolutionView: View {
             }
             .pickerStyle(.segmented)
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 
     private func fieldSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
@@ -1065,8 +1103,7 @@ private struct PendingExpenseResolutionView: View {
                 optionMenu("收入类型", selection: draft.incomeCategory, options: NativeManualRecordDraft.incomeCategories)
             }
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 
     private func optionMenu(_ title: String, selection: Binding<String>, options: [NativeManualRecordOption]) -> some View {
@@ -1146,8 +1183,7 @@ private struct PendingExpenseResolutionView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(solid: true)
     }
 }
 
@@ -1299,6 +1335,7 @@ private struct StagingRecordRow: View {
 
 private struct StagingRecordDetailView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     let record: NativeStagingRecord
     @State private var showDiscardConfirm = false
     @State private var selectedArchiveDomain: NativeArchiveDomain?
@@ -1373,7 +1410,9 @@ private struct StagingRecordDetailView: View {
         ) { domain in
             Button("归档到\(domain.title)") {
                 Task {
-                    await appState.archiveStagingRecord(record, domainKey: domain.id)
+                    if await appState.archiveStagingRecord(record, domainKey: domain.id) != nil {
+                        dismiss()
+                    }
                 }
             }
             Button("取消", role: .cancel) {}

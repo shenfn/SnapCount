@@ -14,6 +14,10 @@ struct RootView: View {
                 LoginView()
             }
         }
+        .fullScreenCover(isPresented: $appState.isOnboardingPresented) {
+            OnboardingFlowView()
+                .environmentObject(appState)
+        }
     }
 
     private var tabRoot: some View {

@@ -15,67 +15,78 @@ struct RecordsView: View {
     var body: some View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
-            List {
-                Section {
-                    JieziMonthSwitcher(
-                        title: monthTitle,
-                        selectionToken: selectedMonthKey,
-                        canAdvance: selectedMonthKey < Self.currentMonthKey,
-                        onPrevious: { shiftMonth(-1) },
-                        onNext: { shiftMonth(1) }
-                    )
-                    Picker("数据域", selection: $selectedKind) {
-                        ForEach(availableKinds) { Text($0.title).tag($0) }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: JieziSpacing.xl2) {
+                    VStack(alignment: .leading, spacing: JieziSpacing.md) {
+                        JieziMonthSwitcher(
+                            title: monthTitle,
+                            selectionToken: selectedMonthKey,
+                            canAdvance: selectedMonthKey < Self.currentMonthKey,
+                            onPrevious: { shiftMonth(-1) },
+                            onNext: { shiftMonth(1) }
+                        )
+                        Picker("数据域", selection: $selectedKind) {
+                            ForEach(availableKinds) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
-                }
+                    .jieziCard(solid: true)
 
-                if isLoadingMonth && monthGroups.isEmpty {
-                    ProgressView("正在加载本月记录…")
+                    if isLoadingMonth && monthGroups.isEmpty {
+                        ProgressView("正在加载本月记录…")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, JieziSpacing.xl5)
+                    } else if let message = appState.recordMonthMessages[selectedMonthKey],
+                              selectedMonthKey != Self.currentMonthKey,
+                              monthGroups.isEmpty {
+                        ContentUnavailableView {
+                            Label("本月记录加载失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                        } description: {
+                            Text(message)
+                        } actions: {
+                            Button("重新加载") { Task { await appState.loadRecordMonth(selectedMonthKey, force: true) } }
+                        }
                         .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
-                } else if let message = appState.recordMonthMessages[selectedMonthKey],
-                          selectedMonthKey != Self.currentMonthKey,
-                          monthGroups.isEmpty {
-                    ContentUnavailableView {
-                        Label("本月记录加载失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
-                    } description: {
-                        Text(message)
-                    } actions: {
-                        Button("重新加载") { Task { await appState.loadRecordMonth(selectedMonthKey, force: true) } }
-                    }
-                    .listRowBackground(Color.clear)
-                } else if groups.isEmpty {
-                    ContentUnavailableView("本月还没有记录", systemImage: "doc.text.magnifyingglass", description: Text("截图识别或手动记录后，会按日期出现在这里。"))
-                        .listRowBackground(Color.clear)
-                } else {
-                    ForEach(groups) { group in
-                        Section(dayTitle(group.dateKey)) {
-                            ForEach(group.records) { item in
-                                NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: item.systemImage)
-                                            .foregroundStyle(JieziTheme.mint)
-                                            .frame(width: 34, height: 34)
-                                            .background(JieziTheme.brand.opacity(0.08), in: Circle())
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(item.title).font(.headline)
-                                            Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        .padding(.vertical, JieziSpacing.xl5)
+                    } else if groups.isEmpty {
+                        JieziEmptyState(
+                            systemImage: "doc.text.magnifyingglass",
+                            title: "本月还没有记录",
+                            message: "截图识别或手动记录后，会按日期出现在这里。"
+                        )
+                    } else {
+                        ForEach(groups) { group in
+                            VStack(alignment: .leading, spacing: JieziSpacing.sm) {
+                                Text(dayTitle(group.dateKey))
+                                    .font(JieziType.sectionTitle)
+                                    .foregroundStyle(JieziTheme.ink)
+                                    .padding(.horizontal, JieziSpacing.xs)
+
+                                VStack(spacing: 0) {
+                                    ForEach(group.records) { item in
+                                        NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
+                                            recordRow(item)
                                         }
-                                        Spacer()
-                                        VStack(alignment: .trailing, spacing: 3) {
-                                            Text(item.value).font(.subheadline.monospacedDigit())
-                                            Text(item.timeLabel ?? "全天").font(.caption2).foregroundStyle(.secondary)
-                                        }
+                                        .buttonStyle(.plain)
                                     }
-                                    .padding(.vertical, 4)
+                                }
+                                .background(
+                                    JieziTheme.paper.opacity(0.72),
+                                    in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
+                                )
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
+                                        .stroke(JieziTheme.brand.opacity(0.10), lineWidth: 1)
                                 }
                             }
                         }
                     }
                 }
+                .padding(.horizontal, JieziSpacing.Semantic.page_padding)
+                .padding(.top, JieziSpacing.sm)
+                .padding(.bottom, JieziSpacing.xl5)
             }
-            .scrollContentBackground(.hidden)
+            .scrollIndicators(.hidden)
             .refreshable { await appState.loadRecordMonth(selectedMonthKey, force: true) }
         }
         .navigationTitle("记录")
@@ -114,6 +125,54 @@ struct RecordsView: View {
 
     private func dayTitle(_ dateKey: String) -> String { String(dateKey.suffix(5)) }
 
+    private func recordRow(_ item: NativeDayRecord) -> some View {
+        HStack(spacing: JieziSpacing.Semantic.item_gap) {
+            Image(systemName: item.systemImage)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(JieziTheme.brand)
+                .frame(width: JieziIcon.Semantic.list_row_block, height: JieziIcon.Semantic.list_row_block)
+                .background(JieziTheme.brand.opacity(0.10), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
+
+            VStack(alignment: .leading, spacing: JieziSpacing.xxs) {
+                Text(item.title)
+                    .font(JieziType.cardTitle)
+                    .foregroundStyle(JieziTheme.ink)
+                Text(item.subtitle)
+                    .font(JieziFont.footnote)
+                    .foregroundStyle(JieziTheme.muted)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: JieziSpacing.sm)
+
+            VStack(alignment: .trailing, spacing: JieziSpacing.xxs) {
+                Text(item.value)
+                    .font(JieziType.moneyInline)
+                    .monospacedDigit()
+                    .foregroundStyle(JieziTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Text(item.timeLabel ?? "全天")
+                    .font(JieziFont.caption)
+                    .foregroundStyle(JieziTheme.muted)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(JieziFont.caption.weight(.bold))
+                .foregroundStyle(JieziTheme.muted.opacity(0.55))
+        }
+        .padding(.horizontal, JieziSpacing.Semantic.item_gap)
+        .padding(.vertical, JieziSpacing.md)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            let stroke = JieziStroke.divider()
+            Rectangle()
+                .fill(stroke.color)
+                .frame(height: stroke.width)
+                .padding(.leading, JieziIcon.Semantic.list_row_block + JieziSpacing.Semantic.item_gap * 2)
+        }
+    }
+
     private func shiftMonth(_ offset: Int) {
         guard let shifted = NativeMonthKey.shifted(selectedMonthKey, by: offset) else { return }
         selectedMonthKey = shifted
@@ -141,7 +200,7 @@ struct RecordDetailView: View {
             JieziTheme.pageBackground.ignoresSafeArea()
             if let detail {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 16) {
                         if let imageURL = detail.imageURL {
                             Button {
                                 imagePreview = ImagePreviewRoute(url: imageURL)
@@ -530,85 +589,145 @@ private struct RecordEditSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section(draft.kind == "income" ? "收入" : "消费") {
-                    TextField(draft.kind == "income" ? "来源" : "商户", text: $draft.title)
-                    TextField("金额", text: $draft.amountText)
-                        .keyboardType(.decimalPad)
-                    TextField("日期", text: $draft.recordDate)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
+            ZStack {
+                JieziPageBackground()
+                VStack(spacing: 0) {
+                    JieziFormTopBar(
+                        title: "编辑记录",
+                        primaryTitle: "保存",
+                        isWorking: isSaving,
+                        onCancel: { dismiss() },
+                        onSubmit: { Task { await save() } }
+                    )
 
-                if draft.kind == "expense" {
-                    Section("消费字段") {
-                        TextField("平台", text: $draft.platform)
-                        TextField("分类", text: $draft.category)
-                        TextField("支付方式", text: $draft.paymentMethod)
-                    }
-                } else {
-                    Section("收入字段") {
-                        TextField("类型", text: $draft.category)
-                    }
-                }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: JieziSpacing.xl2) {
+                            primarySection
+                            classificationSection
+                            accountSection
+                            noteSection
 
-                Section("账户") {
-                    Picker("绑定账户", selection: $draft.accountId) {
-                        Text("不绑定账户").tag(String?.none)
-                        ForEach(accountCandidates) { account in
-                            Text(account.title).tag(String?.some(account.id))
+                            if let message {
+                                JieziFormMessage(message: message)
+                            }
                         }
+                        .padding(.horizontal, JieziSpacing.Semantic.page_padding)
+                        .padding(.top, JieziSpacing.Semantic.card_padding)
+                        .padding(.bottom, JieziSpacing.xl3)
                     }
-                    Text("保存后由服务端原子更新记录与账户流水，不会在客户端直接修改余额。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("备注") {
-                    TextField("备注", text: $draft.note, axis: .vertical)
-                        .lineLimit(3...6)
-                }
-
-                if let message {
-                    Section {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(JieziTheme.coral)
-                    }
+                    .scrollDismissesKeyboard(.interactively)
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 if appState.accounts.isEmpty { await appState.loadAccounts() }
             }
-            .navigationTitle("编辑记录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
-                        dismiss()
-                    }
-                    .disabled(isSaving)
+        }
+    }
+
+    private var primarySection: some View {
+        JieziFormSection(
+            title: draft.kind == "income" ? "收入信息" : "消费信息",
+            subtitle: "只修改需要纠正的字段，保存后会同步刷新详情和统计。"
+        ) {
+            JieziFormRow(
+                title: draft.kind == "income" ? "来源" : "商户",
+                systemImage: draft.kind == "income" ? "arrow.down.circle" : "storefront",
+                showsDivider: true
+            ) {
+                TextField(draft.kind == "income" ? "收入来源" : "商户名称", text: $draft.title)
+                    .jieziInputSurface()
+            }
+            JieziFormRow(title: "金额", systemImage: "yensign", showsDivider: true) {
+                TextField("0.00", text: $draft.amountText)
+                    .keyboardType(.decimalPad)
+                    .jieziInputSurface()
+            }
+            JieziFormRow(title: "日期", systemImage: "calendar") {
+                TextField("YYYY-MM-DD", text: $draft.recordDate)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .jieziInputSurface()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var classificationSection: some View {
+        if draft.kind == "expense" {
+            JieziFormSection(title: "消费字段", subtitle: "这些字段决定渠道、分类与支付统计。") {
+                JieziFormRow(title: "平台", systemImage: "shippingbox", showsDivider: true) {
+                    TextField("消费平台", text: $draft.platform)
+                        .jieziInputSurface()
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task {
-                            await save()
-                        }
-                    } label: {
-                        if isSaving {
-                            ProgressView()
-                        } else {
-                            Text("保存")
-                        }
-                    }
-                    .disabled(isSaving)
+                JieziFormRow(title: "分类", systemImage: "square.grid.2x2", showsDivider: true) {
+                    TextField("消费分类", text: $draft.category)
+                        .jieziInputSurface()
                 }
+                JieziFormRow(title: "支付方式", systemImage: "creditcard") {
+                    TextField("支付方式", text: $draft.paymentMethod)
+                        .jieziInputSurface()
+                }
+            }
+        } else {
+            JieziFormSection(title: "收入字段") {
+                JieziFormRow(title: "收入类型", systemImage: "tag") {
+                    TextField("收入类型", text: $draft.category)
+                        .jieziInputSurface()
+                }
+            }
+        }
+    }
+
+    private var accountSection: some View {
+        JieziFormSection(
+            title: "账户",
+            subtitle: "保存后由服务端原子更新记录与账户流水，不会在客户端直接修改余额。"
+        ) {
+            JieziFormRow(title: "绑定账户", systemImage: "wallet.pass") {
+                Menu {
+                    Button("不绑定账户") { draft.accountId = nil }
+                    ForEach(accountCandidates) { account in
+                        Button(account.title) { draft.accountId = account.id }
+                    }
+                } label: {
+                    selectorLabel(selectedAccountTitle)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var noteSection: some View {
+        JieziFormSection(title: "备注", subtitle: "选填，仅用于补充这条记录的背景。") {
+            JieziFormRow(title: "补充说明", systemImage: "note.text") {
+                TextField("写下一句补充说明", text: $draft.note, axis: .vertical)
+                    .lineLimit(3...6)
+                    .jieziInputSurface()
             }
         }
     }
 
     private var accountCandidates: [NativeAccount] {
         appState.accounts.filter { !$0.isArchived || $0.id == draft.accountId }
+    }
+
+    private var selectedAccountTitle: String {
+        guard let accountId = draft.accountId else { return "不绑定账户" }
+        return accountCandidates.first(where: { $0.id == accountId })?.title ?? "不绑定账户"
+    }
+
+    private func selectorLabel(_ title: String) -> some View {
+        HStack(spacing: JieziSpacing.sm) {
+            Text(title)
+                .foregroundStyle(JieziTheme.ink)
+                .lineLimit(1)
+            Spacer(minLength: JieziSpacing.sm)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(JieziTheme.brand)
+        }
+        .jieziInputSurface()
     }
 
     private func save() async {

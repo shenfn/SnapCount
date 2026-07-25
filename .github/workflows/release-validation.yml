@@ -64,8 +64,8 @@ jobs:
           deno check --no-lock --node-modules-dir=auto supabase/functions/generate-insights/index.ts
           deno check --no-lock --node-modules-dir=auto supabase/functions/ingest-receipt/index.ts
 
-      - name: Test receipt duplicate review
-        run: deno test --no-lock supabase/functions/ingest-receipt/duplicate-review_test.ts
+      - name: Test receipt safeguards
+        run: deno test --no-lock supabase/functions/ingest-receipt/duplicate-review_test.ts supabase/functions/ingest-receipt/signals_test.ts supabase/functions/ingest-receipt/expression-shadow_test.ts
 
       - name: Run Shadow Planner tests
         run: node --test tools/ai-validation/expression-planner/tests/*.test.mjs
@@ -100,4 +100,7 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260720100000_harden_privileged_rpcs_and_receipt_storage.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260721110000_user_finance_vocabulary.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260721190000_finance_perceptual_duplicate_review.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260722100000_staging_discard_cleanup_and_archive_feedback.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260722110000_invalidate_deleted_record_context.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260722120000_expression_improvement_privacy_controls.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-security-migration.sql

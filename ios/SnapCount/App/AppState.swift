@@ -21,6 +21,7 @@ final class AppState: ObservableObject {
     @Published var notificationPermissionStatusText = "检查中"
     @Published var shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
     @Published var shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
+    @Published var isOnboardingPresented = false
     @Published var todayPath = NavigationPath()
     @Published var inboxPath = NavigationPath()
     @Published var recordsPath = NavigationPath()
@@ -87,8 +88,8 @@ final class AppState: ObservableObject {
     private let insightsRepository: InsightsRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
     private let financeVocabularyRepository: FinanceVocabularyRepositoryProtocol
+    private let onboardingProgressStore: OnboardingProgressStore
     private let keychain = KeychainStore.shared
-    private var hasAskedNotificationPermissionThisSession = false
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
     private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
@@ -99,6 +100,7 @@ final class AppState: ObservableObject {
     private var userStateGeneration = 0
     private var dashboardSupplementTask: Task<Void, Never>?
     private var isLoadingFinanceVocabulary = false
+    private var shouldDeferOnboardingForExternalRoute = false
 
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
@@ -111,7 +113,8 @@ final class AppState: ObservableObject {
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         insightsRepository: InsightsRepositoryProtocol = InsightsRepository(),
         settingsRepository: SettingsRepositoryProtocol = SettingsRepository(),
-        financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository()
+        financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository(),
+        onboardingProgressStore: OnboardingProgressStore = OnboardingProgressStore()
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
@@ -124,6 +127,7 @@ final class AppState: ObservableObject {
         self.insightsRepository = insightsRepository
         self.settingsRepository = settingsRepository
         self.financeVocabularyRepository = financeVocabularyRepository
+        self.onboardingProgressStore = onboardingProgressStore
     }
 
     func bootstrap() {
@@ -131,6 +135,7 @@ final class AppState: ObservableObject {
             await restoreAuthentication()
             isBootstrapping = false
             await refreshNotificationPermissionStatus()
+            presentOnboardingIfNeeded()
         }
     }
 
@@ -155,7 +160,6 @@ final class AppState: ObservableObject {
             updateShortcutCredentialMessage()
             Task {
                 await refreshDashboard()
-                await requestShortcutNotificationPermissionIfNeeded()
             }
         } catch {
             if isInvalidRefreshSessionError(error) {
@@ -184,8 +188,8 @@ final class AppState: ObservableObject {
             hasUploadToken = true
             authMessage = "已登录，快捷指令凭据已同步。"
             updateShortcutCredentialMessage()
+            presentOnboardingIfNeeded()
             await refreshDashboard()
-            await requestShortcutNotificationPermissionIfNeeded()
         } catch {
             authMessage = error.localizedDescription
             authMessageIsError = true
@@ -241,8 +245,8 @@ final class AppState: ObservableObject {
                     ? "注册成功，快捷指令凭据已同步。"
                     : "注册成功。上传凭据正在生成，可稍后在设置中重新检查。"
                 updateShortcutCredentialMessage()
+                presentOnboardingIfNeeded()
                 await refreshDashboard()
-                await requestShortcutNotificationPermissionIfNeeded()
             }
         } catch {
             authMessage = error.localizedDescription
@@ -1174,6 +1178,8 @@ final class AppState: ObservableObject {
 
     func handleDeepLink(_ url: URL) {
         guard url.scheme == "jiezi" else { return }
+        shouldDeferOnboardingForExternalRoute = true
+        isOnboardingPresented = false
 
         switch url.host {
         case "inbox":
@@ -1193,6 +1199,8 @@ final class AppState: ObservableObject {
     }
 
     func handleShortcutNotificationRoute(_ route: String?) {
+        shouldDeferOnboardingForExternalRoute = true
+        isOnboardingPresented = false
         let parts = (route ?? "")
             .split(separator: "/")
             .map(String.init)
@@ -1232,8 +1240,9 @@ final class AppState: ObservableObject {
             let session = try await validSession()
             try await inboxRepository.discard(id: record.id, accessToken: session.accessToken)
             inboxPath = NavigationPath()
-            await refreshDashboard()
-            inboxActionMessage = "已销毁这条待处理截图"
+            removeStagingRecordLocally(record.id)
+            refreshDashboardAfterInboxMutation()
+            inboxActionMessage = "已销毁这条待处理截图，原图将在后台安全清理"
         } catch {
             inboxActionMessage = "销毁失败：\(error.localizedDescription)"
             inboxActionMessageIsError = true
@@ -1266,8 +1275,9 @@ final class AppState: ObservableObject {
         }
     }
 
-    func archiveStagingRecord(_ record: NativeStagingRecord, domainKey: String) async {
-        guard inboxActionRecordId == nil else { return }
+    @discardableResult
+    func archiveStagingRecord(_ record: NativeStagingRecord, domainKey: String) async -> String? {
+        guard inboxActionRecordId == nil else { return nil }
         inboxActionRecordId = record.id
         let domainTitle = dashboard.domains.first(where: { $0.id == domainKey })?.shortName
             ?? InboxArchiveDomains.all.first(where: { $0.id == domainKey })?.title
@@ -1277,17 +1287,42 @@ final class AppState: ObservableObject {
         defer { inboxActionRecordId = nil }
         do {
             let session = try await validSession()
-            _ = try await inboxRepository.archive(
+            let targetReference = try await inboxRepository.archive(
                 record,
                 domainKey: domainKey,
                 accessToken: session.accessToken
             )
             inboxPath = NavigationPath()
-            await refreshDashboard()
+            removeStagingRecordLocally(record.id)
+            refreshDashboardAfterInboxMutation()
             inboxActionMessage = "已归档到\(domainTitle)"
+            return targetReference
         } catch {
             inboxActionMessage = "归档失败：\(error.localizedDescription)"
             inboxActionMessageIsError = true
+            return nil
+        }
+    }
+
+    @discardableResult
+    func archiveStagingRecord(
+        _ record: NativeStagingRecord,
+        draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async -> String? {
+        let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
+        return await archiveStagingRecord(adjustedRecord, domainKey: draft.domainKey)
+    }
+
+    private func removeStagingRecordLocally(_ recordId: String) {
+        dashboard.stagingRecords.removeAll { $0.id == recordId }
+        dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
+    }
+
+    private func refreshDashboardAfterInboxMutation() {
+        Task { [weak self] in
+            await Task.yield()
+            await self?.refreshDashboard()
         }
     }
 
@@ -1525,6 +1560,10 @@ final class AppState: ObservableObject {
         await updateSettings(["prompt_optimization_enabled": AnyCodable(enabled)]) { $0.promptOptimizationEnabled = enabled }
     }
 
+    func setExpressionImprovementEnabled(_ enabled: Bool) async {
+        await updateSettings(["expression_improvement_enabled": AnyCodable(enabled)]) { $0.expressionImprovementEnabled = enabled }
+    }
+
     func setImageRetention(days: Int, cleanupExisting: Bool = false) async {
         let keepImages = days != 0
         let retentionDays = keepImages ? days : 7
@@ -1637,17 +1676,37 @@ final class AppState: ObservableObject {
             : "未开启。请在系统设置里允许芥子通知，快捷指令仍会在“显示结果”里展示摘要。"
     }
 
-    func requestShortcutNotificationPermissionIfNeeded() async {
-        guard !hasAskedNotificationPermissionThisSession else { return }
-        hasAskedNotificationPermissionThisSession = true
-
-        let status = await ShortcutNotificationService.shared.authorizationStatus()
-        guard status == .notDetermined else { return }
-        await requestShortcutNotificationPermission()
-    }
-
     func refreshNotificationPermissionStatus() async {
         notificationPermissionStatusText = await ShortcutNotificationService.shared.authorizationStatusText()
+    }
+
+    func presentOnboarding() {
+        guard isSignedIn, !currentUserId.isEmpty else { return }
+        isOnboardingPresented = true
+    }
+
+    func presentOnboardingIfNeeded() {
+        guard isSignedIn,
+              !currentUserId.isEmpty,
+              !shouldDeferOnboardingForExternalRoute,
+              onboardingProgressStore.shouldPresent(for: currentUserId) else { return }
+        isOnboardingPresented = true
+    }
+
+    func finishOnboarding(skipped: Bool) {
+        guard !currentUserId.isEmpty else {
+            isOnboardingPresented = false
+            return
+        }
+        let existing = onboardingProgressStore.completion(for: currentUserId)
+        if !skipped || existing != .completed {
+            onboardingProgressStore.mark(skipped ? .skipped : .completed, for: currentUserId)
+        }
+        isOnboardingPresented = false
+    }
+
+    var onboardingStatusText: String {
+        onboardingProgressStore.completion(for: currentUserId)?.statusText ?? "尚未完成"
     }
 
     func sendTestShortcutNotification() async {
@@ -1806,6 +1865,7 @@ final class AppState: ObservableObject {
         isCleaningSourceImages = false
         isExportingData = false
         isDeletingAccount = false
+        isOnboardingPresented = false
         dashboardMessage = nil
         isShowingCachedDashboard = false
         selectedTab = .today

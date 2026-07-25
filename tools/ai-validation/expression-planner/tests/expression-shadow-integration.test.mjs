@@ -10,10 +10,11 @@ const shadowModulePath = path.join(root, 'supabase/functions/ingest-receipt/expr
 const ingestPath = path.join(root, 'supabase/functions/ingest-receipt/index.ts')
 const sqlPath = path.resolve(here, '../sql/070_expression_shadow_runs.draft.sql')
 
-test('shadow collector defaults off and never changes user output', async () => {
+test('shadow collector defaults off, requires opt-in, and never changes user output', async () => {
   const source = await readFile(shadowModulePath, 'utf8')
   assert.match(source, /value \?\? "off"/)
-  assert.match(source, /if \(mode === "off"\) return/)
+  assert.match(source, /return improvementConsent && mode !== "off"/)
+  assert.match(source, /if \(!shouldCaptureExpressionShadow\(input\.improvementConsent, mode\)\) return/)
   assert.match(source, /changes_user_output: false/)
   assert.match(source, /waitUntil/)
   assert.match(source, /\.catch\(\(error\) =>/)

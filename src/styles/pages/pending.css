@@ -428,11 +428,15 @@ body.verdict-open {
 .pending-film-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
   gap: 12px;
 }
 
 .pending-film-card {
+  display: flex;
+  height: 100%;
   min-width: 0;
+  flex-direction: column;
   padding: 0;
   overflow: hidden;
   border: 1px solid rgba(66, 110, 99, 0.12);
@@ -459,6 +463,7 @@ body.verdict-open {
   position: relative;
   display: block;
   width: 100%;
+  flex: 0 0 auto;
   aspect-ratio: 3 / 4;
   overflow: hidden;
   background: #e7e4d9;
@@ -614,6 +619,7 @@ body.verdict-open {
 .pending-film-caption {
   display: flex;
   min-width: 0;
+  flex: 1 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -971,8 +977,8 @@ body.verdict-open {
 
 .verdict-minor-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
 }
 
 .verdict-minor-actions button {
@@ -1158,7 +1164,7 @@ body.verdict-open {
 }
 
 .pending-film-caption {
-  min-height: 68px;
+  min-height: 94px;
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
@@ -1166,11 +1172,15 @@ body.verdict-open {
 }
 
 .pending-film-caption > strong {
+  display: -webkit-box;
+  min-height: 2.7em;
   overflow: hidden;
   color: #202a27;
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .pending-film-caption .pending-film-caption-domain {
@@ -1279,11 +1289,15 @@ body.verdict-open {
 .pending-bill-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
   gap: 12px;
 }
 
 .pending-bill-film-card {
+  display: flex;
+  height: 100%;
   min-width: 0;
+  flex-direction: column;
   padding: 0;
   overflow: hidden;
   border: 1px solid rgba(66, 110, 99, 0.12);
@@ -1305,6 +1319,7 @@ body.verdict-open {
   position: relative;
   display: block;
   width: 100%;
+  flex: 0 0 auto;
   aspect-ratio: 3 / 4;
   overflow: hidden;
   background: #e7e4d9;
@@ -1375,7 +1390,8 @@ body.verdict-open {
 
 .pending-bill-film-caption {
   display: flex;
-  min-height: 112px;
+  min-height: 122px;
+  flex: 1 0 auto;
   flex-direction: column;
   gap: 6px;
   padding: 9px 10px 10px;
@@ -1398,6 +1414,18 @@ body.verdict-open {
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.pending-processed-edit {
+  min-height: 34px;
+  margin-top: 10px;
+  padding: 0 12px;
+  border: 1px solid rgba(66, 110, 99, 0.18);
+  border-radius: 8px;
+  background: rgba(66, 110, 99, 0.08);
+  color: #31584e;
+  font: 700 12px/1 var(--font);
+  cursor: pointer;
 }
 
 .pending-bill-film-title b {

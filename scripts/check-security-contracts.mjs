@@ -15,12 +15,24 @@ const consentSql = await readFile(
   path.join(repoRoot, "supabase", "migrations", "20260719220000_registration_consent_and_private_defaults.sql"),
   "utf8",
 );
+const expressionPrivacySql = await readFile(
+  path.join(repoRoot, "supabase", "migrations", "20260722120000_expression_improvement_privacy_controls.sql"),
+  "utf8",
+);
 const financeVocabularySql = await readFile(
   path.join(repoRoot, "supabase", "migrations", "20260721110000_user_finance_vocabulary.sql"),
   "utf8",
 );
+const stagingLifecycleSql = await readFile(
+  path.join(repoRoot, "supabase", "migrations", "20260722100000_staging_discard_cleanup_and_archive_feedback.sql"),
+  "utf8",
+);
 const ingestSource = await readFile(
   path.join(repoRoot, "supabase", "functions", "ingest-receipt", "index.ts"),
+  "utf8",
+);
+const expressionShadowSource = await readFile(
+  path.join(repoRoot, "supabase", "functions", "ingest-receipt", "expression-shadow.ts"),
   "utf8",
 );
 const insightsSource = await readFile(
@@ -37,6 +49,14 @@ const receiptTestSource = await readFile(
 );
 const receiptCleanupSource = await readFile(
   path.join(repoRoot, "scripts", "cleanup-test-receipts.mjs"),
+  "utf8",
+);
+const pwaStoreSource = await readFile(
+  path.join(repoRoot, "src", "composables", "useStore.js"),
+  "utf8",
+);
+const nativeDataSource = await readFile(
+  path.join(repoRoot, "ios", "SnapCount", "Services", "NativeDataService.swift"),
   "utf8",
 );
 
@@ -110,6 +130,23 @@ assert.match(consentSql, /submitted_terms_version is distinct from '2026-07-19'/
 assert.match(consentSql, /submitted_privacy_version is distinct from '2026-07-19'/i);
 assert.match(consentSql, /accepted_at timestamptz := now\(\)/i);
 
+assert.match(expressionPrivacySql, /expression_improvement_enabled boolean not null default false/i);
+assert.match(expressionPrivacySql, /statement_timestamp\(\)/i);
+assert.match(expressionPrivacySql, /cleanup_expression_improvement_retention/i);
+assert.match(expressionPrivacySql, /interval '30 days'/i);
+assert.match(expressionPrivacySql, /not exists \([\s\S]*expression_feedback_events[\s\S]*not exists \([\s\S]*expression_preference_signals/i);
+assert.match(expressionPrivacySql, /submitted_privacy_version not in \('2026-07-19', '2026-07-22'\)/i);
+assert.match(expressionShadowSource, /if \(!shouldCaptureExpressionShadow\(input\.improvementConsent, mode\)\) return/);
+assert.match(expressionShadowSource, /proposed_plan: minimizedPlan/);
+assert.doesNotMatch(expressionShadowSource, /rendered_payload:\s*\{\s*feedback,\s*notification/i);
+assert.doesNotMatch(expressionShadowSource, /baseline_payload:[\s\S]{0,120}notification/i);
+assert.match(ingestSource, /expression_improvement_enabled/);
+assert.match(ingestSource, /improvementConsent: privacyConfig\.expressionImprovementEnabled/);
+assert.match(ingestSource, /ai_feedback: payload\.aiFeedback \?\? null/);
+assert.doesNotMatch(ingestSource, /payload\.ai[\s\S]{0,80}\.ai_feedback[\s\S]{0,80}\?\? null/);
+assert.match(ingestSource, /validateModelTone/);
+assert.match(ingestSource, /hasModelOwnedStatisticalClaim/);
+
 assert.match(financeVocabularySql, /create table if not exists public\.user_finance_vocabulary/i);
 assert.match(financeVocabularySql, /user_id uuid not null references auth\.users\(id\) on delete cascade/i);
 assert.match(financeVocabularySql, /alter table public\.user_finance_vocabulary enable row level security/i);
@@ -123,6 +160,16 @@ assert.match(financeVocabularySql, /expense categories must use the stable prima
 assert.match(financeVocabularySql, /linked account not found or permission denied/i);
 assert.match(financeVocabularySql, /revoke all on function public\.record_user_finance_vocabulary\(text, text, text, uuid\)[\s\S]*from public, anon, authenticated, service_role/i);
 assert.match(financeVocabularySql, /grant execute on function public\.record_user_finance_vocabulary\(text, text, text, uuid\)[\s\S]*to authenticated\s*;/i);
+
+assert.match(stagingLifecycleSql, /status in \([\s\S]*'skipped_shared'[\s\S]*\)/i);
+assert.match(stagingLifecycleSql, /create or replace function public\.discard_staging_record\(\s*p_staging_id uuid/i);
+assert.match(stagingLifecycleSql, /source_table[\s\S]*'staging_records'[\s\S]*source_id/i);
+assert.match(stagingLifecycleSql, /revoke all on function public\.discard_staging_record\(uuid, text\) from public, anon, authenticated/i);
+assert.match(stagingLifecycleSql, /grant execute on function public\.discard_staging_record\(uuid, text\) to authenticated/i);
+assert.match(stagingLifecycleSql, /sync_staging_archive_metadata[\s\S]*transactions[\s\S]*ai_feedback[\s\S]*income_records[\s\S]*data_records/i);
+assert.match(stagingLifecycleSql, /data_records[\s\S]*companion_message/i);
+assert.match(stagingLifecycleSql, /update public\.staging_records[\s\S]*status = 'archived'/i);
+assert.doesNotMatch(stagingLifecycleSql, /delete from public\.image_cleanup_queue/i);
 
 assert.match(ingestSource, /function normalizeManagedStoragePath\(value: string\)/);
 assert.match(ingestSource, /collectUserImagePaths[\s\S]*normalizeManagedStoragePath\(rawPath\)/);
@@ -138,6 +185,9 @@ assert.doesNotMatch(ingestSource, /finalizeReadyAccountDeletions[\s\S]{0,2200}cl
 assert.match(ingestSource, /status === "deleting"[\s\S]*rescanAccountDeletionImages/);
 assert.match(ingestSource, /status: "deleting"[\s\S]*5 \* 60 \* 1000/);
 assert.match(ingestSource, /postDeleteQueueCount/);
+assert.match(ingestSource, /clearDiscardedStagingImageReference/);
+assert.match(ingestSource, /status: "skipped_shared"/);
+assert.match(ingestSource, /hasBusinessImageReference\([\s\S]*stagingSource/);
 assert.doesNotMatch(ingestSource, /Uploaded image rollback deferred[\s\S]{0,100}userId/);
 assert.doesNotMatch(ingestSource, /raw=\$\{rawText\.slice/);
 assert.doesNotMatch(ingestSource, /console\.error\(e\)/);
@@ -151,5 +201,9 @@ assert.doesNotMatch(receiptTestSource, /DEFAULT_UPLOAD_TOKEN|uploadToken\s*=\s*[
 assert.doesNotMatch(receiptCleanupSource, /DEFAULT_UPLOAD_TOKEN|uploadToken\s*=\s*["'][0-9a-f-]{36}["']/i);
 assert.match(receiptTestSource, /TEST_RECEIPT_ACCESS_TOKEN[\s\S]*TEST_RECEIPT_UPLOAD_TOKEN/);
 assert.match(receiptTestSource, /缺少测试身份/);
+const pwaDiscardSource = pwaStoreSource.match(/async function discardStagingRecord[\s\S]*?function toggleBatchMode/)?.[0] ?? "";
+assert.match(pwaDiscardSource, /sb\.rpc\('discard_staging_record'/);
+assert.doesNotMatch(pwaDiscardSource, /from\('staging_records'\)\.update/);
+assert.match(nativeDataSource, /func discardStagingRecord[\s\S]*name: "discard_staging_record"/);
 
 console.log("Security migration contracts validated.");
