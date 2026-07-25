@@ -166,7 +166,7 @@ enum NativeInboxPresentation {
 
     static func categories(from items: [NativeInboxItem]) -> [NativeInboxCategory] {
         let order: [NativeInboxFilter] = [.pendingExpense, .routing, .review, .failed, .repair]
-        let categories = order.compactMap { filter in
+        let categories: [NativeInboxCategory] = order.compactMap { (filter: NativeInboxFilter) -> NativeInboxCategory? in
             let categoryItems = filtered(items, by: filter)
             guard !categoryItems.isEmpty else { return nil }
             return NativeInboxCategory(filter: filter, items: categoryItems)
