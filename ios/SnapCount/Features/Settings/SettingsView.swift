@@ -13,6 +13,19 @@ struct SettingsView: View {
                     profileHeader
                 }
 
+                Section("使用帮助") {
+                    Button {
+                        appState.presentOnboarding()
+                    } label: {
+                        settingsRow(
+                            "使用引导",
+                            detail: appState.onboardingStatusText,
+                            systemImage: "point.topleft.down.to.point.bottomright.curvepath"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 Section("数据管理") {
                     NavigationLink {
                         DataExportView()
@@ -135,6 +148,7 @@ struct SettingsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .listStyle(.insetGrouped)
             .refreshable { await appState.loadUserSettings() }
         }
         .navigationTitle("设置")
@@ -219,6 +233,8 @@ private struct VisionSettingsView: View {
             }
         }
         .navigationTitle("识别模型配置")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .disabled(appState.isSavingSettings)
     }
 
@@ -299,6 +315,8 @@ private struct CompanionSettingsView: View {
             }
         }
         .navigationTitle("AI 陪伴")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .disabled(appState.isSavingSettings)
         .onAppear { customNote = appState.userSettings.companionCustomNote }
     }
@@ -321,6 +339,8 @@ private struct InsightSettingsView: View {
             }
         }
         .navigationTitle("AI 联动分析")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .disabled(appState.isSavingSettings)
     }
 }
@@ -336,6 +356,10 @@ private struct PrivacySettingsView: View {
                 Toggle("AI 日志记录", isOn: asyncToggle(appState.userSettings.aiLogsEnabled, appState.setAILogsEnabled))
                 Toggle("Prompt 优化参与", isOn: asyncToggle(appState.userSettings.promptOptimizationEnabled, appState.setPromptOptimizationEnabled))
                 Text("Prompt 优化开启后会保留脱敏后的模型原始输出，默认关闭。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Toggle("参与 AI 改进", isOn: asyncToggle(appState.userSettings.expressionImprovementEnabled, appState.setExpressionImprovementEnabled))
+                Text("开启后保存 30 天的脱敏语义与评分，不含原图、金额、商户或通知原文；关闭会清理未关联点评的后台数据。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -363,6 +387,8 @@ private struct PrivacySettingsView: View {
             }
         }
         .navigationTitle("隐私与留存")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .disabled(appState.isSavingSettings || appState.isCleaningSourceImages)
         .confirmationDialog(retentionDialogTitle, isPresented: $showRetentionConfirmation, titleVisibility: .visible) {
             if let pendingRetention {
@@ -454,6 +480,8 @@ private struct DataExportView: View {
             }
         }
         .navigationTitle("数据导出")
+        .scrollContentBackground(.hidden)
+        .background(JieziTheme.pageBackground)
         .sheet(item: $exportedFile) { file in
             ActivityView(activityItems: [file.url])
         }
@@ -598,6 +626,7 @@ private struct ShortcutSetupView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .listStyle(.insetGrouped)
         }
         .navigationTitle("快捷指令")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
@@ -615,24 +644,6 @@ private struct ShortcutSetupView: View {
         }
     }
 
-    private enum ShortcutTemplateKind {
-        case photo
-        case screenshot
-
-        var title: String {
-            switch self {
-            case .photo: return "拍照模板"
-            case .screenshot: return "截图模板"
-            }
-        }
-
-        var url: String {
-            switch self {
-            case .photo: return AppConfig.photoShortcutTemplateURL
-            case .screenshot: return AppConfig.screenshotShortcutTemplateURL
-            }
-        }
-    }
 }
 
 private struct ShortcutActionRow: View {

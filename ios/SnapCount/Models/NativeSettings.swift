@@ -17,6 +17,7 @@ struct NativeUserSettings: Equatable {
     var companionCustomNote = ""
     var aiLogsEnabled = false
     var promptOptimizationEnabled = false
+    var expressionImprovementEnabled = false
     var keepSourceImages = true
     var imageRetentionDays = -1
 

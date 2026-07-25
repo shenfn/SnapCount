@@ -215,6 +215,14 @@
               <template v-if="r.resolvedAt"> · {{ fmtShort(r.resolvedAt) }}</template>
             </div>
             <div class="pending-record-summary" v-if="r.summary && r.status === 'archived'">{{ r.summary }}</div>
+            <button
+              v-if="r.status === 'archived' && r.targetRecordId"
+              type="button"
+              class="pending-processed-edit"
+              @click.stop="store.openProcessedStagingRecord(r)"
+            >
+              查看并编辑
+            </button>
           </div>
         </div>
       </div>
@@ -306,6 +314,7 @@
               <span>↓</span> {{ verdictPrimaryLabel(activeVerdict) }}
             </button>
             <div class="verdict-minor-actions">
+              <button v-if="suggestedDomain(activeVerdict)" type="button" :disabled="verdictBusy" @click="adjustFromVerdict(activeVerdict)"><span>☷</span>调整</button>
               <button type="button" :disabled="verdictBusy" @click="retryFromVerdict(activeVerdict)"><span>↻</span>重试</button>
               <button type="button" class="danger" :disabled="verdictBusy" @click="discardFromVerdict(activeVerdict)"><span>×</span>销毁</button>
             </div>
@@ -340,6 +349,7 @@ const activeVerdictId = ref(null)
 const verdictBusy = ref(false)
 const stageTouchStartX = ref(null)
 const activeVerdictImageReady = ref(false)
+const editingVerdictContext = ref(null)
 
 const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
@@ -743,6 +753,19 @@ function suggestedDomain(record) {
   return archiveDomains.value.find(domain => domain.id === record.domainKey) || null
 }
 
+function adjustFromVerdict(record) {
+  const domainId = suggestedDomain(record)?.id
+  if (!domainId) return
+  let opened = false
+  if (domainId === 'expense') opened = store.openExpenseStagingModal(record)
+  else if (domainId === 'income') opened = store.openIncomeStagingModal(record)
+  else opened = store.openUniversalRepairFromStaging(record, domainId)
+  if (opened) {
+    editingVerdictContext.value = { recordId: record.id, previousIndex: activeVerdictIndex.value }
+    closeVerdict()
+  }
+}
+
 async function archiveFromVerdict(record, domainId) {
   if (verdictBusy.value) return
   if (domainId === 'reading' && requiresReadingRepair(record)) {
@@ -854,6 +877,19 @@ watch(activeVerdictId, value => {
 watch(filteredStaging, records => {
   if (activeVerdictId.value && !records.some(record => record.id === activeVerdictId.value)) closeVerdict()
 })
+
+watch(
+  () => [store.expenseModal.open, store.incomeModal.open, store.universalModal.open],
+  openStates => {
+    const context = editingVerdictContext.value
+    if (!context || openStates.some(Boolean)) return
+    const records = filteredStaging.value
+    const sameRecord = records.find(record => record.id === context.recordId)
+    const nextRecord = sameRecord || records[Math.min(Math.max(context.previousIndex, 0), records.length - 1)]
+    editingVerdictContext.value = null
+    activeVerdictId.value = nextRecord?.id || null
+  }
+)
 
 onMounted(() => window.addEventListener('keydown', handleStageKeydown))
 onBeforeUnmount(() => {

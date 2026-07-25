@@ -167,6 +167,60 @@ struct NativeManualRecordDraft {
         }
     }
 
+    init(stagingRecord record: NativeStagingRecord, domainKey: String) {
+        let kind: NativeManualRecordKind
+        switch domainKey {
+        case "expense": kind = .expense
+        case "income": kind = .income
+        default: kind = .universal
+        }
+        self.init(kind: kind, domainKey: domainKey)
+
+        let nestedPayload = record.extracted.dictionary("payload_jsonb") ?? [:]
+        let payload = record.extracted.merging(nestedPayload) { current, _ in current }
+        originalPayload = payload
+        imagePath = record.imagePath
+        imageHash = record.imageHash
+        accountId = payload.string("account_id")
+        amountText = payload.double("amount").map { String($0) } ?? ""
+        platform = payload.string("platform") ?? ""
+        paymentMethod = payload.string("payment_method") ?? ""
+        category = domainKey == "income"
+            ? payload.string("income_category") ?? ""
+            : payload.string("category") ?? ""
+        title = payload.string("title")
+            ?? payload.string(domainKey == "income" ? "source_name" : "merchant_name")
+            ?? ""
+        note = payload.string("note")
+            ?? (kind == .universal ? payload.string("summary") ?? "" : record.summary)
+
+        if let parsedDate = Self.dateFormatter.date(from: record.dateKey) {
+            date = parsedDate
+        }
+        let occurredAt = payload.string("occurred_at") ?? payload.string("order_finished_at")
+        let rawTime = payload.string("transaction_time")
+            ?? occurredAt.flatMap { value in
+                guard value.count >= 16 else { return nil }
+                let start = value.index(value.startIndex, offsetBy: 11)
+                let end = value.index(start, offsetBy: 5)
+                return String(value[start..<end]) + ":00"
+            }
+        if let rawTime, let parsedTime = Self.timeFormatter.date(from: rawTime.count == 5 ? rawTime + ":00" : rawTime) {
+            time = parsedTime
+            includesTime = true
+        }
+
+        let metadata = NativeManualDomainMetadata.resolve(nil, fallbackDomainKey: domainKey)
+        primaryValueText = payload.double(metadata.primaryKey).map { String($0) } ?? ""
+        dimension = payload.string(metadata.dimensionKey) ?? ""
+        if domainKey == "wallet" {
+            walletRecordKind = payload.string("record_kind") ?? "cash_snapshot"
+            walletAccountType = payload.string("account_type") ?? "other"
+            walletDueDate = payload.string("due_date") ?? ""
+            walletBillDay = payload.double("bill_day").map { String(Int($0)) } ?? ""
+        }
+    }
+
     var amount: Double? { positiveNumber(amountText) }
     var primaryValue: Double? { positiveNumber(primaryValueText) }
 
@@ -268,6 +322,67 @@ struct NativeManualRecordDraft {
         let sign = seconds >= 0 ? "+" : "-"
         let absolute = abs(seconds)
         return String(format: "%@%02d:%02d", sign, absolute / 3600, (absolute % 3600) / 60)
+    }
+}
+
+extension NativeStagingRecord {
+    func applyingArchiveDraft(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) -> NativeStagingRecord {
+        var payload = draft.originalPayload
+        let cleanTitle = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanSummary = draft.resolvedSummary(domain: domain)
+
+        switch draft.kind {
+        case .expense:
+            if let amount = draft.amount { payload["amount"] = AnyCodable(amount) }
+            payload["merchant_name"] = AnyCodable(cleanTitle)
+            payload["platform"] = AnyCodable(draft.platform)
+            payload["category"] = AnyCodable(draft.category)
+            payload["payment_method"] = AnyCodable(draft.paymentMethod)
+            payload["account_id"] = AnyCodable(draft.accountId.map { $0 as Any } ?? NSNull())
+            payload["transaction_time"] = AnyCodable(draft.timeKey.map { $0 as Any } ?? NSNull())
+        case .income:
+            if let amount = draft.amount { payload["amount"] = AnyCodable(amount) }
+            payload["source_name"] = AnyCodable(cleanTitle)
+            payload["income_category"] = AnyCodable(draft.category)
+            payload["account_id"] = AnyCodable(draft.accountId.map { $0 as Any } ?? NSNull())
+        case .universal:
+            payload = draft.universalPayload(domain: domain)
+            payload["title"] = AnyCodable(draft.resolvedTitle(domain: domain))
+        }
+
+        payload["occurred_at"] = AnyCodable(draft.occurredAt)
+        payload["summary"] = AnyCodable(cleanSummary)
+
+        return NativeStagingRecord(
+            id: id,
+            dateKey: draft.dateKey,
+            title: cleanTitle.isEmpty ? title : cleanTitle,
+            summary: cleanSummary,
+            status: status,
+            statusLabel: statusLabel,
+            recordTypeLabel: recordTypeLabel,
+            createdAtLabel: createdAtLabel,
+            occurredAtLabel: draft.includesTime
+                ? "\(draft.dateKey) \(draft.timeKey.map { String($0.prefix(5)) } ?? "")"
+                : draft.dateKey,
+            confidencePercent: confidencePercent,
+            lastErrorMessage: lastErrorMessage,
+            retryCount: retryCount,
+            systemImage: systemImage,
+            imagePath: imagePath,
+            imageURL: imageURL,
+            imageLoadError: imageLoadError,
+            recordType: draft.domainKey,
+            domainKey: draft.domainKey,
+            domainName: domain?.shortName ?? domainName,
+            extracted: payload,
+            companionMessage: companionMessage,
+            targetRecordId: targetRecordId,
+            imageHash: imageHash
+        )
     }
 }
 

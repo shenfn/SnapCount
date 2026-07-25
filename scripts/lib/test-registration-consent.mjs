@@ -1,5 +1,5 @@
 export const CURRENT_TERMS_VERSION = '2026-07-19'
-export const CURRENT_PRIVACY_VERSION = '2026-07-19'
+export const CURRENT_PRIVACY_VERSION = '2026-07-22'
 
 export function currentTestRegistrationConsent(now = new Date()) {
   const acceptedAt = now.toISOString()

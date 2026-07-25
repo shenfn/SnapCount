@@ -20,7 +20,7 @@ final class SettingsRepository: SettingsRepositoryProtocol {
             [SettingsRow].self,
             path: "rest/v1/user_configs",
             queryItems: [
-                URLQueryItem(name: "select", value: "plan,screenshot_vision_primary,photo_vision_primary,qwen_screenshot_model,qwen_photo_model,qwen_screenshot_enable_thinking,qwen_photo_enable_thinking,ai_insight_provider,companion_enabled,companion_memory_enabled,companion_persona,companion_memory_strength,companion_expression_style,companion_custom_note,ai_logs_enabled,prompt_optimization_enabled,keep_source_images,image_retention_days"),
+                URLQueryItem(name: "select", value: "plan,screenshot_vision_primary,photo_vision_primary,qwen_screenshot_model,qwen_photo_model,qwen_screenshot_enable_thinking,qwen_photo_enable_thinking,ai_insight_provider,companion_enabled,companion_memory_enabled,companion_persona,companion_memory_strength,companion_expression_style,companion_custom_note,ai_logs_enabled,prompt_optimization_enabled,expression_improvement_enabled,keep_source_images,image_retention_days"),
                 URLQueryItem(name: "user_id", value: "eq.\(userId)"),
                 URLQueryItem(name: "limit", value: "1")
             ],
@@ -372,6 +372,7 @@ private struct SettingsRow: Decodable {
     let companionCustomNote: String?
     let aiLogsEnabled: Bool?
     let promptOptimizationEnabled: Bool?
+    let expressionImprovementEnabled: Bool?
     let keepSourceImages: Bool?
     let imageRetentionDays: Int?
 
@@ -393,6 +394,7 @@ private struct SettingsRow: Decodable {
             companionCustomNote: companionCustomNote ?? "",
             aiLogsEnabled: aiLogsEnabled ?? false,
             promptOptimizationEnabled: promptOptimizationEnabled ?? false,
+            expressionImprovementEnabled: expressionImprovementEnabled ?? false,
             keepSourceImages: keepSourceImages ?? true,
             imageRetentionDays: imageRetentionDays ?? -1
         )
@@ -415,6 +417,7 @@ private struct SettingsRow: Decodable {
         case companionCustomNote = "companion_custom_note"
         case aiLogsEnabled = "ai_logs_enabled"
         case promptOptimizationEnabled = "prompt_optimization_enabled"
+        case expressionImprovementEnabled = "expression_improvement_enabled"
         case keepSourceImages = "keep_source_images"
         case imageRetentionDays = "image_retention_days"
     }

@@ -29,7 +29,10 @@ struct DomainsView: View {
                         }
                     }
                 }
-            }.scrollContentBackground(.hidden).searchable(text: $searchText, prompt: "搜索数据域")
+            }
+            .scrollContentBackground(.hidden)
+            .listStyle(.insetGrouped)
+            .searchable(text: $searchText, prompt: "搜索数据域")
         }
         .navigationTitle("数据域")
     }

@@ -1,0 +1,468 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$meta": {
+    "name": "芥子设计系统 Token 单一数据源（SSOT）",
+    "version": "0.2.0",
+    "description": "本文件是 iOS / PWA / Tailwind 三端 Token 的唯一数据源。所有派生产物由 scripts/ 下的生成脚本产出，禁止手工修改派生产物。",
+    "source_of_truth": true,
+    "generated_at_rule": "任何对主题色、字体、间距、圆角、阴影、动效的调整，必须先改本文件，再运行生成脚本。",
+    "design_baseline": "docs/前端设计理念/芥子长期产品与设计基调.md"
+  },
+
+  "color": {
+    "$description": "颜色 Token。themes 数组对应芥子的 9 个长期主题；每个主题包含 paper/brand/light/space/ink/muted/coral 七个语义槽位。line（分隔线）不是槽位，是派生色：brand 13% 透明度，由生成脚本计算。domains 与 art 为全局色，不随主题变化。",
+
+    "themes": [
+      {
+        "id": "cyan",
+        "name": "芥青微光",
+        "description": "温暖日常之下，一座正在呼吸的记忆生境。",
+        "is_default_ios": true,
+        "colors": {
+          "paper": "#F5F1E7",
+          "brand": "#426E63",
+          "light": "#DCBF74",
+          "space": "#17312D",
+          "ink": "#202A27",
+          "muted": "#6E7773",
+          "coral": "#B76555"
+        }
+      },
+      {
+        "id": "xuan",
+        "name": "玄青须弥",
+        "description": "克制现实表面之下，隐藏深邃而辽阔的个人宇宙。",
+        "colors": {
+          "paper": "#EFEFEB",
+          "brand": "#263F3D",
+          "light": "#C79B4E",
+          "space": "#10211F",
+          "ink": "#1A2624",
+          "muted": "#5E6764",
+          "coral": "#A85648"
+        }
+      },
+      {
+        "id": "paper",
+        "name": "宣纸生境",
+        "description": "人生像墨痕留在纸上，在时间中晕开生长。",
+        "colors": {
+          "paper": "#F2EDE0",
+          "brand": "#586C55",
+          "light": "#BC8A54",
+          "space": "#535F4D",
+          "ink": "#2A2F26",
+          "muted": "#6B7163",
+          "coral": "#B26B50"
+        }
+      },
+      {
+        "id": "jade",
+        "name": "竹影鎏金",
+        "description": "沉静竹青承载长期记忆，克制鎏金点亮联系。",
+        "colors": {
+          "paper": "#F3F4EC",
+          "brand": "#345F50",
+          "light": "#C8A55D",
+          "space": "#183A31",
+          "ink": "#1F2B26",
+          "muted": "#67756C",
+          "coral": "#A85F4F"
+        }
+      },
+      {
+        "id": "lotus",
+        "name": "藕荷余晖",
+        "description": "降低科技感，突出柔软、亲密与长期陪伴。",
+        "colors": {
+          "paper": "#F6F0EB",
+          "brand": "#75696F",
+          "light": "#C77C72",
+          "space": "#3B3038",
+          "ink": "#2E2530",
+          "muted": "#7A6F76",
+          "coral": "#B85A4E"
+        }
+      },
+      {
+        "id": "tea",
+        "name": "苔茶暖金",
+        "description": "苔绿与茶金形成朴素、安静、耐看的东方生活感。",
+        "colors": {
+          "paper": "#F3EFDF",
+          "brand": "#66704A",
+          "light": "#BD8D46",
+          "space": "#353D26",
+          "ink": "#2A2F1E",
+          "muted": "#6F7059",
+          "coral": "#AC5F40"
+        }
+      },
+      {
+        "id": "moon",
+        "name": "月白远青",
+        "description": "以月白与远山青平衡现代科技感和东方留白。",
+        "colors": {
+          "paper": "#F0F2F1",
+          "brand": "#416775",
+          "light": "#C7B06E",
+          "space": "#142C35",
+          "ink": "#1C2C32",
+          "muted": "#5F7480",
+          "coral": "#A8554A"
+        }
+      },
+      {
+        "id": "springWood",
+        "name": "枯木逢春",
+        "description": "第一版正式主题。全暖调的侘寂设计，以枯木褐、晚柿红和焦木深夜形成安全、私密的日记本气质。",
+        "is_default_pwa": true,
+        "colors": {
+          "paper": "#F3EFE6",
+          "brand": "#6E5A4B",
+          "light": "#D07A55",
+          "space": "#29211C",
+          "ink": "#241D19",
+          "muted": "#6F6258",
+          "coral": "#B4523A"
+        }
+      },
+      {
+        "id": "temple",
+        "name": "古刹苔痕",
+        "description": "候选主题。以古刹石壁、苔痕与微弱金光表达枯寂、禅意和历史厚度。",
+        "colors": {
+          "paper": "#EBECE6",
+          "brand": "#3A4D40",
+          "light": "#D9A752",
+          "space": "#1B241E",
+          "ink": "#1C241F",
+          "muted": "#5E6B61",
+          "coral": "#A65543"
+        }
+      }
+    ],
+
+    "alpha_variants": {
+      "$description": "常用透明度变体，由生成脚本对 brand/line 等槽位生成。",
+      "brand_alpha_08": 0.08,
+      "brand_alpha_11": 0.11,
+      "brand_alpha_13": 0.13,
+      "brand_alpha_18": 0.18,
+      "brand_alpha_72": 0.72,
+      "brand_alpha_92": 0.92,
+      "light_alpha_12": 0.12,
+      "paper_alpha_72": 0.72,
+      "space_alpha_08": 0.08,
+      "white_alpha_18": 0.18,
+      "white_alpha_22": 0.22
+    },
+
+    "domains": {
+      "$description": "数据域色（源自风格指南 §2.2 与 PWA registry.js）。仅用于域标识小面积点缀：色点、图标块底色、域徽标。全局固定，不随主题切换。",
+      "expense": { "hex": "#C2410C", "name": "消费·赭石" },
+      "income":  { "hex": "#1565C0", "name": "收入·黛蓝" },
+      "sport":   { "hex": "#B45309", "name": "运动·琥珀" },
+      "sleep":   { "hex": "#4338CA", "name": "睡眠·靛青" },
+      "reading": { "hex": "#0369A1", "name": "阅读·青黛" },
+      "food":    { "hex": "#EA580C", "name": "饮食·朱橙" },
+      "wallet":  { "hex": "#7C3AED", "name": "钱包·紫檀" }
+    },
+
+    "art": {
+      "$description": "艺术版专用色（风格指南 §2.3）。只允许出现在启动页、引导页、营销图等「用户停下来看」的地方，功能页面禁用。",
+      "fluorescent_blue": { "hex": "#4A9EFF", "usage": "极细装饰线（0.5mm 以下）" },
+      "cinnabar":         { "hex": "#C8381E", "usage": "底色渲染（仅启动页/营销图）" }
+    }
+  },
+
+  "time_phases": {
+    "$description": "时间段相位调色，源自 jiezi-visual-lab/src/themes.js。生成脚本输出对应的 iOS PhaseCalculator 和 PWA timeAdjustedColors 工具。相邻相位在边界前后 transition_minutes/2 分钟内线性插值，避免整点跳变。",
+    "transition_minutes": 45,
+    "interpolation": "linear_between_adjacent_phases",
+    "phases": [
+      { "id": "deepNight", "name": "深夜", "start": 0,  "end": 5,  "warmth": -12, "brightness": -24, "saturation": -8,  "spaceShift": -18 },
+      { "id": "dawn",      "name": "破晓", "start": 5,  "end": 8,  "warmth": 10,  "brightness": 8,   "saturation": -4,  "spaceShift": -7 },
+      { "id": "morning",   "name": "晨光", "start": 8,  "end": 11, "warmth": 5,   "brightness": 14,  "saturation": 0,   "spaceShift": 0 },
+      { "id": "noon",      "name": "日中", "start": 11, "end": 15, "warmth": 0,   "brightness": 18,  "saturation": -6,  "spaceShift": 5 },
+      { "id": "afternoon", "name": "午后", "start": 15, "end": 18, "warmth": 8,   "brightness": 8,   "saturation": 2,   "spaceShift": 0 },
+      { "id": "dusk",      "name": "暮色", "start": 18, "end": 21, "warmth": 18,  "brightness": -2,  "saturation": 8,   "spaceShift": -8 },
+      { "id": "night",     "name": "入夜", "start": 21, "end": 24, "warmth": -4,  "brightness": -16, "saturation": -2,  "spaceShift": -15 }
+    ]
+  },
+
+  "gradient": {
+    "$description": "页面背景与渐变 Token，对应 JieziTheme.pageBackground / sumeruBackground / brandWash。",
+    "page_background": {
+      "type": "linear",
+      "direction": "top_to_bottom_trailing",
+      "stops": [
+        { "ref": "paper", "amount": 1.0 },
+        { "ref": "paper", "blend_with": "brand", "amount": 0.035 },
+        { "ref": "paper", "blend_with": "light", "amount": 0.045 }
+      ]
+    },
+    "sumeru_background": {
+      "type": "radial",
+      "center_radius": 18,
+      "end_radius": 520,
+      "stops": [
+        { "ref": "brand", "blend_with": "light", "amount": 0.16 },
+        { "ref": "space", "amount": 1.0 },
+        { "ref": "space", "blend_with": "black", "amount": 0.58 }
+      ]
+    },
+    "brand_wash": {
+      "type": "linear",
+      "direction": "top_leading_to_bottom_trailing",
+      "stops": [
+        { "ref": "brand", "alpha": 0.92 },
+        { "ref": "brand", "blend_with": "space", "amount": 0.22 }
+      ]
+    },
+    "page_overlay_light": {
+      "type": "radial",
+      "center": "top_trailing",
+      "start_radius": 0,
+      "end_radius": 260,
+      "stops": [
+        { "ref": "light", "alpha": 0.12 },
+        { "ref": "clear" }
+      ]
+    },
+    "page_overlay_top": {
+      "type": "linear",
+      "direction": "top_leading_to_center",
+      "stops": [
+        { "ref": "white", "alpha": 0.22 },
+        { "ref": "clear" }
+      ]
+    }
+  },
+
+  "typography": {
+    "$description": "字体层级 Token。iOS 用 SwiftUI Font，PWA 用 CSS font-weight + size。",
+    "font_families": {
+      "ios": {
+        "system": ".system",
+        "default_rounded": ".system(.rounded, design: .rounded)",
+        "default_serif": ".system(.serif, design: .serif)"
+      },
+      "pwa": {
+        "sans": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+        "rounded": "'SF Pro Rounded', 'Nunito', 'Quicksand', sans-serif",
+        "serif": "'Lora', 'Source Han Serif SC', 'Noto Serif SC', serif",
+        "mono": "'JetBrains Mono', 'SF Mono', Consolas, monospace"
+      }
+    },
+    "scale": [
+      { "id": "caption2",   "name": "说明2",    "ios_size": 11, "ios_weight": "regular",   "pwa_size": 11, "pwa_weight": 400, "line_height": 1.4 },
+      { "id": "caption",    "name": "说明",     "ios_size": 12, "ios_weight": "regular",   "pwa_size": 12, "pwa_weight": 400, "line_height": 1.4 },
+      { "id": "footnote",   "name": "脚注",     "ios_size": 13, "ios_weight": "regular",   "pwa_size": 13, "pwa_weight": 400, "line_height": 1.45 },
+      { "id": "subheadline","name": "副标题",   "ios_size": 15, "ios_weight": "regular",   "pwa_size": 14, "pwa_weight": 400, "line_height": 1.5 },
+      { "id": "body",       "name": "正文",     "ios_size": 17, "ios_weight": "regular",   "pwa_size": 15, "pwa_weight": 400, "line_height": 1.55 },
+      { "id": "callout",    "name": "标注",     "ios_size": 16, "ios_weight": "medium",    "pwa_size": 14, "pwa_weight": 500, "line_height": 1.5 },
+      { "id": "headline",   "name": "标题",     "ios_size": 17, "ios_weight": "semibold",  "pwa_size": 16, "pwa_weight": 600, "line_height": 1.4 },
+      { "id": "title3",     "name": "标题3",    "ios_size": 20, "ios_weight": "semibold",  "pwa_size": 18, "pwa_weight": 600, "line_height": 1.35 },
+      { "id": "title2",     "name": "标题2",    "ios_size": 22, "ios_weight": "semibold",  "pwa_size": 20, "pwa_weight": 600, "line_height": 1.3 },
+      { "id": "title1",     "name": "标题1",    "ios_size": 28, "ios_weight": "bold",      "pwa_size": 24, "pwa_weight": 700, "line_height": 1.25 },
+      { "id": "largeTitle", "name": "大标题",   "ios_size": 34, "ios_weight": "bold",      "pwa_size": 30, "pwa_weight": 700, "line_height": 1.2 }
+    ],
+
+    "numeric": {
+      "$description": "数字排版规则（金额、计数、统计数字）。iOS 用 rounded 设计 + 等宽数字；PWA 用等宽/表格数字。所有金额与统计数字必须遵守，禁止用默认比例数字。",
+      "ios_design": "rounded",
+      "ios_monospaced_digit": true,
+      "pwa_font_family_ref": "rounded",
+      "pwa_font_variant_numeric": "tabular-nums"
+    },
+
+    "roles": {
+      "$description": "语义字体角色——「芥子味」的来源。scale 是骨架，roles 是衣品。标题用衬线（宋体感）呼应新中式，金额用圆体等宽数字呼应账本感。每个角色 = scale 层级 + 字族变体。",
+      "display":      { "ref": "title1",     "design": "serif",   "usage": "页面主标题、品牌门面（如「个人数据平台」）" },
+      "displayLarge": { "ref": "largeTitle", "design": "serif",   "usage": "空态大标题、启动页书法字位" },
+      "moneyHero":    { "ref": "largeTitle", "design": "rounded", "numeric": true, "usage": "财务主数字（净额估算、大金额输入）" },
+      "moneyCard":    { "ref": "title2",     "design": "rounded", "numeric": true, "usage": "卡片级金额、日汇总数字" },
+      "moneyInline":  { "ref": "headline",   "design": "rounded", "numeric": true, "usage": "列表行内金额" },
+      "sectionTitle": { "ref": "title3",     "design": null,      "usage": "区块标题（如「财务状态」「每日明细」）" },
+      "cardTitle":    { "ref": "headline",   "design": null,      "usage": "卡片内标题、列表行主文字" },
+      "button":       { "ref": "callout",    "design": null,      "weight_override": "semibold", "usage": "按钮文字" },
+      "chip":         { "ref": "footnote",   "design": null,      "weight_override": "medium",   "usage": "分类 Chip、胶囊标签" },
+      "metricLabel":  { "ref": "caption",    "design": null,      "usage": "指标说明文字（如「可用现金」）" }
+    }
+  },
+
+  "spacing": {
+    "$description": "间距系统，采用 4 倍数节奏。命名采用 t-shirt 风格。",
+    "scale": [
+      { "id": "xxs", "name": "极小",  "value": 2 },
+      { "id": "xs",  "name": "小",    "value": 4 },
+      { "id": "sm",  "name": "较小",  "value": 8 },
+      { "id": "md",  "name": "中",    "value": 12 },
+      { "id": "lg",  "name": "较大",  "value": 16 },
+      { "id": "xl",  "name": "大",    "value": 20 },
+      { "id": "xl2", "name": "特大",  "value": 24 },
+      { "id": "xl3", "name": "超大",  "value": 32 },
+      { "id": "xl4", "name": "极超大","value": 40 },
+      { "id": "xl5", "name": "巨型",  "value": 48 },
+      { "id": "xl6", "name": "超巨型","value": 64 },
+      { "id": "xl7", "name": "极限",  "value": 80 }
+    ],
+    "semantic": {
+      "page_padding":     { "ref": "lg",   "value": 16 },
+      "card_padding":     { "ref": null,   "value": 18, "$note": "刻意偏离 4 倍数：18 在 16 与 20 之间的视觉呼吸感最好，与 GlassPanel 一致" },
+      "card_padding_lg":  { "ref": "xl2",  "value": 24 },
+      "section_gap":      { "ref": "xl3",  "value": 32 },
+      "item_gap":         { "ref": "md",   "value": 12 },
+      "item_gap_tight":   { "ref": "sm",   "value": 8 }
+    }
+  },
+
+  "radius": {
+    "$description": "圆角系统。iOS 用 RoundedRectangle(cornerRadius:)，PWA 用 border-radius。",
+    "scale": [
+      { "id": "xs",  "name": "微小",    "value": 4 },
+      { "id": "sm",  "name": "小",      "value": 8 },
+      { "id": "md",  "name": "中",      "value": 12 },
+      { "id": "lg",  "name": "较大",    "value": 16 },
+      { "id": "xl",  "name": "大",      "value": 18 },
+      { "id": "xl2", "name": "特大",    "value": 24 },
+      { "id": "xl3", "name": "超大",    "value": 32 },
+      { "id": "pill","name": "胶囊",    "value": 999 }
+    ],
+    "semantic": {
+      "card":         { "ref": "xl2", "value": 24 },
+      "button":       { "ref": "xl",  "value": 18 },
+      "input":        { "ref": "md",  "value": 12 },
+      "chip":         { "ref": "pill","value": 999 },
+      "sheet":        { "ref": "xl3", "value": 32 }
+    }
+  },
+
+  "shadow": {
+    "$description": "阴影层级。iOS 用 .shadow(color:radius:x:y:)，PWA 用 box-shadow。",
+    "scale": [
+      { "id": "none",   "name": "无",     "color_ref": "space", "alpha": 0,    "radius": 0,  "x": 0, "y": 0 },
+      { "id": "sm",     "name": "微",     "color_ref": "space", "alpha": 0.06, "radius": 6,  "x": 0, "y": 2 },
+      { "id": "md",     "name": "中",     "color_ref": "space", "alpha": 0.08, "radius": 14, "x": 0, "y": 6 },
+      { "id": "lg",     "name": "大",     "color_ref": "space", "alpha": 0.08, "radius": 22, "x": 0, "y": 12 },
+      { "id": "xl",     "name": "超大",   "color_ref": "space", "alpha": 0.12, "radius": 32, "x": 0, "y": 18 },
+      { "id": "brand",  "name": "品牌",   "color_ref": "brand","alpha": 0.18, "radius": 14, "x": 0, "y": 8 }
+    ],
+    "semantic": {
+      "card":          { "ref": "lg"    },
+      "modal":         { "ref": "xl"    },
+      "primary_button":{ "ref": "brand" }
+    }
+  },
+
+  "motion": {
+    "$description": "动效曲线与时长。iOS 用 .animation(.easeInOut(duration:))，PWA 用 cubic-bezier()。",
+    "durations": [
+      { "id": "instant",  "name": "瞬时",   "ms": 0 },
+      { "id": "fast",     "name": "快",     "ms": 150 },
+      { "id": "normal",   "name": "中",     "ms": 250 },
+      { "id": "slow",     "name": "慢",     "ms": 400 },
+      { "id": "deliberate","name": "刻意",  "ms": 600 }
+    ],
+    "easings": [
+      { "id": "standard",     "name": "标准",     "ios": "easeInOut",  "bezier": [0.4, 0.0, 0.2, 1] },
+      { "id": "decelerate",   "name": "减速",     "ios": "easeOut",    "bezier": [0.0, 0.0, 0.2, 1] },
+      { "id": "accelerate",   "name": "加速",     "ios": "easeIn",     "bezier": [0.4, 0.0, 1, 1] },
+      { "id": "spring",       "name": "弹性",     "ios": "spring(response:0.42,dampingFraction:0.82)", "bezier": [0.34, 1.56, 0.64, 1], "$note": "参数与 jiezi-visual-lab 动效决定一致（response 0.42 / damping 0.82）" },
+      { "id": "gentle",       "name": "柔和",     "ios": "easeInOut",  "bezier": [0.45, 0, 0.55, 1] }
+    ],
+    "semantic": {
+      "press":          { "duration": "fast",     "easing": "standard"    },
+      "sheet_present":  { "duration": "slow",     "easing": "decelerate"  },
+      "sheet_dismiss":  { "duration": "normal",   "easing": "accelerate"  },
+      "page_transition":{ "duration": "normal",   "easing": "standard"    },
+      "ripple":         { "duration": "normal",   "easing": "decelerate"  }
+    }
+  },
+
+  "glass": {
+    "$description": "玻璃质感面板参数，对应 GlassPanel 组件。",
+    "card": {
+      "padding":         { "ref": "card_padding", "value": 18 },
+      "radius":          { "ref": "card",          "value": 24 },
+      "background_alpha":0.72,
+      "material":        "ultraThinMaterial",
+      "stroke_color_ref":"brand",
+      "stroke_alpha":    0.11,
+      "stroke_width":    1,
+      "shadow":          { "ref": "card" }
+    },
+    "solid_card": {
+      "$description": "实卡变体：不用材质，用于列表行、小信息卡等高频次低成本场景。视觉上是「浮在宣纸上的薄纸卡」。",
+      "padding":         { "ref": "card_padding", "value": 18 },
+      "radius":          { "ref": "card",          "value": 24 },
+      "background":      "paper_elevated",
+      "background_alpha":0.92,
+      "stroke_color_ref":"brand",
+      "stroke_alpha":    0.08,
+      "stroke_width":    1,
+      "shadow":          { "ref": "sm" }
+    }
+  },
+
+  "stroke": {
+    "$description": "描边 Token。风格指南铁律：金线 0.5mm 为骨，禁止黑粗线。hairline 指 1 物理像素（iOS 0.5pt @2x ≈ 0.33pt @3x）。",
+    "gold_hairline":  { "width": 0.5, "color_ref": "light", "alpha": 0.85, "usage": "金线细描边：印章框、插画框、装饰分隔，新中式的骨" },
+    "brand_hairline": { "width": 1,   "color_ref": "brand", "alpha": 0.11, "usage": "卡片描边（与 glass.card 一致）" },
+    "divider":        { "width": 0.5, "color_ref": "ink",   "alpha": 0.08, "usage": "列表行分隔线" },
+    "focus_ring":     { "width": 1.5, "color_ref": "brand", "alpha": 0.45, "usage": "输入框聚焦态" }
+  },
+
+  "icon": {
+    "$description": "图标尺寸 Token。列表行图标块为圆角矩形容器，图标本体约为容器的 0.55 倍。",
+    "scale": [
+      { "id": "xs",  "value": 16, "usage": "行内小图标、chevron" },
+      { "id": "sm",  "value": 20, "usage": "辅助图标" },
+      { "id": "md",  "value": 24, "usage": "Tab 图标、工具栏" },
+      { "id": "lg",  "value": 28, "usage": "强调图标" },
+      { "id": "xl",  "value": 34, "usage": "数据域图标容器" },
+      { "id": "xl2", "value": 40, "usage": "列表行图标块容器" },
+      { "id": "xl3", "value": 48, "usage": "空态/功能大图标容器" }
+    ],
+    "semantic": {
+      "tab":          { "ref": "md",  "value": 24 },
+      "list_row_block": { "ref": "xl2", "value": 40, "corner_radius_ref": "md", "usage": "列表行首 40pt 圆角图标块（对齐 PWA）" },
+      "domain_block": { "ref": "xl",  "value": 34, "corner_radius_ref": "sm", "usage": "数据域图标容器" }
+    }
+  },
+
+  "haptics": {
+    "$description": "触觉反馈 Token（iOS）。配合动效语义：确认用 light，完成用 success，「吸纳」瞬态用 rigid（视觉实验室「啵」决定）。",
+    "tap":      { "ios": "UIImpactFeedbackGenerator.light",   "usage": "列表点按、卡片轻点" },
+    "confirm":  { "ios": "UIImpactFeedbackGenerator.medium",  "usage": "按钮确认、开关切换" },
+    "absorb":   { "ios": "UIImpactFeedbackGenerator.rigid",   "usage": "芥子吸纳瞬态（「啵」）" },
+    "success":  { "ios": "UINotificationFeedbackGenerator.success", "usage": "入账完成、同步成功" },
+    "warning":  { "ios": "UINotificationFeedbackGenerator.warning", "usage": "识别失败、删除确认" }
+  },
+
+  "layout": {
+    "$description": "页面布局 Token。",
+    "page_max_width":       480,
+    "page_max_width_tablet":720,
+    "safe_area_top":        "env(safe-area-inset-top)",
+    "safe_area_bottom":     "env(safe-area-inset-bottom)",
+    "bottom_sheet_min_height": 0.4,
+    "bottom_sheet_max_height": 0.92,
+    "tab_bar_height_ios": 49,
+    "pwa_nav_height": 72,
+    "$note": "iOS 用原生 TabView（49pt 系统高）；PWA 底部导航 72px（含中央 FAB）。两者语义不同，不要混用。"
+  },
+
+  "z_index": {
+    "$description": "层叠顺序 Token，主要用于 PWA 端。",
+    "scale": [
+      { "id": "base",      "value": 0 },
+      { "id": "content",   "value": 10 },
+      { "id": "sticky",    "value": 100 },
+      { "id": "dropdown",  "value": 1000 },
+      { "id": "modal",     "value": 10000 },
+      { "id": "toast",     "value": 100000 }
+    ]
+  }
+}

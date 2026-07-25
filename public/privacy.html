@@ -11,7 +11,7 @@
 <main>
   <nav><a href="./legal.html">法律与支持</a><a href="./terms.html">服务协议</a><a href="./support.html">用户支持</a></nav>
   <h1>芥子 App 隐私政策</h1>
-  <p class="meta">版本与生效日期：2026-07-19</p>
+  <p class="meta">版本与生效日期：2026-07-22</p>
   <p class="summary">芥子是由尹良超（个人开发者，以下简称“运营者”）提供的个人生活记录与数据整理工具。本政策说明芥子如何处理你的信息。</p>
 
   <h2>1. 适用范围</h2>
@@ -22,12 +22,12 @@
     <li><strong>账户信息：</strong>邮箱地址、用户 ID、登录会话和快捷指令上传凭据。密码由 Supabase Auth 处理，运营者不保存明文密码。</li>
     <li><strong>用户主动提交的内容：</strong>相机照片、相册图片、截图、OCR 文本、备注，以及消费、收入、账户、钱包、运动、睡眠、饮食和阅读记录。</li>
     <li><strong>敏感或高度私密信息：</strong>你主动记录的金额、账户余额、负债、还款、睡眠和其他生活状态。芥子不会在你未主动提交时读取这些内容。</li>
-    <li><strong>设置与反馈：</strong>原图留存策略、AI 设置、陪伴偏好、表达反馈和你主动提交的问题说明。</li>
-    <li><strong>必要的运行信息：</strong>请求时间、处理耗时、错误信息、记录标识、图片精确哈希、不可逆的图片感知指纹和模型调用状态。两类图片指纹仅用于同一账户内识别完全相同或疑似相似的图片，不能用于还原原图。AI 原始输出与额外调试日志默认关闭，仅在你主动开启相应设置时用于排查和改进。</li>
+    <li><strong>设置与反馈：</strong>原图留存策略、AI 设置、陪伴偏好、表达反馈和你主动提交的问题说明。主动点评时会保存所点评的展示内容、选择的原因和可选说明，以便处理反馈。</li>
+    <li><strong>必要的运行信息：</strong>请求时间、处理耗时、错误信息、记录标识、图片精确哈希、不可逆的图片感知指纹和模型调用状态。两类图片指纹仅用于同一账户内识别完全相同或疑似相似的图片，不能用于还原原图。AI 原始输出、额外调试日志和后台 AI 改进数据均默认关闭，仅在你分别主动开启相应设置后处理。</li>
   </ul>
 
   <h2>3. 使用目的</h2>
-  <p>这些信息用于身份验证、图片识别、记录归档、统计展示、账户与还款管理、AI 洞察、数据导出、故障排查、安全防护、删除请求和用户支持。我们不会出售你的个人信息，也不会将其用于与芥子功能无关的广告画像。</p>
+  <p>这些信息用于身份验证、图片识别、记录归档、统计展示、账户与还款管理、AI 洞察、数据导出、故障排查、安全防护、删除请求和用户支持。只有在你开启“参与 AI 改进”后，脱敏的语义键、评分和拒绝原因才会用于评估表达选择。我们不会出售你的个人信息，也不会将其用于与芥子功能无关的广告画像。</p>
 
   <h2>4. 服务商与数据位置</h2>
   <ul>
@@ -45,11 +45,12 @@
     <li>结构化记录、与记录关联的图片哈希或感知指纹以及账户配置，通常保存至你主动删除相应记录或删除账户。</li>
     <li>原图可选择“不保留”“保留 7 天”“保留 30 天”或“永久保留”。选择不保留时，识别完成后会提交删除；选择定期保留时，到期后进入自动清理队列。网络或存储服务失败时任务会重试，设置页会显示可用的清理结果。</li>
     <li>AI 日志默认关闭。关闭设置会停止新增可选 AI 日志，但不会自动删除此前已生成的日志；已有日志可随相关数据或账户删除。</li>
+    <li>“参与 AI 改进”默认关闭。开启后保存的后台改进数据不包含原图、金额、商户名或通知原文，并按 30 天期限每日清理。关闭后会停止新增，并清理未关联你主动点评的后台改进数据；与主动点评直接关联的内容按反馈处理需要保存，直至账户删除或你提出删除请求。</li>
     <li>安全日志和服务商备份可能在必要且受限的周期内保留，随后按服务商的备份轮换机制覆盖；这些副本不用于日常产品功能。</li>
   </ul>
 
   <h2>7. 你的权利</h2>
-  <p>你可以在应用内查看、更正、导出和删除记录，调整图片留存与 AI 日志设置，并从“设置”发起删除账户。账户删除会先清理云端原图和业务数据；如果存储清理未完成，应用会提示失败或重试，而不会把未完成状态冒充为已全部删除。你也可以通过联系邮箱提出访问、更正、导出、撤回同意或删除请求。</p>
+  <p>你可以在应用内查看、更正、导出和删除记录，调整图片留存、AI 日志、Prompt 优化和 AI 改进参与设置，并从“设置”发起删除账户。账户删除会先清理云端原图和业务数据；如果存储清理未完成，应用会提示失败或重试，而不会把未完成状态冒充为已全部删除。你也可以通过联系邮箱提出访问、更正、导出、撤回同意或删除请求。</p>
 
   <h2>8. 安全措施</h2>
   <p>芥子采用 HTTPS 传输、Supabase 行级权限隔离、短时效签名图片地址、服务端密钥隔离、清理队列重试和账户级数据删除等措施。没有任何系统能保证绝对安全；发生可能影响你权益的安全事件时，运营者会依适用法律采取补救并提供必要通知。</p>
@@ -69,15 +70,15 @@
 
   <hr class="language-divider">
   <h1 lang="en">Jiezi App Privacy Policy</h1>
-  <p class="meta" lang="en">Version and effective date: 2026-07-19</p>
+  <p class="meta" lang="en">Version and effective date: 2026-07-22</p>
   <div lang="en">
     <p>Jiezi is a personal life-record and data-organization tool operated by Yin Liangchao, an individual developer.</p>
     <h2>Information and purposes</h2>
-    <p>We process account email and identifiers, content you submit (including images, OCR text, financial, account, wallet, exercise, sleep, diet and reading records), settings, feedback, and necessary request/error metadata. We use this information to authenticate users, recognize images, organize records, provide statistics and AI insights, export data, troubleshoot issues, secure the service, and process deletion requests. We do not sell personal information.</p>
+    <p>We process account email and identifiers, content you submit (including images, OCR text, financial, account, wallet, exercise, sleep, diet and reading records), settings, feedback, and necessary request/error metadata. When you actively submit feedback, we retain the reviewed display content, selected reason, and optional note to process that feedback. We use this information to authenticate users, recognize images, organize records, provide statistics and AI insights, export data, troubleshoot issues, secure the service, and process deletion requests. We do not sell personal information.</p>
     <h2>Service providers and international processing</h2>
     <p>Supabase provides authentication, database, Edge Functions and Storage in Singapore (ap-southeast-1). Images and necessary context selected for AI features are sent to Alibaba Cloud Bailian Qwen through the currently configured mainland China endpoint. Only Qwen 3.6 Flash and Qwen 3.7 Plus are used. Provider retention and processing are governed by the applicable API agreement and provider policy.</p>
     <h2>Retention and controls</h2>
-    <p>Structured records remain until you delete them or delete your account. Source images can be set to no retention, 7 days, 30 days, or permanent retention. Failed storage deletions are retried and are not represented as completed. AI logs are off by default. You may access, correct, export, or delete records and request account deletion in Settings.</p>
+    <p>Structured records remain until you delete them or delete your account. Source images can be set to no retention, 7 days, 30 days, or permanent retention. Failed storage deletions are retried and are not represented as completed. AI logs, raw-output optimization, and AI improvement participation are off by default. If you opt in to AI improvement, only minimized semantic keys, scores, and rejection reasons are cleaned daily under a 30-day rule; source images, amounts, merchant names, and notification text are excluded. Turning the setting off stops collection and removes background improvement data not linked to feedback you actively submitted. Feedback-linked context remains until account deletion or a verified deletion request. You may access, correct, export, or delete records and request account deletion in Settings.</p>
     <h2>Children, security and contact</h2>
     <p>Jiezi is not directed to users under 18. We use HTTPS, row-level access controls, short-lived signed image URLs, secret isolation, and deletion retries, but no system is absolutely secure. For privacy requests, contact Yin Liangchao at <a href="mailto:yinliangchao2222@163.com">yinliangchao2222@163.com</a>. Mandatory rights under applicable local law remain unaffected.</p>
   </div>

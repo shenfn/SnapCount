@@ -52,6 +52,7 @@ struct AccountsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .listStyle(.insetGrouped)
             .refreshable { await appState.loadAccounts() }
         }
         .navigationTitle("账户与钱包")
@@ -306,6 +307,7 @@ struct AccountDetailView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
+                .listStyle(.insetGrouped)
                 .navigationTitle(account.title)
                 .toolbar {
                     Button {

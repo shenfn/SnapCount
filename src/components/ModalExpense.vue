@@ -9,8 +9,8 @@
         <div class="sheet-handle"></div>
       </div>
       <div class="sheet-header">
-        <div class="sheet-title">{{ store.expenseModal.mode === 'edit' ? '编辑支出' : '添加支出' }}</div>
-        <div class="sheet-sub">{{ store.expenseModal.mode === 'edit' ? '调整支出信息与截图' : '手动补录一笔消费' }}</div>
+        <div class="sheet-title">{{ store.expenseModal.mode === 'staging' ? '核对并收下' : (store.expenseModal.mode === 'edit' ? '编辑支出' : '添加支出') }}</div>
+        <div class="sheet-sub">{{ store.expenseModal.mode === 'staging' ? '只改需要调整的字段，确认后自动处理下一条' : (store.expenseModal.mode === 'edit' ? '调整支出信息与截图' : '手动补录一笔消费') }}</div>
       </div>
 
       <div class="sheet-body" ref="bodyEl">
@@ -20,7 +20,7 @@
           placeholder="0.00" min="0.01" step="0.01">
       </div>
 
-      <div v-if="store.expenseModal.mode === 'edit'" class="thumb-wrap">
+      <div v-if="store.expenseModal.mode !== 'create'" class="thumb-wrap">
         <div v-if="store.expenseModal.imageUrl" style="width:100%" @click="store.openImgFull(store.expenseModal.imageUrl)">
           <img :src="store.expenseModal.imageUrl"
             @error="store.markExpenseImageUnavailable()"
@@ -123,7 +123,7 @@
       <div class="sheet-footer">
         <button class="confirm-btn"
           :disabled="!store.expenseModal.amount || !store.expenseModal.platform || !store.expenseModal.category || !store.expenseModal.payment || !store.expenseModal.date || store.isActionPending('expense')"
-          @click="store.confirmExpense()">{{ store.isActionPending('expense') ? '保存中...' : '确认保存' }}</button>
+          @click="store.confirmExpense()">{{ store.isActionPending('expense') ? '保存中...' : (store.expenseModal.mode === 'staging' ? '确认并收下' : '确认保存') }}</button>
         <button v-if="store.expenseModal.mode === 'edit'" class="delete-bill-btn"
           @click="store.openDeleteConfirm('bill', store.expenseModal.id, store.expenseModal.imagePath)">
           删除此支出
