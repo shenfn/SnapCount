@@ -250,8 +250,11 @@ enum NativeHomeInsightPreferences {
         for fallback in financeDefaults where existing[fallback.key] == nil && !result.contains(where: { $0.key == fallback.key }) {
             result.append(fallback)
         }
+        var enabledCount = 0
         return result.enumerated().map { index, item in
-            NativeHomeFinanceCardConfiguration(key: item.key, isEnabled: item.isEnabled, order: index)
+            let isEnabled = item.isEnabled && enabledCount < maximumEnabledCards
+            if isEnabled { enabledCount += 1 }
+            return NativeHomeFinanceCardConfiguration(key: item.key, isEnabled: isEnabled, order: index)
         }
     }
 
@@ -267,8 +270,11 @@ enum NativeHomeInsightPreferences {
         for fallback in domainDefaults where existing[fallback.key] == nil && !result.contains(where: { $0.key == fallback.key }) {
             result.append(fallback)
         }
+        var enabledCount = 0
         return result.enumerated().map { index, item in
-            NativeHomeDomainCardConfiguration(key: item.key, isEnabled: item.isEnabled, order: index)
+            let isEnabled = item.isEnabled && enabledCount < maximumEnabledCards
+            if isEnabled { enabledCount += 1 }
+            return NativeHomeDomainCardConfiguration(key: item.key, isEnabled: isEnabled, order: index)
         }
     }
 
