@@ -100,4 +100,7 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260720100000_harden_privileged_rpcs_and_receipt_storage.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260721110000_user_finance_vocabulary.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260721190000_finance_perceptual_duplicate_review.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260725120000_expression_feedback_positive_choices.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260725123000_expression_feedback_atomic_bundle.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260725124000_expression_record_delete_cleanup.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-security-migration.sql

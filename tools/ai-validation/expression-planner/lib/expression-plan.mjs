@@ -29,10 +29,18 @@ function surfaceScore(candidate, surface) {
   return candidate.scoring?.surfaces?.[surface] ?? null
 }
 
+function surfaceTieBreakPriority(candidate, surface) {
+  const value = Number(candidate.selection_hints?.tie_break_priority?.[surface] ?? 0)
+  return Number.isFinite(value) ? value : 0
+}
+
 function rankedCandidates(candidates, surface) {
   return candidates
     .filter(candidate => surfaceScore(candidate, surface)?.eligible)
-    .sort((left, right) => surfaceScore(right, surface).score - surfaceScore(left, surface).score)
+    .sort((left, right) => {
+      const scoreDelta = surfaceScore(right, surface).score - surfaceScore(left, surface).score
+      return scoreDelta || surfaceTieBreakPriority(right, surface) - surfaceTieBreakPriority(left, surface)
+    })
 }
 
 function exactFactFallback(candidates, surface, covered) {
@@ -43,6 +51,10 @@ function exactFactFallback(candidates, surface, covered) {
   ) ?? null
 }
 
+function surfaceDiversityGroup(candidate, surface) {
+  return candidate.selection_hints?.diversity_groups?.[surface] ?? null
+}
+
 export function buildSurfacePlan(candidates, surface, overrides = {}) {
   const profile = { ...SURFACE_CAPACITY[surface], ...overrides }
   if (!profile.max_candidates) throw new Error(`Unknown or invalid surface: ${surface}`)
@@ -50,6 +62,7 @@ export function buildSurfacePlan(candidates, surface, overrides = {}) {
   const ranked = rankedCandidates(candidates, surface)
   const selected = []
   const excluded = []
+  const selectedDiversityGroups = new Set()
 
   for (const candidate of ranked) {
     const score = surfaceScore(candidate, surface)
@@ -58,20 +71,38 @@ export function buildSurfacePlan(candidates, surface, overrides = {}) {
       excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'covered_by_fixed_content', score: score.score })
       continue
     }
+    const maxExposureCount = Number(candidate.selection_hints?.max_exposure_count?.[surface])
+    const exposureCount = Number(
+      candidate.scoring?.dedupe_exposure_by_surface?.[surface]?.count
+        ?? candidate.scoring?.exposure_by_surface?.[surface]?.count
+        ?? candidate.scoring?.exposure?.count
+        ?? 0,
+    )
+    if (Number.isFinite(maxExposureCount) && exposureCount >= maxExposureCount) {
+      excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'period_cooldown', exposure_count: exposureCount, max_exposure_count: maxExposureCount, score: score.score })
+      continue
+    }
     if (!score.passes_threshold) {
       excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'below_surface_threshold', score: score.score })
+      continue
+    }
+    const diversityGroup = surfaceDiversityGroup(candidate, surface)
+    if (diversityGroup && selectedDiversityGroups.has(diversityGroup)) {
+      excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'duplicate_diversity_group', diversity_group: diversityGroup, score: score.score })
       continue
     }
     if (selected.length >= profile.max_candidates) {
       excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'surface_capacity_reached', score: score.score })
       continue
     }
+    if (diversityGroup) selectedDiversityGroups.add(diversityGroup)
     selected.push({
       candidate_id: candidate.candidate_id,
       semantic_key: semanticKey,
       dimension: candidate.dimension,
       claim_type: candidate.claim_type,
       score: score.score,
+      diversity_group: diversityGroup,
       selection_mode: 'threshold',
       canonical_text: candidate.claim?.canonical_text ?? null,
     })

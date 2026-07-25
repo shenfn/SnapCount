@@ -103,6 +103,10 @@ export function useStore() {
 
   const imgOverlay = reactive({ open: false, src: '' })
   const detailRecord = ref(null)
+  const recordExpressionPlanCache = ref({})
+  const recordExpressionPlanLoadRequests = new Map()
+  const recordExpressionPlanAckRequests = new Map()
+  let recordExpressionPlanCacheVersion = 0
   const activeDomainId = ref(null)
   const activeDateKey = ref('')
   const activeDayKind = ref('all')
@@ -434,6 +438,10 @@ export function useStore() {
     selectedStagingIds.value = new Set()
     batchMode.value = false
     detailRecord.value = null
+    recordExpressionPlanCache.value = {}
+    recordExpressionPlanLoadRequests.clear()
+    recordExpressionPlanAckRequests.clear()
+    recordExpressionPlanCacheVersion += 1
     activeDomainId.value = null
     pageHistory.value = []
     settingsState.aiLogsEnabled = false
@@ -3943,30 +3951,184 @@ export function useStore() {
     }
   }
 
-  async function submitExpressionFeedback({ recordId, choice, freeText = "" }) {
-    if (!recordId || !choice) throw new Error("缺少点评信息")
+  async function postExpressionAction(action, input, { keepalive = false, signal } = {}) {
     const { data: sessionData, error: sessionError } = await sb.auth.getSession()
     if (sessionError) throw sessionError
     const token = sessionData?.session?.access_token
-    if (!token) throw new Error("登录状态已失效，请重新登录")
+    if (!token) throw new Error('登录状态已失效，请重新登录')
     const response = await fetch(`${SUPABASE_URL}/functions/v1/ingest-receipt`, {
-      method: "POST",
-      keepalive: true,
+      method: 'POST',
+      keepalive,
+      signal,
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
-        "apikey": SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'apikey': SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({
-        action: "submit_expression_feedback",
-        record_id: recordId,
-        primary_choice: choice,
-        free_text: freeText,
+        action,
+        ...input,
       }),
     })
     const payload = await response.json().catch(() => ({}))
-    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "点评提交失败")
-    return payload.data
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || '表达服务请求失败')
+    return payload.data || null
+  }
+
+  function setRecordExpressionPlan(recordId, value) {
+    recordExpressionPlanCache.value = {
+      ...recordExpressionPlanCache.value,
+      [recordId]: value,
+    }
+    return value
+  }
+
+  function updateRecordExpressionPlan(recordId, patch) {
+    return setRecordExpressionPlan(recordId, {
+      ...(recordExpressionPlanCache.value[recordId] || {}),
+      ...patch,
+    })
+  }
+
+  async function loadRecordExpressionPlan(recordId, { force = false, signal } = {}) {
+    const normalizedRecordId = String(recordId || '').trim()
+    if (!normalizedRecordId) throw new Error('缺少记录编号')
+    if (recordExpressionPlanLoadRequests.has(normalizedRecordId)) {
+      return recordExpressionPlanLoadRequests.get(normalizedRecordId)
+    }
+    const cached = recordExpressionPlanCache.value[normalizedRecordId]
+    const retryableUnavailable = cached?.status === 'unavailable' && cached.reason === 'plan_not_ready'
+    if (!force && cached && !['loading', 'error'].includes(cached.status) && !retryableUnavailable) return cached
+
+    const cacheVersion = recordExpressionPlanCacheVersion
+    setRecordExpressionPlan(normalizedRecordId, {
+      status: 'loading',
+      available: false,
+      acknowledged: false,
+      feedback: null,
+      error: '',
+    })
+    const request = (async () => {
+      try {
+        const data = await postExpressionAction('get_record_expression_plan', {
+          record_id: normalizedRecordId,
+        }, { signal })
+        if (cacheVersion !== recordExpressionPlanCacheVersion) return null
+        if (!data?.available) {
+          return setRecordExpressionPlan(normalizedRecordId, {
+            status: 'unavailable',
+            available: false,
+            acknowledged: false,
+            feedback: null,
+            reason: data?.reason || 'not_available',
+            error: '',
+          })
+        }
+        const planToken = String(data.plan_token || '').trim()
+        const candidateId = String(data.candidate_id || '').trim()
+        if (!planToken || !candidateId || !data.feedback || typeof data.feedback !== 'object') {
+          throw new Error('表达计划响应不完整')
+        }
+        return setRecordExpressionPlan(normalizedRecordId, {
+          status: 'ready',
+          available: true,
+          acknowledged: false,
+          planToken,
+          candidateId,
+          feedback: data.feedback,
+          error: '',
+        })
+      } catch (error) {
+        if (cacheVersion === recordExpressionPlanCacheVersion) {
+          setRecordExpressionPlan(normalizedRecordId, {
+            status: 'error',
+            available: false,
+            acknowledged: false,
+            feedback: null,
+            error: error?.message || String(error),
+          })
+        }
+        throw error
+      }
+    })()
+    recordExpressionPlanLoadRequests.set(normalizedRecordId, request)
+    try {
+      return await request
+    } finally {
+      if (recordExpressionPlanLoadRequests.get(normalizedRecordId) === request) {
+        recordExpressionPlanLoadRequests.delete(normalizedRecordId)
+      }
+    }
+  }
+
+  async function ackRecordExpressionPlan(recordId, { signal } = {}) {
+    const normalizedRecordId = String(recordId || '').trim()
+    if (!normalizedRecordId) throw new Error('缺少记录编号')
+    if (recordExpressionPlanAckRequests.has(normalizedRecordId)) {
+      return recordExpressionPlanAckRequests.get(normalizedRecordId)
+    }
+    const cached = recordExpressionPlanCache.value[normalizedRecordId]
+    if (!cached?.available) return cached || null
+    if (cached.acknowledged && cached.feedback?.exposure_event_id) return cached
+
+    const cacheVersion = recordExpressionPlanCacheVersion
+    const planToken = cached.planToken
+    const candidateId = cached.candidateId
+    updateRecordExpressionPlan(normalizedRecordId, { status: 'acknowledging', ackError: '' })
+    const request = (async () => {
+      try {
+        const data = await postExpressionAction('ack_record_expression_plan', {
+          record_id: normalizedRecordId,
+          plan_token: planToken,
+          candidate_id: candidateId,
+        }, { signal })
+        if (cacheVersion !== recordExpressionPlanCacheVersion) return null
+        const current = recordExpressionPlanCache.value[normalizedRecordId]
+        if (current?.planToken !== planToken || current?.candidateId !== candidateId) return current || null
+        const exposureEventId = String(data?.feedback?.exposure_event_id || data?.exposure_event_id || '').trim()
+        if (!exposureEventId) throw new Error('表达曝光确认响应不完整')
+        return updateRecordExpressionPlan(normalizedRecordId, {
+          status: 'acknowledged',
+          acknowledged: true,
+          feedback: {
+            ...(current.feedback || {}),
+            ...(data?.feedback || {}),
+            exposure_event_id: exposureEventId,
+          },
+          ackError: '',
+        })
+      } catch (error) {
+        if (cacheVersion === recordExpressionPlanCacheVersion) {
+          const current = recordExpressionPlanCache.value[normalizedRecordId]
+          if (current?.planToken === planToken && current?.candidateId === candidateId) {
+            updateRecordExpressionPlan(normalizedRecordId, {
+              status: 'ack_error',
+              acknowledged: false,
+              ackError: error?.message || String(error),
+            })
+          }
+        }
+        throw error
+      }
+    })()
+    recordExpressionPlanAckRequests.set(normalizedRecordId, request)
+    try {
+      return await request
+    } finally {
+      if (recordExpressionPlanAckRequests.get(normalizedRecordId) === request) {
+        recordExpressionPlanAckRequests.delete(normalizedRecordId)
+      }
+    }
+  }
+
+  async function submitExpressionFeedback({ recordId, choice, freeText = "", exposureEventId = "" }) {
+    if (!recordId || !choice) throw new Error("缺少点评信息")
+    return postExpressionAction('submit_expression_feedback', {
+      record_id: recordId,
+      primary_choice: choice,
+      free_text: freeText,
+      ...(exposureEventId ? { exposure_event_id: exposureEventId } : {}),
+    }, { keepalive: true })
   }
   return {
     currentYear, currentMonth, currentPage, monthLabel,
@@ -3987,7 +4149,7 @@ export function useStore() {
     batchMode, selectedStagingIds, toggleBatchMode, toggleSelectStaging, selectAllStaging, clearSelection, batchDiscard, batchArchive,
     flashMsg, flashVisible,
     imgOverlay,
-    detailRecord, activeDomainId,
+    detailRecord, recordExpressionPlanCache, activeDomainId,
     pendingModal,
     incomeModal,
     expenseModal,
@@ -4023,6 +4185,6 @@ export function useStore() {
     navigateTo, goBack,
     settingsState, toggleSetting, setSetting, setRetention, loadUserSettings, loadFinanceVocabulary,
     actionState, isActionPending, isPendingEntrySaving,
-    refreshIfStale, submitExpressionFeedback,
+    refreshIfStale, loadRecordExpressionPlan, ackRecordExpressionPlan, submitExpressionFeedback,
   }
 }

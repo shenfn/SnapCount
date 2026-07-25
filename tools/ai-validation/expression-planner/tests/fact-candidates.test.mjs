@@ -24,12 +24,12 @@ test('generates auditable daily facts from four events', () => {
   const candidates = generateFactCandidates(events, {
     entityId: 'merchant_example_api_hub', localDate: '2026-07-12', timeZone: 'Asia/Shanghai',
   })
-  assert.equal(candidates.length, 3)
+  assert.equal(candidates.length, 2)
   assert.deepEqual(candidates[0].claim.structured_value, {
     entity_id: 'merchant_example_api_hub', date: '2026-07-12', count: 4, total_amount: 45,
   })
   assert.equal(candidates[1].claim.structured_value.max_amount, 15)
-  assert.equal(candidates[2].claim.structured_value.span_minutes, 631)
+  assert.equal(candidates.some(item => item.claim.semantic_key === 'merchant_daily_activity_span'), false)
 })
 
 test('filters UTC events by the requested local date', () => {
@@ -43,4 +43,19 @@ test('filters UTC events by the requested local date', () => {
     entityId: 'merchant_example_api_hub', localDate: '2026-07-12', timeZone: 'Asia/Shanghai',
   })
   assert.equal(candidates[0].claim.structured_value.count, 1)
+})
+
+test('ignores missing and invalid amounts while preserving an explicit zero', () => {
+  const candidates = generateFactCandidates([
+    { ...events[0], event_id: 'null', amount: null },
+    { ...events[0], event_id: 'blank', amount: '  ' },
+    { ...events[0], event_id: 'invalid', amount: 'not-a-number' },
+    { ...events[0], event_id: 'zero', amount: 0 },
+    { ...events[0], event_id: 'ten', amount: '10' },
+  ], {
+    entityId: 'merchant_example_api_hub', localDate: '2026-07-12', timeZone: 'Asia/Shanghai',
+  })
+  assert.deepEqual(candidates[0].claim.structured_value, {
+    entity_id: 'merchant_example_api_hub', date: '2026-07-12', count: 2, total_amount: 10,
+  })
 })

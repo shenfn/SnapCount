@@ -10,6 +10,106 @@ end;
 $$;
 
 select public.security_test_assert(
+  (
+    select count(*) = 1
+      and max(primary_choice) = 'repetitive'
+      and max(feedback_key) = 'feedback:66666666-6666-4666-8666-666666666666:66666666-0000-4000-8000-000000000002'
+    from public.expression_feedback_events
+    where exposure_event_id = '66666666-0000-4000-8000-000000000002'
+  ),
+  'atomic feedback migration must keep only the newest legacy review with a canonical key'
+);
+select public.security_test_assert(
+  (
+    select count(*) = 1
+      and max(issue_code) = 'repetitive'
+      and max(feedback_key) = 'feedback:66666666-6666-4666-8666-666666666666:66666666-0000-4000-8000-000000000002'
+    from public.expression_preference_signals
+    where exposure_event_id = '66666666-0000-4000-8000-000000000002'
+  ),
+  'atomic feedback migration must keep only signals belonging to the surviving review'
+);
+select public.security_test_assert(
+  exists (
+    select 1
+    from public.expression_exposure_source_records
+    where exposure_event_id = '66666666-0000-4000-8000-000000000002'
+      and source_table = 'transactions'
+      and source_record_id = '66666666-0000-4000-8000-000000000001'
+      and is_primary
+  ),
+  'legacy exposure migration must backfill a structured primary source'
+);
+select public.security_test_assert(
+  (
+    select source_record_ids = array['66666666-0000-4000-8000-000000000001'::uuid]
+    from public.expression_shadow_runs
+    where id = '66666666-0000-4000-8000-000000000007'
+  ),
+  'legacy shadow migration must backfill structured source record ids'
+);
+select public.security_test_assert(
+  (
+    select revision = 1
+    from public.expression_preference_revisions
+    where user_id = '66666666-6666-4666-8666-666666666666'
+  ),
+  'legacy preference data must start at revision one'
+);
+select public.security_test_assert(
+  not has_table_privilege('authenticated', 'public.expression_delivery_snapshots', 'select')
+    and has_table_privilege('service_role', 'public.expression_delivery_snapshots', 'select')
+    and not has_table_privilege('service_role', 'public.expression_delivery_snapshots', 'update'),
+  'delivery snapshots must remain service-only and immutable after insert'
+);
+
+delete from public.transactions
+where id = '66666666-0000-4000-8000-000000000001';
+
+select public.security_test_assert(
+  not exists (
+    select 1 from public.expression_exposure_events
+    where id = '66666666-0000-4000-8000-000000000002'
+  ),
+  'deleting a structured source record must purge its exposure'
+);
+select public.security_test_assert(
+  not exists (
+    select 1 from public.expression_exposure_source_records
+    where exposure_event_id = '66666666-0000-4000-8000-000000000002'
+  ),
+  'source deletion must purge its structured source mapping'
+);
+select public.security_test_assert(
+  not exists (
+    select 1 from public.expression_feedback_events
+    where exposure_event_id = '66666666-0000-4000-8000-000000000002'
+  ) and not exists (
+    select 1 from public.expression_preference_signals
+    where exposure_event_id = '66666666-0000-4000-8000-000000000002'
+  ),
+  'source deletion must purge feedback and preference signals before the exposure'
+);
+select public.security_test_assert(
+  not exists (
+    select 1 from public.expression_shadow_runs
+    where id = '66666666-0000-4000-8000-000000000007'
+  ) and not exists (
+    select 1 from public.expression_preference_snapshots
+    where user_id = '66666666-6666-4666-8666-666666666666'
+  ),
+  'source deletion must purge dependent shadow runs and stale snapshots'
+);
+select public.security_test_assert(
+  (
+    select revision = 2
+    from public.expression_preference_revisions
+    where user_id = '66666666-6666-4666-8666-666666666666'
+  ),
+  'source deletion must invalidate preference revision after deleting reviewed content'
+);
+
+select public.security_test_assert(
   not has_function_privilege('anon', 'public.rebuild_sleep_profile(uuid)', 'execute'),
   'anon must not execute profile rebuilds'
 );
@@ -407,7 +507,8 @@ insert into storage.objects (bucket_id, name) values (
   '55555555-5555-4555-8555-555555555555/account-delete.jpg'
 );
 
-insert into public.transactions (user_id, image_url) values (
+insert into public.transactions (id, user_id, image_url) values (
+  '55555555-0000-4000-8000-000000000001',
   '55555555-5555-4555-8555-555555555555',
   '55555555-5555-4555-8555-555555555555/account-delete.jpg'
 );
@@ -416,17 +517,106 @@ do $$
 declare
   v_exposure_id uuid;
 begin
-  insert into public.expression_exposure_events (user_id)
-  values ('55555555-5555-4555-8555-555555555555')
+  insert into public.expression_exposure_events (
+    id, occurred_at, user_id, event_key, delivery_attempt_id, record_id,
+    record_type, domain_key, candidate_id, semantic_key, claim_type, dimension,
+    surface, lifecycle_state, expression_plan_version, render_contract_version
+  ) values (
+    '55555555-0000-4000-8000-000000000002',
+    now(),
+    '55555555-5555-4555-8555-555555555555',
+    'fixture:account-delete-exposure',
+    'fixture-account-delete',
+    '55555555-0000-4000-8000-000000000001',
+    'expense',
+    'expense',
+    'fixture-account-delete-candidate',
+    'expense_record_name_previous_gap',
+    'fact',
+    'repeat_interval',
+    'record_detail',
+    'client_rendered',
+    'expression-plan-v0.1',
+    'surface-render-contract-v0.1'
+  )
   returning id into v_exposure_id;
-  insert into public.expression_feedback_events (user_id, exposure_event_id)
-  values ('55555555-5555-4555-8555-555555555555', v_exposure_id);
-  insert into public.expression_preference_signals (user_id, exposure_event_id)
-  values ('55555555-5555-4555-8555-555555555555', v_exposure_id);
-  insert into public.expression_preference_snapshots (user_id)
-  values ('55555555-5555-4555-8555-555555555555');
-  insert into public.expression_shadow_runs (user_id)
-  values ('55555555-5555-4555-8555-555555555555');
+  insert into public.expression_feedback_events (
+    occurred_at, user_id, feedback_key, exposure_event_id, candidate_id,
+    semantic_key, surface, primary_choice
+  ) values (
+    now(),
+    '55555555-5555-4555-8555-555555555555',
+    'feedback:55555555-5555-4555-8555-555555555555:55555555-0000-4000-8000-000000000002',
+    v_exposure_id,
+    'fixture-account-delete-candidate',
+    'expense_record_name_previous_gap',
+    'record_detail',
+    'helpful'
+  );
+  insert into public.expression_preference_signals (
+    occurred_at, user_id, signal_key, feedback_key, exposure_event_id,
+    semantic_key, surface, issue_code, preference_dimension, direction,
+    strength, aggregation_policy
+  ) values (
+    now(),
+    '55555555-5555-4555-8555-555555555555',
+    'feedback:55555555-5555-4555-8555-555555555555:55555555-0000-4000-8000-000000000002:helpful',
+    'feedback:55555555-5555-4555-8555-555555555555:55555555-0000-4000-8000-000000000002',
+    v_exposure_id,
+    'expense_record_name_previous_gap',
+    'record_detail',
+    'helpful',
+    'surface_semantic_weights.record_detail.expense_record_name_previous_gap',
+    'increase',
+    0.5,
+    'decay_and_repeat_required'
+  );
+  insert into public.expression_exposure_source_records (
+    exposure_event_id, user_id, source_table, source_record_id,
+    source_fingerprint, is_primary
+  ) values (
+    v_exposure_id,
+    '55555555-5555-4555-8555-555555555555',
+    'transactions',
+    '55555555-0000-4000-8000-000000000001',
+    'fixture-source-fingerprint',
+    true
+  );
+  insert into public.expression_preference_snapshots (user_id, snapshot_version)
+  values ('55555555-5555-4555-8555-555555555555', 'fixture-v1');
+  insert into public.expression_preference_revisions (user_id, revision)
+  values ('55555555-5555-4555-8555-555555555555', 1);
+  insert into public.expression_shadow_runs (
+    id, occurred_at, user_id, event_key, record_type, record_id, surface,
+    response_mode, rollout_mode, lifecycle_state, collector_version,
+    source_record_ids
+  ) values (
+    '55555555-0000-4000-8000-000000000003',
+    now(),
+    '55555555-5555-4555-8555-555555555555',
+    'fixture:account-delete-shadow',
+    'expense',
+    '55555555-0000-4000-8000-000000000001',
+    'shortcut_notification',
+    'json',
+    'enforced_owner_only',
+    'returned_to_shortcut',
+    'fixture-v1',
+    array['55555555-0000-4000-8000-000000000001'::uuid]
+  );
+  insert into public.expression_delivery_snapshots (
+    id, user_id, shadow_run_id, record_id, surface, candidate_id,
+    content_fingerprint, delivery_plan
+  ) values (
+    '55555555-0000-4000-8000-000000000004',
+    '55555555-5555-4555-8555-555555555555',
+    '55555555-0000-4000-8000-000000000003',
+    '55555555-0000-4000-8000-000000000001',
+    'record_detail',
+    'fixture-account-delete-candidate',
+    'fixture-content-fingerprint',
+    '{"status":"auto_planned"}'::jsonb
+  );
 end;
 $$;
 
@@ -448,6 +638,13 @@ select public.security_test_assert(
 select public.security_test_assert(
   not exists (select 1 from public.expression_feedback_events where user_id = '55555555-5555-4555-8555-555555555555'),
   'account deletion must remove expression feedback before its exposure parent'
+);
+select public.security_test_assert(
+  not exists (select 1 from public.expression_exposure_source_records where user_id = '55555555-5555-4555-8555-555555555555')
+    and not exists (select 1 from public.expression_delivery_snapshots where user_id = '55555555-5555-4555-8555-555555555555')
+    and not exists (select 1 from public.expression_preference_revisions where user_id = '55555555-5555-4555-8555-555555555555')
+    and not exists (select 1 from public.expression_shadow_runs where user_id = '55555555-5555-4555-8555-555555555555'),
+  'account deletion must remove new expression source, delivery, revision, and shadow state'
 );
 select public.security_test_assert(
   not exists (select 1 from public.user_finance_vocabulary where user_id = '55555555-5555-4555-8555-555555555555'),

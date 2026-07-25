@@ -920,6 +920,18 @@ private struct PendingExpenseResolutionView: View {
                         header(detail)
                         if let feedback = detail.aiFeedback {
                             NativeAIFeedbackCard(feedback: feedback, compact: true)
+                                .onAppear {
+                                    guard feedback.requiresExposureAcknowledgement else { return }
+                                    appState.setRecordExpressionPlanCardVisible(true, reference: reference)
+                                    Task {
+                                        await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
+                                    }
+                                }
+                                .onDisappear {
+                                    guard feedback.source == "expression_planner" else { return }
+                                    appState.setRecordExpressionPlanCardVisible(false, reference: reference)
+                                }
+                                .id(feedback.renderIdentity)
                         }
                         imageSection(detail)
                         amountSection(draftBinding)

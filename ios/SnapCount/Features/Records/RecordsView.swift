@@ -188,11 +188,23 @@ struct RecordDetailView: View {
                         if let feedback = detail.aiFeedback {
                             NativeAIFeedbackCard(
                                 feedback: feedback,
-                                reviewable: true,
+                                reviewable: feedback.isReviewable,
                                 reviewState: appState.recordFeedbackState
                             ) { choice, text in
                                 Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
                             }
+                            .onAppear {
+                                guard feedback.requiresExposureAcknowledgement else { return }
+                                appState.setRecordExpressionPlanCardVisible(true, reference: reference)
+                                Task {
+                                    await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
+                                }
+                            }
+                            .onDisappear {
+                                guard feedback.source == "expression_planner" else { return }
+                                appState.setRecordExpressionPlanCardVisible(false, reference: reference)
+                            }
+                            .id(feedback.renderIdentity)
                         }
 
                         if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
