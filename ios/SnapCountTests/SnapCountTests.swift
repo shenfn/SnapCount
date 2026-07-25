@@ -877,7 +877,7 @@ final class SnapCountTests: XCTestCase {
         let normalized = NativeHomeInsightPreferences.normalizedFinance(configuration)
 
         XCTAssertEqual(normalized.map(\.key), [.accountMix, .cashSafety, .spendingRhythm, .expenseStructure, .repaymentPlan])
-        XCTAssertEqual(normalized.filter(\.isEnabled).count, 2)
+        XCTAssertEqual(normalized.filter(\.isEnabled).count, 3)
         XCTAssertEqual(normalized.map(\.order), [0, 1, 2, 3, 4])
     }
 
