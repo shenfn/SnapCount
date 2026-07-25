@@ -14,9 +14,21 @@ struct TodayView: View {
     @State private var showDatePicker = false
     @State private var selectedDate = Date()
     @State private var widgetConfiguration = NativeHomeWidgetPreferences.load()
+    @State private var financeCardConfiguration = NativeHomeInsightPreferences.loadFinance()
+    @State private var domainCardConfiguration = NativeHomeInsightPreferences.loadDomains()
+    @State private var selectedFinanceCard: NativeHomeFinanceCardKey = .cashSafety
+    @State private var selectedDomainCard: NativeHomeDomainCardKey = .sleepRecovery
 
     private var enabledWidgets: [NativeHomeWidgetConfiguration] {
         widgetConfiguration.filter(\.isEnabled).sorted { $0.order < $1.order }
+    }
+
+    private var enabledFinanceCards: [NativeHomeFinanceCardConfiguration] {
+        financeCardConfiguration.filter(\.isEnabled).sorted { $0.order < $1.order }
+    }
+
+    private var enabledDomainCards: [NativeHomeDomainCardConfiguration] {
+        domainCardConfiguration.filter(\.isEnabled).sorted { $0.order < $1.order }
     }
 
     private var financeSummary: NativeHomeFinanceSummary {
@@ -29,6 +41,10 @@ struct TodayView: View {
 
     private var pendingSummary: NativeHomePendingSummary {
         NativeHomePendingSummary.make(dashboard: appState.dashboard)
+    }
+
+    private var selectedInsightSnapshot: DashboardSnapshot {
+        appState.reportSnapshot(monthKey: selectedMonthKey)
     }
 
     private var selectedDateKey: String {
@@ -112,7 +128,11 @@ struct TodayView: View {
             ManualRecordSheet()
         }
         .sheet(isPresented: $showWidgetManager) {
-            HomeWidgetManagerSheet(configuration: $widgetConfiguration)
+            HomeWidgetManagerSheet(
+                configuration: $widgetConfiguration,
+                financeConfiguration: $financeCardConfiguration,
+                domainConfiguration: $domainCardConfiguration
+            )
         }
         .sheet(isPresented: $showDatePicker) {
             NavigationStack {
@@ -142,6 +162,15 @@ struct TodayView: View {
         }
         .task(id: selectedMonthKey) {
             await appState.loadRecordMonth(selectedMonthKey)
+        }
+        .onAppear {
+            normalizeInsightSelections()
+        }
+        .onChange(of: financeCardConfiguration) { _ in
+            normalizeInsightSelections()
+        }
+        .onChange(of: domainCardConfiguration) { _ in
+            normalizeInsightSelections()
         }
     }
 
@@ -209,7 +238,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("首页组件")
                     .font(.headline)
-                Text("已启用 \(enabledWidgets.count) 个")
+                Text("已启用 \(enabledWidgets.count) 个区块 · 财务 \(enabledFinanceCards.count) 张 · 数据域 \(enabledDomainCards.count) 张")
                     .font(.caption)
                     .foregroundStyle(JieziTheme.muted)
             }
@@ -260,61 +289,23 @@ struct TodayView: View {
                     Label("账户", systemImage: "chevron.right")
                 }
             }
-
-            JieziCard(solid: true) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("净额估算")
-                                .font(.caption)
-                                .foregroundStyle(JieziTheme.muted)
-                            Text(money(financeSummary.netWorthEstimate, signed: true))
-                                .font(.system(size: 30, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                        }
-                        Spacer()
-                        Text(financeSummary.statusLabel)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(JieziTheme.brand)
-                    }
-
-                    HStack(spacing: 10) {
-                        metric(title: "可用现金", value: money(financeSummary.availableCash))
-                        metric(title: "当前欠款", value: money(financeSummary.liabilityTotal))
-                    }
-                    HStack(spacing: 10) {
-                        metric(title: selectedDateKey == Self.todayKey ? "今日收入" : "所选日收入", value: money(financeSummary.dayIncome, signed: true))
-                        metric(title: selectedDateKey == Self.todayKey ? "今日支出" : "所选日支出", value: money(financeSummary.dayExpense))
-                    }
-
-                    if let liability = financeSummary.nearestLiability {
-                        NavigationLink {
-                            AccountsView()
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("最近待还")
-                                        .font(.caption)
-                                        .foregroundStyle(JieziTheme.muted)
-                                    Text(liability.title)
-                                        .font(.headline)
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 3) {
-                                    Text(money(liability.currentBalance))
-                                        .font(.headline.monospacedDigit())
-                                    Text(liability.paymentDueDay.map { "每月 \($0) 日" } ?? "未设置还款日")
-                                        .font(.caption)
-                                        .foregroundStyle(JieziTheme.muted)
-                                }
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(JieziTheme.muted)
-                            }
-                        }
-                        .buttonStyle(.plain)
+            if enabledFinanceCards.isEmpty {
+                insightEmptyState(title: "财务卡片已隐藏", message: "在首页组件管理中选择你最关心的财务信息。")
+            } else {
+                TabView(selection: $selectedFinanceCard) {
+                    ForEach(enabledFinanceCards) { configuration in
+                        HomeFinanceInsightCardView(
+                            key: configuration.key,
+                            summary: financeSummary,
+                            snapshot: selectedInsightSnapshot,
+                            accounts: appState.accounts,
+                            selectedDateKey: selectedDateKey
+                        )
+                        .tag(configuration.key)
                     }
                 }
+                .tabViewStyle(.page(indexDisplayMode: .automatic))
+                .frame(height: 270)
             }
         }
     }
@@ -359,36 +350,46 @@ struct TodayView: View {
                     Label("全部", systemImage: "chevron.right")
                 }
             }
-
-            NavigationLink {
-                DomainsView()
-            } label: {
-                VStack(spacing: 0) {
-                    ForEach(Array(appState.dashboard.domains.prefix(5).enumerated()), id: \.element.id) { index, domain in
-                        HStack(spacing: 12) {
-                            Text(domain.icon.isEmpty ? "·" : domain.icon)
-                                .frame(width: 34, height: 34)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(domain.shortName)
-                                    .font(.headline)
-                                Text(domain.description)
-                                    .font(.caption)
-                                    .foregroundStyle(JieziTheme.muted)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Text("\(domain.recordCount) 条")
-                                .font(.subheadline.monospacedDigit())
-                        }
-                        .padding(.vertical, 11)
-                        if index < min(appState.dashboard.domains.count, 5) - 1 {
-                            Divider()
-                        }
+            if enabledDomainCards.isEmpty {
+                insightEmptyState(title: "数据域卡片已隐藏", message: "在首页组件管理中选择你想长期观察的生活信息。")
+            } else {
+                TabView(selection: $selectedDomainCard) {
+                    ForEach(enabledDomainCards) { configuration in
+                        HomeDomainInsightCardView(
+                            key: configuration.key,
+                            snapshot: selectedInsightSnapshot,
+                            selectedDaySummary: selectedDaySummary,
+                            selectedDateKey: selectedDateKey
+                        )
+                        .tag(configuration.key)
                     }
                 }
-                .jieziCard(solid: true)
+                .tabViewStyle(.page(indexDisplayMode: .automatic))
+                .frame(height: 246)
             }
-            .buttonStyle(.plain)
+        }
+    }
+
+    private func insightEmptyState(title: String, message: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.headline)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jieziCard(solid: true)
+    }
+
+    private func normalizeInsightSelections() {
+        if let first = enabledFinanceCards.first?.key,
+           !enabledFinanceCards.contains(where: { $0.key == selectedFinanceCard }) {
+            selectedFinanceCard = first
+        }
+        if let first = enabledDomainCards.first?.key,
+           !enabledDomainCards.contains(where: { $0.key == selectedDomainCard }) {
+            selectedDomainCard = first
         }
     }
 
@@ -610,6 +611,8 @@ struct TodayView: View {
 private struct HomeWidgetManagerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var configuration: [NativeHomeWidgetConfiguration]
+    @Binding var financeConfiguration: [NativeHomeFinanceCardConfiguration]
+    @Binding var domainConfiguration: [NativeHomeDomainCardConfiguration]
 
     var body: some View {
         NavigationStack {
@@ -652,8 +655,62 @@ private struct HomeWidgetManagerSheet: View {
                 }
 
                 Section {
+                    Text("财务状态和数据域各最多显示 3 张卡片，首页可左右滑动查看。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("财务状态卡片") {
+                    ForEach(financeConfiguration.indices, id: \.self) { index in
+                        insightConfigurationRow(
+                            title: financeConfiguration[index].key.title,
+                            detail: financeConfiguration[index].key.detail,
+                            systemImage: financeConfiguration[index].key.systemImage,
+                            isEnabled: financeConfiguration[index].isEnabled,
+                            enabledCount: financeConfiguration.filter(\.isEnabled).count,
+                            onToggle: { isEnabled in
+                                financeConfiguration = NativeHomeInsightPreferences.updatingFinance(
+                                    financeConfiguration,
+                                    key: financeConfiguration[index].key,
+                                    isEnabled: isEnabled
+                                )
+                            },
+                            moveUp: { moveFinance(index, offset: -1) },
+                            moveDown: { moveFinance(index, offset: 1) },
+                            isFirst: index == 0,
+                            isLast: index == financeConfiguration.count - 1
+                        )
+                    }
+                }
+
+                Section("数据域卡片") {
+                    ForEach(domainConfiguration.indices, id: \.self) { index in
+                        insightConfigurationRow(
+                            title: domainConfiguration[index].key.title,
+                            detail: domainConfiguration[index].key.detail,
+                            systemImage: domainConfiguration[index].key.systemImage,
+                            isEnabled: domainConfiguration[index].isEnabled,
+                            enabledCount: domainConfiguration.filter(\.isEnabled).count,
+                            onToggle: { isEnabled in
+                                domainConfiguration = NativeHomeInsightPreferences.updatingDomain(
+                                    domainConfiguration,
+                                    key: domainConfiguration[index].key,
+                                    isEnabled: isEnabled
+                                )
+                            },
+                            moveUp: { moveDomain(index, offset: -1) },
+                            moveDown: { moveDomain(index, offset: 1) },
+                            isFirst: index == 0,
+                            isLast: index == domainConfiguration.count - 1
+                        )
+                    }
+                }
+
+                Section {
                     Button("恢复默认") {
                         configuration = NativeHomeWidgetPreferences.defaults
+                        financeConfiguration = NativeHomeInsightPreferences.financeDefaults
+                        domainConfiguration = NativeHomeInsightPreferences.domainDefaults
                     }
                 }
             }
@@ -668,6 +725,55 @@ private struct HomeWidgetManagerSheet: View {
         .onChange(of: configuration) { value in
             NativeHomeWidgetPreferences.save(value)
         }
+        .onChange(of: financeConfiguration) { value in
+            NativeHomeInsightPreferences.saveFinance(value)
+        }
+        .onChange(of: domainConfiguration) { value in
+            NativeHomeInsightPreferences.saveDomains(value)
+        }
+    }
+
+    private func insightConfigurationRow(
+        title: String,
+        detail: String,
+        systemImage: String,
+        isEnabled: Bool,
+        enabledCount: Int,
+        onToggle: @escaping (Bool) -> Void,
+        moveUp: @escaping () -> Void,
+        moveDown: @escaping () -> Void,
+        isFirst: Bool,
+        isLast: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .foregroundStyle(JieziTheme.mint)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Toggle("", isOn: Binding(get: { isEnabled }, set: onToggle))
+                .labelsHidden()
+                .disabled(!isEnabled && enabledCount >= NativeHomeInsightPreferences.maximumEnabledCards)
+            Button(action: moveUp) {
+                Image(systemName: "arrow.up")
+            }
+            .buttonStyle(.borderless)
+            .disabled(isFirst)
+            .accessibilityLabel("上移\(title)")
+            Button(action: moveDown) {
+                Image(systemName: "arrow.down")
+            }
+            .buttonStyle(.borderless)
+            .disabled(isLast)
+            .accessibilityLabel("下移\(title)")
+        }
+        .padding(.vertical, 5)
     }
 
     private func move(_ index: Int, offset: Int) {
@@ -676,6 +782,24 @@ private struct HomeWidgetManagerSheet: View {
         configuration.swapAt(index, destination)
         configuration = configuration.enumerated().map { order, item in
             NativeHomeWidgetConfiguration(key: item.key, isEnabled: item.isEnabled, order: order)
+        }
+    }
+
+    private func moveFinance(_ index: Int, offset: Int) {
+        let destination = index + offset
+        guard financeConfiguration.indices.contains(index), financeConfiguration.indices.contains(destination) else { return }
+        financeConfiguration.swapAt(index, destination)
+        financeConfiguration = financeConfiguration.enumerated().map { order, item in
+            NativeHomeFinanceCardConfiguration(key: item.key, isEnabled: item.isEnabled, order: order)
+        }
+    }
+
+    private func moveDomain(_ index: Int, offset: Int) {
+        let destination = index + offset
+        guard domainConfiguration.indices.contains(index), domainConfiguration.indices.contains(destination) else { return }
+        domainConfiguration.swapAt(index, destination)
+        domainConfiguration = domainConfiguration.enumerated().map { order, item in
+            NativeHomeDomainCardConfiguration(key: item.key, isEnabled: item.isEnabled, order: order)
         }
     }
 }
