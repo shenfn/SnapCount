@@ -219,9 +219,13 @@ const legacyAiFeedback = computed(() => {
   if (!raw) return null
   return raw.aiFeedback || raw.ai_feedback || raw.payload?.ai_feedback || raw.extracted?.ai_feedback || raw.extracted_json?.ai_feedback || null
 })
+const expectedExpressionRecordKind = computed(() => (
+  record.value?.kind === 'universal' ? 'data' : record.value?.kind || ''
+))
 const recordExpressionPlan = computed(() => {
   const recordId = record.value?.id
-  return recordId ? store.recordExpressionPlanCache.value[recordId] || null : null
+  const plan = recordId ? store.recordExpressionPlanCache.value[recordId] || null : null
+  return plan?.recordKind === expectedExpressionRecordKind.value ? plan : null
 })
 const plannerAiFeedback = computed(() => (
   recordExpressionPlan.value?.available ? recordExpressionPlan.value.feedback || null : null
@@ -282,9 +286,9 @@ function feedbackCardElement() {
   return aiFeedbackCardRef.value?.$el || aiFeedbackCardRef.value || null
 }
 
-async function loadPlannerWithRetry(recordId, signal) {
+async function loadPlannerWithRetry(recordId, recordKind, signal) {
   return retryWithBackoff(
-    () => store.loadRecordExpressionPlan(recordId, { signal }),
+    () => store.loadRecordExpressionPlan(recordId, { recordKind, signal }),
     {
       delays: PLAN_NOT_READY_RETRY_DELAYS,
       signal,
@@ -330,9 +334,9 @@ async function acknowledgePlannerWhenVisible(recordId, plan, controller, { manua
 }
 
 watch(
-  () => [store.currentPage.value, record.value?.id || ''],
-  async ([page, recordId], _previous, onCleanup) => {
-    if (page !== 'record-detail' || !recordId) return
+  () => [store.currentPage.value, record.value?.id || '', record.value?.kind || ''],
+  async ([page, recordId, recordKind], _previous, onCleanup) => {
+    if (page !== 'record-detail' || !recordId || !recordKind) return
     const controller = new AbortController()
     activePlannerDeliveryController = controller
     onCleanup(() => {
@@ -340,7 +344,7 @@ watch(
       if (activePlannerDeliveryController === controller) activePlannerDeliveryController = null
     })
     try {
-      const plan = await loadPlannerWithRetry(recordId, controller.signal)
+      const plan = await loadPlannerWithRetry(recordId, recordKind, controller.signal)
       if (!isCurrentVisibleDetail(recordId) || !plan?.available || plan.acknowledged) return
       await acknowledgePlannerWhenVisible(recordId, plan, controller)
     } catch (error) {

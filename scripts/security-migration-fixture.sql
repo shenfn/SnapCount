@@ -46,7 +46,10 @@ create table public.user_configs (
   monthly_quota integer not null default 100,
   daily_quota integer not null default 30,
   is_active boolean not null default true,
-  ai_logs_enabled boolean not null default true
+  ai_logs_enabled boolean not null default true,
+  expression_improvement_enabled boolean not null default false,
+  expression_improvement_consent_at timestamptz,
+  expression_improvement_withdrawn_at timestamptz
 );
 
 create table public.account_deletion_requests (
@@ -228,6 +231,16 @@ insert into auth.users (id) values
 insert into public.user_configs (user_id) values
   ('11111111-1111-4111-8111-111111111111'),
   ('22222222-2222-4222-8222-222222222222');
+
+insert into public.user_configs (
+  user_id,
+  expression_improvement_enabled,
+  expression_improvement_consent_at
+) values (
+  '66666666-6666-4666-8666-666666666666',
+  true,
+  '2026-07-25T07:55:00Z'
+);
 
 insert into storage.objects (bucket_id, name) values
   ('receipt-images', '2026-01-01/victim.jpg'),

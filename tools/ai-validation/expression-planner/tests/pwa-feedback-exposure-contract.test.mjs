@@ -53,6 +53,7 @@ test('PWA renders owner planner feedback before acknowledging its exposure', asy
   assert.match(store, /candidate_id:\s*candidateId/)
   assert.match(store, /recordExpressionPlanCache\.value\s*=\s*\{\}/)
   assert.match(store, /cached\.reason\s*===\s*'plan_not_ready'/)
+  assert.match(detail, /plan\?\.recordKind\s*===\s*expectedExpressionRecordKind\.value/)
   assert.match(detail, /plannerAiFeedback\.value\s*\|\|\s*legacyAiFeedback\.value/)
   assert.match(detail, /:reviewable="aiFeedbackReviewable"/)
   assert.match(detail, /recordExpressionPlan\.value\?\.acknowledged\s*&&\s*aiFeedbackExposureEventId\.value/)

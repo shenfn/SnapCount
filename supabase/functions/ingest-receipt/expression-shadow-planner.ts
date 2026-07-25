@@ -64,6 +64,16 @@ export interface PlannerSourceDependency {
 }
 
 function numberOrNull(value: unknown): number | null { return parseFiniteNumber(value); }
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function objectOrEmpty(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 function explicitTransactionTime(row: ShadowExpenseTransaction): string | null {
   if (typeof row.transaction_time !== "string" || !row.transaction_time.trim() || !row.transaction_date) return null;
   const occurredAt = `${row.transaction_date}T${row.transaction_time.trim()}+08:00`;
@@ -101,28 +111,31 @@ export function buildExpensePlannerSourceRecord(row: ShadowExpenseTransaction) {
   };
 }
 
-export function buildIncomePlannerSourceRecord(row: Record<string, unknown>) {
+export function buildIncomePlannerSourceRecord(row: Record<string, unknown>): ShadowGenericRecord {
+  const incomeDate = stringOrNull(row.income_date);
   return {
-    id: row.id,
-    occurred_at: `${row.income_date}T12:00:00+08:00`,
-    amount: row.amount,
-    source_name: row.source_name,
-    payload: { category: row.category },
+    id: stringOrNull(row.id) ?? "",
+    occurred_at: incomeDate
+      ? `${incomeDate}T12:00:00+08:00`
+      : stringOrNull(row.created_at) ?? "",
+    amount: numberOrNull(row.amount),
+    source_name: stringOrNull(row.source_name),
+    payload: { category: stringOrNull(row.category) },
     source_type: "income_record",
   };
 }
 
-export function buildDataPlannerSourceRecord(row: Record<string, unknown>) {
+export function buildDataPlannerSourceRecord(row: Record<string, unknown>): ShadowGenericRecord {
   return {
-    id: row.id,
-    occurred_at: row.occurred_at,
-    title: row.title,
-    summary: row.summary,
-    payload: row.payload_jsonb ?? {},
-    linked_account_id: row.linked_account_id ?? null,
-    account_snapshot_kind: row.account_snapshot_kind ?? null,
-    snapshot_balance: row.snapshot_balance ?? null,
-    snapshot_at: row.snapshot_at ?? null,
+    id: stringOrNull(row.id) ?? "",
+    occurred_at: stringOrNull(row.occurred_at) ?? "",
+    title: stringOrNull(row.title),
+    summary: stringOrNull(row.summary),
+    payload: objectOrEmpty(row.payload_jsonb),
+    linked_account_id: stringOrNull(row.linked_account_id),
+    account_snapshot_kind: stringOrNull(row.account_snapshot_kind),
+    snapshot_balance: numberOrNull(row.snapshot_balance),
+    snapshot_at: stringOrNull(row.snapshot_at),
     source_type: "data_record",
   };
 }

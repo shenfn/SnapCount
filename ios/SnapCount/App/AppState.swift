@@ -1419,7 +1419,7 @@ final class AppState: ObservableObject {
         guard let preview = await NativeRecordExpressionPlanRetryPolicy.resolve(
             fetch: {
                 try await self.recordRepository.getRecordExpressionPlan(
-                    recordId: detail.rawId,
+                    reference: detail.id,
                     accessToken: session.accessToken
                 )
             },

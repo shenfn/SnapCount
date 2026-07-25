@@ -4227,15 +4227,18 @@ export function useStore() {
     })
   }
 
-  async function loadRecordExpressionPlan(recordId, { force = false, signal } = {}) {
+  async function loadRecordExpressionPlan(recordId, { recordKind, force = false, signal } = {}) {
     const normalizedRecordId = String(recordId || '').trim()
+    const normalizedRecordKind = recordKind === 'universal' ? 'data' : String(recordKind || '').trim()
     if (!normalizedRecordId) throw new Error('缺少记录编号')
-    if (recordExpressionPlanLoadRequests.has(normalizedRecordId)) {
-      return recordExpressionPlanLoadRequests.get(normalizedRecordId)
+    if (!['expense', 'income', 'data'].includes(normalizedRecordKind)) throw new Error('缺少有效的记录类型')
+    const requestKey = `${normalizedRecordKind}:${normalizedRecordId}`
+    if (recordExpressionPlanLoadRequests.has(requestKey)) {
+      return recordExpressionPlanLoadRequests.get(requestKey)
     }
     const cached = recordExpressionPlanCache.value[normalizedRecordId]
     const retryableUnavailable = cached?.status === 'unavailable' && cached.reason === 'plan_not_ready'
-    if (!force && cached && !['loading', 'error'].includes(cached.status) && !retryableUnavailable) return cached
+    if (!force && cached?.recordKind === normalizedRecordKind && !['loading', 'error'].includes(cached.status) && !retryableUnavailable) return cached
 
     const cacheVersion = recordExpressionPlanCacheVersion
     setRecordExpressionPlan(normalizedRecordId, {
@@ -4243,12 +4246,14 @@ export function useStore() {
       available: false,
       acknowledged: false,
       feedback: null,
+      recordKind: normalizedRecordKind,
       error: '',
     })
     const request = (async () => {
       try {
         const data = await postExpressionAction('get_record_expression_plan', {
           record_id: normalizedRecordId,
+          record_kind: normalizedRecordKind,
         }, { signal })
         if (cacheVersion !== recordExpressionPlanCacheVersion) return null
         if (!data?.available) {
@@ -4257,6 +4262,7 @@ export function useStore() {
             available: false,
             acknowledged: false,
             feedback: null,
+            recordKind: normalizedRecordKind,
             reason: data?.reason || 'not_available',
             error: '',
           })
@@ -4270,6 +4276,7 @@ export function useStore() {
           status: 'ready',
           available: true,
           acknowledged: false,
+          recordKind: normalizedRecordKind,
           planToken,
           candidateId,
           feedback: data.feedback,
@@ -4282,18 +4289,19 @@ export function useStore() {
             available: false,
             acknowledged: false,
             feedback: null,
+            recordKind: normalizedRecordKind,
             error: error?.message || String(error),
           })
         }
         throw error
       }
     })()
-    recordExpressionPlanLoadRequests.set(normalizedRecordId, request)
+    recordExpressionPlanLoadRequests.set(requestKey, request)
     try {
       return await request
     } finally {
-      if (recordExpressionPlanLoadRequests.get(normalizedRecordId) === request) {
-        recordExpressionPlanLoadRequests.delete(normalizedRecordId)
+      if (recordExpressionPlanLoadRequests.get(requestKey) === request) {
+        recordExpressionPlanLoadRequests.delete(requestKey)
       }
     }
   }

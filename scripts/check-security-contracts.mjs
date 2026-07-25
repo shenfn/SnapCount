@@ -77,6 +77,10 @@ assert.match(
   /\bbegin;\s+lock table public\.expression_shadow_runs[\s\S]*commit;\s*$/i,
   "the expression feedback lock and schema changes must run in one explicit transaction",
 );
+assert.match(expressionFeedbackAtomicSql, /expires_at timestamptz not null default \(now\(\) \+ interval '1 hour'\)/i);
+assert.match(expressionFeedbackAtomicSql, /shadow_run_id uuid references public\.expression_shadow_runs\(id\) on delete set null/i);
+assert.match(expressionFeedbackAtomicSql, /record_kind text not null check \(record_kind in \('expense', 'income', 'data'\)\)/i);
+assert.match(expressionFeedbackAtomicSql, /cleanup_expression_delivery_snapshots/i);
 const pwaStoreSource = await readFile(
   path.join(repoRoot, "src", "composables", "useStore.js"),
   "utf8",
@@ -286,12 +290,17 @@ assert.match(
   securityMigrationTestSql,
   /source deletion must purge its structured source mapping/i,
 );
+assert.match(
+  securityMigrationTestSql,
+  /select 1 from public\.expression_delivery_snapshots[\s\S]*66666666-0000-4000-8000-000000000008/i,
+);
 
 for (const [functionName, migrationSql] of [
   ["persist_expression_exposure_with_sources", expressionFeedbackAtomicSql],
   ["replace_expression_feedback_bundle", expressionFeedbackAtomicSql],
   ["get_expression_preference_source", expressionFeedbackAtomicSql],
   ["upsert_expression_preference_snapshot_if_newer", expressionFeedbackAtomicSql],
+  ["cleanup_expression_delivery_snapshots", expressionFeedbackAtomicSql],
   ["purge_expression_artifacts_after_record_delete", expressionRecordCleanupSql],
 ]) {
   assert.match(

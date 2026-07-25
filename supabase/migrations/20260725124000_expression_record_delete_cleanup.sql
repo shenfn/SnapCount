@@ -53,6 +53,10 @@ begin
   where user_id = old.user_id
     and id = any(v_exposure_ids);
 
+  delete from public.expression_delivery_snapshots
+  where user_id = old.user_id
+    and record_id = old.id;
+
   delete from public.expression_shadow_runs
   where user_id = old.user_id
     and (

@@ -1,23 +1,20 @@
 import {
-  getExpressionShadowMode,
   loadPlannerPersonalization,
   persistPlannerExposureEvents,
 } from "./expression-shadow.ts";
 import {
   buildDataPlannerSourceRecord,
   buildExpensePlannerSourceRecord,
+  buildExpressionShadowPlan,
+  buildGenericExpressionShadowPlan,
   buildIncomePlannerSourceRecord,
-  canonicalPlannerSource,
   EXPRESSION_PLANNER_VERSION,
   plannerSourceFingerprint,
 } from "./expression-shadow-planner.ts";
 import type { ShadowExpenseTransaction } from "./expression-shadow-planner.ts";
-import { evaluateCandidates } from "../../../tools/ai-validation/expression-planner/lib/eligibility-gates.mjs";
-import { scoreCandidates } from "../../../tools/ai-validation/expression-planner/lib/deterministic-scoring.mjs";
-import { buildExpressionPlans } from "../../../tools/ai-validation/expression-planner/lib/expression-plan.mjs";
-import { buildRenderPlans } from "../../../tools/ai-validation/expression-planner/lib/render-contract.mjs";
 
 const RECORD_DETAIL_RENDER_VERSION = "surface-render-contract-v0.1";
+type RecordKind = "expense" | "income" | "data";
 
 interface DatabaseClient {
   // deno-lint-ignore no-explicit-any
@@ -36,13 +33,12 @@ function text(value: unknown, max = 500): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-function deliveryEnabledFor(userId: string): boolean {
-  if (getExpressionShadowMode() !== "enforced_owner_only") return false;
-  const ownerIds = (Deno.env.get("EXPRESSION_PLANNER_OWNER_USER_IDS") ?? Deno.env.get("EXPRESSION_PLANNER_OWNER_USER_ID") ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  return ownerIds.includes(userId);
+function recordKind(value: unknown): RecordKind | null {
+  const normalized = text(value, 40).toLowerCase();
+  if (["expense", "transaction", "tx"].includes(normalized)) return "expense";
+  if (normalized === "income") return "income";
+  if (["data", "universal"].includes(normalized)) return "data";
+  return null;
 }
 
 function dimensionLabel(dimension: string): string {
@@ -79,40 +75,15 @@ function selectedRecordDetail(plan: Record<string, unknown>) {
   });
 }
 
-async function currentDeliveryPlan(
-  supabase: DatabaseClient,
-  userId: string,
-  storedPlan: Record<string, unknown>,
-) {
-  const candidates = Array.isArray(storedPlan.candidates)
-    ? storedPlan.candidates as Record<string, unknown>[]
-    : [];
-  const personalization = await loadPlannerPersonalization(supabase, userId);
-  const eligible = evaluateCandidates(candidates, { planningContext: "record_event" });
-  const scored = scoreCandidates(eligible, {
-    context: {},
-    preferenceProfile: personalization.preferenceProfile,
-    exposureHistory: personalization.exposureHistory,
-  });
-  const expressionPlans = buildExpressionPlans(scored);
-  return {
-    ...storedPlan,
-    candidates: scored,
-    render_plans: buildRenderPlans(expressionPlans, scored),
-  };
-}
-
 function frozenDeliveryPlan(
-  storedPlan: Record<string, unknown>,
   deliveryPlan: Record<string, unknown>,
   item: ReturnType<typeof selectedRecordDetail>[number],
 ) {
   const renderPlan = object(object(deliveryPlan.render_plans).record_detail);
   return {
     status: "auto_planned",
-    planner_version: storedPlan.planner_version,
-    domain_key: storedPlan.domain_key,
-    source_record: storedPlan.source_record,
+    planner_version: deliveryPlan.planner_version,
+    domain_key: deliveryPlan.domain_key,
     source_dependencies: item.candidate.source_dependencies,
     candidates: [{
       candidate_id: item.candidate.candidate_id,
@@ -141,38 +112,31 @@ function frozenDeliveryPlan(
 async function persistDeliverySnapshot(
   supabase: DatabaseClient,
   userId: string,
-  shadowRow: Record<string, unknown>,
+  recordId: string,
+  kind: RecordKind,
   deliveryPlan: Record<string, unknown>,
   primary: ReturnType<typeof selectedRecordDetail>[number],
 ) {
-  const plan = frozenDeliveryPlan(object(shadowRow.proposed_plan), deliveryPlan, primary);
+  const plan = frozenDeliveryPlan(deliveryPlan, primary);
   const contentFingerprint = plannerSourceFingerprint(plan);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   const snapshot = {
     user_id: userId,
-    shadow_run_id: shadowRow.id,
-    record_id: shadowRow.record_id,
+    shadow_run_id: null,
+    record_id: recordId,
+    record_kind: kind,
+    domain_key: text(deliveryPlan.domain_key, 80),
     surface: "record_detail",
     candidate_id: primary.candidateId,
     content_fingerprint: contentFingerprint,
     delivery_plan: plan,
+    expires_at: expiresAt,
   };
-  const { data: inserted, error } = await supabase.from("expression_delivery_snapshots")
-    .upsert(snapshot, {
-      onConflict: "user_id,shadow_run_id,surface,content_fingerprint",
-      ignoreDuplicates: true,
-    })
-    .select("id,created_at,shadow_run_id,record_id,candidate_id,content_fingerprint,delivery_plan")
+  const { data, error } = await supabase.from("expression_delivery_snapshots")
+    .insert(snapshot)
+    .select("id,created_at,expires_at,shadow_run_id,record_id,record_kind,domain_key,candidate_id,content_fingerprint,delivery_plan")
     .maybeSingle();
   if (error) throw new Error(error.message);
-  if (inserted) return inserted as Record<string, unknown>;
-  const { data, error: lookupError } = await supabase.from("expression_delivery_snapshots")
-    .select("id,created_at,shadow_run_id,record_id,candidate_id,content_fingerprint,delivery_plan")
-    .eq("user_id", userId)
-    .eq("shadow_run_id", shadowRow.id)
-    .eq("surface", "record_detail")
-    .eq("content_fingerprint", contentFingerprint)
-    .maybeSingle();
-  if (lookupError) throw new Error(lookupError.message);
   if (!data) throw new Error("表达下发快照写入失败");
   return data as Record<string, unknown>;
 }
@@ -183,12 +147,14 @@ async function loadDeliverySnapshot(
   recordId: string,
   deliveryToken: string,
 ) {
+  const now = new Date().toISOString();
   const { data, error } = await supabase.from("expression_delivery_snapshots")
-    .select("id,created_at,shadow_run_id,record_id,candidate_id,content_fingerprint,delivery_plan")
+    .select("id,created_at,expires_at,shadow_run_id,record_id,record_kind,domain_key,candidate_id,content_fingerprint,delivery_plan")
     .eq("id", deliveryToken)
     .eq("user_id", userId)
     .eq("record_id", recordId)
     .eq("surface", "record_detail")
+    .gt("expires_at", now)
     .maybeSingle();
   if (error) throw new Error(error.message);
   return data as Record<string, unknown> | null;
@@ -216,55 +182,111 @@ function feedbackPayload(item: ReturnType<typeof selectedRecordDetail>[number], 
   };
 }
 
-async function latestPlan(
-  supabase: DatabaseClient,
-  userId: string,
-  recordId: string,
-  planToken = "",
+function includeCurrentRecord(
+  rows: Record<string, unknown>[],
+  current: Record<string, unknown>,
 ) {
-  let query = supabase.from("expression_shadow_runs")
-    .select("id,created_at,occurred_at,user_id,record_id,record_type,rollout_mode,proposed_plan,processed_at,processing_error")
-    .eq("user_id", userId)
-    .eq("record_id", recordId);
-  if (planToken) query = query.eq("id", planToken);
-  const { data, error } = await query.order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data as Record<string, unknown> | null;
+  const byId = new Map(rows.map((row) => [text(row.id, 100), row]));
+  byId.set(text(current.id, 100), current);
+  return [...byId.values()];
 }
 
-async function currentSourceRecord(
+async function buildCurrentRecordPlan(
   supabase: DatabaseClient,
   userId: string,
   recordId: string,
-  domainKey: string,
+  kind: RecordKind,
 ) {
-  if (domainKey === "expense") {
-    const { data, error } = await supabase.from("transactions")
+  if (kind === "expense") {
+    const { data: current, error } = await supabase.from("transactions")
       .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type")
       .eq("user_id", userId)
       .eq("id", recordId)
       .eq("type", "expense")
       .maybeSingle();
     if (error) throw new Error(error.message);
-    return data ? buildExpensePlannerSourceRecord(data) : null;
+    if (!current) return null;
+    const { data: history, error: historyError } = await supabase.from("transactions")
+      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type")
+      .eq("user_id", userId)
+      .eq("type", "expense")
+      .lte("transaction_date", current.transaction_date)
+      .order("transaction_date", { ascending: false })
+      .order("transaction_time", { ascending: false })
+      .limit(500);
+    if (historyError) throw new Error(historyError.message);
+    const personalization = await loadPlannerPersonalization(supabase, userId);
+    const transactions = includeCurrentRecord(history ?? [], current) as unknown as ShadowExpenseTransaction[];
+    const sourceRecord = buildExpensePlannerSourceRecord(current as ShadowExpenseTransaction);
+    return {
+      kind,
+      domainKey: "expense",
+      plan: buildExpressionShadowPlan({
+        transactions,
+        currentRecordId: recordId,
+        occurredAt: text(sourceRecord.occurred_at, 100),
+        ...personalization,
+      }) as Record<string, unknown>,
+    };
   }
-  if (domainKey === "income") {
-    const { data, error } = await supabase.from("income_records")
+  if (kind === "income") {
+    const { data: current, error } = await supabase.from("income_records")
       .select("id,income_date,created_at,amount,source_name,category")
       .eq("user_id", userId)
       .eq("id", recordId)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    return data ? buildIncomePlannerSourceRecord(data) : null;
+    if (!current) return null;
+    const { data: history, error: historyError } = await supabase.from("income_records")
+      .select("id,income_date,created_at,amount,source_name,category")
+      .eq("user_id", userId)
+      .lte("income_date", current.income_date)
+      .order("income_date", { ascending: false })
+      .limit(500);
+    if (historyError) throw new Error(historyError.message);
+    const personalization = await loadPlannerPersonalization(supabase, userId);
+    const records = includeCurrentRecord(history ?? [], current).map(buildIncomePlannerSourceRecord);
+    return {
+      kind,
+      domainKey: "income",
+      plan: buildGenericExpressionShadowPlan({
+        domainKey: "income",
+        records,
+        currentRecordId: recordId,
+        ...personalization,
+      }) as Record<string, unknown>,
+    };
   }
-  const { data, error } = await supabase.from("data_records")
+  const { data: current, error } = await supabase.from("data_records")
     .select("id,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at")
     .eq("user_id", userId)
     .eq("id", recordId)
-    .eq("domain_key", domainKey)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return data ? buildDataPlannerSourceRecord(data) : null;
+  if (!current) return null;
+  const domainKey = text(current.domain_key, 80);
+  if (!domainKey) return null;
+  let historyQuery = supabase.from("data_records")
+    .select("id,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at")
+    .eq("user_id", userId)
+    .eq("domain_key", domainKey);
+  if (current.occurred_at) historyQuery = historyQuery.lte("occurred_at", current.occurred_at);
+  const { data: history, error: historyError } = await historyQuery
+    .order("occurred_at", { ascending: false })
+    .limit(500);
+  if (historyError) throw new Error(historyError.message);
+  const personalization = await loadPlannerPersonalization(supabase, userId);
+  const records = includeCurrentRecord(history ?? [], current).map(buildDataPlannerSourceRecord);
+  return {
+    kind,
+    domainKey,
+    plan: buildGenericExpressionShadowPlan({
+      domainKey,
+      records,
+      currentRecordId: recordId,
+      ...personalization,
+    }) as Record<string, unknown>,
+  };
 }
 
 type SourceDependency = {
@@ -352,51 +374,39 @@ async function dependencyUnavailableReason(
   return "";
 }
 
-async function planUnavailableReason(
-  supabase: DatabaseClient,
-  userId: string,
-  recordId: string,
-  row: Record<string, unknown>,
-  plan: Record<string, unknown>,
-) {
-  if (row.rollout_mode !== "enforced_owner_only") return "plan_rollout_mismatch";
-  if (plan.planner_version !== EXPRESSION_PLANNER_VERSION) return "plan_version_mismatch";
-  const detailRenderPlan = object(object(plan.render_plans).record_detail);
-  if (detailRenderPlan.render_contract_version !== RECORD_DETAIL_RENDER_VERSION) return "render_version_mismatch";
-  const sourceRecord = object(plan.source_record);
-  if (!Object.keys(sourceRecord).length) return "plan_source_missing";
-  const domainKey = text(plan.domain_key ?? row.record_type, 80);
-  if (!domainKey) return "plan_domain_missing";
-  const current = await currentSourceRecord(supabase, userId, recordId, domainKey);
-  if (!current) return "record_missing";
-  return canonicalPlannerSource(sourceRecord) === canonicalPlannerSource(current)
-    ? ""
-    : "plan_stale";
-}
-
 export async function getRecordExpressionPlan(
   supabase: DatabaseClient,
   userId: string,
   input: Record<string, unknown>,
 ) {
-  if (!deliveryEnabledFor(userId)) return { available: false, reason: "rollout_not_enabled" };
   const recordId = text(input.record_id, 100);
-  if (!recordId) throw new Error("缺少记录编号");
-  const row = await latestPlan(supabase, userId, recordId);
-  if (!row) return { available: false, reason: "plan_not_ready" };
-  if (!row.processed_at) return { available: false, reason: "plan_not_ready" };
-  if (row.processing_error) return { available: false, reason: "plan_failed" };
-  const plan = object(row.proposed_plan);
-  if (plan.status !== "auto_planned") return { available: false, reason: "plan_not_ready" };
-  const unavailableReason = await planUnavailableReason(supabase, userId, recordId, row, plan);
-  if (unavailableReason) return { available: false, reason: unavailableReason };
-  const deliveryPlan = await currentDeliveryPlan(supabase, userId, plan);
+  const kind = recordKind(input.record_kind);
+  if (!recordId || !kind) throw new Error("缺少有效的记录编号或类型");
+  const context = await buildCurrentRecordPlan(supabase, userId, recordId, kind);
+  if (!context) return { available: false, reason: "record_missing" };
+  const deliveryPlan = context.plan;
+  if (deliveryPlan.status !== "auto_planned") {
+    return { available: false, reason: text(deliveryPlan.reason, 100) || "no_selected_candidate" };
+  }
+  if (deliveryPlan.planner_version !== EXPRESSION_PLANNER_VERSION) {
+    return { available: false, reason: "plan_version_mismatch" };
+  }
+  if (object(object(deliveryPlan.render_plans).record_detail).render_contract_version !== RECORD_DETAIL_RENDER_VERSION) {
+    return { available: false, reason: "render_version_mismatch" };
+  }
   const selected = selectedRecordDetail(deliveryPlan);
   if (!selected.length) return { available: false, reason: "no_selected_candidate" };
   const primary = selected[0];
   const dependencyReason = await dependencyUnavailableReason(supabase, userId, primary.candidate);
   if (dependencyReason) return { available: false, reason: dependencyReason };
-  const snapshot = await persistDeliverySnapshot(supabase, userId, row, deliveryPlan, primary);
+  const snapshot = await persistDeliverySnapshot(
+    supabase,
+    userId,
+    recordId,
+    context.kind,
+    deliveryPlan,
+    primary,
+  );
   const frozenPlan = object(snapshot.delivery_plan);
   const frozenPrimary = selectedRecordDetail(frozenPlan)[0];
   if (!frozenPrimary || frozenPrimary.candidateId !== text(snapshot.candidate_id, 200)) {
@@ -406,6 +416,8 @@ export async function getRecordExpressionPlan(
     available: true,
     plan_token: String(snapshot.id),
     record_id: recordId,
+    record_kind: context.kind,
+    domain_key: context.domainKey,
     surface: "record_detail",
     candidate_id: frozenPrimary.candidateId,
     feedback: feedbackPayload(frozenPrimary),
@@ -417,7 +429,6 @@ export async function acknowledgeRecordExpressionPlan(
   userId: string,
   input: Record<string, unknown>,
 ) {
-  if (!deliveryEnabledFor(userId)) throw new Error("当前账号未启用表达规划器灰度");
   const recordId = text(input.record_id, 100);
   const planToken = text(input.plan_token, 100);
   const candidateId = text(input.candidate_id, 200);

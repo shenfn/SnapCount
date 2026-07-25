@@ -38,6 +38,9 @@ test('feedback, signals, and snapshot revisions use service-only transactional c
   assert.match(migration, /replace_expression_feedback_bundle/)
   assert.match(migration, /source_revision bigint/)
   assert.match(migration, /upsert_expression_preference_snapshot_if_newer/)
+  assert.match(migration, /expires_at timestamptz not null default \(now\(\) \+ interval '1 hour'\)/)
+  assert.match(migration, /shadow_run_id uuid references public\.expression_shadow_runs\(id\) on delete set null/)
+  assert.match(migration, /cleanup_expression_delivery_snapshots/)
   assert.match(migration, /revoke all on function public\.replace_expression_feedback_bundle[\s\S]*from public, anon, authenticated/)
   assert.match(migration, /grant execute on function public\.replace_expression_feedback_bundle[\s\S]*to service_role/)
 })
@@ -50,6 +53,7 @@ test('record deletion purges expression artifacts and invalidates preference sna
   assert.match(migration, /delete from public\.expression_preference_signals/)
   assert.match(migration, /delete from public\.expression_feedback_events/)
   assert.match(migration, /delete from public\.expression_exposure_events/)
+  assert.match(migration, /delete from public\.expression_delivery_snapshots/)
   assert.match(migration, /delete from public\.expression_shadow_runs/)
   for (const table of ['transactions', 'income_records', 'data_records']) {
     assert.match(migration, new RegExp(`after delete on public\\.${table}`))

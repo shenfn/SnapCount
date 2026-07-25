@@ -3,7 +3,7 @@ import Foundation
 protocol RecordRepositoryProtocol {
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail
-    func getRecordExpressionPlan(recordId: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup
+    func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup
     func acknowledgeRecordExpressionPlan(
         recordId: String,
         planToken: String,
@@ -31,7 +31,7 @@ struct NativeRecordExpressionPlan: Equatable {
 enum NativeRecordExpressionPlanLookup: Equatable {
     case available(NativeRecordExpressionPlan)
     case pending
-    case unavailable
+    case unavailable(reason: String)
 }
 
 @MainActor
@@ -155,18 +155,19 @@ final class RecordRepository: RecordRepositoryProtocol {
         try await remoteService.fetchRecordDetail(reference: reference, accessToken: accessToken)
     }
 
-    func getRecordExpressionPlan(recordId: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {
+    func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {
         let response = try await remoteClient.postFunction(
             RecordExpressionPlanResponse.self,
             path: "functions/v1/ingest-receipt",
-            body: Self.expressionPlanPreviewRequestBody(recordId: recordId),
+            body: Self.expressionPlanPreviewRequestBody(reference: reference),
             accessToken: accessToken
         )
         guard response.ok else {
             throw SupabaseRemoteError.requestFailed(response.error ?? "表达计划读取失败")
         }
         guard response.data?.available == true else {
-            return response.data?.reason == "plan_not_ready" ? .pending : .unavailable
+            let reason = response.data?.reason ?? "not_available"
+            return reason == "plan_not_ready" ? .pending : .unavailable(reason: reason)
         }
         guard let data = response.data,
               let planToken = data.planToken?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -279,10 +280,13 @@ final class RecordRepository: RecordRepositoryProtocol {
         return body
     }
 
-    static func expressionPlanPreviewRequestBody(recordId: String) -> [String: AnyCodable] {
-        [
+    static func expressionPlanPreviewRequestBody(reference: String) -> [String: AnyCodable] {
+        let recordReference = NativeRecordReference(reference)
+        let recordKind = ["expense", "income"].contains(recordReference.kind) ? recordReference.kind : "data"
+        return [
             "action": AnyCodable("get_record_expression_plan"),
-            "record_id": AnyCodable(recordId)
+            "record_id": AnyCodable(recordReference.rawId),
+            "record_kind": AnyCodable(recordKind)
         ]
     }
 

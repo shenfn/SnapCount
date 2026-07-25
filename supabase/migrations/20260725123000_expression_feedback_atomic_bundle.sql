@@ -205,24 +205,57 @@ grant all on table public.expression_preference_revisions to service_role;
 create table if not exists public.expression_delivery_snapshots (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '1 hour'),
   user_id uuid not null references auth.users(id) on delete cascade,
-  shadow_run_id uuid not null references public.expression_shadow_runs(id) on delete cascade,
+  shadow_run_id uuid references public.expression_shadow_runs(id) on delete set null,
   record_id uuid not null,
+  record_kind text not null check (record_kind in ('expense', 'income', 'data')),
+  domain_key text not null check (domain_key <> ''),
   surface text not null check (surface = 'record_detail'),
   candidate_id text not null check (candidate_id <> ''),
   content_fingerprint text not null check (content_fingerprint <> ''),
   delivery_plan jsonb not null check (jsonb_typeof(delivery_plan) = 'object'),
-  constraint expression_delivery_snapshots_content_key
-    unique (user_id, shadow_run_id, surface, content_fingerprint)
+  constraint expression_delivery_snapshots_expiry_check check (expires_at > created_at)
 );
 
 create index if not exists idx_expression_delivery_snapshots_record
   on public.expression_delivery_snapshots (user_id, record_id, created_at desc);
+create index if not exists idx_expression_delivery_snapshots_expiry
+  on public.expression_delivery_snapshots (expires_at);
 
 alter table public.expression_delivery_snapshots enable row level security;
 revoke all on table public.expression_delivery_snapshots from public, anon, authenticated;
 revoke all on table public.expression_delivery_snapshots from service_role;
 grant select, insert, delete on table public.expression_delivery_snapshots to service_role;
+
+create or replace function public.cleanup_expression_delivery_snapshots()
+returns bigint
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  deleted_count bigint := 0;
+begin
+  delete from public.expression_delivery_snapshots where expires_at <= now();
+  get diagnostics deleted_count = row_count;
+  return deleted_count;
+end;
+$$;
+
+revoke all on function public.cleanup_expression_delivery_snapshots()
+  from public, anon, authenticated;
+grant execute on function public.cleanup_expression_delivery_snapshots()
+  to service_role;
+
+do $block$
+begin
+  if to_regnamespace('cron') is not null then
+    execute 'select cron.unschedule(jobid) from cron.job where jobname = ''cleanup-expression-delivery-snapshots''';
+    execute 'select cron.schedule(''cleanup-expression-delivery-snapshots'', ''*/15 * * * *'', ''select public.cleanup_expression_delivery_snapshots();'')';
+  end if;
+end;
+$block$;
 
 create table if not exists public.expression_exposure_source_records (
   exposure_event_id uuid not null,

@@ -184,10 +184,10 @@ final class SnapCountTests: XCTestCase {
         let repository: RecordRepositoryProtocol = RecordRepositoryStub()
         try await repository.delete(reference: "expense:record-1", accessToken: "test-token")
         let expressionPlanLookup = try await repository.getRecordExpressionPlan(
-            recordId: "record-1",
+            reference: "sleep/record-1",
             accessToken: "test-token"
         )
-        XCTAssertEqual(expressionPlanLookup, .unavailable)
+        XCTAssertEqual(expressionPlanLookup, .unavailable(reason: "no_selected_candidate"))
         try await repository.submitFeedback(
             recordId: "record-1",
             choice: .notHelpful,
@@ -310,10 +310,15 @@ final class SnapCountTests: XCTestCase {
     }
 
     func testExpressionPlanDeliveryRequestBodiesUseTwoPhaseActions() {
-        let previewBody = RecordRepository.expressionPlanPreviewRequestBody(recordId: "record-1")
+        let previewBody = RecordRepository.expressionPlanPreviewRequestBody(reference: "data/record-1")
         XCTAssertEqual(previewBody["action"]?.stringValue, "get_record_expression_plan")
         XCTAssertEqual(previewBody["record_id"]?.stringValue, "record-1")
+        XCTAssertEqual(previewBody["record_kind"]?.stringValue, "data")
         XCTAssertNil(previewBody["plan_token"])
+
+        let sleepPreviewBody = RecordRepository.expressionPlanPreviewRequestBody(reference: "sleep/record-2")
+        XCTAssertEqual(sleepPreviewBody["record_id"]?.stringValue, "record-2")
+        XCTAssertEqual(sleepPreviewBody["record_kind"]?.stringValue, "data")
 
         let acknowledgementBody = RecordRepository.expressionPlanAcknowledgementRequestBody(
             recordId: "record-1",
@@ -353,7 +358,7 @@ final class SnapCountTests: XCTestCase {
         let resolved = await NativeRecordExpressionPlanRetryPolicy.resolve(
             fetch: {
                 try await repository.getRecordExpressionPlan(
-                    recordId: "record-1",
+                    reference: "expense/record-1",
                     accessToken: "test-token"
                 )
             },
@@ -1236,7 +1241,7 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     private(set) var acknowledgementCount = 0
 
     init(
-        expressionPlanLookups: [NativeRecordExpressionPlanLookup] = [.unavailable],
+        expressionPlanLookups: [NativeRecordExpressionPlanLookup] = [.unavailable(reason: "no_selected_candidate")],
         acknowledgedFeedback: NativeAIFeedback? = nil
     ) {
         self.expressionPlanLookups = expressionPlanLookups
@@ -1251,8 +1256,8 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
         throw SupabaseRemoteError.requestFailed("unused")
     }
 
-    func getRecordExpressionPlan(recordId: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {
-        expressionPlanLookups.isEmpty ? .unavailable : expressionPlanLookups.removeFirst()
+    func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {
+        expressionPlanLookups.isEmpty ? .unavailable(reason: "no_selected_candidate") : expressionPlanLookups.removeFirst()
     }
 
     func acknowledgeRecordExpressionPlan(

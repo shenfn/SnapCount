@@ -62,6 +62,27 @@ select public.security_test_assert(
     and not has_table_privilege('service_role', 'public.expression_delivery_snapshots', 'update'),
   'delivery snapshots must remain service-only and immutable after insert'
 );
+select public.security_test_assert(
+  not has_function_privilege('authenticated', 'public.cleanup_expression_delivery_snapshots()', 'execute')
+    and has_function_privilege('service_role', 'public.cleanup_expression_delivery_snapshots()', 'execute'),
+  'delivery snapshot retention cleanup must remain service-only'
+);
+
+insert into public.expression_delivery_snapshots (
+  id, user_id, record_id, record_kind, domain_key, surface, candidate_id,
+  content_fingerprint, delivery_plan, expires_at
+) values (
+  '66666666-0000-4000-8000-000000000008',
+  '66666666-6666-4666-8666-666666666666',
+  '66666666-0000-4000-8000-000000000001',
+  'expense',
+  'expense',
+  'record_detail',
+  'fixture-candidate',
+  'fixture-content-fingerprint',
+  '{"status":"auto_planned"}'::jsonb,
+  now() + interval '1 hour'
+);
 
 delete from public.transactions
 where id = '66666666-0000-4000-8000-000000000001';
@@ -94,6 +115,9 @@ select public.security_test_assert(
   not exists (
     select 1 from public.expression_shadow_runs
     where id = '66666666-0000-4000-8000-000000000007'
+  ) and not exists (
+    select 1 from public.expression_delivery_snapshots
+    where id = '66666666-0000-4000-8000-000000000008'
   ) and not exists (
     select 1 from public.expression_preference_snapshots
     where user_id = '66666666-6666-4666-8666-666666666666'
@@ -136,10 +160,25 @@ select public.security_test_assert(
 
 select public.security_test_assert(
   not exists (
-    select 1 from public.user_configs
-    where expression_improvement_enabled is true
+    select 1
+    from public.user_configs
+    where user_id in (
+        '11111111-1111-4111-8111-111111111111',
+        '22222222-2222-4222-8222-222222222222'
+      )
+      and expression_improvement_enabled is true
   ),
-  'Expression improvement must default to opt-out'
+  'Expression improvement must default ordinary accounts to opt-out'
+);
+select public.security_test_assert(
+  (
+    select expression_improvement_enabled is true
+      and expression_improvement_consent_at is not null
+      and expression_improvement_withdrawn_at is null
+    from public.user_configs
+    where user_id = '66666666-6666-4666-8666-666666666666'
+  ),
+  'The opted-in legacy migration fixture must retain explicit consent'
 );
 select public.security_test_assert(
   not has_function_privilege(
@@ -173,27 +212,71 @@ select public.security_test_assert(
   'Expression improvement opt-in must use a server timestamp'
 );
 
-insert into public.expression_shadow_runs (id, user_id) values (
+insert into public.expression_shadow_runs (
+  id, occurred_at, user_id, event_key, record_type, surface,
+  response_mode, rollout_mode, lifecycle_state, collector_version
+) values (
   '18181818-1818-4818-8818-181818181818',
-  '11111111-1111-4111-8111-111111111111'
+  now(),
+  '11111111-1111-4111-8111-111111111111',
+  'fixture:privacy-opt-out-shadow',
+  'expense',
+  'shortcut_notification',
+  'json',
+  'shadow',
+  'returned_to_shortcut',
+  'fixture-v1'
 );
-insert into public.expression_exposure_events (id, user_id, metadata, selection_mode) values
+insert into public.expression_exposure_events (
+  id, occurred_at, user_id, event_key, delivery_attempt_id, candidate_id,
+  semantic_key, claim_type, surface, lifecycle_state, selection_mode,
+  expression_plan_version, render_contract_version, metadata
+) values
   (
     '19191919-1919-4919-8919-191919191919',
+    now(),
     '11111111-1111-4111-8111-111111111111',
-    '{"source":"production_baseline"}'::jsonb,
-    'legacy_voice'
+    'fixture:privacy-opt-out-unreviewed',
+    'fixture-privacy-opt-out-unreviewed',
+    'fixture-privacy-opt-out-unreviewed',
+    'expense_record_name_previous_gap',
+    'fact',
+    'record_detail',
+    'client_rendered',
+    'legacy_voice',
+    'expression-plan-v0.1',
+    'surface-render-contract-v0.1',
+    '{"source":"production_baseline"}'::jsonb
   ),
   (
     '20202020-2020-4020-8020-202020202020',
+    now(),
     '11111111-1111-4111-8111-111111111111',
-    '{"source":"production_baseline"}'::jsonb,
-    'legacy_voice'
+    'fixture:privacy-opt-out-reviewed',
+    'fixture-privacy-opt-out-reviewed',
+    'fixture-privacy-opt-out-reviewed',
+    'expense_record_name_previous_gap',
+    'fact',
+    'record_detail',
+    'client_rendered',
+    'legacy_voice',
+    'expression-plan-v0.1',
+    'surface-render-contract-v0.1',
+    '{"source":"production_baseline"}'::jsonb
   );
-insert into public.expression_feedback_events (id, user_id, exposure_event_id) values (
+insert into public.expression_feedback_events (
+  id, occurred_at, user_id, feedback_key, exposure_event_id, candidate_id,
+  semantic_key, surface, primary_choice
+) values (
   '21212121-2121-4121-8121-212121212121',
+  now(),
   '11111111-1111-4111-8111-111111111111',
-  '20202020-2020-4020-8020-202020202020'
+  'feedback:11111111-1111-4111-8111-111111111111:20202020-2020-4020-8020-202020202020',
+  '20202020-2020-4020-8020-202020202020',
+  'fixture-privacy-opt-out-reviewed',
+  'expense_record_name_previous_gap',
+  'record_detail',
+  'helpful'
 );
 
 update public.user_configs
@@ -457,7 +540,7 @@ insert into auth.users (id, raw_user_meta_data) values (
 );
 
 insert into auth.users (id, raw_user_meta_data) values (
-  '66666666-6666-4666-8666-666666666666',
+  '77777777-7777-4777-8777-777777777777',
   jsonb_build_object(
     'legal_consent_at', '2020-01-01T00:00:00Z',
     'sensitive_data_consent_at', '2020-01-01T00:00:00Z',
@@ -480,7 +563,7 @@ select public.security_test_assert(
 select public.security_test_assert(
   exists (
     select 1 from public.user_configs
-    where user_id = '66666666-6666-4666-8666-666666666666'
+    where user_id = '77777777-7777-4777-8777-777777777777'
       and privacy_version = '2026-07-22'
       and expression_improvement_enabled is false
   ),
@@ -745,13 +828,15 @@ begin
     array['55555555-0000-4000-8000-000000000001'::uuid]
   );
   insert into public.expression_delivery_snapshots (
-    id, user_id, shadow_run_id, record_id, surface, candidate_id,
-    content_fingerprint, delivery_plan
+    id, user_id, shadow_run_id, record_id, record_kind, domain_key,
+    surface, candidate_id, content_fingerprint, delivery_plan
   ) values (
     '55555555-0000-4000-8000-000000000004',
     '55555555-5555-4555-8555-555555555555',
     '55555555-0000-4000-8000-000000000003',
     '55555555-0000-4000-8000-000000000001',
+    'expense',
+    'expense',
     'record_detail',
     'fixture-account-delete-candidate',
     'fixture-content-fingerprint',
