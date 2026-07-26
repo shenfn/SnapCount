@@ -252,6 +252,11 @@ struct RecordDetailView: View {
                                     reviewState: appState.recordFeedbackState,
                                     exposureState: appState.recordExpressionPlanExposureState,
                                     onRetryExposure: {
+                                        appState.setRecordExpressionPlanCardVisible(
+                                            true,
+                                            reference: reference,
+                                            feedbackIdentity: feedback.renderIdentity
+                                        )
                                         Task {
                                             await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
                                         }
@@ -263,7 +268,11 @@ struct RecordDetailView: View {
                                     in: scrollViewport.frame(in: .global)
                                 ) { isVisible in
                                     guard feedback.source == "expression_planner" else { return }
-                                    appState.setRecordExpressionPlanCardVisible(isVisible, reference: reference)
+                                    appState.setRecordExpressionPlanCardVisible(
+                                        isVisible,
+                                        reference: reference,
+                                        feedbackIdentity: feedback.renderIdentity
+                                    )
                                     if isVisible, feedback.requiresExposureAcknowledgement {
                                         Task {
                                             await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)

@@ -6,17 +6,28 @@ struct ManualRecordSheet: View {
     @State private var draft: NativeManualRecordDraft
     @State private var localMessage: String?
     private let stagingRecord: NativeStagingRecord?
+    private let preserveInboxNavigation: Bool
+    private let onResolved: (() -> Void)?
 
     init(editing detail: NativeRecordDetail? = nil, kind: NativeManualRecordKind = .expense, domainKey: String = "sport") {
         stagingRecord = nil
+        preserveInboxNavigation = false
+        onResolved = nil
         _draft = State(
             initialValue: detail.map { NativeManualRecordDraft(detail: $0) }
                 ?? NativeManualRecordDraft(kind: kind, domainKey: domainKey)
         )
     }
 
-    init(staging record: NativeStagingRecord, domainKey: String) {
+    init(
+        staging record: NativeStagingRecord,
+        domainKey: String,
+        preserveInboxNavigation: Bool = false,
+        onResolved: (() -> Void)? = nil
+    ) {
         stagingRecord = record
+        self.preserveInboxNavigation = preserveInboxNavigation
+        self.onResolved = onResolved
         _draft = State(initialValue: NativeManualRecordDraft(stagingRecord: record, domainKey: domainKey))
     }
 
@@ -504,7 +515,13 @@ struct ManualRecordSheet: View {
             return
         }
         if let stagingRecord {
-            if await appState.archiveStagingRecord(stagingRecord, draft: draft, domain: selectedDomain) != nil {
+            if await appState.archiveStagingRecord(
+                stagingRecord,
+                draft: draft,
+                domain: selectedDomain,
+                preserveInboxNavigation: preserveInboxNavigation
+            ) != nil {
+                onResolved?()
                 dismiss()
             } else {
                 localMessage = appState.inboxActionMessage ?? "归档失败，请稍后重试。"

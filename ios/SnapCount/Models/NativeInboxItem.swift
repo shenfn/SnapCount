@@ -5,6 +5,20 @@ enum NativeInboxItemKind: String {
     case staging
 }
 
+enum NativeInboxScope: String, CaseIterable, Identifiable, Hashable {
+    case all
+    case today
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "全部"
+        case .today: return "今天"
+        }
+    }
+}
+
 enum NativeInboxFilter: String, CaseIterable, Identifiable, Hashable {
     case all
     case pendingExpense
@@ -104,6 +118,47 @@ struct NativeInboxItem: Identifiable {
     let systemImage: String
     let pendingExpense: NativePendingExpense?
     let stagingRecord: NativeStagingRecord?
+
+    var occurrenceDateKey: String? {
+        if let pendingExpense {
+            return Self.dateKey(from: pendingExpense.occurredAtLabel) ?? Self.validDateKey(pendingExpense.dateKey)
+        }
+        return Self.dateKey(from: stagingRecord?.occurredAtLabel)
+    }
+
+    var uploadedDateKey: String? {
+        if let pendingExpense {
+            return Self.dateKey(from: pendingExpense.createdAtLabel)
+        }
+        return Self.dateKey(from: stagingRecord?.createdAtLabel)
+    }
+
+    var sortKey: String {
+        if let pendingExpense {
+            return pendingExpense.occurredAtLabel
+                ?? Self.validDateKey(pendingExpense.dateKey)
+                ?? pendingExpense.createdAtLabel
+        }
+        return stagingRecord?.occurredAtLabel
+            ?? stagingRecord?.createdAtLabel
+            ?? dateKey
+    }
+
+    private static func dateKey(from label: String?) -> String? {
+        guard let label else { return nil }
+        return validDateKey(String(label.prefix(10)))
+    }
+
+    private static func validDateKey(_ value: String?) -> String? {
+        guard let value, value.count == 10 else { return nil }
+        let parts = value.split(separator: "-")
+        guard parts.count == 3,
+              parts[0].count == 4,
+              parts[1].count == 2,
+              parts[2].count == 2,
+              parts.allSatisfy({ Int($0) != nil }) else { return nil }
+        return value
+    }
 }
 
 struct NativeInboxSection: Identifiable {
@@ -148,9 +203,50 @@ enum NativeInboxPresentation {
             )
         }
         return (pendingItems + stagingItems).sorted {
-            if $0.dateKey == $1.dateKey { return $0.id > $1.id }
-            return $0.dateKey > $1.dateKey
+            if $0.sortKey == $1.sortKey { return $0.id > $1.id }
+            return $0.sortKey > $1.sortKey
         }
+    }
+
+    static func filtered(
+        _ items: [NativeInboxItem],
+        scope: NativeInboxScope,
+        filter: NativeInboxFilter,
+        today: String
+    ) -> [NativeInboxItem] {
+        let scoped: [NativeInboxItem]
+        switch scope {
+        case .all:
+            scoped = items
+        case .today:
+            scoped = items.filter { $0.occurrenceDateKey == today }
+        }
+        return filtered(scoped, by: filter)
+    }
+
+    static func counts(
+        _ items: [NativeInboxItem],
+        scope: NativeInboxScope,
+        today: String
+    ) -> [NativeInboxFilter: Int] {
+        Dictionary(uniqueKeysWithValues: NativeInboxFilter.allCases.map { filter in
+            (
+                filter,
+                filtered(items, scope: scope, filter: filter, today: today).count
+            )
+        })
+    }
+
+    static func nextSelection(
+        afterRemoving removedId: String,
+        from orderedIds: [String]
+    ) -> String? {
+        guard let removedIndex = orderedIds.firstIndex(of: removedId) else {
+            return orderedIds.first
+        }
+        let remaining = orderedIds.filter { $0 != removedId }
+        guard !remaining.isEmpty else { return nil }
+        return remaining[min(removedIndex, remaining.count - 1)]
     }
 
     static func filtered(_ items: [NativeInboxItem], by filter: NativeInboxFilter) -> [NativeInboxItem] {

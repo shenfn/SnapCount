@@ -3,6 +3,8 @@ import Foundation
 struct NativeAIFeedback: Equatable {
     let exposureEventId: String?
     let candidateId: String?
+    let semanticKey: String
+    let dimension: String
     let source: String
     let icon: String
     let badge: String
@@ -25,6 +27,8 @@ struct NativeAIFeedback: Equatable {
         let rawCandidateId = payload.string("candidate_id")?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         self.candidateId = rawCandidateId?.isEmpty == false ? rawCandidateId : nil
+        self.semanticKey = payload.string("semantic_key") ?? ""
+        self.dimension = payload.string("dimension") ?? ""
         self.source = payload.string("source") ?? ""
         self.icon = payload.string("icon") ?? "sparkles"
         self.badge = payload.string("badge") ?? "即时反馈"
@@ -61,6 +65,12 @@ struct NativeAIFeedback: Equatable {
         [source, candidateId ?? "legacy", exposureEventId ?? "preview", emotionLine]
             .joined(separator: ":")
     }
+
+    var visibleContentIdentity: String {
+        [badge, band, emotionLine, utilityLine, detailReason, timingLabel]
+            .joined(separator: "\u{1F}")
+    }
+
 }
 
 enum NativeRecordExpressionFeedbackPolicy {
@@ -68,14 +78,32 @@ enum NativeRecordExpressionFeedbackPolicy {
         feedback.compactMap { $0 }.contains { $0.isAcknowledgedPlannerFeedback }
     }
 
+    static func feedbackToDisplay(
+        existing: NativeAIFeedback?,
+        preview: NativeAIFeedback?
+    ) -> NativeAIFeedback? {
+        guard let preview else { return existing }
+        guard let existing else { return preview }
+
+        if existing.isAcknowledgedPlannerFeedback {
+            return existing
+        }
+        if preview.isAcknowledgedPlannerFeedback,
+           preview.visibleContentIdentity == existing.visibleContentIdentity {
+            return preview
+        }
+        if existing.source != "expression_planner" { return existing }
+        return preview
+    }
+
     static func feedbackToPreserve(
         existing: [NativeAIFeedback?],
         pending: NativeAIFeedback?
     ) -> NativeAIFeedback? {
-        if let acknowledged = existing.compactMap({ $0 }).first(where: { $0.isAcknowledgedPlannerFeedback }) {
-            return acknowledged
-        }
-        return pending
+        let acknowledged = existing.compactMap { $0 }
+            .first(where: { $0.isAcknowledgedPlannerFeedback })
+        let current = acknowledged ?? existing.compactMap { $0 }.first
+        return feedbackToDisplay(existing: current, preview: pending)
     }
 }
 
