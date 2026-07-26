@@ -28,6 +28,7 @@ import {
   type FinancialPerceptualCandidate,
   type RankedPerceptualCandidate,
 } from "./duplicate-review.ts";
+import { uniqueNotificationLines } from "./notification-text.ts";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
 // 默认使用 3.6 Flash 控制上传耗时，用户可显式切换到 3.7 Plus。
@@ -2136,12 +2137,12 @@ function feedbackNotification(
     : options.preserveFallbackTail
       ? fallbackLines.slice(1)
       : [];
-  const lines = [
+  const lines = uniqueNotificationLines([
     `${feedback.icon} ${feedback.badge}`,
     compactFeedbackText(feedback.emotion_line, 34),
     compactFeedbackText(feedback.utility_line, 34) ?? fallbackLines[0],
     ...fallbackTail,
-  ].filter(Boolean);
+  ]);
   return lines.join("\n");
 }
 
