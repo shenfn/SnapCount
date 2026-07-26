@@ -25,6 +25,7 @@ import { isLiabilityAccount, mapAccountRow, normalizeAccountType } from '../adap
 import { normalizeFinanceOptionValue } from '../domains/financeReviewOptions'
 
 const PRIMARY_EXPENSE_CATEGORIES = new Set(['餐饮', '购物', '出行', '娱乐', '生活', '健康', '教育', '其他'])
+const PENDING_QUEUE_QUERY_LIMIT = 1000
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
 function humanizeDbError(err) {
@@ -62,6 +63,7 @@ export function useStore() {
   const isLoggedIn = ref(false)
 
   const bills = ref([])
+  const pendingBills = ref([])
   const incomeRecords = ref([])
   const recentIncomeRecords = ref([])
   const transportRecords = ref([])
@@ -117,6 +119,7 @@ export function useStore() {
   const pendingModal = reactive({
     open: false,
     bill: null,
+    returnToQueue: false,
     entryType: 'expense',
     merchantName: '',
     amount: '',
@@ -231,7 +234,6 @@ export function useStore() {
   const monthLabel = computed(() => formatMonthLabel(currentYear.value, currentMonth.value))
 
   const doneBills = computed(() => bills.value.filter(b => b.status === 'done'))
-  const pendingBills = computed(() => bills.value.filter(b => b.status === 'pending'))
 
   const totalExpense = computed(() => doneBills.value.reduce((s, b) => s + b.amount, 0))
   const totalIncome = computed(() => incomeRecords.value.reduce((s, r) => s + r.amount, 0))
@@ -427,6 +429,7 @@ export function useStore() {
 
   function resetUserData() {
     bills.value = []
+    pendingBills.value = []
     incomeRecords.value = []
     recentIncomeRecords.value = []
     transportRecords.value = []
@@ -893,6 +896,7 @@ export function useStore() {
 
       const [
         txResult,
+        pendingTxResult,
         incResult,
         recentIncResult,
         universalResult,
@@ -905,6 +909,12 @@ export function useStore() {
           .lte('transaction_date', end)
           .order('transaction_date', { ascending: false })
           .order('transaction_time', { ascending: false }),
+        sb.from('transactions')
+          .select('*')
+          .eq('status', 'pending')
+          .order('transaction_date', { ascending: false })
+          .order('transaction_time', { ascending: false })
+          .limit(PENDING_QUEUE_QUERY_LIMIT),
         sb.from('income_records')
           .select('*')
           .gte('income_date', start)
@@ -927,16 +937,18 @@ export function useStore() {
           .order('created_at', { ascending: true }),
         sb.from('staging_records')
           .select('*')
-          .not('status', 'in', '(discarded,archived)')
-          .or(`occurred_at.gte.${start}T00:00:00+08:00,occurred_at.is.null`)
+          .or('status.is.null,status.not.in.(confirmed,discarded,archived,assigned)')
           .order('occurred_at', { ascending: false, nullsFirst: false })
-          .limit(30),
+          .order('created_at', { ascending: false })
+          .limit(PENDING_QUEUE_QUERY_LIMIT),
       ])
 
       const { data: txs, error: txErr } = txResult
       if (txErr) throw new Error('账单查询失败: ' + txErr.message)
-
+      const { data: pendingTxs, error: pendingTxErr } = pendingTxResult
+      if (pendingTxErr) throw new Error('待补全账单查询失败: ' + pendingTxErr.message)
       bills.value = (txs || []).map(mapTransaction)
+      pendingBills.value = (pendingTxs || []).map(mapTransaction)
       transportRecords.value = bills.value
         .filter(b => b.cat === 'transport' && b.amount >= 200)
         .map(b => ({ id: b.id, type: b.transport_type || '交通', desc: b.name, amount: b.amount, date: b.date }))
@@ -1017,14 +1029,12 @@ export function useStore() {
       const isCurrentRun = () => runId === loadDataRunId
       const cycleMonth = `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`
       const hydratePendingBillImages = async () => {
-        const pendingPaths = bills.value
-          .filter(bill => bill.status === 'pending')
+        const pendingPaths = pendingBills.value
           .map(bill => bill.image_path || bill.image_url)
           .filter(Boolean)
         const imageUrlMap = await getSignedImageUrlMap(pendingPaths)
         if (!isCurrentRun()) return
-        bills.value = bills.value.map(bill => {
-          if (bill.status !== 'pending') return bill
+        const hydratePendingBill = bill => {
           const imagePath = bill.image_path || bill.image_url || null
           const imageUrl = imagePath ? imageUrlMap[imagePath] || null : null
           return {
@@ -1032,7 +1042,12 @@ export function useStore() {
             imageUrl,
             imageLoadError: Boolean(imagePath && !imageUrl),
           }
-        })
+        }
+        pendingBills.value = pendingBills.value.map(hydratePendingBill)
+        const pendingIds = new Set(pendingBills.value.map(bill => bill.id))
+        bills.value = bills.value.map(bill => (
+          pendingIds.has(bill.id) ? hydratePendingBill(bill) : bill
+        ))
       }
       const hydrateStagingImages = async () => {
         const imageUrlMap = await getSignedImageUrlMap(stagingRows.map(r => r.image_path))
@@ -1263,7 +1278,7 @@ export function useStore() {
 
   let pendingModalInitial = null
 
-  async function openPendingModal(bill) {
+  async function openPendingModal(bill, { returnToQueue = false } = {}) {
     const rawImagePath = bill.image_path || bill.image_url || null
     const existingImageUrl = bill.imageUrl || (rawImagePath?.startsWith('https://') ? rawImagePath : null)
     pendingModal.bill = {
@@ -1274,6 +1289,7 @@ export function useStore() {
       imageLoadError: false,
       imageLoading: !!rawImagePath && !existingImageUrl,
     }
+    pendingModal.returnToQueue = Boolean(returnToQueue)
     pendingModal.entryType = bill.type === 'income' ? 'income' : 'expense'
     pendingModal.merchantName = bill.name !== '未识别商家' ? bill.name : ''
     pendingModal.amount = String(bill.amount)
@@ -1427,6 +1443,7 @@ export function useStore() {
   function closePendingModal() {
     pendingModal.open = false
     pendingModal.bill = null
+    pendingModal.returnToQueue = false
     pendingModalInitial = null
   }
 
@@ -1508,6 +1525,12 @@ export function useStore() {
     }
   }
 
+  function isInSelectedMonth(value) {
+    const dateKey = localDateKeyOf(value)
+    const selectedMonth = `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`
+    return dateKey.slice(0, 7) === selectedMonth
+  }
+
   function pendingEntryActionKey(pendingId) {
     return pendingId ? `pendingEntry:${pendingId}` : ''
   }
@@ -1518,16 +1541,19 @@ export function useStore() {
   }
 
   function setPendingEntryBackgroundSaving(pendingId, saving) {
-    const index = bills.value.findIndex(item => item.id === pendingId)
-    if (index >= 0) {
-      const current = bills.value[index]
+    const updateCollection = collection => {
+      const index = collection.value.findIndex(item => item.id === pendingId)
+      if (index < 0) return
+      const current = collection.value[index]
       if (!saving && current.status !== 'saving') return
-      bills.value[index] = {
+      collection.value[index] = {
         ...current,
         status: saving ? 'saving' : 'pending',
         backgroundSaving: saving,
       }
     }
+    updateCollection(pendingBills)
+    updateCollection(bills)
     if (pendingModal.bill?.id === pendingId) {
       pendingModal.bill = {
         ...pendingModal.bill,
@@ -1590,14 +1616,13 @@ export function useStore() {
           invalidateRecordExpressionPlan(confirmedIncomeId)
         }
 
-        const billIndex = bills.value.findIndex(item => item.id === pendingId)
-        if (billIndex >= 0) bills.value.splice(billIndex, 1)
+        pendingBills.value = pendingBills.value.filter(item => item.id !== pendingId)
+        bills.value = bills.value.filter(item => item.id !== pendingId)
 
         if (data?.income_record) {
           const mappedIncome = mapIncomeRow(data.income_record)
-          const selectedMonth = `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`
           const currentMonthRows = incomeRecords.value.filter(item => item.id !== mappedIncome.id)
-          incomeRecords.value = String(mappedIncome.dateRaw || '').slice(0, 7) === selectedMonth
+          incomeRecords.value = isInSelectedMonth(mappedIncome.dateRaw)
             ? [mappedIncome, ...currentMonthRows]
             : currentMonthRows
           recentIncomeRecords.value = [
@@ -1639,25 +1664,31 @@ export function useStore() {
         invalidateRecordExpressionPlan(confirmedExpenseId)
       }
 
+      const pendingBill = pendingBills.value.find(item => item.id === pendingId) || bill
       const billIndex = bills.value.findIndex(item => item.id === pendingId)
-      if (billIndex >= 0) {
-        const currentBill = bills.value[billIndex]
-        const confirmedBill = data?.transaction ? mapTransaction(data.transaction) : {
-          ...currentBill,
-          platform,
-          cat: category,
-          payment,
-          name: merchantName || `${platform}消费`,
-          amount,
-          status: 'done',
-          accountId: expenseAccountId,
-        }
-        bills.value[billIndex] = {
-          ...currentBill,
-          ...confirmedBill,
-          imageUrl: currentBill.imageUrl || bill.image_url || null,
-          imageLoadError: currentBill.imageLoadError || false,
-        }
+      const currentBill = billIndex >= 0 ? bills.value[billIndex] : pendingBill
+      const confirmedBill = data?.transaction ? mapTransaction(data.transaction) : {
+        ...currentBill,
+        platform,
+        cat: category,
+        payment,
+        name: merchantName || `${platform}消费`,
+        amount,
+        status: 'done',
+        accountId: expenseAccountId,
+      }
+      const mergedBill = {
+        ...currentBill,
+        ...confirmedBill,
+        imageUrl: currentBill.imageUrl || bill.image_url || null,
+        imageLoadError: currentBill.imageLoadError || false,
+      }
+      pendingBills.value = pendingBills.value.filter(item => item.id !== pendingId)
+      if (isInSelectedMonth(mergedBill.dateRaw)) {
+        if (billIndex >= 0) bills.value[billIndex] = mergedBill
+        else bills.value.unshift(mergedBill)
+      } else if (billIndex >= 0) {
+        bills.value.splice(billIndex, 1)
       }
 
       transportRecords.value = bills.value
@@ -2520,6 +2551,7 @@ export function useStore() {
     )))
     const successCount = results.filter(result => result.status === 'fulfilled' && result.value).length
     selectedStagingIds.value = new Set()
+    batchMode.value = false
     showFlash(successCount === ids.length
       ? `✓ 已销毁 ${successCount} 条，原图将在后台安全清理`
       : `⚠ 已销毁 ${successCount}/${ids.length} 条，其余请重试`)
@@ -2547,6 +2579,7 @@ export function useStore() {
       }
     }
     selectedStagingIds.value = new Set()
+    batchMode.value = false
     showFlash(`✓ 已归档 ${successCount}/${ids.length} 条`)
   }
 
@@ -2648,8 +2681,12 @@ export function useStore() {
       if (sIdx >= 0) stagingRecords.value.splice(sIdx, 1)
       const bill = { ...mapTransaction(inserted), aiFeedback, companionMessage: companionMessage || '' }
       const billIndex = bills.value.findIndex(item => item.id === bill.id)
-      if (billIndex >= 0) bills.value[billIndex] = bill
-      else bills.value.unshift(bill)
+      if (isInSelectedMonth(bill.dateRaw)) {
+        if (billIndex >= 0) bills.value[billIndex] = bill
+        else bills.value.unshift(bill)
+      } else if (billIndex >= 0) {
+        bills.value.splice(billIndex, 1)
+      }
       rememberProcessedStaging(record, {
         status: 'archived',
         domainKey: 'expense',
@@ -2688,11 +2725,16 @@ export function useStore() {
       if (sIdx2 >= 0) stagingRecords.value.splice(sIdx2, 1)
       const income = { ...mapIncomeRow(inserted), aiFeedback, companionMessage: companionMessage || '' }
       const incomeIndex = incomeRecords.value.findIndex(item => item.id === income.id)
-      if (incomeIndex >= 0) incomeRecords.value[incomeIndex] = income
-      else incomeRecords.value.unshift(income)
+      if (isInSelectedMonth(income.dateRaw)) {
+        if (incomeIndex >= 0) incomeRecords.value[incomeIndex] = income
+        else incomeRecords.value.unshift(income)
+      } else if (incomeIndex >= 0) {
+        incomeRecords.value.splice(incomeIndex, 1)
+      }
       const recentIndex = recentIncomeRecords.value.findIndex(item => item.id === income.id)
       if (recentIndex >= 0) recentIncomeRecords.value[recentIndex] = income
       else recentIncomeRecords.value.unshift(income)
+      recentIncomeRecords.value = recentIncomeRecords.value.slice(0, 10)
       rememberProcessedStaging(record, {
         status: 'archived',
         domainKey: 'income',
@@ -2755,8 +2797,12 @@ export function useStore() {
       staging_record_id: record.id,
     })
     const dataIndex = dataRecords.value.findIndex(item => item.id === targetRecord.id)
-    if (dataIndex >= 0) dataRecords.value[dataIndex] = targetRecord
-    else dataRecords.value.unshift(targetRecord)
+    if (isInSelectedMonth(targetRecord.occurredAt)) {
+      if (dataIndex >= 0) dataRecords.value[dataIndex] = targetRecord
+      else dataRecords.value.unshift(targetRecord)
+    } else if (dataIndex >= 0) {
+      dataRecords.value.splice(dataIndex, 1)
+    }
     rememberProcessedStaging(record, {
       status: 'archived',
       domainKey,
@@ -4188,6 +4234,8 @@ export function useStore() {
         // 本地移除，避免全量刷新
         const billIdx = bills.value.findIndex(b => b.id === id)
         if (billIdx >= 0) bills.value.splice(billIdx, 1)
+        const pendingBillIdx = pendingBills.value.findIndex(b => b.id === id)
+        if (pendingBillIdx >= 0) pendingBills.value.splice(pendingBillIdx, 1)
         showFlash(result.cleanup_pending ? '✓ 记录已删除，原图将在后台清理' : '✓ 已删除')
       } else if (type === 'income') {
         const result = await deleteRecordThroughBackend('income', id)

@@ -299,6 +299,43 @@ body.verdict-open {
   color: #6e7773;
 }
 
+.pending-hero > div:first-child {
+  min-width: 0;
+}
+
+.pending-hero-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.pending-scope-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(48px, 1fr));
+  padding: 3px;
+  border: 1px solid rgba(66, 110, 99, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.pending-scope-switch button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #6e7773;
+  font: 650 12px/1 var(--font);
+  cursor: pointer;
+}
+
+.pending-scope-switch button.active {
+  background: #426e63;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(32, 42, 39, 0.12);
+}
+
 .pending-select-toggle {
   min-width: 48px;
   min-height: 36px;
@@ -457,6 +494,14 @@ body.verdict-open {
 .pending-film-card.selected {
   border-color: #426e63;
   box-shadow: 0 0 0 2px rgba(66, 110, 99, 0.18), 0 8px 20px rgba(32, 42, 39, 0.08);
+}
+
+.pending-film-card.batch-unavailable {
+  opacity: 0.62;
+}
+
+.pending-film-card.is-bill-card {
+  border-color: rgba(166, 106, 24, 0.18);
 }
 
 .pending-film-visual {
@@ -1033,6 +1078,16 @@ body.verdict-open {
 }
 
 @media (max-width: 360px) {
+  .pending-hero {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .pending-hero-actions {
+    justify-content: space-between;
+  }
+
   .pending-film-grid {
     gap: 9px;
   }

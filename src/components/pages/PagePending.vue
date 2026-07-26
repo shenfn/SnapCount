@@ -2,46 +2,54 @@
   <div class="page active pending-verdict-page">
     <header class="pending-hero">
       <div>
-        <div class="page-title">中转站</div>
+        <div class="page-title">收件箱</div>
         <div class="page-subtitle">
-          {{ totalPending ? `${totalPending} 张截图等你看一眼` : '当前没有待处理记录' }}
+          {{ pendingScope === 'today'
+            ? (scopedPendingCount ? `今天还有 ${scopedPendingCount} 条需要你决定` : '今天没有待处理记录')
+            : (totalPending ? `全部 ${totalPending} 条按发生时间排列` : '当前没有待处理记录') }}
         </div>
       </div>
-      <button
-        v-if="filteredStaging.length"
-        type="button"
-        class="pending-select-toggle"
-        @click="store.toggleBatchMode()"
-      >
-        {{ store.batchMode.value ? '完成' : '选择' }}
-      </button>
+      <div class="pending-hero-actions">
+        <div class="pending-scope-switch" role="group" aria-label="待处理记录范围">
+          <button type="button" :class="{ active: pendingScope === 'all' }" @click="setPendingScope('all')">全部</button>
+          <button type="button" :class="{ active: pendingScope === 'today' }" @click="setPendingScope('today')">今天</button>
+        </div>
+        <button
+          v-if="filteredStaging.length"
+          type="button"
+          class="pending-select-toggle"
+          @click="store.toggleBatchMode()"
+        >
+          {{ store.batchMode.value ? '完成' : '选择' }}
+        </button>
+      </div>
     </header>
 
-    <div class="pending-filter-row" aria-label="中转站筛选">
-      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'all' }" @click="store.pendingFilter.value = 'all'">
-        全部 <span>{{ totalPending }}</span>
+    <div class="pending-filter-row" aria-label="收件箱状态筛选">
+      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'all' }" @click="setPendingFilter('all')">
+        全部 <span>{{ pendingStatusCounts.all }}</span>
       </button>
-      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'routing_failed' }" @click="store.pendingFilter.value = 'routing_failed'">
-        待分类 <span>{{ stagingStatusCounts.routing }}</span>
+      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'routing_failed' }" @click="setPendingFilter('routing_failed')">
+        待分类 <span>{{ pendingStatusCounts.routing_failed }}</span>
       </button>
-      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'pending_review' }" @click="store.pendingFilter.value = 'pending_review'">
-        待确认 <span>{{ stagingStatusCounts.review }}</span>
+      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'pending_review' }" @click="setPendingFilter('pending_review')">
+        待确认 <span>{{ pendingStatusCounts.pending_review }}</span>
       </button>
-      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'ai_error' }" @click="store.pendingFilter.value = 'ai_error'">
-        需重试 <span>{{ stagingStatusCounts.retry }}</span>
+      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'ai_error' }" @click="setPendingFilter('ai_error')">
+        需重试 <span>{{ pendingStatusCounts.ai_error }}</span>
       </button>
-      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'schema_failed' }" @click="store.pendingFilter.value = 'schema_failed'">
-        待修补 <span>{{ stagingStatusCounts.repair }}</span>
+      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'schema_failed' }" @click="setPendingFilter('schema_failed')">
+        待修补 <span>{{ pendingStatusCounts.schema_failed }}</span>
       </button>
-      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'bill_pending' }" @click="store.pendingFilter.value = 'bill_pending'">
-        账单补充 <span>{{ store.pendingSummary.value.billPending }}</span>
+      <button type="button" class="pending-filter-chip" :class="{ active: store.pendingFilter.value === 'bill_pending' }" @click="setPendingFilter('bill_pending')">
+        账单补全 <span>{{ pendingStatusCounts.bill_pending }}</span>
       </button>
     </div>
 
-    <div v-if="!totalPending" class="pending-empty-state">
+    <div v-if="!filteredQueue.length" class="pending-empty-state">
       <div class="pending-empty-orbit" aria-hidden="true"><span></span></div>
-      <div class="empty-title">微尘皆已落定</div>
-      <div class="empty-desc">新的截图会在这里稍作停留</div>
+      <div class="empty-title">{{ totalPending ? '当前范围已经处理完' : '微尘皆已落定' }}</div>
+      <div class="empty-desc">{{ totalPending ? '切换范围或状态可以查看其他记录' : '新的截图会在这里稍作停留' }}</div>
     </div>
 
     <button
@@ -53,58 +61,82 @@
       {{ store.selectedStagingIds.value.size === filteredStaging.length ? '已全选' : `全选 ${filteredStaging.length} 张` }}
     </button>
 
-    <div v-if="filteredStaging.length" class="pending-film-groups">
-      <section v-for="section in stagingSections" :key="section.key" class="pending-film-group">
+    <div v-if="filteredQueue.length" class="pending-film-groups">
+      <section v-for="section in pendingSections" :key="section.key" class="pending-film-group">
         <div class="pending-date-label">{{ section.label }}</div>
         <div class="pending-film-grid">
           <button
-            v-for="r in section.items"
-            :key="r.id"
+            v-for="item in section.items"
+            :key="item.queueId"
             type="button"
             class="pending-film-card"
             :class="{
-              selected: store.selectedStagingIds.value.has(r.id),
-              'has-image': Boolean(r.imageUrl),
-              'is-fact-card': !r.imageUrl,
+              selected: item.source === 'staging' && store.selectedStagingIds.value.has(item.sourceId),
+              'has-image': Boolean(queueImageUrl(item)),
+              'is-fact-card': !queueImageUrl(item),
+              'is-bill-card': item.source === 'bill',
+              'batch-unavailable': store.batchMode.value && item.source === 'bill',
             }"
-            @click="handleFilmTap(r)"
+            @click="handleQueueTap(item)"
           >
-            <span class="pending-film-visual" :class="{ 'has-image': Boolean(r.imageUrl) }">
-              <img v-if="r.imageUrl" :src="r.imageUrl" :alt="reviewTitle(r)" loading="lazy" decoding="async" fetchpriority="low" @error="markImageUnavailable(r)">
-              <span v-else class="pending-film-note">
-                <span class="pending-film-note-kicker">{{ r.imagePath ? '原图暂不可用 · 文字事实' : '原图未保留 · 文字事实' }}</span>
-                <span class="pending-film-note-heading">
-                  <span class="pending-film-note-icon">{{ typeGlyph(r.recordType) }}</span>
-                  <strong>{{ reviewTitle(r) }}</strong>
+            <span class="pending-film-visual" :class="{ 'has-image': Boolean(queueImageUrl(item)) }">
+              <img v-if="queueImageUrl(item)" :src="queueImageUrl(item)" :alt="queueTitle(item)" loading="lazy" decoding="async" fetchpriority="low" @error="markQueueImageUnavailable(item)">
+              <span v-else-if="item.source === 'bill'" class="pending-bill-fact-note">
+                <span class="pending-film-note-kicker">{{ item.record.image_path || item.record.image_url ? '原图暂不可用 · 账单事实' : '原图未保留 · 账单事实' }}</span>
+                <span class="pending-bill-fact-icon">支</span>
+                <strong>{{ billReviewTitle(item.record) }}</strong>
+                <b>-¥{{ Number(item.record.amount || 0).toFixed(2) }}</b>
+                <span class="pending-bill-fact-lines">
+                  <span>{{ item.record.platform === '?' ? '平台未知' : item.record.platform }}</span>
+                  <span>{{ billCategoryLabel(item.record.cat) }}</span>
+                  <span>{{ item.record.payment === '?' ? '支付未知' : item.record.payment }}</span>
                 </span>
-                <span class="pending-film-note-summary">{{ reviewDescription(r) }}</span>
-                <span v-if="factRows(r).length" class="pending-film-facts">
-                  <span v-for="fact in factRows(r).slice(0, 3)" :key="`${r.id}-${fact.key}`">
+              </span>
+              <span v-else class="pending-film-note">
+                <span class="pending-film-note-kicker">{{ item.record.imagePath ? '原图暂不可用 · 文字事实' : '原图未保留 · 文字事实' }}</span>
+                <span class="pending-film-note-heading">
+                  <span class="pending-film-note-icon">{{ typeGlyph(item.record.recordType) }}</span>
+                  <strong>{{ queueTitle(item) }}</strong>
+                </span>
+                <span class="pending-film-note-summary">{{ queueDescription(item) }}</span>
+                <span v-if="queueFactRows(item).length" class="pending-film-facts">
+                  <span v-for="fact in queueFactRows(item).slice(0, 3)" :key="`${item.queueId}-${fact.key}`">
                     <small>{{ fact.label }}</small>
                     <b>{{ fact.value }}</b>
                   </span>
                 </span>
-                <span v-else-if="r.lastErrorMessage" class="pending-film-note-error">
-                  {{ readableError(r.lastErrorMessage) }}
+                <span v-else-if="item.record.lastErrorMessage" class="pending-film-note-error">
+                  {{ readableError(item.record.lastErrorMessage) }}
                 </span>
               </span>
-              <span class="pending-film-state" :class="statusTone(r.status)">
-                <i></i>{{ statusLabel(r.status) }}
+              <span class="pending-film-state" :class="statusTone(item.status)">
+                <i></i>{{ statusLabel(item.status) }}
               </span>
-              <span v-if="store.batchMode.value" class="pending-film-select" :class="{ checked: store.selectedStagingIds.value.has(r.id) }">
-                {{ store.selectedStagingIds.value.has(r.id) ? '✓' : '' }}
+              <span v-if="store.batchMode.value && item.source === 'staging'" class="pending-film-select" :class="{ checked: store.selectedStagingIds.value.has(item.sourceId) }">
+                {{ store.selectedStagingIds.value.has(item.sourceId) ? '✓' : '' }}
               </span>
-              <span v-if="r.imageUrl" class="pending-film-scrim">
-                <strong>{{ reviewTitle(r) }}</strong>
-                <small>{{ reviewDescription(r) }}</small>
+              <span v-if="queueImageUrl(item)" class="pending-film-scrim">
+                <strong>{{ queueTitle(item) }}</strong>
+                <small>{{ queueDescription(item) }}</small>
               </span>
             </span>
-            <span class="pending-film-caption">
-              <strong>{{ reviewTitle(r) }}</strong>
-              <span class="pending-film-caption-domain">{{ reviewContextLabel(r) }}</span>
+            <span class="pending-film-caption" :class="{ 'pending-bill-film-caption': item.source === 'bill' }">
+              <span v-if="item.source === 'bill'" class="pending-bill-film-title">
+                <strong>{{ item.record.name || '待补全账单' }}</strong>
+                <b>-¥{{ Number(item.record.amount || 0).toFixed(2) }}</b>
+              </span>
+              <template v-else>
+                <strong>{{ queueTitle(item) }}</strong>
+                <span class="pending-film-caption-domain">{{ queueContextLabel(item) }}</span>
+              </template>
               <span class="pending-time-stack">
-                <span><i>记录</i>{{ r.occurredAt ? fmtShort(r.occurredAt) : '未识别' }}</span>
-                <span><i>上传</i>{{ fmtShort(r.createdAt) || '未知' }}</span>
+                <span><i>记录</i>{{ queueOccurredLabel(item) }}</span>
+                <span><i>上传</i>{{ fmtShort(item.createdAt) || '未知' }}</span>
+              </span>
+              <span v-if="item.source === 'bill'" class="pending-bill-facts">
+                <span :class="{ missing: item.record.platform === '?' }">{{ item.record.platform === '?' ? '平台未知' : item.record.platform }}</span>
+                <span :class="{ missing: item.record.cat === '?' }">{{ billCategoryLabel(item.record.cat) }}</span>
+                <span :class="{ missing: item.record.payment === '?' }">{{ item.record.payment === '?' ? '支付未知' : item.record.payment }}</span>
               </span>
             </span>
           </button>
@@ -120,65 +152,6 @@
         <button class="btn btn-danger btn-sm" @click="store.batchDiscard()">销毁</button>
       </div>
     </div>
-
-    <section v-if="showBillPending && filteredBills.length" class="pending-bill-section">
-      <header class="pending-section-heading">
-        <div>
-          <span>事实补全</span>
-          <h2>账单待补充</h2>
-        </div>
-        <strong>{{ filteredBills.length }} 条</strong>
-      </header>
-      <div class="pending-bill-groups">
-        <section v-for="section in billSections" :key="section.key" class="pending-bill-group">
-          <div class="pending-date-label">{{ section.label }}</div>
-          <div class="pending-bill-grid">
-            <button
-              v-for="b in section.items"
-              :key="b.id"
-              type="button"
-              class="pending-bill-film-card"
-              @click="store.openPendingModal(b)"
-            >
-              <span class="pending-bill-visual" :class="{ 'has-image': Boolean(b.imageUrl) }">
-                <img v-if="b.imageUrl" :src="b.imageUrl" :alt="b.name || '待补充账单'" loading="lazy" decoding="async" fetchpriority="low" @error="markBillImageUnavailable(b)">
-                <span v-else class="pending-bill-fact-note">
-                  <span class="pending-film-note-kicker">{{ b.image_path || b.image_url ? '原图暂不可用 · 账单事实' : '原图未保留 · 账单事实' }}</span>
-                  <span class="pending-bill-fact-icon">支</span>
-                  <strong>{{ billReviewTitle(b) }}</strong>
-                  <b>-¥{{ Number(b.amount || 0).toFixed(2) }}</b>
-                  <span class="pending-bill-fact-lines">
-                    <span>{{ b.platform === '?' ? '平台未知' : b.platform }}</span>
-                    <span>{{ billCategoryLabel(b.cat) }}</span>
-                    <span>{{ b.payment === '?' ? '支付未知' : b.payment }}</span>
-                  </span>
-                </span>
-                <span class="pending-film-state review"><i></i>待补充</span>
-                <span v-if="b.imageUrl" class="pending-film-scrim">
-                  <strong>{{ billReviewTitle(b) }}</strong>
-                  <small>{{ b.name }} · -¥{{ Number(b.amount || 0).toFixed(2) }}</small>
-                </span>
-              </span>
-              <span class="pending-bill-film-caption">
-                <span class="pending-bill-film-title">
-                  <strong>{{ b.name }}</strong>
-                  <b>-¥{{ Number(b.amount || 0).toFixed(2) }}</b>
-                </span>
-                <span class="pending-time-stack">
-                  <span><i>记录</i>{{ billOccurredLabel(b) }}</span>
-                  <span><i>上传</i>{{ fmtShort(b.createdAt) || '未知' }}</span>
-                </span>
-                <span class="pending-bill-facts">
-                  <span :class="{ missing: b.platform === '?' }">{{ b.platform === '?' ? '平台未知' : b.platform }}</span>
-                  <span :class="{ missing: b.cat === '?' }">{{ billCategoryLabel(b.cat) }}</span>
-                  <span :class="{ missing: b.payment === '?' }">{{ b.payment === '?' ? '支付未知' : b.payment }}</span>
-                </span>
-              </span>
-            </button>
-          </div>
-        </section>
-      </div>
-    </section>
 
     <!-- 已处理记录 -->
     <div v-if="store.processedStagingRecords.value.length" class="section-header" style="margin-top: 8px;">
@@ -236,99 +209,109 @@
           <header class="verdict-stage-topbar">
             <button type="button" class="verdict-icon-button" aria-label="关闭裁决台" @click="closeVerdict">×</button>
             <div class="verdict-stage-state" :class="statusTone(activeVerdict.status)">
-              <i></i>{{ statusLabel(activeVerdict.status) }} · {{ reviewContextLabel(activeVerdict) }}
+              <i></i>{{ statusLabel(activeVerdict.status) }} · {{ queueContextLabel(activeVerdict) }}
             </div>
-            <div class="verdict-stage-counter">{{ activeVerdictIndex + 1 }} / {{ filteredStaging.length }}</div>
+            <div class="verdict-stage-counter">{{ activeVerdictIndex + 1 }} / {{ filteredQueue.length }}</div>
           </header>
 
           <div class="verdict-photo-stage" @touchstart="onStageTouchStart" @touchend="onStageTouchEnd">
             <button type="button" class="verdict-page-button previous" :disabled="activeVerdictIndex <= 0" aria-label="上一张" @click="moveVerdict(-1)">‹</button>
             <button
-              v-if="activeVerdict.imageUrl"
+              v-if="queueImageUrl(activeVerdict)"
               type="button"
               class="verdict-photo"
               :class="{ 'is-loading': !activeVerdictImageReady }"
               aria-label="查看原图"
-              @click="store.openImgFull(activeVerdict.imageUrl)"
+              @click="store.openImgFull(queueImageUrl(activeVerdict))"
             >
               <span v-if="!activeVerdictImageReady" class="verdict-image-loading" aria-live="polite">
                 <i></i><span>正在准备原图</span>
               </span>
-              <img :src="activeVerdict.imageUrl" :alt="reviewTitle(activeVerdict)" decoding="async" fetchpriority="high"
-                @load="activeVerdictImageReady = true" @error="markActiveImageUnavailable(activeVerdict)">
+              <img :src="queueImageUrl(activeVerdict)" :alt="queueTitle(activeVerdict)" decoding="async" fetchpriority="high"
+                @load="activeVerdictImageReady = true" @error="markActiveQueueImageUnavailable(activeVerdict)">
             </button>
             <div v-else class="verdict-fact-sheet">
-              <span class="verdict-fact-kicker">{{ activeVerdict.imagePath ? '原图暂不可用 · 文字事实' : '原图未保留 · 文字事实' }}</span>
+              <span class="verdict-fact-kicker">{{ queueHasImageReference(activeVerdict) ? '原图暂不可用 · 文字事实' : '原图未保留 · 文字事实' }}</span>
               <div class="verdict-fact-heading">
-                <span>{{ typeGlyph(activeVerdict.recordType) }}</span>
-                <strong>{{ reviewTitle(activeVerdict) }}</strong>
+                <span>{{ activeVerdict.source === 'bill' ? '支' : typeGlyph(activeVerdict.record.recordType) }}</span>
+                <strong>{{ queueTitle(activeVerdict) }}</strong>
               </div>
-              <p>{{ reviewDescription(activeVerdict) }}</p>
-              <dl v-if="factRows(activeVerdict).length">
-                <div v-for="fact in factRows(activeVerdict).slice(0, 5)" :key="`verdict-${activeVerdict.id}-${fact.key}`">
+              <p>{{ queueDescription(activeVerdict) }}</p>
+              <dl v-if="queueFactRows(activeVerdict).length">
+                <div v-for="fact in queueFactRows(activeVerdict).slice(0, 5)" :key="`verdict-${activeVerdict.queueId}-${fact.key}`">
                   <dt>{{ fact.label }}</dt>
                   <dd>{{ fact.value }}</dd>
                 </div>
               </dl>
               <div v-else class="verdict-fact-empty">没有保留原图，当前仅能依据识别摘要进行判断。</div>
             </div>
-            <button type="button" class="verdict-page-button next" :disabled="activeVerdictIndex >= filteredStaging.length - 1" aria-label="下一张" @click="moveVerdict(1)">›</button>
+            <button type="button" class="verdict-page-button next" :disabled="activeVerdictIndex >= filteredQueue.length - 1" aria-label="下一张" @click="moveVerdict(1)">›</button>
           </div>
 
           <div class="verdict-stage-info">
-            <strong>{{ reviewTitle(activeVerdict) }}</strong>
-            <p class="verdict-stage-guidance">{{ reviewDescription(activeVerdict) }}</p>
-            <div class="verdict-stage-meta">
-              <span class="verdict-assurance"><i v-for="dot in 3" :key="dot" :class="{ on: dot <= assuranceDots(activeVerdict.confidence) }"></i>{{ assuranceLabel(activeVerdict.confidence) }}</span>
-              <span v-if="activeVerdict.retryCount">已重试 {{ activeVerdict.retryCount }} 次</span>
+            <strong>{{ queueTitle(activeVerdict) }}</strong>
+            <p class="verdict-stage-guidance">{{ queueDescription(activeVerdict) }}</p>
+            <div v-if="activeVerdict.source === 'staging'" class="verdict-stage-meta">
+              <span class="verdict-assurance"><i v-for="dot in 3" :key="dot" :class="{ on: dot <= assuranceDots(activeVerdict.record.confidence) }"></i>{{ assuranceLabel(activeVerdict.record.confidence) }}</span>
+              <span v-if="activeVerdict.record.retryCount">已重试 {{ activeVerdict.record.retryCount }} 次</span>
             </div>
             <div class="verdict-time-stack verdict-time-stack-detail">
-              <span><i>记录时间</i>{{ activeVerdict.occurredAt ? fmtShort(activeVerdict.occurredAt) : '未识别' }}</span>
+              <span><i>记录时间</i>{{ queueOccurredLabel(activeVerdict) }}</span>
               <span><i>上传时间</i>{{ fmtShort(activeVerdict.createdAt) || '未知' }}</span>
             </div>
-            <div v-if="displayError(activeVerdict)" class="verdict-stage-error">{{ displayError(activeVerdict) }}</div>
-            <div v-if="requiresReadingRepair(activeVerdict)" class="verdict-value-note">
+            <div v-if="activeVerdict.source === 'staging' && displayError(activeVerdict.record)" class="verdict-stage-error">{{ displayError(activeVerdict.record) }}</div>
+            <div v-if="activeVerdict.source === 'staging' && requiresReadingRepair(activeVerdict.record)" class="verdict-value-note">
               <strong>补完有什么用</strong>
               <span>书名用于归到对应书籍，阅读时长会进入你的阅读趋势；原图会继续作为这次记录的依据。</span>
             </div>
           </div>
 
-          <div v-if="activeVerdict.repaymentCandidate" class="verdict-repayment">
+          <div v-if="activeVerdict.source === 'staging' && activeVerdict.record.repaymentCandidate" class="verdict-repayment">
             <div>
               <strong>可能是还款截图</strong>
-              <span>{{ activeVerdict.repaymentCandidate.account.name }} {{ activeVerdict.repaymentCandidate.cycle.cycleMonth }} 账单</span>
+              <span>{{ activeVerdict.record.repaymentCandidate.account.name }} {{ activeVerdict.record.repaymentCandidate.cycle.cycleMonth }} 账单</span>
             </div>
-            <button type="button" :disabled="verdictBusy" @click="confirmRepaymentFromVerdict(activeVerdict)">
-              确认 ¥{{ Number(activeVerdict.repaymentCandidate.amount || 0).toFixed(2) }}
+            <button type="button" :disabled="verdictBusy" @click="confirmRepaymentFromVerdict(activeVerdict.record)">
+              确认 ¥{{ Number(activeVerdict.record.repaymentCandidate.amount || 0).toFixed(2) }}
             </button>
           </div>
 
-          <div class="verdict-stage-actions">
+          <div v-if="activeVerdict.source === 'bill'" class="verdict-stage-actions verdict-bill-actions">
+            <button type="button" class="verdict-accept-button" :disabled="verdictBusy" @click="openBillFromVerdict(activeVerdict)">
+              <span>↓</span> 补全这笔账单
+            </button>
+            <div class="verdict-minor-actions">
+              <button type="button" :disabled="activeVerdictIndex >= filteredQueue.length - 1" @click="moveVerdict(1)"><span>›</span>稍后</button>
+              <button type="button" @click="queueImageUrl(activeVerdict) && store.openImgFull(queueImageUrl(activeVerdict))"><span>⌕</span>原图</button>
+            </div>
+          </div>
+
+          <div v-else class="verdict-stage-actions">
             <button
-              v-if="suggestedDomain(activeVerdict)"
+              v-if="suggestedDomain(activeVerdict.record)"
               type="button"
               class="verdict-accept-button"
               :disabled="verdictBusy"
-              @click="archiveFromVerdict(activeVerdict, suggestedDomain(activeVerdict).id)"
+              @click="archiveFromVerdict(activeVerdict.record, suggestedDomain(activeVerdict.record).id)"
             >
-              <span>↓</span> {{ verdictPrimaryLabel(activeVerdict) }}
+              <span>↓</span> {{ verdictPrimaryLabel(activeVerdict.record) }}
             </button>
             <div class="verdict-minor-actions">
-              <button v-if="suggestedDomain(activeVerdict)" type="button" :disabled="verdictBusy" @click="adjustFromVerdict(activeVerdict)"><span>☷</span>调整</button>
-              <button type="button" :disabled="verdictBusy" @click="retryFromVerdict(activeVerdict)"><span>↻</span>重试</button>
-              <button type="button" class="danger" :disabled="verdictBusy" @click="discardFromVerdict(activeVerdict)"><span>×</span>销毁</button>
+              <button v-if="suggestedDomain(activeVerdict.record)" type="button" :disabled="verdictBusy" @click="adjustFromVerdict(activeVerdict.record)"><span>☷</span>调整</button>
+              <button type="button" :disabled="verdictBusy" @click="retryFromVerdict(activeVerdict.record)"><span>↻</span>重试</button>
+              <button type="button" class="danger" :disabled="verdictBusy" @click="discardFromVerdict(activeVerdict.record)"><span>×</span>销毁</button>
             </div>
           </div>
 
-          <div class="verdict-domain-strip">
+          <div v-if="activeVerdict.source === 'staging'" class="verdict-domain-strip">
             <span>改判到</span>
             <button
               v-for="domain in archiveDomains"
               :key="`verdict-${domain.id}`"
               type="button"
-              :class="{ current: suggestedDomain(activeVerdict)?.id === domain.id }"
+              :class="{ current: suggestedDomain(activeVerdict.record)?.id === domain.id }"
               :disabled="verdictBusy"
-              @click="archiveFromVerdict(activeVerdict, domain.id)"
+              @click="archiveFromVerdict(activeVerdict.record, domain.id)"
             >
               {{ domain.shortName }}
             </button>
@@ -341,8 +324,14 @@
 
 <script setup>
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { getLocalDateKey, localDateKeyOf } from '../../utils/helpers'
+import { getLocalDateKey } from '../../utils/helpers'
 import { getSystemDomainLabel } from '../../domains/registry'
+import {
+  buildPendingQueue,
+  countPendingQueueByStatus,
+  filterPendingQueue,
+  pendingQueueItemAtPreviousIndex,
+} from '../../domains/pendingQueue'
 
 const store = inject('store')
 const activeVerdictId = ref(null)
@@ -350,41 +339,35 @@ const verdictBusy = ref(false)
 const stageTouchStartX = ref(null)
 const activeVerdictImageReady = ref(false)
 const editingVerdictContext = ref(null)
+const pendingScope = ref('today')
 
 const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
-const totalPending = computed(() => store.pendingBills.value.length + store.stagingRecords.value.length)
-const stagingStatusCounts = computed(() => store.stagingRecords.value.reduce((counts, record) => {
-  if (['routing_failed', 'unrouted', 'unassigned'].includes(record.status)) counts.routing += 1
-  else if (['pending_review', 'routed', 'extracted'].includes(record.status)) counts.review += 1
-  else if (['ai_error', 'failed', 'extraction_failed'].includes(record.status)) counts.retry += 1
-  else if (record.status === 'schema_failed') counts.repair += 1
-  return counts
-}, { routing: 0, review: 0, retry: 0, repair: 0 }))
+const pendingQueue = computed(() => buildPendingQueue({
+  stagingRecords: store.stagingRecords.value,
+  pendingBills: store.pendingBills.value,
+}))
+const todayKey = ref(getLocalDateKey())
+let todayRefreshTimer = null
+const totalPending = computed(() => pendingQueue.value.length)
+const pendingStatusCounts = computed(() => countPendingQueueByStatus(pendingQueue.value, {
+  scope: pendingScope.value,
+  todayKey: todayKey.value,
+}))
+const scopedPendingCount = computed(() => pendingStatusCounts.value.all)
+const filteredQueue = computed(() => filterPendingQueue(pendingQueue.value, {
+  scope: pendingScope.value,
+  filter: store.pendingFilter.value,
+  todayKey: todayKey.value,
+}))
+const filteredStaging = computed(() => filteredQueue.value
+  .filter(item => item.source === 'staging')
+  .map(item => item.record))
 
-const showBillPending = computed(() =>
-  store.pendingFilter.value === 'all' || store.pendingFilter.value === 'bill_pending'
-)
-
-const filteredStaging = computed(() => {
-  const records = store.stagingRecords.value
-  if (store.pendingFilter.value === 'bill_pending') return []
-  if (store.pendingFilter.value === 'all') return records
-  if (store.pendingFilter.value === 'routing_failed') return records.filter(r => ['routing_failed', 'unrouted', 'unassigned'].includes(r.status))
-  if (store.pendingFilter.value === 'pending_review') return records.filter(r => ['pending_review', 'routed', 'extracted'].includes(r.status))
-  if (store.pendingFilter.value === 'ai_error') return records.filter(r => ['ai_error', 'failed', 'extraction_failed'].includes(r.status))
-  return records.filter(r => r.status === store.pendingFilter.value)
-})
-
-const activeVerdictIndex = computed(() => filteredStaging.value.findIndex(record => record.id === activeVerdictId.value))
+const activeVerdictIndex = computed(() => filteredQueue.value.findIndex(item => item.queueId === activeVerdictId.value))
 const activeVerdict = computed(() => {
   const index = activeVerdictIndex.value
-  return index >= 0 ? filteredStaging.value[index] : null
-})
-
-const filteredBills = computed(() => {
-  if (store.pendingFilter.value !== 'all' && store.pendingFilter.value !== 'bill_pending') return []
-  return store.pendingBills.value
+  return index >= 0 ? filteredQueue.value[index] : null
 })
 
 function dateSectionLabel(key, today, yesterday) {
@@ -397,14 +380,12 @@ function dateSectionLabel(key, today, yesterday) {
   return `${yearPrefix}${d.getMonth() + 1}月${d.getDate()}日 · ${dayNames[d.getDay()]}`
 }
 
-function groupIntoDateSections(items, dateField) {
+function groupIntoDateSections(items) {
   const today = getLocalDateKey()
   const yesterday = getLocalDateKey(new Date(Date.now() - 86400000))
   const groups = new Map()
   items.forEach(item => {
-    const raw = item[dateField] || item.createdAt
-    const resolvedKey = localDateKeyOf(raw)
-    const key = resolvedKey && resolvedKey.length >= 10 ? resolvedKey : 'unknown'
+    const key = item.occurredDateKey || 'unknown'
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(item)
   })
@@ -421,8 +402,7 @@ function groupIntoDateSections(items, dateField) {
     }))
 }
 
-const stagingSections = computed(() => groupIntoDateSections(filteredStaging.value, 'occurredAt'))
-const billSections = computed(() => groupIntoDateSections(filteredBills.value, 'dateRaw'))
+const pendingSections = computed(() => groupIntoDateSections(filteredQueue.value))
 
 const archiveDomains = computed(() => store.domains.value)
 
@@ -713,29 +693,105 @@ function billCategoryLabel(value) {
   }[value] || value
 }
 
-function markImageUnavailable(record) {
-  if (!record) return
-  record.imageUrl = null
-  record.imageLoadError = true
+function queueImageUrl(item) {
+  return item?.record?.imageUrl || ''
 }
 
-function markActiveImageUnavailable(record) {
+function queueHasImageReference(item) {
+  if (item?.source === 'bill') return Boolean(item.record?.image_path || item.record?.image_url)
+  return Boolean(item?.record?.imagePath)
+}
+
+function queueTitle(item) {
+  if (item?.source === 'bill') return billReviewTitle(item.record)
+  return reviewTitle(item?.record)
+}
+
+function queueDescription(item) {
+  if (item?.source !== 'bill') return reviewDescription(item?.record)
+  const bill = item.record
+  const merchant = String(bill?.name || '').trim() || '待补全账单'
+  const amount = Number(bill?.amount || 0)
+  const missing = billMissingFields(bill)
+  if (missing.length) return `${merchant} · ¥${amount.toFixed(2)}；还需补充${missing.join('、')}`
+  return `${merchant} · ¥${amount.toFixed(2)}；核对后即可进入财务统计`
+}
+
+function queueContextLabel(item) {
+  if (item?.source === 'bill') return '支出 · 账单补全'
+  return reviewContextLabel(item?.record)
+}
+
+function queueFactRows(item) {
+  if (item?.source !== 'bill') return factRows(item?.record)
+  const bill = item.record
+  return [
+    { key: 'amount', label: '金额', value: `¥${Number(bill?.amount || 0).toFixed(2)}` },
+    { key: 'platform', label: '消费渠道', value: bill?.platform === '?' ? '待补充' : bill?.platform },
+    { key: 'category', label: '消费分类', value: billCategoryLabel(bill?.cat) },
+    { key: 'payment', label: '支付方式', value: bill?.payment === '?' ? '待补充' : bill?.payment },
+  ]
+}
+
+function queueOccurredLabel(item) {
+  if (item?.source === 'bill') return billOccurredLabel(item.record)
+  return item?.occurredAt ? fmtShort(item.occurredAt) : '未识别'
+}
+
+function markQueueImageUnavailable(item) {
+  if (!item?.record) return
+  item.record.imageUrl = null
+  item.record.imageLoadError = true
+}
+
+function markActiveQueueImageUnavailable(item) {
   activeVerdictImageReady.value = true
-  markImageUnavailable(record)
+  markQueueImageUnavailable(item)
 }
 
-function markBillImageUnavailable(bill) {
-  if (!bill) return
-  bill.imageUrl = null
-  bill.imageLoadError = true
+function setPendingScope(scope) {
+  pendingScope.value = scope
+  exitBatchMode()
 }
 
-function handleFilmTap(record) {
+function setPendingFilter(filter) {
+  store.pendingFilter.value = filter
+  exitBatchMode()
+}
+
+function exitBatchMode() {
+  if (store.batchMode.value) store.toggleBatchMode()
+  else store.clearSelection()
+}
+
+function scheduleTodayRefresh() {
+  if (todayRefreshTimer !== null) window.clearTimeout(todayRefreshTimer)
+  const now = new Date()
+  const nextMidnight = new Date(now)
+  nextMidnight.setHours(24, 0, 0, 0)
+  const delay = Math.max(1_000, nextMidnight.getTime() - now.getTime() + 1_000)
+  todayRefreshTimer = window.setTimeout(() => {
+    todayKey.value = getLocalDateKey()
+    scheduleTodayRefresh()
+  }, delay)
+}
+
+function refreshTodayKey() {
+  todayKey.value = getLocalDateKey()
+  scheduleTodayRefresh()
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') refreshTodayKey()
+}
+
+function handleQueueTap(item) {
   if (store.batchMode.value) {
-    store.toggleSelectStaging(record.id)
+    if (item.source === 'staging') store.toggleSelectStaging(item.sourceId)
+    else store.showFlash('账单需要逐条补全')
     return
   }
-  activeVerdictId.value = record.id
+  activeVerdictId.value = item.queueId
 }
 
 function closeVerdict() {
@@ -744,8 +800,8 @@ function closeVerdict() {
 
 function moveVerdict(offset) {
   const nextIndex = activeVerdictIndex.value + offset
-  if (nextIndex < 0 || nextIndex >= filteredStaging.value.length) return
-  activeVerdictId.value = filteredStaging.value[nextIndex].id
+  if (nextIndex < 0 || nextIndex >= filteredQueue.value.length) return
+  activeVerdictId.value = filteredQueue.value[nextIndex].queueId
 }
 
 function suggestedDomain(record) {
@@ -761,23 +817,42 @@ function adjustFromVerdict(record) {
   else if (domainId === 'income') opened = store.openIncomeStagingModal(record)
   else opened = store.openUniversalRepairFromStaging(record, domainId)
   if (opened) {
-    editingVerdictContext.value = { recordId: record.id, previousIndex: activeVerdictIndex.value }
+    editingVerdictContext.value = {
+      queueId: `staging:${record.id}`,
+      previousIndex: activeVerdictIndex.value,
+    }
     closeVerdict()
   }
+}
+
+function openBillFromVerdict(item) {
+  if (item?.source !== 'bill') return
+  editingVerdictContext.value = {
+    queueId: item.queueId,
+    previousIndex: activeVerdictIndex.value,
+  }
+  void store.openPendingModal(item.record, { returnToQueue: true })
+  closeVerdict()
 }
 
 async function archiveFromVerdict(record, domainId) {
   if (verdictBusy.value) return
   if (domainId === 'reading' && requiresReadingRepair(record)) {
     const opened = store.openUniversalRepairFromStaging(record, domainId)
-    if (opened) closeVerdict()
+    if (opened) {
+      editingVerdictContext.value = {
+        queueId: `staging:${record.id}`,
+        previousIndex: activeVerdictIndex.value,
+      }
+      closeVerdict()
+    }
     return
   }
   const previousIndex = activeVerdictIndex.value
   verdictBusy.value = true
   try {
     await store.archiveStagingRecord(record, domainId)
-    settleVerdictAfterAction(record.id, previousIndex)
+    settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
   } finally {
     verdictBusy.value = false
   }
@@ -789,7 +864,7 @@ async function retryFromVerdict(record) {
   verdictBusy.value = true
   try {
     await store.retryStagingRecord(record)
-    settleVerdictAfterAction(record.id, previousIndex)
+    settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
   } finally {
     verdictBusy.value = false
   }
@@ -801,7 +876,7 @@ async function discardFromVerdict(record) {
   verdictBusy.value = true
   try {
     await store.discardStagingRecord(record)
-    settleVerdictAfterAction(record.id, previousIndex)
+    settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
   } finally {
     verdictBusy.value = false
   }
@@ -813,20 +888,24 @@ async function confirmRepaymentFromVerdict(record) {
   verdictBusy.value = true
   try {
     await store.confirmStagingRepayment(record)
-    settleVerdictAfterAction(record.id, previousIndex)
+    settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
   } finally {
     verdictBusy.value = false
   }
 }
 
-function settleVerdictAfterAction(recordId, previousIndex) {
-  if (store.stagingRecords.value.some(item => item.id === recordId)) return
-  const records = filteredStaging.value
-  if (!records.length) {
+function settleVerdictAfterAction(queueId, previousIndex) {
+  const sameItem = filteredQueue.value.find(item => item.queueId === queueId)
+  if (sameItem) {
+    activeVerdictId.value = sameItem.queueId
+    return
+  }
+  const nextItem = pendingQueueItemAtPreviousIndex(filteredQueue.value, previousIndex)
+  if (!nextItem) {
     closeVerdict()
     return
   }
-  activeVerdictId.value = records[Math.min(Math.max(previousIndex, 0), records.length - 1)].id
+  activeVerdictId.value = nextItem.queueId
 }
 
 function onStageTouchStart(event) {
@@ -858,47 +937,60 @@ function warmImage(url, onReady) {
   if (image.complete && image.naturalWidth > 0) onReady?.()
 }
 
-watch(activeVerdict, record => {
-  activeVerdictImageReady.value = !record?.imageUrl
-  if (!record?.imageUrl) return
-  const activeId = record.id
-  warmImage(record.imageUrl, () => {
-    if (activeVerdict.value?.id === activeId) activeVerdictImageReady.value = true
+watch(activeVerdict, item => {
+  const imageUrl = queueImageUrl(item)
+  activeVerdictImageReady.value = !imageUrl
+  if (!imageUrl) return
+  const activeId = item.queueId
+  warmImage(imageUrl, () => {
+    if (activeVerdict.value?.queueId === activeId) activeVerdictImageReady.value = true
   })
   const index = activeVerdictIndex.value
-  warmImage(filteredStaging.value[index - 1]?.imageUrl)
-  warmImage(filteredStaging.value[index + 1]?.imageUrl)
+  warmImage(queueImageUrl(filteredQueue.value[index - 1]))
+  warmImage(queueImageUrl(filteredQueue.value[index + 1]))
 }, { immediate: true })
 
 watch(activeVerdictId, value => {
   document.body.classList.toggle('verdict-open', Boolean(value))
 })
 
-watch(filteredStaging, records => {
-  if (activeVerdictId.value && !records.some(record => record.id === activeVerdictId.value)) closeVerdict()
+watch(filteredQueue, items => {
+  if (activeVerdictId.value && !items.some(item => item.queueId === activeVerdictId.value)) closeVerdict()
 })
 
 watch(
-  () => [store.expenseModal.open, store.incomeModal.open, store.universalModal.open],
+  () => [
+    store.expenseModal.open,
+    store.incomeModal.open,
+    store.universalModal.open,
+    store.pendingModal.open,
+  ],
   openStates => {
     const context = editingVerdictContext.value
     if (!context || openStates.some(Boolean)) return
-    const records = filteredStaging.value
-    const sameRecord = records.find(record => record.id === context.recordId)
-    const nextRecord = sameRecord || records[Math.min(Math.max(context.previousIndex, 0), records.length - 1)]
+    const sameItem = filteredQueue.value.find(item => item.queueId === context.queueId)
+    const nextItem = sameItem || pendingQueueItemAtPreviousIndex(filteredQueue.value, context.previousIndex)
     editingVerdictContext.value = null
-    activeVerdictId.value = nextRecord?.id || null
+    activeVerdictId.value = nextItem?.queueId || null
   }
 )
 
-onMounted(() => window.addEventListener('keydown', handleStageKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', handleStageKeydown)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  refreshTodayKey()
+})
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleStageKeydown)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  if (todayRefreshTimer !== null) window.clearTimeout(todayRefreshTimer)
+  todayRefreshTimer = null
   document.body.classList.remove('verdict-open')
 })
 
 function statusLabel(status) {
   const map = {
+    bill_pending: '账单补全',
     ai_error: 'AI失败',
     routing_failed: '待分类',
     pending_review: '待确认',
