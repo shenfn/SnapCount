@@ -204,6 +204,10 @@ const fabOpen = ref(false)
 // 同时各调一次 loadData() 产生竞态。
 async function applySession(session) {
   if (!session?.user) return
+  const switchingUser = Boolean(
+    store.currentUserId.value && store.currentUserId.value !== session.user.id,
+  )
+  if (switchingUser) store.resetUserData()
   const sameUser = store.isLoggedIn.value && store.currentUserId.value === session.user.id
   store.currentUserId.value = session.user.id
   store.currentUserEmail.value = session.user.email || ''

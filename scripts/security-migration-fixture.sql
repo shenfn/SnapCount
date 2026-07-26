@@ -46,7 +46,10 @@ create table public.user_configs (
   monthly_quota integer not null default 100,
   daily_quota integer not null default 30,
   is_active boolean not null default true,
-  ai_logs_enabled boolean not null default true
+  ai_logs_enabled boolean not null default true,
+  expression_improvement_enabled boolean not null default false,
+  expression_improvement_consent_at timestamptz,
+  expression_improvement_withdrawn_at timestamptz
 );
 
 create table public.account_deletion_requests (
@@ -120,35 +123,10 @@ create table public.ai_recognition_logs (
   image_url text
 );
 
-create table public.expression_exposure_events (
-  id uuid primary key default gen_random_uuid(),
-  created_at timestamptz not null default now(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  metadata jsonb not null default '{}'::jsonb,
-  selection_mode text
-);
-
-create table public.expression_feedback_events (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  exposure_event_id uuid not null references public.expression_exposure_events(id) on delete restrict
-);
-
-create table public.expression_preference_signals (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  exposure_event_id uuid references public.expression_exposure_events(id) on delete restrict
-);
-
-create table public.expression_preference_snapshots (
-  user_id uuid primary key references auth.users(id) on delete cascade
-);
-
-create table public.expression_shadow_runs (
-  id uuid primary key default gen_random_uuid(),
-  created_at timestamptz not null default now(),
-  user_id uuid not null references auth.users(id) on delete cascade
-);
+-- Use the production expression schemas so later migration tests cannot pass
+-- against a reduced fixture that omits required columns or constraints.
+\ir ../supabase/migrations/20260713101632_expression_shadow_runs.sql
+\ir ../supabase/migrations/20260713130137_expression_feedback_loop.sql
 
 create table public.user_routing_feedback (id uuid primary key default gen_random_uuid(), user_id uuid);
 create table public.ai_insights (id uuid primary key default gen_random_uuid(), user_id uuid);
@@ -247,11 +225,22 @@ returns void language sql security definer as $$ select $$;
 
 insert into auth.users (id) values
   ('11111111-1111-4111-8111-111111111111'),
-  ('22222222-2222-4222-8222-222222222222');
+  ('22222222-2222-4222-8222-222222222222'),
+  ('66666666-6666-4666-8666-666666666666');
 
 insert into public.user_configs (user_id) values
   ('11111111-1111-4111-8111-111111111111'),
   ('22222222-2222-4222-8222-222222222222');
+
+insert into public.user_configs (
+  user_id,
+  expression_improvement_enabled,
+  expression_improvement_consent_at
+) values (
+  '66666666-6666-4666-8666-666666666666',
+  true,
+  '2026-07-25T07:55:00Z'
+);
 
 insert into storage.objects (bucket_id, name) values
   ('receipt-images', '2026-01-01/victim.jpg'),
@@ -307,3 +296,120 @@ insert into public.ai_recognition_logs (user_id, image_url) values
     null,
     'https://fixture.supabase.co/storage/v1/object/sign/receipt-images/2026-01-02/owner.jpg?token=legacy-unowned-log'
   );
+
+-- Seed duplicate legacy reviews before the atomic migration. The newest row
+-- and its signal must survive with canonical keys after migration.
+insert into public.transactions (id, user_id) values (
+  '66666666-0000-4000-8000-000000000001',
+  '66666666-6666-4666-8666-666666666666'
+);
+
+insert into public.expression_exposure_events (
+  id, occurred_at, user_id, event_key, delivery_attempt_id, record_id,
+  record_type, domain_key, candidate_id, semantic_key, claim_type, dimension,
+  surface, lifecycle_state, expression_plan_version, render_contract_version
+) values (
+  '66666666-0000-4000-8000-000000000002',
+  '2026-07-25T08:00:00Z',
+  '66666666-6666-4666-8666-666666666666',
+  'fixture:legacy-exposure',
+  'fixture-delivery',
+  '66666666-0000-4000-8000-000000000001',
+  'expense',
+  'expense',
+  'fixture-candidate',
+  'expense_record_name_previous_gap',
+  'fact',
+  'repeat_interval',
+  'record_detail',
+  'client_rendered',
+  'expression-plan-v0.1',
+  'surface-render-contract-v0.1'
+);
+
+insert into public.expression_feedback_events (
+  id, occurred_at, user_id, feedback_key, exposure_event_id, candidate_id,
+  semantic_key, surface, primary_choice
+) values
+  (
+    '66666666-0000-4000-8000-000000000003',
+    '2026-07-25T08:01:00Z',
+    '66666666-6666-4666-8666-666666666666',
+    'legacy-feedback-older',
+    '66666666-0000-4000-8000-000000000002',
+    'fixture-candidate',
+    'expense_record_name_previous_gap',
+    'record_detail',
+    'not_helpful'
+  ),
+  (
+    '66666666-0000-4000-8000-000000000004',
+    '2026-07-25T08:02:00Z',
+    '66666666-6666-4666-8666-666666666666',
+    'legacy-feedback-newer',
+    '66666666-0000-4000-8000-000000000002',
+    'fixture-candidate',
+    'expense_record_name_previous_gap',
+    'record_detail',
+    'repetitive'
+  );
+
+insert into public.expression_preference_signals (
+  id, occurred_at, user_id, signal_key, feedback_key, exposure_event_id,
+  semantic_key, surface, issue_code, preference_dimension, direction,
+  strength, aggregation_policy
+) values
+  (
+    '66666666-0000-4000-8000-000000000005',
+    '2026-07-25T08:01:00Z',
+    '66666666-6666-4666-8666-666666666666',
+    'legacy-signal-older',
+    'legacy-feedback-older',
+    '66666666-0000-4000-8000-000000000002',
+    'expense_record_name_previous_gap',
+    'record_detail',
+    'not_helpful',
+    'surface_semantic_weights.record_detail.expense_record_name_previous_gap',
+    'decrease',
+    0.4,
+    'decay_and_repeat_required'
+  ),
+  (
+    '66666666-0000-4000-8000-000000000006',
+    '2026-07-25T08:02:00Z',
+    '66666666-6666-4666-8666-666666666666',
+    'legacy-signal-newer',
+    'legacy-feedback-newer',
+    '66666666-0000-4000-8000-000000000002',
+    'expense_record_name_previous_gap',
+    'record_detail',
+    'repetitive',
+    'surface_semantic_weights.record_detail.expense_record_name_previous_gap',
+    'decrease',
+    0.7,
+    'decay_and_repeat_required'
+  );
+
+insert into public.expression_preference_snapshots (
+  user_id, snapshot_version
+) values (
+  '66666666-6666-4666-8666-666666666666',
+  'fixture-v0'
+);
+
+insert into public.expression_shadow_runs (
+  id, occurred_at, user_id, event_key, record_type, record_id, surface,
+  response_mode, rollout_mode, lifecycle_state, collector_version
+) values (
+  '66666666-0000-4000-8000-000000000007',
+  '2026-07-25T08:00:00Z',
+  '66666666-6666-4666-8666-666666666666',
+  'fixture:legacy-shadow',
+  'expense',
+  '66666666-0000-4000-8000-000000000001',
+  'shortcut_notification',
+  'json',
+  'shadow',
+  'returned_to_shortcut',
+  'fixture-v0'
+);

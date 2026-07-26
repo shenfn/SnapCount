@@ -957,42 +957,63 @@ private struct PendingExpenseResolutionView: View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
             if let detail, let draftBinding = Binding($draft) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        header(detail)
-                        if let feedback = detail.aiFeedback {
-                            NativeAIFeedbackCard(feedback: feedback, compact: true)
-                        }
-                        imageSection(detail)
-                        amountSection(draftBinding)
-                        typeSection(draftBinding)
-                        fieldSection(draftBinding)
-                        accountSection(draftBinding)
-                        if let message = appState.pendingResolutionMessage {
-                            Label(message, systemImage: message.hasPrefix("保存失败") ? "exclamationmark.circle" : "info.circle")
-                                .font(.footnote)
-                                .foregroundStyle(message.hasPrefix("保存失败") ? JieziTheme.coral : JieziTheme.brand)
-                        }
-                        Button {
-                            Task { _ = await appState.confirmPendingRecord(draftBinding.wrappedValue) }
-                        } label: {
-                            if appState.isConfirmingPendingRecord {
-                                ProgressView().tint(.white).frame(maxWidth: .infinity)
-                            } else {
-                                Label("确认保存", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                GeometryReader { scrollViewport in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            header(detail)
+                            if let feedback = detail.aiFeedback {
+                                NativeAIFeedbackCard(
+                                    feedback: feedback,
+                                    compact: true,
+                                    reviewable: feedback.isReviewable,
+                                    reviewState: appState.recordFeedbackState
+                                ) { choice, text in
+                                    Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                                }
+                                .onNativeAIFeedbackCardVisibilityChange(
+                                    in: scrollViewport.frame(in: .global)
+                                ) { isVisible in
+                                    guard feedback.source == "expression_planner" else { return }
+                                    appState.setRecordExpressionPlanCardVisible(isVisible, reference: reference)
+                                    if isVisible, feedback.requiresExposureAcknowledgement {
+                                        Task {
+                                            await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
+                                        }
+                                    }
+                                }
+                                .id(feedback.renderIdentity)
                             }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(JieziTheme.brand)
-                        .controlSize(.large)
-                        .disabled(appState.isConfirmingPendingRecord || draftBinding.wrappedValue.validationMessage != nil)
+                            imageSection(detail)
+                            amountSection(draftBinding)
+                            typeSection(draftBinding)
+                            fieldSection(draftBinding)
+                            accountSection(draftBinding)
+                            if let message = appState.pendingResolutionMessage {
+                                Label(message, systemImage: message.hasPrefix("保存失败") ? "exclamationmark.circle" : "info.circle")
+                                    .font(.footnote)
+                                    .foregroundStyle(message.hasPrefix("保存失败") ? JieziTheme.coral : JieziTheme.brand)
+                            }
+                            Button {
+                                Task { _ = await appState.confirmPendingRecord(draftBinding.wrappedValue) }
+                            } label: {
+                                if appState.isConfirmingPendingRecord {
+                                    ProgressView().tint(.white).frame(maxWidth: .infinity)
+                                } else {
+                                    Label("确认保存", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(JieziTheme.brand)
+                            .controlSize(.large)
+                            .disabled(appState.isConfirmingPendingRecord || draftBinding.wrappedValue.validationMessage != nil)
 
-                        Button(role: .destructive) { showDeleteConfirm = true } label: {
-                            Label("删除此账单", systemImage: "trash").frame(maxWidth: .infinity)
+                            Button(role: .destructive) { showDeleteConfirm = true } label: {
+                                Label("删除此账单", systemImage: "trash").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
+                        .padding(16)
                     }
-                    .padding(16)
                 }
             } else if let message = appState.recordDetailMessage {
                 ContentUnavailableView("无法读取待补全账单", systemImage: "exclamationmark.triangle", description: Text(message))

@@ -104,6 +104,11 @@ export function useStore() {
 
   const imgOverlay = reactive({ open: false, src: '' })
   const detailRecord = ref(null)
+  const recordExpressionPlanCache = ref({})
+  const recordExpressionPlanLoadRequests = new Map()
+  const recordExpressionPlanAckRequests = new Map()
+  const recordExpressionPlanCacheRevisions = new Map()
+  let recordExpressionPlanCacheVersion = 0
   const activeDomainId = ref(null)
   const activeDateKey = ref('')
   const activeDayKind = ref('all')
@@ -438,6 +443,11 @@ export function useStore() {
     selectedStagingIds.value = new Set()
     batchMode.value = false
     detailRecord.value = null
+    recordExpressionPlanCache.value = {}
+    recordExpressionPlanLoadRequests.clear()
+    recordExpressionPlanAckRequests.clear()
+    recordExpressionPlanCacheRevisions.clear()
+    recordExpressionPlanCacheVersion += 1
     activeDomainId.value = null
     pageHistory.value = []
     settingsState.aiLogsEnabled = false
@@ -1574,6 +1584,11 @@ export function useStore() {
           showError('上一条保存失败，已放回待补充：' + humanizeDbError(error))
           return { ok: false }
         }
+        invalidateRecordExpressionPlan(pendingId)
+        const confirmedIncomeId = data?.income_record?.id
+        if (confirmedIncomeId && confirmedIncomeId !== pendingId) {
+          invalidateRecordExpressionPlan(confirmedIncomeId)
+        }
 
         const billIndex = bills.value.findIndex(item => item.id === pendingId)
         if (billIndex >= 0) bills.value.splice(billIndex, 1)
@@ -1617,6 +1632,11 @@ export function useStore() {
         setPendingEntryBackgroundSaving(pendingId, false)
         showError('上一条保存失败，已放回待补充：' + humanizeDbError(error))
         return { ok: false }
+      }
+      invalidateRecordExpressionPlan(pendingId)
+      const confirmedExpenseId = data?.transaction?.id
+      if (confirmedExpenseId && confirmedExpenseId !== pendingId) {
+        invalidateRecordExpressionPlan(confirmedExpenseId)
       }
 
       const billIndex = bills.value.findIndex(item => item.id === pendingId)
@@ -1808,6 +1828,7 @@ export function useStore() {
           p_account_id: incomeAccountId,
         })
         if (error) { showError('保存失败：' + humanizeDbError(error)); return }
+        invalidateRecordExpressionPlan(incomeModal.id)
         await refreshAccountsFromDB()
         if (currentPage.value === 'unbound-records') await loadUnboundRecords()
         closeIncomeModal()
@@ -1853,6 +1874,7 @@ export function useStore() {
         p_account_id: incomeAccountIdNew,
       })
       if (error) { showError('保存失败：' + humanizeDbError(error)); return }
+      invalidateRecordExpressionPlan(newRow?.id)
       await refreshAccountsFromDB()
       if (currentPage.value === 'unbound-records') await loadUnboundRecords()
       closeIncomeModal()
@@ -2085,6 +2107,7 @@ export function useStore() {
           p_account_id: expenseAccountId,
         })
         if (error) { showError('保存失败：' + humanizeDbError(error)); return }
+        invalidateRecordExpressionPlan(expenseModal.id)
         learnConfirmedExpenseVocabulary({
           platform: expenseModal.platform,
           category: expenseModal.category,
@@ -2142,6 +2165,7 @@ export function useStore() {
         p_account_id: expenseAccountIdNew,
       })
       if (error) { showError('保存失败：' + humanizeDbError(error)); return }
+      invalidateRecordExpressionPlan(newRow?.id)
       learnConfirmedExpenseVocabulary({
         platform: expenseModal.platform,
         category: expenseModal.category,
@@ -2297,6 +2321,8 @@ export function useStore() {
         showError('保存失败：' + humanizeDbError(error))
         return
       }
+      invalidateRecordExpressionPlan(stagingSource.id)
+      invalidateRecordExpressionPlan(data?.target_record_id)
 
       const stagingIndex = stagingRecords.value.findIndex(item => item.id === stagingSource.id)
       if (stagingIndex >= 0) stagingRecords.value.splice(stagingIndex, 1)
@@ -2338,6 +2364,7 @@ export function useStore() {
         showError('保存失败：' + humanizeDbError(error))
         return
       }
+      invalidateRecordExpressionPlan(universalModal.id)
       closeUniversalModal()
       const idx = dataRecords.value.findIndex(r => r.id === universalModal.id)
       if (idx >= 0) {
@@ -2363,6 +2390,7 @@ export function useStore() {
         showError('保存失败：' + humanizeDbError(error))
         return
       }
+      invalidateRecordExpressionPlan(newRow?.id)
       closeUniversalModal()
       dataRecords.value.unshift({
         id: newRow.id,
@@ -2764,6 +2792,8 @@ export function useStore() {
       payload_jsonb: payload,
     })
     if (feedbackErr) console.warn('写入路由反馈失败:', feedbackErr.message)
+    invalidateRecordExpressionPlan(record.id)
+    invalidateRecordExpressionPlan(targetRecordId)
     return true
   }
 
@@ -3502,6 +3532,7 @@ export function useStore() {
       })
       if (error) { showFlash('补绑失败：' + humanizeDbError(error)); return false }
     }
+    invalidateRecordExpressionPlan(record.id)
 
     if (!options.silent) {
       await refreshAccountsFromDB()
@@ -3750,6 +3781,7 @@ export function useStore() {
         await loadData(0, true)
         return
       }
+      invalidateRecordExpressionPlan(record.id)
 
       accounts.value.unshift(mapAccountRow(accountRow))
       await upsertRepaymentCycleFromWalletSnapshot(record, accountRow.id)
@@ -3814,6 +3846,7 @@ export function useStore() {
       await loadData(0, true)
       return
     }
+    invalidateRecordExpressionPlan(record.id)
 
     await upsertRepaymentCycleFromWalletSnapshot(record, accountId)
     await reconcileLiabilityAccountFromWalletSnapshot(record, accountId)
@@ -4139,6 +4172,7 @@ export function useStore() {
     })
     const result = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(result.error || `删除请求失败（${response.status}）`)
+    invalidateRecordExpressionPlan(recordId)
     return result
   }
 
@@ -4180,30 +4214,224 @@ export function useStore() {
     }
   }
 
-  async function submitExpressionFeedback({ recordId, choice, freeText = "" }) {
-    if (!recordId || !choice) throw new Error("缺少点评信息")
+  async function postExpressionAction(action, input, { keepalive = false, signal } = {}) {
     const { data: sessionData, error: sessionError } = await sb.auth.getSession()
     if (sessionError) throw sessionError
     const token = sessionData?.session?.access_token
-    if (!token) throw new Error("登录状态已失效，请重新登录")
+    if (!token) throw new Error('登录状态已失效，请重新登录')
     const response = await fetch(`${SUPABASE_URL}/functions/v1/ingest-receipt`, {
-      method: "POST",
-      keepalive: true,
+      method: 'POST',
+      keepalive,
+      signal,
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
-        "apikey": SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'apikey': SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({
-        action: "submit_expression_feedback",
-        record_id: recordId,
-        primary_choice: choice,
-        free_text: freeText,
+        action,
+        ...input,
       }),
     })
     const payload = await response.json().catch(() => ({}))
-    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "点评提交失败")
-    return payload.data
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || '表达服务请求失败')
+    return payload.data || null
+  }
+
+  function setRecordExpressionPlan(recordId, value) {
+    recordExpressionPlanCache.value = {
+      ...recordExpressionPlanCache.value,
+      [recordId]: value,
+    }
+    return value
+  }
+
+  function updateRecordExpressionPlan(recordId, patch) {
+    return setRecordExpressionPlan(recordId, {
+      ...(recordExpressionPlanCache.value[recordId] || {}),
+      ...patch,
+    })
+  }
+
+  function getRecordExpressionPlanCacheRevision(recordId) {
+    return recordExpressionPlanCacheRevisions.get(recordId) || 0
+  }
+
+  function isRecordExpressionPlanCacheCurrent(recordId, cacheVersion, cacheRevision) {
+    return cacheVersion === recordExpressionPlanCacheVersion
+      && cacheRevision === getRecordExpressionPlanCacheRevision(recordId)
+  }
+
+  function invalidateRecordExpressionPlan(recordId) {
+    const normalizedRecordId = String(recordId || '').trim()
+    if (!normalizedRecordId) return false
+
+    const hadCachedPlan = Object.prototype.hasOwnProperty.call(recordExpressionPlanCache.value, normalizedRecordId)
+    if (hadCachedPlan) {
+      const nextCache = { ...recordExpressionPlanCache.value }
+      delete nextCache[normalizedRecordId]
+      recordExpressionPlanCache.value = nextCache
+    }
+    for (const recordKind of ['expense', 'income', 'data']) {
+      recordExpressionPlanLoadRequests.delete(`${recordKind}:${normalizedRecordId}`)
+    }
+    recordExpressionPlanAckRequests.delete(normalizedRecordId)
+    recordExpressionPlanCacheRevisions.set(
+      normalizedRecordId,
+      getRecordExpressionPlanCacheRevision(normalizedRecordId) + 1,
+    )
+    return hadCachedPlan
+  }
+
+  async function loadRecordExpressionPlan(recordId, { recordKind, force = false, signal } = {}) {
+    const normalizedRecordId = String(recordId || '').trim()
+    const normalizedRecordKind = recordKind === 'universal' ? 'data' : String(recordKind || '').trim()
+    if (!normalizedRecordId) throw new Error('缺少记录编号')
+    if (!['expense', 'income', 'data'].includes(normalizedRecordKind)) throw new Error('缺少有效的记录类型')
+    const requestKey = `${normalizedRecordKind}:${normalizedRecordId}`
+    if (recordExpressionPlanLoadRequests.has(requestKey)) {
+      return recordExpressionPlanLoadRequests.get(requestKey)
+    }
+    const cached = recordExpressionPlanCache.value[normalizedRecordId]
+    const retryableUnavailable = cached?.status === 'unavailable' && cached.reason === 'plan_not_ready'
+    if (!force && cached?.recordKind === normalizedRecordKind && !['loading', 'error'].includes(cached.status) && !retryableUnavailable) return cached
+
+    const cacheVersion = recordExpressionPlanCacheVersion
+    const cacheRevision = getRecordExpressionPlanCacheRevision(normalizedRecordId)
+    setRecordExpressionPlan(normalizedRecordId, {
+      status: 'loading',
+      available: false,
+      acknowledged: false,
+      feedback: null,
+      recordKind: normalizedRecordKind,
+      error: '',
+    })
+    const request = (async () => {
+      try {
+        const data = await postExpressionAction('get_record_expression_plan', {
+          record_id: normalizedRecordId,
+          record_kind: normalizedRecordKind,
+        }, { signal })
+        if (!isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)) return null
+        if (!data?.available) {
+          return setRecordExpressionPlan(normalizedRecordId, {
+            status: 'unavailable',
+            available: false,
+            acknowledged: false,
+            feedback: null,
+            recordKind: normalizedRecordKind,
+            reason: data?.reason || 'not_available',
+            error: '',
+          })
+        }
+        const planToken = String(data.plan_token || '').trim()
+        const candidateId = String(data.candidate_id || '').trim()
+        if (!planToken || !candidateId || !data.feedback || typeof data.feedback !== 'object') {
+          throw new Error('表达计划响应不完整')
+        }
+        return setRecordExpressionPlan(normalizedRecordId, {
+          status: 'ready',
+          available: true,
+          acknowledged: false,
+          recordKind: normalizedRecordKind,
+          planToken,
+          candidateId,
+          feedback: data.feedback,
+          error: '',
+        })
+      } catch (error) {
+        if (isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)) {
+          setRecordExpressionPlan(normalizedRecordId, {
+            status: 'error',
+            available: false,
+            acknowledged: false,
+            feedback: null,
+            recordKind: normalizedRecordKind,
+            error: error?.message || String(error),
+          })
+        }
+        throw error
+      }
+    })()
+    recordExpressionPlanLoadRequests.set(requestKey, request)
+    try {
+      return await request
+    } finally {
+      if (recordExpressionPlanLoadRequests.get(requestKey) === request) {
+        recordExpressionPlanLoadRequests.delete(requestKey)
+      }
+    }
+  }
+
+  async function ackRecordExpressionPlan(recordId, { signal } = {}) {
+    const normalizedRecordId = String(recordId || '').trim()
+    if (!normalizedRecordId) throw new Error('缺少记录编号')
+    if (recordExpressionPlanAckRequests.has(normalizedRecordId)) {
+      return recordExpressionPlanAckRequests.get(normalizedRecordId)
+    }
+    const cached = recordExpressionPlanCache.value[normalizedRecordId]
+    if (!cached?.available) return cached || null
+    if (cached.acknowledged && cached.feedback?.exposure_event_id) return cached
+
+    const cacheVersion = recordExpressionPlanCacheVersion
+    const cacheRevision = getRecordExpressionPlanCacheRevision(normalizedRecordId)
+    const planToken = cached.planToken
+    const candidateId = cached.candidateId
+    updateRecordExpressionPlan(normalizedRecordId, { status: 'acknowledging', ackError: '' })
+    const request = (async () => {
+      try {
+        const data = await postExpressionAction('ack_record_expression_plan', {
+          record_id: normalizedRecordId,
+          plan_token: planToken,
+          candidate_id: candidateId,
+        }, { signal })
+        if (!isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)) return null
+        const current = recordExpressionPlanCache.value[normalizedRecordId]
+        if (current?.planToken !== planToken || current?.candidateId !== candidateId) return current || null
+        const exposureEventId = String(data?.feedback?.exposure_event_id || data?.exposure_event_id || '').trim()
+        if (!exposureEventId) throw new Error('表达曝光确认响应不完整')
+        return updateRecordExpressionPlan(normalizedRecordId, {
+          status: 'acknowledged',
+          acknowledged: true,
+          feedback: {
+            ...(current.feedback || {}),
+            ...(data?.feedback || {}),
+            exposure_event_id: exposureEventId,
+          },
+          ackError: '',
+        })
+      } catch (error) {
+        if (isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)) {
+          const current = recordExpressionPlanCache.value[normalizedRecordId]
+          if (current?.planToken === planToken && current?.candidateId === candidateId) {
+            updateRecordExpressionPlan(normalizedRecordId, {
+              status: 'ack_error',
+              acknowledged: false,
+              ackError: error?.message || String(error),
+            })
+          }
+        }
+        throw error
+      }
+    })()
+    recordExpressionPlanAckRequests.set(normalizedRecordId, request)
+    try {
+      return await request
+    } finally {
+      if (recordExpressionPlanAckRequests.get(normalizedRecordId) === request) {
+        recordExpressionPlanAckRequests.delete(normalizedRecordId)
+      }
+    }
+  }
+
+  async function submitExpressionFeedback({ recordId, choice, freeText = "", exposureEventId = "" }) {
+    if (!recordId || !choice) throw new Error("缺少点评信息")
+    return postExpressionAction('submit_expression_feedback', {
+      record_id: recordId,
+      primary_choice: choice,
+      free_text: freeText,
+      ...(exposureEventId ? { exposure_event_id: exposureEventId } : {}),
+    }, { keepalive: true })
   }
   return {
     currentYear, currentMonth, currentPage, monthLabel,
@@ -4224,7 +4452,7 @@ export function useStore() {
     batchMode, selectedStagingIds, toggleBatchMode, toggleSelectStaging, selectAllStaging, clearSelection, batchDiscard, batchArchive,
     flashMsg, flashVisible,
     imgOverlay,
-    detailRecord, activeDomainId,
+    detailRecord, recordExpressionPlanCache, activeDomainId,
     pendingModal,
     incomeModal,
     expenseModal,
@@ -4260,6 +4488,6 @@ export function useStore() {
     navigateTo, goBack,
     settingsState, toggleSetting, setSetting, setRetention, loadUserSettings, loadFinanceVocabulary,
     actionState, isActionPending, isPendingEntrySaving,
-    refreshIfStale, submitExpressionFeedback,
+    refreshIfStale, loadRecordExpressionPlan, ackRecordExpressionPlan, submitExpressionFeedback,
   }
 }

@@ -51,4 +51,14 @@ test('shadow capture automatically invokes the shared deterministic planner', as
   assert.match(source, /shared_expression_planner_completed/)
   assert.match(source, /proposed_score_summary: scoreSummary/)
   assert.match(source, /processing_error: null/)
+  assert.match(source, /\.eq\("user_id", params\.userId\)\.eq\("type", "expense"\)/)
+})
+
+test('shared planner exposure writer keeps shadow previews out of novelty history', async () => {
+  const source = await readFile(shadowModulePath, 'utf8')
+  assert.match(source, /export async function persistPlannerExposureEvents/)
+  assert.match(source, /if \(params\.simulationOnly === true\) return \[\]/)
+  assert.match(source, /scoped_dedupe_key: `\$\{params\.surface\}:\$\{dedupeKey\}`/)
+  assert.match(source, /counts_for_novelty: true/)
+  assert.match(source, /if \(item\.selection_mode === "legacy_voice"\) continue/)
 })

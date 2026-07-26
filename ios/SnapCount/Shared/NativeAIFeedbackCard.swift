@@ -1,5 +1,127 @@
 import SwiftUI
 
+enum NativeAIFeedbackCardVisibility {
+    static let minimumVisibleRatio: CGFloat = 0.01
+
+    static func visibleRatio(cardFrame: CGRect, viewportFrame: CGRect) -> CGFloat {
+        guard !cardFrame.isNull,
+              !cardFrame.isInfinite,
+              !cardFrame.isEmpty,
+              !viewportFrame.isNull,
+              !viewportFrame.isInfinite,
+              !viewportFrame.isEmpty else { return 0 }
+
+        let intersection = cardFrame.intersection(viewportFrame)
+        guard !intersection.isNull, !intersection.isEmpty else { return 0 }
+        let cardArea = cardFrame.width * cardFrame.height
+        guard cardArea > 0 else { return 0 }
+        return (intersection.width * intersection.height) / cardArea
+    }
+
+    static func isVisible(
+        cardFrame: CGRect,
+        viewportFrame: CGRect,
+        minimumVisibleRatio: CGFloat = NativeAIFeedbackCardVisibility.minimumVisibleRatio
+    ) -> Bool {
+        let threshold = min(max(minimumVisibleRatio, 0), 1)
+        let ratio = visibleRatio(cardFrame: cardFrame, viewportFrame: viewportFrame)
+        return ratio > 0 && ratio >= threshold
+    }
+}
+
+enum NativeAIFeedbackReviewPresentation: Equatable {
+    case form(isRevision: Bool)
+    case submitting
+    case submitted
+
+    static func resolve(
+        reviewState: NativeAIFeedbackReviewState,
+        isRevisingSubmittedReview: Bool
+    ) -> NativeAIFeedbackReviewPresentation {
+        switch reviewState {
+        case .submitting:
+            return .submitting
+        case .submitted:
+            return isRevisingSubmittedReview ? .form(isRevision: true) : .submitted
+        case .idle:
+            return .form(isRevision: false)
+        case .failed:
+            return .form(isRevision: isRevisingSubmittedReview)
+        }
+    }
+}
+
+private struct NativeAIFeedbackCardFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect { .null }
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+private struct NativeAIFeedbackCardVisibilityModifier: ViewModifier {
+    let viewportFrame: CGRect
+    let minimumVisibleRatio: CGFloat
+    let onVisibilityChange: (Bool) -> Void
+
+    @State private var cardFrame = CGRect.null
+    @State private var lastReportedVisibility = false
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: NativeAIFeedbackCardFramePreferenceKey.self,
+                        value: proxy.frame(in: .global)
+                    )
+                }
+            }
+            .onPreferenceChange(NativeAIFeedbackCardFramePreferenceKey.self) { frame in
+                cardFrame = frame
+                reportVisibility(cardFrame: frame, viewportFrame: viewportFrame)
+            }
+            .onChange(of: viewportFrame) { _, frame in
+                reportVisibility(cardFrame: cardFrame, viewportFrame: frame)
+            }
+            .onDisappear {
+                reportVisibility(false)
+            }
+    }
+
+    private func reportVisibility(cardFrame: CGRect, viewportFrame: CGRect) {
+        reportVisibility(
+            NativeAIFeedbackCardVisibility.isVisible(
+                cardFrame: cardFrame,
+                viewportFrame: viewportFrame,
+                minimumVisibleRatio: minimumVisibleRatio
+            )
+        )
+    }
+
+    private func reportVisibility(_ isVisible: Bool) {
+        guard isVisible != lastReportedVisibility else { return }
+        lastReportedVisibility = isVisible
+        onVisibilityChange(isVisible)
+    }
+}
+
+extension View {
+    func onNativeAIFeedbackCardVisibilityChange(
+        in viewportFrame: CGRect,
+        minimumVisibleRatio: CGFloat = NativeAIFeedbackCardVisibility.minimumVisibleRatio,
+        perform action: @escaping (Bool) -> Void
+    ) -> some View {
+        modifier(
+            NativeAIFeedbackCardVisibilityModifier(
+                viewportFrame: viewportFrame,
+                minimumVisibleRatio: minimumVisibleRatio,
+                onVisibilityChange: action
+            )
+        )
+    }
+}
+
 struct NativeAIFeedbackCard: View {
     let feedback: NativeAIFeedback
     var compact = false
@@ -10,6 +132,7 @@ struct NativeAIFeedbackCard: View {
     @State private var showReason = false
     @State private var selectedChoice: NativeAIFeedbackReviewChoice?
     @State private var reviewText = ""
+    @State private var isRevisingSubmittedReview = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 10 : 14) {
@@ -82,6 +205,11 @@ struct NativeAIFeedbackCard: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(bandColor.opacity(0.18), lineWidth: 1)
         }
+        .onChange(of: reviewState) { _, state in
+            if case .submitted = state {
+                isRevisingSubmittedReview = false
+            }
+        }
     }
 
     @ViewBuilder
@@ -96,48 +224,65 @@ struct NativeAIFeedbackCard: View {
 
     @ViewBuilder
     private var reviewContent: some View {
-        switch reviewState {
+        switch NativeAIFeedbackReviewPresentation.resolve(
+            reviewState: reviewState,
+            isRevisingSubmittedReview: isRevisingSubmittedReview
+        ) {
         case .submitting:
             Label("已收到，正在后台更新偏好…", systemImage: "arrow.triangle.2.circlepath")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(JieziTheme.brand)
         case .submitted:
-            Label("已记录，会用于后续表达调整", systemImage: "checkmark.circle.fill")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(JieziTheme.brand)
-        case .idle, .failed:
             VStack(alignment: .leading, spacing: 10) {
-                Text("点评这条反馈")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                Picker("反馈原因", selection: $selectedChoice) {
-                    Text("请选择").tag(NativeAIFeedbackReviewChoice?.none)
-                    ForEach(NativeAIFeedbackReviewChoice.allCases) { choice in
-                        Text(choice.title).tag(Optional(choice))
-                    }
+                Label("已记录，会用于后续表达调整", systemImage: "checkmark.circle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(JieziTheme.brand)
+                Button {
+                    isRevisingSubmittedReview = true
+                } label: {
+                    Label("修改点评", systemImage: "pencil")
                 }
-                .pickerStyle(.menu)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("ai-feedback-edit-review")
+            }
+        case .form(let isRevision):
+            reviewForm(isRevision: isRevision)
+        }
+    }
 
-                if selectedChoice != nil {
-                    TextField("可以补充原因（选填）", text: $reviewText, axis: .vertical)
-                        .lineLimit(2...4)
-                        .textFieldStyle(.roundedBorder)
-                    Button {
-                        guard let selectedChoice else { return }
-                        onSubmit?(selectedChoice, reviewText.trimmingCharacters(in: .whitespacesAndNewlines))
-                    } label: {
-                        Label("提交点评", systemImage: "paperplane.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(JieziTheme.brand)
+    private func reviewForm(isRevision: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(isRevision ? "修改这条点评" : "点评这条反馈")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            Picker("反馈原因", selection: $selectedChoice) {
+                Text("请选择").tag(NativeAIFeedbackReviewChoice?.none)
+                ForEach(NativeAIFeedbackReviewChoice.allCases) { choice in
+                    Text(choice.title).tag(Optional(choice))
                 }
+            }
+            .pickerStyle(.menu)
 
-                if case .failed(let message) = reviewState {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.red)
+            if selectedChoice != nil {
+                TextField("可以补充原因（选填）", text: $reviewText, axis: .vertical)
+                    .lineLimit(2...4)
+                    .textFieldStyle(.roundedBorder)
+                Button {
+                    guard let selectedChoice else { return }
+                    onSubmit?(selectedChoice, reviewText.trimmingCharacters(in: .whitespacesAndNewlines))
+                } label: {
+                    Label(isRevision ? "保存修改" : "提交点评", systemImage: "paperplane.fill")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(JieziTheme.brand)
+            }
+
+            if case .failed(let message) = reviewState {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
     }

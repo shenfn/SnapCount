@@ -1,4 +1,12 @@
-import { buildExpressionShadowPlan, buildGenericExpressionShadowPlan } from "./expression-shadow-planner.ts";
+import {
+  buildDataPlannerSourceRecord,
+  buildExpressionShadowPlan,
+  buildGenericExpressionShadowPlan,
+  buildIncomePlannerSourceRecord,
+  EXPRESSION_PLANNER_VERSION,
+  plannerSourceFingerprint,
+} from "./expression-shadow-planner.ts";
+import { rebuildExpressionPreferenceSnapshot } from "./expression-feedback.ts";
 
 type ExpressionShadowMode = "off" | "shadow" | "enforced_owner_only" | "canary";
 type ShortcutResponseMode = "json" | "text";
@@ -14,6 +22,8 @@ interface ShadowCaptureInput {
 interface ShadowDatabaseClient {
   // deno-lint-ignore no-explicit-any
   from: (table: string) => any;
+  // deno-lint-ignore no-explicit-any
+  rpc: (name: string, params: Record<string, unknown>) => any;
 }
 
 const SUPPORTED_MODES = new Set<ExpressionShadowMode>([
@@ -247,14 +257,21 @@ async function persistShadowPlan(
   const scoreSummary = minimizedPlan.status === "auto_planned"
     ? { eligibility: minimizedPlan.eligibility_summary, plans: minimizedPlan.plan_summary }
     : {};
+  const sourceRecordIds = Array.isArray(plan.source_dependencies)
+    ? [...new Set(plan.source_dependencies.flatMap((rawDependency) => {
+      const dependency = objectValue(rawDependency);
+      const sourceRecordId = normalizeString(dependency?.source_record_id);
+      return sourceRecordId ? [sourceRecordId] : [];
+    }))]
+    : [];
   const { error } = await supabase.from("expression_shadow_runs").update({
     collector_result: {
       ...params.collectorResult,
       planner_status: plan.status,
-      planner_version: plan.planner_version ?? "expression-shadow-auto-v0.2",
+      planner_version: plan.planner_version ?? EXPRESSION_PLANNER_VERSION,
       candidate_generation: "shared_expression_planner_completed",
     },
-    proposed_plan: minimizedPlan, proposed_score_summary: scoreSummary,
+    proposed_plan: minimizedPlan, proposed_score_summary: scoreSummary, source_record_ids: sourceRecordIds,
     processed_at: new Date().toISOString(), processing_error: null,
   }).eq("event_key", params.eventKey);
   if (error) throw new Error(error.message);
@@ -268,11 +285,186 @@ async function persistPlannerError(supabase: ShadowDatabaseClient, eventKey: str
   if (updateError) console.warn("[expression-shadow] planner error persistence failed:", updateError.message);
 }
 
+/**
+ * Persist a candidate only at the point where a shared planner render is
+ * actually delivered. Shadow previews return without writing so they cannot
+ * consume novelty budget or violate the production exposure table contract.
+ */
+export async function persistPlannerExposureEvents(
+  supabase: ShadowDatabaseClient,
+  params: {
+    userId: string;
+    recordId?: string | null;
+    recordType?: string | null;
+    occurredAt: string;
+    surface: string;
+    deliveryAttemptId: string;
+    plan: Record<string, unknown>;
+    candidateIds?: string[];
+    deliveryEvidenceByCandidateId?: Record<string, {
+      rendered_payload?: Record<string, unknown>;
+      visible_field_paths?: string[];
+      expandable_field_paths?: string[];
+      persisted_only_field_paths?: string[];
+    }>;
+    lifecycleState?: string;
+    simulationOnly?: boolean;
+  },
+): Promise<Record<string, unknown>[]> {
+  if (params.simulationOnly === true) return [];
+  const renderPlans = objectValue(params.plan.render_plans) ?? {};
+  const renderPlan = objectValue(renderPlans[params.surface]) ?? {};
+  const decision = objectValue(params.plan.decision) ?? {};
+  const decisionId = normalizeString(decision.decision_id);
+  const selectionProbability = typeof decision.selection_probability === "number"
+      && Number.isFinite(decision.selection_probability)
+    ? decision.selection_probability
+    : null;
+  const allSelected = Array.isArray(renderPlan.selected)
+    ? renderPlan.selected
+    : normalizeString(params.plan.surface) === params.surface && Array.isArray(params.plan.selected)
+    ? params.plan.selected
+    : params.surface === "shortcut_notification" && Array.isArray(params.plan.selected)
+    ? params.plan.selected
+    : [];
+  const requestedCandidateIds = new Set((params.candidateIds ?? []).filter(Boolean));
+  const selected = requestedCandidateIds.size > 0
+    ? allSelected.filter((item: Record<string, unknown>) => requestedCandidateIds.has(String(item.candidate_id ?? "")))
+    : allSelected;
+  const candidates = Array.isArray(params.plan.candidates) ? params.plan.candidates : [];
+  const byId = new Map(candidates.map((candidate: Record<string, unknown>) => [candidate.candidate_id, candidate]));
+  const deliveries = selected.map((item: Record<string, unknown>) => {
+    const candidate = byId.get(item.candidate_id) ?? {};
+    const claim = objectValue(candidate.claim) ?? {};
+    const selectionHints = objectValue(candidate.selection_hints) ?? {};
+    const deliveryEvidence = objectValue(
+      params.deliveryEvidenceByCandidateId?.[String(item.candidate_id ?? "")],
+    );
+    const exposureKey = normalizeString(item.exposure_key)
+      ?? normalizeString(selectionHints.exposure_key)
+      ?? normalizeString(claim.semantic_key)
+      ?? String(item.candidate_id ?? "unknown");
+    const dedupeKey = normalizeString(item.dedupe_key)
+      ?? normalizeString(selectionHints.dedupe_key)
+      ?? exposureKey;
+    const sources = Array.isArray(candidate.source_dependencies)
+      ? candidate.source_dependencies.flatMap((rawDependency: unknown) => {
+        const dependency = objectValue(rawDependency);
+        const sourceTable = normalizeString(dependency?.source_table);
+        const sourceRecordId = normalizeString(dependency?.source_record_id);
+        const sourceFingerprint = normalizeString(dependency?.source_fingerprint);
+        if (!sourceTable || !sourceRecordId || !sourceFingerprint) return [];
+        return [{
+          source_table: sourceTable,
+          source_record_id: sourceRecordId,
+          source_fingerprint: sourceFingerprint,
+          is_primary: dependency?.is_primary === true,
+        }];
+      })
+      : [];
+    const renderedPayload = deliveryEvidence?.rendered_payload ?? {
+      canonical_text: item.canonical_text ?? claim.canonical_text ?? null,
+    };
+    const contentFingerprint = plannerSourceFingerprint({
+      planner_version: params.plan.planner_version,
+      render_contract_version: renderPlan.render_contract_version,
+      candidate_id: item.candidate_id,
+      semantic_key: claim.semantic_key,
+      exposure_key: exposureKey,
+      dedupe_key: dedupeKey,
+      rendered_payload: renderedPayload,
+      sources,
+    });
+    const eventKey = [
+      "planner",
+      params.userId,
+      params.recordId ?? "no-record",
+      params.surface,
+      params.deliveryAttemptId,
+      String(item.candidate_id ?? "unknown"),
+      contentFingerprint,
+    ].join(":");
+    const row = {
+      event_key: eventKey,
+      delivery_attempt_id: params.deliveryAttemptId,
+      occurred_at: params.occurredAt,
+      user_id: params.userId,
+      record_id: params.recordId ?? null,
+      record_type: params.recordType ?? null,
+      domain_key: normalizeString(candidate.domain_key) ?? params.recordType ?? null,
+      entity_id: normalizeString(claim.structured_value && objectValue(claim.structured_value)?.entity_id),
+      candidate_id: String(item.candidate_id ?? "unknown"),
+      semantic_key: normalizeString(claim.semantic_key) ?? "unknown",
+      claim_type: normalizeString(candidate.claim_type) ?? "inference",
+      dimension: normalizeString(candidate.dimension),
+      surface: params.surface,
+      lifecycle_state: params.lifecycleState ?? "client_rendered",
+      selection_mode: normalizeString(item.selection_mode) ?? "threshold",
+      score: typeof item.score === "number" ? item.score : null,
+      expression_plan_version: normalizeString(renderPlan.expression_plan_version)
+        ?? normalizeString(params.plan.planner_version)
+        ?? EXPRESSION_PLANNER_VERSION,
+      render_contract_version: normalizeString(renderPlan.render_contract_version) ?? "surface-render-contract-v0.1",
+      scoring_version: normalizeString(objectValue(candidate.scoring)?.scoring_version),
+      visible_field_paths: Array.isArray(deliveryEvidence?.visible_field_paths)
+        ? deliveryEvidence.visible_field_paths
+        : Array.isArray(item.visible_field_paths) ? item.visible_field_paths : [],
+      expandable_field_paths: Array.isArray(deliveryEvidence?.expandable_field_paths)
+        ? deliveryEvidence.expandable_field_paths
+        : Array.isArray(item.expandable_field_paths) ? item.expandable_field_paths : [],
+      persisted_only_field_paths: Array.isArray(deliveryEvidence?.persisted_only_field_paths)
+        ? deliveryEvidence.persisted_only_field_paths
+        : Array.isArray(item.persisted_only_field_paths) ? item.persisted_only_field_paths : [],
+      rendered_payload: renderedPayload,
+      metadata: {
+        source: "shared_expression_planner",
+        plan_token: params.deliveryAttemptId,
+        content_fingerprint: contentFingerprint,
+        exposure_key: exposureKey,
+        scoped_exposure_key: `${params.surface}:${exposureKey}`,
+        dedupe_key: dedupeKey,
+        scoped_dedupe_key: `${params.surface}:${dedupeKey}`,
+        ...(decisionId
+          ? {
+            decision_id: decisionId,
+            decision_version: normalizeString(decision.decision_version),
+            decided_at: normalizeString(decision.decided_at),
+            policy_name: normalizeString(decision.policy_name),
+            policy_version: normalizeString(decision.policy_version),
+            planner_version: normalizeString(decision.planner_version),
+            decision_scoring_version: normalizeString(decision.scoring_version),
+            candidate_schema_version: normalizeString(decision.candidate_schema_version),
+            chosen_action_id: normalizeString(decision.chosen_action_id),
+            selection_probability: selectionProbability,
+            decision_selection_mode: normalizeString(decision.selection_mode),
+            action_set: Array.isArray(decision.action_set) ? decision.action_set : [],
+          }
+          : {}),
+      },
+      simulation_only: false,
+      counts_for_novelty: true,
+    };
+    return { row, sources };
+  });
+  if (!deliveries.length) return [];
+  return await Promise.all(deliveries.map(async ({ row, sources }) => {
+    const { data, error } = await supabase.rpc("persist_expression_exposure_with_sources", {
+      p_user_id: params.userId,
+      p_event_key: row.event_key,
+      p_exposure: row,
+      p_sources: sources,
+    });
+    if (error) throw new Error(error.message);
+    return objectValue(objectValue(data)?.exposure) ?? objectValue(data) ?? {};
+  }));
+}
+
 async function processExpenseShadow(supabase: ShadowDatabaseClient, params: { eventKey: string; userId: string; recordId: string; occurredAt: string; collectorResult: Record<string, unknown> }): Promise<void> {
   try {
     const { data, error } = await supabase.from("transactions")
-      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status")
-      .eq("user_id", params.userId).order("transaction_date", { ascending: false }).order("transaction_time", { ascending: false }).limit(500);
+      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type")
+      .eq("user_id", params.userId).eq("type", "expense")
+      .order("transaction_date", { ascending: false }).order("transaction_time", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
     const personalization = await loadPlannerPersonalization(supabase, params.userId);
     const plan = buildExpressionShadowPlan({ transactions: data ?? [], currentRecordId: params.recordId, occurredAt: params.occurredAt, ...personalization });
@@ -286,9 +478,7 @@ async function processIncomeShadow(supabase: ShadowDatabaseClient, params: { eve
       .select("id,income_date,created_at,amount,source_name,category")
       .eq("user_id", params.userId).order("income_date", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
-    const records = (data ?? []).map((row: Record<string, unknown>) => ({
-      id: row.id, occurred_at: `${row.income_date}T12:00:00+08:00`, amount: row.amount, source_name: row.source_name, payload: { category: row.category }, source_type: "income_record",
-    }));
+    const records = (data ?? []).map(buildIncomePlannerSourceRecord);
     const personalization = await loadPlannerPersonalization(supabase, params.userId);
     const plan = buildGenericExpressionShadowPlan({ domainKey: "income", records, currentRecordId: params.recordId, ...personalization });
     await persistShadowPlan(supabase, params, plan as Record<string, unknown>);
@@ -298,12 +488,10 @@ async function processIncomeShadow(supabase: ShadowDatabaseClient, params: { eve
 async function processBuiltinShadow(supabase: ShadowDatabaseClient, params: { eventKey: string; userId: string; recordId: string; domainKey: string; collectorResult: Record<string, unknown> }): Promise<void> {
   try {
     const { data, error } = await supabase.from("data_records")
-      .select("id,occurred_at,title,summary,payload_jsonb,domain_key")
+      .select("id,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at")
       .eq("user_id", params.userId).eq("domain_key", params.domainKey).order("occurred_at", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
-    const records = (data ?? []).map((row: Record<string, unknown>) => ({
-      id: row.id, occurred_at: row.occurred_at, title: row.title, summary: row.summary, payload: row.payload_jsonb ?? {}, source_type: "data_record",
-    }));
+    const records = (data ?? []).map(buildDataPlannerSourceRecord);
     const personalization = await loadPlannerPersonalization(supabase, params.userId);
     const plan = buildGenericExpressionShadowPlan({ domainKey: params.domainKey, records, currentRecordId: params.recordId, ...personalization });
     await persistShadowPlan(supabase, params, plan as Record<string, unknown>);
@@ -322,22 +510,54 @@ function baselineSemanticKey(recordType: string | null, badge: string): string {
   return known[badge] ?? `${recordType ?? "unknown"}_baseline_feedback`;
 }
 
-async function loadPlannerPersonalization(supabase: ShadowDatabaseClient, userId: string) {
-  const [{ data: snapshot }, { data: exposures }] = await Promise.all([
-    supabase.from("expression_preference_snapshots").select("scoring_profile").eq("user_id", userId).maybeSingle(),
-    supabase.from("expression_exposure_events").select("semantic_key,occurred_at")
+export async function loadPlannerPersonalization(supabase: ShadowDatabaseClient, userId: string) {
+  const [revisionResult, exposureResult] = await Promise.all([
+    supabase.from("expression_preference_revisions").select("revision").eq("user_id", userId).maybeSingle(),
+    supabase.from("expression_exposure_events").select("semantic_key,occurred_at,metadata,selection_mode,lifecycle_state,simulation_only,counts_for_novelty,surface")
       .eq("user_id", userId).eq("counts_for_novelty", true).order("occurred_at", { ascending: false }).limit(1000),
   ]);
+  if (revisionResult.error) throw new Error(revisionResult.error.message);
+  if (exposureResult.error) throw new Error(exposureResult.error.message);
+  const { data: revision } = revisionResult;
+  const { data: exposures } = exposureResult;
+  const snapshotResult = await supabase.from("expression_preference_snapshots")
+    .select("scoring_profile,source_revision")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (snapshotResult.error) throw new Error(snapshotResult.error.message);
+  const snapshot = snapshotResult.data;
   const exposureHistory: Record<string, { count: number; last_shown_at: string | null }> = {};
   for (const item of exposures ?? []) {
-    const key = normalizeString(item.semantic_key);
-    if (!key) continue;
-    const entry = exposureHistory[key] ?? { count: 0, last_shown_at: null };
-    entry.count += 1;
-    if (!entry.last_shown_at) entry.last_shown_at = item.occurred_at ?? null;
-    exposureHistory[key] = entry;
+    if (item.simulation_only === true || item.counts_for_novelty !== true) continue;
+    if (item.selection_mode === "legacy_voice") continue;
+    const lifecycleState = normalizeString(item.lifecycle_state);
+    if (lifecycleState && !["returned_to_shortcut", "client_rendered", "client_acknowledged", "user_reviewed"].includes(lifecycleState)) continue;
+    const metadata = objectValue(item.metadata) ?? {};
+    const exposureKey = normalizeString(metadata.exposure_key) ?? normalizeString(item.semantic_key);
+    const dedupeKey = normalizeString(metadata.dedupe_key) ?? exposureKey;
+    const surface = normalizeString(item.surface);
+    if (!exposureKey || !surface) continue;
+    const historyKeys = new Set([
+      normalizeString(metadata.scoped_exposure_key) ?? `${surface}:${exposureKey}`,
+      normalizeString(metadata.scoped_dedupe_key) ?? `${surface}:${dedupeKey}`,
+    ]);
+    for (const key of historyKeys) {
+      if (!key) continue;
+      const entry = exposureHistory[key] ?? { count: 0, last_shown_at: null };
+      entry.count += 1;
+      if (!entry.last_shown_at) entry.last_shown_at = item.occurred_at ?? null;
+      exposureHistory[key] = entry;
+    }
   }
-  return { preferenceProfile: objectValue(snapshot?.scoring_profile) ?? {}, exposureHistory };
+  const currentRevision = Number(revision?.revision);
+  const snapshotRevision = Number(snapshot?.source_revision);
+  const snapshotIsCurrent = !Number.isFinite(currentRevision)
+    || (Number.isFinite(snapshotRevision) && snapshotRevision === currentRevision);
+  let preferenceProfile = snapshotIsCurrent ? objectValue(snapshot?.scoring_profile) ?? {} : {};
+  if (!snapshotIsCurrent) {
+    preferenceProfile = (await rebuildExpressionPreferenceSnapshot(supabase, userId)).scoringProfile;
+  }
+  return { preferenceProfile, exposureHistory };
 }
 
 async function captureBaselineExposure(
@@ -352,6 +572,17 @@ async function captureBaselineExposure(
   const badge = normalizeString(feedback.badge) ?? "即时反馈";
   const semanticKey = baselineSemanticKey(params.recordType, badge);
   const exposureEventKey = `${params.eventKey}:baseline_ai_feedback`;
+  const sourceTable = params.recordType === "expense"
+    ? "transactions"
+    : params.recordType === "income"
+    ? "income_records"
+    : "data_records";
+  const source = {
+    source_table: sourceTable,
+    source_record_id: params.recordId,
+    source_fingerprint: `legacy-record:${params.recordType ?? "unknown"}:${params.recordId}`,
+    is_primary: true,
+  };
   const row = {
     event_key: exposureEventKey, delivery_attempt_id: params.eventKey, occurred_at: params.occurredAt,
     user_id: params.userId, trace_id: params.traceId, ai_log_id: params.aiLogId, record_id: params.recordId,
@@ -370,8 +601,12 @@ async function captureBaselineExposure(
     metadata: { source: "production_baseline", shadow_event_key: params.eventKey },
     simulation_only: false, counts_for_novelty: true,
   };
-  const { error } = await supabase.from("expression_exposure_events")
-    .upsert(row, { onConflict: "event_key", ignoreDuplicates: true });
+  const { error } = await supabase.rpc("persist_expression_exposure_with_sources", {
+    p_user_id: params.userId,
+    p_event_key: exposureEventKey,
+    p_exposure: row,
+    p_sources: [source],
+  });
   if (error) console.warn("[expression-shadow] exposure capture failed:", error.message);
 }
 

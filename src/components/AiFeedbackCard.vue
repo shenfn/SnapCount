@@ -24,8 +24,11 @@
     </div>
     <div v-if="reviewable" class="ai-feedback-review">
       <div class="ai-feedback-review-title">点评这条反馈</div>
-      <div v-if="reviewState === 'syncing'" class="ai-feedback-review-success">已收到，正在后台更新偏好…</div>
-      <div v-else-if="reviewState === 'submitted'" class="ai-feedback-review-success">已记录，会用于后续表达调整</div>
+      <div v-if="reviewState === 'syncing'" class="ai-feedback-review-success" role="status" aria-live="polite">正在记录点评…</div>
+      <div v-else-if="reviewState === 'submitted' && !editingReview" class="ai-feedback-review-submitted">
+        <div class="ai-feedback-review-success" role="status" aria-live="polite">已记录，将用于后续选择</div>
+        <button type="button" class="ai-feedback-review-edit" @click="startReviewEdit">修改点评</button>
+      </div>
       <template v-else>
         <div class="ai-feedback-review-options">
           <button
@@ -35,11 +38,12 @@
             class="ai-feedback-review-chip"
             :class="{ active: selectedChoice === choice.value }"
             :disabled="submitting"
+            :aria-pressed="selectedChoice === choice.value"
             @click="selectedChoice = choice.value"
           >{{ choice.label }}</button>
         </div>
         <template v-if="selectedChoice">
-          <textarea v-model="reviewText" class="ai-feedback-review-text" maxlength="500" placeholder="可以补充原因（选填）"></textarea>
+          <textarea v-model="reviewText" class="ai-feedback-review-text" maxlength="500" aria-label="点评补充原因（选填）" placeholder="可以补充原因（选填）"></textarea>
           <button type="button" class="ai-feedback-review-submit" :disabled="submitting" @click="submitReview">
             {{ submitting ? '提交中…' : '提交点评' }}
           </button>
@@ -47,11 +51,20 @@
         <div v-if="reviewState === 'error'" class="ai-feedback-review-error">提交失败，请稍后重试</div>
       </template>
     </div>
+    <div v-else-if="reviewUnavailable" class="ai-feedback-review ai-feedback-review-unavailable">
+      <div class="ai-feedback-review-error">暂时无法点评</div>
+      <button
+        type="button"
+        class="ai-feedback-review-retry"
+        :disabled="reviewRetrying"
+        @click="emit('retry-review')"
+      >{{ reviewRetrying ? '重试中…' : '重试' }}</button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
   feedback: { type: Object, default: null },
@@ -60,14 +73,22 @@ const props = defineProps({
   reviewable: { type: Boolean, default: false },
   reviewState: { type: String, default: '' },
   submitting: { type: Boolean, default: false },
+  exposureEventId: { type: String, default: '' },
+  reviewUnavailable: { type: Boolean, default: false },
+  reviewRetrying: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['submit-review'])
+const emit = defineEmits(['submit-review', 'retry-review'])
 
 const showReason = ref(false)
 const selectedChoice = ref('')
 const reviewText = ref('')
+const editingReview = ref(false)
 const reviewChoices = [
+  { value: 'helpful', label: '有帮助' },
+  { value: 'good_angle', label: '这个角度不错' },
+  { value: 'just_what_i_wanted', label: '正是我想看的' },
+  { value: 'no_change_needed', label: '这次不用调整' },
   { value: 'incorrect', label: '说得不对' },
   { value: 'not_helpful', label: '没什么帮助' },
   { value: 'repetitive', label: '有点重复' },
@@ -75,10 +96,24 @@ const reviewChoices = [
   { value: 'other', label: '其他' },
 ]
 
+function startReviewEdit() {
+  editingReview.value = true
+}
+
 function submitReview() {
   if (!selectedChoice.value || props.submitting) return
-  emit('submit-review', { choice: selectedChoice.value, freeText: reviewText.value.trim() })
+  emit('submit-review', {
+    choice: selectedChoice.value,
+    freeText: reviewText.value.trim(),
+    exposureEventId: props.exposureEventId || '',
+  })
 }
+
+watch(() => props.reviewState, (nextState, previousState) => {
+  if (nextState === 'submitted' && previousState === 'syncing') {
+    editingReview.value = false
+  }
+})
 
 const bandClass = computed(() => {
   const band = props.feedback?.band
@@ -275,6 +310,13 @@ const timingLabel = computed(() => props.feedback?.timing_signal?.label || '')
 .ai-feedback-review-submit { margin-top: 8px; border: 0; border-radius: 12px; padding: 9px 14px; background: var(--primary); color: white; font-weight: 800; cursor: pointer; }
 .ai-feedback-review-submit:disabled, .ai-feedback-review-chip:disabled { opacity: .55; cursor: default; }
 .ai-feedback-review-success { margin-top: 8px; color: var(--primary); font-size: 13px; font-weight: 700; }
+.ai-feedback-review-submitted { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ai-feedback-review-edit { flex: 0 0 auto; margin-top: 8px; border: 0; padding: 6px 4px; background: none; color: var(--primary); font-size: 12px; font-weight: 800; cursor: pointer; }
+.ai-feedback-review-edit:hover { text-decoration: underline; }
 .ai-feedback-review-error { margin-top: 8px; color: #b45309; font-size: 12px; }
+.ai-feedback-review-unavailable { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ai-feedback-review-unavailable .ai-feedback-review-error { margin-top: 0; }
+.ai-feedback-review-retry { border: 0; padding: 6px 4px; background: none; color: var(--primary); font-size: 12px; font-weight: 800; cursor: pointer; }
+.ai-feedback-review-retry:disabled { opacity: .55; cursor: default; }
 
 </style>

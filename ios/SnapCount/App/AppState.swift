@@ -1,5 +1,13 @@
 import SwiftUI
 
+private struct PendingRecordExpressionPlanDelivery {
+    let recordId: String
+    let plan: NativeRecordExpressionPlan
+    let previousFeedback: NativeAIFeedback?
+    let userId: String
+    let generation: Int
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var selectedTab: AppTab = .today
@@ -95,6 +103,10 @@ final class AppState: ObservableObject {
     private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
     private var activeRecordReference: String?
     private var prefetchingRecordReferences: Set<String> = []
+    private var expressionPlanDeliveryTokens: [String: UUID] = [:]
+    private var pendingRecordExpressionPlans: [String: PendingRecordExpressionPlanDelivery] = [:]
+    private var expressionPlanAcknowledgementTokens: [String: UUID] = [:]
+    private var visibleRecordExpressionPlanCards: Set<String> = []
     private var insightsLoadedAt: Date?
     private var dashboardRefreshGeneration = 0
     private var userStateGeneration = 0
@@ -357,7 +369,8 @@ final class AppState: ObservableObject {
         isShowingCachedDashboard = false
         try? snapshotStore.save(snapshot, userId: userId)
         for detail in snapshot.recordDetails.values {
-            recordDetailCache[NativeRecordReference(detail.id).canonicalValue] = detail
+            let canonicalReference = NativeRecordReference(detail.id).canonicalValue
+            recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
         }
     }
 
@@ -385,9 +398,7 @@ final class AppState: ObservableObject {
             supplemented.domains = domains
             self.publishDashboard(supplemented, userId: session.user.id)
             if let selectedId = self.selectedRecordDetail?.id,
-               let selected = supplemented.recordDetails.values.first(where: {
-                   NativeRecordReference($0.id).canonicalValue == NativeRecordReference(selectedId).canonicalValue
-               }) {
+               let selected = self.recordDetailCache[NativeRecordReference(selectedId).canonicalValue] {
                 self.selectedRecordDetail = selected
             }
             self.prefetchDashboardImages(supplemented)
@@ -496,7 +507,8 @@ final class AppState: ObservableObject {
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             recordMonthDetails[monthKey] = month.details
             for (reference, detail) in month.details {
-                recordDetailCache[NativeRecordReference(reference).canonicalValue] = detail
+                let canonicalReference = NativeRecordReference(reference).canonicalValue
+                recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
             }
             recordMonthGroups[monthKey] = month.groups
         } catch {
@@ -1116,7 +1128,6 @@ final class AppState: ObservableObject {
         selectedTab = .records
         let reference = "data/\(snapshot.id)"
         recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
-        Task { await loadRecordDetail(reference: reference) }
     }
 
     private func refreshAfterAccountBinding(monthKey: String) async {
@@ -1154,7 +1165,7 @@ final class AppState: ObservableObject {
             guard generation == userStateGeneration,
                   isSignedIn,
                   currentUserId == session.user.id else { return }
-            recordDetailCache[reference] = detail
+            recordDetailCache[reference] = detailPreservingExpressionFeedback(detail)
         } catch {
             return
         }
@@ -1173,7 +1184,6 @@ final class AppState: ObservableObject {
     func openPendingExpense(_ pending: NativePendingExpense) {
         selectedTab = .inbox
         inboxPath = NavigationPath([NativeInboxRoute.record(reference: pending.reference)])
-        Task { await loadRecordDetail(reference: pending.reference) }
     }
 
     func handleDeepLink(_ url: URL) {
@@ -1345,6 +1355,14 @@ final class AppState: ObservableObject {
         if !force, let cached = recordDetailCache[canonicalReference] {
             selectedRecordDetail = cached
             if cached.imagePath == nil || cached.imageURL != nil || cached.imageLoadError {
+                if let session = try? await validSession() {
+                    await prepareRecordExpressionPlan(
+                        for: cached,
+                        canonicalReference: canonicalReference,
+                        session: session,
+                        generation: generation
+                    )
+                }
                 return
             }
         }
@@ -1360,11 +1378,241 @@ final class AppState: ObservableObject {
             recordDetailCache[canonicalReference] = detail
             guard activeRecordReference == canonicalReference else { return }
             selectedRecordDetail = detail
+            await prepareRecordExpressionPlan(
+                for: detail,
+                canonicalReference: canonicalReference,
+                session: session,
+                generation: generation
+            )
         } catch {
             if activeRecordReference == canonicalReference {
                 recordDetailMessage = error.localizedDescription
             }
         }
+    }
+
+    private func prepareRecordExpressionPlan(
+        for detail: NativeRecordDetail,
+        canonicalReference: String,
+        session: SupabaseAuthSession,
+        generation: Int
+    ) async {
+        if let pending = pendingRecordExpressionPlans[canonicalReference],
+           pending.userId == session.user.id,
+           pending.generation == generation,
+           var previewDetail = selectedRecordDetail,
+           NativeRecordReference(previewDetail.id).canonicalValue == canonicalReference {
+            previewDetail.aiFeedback = pending.plan.feedback
+            recordDetailCache[canonicalReference] = previewDetail
+            selectedRecordDetail = previewDetail
+            return
+        }
+        guard expressionPlanDeliveryTokens[canonicalReference] == nil else { return }
+        let deliveryToken = UUID()
+        expressionPlanDeliveryTokens[canonicalReference] = deliveryToken
+        defer {
+            if expressionPlanDeliveryTokens[canonicalReference] == deliveryToken {
+                expressionPlanDeliveryTokens.removeValue(forKey: canonicalReference)
+            }
+        }
+
+        guard let preview = await NativeRecordExpressionPlanRetryPolicy.resolve(
+            fetch: {
+                try await self.recordRepository.getRecordExpressionPlan(
+                    reference: detail.id,
+                    accessToken: session.accessToken
+                )
+            },
+            shouldContinue: {
+                self.isCurrentExpressionPlanDelivery(
+                    canonicalReference: canonicalReference,
+                    session: session,
+                    generation: generation
+                )
+            }
+        ) else { return }
+
+        guard !Task.isCancelled,
+              generation == userStateGeneration,
+              isSignedIn,
+              currentUserId == session.user.id,
+              activeRecordReference == canonicalReference,
+              var previewDetail = selectedRecordDetail,
+              NativeRecordReference(previewDetail.id).canonicalValue == canonicalReference else { return }
+
+        let previousFeedback = previewDetail.aiFeedback
+        previewDetail.aiFeedback = preview.feedback
+        pendingRecordExpressionPlans[canonicalReference] = PendingRecordExpressionPlanDelivery(
+            recordId: detail.rawId,
+            plan: preview,
+            previousFeedback: previousFeedback,
+            userId: session.user.id,
+            generation: generation
+        )
+        recordDetailCache[canonicalReference] = previewDetail
+        selectedRecordDetail = previewDetail
+        recordFeedbackState = .idle
+    }
+
+    func setRecordExpressionPlanCardVisible(_ isVisible: Bool, reference: String) {
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        if isVisible {
+            visibleRecordExpressionPlanCards.insert(canonicalReference)
+        } else {
+            visibleRecordExpressionPlanCards.remove(canonicalReference)
+        }
+    }
+
+    func isRecordExpressionPlanCardVisible(reference: String) -> Bool {
+        visibleRecordExpressionPlanCards.contains(NativeRecordReference(reference).canonicalValue)
+    }
+
+    func acknowledgeRecordExpressionPlanIfVisible(reference: String) async {
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        guard let pending = pendingRecordExpressionPlans[canonicalReference] else { return }
+        guard expressionPlanAcknowledgementTokens[canonicalReference] == nil else { return }
+        guard isCurrentPendingExpressionPlan(
+            pending,
+            canonicalReference: canonicalReference
+        ) else {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+            return
+        }
+
+        let acknowledgementToken = UUID()
+        expressionPlanAcknowledgementTokens[canonicalReference] = acknowledgementToken
+        defer {
+            if expressionPlanAcknowledgementTokens[canonicalReference] == acknowledgementToken {
+                expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
+            }
+        }
+
+        let session: SupabaseAuthSession
+        do {
+            session = try await validSession()
+        } catch {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+            return
+        }
+        guard session.user.id == pending.userId,
+              isCurrentPendingExpressionPlan(
+                pending,
+                canonicalReference: canonicalReference
+              ) else {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+            return
+        }
+
+        guard let acknowledgedFeedback = await NativeRecordExpressionPlanAcknowledgementRetryPolicy.resolve(
+            acknowledge: {
+                try await self.recordRepository.acknowledgeRecordExpressionPlan(
+                    recordId: pending.recordId,
+                    planToken: pending.plan.planToken,
+                    candidateId: pending.plan.candidateId,
+                    accessToken: session.accessToken
+                )
+            },
+            shouldContinue: {
+                self.pendingRecordExpressionPlans[canonicalReference]?.plan == pending.plan
+                    && self.isCurrentPendingExpressionPlan(
+                        pending,
+                        canonicalReference: canonicalReference
+                    )
+            }
+        ) else {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+            return
+        }
+
+        guard pending.generation == userStateGeneration,
+              isSignedIn,
+              currentUserId == pending.userId else { return }
+        if pendingRecordExpressionPlans[canonicalReference]?.plan == pending.plan {
+            pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
+        }
+        guard var finalDetail = recordDetailCache[canonicalReference] else { return }
+        finalDetail.aiFeedback = acknowledgedFeedback
+        recordDetailCache[canonicalReference] = finalDetail
+        if activeRecordReference == canonicalReference,
+           selectedRecordDetail.map({ NativeRecordReference($0.id).canonicalValue == canonicalReference }) == true {
+            selectedRecordDetail = finalDetail
+            recordFeedbackState = .idle
+        }
+    }
+
+    private func restoreUnacknowledgedExpressionPreview(
+        _ previewFeedback: NativeAIFeedback,
+        previousFeedback: NativeAIFeedback?,
+        canonicalReference: String
+    ) {
+        if var cached = recordDetailCache[canonicalReference], cached.aiFeedback == previewFeedback {
+            cached.aiFeedback = previousFeedback
+            recordDetailCache[canonicalReference] = cached
+        }
+        if activeRecordReference == canonicalReference,
+           var selected = selectedRecordDetail,
+           selected.aiFeedback == previewFeedback {
+            selected.aiFeedback = previousFeedback
+            selectedRecordDetail = selected
+        }
+    }
+
+    private func isCurrentPendingExpressionPlan(
+        _ pending: PendingRecordExpressionPlanDelivery,
+        canonicalReference: String
+    ) -> Bool {
+        !Task.isCancelled
+            && pending.generation == userStateGeneration
+            && isSignedIn
+            && currentUserId == pending.userId
+            && activeRecordReference == canonicalReference
+            && visibleRecordExpressionPlanCards.contains(canonicalReference)
+            && selectedRecordDetail.map {
+                NativeRecordReference($0.id).canonicalValue == canonicalReference
+                    && $0.aiFeedback == pending.plan.feedback
+            } == true
+    }
+
+    private func discardPendingExpressionPlan(
+        _ pending: PendingRecordExpressionPlanDelivery,
+        canonicalReference: String
+    ) {
+        guard pendingRecordExpressionPlans[canonicalReference]?.plan == pending.plan else { return }
+        pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
+        visibleRecordExpressionPlanCards.remove(canonicalReference)
+        restoreUnacknowledgedExpressionPreview(
+            pending.plan.feedback,
+            previousFeedback: pending.previousFeedback,
+            canonicalReference: canonicalReference
+        )
+    }
+
+    private func isCurrentExpressionPlanDelivery(
+        canonicalReference: String,
+        session: SupabaseAuthSession,
+        generation: Int
+    ) -> Bool {
+        !Task.isCancelled
+            && generation == userStateGeneration
+            && isSignedIn
+            && currentUserId == session.user.id
+            && activeRecordReference == canonicalReference
+    }
+
+    private func detailPreservingExpressionFeedback(
+        _ detail: NativeRecordDetail
+    ) -> NativeRecordDetail {
+        let canonicalReference = NativeRecordReference(detail.id).canonicalValue
+        if let pendingFeedback = pendingRecordExpressionPlans[canonicalReference]?.plan.feedback {
+            var preserved = detail
+            preserved.aiFeedback = pendingFeedback
+            return preserved
+        }
+        guard let feedback = recordDetailCache[canonicalReference]?.aiFeedback,
+              feedback.isAcknowledgedPlannerFeedback else { return detail }
+        var preserved = detail
+        preserved.aiFeedback = feedback
+        return preserved
     }
 
     func recordDetail(matching reference: String) -> NativeRecordDetail? {
@@ -1457,7 +1705,9 @@ final class AppState: ObservableObject {
 
     func submitRecordFeedback(choice: NativeAIFeedbackReviewChoice, freeText: String) async {
         if case .submitting = recordFeedbackState { return }
-        guard let detail = selectedRecordDetail else { return }
+        guard let detail = selectedRecordDetail,
+              let feedback = detail.aiFeedback,
+              feedback.isReviewable else { return }
         recordFeedbackState = .submitting
         do {
             let session = try await validSession()
@@ -1465,6 +1715,7 @@ final class AppState: ObservableObject {
                 recordId: detail.rawId,
                 choice: choice,
                 freeText: freeText,
+                exposureEventId: feedback.exposureEventId,
                 accessToken: session.accessToken
             )
             recordFeedbackState = .submitted
@@ -1822,6 +2073,10 @@ final class AppState: ObservableObject {
         recordDetailCache.removeAll()
         activeRecordReference = nil
         prefetchingRecordReferences.removeAll()
+        expressionPlanDeliveryTokens.removeAll()
+        pendingRecordExpressionPlans.removeAll()
+        expressionPlanAcknowledgementTokens.removeAll()
+        visibleRecordExpressionPlanCards.removeAll()
         recordDetailMessage = nil
         isSavingRecordDetail = false
         isDeletingRecordDetail = false

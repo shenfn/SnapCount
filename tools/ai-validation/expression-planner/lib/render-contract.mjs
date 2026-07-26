@@ -51,6 +51,8 @@ export function buildRenderPlans(expressionPlans, candidates) {
         dimension: selection.dimension,
         score: selection.score,
         selection_mode: selection.selection_mode,
+        exposure_key: candidate?.selection_hints?.exposure_key ?? candidate?.claim?.semantic_key ?? null,
+        dedupe_key: candidate?.selection_hints?.dedupe_key ?? candidate?.selection_hints?.exposure_key ?? candidate?.claim?.semantic_key ?? null,
         structured_value: candidate?.claim?.structured_value ?? null,
         canonical_text: candidate?.claim?.canonical_text ?? selection.canonical_text ?? null,
         visible_field_paths: contract.visible_feedback_fields.map(field => `rendered_feedback.${field}`),
@@ -87,6 +89,8 @@ export function buildExposureEvents(renderPlans, { traceId, occurredAt, simulati
         dimension: selected.dimension,
         score: selected.score,
         selection_mode: selected.selection_mode,
+        exposure_key: selected.exposure_key,
+        dedupe_key: selected.dedupe_key,
         surface,
         lifecycle_state: simulationOnly ? 'rendered_preview' : plan.delivery_state_when_sent,
         expression_plan_version: plan.expression_plan_version,
@@ -108,14 +112,18 @@ export function compileExposureHistory(events) {
   const history = {}
   for (const event of events) {
     if (event.simulation_only || !event.counts_for_novelty || !acceptedStates.has(event.lifecycle_state)) continue
-    const key = event.semantic_key
-    if (!key) continue
-    const previous = history[key] ?? { count: 0, last_shown_at: null }
-    previous.count += 1
-    if (!previous.last_shown_at || new Date(event.occurred_at) > new Date(previous.last_shown_at)) {
-      previous.last_shown_at = event.occurred_at
+    const exposureKey = event.exposure_key ?? event.semantic_key
+    const dedupeKey = event.dedupe_key ?? exposureKey
+    if (!exposureKey || !event.surface) continue
+    for (const historyKey of new Set([exposureKey, dedupeKey].filter(Boolean))) {
+      const key = `${event.surface}:${historyKey}`
+      const previous = history[key] ?? { count: 0, last_shown_at: null, exposure_key: historyKey, scoped_exposure_key: key }
+      previous.count += 1
+      if (!previous.last_shown_at || new Date(event.occurred_at) > new Date(previous.last_shown_at)) {
+        previous.last_shown_at = event.occurred_at
+      }
+      history[key] = previous
     }
-    history[key] = previous
   }
   return history
 }

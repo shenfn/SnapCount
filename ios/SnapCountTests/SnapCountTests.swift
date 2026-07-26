@@ -183,7 +183,18 @@ final class SnapCountTests: XCTestCase {
     func testRecordRepositoryProtocolSupportsStubInjection() async throws {
         let repository: RecordRepositoryProtocol = RecordRepositoryStub()
         try await repository.delete(reference: "expense:record-1", accessToken: "test-token")
-        try await repository.submitFeedback(recordId: "record-1", choice: .notHelpful, freeText: "", accessToken: "test-token")
+        let expressionPlanLookup = try await repository.getRecordExpressionPlan(
+            reference: "sleep/record-1",
+            accessToken: "test-token"
+        )
+        XCTAssertEqual(expressionPlanLookup, .unavailable(reason: "no_selected_candidate"))
+        try await repository.submitFeedback(
+            recordId: "record-1",
+            choice: .notHelpful,
+            freeText: "",
+            exposureEventId: "exposure-1",
+            accessToken: "test-token"
+        )
     }
 
     func testRecordReferenceCanonicalizesLegacyAliases() {
@@ -236,15 +247,339 @@ final class SnapCountTests: XCTestCase {
             "icon": AnyCodable("✨"),
             "badge": AnyCodable("今天很稳"),
             "band": AnyCodable("positive"),
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-1"),
             "emotion_line": AnyCodable("记录已经落下。"),
             "utility_line": AnyCodable("继续保持当前节奏。"),
             "detail_reason": AnyCodable("金额和分类完整。"),
+            "exposure_event_id": AnyCodable("exposure-1"),
             "timing_signal": AnyCodable(["label": AnyCodable("晚间记录")])
         ]))
 
+        XCTAssertEqual(feedback.exposureEventId, "exposure-1")
+        XCTAssertEqual(feedback.candidateId, "candidate-1")
+        XCTAssertTrue(feedback.isReviewable)
+        XCTAssertTrue(feedback.isAcknowledgedPlannerFeedback)
         XCTAssertEqual(feedback.badge, "今天很稳")
         XCTAssertEqual(feedback.bandLabel, "正向")
         XCTAssertEqual(feedback.timingLabel, "晚间记录")
+    }
+
+    func testPlannerPreviewIsNotReviewableBeforeExposureAcknowledgement() throws {
+        let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-1"),
+            "emotion_line": AnyCodable("本周餐饮支出较上周同期下降。")
+        ]))
+
+        XCTAssertNil(feedback.exposureEventId)
+        XCTAssertTrue(feedback.requiresExposureAcknowledgement)
+        XCTAssertFalse(feedback.isReviewable)
+        XCTAssertFalse(feedback.isAcknowledgedPlannerFeedback)
+    }
+
+    func testLegacyFeedbackRemainsReviewableWithoutExposureEvent() throws {
+        let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "emotion_line": AnyCodable("这条旧反馈仍可按记录点评。")
+        ]))
+
+        XCTAssertNil(feedback.exposureEventId)
+        XCTAssertTrue(feedback.isReviewable)
+    }
+
+    func testFeedbackRequestBodyIncludesOnlyUsableExposureEventId() {
+        let boundBody = RecordRepository.feedbackRequestBody(
+            recordId: "record-1",
+            choice: .helpful,
+            freeText: "这个角度很好",
+            exposureEventId: " exposure-1 "
+        )
+
+        XCTAssertEqual(boundBody["record_id"]?.stringValue, "record-1")
+        XCTAssertEqual(boundBody["primary_choice"]?.stringValue, "helpful")
+        XCTAssertEqual(boundBody["exposure_event_id"]?.stringValue, "exposure-1")
+
+        let unboundBody = RecordRepository.feedbackRequestBody(
+            recordId: "record-2",
+            choice: .notHelpful,
+            freeText: "",
+            exposureEventId: "  "
+        )
+
+        XCTAssertNil(unboundBody["exposure_event_id"])
+    }
+
+    func testExpressionPlanDeliveryRequestBodiesUseTwoPhaseActions() {
+        let previewBody = RecordRepository.expressionPlanPreviewRequestBody(reference: "data/record-1")
+        XCTAssertEqual(previewBody["action"]?.stringValue, "get_record_expression_plan")
+        XCTAssertEqual(previewBody["record_id"]?.stringValue, "record-1")
+        XCTAssertEqual(previewBody["record_kind"]?.stringValue, "data")
+        XCTAssertNil(previewBody["plan_token"])
+
+        let sleepPreviewBody = RecordRepository.expressionPlanPreviewRequestBody(reference: "sleep/record-2")
+        XCTAssertEqual(sleepPreviewBody["record_id"]?.stringValue, "record-2")
+        XCTAssertEqual(sleepPreviewBody["record_kind"]?.stringValue, "data")
+
+        let acknowledgementBody = RecordRepository.expressionPlanAcknowledgementRequestBody(
+            recordId: "record-1",
+            planToken: "plan-1",
+            candidateId: "candidate-1"
+        )
+        XCTAssertEqual(acknowledgementBody["action"]?.stringValue, "ack_record_expression_plan")
+        XCTAssertEqual(acknowledgementBody["record_id"]?.stringValue, "record-1")
+        XCTAssertEqual(acknowledgementBody["plan_token"]?.stringValue, "plan-1")
+        XCTAssertEqual(acknowledgementBody["candidate_id"]?.stringValue, "candidate-1")
+    }
+
+    @MainActor
+    func testExpressionPlanRetryWaitsForExplicitAcknowledgement() async throws {
+        let previewFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-1"),
+            "emotion_line": AnyCodable("距离上一次同名记录已经过去 2 天。")
+        ]))
+        let acknowledgedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-1"),
+            "emotion_line": AnyCodable("距离上一次同名记录已经过去 2 天。"),
+            "exposure_event_id": AnyCodable("exposure-1")
+        ]))
+        let expected = NativeRecordExpressionPlan(
+            planToken: "plan-1",
+            candidateId: "candidate-1",
+            feedback: previewFeedback
+        )
+        let repository = RecordRepositoryStub(
+            expressionPlanLookups: [.pending, .pending, .available(expected)],
+            acknowledgedFeedback: acknowledgedFeedback
+        )
+        var observedDelays: [UInt64] = []
+
+        let resolved = await NativeRecordExpressionPlanRetryPolicy.resolve(
+            fetch: {
+                try await repository.getRecordExpressionPlan(
+                    reference: "expense/record-1",
+                    accessToken: "test-token"
+                )
+            },
+            shouldContinue: { true },
+            sleep: { observedDelays.append($0) }
+        )
+
+        XCTAssertEqual(resolved, expected)
+        XCTAssertNotEqual(previewFeedback.renderIdentity, acknowledgedFeedback.renderIdentity)
+        XCTAssertEqual(observedDelays, Array(NativeRecordExpressionPlanRetryPolicy.delaysNanoseconds.prefix(2)))
+        XCTAssertLessThanOrEqual(
+            NativeRecordExpressionPlanRetryPolicy.delaysNanoseconds.reduce(0, +),
+            6_000_000_000
+        )
+        XCTAssertEqual(repository.acknowledgementCount, 0)
+        let resolvedPlan = try XCTUnwrap(resolved)
+        let acknowledged = try await repository.acknowledgeRecordExpressionPlan(
+            recordId: "record-1",
+            planToken: resolvedPlan.planToken,
+            candidateId: resolvedPlan.candidateId,
+            accessToken: "test-token"
+        )
+        XCTAssertEqual(acknowledged.exposureEventId, "exposure-1")
+        XCTAssertEqual(repository.acknowledgementCount, 1)
+    }
+
+    @MainActor
+    func testExpressionPlanCardVisibilityStateIsExplicitAndReversible() {
+        let state = AppState()
+
+        XCTAssertFalse(state.isRecordExpressionPlanCardVisible(reference: "expense/record-1"))
+        state.setRecordExpressionPlanCardVisible(true, reference: "tx-record-1")
+        XCTAssertTrue(state.isRecordExpressionPlanCardVisible(reference: "expense/record-1"))
+        state.setRecordExpressionPlanCardVisible(false, reference: "expense/record-1")
+        XCTAssertFalse(state.isRecordExpressionPlanCardVisible(reference: "tx-record-1"))
+    }
+
+    func testAIFeedbackCardVisibilityRequiresOnePercentOfCardArea() {
+        let cardFrame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let exactlyOnePercent = CGRect(x: 99, y: 0, width: 100, height: 100)
+        let lessThanOnePercent = CGRect(x: 99.1, y: 0, width: 100, height: 100)
+        let outsideViewport = CGRect(x: 100, y: 0, width: 100, height: 100)
+
+        XCTAssertEqual(
+            NativeAIFeedbackCardVisibility.visibleRatio(
+                cardFrame: cardFrame,
+                viewportFrame: exactlyOnePercent
+            ),
+            0.01,
+            accuracy: 0.000_001
+        )
+        XCTAssertTrue(
+            NativeAIFeedbackCardVisibility.isVisible(
+                cardFrame: cardFrame,
+                viewportFrame: exactlyOnePercent
+            )
+        )
+        XCTAssertFalse(
+            NativeAIFeedbackCardVisibility.isVisible(
+                cardFrame: cardFrame,
+                viewportFrame: lessThanOnePercent
+            )
+        )
+        XCTAssertFalse(
+            NativeAIFeedbackCardVisibility.isVisible(
+                cardFrame: cardFrame,
+                viewportFrame: outsideViewport
+            )
+        )
+        XCTAssertFalse(
+            NativeAIFeedbackCardVisibility.isVisible(
+                cardFrame: .zero,
+                viewportFrame: cardFrame
+            )
+        )
+    }
+
+    func testSubmittedAIFeedbackCanReopenRevisionFormForSameExposure() {
+        XCTAssertEqual(NativeAIFeedbackReviewChoice.allCases.count, 9)
+        XCTAssertEqual(
+            NativeAIFeedbackReviewPresentation.resolve(
+                reviewState: .submitted,
+                isRevisingSubmittedReview: false
+            ),
+            .submitted
+        )
+        XCTAssertEqual(
+            NativeAIFeedbackReviewPresentation.resolve(
+                reviewState: .submitted,
+                isRevisingSubmittedReview: true
+            ),
+            .form(isRevision: true)
+        )
+        XCTAssertEqual(
+            NativeAIFeedbackReviewPresentation.resolve(
+                reviewState: .failed("temporary failure"),
+                isRevisingSubmittedReview: true
+            ),
+            .form(isRevision: true)
+        )
+
+        let original = RecordRepository.feedbackRequestBody(
+            recordId: "record-1",
+            choice: .helpful,
+            freeText: "这个角度很好",
+            exposureEventId: "exposure-1"
+        )
+        let revision = RecordRepository.feedbackRequestBody(
+            recordId: "record-1",
+            choice: .repetitive,
+            freeText: "最近出现得太多",
+            exposureEventId: "exposure-1"
+        )
+
+        XCTAssertEqual(
+            original["exposure_event_id"]?.stringValue,
+            revision["exposure_event_id"]?.stringValue
+        )
+        XCTAssertNotEqual(
+            original["primary_choice"]?.stringValue,
+            revision["primary_choice"]?.stringValue
+        )
+    }
+
+    @MainActor
+    func testExpressionPlanRetryStopsWhenDetailIsNoLongerActive() async {
+        var isActive = true
+        var fetchCount = 0
+
+        let resolved = await NativeRecordExpressionPlanRetryPolicy.resolve(
+            fetch: {
+                fetchCount += 1
+                return .pending
+            },
+            shouldContinue: { isActive },
+            sleep: { _ in isActive = false }
+        )
+
+        XCTAssertNil(resolved)
+        XCTAssertEqual(fetchCount, 1)
+    }
+
+    @MainActor
+    func testExpressionPlanAcknowledgementRetriesTransientFailuresWithinBound() async throws {
+        let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-1"),
+            "emotion_line": AnyCodable("距离上一次同名记录已经过去 2 天。"),
+            "exposure_event_id": AnyCodable("exposure-1")
+        ]))
+        var attemptCount = 0
+        var observedDelays: [UInt64] = []
+
+        let resolved = await NativeRecordExpressionPlanAcknowledgementRetryPolicy.resolve(
+            acknowledge: {
+                attemptCount += 1
+                if attemptCount < 3 {
+                    throw SupabaseRemoteError.requestFailed("temporary failure")
+                }
+                return feedback
+            },
+            shouldContinue: { true },
+            sleep: { observedDelays.append($0) }
+        )
+
+        XCTAssertEqual(resolved, feedback)
+        XCTAssertEqual(attemptCount, 3)
+        XCTAssertEqual(
+            observedDelays,
+            Array(NativeRecordExpressionPlanAcknowledgementRetryPolicy.delaysNanoseconds.prefix(2))
+        )
+    }
+
+    @MainActor
+    func testExpressionPlanAcknowledgementStopsRetryingWhenCardIsNoLongerVisible() async {
+        var isVisible = true
+        var attemptCount = 0
+        var observedDelays: [UInt64] = []
+
+        let resolved = await NativeRecordExpressionPlanAcknowledgementRetryPolicy.resolve(
+            acknowledge: {
+                attemptCount += 1
+                throw SupabaseRemoteError.requestFailed("temporary failure")
+            },
+            shouldContinue: { isVisible },
+            sleep: { delay in
+                observedDelays.append(delay)
+                isVisible = false
+            }
+        )
+
+        XCTAssertNil(resolved)
+        XCTAssertEqual(attemptCount, 1)
+        XCTAssertEqual(observedDelays, [
+            NativeRecordExpressionPlanAcknowledgementRetryPolicy.delaysNanoseconds[0]
+        ])
+    }
+
+    @MainActor
+    func testExpressionPlanAcknowledgementRetryHasAHardAttemptLimit() async {
+        var attemptCount = 0
+        var observedDelays: [UInt64] = []
+
+        let resolved = await NativeRecordExpressionPlanAcknowledgementRetryPolicy.resolve(
+            acknowledge: {
+                attemptCount += 1
+                throw SupabaseRemoteError.requestFailed("temporary failure")
+            },
+            shouldContinue: { true },
+            sleep: { observedDelays.append($0) }
+        )
+
+        XCTAssertNil(resolved)
+        XCTAssertEqual(
+            attemptCount,
+            NativeRecordExpressionPlanAcknowledgementRetryPolicy.delaysNanoseconds.count + 1
+        )
+        XCTAssertEqual(
+            observedDelays,
+            NativeRecordExpressionPlanAcknowledgementRetryPolicy.delaysNanoseconds
+        )
     }
 
     func testRecordDetailPresentationUsesDomainSpecificFields() throws {
@@ -987,13 +1322,42 @@ private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
 }
 
 
-private struct RecordRepositoryStub: RecordRepositoryProtocol {
+private final class RecordRepositoryStub: RecordRepositoryProtocol {
+    private var expressionPlanLookups: [NativeRecordExpressionPlanLookup]
+    private let acknowledgedFeedback: NativeAIFeedback?
+    private(set) var acknowledgementCount = 0
+
+    init(
+        expressionPlanLookups: [NativeRecordExpressionPlanLookup] = [.unavailable(reason: "no_selected_candidate")],
+        acknowledgedFeedback: NativeAIFeedback? = nil
+    ) {
+        self.expressionPlanLookups = expressionPlanLookups
+        self.acknowledgedFeedback = acknowledgedFeedback
+    }
+
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
         NativeRecordMonthSnapshot(groups: [], details: [:])
     }
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
         throw SupabaseRemoteError.requestFailed("unused")
+    }
+
+    func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {
+        expressionPlanLookups.isEmpty ? .unavailable(reason: "no_selected_candidate") : expressionPlanLookups.removeFirst()
+    }
+
+    func acknowledgeRecordExpressionPlan(
+        recordId: String,
+        planToken: String,
+        candidateId: String,
+        accessToken: String
+    ) async throws -> NativeAIFeedback {
+        acknowledgementCount += 1
+        guard let acknowledgedFeedback else {
+            throw SupabaseRemoteError.requestFailed("unused")
+        }
+        return acknowledgedFeedback
     }
 
     func saveDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String {
@@ -1006,7 +1370,13 @@ private struct RecordRepositoryStub: RecordRepositoryProtocol {
 
     func delete(reference: String, accessToken: String) async throws {}
 
-    func submitFeedback(recordId: String, choice: NativeAIFeedbackReviewChoice, freeText: String, accessToken: String) async throws {}
+    func submitFeedback(
+        recordId: String,
+        choice: NativeAIFeedbackReviewChoice,
+        freeText: String,
+        exposureEventId: String?,
+        accessToken: String
+    ) async throws {}
 }
 
 private struct InboxRepositoryStub: InboxRepositoryProtocol {
