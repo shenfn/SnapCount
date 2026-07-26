@@ -2258,6 +2258,16 @@ final class AppState: ObservableObject {
                 userId: session.user.id,
                 accessToken: session.accessToken
             )
+            let savedReference = NativeRecordReference(reference).canonicalValue
+            if let existingRawId = draft.existingRawId {
+                let originalReference = NativeRecordReference(
+                    kind: "data",
+                    rawId: existingRawId
+                ).canonicalValue
+                invalidateRecordExpressionPlanState(
+                    afterChanging: [originalReference, savedReference]
+                )
+            }
             if draft.kind == .expense {
                 scheduleConfirmedExpenseVocabulary(
                     platform: draft.platform,
@@ -2273,8 +2283,8 @@ final class AppState: ObservableObject {
                 await loadAccounts()
             }
             if draft.existingRawId != nil {
-                recordDetailCache.removeValue(forKey: reference)
-                await loadRecordDetail(reference: reference, force: true)
+                recordDetailCache.removeValue(forKey: savedReference)
+                await loadRecordDetail(reference: savedReference, force: true)
             }
             manualRecordMessage = draft.existingRawId == nil ? "记录已保存" : "记录已更新"
             return true

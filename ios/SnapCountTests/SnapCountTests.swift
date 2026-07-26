@@ -742,6 +742,120 @@ final class SnapCountTests: XCTestCase {
     }
 
     @MainActor
+    func testEditingUniversalRecordDoesNotRestorePreEditPlannerFeedback() async throws {
+        let acknowledgedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-before-edit"),
+            "emotion_line": AnyCodable("编辑前的可点评候选"),
+            "exposure_event_id": AnyCodable("exposure-before-edit")
+        ]))
+        let refreshedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-after-edit"),
+            "emotion_line": AnyCodable("编辑后重新计算的候选")
+        ]))
+        let readingPayload = [
+            "reading_minutes": AnyCodable(25),
+            "book_name": AnyCodable("测试书名")
+        ]
+        let repository = RecordRepositoryStub(
+            details: [
+                expressionRecordDetail(
+                    referencePrefix: "data",
+                    kind: "data",
+                    category: "reading",
+                    domainKey: "reading",
+                    payload: readingPayload,
+                    feedback: acknowledgedFeedback
+                ),
+                expressionRecordDetail(
+                    referencePrefix: "data",
+                    kind: "data",
+                    category: "reading",
+                    domainKey: "reading",
+                    payload: readingPayload
+                )
+            ],
+            expressionPlanLookups: [.available(NativeRecordExpressionPlan(
+                planToken: "plan-after-edit",
+                candidateId: "candidate-after-edit",
+                feedback: refreshedFeedback
+            ))],
+            createReference: "data/record-1"
+        )
+        let state = AppState(
+            dashboardRepository: DashboardRepositoryStub(snapshot: DashboardSnapshot()),
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+
+        await state.loadRecordDetail(reference: "data/record-1", force: true)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, acknowledgedFeedback)
+
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "reading")
+        draft.existingRawId = "record-1"
+        let saved = await state.createManualRecord(draft, domain: nil)
+
+        XCTAssertTrue(saved)
+        XCTAssertEqual(repository.createCount, 1)
+        XCTAssertEqual(repository.expressionPlanLookupCount, 1)
+        XCTAssertEqual(state.selectedRecordDetail?.id, "data/record-1")
+        XCTAssertEqual(state.recordDetail(matching: "data-record-1")?.aiFeedback, refreshedFeedback)
+        XCTAssertNotEqual(state.selectedRecordDetail?.aiFeedback, acknowledgedFeedback)
+        XCTAssertTrue(state.selectedRecordDetail?.aiFeedback?.requiresExposureAcknowledgement == true)
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
+    }
+
+    @MainActor
+    func testEditingUniversalRecordDiscardsPreEditPendingExpressionPlan() async throws {
+        let pendingFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-before-edit"),
+            "emotion_line": AnyCodable("编辑前尚未确认的候选")
+        ]))
+        let readingDetail = expressionRecordDetail(
+            referencePrefix: "data",
+            kind: "data",
+            category: "reading",
+            domainKey: "reading",
+            payload: ["reading_minutes": AnyCodable(25)]
+        )
+        let repository = RecordRepositoryStub(
+            details: [readingDetail, readingDetail],
+            expressionPlanLookups: [
+                .available(NativeRecordExpressionPlan(
+                    planToken: "plan-before-edit",
+                    candidateId: "candidate-before-edit",
+                    feedback: pendingFeedback
+                )),
+                .unavailable(reason: "no_selected_candidate")
+            ],
+            createReference: "data/record-1"
+        )
+        let state = AppState(
+            dashboardRepository: DashboardRepositoryStub(snapshot: DashboardSnapshot()),
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+
+        await state.loadRecordDetail(reference: "data/record-1", force: true)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, pendingFeedback)
+
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "reading")
+        draft.existingRawId = "record-1"
+        let saved = await state.createManualRecord(draft, domain: nil)
+        XCTAssertTrue(saved)
+
+        state.setRecordExpressionPlanCardVisible(true, reference: "data/record-1")
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "data/record-1")
+
+        XCTAssertEqual(repository.expressionPlanLookupCount, 2)
+        XCTAssertEqual(repository.acknowledgementCount, 0)
+        XCTAssertNil(state.selectedRecordDetail?.aiFeedback)
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
+    }
+
+    @MainActor
     func testExpressionPlanRetryStopsWhenDetailIsNoLongerActive() async {
         var isActive = true
         var fetchCount = 0
@@ -1760,12 +1874,17 @@ final class SnapCountTests: XCTestCase {
 
     private func expressionRecordDetail(
         id: String = "record-1",
+        referencePrefix: String = "expense",
+        kind: String = "expense",
+        category: String? = "other",
+        domainKey: String? = nil,
+        payload: [String: AnyCodable]? = nil,
         feedback: NativeAIFeedback? = nil
     ) -> NativeRecordDetail {
         NativeRecordDetail(
-            id: "expense/\(id)",
+            id: "\(referencePrefix)/\(id)",
             rawId: id,
-            kind: "expense",
+            kind: kind,
             title: "测试记录",
             subtitle: "2026-07-25",
             value: "¥6.80",
@@ -1777,14 +1896,15 @@ final class SnapCountTests: XCTestCase {
             amount: 6.8,
             merchantName: "测试商户",
             platform: "支付宝",
-            category: "other",
+            category: category,
             paymentMethod: "花呗",
             recordDate: "2026-07-25",
             note: nil,
             companionMessage: nil,
             accountId: nil,
             systemImage: "creditcard",
-            payload: nil,
+            payload: payload,
+            domainKey: domainKey,
             aiFeedback: feedback
         )
     }
@@ -1808,19 +1928,23 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     private var details: [NativeRecordDetail]
     private var expressionPlanLookups: [NativeRecordExpressionPlanLookup]
     private let acknowledgedFeedback: NativeAIFeedback?
+    private let createReference: String
     private var acknowledgementFailuresRemaining: Int
     private(set) var expressionPlanLookupCount = 0
     private(set) var acknowledgementCount = 0
+    private(set) var createCount = 0
 
     init(
         details: [NativeRecordDetail] = [],
         expressionPlanLookups: [NativeRecordExpressionPlanLookup] = [.unavailable(reason: "no_selected_candidate")],
         acknowledgedFeedback: NativeAIFeedback? = nil,
+        createReference: String = "expense/record-1",
         acknowledgementFailuresRemaining: Int = 0
     ) {
         self.details = details
         self.expressionPlanLookups = expressionPlanLookups
         self.acknowledgedFeedback = acknowledgedFeedback
+        self.createReference = createReference
         self.acknowledgementFailuresRemaining = acknowledgementFailuresRemaining
     }
 
@@ -1864,7 +1988,8 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     }
 
     func create(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?, userId: String, accessToken: String) async throws -> String {
-        "expense:record-1"
+        createCount += 1
+        return createReference
     }
 
     func delete(reference: String, accessToken: String) async throws {}
