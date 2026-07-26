@@ -5,7 +5,7 @@ enum NativeInboxItemKind: String {
     case staging
 }
 
-enum NativeInboxFilter: String, CaseIterable, Identifiable {
+enum NativeInboxFilter: String, CaseIterable, Identifiable, Hashable {
     case all
     case pendingExpense
     case failed
@@ -23,6 +23,35 @@ enum NativeInboxFilter: String, CaseIterable, Identifiable {
         case .repair: return "待修补"
         case .routing: return "待分类"
         case .review: return "待确认"
+        }
+    }
+
+    var galleryTitle: String {
+        switch self {
+        case .all: return "全部待处理"
+        default: return title
+        }
+    }
+
+    var gallerySubtitle: String {
+        switch self {
+        case .all: return "把还没落定的记录集中看一遍"
+        case .pendingExpense: return "金额、渠道或支付方式还差一点"
+        case .failed: return "识别没有完成，可以重新试一次"
+        case .repair: return "有几项信息需要补上"
+        case .routing: return "选择它应该归到哪个地方"
+        case .review: return "快速看一眼，确认识别结果"
+        }
+    }
+
+    var gallerySystemImage: String {
+        switch self {
+        case .all: return "square.grid.2x2"
+        case .pendingExpense: return "creditcard"
+        case .failed: return "arrow.clockwise.circle"
+        case .repair: return "wrench.and.screwdriver"
+        case .routing: return "folder"
+        case .review: return "checkmark.circle"
         }
     }
 }
@@ -83,6 +112,17 @@ struct NativeInboxSection: Identifiable {
     let items: [NativeInboxItem]
 }
 
+struct NativeInboxCategory: Identifiable {
+    let filter: NativeInboxFilter
+    let items: [NativeInboxItem]
+
+    var id: String { filter.rawValue }
+    var title: String { filter.galleryTitle }
+    var subtitle: String { filter.gallerySubtitle }
+    var systemImage: String { filter.gallerySystemImage }
+    var count: Int { items.count }
+}
+
 enum NativeInboxPresentation {
     private static let failedStatuses = ["ai_error", "failed", "extraction_failed"]
     private static let repairStatuses = ["schema_failed"]
@@ -122,6 +162,20 @@ enum NativeInboxPresentation {
         case .routing: return items.filter { routingStatuses.contains($0.status) }
         case .review: return items.filter { reviewStatuses.contains($0.status) }
         }
+    }
+
+    static func categories(from items: [NativeInboxItem]) -> [NativeInboxCategory] {
+        let order: [NativeInboxFilter] = [.pendingExpense, .routing, .review, .failed, .repair]
+        let categories: [NativeInboxCategory] = order.compactMap { (filter: NativeInboxFilter) -> NativeInboxCategory? in
+            let categoryItems = filtered(items, by: filter)
+            guard !categoryItems.isEmpty else { return nil }
+            return NativeInboxCategory(filter: filter, items: categoryItems)
+        }
+
+        let categorizedIDs = Set(categories.flatMap { $0.items.map(\.id) })
+        let uncategorizedItems = items.filter { !categorizedIDs.contains($0.id) }
+        guard !uncategorizedItems.isEmpty else { return categories }
+        return categories + [NativeInboxCategory(filter: .all, items: items)]
     }
 
     static func sections(from items: [NativeInboxItem], today: String, yesterday: String) -> [NativeInboxSection] {

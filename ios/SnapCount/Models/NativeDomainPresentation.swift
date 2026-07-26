@@ -303,7 +303,9 @@ enum NativeDomainPresentationAdapter {
             subtitle: record.subtitle,
             value: formatFact(value, fact: fact, currency: currency),
             timeLabel: record.timeLabel,
-            systemImage: record.systemImage
+            systemImage: record.systemImage,
+            transactionType: record.transactionType,
+            status: record.status
         )
     }
 

@@ -63,6 +63,22 @@ struct NativeAIFeedback: Equatable {
     }
 }
 
+enum NativeRecordExpressionFeedbackPolicy {
+    static func hasAcknowledgedPlannerFeedback(_ feedback: [NativeAIFeedback?]) -> Bool {
+        feedback.compactMap { $0 }.contains { $0.isAcknowledgedPlannerFeedback }
+    }
+
+    static func feedbackToPreserve(
+        existing: [NativeAIFeedback?],
+        pending: NativeAIFeedback?
+    ) -> NativeAIFeedback? {
+        if let acknowledged = existing.compactMap({ $0 }).first(where: { $0.isAcknowledgedPlannerFeedback }) {
+            return acknowledged
+        }
+        return pending
+    }
+}
+
 enum NativeAIFeedbackReviewChoice: String, CaseIterable, Identifiable {
     case helpful
     case goodAngle = "good_angle"
@@ -96,4 +112,10 @@ enum NativeAIFeedbackReviewState: Equatable {
     case submitting
     case submitted
     case failed(String)
+}
+
+enum NativeRecordExpressionPlanExposureState: Equatable {
+    case idle
+    case acknowledging
+    case failed
 }
