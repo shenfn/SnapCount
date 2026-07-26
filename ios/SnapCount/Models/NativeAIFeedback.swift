@@ -1,6 +1,9 @@
 import Foundation
 
 struct NativeAIFeedback: Equatable {
+    let exposureEventId: String?
+    let candidateId: String?
+    let source: String
     let icon: String
     let badge: String
     let band: String
@@ -16,6 +19,13 @@ struct NativeAIFeedback: Equatable {
         let detailReason = payload.string("detail_reason") ?? ""
         guard !emotionLine.isEmpty || !utilityLine.isEmpty || !detailReason.isEmpty else { return nil }
 
+        let rawExposureEventId = payload.string("exposure_event_id")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        self.exposureEventId = rawExposureEventId?.isEmpty == false ? rawExposureEventId : nil
+        let rawCandidateId = payload.string("candidate_id")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        self.candidateId = rawCandidateId?.isEmpty == false ? rawCandidateId : nil
+        self.source = payload.string("source") ?? ""
         self.icon = payload.string("icon") ?? "sparkles"
         self.badge = payload.string("badge") ?? "即时反馈"
         self.band = payload.string("band") ?? "neutral"
@@ -34,9 +44,30 @@ struct NativeAIFeedback: Equatable {
         default: return "观察"
         }
     }
+
+    var isReviewable: Bool {
+        source != "expression_planner" || isAcknowledgedPlannerFeedback
+    }
+
+    var requiresExposureAcknowledgement: Bool {
+        source == "expression_planner" && exposureEventId == nil
+    }
+
+    var isAcknowledgedPlannerFeedback: Bool {
+        source == "expression_planner" && exposureEventId != nil
+    }
+
+    var renderIdentity: String {
+        [source, candidateId ?? "legacy", exposureEventId ?? "preview", emotionLine]
+            .joined(separator: ":")
+    }
 }
 
 enum NativeAIFeedbackReviewChoice: String, CaseIterable, Identifiable {
+    case helpful
+    case goodAngle = "good_angle"
+    case justWhatIWanted = "just_what_i_wanted"
+    case noChangeNeeded = "no_change_needed"
     case incorrect
     case notHelpful = "not_helpful"
     case repetitive
@@ -47,6 +78,10 @@ enum NativeAIFeedbackReviewChoice: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .helpful: return "有帮助"
+        case .goodAngle: return "这个角度不错"
+        case .justWhatIWanted: return "正是我想看的"
+        case .noChangeNeeded: return "这次不用调整"
         case .incorrect: return "说得不对"
         case .notHelpful: return "没什么帮助"
         case .repetitive: return "有点重复"

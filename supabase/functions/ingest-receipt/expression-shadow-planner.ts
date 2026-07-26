@@ -7,13 +7,22 @@ import {
 } from "../../../tools/ai-validation/expression-planner/lib/entity-normalizer.mjs";
 import merchantAliasConfig from "../../../tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json" with { type: "json" };
 // @ts-ignore See note above.
-import { generateFactCandidates } from "../../../tools/ai-validation/expression-planner/lib/fact-candidates.mjs";
+import {
+  generateCurrentExpenseRecordCandidate,
+  generateFactCandidates,
+} from "../../../tools/ai-validation/expression-planner/lib/fact-candidates.mjs";
+// @ts-ignore See note above.
+import { generateRecordNameRecurrenceCandidates } from "../../../tools/ai-validation/expression-planner/lib/recurrence-candidates.mjs";
 // @ts-ignore See note above.
 import { generateCategoryComparisonCandidates, generateComparisonCandidates } from "../../../tools/ai-validation/expression-planner/lib/comparison-candidates.mjs";
 // @ts-ignore See note above.
 import { buildExpenseFactContract } from "../../../tools/ai-validation/expression-planner/lib/expense-fact-contract.mjs";
 // @ts-ignore See note above.
-import { generateIncomeCandidates, generateBuiltinDomainCandidates } from "../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs";
+import {
+  generateIncomeCandidates,
+  generateBuiltinDomainCandidates,
+  parseFiniteNumber,
+} from "../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs";
 // @ts-ignore See note above.
 import { evaluateCandidates, summarizeEligibility } from "../../../tools/ai-validation/expression-planner/lib/eligibility-gates.mjs";
 // @ts-ignore See note above.
@@ -27,71 +36,311 @@ import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories
 
 export interface ShadowExpenseTransaction {
   id: string; transaction_date: string; transaction_time?: string | null; created_at?: string | null;
-  amount: number | string; merchant_name?: string | null; category?: string | null;
-  platform?: string | null; payment_method?: string | null; status?: string | null;
+  amount: number | string | null; merchant_name?: string | null; category?: string | null;
+  platform?: string | null; payment_method?: string | null; status?: string | null; type?: string | null;
 }
 
 export interface ShadowGenericRecord {
   [key: string]: unknown;
   id: string; occurred_at: string; amount?: number | string | null; source_name?: string | null;
   title?: string | null; summary?: string | null; payload?: Record<string, unknown>; source_type?: string;
+  linked_account_id?: string | null; account_snapshot_kind?: string | null;
+  snapshot_balance?: number | string | null; snapshot_at?: string | null;
 }
 
 interface ShadowPlannerOptions { preferenceProfile?: Record<string, unknown>; exposureHistory?: Record<string, unknown>; }
-interface ShadowPlannerInput extends ShadowPlannerOptions { transactions: ShadowExpenseTransaction[]; currentRecordId: string; occurredAt?: string | null; }
-interface GenericPlannerInput extends ShadowPlannerOptions { domainKey: string; records: ShadowGenericRecord[]; currentRecordId: string; }
+interface ShadowPlannerInput extends ShadowPlannerOptions {
+  transactions: ShadowExpenseTransaction[];
+  currentRecordId: string;
+  occurredAt?: string | null;
+}
+interface GenericPlannerInput extends ShadowPlannerOptions { domainKey: string; records: ShadowGenericRecord[]; currentRecordId: string; domainProfile?: Record<string, unknown>; }
 
+export const EXPRESSION_PLANNER_VERSION = "expression-shadow-auto-v0.4";
 const MERCHANT_ALIAS_MAP = compileMerchantAliases(merchantAliasConfig);
 
-function numberOrNull(value: unknown): number | null { const number = Number(value); return Number.isFinite(number) ? number : null; }
+export interface PlannerSourceDependency {
+  source_table: "transactions" | "income_records" | "data_records";
+  source_record_id: string;
+  source_fingerprint: string;
+  is_primary: boolean;
+}
+
+function numberOrNull(value: unknown): number | null { return parseFiniteNumber(value); }
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function objectOrEmpty(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function explicitTransactionTime(row: ShadowExpenseTransaction): string | null {
+  if (typeof row.transaction_time !== "string" || !row.transaction_time.trim() || !row.transaction_date) return null;
+  const occurredAt = `${row.transaction_date}T${row.transaction_time.trim()}+08:00`;
+  return Number.isFinite(new Date(occurredAt).getTime()) ? occurredAt : null;
+}
 function occurredAtOf(row: ShadowExpenseTransaction): string {
-  return row.transaction_date ? `${row.transaction_date}T${row.transaction_time || "12:00:00"}+08:00` : row.created_at || new Date().toISOString();
+  return explicitTransactionTime(row)
+    ?? (row.transaction_date ? `${row.transaction_date}T12:00:00+08:00` : row.created_at || "");
 }
 function toRecord(row: ShadowExpenseTransaction, aliasMap: Map<string, unknown>) {
   const category = normalizeExpenseCategory(row.category);
+  const hasPreciseEventTime = explicitTransactionTime(row) !== null;
   return { id: row.id, transaction_date: row.transaction_date, occurred_at: occurredAtOf(row), amount: numberOrNull(row.amount),
     merchant: resolveMerchant(row.merchant_name, aliasMap), category, platform: row.platform ?? null, payment_method: row.payment_method ?? null,
-    status: row.status ?? null, fact_contract: buildExpenseFactContract({ status: row.status, category }) };
+    status: row.status ?? null, created_at: row.created_at ?? null,
+    has_precise_event_time: hasPreciseEventTime,
+    event_time_source: hasPreciseEventTime ? "transaction_time" : "date_noon_proxy",
+    event_time_confidence: hasPreciseEventTime ? 0.95 : 0.35,
+    fact_contract: buildExpenseFactContract({ status: row.status, category }) };
+}
+
+export function buildExpensePlannerSourceRecord(row: ShadowExpenseTransaction) {
+  const record = toRecord(row, MERCHANT_ALIAS_MAP);
+  return {
+    id: record.id,
+    transaction_date: record.transaction_date,
+    occurred_at: record.occurred_at,
+    amount: record.amount,
+    merchant_name: record.merchant.raw_name,
+    category: record.category,
+    platform: record.platform,
+    payment_method: record.payment_method,
+    status: record.status,
+    type: row.type ?? null,
+  };
+}
+
+export function buildIncomePlannerSourceRecord(row: Record<string, unknown>): ShadowGenericRecord {
+  const incomeDate = stringOrNull(row.income_date);
+  return {
+    id: stringOrNull(row.id) ?? "",
+    occurred_at: incomeDate
+      ? `${incomeDate}T12:00:00+08:00`
+      : stringOrNull(row.created_at) ?? "",
+    amount: numberOrNull(row.amount),
+    source_name: stringOrNull(row.source_name),
+    payload: { category: stringOrNull(row.category) },
+    source_type: "income_record",
+  };
+}
+
+export function buildDataPlannerSourceRecord(row: Record<string, unknown>): ShadowGenericRecord {
+  return {
+    id: stringOrNull(row.id) ?? "",
+    occurred_at: stringOrNull(row.occurred_at) ?? "",
+    title: stringOrNull(row.title),
+    summary: stringOrNull(row.summary),
+    payload: objectOrEmpty(row.payload_jsonb),
+    linked_account_id: stringOrNull(row.linked_account_id),
+    account_snapshot_kind: stringOrNull(row.account_snapshot_kind),
+    snapshot_balance: numberOrNull(row.snapshot_balance),
+    snapshot_at: stringOrNull(row.snapshot_at),
+    source_type: "data_record",
+  };
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, canonicalValue(item)]),
+    );
+  }
+  if (typeof value === "number" && !Number.isFinite(value)) return null;
+  return value;
+}
+
+export function canonicalPlannerSource(value: unknown): string {
+  return JSON.stringify(canonicalValue(value));
+}
+
+export function plannerSourceFingerprint(value: unknown): string {
+  const bytes = new TextEncoder().encode(canonicalPlannerSource(value));
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of bytes) {
+    hash ^= BigInt(byte);
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
+}
+
+function evidenceRecordId(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const sourceId = value.trim();
+  for (const prefix of ["transaction:", "income_record:", "data_record:"]) {
+    if (sourceId.startsWith(prefix)) return sourceId.slice(prefix.length) || null;
+  }
+  return sourceId;
+}
+
+function sourceDependencies(
+  sourceTable: PlannerSourceDependency["source_table"],
+  records: Record<string, unknown>[],
+  primaryRecordId: string,
+) {
+  const dependencies = records.flatMap((record) => {
+    const sourceRecordId = typeof record.id === "string" ? record.id : "";
+    if (!sourceRecordId) return [];
+    return [{
+      source_table: sourceTable,
+      source_record_id: sourceRecordId,
+      source_fingerprint: plannerSourceFingerprint(record),
+      is_primary: sourceRecordId === primaryRecordId,
+    } satisfies PlannerSourceDependency];
+  });
+  return new Map(dependencies.map((dependency) => [dependency.source_record_id, dependency]));
+}
+
+function attachCandidateDependencies(
+  candidate: Record<string, unknown>,
+  dependencyById: Map<string, PlannerSourceDependency>,
+  primaryRecordId: string,
+) {
+  const referencedIds = new Set<string>([primaryRecordId]);
+  const evidence = Array.isArray(candidate.evidence) ? candidate.evidence : [];
+  for (const rawEvidence of evidence) {
+    const evidenceItem = rawEvidence && typeof rawEvidence === "object"
+      ? rawEvidence as Record<string, unknown>
+      : {};
+    const sourceRecordId = evidenceRecordId(evidenceItem.source_id);
+    if (sourceRecordId) referencedIds.add(sourceRecordId);
+  }
+  const dependencies = [...referencedIds]
+    .map((sourceRecordId) => dependencyById.get(sourceRecordId))
+    .filter((dependency): dependency is PlannerSourceDependency => Boolean(dependency))
+    .sort((left, right) => left.source_record_id.localeCompare(right.source_record_id));
+  return { ...candidate, source_dependencies: dependencies };
 }
 function toFactEvent(record: ReturnType<typeof toRecord>) {
-  return { event_id: `transaction:${record.id}`, source_type: "transaction", ledger_status: "confirmed_transaction", trust_level: "confirmed",
-    count_in_facts: record.amount !== null && record.fact_contract.expense_total_scope === "include", event_at: record.occurred_at, event_time_source: "transaction_time", event_time_confidence: 0.95,
-    known_at: record.occurred_at, amount: record.amount, merchant: record.merchant, category: record.category, platform: record.platform,
+  const confirmed = record.fact_contract.fact_status === "confirmed";
+  return { event_id: `transaction:${record.id}`, source_type: "transaction", ledger_status: confirmed ? "confirmed_transaction" : "pending_review", trust_level: confirmed ? "confirmed" : "provisional",
+    count_in_facts: record.amount !== null && record.fact_contract.expense_total_scope === "include", event_at: record.occurred_at,
+    event_time_source: record.event_time_source, event_time_precision: record.has_precise_event_time ? "second" : "date_only",
+    event_time_confidence: record.event_time_confidence,
+    known_at: record.created_at ?? record.occurred_at, transaction_date: record.transaction_date,
+    amount: record.amount, merchant: record.merchant, category: record.category, platform: record.platform,
     payment_method: record.payment_method, fact_contract: record.fact_contract, target_table: "transactions", target_id: record.id };
 }
 
-function finalizePlan(domainKey: string, currentRecord: Record<string, unknown>, candidates: Record<string, unknown>[], options: ShadowPlannerOptions, coveredSemanticKeys: string[] = []) {
-  const eligibleCandidates = evaluateCandidates(candidates);
+function knownAt(record: ReturnType<typeof toRecord>): number | null {
+  const timestamp = new Date(record.created_at ?? "").getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function wasKnownBeforeCurrent(record: ReturnType<typeof toRecord>, currentRecord: ReturnType<typeof toRecord>, currentOccurredAt: number) {
+  if (record.id === currentRecord.id) return false;
+  const recordKnownAt = knownAt(record);
+  const currentKnownAt = knownAt(currentRecord);
+  if (currentKnownAt !== null) return recordKnownAt !== null && recordKnownAt < currentKnownAt;
+  const occurredAt = new Date(record.occurred_at).getTime();
+  return Number.isFinite(occurredAt) && occurredAt < currentOccurredAt;
+}
+
+function isCausalCurrentDayRecord(record: ReturnType<typeof toRecord>, currentRecord: ReturnType<typeof toRecord>, currentOccurredAt: number) {
+  if (record.transaction_date !== currentRecord.transaction_date) return false;
+  if (record.id === currentRecord.id) return true;
+  if (!wasKnownBeforeCurrent(record, currentRecord, currentOccurredAt)) return false;
+  const recordKnownAt = knownAt(record);
+  const currentKnownAt = knownAt(currentRecord);
+  if (!record.has_precise_event_time || !currentRecord.has_precise_event_time) {
+    return recordKnownAt !== null && currentKnownAt !== null;
+  }
+  const occurredAt = new Date(record.occurred_at).getTime();
+  if (!Number.isFinite(occurredAt)) return false;
+  if (occurredAt < currentOccurredAt) return true;
+  return occurredAt === currentOccurredAt && recordKnownAt !== null && currentKnownAt !== null;
+}
+
+function finalizePlan(
+  domainKey: string,
+  currentRecord: Record<string, unknown>,
+  candidates: Record<string, unknown>[],
+  options: ShadowPlannerOptions,
+  coveredSemanticKeys: string[] = [],
+  sourceRecord: Record<string, unknown> = currentRecord,
+  sourceTable: PlannerSourceDependency["source_table"] = "data_records",
+  sourceRecords: Record<string, unknown>[] = [sourceRecord],
+) {
+  const eligibleCandidates = evaluateCandidates(candidates, { planningContext: "record_event" });
   const scoredCandidates = scoreCandidates(eligibleCandidates, { context: {}, preferenceProfile: options.preferenceProfile ?? {}, exposureHistory: options.exposureHistory ?? {} });
   const expressionPlans = buildExpressionPlans(scoredCandidates, { shortcut_notification: { covered_semantic_keys: coveredSemanticKeys } });
   const renderPlans = buildRenderPlans(expressionPlans, scoredCandidates);
+  const primaryRecordId = String(sourceRecord.id ?? currentRecord.id ?? "");
+  const dependencyById = sourceDependencies(sourceTable, sourceRecords, primaryRecordId);
+  const candidatesWithDependencies = scoredCandidates.map((candidate: Record<string, unknown>) =>
+    attachCandidateDependencies(candidate, dependencyById, primaryRecordId)
+  );
+  const planDependencies = [...new Map<string, PlannerSourceDependency>(
+    candidatesWithDependencies
+      .flatMap((candidate: Record<string, unknown>) =>
+        (candidate.source_dependencies as PlannerSourceDependency[] | undefined) ?? []
+      )
+      .map((dependency: PlannerSourceDependency) => [
+        `${dependency.source_table}:${dependency.source_record_id}`,
+        dependency,
+      ]),
+  ).values()];
   return {
-    status: "auto_planned", planner_version: "expression-shadow-auto-v0.2", domain_key: domainKey,
-    shared_modules: ["fact-candidates", "comparison-candidates", "generic-domain-candidates", "eligibility-gates", "deterministic-scoring", "expression-plan", "render-contract"],
-    changes_user_output: false, current_record: currentRecord, candidate_count: scoredCandidates.length,
-    candidates: scoredCandidates.map((candidate: Record<string, unknown>) => ({ candidate_id: candidate.candidate_id, claim_type: candidate.claim_type, dimension: candidate.dimension, claim: candidate.claim, quality: candidate.quality, eligibility: candidate.eligibility, scoring: candidate.scoring })),
+    status: "auto_planned", planner_version: EXPRESSION_PLANNER_VERSION, domain_key: domainKey,
+    shared_modules: ["fact-candidates", "recurrence-candidates", "comparison-candidates", "generic-domain-candidates", "eligibility-gates", "deterministic-scoring", "expression-plan", "render-contract"],
+    changes_user_output: false, current_record: currentRecord, source_record: sourceRecord, source_dependencies: planDependencies, candidate_count: scoredCandidates.length,
+    candidates: candidatesWithDependencies.map((candidate: Record<string, unknown>) => ({ candidate_id: candidate.candidate_id, claim_type: candidate.claim_type, dimension: candidate.dimension, claim: candidate.claim, evidence: candidate.evidence, source_dependencies: candidate.source_dependencies, numbers: candidate.numbers, quality: candidate.quality, eligibility: candidate.eligibility, scoring: candidate.scoring, selection_hints: candidate.selection_hints })),
     selected: renderPlans.shortcut_notification.selected, shortcut_plan: expressionPlans.shortcut_notification,
+    render_plans: renderPlans,
     plan_summary: summarizePlans(expressionPlans), score_summary: summarizeScores(scoredCandidates), eligibility_summary: summarizeEligibility(scoredCandidates),
   };
 }
 
 export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
-  const allRecords = input.transactions.map(row => toRecord(row, MERCHANT_ALIAS_MAP)).filter(row => row.amount !== null);
-  const currentRecord = allRecords.find(row => row.id === input.currentRecordId) ?? null;
-  if (!currentRecord) return { status: "skipped", reason: "current_expense_record_missing", changes_user_output: false };
-  const records = allRecords.filter(row => row.fact_contract.fact_status === "confirmed" && row.merchant.entity_id);
+  const normalizedRecords = input.transactions
+    .filter(row => row.type === undefined || row.type === null || row.type === "expense")
+    .map(row => toRecord(row, MERCHANT_ALIAS_MAP));
+  const currentRecord = normalizedRecords.find(row => row.id === input.currentRecordId) ?? null;
+  if (!currentRecord || currentRecord.amount === null) return { status: "skipped", reason: "current_expense_record_missing", changes_user_output: false };
   const localDate = currentRecord.transaction_date; const entityId = currentRecord.merchant.entity_id;
   const currentOccurredAt = new Date(currentRecord.occurred_at).getTime();
+  const causalRecords = normalizedRecords.filter(row => row.id === currentRecord.id || wasKnownBeforeCurrent(row, currentRecord, currentOccurredAt));
+  const records = causalRecords.filter(row => row.amount !== null && row.fact_contract.fact_status === "confirmed" && row.merchant.entity_id);
   const priorMerchants = records
     .filter(row => row.id !== currentRecord.id && new Date(row.occurred_at).getTime() < currentOccurredAt)
     .map(row => row.merchant);
   const merchantObservation = summarizeMerchantObservation(currentRecord.merchant, priorMerchants);
-  const currentDayEvents = entityId ? records.filter(row => row.transaction_date === localDate).map(toFactEvent) : [];
-  const currentEntityDayCount = currentDayEvents.filter(event => event.merchant.entity_id === entityId).length;
-  let factCandidates = entityId ? generateFactCandidates(currentDayEvents, { entityId, localDate, timeZone: "Asia/Shanghai" }) : [];
-  if (currentEntityDayCount <= 1) factCandidates = factCandidates.filter((candidate: Record<string, unknown>) => !["merchant_daily_count_total", "merchant_daily_amount_structure", "merchant_daily_activity_span"].includes((candidate.claim as Record<string, unknown>)?.semantic_key as string));
-  const comparisonCandidates = entityId ? generateComparisonCandidates({ records, currentDayEvents, entityId, localDate }) : [];
-  const categoryComparisonCandidates = generateCategoryComparisonCandidates({ records: allRecords, currentRecord });
+  const currentDayEvents = entityId
+    ? records.filter(row => isCausalCurrentDayRecord(row, currentRecord, currentOccurredAt)).map(toFactEvent)
+    : [];
+  const currentEntityDayCount = currentDayEvents.filter(event => event.count_in_facts && event.merchant.entity_id === entityId).length;
+  const currentRecordCandidates = generateCurrentExpenseRecordCandidate(toFactEvent(currentRecord), {
+    timeZone: "Asia/Shanghai",
+  });
+  const currentRecordConfirmed = currentRecord.fact_contract.fact_status === "confirmed";
+  let factCandidates = currentRecordConfirmed && entityId ? generateFactCandidates(currentDayEvents, {
+    entityId,
+    localDate,
+    timeZone: "Asia/Shanghai",
+    currentRecordId: currentRecord.id,
+  }) : [];
+  if (currentEntityDayCount <= 1) factCandidates = factCandidates.filter((candidate: Record<string, unknown>) => !["merchant_daily_count_total", "merchant_daily_amount_structure"].includes((candidate.claim as Record<string, unknown>)?.semantic_key as string));
+  const recurrenceCandidates = currentRecordConfirmed ? generateRecordNameRecurrenceCandidates(records.map(toFactEvent), {
+    currentEventId: `transaction:${currentRecord.id}`,
+    timeZone: "Asia/Shanghai",
+  }) : [];
+  const comparisonCandidates = currentRecordConfirmed && entityId ? generateComparisonCandidates({
+    records,
+    currentDayEvents,
+    entityId,
+    localDate,
+    currentRecordId: currentRecord.id,
+  }) : [];
+  const categoryComparisonCandidates = currentRecordConfirmed
+    ? generateCategoryComparisonCandidates({ records: causalRecords, currentRecord })
+    : [];
   return finalizePlan("expense", {
     id: currentRecord.id,
     entity_id: entityId,
@@ -103,7 +352,9 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
     category: currentRecord.category,
     fact_contract: currentRecord.fact_contract,
     occurred_at: currentRecord.occurred_at,
-  }, [...factCandidates, ...comparisonCandidates, ...categoryComparisonCandidates], input);
+  }, [...currentRecordCandidates, ...factCandidates, ...recurrenceCandidates, ...comparisonCandidates, ...categoryComparisonCandidates], input, [],
+  buildExpensePlannerSourceRecord(input.transactions.find(row => row.id === input.currentRecordId)!), "transactions",
+  input.transactions.map(buildExpensePlannerSourceRecord));
 }
 
 export function buildGenericExpressionShadowPlan(input: GenericPlannerInput) {
@@ -111,7 +362,8 @@ export function buildGenericExpressionShadowPlan(input: GenericPlannerInput) {
   if (!currentRecord) return { status: "skipped", reason: "current_domain_record_missing", domain_key: input.domainKey, changes_user_output: false };
   const candidates = input.domainKey === "income"
     ? generateIncomeCandidates(input.records, input.currentRecordId)
-    : generateBuiltinDomainCandidates(input.domainKey, input.records, input.currentRecordId);
+    : generateBuiltinDomainCandidates(input.domainKey, input.records, input.currentRecordId, input.domainProfile ?? {});
   const covered = input.domainKey === "income" ? ["income_current_amount", "income_month_total_count"] : [];
-  return finalizePlan(input.domainKey, currentRecord, candidates, input, covered);
+  const sourceTable = input.domainKey === "income" ? "income_records" : "data_records";
+  return finalizePlan(input.domainKey, currentRecord, candidates, input, covered, currentRecord, sourceTable, input.records);
 }

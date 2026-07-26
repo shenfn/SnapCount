@@ -258,7 +258,22 @@
           </div>
         </section>
 
-        <AiFeedbackCard v-if="aiFeedback" :feedback="aiFeedback" compact class="pending-ai-feedback" />
+        <AiFeedbackCard
+          v-if="aiFeedback"
+          ref="pendingAiFeedbackCardRef"
+          :key="aiFeedbackCardKey"
+          :feedback="aiFeedback"
+          :reviewable="aiFeedbackReviewable"
+          :review-state="feedbackReviewState"
+          :submitting="feedbackReviewSubmitting"
+          :exposure-event-id="aiFeedbackExposureEventId"
+          :review-unavailable="plannerReviewUnavailable"
+          :review-retrying="plannerReviewRetrying"
+          compact
+          class="pending-ai-feedback"
+          @submit-review="submitFeedbackReview"
+          @retry-review="retryPlannerDelivery"
+        />
       </div>
 
       <div class="sheet-footer pending-sheet-footer">
@@ -286,10 +301,20 @@
 </template>
 
 <script setup>
-import { computed, inject, ref, watch, onUnmounted } from 'vue'
+import { computed, inject, nextTick, ref, watch, onUnmounted } from 'vue'
 import AccountPicker from './AccountPicker.vue'
 import AiFeedbackCard from './AiFeedbackCard.vue'
 import { buildAdaptiveFinanceOptions, normalizeFinanceOptionValue } from '../domains/financeReviewOptions'
+import {
+  createAbortError,
+  isAbortError,
+  retryWithBackoff,
+  waitForVisibleElement,
+} from '../utils/expressionDelivery'
+
+const PLAN_NOT_READY_RETRY_DELAYS = [250, 750, 1500]
+const ACK_RETRY_DELAYS = [400, 1200]
+
 const store = inject('store')
 const review = computed(() => store.pendingAccountReview(store.pendingModal.entryType, store.pendingModal.bill))
 const evidenceImageReady = ref(false)
@@ -298,12 +323,53 @@ const showAllFields = ref(false)
 const showAccountPicker = ref(false)
 const customOptionKind = ref('')
 const customOptionValue = ref('')
+const pendingAiFeedbackCardRef = ref(null)
+const plannerDeliveryStates = ref({})
+const feedbackReviewStates = ref({})
+let activePlannerDeliveryController = null
 
-const aiFeedback = computed(() => {
+const legacyAiFeedback = computed(() => {
   const bill = store.pendingModal.bill
   if (!bill) return null
   return bill.aiFeedback || bill.ai_feedback || bill.extracted_json?.ai_feedback || bill.payload?.ai_feedback || null
 })
+const expressionRecordId = computed(() => String(store.pendingModal.bill?.id || '').trim())
+const expressionRecordKind = computed(() => (
+  store.pendingModal.bill?.type === 'income' ? 'income' : 'expense'
+))
+const recordExpressionPlan = computed(() => {
+  const plan = expressionRecordId.value
+    ? store.recordExpressionPlanCache.value[expressionRecordId.value] || null
+    : null
+  return plan?.recordKind === expressionRecordKind.value ? plan : null
+})
+const plannerAiFeedback = computed(() => (
+  recordExpressionPlan.value?.available ? recordExpressionPlan.value.feedback || null : null
+))
+const aiFeedback = computed(() => plannerAiFeedback.value || legacyAiFeedback.value)
+const aiFeedbackExposureEventId = computed(() => (
+  aiFeedback.value?.exposure_event_id || aiFeedback.value?.exposureEventId || ''
+))
+const aiFeedbackCardKey = computed(() => {
+  const recordId = expressionRecordId.value || 'none'
+  const plan = recordExpressionPlan.value
+  if (plan?.available && plan.feedback) {
+    return `pending-ai-feedback-${recordId}-planner-${plan.planToken}-${plan.candidateId}`
+  }
+  return `pending-ai-feedback-${recordId}-legacy`
+})
+const aiFeedbackReviewable = computed(() => {
+  if (!aiFeedback.value) return false
+  if (!plannerAiFeedback.value) return true
+  return Boolean(recordExpressionPlan.value?.acknowledged && aiFeedbackExposureEventId.value)
+})
+const plannerDeliveryState = computed(() => plannerDeliveryStates.value[aiFeedbackCardKey.value] || '')
+const plannerReviewUnavailable = computed(() => (
+  Boolean(plannerAiFeedback.value) && ['ack_failed', 'manual_retrying'].includes(plannerDeliveryState.value)
+))
+const plannerReviewRetrying = computed(() => plannerDeliveryState.value === 'manual_retrying')
+const feedbackReviewState = computed(() => feedbackReviewStates.value[aiFeedbackCardKey.value] || '')
+const feedbackReviewSubmitting = computed(() => feedbackReviewState.value === 'syncing')
 
 const isCompletedBill = computed(() => store.pendingModal.bill?.status === 'done')
 const billQueue = computed(() => {
@@ -536,6 +602,128 @@ const isSwiping = ref(false)
 const isClosing = ref(false)
 const swipeDir = ref(null)
 
+function setPlannerDeliveryState(deliveryKey, state) {
+  plannerDeliveryStates.value = { ...plannerDeliveryStates.value, [deliveryKey]: state }
+}
+
+function setFeedbackReviewState(reviewKey, state) {
+  feedbackReviewStates.value = { ...feedbackReviewStates.value, [reviewKey]: state }
+}
+
+function isCurrentPendingPlanner(recordId, recordKind, plan) {
+  const current = recordExpressionPlan.value
+  return store.pendingModal.open
+    && expressionRecordId.value === recordId
+    && expressionRecordKind.value === recordKind
+    && current?.planToken === plan?.planToken
+    && current?.candidateId === plan?.candidateId
+}
+
+function pendingFeedbackCardElement() {
+  return pendingAiFeedbackCardRef.value?.$el || pendingAiFeedbackCardRef.value || null
+}
+
+async function loadPlannerWithRetry(recordId, recordKind, signal) {
+  return retryWithBackoff(
+    () => store.loadRecordExpressionPlan(recordId, { recordKind, signal }),
+    {
+      delays: PLAN_NOT_READY_RETRY_DELAYS,
+      signal,
+      shouldRetryResult: plan => !plan?.available && plan?.reason === 'plan_not_ready',
+      shouldRetryError: () => false,
+    },
+  )
+}
+
+async function acknowledgePlannerWhenVisible(recordId, recordKind, plan, controller, { manual = false } = {}) {
+  const deliveryKey = `pending-ai-feedback-${recordId}-planner-${plan.planToken}-${plan.candidateId}`
+  setPlannerDeliveryState(deliveryKey, manual ? 'manual_retrying' : 'waiting_visibility')
+  try {
+    await nextTick()
+    const acknowledged = await retryWithBackoff(
+      async () => {
+        await waitForVisibleElement(pendingFeedbackCardElement(), { signal: controller.signal })
+        if (!isCurrentPendingPlanner(recordId, recordKind, plan)) throw createAbortError()
+        if (!manual) setPlannerDeliveryState(deliveryKey, 'acknowledging')
+        return store.ackRecordExpressionPlan(recordId, { signal: controller.signal })
+      },
+      {
+        delays: ACK_RETRY_DELAYS,
+        signal: controller.signal,
+        shouldRetryError: error => !isAbortError(error),
+        onRetry: () => setPlannerDeliveryState(
+          deliveryKey,
+          manual ? 'manual_retrying' : 'waiting_visibility',
+        ),
+      },
+    )
+    if (acknowledged?.acknowledged && isCurrentPendingPlanner(recordId, recordKind, plan)) {
+      setPlannerDeliveryState(deliveryKey, 'ready')
+    }
+    return acknowledged
+  } catch (error) {
+    if (isAbortError(error) || controller.signal.aborted) return null
+    if (isCurrentPendingPlanner(recordId, recordKind, plan)) setPlannerDeliveryState(deliveryKey, 'ack_failed')
+    throw error
+  }
+}
+
+watch(
+  () => [store.pendingModal.open, expressionRecordId.value, expressionRecordKind.value],
+  async ([open, recordId, recordKind], _previous, onCleanup) => {
+    if (!open || !recordId || !recordKind) return
+    const controller = new AbortController()
+    activePlannerDeliveryController = controller
+    onCleanup(() => {
+      controller.abort()
+      if (activePlannerDeliveryController === controller) activePlannerDeliveryController = null
+    })
+    try {
+      const plan = await loadPlannerWithRetry(recordId, recordKind, controller.signal)
+      if (!isCurrentPendingPlanner(recordId, recordKind, plan) || !plan?.available || plan.acknowledged) return
+      await acknowledgePlannerWhenVisible(recordId, recordKind, plan, controller)
+    } catch (error) {
+      if (!isAbortError(error)) console.warn('交付待补充记录表达计划失败:', error)
+    }
+  },
+  { immediate: true },
+)
+
+async function retryPlannerDelivery() {
+  const recordId = expressionRecordId.value
+  const recordKind = expressionRecordKind.value
+  const plan = recordExpressionPlan.value
+  const controller = activePlannerDeliveryController
+  if (!recordId || !plan?.available || plan.acknowledged || !controller || controller.signal.aborted) return
+  if (plannerDeliveryState.value !== 'ack_failed') return
+  try {
+    await acknowledgePlannerWhenVisible(recordId, recordKind, plan, controller, { manual: true })
+  } catch (error) {
+    if (!isAbortError(error)) console.warn('重新确认待补充记录曝光失败:', error)
+  }
+}
+
+async function submitFeedbackReview({ choice, freeText, exposureEventId }) {
+  const recordId = expressionRecordId.value
+  const reviewKey = aiFeedbackCardKey.value
+  if (!recordId || !aiFeedbackReviewable.value || feedbackReviewStates.value[reviewKey] === 'syncing') return
+  setFeedbackReviewState(reviewKey, 'syncing')
+  store.showFlash('正在记录点评')
+  try {
+    await store.submitExpressionFeedback({ recordId, choice, freeText, exposureEventId })
+    setFeedbackReviewState(reviewKey, 'submitted')
+    if (expressionRecordId.value === recordId && aiFeedbackCardKey.value === reviewKey) {
+      store.showFlash('已记录，将用于后续选择')
+    }
+  } catch (error) {
+    console.warn('提交待补充记录点评失败:', error)
+    setFeedbackReviewState(reviewKey, 'error')
+    if (expressionRecordId.value === recordId && aiFeedbackCardKey.value === reviewKey) {
+      store.showFlash('点评提交失败，请重试')
+    }
+  }
+}
+
 watch(() => store.pendingModal.bill?.id, () => {
   showAllFields.value = false
   showAccountPicker.value = false
@@ -595,7 +783,10 @@ watch(() => [store.pendingModal.bill?.id, store.pendingModal.bill?.image_url], (
   warmEvidenceImage(billQueue.value[index + 1]?.imageUrl)
 })
 
-onUnmounted(unlockBodyScroll)
+onUnmounted(() => {
+  activePlannerDeliveryController?.abort()
+  unlockBodyScroll()
+})
 
 function isScrollAtTop() {
   if (!bodyEl.value) return true

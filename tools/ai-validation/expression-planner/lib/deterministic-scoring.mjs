@@ -15,7 +15,7 @@ export const INTERRUPTION_COSTS = {
 export const DEFAULT_IMPORTANCE = {
   merchant_daily_count_total: 0.9,
   merchant_daily_amount_structure: 0.68,
-  merchant_daily_activity_span: 0.58,
+  expense_record_name_previous_gap: 0.84,
   merchant_daily_vs_active_day_median: 0.88,
   merchant_week_to_date_vs_previous_week_same_period: 0.92,
   expense_category_week_to_date_vs_previous_week_same_period: 0.92,
@@ -43,8 +43,17 @@ function roundScore(value) {
   return Math.round(value * 100) / 100
 }
 
-function exposureFor(candidate, exposureHistory) {
-  return exposureHistory?.[candidate.claim?.semantic_key] ?? { count: 0, last_shown_at: null }
+function exposureFor(candidate, exposureHistory, surface = null, keyKind = 'exposure') {
+  const exposureKey = keyKind === 'dedupe'
+    ? candidate.selection_hints?.dedupe_key ?? candidate.selection_hints?.exposure_key ?? candidate.claim?.semantic_key
+    : candidate.selection_hints?.exposure_key ?? candidate.claim?.semantic_key
+  const scopedKey = surface ? `${surface}:${exposureKey}` : exposureKey
+  return exposureHistory?.[scopedKey] ?? {
+    count: 0,
+    last_shown_at: null,
+    exposure_key: exposureKey,
+    scoped_exposure_key: scopedKey,
+  }
 }
 
 function noveltyFromExposure(exposure) {
@@ -59,19 +68,37 @@ function noveltyFromExposure(exposure) {
 function repetitionPenalty(exposure, preferenceProfile, surface = 'all') {
   const count = Number(exposure?.count ?? 0)
   if (count <= 0) return 0
-  const tolerance = clamp(Number(preferenceProfile?.repetition_tolerance?.[surface] ?? preferenceProfile?.repetition_tolerance?.all ?? 1), 0.7, 1.15)
+  const legacyPreferences = preferenceProfile?.rendering_preferences ?? {}
+  const tolerance = clamp(Number(
+    preferenceProfile?.repetition_tolerance?.[surface]
+      ?? preferenceProfile?.repetition_tolerance?.all
+      ?? legacyPreferences[`${surface}:repetition_tolerance`]
+      ?? legacyPreferences[`all:repetition_tolerance`]
+      ?? 1,
+  ), 0.7, 1.15)
   return Math.min(20, (count * 2) / tolerance)
 }
 
 function preferenceMultiplier(candidate, preferenceProfile, surface = null) {
   const semanticKey = candidate.claim?.semantic_key
+  const legacyPreferences = preferenceProfile?.rendering_preferences ?? {}
   const semantic = preferenceProfile?.semantic_key_weights?.[semanticKey]
   const dimension = preferenceProfile?.dimension_weights?.[candidate.dimension]
+  const legacyDimension = surface ? legacyPreferences[`${surface}:${candidate.dimension}`] : null
+  const legacySemantic = surface ? legacyPreferences[`${surface}:${semanticKey}`] : null
   const claimType = preferenceProfile?.claim_type_weights?.[candidate.claim_type]
-  const base = Number(semantic ?? dimension ?? claimType ?? 1)
+  const base = Number(semantic ?? dimension ?? claimType ?? legacyDimension ?? 1)
   if (!surface) return clamp(base, 0.6, 1.2)
-  const surfaceSemantic = Number(preferenceProfile?.surface_semantic_weights?.[surface]?.[semanticKey] ?? 1)
-  const surfaceWeight = Number(preferenceProfile?.surface_weights?.[surface] ?? 1)
+  const surfaceSemantic = Number(
+    preferenceProfile?.surface_semantic_weights?.[surface]?.[semanticKey]
+      ?? (semantic == null ? legacySemantic : null)
+      ?? 1,
+  )
+  const surfaceWeight = Number(
+    preferenceProfile?.surface_weights?.[surface]
+      ?? legacyPreferences[`${surface}:semantic_preference`]
+      ?? 1,
+  )
   return clamp(base * surfaceSemantic * surfaceWeight, 0.6, 1.2)
 }
 
@@ -81,7 +108,7 @@ function relevanceMultiplier(candidate, context) {
   return candidateEntity === context.entity_id ? 1 : 0.35
 }
 
-function scoreSurface(candidate, surface, components, preferenceProfile, exposure) {
+function scoreSurface(candidate, surface, baseComponents, preferenceProfile, exposure) {
   const surfaceGate = candidate.eligibility?.surface_eligibility?.[surface]
   if (!candidate.eligibility?.eligible || !surfaceGate?.eligible) {
     return {
@@ -96,6 +123,10 @@ function scoreSurface(candidate, surface, components, preferenceProfile, exposur
     }
   }
   const userPreference = preferenceMultiplier(candidate, preferenceProfile, surface)
+  const components = {
+    ...baseComponents,
+    novelty: noveltyFromExposure(exposure),
+  }
   const raw = 100
     * components.importance
     * components.relevance
@@ -111,6 +142,7 @@ function scoreSurface(candidate, surface, components, preferenceProfile, exposur
     threshold: SURFACE_THRESHOLDS[surface],
     passes_threshold: score >= SURFACE_THRESHOLDS[surface],
     interruption_cost: INTERRUPTION_COSTS[surface],
+    novelty: components.novelty,
     repetition_penalty: surfaceRepetitionPenalty,
     user_preference: userPreference,
     blocked_reasons: [],
@@ -118,25 +150,53 @@ function scoreSurface(candidate, surface, components, preferenceProfile, exposur
 }
 
 export function scoreCandidate(candidate, { preferenceProfile = {}, exposureHistory = {}, context = {} } = {}) {
-  const exposure = exposureFor(candidate, exposureHistory)
-  const components = {
+  const baseExposure = exposureFor(candidate, exposureHistory)
+  const baseComponents = {
     importance: DEFAULT_IMPORTANCE[candidate.claim?.semantic_key] ?? 0.6,
     relevance: relevanceMultiplier(candidate, context),
     confidence: clamp(Number(candidate.quality?.confidence ?? 0), 0, 1),
-    novelty: noveltyFromExposure(exposure),
-    user_preference: preferenceMultiplier(candidate, preferenceProfile),
-    repetition_penalty: repetitionPenalty(exposure, preferenceProfile),
   }
-  const surfaceScores = Object.fromEntries(
-    Object.keys(SURFACE_THRESHOLDS).map(surface => [surface, scoreSurface(candidate, surface, components, preferenceProfile, exposure)]),
-  )
+  const components = {
+    ...baseComponents,
+    novelty: noveltyFromExposure(baseExposure),
+    user_preference: preferenceMultiplier(candidate, preferenceProfile),
+    repetition_penalty: repetitionPenalty(baseExposure, preferenceProfile),
+  }
+  const exposureBySurface = Object.fromEntries(Object.keys(SURFACE_THRESHOLDS).map(surface => {
+    const exposure = exposureFor(candidate, exposureHistory, surface)
+    return [surface, exposure]
+  }))
+  const dedupeExposureBySurface = Object.fromEntries(Object.keys(SURFACE_THRESHOLDS).map(surface => {
+    const exposure = exposureFor(candidate, exposureHistory, surface, 'dedupe')
+    return [surface, exposure]
+  }))
+  const surfaceScores = Object.fromEntries(Object.keys(SURFACE_THRESHOLDS).map(surface => [
+    surface,
+    scoreSurface(candidate, surface, baseComponents, preferenceProfile, exposureBySurface[surface]),
+  ]))
   return {
     ...candidate,
     scoring: {
       scoring_version: 'deterministic-score-v0.2',
       formula: '100 × importance × relevance × confidence × novelty × user_preference - repetition_penalty - interruption_cost',
       components,
-      exposure: { count: Number(exposure.count ?? 0), last_shown_at: exposure.last_shown_at ?? null },
+      exposure: {
+        exposure_key: baseExposure.exposure_key ?? candidate.selection_hints?.exposure_key ?? candidate.claim?.semantic_key,
+        count: Number(baseExposure.count ?? 0),
+        last_shown_at: baseExposure.last_shown_at ?? null,
+      },
+      exposure_by_surface: Object.fromEntries(Object.entries(exposureBySurface).map(([surface, exposure]) => [surface, {
+        exposure_key: exposure.exposure_key ?? candidate.selection_hints?.exposure_key ?? candidate.claim?.semantic_key,
+        scoped_exposure_key: exposure.scoped_exposure_key ?? `${surface}:${candidate.selection_hints?.exposure_key ?? candidate.claim?.semantic_key}`,
+        count: Number(exposure.count ?? 0),
+        last_shown_at: exposure.last_shown_at ?? null,
+      }])),
+      dedupe_exposure_by_surface: Object.fromEntries(Object.entries(dedupeExposureBySurface).map(([surface, exposure]) => [surface, {
+        dedupe_key: exposure.exposure_key ?? candidate.selection_hints?.dedupe_key ?? candidate.selection_hints?.exposure_key ?? candidate.claim?.semantic_key,
+        scoped_dedupe_key: exposure.scoped_exposure_key ?? `${surface}:${candidate.selection_hints?.dedupe_key ?? candidate.selection_hints?.exposure_key ?? candidate.claim?.semantic_key}`,
+        count: Number(exposure.count ?? 0),
+        last_shown_at: exposure.last_shown_at ?? null,
+      }])),
       surfaces: surfaceScores,
     },
   }

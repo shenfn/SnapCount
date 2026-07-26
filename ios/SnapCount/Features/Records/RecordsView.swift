@@ -199,69 +199,83 @@ struct RecordDetailView: View {
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
             if let detail {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if let imageURL = detail.imageURL {
-                            Button {
-                                imagePreview = ImagePreviewRoute(url: imageURL)
-                            } label: {
-                                RecordImagePreview(url: imageURL) {
-                                    Task { await appState.loadRecordDetail(reference: reference, force: true) }
+                GeometryReader { scrollViewport in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            if let imageURL = detail.imageURL {
+                                Button {
+                                    imagePreview = ImagePreviewRoute(url: imageURL)
+                                } label: {
+                                    RecordImagePreview(url: imageURL) {
+                                        Task { await appState.loadRecordDetail(reference: reference, force: true) }
+                                    }
                                 }
+                                .buttonStyle(.plain)
+                            } else if detail.imageLoadError {
+                                unavailableImageView
                             }
-                            .buttonStyle(.plain)
-                        } else if detail.imageLoadError {
-                            unavailableImageView
-                        }
 
-                        recordHeader(detail)
+                            recordHeader(detail)
 
-                        detailSection(
-                            title: "基本信息",
-                            rows: NativeRecordDetailPresentationAdapter.basicRows(
-                                for: detail,
-                                accountName: accountName(for: detail)
+                            detailSection(
+                                title: "基本信息",
+                                rows: NativeRecordDetailPresentationAdapter.basicRows(
+                                    for: detail,
+                                    accountName: accountName(for: detail)
+                                )
                             )
-                        )
 
-                        detailSection(
-                            title: "抽取字段",
-                            rows: NativeRecordDetailPresentationAdapter.extractedRows(
-                                for: detail,
-                                domain: appState.dashboard.domains.first { $0.id == detail.domainKey }
+                            detailSection(
+                                title: "抽取字段",
+                                rows: NativeRecordDetailPresentationAdapter.extractedRows(
+                                    for: detail,
+                                    domain: appState.dashboard.domains.first { $0.id == detail.domainKey }
+                                )
                             )
-                        )
 
-                        if let binding = NativeRecordDetailPresentationAdapter.accountBinding(
-                            for: detail,
-                            accounts: appState.accounts
-                        ) {
-                            accountBindingSection(binding, detail: detail)
-                        }
-
-                        let dishes = NativeRecordDetailPresentationAdapter.foodDishes(for: detail)
-                        if !dishes.isEmpty {
-                            foodDishesSection(dishes)
-                        }
-
-                        if let feedback = detail.aiFeedback {
-                            NativeAIFeedbackCard(
-                                feedback: feedback,
-                                reviewable: true,
-                                reviewState: appState.recordFeedbackState
-                            ) { choice, text in
-                                Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                            if let binding = NativeRecordDetailPresentationAdapter.accountBinding(
+                                for: detail,
+                                accounts: appState.accounts
+                            ) {
+                                accountBindingSection(binding, detail: detail)
                             }
-                        }
 
-                        if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
-                            companionSection(companionMessage)
-                        }
+                            let dishes = NativeRecordDetailPresentationAdapter.foodDishes(for: detail)
+                            if !dishes.isEmpty {
+                                foodDishesSection(dishes)
+                            }
 
-                        summarySection(NativeRecordDetailPresentationAdapter.aiSummary(for: detail))
-                        actionSection(detail)
+                            if let feedback = detail.aiFeedback {
+                                NativeAIFeedbackCard(
+                                    feedback: feedback,
+                                    reviewable: feedback.isReviewable,
+                                    reviewState: appState.recordFeedbackState
+                                ) { choice, text in
+                                    Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                                }
+                                .onNativeAIFeedbackCardVisibilityChange(
+                                    in: scrollViewport.frame(in: .global)
+                                ) { isVisible in
+                                    guard feedback.source == "expression_planner" else { return }
+                                    appState.setRecordExpressionPlanCardVisible(isVisible, reference: reference)
+                                    if isVisible, feedback.requiresExposureAcknowledgement {
+                                        Task {
+                                            await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
+                                        }
+                                    }
+                                }
+                                .id(feedback.renderIdentity)
+                            }
+
+                            if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
+                                companionSection(companionMessage)
+                            }
+
+                            summarySection(NativeRecordDetailPresentationAdapter.aiSummary(for: detail))
+                            actionSection(detail)
+                        }
+                        .padding(16)
                     }
-                    .padding(16)
                 }
             } else if let message = appState.recordDetailMessage {
                 ContentUnavailableView(

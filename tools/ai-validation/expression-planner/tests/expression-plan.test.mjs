@@ -2,14 +2,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildExpressionPlans, buildSurfacePlan } from '../lib/expression-plan.mjs'
 
-function candidate(id, semanticKey, claimType, subtype, scores) {
+function candidate(id, semanticKey, claimType, subtype, scores, diversityGroups = {}, tieBreakPriority = {}) {
   return {
     candidate_id: id,
     dimension: semanticKey,
     claim_type: claimType,
     fact_subtype: subtype,
     claim: { semantic_key: semanticKey, canonical_text: semanticKey },
-    scoring: { surfaces: Object.fromEntries(Object.entries(scores).map(([surface, score]) => [surface, {
+    selection_hints: { diversity_groups: diversityGroups, tie_break_priority: tieBreakPriority },
+    scoring: { exposure: { count: 0 }, surfaces: Object.fromEntries(Object.entries(scores).map(([surface, score]) => [surface, {
       eligible: score !== null, score, passes_threshold: score !== null && score >= ({ shortcut_notification: 75, pwa_pending_ai_card: 65, record_detail: 45, weekly_report: 35 }[surface]),
     }])) },
   }
@@ -19,8 +20,8 @@ const daily = candidate('daily', 'merchant_daily_count_total', 'fact', 'aggregat
   shortcut_notification: 78, pwa_pending_ai_card: 84, record_detail: 90, weekly_report: 90,
 })
 const weekly = candidate('weekly', 'merchant_week_to_date_vs_previous_week_same_period', 'comparison', null, {
-  shortcut_notification: 75.4, pwa_pending_ai_card: 81.4, record_detail: 87.4, weekly_report: 87.4,
-})
+  shortcut_notification: null, pwa_pending_ai_card: null, record_detail: null, weekly_report: 87.4,
+}, { weekly_report: 'expense_week_to_date_comparison' })
 const baseline = candidate('baseline', 'merchant_daily_vs_active_day_median', 'comparison', null, {
   shortcut_notification: 67.2, pwa_pending_ai_card: 73.2, record_detail: 79.2, weekly_report: 79.2,
 })
@@ -30,7 +31,8 @@ const amounts = candidate('amounts', 'merchant_daily_amount_structure', 'fact', 
 
 test('does not repeat the fixed daily summary in shortcut notification', () => {
   const plan = buildSurfacePlan([daily, weekly, baseline, amounts], 'shortcut_notification')
-  assert.equal(plan.selected[0].candidate_id, 'weekly')
+  assert.equal(plan.selected[0].candidate_id, 'amounts')
+  assert.equal(plan.selected[0].selection_mode, 'exact_fact_fallback')
   assert.equal(plan.excluded.find(item => item.candidate_id === 'daily').reason, 'covered_by_fixed_content')
 })
 
@@ -38,7 +40,7 @@ test('selects one primary candidate for the PWA pending AI card', () => {
   const plan = buildSurfacePlan([daily, weekly, baseline], 'pwa_pending_ai_card')
   assert.equal(plan.selected.length, 1)
   assert.equal(plan.selected[0].candidate_id, 'daily')
-  assert.equal(plan.excluded.find(item => item.candidate_id === 'weekly').reason, 'surface_capacity_reached')
+  assert.equal(plan.selected.some(item => item.candidate_id === 'weekly'), false)
 })
 
 test('uses an exact fact fallback instead of silence when no candidate passes', () => {
@@ -53,6 +55,42 @@ test('uses an exact fact fallback instead of silence when no candidate passes', 
 
 test('respects record detail capacity while retaining multiple angles', () => {
   const plans = buildExpressionPlans([daily, weekly, baseline, amounts])
-  assert.deepEqual(plans.record_detail.selected.map(item => item.candidate_id), ['daily', 'weekly', 'baseline'])
-  assert.equal(plans.record_detail.excluded.find(item => item.candidate_id === 'amounts').reason, 'surface_capacity_reached')
+  assert.deepEqual(plans.record_detail.selected.map(item => item.candidate_id), ['daily', 'baseline', 'amounts'])
+  assert.equal(plans.record_detail.selected.some(item => item.candidate_id === 'weekly'), false)
+})
+
+test('keeps weekly comparisons out of detail so record-level angles use the slots', () => {
+  const categoryWeekly = candidate('category-weekly', 'expense_category_week_to_date_vs_previous_week_same_period', 'comparison', null, {
+    shortcut_notification: null, pwa_pending_ai_card: null, record_detail: null, weekly_report: 87.4,
+  }, { weekly_report: 'expense_week_to_date_comparison' })
+  const recurrence = candidate('recurrence', 'expense_record_name_previous_gap', 'fact', 'derived', {
+    shortcut_notification: null, pwa_pending_ai_card: 73.8, record_detail: 79.8, weekly_report: null,
+  })
+  const plan = buildExpressionPlans([daily, weekly, categoryWeekly, recurrence, baseline]).record_detail
+
+  assert.deepEqual(plan.selected.map(item => item.candidate_id), ['daily', 'recurrence', 'baseline'])
+  assert.equal(plan.selected.some(item => ['weekly', 'category-weekly'].includes(item.candidate_id)), false)
+})
+
+test('keeps category and merchant weekly comparisons in one report slot', () => {
+  const category = candidate('category', 'expense_category_week_to_date_vs_previous_week_same_period', 'comparison', null, {
+    shortcut_notification: null, pwa_pending_ai_card: 81, record_detail: 87, weekly_report: 87,
+  }, { weekly_report: 'expense_week_to_date_comparison' })
+  const merchant = candidate('merchant', 'merchant_week_to_date_vs_previous_week_same_period', 'comparison', null, {
+    shortcut_notification: null, pwa_pending_ai_card: 82, record_detail: 86, weekly_report: 86,
+  }, { weekly_report: 'expense_week_to_date_comparison' })
+  const plan = buildExpressionPlans([category, merchant]).weekly_report
+  assert.deepEqual(plan.selected.map(item => item.candidate_id), ['category'])
+  assert.equal(plan.excluded.find(item => item.candidate_id === 'merchant').reason, 'duplicate_diversity_group')
+})
+
+test('applies a period cooldown after a delivered weekly comparison', () => {
+  const weekly = candidate('weekly', 'merchant_week_to_date_vs_previous_week_same_period', 'comparison', null, {
+    shortcut_notification: null, pwa_pending_ai_card: 81, record_detail: 86, weekly_report: 86,
+  }, { weekly_report: 'expense_week_to_date_comparison' })
+  weekly.selection_hints.max_exposure_count = { weekly_report: 1 }
+  weekly.scoring.dedupe_exposure_by_surface = { weekly_report: { count: 1 } }
+  const plan = buildExpressionPlans([weekly]).weekly_report
+  assert.equal(plan.selected.length, 0)
+  assert.equal(plan.excluded[0].reason, 'period_cooldown')
 })

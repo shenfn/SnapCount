@@ -7,6 +7,11 @@ import { decode as decodePng } from "npm:fast-png@6.2.0";
 import { PROMPT, buildPrompt, buildFeedbackPrompt, buildVoicePrompt } from "./prompts.ts";
 import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
+  acknowledgeRecordExpressionPlan,
+  getRecordExpressionPlan,
+  isRecordExpressionOwnerEnabled,
+} from "./expression-delivery.ts";
+import {
   loadDomainProfiles,
   selectSignals,
   validateModelTone,
@@ -4950,6 +4955,43 @@ Deno.serve(async (req) => {
     if (contentType.includes("application/json")) {
       const jsonBody = await req.json().catch(() => ({}));
       const action = jsonBody?.action;
+
+      if (action === "get_record_expression_plan" || action === "ack_record_expression_plan") {
+        const actionUserId = await authenticatedUserId(req);
+        if (!actionUserId) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        if (!isRecordExpressionOwnerEnabled(actionUserId)) {
+          if (action === "get_record_expression_plan") {
+            return new Response(JSON.stringify({
+              ok: true,
+              data: { available: false, reason: "owner_only_unavailable" },
+            }), {
+              headers: { "Content-Type": "application/json", ...corsHeaders },
+            });
+          }
+          return new Response(JSON.stringify({ ok: false, error: "表达规划器当前未启用" }), {
+            status: 403, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        try {
+          const result = action === "get_record_expression_plan"
+            ? await getRecordExpressionPlan(supabase, actionUserId, jsonBody)
+            : await acknowledgeRecordExpressionPlan(supabase, actionUserId, jsonBody);
+          return new Response(JSON.stringify({ ok: true, data: result }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        } catch (deliveryError) {
+          return new Response(JSON.stringify({
+            ok: false,
+            error: deliveryError instanceof Error ? deliveryError.message : String(deliveryError),
+          }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+      }
 
       if (action === "submit_expression_feedback") {
         const actionUserId = await authenticatedUserId(req);

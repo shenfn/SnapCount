@@ -9,6 +9,13 @@ function finiteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+function allowedSurfacesFor(candidate) {
+  const configured = candidate.selection_hints?.allowed_surfaces
+  if (Array.isArray(configured)) return configured
+  if (candidate.selection_hints?.delivery_scope === 'period_summary') return ['weekly_report']
+  return null
+}
+
 function hardGate(candidate) {
   const reasons = []
   if (!candidate?.claim?.semantic_key) reasons.push('missing_semantic_key')
@@ -35,25 +42,46 @@ function hardGate(candidate) {
   return reasons
 }
 
-function surfaceDecision(candidate, surface, rule, hardBlocked) {
+function surfaceDecision(candidate, surface, rule, hardBlocked, planningContext) {
   const reasons = [...hardBlocked]
   const confidence = candidate.quality?.confidence ?? 0
   const coverage = candidate.quality?.data_coverage ?? 0
   if (confidence < rule.min_confidence) reasons.push('confidence_below_surface_threshold')
   if (coverage < rule.min_data_coverage) reasons.push('data_coverage_below_surface_threshold')
 
+  const allowedSurfaces = allowedSurfacesFor(candidate)
+  if (Array.isArray(allowedSurfaces) && !allowedSurfaces.includes(surface)) {
+    reasons.push('surface_outside_candidate_delivery_scope')
+  }
+
   if (candidate.claim_type === 'comparison' && surface === 'shortcut_notification') {
-    const sampleCount = candidate.quality?.sample_count ?? 0
-    if (sampleCount < 7) reasons.push('comparison_sample_too_small_for_interruptive_surface')
+    reasons.push('period_comparison_not_interruptive')
+  }
+
+  if (candidate.claim_type === 'comparison' && surface === 'weekly_report' && candidate.selection_hints?.period_owner === false) {
+    reasons.push('period_surface_requires_latest_record')
+  }
+
+  if (surface === 'weekly_report' && planningContext === 'record_event') {
+    reasons.push('period_report_requires_report_context')
+  }
+
+  if (candidate.claim?.semantic_key === 'merchant_daily_activity_span') {
+    reasons.push('diagnostic_temporal_window_not_user_facing')
+  }
+
+  if (candidate.claim?.semantic_key === 'expense_record_name_previous_gap') {
+    if (surface === 'shortcut_notification') reasons.push('repeat_interval_not_interruptive')
+    if (surface === 'weekly_report') reasons.push('record_level_fact_not_weekly_summary')
   }
 
   return { eligible: reasons.length === 0, blocked_reasons: [...new Set(reasons)] }
 }
 
-export function evaluateCandidateEligibility(candidate) {
+export function evaluateCandidateEligibility(candidate, { planningContext = 'surface_preview' } = {}) {
   const hardBlocked = hardGate(candidate)
   const surfaceEligibility = Object.fromEntries(
-    Object.entries(SURFACE_RULES).map(([surface, rule]) => [surface, surfaceDecision(candidate, surface, rule, hardBlocked)]),
+    Object.entries(SURFACE_RULES).map(([surface, rule]) => [surface, surfaceDecision(candidate, surface, rule, hardBlocked, planningContext)]),
   )
   return {
     ...candidate,
@@ -65,8 +93,8 @@ export function evaluateCandidateEligibility(candidate) {
   }
 }
 
-export function evaluateCandidates(candidates) {
-  return candidates.map(evaluateCandidateEligibility)
+export function evaluateCandidates(candidates, options = {}) {
+  return candidates.map(candidate => evaluateCandidateEligibility(candidate, options))
 }
 
 export function summarizeEligibility(candidates) {

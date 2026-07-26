@@ -51,6 +51,36 @@ const receiptCleanupSource = await readFile(
   path.join(repoRoot, "scripts", "cleanup-test-receipts.mjs"),
   "utf8",
 );
+const releaseValidationSource = await readFile(
+  path.join(repoRoot, ".github", "workflows", "release-validation.yml"),
+  "utf8",
+);
+const securityFixtureSql = await readFile(
+  path.join(repoRoot, "scripts", "security-migration-fixture.sql"),
+  "utf8",
+);
+const securityMigrationTestSql = await readFile(
+  path.join(repoRoot, "scripts", "test-security-migration.sql"),
+  "utf8",
+);
+const expressionFeedbackAtomicSql = await readFile(
+  path.join(repoRoot, "supabase", "migrations", "20260725123000_expression_feedback_atomic_bundle.sql"),
+  "utf8",
+);
+const expressionRecordCleanupSql = await readFile(
+  path.join(repoRoot, "supabase", "migrations", "20260725124000_expression_record_delete_cleanup.sql"),
+  "utf8",
+);
+
+assert.match(
+  expressionFeedbackAtomicSql,
+  /\bbegin;\s+lock table public\.expression_shadow_runs[\s\S]*commit;\s*$/i,
+  "the expression feedback lock and schema changes must run in one explicit transaction",
+);
+assert.match(expressionFeedbackAtomicSql, /expires_at timestamptz not null default \(now\(\) \+ interval '1 hour'\)/i);
+assert.match(expressionFeedbackAtomicSql, /shadow_run_id uuid references public\.expression_shadow_runs\(id\) on delete set null/i);
+assert.match(expressionFeedbackAtomicSql, /record_kind text not null check \(record_kind in \('expense', 'income', 'data'\)\)/i);
+assert.match(expressionFeedbackAtomicSql, /cleanup_expression_delivery_snapshots/i);
 const pwaStoreSource = await readFile(
   path.join(repoRoot, "src", "composables", "useStore.js"),
   "utf8",
@@ -205,5 +235,80 @@ const pwaDiscardSource = pwaStoreSource.match(/async function discardStagingReco
 assert.match(pwaDiscardSource, /sb\.rpc\('discard_staging_record'/);
 assert.doesNotMatch(pwaDiscardSource, /from\('staging_records'\)\.update/);
 assert.match(nativeDataSource, /func discardStagingRecord[\s\S]*name: "discard_staging_record"/);
+
+const expressionMigrationFiles = [
+  "20260725120000_expression_feedback_positive_choices.sql",
+  "20260725123000_expression_feedback_atomic_bundle.sql",
+  "20260725124000_expression_record_delete_cleanup.sql",
+];
+let previousMigrationIndex = -1;
+for (const migrationFile of expressionMigrationFiles) {
+  const migrationCommand = `-f supabase/migrations/${migrationFile}`;
+  const migrationIndex = releaseValidationSource.indexOf(migrationCommand);
+  assert.notEqual(migrationIndex, -1, `release validation must execute ${migrationFile}`);
+  assert.ok(
+    migrationIndex > previousMigrationIndex,
+    "expression migrations must execute in timestamp order",
+  );
+  previousMigrationIndex = migrationIndex;
+}
+const fixtureCommandIndex = releaseValidationSource.indexOf("-f scripts/security-migration-fixture.sql");
+const migrationTestCommandIndex = releaseValidationSource.indexOf("-f scripts/test-security-migration.sql");
+assert.notEqual(fixtureCommandIndex, -1, "release validation must load the PostgreSQL fixture");
+assert.notEqual(migrationTestCommandIndex, -1, "release validation must run PostgreSQL assertions");
+assert.ok(
+  fixtureCommandIndex < previousMigrationIndex,
+  "the PostgreSQL fixture must run before expression migrations",
+);
+assert.ok(
+  migrationTestCommandIndex > previousMigrationIndex,
+  "the PostgreSQL assertions must run after expression migrations",
+);
+
+assert.match(
+  securityFixtureSql,
+  /\\ir \.\.\/supabase\/migrations\/20260713101632_expression_shadow_runs\.sql/i,
+);
+assert.match(
+  securityFixtureSql,
+  /\\ir \.\.\/supabase\/migrations\/20260713130137_expression_feedback_loop\.sql/i,
+);
+assert.doesNotMatch(
+  securityFixtureSql,
+  /create table(?: if not exists)? public\.expression_(?:shadow_runs|exposure_events|feedback_events|preference_signals|preference_snapshots)/i,
+);
+
+assert.match(
+  securityMigrationTestSql,
+  /delete from public\.transactions\s+where id = '66666666-0000-4000-8000-000000000001'/i,
+);
+assert.match(
+  securityMigrationTestSql,
+  /not exists \(\s*select 1 from public\.expression_exposure_source_records\s+where exposure_event_id = '66666666-0000-4000-8000-000000000002'/i,
+);
+assert.match(
+  securityMigrationTestSql,
+  /source deletion must purge its structured source mapping/i,
+);
+assert.match(
+  securityMigrationTestSql,
+  /select 1 from public\.expression_delivery_snapshots[\s\S]*66666666-0000-4000-8000-000000000008/i,
+);
+
+for (const [functionName, migrationSql] of [
+  ["persist_expression_exposure_with_sources", expressionFeedbackAtomicSql],
+  ["replace_expression_feedback_bundle", expressionFeedbackAtomicSql],
+  ["get_expression_preference_source", expressionFeedbackAtomicSql],
+  ["upsert_expression_preference_snapshot_if_newer", expressionFeedbackAtomicSql],
+  ["cleanup_expression_delivery_snapshots", expressionFeedbackAtomicSql],
+  ["purge_expression_artifacts_after_record_delete", expressionRecordCleanupSql],
+]) {
+  assert.match(
+    migrationSql,
+    new RegExp(`create or replace function public\\.${functionName}[\\s\\S]*?security definer[\\s\\S]*?set search_path = pg_catalog, public`, "i"),
+  );
+}
+assert.doesNotMatch(expressionFeedbackAtomicSql, /set search_path = public/i);
+assert.doesNotMatch(expressionRecordCleanupSql, /set search_path = public/i);
 
 console.log("Security migration contracts validated.");

@@ -7,7 +7,7 @@ function candidate(overrides = {}) {
     candidate_id: 'daily-total',
     dimension: 'daily_aggregation',
     claim_type: 'fact',
-    claim: { semantic_key: 'merchant_daily_count_total', structured_value: { entity_id: 'merchant_qlhazycoder' } },
+    claim: { semantic_key: 'merchant_daily_count_total', structured_value: { entity_id: 'merchant_fixture_alpha' } },
     quality: { confidence: 1, data_coverage: 1 },
     eligibility: {
       eligible: true,
@@ -24,7 +24,7 @@ function candidate(overrides = {}) {
 }
 
 test('scores a new precise daily fact above notification threshold', () => {
-  const result = scoreCandidate(candidate(), { context: { entity_id: 'merchant_qlhazycoder' } })
+  const result = scoreCandidate(candidate(), { context: { entity_id: 'merchant_fixture_alpha' } })
   assert.equal(result.scoring.surfaces.shortcut_notification.score, 78)
   assert.equal(result.scoring.surfaces.shortcut_notification.passes_threshold, true)
   assert.equal(result.scoring.components.novelty, 1)
@@ -32,12 +32,14 @@ test('scores a new precise daily fact above notification threshold', () => {
 
 test('allows occasional repetition but lowers its score deterministically', () => {
   const result = scoreCandidate(candidate(), {
-    context: { entity_id: 'merchant_qlhazycoder' },
-    exposureHistory: { merchant_daily_count_total: { count: 1, last_shown_at: '2026-07-12T12:00:00+08:00' } },
+    context: { entity_id: 'merchant_fixture_alpha' },
+    exposureHistory: { 'record_detail:merchant_daily_count_total': { count: 1, last_shown_at: '2026-07-12T12:00:00+08:00' } },
   })
-  assert.equal(result.scoring.components.novelty, 0.92)
-  assert.equal(result.scoring.components.repetition_penalty, 2)
+  assert.equal(result.scoring.components.novelty, 1)
+  assert.equal(result.scoring.exposure_by_surface.record_detail.count, 1)
+  assert.equal(result.scoring.surfaces.record_detail.novelty, 0.92)
   assert.equal(result.scoring.surfaces.record_detail.score, 80.8)
+  assert.equal(result.scoring.surfaces.shortcut_notification.score, 78)
 })
 
 test('applies explicit user preference without exceeding bounded multipliers', () => {
@@ -60,7 +62,7 @@ test('summarizes ranked candidates per surface', () => {
   const high = scoreCandidate(candidate())
   const low = scoreCandidate(candidate({
     candidate_id: 'amounts',
-    claim: { semantic_key: 'merchant_daily_amount_structure', structured_value: { entity_id: 'merchant_qlhazycoder' } },
+    claim: { semantic_key: 'merchant_daily_amount_structure', structured_value: { entity_id: 'merchant_fixture_alpha' } },
   }))
   const summary = summarizeScores([low, high])
   assert.equal(summary.pwa_pending_ai_card.ranking[0].candidate_id, 'daily-total')
@@ -81,4 +83,28 @@ test('applies surface-specific semantic preference only to the matching surface'
   assert.equal(result.scoring.surfaces.shortcut_notification.score, 60)
   assert.equal(result.scoring.surfaces.record_detail.user_preference, 1)
   assert.equal(result.scoring.surfaces.record_detail.score, 90)
+})
+
+test('uses a stable period exposure key instead of a global semantic count', () => {
+  const scoped = candidate({
+    selection_hints: { exposure_key: 'expense:merchant:merchant_fixture_alpha:week_to_date:2026-07-20' },
+  })
+  const result = scoreCandidate(scoped, {
+    exposureHistory: {
+      merchant_daily_count_total: { count: 5, last_shown_at: '2026-07-23T12:00:00+08:00' },
+      'record_detail:expense:merchant:merchant_fixture_alpha:week_to_date:2026-07-20': { count: 1, last_shown_at: '2026-07-22T12:00:00+08:00' },
+    },
+  })
+  assert.equal(result.scoring.exposure.exposure_key, 'expense:merchant:merchant_fixture_alpha:week_to_date:2026-07-20')
+  assert.equal(result.scoring.exposure.count, 0)
+  assert.equal(result.scoring.exposure_by_surface.record_detail.count, 1)
+  assert.equal(result.scoring.surfaces.record_detail.novelty, 0.92)
+  assert.equal(result.scoring.exposure_by_surface.shortcut_notification.count, 0)
+})
+
+test('accepts the legacy rendering preference snapshot shape while new profiles migrate', () => {
+  const result = scoreCandidate(candidate(), {
+    preferenceProfile: { rendering_preferences: { 'record_detail:semantic_preference': 0.8 } },
+  })
+  assert.equal(result.scoring.surfaces.record_detail.user_preference, 0.8)
 })
