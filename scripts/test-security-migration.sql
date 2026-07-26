@@ -68,6 +68,55 @@ select public.security_test_assert(
   'delivery snapshot retention cleanup must remain service-only'
 );
 
+select set_config('request.jwt.claim.role', 'service_role', false);
+select public.replace_expression_feedback_bundle(
+  '66666666-6666-4666-8666-666666666666',
+  '66666666-0000-4000-8000-000000000002',
+  jsonb_build_object(
+    'primary_choice', 'helpful',
+    'issue_annotations', jsonb_build_array(
+      jsonb_build_object(
+        'issue_code', 'helpful',
+        'source', 'database_regression',
+        'confidence', 0.6,
+        'evidence', null
+      )
+    ),
+    'free_text', 'database regression',
+    'suggested_action', ''
+  ),
+  jsonb_build_array(
+    jsonb_build_object(
+      'issue_code', 'helpful',
+      'preference_dimension', 'semantic_preference',
+      'direction', 'increase',
+      'strength', 0.0825,
+      'aggregation_policy', 'decay_and_repeat_required',
+      'metadata', jsonb_build_object('source', 'database_regression')
+    )
+  )
+);
+select public.security_test_assert(
+  (
+    select count(*) = 1
+      and max(primary_choice) = 'helpful'
+    from public.expression_feedback_events
+    where exposure_event_id = '66666666-0000-4000-8000-000000000002'
+  ),
+  'atomic feedback replacement must keep one current positive review'
+);
+select public.security_test_assert(
+  (
+    select count(*) = 1
+      and max(issue_code) = 'helpful'
+      and max(signal_key) = 'feedback:66666666-6666-4666-8666-666666666666:66666666-0000-4000-8000-000000000002:helpful'
+    from public.expression_preference_signals
+    where exposure_event_id = '66666666-0000-4000-8000-000000000002'
+  ),
+  'atomic feedback replacement must persist a non-empty signal with a canonical key'
+);
+select set_config('request.jwt.claim.role', '', false);
+
 insert into public.expression_delivery_snapshots (
   id, user_id, record_id, record_kind, domain_key, surface, candidate_id,
   content_fingerprint, delivery_plan, expires_at
@@ -126,11 +175,11 @@ select public.security_test_assert(
 );
 select public.security_test_assert(
   (
-    select revision = 2
+    select revision = 3
     from public.expression_preference_revisions
     where user_id = '66666666-6666-4666-8666-666666666666'
   ),
-  'source deletion must invalidate preference revision after deleting reviewed content'
+  'source deletion must invalidate the preference revision after the RPC update'
 );
 
 select public.security_test_assert(

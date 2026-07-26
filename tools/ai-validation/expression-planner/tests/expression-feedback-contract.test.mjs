@@ -10,6 +10,7 @@ const feedbackPath = path.join(root, 'supabase/functions/ingest-receipt/expressi
 const migrationPath = path.join(root, 'supabase/migrations/20260725120000_expression_feedback_positive_choices.sql')
 const atomicMigrationPath = path.join(root, 'supabase/migrations/20260725123000_expression_feedback_atomic_bundle.sql')
 const deleteCleanupMigrationPath = path.join(root, 'supabase/migrations/20260725124000_expression_record_delete_cleanup.sql')
+const signalKeyHotfixMigrationPath = path.join(root, 'supabase/migrations/20260726121000_fix_expression_feedback_signal_key_precedence.sql')
 
 test('feedback contract accepts positive and corrective choices and emits scorer profile keys', async () => {
   const source = await readFile(feedbackPath, 'utf8')
@@ -41,10 +42,16 @@ test('feedback, signals, and snapshot revisions use service-only transactional c
   assert.match(migration, /expires_at timestamptz not null default \(now\(\) \+ interval '1 hour'\)/)
   assert.match(migration, /shadow_run_id uuid references public\.expression_shadow_runs\(id\) on delete set null/)
   assert.match(migration, /cleanup_expression_delivery_snapshots/)
+  assert.match(migration, /v_feedback_key \|\| ':' \|\| \(signal\.value ->> 'issue_code'\)/)
   assert.match(migration, /'decision_id', nullif\(v_exposure\.metadata ->> 'decision_id', ''\)/)
   assert.match(migration, /'selection_probability',[\s\S]*v_exposure\.metadata -> 'selection_probability'/)
   assert.match(migration, /revoke all on function public\.replace_expression_feedback_bundle[\s\S]*from public, anon, authenticated/)
   assert.match(migration, /grant execute on function public\.replace_expression_feedback_bundle[\s\S]*to service_role/)
+
+  const hotfixMigration = await readFile(signalKeyHotfixMigrationPath, 'utf8')
+  assert.match(hotfixMigration, /pg_get_functiondef\(v_signature::oid\)/)
+  assert.match(hotfixMigration, /execute replace\(v_definition, v_buggy, v_fixed\)/)
+  assert.match(hotfixMigration, /v_feedback_key \|\| ':' \|\| \(signal\.value ->> 'issue_code'\)/)
 })
 
 test('record deletion purges expression artifacts and invalidates preference snapshots', async () => {

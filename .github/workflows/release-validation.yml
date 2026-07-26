@@ -106,4 +106,8 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260725120000_expression_feedback_positive_choices.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260725123000_expression_feedback_atomic_bundle.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260725124000_expression_record_delete_cleanup.sql
+          # Exercise the deployed-bug upgrade path, then prove the hotfix is idempotent.
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-expression-feedback-signal-key-hotfix-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260726121000_fix_expression_feedback_signal_key_precedence.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260726121000_fix_expression_feedback_signal_key_precedence.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-security-migration.sql

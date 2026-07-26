@@ -829,7 +829,7 @@ begin
   select
     v_occurred_at,
     p_user_id,
-    v_feedback_key || ':' || signal.value ->> 'issue_code',
+    v_feedback_key || ':' || (signal.value ->> 'issue_code'),
     v_feedback_key,
     p_exposure_event_id,
     v_exposure.semantic_key,

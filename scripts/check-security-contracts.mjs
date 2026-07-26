@@ -71,6 +71,14 @@ const expressionRecordCleanupSql = await readFile(
   path.join(repoRoot, "supabase", "migrations", "20260725124000_expression_record_delete_cleanup.sql"),
   "utf8",
 );
+const expressionFeedbackSignalKeyHotfixSql = await readFile(
+  path.join(repoRoot, "supabase", "migrations", "20260726121000_fix_expression_feedback_signal_key_precedence.sql"),
+  "utf8",
+);
+const expressionFeedbackSignalKeyHotfixFixtureSql = await readFile(
+  path.join(repoRoot, "scripts", "test-expression-feedback-signal-key-hotfix-fixture.sql"),
+  "utf8",
+);
 
 assert.match(
   expressionFeedbackAtomicSql,
@@ -81,6 +89,23 @@ assert.match(expressionFeedbackAtomicSql, /expires_at timestamptz not null defau
 assert.match(expressionFeedbackAtomicSql, /shadow_run_id uuid references public\.expression_shadow_runs\(id\) on delete set null/i);
 assert.match(expressionFeedbackAtomicSql, /record_kind text not null check \(record_kind in \('expense', 'income', 'data'\)\)/i);
 assert.match(expressionFeedbackAtomicSql, /cleanup_expression_delivery_snapshots/i);
+assert.match(
+  expressionFeedbackAtomicSql,
+  /v_feedback_key \|\| ':' \|\| \(signal\.value ->> 'issue_code'\)/,
+  "fresh installs must parenthesize JSON extraction before concatenating the signal key",
+);
+assert.match(expressionFeedbackSignalKeyHotfixSql, /pg_get_functiondef\(v_signature::oid\)/);
+assert.match(expressionFeedbackSignalKeyHotfixSql, /execute replace\(v_definition, v_buggy, v_fixed\)/);
+assert.match(
+  expressionFeedbackSignalKeyHotfixSql,
+  /v_feedback_key \|\| ':' \|\| \(signal\.value ->> 'issue_code'\)/,
+);
+assert.match(expressionFeedbackSignalKeyHotfixFixtureSql, /test-only/i);
+assert.match(
+  expressionFeedbackSignalKeyHotfixFixtureSql,
+  /execute replace\(v_definition, v_fixed, v_buggy\)/,
+  "the PostgreSQL regression fixture must recreate the deployed precedence bug before applying the hotfix",
+);
 const pwaStoreSource = await readFile(
   path.join(repoRoot, "src", "composables", "useStore.js"),
   "utf8",
@@ -240,6 +265,7 @@ const expressionMigrationFiles = [
   "20260725120000_expression_feedback_positive_choices.sql",
   "20260725123000_expression_feedback_atomic_bundle.sql",
   "20260725124000_expression_record_delete_cleanup.sql",
+  "20260726121000_fix_expression_feedback_signal_key_precedence.sql",
 ];
 let previousMigrationIndex = -1;
 for (const migrationFile of expressionMigrationFiles) {
