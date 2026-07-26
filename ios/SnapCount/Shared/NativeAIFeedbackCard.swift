@@ -49,6 +49,13 @@ enum NativeAIFeedbackReviewPresentation: Equatable {
             return .form(isRevision: isRevisingSubmittedReview)
         }
     }
+
+    static func shouldShowSection(
+        reviewable: Bool,
+        requiresExposureAcknowledgement: Bool
+    ) -> Bool {
+        reviewable || requiresExposureAcknowledgement
+    }
 }
 
 private struct NativeAIFeedbackCardFramePreferenceKey: PreferenceKey {
@@ -127,6 +134,8 @@ struct NativeAIFeedbackCard: View {
     var compact = false
     var reviewable = false
     var reviewState: NativeAIFeedbackReviewState = .idle
+    var exposureState: NativeRecordExpressionPlanExposureState = .idle
+    var onRetryExposure: (() -> Void)?
     var onSubmit: ((NativeAIFeedbackReviewChoice, String) -> Void)?
 
     @State private var showReason = false
@@ -194,9 +203,16 @@ struct NativeAIFeedbackCard: View {
                     .foregroundStyle(JieziTheme.brand)
             }
 
-            if reviewable {
+            if NativeAIFeedbackReviewPresentation.shouldShowSection(
+                reviewable: reviewable,
+                requiresExposureAcknowledgement: feedback.requiresExposureAcknowledgement
+            ) {
                 Divider()
-                reviewContent
+                if reviewable {
+                    reviewContent
+                } else {
+                    pendingReviewContent
+                }
             }
         }
         .padding(compact ? 14 : 16)
@@ -248,6 +264,33 @@ struct NativeAIFeedbackCard: View {
             }
         case .form(let isRevision):
             reviewForm(isRevision: isRevision)
+        }
+    }
+
+    private var pendingReviewContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("点评这条反馈")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            if exposureState == .failed {
+                Button {
+                    onRetryExposure?()
+                } label: {
+                    Label("重新开启点评", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("ai-feedback-retry-exposure")
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("正在开启点评…")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(JieziTheme.brand)
+                }
+                .accessibilityIdentifier("ai-feedback-awaiting-exposure")
+            }
         }
     }
 

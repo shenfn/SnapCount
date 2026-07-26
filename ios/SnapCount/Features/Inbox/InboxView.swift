@@ -1215,7 +1215,13 @@ private struct PendingExpenseResolutionView: View {
                                     feedback: feedback,
                                     compact: true,
                                     reviewable: feedback.isReviewable,
-                                    reviewState: appState.recordFeedbackState
+                                    reviewState: appState.recordFeedbackState,
+                                    exposureState: appState.recordExpressionPlanExposureState,
+                                    onRetryExposure: {
+                                        Task {
+                                            await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
+                                        }
+                                    }
                                 ) { choice, text in
                                     Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
                                 }
@@ -1279,6 +1285,9 @@ private struct PendingExpenseResolutionView: View {
                 draft = NativePendingResolutionDraft(detail: detail)
             }
             await appState.loadFinanceVocabulary()
+        }
+        .onDisappear {
+            appState.deactivateRecordDetail(reference: reference)
         }
         .confirmationDialog("删除这条待补全账单？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
             Button("删除", role: .destructive) {

@@ -71,6 +71,7 @@ final class SnapCountTests: XCTestCase {
         state.todayPath.append(NativeDayDetailRoute(dateKey: "2026-07-17", kind: .all))
         state.inboxPath.append(NativeInboxRoute.staging(recordId: "staging-1"))
         state.recordsPath.append(NativeRecordRoute(reference: "expense/record-1"))
+        state.recordExpressionPlanExposureState = .failed
         state.selectedRecordDetail = NativeRecordDetail(
             id: "expense/record-1", rawId: "record-1", kind: "expense",
             title: "早餐", subtitle: "2026-07-17", value: "¥12.00", detailRows: [],
@@ -101,6 +102,7 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(state.inboxPath.count, 0)
         XCTAssertEqual(state.recordsPath.count, 0)
         XCTAssertNil(state.selectedRecordDetail)
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
         XCTAssertTrue(state.accounts.isEmpty)
         XCTAssertTrue(state.financeVocabulary.isEmpty)
     }
@@ -288,6 +290,12 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(feedback.candidateId, "candidate-1")
         XCTAssertTrue(feedback.isReviewable)
         XCTAssertTrue(feedback.isAcknowledgedPlannerFeedback)
+        XCTAssertTrue(
+            NativeAIFeedbackReviewPresentation.shouldShowSection(
+                reviewable: feedback.isReviewable,
+                requiresExposureAcknowledgement: feedback.requiresExposureAcknowledgement
+            )
+        )
         XCTAssertEqual(feedback.badge, "今天很稳")
         XCTAssertEqual(feedback.bandLabel, "正向")
         XCTAssertEqual(feedback.timingLabel, "晚间记录")
@@ -304,6 +312,12 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(feedback.requiresExposureAcknowledgement)
         XCTAssertFalse(feedback.isReviewable)
         XCTAssertFalse(feedback.isAcknowledgedPlannerFeedback)
+        XCTAssertTrue(
+            NativeAIFeedbackReviewPresentation.shouldShowSection(
+                reviewable: feedback.isReviewable,
+                requiresExposureAcknowledgement: feedback.requiresExposureAcknowledgement
+            )
+        )
     }
 
     func testLegacyFeedbackRemainsReviewableWithoutExposureEvent() throws {
@@ -313,6 +327,18 @@ final class SnapCountTests: XCTestCase {
 
         XCTAssertNil(feedback.exposureEventId)
         XCTAssertTrue(feedback.isReviewable)
+        XCTAssertTrue(
+            NativeAIFeedbackReviewPresentation.shouldShowSection(
+                reviewable: feedback.isReviewable,
+                requiresExposureAcknowledgement: feedback.requiresExposureAcknowledgement
+            )
+        )
+        XCTAssertFalse(
+            NativeAIFeedbackReviewPresentation.shouldShowSection(
+                reviewable: false,
+                requiresExposureAcknowledgement: feedback.requiresExposureAcknowledgement
+            )
+        )
     }
 
     func testFeedbackRequestBodyIncludesOnlyUsableExposureEventId() {
@@ -511,6 +537,210 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    func testAcknowledgedPlannerFeedbackWinsOverPendingAndRemoteFeedback() throws {
+        let remoteFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("legacy_voice"),
+            "emotion_line": AnyCodable("远端旧反馈")
+        ]))
+        let pendingFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-new"),
+            "emotion_line": AnyCodable("新的待确认候选")
+        ]))
+        let acknowledgedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-stable"),
+            "emotion_line": AnyCodable("当前可点评候选"),
+            "exposure_event_id": AnyCodable("exposure-stable")
+        ]))
+
+        XCTAssertTrue(
+            NativeRecordExpressionFeedbackPolicy.hasAcknowledgedPlannerFeedback([
+                remoteFeedback,
+                acknowledgedFeedback
+            ])
+        )
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
+                existing: [remoteFeedback, acknowledgedFeedback],
+                pending: pendingFeedback
+            ),
+            acknowledgedFeedback
+        )
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
+                existing: [remoteFeedback],
+                pending: pendingFeedback
+            ),
+            pendingFeedback
+        )
+    }
+
+    @MainActor
+    func testExpressionPlanAcknowledgementFailureKeepsPreviewAndCanRetry() async throws {
+        let previewFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-1"),
+            "emotion_line": AnyCodable("记录于今天 09:43。")
+        ]))
+        let acknowledgedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-1"),
+            "emotion_line": AnyCodable("记录于今天 09:43。"),
+            "exposure_event_id": AnyCodable("exposure-1")
+        ]))
+        let repository = RecordRepositoryStub(
+            details: [expressionRecordDetail()],
+            expressionPlanLookups: [.available(NativeRecordExpressionPlan(
+                planToken: "plan-1",
+                candidateId: "candidate-1",
+                feedback: previewFeedback
+            ))],
+            acknowledgedFeedback: acknowledgedFeedback,
+            acknowledgementFailuresRemaining: 4
+        )
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession },
+            expressionPlanAcknowledgementSleep: { _ in }
+        )
+
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+        state.setRecordExpressionPlanCardVisible(true, reference: "expense/record-1")
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
+
+        XCTAssertEqual(repository.acknowledgementCount, 4)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, previewFeedback)
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .failed)
+        XCTAssertTrue(state.selectedRecordDetail?.aiFeedback?.requiresExposureAcknowledgement == true)
+
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
+
+        XCTAssertEqual(repository.acknowledgementCount, 5)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, acknowledgedFeedback)
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
+        XCTAssertTrue(state.selectedRecordDetail?.aiFeedback?.isReviewable == true)
+    }
+
+    @MainActor
+    func testExpressionPlanAcknowledgementContinuesAfterCardLeavesViewport() async throws {
+        let previewFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-1"),
+            "emotion_line": AnyCodable("记录于今天 09:43。")
+        ]))
+        let acknowledgedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-1"),
+            "emotion_line": AnyCodable("记录于今天 09:43。"),
+            "exposure_event_id": AnyCodable("exposure-1")
+        ]))
+        let repository = RecordRepositoryStub(
+            details: [expressionRecordDetail()],
+            expressionPlanLookups: [.available(NativeRecordExpressionPlan(
+                planToken: "plan-1",
+                candidateId: "candidate-1",
+                feedback: previewFeedback
+            ))],
+            acknowledgedFeedback: acknowledgedFeedback,
+            acknowledgementFailuresRemaining: 1
+        )
+        var stateReference: AppState?
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession },
+            expressionPlanAcknowledgementSleep: { _ in
+                await MainActor.run {
+                    stateReference?.setRecordExpressionPlanCardVisible(
+                        false,
+                        reference: "expense/record-1"
+                    )
+                }
+            }
+        )
+        stateReference = state
+
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+        state.setRecordExpressionPlanCardVisible(true, reference: "expense/record-1")
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
+
+        XCTAssertEqual(repository.acknowledgementCount, 2)
+        XCTAssertFalse(state.isRecordExpressionPlanCardVisible(reference: "expense/record-1"))
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, acknowledgedFeedback)
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
+    }
+
+    @MainActor
+    func testAcknowledgedPlannerFeedbackSurvivesRemoteRefreshUntilRecordChanges() async throws {
+        let legacyFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("legacy_voice"),
+            "emotion_line": AnyCodable("远端旧反馈")
+        ]))
+        let acknowledgedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-stable"),
+            "emotion_line": AnyCodable("当前可点评候选"),
+            "exposure_event_id": AnyCodable("exposure-stable")
+        ]))
+        let repository = RecordRepositoryStub(details: [
+            expressionRecordDetail(feedback: acknowledgedFeedback),
+            expressionRecordDetail(feedback: legacyFeedback)
+        ])
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+
+        XCTAssertEqual(repository.expressionPlanLookupCount, 0)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, acknowledgedFeedback)
+
+        state.invalidateRecordExpressionPlanState(afterChanging: ["expense/record-1"])
+
+        XCTAssertNil(state.selectedRecordDetail)
+        XCTAssertNil(state.recordDetail(matching: "expense/record-1"))
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
+    }
+
+    @MainActor
+    func testSwitchingRecordsInvalidatesOldPendingExpressionPlan() async throws {
+        let previewFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-a"),
+            "emotion_line": AnyCodable("A 的待确认候选")
+        ]))
+        let repository = RecordRepositoryStub(
+            details: [
+                expressionRecordDetail(id: "record-a"),
+                expressionRecordDetail(id: "record-b")
+            ],
+            expressionPlanLookups: [
+                .available(NativeRecordExpressionPlan(
+                    planToken: "plan-a",
+                    candidateId: "candidate-a",
+                    feedback: previewFeedback
+                )),
+                .unavailable(reason: "no_selected_candidate")
+            ]
+        )
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession },
+            expressionPlanAcknowledgementSleep: { _ in }
+        )
+
+        await state.loadRecordDetail(reference: "expense/record-a", force: true)
+        await state.loadRecordDetail(reference: "expense/record-b", force: true)
+        state.setRecordExpressionPlanCardVisible(true, reference: "expense/record-a")
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-a")
+
+        XCTAssertEqual(repository.acknowledgementCount, 0)
+        XCTAssertEqual(state.selectedRecordDetail?.id, "expense/record-b")
+        XCTAssertNil(state.selectedRecordDetail?.aiFeedback)
+    }
+
     @MainActor
     func testExpressionPlanRetryStopsWhenDetailIsNoLongerActive() async {
         var isActive = true
@@ -561,8 +791,8 @@ final class SnapCountTests: XCTestCase {
     }
 
     @MainActor
-    func testExpressionPlanAcknowledgementStopsRetryingWhenCardIsNoLongerVisible() async {
-        var isVisible = true
+    func testExpressionPlanAcknowledgementStopsRetryingWhenDeliveryContextIsNoLongerActive() async {
+        var isActive = true
         var attemptCount = 0
         var observedDelays: [UInt64] = []
 
@@ -571,10 +801,10 @@ final class SnapCountTests: XCTestCase {
                 attemptCount += 1
                 throw SupabaseRemoteError.requestFailed("temporary failure")
             },
-            shouldContinue: { isVisible },
+            shouldContinue: { isActive },
             sleep: { delay in
                 observedDelays.append(delay)
-                isVisible = false
+                isActive = false
             }
         )
 
@@ -1519,6 +1749,46 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(consent.legalAcceptedAt, consent.sensitiveDataAcceptedAt)
     }
 
+    private static let expressionTestSession = SupabaseAuthSession(
+        accessToken: "test-token",
+        refreshToken: nil,
+        expiresIn: nil,
+        expiresAt: nil,
+        tokenType: "bearer",
+        user: SupabaseUser(id: "user-1", email: "test@example.com")
+    )
+
+    private func expressionRecordDetail(
+        id: String = "record-1",
+        feedback: NativeAIFeedback? = nil
+    ) -> NativeRecordDetail {
+        NativeRecordDetail(
+            id: "expense/\(id)",
+            rawId: id,
+            kind: "expense",
+            title: "测试记录",
+            subtitle: "2026-07-25",
+            value: "¥6.80",
+            detailRows: [],
+            imageURL: nil,
+            imageLoadError: false,
+            imagePath: nil,
+            imageHash: nil,
+            amount: 6.8,
+            merchantName: "测试商户",
+            platform: "支付宝",
+            category: "other",
+            paymentMethod: "花呗",
+            recordDate: "2026-07-25",
+            note: nil,
+            companionMessage: nil,
+            accountId: nil,
+            systemImage: "creditcard",
+            payload: nil,
+            aiFeedback: feedback
+        )
+    }
+
 }
 
 private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
@@ -1535,16 +1805,23 @@ private struct DashboardRepositoryStub: DashboardRepositoryProtocol {
 
 
 private final class RecordRepositoryStub: RecordRepositoryProtocol {
+    private var details: [NativeRecordDetail]
     private var expressionPlanLookups: [NativeRecordExpressionPlanLookup]
     private let acknowledgedFeedback: NativeAIFeedback?
+    private var acknowledgementFailuresRemaining: Int
+    private(set) var expressionPlanLookupCount = 0
     private(set) var acknowledgementCount = 0
 
     init(
+        details: [NativeRecordDetail] = [],
         expressionPlanLookups: [NativeRecordExpressionPlanLookup] = [.unavailable(reason: "no_selected_candidate")],
-        acknowledgedFeedback: NativeAIFeedback? = nil
+        acknowledgedFeedback: NativeAIFeedback? = nil,
+        acknowledgementFailuresRemaining: Int = 0
     ) {
+        self.details = details
         self.expressionPlanLookups = expressionPlanLookups
         self.acknowledgedFeedback = acknowledgedFeedback
+        self.acknowledgementFailuresRemaining = acknowledgementFailuresRemaining
     }
 
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
@@ -1552,11 +1829,17 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     }
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
-        throw SupabaseRemoteError.requestFailed("unused")
+        guard !details.isEmpty else {
+            throw SupabaseRemoteError.requestFailed("unused")
+        }
+        return details.removeFirst()
     }
 
     func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {
-        expressionPlanLookups.isEmpty ? .unavailable(reason: "no_selected_candidate") : expressionPlanLookups.removeFirst()
+        expressionPlanLookupCount += 1
+        return expressionPlanLookups.isEmpty
+            ? .unavailable(reason: "no_selected_candidate")
+            : expressionPlanLookups.removeFirst()
     }
 
     func acknowledgeRecordExpressionPlan(
@@ -1566,6 +1849,10 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
         accessToken: String
     ) async throws -> NativeAIFeedback {
         acknowledgementCount += 1
+        if acknowledgementFailuresRemaining > 0 {
+            acknowledgementFailuresRemaining -= 1
+            throw SupabaseRemoteError.requestFailed("temporary failure")
+        }
         guard let acknowledgedFeedback else {
             throw SupabaseRemoteError.requestFailed("unused")
         }

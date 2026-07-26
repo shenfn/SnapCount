@@ -249,7 +249,13 @@ struct RecordDetailView: View {
                                 NativeAIFeedbackCard(
                                     feedback: feedback,
                                     reviewable: feedback.isReviewable,
-                                    reviewState: appState.recordFeedbackState
+                                    reviewState: appState.recordFeedbackState,
+                                    exposureState: appState.recordExpressionPlanExposureState,
+                                    onRetryExposure: {
+                                        Task {
+                                            await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
+                                        }
+                                    }
                                 ) { choice, text in
                                     Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
                                 }
@@ -316,6 +322,9 @@ struct RecordDetailView: View {
         }
         .task(id: reference) {
             await appState.loadRecordDetail(reference: reference)
+        }
+        .onDisappear {
+            appState.deactivateRecordDetail(reference: reference)
         }
         .sheet(item: $imagePreview) { route in
             NavigationStack {
