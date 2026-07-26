@@ -11,7 +11,7 @@
         <div class="pending-stage-state" :class="{ complete: isCompletedBill }">
           <i></i>{{ billStatusLabel }} · 账单补全
         </div>
-        <div class="pending-stage-counter">{{ billPositionText }}</div>
+        <div class="pending-stage-counter">{{ store.pendingModal.returnToQueue ? '连续序列' : billPositionText }}</div>
       </header>
 
       <header class="sheet-header pending-sheet-header">
@@ -42,7 +42,7 @@
           </div>
 
           <div class="pending-evidence-carousel">
-            <button type="button" class="pending-evidence-page previous" :disabled="!canMoveBill(-1)" aria-label="上一笔账单" @click="requestMoveBill(-1)">‹</button>
+            <button v-if="!store.pendingModal.returnToQueue" type="button" class="pending-evidence-page previous" :disabled="!canMoveBill(-1)" aria-label="上一笔账单" @click="requestMoveBill(-1)">‹</button>
             <div class="pending-evidence-frame">
               <div v-if="store.pendingModal.bill?.imageLoading" class="pending-evidence-stage pending-evidence-loading" aria-live="polite">
                 <span class="pending-loading-mark" aria-hidden="true"></span>
@@ -80,7 +80,7 @@
                 </div>
               </div>
             </div>
-            <button type="button" class="pending-evidence-page next" :disabled="!canMoveBill(1)" aria-label="下一笔账单" @click="requestMoveBill(1)">›</button>
+            <button v-if="!store.pendingModal.returnToQueue" type="button" class="pending-evidence-page next" :disabled="!canMoveBill(1)" aria-label="下一笔账单" @click="requestMoveBill(1)">›</button>
           </div>
 
           <div class="pending-evidence-meta" role="list" aria-label="账单时间信息">
@@ -375,6 +375,7 @@ const isCompletedBill = computed(() => store.pendingModal.bill?.status === 'done
 const billQueue = computed(() => {
   const current = store.pendingModal.bill
   if (!current) return []
+  if (store.pendingModal.returnToQueue) return [current]
   if (isCompletedBill.value) return [current]
   const pending = store.pendingBills.value
   return pending.some(item => item.id === current.id) ? pending : [current, ...pending]
@@ -504,12 +505,17 @@ const currentSavePending = computed(() => store.isPendingEntrySaving(store.pendi
 const saveDisabled = computed(() => currentSavePending.value || missingFields.value.length > 0)
 const saveLabel = computed(() => {
   if (isCompletedBill.value) return '保存修改'
+  if (store.pendingModal.returnToQueue) return '补全并继续'
   return hasAnotherBill.value ? '补全并下一条' : '补全并收下'
 })
 const saveSupportText = computed(() => {
-  if (currentSavePending.value) return hasAnotherBill.value ? '正在后台保存，马上进入下一条' : '正在后台保存最后一条'
+  if (currentSavePending.value) {
+    if (store.pendingModal.returnToQueue) return '正在保存，随后返回连续序列'
+    return hasAnotherBill.value ? '正在后台保存，马上进入下一条' : '正在后台保存最后一条'
+  }
   if (missingFields.value.length) return `还需要补充：${missingFields.value.join('、')}`
   if (isCompletedBill.value) return '更新已入账信息'
+  if (store.pendingModal.returnToQueue) return '保存后继续处理相邻记录'
   return hasAnotherBill.value ? '保存后自动进入下一条' : '保存后完成本批处理'
 })
 
@@ -817,13 +823,14 @@ function doForceClose() {
 
 async function doSave() {
   const currentBillId = store.pendingModal.bill?.id
+  const returnToQueue = store.pendingModal.returnToQueue
   const currentIndex = billIndex.value
   const queueSnapshot = [...billQueue.value]
   const nextBill = queueSnapshot[currentIndex + 1]
     || queueSnapshot.find(item => item.id !== currentBillId)
     || null
 
-  if (isCompletedBill.value) {
+  if (isCompletedBill.value || returnToQueue) {
     const result = await store.confirmEntry()
     if (!result?.ok) return
   } else {
@@ -832,6 +839,10 @@ async function doSave() {
 
   showUnsaved.value = false
   if (!store.pendingModal.open || store.pendingModal.bill?.id !== currentBillId) return
+  if (returnToQueue) {
+    store.closePendingModal()
+    return
+  }
   if (nextBill) {
     if (bodyEl.value) bodyEl.value.scrollTop = 0
     void store.openPendingModal(nextBill)

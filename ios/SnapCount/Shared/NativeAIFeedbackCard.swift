@@ -58,6 +58,22 @@ enum NativeAIFeedbackReviewPresentation: Equatable {
     }
 }
 
+enum NativeAIFeedbackExposurePresentation: Equatable {
+    case start
+    case acknowledging
+    case retry
+
+    static func resolve(
+        exposureState: NativeRecordExpressionPlanExposureState
+    ) -> NativeAIFeedbackExposurePresentation {
+        switch exposureState {
+        case .idle: return .start
+        case .acknowledging: return .acknowledging
+        case .failed: return .retry
+        }
+    }
+}
+
 private struct NativeAIFeedbackCardFramePreferenceKey: PreferenceKey {
     static var defaultValue: CGRect { .null }
 
@@ -272,7 +288,17 @@ struct NativeAIFeedbackCard: View {
             Text("点评这条反馈")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.secondary)
-            if exposureState == .failed {
+            switch NativeAIFeedbackExposurePresentation.resolve(exposureState: exposureState) {
+            case .start:
+                Button {
+                    onRetryExposure?()
+                } label: {
+                    Label("开启点评", systemImage: "bubble.left.and.bubble.right")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("ai-feedback-start-exposure")
+            case .retry:
                 Button {
                     onRetryExposure?()
                 } label: {
@@ -281,7 +307,7 @@ struct NativeAIFeedbackCard: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .accessibilityIdentifier("ai-feedback-retry-exposure")
-            } else {
+            case .acknowledging:
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)

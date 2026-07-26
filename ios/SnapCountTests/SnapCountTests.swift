@@ -195,6 +195,71 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(merged.dailySummaries.first?.income, 30)
     }
 
+    func testDashboardPendingHistoryFailurePreservesOnlyOlderPendingRecords() {
+        let currentMonth = String(NativeLocalDate.dateKey(Date()).prefix(7))
+        let currentDate = "\(currentMonth)-15"
+        let olderDate = NativeMonthKey.shifted(currentMonth, by: -1).map { "\($0)-20" }
+            ?? "2026-06-20"
+        let currentPending = NativePendingExpense(
+            id: "current-new", title: "本月待补全", amount: 12, dateKey: currentDate,
+            reference: "expense/current-new", occurredAtLabel: "\(currentDate) 12:00"
+        )
+        let staleCurrentPending = NativePendingExpense(
+            id: "current-stale", title: "已处理的旧缓存", amount: 18, dateKey: currentDate,
+            reference: "expense/current-stale", occurredAtLabel: "\(currentDate) 08:00"
+        )
+        let olderPending = NativePendingExpense(
+            id: "older", title: "跨月待补全", amount: 20, dateKey: olderDate,
+            reference: "expense/older", occurredAtLabel: "\(olderDate) 09:00"
+        )
+        var previous = DashboardSnapshot(monthExpense: 80)
+        previous.pendingExpenses = [staleCurrentPending, olderPending]
+        var partial = DashboardSnapshot(monthExpense: 100)
+        partial.pendingExpenses = [currentPending]
+        partial.unavailableSections = [.pendingExpense]
+
+        let merged = partial.mergingUnavailableSections(from: previous)
+
+        XCTAssertEqual(merged.monthExpense, 100)
+        XCTAssertEqual(merged.pendingExpenses.map(\.id), ["current-new", "older"])
+        XCTAssertEqual(merged.pendingCount, 2)
+    }
+
+    func testDashboardKeepsFreshPendingWhenMonthlyExpenseQueryFails() {
+        let previousPending = NativePendingExpense(
+            id: "previous",
+            title: "旧待补全",
+            amount: 10,
+            dateKey: "2026-07-20",
+            reference: "expense/previous"
+        )
+        let freshPending = NativePendingExpense(
+            id: "fresh",
+            title: "新待补全",
+            amount: 20,
+            dateKey: "2026-07-26",
+            reference: "expense/fresh"
+        )
+        var previous = DashboardSnapshot(monthExpense: 80, todayExpense: 8)
+        previous.pendingExpenses = [previousPending]
+        var partial = DashboardSnapshot(monthExpense: 0, todayExpense: 0)
+        partial.pendingExpenses = [freshPending]
+        partial.unavailableSections = [.expense]
+
+        let merged = partial.mergingUnavailableSections(from: previous)
+
+        XCTAssertEqual(merged.monthExpense, 80)
+        XCTAssertEqual(merged.todayExpense, 8)
+        XCTAssertEqual(merged.pendingExpenses.map(\.id), ["fresh"])
+        XCTAssertEqual(merged.pendingCount, 1)
+    }
+
+    func testDashboardPagedQueriesEndWithUniqueIDTieBreaker() {
+        XCTAssertTrue(
+            NativeDashboardQueryOrder.pagedQueries.allSatisfy { $0.hasSuffix(",id.desc") }
+        )
+    }
+
     func testCameraUploadUsesSmallerPhotoPreset() throws {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1_800, height: 1_200))
         let source = renderer.image { context in
@@ -442,10 +507,19 @@ final class SnapCountTests: XCTestCase {
     @MainActor
     func testExpressionPlanCardVisibilityStateIsExplicitAndReversible() {
         let state = AppState()
+        let feedbackIdentity = "expression_planner:candidate-1:preview:当前候选"
 
         XCTAssertFalse(state.isRecordExpressionPlanCardVisible(reference: "expense/record-1"))
-        state.setRecordExpressionPlanCardVisible(true, reference: "tx-record-1")
+        state.setRecordExpressionPlanCardVisible(
+            true,
+            reference: "tx-record-1",
+            feedbackIdentity: feedbackIdentity
+        )
         XCTAssertTrue(state.isRecordExpressionPlanCardVisible(reference: "expense/record-1"))
+        XCTAssertTrue(state.isRecordExpressionPlanCardVisible(
+            reference: "expense/record-1",
+            feedbackIdentity: feedbackIdentity
+        ))
         state.setRecordExpressionPlanCardVisible(false, reference: "expense/record-1")
         XCTAssertFalse(state.isRecordExpressionPlanCardVisible(reference: "tx-record-1"))
     }
@@ -572,8 +646,178 @@ final class SnapCountTests: XCTestCase {
                 existing: [remoteFeedback],
                 pending: pendingFeedback
             ),
-            pendingFeedback
+            remoteFeedback
         )
+    }
+
+    func testLowValuePlannerPreviewDoesNotDowngradeCompleteCompanionFeedback() throws {
+        let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "badge": AnyCodable("金额偏高"),
+            "emotion_line": AnyCodable("这笔比你平时的同类消费高一些。"),
+            "detail_reason": AnyCodable("结合当前金额和历史消费判断。")
+        ]))
+        let contextPreview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
+            "dimension": AnyCodable("record_context"),
+            "emotion_line": AnyCodable("记录于今天 09:43。"),
+            "detail_reason": AnyCodable("基于当前记录计算。")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: companionFeedback,
+                preview: contextPreview
+            ),
+            companionFeedback
+        )
+    }
+
+    func testLowValuePlannerPreviewDoesNotReplaceConciseCompanionFeedback() throws {
+        let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "emotion_line": AnyCodable("这笔金额值得留意。")
+        ]))
+        let contextPreview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
+            "dimension": AnyCodable("record_context"),
+            "emotion_line": AnyCodable("记录于今天 09:43。"),
+            "detail_reason": AnyCodable("基于当前记录计算。")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: companionFeedback,
+                preview: contextPreview
+            ),
+            companionFeedback
+        )
+    }
+
+    func testPlannerPreviewStillDisplaysWhenRecordHasNoFeedback() throws {
+        let contextPreview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
+            "dimension": AnyCodable("record_context"),
+            "emotion_line": AnyCodable("记录于今天 09:43。")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: nil,
+                preview: contextPreview
+            ),
+            contextPreview
+        )
+    }
+
+    func testIncompletePlannerInsightDoesNotReplaceCompleteCompanionFeedback() throws {
+        let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "emotion_line": AnyCodable("这笔金额值得留意。"),
+            "detail_reason": AnyCodable("金额明显高于同类记录。")
+        ]))
+        let incompleteComparison = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("comparison:merchant:daily-active-median:record-1"),
+            "semantic_key": AnyCodable("merchant_daily_vs_active_day_median"),
+            "dimension": AnyCodable("personal_baseline"),
+            "emotion_line": AnyCodable("今天共 1 笔、4 元。")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: companionFeedback,
+                preview: incompleteComparison
+            ),
+            companionFeedback
+        )
+    }
+
+    func testCompletePlannerInsightDoesNotReplaceExistingCompanionFeedback() throws {
+        let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "emotion_line": AnyCodable("这笔金额值得留意。"),
+            "detail_reason": AnyCodable("金额偏高。")
+        ]))
+        let comparison = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("comparison:merchant:daily-active-median:record-1"),
+            "semantic_key": AnyCodable("merchant_daily_vs_active_day_median"),
+            "dimension": AnyCodable("personal_baseline"),
+            "emotion_line": AnyCodable("今天共 1 笔、4 元，低于你的活跃日中位数。"),
+            "detail_reason": AnyCodable("基于 8 个历史活跃日计算。")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: companionFeedback,
+                preview: comparison
+            ),
+            companionFeedback
+        )
+    }
+
+    func testExposurePresentationDoesNotShowProgressBeforeAcknowledgementStarts() {
+        XCTAssertEqual(
+            NativeAIFeedbackExposurePresentation.resolve(exposureState: .idle),
+            .start
+        )
+        XCTAssertEqual(
+            NativeAIFeedbackExposurePresentation.resolve(exposureState: .acknowledging),
+            .acknowledging
+        )
+        XCTAssertEqual(
+            NativeAIFeedbackExposurePresentation.resolve(exposureState: .failed),
+            .retry
+        )
+    }
+
+    @MainActor
+    func testCompleteCompanionFeedbackSurvivesLowValuePlannerLookup() async throws {
+        let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "badge": AnyCodable("金额偏高"),
+            "emotion_line": AnyCodable("这笔比你平时的同类消费高一些。"),
+            "detail_reason": AnyCodable("结合当前金额和历史消费判断。")
+        ]))
+        let contextPreview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
+            "dimension": AnyCodable("record_context"),
+            "emotion_line": AnyCodable("记录于今天 09:43。"),
+            "detail_reason": AnyCodable("基于当前记录计算。")
+        ]))
+        let repository = RecordRepositoryStub(
+            details: [expressionRecordDetail(feedback: companionFeedback)],
+            expressionPlanLookups: [.available(NativeRecordExpressionPlan(
+                planToken: "plan-context",
+                candidateId: "fact:expense:record-context:record-1",
+                feedback: contextPreview
+            ))]
+        )
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+        state.setRecordExpressionPlanCardVisible(
+            true,
+            reference: "expense/record-1",
+            feedbackIdentity: contextPreview.renderIdentity
+        )
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
+
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, companionFeedback)
+        XCTAssertEqual(repository.acknowledgementCount, 0)
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
     }
 
     @MainActor
@@ -607,6 +851,10 @@ final class SnapCountTests: XCTestCase {
 
         await state.loadRecordDetail(reference: "expense/record-1", force: true)
         state.setRecordExpressionPlanCardVisible(true, reference: "expense/record-1")
+        XCTAssertTrue(state.isRecordExpressionPlanCardVisible(
+            reference: "expense/record-1",
+            feedbackIdentity: previewFeedback.renderIdentity
+        ))
         await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
 
         XCTAssertEqual(repository.acknowledgementCount, 4)
@@ -701,6 +949,95 @@ final class SnapCountTests: XCTestCase {
 
         XCTAssertNil(state.selectedRecordDetail)
         XCTAssertNil(state.recordDetail(matching: "expense/record-1"))
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
+    }
+
+    @MainActor
+    func testExpressionPlanAcknowledgementRequiresVisibleCandidateIdentity() async throws {
+        let previewFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-current"),
+            "emotion_line": AnyCodable("当前候选")
+        ]))
+        let repository = RecordRepositoryStub(
+            details: [expressionRecordDetail()],
+            expressionPlanLookups: [.available(NativeRecordExpressionPlan(
+                planToken: "plan-current",
+                candidateId: "candidate-current",
+                feedback: previewFeedback
+            ))]
+        )
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+        state.setRecordExpressionPlanCardVisible(
+            true,
+            reference: "expense/record-1",
+            feedbackIdentity: "expression_planner:candidate-old:preview:旧候选"
+        )
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
+
+        XCTAssertEqual(repository.acknowledgementCount, 0)
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, previewFeedback)
+    }
+
+    @MainActor
+    func testStaleAcknowledgementCannotOverwriteAnotherRecord() async throws {
+        let previewFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-a"),
+            "emotion_line": AnyCodable("A 的待确认候选")
+        ]))
+        let acknowledgedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-a"),
+            "emotion_line": AnyCodable("A 的待确认候选"),
+            "exposure_event_id": AnyCodable("exposure-a")
+        ]))
+        var stateReference: AppState?
+        let repository = RecordRepositoryStub(
+            details: [
+                expressionRecordDetail(id: "record-a"),
+                expressionRecordDetail(id: "record-b")
+            ],
+            expressionPlanLookups: [
+                .available(NativeRecordExpressionPlan(
+                    planToken: "plan-a",
+                    candidateId: "candidate-a",
+                    feedback: previewFeedback
+                )),
+                .unavailable(reason: "no_selected_candidate")
+            ],
+            acknowledgedFeedback: acknowledgedFeedback,
+            onAcknowledgementStarted: {
+                await stateReference?.loadRecordDetail(
+                    reference: "expense/record-b",
+                    force: true
+                )
+            }
+        )
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+        stateReference = state
+
+        await state.loadRecordDetail(reference: "expense/record-a", force: true)
+        state.setRecordExpressionPlanCardVisible(
+            true,
+            reference: "expense/record-a",
+            feedbackIdentity: previewFeedback.renderIdentity
+        )
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-a")
+
+        XCTAssertEqual(repository.acknowledgementCount, 1)
+        XCTAssertEqual(state.selectedRecordDetail?.id, "expense/record-b")
+        XCTAssertNil(state.selectedRecordDetail?.aiFeedback)
+        XCTAssertNotEqual(state.selectedRecordDetail?.aiFeedback, acknowledgedFeedback)
         XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
     }
 
@@ -1258,6 +1595,86 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNil(item.stagingRecord)
     }
 
+    func testInboxTodayScopeUsesOccurrenceInsteadOfUploadFallback() {
+        let unknownOccurrence = NativeStagingRecord(
+            id: "unknown", dateKey: "2026-07-26", title: "待分类", summary: "发生时间未知",
+            status: "routing_failed", statusLabel: "待分类", recordTypeLabel: "截图",
+            createdAtLabel: "2026-07-26 09:30", occurredAtLabel: nil, confidencePercent: nil,
+            lastErrorMessage: nil, retryCount: 0, systemImage: "tray", imagePath: nil,
+            imageURL: nil, imageLoadError: false, recordType: "uncertain", domainKey: nil,
+            domainName: nil, extracted: [:], companionMessage: nil, targetRecordId: nil, imageHash: nil
+        )
+        let oldOccurrence = NativeStagingRecord(
+            id: "old", dateKey: "2026-07-25", title: "待确认", summary: "昨天发生、今天上传",
+            status: "pending_review", statusLabel: "待确认", recordTypeLabel: "截图",
+            createdAtLabel: "2026-07-26 10:00", occurredAtLabel: "2026-07-25 22:30", confidencePercent: 80,
+            lastErrorMessage: nil, retryCount: 0, systemImage: "tray", imagePath: nil,
+            imageURL: nil, imageLoadError: false, recordType: "uncertain", domainKey: nil,
+            domainName: nil, extracted: [:], companionMessage: nil, targetRecordId: nil, imageHash: nil
+        )
+        let todayOccurrence = NativeStagingRecord(
+            id: "today", dateKey: "2026-07-26", title: "待确认", summary: "今天发生",
+            status: "pending_review", statusLabel: "待确认", recordTypeLabel: "截图",
+            createdAtLabel: "2026-07-26 11:00", occurredAtLabel: "2026-07-26 08:00", confidencePercent: 80,
+            lastErrorMessage: nil, retryCount: 0, systemImage: "tray", imagePath: nil,
+            imageURL: nil, imageLoadError: false, recordType: "uncertain", domainKey: nil,
+            domainName: nil, extracted: [:], companionMessage: nil, targetRecordId: nil, imageHash: nil
+        )
+
+        let allItems = NativeInboxPresentation.items(
+            pendingExpenses: [],
+            stagingRecords: [unknownOccurrence, oldOccurrence, todayOccurrence]
+        )
+        let todayItems = NativeInboxPresentation.filtered(
+            allItems,
+            scope: .today,
+            filter: .all,
+            today: "2026-07-26"
+        )
+
+        XCTAssertEqual(todayItems.map(\.id), ["staging-today"])
+        XCTAssertEqual(allItems.count, 3)
+    }
+
+    func testInboxMixedQueueSortsByOccurrenceAcrossKinds() {
+        let pending = NativePendingExpense(
+            id: "bill", title: "待补全账单", amount: 18,
+            dateKey: "2026-07-26", reference: "expense/bill",
+            occurredAtLabel: "2026-07-26 09:30", createdAtLabel: "2026-07-26 09:31"
+        )
+        let staging = NativeStagingRecord(
+            id: "review", dateKey: "2026-07-26", title: "待确认", summary: "稍早发生",
+            status: "pending_review", statusLabel: "待确认", recordTypeLabel: "截图",
+            createdAtLabel: "2026-07-26 10:00", occurredAtLabel: "2026-07-26 09:00", confidencePercent: 80,
+            lastErrorMessage: nil, retryCount: 0, systemImage: "tray", imagePath: nil,
+            imageURL: nil, imageLoadError: false, recordType: "uncertain", domainKey: nil,
+            domainName: nil, extracted: [:], companionMessage: nil, targetRecordId: nil, imageHash: nil
+        )
+
+        let items = NativeInboxPresentation.items(
+            pendingExpenses: [pending],
+            stagingRecords: [staging]
+        )
+
+        XCTAssertEqual(items.map(\.id), ["pending-bill", "staging-review"])
+    }
+
+    func testInboxNextSelectionKeepsAdjacentPosition() {
+        let ids = ["first", "middle", "last"]
+
+        XCTAssertEqual(
+            NativeInboxPresentation.nextSelection(afterRemoving: "middle", from: ids),
+            "last"
+        )
+        XCTAssertEqual(
+            NativeInboxPresentation.nextSelection(afterRemoving: "last", from: ids),
+            "middle"
+        )
+        XCTAssertNil(
+            NativeInboxPresentation.nextSelection(afterRemoving: "only", from: ["only"])
+        )
+    }
+
     func testAtomicArchiveBodyUsesStagingIdentityAndDomain() {
         let record = NativeStagingRecord(
             id: "staging-1", dateKey: "2026-07-16", title: "骑行记录", summary: "骑行 30 分钟",
@@ -1616,6 +2033,40 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(summaries.filter { $0.expense > 0 }.count, 2)
     }
 
+    func testHomeInsightDailySummariesShowNewestRecordedDayFirst() {
+        let olderRecord = NativeDayRecord(
+            id: "expense-old", reference: "expense/old", dateKey: "2026-07-01", kind: .expense,
+            domainKey: "expense", title: "早餐", subtitle: "", value: "¥12", timeLabel: nil,
+            systemImage: "creditcard"
+        )
+        let newerRecord = NativeDayRecord(
+            id: "expense-new", reference: "expense/new", dateKey: "2026-07-25", kind: .expense,
+            domainKey: "expense", title: "晚餐", subtitle: "", value: "¥30", timeLabel: nil,
+            systemImage: "creditcard"
+        )
+        let snapshot = DashboardSnapshot(dayRecordGroups: [
+            NativeDayRecordGroup(dateKey: "2026-07-01", records: [olderRecord]),
+            NativeDayRecordGroup(dateKey: "2026-07-25", records: [newerRecord])
+        ])
+
+        XCTAssertEqual(
+            NativeHomeInsightAnalytics.dailySummaries(from: snapshot).map(\.dateKey),
+            ["2026-07-25", "2026-07-01"]
+        )
+    }
+
+    func testHomeInsightDailySummaryFallbackShowsNewestDayFirst() {
+        let snapshot = DashboardSnapshot(dailySummaries: [
+            NativeDailySummary(dateKey: "2026-07-01", expense: 12, income: 0, pendingCount: 0, recordCount: 1),
+            NativeDailySummary(dateKey: "2026-07-25", expense: 30, income: 0, pendingCount: 0, recordCount: 1)
+        ])
+
+        XCTAssertEqual(
+            NativeHomeInsightAnalytics.dailySummaries(from: snapshot).map(\.dateKey),
+            ["2026-07-25", "2026-07-01"]
+        )
+    }
+
     func testHomeInsightRecentWindowIncludesPreviousMonthAndExcludesPendingExpense() {
         let juneSnapshot = DashboardSnapshot(dayRecordGroups: [
             NativeDayRecordGroup(dateKey: "2026-06-30", records: [
@@ -1929,6 +2380,7 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     private var expressionPlanLookups: [NativeRecordExpressionPlanLookup]
     private let acknowledgedFeedback: NativeAIFeedback?
     private let createReference: String
+    private let onAcknowledgementStarted: (@MainActor () async -> Void)?
     private var acknowledgementFailuresRemaining: Int
     private(set) var expressionPlanLookupCount = 0
     private(set) var acknowledgementCount = 0
@@ -1939,13 +2391,15 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
         expressionPlanLookups: [NativeRecordExpressionPlanLookup] = [.unavailable(reason: "no_selected_candidate")],
         acknowledgedFeedback: NativeAIFeedback? = nil,
         createReference: String = "expense/record-1",
-        acknowledgementFailuresRemaining: Int = 0
+        acknowledgementFailuresRemaining: Int = 0,
+        onAcknowledgementStarted: (@MainActor () async -> Void)? = nil
     ) {
         self.details = details
         self.expressionPlanLookups = expressionPlanLookups
         self.acknowledgedFeedback = acknowledgedFeedback
         self.createReference = createReference
         self.acknowledgementFailuresRemaining = acknowledgementFailuresRemaining
+        self.onAcknowledgementStarted = onAcknowledgementStarted
     }
 
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
@@ -1973,6 +2427,9 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
         accessToken: String
     ) async throws -> NativeAIFeedback {
         acknowledgementCount += 1
+        if let onAcknowledgementStarted {
+            await onAcknowledgementStarted()
+        }
         if acknowledgementFailuresRemaining > 0 {
             acknowledgementFailuresRemaining -= 1
             throw SupabaseRemoteError.requestFailed("temporary failure")

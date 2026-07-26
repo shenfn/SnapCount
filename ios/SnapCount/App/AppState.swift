@@ -113,7 +113,7 @@ final class AppState: ObservableObject {
     private var expressionPlanDeliveryTokens: [String: UUID] = [:]
     private var pendingRecordExpressionPlans: [String: PendingRecordExpressionPlanDelivery] = [:]
     private var expressionPlanAcknowledgementTokens: [String: UUID] = [:]
-    private var visibleRecordExpressionPlanCards: Set<String> = []
+    private var visibleRecordExpressionPlanCards: [String: String] = [:]
     private var insightsLoadedAt: Date?
     private var dashboardRefreshGeneration = 0
     private var userStateGeneration = 0
@@ -1251,8 +1251,12 @@ final class AppState: ObservableObject {
         }
     }
 
-    func discardStagingRecord(_ record: NativeStagingRecord) async {
-        guard inboxActionRecordId == nil else { return }
+    @discardableResult
+    func discardStagingRecord(
+        _ record: NativeStagingRecord,
+        preserveInboxNavigation: Bool = false
+    ) async -> Bool {
+        guard inboxActionRecordId == nil else { return false }
         inboxActionRecordId = record.id
         inboxActionMessage = "正在销毁截图…"
         inboxActionMessageIsError = false
@@ -1260,18 +1264,24 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             try await inboxRepository.discard(id: record.id, accessToken: session.accessToken)
-            inboxPath = NavigationPath()
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
             removeStagingRecordLocally(record.id)
             refreshDashboardAfterInboxMutation()
             inboxActionMessage = "已销毁这条待处理截图，原图将在后台安全清理"
+            return true
         } catch {
             inboxActionMessage = "销毁失败：\(error.localizedDescription)"
             inboxActionMessageIsError = true
+            return false
         }
     }
 
-    func retryStagingRecord(_ record: NativeStagingRecord) async {
-        guard inboxActionRecordId == nil else { return }
+    @discardableResult
+    func retryStagingRecord(
+        _ record: NativeStagingRecord,
+        preserveInboxNavigation: Bool = false
+    ) async -> Bool {
+        guard inboxActionRecordId == nil else { return false }
         inboxActionRecordId = record.id
         inboxActionMessage = "正在重新识别…"
         inboxActionMessageIsError = false
@@ -1281,7 +1291,7 @@ final class AppState: ObservableObject {
             let result = try await inboxRepository.retry(id: record.id, accessToken: session.accessToken)
             await refreshDashboard()
             let remainsInInbox = dashboard.stagingRecords.contains { $0.id == record.id }
-            if !remainsInInbox {
+            if !remainsInInbox, !preserveInboxNavigation {
                 inboxPath = NavigationPath()
             }
             inboxActionMessage = remainsInInbox
@@ -1290,14 +1300,20 @@ final class AppState: ObservableObject {
             if result.route.hasPrefix("inbox") {
                 inboxActionMessage = "重新识别完成，仍需确认或选择归档域"
             }
+            return true
         } catch {
             inboxActionMessage = "重新识别失败：\(error.localizedDescription)"
             inboxActionMessageIsError = true
+            return false
         }
     }
 
     @discardableResult
-    func archiveStagingRecord(_ record: NativeStagingRecord, domainKey: String) async -> String? {
+    func archiveStagingRecord(
+        _ record: NativeStagingRecord,
+        domainKey: String,
+        preserveInboxNavigation: Bool = false
+    ) async -> String? {
         guard inboxActionRecordId == nil else { return nil }
         inboxActionRecordId = record.id
         let domainTitle = dashboard.domains.first(where: { $0.id == domainKey })?.shortName
@@ -1313,7 +1329,7 @@ final class AppState: ObservableObject {
                 domainKey: domainKey,
                 accessToken: session.accessToken
             )
-            inboxPath = NavigationPath()
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
             removeStagingRecordLocally(record.id)
             refreshDashboardAfterInboxMutation()
             inboxActionMessage = "已归档到\(domainTitle)"
@@ -1329,10 +1345,15 @@ final class AppState: ObservableObject {
     func archiveStagingRecord(
         _ record: NativeStagingRecord,
         draft: NativeManualRecordDraft,
-        domain: NativeDomainDefinition?
+        domain: NativeDomainDefinition?,
+        preserveInboxNavigation: Bool = false
     ) async -> String? {
         let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
-        return await archiveStagingRecord(adjustedRecord, domainKey: draft.domainKey)
+        return await archiveStagingRecord(
+            adjustedRecord,
+            domainKey: draft.domainKey,
+            preserveInboxNavigation: preserveInboxNavigation
+        )
     }
 
     private func removeStagingRecordLocally(_ recordId: String) {
@@ -1366,6 +1387,7 @@ final class AppState: ObservableObject {
         recordDetailMessage = nil
         if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
             recordFeedbackState = .idle
+            recordExpressionPlanExposureState = .idle
         }
         if !force, let cached = recordDetailCache[canonicalReference] {
             selectedRecordDetail = cached
@@ -1413,25 +1435,44 @@ final class AppState: ObservableObject {
         session: SupabaseAuthSession,
         generation: Int
     ) async {
+        var baseDetail = detailPreservingExpressionFeedback(detail)
         let selectedFeedback = selectedRecordDetail.flatMap { selected -> NativeAIFeedback? in
             NativeRecordReference(selected.id).canonicalValue == canonicalReference
                 ? selected.aiFeedback
                 : nil
         }
+        baseDetail.aiFeedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
+            existing: [
+                baseDetail.aiFeedback,
+                recordDetailCache[canonicalReference]?.aiFeedback,
+                selectedFeedback
+            ],
+            pending: nil
+        )
         guard !NativeRecordExpressionFeedbackPolicy.hasAcknowledgedPlannerFeedback([
-            detail.aiFeedback,
+            baseDetail.aiFeedback,
             recordDetailCache[canonicalReference]?.aiFeedback,
             selectedFeedback
-        ]) else { return }
+        ]) else {
+            publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            return
+        }
 
         if let pending = pendingRecordExpressionPlans[canonicalReference],
            pending.userId == session.user.id,
-           pending.generation == generation,
-           var previewDetail = selectedRecordDetail,
-           NativeRecordReference(previewDetail.id).canonicalValue == canonicalReference {
-            previewDetail.aiFeedback = pending.plan.feedback
-            recordDetailCache[canonicalReference] = previewDetail
-            selectedRecordDetail = previewDetail
+           pending.generation == generation {
+            let selected = NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: baseDetail.aiFeedback,
+                preview: pending.plan.feedback
+            )
+            if selected == pending.plan.feedback {
+                baseDetail.aiFeedback = selected
+                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            } else {
+                discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+                baseDetail.aiFeedback = selected
+                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            }
             return
         }
         guard expressionPlanDeliveryTokens[canonicalReference] == nil else { return }
@@ -1458,24 +1499,50 @@ final class AppState: ObservableObject {
                     generation: generation
                 )
             }
-        ) else { return }
+        ) else {
+            if isCurrentExpressionPlanDelivery(
+                canonicalReference: canonicalReference,
+                session: session,
+                generation: generation
+            ) {
+                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            }
+            return
+        }
 
         guard !Task.isCancelled,
               expressionPlanDeliveryTokens[canonicalReference] == deliveryToken,
               generation == userStateGeneration,
               isSignedIn,
               currentUserId == session.user.id,
-              activeRecordReference == canonicalReference,
-              var previewDetail = selectedRecordDetail,
-              NativeRecordReference(previewDetail.id).canonicalValue == canonicalReference else { return }
+              activeRecordReference == canonicalReference else { return }
 
         guard !NativeRecordExpressionFeedbackPolicy.hasAcknowledgedPlannerFeedback([
-            previewDetail.aiFeedback,
+            baseDetail.aiFeedback,
             recordDetailCache[canonicalReference]?.aiFeedback
-        ]) else { return }
+        ]) else {
+            publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            return
+        }
 
-        let previousFeedback = previewDetail.aiFeedback
-        previewDetail.aiFeedback = preview.feedback
+        let previousFeedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
+            existing: [
+                baseDetail.aiFeedback,
+                recordDetailCache[canonicalReference]?.aiFeedback
+            ],
+            pending: nil
+        )
+        let selected = NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+            existing: previousFeedback,
+            preview: preview.feedback
+        )
+        baseDetail.aiFeedback = selected
+        guard selected == preview.feedback else {
+            publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            recordExpressionPlanExposureState = .idle
+            return
+        }
+
         pendingRecordExpressionPlans[canonicalReference] = PendingRecordExpressionPlanDelivery(
             id: UUID(),
             recordId: detail.rawId,
@@ -1484,23 +1551,50 @@ final class AppState: ObservableObject {
             userId: session.user.id,
             generation: generation
         )
-        recordDetailCache[canonicalReference] = previewDetail
-        selectedRecordDetail = previewDetail
+        publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
         recordFeedbackState = .idle
         recordExpressionPlanExposureState = .idle
     }
 
-    func setRecordExpressionPlanCardVisible(_ isVisible: Bool, reference: String) {
+    private func publishResolvedRecordDetail(
+        _ detail: NativeRecordDetail,
+        canonicalReference: String
+    ) {
+        recordDetailCache[canonicalReference] = detail
+        guard activeRecordReference == canonicalReference else { return }
+        selectedRecordDetail = detail
+    }
+
+    func setRecordExpressionPlanCardVisible(
+        _ isVisible: Bool,
+        reference: String,
+        feedbackIdentity: String? = nil
+    ) {
         let canonicalReference = NativeRecordReference(reference).canonicalValue
+        let identity = feedbackIdentity ?? selectedRecordDetail.flatMap { detail -> String? in
+            guard NativeRecordReference(detail.id).canonicalValue == canonicalReference else { return nil }
+            return detail.aiFeedback?.renderIdentity
+        }
         if isVisible {
-            visibleRecordExpressionPlanCards.insert(canonicalReference)
-        } else {
-            visibleRecordExpressionPlanCards.remove(canonicalReference)
+            guard let identity else { return }
+            visibleRecordExpressionPlanCards[canonicalReference] = identity
+        } else if feedbackIdentity == nil
+                    || visibleRecordExpressionPlanCards[canonicalReference] == feedbackIdentity {
+            visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
         }
     }
 
-    func isRecordExpressionPlanCardVisible(reference: String) -> Bool {
-        visibleRecordExpressionPlanCards.contains(NativeRecordReference(reference).canonicalValue)
+    func isRecordExpressionPlanCardVisible(
+        reference: String,
+        feedbackIdentity: String? = nil
+    ) -> Bool {
+        let visibleIdentity = visibleRecordExpressionPlanCards[
+            NativeRecordReference(reference).canonicalValue
+        ]
+        if let feedbackIdentity {
+            return visibleIdentity == feedbackIdentity
+        }
+        return visibleIdentity != nil
     }
 
     func acknowledgeRecordExpressionPlanIfVisible(reference: String) async {
@@ -1515,7 +1609,8 @@ final class AppState: ObservableObject {
             return
         }
         guard !Task.isCancelled,
-              visibleRecordExpressionPlanCards.contains(canonicalReference) else { return }
+              visibleRecordExpressionPlanCards[canonicalReference]
+                == pending.plan.feedback.renderIdentity else { return }
 
         let acknowledgementToken = UUID()
         expressionPlanAcknowledgementTokens[canonicalReference] = acknowledgementToken
@@ -1570,7 +1665,8 @@ final class AppState: ObservableObject {
             return
         }
 
-        guard isPendingExpressionPlanActive(
+        guard expressionPlanAcknowledgementTokens[canonicalReference] == acknowledgementToken,
+              isPendingExpressionPlanActive(
             pending,
             canonicalReference: canonicalReference
         ) else { return }
@@ -1640,7 +1736,7 @@ final class AppState: ObservableObject {
     ) {
         guard pendingRecordExpressionPlans[canonicalReference]?.id == pending.id else { return }
         pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
-        visibleRecordExpressionPlanCards.remove(canonicalReference)
+        visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
         restoreUnacknowledgedExpressionPreview(
             pending.plan.feedback,
             previousFeedback: pending.previousFeedback,
@@ -1696,7 +1792,7 @@ final class AppState: ObservableObject {
         }
         expressionPlanDeliveryTokens.removeValue(forKey: canonicalReference)
         expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
-        visibleRecordExpressionPlanCards.remove(canonicalReference)
+        visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
         activeRecordReference = nil
         selectedRecordDetail = nil
         recordFeedbackState = .idle
@@ -1709,7 +1805,7 @@ final class AppState: ObservableObject {
             pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
             expressionPlanDeliveryTokens.removeValue(forKey: canonicalReference)
             expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
-            visibleRecordExpressionPlanCards.remove(canonicalReference)
+            visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
             recordDetailCache.removeValue(forKey: canonicalReference)
         }
         if let selectedReference = selectedRecordDetail.map({
@@ -1769,7 +1865,10 @@ final class AppState: ObservableObject {
         }
     }
 
-    func confirmPendingRecord(_ draft: NativePendingResolutionDraft) async -> Bool {
+    func confirmPendingRecord(
+        _ draft: NativePendingResolutionDraft,
+        preserveInboxNavigation: Bool = false
+    ) async -> Bool {
         guard !isConfirmingPendingRecord else { return false }
         if let validationMessage = draft.validationMessage {
             pendingResolutionMessage = validationMessage
@@ -1796,7 +1895,7 @@ final class AppState: ObservableObject {
             )
             await loadAccounts()
             await refreshDashboard()
-            inboxPath = NavigationPath()
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
             pendingResolutionMessage = draft.kind == .income ? "收入已记录" : "支出已补全"
             return true
         } catch {

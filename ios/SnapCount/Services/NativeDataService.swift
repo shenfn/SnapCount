@@ -2,9 +2,20 @@ import Foundation
 
 enum DashboardDataSection: Hashable {
     case expense
+    case pendingExpense
     case income
     case universal
     case staging
+}
+
+enum NativeDashboardQueryOrder {
+    static let transactions = "transaction_date.desc,transaction_time.desc.nullslast,created_at.desc,id.desc"
+    static let pendingTransactions = transactions
+    static let incomes = "income_date.desc,created_at.desc,id.desc"
+    static let universal = "occurred_at.desc.nullslast,created_at.desc,id.desc"
+    static let staging = "occurred_at.desc.nullslast,created_at.desc,id.desc"
+
+    static let pagedQueries = [transactions, pendingTransactions, incomes, universal, staging]
 }
 
 struct DashboardSnapshot {
@@ -185,6 +196,9 @@ private func capture<Value>(_ operation: () async throws -> Value) async -> Nati
 }
 
 final class NativeDataService {
+    private static let resolvedStagingStatuses: Set<String> = [
+        "confirmed", "discarded", "archived", "assigned"
+    ]
     private let remoteClient: SupabaseRemoteClientProtocol
     private let decoder = JSONDecoder()
     private let imageURLProvider: SupabaseImageURLProvider
@@ -204,17 +218,33 @@ final class NativeDataService {
 
         let monthRange = try monthRange(for: localDateString(Date()).prefix(7).description)
         async let transactionsResult = capture { try await self.fetchTransactions(in: monthRange, accessToken: accessToken) }
+        async let pendingTransactionsResult = capture { try await self.fetchPendingTransactions(accessToken: accessToken) }
         async let incomesResult = capture { try await self.fetchIncomes(in: monthRange, accessToken: accessToken) }
         async let universalResult = capture { try await self.fetchUniversalRecords(in: monthRange, accessToken: accessToken) }
         async let stagingResult = capture { try await self.fetchStagingRecords(accessToken: accessToken) }
 
-        let (transactions, incomes, universal, staging) = await (transactionsResult, incomesResult, universalResult, stagingResult)
-        let txRows = transactions.value ?? []
+        let (transactions, pendingTransactions, incomes, universal, staging) = await (
+            transactionsResult,
+            pendingTransactionsResult,
+            incomesResult,
+            universalResult,
+            stagingResult
+        )
+        var seenTransactionIDs = Set<String>()
+        let txRows = ((transactions.value ?? []) + (pendingTransactions.value ?? [])).filter {
+            seenTransactionIDs.insert($0.id).inserted
+        }
         let incomeRows = incomes.value ?? []
         let universalRows = universal.value ?? []
         let stagingRows = staging.value ?? []
-        let errors = [transactions.error, incomes.error, universal.error, staging.error].compactMap { $0 }
-        if errors.count == 4 {
+        let errors = [
+            transactions.error,
+            pendingTransactions.error,
+            incomes.error,
+            universal.error,
+            staging.error
+        ].compactMap { $0 }
+        if errors.count == 5 {
             throw SupabaseRemoteError.requestFailed(errors.map(\.localizedDescription).joined(separator: "；"))
         }
         let today = localDateString(Date())
@@ -223,12 +253,14 @@ final class NativeDataService {
         var snapshot = DashboardSnapshot()
         snapshot.unavailableSections = Set([
             transactions.error == nil ? nil : DashboardDataSection.expense,
+            pendingTransactions.error == nil ? nil : DashboardDataSection.pendingExpense,
             incomes.error == nil ? nil : DashboardDataSection.income,
             universal.error == nil ? nil : DashboardDataSection.universal,
             staging.error == nil ? nil : DashboardDataSection.staging
         ].compactMap { $0 })
         snapshot.loadWarnings = [
             transactions.error.map { "消费数据暂未同步：\($0.localizedDescription)" },
+            pendingTransactions.error.map { "较早的待补全账单暂未同步：\($0.localizedDescription)" },
             incomes.error.map { "收入数据暂未同步：\($0.localizedDescription)" },
             universal.error.map { "通用数据暂未同步：\($0.localizedDescription)" },
             staging.error.map { "中转站暂未同步：\($0.localizedDescription)" }
@@ -258,7 +290,7 @@ final class NativeDataService {
 
         snapshot.pendingCount =
             txRows.filter { $0.status == "pending" }.count +
-            stagingRows.filter { !["discarded", "archived", "assigned"].contains($0.status ?? "") }.count
+            stagingRows.filter { Self.isOpenStagingStatus($0.status) }.count
 
         let monthExpenseCount = txRows.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.count
         let monthIncomeCount = incomeRows.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.count
@@ -314,7 +346,7 @@ final class NativeDataService {
             signedURLs: [:]
         )
         snapshot.stagingRecords = stagingRows
-            .filter { !["discarded", "archived", "assigned"].contains($0.status ?? "") }
+            .filter { Self.isOpenStagingStatus($0.status) }
             .map { stagingRecord($0, signedImageURL: nil) }
         return snapshot
     }
@@ -364,7 +396,20 @@ final class NativeDataService {
                 URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
                 URLQueryItem(name: "transaction_date", value: "gte.\(range.startDate)"),
                 URLQueryItem(name: "transaction_date", value: "lte.\(range.endDate)"),
-                URLQueryItem(name: "order", value: "transaction_date.desc,transaction_time.desc.nullslast,created_at.desc")
+                URLQueryItem(name: "order", value: NativeDashboardQueryOrder.transactions)
+            ],
+            accessToken: accessToken
+        )
+    }
+
+    private func fetchPendingTransactions(accessToken: String) async throws -> [TransactionRow] {
+        try await pagedRows(
+            [TransactionRow].self,
+            path: "rest/v1/transactions",
+            queryItems: [
+                URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
+                URLQueryItem(name: "status", value: "eq.pending"),
+                URLQueryItem(name: "order", value: NativeDashboardQueryOrder.pendingTransactions)
             ],
             accessToken: accessToken
         )
@@ -378,7 +423,7 @@ final class NativeDataService {
                 URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
                 URLQueryItem(name: "income_date", value: "gte.\(range.startDate)"),
                 URLQueryItem(name: "income_date", value: "lte.\(range.endDate)"),
-                URLQueryItem(name: "order", value: "income_date.desc,created_at.desc")
+                URLQueryItem(name: "order", value: NativeDashboardQueryOrder.incomes)
             ],
             accessToken: accessToken
         )
@@ -392,7 +437,7 @@ final class NativeDataService {
                 URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
                 URLQueryItem(name: "occurred_at", value: "gte.\(range.startTimestamp)"),
                 URLQueryItem(name: "occurred_at", value: "lte.\(range.endTimestamp)"),
-                URLQueryItem(name: "order", value: "occurred_at.desc.nullslast,created_at.desc")
+                URLQueryItem(name: "order", value: NativeDashboardQueryOrder.universal)
             ],
             accessToken: accessToken
         )
@@ -458,13 +503,13 @@ final class NativeDataService {
     }
 
     private func fetchStagingRecords(accessToken: String) async throws -> [StagingRow] {
-        try await decoded(
+        try await pagedRows(
             [StagingRow].self,
             path: "rest/v1/staging_records",
             queryItems: [
                 URLQueryItem(name: "select", value: "id,created_at,status,detected_domain_key,detected_domain_name,record_type,occurred_at,confidence,ai_summary,last_error_message,retry_count,image_path,image_hash,image_type,extracted_json,companion_message,target_record_id"),
-                URLQueryItem(name: "order", value: "created_at.desc"),
-                URLQueryItem(name: "limit", value: "30")
+                URLQueryItem(name: "or", value: Self.openStagingStatusFilter),
+                URLQueryItem(name: "order", value: NativeDashboardQueryOrder.staging)
             ],
             accessToken: accessToken
         )
@@ -916,7 +961,10 @@ final class NativeDataService {
             let dayTransactions = transactions.filter { $0.transactionDate == date }
             let dayIncomes = incomes.filter { $0.incomeDate == date }
             let dayUniversal = universal.filter { ($0.occurredAt ?? $0.createdAt).map(dateOnly) == date }
-            let dayStaging = staging.filter { ($0.occurredAt ?? $0.createdAt).map(dateOnly) == date && !["discarded", "archived", "assigned"].contains($0.status ?? "") }
+            let dayStaging = staging.filter {
+                ($0.occurredAt ?? $0.createdAt).map(dateOnly) == date
+                    && Self.isOpenStagingStatus($0.status)
+            }
             return NativeDailySummary(
                 dateKey: date,
                 expense: dayTransactions
@@ -946,7 +994,10 @@ final class NativeDataService {
             let kind = NativeDayRecordKind(rawValue: row.domainKey ?? "") ?? .all
             records.append(NativeDayRecord(id: "data-\(row.id)", reference: "data/\(row.id)", dateKey: dateOnly(sourceDate), kind: kind, domainKey: row.domainKey, title: row.title ?? row.summary ?? domainName(row.domainKey), subtitle: row.summary ?? domainName(row.domainKey), value: "", timeLabel: timeOnly(sourceDate), systemImage: kind == .all ? "sparkles" : kind.systemImage))
         }
-        staging.filter { !["discarded", "archived", "assigned", "confirmed"].contains($0.status ?? "") && ($0.occurredAt ?? $0.createdAt).map(dateOnly)?.hasPrefix(monthPrefix) == true }.forEach { row in
+        staging.filter {
+            Self.isOpenStagingStatus($0.status)
+                && ($0.occurredAt ?? $0.createdAt).map(dateOnly)?.hasPrefix(monthPrefix) == true
+        }.forEach { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
             records.append(NativeDayRecord(id: "staging-\(row.id)", reference: "staging-\(row.id)", dateKey: dateOnly(sourceDate), kind: .staging, domainKey: row.detectedDomainKey, title: row.detectedDomainName ?? domainName(row.detectedDomainKey), subtitle: row.aiSummary ?? row.lastErrorMessage ?? "待处理截图", value: row.recordType == "income" ? "+ 待确认" : row.recordType == "expense" ? "- 待确认" : "待分类", timeLabel: timeOnly(sourceDate), systemImage: stagingSystemImage(row.status ?? "unassigned")))
         }
@@ -1286,6 +1337,16 @@ final class NativeDataService {
 
     private func localDateString(_ date: Date) -> String {
         NativeLocalDate.dateKey(date)
+    }
+
+    private static var openStagingStatusFilter: String {
+        let resolved = resolvedStagingStatuses.sorted().joined(separator: ",")
+        return "(status.is.null,status.not.in.(\(resolved)))"
+    }
+
+    private static func isOpenStagingStatus(_ status: String?) -> Bool {
+        guard let status else { return true }
+        return !resolvedStagingStatuses.contains(status)
     }
 }
 

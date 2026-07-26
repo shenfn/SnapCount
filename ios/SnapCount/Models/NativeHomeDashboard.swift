@@ -330,11 +330,11 @@ struct NativeHomeSleepSpendingObservation: Equatable {
 enum NativeHomeInsightAnalytics {
     static func dailySummaries(from snapshot: DashboardSnapshot) -> [NativeDailySummary] {
         guard !snapshot.dayRecordGroups.isEmpty else {
-            return snapshot.dailySummaries.sorted { $0.dateKey < $1.dateKey }
+            return snapshot.dailySummaries.sorted { $0.dateKey > $1.dateKey }
         }
 
         return snapshot.dayRecordGroups
-            .sorted { $0.dateKey < $1.dateKey }
+            .sorted { $0.dateKey > $1.dateKey }
             .map { group in
                 NativeDailySummary(
                     dateKey: group.dateKey,

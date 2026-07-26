@@ -15,6 +15,7 @@
     "test:expression-feedback": "node --env-file=.env.local scripts/test-expression-feedback.mjs",
     "test:registration-consent": "node --env-file=.env.local scripts/test-registration-consent.mjs",
     "test:finance-options": "node scripts/test-finance-review-options.mjs",
+    "test:pending-queue": "node scripts/test-pending-queue.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",
     "audit:storage-orphans": "node scripts/audit-storage-orphans.mjs",

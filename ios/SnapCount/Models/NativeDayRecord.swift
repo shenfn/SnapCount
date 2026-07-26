@@ -72,7 +72,24 @@ extension DashboardSnapshot {
         if unavailableSections.contains(.expense) {
             merged.monthExpense = previous.monthExpense
             merged.todayExpense = previous.todayExpense
-            merged.pendingExpenses = previous.pendingExpenses
+            if unavailableSections.contains(.pendingExpense) {
+                merged.pendingExpenses = previous.pendingExpenses
+            }
+        }
+        if unavailableSections.contains(.pendingExpense),
+           !unavailableSections.contains(.expense) {
+            let monthPrefix = String(NativeLocalDate.dateKey(Date()).prefix(7))
+            let currentMonthPending = merged.pendingExpenses.filter { $0.dateKey.hasPrefix(monthPrefix) }
+            let olderPending = previous.pendingExpenses.filter { !$0.dateKey.hasPrefix(monthPrefix) }
+            merged.pendingExpenses = (currentMonthPending + olderPending).sorted {
+                if $0.dateKey != $1.dateKey { return $0.dateKey > $1.dateKey }
+                let leftOccurredAt = $0.occurredAtLabel ?? ""
+                let rightOccurredAt = $1.occurredAtLabel ?? ""
+                if leftOccurredAt != rightOccurredAt {
+                    return leftOccurredAt > rightOccurredAt
+                }
+                return $0.id > $1.id
+            }
         }
         if unavailableSections.contains(.income) {
             merged.monthIncome = previous.monthIncome
@@ -89,7 +106,9 @@ extension DashboardSnapshot {
         merged.monthCount = merged.dayRecordGroups.flatMap(\.records).filter { $0.kind != .staging }.count
         merged.pendingCount = merged.pendingExpenses.count + merged.stagingRecords.count
         merged.recordDetails = mergedRecordDetails(from: previous)
-        merged.recentRecords = previous.recentRecords
+        if !unavailableSections.isSubset(of: Set([DashboardDataSection.pendingExpense])) {
+            merged.recentRecords = previous.recentRecords
+        }
         return merged
     }
 
