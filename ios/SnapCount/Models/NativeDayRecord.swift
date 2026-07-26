@@ -18,6 +18,36 @@ struct NativeDayRecord: Identifiable {
     let value: String
     let timeLabel: String?
     let systemImage: String
+    let transactionType: String?
+    let status: String?
+
+    init(
+        id: String,
+        reference: String,
+        dateKey: String,
+        kind: NativeDayRecordKind,
+        domainKey: String?,
+        title: String,
+        subtitle: String,
+        value: String,
+        timeLabel: String?,
+        systemImage: String,
+        transactionType: String? = nil,
+        status: String? = nil
+    ) {
+        self.id = id
+        self.reference = reference
+        self.dateKey = dateKey
+        self.kind = kind
+        self.domainKey = domainKey
+        self.title = title
+        self.subtitle = subtitle
+        self.value = value
+        self.timeLabel = timeLabel
+        self.systemImage = systemImage
+        self.transactionType = transactionType
+        self.status = status
+    }
 }
 
 struct NativeDayRecordGroup: Identifiable {

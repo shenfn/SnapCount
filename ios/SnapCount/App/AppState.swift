@@ -526,9 +526,7 @@ final class AppState: ObservableObject {
         snapshot.dayRecordGroups = groups
         snapshot.recordDetails = details
         snapshot.monthCount = records.count
-        snapshot.monthExpense = details.values
-            .filter { $0.kind == "expense" }
-            .reduce(0) { $0 + ($1.amount ?? 0) }
+        snapshot.monthExpense = NativeHomeInsightAnalytics.confirmedExpenseTotal(from: snapshot)
         snapshot.monthIncome = details.values
             .filter { $0.kind == "income" }
             .reduce(0) { $0 + ($1.amount ?? 0) }

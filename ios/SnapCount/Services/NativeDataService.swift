@@ -269,13 +269,17 @@ final class NativeDataService {
         snapshot.monthCount = monthExpenseCount + monthIncomeCount + monthUniversalCount
 
         snapshot.monthExpense = txRows
-            .filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }
+            .filter {
+                $0.transactionDate?.hasPrefix(monthPrefix) == true &&
+                    $0.status == "done" &&
+                    $0.type == "expense"
+            }
             .reduce(0) { $0 + ($1.amount ?? 0) }
         snapshot.monthIncome = incomeRows
             .filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }
             .reduce(0) { $0 + ($1.amount ?? 0) }
         snapshot.todayExpense = txRows
-            .filter { $0.transactionDate == today }
+            .filter { $0.transactionDate == today && $0.status == "done" && $0.type == "expense" }
             .reduce(0) { $0 + ($1.amount ?? 0) }
         snapshot.todayIncome = incomeRows
             .filter { $0.incomeDate == today }
@@ -915,7 +919,9 @@ final class NativeDataService {
             let dayStaging = staging.filter { ($0.occurredAt ?? $0.createdAt).map(dateOnly) == date && !["discarded", "archived", "assigned"].contains($0.status ?? "") }
             return NativeDailySummary(
                 dateKey: date,
-                expense: dayTransactions.reduce(0) { $0 + ($1.amount ?? 0) },
+                expense: dayTransactions
+                    .filter { $0.status == "done" && $0.type == "expense" }
+                    .reduce(0) { $0 + ($1.amount ?? 0) },
                 income: dayIncomes.reduce(0) { $0 + ($1.amount ?? 0) },
                 pendingCount: dayTransactions.filter { $0.status == "pending" }.count + dayStaging.count,
                 recordCount: dayTransactions.count + dayIncomes.count + dayUniversal.count + dayStaging.count
@@ -929,7 +935,7 @@ final class NativeDataService {
         var records: [NativeDayRecord] = []
         transactions.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let dateKey = row.transactionDate else { return }
-            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "expense/\(row.id)", dateKey: dateKey, kind: .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: row.transactionTime, systemImage: row.status == "pending" ? "clock" : "creditcard"))
+            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "expense/\(row.id)", dateKey: dateKey, kind: .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: row.transactionTime, systemImage: row.status == "pending" ? "clock" : "creditcard", transactionType: row.type, status: row.status))
         }
         incomes.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let dateKey = row.incomeDate else { return }

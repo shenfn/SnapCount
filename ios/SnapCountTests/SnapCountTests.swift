@@ -1031,9 +1031,21 @@ final class SnapCountTests: XCTestCase {
     func testDashboardSnapshotStoreIsolatesUsers() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let store = DashboardSnapshotStore(directory: directory)
-        let snapshot = DashboardSnapshot(todayCount: 2, pendingCount: 1)
+        let record = NativeDayRecord(
+            id: "expense-1", reference: "expense/1", dateKey: "2026-07-23", kind: .expense,
+            domainKey: "expense", title: "早餐", subtitle: "", value: "¥20", timeLabel: nil,
+            systemImage: "creditcard", transactionType: "expense", status: "done"
+        )
+        let snapshot = DashboardSnapshot(
+            todayCount: 2,
+            pendingCount: 1,
+            dayRecordGroups: [NativeDayRecordGroup(dateKey: "2026-07-23", records: [record])]
+        )
         try store.save(snapshot, userId: "user-a")
-        XCTAssertEqual(try store.load(userId: "user-a")?.dashboardSnapshot.todayCount, 2)
+        let restored = try store.load(userId: "user-a")?.dashboardSnapshot
+        XCTAssertEqual(restored?.todayCount, 2)
+        XCTAssertEqual(restored?.dayRecordGroups.first?.records.first?.transactionType, "expense")
+        XCTAssertEqual(restored?.dayRecordGroups.first?.records.first?.status, "done")
         XCTAssertNil(try store.load(userId: "user-b"))
         try? FileManager.default.removeItem(at: directory)
     }
@@ -1199,6 +1211,10 @@ final class SnapCountTests: XCTestCase {
     func testHomeInsightDefaultsShowThreeFinanceAndDomainCards() {
         XCTAssertEqual(NativeHomeInsightPreferences.financeDefaults.filter(\.isEnabled).count, 3)
         XCTAssertEqual(NativeHomeInsightPreferences.domainDefaults.filter(\.isEnabled).count, 3)
+        XCTAssertEqual(
+            NativeHomeInsightPreferences.domainDefaults.filter(\.isEnabled).map(\.key),
+            [.sleepRecovery, .foodEnergy, .sleepSpending]
+        )
         XCTAssertEqual(NativeHomeInsightPreferences.maximumEnabledCards, 3)
     }
 
@@ -1254,6 +1270,114 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(summaries[4].expense, 12)
         XCTAssertEqual(summaries[6].expense, 30)
         XCTAssertEqual(summaries.filter { $0.expense > 0 }.count, 2)
+    }
+
+    func testHomeInsightRecentWindowIncludesPreviousMonthAndExcludesPendingExpense() {
+        let juneSnapshot = DashboardSnapshot(dayRecordGroups: [
+            NativeDayRecordGroup(dateKey: "2026-06-30", records: [
+                NativeDayRecord(
+                    id: "expense-june", reference: "expense/june", dateKey: "2026-06-30", kind: .expense,
+                    domainKey: "expense", title: "晚餐", subtitle: "", value: "¥40", timeLabel: nil,
+                    systemImage: "creditcard", transactionType: "expense", status: "done"
+                )
+            ])
+        ])
+        let julySnapshot = DashboardSnapshot(dayRecordGroups: [
+            NativeDayRecordGroup(dateKey: "2026-07-01", records: [
+                NativeDayRecord(
+                    id: "expense-pending", reference: "expense/pending", dateKey: "2026-07-01", kind: .expense,
+                    domainKey: "expense", title: "待补全", subtitle: "", value: "¥999", timeLabel: nil,
+                    systemImage: "clock", transactionType: "expense", status: "pending"
+                )
+            ]),
+            NativeDayRecordGroup(dateKey: "2026-07-02", records: [
+                NativeDayRecord(
+                    id: "expense-july", reference: "expense/july", dateKey: "2026-07-02", kind: .expense,
+                    domainKey: "expense", title: "早餐", subtitle: "", value: "¥20", timeLabel: nil,
+                    systemImage: "creditcard", transactionType: "expense", status: "done"
+                )
+            ])
+        ])
+
+        let combined = NativeHomeInsightAnalytics.combining([julySnapshot, juneSnapshot])
+        let summaries = NativeHomeInsightAnalytics.recentDailySummaries(
+            from: combined,
+            endingAt: "2026-07-02"
+        )
+
+        XCTAssertEqual(
+            NativeHomeInsightAnalytics.monthKeysForRecentWindow(endingAt: "2026-07-02"),
+            ["2026-07", "2026-06"]
+        )
+        XCTAssertEqual(summaries.count, 7)
+        XCTAssertEqual(summaries.reduce(0) { $0 + $1.expense }, 60)
+        XCTAssertEqual(summaries.first(where: { $0.dateKey == "2026-07-01" })?.pendingCount, 1)
+    }
+
+    func testHomeInsightFinancialAggregatesExcludePendingExpenses() {
+        let confirmed = NativeDayRecord(
+            id: "expense-done", reference: "expense/done", dateKey: "2026-07-23", kind: .expense,
+            domainKey: "expense", title: "早餐", subtitle: "", value: "¥20", timeLabel: nil,
+            systemImage: "creditcard", transactionType: "expense", status: "done"
+        )
+        let pending = NativeDayRecord(
+            id: "expense-pending", reference: "expense/pending", dateKey: "2026-07-23", kind: .expense,
+            domainKey: "expense", title: "待补全", subtitle: "", value: "¥900", timeLabel: nil,
+            systemImage: "clock", transactionType: "expense", status: "pending"
+        )
+        let legacyIncome = NativeDayRecord(
+            id: "legacy-income", reference: "expense/legacy-income", dateKey: "2026-07-23", kind: .expense,
+            domainKey: "expense", title: "旧收入", subtitle: "", value: "¥500", timeLabel: nil,
+            systemImage: "creditcard", transactionType: "income", status: "done"
+        )
+        let sleep = NativeDayRecord(
+            id: "sleep-1", reference: "data/sleep-1", dateKey: "2026-07-23", kind: .sleep,
+            domainKey: "sleep", title: "睡眠", subtitle: "", value: "", timeLabel: nil,
+            systemImage: "moon"
+        )
+        let snapshot = DashboardSnapshot(dayRecordGroups: [
+            NativeDayRecordGroup(dateKey: "2026-07-23", records: [confirmed, pending, legacyIncome, sleep])
+        ])
+
+        XCTAssertEqual(NativeHomeInsightAnalytics.dailySummary(on: "2026-07-23", from: snapshot).expense, 20)
+        XCTAssertEqual(NativeHomeInsightAnalytics.dailySummary(on: "2026-07-23", from: snapshot).pendingCount, 1)
+        XCTAssertEqual(NativeHomeInsightAnalytics.confirmedExpenseTotal(from: snapshot), 20)
+        XCTAssertEqual(NativeHomeInsightAnalytics.expenseBreakdown(from: snapshot).first?.amount, 20)
+        XCTAssertFalse(NativeHomeInsightAnalytics.hasHydratedExpenseDetails(in: snapshot))
+        XCTAssertEqual(NativeHomeInsightAnalytics.sleepSpendingObservation(from: snapshot).sleepDayAverage, 20)
+        XCTAssertFalse(NativeHomeInsightAnalytics.hasHydratedDetails(for: "sleep", in: snapshot))
+        XCTAssertEqual(NativeHomeDomainCardKey.dailyBalance.title, "当天生活")
+    }
+
+    func testHomeInsightDomainMetricsRequireARealMetricField() {
+        let sleep = NativeDayRecord(
+            id: "sleep-1", reference: "data/sleep-1", dateKey: "2026-07-23", kind: .sleep,
+            domainKey: "sleep", title: "睡眠", subtitle: "", value: "", timeLabel: nil,
+            systemImage: "moon"
+        )
+
+        func detail(payload: [String: AnyCodable]) -> NativeRecordDetail {
+            NativeRecordDetail(
+                id: "data/sleep-1", rawId: "sleep-1", kind: "data", title: "睡眠", subtitle: "2026-07-23",
+                value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+                amount: nil, merchantName: nil, platform: nil, category: "sleep", paymentMethod: nil,
+                recordDate: "2026-07-23", note: nil, companionMessage: nil, accountId: nil,
+                systemImage: "moon", payload: payload, domainKey: "sleep"
+            )
+        }
+
+        let groups = [NativeDayRecordGroup(dateKey: "2026-07-23", records: [sleep])]
+        let metadataOnly = DashboardSnapshot(
+            dayRecordGroups: groups,
+            recordDetails: ["data/sleep-1": detail(payload: ["ai_feedback": AnyCodable(["choice": "good"])])]
+        )
+        let hydrated = DashboardSnapshot(
+            dayRecordGroups: groups,
+            recordDetails: ["data/sleep-1": detail(payload: ["sleep_minutes": AnyCodable(480)])]
+        )
+
+        XCTAssertFalse(NativeHomeInsightAnalytics.hasHydratedDetails(for: "sleep", in: metadataOnly))
+        XCTAssertTrue(NativeHomeInsightAnalytics.hasHydratedDetails(for: "sleep", in: hydrated))
     }
 
     func testAccountTypeNormalizationMatchesPWAAdapter() {

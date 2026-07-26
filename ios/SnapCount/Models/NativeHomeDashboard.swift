@@ -106,7 +106,7 @@ enum NativeHomeFinanceCardKey: String, Codable, CaseIterable, Identifiable, Hash
         switch self {
         case .cashSafety: return "现金与还款"
         case .spendingRhythm: return "消费节奏"
-        case .expenseStructure: return "本月花到哪里"
+        case .expenseStructure: return "月度花到哪里"
         case .repaymentPlan: return "还款准备"
         case .accountMix: return "账户覆盖"
         }
@@ -117,7 +117,7 @@ enum NativeHomeFinanceCardKey: String, Codable, CaseIterable, Identifiable, Hash
         case .cashSafety: return "可用现金、欠款与净额"
         case .spendingRhythm: return "近 7 日支出与日均节奏"
         case .expenseStructure: return "分类占比与最高支出"
-        case .repaymentPlan: return "最近待还与还款日"
+        case .repaymentPlan: return "负债账户与每月还款日"
         case .accountMix: return "资产账户与负债账户"
         }
     }
@@ -158,16 +158,16 @@ enum NativeHomeDomainCardKey: String, Codable, CaseIterable, Identifiable, Hasha
         case .foodEnergy: return "饮食能量"
         case .readingProgress: return "阅读进度"
         case .sleepSpending: return "睡眠 × 支出"
-        case .dailyBalance: return "今日生活"
+        case .dailyBalance: return "当天生活"
         }
     }
 
     var detail: String {
         switch self {
-        case .sleepRecovery: return "睡眠时长、质量与本周变化"
+        case .sleepRecovery: return "睡眠时长、质量与最近记录"
         case .movementRhythm: return "运动时长、次数与类型"
-        case .foodEnergy: return "热量、餐次与记录天数"
-        case .readingProgress: return "阅读时长、天数与书籍"
+        case .foodEnergy: return "热量、餐次与最近记录"
+        case .readingProgress: return "阅读时长、记录次数与书籍"
         case .sleepSpending: return "有睡眠记录日的支出观察"
         case .dailyBalance: return "同一天的财务与生活记录"
         }
@@ -206,7 +206,7 @@ enum NativeHomeInsightPreferences {
     }
 
     static var domainDefaults: [NativeHomeDomainCardConfiguration] {
-        let enabled: Set<NativeHomeDomainCardKey> = [.sleepRecovery, .movementRhythm, .sleepSpending]
+        let enabled: Set<NativeHomeDomainCardKey> = [.sleepRecovery, .foodEnergy, .sleepSpending]
         return NativeHomeDomainCardKey.allCases.enumerated().map { index, key in
             NativeHomeDomainCardConfiguration(key: key, isEnabled: enabled.contains(key), order: index)
         }
@@ -329,7 +329,7 @@ struct NativeHomeSleepSpendingObservation: Equatable {
 
 enum NativeHomeInsightAnalytics {
     static func dailySummaries(from snapshot: DashboardSnapshot) -> [NativeDailySummary] {
-        if !snapshot.dailySummaries.isEmpty {
+        guard !snapshot.dayRecordGroups.isEmpty else {
             return snapshot.dailySummaries.sorted { $0.dateKey < $1.dateKey }
         }
 
@@ -340,10 +340,55 @@ enum NativeHomeInsightAnalytics {
                     dateKey: group.dateKey,
                     expense: amountTotal(in: group.records, kind: .expense, snapshot: snapshot),
                     income: amountTotal(in: group.records, kind: .income, snapshot: snapshot),
-                    pendingCount: group.records.filter { $0.kind == .staging }.count,
+                    pendingCount: group.records.filter {
+                        $0.kind == .staging || isPendingExpense($0, snapshot: snapshot)
+                    }.count,
                     recordCount: group.records.count
                 )
             }
+    }
+
+    static func dailySummary(on dateKey: String, from snapshot: DashboardSnapshot) -> NativeDailySummary {
+        dailySummaries(from: snapshot).first(where: { $0.dateKey == dateKey })
+            ?? NativeDailySummary(dateKey: dateKey, expense: 0, income: 0, pendingCount: 0, recordCount: 0)
+    }
+
+    static func monthKeysForRecentWindow(endingAt dateKey: String, dayCount: Int = 7) -> [String] {
+        guard dayCount > 0, let endDate = dateFormatter.date(from: dateKey) else { return [] }
+        var monthKeys: [String] = []
+        for offset in 0..<dayCount {
+            guard let date = chinaCalendar.date(byAdding: .day, value: -offset, to: endDate) else { continue }
+            let key = String(dateFormatter.string(from: date).prefix(7))
+            if !monthKeys.contains(key) { monthKeys.append(key) }
+        }
+        return monthKeys
+    }
+
+    static func combining(_ snapshots: [DashboardSnapshot]) -> DashboardSnapshot {
+        var recordsByDate: [String: [String: NativeDayRecord]] = [:]
+        var details: [String: NativeRecordDetail] = [:]
+
+        for snapshot in snapshots {
+            for group in snapshot.dayRecordGroups {
+                for record in group.records {
+                    recordsByDate[group.dateKey, default: [:]][record.id] = record
+                }
+            }
+            for (reference, detail) in snapshot.recordDetails {
+                details[reference] = detail
+            }
+        }
+
+        var combined = DashboardSnapshot()
+        combined.dayRecordGroups = recordsByDate.map { dateKey, records in
+            NativeDayRecordGroup(
+                dateKey: dateKey,
+                records: records.values.sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }
+            )
+        }.sorted { $0.dateKey > $1.dateKey }
+        combined.recordDetails = details
+        combined.domains = snapshots.first(where: { !$0.domains.isEmpty })?.domains ?? []
+        return combined
     }
 
     static func recentDailySummaries(
@@ -365,12 +410,28 @@ enum NativeHomeInsightAnalytics {
         var totals: [String: Double] = [:]
         for record in snapshot.dayRecordGroups.flatMap(\.records) where record.kind == .expense {
             let detail = detail(for: record, snapshot: snapshot)
-            let category = detail?.category?.isEmpty == false ? detail?.category ?? "其他" : "其他"
+            guard isConfirmedExpense(record, snapshot: snapshot) else { continue }
+            let rawCategory = detail?.category?.isEmpty == false ? detail?.category ?? "其他" : "其他"
+            let category = NativeFinanceOptionCatalog.categoryTitle(for: rawCategory) ?? rawCategory
             totals[category, default: 0] += amount(for: record, detail: detail)
         }
         return totals
             .map { NativeHomeExpenseCategory(name: $0.key, amount: $0.value) }
             .sorted { $0.amount > $1.amount }
+    }
+
+    static func confirmedExpenseTotal(from snapshot: DashboardSnapshot) -> Double {
+        snapshot.dayRecordGroups.flatMap(\.records).reduce(0) { total, record in
+            guard record.kind == .expense, isConfirmedExpense(record, snapshot: snapshot) else { return total }
+            return total + amount(for: record, detail: detail(for: record, snapshot: snapshot))
+        }
+    }
+
+    static func hasHydratedExpenseDetails(in snapshot: DashboardSnapshot) -> Bool {
+        let records = snapshot.dayRecordGroups.flatMap(\.records).filter {
+            $0.kind == .expense && isConfirmedExpense($0, snapshot: snapshot)
+        }
+        return records.isEmpty || records.allSatisfy { detail(for: $0, snapshot: snapshot) != nil }
     }
 
     static func domainRecords(_ domainKey: String, from snapshot: DashboardSnapshot) -> [NativeDayRecord] {
@@ -379,16 +440,46 @@ enum NativeHomeInsightAnalytics {
             .filter { ($0.domainKey ?? $0.kind.rawValue) == domainKey && $0.kind != .staging }
     }
 
+    static func hasHydratedDetails(for domainKey: String, in snapshot: DashboardSnapshot) -> Bool {
+        let records = domainRecords(domainKey, from: snapshot)
+        let metricKeys: [String]
+        switch domainKey {
+        case "sleep":
+            metricKeys = ["sleep_minutes", "duration_minutes", "sleep_hours", "duration_hours"]
+        case "sport":
+            metricKeys = ["duration_minutes"]
+        case "reading":
+            metricKeys = ["reading_minutes", "duration_minutes", "reading_hours"]
+        case "food":
+            metricKeys = ["total_calorie_kcal", "calories", "calories_kcal"]
+        default:
+            metricKeys = []
+        }
+        return records.isEmpty || records.allSatisfy { record in
+            guard let payload = detail(for: record, snapshot: snapshot)?.payload else { return false }
+            return metricKeys.isEmpty || metricKeys.contains { payload.double($0) != nil }
+        }
+    }
+
     static func sleepSpendingObservation(from snapshot: DashboardSnapshot) -> NativeHomeSleepSpendingObservation {
         let sleepDays = Set(domainRecords("sleep", from: snapshot).map(\.dateKey))
-        let expenseByDay = Dictionary(grouping: snapshot.dayRecordGroups.flatMap(\.records).filter { $0.kind == .expense }, by: \.dateKey)
+        let expenseByDay = Dictionary(
+            grouping: snapshot.dayRecordGroups.flatMap(\.records).filter {
+                $0.kind == .expense && isConfirmedExpense($0, snapshot: snapshot)
+            },
+            by: \.dateKey
+        )
             .mapValues { records in
                 records.reduce(0) { total, record in
                     total + amount(for: record, detail: detail(for: record, snapshot: snapshot))
                 }
             }
         let sleepDayTotal = sleepDays.reduce(0) { $0 + (expenseByDay[$1] ?? 0) }
-        let allDays = Set(snapshot.dayRecordGroups.map(\.dateKey))
+        let allDays = Set(
+            snapshot.dayRecordGroups.flatMap(\.records).filter {
+                $0.kind != .staging && ($0.kind != .expense || isConfirmedExpense($0, snapshot: snapshot))
+            }.map(\.dateKey)
+        )
         let allDayTotal = allDays.reduce(0) { $0 + (expenseByDay[$1] ?? 0) }
         return NativeHomeSleepSpendingObservation(
             sleepDays: sleepDays.count,
@@ -407,9 +498,30 @@ enum NativeHomeInsightAnalytics {
         kind: NativeDayRecordKind,
         snapshot: DashboardSnapshot
     ) -> Double {
-        records.filter { $0.kind == kind }.reduce(0) { total, record in
+        records.filter {
+            $0.kind == kind && (kind != .expense || isConfirmedExpense($0, snapshot: snapshot))
+        }.reduce(0) { total, record in
             total + amount(for: record, detail: detail(for: record, snapshot: snapshot))
         }
+    }
+
+    private static func isConfirmedExpense(_ record: NativeDayRecord, snapshot: DashboardSnapshot) -> Bool {
+        guard record.kind == .expense else { return true }
+        if let transactionType = record.transactionType, transactionType != "expense" {
+            return false
+        }
+        if let status = record.status ?? detail(for: record, snapshot: snapshot)?.status {
+            return status == "done"
+        }
+        return record.systemImage != "clock"
+    }
+
+    private static func isPendingExpense(_ record: NativeDayRecord, snapshot: DashboardSnapshot) -> Bool {
+        guard record.kind == .expense else { return false }
+        if let status = record.status ?? detail(for: record, snapshot: snapshot)?.status {
+            return status == "pending"
+        }
+        return record.systemImage == "clock"
     }
 
     private static func amount(for record: NativeDayRecord, detail: NativeRecordDetail?) -> Double {
@@ -469,7 +581,10 @@ struct NativeHomeFinanceSummary {
         let liabilityAccounts = activeAccounts.filter { $0.type.isLiability && $0.currentBalance > 0 }
         let liabilityTotal = liabilityAccounts.reduce(0) { $0 + $1.currentBalance }
         let nearestLiability = liabilityAccounts.sorted {
-            ($0.paymentDueDay ?? 99, -$0.currentBalance) < ($1.paymentDueDay ?? 99, -$1.currentBalance)
+            if $0.currentBalance == $1.currentBalance {
+                return ($0.paymentDueDay ?? 99) < ($1.paymentDueDay ?? 99)
+            }
+            return $0.currentBalance > $1.currentBalance
         }.first
 
         return NativeHomeFinanceSummary(

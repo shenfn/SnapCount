@@ -33,7 +33,53 @@ struct PersistedDashboardSnapshot: Codable {
     }
 
     struct DailySummary: Codable { let dateKey: String; let expense: Double; let income: Double; let pendingCount: Int; let recordCount: Int; init(_ value: NativeDailySummary) { dateKey=value.dateKey; expense=value.expense; income=value.income; pendingCount=value.pendingCount; recordCount=value.recordCount }; var native: NativeDailySummary { NativeDailySummary(dateKey:dateKey,expense:expense,income:income,pendingCount:pendingCount,recordCount:recordCount) } }
-    struct DayRecord: Codable { let id:String; let reference:String; let dateKey:String; let kind:String; let domainKey:String?; let title:String; let subtitle:String; let value:String; let timeLabel:String?; let systemImage:String; init(_ item:NativeDayRecord){id=item.id;reference=item.reference;dateKey=item.dateKey;kind=item.kind.rawValue;domainKey=item.domainKey;title=item.title;subtitle=item.subtitle;value=item.value;timeLabel=item.timeLabel;systemImage=item.systemImage}; var native:NativeDayRecord?{guard let kind=NativeDayRecordKind(rawValue:kind) else{return nil};return NativeDayRecord(id:id,reference:reference,dateKey:dateKey,kind:kind,domainKey:domainKey,title:title,subtitle:subtitle,value:value,timeLabel:timeLabel,systemImage:systemImage)} }
+    struct DayRecord: Codable {
+        let id: String
+        let reference: String
+        let dateKey: String
+        let kind: String
+        let domainKey: String?
+        let title: String
+        let subtitle: String
+        let value: String
+        let timeLabel: String?
+        let systemImage: String
+        let transactionType: String?
+        let status: String?
+
+        init(_ item: NativeDayRecord) {
+            id = item.id
+            reference = item.reference
+            dateKey = item.dateKey
+            kind = item.kind.rawValue
+            domainKey = item.domainKey
+            title = item.title
+            subtitle = item.subtitle
+            value = item.value
+            timeLabel = item.timeLabel
+            systemImage = item.systemImage
+            transactionType = item.transactionType
+            status = item.status
+        }
+
+        var native: NativeDayRecord? {
+            guard let kind = NativeDayRecordKind(rawValue: kind) else { return nil }
+            return NativeDayRecord(
+                id: id,
+                reference: reference,
+                dateKey: dateKey,
+                kind: kind,
+                domainKey: domainKey,
+                title: title,
+                subtitle: subtitle,
+                value: value,
+                timeLabel: timeLabel,
+                systemImage: systemImage,
+                transactionType: transactionType,
+                status: status
+            )
+        }
+    }
     struct DayRecordGroup: Codable { let dateKey:String; let records:[DayRecord]; init(_ value:NativeDayRecordGroup){dateKey=value.dateKey;records=value.records.map(DayRecord.init)}; var native:NativeDayRecordGroup{NativeDayRecordGroup(dateKey:dateKey,records:records.compactMap(\.native))} }
     struct RecordSummary: Codable { let id:String;let title:String;let subtitle:String;let value:String;let systemImage:String;init(_ item:NativeRecordSummary){id=item.id;title=item.title;subtitle=item.subtitle;value=item.value;systemImage=item.systemImage};var native:NativeRecordSummary{NativeRecordSummary(id:id,title:title,subtitle:subtitle,value:value,systemImage:systemImage)} }
     struct PendingExpense: Codable { let id:String;let title:String;let amount:Double;let dateKey:String;let reference:String;let imagePath:String?;let occurredAtLabel:String?;let createdAtLabel:String?;init(_ item:NativePendingExpense){id=item.id;title=item.title;amount=item.amount;dateKey=item.dateKey;reference=item.reference;imagePath=item.imagePath;occurredAtLabel=item.occurredAtLabel;createdAtLabel=item.createdAtLabel};var native:NativePendingExpense{NativePendingExpense(id:id,title:title,amount:amount,dateKey:dateKey,reference:reference,imagePath:imagePath,occurredAtLabel:occurredAtLabel,createdAtLabel:createdAtLabel ?? "最近上传")} }

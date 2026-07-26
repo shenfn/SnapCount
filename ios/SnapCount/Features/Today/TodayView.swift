@@ -32,10 +32,14 @@ struct TodayView: View {
     }
 
     private var financeSummary: NativeHomeFinanceSummary {
-        NativeHomeFinanceSummary.make(
+        let daySummary = NativeHomeInsightAnalytics.dailySummary(
+            on: selectedDateKey,
+            from: selectedInsightSnapshot
+        )
+        return NativeHomeFinanceSummary.make(
             accounts: appState.accounts,
-            dayExpense: selectedDaySummary.expense,
-            dayIncome: selectedDaySummary.income
+            dayExpense: daySummary.expense,
+            dayIncome: daySummary.income
         )
     }
 
@@ -47,6 +51,26 @@ struct TodayView: View {
         appState.reportSnapshot(monthKey: selectedMonthKey)
     }
 
+    private var recentFinanceMonthKeys: [String] {
+        NativeHomeInsightAnalytics.monthKeysForRecentWindow(endingAt: selectedDateKey)
+    }
+
+    private var recentFinanceSnapshot: DashboardSnapshot {
+        NativeHomeInsightAnalytics.combining(
+            recentFinanceMonthKeys.map { appState.reportSnapshot(monthKey: $0) }
+        )
+    }
+
+    private var requiredMonthKeys: [String] {
+        ([selectedMonthKey] + recentFinanceMonthKeys).reduce(into: [String]()) { result, monthKey in
+            if !result.contains(monthKey) { result.append(monthKey) }
+        }
+    }
+
+    private var insightLoadKey: String {
+        requiredMonthKeys.joined(separator: "|")
+    }
+
     private var selectedDateKey: String {
         Self.dateKeyFormatter.string(from: selectedDate)
     }
@@ -55,26 +79,12 @@ struct TodayView: View {
         String(selectedDateKey.prefix(7))
     }
 
-    private var selectedMonthGroups: [NativeDayRecordGroup] {
-        appState.recordGroups(monthKey: selectedMonthKey)
-    }
-
-    private var selectedDayGroup: NativeDayRecordGroup? {
-        selectedMonthGroups.first { $0.dateKey == selectedDateKey }
-    }
-
     private var selectedDaySummary: NativeDailySummary {
-        if let summary = appState.dashboard.dailySummaries.first(where: { $0.dateKey == selectedDateKey }) {
-            return summary
-        }
-        return summary(from: selectedDayGroup, dateKey: selectedDateKey)
+        NativeHomeInsightAnalytics.dailySummary(on: selectedDateKey, from: selectedInsightSnapshot)
     }
 
     private var selectedMonthSummaries: [NativeDailySummary] {
-        if selectedMonthKey == Self.currentMonthKey, !appState.dashboard.dailySummaries.isEmpty {
-            return appState.dashboard.dailySummaries
-        }
-        let summaries = selectedMonthGroups.map { summary(from: $0, dateKey: $0.dateKey) }
+        let summaries = NativeHomeInsightAnalytics.dailySummaries(from: selectedInsightSnapshot)
         return summaries.isEmpty ? [selectedDaySummary] : summaries
     }
 
@@ -160,8 +170,10 @@ struct TodayView: View {
         .task {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
         }
-        .task(id: selectedMonthKey) {
-            await appState.loadRecordMonth(selectedMonthKey)
+        .task(id: insightLoadKey) {
+            for monthKey in requiredMonthKeys {
+                await appState.loadRecordMonth(monthKey)
+            }
         }
         .onAppear {
             normalizeInsightSelections()
@@ -298,6 +310,7 @@ struct TodayView: View {
                             key: configuration.key,
                             summary: financeSummary,
                             snapshot: selectedInsightSnapshot,
+                            recentSnapshot: recentFinanceSnapshot,
                             accounts: appState.accounts,
                             selectedDateKey: selectedDateKey
                         )
@@ -343,7 +356,7 @@ struct TodayView: View {
 
     private var domainsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "数据域", subtitle: "本月记录分布") {
+            sectionHeader(title: "数据域", subtitle: "所选月记录分布") {
                 NavigationLink {
                     DomainsView()
                 } label: {
@@ -358,7 +371,10 @@ struct TodayView: View {
                         HomeDomainInsightCardView(
                             key: configuration.key,
                             snapshot: selectedInsightSnapshot,
-                            selectedDaySummary: selectedDaySummary,
+                            selectedDaySummary: NativeHomeInsightAnalytics.dailySummary(
+                                on: selectedDateKey,
+                                from: selectedInsightSnapshot
+                            ),
                             selectedDateKey: selectedDateKey
                         )
                         .tag(configuration.key)
@@ -513,32 +529,6 @@ struct TodayView: View {
             Spacer()
             Text(value).font(.headline.monospacedDigit())
         }
-    }
-
-    private func summary(from group: NativeDayRecordGroup?, dateKey: String) -> NativeDailySummary {
-        let records = group?.records ?? []
-        let pendingCount = records.filter { $0.kind == .staging }.count
-        return NativeDailySummary(
-            dateKey: dateKey,
-            expense: amountTotal(in: records, kind: .expense),
-            income: amountTotal(in: records, kind: .income),
-            pendingCount: pendingCount,
-            recordCount: records.count
-        )
-    }
-
-    private func amountTotal(in records: [NativeDayRecord], kind: NativeDayRecordKind) -> Double {
-        records.filter { $0.kind == kind }.reduce(0) { partial, record in
-            partial + numericAmount(record.value)
-        }
-    }
-
-    private func numericAmount(_ value: String) -> Double {
-        let cleaned = value
-            .replacingOccurrences(of: "¥", with: "")
-            .replacingOccurrences(of: "+", with: "")
-            .replacingOccurrences(of: ",", with: "")
-        return Double(cleaned) ?? 0
     }
 
     private func shiftSelectedMonth(_ offset: Int) {

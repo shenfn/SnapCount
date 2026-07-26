@@ -5,6 +5,7 @@ struct HomeFinanceInsightCardView: View {
     let key: NativeHomeFinanceCardKey
     let summary: NativeHomeFinanceSummary
     let snapshot: DashboardSnapshot
+    let recentSnapshot: DashboardSnapshot
     let accounts: [NativeAccount]
     let selectedDateKey: String
 
@@ -78,7 +79,7 @@ struct HomeFinanceInsightCardView: View {
             if let liability = summary.nearestLiability {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("最近待还")
+                        Text("欠款较高账户")
                             .font(.caption)
                             .foregroundStyle(JieziTheme.muted)
                         Text(liability.title)
@@ -105,7 +106,7 @@ struct HomeFinanceInsightCardView: View {
 
     private var spendingRhythm: some View {
         let days = NativeHomeInsightAnalytics.recentDailySummaries(
-            from: snapshot,
+            from: recentSnapshot,
             endingAt: selectedDateKey
         )
         let values = days.map(\.expense)
@@ -126,7 +127,7 @@ struct HomeFinanceInsightCardView: View {
             HStack {
                 Text("有消费的 \(activeDays) 天")
                 Spacer()
-                Text("今日 \(money(summary.dayExpense))")
+                Text("当天 \(money(summary.dayExpense))")
             }
             .font(.caption)
             .foregroundStyle(JieziTheme.muted)
@@ -135,13 +136,14 @@ struct HomeFinanceInsightCardView: View {
 
     private var expenseStructure: some View {
         let breakdown = NativeHomeInsightAnalytics.expenseBreakdown(from: snapshot)
-        let total = breakdown.reduce(0) { $0 + $1.amount }
+        let total = NativeHomeInsightAnalytics.confirmedExpenseTotal(from: snapshot)
+        let detailsAreReady = NativeHomeInsightAnalytics.hasHydratedExpenseDetails(in: snapshot)
         let top = breakdown.first
 
         return VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("本月已归档支出")
+                    Text("所选月已确认支出")
                         .font(.caption)
                         .foregroundStyle(JieziTheme.muted)
                     Text(money(total))
@@ -149,7 +151,7 @@ struct HomeFinanceInsightCardView: View {
                         .monospacedDigit()
                 }
                 Spacer()
-                if let top {
+                if detailsAreReady, let top {
                     VStack(alignment: .trailing, spacing: 3) {
                         Text("最高分类")
                             .font(.caption)
@@ -162,8 +164,10 @@ struct HomeFinanceInsightCardView: View {
                     }
                 }
             }
-            if breakdown.isEmpty {
+            if total == 0 {
                 HomeInsightEmptyLine(text: "归档几笔消费后，这里会告诉你钱主要花在哪里。")
+            } else if !detailsAreReady {
+                HomeInsightEmptyLine(text: "连接后会同步消费分类详情。")
             } else {
                 ForEach(Array(breakdown.prefix(3))) { item in
                     HStack(spacing: 8) {
@@ -193,12 +197,12 @@ struct HomeFinanceInsightCardView: View {
                         .frame(width: 38, height: 38)
                         .background(JieziTheme.gold.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("先关注这一笔")
+                        Text("欠款较高账户")
                             .font(.caption)
                             .foregroundStyle(JieziTheme.muted)
                         Text(liability.title)
                             .font(.headline)
-                        Text(liability.paymentDueDay.map { "每月 \($0) 日到期" } ?? "还款日尚未设置")
+                        Text(liability.paymentDueDay.map { "每月 \($0) 日还款" } ?? "还款日尚未设置")
                             .font(.subheadline)
                             .foregroundStyle(JieziTheme.muted)
                     }
@@ -207,7 +211,7 @@ struct HomeFinanceInsightCardView: View {
                         .font(.headline.monospacedDigit())
                 }
                 HStack {
-                    Text("当前待还总额")
+                    Text("负债账户当前欠款")
                     Spacer()
                     Text(money(summary.liabilityTotal))
                         .font(.subheadline.monospacedDigit().weight(.semibold))
@@ -316,16 +320,26 @@ struct HomeDomainInsightCardView: View {
 
     @ViewBuilder
     private func domainMetricContent(domainKey: String, emptyText: String) -> some View {
-        if let presentation = presentation(for: domainKey), !presentation.recentRecords.isEmpty {
+        let records = NativeHomeInsightAnalytics.domainRecords(domainKey, from: snapshot)
+        if !records.isEmpty,
+           !NativeHomeInsightAnalytics.hasHydratedDetails(for: domainKey, in: snapshot) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    HomeInsightMetricCell(label: "月内记录", value: "\(records.count)", tint: accent)
+                    HomeInsightMetricCell(label: "详细指标", value: "待同步", tint: JieziTheme.ink)
+                }
+                HomeInsightEmptyLine(text: "连接后会同步时长、热量等详细数据。")
+            }
+        } else if let presentation = presentation(for: domainKey), !presentation.recentRecords.isEmpty {
             let metrics = presentation.metrics
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
-                    HomeInsightMetricCell(label: metricLabel(metrics, index: 0, fallback: "本月累计"), value: metricValue(metrics, index: 0), tint: accent)
-                    HomeInsightMetricCell(label: metricLabel(metrics, index: 1, fallback: "本月记录"), value: metricValue(metrics, index: 1), tint: JieziTheme.ink)
+                    HomeInsightMetricCell(label: metricLabel(metrics, index: 0, fallback: "月内累计"), value: metricValue(metrics, index: 0), tint: accent)
+                    HomeInsightMetricCell(label: metricLabel(metrics, index: 1, fallback: "月内记录"), value: metricValue(metrics, index: 1), tint: JieziTheme.ink)
                 }
                 if let top = presentation.distribution.first {
                     HStack {
-                        Text(domainKey == "reading" ? "记录最多" : "主要分布")
+                        Text(domainKey == "reading" ? "阅读投入最多" : "主要分布")
                         Spacer()
                         Text(top.name)
                             .font(.subheadline.weight(.semibold))
@@ -419,7 +433,8 @@ struct HomeDomainInsightCardView: View {
     }
 
     private func metricLabel(_ metrics: [NativeDomainMetric], index: Int, fallback: String) -> String {
-        metrics.indices.contains(index) ? metrics[index].label : fallback
+        let label = metrics.indices.contains(index) ? metrics[index].label : fallback
+        return label.replacingOccurrences(of: "本月", with: "月内")
     }
 
     private func metricValue(_ metrics: [NativeDomainMetric], index: Int) -> String {
