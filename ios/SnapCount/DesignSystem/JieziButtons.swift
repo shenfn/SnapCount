@@ -7,7 +7,7 @@ import SwiftUI
 struct JieziPrimaryButton: View {
     let title: String
     var systemImage: String? = nil
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let action: () -> Void
 
     var body: some View {
@@ -42,7 +42,7 @@ struct JieziPrimaryButton: View {
 struct JieziSecondaryButton: View {
     let title: String
     var systemImage: String? = nil
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let action: () -> Void
 
     var body: some View {
@@ -72,7 +72,7 @@ struct JieziSecondaryButton: View {
 struct JieziDangerButton: View {
     let title: String
     var systemImage: String? = nil
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let action: () -> Void
 
     var body: some View {
@@ -102,7 +102,7 @@ struct JieziDangerButton: View {
 struct JieziGhostButton: View {
     let title: String
     var systemImage: String? = nil
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let action: () -> Void
 
     var body: some View {

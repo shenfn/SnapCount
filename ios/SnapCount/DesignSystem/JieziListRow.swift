@@ -5,12 +5,15 @@ import SwiftUI
 // 分隔线使用 JieziStroke.divider（ink 8% 0.5pt），不用系统粗灰线。
 
 struct JieziListRow: View {
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     var systemImage: String? = nil
     var iconTint: Color? = nil
     let title: String
     var subtitle: String? = nil
+    var subtitleLineLimit = 1
     var trailingText: String? = nil
+    var trailingSubtitle: String? = nil
+    var trailingTint: Color? = nil
     var trailingIsMoney: Bool = false
     var showsChevron: Bool = true
     var showDivider: Bool = false
@@ -39,18 +42,31 @@ struct JieziListRow: View {
                     Text(subtitle)
                         .font(JieziFont.footnote)
                         .foregroundStyle(palette.muted)
-                        .lineLimit(1)
+                        .lineLimit(subtitleLineLimit)
                 }
             }
 
             Spacer(minLength: JieziSpacing.sm)
 
-            if let trailingText {
-                Text(trailingText)
-                    .font(trailingIsMoney ? JieziType.moneyInline : JieziFont.subheadline)
-                    .monospacedDigit()
-                    .foregroundStyle(palette.ink)
+            if trailingText != nil || trailingSubtitle != nil {
+                VStack(alignment: .trailing, spacing: JieziSpacing.xxs) {
+                    if let trailingText {
+                        Text(trailingText)
+                            .font(trailingIsMoney ? JieziType.moneyInline : JieziFont.subheadline)
+                            .monospacedDigit()
+                            .foregroundStyle(trailingTint ?? palette.ink)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                    }
+                    if let trailingSubtitle {
+                        Text(trailingSubtitle)
+                            .font(JieziFont.caption)
+                            .foregroundStyle(palette.muted)
+                            .lineLimit(1)
+                    }
+                }
             }
+            .layoutPriority(1)
 
             if showsChevron {
                 Image(systemName: "chevron.right")
@@ -82,5 +98,35 @@ struct JieziListRow: View {
         } else {
             row
         }
+    }
+}
+
+struct JieziRecordRow: View {
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
+    let systemImage: String
+    let iconTint: Color
+    let title: String
+    let subtitle: String
+    let value: String
+    let timeLabel: String
+    var valueTint: Color? = nil
+    var showsChevron = true
+    var showDivider = false
+
+    var body: some View {
+        JieziListRow(
+            palette: palette,
+            systemImage: systemImage,
+            iconTint: iconTint,
+            title: title,
+            subtitle: subtitle,
+            subtitleLineLimit: 1,
+            trailingText: value,
+            trailingSubtitle: timeLabel,
+            trailingTint: valueTint,
+            trailingIsMoney: true,
+            showsChevron: showsChevron,
+            showDivider: showDivider
+        )
     }
 }

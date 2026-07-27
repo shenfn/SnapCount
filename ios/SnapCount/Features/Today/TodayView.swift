@@ -348,7 +348,7 @@ struct TodayView: View {
                     pendingRow("待确认", count: pendingSummary.review, systemImage: "checklist")
                     pendingRow("识别失败", count: pendingSummary.failed, systemImage: "exclamationmark.triangle")
                 }
-                .jieziCard(solid: true)
+                .jieziCard(palette: JieziTheme.palette, solid: true)
             }
             .buttonStyle(.plain)
         }
@@ -395,7 +395,7 @@ struct TodayView: View {
                 .foregroundStyle(JieziTheme.muted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .jieziCard(solid: true)
+        .jieziCard(palette: JieziTheme.palette, solid: true)
     }
 
     private func normalizeInsightSelections() {
@@ -507,7 +507,7 @@ struct TodayView: View {
             .foregroundStyle(JieziTheme.ink)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous))
-            .jieziCard(solid: true)
+            .jieziCard(palette: JieziTheme.palette, solid: true)
         }
         .buttonStyle(JieziPressableButtonStyle())
         .accessibilityHint("打开当天全部记录")

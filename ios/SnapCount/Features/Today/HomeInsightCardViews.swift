@@ -501,7 +501,7 @@ private struct HomeInsightCardFrame<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .jieziCard(solid: true)
+        .jieziCard(palette: JieziTheme.palette, solid: true)
     }
 }
 

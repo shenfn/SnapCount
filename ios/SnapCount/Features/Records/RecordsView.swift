@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RecordsView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var themeManager: JieziThemeManager
     @State private var selectedKind: NativeDayRecordKind = .all
     @State private var selectedMonthKey = RecordsView.currentMonthKey
     @State private var showManualRecordSheet = false
@@ -11,26 +12,39 @@ struct RecordsView: View {
     private var groups: [NativeDayRecordGroup] { query.groups(from: monthGroups) }
     private var availableKinds: [NativeDayRecordKind] { query.availableKinds(from: monthGroups) }
     private var isLoadingMonth: Bool { appState.loadingRecordMonthKey == selectedMonthKey }
+    private var palette: JieziGeneratedPalette { themeManager.palette }
 
     var body: some View {
         ZStack {
-            JieziTheme.pageBackground.ignoresSafeArea()
+            JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: JieziSpacing.xl2) {
                     VStack(alignment: .leading, spacing: JieziSpacing.md) {
                         JieziMonthSwitcher(
+                            palette: palette,
                             title: monthTitle,
                             selectionToken: selectedMonthKey,
                             canAdvance: selectedMonthKey < Self.currentMonthKey,
                             onPrevious: { shiftMonth(-1) },
                             onNext: { shiftMonth(1) }
                         )
-                        Picker("数据域", selection: $selectedKind) {
-                            ForEach(availableKinds) { Text($0.title).tag($0) }
+                        ScrollView(.horizontal) {
+                            HStack(spacing: JieziSpacing.sm) {
+                                ForEach(availableKinds) { kind in
+                                    JieziChip(
+                                        palette: palette,
+                                        title: kind.title,
+                                        isSelected: selectedKind == kind,
+                                        tint: kind == .all ? palette.brand : domainColor(for: kind.rawValue)
+                                    ) {
+                                        selectedKind = kind
+                                    }
+                                }
+                            }
                         }
-                        .pickerStyle(.segmented)
+                        .scrollIndicators(.hidden)
                     }
-                    .jieziCard(solid: true)
+                    .jieziCard(palette: palette, solid: true)
 
                     if isLoadingMonth && monthGroups.isEmpty {
                         ProgressView("正在加载本月记录…")
@@ -50,6 +64,7 @@ struct RecordsView: View {
                         .padding(.vertical, JieziSpacing.xl5)
                     } else if groups.isEmpty {
                         JieziEmptyState(
+                            palette: palette,
                             systemImage: "doc.text.magnifyingglass",
                             title: "本月还没有记录",
                             message: "截图识别或手动记录后，会按日期出现在这里。"
@@ -57,27 +72,25 @@ struct RecordsView: View {
                     } else {
                         ForEach(groups) { group in
                             VStack(alignment: .leading, spacing: JieziSpacing.sm) {
-                                Text(dayTitle(group.dateKey))
-                                    .font(JieziType.sectionTitle)
-                                    .foregroundStyle(JieziTheme.ink)
-                                    .padding(.horizontal, JieziSpacing.xs)
+                                dayHeader(group)
 
                                 VStack(spacing: 0) {
-                                    ForEach(group.records) { item in
+                                    ForEach(Array(group.records.enumerated()), id: \.element.id) { index, item in
                                         NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
-                                            recordRow(item)
+                                            recordRow(item, showDivider: index < group.records.count - 1)
                                         }
                                         .buttonStyle(.plain)
                                     }
                                 }
                                 .background(
-                                    JieziTheme.paper.opacity(0.72),
+                                    palette.paper.opacity(0.82),
                                     in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
                                 )
                                 .overlay {
                                     RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
-                                        .stroke(JieziTheme.brand.opacity(0.10), lineWidth: 1)
+                                        .stroke(palette.brand.opacity(0.10), lineWidth: 1)
                                 }
+                                .jieziShadow(JieziShadows.sm(palette))
                             }
                         }
                     }
@@ -92,14 +105,12 @@ struct RecordsView: View {
         .navigationTitle("记录")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showManualRecordSheet = true
                 } label: {
                     Label("新增记录", systemImage: "plus")
                 }
-                NavigationLink { AccountsView() } label: { Label("账户", systemImage: "wallet.pass") }
-                NavigationLink { DomainsView() } label: { Label("数据域", systemImage: "square.stack.3d.up") }
             }
         }
         .navigationDestination(for: NativeRecordRoute.self) { route in
@@ -123,54 +134,91 @@ struct RecordsView: View {
         NativeMonthKey.title(selectedMonthKey)
     }
 
-    private func dayTitle(_ dateKey: String) -> String { String(dateKey.suffix(5)) }
-
-    private func recordRow(_ item: NativeDayRecord) -> some View {
-        HStack(spacing: JieziSpacing.Semantic.item_gap) {
-            Image(systemName: item.systemImage)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(JieziTheme.brand)
-                .frame(width: JieziIcon.Semantic.list_row_block, height: JieziIcon.Semantic.list_row_block)
-                .background(JieziTheme.brand.opacity(0.10), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
-
-            VStack(alignment: .leading, spacing: JieziSpacing.xxs) {
-                Text(item.title)
-                    .font(JieziType.cardTitle)
-                    .foregroundStyle(JieziTheme.ink)
-                Text(item.subtitle)
-                    .font(JieziFont.footnote)
-                    .foregroundStyle(JieziTheme.muted)
-                    .lineLimit(2)
+    private func dayHeader(_ group: NativeDayRecordGroup) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
+                dayIdentity(group.dateKey)
+                Spacer(minLength: JieziSpacing.sm)
+                daySummary(group)
             }
-
-            Spacer(minLength: JieziSpacing.sm)
-
-            VStack(alignment: .trailing, spacing: JieziSpacing.xxs) {
-                Text(item.value)
-                    .font(JieziType.moneyInline)
-                    .monospacedDigit()
-                    .foregroundStyle(JieziTheme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                Text(item.timeLabel ?? "全天")
-                    .font(JieziFont.caption)
-                    .foregroundStyle(JieziTheme.muted)
+            VStack(alignment: .leading, spacing: JieziSpacing.xs) {
+                dayIdentity(group.dateKey)
+                daySummary(group)
             }
+        }
+        .padding(.horizontal, JieziSpacing.xs)
+    }
 
-            Image(systemName: "chevron.right")
-                .font(JieziFont.caption.weight(.bold))
-                .foregroundStyle(JieziTheme.muted.opacity(0.55))
+    private func dayIdentity(_ dateKey: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
+            Text(dayTitle(dateKey))
+                .font(JieziType.sectionTitle)
+                .foregroundStyle(palette.ink)
+            Text(weekdayTitle(dateKey))
+                .font(JieziFont.footnote)
+                .foregroundStyle(palette.muted)
         }
-        .padding(.horizontal, JieziSpacing.Semantic.item_gap)
-        .padding(.vertical, JieziSpacing.md)
-        .contentShape(Rectangle())
-        .overlay(alignment: .bottom) {
-            let stroke = JieziStroke.divider()
-            Rectangle()
-                .fill(stroke.color)
-                .frame(height: stroke.width)
-                .padding(.leading, JieziIcon.Semantic.list_row_block + JieziSpacing.Semantic.item_gap * 2)
+    }
+
+    private func daySummary(_ group: NativeDayRecordGroup) -> some View {
+        Text(daySummaryText(group))
+            .font(JieziFont.caption)
+            .foregroundStyle(palette.muted)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+    }
+
+    private func recordRow(_ item: NativeDayRecord, showDivider: Bool) -> some View {
+        JieziRecordRow(
+            palette: palette,
+            systemImage: item.systemImage,
+            iconTint: domainColor(for: item.domainKey ?? item.kind.rawValue),
+            title: item.title,
+            subtitle: item.subtitle,
+            value: item.value,
+            timeLabel: item.timeLabel ?? "全天",
+            valueTint: valueColor(for: item.kind),
+            showDivider: showDivider
+        )
+    }
+
+    private func dayTitle(_ dateKey: String) -> String {
+        guard let date = Self.dateFormatter.date(from: dateKey) else { return String(dateKey.suffix(5)) }
+        return Self.dayFormatter.string(from: date)
+    }
+
+    private func weekdayTitle(_ dateKey: String) -> String {
+        guard let date = Self.dateFormatter.date(from: dateKey) else { return "" }
+        return Self.weekdayFormatter.string(from: date)
+    }
+
+    private func daySummaryText(_ group: NativeDayRecordGroup) -> String {
+        guard selectedKind == .all,
+              let summary = appState.dashboard.dailySummaries.first(where: { $0.dateKey == group.dateKey }) else {
+            return "\(group.records.count) 条"
         }
+        var parts: [String] = []
+        if summary.expense > 0 { parts.append("支出 \(money(summary.expense))") }
+        if summary.income > 0 { parts.append("收入 \(money(summary.income))") }
+        if parts.isEmpty { parts.append("\(group.records.count) 条") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func domainColor(for domain: String) -> Color {
+        let supported = ["expense", "income", "sport", "sleep", "reading", "food", "wallet"]
+        return supported.contains(domain) ? JieziDomainColor.color(for: domain) : palette.brand
+    }
+
+    private func valueColor(for kind: NativeDayRecordKind) -> Color {
+        switch kind {
+        case .expense: return palette.coral
+        case .income: return palette.brand
+        default: return palette.ink
+        }
+    }
+
+    private func money(_ value: Double) -> String {
+        String(format: "¥%.0f", value)
     }
 
     private func shiftMonth(_ offset: Int) {
@@ -180,10 +228,35 @@ struct RecordsView: View {
     }
 
     private static var currentMonthKey: String { NativeMonthKey.current() }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .current
+        formatter.dateFormat = "MM月dd日"
+        return formatter
+    }()
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .current
+        formatter.dateFormat = "EEEE"
+        return formatter
+    }()
 }
 
 struct RecordDetailView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var themeManager: JieziThemeManager
     @Environment(\.dismiss) private var dismiss
     let reference: String
     @State private var imagePreview: ImagePreviewRoute?
@@ -194,28 +267,30 @@ struct RecordDetailView: View {
     private var detail: NativeRecordDetail? {
         appState.recordDetail(matching: reference)
     }
+    private var palette: JieziGeneratedPalette { themeManager.palette }
 
     var body: some View {
         ZStack {
-            JieziTheme.pageBackground.ignoresSafeArea()
+            JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
             if let detail {
                 GeometryReader { scrollViewport in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: JieziSpacing.xl2) {
+                            recordHeader(detail)
+
                             if let imageURL = detail.imageURL {
                                 Button {
                                     imagePreview = ImagePreviewRoute(url: imageURL)
                                 } label: {
-                                    RecordImagePreview(url: imageURL) {
+                                    RecordImagePreview(url: imageURL, palette: palette) {
                                         Task { await appState.loadRecordDetail(reference: reference, force: true) }
                                     }
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("查看原始图片")
                             } else if detail.imageLoadError {
                                 unavailableImageView
                             }
-
-                            recordHeader(detail)
 
                             detailSection(
                                 title: "基本信息",
@@ -283,14 +358,23 @@ struct RecordDetailView: View {
                             }
 
                             if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
-                                companionSection(companionMessage)
+                                aiContextSection(
+                                    summary: NativeRecordDetailPresentationAdapter.aiSummary(for: detail),
+                                    companionMessage: companionMessage
+                                )
+                            } else {
+                                aiContextSection(
+                                    summary: NativeRecordDetailPresentationAdapter.aiSummary(for: detail),
+                                    companionMessage: nil
+                                )
                             }
-
-                            summarySection(NativeRecordDetailPresentationAdapter.aiSummary(for: detail))
                             actionSection(detail)
                         }
-                        .padding(16)
+                        .padding(.horizontal, JieziSpacing.Semantic.page_padding)
+                        .padding(.top, JieziSpacing.sm)
+                        .padding(.bottom, JieziSpacing.xl5)
                     }
+                    .scrollIndicators(.hidden)
                 }
             } else if let message = appState.recordDetailMessage {
                 ContentUnavailableView(
@@ -304,31 +388,6 @@ struct RecordDetailView: View {
         }
         .navigationTitle("记录详情")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbar {
-            if let detail {
-                if detail.isEditable {
-                    Button {
-                        if detail.kind == "data" {
-                            universalEditDetail = detail
-                        } else {
-                            editDraft = NativeRecordEditDraft(detail: detail)
-                        }
-                    } label: {
-                        Label("编辑", systemImage: "square.and.pencil")
-                    }
-                    .disabled(appState.isSavingRecordDetail)
-                }
-
-                if detail.isDeletable {
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
-                    .disabled(appState.isDeletingRecordDetail)
-                }
-            }
-        }
         .task(id: reference) {
             await appState.loadRecordDetail(reference: reference)
         }
@@ -390,58 +449,94 @@ struct RecordDetailView: View {
             Task { await appState.loadRecordDetail(reference: reference, force: true) }
         } label: {
             Label("截图文件不可用，点此重新加载", systemImage: "arrow.clockwise")
-                .font(.footnote)
-                .foregroundStyle(JieziTheme.brand)
-                .frame(maxWidth: .infinity, minHeight: 88)
+                .font(JieziFont.subheadline.weight(.semibold))
+                .foregroundStyle(palette.brand)
+                .frame(maxWidth: .infinity, minHeight: 112)
+                .jieziCard(palette: palette, solid: true)
         }
         .buttonStyle(.plain)
     }
 
     private func recordHeader(_ detail: NativeRecordDetail) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: detail.systemImage)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(JieziTheme.brand)
-                .frame(width: 40, height: 40)
-                .background(JieziTheme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(detail.title).font(.headline)
-                Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
+        let tint = domainColor(for: detail.domainKey ?? detail.kind)
+        return VStack(alignment: .leading, spacing: JieziSpacing.md) {
+            HStack(spacing: JieziSpacing.sm) {
+                Image(systemName: detail.systemImage)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: JieziIcon.xl3, height: JieziIcon.xl3)
+                    .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
+                Text(NativeRecordDetailPresentationAdapter.domainLabel(for: detail))
+                    .font(JieziType.chip)
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, JieziSpacing.sm)
+                    .padding(.vertical, JieziSpacing.xs)
+                    .background(tint.opacity(0.09), in: Capsule())
+                Spacer(minLength: JieziSpacing.sm)
+                if detail.status == "pending" {
+                    Text("待补充")
+                        .font(JieziType.chip)
+                        .foregroundStyle(palette.light)
+                }
             }
-            Spacer()
+
+            Text(detail.title)
+                .font(JieziType.sectionTitle)
+                .foregroundStyle(palette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+
             if !detail.value.isEmpty {
-                Text(detail.value).font(.headline.monospacedDigit())
+                Text(detail.value)
+                    .font(detail.kind == "expense" || detail.kind == "income" ? JieziType.moneyHero : JieziType.moneyCard)
+                    .monospacedDigit()
+                    .foregroundStyle(valueColor(for: detail.kind))
+                    .minimumScaleFactor(0.68)
             }
+
+            Text(detail.subtitle)
+                .font(JieziFont.footnote)
+                .foregroundStyle(palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziCard(palette: palette, solid: true)
     }
 
     private func detailSection(title: String, rows: [NativeDetailRow]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(.headline).padding(.bottom, 12)
+        JieziDetailCard(
+            palette: palette,
+            title: title,
+            systemImage: title == "基本信息" ? "info.circle" : "text.badge.checkmark"
+        ) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                HStack(alignment: .top, spacing: 16) {
-                    Text(row.label).font(.subheadline).foregroundStyle(.secondary).frame(width: 82, alignment: .leading)
-                    Text(row.value).font(.subheadline).frame(maxWidth: .infinity, alignment: .trailing).multilineTextAlignment(.trailing)
-                }
-                .padding(.vertical, 10)
-                if index < rows.count - 1 { Divider() }
+                JieziDetailRow(
+                    palette: palette,
+                    label: row.label,
+                    value: row.value,
+                    showDivider: index < rows.count - 1
+                )
             }
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func foodDishesSection(_ dishes: [NativeFoodDish]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("菜品明细").font(.headline)
-            ForEach(dishes) { dish in
+        JieziDetailCard(
+            palette: palette,
+            title: "菜品明细",
+            systemImage: "fork.knife",
+            tint: JieziDomainColor.food
+        ) {
+            ForEach(Array(dishes.enumerated()), id: \.element.id) { index, dish in
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
-                        Text(dish.name).font(.subheadline.weight(.semibold))
+                        Text(dish.name)
+                            .font(JieziFont.subheadline.weight(.semibold))
+                            .foregroundStyle(palette.ink)
                         Spacer()
-                        if let calories = dish.calories { Text("\(Int(calories.rounded())) kcal").font(.caption.monospacedDigit()) }
+                        if let calories = dish.calories {
+                            Text("\(Int(calories.rounded())) kcal")
+                                .font(JieziFont.caption.monospacedDigit())
+                                .foregroundStyle(JieziDomainColor.food)
+                        }
                     }
                     HStack(spacing: 12) {
                         if let estimatedGrams = dish.estimatedGrams { Text("约 \(estimatedGrams, specifier: "%.0f")g") }
@@ -449,49 +544,58 @@ struct RecordDetailView: View {
                         if let carbs = dish.carbs { Text("碳水 \(carbs, specifier: "%.1f")g") }
                         if let fat = dish.fat { Text("脂肪 \(fat, specifier: "%.1f")g") }
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(JieziFont.caption)
+                    .foregroundStyle(palette.muted)
                 }
-                .padding(12)
-                .background(JieziTheme.brand.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.vertical, JieziSpacing.md)
+                .overlay(alignment: .bottom) {
+                    if index < dishes.count - 1 {
+                        let stroke = JieziStroke.divider(palette)
+                        Rectangle().fill(stroke.color).frame(height: stroke.width)
+                    }
+                }
             }
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func accountBindingSection(
         _ binding: NativeRecordAccountBindingPresentation,
         detail: NativeRecordDetail
     ) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: accountBindingIcon(binding.status))
-                .font(.body.weight(.bold))
-                .foregroundStyle(accountBindingColor(binding.status))
-                .frame(width: 36, height: 36)
-                .background(accountBindingColor(binding.status).opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 5) {
-                Text("账户绑定").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                Text(binding.title).font(.subheadline.weight(.semibold))
-                Text(binding.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 8)
-            if let account = binding.recommendedAccount {
-                Button("一键绑定") {
-                    Task {
-                        var draft = NativeRecordEditDraft(detail: detail)
-                        draft.accountId = account.id
-                        _ = await appState.saveRecordDetail(draft)
-                    }
+        let tint = accountBindingColor(binding.status)
+        return JieziDetailCard(
+            palette: palette,
+            title: "账户影响",
+            systemImage: accountBindingIcon(binding.status),
+            tint: tint
+        ) {
+            HStack(alignment: .top, spacing: JieziSpacing.md) {
+                VStack(alignment: .leading, spacing: JieziSpacing.xs) {
+                    Text(binding.title)
+                        .font(JieziFont.subheadline.weight(.semibold))
+                        .foregroundStyle(palette.ink)
+                    Text(binding.reason)
+                        .font(JieziFont.caption)
+                        .foregroundStyle(palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(JieziTheme.brand)
-                .disabled(appState.isSavingRecordDetail)
+                Spacer(minLength: JieziSpacing.sm)
+                if let account = binding.recommendedAccount {
+                    Button {
+                        Task {
+                            var draft = NativeRecordEditDraft(detail: detail)
+                            draft.accountId = account.id
+                            _ = await appState.saveRecordDetail(draft)
+                        }
+                    } label: {
+                        Label("绑定", systemImage: "link")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(tint)
+                    .disabled(appState.isSavingRecordDetail)
+                }
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(accountBindingColor(binding.status).opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func accountBindingIcon(_ status: NativeRecordAccountBindingStatus) -> String {
@@ -504,56 +608,88 @@ struct RecordDetailView: View {
 
     private func accountBindingColor(_ status: NativeRecordAccountBindingStatus) -> Color {
         switch status {
-        case .bound: return JieziTheme.brand
-        case .recommended: return JieziTheme.gold
-        case .unbound: return JieziTheme.coral
+        case .bound: return palette.brand
+        case .recommended: return palette.light
+        case .unbound: return palette.coral
         }
     }
 
-    private func companionSection(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "quote.bubble.fill").foregroundStyle(JieziTheme.brand)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("AI 陪伴").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                Text(message).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+    private func aiContextSection(summary: String, companionMessage: String?) -> some View {
+        JieziDetailCard(
+            palette: palette,
+            title: "AI 记录",
+            systemImage: "sparkles",
+            tint: palette.light,
+            solid: false
+        ) {
+            if let companionMessage, !companionMessage.isEmpty {
+                VStack(alignment: .leading, spacing: JieziSpacing.xs) {
+                    Text("陪伴")
+                        .font(JieziFont.caption.weight(.semibold))
+                        .foregroundStyle(palette.muted)
+                    Text(companionMessage)
+                        .font(JieziFont.subheadline)
+                        .foregroundStyle(palette.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, JieziSpacing.md)
+
+                let stroke = JieziStroke.divider(palette)
+                Rectangle().fill(stroke.color).frame(height: stroke.width)
             }
+
+            VStack(alignment: .leading, spacing: JieziSpacing.xs) {
+                Text("识别摘要")
+                    .font(JieziFont.caption.weight(.semibold))
+                    .foregroundStyle(palette.muted)
+                Text(summary)
+                    .font(JieziFont.subheadline)
+                    .foregroundStyle(palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, JieziSpacing.md)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(JieziTheme.brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func summarySection(_ summary: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("AI 摘要").font(.headline)
-            Text(summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
-    }
-
+    @ViewBuilder
     private func actionSection(_ detail: NativeRecordDetail) -> some View {
-        HStack(spacing: 12) {
-            if detail.isEditable {
-                Button {
-                    if detail.kind == "data" { universalEditDetail = detail }
-                    else { editDraft = NativeRecordEditDraft(detail: detail) }
-                } label: {
-                    Label(detail.status == "pending" ? "补充信息" : "编辑", systemImage: "square.and.pencil")
-                        .frame(maxWidth: .infinity)
+        if detail.isEditable || detail.isDeletable {
+            HStack(spacing: JieziSpacing.md) {
+                if detail.isEditable {
+                    JieziPrimaryButton(
+                        title: detail.status == "pending" ? "补充信息" : "编辑记录",
+                        systemImage: "square.and.pencil",
+                        palette: palette
+                    ) {
+                        if detail.kind == "data" { universalEditDetail = detail }
+                        else { editDraft = NativeRecordEditDraft(detail: detail) }
+                    }
+                    .disabled(appState.isSavingRecordDetail)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(JieziTheme.brand)
-            }
-            if detail.isDeletable {
-                Button(role: .destructive) {
-                    showDeleteConfirm = true
-                } label: {
-                    Label("删除", systemImage: "trash").frame(maxWidth: .infinity)
+                if detail.isDeletable {
+                    JieziDangerButton(
+                        title: "删除",
+                        systemImage: "trash",
+                        palette: palette
+                    ) {
+                        showDeleteConfirm = true
+                    }
+                    .disabled(appState.isDeletingRecordDetail)
                 }
-                .buttonStyle(.bordered)
             }
+        }
+    }
+
+    private func domainColor(for domain: String) -> Color {
+        let supported = ["expense", "income", "sport", "sleep", "reading", "food", "wallet"]
+        return supported.contains(domain) ? JieziDomainColor.color(for: domain) : palette.brand
+    }
+
+    private func valueColor(for kind: String) -> Color {
+        switch kind {
+        case "expense": return palette.coral
+        case "income": return palette.brand
+        default: return domainColor(for: kind)
         }
     }
 
@@ -565,6 +701,7 @@ struct RecordDetailView: View {
 
 private struct RecordImagePreview: View {
     let url: URL
+    let palette: JieziGeneratedPalette
     let onRetry: () -> Void
 
     var body: some View {
@@ -573,33 +710,24 @@ private struct RecordImagePreview: View {
                 .resizable()
                 .scaledToFit()
                 .frame(maxWidth: .infinity)
-                .frame(maxHeight: 280)
-                .background(JieziTheme.pageBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(alignment: .topLeading) {
-                    Label("原始图片", systemImage: "photo")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(10)
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    Label("大图", systemImage: "arrow.up.left.and.arrow.down.right")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(10)
+                .background(palette.paper.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: JieziRadius.lg, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: JieziRadius.lg, style: .continuous)
+                        .stroke(palette.brand.opacity(0.10), lineWidth: 1)
                 }
         } placeholder: {
-            ProgressView().frame(maxWidth: .infinity, minHeight: 128)
+            ProgressView()
+                .tint(palette.brand)
+                .frame(maxWidth: .infinity, minHeight: 220)
+                .background(palette.paper.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: JieziRadius.lg, style: .continuous))
         } failure: {
             Button(action: onRetry) {
                 Label("截图加载失败，点此重试", systemImage: "arrow.clockwise")
-                    .font(.footnote)
-                    .foregroundStyle(JieziTheme.brand)
-                    .frame(maxWidth: .infinity, minHeight: 128)
+                    .font(JieziFont.footnote)
+                    .foregroundStyle(palette.brand)
+                    .frame(maxWidth: .infinity, minHeight: 160)
             }
             .buttonStyle(.plain)
         }

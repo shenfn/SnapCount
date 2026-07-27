@@ -336,7 +336,7 @@ struct NativeAIFeedbackCard: View {
             if selectedChoice != nil {
                 TextField("可以补充原因（选填）", text: $reviewText, axis: .vertical)
                     .lineLimit(2...4)
-                    .textFieldStyle(.roundedBorder)
+                    .jieziInputSurface(palette: JieziTheme.palette)
                 Button {
                     guard let selectedChoice else { return }
                     onSubmit?(selectedChoice, reviewText.trimmingCharacters(in: .whitespacesAndNewlines))

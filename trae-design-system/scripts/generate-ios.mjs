@@ -274,7 +274,7 @@ tokens.shadow.scale.forEach((s) => {
   if (s.alpha === 0) {
     lines.push(`    static let ${s.id} = JieziShadow(color: .clear, alpha: 0, radius: 0, x: 0, y: 0)`);
   } else {
-    lines.push(`    static func ${s.id}(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow {`);
+    lines.push(`    static func ${s.id}(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow {`);
     lines.push(`        JieziShadow(color: p.${s.color_ref}, alpha: ${s.alpha}, radius: ${s.radius}, x: ${s.x}, y: ${s.y})`);
     lines.push('    }');
   }
@@ -283,7 +283,7 @@ lines.push('');
 lines.push('    enum Semantic {');
 Object.entries(tokens.shadow.semantic).forEach(([k, v]) => {
   lines.push(`        /// 语义阴影：${k} → ${v.ref}`);
-  lines.push(`        static func ${k}(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow { JieziShadows.${v.ref}(p) }`);
+  lines.push(`        static func ${k}(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow { JieziShadows.${v.ref}(p) }`);
 });
 lines.push('    }');
 lines.push('}');
@@ -332,7 +332,7 @@ lines.push('enum JieziStroke {');
 Object.entries(tokens.stroke).forEach(([k, v]) => {
   if (k === '$description') return;
   lines.push(`    /// ${v.usage}`);
-  lines.push(`    static func ${k}(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziStrokeStyle {`);
+  lines.push(`    static func ${k}(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziStrokeStyle {`);
   lines.push(`        JieziStrokeStyle(color: p.${v.color_ref}.opacity(${v.alpha}), width: ${v.width})`);
   lines.push('    }');
 });
@@ -372,7 +372,7 @@ Object.entries(tokens.color.domains).forEach(([k, v]) => {
   if (k === '$description') return;
   lines.push(`        case "${k}": return JieziDomainColor.${k}`);
 });
-lines.push('        default: return JieziGeneratedPalette.defaultPalette.brand');
+lines.push('        default: return JieziThemeManager.shared.palette.brand');
 lines.push('        }');
 lines.push('    }');
 lines.push('}');
@@ -434,7 +434,7 @@ lines.push('');
 lines.push('// MARK: - 渐变构建器');
 lines.push('');
 lines.push('enum JieziGradient {');
-lines.push('    static func pageBackground(palette: JieziGeneratedPalette = .defaultPalette) -> LinearGradient {');
+lines.push('    static func pageBackground(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> LinearGradient {');
 lines.push('        LinearGradient(');
 lines.push('            colors: [');
 lines.push('                palette.paper,');
@@ -446,7 +446,7 @@ lines.push('            endPoint: .bottomTrailing');
 lines.push('        )');
 lines.push('    }');
 lines.push('');
-lines.push('    static func sumeruBackground(palette: JieziGeneratedPalette = .defaultPalette) -> RadialGradient {');
+lines.push('    static func sumeruBackground(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> RadialGradient {');
 lines.push('        RadialGradient(');
 lines.push('            colors: [');
 lines.push('                palette.brand.jieziBlended(with: palette.light, amount: 0.16),');
@@ -459,7 +459,7 @@ lines.push('            endRadius: 520');
 lines.push('        )');
 lines.push('    }');
 lines.push('');
-lines.push('    static func brandWash(palette: JieziGeneratedPalette = .defaultPalette) -> LinearGradient {');
+lines.push('    static func brandWash(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> LinearGradient {');
 lines.push('        LinearGradient(');
 lines.push('            colors: [');
 lines.push('                palette.brand.opacity(0.92),');
@@ -504,7 +504,7 @@ lines.push('}');
 lines.push('');
 lines.push('extension View {');
 lines.push('    /// 芥子卡片：默认玻璃卡（材质+宣纸底色），solid: true 为实卡（列表行/小卡场景）。');
-lines.push('    func jieziCard(palette: JieziGeneratedPalette = .defaultPalette, solid: Bool = false) -> some View {');
+lines.push('    func jieziCard(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette, solid: Bool = false) -> some View {');
 lines.push('        modifier(JieziCardStyle(palette: palette, solid: solid))');
 lines.push('    }');
 lines.push('}');

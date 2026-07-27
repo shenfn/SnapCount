@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var themeManager: JieziThemeManager
 
     var body: some View {
         Group {
@@ -58,8 +59,8 @@ struct RootView: View {
             .tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage) }
             .tag(AppTab.settings)
         }
-        .tint(JieziTheme.brand)
-        .toolbarBackground(JieziTheme.paper.opacity(0.94), for: .tabBar)
+        .tint(themeManager.palette.brand)
+        .toolbarBackground(themeManager.palette.paper.opacity(0.94), for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .onChange(of: appState.selectedTab) { tab in
             guard [.today, .inbox, .records].contains(tab) else { return }
