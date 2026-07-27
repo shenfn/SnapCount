@@ -1923,6 +1923,37 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(snapshot.foodCalories, 2100)
     }
 
+    func testFinanceChartScaleKeepsNormalAmountsLinear() {
+        let rows = [
+            makeInsightDay(date: "2026-07-14", expense: 30, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-15", expense: 40, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-16", expense: 80, income: 0, sleep: 0, food: 0)
+        ]
+
+        let scale = NativeFinanceChartScale(rows: rows)
+
+        XCTAssertFalse(scale.isCompressed)
+        XCTAssertEqual(scale.plottedAmount(80), 80)
+        XCTAssertGreaterThanOrEqual(scale.limit, 80)
+    }
+
+    func testFinanceChartScaleCompressesOutliersWithoutChangingRegularAmounts() {
+        let rows = [
+            makeInsightDay(date: "2026-07-14", expense: 30, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-15", expense: 40, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-16", expense: 50, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-17", expense: 1_000, income: 5_000, sleep: 0, food: 0)
+        ]
+
+        let scale = NativeFinanceChartScale(rows: rows)
+
+        XCTAssertTrue(scale.isCompressed)
+        XCTAssertEqual(scale.compressedCount, 2)
+        XCTAssertEqual(scale.plottedAmount(50), 50)
+        XCTAssertEqual(scale.plottedAmount(1_000), scale.limit)
+        XCTAssertEqual(scale.plottedAmount(5_000), scale.limit)
+    }
+
     func testAIInsightPayloadParsesStructuredLists() {
         let payload = NativeAIInsightPayload([
             "headline": AnyCodable("近两周收支稳定"),
