@@ -674,8 +674,23 @@ private struct NativeInboxFilmCard: View {
 
     @ViewBuilder
     private var mediaSurface: some View {
-        let surface = ZStack(alignment: .topLeading) {
+        if isSingleColumn, imageURL != nil {
+            decoratedMediaSurface
+        } else {
+            GeometryReader { proxy in
+                decoratedMediaSurface
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+            .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var decoratedMediaSurface: some View {
+        ZStack(alignment: .topLeading) {
             filmContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
             InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
                 .padding(JieziSpacing.sm)
         }
@@ -687,12 +702,6 @@ private struct NativeInboxFilmCard: View {
                 .stroke(statusColor.opacity(0.14), lineWidth: 1)
         }
         .shadow(color: JieziTheme.space.opacity(0.07), radius: 10, x: 0, y: 6)
-
-        if isSingleColumn, imageURL != nil {
-            surface
-        } else {
-            surface.aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
-        }
     }
 
     @ViewBuilder
