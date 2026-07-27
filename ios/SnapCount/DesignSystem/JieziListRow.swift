@@ -65,8 +65,8 @@ struct JieziListRow: View {
                             .lineLimit(1)
                     }
                 }
+                .layoutPriority(1)
             }
-            .layoutPriority(1)
 
             if showsChevron {
                 Image(systemName: "chevron.right")
