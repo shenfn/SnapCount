@@ -237,7 +237,7 @@ struct InboxView: View {
                     .foregroundStyle(JieziTheme.muted)
                 LazyVGrid(
                     columns: Array(
-                        repeating: GridItem(.flexible(), spacing: JieziSpacing.lg, alignment: .top),
+                        repeating: GridItem(.flexible(minimum: 0), spacing: JieziSpacing.lg, alignment: .top),
                         count: columnCount
                     ),
                     spacing: JieziSpacing.xl2
@@ -253,6 +253,7 @@ struct InboxView: View {
                             )
                         }
                         .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
+                        .frame(maxWidth: .infinity)
                     }
                 }
             }
@@ -594,7 +595,7 @@ private struct InboxCategoryView: View {
     private func inboxGrid(_ sectionItems: [NativeInboxItem]) -> some View {
         LazyVGrid(
             columns: Array(
-                repeating: GridItem(.flexible(), spacing: JieziSpacing.lg, alignment: .top),
+                repeating: GridItem(.flexible(minimum: 0), spacing: JieziSpacing.lg, alignment: .top),
                 count: columnCount
             ),
             spacing: JieziSpacing.xl2
@@ -675,33 +676,53 @@ private struct NativeInboxFilmCard: View {
     @ViewBuilder
     private var mediaSurface: some View {
         if isSingleColumn, imageURL != nil {
-            decoratedMediaSurface
+            singleColumnMediaSurface
         } else {
-            GeometryReader { proxy in
-                decoratedMediaSurface
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-            }
-            .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
-            .frame(maxWidth: .infinity)
+            fixedAspectMediaSurface
         }
     }
 
-    private var decoratedMediaSurface: some View {
+    private var singleColumnMediaSurface: some View {
         ZStack(alignment: .topLeading) {
             filmContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity)
                 .clipped()
             InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
                 .padding(JieziSpacing.sm)
         }
         .frame(maxWidth: .infinity)
         .background(JieziTheme.paper.opacity(0.74))
-        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
+        .clipShape(mediaShape)
         .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous)
-                .stroke(statusColor.opacity(0.14), lineWidth: 1)
+            mediaShape.stroke(statusColor.opacity(0.14), lineWidth: 1)
         }
         .shadow(color: JieziTheme.space.opacity(0.07), radius: 10, x: 0, y: 6)
+    }
+
+    private var fixedAspectMediaSurface: some View {
+        // The shape owns the grid-cell size; overlay content cannot widen the column.
+        mediaShape
+            .fill(JieziTheme.paper.opacity(0.74))
+            .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                filmContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+            }
+            .overlay(alignment: .topLeading) {
+                InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
+                    .padding(JieziSpacing.sm)
+            }
+            .clipShape(mediaShape)
+            .overlay {
+                mediaShape.stroke(statusColor.opacity(0.14), lineWidth: 1)
+            }
+            .shadow(color: JieziTheme.space.opacity(0.07), radius: 10, x: 0, y: 6)
+    }
+
+    private var mediaShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous)
     }
 
     @ViewBuilder
