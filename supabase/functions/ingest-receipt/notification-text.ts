@@ -17,3 +17,15 @@ export function uniqueNotificationLines(
 
   return unique;
 }
+
+export function mergePlannerNotification(
+  plannerMessage: string | null | undefined,
+  fallbackNotification: string,
+  companionMessage?: string | null,
+): string {
+  return uniqueNotificationLines([
+    ...String(companionMessage ?? "").split("\n"),
+    plannerMessage,
+    ...fallbackNotification.split("\n"),
+  ]).join("\n");
+}

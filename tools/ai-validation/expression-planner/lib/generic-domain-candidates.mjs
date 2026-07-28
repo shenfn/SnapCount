@@ -40,6 +40,57 @@ function timestamp(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function domainRecordKnownAt(record) {
+  return timestamp(record?.created_at) ?? timestamp(record?.occurred_at)
+}
+
+function canonicalTimestamp(value) {
+  const parsed = timestamp(value)
+  return parsed === null ? null : new Date(parsed).toISOString()
+}
+
+function sleepEventKey(record) {
+  const start = canonicalTimestamp(payloadValue(record, "sleep_start_at"))
+  const wake = canonicalTimestamp(payloadValue(record, "wake_at"))
+  if (!start || !wake) return null
+  return JSON.stringify({
+    start,
+    wake,
+    sleep_minutes: num(payloadValue(record, "sleep_minutes")),
+    sleep_hours: num(payloadValue(record, "sleep_hours")),
+    deep_sleep_minutes: num(payloadValue(record, "deep_sleep_minutes")),
+    light_sleep_minutes: num(payloadValue(record, "light_sleep_minutes")),
+    rem_minutes: num(payloadValue(record, "rem_minutes")),
+    awake_minutes: num(payloadValue(record, "awake_minutes")),
+  })
+}
+
+export function prepareDomainRecords(domainKey, records, currentRecordId) {
+  const current = records.find(record => record.id === currentRecordId)
+  if (!current) return []
+  const currentKnownAt = domainRecordKnownAt(current)
+  const causal = records.filter(record => {
+    if (record.id === currentRecordId) return true
+    const knownAt = domainRecordKnownAt(record)
+    return currentKnownAt !== null && knownAt !== null && knownAt < currentKnownAt
+  })
+  if (domainKey !== "sleep") return causal
+
+  const ordered = [...causal].sort((left, right) => {
+    if (left.id === currentRecordId) return -1
+    if (right.id === currentRecordId) return 1
+    return (domainRecordKnownAt(right) ?? 0) - (domainRecordKnownAt(left) ?? 0)
+  })
+  const seen = new Set()
+  return ordered.filter(record => {
+    const key = sleepEventKey(record)
+    if (!key) return true
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 function formatLocalTime(value) {
   const parsed = timestamp(value)
   if (parsed === null) return null

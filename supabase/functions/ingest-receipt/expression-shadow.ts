@@ -462,7 +462,7 @@ export async function persistPlannerExposureEvents(
 async function processExpenseShadow(supabase: ShadowDatabaseClient, params: { eventKey: string; userId: string; recordId: string; occurredAt: string; collectorResult: Record<string, unknown> }): Promise<void> {
   try {
     const { data, error } = await supabase.from("transactions")
-      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type")
+      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash")
       .eq("user_id", params.userId).eq("type", "expense")
       .order("transaction_date", { ascending: false }).order("transaction_time", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
@@ -488,7 +488,7 @@ async function processIncomeShadow(supabase: ShadowDatabaseClient, params: { eve
 async function processBuiltinShadow(supabase: ShadowDatabaseClient, params: { eventKey: string; userId: string; recordId: string; domainKey: string; collectorResult: Record<string, unknown> }): Promise<void> {
   try {
     const { data, error } = await supabase.from("data_records")
-      .select("id,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at")
+      .select("id,created_at,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at")
       .eq("user_id", params.userId).eq("domain_key", params.domainKey).order("occurred_at", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
     const records = (data ?? []).map(buildDataPlannerSourceRecord);

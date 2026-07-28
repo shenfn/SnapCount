@@ -16,6 +16,7 @@ function event(id, name, normalizedName, eventAt, options = {}) {
     event_time_source: options.precision === 'date_only' ? 'date_noon_proxy' : 'transaction_time',
     event_time_precision: options.precision ?? 'second',
     event_time_confidence: options.precision === 'date_only' ? 0.35 : 0.95,
+    observation_group: options.observationGroup ?? null,
     merchant: {
       entity_id: `merchant_unmapped_${normalizedName}`,
       canonical_name: name,
@@ -126,4 +127,31 @@ test('does not use pending or otherwise fact-ineligible records as the previous 
   assert.deepEqual(generateRecordNameRecurrenceCandidates([previous, current], {
     currentEventId: current.event_id,
   }), [])
+})
+
+test('skips the same observation batch and compares with the prior independent record', () => {
+  const older = event('older', 'Same Name', 'samename', '2026-07-10T09:00:00+08:00')
+  const sameBatch = event('same-batch', 'Same Name', 'samename', '2026-07-12T09:00:00+08:00', {
+    observationGroup: 'capture-2',
+  })
+  const current = event('current', 'Same Name', 'samename', '2026-07-12T09:05:00+08:00', {
+    observationGroup: 'capture-2',
+  })
+
+  const candidate = generateRecordNameRecurrenceCandidates([older, sameBatch, current], {
+    currentEventId: current.event_id,
+  })[0]
+  assert.equal(candidate.claim.structured_value.previous_record_id, 'older')
+  assert.equal(candidate.claim.structured_value.elapsed_minutes, 2885)
+})
+
+test('skips an exact repeated observation even when capture metadata is absent', () => {
+  const older = event('older', 'Same Name', 'samename', '2026-07-10T09:00:00+08:00', { amount: 8 })
+  const duplicate = event('duplicate', 'Same Name', 'samename', '2026-07-12T09:00:00+08:00', { amount: 10 })
+  const current = event('current', 'Same Name', 'samename', '2026-07-12T09:00:00+08:00', { amount: 10 })
+
+  const candidate = generateRecordNameRecurrenceCandidates([older, duplicate, current], {
+    currentEventId: current.event_id,
+  })[0]
+  assert.equal(candidate.claim.structured_value.previous_record_id, 'older')
 })

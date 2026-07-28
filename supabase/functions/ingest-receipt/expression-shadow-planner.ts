@@ -22,6 +22,7 @@ import {
   generateIncomeCandidates,
   generateBuiltinDomainCandidates,
   parseFiniteNumber,
+  prepareDomainRecords,
 } from "../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs";
 // @ts-ignore See note above.
 import { evaluateCandidates, summarizeEligibility } from "../../../tools/ai-validation/expression-planner/lib/eligibility-gates.mjs";
@@ -38,11 +39,13 @@ export interface ShadowExpenseTransaction {
   id: string; transaction_date: string; transaction_time?: string | null; created_at?: string | null;
   amount: number | string | null; merchant_name?: string | null; category?: string | null;
   platform?: string | null; payment_method?: string | null; status?: string | null; type?: string | null;
+  staging_record_id?: string | null; image_hash?: string | null; batch_alias?: string | null;
 }
 
 export interface ShadowGenericRecord {
   [key: string]: unknown;
   id: string; occurred_at: string; amount?: number | string | null; source_name?: string | null;
+  created_at?: string | null;
   title?: string | null; summary?: string | null; payload?: Record<string, unknown>; source_type?: string;
   linked_account_id?: string | null; account_snapshot_kind?: string | null;
   snapshot_balance?: number | string | null; snapshot_at?: string | null;
@@ -95,6 +98,7 @@ function toRecord(row: ShadowExpenseTransaction, aliasMap: Map<string, unknown>)
     has_precise_event_time: hasPreciseEventTime,
     event_time_source: hasPreciseEventTime ? "transaction_time" : "date_noon_proxy",
     event_time_confidence: hasPreciseEventTime ? 0.95 : 0.35,
+    observation_group: row.staging_record_id ?? row.image_hash ?? row.batch_alias ?? null,
     fact_contract: buildExpenseFactContract({ status: row.status, category }) };
 }
 
@@ -109,6 +113,7 @@ export function buildExpensePlannerSourceRecord(row: ShadowExpenseTransaction) {
     category: record.category,
     platform: record.platform,
     payment_method: record.payment_method,
+    observation_group: record.observation_group,
     status: record.status,
     type: row.type ?? null,
   };
@@ -118,6 +123,7 @@ export function buildIncomePlannerSourceRecord(row: Record<string, unknown>): Sh
   const incomeDate = stringOrNull(row.income_date);
   return {
     id: stringOrNull(row.id) ?? "",
+    created_at: stringOrNull(row.created_at),
     occurred_at: incomeDate
       ? `${incomeDate}T12:00:00+08:00`
       : stringOrNull(row.created_at) ?? "",
@@ -131,6 +137,7 @@ export function buildIncomePlannerSourceRecord(row: Record<string, unknown>): Sh
 export function buildDataPlannerSourceRecord(row: Record<string, unknown>): ShadowGenericRecord {
   return {
     id: stringOrNull(row.id) ?? "",
+    created_at: stringOrNull(row.created_at),
     occurred_at: stringOrNull(row.occurred_at) ?? "",
     title: stringOrNull(row.title),
     summary: stringOrNull(row.summary),
@@ -226,7 +233,8 @@ function toFactEvent(record: ReturnType<typeof toRecord>) {
     event_time_confidence: record.event_time_confidence,
     known_at: record.created_at ?? record.occurred_at, transaction_date: record.transaction_date,
     amount: record.amount, merchant: record.merchant, category: record.category, platform: record.platform,
-    payment_method: record.payment_method, fact_contract: record.fact_contract, target_table: "transactions", target_id: record.id };
+    payment_method: record.payment_method, observation_group: record.observation_group,
+    fact_contract: record.fact_contract, target_table: "transactions", target_id: record.id };
 }
 
 function knownAt(record: ReturnType<typeof toRecord>): number | null {
@@ -358,12 +366,13 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
 }
 
 export function buildGenericExpressionShadowPlan(input: GenericPlannerInput) {
-  const currentRecord = input.records.find(record => record.id === input.currentRecordId) ?? null;
+  const planningRecords = prepareDomainRecords(input.domainKey, input.records, input.currentRecordId);
+  const currentRecord = planningRecords.find((record: ShadowGenericRecord) => record.id === input.currentRecordId) ?? null;
   if (!currentRecord) return { status: "skipped", reason: "current_domain_record_missing", domain_key: input.domainKey, changes_user_output: false };
   const candidates = input.domainKey === "income"
-    ? generateIncomeCandidates(input.records, input.currentRecordId)
-    : generateBuiltinDomainCandidates(input.domainKey, input.records, input.currentRecordId, input.domainProfile ?? {});
+    ? generateIncomeCandidates(planningRecords, input.currentRecordId)
+    : generateBuiltinDomainCandidates(input.domainKey, planningRecords, input.currentRecordId, input.domainProfile ?? {});
   const covered = input.domainKey === "income" ? ["income_current_amount", "income_month_total_count"] : [];
   const sourceTable = input.domainKey === "income" ? "income_records" : "data_records";
-  return finalizePlan(input.domainKey, currentRecord, candidates, input, covered, currentRecord, sourceTable, input.records);
+  return finalizePlan(input.domainKey, currentRecord, candidates, input, covered, currentRecord, sourceTable, planningRecords);
 }

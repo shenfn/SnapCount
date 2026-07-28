@@ -53,6 +53,21 @@ test('uses an exact fact fallback instead of silence when no candidate passes', 
   assert.equal(plan.selected[0].selection_mode, 'exact_fact_fallback')
 })
 
+test('uses record context only when no richer detail candidate is selected', () => {
+  const context = candidate('context', 'expense_current_record_context', 'fact', 'observed', {
+    shortcut_notification: null, pwa_pending_ai_card: 60, record_detail: 69, weekly_report: null,
+  })
+  context.selection_hints.fallback_only_surfaces = ['pwa_pending_ai_card', 'record_detail']
+
+  const richPlan = buildSurfacePlan([context, baseline], 'record_detail')
+  assert.deepEqual(richPlan.selected.map(item => item.candidate_id), ['baseline'])
+  assert.equal(richPlan.excluded.find(item => item.candidate_id === 'context').reason, 'reserved_as_surface_fallback')
+
+  const fallbackPlan = buildSurfacePlan([context], 'record_detail')
+  assert.deepEqual(fallbackPlan.selected.map(item => item.candidate_id), ['context'])
+  assert.equal(fallbackPlan.selected[0].selection_mode, 'surface_fallback')
+})
+
 test('respects record detail capacity while retaining multiple angles', () => {
   const plans = buildExpressionPlans([daily, weekly, baseline, amounts])
   assert.deepEqual(plans.record_detail.selected.map(item => item.candidate_id), ['daily', 'baseline', 'amounts'])

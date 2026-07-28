@@ -1,13 +1,14 @@
 // 随手账 · Edge Function: ingest-receipt
 // 部署: supabase functions deploy ingest-receipt --no-verify-jwt
 
-import { createClient } from "npm:@supabase/supabase-js@2.45.0";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.45.0";
 import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
 import { PROMPT, buildPrompt, buildFeedbackPrompt, buildVoicePrompt } from "./prompts.ts";
 import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   acknowledgeRecordExpressionPlan,
+  deliverShortcutExpressionPlan,
   getRecordExpressionPlan,
   isRecordExpressionOwnerEnabled,
 } from "./expression-delivery.ts";
@@ -28,7 +29,8 @@ import {
   type FinancialPerceptualCandidate,
   type RankedPerceptualCandidate,
 } from "./duplicate-review.ts";
-import { uniqueNotificationLines } from "./notification-text.ts";
+import { mergePlannerNotification, uniqueNotificationLines } from "./notification-text.ts";
+import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories.js";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
 // 默认使用 3.6 Flash 控制上传耗时，用户可显式切换到 3.7 Plus。
@@ -2144,6 +2146,35 @@ function feedbackNotification(
     ...fallbackTail,
   ]);
   return lines.join("\n");
+}
+
+async function shortcutPlannerMessage(
+  supabase: SupabaseClient,
+  userId: string,
+  input: {
+    recordId: string;
+    recordKind: "expense" | "income" | "data";
+    occurredAt: string | null;
+    deliveryAttemptId: string;
+  },
+): Promise<string | null> {
+  if (!isRecordExpressionOwnerEnabled(userId)) return null;
+  try {
+    const delivery = await deliverShortcutExpressionPlan(supabase, userId, {
+      record_id: input.recordId,
+      record_kind: input.recordKind,
+      occurred_at: input.occurredAt ?? new Date().toISOString(),
+      delivery_attempt_id: input.deliveryAttemptId,
+    });
+    return delivery.available && typeof delivery.message === "string"
+      ? delivery.message
+      : null;
+  } catch (error) {
+    console.warn("[expression-delivery] shortcut fallback", {
+      error_type: error instanceof Error ? error.name : typeof error,
+    });
+    return null;
+  }
 }
 
 function expenseCategoryLabel(category: string | null): string | null {
@@ -5742,6 +5773,9 @@ Deno.serve(async (req) => {
         })),
       });
     }
+    ai.category = ai.category
+      ? normalizeExpenseCategory(ai.category) ?? "other"
+      : null;
     timings.mark("vision_total");
     const storageUpload = await storageUploadPromise;
     timings.record("storage_upload", storageUpload.durationMs);
@@ -6404,13 +6438,28 @@ Deno.serve(async (req) => {
 
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
       const _domainDoneNotif = `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`;
+      const _domainLegacyNotif = aiFeedback
+        ? feedbackNotification(aiFeedback, _domainDoneNotif, { preserveFallbackAll: true })
+        : withCompanion(_domainDoneNotif);
+      const _domainPlannerMessage = await shortcutPlannerMessage(supabase, userId, {
+        recordId: row.id,
+        recordKind: "data",
+        occurredAt: fallbackOccurredAt,
+        deliveryAttemptId: `${traceId}:shortcut:${row.id}`,
+      });
       return respondWithExpressionShadow(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: builtinKey,
         ai_ok: aiOk,
         message: `✓ ${domainNameFromKey(builtinKey) ?? "记录"}已归档`,
-        notification: aiFeedback ? feedbackNotification(aiFeedback, _domainDoneNotif, { preserveFallbackAll: true }) : withCompanion(_domainDoneNotif),
+        notification: _domainPlannerMessage
+          ? mergePlannerNotification(
+            _domainPlannerMessage,
+            _domainDoneNotif,
+            aiFeedback ? feedbackNotification(aiFeedback, "") || companionMessage : companionMessage,
+          )
+          : _domainLegacyNotif,
         time_context: timeContext,
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
@@ -6699,13 +6748,28 @@ Deno.serve(async (req) => {
       const _iDoneSum = await summarizeMonthIncome(supabase, userId);
       const _iSourceLabel = sourceName && sourceName !== "截图识别收入" ? ` · ${sourceName}` : "";
       const _incomeNotif = `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`;
+      const _incomeLegacyNotif = aiFeedback
+        ? feedbackNotification(aiFeedback, _incomeNotif, { preserveFallbackAll: true })
+        : withCompanion(_incomeNotif);
+      const _incomePlannerMessage = await shortcutPlannerMessage(supabase, userId, {
+        recordId: row.id,
+        recordKind: "income",
+        occurredAt,
+        deliveryAttemptId: `${traceId}:shortcut:${row.id}`,
+      });
       return respondWithExpressionShadow(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: "income",
         ai_ok: aiOk,
         message: "✓ 收入已记录",
-        notification: aiFeedback ? feedbackNotification(aiFeedback, _incomeNotif, { preserveFallbackAll: true }) : withCompanion(_incomeNotif),
+        notification: _incomePlannerMessage
+          ? mergePlannerNotification(
+            _incomePlannerMessage,
+            _incomeNotif,
+            aiFeedback ? feedbackNotification(aiFeedback, "") || companionMessage : companionMessage,
+          )
+          : _incomeLegacyNotif,
         time_context: timeContext,
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
@@ -6974,6 +7038,15 @@ Deno.serve(async (req) => {
       _ePrimary = `⚠️ ${_ePrimary.replace(/^[💸⚠️]\s*/, "")} · 疑似 3 分钟内重复`;
     }
     const _expenseNotif = `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`;
+    const _expenseLegacyNotif = aiFeedback
+      ? feedbackNotification(aiFeedback, _expenseNotif, { preserveFallbackAll: true })
+      : withCompanion(_expenseNotif);
+    const _expensePlannerMessage = await shortcutPlannerMessage(supabase, userId, {
+      recordId: row.id,
+      recordKind: "expense",
+      occurredAt,
+      deliveryAttemptId: `${traceId}:shortcut:${row.id}`,
+    });
     return respondWithExpressionShadow(withTraceMeta({
       status: row.status,
       id: row.id,
@@ -6983,7 +7056,13 @@ Deno.serve(async (req) => {
       message: possibleDuplicate
         ? `✓ 已记账（⚠ 3 分钟内有相同消费，请确认是否重复，参考 id: ${dupRefId}）`
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
-      notification: aiFeedback ? feedbackNotification(aiFeedback, _expenseNotif, { preserveFallbackAll: true }) : withCompanion(_expenseNotif),
+      notification: _expensePlannerMessage
+        ? mergePlannerNotification(
+          _expensePlannerMessage,
+          _expenseNotif,
+          aiFeedback ? feedbackNotification(aiFeedback, "") || companionMessage : companionMessage,
+        )
+        : _expenseLegacyNotif,
       time_context: timeContext,
       companion_message: companionMessage,
       ai_feedback: aiFeedback,

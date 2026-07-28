@@ -313,6 +313,44 @@ const supportedCases = [
   },
 ]
 
+test('shortcut delivery consumes a planner candidate and persists one real exposure', async () => {
+  const module = await loadModule()
+  const currentId = '90000000-0000-4000-8000-000000000004'
+  const transactions = [1, 2, 3, 4].map((index) => ({
+    id: `90000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    user_id: userId,
+    type: 'expense',
+    transaction_date: '2026-07-25',
+    transaction_time: `${String(8 + index).padStart(2, '0')}:00:00`,
+    created_at: `2026-07-25T${String(8 + index).padStart(2, '0')}:01:00+08:00`,
+    amount: 10,
+    merchant_name: '便利店',
+    category: 'shopping',
+    platform: '线下',
+    payment_method: '微信支付',
+    status: 'done',
+  }))
+  const { client, state } = database({ transactions })
+  const input = {
+    record_id: currentId,
+    record_kind: 'expense',
+    occurred_at: '2026-07-25T12:00:00+08:00',
+    delivery_attempt_id: 'shortcut-attempt-1',
+  }
+
+  const first = await module.deliverShortcutExpressionPlan(client, userId, input)
+  const second = await module.deliverShortcutExpressionPlan(client, userId, input)
+
+  assert.equal(first.available, true)
+  assert.equal(first.semantic_key, 'merchant_daily_count_total')
+  assert.match(first.message, /4 笔/)
+  assert.equal(second.exposure_event_id, first.exposure_event_id)
+  assert.equal(state.tables.expression_exposure_events.length, 1)
+  assert.equal(state.tables.expression_exposure_events[0].surface, 'shortcut_notification')
+  assert.equal(state.tables.expression_exposure_events[0].lifecycle_state, 'returned_to_shortcut')
+  assert.notEqual(state.tables.expression_exposure_events[0].selection_mode, 'legacy_voice')
+})
+
 test('single-user owner gate defaults closed for disabled or non-owner access', async () => {
   const item = supportedCases.find(entry => entry.name === 'expense')
   const disabledModule = await loadModule({ EXPRESSION_PLANNER_OWNER_ENABLED: 'false' })

@@ -70,6 +70,59 @@ test('sleep planner creates a personal median comparison from history', () => {
   assert.ok(plan.plan_summary.record_detail.selected_count >= 1)
 })
 
+test('sleep baseline only uses records known before the current record', () => {
+  const records = [6, 7, 8].map((hours, index) => ({
+    id: `past-${index}`,
+    created_at: `2026-07-0${index + 1}T09:00:00+08:00`,
+    occurred_at: `2026-07-0${index + 1}T08:00:00+08:00`,
+    payload: { sleep_hours: hours },
+  }))
+  records.push({
+    id: 'current-causal', created_at: '2026-07-05T09:00:00+08:00', occurred_at: '2026-07-05T08:00:00+08:00',
+    payload: { sleep_hours: 5 },
+  })
+  records.push({
+    id: 'future-record', created_at: '2026-07-06T09:00:00+08:00', occurred_at: '2026-07-06T08:00:00+08:00',
+    payload: { sleep_hours: 12 },
+  })
+
+  const plan = buildGenericExpressionShadowPlan({ domainKey: 'sleep', records, currentRecordId: 'current-causal' })
+  const comparison = candidate(plan, 'sleep_vs_personal_median')
+  assert.equal(comparison.claim.structured_value.sample_count, 3)
+  assert.equal(comparison.claim.structured_value.median, 7)
+})
+
+test('sleep baseline folds exact duplicate rows for the same sleep event', () => {
+  function sleepEvent(id, day, hours, createdAt) {
+    return {
+      id,
+      created_at: createdAt,
+      occurred_at: `2026-07-${day}T08:00:00+08:00`,
+      payload: {
+        sleep_hours: hours,
+        sleep_minutes: hours * 60,
+        sleep_start_at: `2026-07-${day}T01:00:00+08:00`,
+        wake_at: `2026-07-${day}T08:00:00+08:00`,
+        deep_sleep_minutes: 120,
+        light_sleep_minutes: hours * 60 - 160,
+        rem_minutes: 40,
+      },
+    }
+  }
+  const records = [
+    sleepEvent('event-a', '01', 6, '2026-07-01T08:05:00+08:00'),
+    sleepEvent('event-a-duplicate', '01', 6, '2026-07-01T08:06:00+08:00'),
+    sleepEvent('event-b', '02', 7, '2026-07-02T08:05:00+08:00'),
+    sleepEvent('event-c', '03', 8, '2026-07-03T08:05:00+08:00'),
+    sleepEvent('current-dedup', '05', 5, '2026-07-05T08:05:00+08:00'),
+  ]
+
+  const plan = buildGenericExpressionShadowPlan({ domainKey: 'sleep', records, currentRecordId: 'current-dedup' })
+  const comparison = candidate(plan, 'sleep_vs_personal_median')
+  assert.equal(comparison.claim.structured_value.sample_count, 3)
+  assert.equal(comparison.claim.structured_value.median, 7)
+})
+
 test('sleep planner falls back to sleep_minutes when sleep_hours is null', () => {
   const plan = buildGenericExpressionShadowPlan({
     domainKey: 'sleep',

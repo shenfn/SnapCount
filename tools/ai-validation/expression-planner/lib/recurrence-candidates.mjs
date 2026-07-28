@@ -110,6 +110,16 @@ function evidenceEntry(event) {
   }
 }
 
+function sameObservation(left, right) {
+  const leftGroup = String(left?.observation_group ?? "").trim()
+  const rightGroup = String(right?.observation_group ?? "").trim()
+  if (leftGroup && rightGroup && leftGroup === rightGroup) return true
+  if (!preciseEventTime(left) || !preciseEventTime(right)) return false
+  return timestamp(left.event_at) === timestamp(right.event_at)
+    && parseFiniteNumber(left.amount) === parseFiniteNumber(right.amount)
+    && left.merchant?.normalized_key === right.merchant?.normalized_key
+}
+
 /**
  * @param {any[]} events
  * @param {{ currentEventId?: string | null, timeZone?: string }} options
@@ -126,6 +136,7 @@ export function generateRecordNameRecurrenceCandidates(events, {
   const prior = events
     .filter(event => event.event_id !== currentEventId)
     .filter(event => event.count_in_facts && event.merchant?.normalized_key === normalizedName)
+    .filter(event => !sameObservation(event, current))
     .filter(event => knownBefore(event, current))
     .sort((left, right) => eventSortTime(right, timeZone) - eventSortTime(left, timeZone))
   const previous = prior[0]
