@@ -4,69 +4,31 @@ import UIKit
 // 注意：间距/圆角/动效 Token 已统一由 JieziTheme+Generated.swift（SSOT 生成）提供。
 // 本文件只保留色板、渐变与手写组件；新增代码请使用生成文件中的 JieziSpacing/JieziRadius/JieziEasing 等。
 
-struct JieziThemePalette {
-    let paper: Color
-    let brand: Color
-    let light: Color
-    let space: Color
-    let ink: Color
-    let muted: Color
-    let line: Color
-
-    static let cyanGlow = JieziThemePalette(
-        paper: Color(hex: "F5F1E7"),
-        brand: Color(hex: "426E63"),
-        light: Color(hex: "DCBF74"),
-        space: Color(hex: "17312D"),
-        ink: Color(hex: "202A27"),
-        muted: Color(hex: "6E7773"),
-        line: Color(hex: "426E63").opacity(0.13)
-    )
-}
-
 enum JieziTheme {
-    static let palette = JieziThemePalette.cyanGlow
+    static var palette: JieziGeneratedPalette { JieziThemeManager.shared.palette }
 
-    static let paper = palette.paper
-    static let ink = palette.ink
-    static let muted = palette.muted
-    static let mint = palette.brand
-    static let brand = palette.brand
-    static let gold = palette.light
-    static let light = palette.light
-    static let space = palette.space
-    static let line = palette.line
-    static let coral = Color(hex: "B76555")
+    static var paper: Color { palette.paper }
+    static var ink: Color { palette.ink }
+    static var muted: Color { palette.muted }
+    static var mint: Color { palette.brand }
+    static var brand: Color { palette.brand }
+    static var gold: Color { palette.light }
+    static var light: Color { palette.light }
+    static var space: Color { palette.space }
+    static var line: Color { palette.line }
+    static var coral: Color { palette.coral }
 
-    static let pageBackground = LinearGradient(
-        colors: [
-            palette.paper,
-            palette.paper.blended(with: palette.brand, amount: 0.035),
-            palette.paper.blended(with: palette.light, amount: 0.045)
-        ],
-        startPoint: .top,
-        endPoint: .bottomTrailing
-    )
+    static var pageBackground: LinearGradient {
+        JieziGradient.pageBackground(palette: palette)
+    }
 
-    static let sumeruBackground = RadialGradient(
-        colors: [
-            palette.brand.blended(with: palette.light, amount: 0.16),
-            palette.space,
-            palette.space.blended(with: .black, amount: 0.58)
-        ],
-        center: .center,
-        startRadius: 18,
-        endRadius: 520
-    )
+    static var sumeruBackground: RadialGradient {
+        JieziGradient.sumeruBackground(palette: palette)
+    }
 
-    static let brandWash = LinearGradient(
-        colors: [
-            palette.brand.opacity(0.92),
-            palette.brand.blended(with: palette.space, amount: 0.22)
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static var brandWash: LinearGradient {
+        JieziGradient.brandWash(palette: palette)
+    }
 }
 
 struct JieziPageBackground: View {
@@ -148,6 +110,7 @@ struct JieziPressableButtonStyle: ButtonStyle {
 }
 
 struct JieziMonthSwitcher: View {
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let title: String
     let selectionToken: String
     let canAdvance: Bool
@@ -160,7 +123,7 @@ struct JieziMonthSwitcher: View {
             Spacer(minLength: 12)
             Text(title)
                 .font(.headline.monospacedDigit())
-                .foregroundStyle(JieziTheme.ink)
+                .foregroundStyle(palette.ink)
             Spacer(minLength: 12)
             monthButton(systemImage: "chevron.right", enabled: canAdvance, action: onNext)
         }
@@ -172,9 +135,9 @@ struct JieziMonthSwitcher: View {
             Image(systemName: systemImage)
                 .font(.subheadline.bold())
                 .frame(width: 44, height: 44)
-                .foregroundStyle(enabled ? JieziTheme.brand : JieziTheme.muted.opacity(0.3))
+                .foregroundStyle(enabled ? palette.brand : palette.muted.opacity(0.3))
                 .background(.white.opacity(enabled ? 0.82 : 0.4), in: Circle())
-                .overlay(Circle().stroke(JieziTheme.brand.opacity(enabled ? 0.1 : 0.04)))
+                .overlay(Circle().stroke(palette.brand.opacity(enabled ? 0.1 : 0.04)))
         }
         .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.9))
         .disabled(!enabled)

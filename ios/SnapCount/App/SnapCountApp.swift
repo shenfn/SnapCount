@@ -4,12 +4,14 @@ import SwiftUI
 struct SnapCountApp: App {
     @UIApplicationDelegateAdaptor(AppNotificationDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
+    @StateObject private var themeManager = JieziThemeManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
+                .environmentObject(themeManager)
                 .task {
                     appState.bootstrap()
                     if let route = AppNotificationDelegate.consumePendingRoute() {

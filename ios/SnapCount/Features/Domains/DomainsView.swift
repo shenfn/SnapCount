@@ -38,7 +38,7 @@ struct DomainsView: View {
     }
 }
 
-private struct DomainDetailView: View {
+struct DomainDetailView: View {
     @EnvironmentObject private var appState: AppState
     let domain: NativeDomainDefinition
     @State private var snapshotForAccountPicker: NativeWalletSnapshot?

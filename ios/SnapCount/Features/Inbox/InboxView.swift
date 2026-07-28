@@ -237,10 +237,10 @@ struct InboxView: View {
                     .foregroundStyle(JieziTheme.muted)
                 LazyVGrid(
                     columns: Array(
-                        repeating: GridItem(.flexible(), spacing: JieziSpacing.md),
+                        repeating: GridItem(.flexible(minimum: 0), spacing: JieziSpacing.lg, alignment: .top),
                         count: columnCount
                     ),
-                    spacing: JieziSpacing.md
+                    spacing: JieziSpacing.xl2
                 ) {
                     ForEach(section.items) { item in
                         Button {
@@ -253,6 +253,7 @@ struct InboxView: View {
                             )
                         }
                         .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
+                        .frame(maxWidth: .infinity)
                     }
                 }
             }
@@ -594,10 +595,10 @@ private struct InboxCategoryView: View {
     private func inboxGrid(_ sectionItems: [NativeInboxItem]) -> some View {
         LazyVGrid(
             columns: Array(
-                repeating: GridItem(.flexible(), spacing: JieziSpacing.md),
+                repeating: GridItem(.flexible(minimum: 0), spacing: JieziSpacing.lg, alignment: .top),
                 count: columnCount
             ),
-            spacing: JieziSpacing.md
+            spacing: JieziSpacing.xl2
         ) {
             ForEach(sectionItems) { item in
                 inboxCell(item)
@@ -658,96 +659,178 @@ private struct NativeInboxFilmCard: View {
     let repaymentCandidate: NativeRepaymentCandidate?
     var isSingleColumn = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                filmContent
-                InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
-                    .padding(8)
-            }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
-            .background(JieziTheme.paper.opacity(0.72))
-            .clipped()
+    private var imageURL: URL? {
+        item.stagingRecord?.imageURL ?? item.pendingExpense?.imageURL
+    }
 
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(JieziTheme.ink)
-                        .lineLimit(2)
-                        .frame(minHeight: 32, alignment: .topLeading)
-                    if let record = item.stagingRecord {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("记录 \(record.occurredAtLabel ?? "未识别")")
-                            Text("上传 \(record.createdAtLabel)")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(JieziTheme.muted)
-                        .lineLimit(1)
-                    } else if let pending = item.pendingExpense {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("记录 \(pending.occurredAtLabel ?? pending.dateKey)")
-                            Text("上传 \(pending.createdAtLabel)")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(JieziTheme.muted)
-                        .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 4)
-                if repaymentCandidate != nil {
-                    Image(systemName: "creditcard.and.123")
-                        .font(.caption2)
-                        .foregroundStyle(JieziTheme.brand)
-                } else if let confidence = item.stagingRecord?.confidencePercent {
-                    Text("\(confidence)%")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(JieziTheme.muted)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, minHeight: 86, alignment: .top)
+    var body: some View {
+        VStack(alignment: .leading, spacing: JieziSpacing.sm) {
+            mediaSurface
+            caption
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var mediaSurface: some View {
+        if isSingleColumn, imageURL != nil {
+            singleColumnMediaSurface
+        } else {
+            fixedAspectMediaSurface
+        }
+    }
+
+    private var singleColumnMediaSurface: some View {
+        ZStack(alignment: .topLeading) {
+            filmContent
+                .frame(maxWidth: .infinity)
+                .clipped()
+            InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
+                .padding(JieziSpacing.sm)
         }
         .frame(maxWidth: .infinity)
-        .background(Color.white.opacity(0.7))
-        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
+        .background(JieziTheme.paper.opacity(0.74))
+        .clipShape(mediaShape)
         .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
-                .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
+            mediaShape.stroke(statusColor.opacity(0.14), lineWidth: 1)
         }
-        .shadow(color: JieziTheme.space.opacity(0.08), radius: 10, x: 0, y: 6)
+        .shadow(color: JieziTheme.space.opacity(0.07), radius: 10, x: 0, y: 6)
+    }
+
+    private var fixedAspectMediaSurface: some View {
+        // The shape owns the grid-cell size; overlay content cannot widen the column.
+        mediaShape
+            .fill(JieziTheme.paper.opacity(0.74))
+            .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                filmContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+            }
+            .overlay(alignment: .topLeading) {
+                InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
+                    .padding(JieziSpacing.sm)
+            }
+            .clipShape(mediaShape)
+            .overlay {
+                mediaShape.stroke(statusColor.opacity(0.14), lineWidth: 1)
+            }
+            .shadow(color: JieziTheme.space.opacity(0.07), radius: 10, x: 0, y: 6)
+    }
+
+    private var mediaShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous)
     }
 
     @ViewBuilder
     private var filmContent: some View {
-        Group {
-            if let url = item.stagingRecord?.imageURL ?? item.pendingExpense?.imageURL {
-                CachedRemoteImage(url: url) { image in
-                    ZStack(alignment: .bottomLeading) {
-                        image.resizable().scaledToFill()
-                        LinearGradient(
-                            colors: [.clear, JieziTheme.space.opacity(0.72)],
-                            startPoint: .center,
-                            endPoint: .bottom
-                        )
-                        Text(item.subtitle)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
-                            .padding(10)
-                    }
-                } placeholder: {
-                    ProgressView().tint(JieziTheme.brand)
-                } failure: {
-                    noteContent
+        if let imageURL {
+            CachedRemoteImage(url: imageURL) { image in
+                if isSingleColumn || item.pendingExpense != nil {
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                } else {
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else {
+            } placeholder: {
+                ProgressView()
+                    .tint(JieziTheme.brand)
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
+            } failure: {
                 noteContent
+                    .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
             }
+        } else {
+            noteContent
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var caption: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(JieziTheme.ink)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                captionAccessory
+            }
+
+            if item.stagingRecord != nil, !item.subtitle.isEmpty {
+                Text(item.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.muted)
+                    .lineLimit(isSingleColumn ? 3 : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            timeStack
+        }
+        .padding(.horizontal, 2)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var captionAccessory: some View {
+        if repaymentCandidate != nil {
+            Image(systemName: "creditcard.and.123")
+                .font(.caption)
+                .foregroundStyle(JieziTheme.brand)
+                .accessibilityLabel("可能是还款记录")
+        } else if let pending = item.pendingExpense {
+            Text(String(format: "-¥%.2f", pending.amount))
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(JieziTheme.coral)
+                .lineLimit(1)
+        } else if let confidence = item.stagingRecord?.confidencePercent {
+            Text("\(confidence)%")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(JieziTheme.muted)
+        }
+    }
+
+    @ViewBuilder
+    private var timeStack: some View {
+        if let record = item.stagingRecord {
+            inboxTimes(
+                occurredAt: record.occurredAtLabel ?? "未识别",
+                createdAt: record.createdAtLabel
+            )
+        } else if let pending = item.pendingExpense {
+            inboxTimes(
+                occurredAt: pending.occurredAtLabel ?? pending.dateKey,
+                createdAt: pending.createdAtLabel
+            )
+        }
+    }
+
+    private func inboxTimes(occurredAt: String, createdAt: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            inboxTimeRow(label: "记录", value: occurredAt)
+            inboxTimeRow(label: "上传", value: createdAt)
+        }
+        .font(.caption2)
+        .foregroundStyle(JieziTheme.muted)
+    }
+
+    private func inboxTimeRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text(label)
+                .foregroundStyle(JieziTheme.muted.opacity(0.72))
+            Text(value)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
     }
 
     private var noteContent: some View {
@@ -1794,6 +1877,7 @@ private struct InboxZoomableImage<Content: View>: View {
 
 private struct PendingExpenseResolutionView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var themeManager: JieziThemeManager
     @Environment(\.dismiss) private var dismiss
     let reference: String
     let preserveInboxNavigation: Bool
@@ -1815,10 +1899,11 @@ private struct PendingExpenseResolutionView: View {
         guard appState.selectedRecordDetail?.id == reference else { return nil }
         return appState.selectedRecordDetail
     }
+    private var palette: JieziGeneratedPalette { themeManager.palette }
 
     var body: some View {
         ZStack {
-            JieziTheme.pageBackground.ignoresSafeArea()
+            JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
             if let detail, let draftBinding = Binding($draft) {
                 GeometryReader { scrollViewport in
                     ScrollView {
@@ -1895,7 +1980,7 @@ private struct PendingExpenseResolutionView: View {
                                 }
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(JieziTheme.brand)
+                            .tint(palette.brand)
                             .controlSize(.large)
                             .disabled(appState.isConfirmingPendingRecord || draftBinding.wrappedValue.validationMessage != nil)
 
@@ -1943,17 +2028,17 @@ private struct PendingExpenseResolutionView: View {
         HStack(spacing: 12) {
             Image(systemName: "clock.badge.exclamationmark")
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(JieziTheme.gold)
+                .foregroundStyle(palette.light)
                 .frame(width: 40, height: 40)
-                .background(JieziTheme.gold.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .background(palette.light.opacity(0.12), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(detail.title).font(.headline)
                 Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Text("待补全").font(.caption.weight(.bold)).foregroundStyle(JieziTheme.gold)
+            Text("待补全").font(.caption.weight(.bold)).foregroundStyle(palette.light)
         }
-        .jieziCard(solid: true)
+        .jieziCard(palette: palette, solid: true)
     }
 
     private func companionSection(_ message: String) -> some View {
@@ -1978,14 +2063,14 @@ private struct PendingExpenseResolutionView: View {
     private func imageSection(_ detail: NativeRecordDetail) -> some View {
         if let imageURL = detail.imageURL {
             CachedRemoteImage(url: imageURL) { image in
-                image.resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: 240)
+                image.resizable().scaledToFit().frame(maxWidth: .infinity)
             } placeholder: {
                 ProgressView().frame(maxWidth: .infinity, minHeight: 160)
             } failure: {
                 Label("截图文件不可用", systemImage: "photo.badge.exclamationmark")
                     .frame(maxWidth: .infinity, minHeight: 120)
             }
-            .jieziCard(solid: true)
+            .jieziCard(palette: palette, solid: true)
         }
     }
 
@@ -1995,13 +2080,14 @@ private struct PendingExpenseResolutionView: View {
             HStack(spacing: 6) {
                 Text(draft.wrappedValue.kind == .income ? "+¥" : "-¥")
                     .font(.title2.weight(.bold))
-                    .foregroundStyle(draft.wrappedValue.kind == .income ? JieziTheme.brand : JieziTheme.coral)
+                    .foregroundStyle(draft.wrappedValue.kind == .income ? palette.brand : palette.coral)
                 TextField("0.00", text: draft.amountText)
                     .keyboardType(.decimalPad)
                     .font(.title2.weight(.bold).monospacedDigit())
             }
+            .jieziInputSurface(palette: palette)
         }
-        .jieziCard(solid: true)
+        .jieziCard(palette: palette, solid: true)
     }
 
     private func typeSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
@@ -2012,14 +2098,14 @@ private struct PendingExpenseResolutionView: View {
             }
             .pickerStyle(.segmented)
         }
-        .jieziCard(solid: true)
+        .jieziCard(palette: palette, solid: true)
     }
 
     private func fieldSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(draft.wrappedValue.kind == .income ? "收入字段" : "消费字段").font(.headline)
             TextField(draft.wrappedValue.kind == .income ? "来源名称（可选）" : "商家名称（可选）", text: draft.merchantOrSourceName)
-                .textFieldStyle(.roundedBorder)
+                .jieziInputSurface(palette: palette)
             if draft.wrappedValue.kind == .expense {
                 editableOptionField(
                     "消费渠道",
@@ -2040,7 +2126,7 @@ private struct PendingExpenseResolutionView: View {
                 optionMenu("收入类型", selection: draft.incomeCategory, options: NativeManualRecordDraft.incomeCategories)
             }
         }
-        .jieziCard(solid: true)
+        .jieziCard(palette: palette, solid: true)
     }
 
     private func optionMenu(_ title: String, selection: Binding<String>, options: [NativeManualRecordOption]) -> some View {
@@ -2052,12 +2138,13 @@ private struct PendingExpenseResolutionView: View {
             }
         } label: {
             HStack {
-                Text(title).foregroundStyle(JieziTheme.ink)
+                Text(title).foregroundStyle(palette.ink)
                 Spacer()
                 Text(options.first(where: { $0.id == selection.wrappedValue })?.title ?? "请选择")
-                    .foregroundStyle(selection.wrappedValue.isEmpty ? .secondary : JieziTheme.brand)
+                    .foregroundStyle(selection.wrappedValue.isEmpty ? palette.muted : palette.brand)
                 Image(systemName: "chevron.up.chevron.down").font(.caption)
             }
+            .jieziInputSurface(palette: palette)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -2074,7 +2161,7 @@ private struct PendingExpenseResolutionView: View {
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 TextField("输入或选择", text: selection)
-                    .textFieldStyle(.roundedBorder)
+                    .jieziInputSurface(palette: palette)
                 Menu {
                     ForEach(options) { option in
                         Button(option.isFrequent ? "\(option.title) · 常用" : option.title) {
@@ -2083,9 +2170,14 @@ private struct PendingExpenseResolutionView: View {
                     }
                 } label: {
                     Image(systemName: "chevron.up.chevron.down")
-                        .frame(width: 36, height: 36)
+                        .foregroundStyle(palette.brand)
+                        .frame(width: 46, height: 46)
+                        .background(
+                            palette.brand.opacity(0.055),
+                            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
+                        )
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
                 .accessibilityLabel("选择\(title)")
             }
         }
@@ -2116,11 +2208,12 @@ private struct PendingExpenseResolutionView: View {
                     Spacer()
                     Image(systemName: "chevron.up.chevron.down").font(.caption)
                 }
+                .jieziInputSurface(palette: palette)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .jieziCard(solid: true)
+        .jieziCard(palette: palette, solid: true)
     }
 }
 

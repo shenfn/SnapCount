@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct JieziFormTopBar: View {
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let title: String
     let primaryTitle: String
     let isWorking: Bool
@@ -69,7 +69,7 @@ struct JieziFormTopBar: View {
 }
 
 struct JieziFormSection<Content: View>: View {
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let title: String
     var subtitle: String? = nil
     @ViewBuilder var content: () -> Content
@@ -101,7 +101,7 @@ struct JieziFormSection<Content: View>: View {
 }
 
 struct JieziFormRow<Content: View>: View {
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let title: String
     var subtitle: String? = nil
     var systemImage: String? = nil
@@ -145,7 +145,7 @@ struct JieziFormRow<Content: View>: View {
 }
 
 struct JieziFormMessage: View {
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let message: String
     var isError = true
 
@@ -183,7 +183,7 @@ private struct JieziInputSurfaceModifier: ViewModifier {
 }
 
 extension View {
-    func jieziInputSurface(palette: JieziGeneratedPalette = .defaultPalette) -> some View {
+    func jieziInputSurface(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> some View {
         modifier(JieziInputSurfaceModifier(palette: palette))
     }
 }

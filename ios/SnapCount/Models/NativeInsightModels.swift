@@ -47,6 +47,64 @@ struct NativeDailyDomainSummary: Decodable, Identifiable {
     }
 }
 
+struct NativeFinanceChartScale: Equatable {
+    let limit: Double
+    let compressedCount: Int
+
+    var isCompressed: Bool { compressedCount > 0 }
+    var domain: ClosedRange<Double> { -limit...limit }
+
+    init(rows: [NativeDailyDomainSummary]) {
+        let amounts = rows
+            .flatMap { [$0.expenseTotal, $0.incomeTotal] }
+            .filter { $0 > 0 }
+            .sorted()
+
+        guard let maximum = amounts.last else {
+            limit = 1
+            compressedCount = 0
+            return
+        }
+
+        let referenceIndex = Int(floor(Double(amounts.count - 1) * 0.6))
+        let regularLimit = Self.roundedUpperBound(amounts[referenceIndex] * 3)
+        let shouldCompress = amounts.count >= 3 && maximum > regularLimit * 1.5
+
+        if shouldCompress {
+            limit = regularLimit
+            compressedCount = amounts.filter { $0 > regularLimit }.count
+        } else {
+            limit = Self.roundedUpperBound(maximum * 1.05)
+            compressedCount = 0
+        }
+    }
+
+    func plottedAmount(_ amount: Double) -> Double {
+        min(max(amount, 0), limit)
+    }
+
+    func isCompressed(_ amount: Double) -> Bool {
+        amount > limit
+    }
+
+    private static func roundedUpperBound(_ value: Double) -> Double {
+        guard value > 0 else { return 1 }
+        let magnitude = pow(10, floor(log10(value)))
+        let normalized = value / magnitude
+        let rounded: Double
+        if normalized <= 1 {
+            rounded = 1
+        } else if normalized <= 2 {
+            rounded = 2
+        } else if normalized <= 5 {
+            rounded = 5
+        } else {
+            rounded = 10
+        }
+        return rounded * magnitude
+    }
+}
+
 enum NativeInsightDomain: String, CaseIterable, Identifiable {
     case expense, income, sleep, sport, food, reading
 

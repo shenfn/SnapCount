@@ -3,6 +3,7 @@ import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var themeManager: JieziThemeManager
     @State private var showDeleteAccountConfirmation = false
 
     var body: some View {
@@ -24,6 +25,18 @@ struct SettingsView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                }
+
+                Section("外观") {
+                    NavigationLink {
+                        ThemeSettingsView()
+                    } label: {
+                        settingsRow(
+                            "界面主题",
+                            detail: themeManager.palette.name,
+                            systemImage: "paintpalette"
+                        )
+                    }
                 }
 
                 Section("数据管理") {
@@ -206,6 +219,60 @@ struct SettingsView: View {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         return build.isEmpty ? version : "\(version) (\(build))"
+    }
+}
+
+private struct ThemeSettingsView: View {
+    @EnvironmentObject private var themeManager: JieziThemeManager
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(JieziGeneratedPalette.all, id: \.id) { palette in
+                    Button {
+                        JieziHaptics.tap()
+                        themeManager.switchTo(palette.id)
+                    } label: {
+                        HStack(spacing: JieziSpacing.md) {
+                            themeSwatch(palette)
+                            VStack(alignment: .leading, spacing: JieziSpacing.xxs) {
+                                Text(palette.name)
+                                    .font(JieziType.cardTitle)
+                                    .foregroundStyle(themeManager.palette.ink)
+                                if themeManager.palette.id == palette.id {
+                                    Text("当前使用")
+                                        .font(JieziFont.caption)
+                                        .foregroundStyle(themeManager.palette.muted)
+                                }
+                            }
+                            Spacer(minLength: JieziSpacing.sm)
+                            Image(systemName: themeManager.palette.id == palette.id ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(themeManager.palette.id == palette.id ? themeManager.palette.brand : themeManager.palette.muted.opacity(0.45))
+                        }
+                        .padding(.vertical, JieziSpacing.xs)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .navigationTitle("界面主题")
+        .scrollContentBackground(.hidden)
+        .background(JieziGradient.pageBackground(palette: themeManager.palette))
+    }
+
+    private func themeSwatch(_ palette: JieziGeneratedPalette) -> some View {
+        HStack(spacing: 0) {
+            palette.brand
+            palette.light
+            palette.coral
+        }
+        .frame(width: 54, height: 38)
+        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous)
+                .stroke(palette.space.opacity(0.12), lineWidth: 1)
+        }
+        .accessibilityHidden(true)
     }
 }
 

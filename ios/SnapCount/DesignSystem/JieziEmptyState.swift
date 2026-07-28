@@ -4,7 +4,7 @@ import SwiftUI
 // 过渡期用 SF Symbol；风格指南的空态插画资产到位后，把 systemImage 换成插画视图即可，布局不变。
 
 struct JieziEmptyState: View {
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let systemImage: String
     let title: String
     var message: String? = nil

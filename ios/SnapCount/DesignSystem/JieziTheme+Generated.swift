@@ -2,7 +2,7 @@
 //  JieziTheme+Generated.swift
 //  SnapCount
 //
-//  自动生成于 2026-07-24T01:47:28.440Z
+//  自动生成于 2026-07-27T03:17:17.338Z
 //  数据源：trae-design-system/tokens/design-tokens.json v0.2.0
 //  禁止手工修改本文件。任何调整请改 SSOT 后运行 scripts/generate-ios.mjs
 //
@@ -336,29 +336,29 @@ struct JieziShadow {
 
 enum JieziShadows {
     static let none = JieziShadow(color: .clear, alpha: 0, radius: 0, x: 0, y: 0)
-    static func sm(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow {
+    static func sm(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow {
         JieziShadow(color: p.space, alpha: 0.06, radius: 6, x: 0, y: 2)
     }
-    static func md(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow {
+    static func md(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow {
         JieziShadow(color: p.space, alpha: 0.08, radius: 14, x: 0, y: 6)
     }
-    static func lg(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow {
+    static func lg(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow {
         JieziShadow(color: p.space, alpha: 0.08, radius: 22, x: 0, y: 12)
     }
-    static func xl(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow {
+    static func xl(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow {
         JieziShadow(color: p.space, alpha: 0.12, radius: 32, x: 0, y: 18)
     }
-    static func brand(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow {
+    static func brand(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow {
         JieziShadow(color: p.brand, alpha: 0.18, radius: 14, x: 0, y: 8)
     }
 
     enum Semantic {
         /// 语义阴影：card → lg
-        static func card(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow { JieziShadows.lg(p) }
+        static func card(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow { JieziShadows.lg(p) }
         /// 语义阴影：modal → xl
-        static func modal(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow { JieziShadows.xl(p) }
+        static func modal(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow { JieziShadows.xl(p) }
         /// 语义阴影：primary_button → brand
-        static func primary_button(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziShadow { JieziShadows.brand(p) }
+        static func primary_button(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziShadow { JieziShadows.brand(p) }
     }
 }
 
@@ -418,19 +418,19 @@ struct JieziStrokeStyle {
 
 enum JieziStroke {
     /// 金线细描边：印章框、插画框、装饰分隔，新中式的骨
-    static func gold_hairline(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziStrokeStyle {
+    static func gold_hairline(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziStrokeStyle {
         JieziStrokeStyle(color: p.light.opacity(0.85), width: 0.5)
     }
     /// 卡片描边（与 glass.card 一致）
-    static func brand_hairline(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziStrokeStyle {
+    static func brand_hairline(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziStrokeStyle {
         JieziStrokeStyle(color: p.brand.opacity(0.11), width: 1)
     }
     /// 列表行分隔线
-    static func divider(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziStrokeStyle {
+    static func divider(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziStrokeStyle {
         JieziStrokeStyle(color: p.ink.opacity(0.08), width: 0.5)
     }
     /// 输入框聚焦态
-    static func focus_ring(_ p: JieziGeneratedPalette = .defaultPalette) -> JieziStrokeStyle {
+    static func focus_ring(_ p: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> JieziStrokeStyle {
         JieziStrokeStyle(color: p.brand.opacity(0.45), width: 1.5)
     }
 }
@@ -487,7 +487,7 @@ enum JieziDomainColor {
         case "reading": return JieziDomainColor.reading
         case "food": return JieziDomainColor.food
         case "wallet": return JieziDomainColor.wallet
-        default: return JieziGeneratedPalette.defaultPalette.brand
+        default: return JieziThemeManager.shared.palette.brand
         }
     }
 }
@@ -537,7 +537,7 @@ enum JieziHaptics {
 // MARK: - 渐变构建器
 
 enum JieziGradient {
-    static func pageBackground(palette: JieziGeneratedPalette = .defaultPalette) -> LinearGradient {
+    static func pageBackground(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> LinearGradient {
         LinearGradient(
             colors: [
                 palette.paper,
@@ -549,7 +549,7 @@ enum JieziGradient {
         )
     }
 
-    static func sumeruBackground(palette: JieziGeneratedPalette = .defaultPalette) -> RadialGradient {
+    static func sumeruBackground(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> RadialGradient {
         RadialGradient(
             colors: [
                 palette.brand.jieziBlended(with: palette.light, amount: 0.16),
@@ -562,7 +562,7 @@ enum JieziGradient {
         )
     }
 
-    static func brandWash(palette: JieziGeneratedPalette = .defaultPalette) -> LinearGradient {
+    static func brandWash(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> LinearGradient {
         LinearGradient(
             colors: [
                 palette.brand.opacity(0.92),
@@ -603,7 +603,7 @@ struct JieziCardStyle: ViewModifier {
 
 extension View {
     /// 芥子卡片：默认玻璃卡（材质+宣纸底色），solid: true 为实卡（列表行/小卡场景）。
-    func jieziCard(palette: JieziGeneratedPalette = .defaultPalette, solid: Bool = false) -> some View {
+    func jieziCard(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette, solid: Bool = false) -> some View {
         modifier(JieziCardStyle(palette: palette, solid: solid))
     }
 }

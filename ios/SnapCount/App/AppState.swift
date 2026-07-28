@@ -1197,6 +1197,11 @@ final class AppState: ObservableObject {
         inboxPath = NavigationPath([NativeInboxRoute.record(reference: pending.reference)])
     }
 
+    func openInbox(filter: NativeInboxFilter) {
+        selectedTab = .inbox
+        inboxPath = NavigationPath([NativeInboxRoute.category(filter: filter)])
+    }
+
     func handleDeepLink(_ url: URL) {
         guard url.scheme == "jiezi" else { return }
         shouldDeferOnboardingForExternalRoute = true

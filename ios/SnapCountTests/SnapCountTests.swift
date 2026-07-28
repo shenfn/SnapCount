@@ -107,6 +107,16 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(state.financeVocabulary.isEmpty)
     }
 
+    @MainActor
+    func testOpeningInboxCategorySwitchesTabAndCreatesOneRoute() {
+        let state = AppState()
+
+        state.openInbox(filter: .failed)
+
+        XCTAssertEqual(state.selectedTab, .inbox)
+        XCTAssertEqual(state.inboxPath.count, 1)
+    }
+
     func testDashboardRepositoryProtocolSupportsStubInjection() async throws {
         let expected = DashboardSnapshot(todayCount: 3)
         let repository = DashboardRepositoryStub(snapshot: expected)
@@ -1961,6 +1971,37 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(snapshot.foodCalories, 2100)
     }
 
+    func testFinanceChartScaleKeepsNormalAmountsLinear() {
+        let rows = [
+            makeInsightDay(date: "2026-07-14", expense: 30, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-15", expense: 40, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-16", expense: 80, income: 0, sleep: 0, food: 0)
+        ]
+
+        let scale = NativeFinanceChartScale(rows: rows)
+
+        XCTAssertFalse(scale.isCompressed)
+        XCTAssertEqual(scale.plottedAmount(80), 80)
+        XCTAssertGreaterThanOrEqual(scale.limit, 80)
+    }
+
+    func testFinanceChartScaleCompressesOutliersWithoutChangingRegularAmounts() {
+        let rows = [
+            makeInsightDay(date: "2026-07-14", expense: 30, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-15", expense: 40, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-16", expense: 50, income: 0, sleep: 0, food: 0),
+            makeInsightDay(date: "2026-07-17", expense: 1_000, income: 5_000, sleep: 0, food: 0)
+        ]
+
+        let scale = NativeFinanceChartScale(rows: rows)
+
+        XCTAssertTrue(scale.isCompressed)
+        XCTAssertEqual(scale.compressedCount, 2)
+        XCTAssertEqual(scale.plottedAmount(50), 50)
+        XCTAssertEqual(scale.plottedAmount(1_000), scale.limit)
+        XCTAssertEqual(scale.plottedAmount(5_000), scale.limit)
+    }
+
     func testAIInsightPayloadParsesStructuredLists() {
         let payload = NativeAIInsightPayload([
             "headline": AnyCodable("近两周收支稳定"),
@@ -2015,6 +2056,17 @@ final class SnapCountTests: XCTestCase {
             [.sleepRecovery, .foodEnergy, .sleepSpending]
         )
         XCTAssertEqual(NativeHomeInsightPreferences.maximumEnabledCards, 3)
+    }
+
+    func testHomeInsightCardsDeclareUsefulDestinations() {
+        XCTAssertEqual(NativeHomeFinanceCardKey.cashSafety.destination, .accounts)
+        XCTAssertEqual(NativeHomeFinanceCardKey.spendingRhythm.destination, .records)
+        XCTAssertEqual(NativeHomeFinanceCardKey.expenseStructure.destination, .expenseDomain)
+        XCTAssertEqual(NativeHomeFinanceCardKey.repaymentPlan.destination, .nearestLiability)
+        XCTAssertEqual(NativeHomeDomainCardKey.sleepRecovery.destination, .domain("sleep"))
+        XCTAssertEqual(NativeHomeDomainCardKey.foodEnergy.destination, .domain("food"))
+        XCTAssertEqual(NativeHomeDomainCardKey.sleepSpending.destination, .allDomains)
+        XCTAssertEqual(NativeHomeDomainCardKey.dailyBalance.destination, .selectedDay)
     }
 
     func testHomeInsightPreferencesRestoreMissingCardsAndRemoveDuplicates() {

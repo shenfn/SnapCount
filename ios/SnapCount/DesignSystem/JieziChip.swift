@@ -4,7 +4,7 @@ import SwiftUI
 // 可通过 tint 换成数据域色（JieziDomainColor）。
 
 struct JieziChip: View {
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let title: String
     var isSelected: Bool = false
     var tint: Color? = nil

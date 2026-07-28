@@ -297,14 +297,32 @@ struct InsightsView: View {
 
     @ViewBuilder
     private func financeChart(_ snapshot: NativeInsightSnapshot) -> some View {
+        let scale = NativeFinanceChartScale(rows: snapshot.rows)
         VStack(alignment: .leading, spacing: 10) {
             Text("每日收支流水").font(.title3.bold())
             ScrollView(.horizontal, showsIndicators: false) {
                 Chart(snapshot.rows) { row in
-                    BarMark(x: .value("日期", row.date), y: .value("支出", -row.expenseTotal))
+                    BarMark(
+                        x: .value("日期", row.date),
+                        y: .value("支出", -scale.plottedAmount(row.expenseTotal))
+                    )
                         .foregroundStyle(JieziTheme.coral)
-                    BarMark(x: .value("日期", row.date), y: .value("收入", row.incomeTotal))
+                    BarMark(
+                        x: .value("日期", row.date),
+                        y: .value("收入", scale.plottedAmount(row.incomeTotal))
+                    )
                         .foregroundStyle(JieziTheme.mint)
+                }
+                .chartYScale(domain: scale.domain)
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let date = value.as(String.self) {
+                                Text(String(date.suffix(5)))
+                            }
+                        }
+                    }
                 }
                 .chartYAxis {
                     AxisMarks { value in
@@ -314,11 +332,36 @@ struct InsightsView: View {
                         }
                     }
                 }
-                .frame(width: max(CGFloat(snapshot.rows.count) * 36, 340), height: 220)
+                .frame(width: max(CGFloat(snapshot.rows.count) * 52, 340), height: 220)
+            }
+            if scale.isCompressed {
+                Text(financeCompressionSummary(snapshot.rows, scale: scale))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)
         .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func financeCompressionSummary(
+        _ rows: [NativeDailyDomainSummary],
+        scale: NativeFinanceChartScale
+    ) -> String {
+        var entries: [String] = []
+        for row in rows {
+            let date = String(row.date.suffix(5))
+            if scale.isCompressed(row.expenseTotal) {
+                entries.append("\(date) 支出 \(currency(row.expenseTotal))")
+            }
+            if scale.isCompressed(row.incomeTotal) {
+                entries.append("\(date) 收入 \(currency(row.incomeTotal))")
+            }
+        }
+        let visibleEntries = entries.prefix(4).joined(separator: "、")
+        let remainder = entries.count > 4 ? "等" : ""
+        return "为看清日常波动，已压缩 \(scale.compressedCount) 个大额日汇总的柱高；实际金额：\(visibleEntries)\(remainder)。"
     }
 
     @ViewBuilder

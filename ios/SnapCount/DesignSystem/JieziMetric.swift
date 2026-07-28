@@ -4,7 +4,7 @@ import SwiftUI
 // 用于财务状态卡的 2×2 指标格、统计卡网格等场景。
 
 struct JieziMetric: View {
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let label: String
     let value: String
     var valueTint: Color? = nil
