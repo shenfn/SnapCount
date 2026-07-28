@@ -646,7 +646,7 @@ final class SnapCountTests: XCTestCase {
                 existing: [remoteFeedback],
                 pending: pendingFeedback
             ),
-            remoteFeedback
+            pendingFeedback
         )
     }
 
