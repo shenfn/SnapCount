@@ -55,6 +55,10 @@ function surfaceDiversityGroup(candidate, surface) {
   return candidate.selection_hints?.diversity_groups?.[surface] ?? null
 }
 
+function isSurfaceFallback(candidate, surface) {
+  return candidate.selection_hints?.fallback_only_surfaces?.includes(surface) === true
+}
+
 export function buildSurfacePlan(candidates, surface, overrides = {}) {
   const profile = { ...SURFACE_CAPACITY[surface], ...overrides }
   if (!profile.max_candidates) throw new Error(`Unknown or invalid surface: ${surface}`)
@@ -69,6 +73,10 @@ export function buildSurfacePlan(candidates, surface, overrides = {}) {
     const semanticKey = candidate.claim?.semantic_key
     if (covered.has(semanticKey)) {
       excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'covered_by_fixed_content', score: score.score })
+      continue
+    }
+    if (isSurfaceFallback(candidate, surface)) {
+      excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'reserved_as_surface_fallback', score: score.score })
       continue
     }
     const maxExposureCount = Number(candidate.selection_hints?.max_exposure_count?.[surface])
@@ -106,6 +114,28 @@ export function buildSurfacePlan(candidates, surface, overrides = {}) {
       selection_mode: 'threshold',
       canonical_text: candidate.claim?.canonical_text ?? null,
     })
+  }
+
+  if (!selected.length) {
+    const fallback = ranked.find(candidate =>
+      isSurfaceFallback(candidate, surface)
+      && !covered.has(candidate.claim?.semantic_key)
+      && surfaceScore(candidate, surface)?.passes_threshold,
+    )
+    if (fallback) {
+      const score = surfaceScore(fallback, surface)
+      selected.push({
+        candidate_id: fallback.candidate_id,
+        semantic_key: fallback.claim?.semantic_key,
+        dimension: fallback.dimension,
+        claim_type: fallback.claim_type,
+        score: score.score,
+        selection_mode: 'surface_fallback',
+        canonical_text: fallback.claim?.canonical_text ?? null,
+      })
+      const excludedItem = excluded.find(item => item.candidate_id === fallback.candidate_id)
+      if (excludedItem) excludedItem.reason = 'selected_as_surface_fallback'
+    }
   }
 
   let fallbackUsed = false

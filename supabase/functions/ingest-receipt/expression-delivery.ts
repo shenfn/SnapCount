@@ -321,7 +321,7 @@ async function buildCurrentRecordPlan(
 ) {
   if (kind === "expense") {
     const { data: current, error } = await supabase.from("transactions")
-      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type")
+      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash")
       .eq("user_id", userId)
       .eq("id", recordId)
       .eq("type", "expense")
@@ -329,7 +329,7 @@ async function buildCurrentRecordPlan(
     if (error) throw new Error(error.message);
     if (!current) return null;
     const { data: history, error: historyError } = await supabase.from("transactions")
-      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type")
+      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash")
       .eq("user_id", userId)
       .eq("type", "expense")
       .lte("transaction_date", current.transaction_date)
@@ -380,7 +380,7 @@ async function buildCurrentRecordPlan(
     };
   }
   const { data: current, error } = await supabase.from("data_records")
-    .select("id,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at")
+    .select("id,created_at,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at")
     .eq("user_id", userId)
     .eq("id", recordId)
     .maybeSingle();
@@ -389,7 +389,7 @@ async function buildCurrentRecordPlan(
   const domainKey = text(current.domain_key, 80);
   if (!domainKey) return null;
   let historyQuery = supabase.from("data_records")
-    .select("id,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at")
+    .select("id,created_at,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at")
     .eq("user_id", userId)
     .eq("domain_key", domainKey);
   if (current.occurred_at) historyQuery = historyQuery.lte("occurred_at", current.occurred_at);
@@ -446,10 +446,10 @@ async function currentDependencyRecords(
 ) {
   if (!recordIds.length) return [];
   const fields = sourceTable === "transactions"
-    ? "id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type"
+    ? "id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash"
     : sourceTable === "income_records"
     ? "id,income_date,created_at,amount,source_name,category"
-    : "id,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at";
+    : "id,created_at,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at";
   const rows: Record<string, unknown>[] = [];
   for (let offset = 0; offset < recordIds.length; offset += 100) {
     let query = supabase.from(sourceTable)
@@ -494,6 +494,84 @@ async function dependencyUnavailableReason(
     }
   }
   return "";
+}
+
+function selectedShortcutNotification(plan: Record<string, unknown>) {
+  const renderPlan = object(object(plan.render_plans).shortcut_notification);
+  const selected = Array.isArray(renderPlan.selected) ? renderPlan.selected : [];
+  const candidates = Array.isArray(plan.candidates) ? plan.candidates : [];
+  const byId = new Map(candidates.map((candidate: Record<string, unknown>) => [
+    text(candidate.candidate_id, 200),
+    candidate,
+  ]));
+  return selected.flatMap((selection: Record<string, unknown>) => {
+    const candidateId = text(selection.candidate_id, 200);
+    const candidate = byId.get(candidateId);
+    if (!candidate) return [];
+    const claim = object(candidate.claim);
+    const canonicalText = text(selection.canonical_text ?? claim.canonical_text, 500);
+    if (!candidateId || !canonicalText) return [];
+    return [{ selection, candidate, candidateId, canonicalText }];
+  });
+}
+
+export async function deliverShortcutExpressionPlan(
+  supabase: DatabaseClient,
+  userId: string,
+  input: {
+    record_id: string;
+    record_kind: string;
+    occurred_at: string;
+    delivery_attempt_id: string;
+  },
+) {
+  if (!isRecordExpressionOwnerEnabled(userId)) {
+    return { available: false, reason: "owner_only_unavailable" };
+  }
+  const recordId = text(input.record_id, 100);
+  const kind = recordKind(input.record_kind);
+  const deliveryAttemptId = text(input.delivery_attempt_id, 200);
+  if (!recordId || !kind || !deliveryAttemptId) {
+    return { available: false, reason: "invalid_delivery_input" };
+  }
+  const context = await buildCurrentRecordPlan(supabase, userId, recordId, kind);
+  if (!context) return { available: false, reason: "record_missing" };
+  const plan = context.plan;
+  if (plan.status !== "auto_planned" || plan.planner_version !== EXPRESSION_PLANNER_VERSION) {
+    return { available: false, reason: text(plan.reason, 100) || "no_selected_candidate" };
+  }
+  const primary = selectedShortcutNotification(plan)[0];
+  if (!primary) return { available: false, reason: "no_selected_candidate" };
+  const dependencyReason = await dependencyUnavailableReason(supabase, userId, primary.candidate);
+  if (dependencyReason) return { available: false, reason: dependencyReason };
+  const exposures = await persistPlannerExposureEvents(supabase, {
+    userId,
+    recordId,
+    recordType: context.domainKey,
+    occurredAt: text(input.occurred_at, 100) || new Date().toISOString(),
+    surface: "shortcut_notification",
+    deliveryAttemptId,
+    plan,
+    candidateIds: [primary.candidateId],
+    deliveryEvidenceByCandidateId: {
+      [primary.candidateId]: {
+        rendered_payload: { message: primary.canonicalText },
+        visible_field_paths: ["message"],
+        expandable_field_paths: [],
+        persisted_only_field_paths: [],
+      },
+    },
+    lifecycleState: "returned_to_shortcut",
+    simulationOnly: false,
+  });
+  const exposure = exposures.find((item) => text(item.candidate_id, 200) === primary.candidateId);
+  return {
+    available: true,
+    message: primary.canonicalText,
+    candidate_id: primary.candidateId,
+    semantic_key: text(object(primary.candidate.claim).semantic_key, 200),
+    exposure_event_id: text(exposure?.id, 100),
+  };
 }
 
 export async function getRecordExpressionPlan(

@@ -111,6 +111,7 @@ export function generateCurrentExpenseRecordCandidate(event, { timeZone = 'Asia/
     quality: { confidence: pendingReview ? 0.9 : 1 },
     selectionHints: {
       allowed_surfaces: ['pwa_pending_ai_card', 'record_detail'],
+      fallback_only_surfaces: ['pwa_pending_ai_card', 'record_detail'],
       exposure_key: `expense:record:${recordId}:context`,
       dedupe_key: `expense:record:${recordId}:context`,
     },

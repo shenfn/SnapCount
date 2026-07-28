@@ -23,7 +23,8 @@
     "trace:server": "node tools/ai-validation/server/index.mjs",
     "trace:ui": "cd tools/ai-validation/ui/trace-console && npm run dev",
     "trace:console": "node tools/ai-validation/start.mjs",
-    "trace:extract-prompt": "cd tools/ai-validation/server && npx tsx extract-prompt.mjs"
+    "trace:extract-prompt": "cd tools/ai-validation/server && npx tsx extract-prompt.mjs",
+    "replay:recent-planner": "node tools/ai-validation/expression-planner/replay-recent-snapshot.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
