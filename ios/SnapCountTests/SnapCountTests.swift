@@ -650,7 +650,7 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
-    func testLowValuePlannerPreviewDoesNotDowngradeCompleteCompanionFeedback() throws {
+    func testPlannerPreviewUsesIndependentFeedbackSlotInsteadOfLegacyFeedback() throws {
         let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),
             "badge": AnyCodable("金额偏高"),
@@ -671,30 +671,51 @@ final class SnapCountTests: XCTestCase {
                 existing: companionFeedback,
                 preview: contextPreview
             ),
-            companionFeedback
+            contextPreview
         )
     }
 
-    func testLowValuePlannerPreviewDoesNotReplaceConciseCompanionFeedback() throws {
+    func testLegacyFeedbackIsHiddenWhenRecordHasCompanionMessage() throws {
         let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),
             "emotion_line": AnyCodable("这笔金额值得留意。")
         ]))
-        let contextPreview = try XCTUnwrap(NativeAIFeedback(payload: [
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: "支付宝的 6.8 元支出已归档，平静收尾。",
+                feedback: companionFeedback
+            )
+        )
+    }
+
+    func testPlannerFeedbackStillRendersAfterCompanionMessage() throws {
+        let plannerFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("expression_planner"),
             "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
-            "semantic_key": AnyCodable("expense_current_record_context"),
-            "dimension": AnyCodable("record_context"),
-            "emotion_line": AnyCodable("记录于今天 09:43。"),
-            "detail_reason": AnyCodable("基于当前记录计算。")
+            "emotion_line": AnyCodable("7/28 19:15 已记录一笔 6.8 元支出。")
         ]))
 
         XCTAssertEqual(
-            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
-                existing: companionFeedback,
-                preview: contextPreview
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: "支付宝的 6.8 元支出已归档，平静收尾。",
+                feedback: plannerFeedback
             ),
-            companionFeedback
+            plannerFeedback
+        )
+    }
+
+    func testLegacyFeedbackRendersWithoutCompanionMessage() throws {
+        let legacyFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("legacy_voice"),
+            "emotion_line": AnyCodable("已记录这笔支出。")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: nil,
+                feedback: legacyFeedback
+            ),
+            legacyFeedback
         )
     }
 
@@ -716,7 +737,7 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
-    func testIncompletePlannerInsightDoesNotReplaceCompleteCompanionFeedback() throws {
+    func testIncompletePlannerInsightStillUsesPlannerFeedbackSlot() throws {
         let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),
             "emotion_line": AnyCodable("这笔金额值得留意。"),
@@ -735,11 +756,11 @@ final class SnapCountTests: XCTestCase {
                 existing: companionFeedback,
                 preview: incompleteComparison
             ),
-            companionFeedback
+            incompleteComparison
         )
     }
 
-    func testCompletePlannerInsightDoesNotReplaceExistingCompanionFeedback() throws {
+    func testCompletePlannerInsightUsesPlannerFeedbackSlot() throws {
         let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),
             "emotion_line": AnyCodable("这笔金额值得留意。"),
@@ -759,7 +780,7 @@ final class SnapCountTests: XCTestCase {
                 existing: companionFeedback,
                 preview: comparison
             ),
-            companionFeedback
+            comparison
         )
     }
 
@@ -779,8 +800,8 @@ final class SnapCountTests: XCTestCase {
     }
 
     @MainActor
-    func testCompleteCompanionFeedbackSurvivesLowValuePlannerLookup() async throws {
-        let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+    func testCompanionMessageCoexistsWithPlannerPreviewAndAcknowledgement() async throws {
+        let legacyFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),
             "badge": AnyCodable("金额偏高"),
             "emotion_line": AnyCodable("这笔比你平时的同类消费高一些。"),
@@ -794,13 +815,27 @@ final class SnapCountTests: XCTestCase {
             "emotion_line": AnyCodable("记录于今天 09:43。"),
             "detail_reason": AnyCodable("基于当前记录计算。")
         ]))
+        let acknowledgedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
+            "dimension": AnyCodable("record_context"),
+            "emotion_line": AnyCodable("记录于今天 09:43。"),
+            "detail_reason": AnyCodable("基于当前记录计算。"),
+            "exposure_event_id": AnyCodable("exposure-context")
+        ]))
+        let companionMessage = "支付宝的 6.8 元支出已归档，平静收尾。"
         let repository = RecordRepositoryStub(
-            details: [expressionRecordDetail(feedback: companionFeedback)],
+            details: [expressionRecordDetail(
+                feedback: legacyFeedback,
+                companionMessage: companionMessage
+            )],
             expressionPlanLookups: [.available(NativeRecordExpressionPlan(
                 planToken: "plan-context",
                 candidateId: "fact:expense:record-context:record-1",
                 feedback: contextPreview
-            ))]
+            ))],
+            acknowledgedFeedback: acknowledgedFeedback
         )
         let state = AppState(
             recordRepository: repository,
@@ -808,6 +843,8 @@ final class SnapCountTests: XCTestCase {
         )
 
         await state.loadRecordDetail(reference: "expense/record-1", force: true)
+        XCTAssertEqual(state.selectedRecordDetail?.companionMessage, companionMessage)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, contextPreview)
         state.setRecordExpressionPlanCardVisible(
             true,
             reference: "expense/record-1",
@@ -815,8 +852,9 @@ final class SnapCountTests: XCTestCase {
         )
         await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
 
-        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, companionFeedback)
-        XCTAssertEqual(repository.acknowledgementCount, 0)
+        XCTAssertEqual(state.selectedRecordDetail?.companionMessage, companionMessage)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, acknowledgedFeedback)
+        XCTAssertEqual(repository.acknowledgementCount, 1)
         XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
     }
 
@@ -2330,7 +2368,8 @@ final class SnapCountTests: XCTestCase {
         category: String? = "other",
         domainKey: String? = nil,
         payload: [String: AnyCodable]? = nil,
-        feedback: NativeAIFeedback? = nil
+        feedback: NativeAIFeedback? = nil,
+        companionMessage: String? = nil
     ) -> NativeRecordDetail {
         NativeRecordDetail(
             id: "\(referencePrefix)/\(id)",
@@ -2351,7 +2390,7 @@ final class SnapCountTests: XCTestCase {
             paymentMethod: "花呗",
             recordDate: "2026-07-25",
             note: nil,
-            companionMessage: nil,
+            companionMessage: companionMessage,
             accountId: nil,
             systemImage: "creditcard",
             payload: payload,

@@ -78,7 +78,8 @@ test('PWA renders owner planner feedback before acknowledging its exposure', asy
   assert.match(store, /recordExpressionPlanCache\.value\s*=\s*\{\}/)
   assert.match(store, /cached\.reason\s*===\s*'plan_not_ready'/)
   assert.match(detail, /plan\?\.recordKind\s*===\s*expectedExpressionRecordKind\.value/)
-  assert.match(detail, /plannerAiFeedback\.value\s*\|\|\s*legacyAiFeedback\.value/)
+  assert.match(detail, /plannerLookupSettled\s*=\s*computed/)
+  assert.match(detail, /!companionMessage\.value\s*&&\s*plannerLookupSettled\.value\s*\?\s*legacyAiFeedback\.value/)
   assert.match(detail, /:reviewable="aiFeedbackReviewable"/)
   assert.match(detail, /recordExpressionPlan\.value\?\.acknowledged\s*&&\s*aiFeedbackExposureEventId\.value/)
   assert.match(detail, /!aiFeedbackReviewable\.value/)
@@ -98,6 +99,23 @@ test('PWA renders owner planner feedback before acknowledging its exposure', asy
   assert.ok(nextTickIndex > loadIndex, 'detail must render the planner feedback before acknowledgement')
   assert.ok(visibleIndex > nextTickIndex, 'detail must wait until the rendered card enters the viewport')
   assert.ok(ackIndex > visibleIndex, 'detail must acknowledge only after visibility is confirmed')
+})
+
+test('PWA renders companion copy before the independently selected planner candidate', async () => {
+  const [detail, pending] = await Promise.all([
+    readFile(path.join(root, 'src/components/pages/PageRecordDetail.vue'), 'utf8'),
+    readFile(path.join(root, 'src/components/ModalPending.vue'), 'utf8'),
+  ])
+
+  const detailCompanionIndex = detail.indexOf('class="record-detail-companion"')
+  const detailPlannerIndex = detail.indexOf('<AiFeedbackCard', detailCompanionIndex)
+  assert.ok(detailCompanionIndex >= 0, 'record detail must render companion copy')
+  assert.ok(detailPlannerIndex > detailCompanionIndex, 'record detail must render the planner card after companion copy')
+
+  const pendingCompanionIndex = pending.indexOf('class="pending-companion"')
+  const pendingPlannerIndex = pending.indexOf('<AiFeedbackCard', pendingCompanionIndex)
+  assert.ok(pendingCompanionIndex >= 0, 'pending detail must render companion copy')
+  assert.ok(pendingPlannerIndex > pendingCompanionIndex, 'pending detail must render the planner card after companion copy')
 })
 
 test('PWA pending records expose the same visible acknowledgement and review loop', async () => {
