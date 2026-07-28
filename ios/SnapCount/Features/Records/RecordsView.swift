@@ -2,8 +2,9 @@ import SwiftUI
 
 struct RecordsView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var themeManager: JieziThemeManager
     @State private var selectedKind: NativeDayRecordKind = .all
-    @State private var selectedMonthKey = RecordsView.currentMonthKey
+    @State private var selectedMonthKey: String
     @State private var showManualRecordSheet = false
 
     private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: selectedKind) }
@@ -11,26 +12,48 @@ struct RecordsView: View {
     private var groups: [NativeDayRecordGroup] { query.groups(from: monthGroups) }
     private var availableKinds: [NativeDayRecordKind] { query.availableKinds(from: monthGroups) }
     private var isLoadingMonth: Bool { appState.loadingRecordMonthKey == selectedMonthKey }
+    private var palette: JieziGeneratedPalette { themeManager.palette }
+
+    init() {
+        _selectedMonthKey = State(initialValue: Self.currentMonthKey)
+    }
+
+    init(initialMonthKey: String) {
+        _selectedMonthKey = State(initialValue: initialMonthKey)
+    }
 
     var body: some View {
         ZStack {
-            JieziTheme.pageBackground.ignoresSafeArea()
+            JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: JieziSpacing.xl2) {
                     VStack(alignment: .leading, spacing: JieziSpacing.md) {
                         JieziMonthSwitcher(
+                            palette: palette,
                             title: monthTitle,
                             selectionToken: selectedMonthKey,
                             canAdvance: selectedMonthKey < Self.currentMonthKey,
                             onPrevious: { shiftMonth(-1) },
                             onNext: { shiftMonth(1) }
                         )
-                        Picker("数据域", selection: $selectedKind) {
-                            ForEach(availableKinds) { Text($0.title).tag($0) }
+                        contextNavigation
+                        ScrollView(.horizontal) {
+                            HStack(spacing: JieziSpacing.sm) {
+                                ForEach(availableKinds) { kind in
+                                    JieziChip(
+                                        palette: palette,
+                                        title: kind.title,
+                                        isSelected: selectedKind == kind,
+                                        tint: kind == .all ? palette.brand : domainColor(for: kind.rawValue)
+                                    ) {
+                                        selectedKind = kind
+                                    }
+                                }
+                            }
                         }
-                        .pickerStyle(.segmented)
+                        .scrollIndicators(.hidden)
                     }
-                    .jieziCard(solid: true)
+                    .jieziCard(palette: palette, solid: true)
 
                     if isLoadingMonth && monthGroups.isEmpty {
                         ProgressView("正在加载本月记录…")
@@ -50,6 +73,7 @@ struct RecordsView: View {
                         .padding(.vertical, JieziSpacing.xl5)
                     } else if groups.isEmpty {
                         JieziEmptyState(
+                            palette: palette,
                             systemImage: "doc.text.magnifyingglass",
                             title: "本月还没有记录",
                             message: "截图识别或手动记录后，会按日期出现在这里。"
@@ -57,27 +81,25 @@ struct RecordsView: View {
                     } else {
                         ForEach(groups) { group in
                             VStack(alignment: .leading, spacing: JieziSpacing.sm) {
-                                Text(dayTitle(group.dateKey))
-                                    .font(JieziType.sectionTitle)
-                                    .foregroundStyle(JieziTheme.ink)
-                                    .padding(.horizontal, JieziSpacing.xs)
+                                dayHeader(group)
 
                                 VStack(spacing: 0) {
-                                    ForEach(group.records) { item in
+                                    ForEach(Array(group.records.enumerated()), id: \.element.id) { index, item in
                                         NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
-                                            recordRow(item)
+                                            recordRow(item, showDivider: index < group.records.count - 1)
                                         }
                                         .buttonStyle(.plain)
                                     }
                                 }
                                 .background(
-                                    JieziTheme.paper.opacity(0.72),
+                                    palette.paper.opacity(0.82),
                                     in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
                                 )
                                 .overlay {
                                     RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
-                                        .stroke(JieziTheme.brand.opacity(0.10), lineWidth: 1)
+                                        .stroke(palette.brand.opacity(0.10), lineWidth: 1)
                                 }
+                                .jieziShadow(JieziShadows.sm(palette))
                             }
                         }
                     }
@@ -92,14 +114,12 @@ struct RecordsView: View {
         .navigationTitle("记录")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showManualRecordSheet = true
                 } label: {
                     Label("新增记录", systemImage: "plus")
                 }
-                NavigationLink { AccountsView() } label: { Label("账户", systemImage: "wallet.pass") }
-                NavigationLink { DomainsView() } label: { Label("数据域", systemImage: "square.stack.3d.up") }
             }
         }
         .navigationDestination(for: NativeRecordRoute.self) { route in
@@ -123,54 +143,114 @@ struct RecordsView: View {
         NativeMonthKey.title(selectedMonthKey)
     }
 
-    private func dayTitle(_ dateKey: String) -> String { String(dateKey.suffix(5)) }
-
-    private func recordRow(_ item: NativeDayRecord) -> some View {
-        HStack(spacing: JieziSpacing.Semantic.item_gap) {
-            Image(systemName: item.systemImage)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(JieziTheme.brand)
-                .frame(width: JieziIcon.Semantic.list_row_block, height: JieziIcon.Semantic.list_row_block)
-                .background(JieziTheme.brand.opacity(0.10), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
-
-            VStack(alignment: .leading, spacing: JieziSpacing.xxs) {
-                Text(item.title)
-                    .font(JieziType.cardTitle)
-                    .foregroundStyle(JieziTheme.ink)
-                Text(item.subtitle)
-                    .font(JieziFont.footnote)
-                    .foregroundStyle(JieziTheme.muted)
-                    .lineLimit(2)
+    private var contextNavigation: some View {
+        HStack(spacing: JieziSpacing.sm) {
+            NavigationLink {
+                AccountsView()
+            } label: {
+                Label("账户", systemImage: "wallet.pass")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.bordered)
+            .tint(palette.brand)
 
-            Spacer(minLength: JieziSpacing.sm)
-
-            VStack(alignment: .trailing, spacing: JieziSpacing.xxs) {
-                Text(item.value)
-                    .font(JieziType.moneyInline)
-                    .monospacedDigit()
-                    .foregroundStyle(JieziTheme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                Text(item.timeLabel ?? "全天")
-                    .font(JieziFont.caption)
-                    .foregroundStyle(JieziTheme.muted)
+            NavigationLink {
+                DomainsView()
+            } label: {
+                Label("数据域", systemImage: "square.stack.3d.up")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.bordered)
+            .tint(palette.brand)
+        }
+        .font(.subheadline.weight(.semibold))
+    }
 
-            Image(systemName: "chevron.right")
-                .font(JieziFont.caption.weight(.bold))
-                .foregroundStyle(JieziTheme.muted.opacity(0.55))
+    private func dayHeader(_ group: NativeDayRecordGroup) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
+                dayIdentity(group.dateKey)
+                Spacer(minLength: JieziSpacing.sm)
+                daySummary(group)
+            }
+            VStack(alignment: .leading, spacing: JieziSpacing.xs) {
+                dayIdentity(group.dateKey)
+                daySummary(group)
+            }
         }
-        .padding(.horizontal, JieziSpacing.Semantic.item_gap)
-        .padding(.vertical, JieziSpacing.md)
-        .contentShape(Rectangle())
-        .overlay(alignment: .bottom) {
-            let stroke = JieziStroke.divider()
-            Rectangle()
-                .fill(stroke.color)
-                .frame(height: stroke.width)
-                .padding(.leading, JieziIcon.Semantic.list_row_block + JieziSpacing.Semantic.item_gap * 2)
+        .padding(.horizontal, JieziSpacing.xs)
+    }
+
+    private func dayIdentity(_ dateKey: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
+            Text(dayTitle(dateKey))
+                .font(JieziType.sectionTitle)
+                .foregroundStyle(palette.ink)
+            Text(weekdayTitle(dateKey))
+                .font(JieziFont.footnote)
+                .foregroundStyle(palette.muted)
         }
+    }
+
+    private func daySummary(_ group: NativeDayRecordGroup) -> some View {
+        Text(daySummaryText(group))
+            .font(JieziFont.caption)
+            .foregroundStyle(palette.muted)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+    }
+
+    private func recordRow(_ item: NativeDayRecord, showDivider: Bool) -> some View {
+        JieziRecordRow(
+            palette: palette,
+            systemImage: item.systemImage,
+            iconTint: domainColor(for: item.domainKey ?? item.kind.rawValue),
+            title: item.title,
+            subtitle: item.subtitle,
+            value: item.value,
+            timeLabel: item.timeLabel ?? "全天",
+            valueTint: valueColor(for: item.kind),
+            showDivider: showDivider
+        )
+    }
+
+    private func dayTitle(_ dateKey: String) -> String {
+        guard let date = Self.dateFormatter.date(from: dateKey) else { return String(dateKey.suffix(5)) }
+        return Self.dayFormatter.string(from: date)
+    }
+
+    private func weekdayTitle(_ dateKey: String) -> String {
+        guard let date = Self.dateFormatter.date(from: dateKey) else { return "" }
+        return Self.weekdayFormatter.string(from: date)
+    }
+
+    private func daySummaryText(_ group: NativeDayRecordGroup) -> String {
+        guard selectedKind == .all,
+              let summary = appState.dashboard.dailySummaries.first(where: { $0.dateKey == group.dateKey }) else {
+            return "\(group.records.count) 条"
+        }
+        var parts: [String] = []
+        if summary.expense > 0 { parts.append("支出 \(money(summary.expense))") }
+        if summary.income > 0 { parts.append("收入 \(money(summary.income))") }
+        if parts.isEmpty { parts.append("\(group.records.count) 条") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func domainColor(for domain: String) -> Color {
+        let supported = ["expense", "income", "sport", "sleep", "reading", "food", "wallet"]
+        return supported.contains(domain) ? JieziDomainColor.color(for: domain) : palette.brand
+    }
+
+    private func valueColor(for kind: NativeDayRecordKind) -> Color {
+        switch kind {
+        case .expense: return palette.coral
+        case .income: return palette.brand
+        default: return palette.ink
+        }
+    }
+
+    private func money(_ value: Double) -> String {
+        String(format: "¥%.0f", value)
     }
 
     private func shiftMonth(_ offset: Int) {
@@ -180,6 +260,30 @@ struct RecordsView: View {
     }
 
     private static var currentMonthKey: String { NativeMonthKey.current() }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .current
+        formatter.dateFormat = "MM月dd日"
+        return formatter
+    }()
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .current
+        formatter.dateFormat = "EEEE"
+        return formatter
+    }()
 }
 
 struct RecordDetailView: View {

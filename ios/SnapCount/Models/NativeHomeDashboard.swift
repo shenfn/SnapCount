@@ -131,6 +131,22 @@ enum NativeHomeFinanceCardKey: String, Codable, CaseIterable, Identifiable, Hash
         case .accountMix: return "rectangle.3.group"
         }
     }
+
+    var destination: NativeHomeFinanceCardDestination {
+        switch self {
+        case .cashSafety, .accountMix: return .accounts
+        case .spendingRhythm: return .records
+        case .expenseStructure: return .expenseDomain
+        case .repaymentPlan: return .nearestLiability
+        }
+    }
+}
+
+enum NativeHomeFinanceCardDestination: Equatable {
+    case accounts
+    case records
+    case expenseDomain
+    case nearestLiability
 }
 
 struct NativeHomeFinanceCardConfiguration: Codable, Identifiable, Equatable {
@@ -183,6 +199,23 @@ enum NativeHomeDomainCardKey: String, Codable, CaseIterable, Identifiable, Hasha
         case .dailyBalance: return "circle.grid.2x2"
         }
     }
+
+    var destination: NativeHomeDomainCardDestination {
+        switch self {
+        case .sleepRecovery: return .domain("sleep")
+        case .movementRhythm: return .domain("sport")
+        case .foodEnergy: return .domain("food")
+        case .readingProgress: return .domain("reading")
+        case .sleepSpending: return .allDomains
+        case .dailyBalance: return .selectedDay
+        }
+    }
+}
+
+enum NativeHomeDomainCardDestination: Equatable {
+    case domain(String)
+    case allDomains
+    case selectedDay
 }
 
 struct NativeHomeDomainCardConfiguration: Codable, Identifiable, Equatable {
@@ -602,6 +635,7 @@ struct NativeHomePendingSummary {
     let total: Int
     let pendingExpenses: Int
     let failed: Int
+    let repair: Int
     let routing: Int
     let review: Int
 
@@ -614,6 +648,7 @@ struct NativeHomePendingSummary {
             total: items.count,
             pendingExpenses: NativeInboxPresentation.filtered(items, by: .pendingExpense).count,
             failed: NativeInboxPresentation.filtered(items, by: .failed).count,
+            repair: NativeInboxPresentation.filtered(items, by: .repair).count,
             routing: NativeInboxPresentation.filtered(items, by: .routing).count,
             review: NativeInboxPresentation.filtered(items, by: .review).count
         )

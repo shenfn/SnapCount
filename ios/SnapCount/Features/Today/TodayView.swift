@@ -306,14 +306,20 @@ struct TodayView: View {
             } else {
                 TabView(selection: $selectedFinanceCard) {
                     ForEach(enabledFinanceCards) { configuration in
-                        HomeFinanceInsightCardView(
-                            key: configuration.key,
-                            summary: financeSummary,
-                            snapshot: selectedInsightSnapshot,
-                            recentSnapshot: recentFinanceSnapshot,
-                            accounts: appState.accounts,
-                            selectedDateKey: selectedDateKey
-                        )
+                        NavigationLink {
+                            financeDestination(for: configuration.key)
+                        } label: {
+                            HomeFinanceInsightCardView(
+                                key: configuration.key,
+                                summary: financeSummary,
+                                snapshot: selectedInsightSnapshot,
+                                recentSnapshot: recentFinanceSnapshot,
+                                accounts: appState.accounts,
+                                selectedDateKey: selectedDateKey
+                            )
+                        }
+                        .buttonStyle(JieziPressableButtonStyle())
+                        .accessibilityHint("打开\(configuration.key.title)详情")
                         .tag(configuration.key)
                     }
                 }
@@ -339,18 +345,14 @@ struct TodayView: View {
     private var pendingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(title: "因缘流转", subtitle: "\(pendingSummary.total) 条待处理")
-            Button {
-                appState.selectedTab = .inbox
-            } label: {
-                VStack(spacing: 12) {
-                    pendingRow("待补全账单", count: pendingSummary.pendingExpenses, systemImage: "clock.badge.exclamationmark")
-                    pendingRow("待分类", count: pendingSummary.routing, systemImage: "questionmark.folder")
-                    pendingRow("待确认", count: pendingSummary.review, systemImage: "checklist")
-                    pendingRow("识别失败", count: pendingSummary.failed, systemImage: "exclamationmark.triangle")
-                }
-                .jieziCard(solid: true)
+            VStack(spacing: 12) {
+                pendingNavigationRow("待补全账单", count: pendingSummary.pendingExpenses, systemImage: "clock.badge.exclamationmark", filter: .pendingExpense)
+                pendingNavigationRow("待分类", count: pendingSummary.routing, systemImage: "questionmark.folder", filter: .routing)
+                pendingNavigationRow("待确认", count: pendingSummary.review, systemImage: "checklist", filter: .review)
+                pendingNavigationRow("识别失败", count: pendingSummary.failed, systemImage: "exclamationmark.triangle", filter: .failed)
+                pendingNavigationRow("待修补", count: pendingSummary.repair, systemImage: "wrench.and.screwdriver", filter: .repair)
             }
-            .buttonStyle(.plain)
+            .jieziCard(palette: JieziTheme.palette, solid: true)
         }
     }
 
@@ -368,15 +370,21 @@ struct TodayView: View {
             } else {
                 TabView(selection: $selectedDomainCard) {
                     ForEach(enabledDomainCards) { configuration in
-                        HomeDomainInsightCardView(
-                            key: configuration.key,
-                            snapshot: selectedInsightSnapshot,
-                            selectedDaySummary: NativeHomeInsightAnalytics.dailySummary(
-                                on: selectedDateKey,
-                                from: selectedInsightSnapshot
-                            ),
-                            selectedDateKey: selectedDateKey
-                        )
+                        NavigationLink {
+                            domainDestination(for: configuration.key)
+                        } label: {
+                            HomeDomainInsightCardView(
+                                key: configuration.key,
+                                snapshot: selectedInsightSnapshot,
+                                selectedDaySummary: NativeHomeInsightAnalytics.dailySummary(
+                                    on: selectedDateKey,
+                                    from: selectedInsightSnapshot
+                                ),
+                                selectedDateKey: selectedDateKey
+                            )
+                        }
+                        .buttonStyle(JieziPressableButtonStyle())
+                        .accessibilityHint("打开\(configuration.key.title)详情")
                         .tag(configuration.key)
                     }
                 }
@@ -395,7 +403,7 @@ struct TodayView: View {
                 .foregroundStyle(JieziTheme.muted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .jieziCard(solid: true)
+        .jieziCard(palette: JieziTheme.palette, solid: true)
     }
 
     private func normalizeInsightSelections() {
@@ -406,6 +414,45 @@ struct TodayView: View {
         if let first = enabledDomainCards.first?.key,
            !enabledDomainCards.contains(where: { $0.key == selectedDomainCard }) {
             selectedDomainCard = first
+        }
+    }
+
+    @ViewBuilder
+    private func financeDestination(for key: NativeHomeFinanceCardKey) -> some View {
+        switch key.destination {
+        case .accounts:
+            AccountsView()
+        case .records:
+            RecordsView(initialMonthKey: selectedMonthKey)
+        case .expenseDomain:
+            domainDetailOrList(domainKey: "expense")
+        case .nearestLiability:
+            if let account = financeSummary.nearestLiability {
+                AccountDetailView(accountId: account.id)
+            } else {
+                AccountsView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func domainDestination(for key: NativeHomeDomainCardKey) -> some View {
+        switch key.destination {
+        case .domain(let domainKey):
+            domainDetailOrList(domainKey: domainKey)
+        case .allDomains:
+            DomainsView()
+        case .selectedDay:
+            DayDetailView(route: NativeDayDetailRoute(dateKey: selectedDateKey, kind: .all))
+        }
+    }
+
+    @ViewBuilder
+    private func domainDetailOrList(domainKey: String) -> some View {
+        if let domain = appState.dashboard.domains.first(where: { $0.id == domainKey }) {
+            DomainDetailView(domain: domain)
+        } else {
+            DomainsView()
         }
     }
 
@@ -507,7 +554,7 @@ struct TodayView: View {
             .foregroundStyle(JieziTheme.ink)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous))
-            .jieziCard(solid: true)
+            .jieziCard(palette: JieziTheme.palette, solid: true)
         }
         .buttonStyle(JieziPressableButtonStyle())
         .accessibilityHint("打开当天全部记录")
@@ -552,6 +599,22 @@ struct TodayView: View {
                 .font(.caption.bold())
                 .foregroundStyle(JieziTheme.muted)
         }
+    }
+
+    private func pendingNavigationRow(
+        _ title: String,
+        count: Int,
+        systemImage: String,
+        filter: NativeInboxFilter
+    ) -> some View {
+        Button {
+            appState.openInbox(filter: filter)
+        } label: {
+            pendingRow(title, count: count, systemImage: systemImage)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("打开\(title)分类")
     }
 
     private func money(_ value: Double, signed: Bool = false) -> String {

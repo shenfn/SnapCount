@@ -497,11 +497,14 @@ private struct HomeInsightCardFrame<Content: View>: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(JieziTheme.muted)
             }
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .jieziCard(solid: true)
+        .jieziCard(palette: JieziTheme.palette, solid: true)
     }
 }
 

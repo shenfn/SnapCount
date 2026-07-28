@@ -8,7 +8,7 @@ import SwiftUI
 //   JieziSectionHeader(title: "今日记录")   // 无 accessory 时传 EmptyView()
 
 struct JieziSectionHeader<Accessory: View>: View {
-    var palette: JieziGeneratedPalette = .defaultPalette
+    var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let title: String
     var subtitle: String? = nil
     @ViewBuilder var accessory: () -> Accessory
@@ -34,7 +34,7 @@ struct JieziSectionHeader<Accessory: View>: View {
 }
 
 extension JieziSectionHeader where Accessory == EmptyView {
-    init(palette: JieziGeneratedPalette = .defaultPalette, title: String, subtitle: String? = nil) {
+    init(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette, title: String, subtitle: String? = nil) {
         self.palette = palette
         self.title = title
         self.subtitle = subtitle
