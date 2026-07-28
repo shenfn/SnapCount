@@ -88,12 +88,21 @@ enum NativeRecordExpressionFeedbackPolicy {
         if existing.isAcknowledgedPlannerFeedback {
             return existing
         }
-        if preview.isAcknowledgedPlannerFeedback,
-           preview.visibleContentIdentity == existing.visibleContentIdentity {
-            return preview
-        }
-        if existing.source != "expression_planner" { return existing }
         return preview
+    }
+
+    static func feedbackToRender(
+        companionMessage: String?,
+        feedback: NativeAIFeedback?
+    ) -> NativeAIFeedback? {
+        guard let feedback else { return nil }
+        let hasCompanion = companionMessage?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
+        if hasCompanion && feedback.source != "expression_planner" {
+            return nil
+        }
+        return feedback
     }
 
     static func feedbackToPreserve(

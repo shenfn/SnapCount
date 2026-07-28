@@ -245,7 +245,14 @@ struct RecordDetailView: View {
                                 foodDishesSection(dishes)
                             }
 
-                            if let feedback = detail.aiFeedback {
+                            if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
+                                companionSection(companionMessage)
+                            }
+
+                            if let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                                companionMessage: detail.companionMessage,
+                                feedback: detail.aiFeedback
+                            ) {
                                 NativeAIFeedbackCard(
                                     feedback: feedback,
                                     reviewable: feedback.isReviewable,
@@ -280,10 +287,6 @@ struct RecordDetailView: View {
                                     }
                                 }
                                 .id(feedback.renderIdentity)
-                            }
-
-                            if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
-                                companionSection(companionMessage)
                             }
 
                             summarySection(NativeRecordDetailPresentationAdapter.aiSummary(for: detail))

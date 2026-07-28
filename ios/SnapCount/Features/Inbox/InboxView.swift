@@ -1824,7 +1824,13 @@ private struct PendingExpenseResolutionView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             header(detail)
-                            if let feedback = detail.aiFeedback {
+                            if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
+                                companionSection(companionMessage)
+                            }
+                            if let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                                companionMessage: detail.companionMessage,
+                                feedback: detail.aiFeedback
+                            ) {
                                 NativeAIFeedbackCard(
                                     feedback: feedback,
                                     compact: true,
@@ -1948,6 +1954,24 @@ private struct PendingExpenseResolutionView: View {
             Text("待补全").font(.caption.weight(.bold)).foregroundStyle(JieziTheme.gold)
         }
         .jieziCard(solid: true)
+    }
+
+    private func companionSection(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "quote.bubble.fill")
+                .foregroundStyle(JieziTheme.brand)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("AI 陪伴")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(JieziTheme.brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder

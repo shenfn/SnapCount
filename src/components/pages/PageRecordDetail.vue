@@ -100,6 +100,14 @@
         </div>
       </div>
 
+      <div v-if="companionMessage" class="record-detail-companion">
+        <div class="record-detail-companion-mark">💬</div>
+        <div>
+          <div class="record-detail-companion-title">AI 陪伴</div>
+          <div class="record-detail-companion-text">{{ companionMessage }}</div>
+        </div>
+      </div>
+
       <AiFeedbackCard
         v-if="aiFeedback"
         ref="aiFeedbackCardRef"
@@ -114,14 +122,6 @@
         @retry-review="retryPlannerDelivery"
         @submit-review="submitFeedbackReview"
       />
-
-      <div v-if="companionMessage" class="record-detail-companion">
-        <div class="record-detail-companion-mark">💬</div>
-        <div>
-          <div class="record-detail-companion-title">AI 陪伴</div>
-          <div class="record-detail-companion-text">{{ companionMessage }}</div>
-        </div>
-      </div>
 
       <div class="record-detail-section">
         <div class="record-detail-section-title">AI 摘要</div>
@@ -230,7 +230,18 @@ const recordExpressionPlan = computed(() => {
 const plannerAiFeedback = computed(() => (
   recordExpressionPlan.value?.available ? recordExpressionPlan.value.feedback || null : null
 ))
-const aiFeedback = computed(() => plannerAiFeedback.value || legacyAiFeedback.value)
+const companionMessage = computed(() => {
+  const raw = record.value?.raw
+  if (!raw) return ''
+  return raw.companionMessage || raw.companion_message || raw.payload?.companion_message || ''
+})
+const plannerLookupSettled = computed(() => (
+  ['unavailable', 'error'].includes(recordExpressionPlan.value?.status)
+))
+const aiFeedback = computed(() => (
+  plannerAiFeedback.value
+  || (!companionMessage.value && plannerLookupSettled.value ? legacyAiFeedback.value : null)
+))
 const aiFeedbackExposureEventId = computed(() => (
   aiFeedback.value?.exposure_event_id || aiFeedback.value?.exposureEventId || ''
 ))
@@ -262,13 +273,6 @@ function setFeedbackReviewState(reviewKey, state) {
 function setPlannerDeliveryState(deliveryKey, state) {
   plannerDeliveryStates.value = { ...plannerDeliveryStates.value, [deliveryKey]: state }
 }
-const companionMessage = computed(() => {
-  const raw = record.value?.raw
-  if (!raw) return ''
-  const text = raw.companionMessage || raw.companion_message || raw.payload?.companion_message || ''
-  if (aiFeedback.value?.emotion_line && text === aiFeedback.value.emotion_line) return ''
-  return text
-})
 const aiSummary = computed(() => getRecordAiSummary(store, record.value, domainLabel.value))
 
 function isCurrentVisibleDetail(recordId) {
