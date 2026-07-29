@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+import './styles/generated/jiezi-tokens.css'
 import './styles/main.css'
 import './styles/components/app-shell.css'
 import './styles/components/nav-fab.css'

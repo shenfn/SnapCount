@@ -60,7 +60,7 @@
 .loader-line,
 .loader-coin {
   fill: none;
-  stroke: #2d6a4f;
+  stroke: var(--primary);
   stroke-linecap: round;
   stroke-width: 3.5;
 }
@@ -101,7 +101,7 @@
   inset: 0 auto 0 0;
   width: 46px;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(45, 106, 79, 0), #2d6a4f, rgba(45, 106, 79, 0));
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
   animation: loader-track 1.25s ease-in-out infinite;
 }
 

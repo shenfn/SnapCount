@@ -1,0 +1,447 @@
+/*
+ * 芥子设计系统 PWA CSS Variables
+ * 自动生成 · Token v0.2.0
+ * 数据源：trae-design-system/tokens/design-tokens.json v0.2.0
+ * 禁止手工修改本文件。任何调整请改 SSOT 后运行 scripts/generate-css.mjs
+ */
+
+/* 芥青微光 (cyan) - 温暖日常之下，一座正在呼吸的记忆生境。 */
+:root,
+[data-theme="cyan"] {
+  --jiezi-color-paper: #F5F1E7;
+  --jiezi-color-brand: #426E63;
+  --jiezi-color-light: #DCBF74;
+  --jiezi-color-space: #17312D;
+  --jiezi-color-ink: #202A27;
+  --jiezi-color-muted: #666E6A;
+  --jiezi-color-coral: #A1594B;
+  --jiezi-color-brand-alpha-8: rgba(66, 110, 99, 0.08);
+  --jiezi-color-brand-alpha-11: rgba(66, 110, 99, 0.11);
+  --jiezi-color-brand-alpha-13: rgba(66, 110, 99, 0.13);
+  --jiezi-color-brand-alpha-18: rgba(66, 110, 99, 0.18);
+  --jiezi-color-brand-alpha-72: rgba(66, 110, 99, 0.72);
+  --jiezi-color-brand-alpha-92: rgba(66, 110, 99, 0.92);
+  --jiezi-color-light-alpha-12: rgba(220, 191, 116, 0.12);
+  --jiezi-color-paper-alpha-72: rgba(245, 241, 231, 0.72);
+  --jiezi-color-space-alpha-8: rgba(23, 49, 45, 0.08);
+  --jiezi-color-line: rgba(66, 110, 99, 0.13);
+}
+
+/* 玄青须弥 (xuan) - 克制现实表面之下，隐藏深邃而辽阔的个人宇宙。 */
+[data-theme="xuan"] {
+  --jiezi-color-paper: #EFEFEB;
+  --jiezi-color-brand: #263F3D;
+  --jiezi-color-light: #C79B4E;
+  --jiezi-color-space: #10211F;
+  --jiezi-color-ink: #1A2624;
+  --jiezi-color-muted: #5E6764;
+  --jiezi-color-coral: #A55447;
+  --jiezi-color-brand-alpha-8: rgba(38, 63, 61, 0.08);
+  --jiezi-color-brand-alpha-11: rgba(38, 63, 61, 0.11);
+  --jiezi-color-brand-alpha-13: rgba(38, 63, 61, 0.13);
+  --jiezi-color-brand-alpha-18: rgba(38, 63, 61, 0.18);
+  --jiezi-color-brand-alpha-72: rgba(38, 63, 61, 0.72);
+  --jiezi-color-brand-alpha-92: rgba(38, 63, 61, 0.92);
+  --jiezi-color-light-alpha-12: rgba(199, 155, 78, 0.12);
+  --jiezi-color-paper-alpha-72: rgba(239, 239, 235, 0.72);
+  --jiezi-color-space-alpha-8: rgba(16, 33, 31, 0.08);
+  --jiezi-color-line: rgba(38, 63, 61, 0.13);
+}
+
+/* 宣纸生境 (paper) - 人生像墨痕留在纸上，在时间中晕开生长。 */
+[data-theme="paper"] {
+  --jiezi-color-paper: #F2EDE0;
+  --jiezi-color-brand: #586C55;
+  --jiezi-color-light: #BC8A54;
+  --jiezi-color-space: #535F4D;
+  --jiezi-color-ink: #2A2F26;
+  --jiezi-color-muted: #676C5F;
+  --jiezi-color-coral: #975B44;
+  --jiezi-color-brand-alpha-8: rgba(88, 108, 85, 0.08);
+  --jiezi-color-brand-alpha-11: rgba(88, 108, 85, 0.11);
+  --jiezi-color-brand-alpha-13: rgba(88, 108, 85, 0.13);
+  --jiezi-color-brand-alpha-18: rgba(88, 108, 85, 0.18);
+  --jiezi-color-brand-alpha-72: rgba(88, 108, 85, 0.72);
+  --jiezi-color-brand-alpha-92: rgba(88, 108, 85, 0.92);
+  --jiezi-color-light-alpha-12: rgba(188, 138, 84, 0.12);
+  --jiezi-color-paper-alpha-72: rgba(242, 237, 224, 0.72);
+  --jiezi-color-space-alpha-8: rgba(83, 95, 77, 0.08);
+  --jiezi-color-line: rgba(88, 108, 85, 0.13);
+}
+
+/* 竹影鎏金 (jade) - 沉静竹青承载长期记忆，克制鎏金点亮联系。 */
+[data-theme="jade"] {
+  --jiezi-color-paper: #F3F4EC;
+  --jiezi-color-brand: #345F50;
+  --jiezi-color-light: #C8A55D;
+  --jiezi-color-space: #183A31;
+  --jiezi-color-ink: #1F2B26;
+  --jiezi-color-muted: #647169;
+  --jiezi-color-coral: #A15B4C;
+  --jiezi-color-brand-alpha-8: rgba(52, 95, 80, 0.08);
+  --jiezi-color-brand-alpha-11: rgba(52, 95, 80, 0.11);
+  --jiezi-color-brand-alpha-13: rgba(52, 95, 80, 0.13);
+  --jiezi-color-brand-alpha-18: rgba(52, 95, 80, 0.18);
+  --jiezi-color-brand-alpha-72: rgba(52, 95, 80, 0.72);
+  --jiezi-color-brand-alpha-92: rgba(52, 95, 80, 0.92);
+  --jiezi-color-light-alpha-12: rgba(200, 165, 93, 0.12);
+  --jiezi-color-paper-alpha-72: rgba(243, 244, 236, 0.72);
+  --jiezi-color-space-alpha-8: rgba(24, 58, 49, 0.08);
+  --jiezi-color-line: rgba(52, 95, 80, 0.13);
+}
+
+/* 藕荷余晖 (lotus) - 降低科技感，突出柔软、亲密与长期陪伴。 */
+[data-theme="lotus"] {
+  --jiezi-color-paper: #F6F0EB;
+  --jiezi-color-brand: #75696F;
+  --jiezi-color-light: #C77C72;
+  --jiezi-color-space: #3B3038;
+  --jiezi-color-ink: #2E2530;
+  --jiezi-color-muted: #746970;
+  --jiezi-color-coral: #A95348;
+  --jiezi-color-brand-alpha-8: rgba(117, 105, 111, 0.08);
+  --jiezi-color-brand-alpha-11: rgba(117, 105, 111, 0.11);
+  --jiezi-color-brand-alpha-13: rgba(117, 105, 111, 0.13);
+  --jiezi-color-brand-alpha-18: rgba(117, 105, 111, 0.18);
+  --jiezi-color-brand-alpha-72: rgba(117, 105, 111, 0.72);
+  --jiezi-color-brand-alpha-92: rgba(117, 105, 111, 0.92);
+  --jiezi-color-light-alpha-12: rgba(199, 124, 114, 0.12);
+  --jiezi-color-paper-alpha-72: rgba(246, 240, 235, 0.72);
+  --jiezi-color-space-alpha-8: rgba(59, 48, 56, 0.08);
+  --jiezi-color-line: rgba(117, 105, 111, 0.13);
+}
+
+/* 苔茶暖金 (tea) - 苔绿与茶金形成朴素、安静、耐看的东方生活感。 */
+[data-theme="tea"] {
+  --jiezi-color-paper: #F3EFDF;
+  --jiezi-color-brand: #66704A;
+  --jiezi-color-light: #BD8D46;
+  --jiezi-color-space: #353D26;
+  --jiezi-color-ink: #2A2F1E;
+  --jiezi-color-muted: #6C6D56;
+  --jiezi-color-coral: #A0583C;
+  --jiezi-color-brand-alpha-8: rgba(102, 112, 74, 0.08);
+  --jiezi-color-brand-alpha-11: rgba(102, 112, 74, 0.11);
+  --jiezi-color-brand-alpha-13: rgba(102, 112, 74, 0.13);
+  --jiezi-color-brand-alpha-18: rgba(102, 112, 74, 0.18);
+  --jiezi-color-brand-alpha-72: rgba(102, 112, 74, 0.72);
+  --jiezi-color-brand-alpha-92: rgba(102, 112, 74, 0.92);
+  --jiezi-color-light-alpha-12: rgba(189, 141, 70, 0.12);
+  --jiezi-color-paper-alpha-72: rgba(243, 239, 223, 0.72);
+  --jiezi-color-space-alpha-8: rgba(53, 61, 38, 0.08);
+  --jiezi-color-line: rgba(102, 112, 74, 0.13);
+}
+
+/* 月白远青 (moon) - 以月白与远山青平衡现代科技感和东方留白。 */
+[data-theme="moon"] {
+  --jiezi-color-paper: #F0F2F1;
+  --jiezi-color-brand: #416775;
+  --jiezi-color-light: #C7B06E;
+  --jiezi-color-space: #142C35;
+  --jiezi-color-ink: #1C2C32;
+  --jiezi-color-muted: #5B6F7B;
+  --jiezi-color-coral: #A7554A;
+  --jiezi-color-brand-alpha-8: rgba(65, 103, 117, 0.08);
+  --jiezi-color-brand-alpha-11: rgba(65, 103, 117, 0.11);
+  --jiezi-color-brand-alpha-13: rgba(65, 103, 117, 0.13);
+  --jiezi-color-brand-alpha-18: rgba(65, 103, 117, 0.18);
+  --jiezi-color-brand-alpha-72: rgba(65, 103, 117, 0.72);
+  --jiezi-color-brand-alpha-92: rgba(65, 103, 117, 0.92);
+  --jiezi-color-light-alpha-12: rgba(199, 176, 110, 0.12);
+  --jiezi-color-paper-alpha-72: rgba(240, 242, 241, 0.72);
+  --jiezi-color-space-alpha-8: rgba(20, 44, 53, 0.08);
+  --jiezi-color-line: rgba(65, 103, 117, 0.13);
+}
+
+/* 枯木逢春 (springWood) - 第一版正式主题。全暖调的侘寂设计，以枯木褐、晚柿红和焦木深夜形成安全、私密的日记本气质。 */
+[data-theme="springWood"] {
+  --jiezi-color-paper: #F3EFE6;
+  --jiezi-color-brand: #6E5A4B;
+  --jiezi-color-light: #D07A55;
+  --jiezi-color-space: #29211C;
+  --jiezi-color-ink: #241D19;
+  --jiezi-color-muted: #6F6258;
+  --jiezi-color-coral: #AE4F38;
+  --jiezi-color-brand-alpha-8: rgba(110, 90, 75, 0.08);
+  --jiezi-color-brand-alpha-11: rgba(110, 90, 75, 0.11);
+  --jiezi-color-brand-alpha-13: rgba(110, 90, 75, 0.13);
+  --jiezi-color-brand-alpha-18: rgba(110, 90, 75, 0.18);
+  --jiezi-color-brand-alpha-72: rgba(110, 90, 75, 0.72);
+  --jiezi-color-brand-alpha-92: rgba(110, 90, 75, 0.92);
+  --jiezi-color-light-alpha-12: rgba(208, 122, 85, 0.12);
+  --jiezi-color-paper-alpha-72: rgba(243, 239, 230, 0.72);
+  --jiezi-color-space-alpha-8: rgba(41, 33, 28, 0.08);
+  --jiezi-color-line: rgba(110, 90, 75, 0.13);
+}
+
+/* 古刹苔痕 (temple) - 候选主题。以古刹石壁、苔痕与微弱金光表达枯寂、禅意和历史厚度。 */
+[data-theme="temple"] {
+  --jiezi-color-paper: #EBECE6;
+  --jiezi-color-brand: #3A4D40;
+  --jiezi-color-light: #D9A752;
+  --jiezi-color-space: #1B241E;
+  --jiezi-color-ink: #1C241F;
+  --jiezi-color-muted: #5E6B61;
+  --jiezi-color-coral: #A15241;
+  --jiezi-color-brand-alpha-8: rgba(58, 77, 64, 0.08);
+  --jiezi-color-brand-alpha-11: rgba(58, 77, 64, 0.11);
+  --jiezi-color-brand-alpha-13: rgba(58, 77, 64, 0.13);
+  --jiezi-color-brand-alpha-18: rgba(58, 77, 64, 0.18);
+  --jiezi-color-brand-alpha-72: rgba(58, 77, 64, 0.72);
+  --jiezi-color-brand-alpha-92: rgba(58, 77, 64, 0.92);
+  --jiezi-color-light-alpha-12: rgba(217, 167, 82, 0.12);
+  --jiezi-color-paper-alpha-72: rgba(235, 236, 230, 0.72);
+  --jiezi-color-space-alpha-8: rgba(27, 36, 30, 0.08);
+  --jiezi-color-line: rgba(58, 77, 64, 0.13);
+}
+
+/* 字体层级 */
+:root {
+  --jiezi-font-caption2-size: 11px;
+  --jiezi-font-caption2-weight: 400;
+  --jiezi-font-caption2-line-height: 1.4;
+  --jiezi-font-caption-size: 12px;
+  --jiezi-font-caption-weight: 400;
+  --jiezi-font-caption-line-height: 1.4;
+  --jiezi-font-footnote-size: 13px;
+  --jiezi-font-footnote-weight: 400;
+  --jiezi-font-footnote-line-height: 1.45;
+  --jiezi-font-subheadline-size: 14px;
+  --jiezi-font-subheadline-weight: 400;
+  --jiezi-font-subheadline-line-height: 1.5;
+  --jiezi-font-body-size: 15px;
+  --jiezi-font-body-weight: 400;
+  --jiezi-font-body-line-height: 1.55;
+  --jiezi-font-callout-size: 14px;
+  --jiezi-font-callout-weight: 500;
+  --jiezi-font-callout-line-height: 1.5;
+  --jiezi-font-headline-size: 16px;
+  --jiezi-font-headline-weight: 600;
+  --jiezi-font-headline-line-height: 1.4;
+  --jiezi-font-title3-size: 18px;
+  --jiezi-font-title3-weight: 600;
+  --jiezi-font-title3-line-height: 1.35;
+  --jiezi-font-title2-size: 20px;
+  --jiezi-font-title2-weight: 600;
+  --jiezi-font-title2-line-height: 1.3;
+  --jiezi-font-title1-size: 24px;
+  --jiezi-font-title1-weight: 700;
+  --jiezi-font-title1-line-height: 1.25;
+  --jiezi-font-largeTitle-size: 30px;
+  --jiezi-font-largeTitle-weight: 700;
+  --jiezi-font-largeTitle-line-height: 1.2;
+
+  --jiezi-font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --jiezi-font-family-rounded: 'SF Pro Rounded', 'Nunito', 'Quicksand', sans-serif;
+  --jiezi-font-family-serif: 'Lora', 'Source Han Serif SC', 'Noto Serif SC', serif;
+  --jiezi-font-family-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+}
+
+/* 间距 */
+:root {
+  --jiezi-spacing-xxs: 2px;
+  --jiezi-spacing-xs: 4px;
+  --jiezi-spacing-sm: 8px;
+  --jiezi-spacing-md: 12px;
+  --jiezi-spacing-lg: 16px;
+  --jiezi-spacing-xl: 20px;
+  --jiezi-spacing-xl2: 24px;
+  --jiezi-spacing-xl3: 32px;
+  --jiezi-spacing-xl4: 40px;
+  --jiezi-spacing-xl5: 48px;
+  --jiezi-spacing-xl6: 64px;
+  --jiezi-spacing-xl7: 80px;
+
+  --jiezi-spacing-page_padding: 16px;
+  --jiezi-spacing-card_padding: 18px;
+  --jiezi-spacing-card_padding_lg: 24px;
+  --jiezi-spacing-section_gap: 32px;
+  --jiezi-spacing-item_gap: 12px;
+  --jiezi-spacing-item_gap_tight: 8px;
+}
+
+/* 圆角 */
+:root {
+  --jiezi-radius-xs: 4px;
+  --jiezi-radius-sm: 8px;
+  --jiezi-radius-md: 12px;
+  --jiezi-radius-lg: 16px;
+  --jiezi-radius-xl: 18px;
+  --jiezi-radius-xl2: 24px;
+  --jiezi-radius-xl3: 32px;
+  --jiezi-radius-pill: 9999px;
+
+  --jiezi-radius-card: 24px;
+  --jiezi-radius-button: 18px;
+  --jiezi-radius-input: 12px;
+  --jiezi-radius-chip: 9999px;
+  --jiezi-radius-sheet: 32px;
+}
+
+/* 阴影 */
+:root {
+  --jiezi-shadow-none: 0 0px 0px var(--jiezi-color-space);
+  --jiezi-shadow-none-alpha: 0;
+  --jiezi-shadow-sm: 0 2px 6px var(--jiezi-color-space);
+  --jiezi-shadow-sm-alpha: 0.06;
+  --jiezi-shadow-md: 0 6px 14px var(--jiezi-color-space);
+  --jiezi-shadow-md-alpha: 0.08;
+  --jiezi-shadow-lg: 0 12px 22px var(--jiezi-color-space);
+  --jiezi-shadow-lg-alpha: 0.08;
+  --jiezi-shadow-xl: 0 18px 32px var(--jiezi-color-space);
+  --jiezi-shadow-xl-alpha: 0.12;
+  --jiezi-shadow-brand: 0 8px 14px var(--jiezi-color-brand);
+  --jiezi-shadow-brand-alpha: 0.18;
+
+  --jiezi-shadow-semantic-card: var(--jiezi-shadow-lg);
+  --jiezi-shadow-semantic-modal: var(--jiezi-shadow-xl);
+  --jiezi-shadow-semantic-primary_button: var(--jiezi-shadow-brand);
+}
+
+/* 动效 */
+:root {
+  --jiezi-duration-instant: 0ms;
+  --jiezi-duration-fast: 150ms;
+  --jiezi-duration-normal: 250ms;
+  --jiezi-duration-slow: 400ms;
+  --jiezi-duration-deliberate: 600ms;
+
+  --jiezi-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --jiezi-easing-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --jiezi-easing-accelerate: cubic-bezier(0.4, 0, 1, 1);
+  --jiezi-easing-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --jiezi-easing-gentle: cubic-bezier(0.45, 0, 0.55, 1);
+
+  --jiezi-motion-press-duration: var(--jiezi-duration-fast);
+  --jiezi-motion-press-easing: var(--jiezi-easing-standard);
+  --jiezi-motion-sheet_present-duration: var(--jiezi-duration-slow);
+  --jiezi-motion-sheet_present-easing: var(--jiezi-easing-decelerate);
+  --jiezi-motion-sheet_dismiss-duration: var(--jiezi-duration-normal);
+  --jiezi-motion-sheet_dismiss-easing: var(--jiezi-easing-accelerate);
+  --jiezi-motion-page_transition-duration: var(--jiezi-duration-normal);
+  --jiezi-motion-page_transition-easing: var(--jiezi-easing-standard);
+  --jiezi-motion-ripple-duration: var(--jiezi-duration-normal);
+  --jiezi-motion-ripple-easing: var(--jiezi-easing-decelerate);
+}
+
+/* 数据域色（全局固定） */
+:root {
+  --jiezi-domain-expense: #C2410C; /* 消费·赭石 */
+  --jiezi-domain-income: #1565C0; /* 收入·黛蓝 */
+  --jiezi-domain-sport: #B45309; /* 运动·琥珀 */
+  --jiezi-domain-sleep: #4338CA; /* 睡眠·靛青 */
+  --jiezi-domain-reading: #0369A1; /* 阅读·青黛 */
+  --jiezi-domain-food: #EA580C; /* 饮食·朱橙 */
+  --jiezi-domain-wallet: #7C3AED; /* 钱包·紫檀 */
+}
+
+/* 艺术版专用色（功能页面禁用） */
+:root {
+  --jiezi-art-fluorescent-blue: #4A9EFF; /* 极细装饰线（0.5mm 以下） */
+  --jiezi-art-cinnabar: #C8381E; /* 底色渲染（仅启动页/营销图） */
+}
+
+/* 描边（金线 0.5mm 为骨） */
+:root {
+  --jiezi-stroke-gold-hairline-width: 0.5px; /* 金线细描边：印章框、插画框、装饰分隔，新中式的骨 */
+  --jiezi-stroke-gold-hairline-color: var(--jiezi-color-light);
+  --jiezi-stroke-gold-hairline-alpha: 0.85;
+  --jiezi-stroke-brand-hairline-width: 1px; /* 卡片描边（与 glass.card 一致） */
+  --jiezi-stroke-brand-hairline-color: var(--jiezi-color-brand);
+  --jiezi-stroke-brand-hairline-alpha: 0.11;
+  --jiezi-stroke-divider-width: 0.5px; /* 列表行分隔线 */
+  --jiezi-stroke-divider-color: var(--jiezi-color-ink);
+  --jiezi-stroke-divider-alpha: 0.08;
+  --jiezi-stroke-focus-ring-width: 1.5px; /* 输入框聚焦态 */
+  --jiezi-stroke-focus-ring-color: var(--jiezi-color-brand);
+  --jiezi-stroke-focus-ring-alpha: 0.45;
+}
+
+/* 图标尺寸 */
+:root {
+  --jiezi-icon-xs: 16px; /* 行内小图标、chevron */
+  --jiezi-icon-sm: 20px; /* 辅助图标 */
+  --jiezi-icon-md: 24px; /* Tab 图标、工具栏 */
+  --jiezi-icon-lg: 28px; /* 强调图标 */
+  --jiezi-icon-xl: 34px; /* 数据域图标容器 */
+  --jiezi-icon-xl2: 40px; /* 列表行图标块容器 */
+  --jiezi-icon-xl3: 48px; /* 空态/功能大图标容器 */
+  --jiezi-icon-semantic-tab: 24px;
+  --jiezi-icon-semantic-list-row-block: 40px;
+  --jiezi-icon-semantic-domain-block: 34px;
+}
+
+/* 语义字体角色（serif 标题 + rounded 金额） */
+:root {
+  --jiezi-type-display-size: 24px; /* 页面主标题、品牌门面（如「个人数据平台」） */
+  --jiezi-type-display-weight: 700;
+  --jiezi-type-display-line-height: 1.25;
+  --jiezi-type-display-family: var(--jiezi-font-family-serif);
+  --jiezi-type-display-large-size: 30px; /* 空态大标题、启动页书法字位 */
+  --jiezi-type-display-large-weight: 700;
+  --jiezi-type-display-large-line-height: 1.2;
+  --jiezi-type-display-large-family: var(--jiezi-font-family-serif);
+  --jiezi-type-money-hero-size: 30px; /* 财务主数字（净额估算、大金额输入） */
+  --jiezi-type-money-hero-weight: 700;
+  --jiezi-type-money-hero-line-height: 1.2;
+  --jiezi-type-money-hero-family: var(--jiezi-font-family-rounded);
+  --jiezi-type-money-hero-numeric: tabular-nums;
+  --jiezi-type-money-card-size: 20px; /* 卡片级金额、日汇总数字 */
+  --jiezi-type-money-card-weight: 600;
+  --jiezi-type-money-card-line-height: 1.3;
+  --jiezi-type-money-card-family: var(--jiezi-font-family-rounded);
+  --jiezi-type-money-card-numeric: tabular-nums;
+  --jiezi-type-money-inline-size: 16px; /* 列表行内金额 */
+  --jiezi-type-money-inline-weight: 600;
+  --jiezi-type-money-inline-line-height: 1.4;
+  --jiezi-type-money-inline-family: var(--jiezi-font-family-rounded);
+  --jiezi-type-money-inline-numeric: tabular-nums;
+  --jiezi-type-section-title-size: 18px; /* 区块标题（如「财务状态」「每日明细」） */
+  --jiezi-type-section-title-weight: 600;
+  --jiezi-type-section-title-line-height: 1.35;
+  --jiezi-type-section-title-family: var(--jiezi-font-family-sans);
+  --jiezi-type-card-title-size: 16px; /* 卡片内标题、列表行主文字 */
+  --jiezi-type-card-title-weight: 600;
+  --jiezi-type-card-title-line-height: 1.4;
+  --jiezi-type-card-title-family: var(--jiezi-font-family-sans);
+  --jiezi-type-button-size: 14px; /* 按钮文字 */
+  --jiezi-type-button-weight: 600;
+  --jiezi-type-button-line-height: 1.5;
+  --jiezi-type-button-family: var(--jiezi-font-family-sans);
+  --jiezi-type-chip-size: 13px; /* 分类 Chip、胶囊标签 */
+  --jiezi-type-chip-weight: 500;
+  --jiezi-type-chip-line-height: 1.45;
+  --jiezi-type-chip-family: var(--jiezi-font-family-sans);
+  --jiezi-type-metric-label-size: 12px; /* 指标说明文字（如「可用现金」） */
+  --jiezi-type-metric-label-weight: 400;
+  --jiezi-type-metric-label-line-height: 1.4;
+  --jiezi-type-metric-label-family: var(--jiezi-font-family-sans);
+}
+
+/* 布局 */
+:root {
+  --jiezi-layout-page-max-width: 480px;
+  --jiezi-layout-page-max-width-tablet: 720px;
+  --jiezi-layout-safe-area-top: env(safe-area-inset-top);
+  --jiezi-layout-safe-area-bottom: env(safe-area-inset-bottom);
+  --jiezi-layout-bottom-sheet-min-height: 0.4px;
+  --jiezi-layout-bottom-sheet-max-height: 0.92px;
+  --jiezi-layout-tab-bar-height-ios: 49px;
+  --jiezi-layout-pwa-nav-height: 72px;
+}
+
+/* z-index */
+:root {
+  --jiezi-z-base: 0;
+  --jiezi-z-content: 10;
+  --jiezi-z-sticky: 100;
+  --jiezi-z-dropdown: 1000;
+  --jiezi-z-modal: 10000;
+  --jiezi-z-toast: 100000;
+}
+
+/*
+ * 时间相位切换工具（运行时 JS）
+ * 使用：import { applyTimePhase } from "./tokens-phase.mjs";
+ *       applyTimePhase(new Date().getHours());
+ */

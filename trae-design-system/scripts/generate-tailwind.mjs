@@ -106,7 +106,7 @@ const config = {
 const lines = [];
 lines.push('/**');
 lines.push(' * 芥子设计系统 Tailwind Preset');
-lines.push(` * 自动生成于 ${new Date().toISOString()}`);
+lines.push(` * 自动生成 · Token v${tokens.$meta.version}`);
 lines.push(` * 数据源：trae-design-system/tokens/design-tokens.json v${tokens.$meta.version}`);
 lines.push(' * 禁止手工修改本文件。任何调整请改 SSOT 后运行 scripts/generate-tailwind.mjs');
 lines.push(' */');
