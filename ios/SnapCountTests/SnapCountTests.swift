@@ -1723,6 +1723,21 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    func testInboxAdjacentSelectionStopsAtQueueEdges() {
+        let ids = ["first", "middle", "last"]
+
+        XCTAssertEqual(
+            NativeInboxPresentation.adjacentSelection(to: "middle", offset: -1, in: ids),
+            "first"
+        )
+        XCTAssertEqual(
+            NativeInboxPresentation.adjacentSelection(to: "middle", offset: 1, in: ids),
+            "last"
+        )
+        XCTAssertNil(NativeInboxPresentation.adjacentSelection(to: "first", offset: -1, in: ids))
+        XCTAssertNil(NativeInboxPresentation.adjacentSelection(to: "last", offset: 1, in: ids))
+    }
+
     func testAtomicArchiveBodyUsesStagingIdentityAndDomain() {
         let record = NativeStagingRecord(
             id: "staging-1", dateKey: "2026-07-16", title: "骑行记录", summary: "骑行 30 分钟",

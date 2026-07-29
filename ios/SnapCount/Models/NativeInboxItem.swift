@@ -249,6 +249,18 @@ enum NativeInboxPresentation {
         return remaining[min(removedIndex, remaining.count - 1)]
     }
 
+    static func adjacentSelection(
+        to selectedId: String?,
+        offset: Int,
+        in orderedIds: [String]
+    ) -> String? {
+        guard !orderedIds.isEmpty else { return nil }
+        let currentIndex = selectedId.flatMap { orderedIds.firstIndex(of: $0) } ?? 0
+        let nextIndex = currentIndex + offset
+        guard orderedIds.indices.contains(nextIndex) else { return nil }
+        return orderedIds[nextIndex]
+    }
+
     static func filtered(_ items: [NativeInboxItem], by filter: NativeInboxFilter) -> [NativeInboxItem] {
         switch filter {
         case .all: return items
