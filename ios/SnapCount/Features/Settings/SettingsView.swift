@@ -8,160 +8,241 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            JieziTheme.pageBackground.ignoresSafeArea()
-            List {
-                Section {
+            JieziPageBackground()
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: JieziSpacing.Semantic.section_gap) {
                     profileHeader
-                }
 
-                Section("使用帮助") {
-                    Button {
-                        appState.presentOnboarding()
-                    } label: {
-                        settingsRow(
-                            "使用引导",
-                            detail: appState.onboardingStatusText,
-                            systemImage: "point.topleft.down.to.point.bottomright.curvepath"
+                    settingsSection("使用帮助") {
+                        JieziListRow(
+                            palette: themeManager.palette,
+                            systemImage: "point.topleft.down.to.point.bottomright.curvepath",
+                            title: "使用引导",
+                            subtitle: appState.onboardingStatusText,
+                            action: appState.presentOnboarding
                         )
                     }
-                    .buttonStyle(.plain)
-                }
 
-                Section("外观") {
-                    NavigationLink {
-                        ThemeSettingsView()
-                    } label: {
-                        settingsRow(
-                            "界面主题",
-                            detail: themeManager.palette.name,
-                            systemImage: "paintpalette"
+                    settingsSection("外观与数据") {
+                        NavigationLink {
+                            ThemeSettingsView()
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "paintpalette",
+                                title: "界面主题",
+                                subtitle: themeManager.palette.name,
+                                showDivider: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            DataExportView()
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "square.and.arrow.up",
+                                title: "数据导出",
+                                subtitle: "导出支出、收入和通用记录"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    settingsSection("AI 能力") {
+                        NavigationLink {
+                            VisionSettingsView()
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "viewfinder",
+                                title: "截图 / 拍照识别",
+                                subtitle: "截图：\(providerTitle(appState.userSettings.screenshotVisionPrimary)) · 拍照：\(providerTitle(appState.userSettings.photoVisionPrimary))",
+                                subtitleLineLimit: 2,
+                                showDivider: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            CompanionSettingsView()
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "quote.bubble",
+                                title: "AI 陪伴",
+                                subtitle: appState.userSettings.companionEnabled
+                                    ? "已开启 · \(optionTitle(NativeSettingsOptions.personas, appState.userSettings.companionPersona))"
+                                    : "已关闭",
+                                showDivider: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            InsightSettingsView()
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "chart.line.uptrend.xyaxis",
+                                title: "AI 联动分析",
+                                subtitle: optionTitle(NativeSettingsOptions.insightProviders, appState.userSettings.aiInsightProvider)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    settingsSection("隐私与留存") {
+                        NavigationLink {
+                            PrivacySettingsView()
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "hand.raised",
+                                title: "识别数据与原图",
+                                subtitle: appState.userSettings.retentionDescription,
+                                subtitleLineLimit: 2
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    settingsSection("快捷指令") {
+                        NavigationLink {
+                            ShortcutSetupView()
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "wand.and.stars",
+                                title: "快捷指令设置",
+                                subtitle: appState.hasUploadToken ? "凭据已同步" : "需要重新登录同步凭据",
+                                showDivider: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        settingsToggleRow(
+                            title: "上传完成通知",
+                            systemImage: "bell",
+                            isOn: Binding(
+                                get: { appState.shortcutNotificationsEnabled },
+                                set: { appState.setShortcutNotificationsEnabled($0) }
+                            ),
+                            showDivider: true
+                        )
+
+                        settingsToggleRow(
+                            title: "快捷指令结果卡片",
+                            systemImage: "rectangle.on.rectangle",
+                            isOn: Binding(
+                                get: { appState.shortcutResultCardEnabled },
+                                set: { appState.setShortcutResultCardEnabled($0) }
+                            )
                         )
                     }
-                }
 
-                Section("数据管理") {
-                    NavigationLink {
-                        DataExportView()
-                    } label: {
-                        settingsRow("数据导出", detail: "导出支出、收入和通用记录", systemImage: "square.and.arrow.up")
-                    }
-                }
-
-                Section("AI 能力") {
-                    NavigationLink {
-                        VisionSettingsView()
-                    } label: {
-                        settingsRow(
-                            "截图 / 拍照识别",
-                            detail: "截图：\(providerTitle(appState.userSettings.screenshotVisionPrimary)) · 拍照：\(providerTitle(appState.userSettings.photoVisionPrimary))",
-                            systemImage: "viewfinder"
+                    settingsSection("关于") {
+                        JieziListRow(
+                            palette: themeManager.palette,
+                            systemImage: "info.circle",
+                            title: "当前版本",
+                            trailingText: versionLabel,
+                            showsChevron: false,
+                            showDivider: true
+                        )
+                        JieziListRow(
+                            palette: themeManager.palette,
+                            systemImage: "externaldrive",
+                            title: "数据存储",
+                            trailingText: "Supabase 新加坡节点",
+                            showsChevron: false
                         )
                     }
-                    NavigationLink {
-                        CompanionSettingsView()
-                    } label: {
-                        settingsRow(
-                            "AI 陪伴",
-                            detail: appState.userSettings.companionEnabled ? "已开启 · \(optionTitle(NativeSettingsOptions.personas, appState.userSettings.companionPersona))" : "已关闭",
-                            systemImage: "quote.bubble"
-                        )
-                    }
-                    NavigationLink {
-                        InsightSettingsView()
-                    } label: {
-                        settingsRow(
-                            "AI 联动分析",
-                            detail: optionTitle(NativeSettingsOptions.insightProviders, appState.userSettings.aiInsightProvider),
-                            systemImage: "chart.line.uptrend.xyaxis"
-                        )
-                    }
-                }
 
-                Section("隐私与留存") {
-                    NavigationLink {
-                        PrivacySettingsView()
-                    } label: {
-                        settingsRow(
-                            "识别数据与原图",
-                            detail: appState.userSettings.retentionDescription,
-                            systemImage: "hand.raised"
-                        )
-                    }
-                }
+                    settingsSection("账户与安全") {
+                        NavigationLink {
+                            LegalDocumentView(kind: .privacy)
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "hand.raised",
+                                title: "隐私政策",
+                                showDivider: true
+                            )
+                        }
+                        .buttonStyle(.plain)
 
-                Section("快捷指令") {
-                    NavigationLink {
-                        ShortcutSetupView()
-                    } label: {
-                        settingsRow(
-                            "快捷指令设置",
-                            detail: appState.hasUploadToken ? "凭据已同步" : "需要重新登录同步凭据",
-                            systemImage: "wand.and.stars"
-                        )
-                    }
-                    Toggle(isOn: Binding(
-                        get: { appState.shortcutNotificationsEnabled },
-                        set: { appState.setShortcutNotificationsEnabled($0) }
-                    )) {
-                        Label("上传完成通知", systemImage: "bell")
-                    }
-                    Toggle(isOn: Binding(
-                        get: { appState.shortcutResultCardEnabled },
-                        set: { appState.setShortcutResultCardEnabled($0) }
-                    )) {
-                        Label("快捷指令结果卡片", systemImage: "rectangle.on.rectangle")
-                    }
-                }
+                        NavigationLink {
+                            LegalDocumentView(kind: .terms)
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "doc.text",
+                                title: "服务协议",
+                                showDivider: true
+                            )
+                        }
+                        .buttonStyle(.plain)
 
-                Section("关于") {
-                    LabeledContent("当前版本") {
-                        Text(versionLabel).foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            showDeleteAccountConfirmation = true
+                        } label: {
+                            JieziListRow(
+                                palette: themeManager.palette,
+                                systemImage: "person.crop.circle.badge.xmark",
+                                iconTint: themeManager.palette.coral,
+                                title: "删除账户及全部数据",
+                                trailingTint: themeManager.palette.coral,
+                                showsChevron: false
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(appState.isDeletingAccount)
                     }
-                    LabeledContent("数据存储") {
-                        Text("Supabase 新加坡节点").foregroundStyle(.secondary)
-                    }
-                }
 
-                Section("账户与安全") {
-                    NavigationLink {
-                        LegalDocumentView(kind: .privacy)
-                    } label: {
-                        Label("隐私政策", systemImage: "hand.raised")
-                    }
-                    NavigationLink {
-                        LegalDocumentView(kind: .terms)
-                    } label: {
-                        Label("服务协议", systemImage: "doc.text")
-                    }
-                    Button(role: .destructive) {
-                        showDeleteAccountConfirmation = true
-                    } label: {
-                        Label("删除账户及全部数据", systemImage: "person.crop.circle.badge.xmark")
-                    }
-                    .disabled(appState.isDeletingAccount)
-                }
-
-                Section {
                     Button(role: .destructive) {
                         appState.signOut()
                     } label: {
                         Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                            .font(JieziType.button)
+                            .foregroundStyle(themeManager.palette.coral)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, JieziSpacing.lg)
+                            .background(
+                                themeManager.palette.coral.opacity(0.08),
+                                in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.button, style: .continuous)
+                            )
                     }
-                }
+                    .buttonStyle(JieziPressableButtonStyle())
 
-                if appState.isLoadingSettings || appState.isSavingSettings || appState.isDeletingAccount {
-                    Section { ProgressView(appState.isLoadingSettings ? "正在同步设置" : "正在保存设置") }
-                }
-                if let message = appState.settingsMessage {
-                    Section {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(message.contains("失败") ? JieziTheme.coral : .secondary)
+                    if appState.isLoadingSettings || appState.isSavingSettings || appState.isDeletingAccount {
+                        JieziCard(palette: themeManager.palette, solid: true) {
+                            HStack(spacing: JieziSpacing.md) {
+                                ProgressView()
+                                    .tint(themeManager.palette.brand)
+                                Text(appState.isLoadingSettings ? "正在同步设置" : "正在保存设置")
+                                    .font(JieziFont.footnote)
+                                    .foregroundStyle(themeManager.palette.muted)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    if let message = appState.settingsMessage {
+                        JieziCard(palette: themeManager.palette, solid: true) {
+                            Text(message)
+                                .font(JieziFont.footnote)
+                                .foregroundStyle(message.contains("失败") ? themeManager.palette.coral : themeManager.palette.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
+                .padding(.horizontal, JieziSpacing.Semantic.page_padding)
+                .padding(.top, JieziSpacing.sm)
+                .padding(.bottom, JieziSpacing.xl6)
             }
-            .scrollContentBackground(.hidden)
-            .listStyle(.insetGrouped)
             .refreshable { await appState.loadUserSettings() }
         }
         .navigationTitle("设置")
@@ -178,33 +259,75 @@ struct SettingsView: View {
     }
 
     private var profileHeader: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 38))
-                .foregroundStyle(JieziTheme.brand)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(appState.currentUserEmail.isEmpty ? "已登录用户" : appState.currentUserEmail)
-                    .font(.headline)
-                Text("\(appState.userSettings.planTitle) · \(appState.currentUserId)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        JieziCard(palette: themeManager.palette) {
+            HStack(spacing: JieziSpacing.md) {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 42))
+                    .foregroundStyle(themeManager.palette.brand)
+                VStack(alignment: .leading, spacing: JieziSpacing.xxs) {
+                    Text(appState.currentUserEmail.isEmpty ? "已登录用户" : appState.currentUserEmail)
+                        .font(JieziType.cardTitle)
+                        .foregroundStyle(themeManager.palette.ink)
+                        .lineLimit(1)
+                    Text("\(appState.userSettings.planTitle) · \(appState.currentUserId)")
+                        .font(JieziFont.caption)
+                        .foregroundStyle(themeManager.palette.muted)
+                        .lineLimit(1)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 5)
     }
 
-    private func settingsRow(_ title: String, detail: String, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .foregroundStyle(JieziTheme.brand)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+    private func settingsSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: JieziSpacing.sm) {
+            JieziSectionHeader(palette: themeManager.palette, title: title)
+                .padding(.horizontal, JieziSpacing.xs)
+            JieziCard(palette: themeManager.palette, solid: true) {
+                VStack(spacing: 0) {
+                    content()
+                }
             }
         }
-        .padding(.vertical, 3)
+    }
+
+    private func settingsToggleRow(
+        title: String,
+        systemImage: String,
+        isOn: Binding<Bool>,
+        showDivider: Bool = false
+    ) -> some View {
+        HStack(spacing: JieziSpacing.Semantic.item_gap) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(themeManager.palette.brand)
+                .frame(width: JieziIcon.Semantic.list_row_block, height: JieziIcon.Semantic.list_row_block)
+                .background(
+                    themeManager.palette.brand.opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous)
+                )
+            Text(title)
+                .font(JieziType.cardTitle)
+                .foregroundStyle(themeManager.palette.ink)
+            Spacer(minLength: JieziSpacing.sm)
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .tint(themeManager.palette.brand)
+        }
+        .padding(.horizontal, JieziSpacing.Semantic.item_gap)
+        .padding(.vertical, JieziSpacing.md)
+        .overlay(alignment: .bottom) {
+            if showDivider {
+                let stroke = JieziStroke.divider(themeManager.palette)
+                Rectangle()
+                    .fill(stroke.color)
+                    .frame(height: stroke.width)
+                    .padding(.leading, JieziIcon.Semantic.list_row_block + JieziSpacing.Semantic.item_gap * 2)
+            }
+        }
     }
 
     private func providerTitle(_ id: String) -> String {
