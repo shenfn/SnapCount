@@ -2,7 +2,7 @@
 //  JieziTheme+Generated.swift
 //  SnapCount
 //
-//  自动生成于 2026-07-27T03:17:17.338Z
+//  自动生成 · Token v0.2.0
 //  数据源：trae-design-system/tokens/design-tokens.json v0.2.0
 //  禁止手工修改本文件。任何调整请改 SSOT 后运行 scripts/generate-ios.mjs
 //
@@ -64,8 +64,8 @@ struct JieziGeneratedPalette {
         light: Color(jieziHex: "#DCBF74"),
         space: Color(jieziHex: "#17312D"),
         ink: Color(jieziHex: "#202A27"),
-        muted: Color(jieziHex: "#6E7773"),
-        coral: Color(jieziHex: "#B76555")
+        muted: Color(jieziHex: "#666E6A"),
+        coral: Color(jieziHex: "#A1594B")
     )
 
     static let xuan = JieziGeneratedPalette(
@@ -76,7 +76,7 @@ struct JieziGeneratedPalette {
         space: Color(jieziHex: "#10211F"),
         ink: Color(jieziHex: "#1A2624"),
         muted: Color(jieziHex: "#5E6764"),
-        coral: Color(jieziHex: "#A85648")
+        coral: Color(jieziHex: "#A55447")
     )
 
     static let paper = JieziGeneratedPalette(
@@ -86,8 +86,8 @@ struct JieziGeneratedPalette {
         light: Color(jieziHex: "#BC8A54"),
         space: Color(jieziHex: "#535F4D"),
         ink: Color(jieziHex: "#2A2F26"),
-        muted: Color(jieziHex: "#6B7163"),
-        coral: Color(jieziHex: "#B26B50")
+        muted: Color(jieziHex: "#676C5F"),
+        coral: Color(jieziHex: "#975B44")
     )
 
     static let jade = JieziGeneratedPalette(
@@ -97,8 +97,8 @@ struct JieziGeneratedPalette {
         light: Color(jieziHex: "#C8A55D"),
         space: Color(jieziHex: "#183A31"),
         ink: Color(jieziHex: "#1F2B26"),
-        muted: Color(jieziHex: "#67756C"),
-        coral: Color(jieziHex: "#A85F4F")
+        muted: Color(jieziHex: "#647169"),
+        coral: Color(jieziHex: "#A15B4C")
     )
 
     static let lotus = JieziGeneratedPalette(
@@ -108,8 +108,8 @@ struct JieziGeneratedPalette {
         light: Color(jieziHex: "#C77C72"),
         space: Color(jieziHex: "#3B3038"),
         ink: Color(jieziHex: "#2E2530"),
-        muted: Color(jieziHex: "#7A6F76"),
-        coral: Color(jieziHex: "#B85A4E")
+        muted: Color(jieziHex: "#746970"),
+        coral: Color(jieziHex: "#A95348")
     )
 
     static let tea = JieziGeneratedPalette(
@@ -119,8 +119,8 @@ struct JieziGeneratedPalette {
         light: Color(jieziHex: "#BD8D46"),
         space: Color(jieziHex: "#353D26"),
         ink: Color(jieziHex: "#2A2F1E"),
-        muted: Color(jieziHex: "#6F7059"),
-        coral: Color(jieziHex: "#AC5F40")
+        muted: Color(jieziHex: "#6C6D56"),
+        coral: Color(jieziHex: "#A0583C")
     )
 
     static let moon = JieziGeneratedPalette(
@@ -130,8 +130,8 @@ struct JieziGeneratedPalette {
         light: Color(jieziHex: "#C7B06E"),
         space: Color(jieziHex: "#142C35"),
         ink: Color(jieziHex: "#1C2C32"),
-        muted: Color(jieziHex: "#5F7480"),
-        coral: Color(jieziHex: "#A8554A")
+        muted: Color(jieziHex: "#5B6F7B"),
+        coral: Color(jieziHex: "#A7554A")
     )
 
     static let springWood = JieziGeneratedPalette(
@@ -142,7 +142,7 @@ struct JieziGeneratedPalette {
         space: Color(jieziHex: "#29211C"),
         ink: Color(jieziHex: "#241D19"),
         muted: Color(jieziHex: "#6F6258"),
-        coral: Color(jieziHex: "#B4523A")
+        coral: Color(jieziHex: "#AE4F38")
     )
 
     static let temple = JieziGeneratedPalette(
@@ -153,7 +153,7 @@ struct JieziGeneratedPalette {
         space: Color(jieziHex: "#1B241E"),
         ink: Color(jieziHex: "#1C241F"),
         muted: Color(jieziHex: "#5E6B61"),
-        coral: Color(jieziHex: "#A65543")
+        coral: Color(jieziHex: "#A15241")
     )
 
     /// 全部主题清单，供设置页展示与切换

@@ -559,7 +559,7 @@
 }
 
 .finance-bar-label {
-  color: #9b978f;
+  color: var(--text3);
   font-size: 12px;
   font-weight: 800;
 }
@@ -804,7 +804,7 @@
 }
 
 .home-layout-switch input:checked + span {
-  background: #2d6a4f;
+  background: var(--primary);
 }
 
 .home-layout-switch input:checked + span::after {

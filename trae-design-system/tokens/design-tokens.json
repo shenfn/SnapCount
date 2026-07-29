@@ -18,14 +18,15 @@
         "name": "芥青微光",
         "description": "温暖日常之下，一座正在呼吸的记忆生境。",
         "is_default_ios": true,
+        "is_default_pwa": true,
         "colors": {
           "paper": "#F5F1E7",
           "brand": "#426E63",
           "light": "#DCBF74",
           "space": "#17312D",
           "ink": "#202A27",
-          "muted": "#6E7773",
-          "coral": "#B76555"
+          "muted": "#666E6A",
+          "coral": "#A1594B"
         }
       },
       {
@@ -39,7 +40,7 @@
           "space": "#10211F",
           "ink": "#1A2624",
           "muted": "#5E6764",
-          "coral": "#A85648"
+          "coral": "#A55447"
         }
       },
       {
@@ -52,8 +53,8 @@
           "light": "#BC8A54",
           "space": "#535F4D",
           "ink": "#2A2F26",
-          "muted": "#6B7163",
-          "coral": "#B26B50"
+          "muted": "#676C5F",
+          "coral": "#975B44"
         }
       },
       {
@@ -66,8 +67,8 @@
           "light": "#C8A55D",
           "space": "#183A31",
           "ink": "#1F2B26",
-          "muted": "#67756C",
-          "coral": "#A85F4F"
+          "muted": "#647169",
+          "coral": "#A15B4C"
         }
       },
       {
@@ -80,8 +81,8 @@
           "light": "#C77C72",
           "space": "#3B3038",
           "ink": "#2E2530",
-          "muted": "#7A6F76",
-          "coral": "#B85A4E"
+          "muted": "#746970",
+          "coral": "#A95348"
         }
       },
       {
@@ -94,8 +95,8 @@
           "light": "#BD8D46",
           "space": "#353D26",
           "ink": "#2A2F1E",
-          "muted": "#6F7059",
-          "coral": "#AC5F40"
+          "muted": "#6C6D56",
+          "coral": "#A0583C"
         }
       },
       {
@@ -108,15 +109,14 @@
           "light": "#C7B06E",
           "space": "#142C35",
           "ink": "#1C2C32",
-          "muted": "#5F7480",
-          "coral": "#A8554A"
+          "muted": "#5B6F7B",
+          "coral": "#A7554A"
         }
       },
       {
         "id": "springWood",
         "name": "枯木逢春",
         "description": "第一版正式主题。全暖调的侘寂设计，以枯木褐、晚柿红和焦木深夜形成安全、私密的日记本气质。",
-        "is_default_pwa": true,
         "colors": {
           "paper": "#F3EFE6",
           "brand": "#6E5A4B",
@@ -124,7 +124,7 @@
           "space": "#29211C",
           "ink": "#241D19",
           "muted": "#6F6258",
-          "coral": "#B4523A"
+          "coral": "#AE4F38"
         }
       },
       {
@@ -138,7 +138,7 @@
           "space": "#1B241E",
           "ink": "#1C241F",
           "muted": "#5E6B61",
-          "coral": "#A65543"
+          "coral": "#A15241"
         }
       }
     ],

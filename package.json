@@ -18,6 +18,8 @@
     "test:pending-queue": "node scripts/test-pending-queue.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",
+    "check:design-contrast": "node trae-design-system/scripts/check-contrast.mjs",
+    "generate:design-tokens": "node trae-design-system/scripts/generate-ios.mjs && node trae-design-system/scripts/generate-css.mjs && node trae-design-system/scripts/generate-tailwind.mjs",
     "audit:storage-orphans": "node scripts/audit-storage-orphans.mjs",
     "migrate:legacy-signed-images": "node scripts/migrate-legacy-signed-image-urls.mjs",
     "trace:server": "node tools/ai-validation/server/index.mjs",

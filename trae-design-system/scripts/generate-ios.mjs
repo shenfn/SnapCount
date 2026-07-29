@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, '..');
+const REPO_ROOT = resolve(ROOT, '..');
 
 const tokens = JSON.parse(readFileSync(join(ROOT, 'tokens/design-tokens.json'), 'utf8'));
 const outDir = join(ROOT, 'dist/jiezi');
@@ -45,7 +46,7 @@ lines.push('//');
 lines.push('//  JieziTheme+Generated.swift');
 lines.push('//  SnapCount');
 lines.push('//');
-lines.push(`//  自动生成于 ${new Date().toISOString()}`);
+lines.push(`//  自动生成 · Token v${tokens.$meta.version}`);
 lines.push(`//  数据源：trae-design-system/tokens/design-tokens.json v${tokens.$meta.version}`);
 lines.push('//  禁止手工修改本文件。任何调整请改 SSOT 后运行 scripts/generate-ios.mjs');
 lines.push('//');
@@ -508,11 +509,14 @@ lines.push('    func jieziCard(palette: JieziGeneratedPalette = JieziThemeManage
 lines.push('        modifier(JieziCardStyle(palette: palette, solid: solid))');
 lines.push('    }');
 lines.push('}');
-lines.push('');
 
 const outPath = join(outDir, 'JieziTheme+Generated.swift');
-writeFileSync(outPath, lines.join('\n'));
+const trackedOutPath = join(REPO_ROOT, 'ios/SnapCount/DesignSystem/JieziTheme+Generated.swift');
+const swiftOutput = `${lines.join('\n')}\n`;
+writeFileSync(outPath, swiftOutput);
+writeFileSync(trackedOutPath, swiftOutput);
 console.log(`✓ iOS Swift Token 已生成：${outPath}`);
+console.log(`✓ iOS Swift Token 已同步：${trackedOutPath}`);
 console.log(`  - ${tokens.color.themes.length} 个主题（含派生 line 计算属性）`);
 console.log(`  - ${tokens.time_phases.phases.length} 个时间相位 + 线性插值（transition ${tokens.time_phases.transition_minutes}min）`);
 console.log(`  - ${tokens.typography.scale.length} 个字体层级 + ${Object.keys(tokens.typography.roles).filter((k) => k !== '$description').length} 个语义角色`);
