@@ -982,13 +982,6 @@ private struct InboxVerdictStageView: View {
         return items[min(currentIndex, items.count - 1)]
     }
 
-    private var pageSelection: Binding<String> {
-        Binding(
-            get: { selection ?? items.first?.id ?? "" },
-            set: { selection = $0 }
-        )
-    }
-
     var body: some View {
         ZStack {
             LinearGradient(
@@ -1009,22 +1002,15 @@ private struct InboxVerdictStageView: View {
             } else if let current {
                 VStack(spacing: 0) {
                     stageTopBar(current)
-                    TabView(selection: pageSelection) {
-                        ForEach(items) { item in
-                            stageVisual(item)
-                                .tag(item.id)
-                        }
+                    InboxStageRecordPager(
+                        canMovePrevious: currentIndex > 0,
+                        canMoveNext: currentIndex < items.count - 1,
+                        move: movePage
+                    ) {
+                        stageVisual(current)
+                            .id(current.id)
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
                     .frame(maxHeight: .infinity)
-                    .overlay {
-                        InboxStagePagingControls(
-                            canMovePrevious: currentIndex > 0,
-                            canMoveNext: currentIndex < items.count - 1,
-                            movePrevious: { movePage(by: -1) },
-                            moveNext: { movePage(by: 1) }
-                        )
-                    }
 
                     stageInfo(current)
                     stageActions(current)
@@ -1119,15 +1105,14 @@ private struct InboxVerdictStageView: View {
         }
     }
 
-    private func movePage(by offset: Int) {
+    private func movePage(_ offset: Int) {
         guard let next = NativeInboxPresentation.adjacentSelection(
             to: selection,
             offset: offset,
             in: items.map(\.id)
         ) else { return }
-        withAnimation(.easeOut(duration: 0.22)) {
-            selection = next
-        }
+        selection = next
+        JieziHaptics.tap()
     }
 
     private func stageTopBar(_ item: NativeInboxItem) -> some View {
@@ -1431,7 +1416,6 @@ private struct PendingStageImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 26)
     }
 
     private func factSheet(_ message: String) -> some View {
@@ -1488,13 +1472,6 @@ private struct StagingVerdictStageView: View {
         return records[min(currentIndex, records.count - 1)]
     }
 
-    private var pageSelection: Binding<String> {
-        Binding(
-            get: { selection ?? records.first?.id ?? "" },
-            set: { selection = $0 }
-        )
-    }
-
     var body: some View {
         ZStack {
             LinearGradient(
@@ -1515,24 +1492,17 @@ private struct StagingVerdictStageView: View {
             } else if let current {
                 VStack(spacing: 0) {
                     stageTopBar(current)
-                    TabView(selection: pageSelection) {
-                        ForEach(records) { record in
-                            StagingStageImage(record: record) { url in
-                                imagePreview = StagingImagePreviewRoute(url: url)
-                            }
-                                .tag(record.id)
+                    InboxStageRecordPager(
+                        canMovePrevious: currentIndex > 0,
+                        canMoveNext: currentIndex < records.count - 1,
+                        move: movePage
+                    ) {
+                        StagingStageImage(record: current) { url in
+                            imagePreview = StagingImagePreviewRoute(url: url)
                         }
+                        .id(current.id)
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
                     .frame(maxHeight: .infinity)
-                    .overlay {
-                        InboxStagePagingControls(
-                            canMovePrevious: currentIndex > 0,
-                            canMoveNext: currentIndex < records.count - 1,
-                            movePrevious: { movePage(by: -1) },
-                            moveNext: { movePage(by: 1) }
-                        )
-                    }
 
                     stageInfo(current)
                     stageActions(current)
@@ -1586,15 +1556,14 @@ private struct StagingVerdictStageView: View {
         }
     }
 
-    private func movePage(by offset: Int) {
+    private func movePage(_ offset: Int) {
         guard let next = NativeInboxPresentation.adjacentSelection(
             to: selection,
             offset: offset,
             in: records.map(\.id)
         ) else { return }
-        withAnimation(.easeOut(duration: 0.22)) {
-            selection = next
-        }
+        selection = next
+        JieziHaptics.tap()
     }
 
     private func stageTopBar(_ record: NativeStagingRecord) -> some View {
@@ -1859,7 +1828,6 @@ private struct StagingStageImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 26)
         .task(id: record.id) {
             guard record.imageURL == nil, record.imagePath != nil, resolvedURL == nil else { return }
             isResolving = true
@@ -1877,29 +1845,78 @@ private struct StagingStageImage: View {
     }
 }
 
-private struct InboxStagePagingControls: View {
+private struct InboxStageRecordPager<Content: View>: View {
     let canMovePrevious: Bool
     let canMoveNext: Bool
-    let movePrevious: () -> Void
-    let moveNext: () -> Void
+    let move: (Int) -> Void
+    private let content: Content
+
+    @GestureState private var resistedDragOffset: CGFloat = 0
+
+    init(
+        canMovePrevious: Bool,
+        canMoveNext: Bool,
+        move: @escaping (Int) -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.canMovePrevious = canMovePrevious
+        self.canMoveNext = canMoveNext
+        self.move = move
+        self.content = content()
+    }
 
     var body: some View {
-        HStack {
+        HStack(spacing: 6) {
             pageButton(
                 systemImage: "chevron.left",
                 accessibilityLabel: "上一条记录",
                 enabled: canMovePrevious,
-                action: movePrevious
+                action: { move(-1) }
             )
-            Spacer()
+
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    Color.white.opacity(0.76),
+                    in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
+                        .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
+                }
+                .shadow(color: JieziTheme.space.opacity(0.1), radius: 12, x: 0, y: 7)
+                .contentShape(Rectangle())
+                .offset(x: resistedDragOffset)
+                .simultaneousGesture(horizontalSwipeGesture)
+
             pageButton(
                 systemImage: "chevron.right",
                 accessibilityLabel: "下一条记录",
                 enabled: canMoveNext,
-                action: moveNext
+                action: { move(1) }
             )
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 10)
+    }
+
+    private var horizontalSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+            .updating($resistedDragOffset) { value, state, transaction in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                transaction.animation = nil
+                state = min(12, max(-12, value.translation.width * 0.08))
+            }
+            .onEnded { value in
+                guard let offset = NativeInboxPresentation.swipePageOffset(
+                    translationX: Double(value.translation.width),
+                    translationY: Double(value.translation.height),
+                    predictedEndTranslationX: Double(value.predictedEndTranslation.width)
+                ) else { return }
+                guard (offset < 0 && canMovePrevious) || (offset > 0 && canMoveNext) else { return }
+                move(offset)
+            }
     }
 
     private func pageButton(
@@ -1911,13 +1928,9 @@ private struct InboxStagePagingControls: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 17, weight: .semibold))
-                .frame(width: 36, height: 44)
+                .frame(width: 28, height: 44)
                 .foregroundStyle(JieziTheme.brand)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
-                        .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
-                }
+                .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
