@@ -1,8 +1,9 @@
 :root {
-  --primary: #2d6a4f;
-  --primary-light: #40916c;
-  --primary-dark: #1b4332;
-  --primary-bg: #e8f4ee;
+  /* Compatibility aliases. Theme values come from generated/jiezi-tokens.css. */
+  --primary: var(--jiezi-color-brand);
+  --primary-light: color-mix(in srgb, var(--jiezi-color-brand) 76%, white);
+  --primary-dark: var(--jiezi-color-space);
+  --primary-bg: var(--jiezi-color-brand-alpha-8);
   --secondary: #1565c0;
   --secondary-light: #1e88e5;
   --accent: #b45309;
@@ -11,44 +12,44 @@
   --success-light: #dcfce7;
   --warning: #b45309;
   --warning-light: #ffedd5;
-  --danger: #b91c1c;
-  --danger-light: #fee2e2;
+  --danger: var(--jiezi-color-coral);
+  --danger-light: color-mix(in srgb, var(--jiezi-color-coral) 12%, var(--jiezi-color-paper));
   --info: #1d4ed8;
   --info-light: #dbeafe;
-  --bg: #f7f6f3;
-  --bg-card: #ffffff;
-  --bg-elevated: rgba(255, 255, 255, 0.92);
-  --surface2: #f0eee9;
-  --text: #1a1a18;
-  --text2: #5f5b53;
-  --text3: #9b978f;
-  --border: rgba(26, 26, 24, 0.08);
-  --border2: rgba(26, 26, 24, 0.16);
-  --divider: #ebe7df;
-  --shadow-sm: 0 1px 2px rgba(45, 40, 30, 0.05);
-  --shadow-md: 0 8px 24px rgba(45, 40, 30, 0.08);
-  --shadow-lg: 0 18px 40px rgba(45, 40, 30, 0.14);
-  --focus-ring: 0 0 0 3px rgba(45, 106, 79, 0.18);
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 18px;
-  --radius-xl: 22px;
-  --radius-full: 999px;
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 12px;
-  --spacing-lg: 16px;
-  --spacing-xl: 20px;
-  --spacing-2xl: 24px;
-  --spacing-3xl: 32px;
+  --bg: var(--jiezi-color-paper);
+  --bg-card: color-mix(in srgb, var(--jiezi-color-paper) 82%, white);
+  --bg-elevated: color-mix(in srgb, var(--jiezi-color-paper) 72%, transparent);
+  --surface2: color-mix(in srgb, var(--jiezi-color-paper) 92%, var(--jiezi-color-space));
+  --text: var(--jiezi-color-ink);
+  --text2: var(--jiezi-color-muted);
+  --text3: color-mix(in srgb, var(--jiezi-color-muted) 72%, var(--jiezi-color-paper));
+  --border: var(--jiezi-color-brand-alpha-8);
+  --border2: var(--jiezi-color-line);
+  --divider: var(--jiezi-color-line);
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--jiezi-color-space) 5%, transparent);
+  --shadow-md: 0 8px 24px color-mix(in srgb, var(--jiezi-color-space) 8%, transparent);
+  --shadow-lg: 0 18px 40px color-mix(in srgb, var(--jiezi-color-space) 14%, transparent);
+  --focus-ring: 0 0 0 3px var(--jiezi-color-brand-alpha-18);
+  --radius-sm: var(--jiezi-radius-sm);
+  --radius-md: var(--jiezi-radius-md);
+  --radius-lg: var(--jiezi-radius-lg);
+  --radius-xl: var(--jiezi-radius-xl2);
+  --radius-full: var(--jiezi-radius-pill);
+  --spacing-xs: var(--jiezi-spacing-xs);
+  --spacing-sm: var(--jiezi-spacing-sm);
+  --spacing-md: var(--jiezi-spacing-md);
+  --spacing-lg: var(--jiezi-spacing-lg);
+  --spacing-xl: var(--jiezi-spacing-xl);
+  --spacing-2xl: var(--jiezi-spacing-xl2);
+  --spacing-3xl: var(--jiezi-spacing-xl3);
   --nav-h: 72px;
-  --z-nav: 100;
-  --z-popover: 150;
-  --z-overlay: 999;
-  --z-modal: 1200;
-  --z-image: 1300;
-  --font: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
-  --font-num: "DM Sans", "Noto Sans SC", system-ui, sans-serif;
+  --z-nav: var(--jiezi-z-sticky);
+  --z-popover: var(--jiezi-z-dropdown);
+  --z-overlay: var(--jiezi-z-dropdown);
+  --z-modal: var(--jiezi-z-modal);
+  --z-image: var(--jiezi-z-modal);
+  --font: var(--jiezi-font-family-sans);
+  --font-num: var(--jiezi-font-family-rounded);
 }
 
 * {
@@ -63,8 +64,12 @@ body {
   min-height: 100%;
   font-family: var(--font);
   background:
-    radial-gradient(circle at top left, rgba(45, 106, 79, 0.08), transparent 30%),
-    linear-gradient(180deg, #fbfaf7 0%, #f3f0ea 100%);
+    radial-gradient(circle at top left, var(--jiezi-color-brand-alpha-8), transparent 30%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--jiezi-color-paper) 88%, white) 0%,
+      var(--jiezi-color-paper) 100%
+    );
   color: var(--text);
 }
 

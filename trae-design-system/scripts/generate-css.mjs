@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, '..');
+const REPO_ROOT = resolve(ROOT, '..');
 
 const tokens = JSON.parse(readFileSync(join(ROOT, 'tokens/design-tokens.json'), 'utf8'));
 const outDir = join(ROOT, 'dist/pwa');
@@ -31,15 +32,17 @@ mkdirSync(outDir, { recursive: true });
 const lines = [];
 lines.push('/*');
 lines.push(' * 芥子设计系统 PWA CSS Variables');
-lines.push(` * 自动生成于 ${new Date().toISOString()}`);
+lines.push(` * 自动生成 · Token v${tokens.$meta.version}`);
 lines.push(` * 数据源：trae-design-system/tokens/design-tokens.json v${tokens.$meta.version}`);
 lines.push(' * 禁止手工修改本文件。任何调整请改 SSOT 后运行 scripts/generate-css.mjs');
 lines.push(' */');
 lines.push('');
 
 // 默认主题写到 :root，所有主题都以 [data-theme="xxx"] 暴露
-tokens.color.themes.forEach((theme, idx) => {
-  const selector = theme.is_default_ios ? ':root' : `[data-theme="${theme.id}"]`;
+tokens.color.themes.forEach((theme) => {
+  const selector = theme.is_default_pwa
+    ? `:root,\n[data-theme="${theme.id}"]`
+    : `[data-theme="${theme.id}"]`;
   lines.push(`/* ${theme.name} (${theme.id}) - ${theme.description} */`);
   lines.push(`${selector} {`);
   Object.entries(theme.colors).forEach(([key, value]) => {
@@ -214,6 +217,7 @@ lines.push('');
 lines.push('/* 布局 */');
 lines.push(':root {');
 Object.entries(tokens.layout).forEach(([k, v]) => {
+  if (k.startsWith('$')) return;
   if (typeof v === 'number') {
     lines.push(`  --jiezi-layout-${k.replace(/_/g, '-')}: ${v}px;`);
   } else {
@@ -240,13 +244,18 @@ lines.push(' *       applyTimePhase(new Date().getHours());');
 lines.push(' */');
 
 const cssOutPath = join(outDir, 'tokens.css');
-writeFileSync(cssOutPath, lines.join('\n'));
+const trackedCssOutDir = join(REPO_ROOT, 'src/styles/generated');
+const trackedCssOutPath = join(trackedCssOutDir, 'jiezi-tokens.css');
+const cssOutput = `${lines.join('\n')}\n`;
+mkdirSync(trackedCssOutDir, { recursive: true });
+writeFileSync(cssOutPath, cssOutput);
+writeFileSync(trackedCssOutPath, cssOutput);
 
 // 同时输出一份 JS 版本便于按需 import
 const jsLines = [];
 jsLines.push('/**');
 jsLines.push(' * 芥子设计系统 PWA JS Token');
-jsLines.push(` * 自动生成于 ${new Date().toISOString()}`);
+jsLines.push(` * 自动生成 · Token v${tokens.$meta.version}`);
 jsLines.push(' */');
 jsLines.push('');
 jsLines.push('export const THEMES = [');
@@ -316,6 +325,7 @@ const jsOutPath = join(outDir, 'tokens.js');
 writeFileSync(jsOutPath, jsLines.join('\n'));
 
 console.log(`✓ PWA CSS Token 已生成：${cssOutPath}`);
+console.log(`✓ PWA CSS Token 已同步：${trackedCssOutPath}`);
 console.log(`✓ PWA JS  Token 已生成：${jsOutPath}`);
 console.log(`  - ${tokens.color.themes.length} 个主题（含 [data-theme] 切换）`);
 console.log(`  - ${tokens.typography.scale.length} 个字体层级`);

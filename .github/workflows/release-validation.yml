@@ -43,6 +43,14 @@ jobs:
       - name: Install PWA dependencies
         run: npm ci
 
+      - name: Validate design token contrast
+        run: npm run check:design-contrast
+
+      - name: Validate generated design artifacts
+        run: |
+          npm run generate:design-tokens
+          git diff --exit-code -- ios/SnapCount/DesignSystem/JieziTheme+Generated.swift src/styles/generated/jiezi-tokens.css
+
       - name: Build PWA
         run: npm run build
 

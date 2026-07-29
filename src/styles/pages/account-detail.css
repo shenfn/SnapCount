@@ -18,7 +18,7 @@
   padding: 24px;
   margin-bottom: 14px;
   color: #fff;
-  background: linear-gradient(135deg, #1b4332 0%, #2d6a4f 55%, #74c69d 130%);
+  background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 55%, var(--primary-light) 130%);
   box-shadow: 0 20px 44px rgba(27, 67, 50, 0.22);
   overflow: hidden;
   position: relative;
