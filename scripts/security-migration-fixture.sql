@@ -42,11 +42,34 @@ create table auth.users (
 
 create table public.user_configs (
   user_id uuid primary key references auth.users(id) on delete cascade,
+  updated_at timestamptz not null default now(),
   plan text not null default 'seed',
   monthly_quota integer not null default 100,
   daily_quota integer not null default 30,
+  used_this_month integer not null default 0,
+  used_today integer not null default 0,
+  last_reset_at timestamptz,
   is_active boolean not null default true,
+  upload_token uuid default gen_random_uuid(),
+  notes text,
+  vision_primary text not null default 'auto',
+  screenshot_vision_primary text not null default 'auto',
+  photo_vision_primary text not null default 'qwen',
+  qwen_screenshot_model text not null default 'qwen3.6-flash',
+  qwen_photo_model text not null default 'qwen3.6-flash',
+  qwen_screenshot_enable_thinking boolean not null default false,
+  qwen_photo_enable_thinking boolean not null default false,
+  ai_insight_provider text not null default 'auto',
+  companion_enabled boolean not null default true,
+  companion_memory_enabled boolean not null default true,
+  companion_persona text not null default 'observer',
+  companion_memory_strength text not null default 'balanced',
+  companion_expression_style text not null default 'plain',
+  companion_custom_note text,
   ai_logs_enabled boolean not null default true,
+  prompt_optimization_enabled boolean not null default false,
+  keep_source_images boolean not null default true,
+  image_retention_days integer not null default -1,
   expression_improvement_enabled boolean not null default false,
   expression_improvement_consent_at timestamptz,
   expression_improvement_withdrawn_at timestamptz
@@ -57,7 +80,16 @@ create table public.account_deletion_requests (
   user_id uuid not null unique,
   status text not null default 'requested'
     check (status in ('requested', 'cleaning', 'deleting', 'completed', 'failed')),
-  updated_at timestamptz not null default now()
+  requested_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz,
+  attempts integer not null default 0,
+  next_retry_at timestamptz,
+  total_images integer not null default 0,
+  deleted_images integer not null default 0,
+  remaining_images integer not null default 0,
+  skipped_external integer not null default 0,
+  last_error text
 );
 
 create table public.transactions (
@@ -182,6 +214,8 @@ alter table public.transactions enable row level security;
 alter table public.income_records enable row level security;
 alter table public.data_records enable row level security;
 alter table public.staging_records enable row level security;
+alter table public.user_configs enable row level security;
+alter table public.account_deletion_requests enable row level security;
 alter table storage.objects enable row level security;
 
 create policy tx_user_access on public.transactions
@@ -192,6 +226,10 @@ create policy data_user_access on public.data_records
   for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy staging_user_access on public.staging_records
   for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy user_configs_access on public.user_configs
+  for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy account_deletion_requests_service_only on public.account_deletion_requests
+  for all using (false) with check (false);
 
 create policy allow_anon_select_receipt_images on storage.objects
   for select to anon using (bucket_id = 'receipt-images');
@@ -203,6 +241,8 @@ create policy allow_auth_delete_receipt_images on storage.objects
   for delete to authenticated using (bucket_id = 'receipt-images');
 
 grant select, insert, update, delete on public.transactions, public.income_records, public.data_records, public.staging_records to authenticated;
+grant select, insert, update on public.user_configs to authenticated;
+revoke all on public.account_deletion_requests from public, anon, authenticated;
 grant select, delete on storage.objects to anon, authenticated;
 grant all on all tables in schema public, storage, auth to service_role;
 
@@ -226,7 +266,21 @@ returns void language sql security definer as $$ select $$;
 insert into auth.users (id) values
   ('11111111-1111-4111-8111-111111111111'),
   ('22222222-2222-4222-8222-222222222222'),
-  ('66666666-6666-4666-8666-666666666666');
+  ('66666666-6666-4666-8666-666666666666'),
+  ('88888888-8888-4888-8888-888888888888'),
+  ('99999999-9999-4999-8999-999999999999');
+
+insert into public.account_deletion_requests (
+  id,
+  user_id,
+  status,
+  requested_at
+) values (
+  '88888888-0000-4000-8000-000000000001',
+  '88888888-8888-4888-8888-888888888888',
+  'requested',
+  '2026-08-01T00:00:00Z'
+);
 
 insert into public.user_configs (user_id) values
   ('11111111-1111-4111-8111-111111111111'),

@@ -619,6 +619,219 @@ select public.security_test_assert(
   'new privacy version must register with Expression improvement disabled'
 );
 
+select public.security_test_assert(
+  not has_table_privilege('service_role', 'public.user_consent_events', 'update')
+    and not has_table_privilege('service_role', 'public.user_consent_events', 'delete'),
+  'consent audit events must remain append-only for the service role'
+);
+select public.security_test_assert(
+  not has_function_privilege('authenticated', 'public.get_consent_status_for_user(uuid)', 'execute')
+    and has_function_privilege('authenticated', 'public.get_my_consent_status()', 'execute')
+    and has_function_privilege('authenticated', 'public.accept_my_consent(text,text,text)', 'execute'),
+  'consent RPC privileges must separate user and service-only paths'
+);
+
+select set_config('request.jwt.claim.sub', '44444444-4444-4444-8444-444444444444', false);
+select set_config('request.jwt.claim.role', 'authenticated', false);
+set role authenticated;
+select public.security_test_assert(
+  (public.get_my_consent_status()->>'needs_consent')::boolean
+    and (public.get_my_consent_status()->'missing') ? 'sensitive_data',
+  'historical registrations without the sensitive-data version must be gated'
+);
+do $$
+declare
+  blocked boolean := false;
+begin
+  begin
+    update public.user_configs
+    set sensitive_data_version = 'forged'
+    where user_id = auth.uid();
+  exception when others then
+    blocked := position('consent columns can only be changed' in sqlerrm) > 0
+      or sqlstate = '42501';
+  end;
+  if not blocked then
+    raise exception 'direct consent column update was not blocked';
+  end if;
+end;
+$$;
+do $$
+declare
+  blocked boolean := false;
+begin
+  begin
+    update public.user_configs
+    set is_active = false,
+        upload_token = gen_random_uuid(),
+        plan = 'pro',
+        monthly_quota = 999999
+    where user_id = auth.uid();
+  exception when others then
+    blocked := sqlstate = '42501';
+  end;
+  if not blocked then
+    raise exception 'direct server-managed account field update was not blocked';
+  end if;
+end;
+$$;
+select public.security_test_assert(
+  has_table_privilege('authenticated', 'public.user_configs', 'insert')
+    and not has_table_privilege('authenticated', 'public.user_configs', 'delete')
+    and not has_table_privilege('authenticated', 'public.user_configs', 'update'),
+  'clients may use legacy upsert but must not delete rows or receive whole-table update access'
+);
+insert into public.user_configs (user_id, keep_source_images, updated_at)
+values (auth.uid(), false, now())
+on conflict (user_id) do update
+set keep_source_images = excluded.keep_source_images,
+    updated_at = excluded.updated_at;
+select public.security_test_assert(
+  exists (
+    select 1
+    from public.user_configs
+    where user_id = auth.uid()
+      and keep_source_images is false
+  ),
+  'legacy preference upsert must remain compatible for an existing configuration row'
+);
+reset role;
+select set_config('request.jwt.claim.sub', '99999999-9999-4999-8999-999999999999', false);
+select set_config('request.jwt.claim.role', 'authenticated', false);
+set role authenticated;
+do $$
+declare
+  blocked boolean := false;
+begin
+  begin
+    insert into public.user_configs (user_id, keep_source_images, updated_at)
+    values (auth.uid(), false, now())
+    on conflict (user_id) do update
+    set keep_source_images = excluded.keep_source_images,
+        updated_at = excluded.updated_at;
+  exception when others then
+    blocked := position('can only be created by the server' in sqlerrm) > 0;
+  end;
+  if not blocked then
+    raise exception 'client recreated a missing user configuration row';
+  end if;
+end;
+$$;
+reset role;
+select set_config('request.jwt.claim.sub', '44444444-4444-4444-8444-444444444444', false);
+select set_config('request.jwt.claim.role', 'authenticated', false);
+set role authenticated;
+do $$
+declare
+  blocked boolean := false;
+begin
+  begin
+    perform public.accept_my_consent('2026-07-19', '2026-07-19', '2026-07-22');
+  exception when check_violation then
+    blocked := true;
+  end;
+  if not blocked then
+    raise exception 'outdated consent versions were not rejected';
+  end if;
+end;
+$$;
+select public.accept_my_consent('2026-07-19', '2026-07-22', '2026-07-22');
+select public.security_test_assert(
+  not (public.get_my_consent_status()->>'needs_consent')::boolean
+    and jsonb_array_length(public.get_my_consent_status()->'missing') = 0,
+  'accepting every current version must close the historical-account gate'
+);
+select public.accept_my_consent('2026-07-19', '2026-07-22', '2026-07-22');
+reset role;
+select public.security_test_assert(
+  (
+    select count(*)
+    from public.user_consent_events
+    where user_id = '44444444-4444-4444-8444-444444444444'
+      and source = 'client_rpc'
+  ) = 2,
+  'repeating current consent must succeed and append a separate audit event'
+);
+select public.security_test_assert(
+  exists (
+    select 1 from public.user_consent_events
+    where user_id = '44444444-4444-4444-8444-444444444444'
+      and source = 'client_rpc'
+      and sensitive_data_version = '2026-07-22'
+  ),
+  'consent acceptance must append a server-timestamped audit event'
+);
+
+update public.user_configs
+set is_active = false
+where user_id = '77777777-7777-4777-8777-777777777777';
+select set_config('request.jwt.claim.sub', '77777777-7777-4777-8777-777777777777', false);
+select set_config('request.jwt.claim.role', 'authenticated', false);
+set role authenticated;
+do $$
+declare
+  blocked boolean := false;
+begin
+  begin
+    update public.user_configs
+    set is_active = true
+    where user_id = auth.uid();
+  exception when others then
+    blocked := sqlstate = '42501';
+  end;
+  if not blocked then
+    raise exception 'inactive account was allowed to reactivate itself';
+  end if;
+end;
+$$;
+do $$
+declare
+  blocked boolean := false;
+begin
+  begin
+    perform public.accept_my_consent('2026-07-19', '2026-07-22', '2026-07-22');
+  exception when others then
+    blocked := position('missing or inactive' in sqlerrm) > 0;
+  end;
+  if not blocked then
+    raise exception 'inactive account was allowed to accept consent';
+  end if;
+end;
+$$;
+reset role;
+
+select public.security_test_assert(
+  estimated_completion_at = '2026-08-02T00:00:00Z'::timestamptz
+    and support_reference ~ '^DEL-[0-9A-F]{12}$',
+  'existing deletion requests must receive a stable estimate and opaque support reference'
+)
+from public.account_deletion_requests
+where id = '88888888-0000-4000-8000-000000000001';
+select public.security_test_assert(
+  not has_function_privilege('authenticated', 'public.claim_account_deletion_request()', 'execute')
+    and has_function_privilege('service_role', 'public.claim_account_deletion_request()', 'execute'),
+  'only the service role may claim account deletion work'
+);
+create temporary table security_test_claim as
+select * from public.claim_account_deletion_request();
+select public.security_test_assert(
+  (select count(*) from security_test_claim) = 1
+    and (select lease_token is not null from security_test_claim limit 1),
+  'the oldest eligible deletion request must be leased atomically'
+);
+select public.security_test_assert(
+  not exists (select 1 from public.claim_account_deletion_request()),
+  'a live account deletion lease must not be claimed twice'
+);
+update public.account_deletion_requests
+set lease_expires_at = statement_timestamp() - interval '1 second'
+where id = '88888888-0000-4000-8000-000000000001';
+select public.security_test_assert(
+  exists (select 1 from public.claim_account_deletion_request()),
+  'an expired account deletion lease must have a recovery path'
+);
+drop table security_test_claim;
+
 select set_config('request.jwt.claim.role', 'service_role', false);
 set role service_role;
 

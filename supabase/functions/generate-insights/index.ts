@@ -14,6 +14,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { MODE_GUIDES, SAFETY_RULES, WRITING_RULES, buildDomainHeuristics } from "./prompts.ts";
+import {
+  consentGateBody,
+  consentGateStatus,
+  loadMyConsentStatus,
+} from "../_shared/consent.ts";
 
 const QWEN_TEXT_ENDPOINT     = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 const QWEN_ROUTER_MODEL      = "qwen3.6-flash";
@@ -522,15 +527,23 @@ Deno.serve(async (req: Request) => {
 
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id || null;
-    let insightProviderPref: InsightProviderName = "auto";
-    if (userId) {
-      const { data: cfg } = await supabase
-        .from("user_configs")
-        .select("ai_insight_provider")
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (cfg?.ai_insight_provider === "qwen") insightProviderPref = "qwen";
+    if (!userId) return jsonResponse({ error: "Unauthorized" }, 401);
+
+    // Insight generation sends the user's personal records to Qwen. Keep the
+    // gate server-side so a legacy client cannot bypass a new consent version
+    // by calling the Edge Function directly.
+    const consentCheck = await loadMyConsentStatus(supabase);
+    if (!consentCheck.ok) {
+      return jsonResponse(consentGateBody(consentCheck), consentGateStatus(consentCheck));
     }
+
+    let insightProviderPref: InsightProviderName = "auto";
+    const { data: cfg } = await supabase
+      .from("user_configs")
+      .select("ai_insight_provider")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (cfg?.ai_insight_provider === "qwen") insightProviderPref = "qwen";
 
     // 2. 解析请求
     const body = await req.json().catch(() => ({}));

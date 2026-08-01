@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import {
   CURRENT_PRIVACY_VERSION,
+  CURRENT_SENSITIVE_DATA_VERSION,
   CURRENT_TERMS_VERSION,
   currentTestRegistrationConsent,
 } from './lib/test-registration-consent.mjs'
@@ -53,13 +54,14 @@ try {
   createdUserIds.push(accepted.data.user.id)
 
   const { data: config, error: configError } = await admin.from('user_configs')
-    .select('legal_consent_at,sensitive_data_consent_at,terms_version,privacy_version,ai_logs_enabled')
+    .select('legal_consent_at,sensitive_data_consent_at,terms_version,privacy_version,sensitive_data_version,ai_logs_enabled')
     .eq('user_id', accepted.data.user.id)
     .single()
   if (configError) throw new Error(configError.message)
 
   assert(config.terms_version === CURRENT_TERMS_VERSION, 'Terms version was not persisted')
   assert(config.privacy_version === CURRENT_PRIVACY_VERSION, 'Privacy version was not persisted')
+  assert(config.sensitive_data_version === CURRENT_SENSITIVE_DATA_VERSION, 'Sensitive-data version was not persisted')
   assert(config.legal_consent_at === config.sensitive_data_consent_at, 'Server consent timestamps differ')
   assert(Date.parse(config.legal_consent_at) >= Date.now() - 60_000, 'Consent did not use current server time')
   assert(config.ai_logs_enabled === false, 'AI logs must default to disabled')
@@ -69,6 +71,7 @@ try {
     checks: [
       'registration without consent rejected',
       'registration with current consent accepted',
+      'all three consent versions persisted',
       'server consent timestamp persisted',
       'AI logs default disabled',
     ],

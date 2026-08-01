@@ -1,5 +1,6 @@
 export const CURRENT_TERMS_VERSION = '2026-07-19'
 export const CURRENT_PRIVACY_VERSION = '2026-07-22'
+export const CURRENT_SENSITIVE_DATA_VERSION = '2026-07-22'
 
 export function currentTestRegistrationConsent(now = new Date()) {
   const acceptedAt = now.toISOString()
@@ -8,5 +9,6 @@ export function currentTestRegistrationConsent(now = new Date()) {
     sensitive_data_consent_at: acceptedAt,
     terms_version: CURRENT_TERMS_VERSION,
     privacy_version: CURRENT_PRIVACY_VERSION,
+    sensitive_data_version: CURRENT_SENSITIVE_DATA_VERSION,
   }
 }

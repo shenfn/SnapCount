@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   CURRENT_PRIVACY_VERSION,
+  CURRENT_SENSITIVE_DATA_VERSION,
   CURRENT_TERMS_VERSION,
   currentTestRegistrationConsent,
 } from './lib/test-registration-consent.mjs'
@@ -13,7 +14,9 @@ test('test registration metadata follows the current legal contract', () => {
     sensitive_data_consent_at: now.toISOString(),
     terms_version: CURRENT_TERMS_VERSION,
     privacy_version: CURRENT_PRIVACY_VERSION,
+    sensitive_data_version: CURRENT_SENSITIVE_DATA_VERSION,
   })
   assert.equal(CURRENT_TERMS_VERSION, '2026-07-19')
   assert.equal(CURRENT_PRIVACY_VERSION, '2026-07-22')
+  assert.equal(CURRENT_SENSITIVE_DATA_VERSION, '2026-07-22')
 })

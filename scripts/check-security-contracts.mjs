@@ -19,6 +19,14 @@ const expressionPrivacySql = await readFile(
   path.join(repoRoot, "supabase", "migrations", "20260722120000_expression_improvement_privacy_controls.sql"),
   "utf8",
 );
+const versionedConsentSql = await readFile(
+  path.join(repoRoot, "supabase", "migrations", "20260801090000_versioned_consent_gate.sql"),
+  "utf8",
+);
+const accountDeletionContractSql = await readFile(
+  path.join(repoRoot, "supabase", "migrations", "20260801100000_account_deletion_status_contract.sql"),
+  "utf8",
+);
 const financeVocabularySql = await readFile(
   path.join(repoRoot, "supabase", "migrations", "20260721110000_user_finance_vocabulary.sql"),
   "utf8",
@@ -37,6 +45,10 @@ const expressionShadowSource = await readFile(
 );
 const insightsSource = await readFile(
   path.join(repoRoot, "supabase", "functions", "generate-insights", "index.ts"),
+  "utf8",
+);
+const sharedConsentSource = await readFile(
+  path.join(repoRoot, "supabase", "functions", "_shared", "consent.ts"),
   "utf8",
 );
 const imageMigrationSource = await readFile(
@@ -234,7 +246,19 @@ assert.match(ingestSource, /processAccountDeletionCleanupRows/);
 assert.match(ingestSource, /clearImageReferencesBatch/);
 assert.match(ingestSource, /\.remove\(rowsNeedingStorageDelete\.map/);
 assert.match(ingestSource, /cleanupReason: "account_delete"[\s\S]*limit: 100/);
-assert.match(ingestSource, /action === "delete_account"[\s\S]*invoke_image_cleanup_worker[\s\S]*cleanup: null/);
+assert.match(ingestSource, /action === "delete_account"[\s\S]*loadAccountDeletionRequest[\s\S]*invoke_image_cleanup_worker/);
+assert.match(ingestSource, /action === "get_account_deletion_status"[\s\S]*accountDeletionResponse/);
+assert.match(ingestSource, /request_id[\s\S]*support_reference[\s\S]*retryable/);
+assert.match(ingestSource, /status: "completed"[\s\S]*completed_at/);
+assert.match(accountDeletionContractSql, /estimated_completion_at timestamptz/i);
+assert.match(accountDeletionContractSql, /support_reference text/i);
+assert.match(accountDeletionContractSql, /tr_set_account_deletion_metadata/i);
+assert.match(accountDeletionContractSql, /for update skip locked/i);
+assert.match(accountDeletionContractSql, /claim_account_deletion_request/i);
+assert.match(accountDeletionContractSql, /lease_token uuid/i);
+assert.match(accountDeletionContractSql, /purge_completed_account_deletion_receipts/i);
+assert.match(ingestSource, /rpc\("claim_account_deletion_request"\)/);
+assert.match(ingestSource, /Account deletion worker lease was lost/);
 assert.doesNotMatch(ingestSource, /action === "delete_account"[\s\S]{0,1400}await prepareAccountDeletion/);
 assert.doesNotMatch(ingestSource, /finalizeReadyAccountDeletions[\s\S]{0,2200}cleanupAllUserImages/);
 assert.match(ingestSource, /status === "deleting"[\s\S]*rescanAccountDeletionImages/);
@@ -248,6 +272,30 @@ assert.doesNotMatch(ingestSource, /raw=\$\{rawText\.slice/);
 assert.doesNotMatch(ingestSource, /console\.error\(e\)/);
 assert.doesNotMatch(insightsSource, /AI 返回不是合法 JSON：/);
 assert.doesNotMatch(insightsSource, /console\.error\("\[generate-insights\][^\n]*, e\)/);
+assert.match(versionedConsentSql, /add column if not exists sensitive_data_version text/i);
+assert.match(versionedConsentSql, /create or replace function public\.accept_my_consent/i);
+assert.match(versionedConsentSql, /tr_reject_client_consent_update/i);
+assert.match(versionedConsentSql, /user_consent_events/i);
+assert.match(versionedConsentSql, /revoke insert, delete on public\.user_configs from public, anon, authenticated/i);
+assert.match(versionedConsentSql, /grant insert on public\.user_configs to authenticated/i);
+assert.match(versionedConsentSql, /revoke update on public\.user_configs from public, anon, authenticated/i);
+assert.match(versionedConsentSql, /from public\.user_configs[\s\S]*where user_id = new\.user_id[\s\S]*for key share/i);
+assert.match(versionedConsentSql, /grant update \([\s\S]*expression_improvement_enabled[\s\S]*\) on public\.user_configs to authenticated/i);
+assert.doesNotMatch(versionedConsentSql, /grant update \([\s\S]*\bis_active\b[\s\S]*\) on public\.user_configs to authenticated/i);
+assert.doesNotMatch(versionedConsentSql, /grant update \([\s\S]*\bupload_token\b[\s\S]*\) on public\.user_configs to authenticated/i);
+assert.match(sharedConsentSource, /CONSENT_REQUIRED_CODE = "consent_required"/);
+assert.match(sharedConsentSource, /status\.accepted_versions\[key\] === required/);
+assert.match(sharedConsentSource, /status\.legal_consent_at/);
+assert.match(ingestSource, /loadConsentStatusForUser[\s\S]*consentGateBody/);
+assert.match(ingestSource, /action === "get_record_expression_plan"[\s\S]{0,1200}loadConsentStatusForUser/);
+assert.match(ingestSource, /action === "submit_expression_feedback"[\s\S]{0,900}loadConsentStatusForUser/);
+assert.match(insightsSource, /loadMyConsentStatus[\s\S]*consentGateBody/);
+
+const jsonActionDispatchIndex = ingestSource.indexOf('if (contentType.includes("application/json"))');
+const qwenProviderInitIndex = ingestSource.indexOf("const qwenProvider: ProviderConfig");
+const multipartParseIndex = ingestSource.indexOf("const form = await req.formData()");
+assert.ok(jsonActionDispatchIndex >= 0 && qwenProviderInitIndex > jsonActionDispatchIndex);
+assert.ok(multipartParseIndex > qwenProviderInitIndex);
 assert.doesNotMatch(imageMigrationSource, /from\("receipt_image_migration_jobs"\)[\s\S]{0,160}\.update\(/);
 assert.match(imageMigrationSource, /claim_receipt_image_migration_job/);
 assert.match(imageMigrationSource, /mark_receipt_image_migration_copied/);
@@ -280,8 +328,19 @@ for (const migrationFile of expressionMigrationFiles) {
 }
 const fixtureCommandIndex = releaseValidationSource.indexOf("-f scripts/security-migration-fixture.sql");
 const migrationTestCommandIndex = releaseValidationSource.indexOf("-f scripts/test-security-migration.sql");
+const versionedConsentMigrationIndex = releaseValidationSource.indexOf(
+  "-f supabase/migrations/20260801090000_versioned_consent_gate.sql",
+);
+const deletionContractMigrationIndex = releaseValidationSource.indexOf(
+  "-f supabase/migrations/20260801100000_account_deletion_status_contract.sql",
+);
 assert.notEqual(fixtureCommandIndex, -1, "release validation must load the PostgreSQL fixture");
 assert.notEqual(migrationTestCommandIndex, -1, "release validation must run PostgreSQL assertions");
+assert.match(releaseValidationSource, /npm run test:auth-flow/);
+assert.match(releaseValidationSource, /supabase\/functions\/_shared\/consent_test\.ts/);
+assert.ok(versionedConsentMigrationIndex > previousMigrationIndex);
+assert.ok(deletionContractMigrationIndex > versionedConsentMigrationIndex);
+assert.ok(migrationTestCommandIndex > deletionContractMigrationIndex);
 assert.ok(
   fixtureCommandIndex < previousMigrationIndex,
   "the PostgreSQL fixture must run before expression migrations",

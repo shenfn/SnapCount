@@ -31,6 +31,11 @@ import {
 } from "./duplicate-review.ts";
 import { mergePlannerNotification, uniqueNotificationLines } from "./notification-text.ts";
 import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories.js";
+import {
+  consentGateBody,
+  consentGateStatus,
+  loadConsentStatusForUser,
+} from "../_shared/consent.ts";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
 // 默认使用 3.6 Flash 控制上传耗时，用户可显式切换到 3.7 Plus。
@@ -4705,16 +4710,110 @@ async function updateAccountDeletionRequest(
   supabase: ReturnType<typeof createClient>,
   userId: string,
   values: Record<string, unknown>,
+  leaseToken?: string,
 ): Promise<void> {
-  const { error } = await supabase.from("account_deletion_requests")
+  let query = supabase.from("account_deletion_requests")
     .update({ ...values, updated_at: new Date().toISOString() })
     .eq("user_id", userId);
+  if (leaseToken) query = query.eq("lease_token", leaseToken);
+  const { data, error } = await query.select("id").maybeSingle();
   if (error) throw new Error(`Failed to update account deletion request: ${error.message}`);
+  if (!data) throw new Error("Account deletion worker lease was lost");
+}
+
+type AccountDeletionRequestRow = {
+  id?: string;
+  user_id?: string;
+  status?: string;
+  requested_at?: string;
+  updated_at?: string;
+  completed_at?: string | null;
+  estimated_completion_at?: string | null;
+  support_reference?: string | null;
+  total_images?: number | null;
+  deleted_images?: number | null;
+  remaining_images?: number | null;
+  skipped_external?: number | null;
+  last_error?: string | null;
+  lease_token?: string | null;
+  lease_expires_at?: string | null;
+};
+
+function accountDeletionResponse(
+  row: AccountDeletionRequestRow,
+  workerInvoked = false,
+): Record<string, unknown> {
+  const state = String(row.status ?? "requested");
+  const completed = state === "completed";
+  const failed = state === "failed";
+  const cleanup = {
+    total: Number(row.total_images ?? 0),
+    queued: Number(row.remaining_images ?? 0),
+    processed: Number(row.deleted_images ?? 0),
+    failed: failed ? 1 : 0,
+    dead_letter: 0,
+    skipped_external: Number(row.skipped_external ?? 0),
+    remaining: Number(row.remaining_images ?? 0),
+  };
+  return {
+    status: completed ? "deleted" : "deletion_pending",
+    deletion_status: state,
+    request_id: row.id ?? null,
+    requested_at: row.requested_at ?? null,
+    completed_at: row.completed_at ?? null,
+    estimated_completion_at: row.estimated_completion_at ?? null,
+    support_reference: row.support_reference ?? null,
+    retryable: !completed,
+    worker_invoked: workerInvoked,
+    message: completed
+      ? "账户及其云端数据已删除"
+      : failed
+        ? "账户删除任务暂时失败，系统会继续重试；如需帮助请提供支持编号"
+        : "账户删除请求已受理，通常在 24 小时内完成；退出后可凭支持编号联系支持查询",
+    cleanup,
+  };
+}
+
+async function loadAccountDeletionRequest(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<AccountDeletionRequestRow | null> {
+  const { data, error } = await supabase.from("account_deletion_requests")
+    .select("id,user_id,status,requested_at,updated_at,completed_at,estimated_completion_at,support_reference,total_images,deleted_images,remaining_images,skipped_external,last_error")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to read account deletion request: ${error.message}`);
+  return (data ?? null) as AccountDeletionRequestRow | null;
+}
+
+async function accountDeletionProgress(
+  supabase: ReturnType<typeof createClient>,
+  row: AccountDeletionRequestRow,
+): Promise<AccountDeletionRequestRow> {
+  if (!row.user_id) return row;
+  const { count: remaining, error: remainingError } = await supabase.from("image_cleanup_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", row.user_id)
+    .eq("cleanup_reason", "account_delete")
+    .in("status", ["pending", "failed", "processing", "dead_letter"]);
+  if (remainingError) throw new Error(`Failed to read account deletion progress: ${remainingError.message}`);
+  const { count: processed, error: processedError } = await supabase.from("image_cleanup_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", row.user_id)
+    .eq("cleanup_reason", "account_delete")
+    .in("status", ["done", "skipped_external"]);
+  if (processedError) throw new Error(`Failed to read account deletion progress: ${processedError.message}`);
+  return {
+    ...row,
+    deleted_images: processed ?? row.deleted_images ?? 0,
+    remaining_images: remaining ?? row.remaining_images ?? 0,
+  };
 }
 
 async function prepareAccountDeletion(
   supabase: ReturnType<typeof createClient>,
   userId: string,
+  leaseToken: string,
 ): Promise<Awaited<ReturnType<typeof cleanupAllUserImages>>> {
   const updatedAt = new Date().toISOString();
   const { error: deactivateError } = await supabase.from("user_configs").update({
@@ -4753,7 +4852,7 @@ async function prepareAccountDeletion(
     skipped_external: cleanup.skippedExternal,
     last_error: null,
     next_retry_at: null,
-  });
+  }, leaseToken);
   return cleanup;
 }
 
@@ -4784,13 +4883,14 @@ async function rescanAccountDeletionImages(
 async function finalizeAccountDeletion(
   supabase: ReturnType<typeof createClient>,
   userId: string,
+  leaseToken: string,
 ): Promise<boolean> {
   try {
     await updateAccountDeletionRequest(supabase, userId, {
       status: "deleting",
       last_error: null,
       next_retry_at: null,
-    });
+    }, leaseToken);
     const { error: dataError } = await supabase.rpc("delete_user_account_data", { p_user_id: userId });
     if (dataError) throw new Error(`删除账户数据失败：${dataError.message}`);
 
@@ -4807,7 +4907,9 @@ async function finalizeAccountDeletion(
         status: "cleaning",
         remaining_images: postDeleteQueueCount,
         next_retry_at: new Date().toISOString(),
-      });
+        lease_token: null,
+        lease_expires_at: null,
+      }, leaseToken);
       return false;
     }
 
@@ -4817,8 +4919,18 @@ async function finalizeAccountDeletion(
     if (authError && !/not found/i.test(authError.message)) {
       throw new Error(`删除登录账户失败：${authError.message}`);
     }
-    const { error: requestDeleteError } = await supabase.from("account_deletion_requests").delete().eq("user_id", userId);
-    if (requestDeleteError) throw new Error(`删除账户清理请求失败：${requestDeleteError.message}`);
+    // Keep a short-lived completed row so the client/support team can confirm
+    // that the asynchronous request really reached its terminal state. The
+    // existing worker retention cleanup removes it after 30 days.
+    await updateAccountDeletionRequest(supabase, userId, {
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      remaining_images: 0,
+      last_error: null,
+      next_retry_at: null,
+      lease_token: null,
+      lease_expires_at: null,
+    }, leaseToken);
     return true;
   } catch (deletionError) {
     const { data: existing } = await supabase.from("account_deletion_requests")
@@ -4831,7 +4943,9 @@ async function finalizeAccountDeletion(
       attempts,
       last_error: String(deletionError),
       next_retry_at: new Date(Date.now() + Math.min(12 * 60, Math.pow(5, attempts - 1)) * 60 * 1000).toISOString(),
-    }).catch((requestError) => {
+      lease_token: null,
+      lease_expires_at: null,
+    }, leaseToken).catch((requestError) => {
       console.error("Failed to persist account deletion failure", {
         error_type: requestError instanceof Error ? requestError.name : typeof requestError,
       });
@@ -4846,24 +4960,20 @@ async function finalizeAccountDeletion(
 async function finalizeReadyAccountDeletions(
   supabase: ReturnType<typeof createClient>,
 ): Promise<{ prepared: number; completed: number; failed: number }> {
-  const now = new Date().toISOString();
-  const { data, error } = await supabase.from("account_deletion_requests")
-    .select("user_id,status")
-    .in("status", ["requested", "cleaning", "deleting", "failed"])
-    .or(`next_retry_at.is.null,next_retry_at.lte.${now}`)
-    .order("requested_at", { ascending: true })
-    .limit(1);
-  if (error) throw new Error(`Failed to read pending account deletions: ${error.message}`);
+  const { data, error } = await supabase.rpc("claim_account_deletion_request");
+  if (error) throw new Error(`Failed to claim pending account deletion: ${error.message}`);
 
   let completed = 0;
   let failed = 0;
   let prepared = 0;
-  for (const row of data ?? []) {
+  for (const row of (data ?? []) as AccountDeletionRequestRow[]) {
     const userId = String(row.user_id);
     let status = String(row.status);
+    const leaseToken = String(row.lease_token ?? "");
+    if (!leaseToken) throw new Error("Claimed account deletion is missing a lease token");
     try {
       if (status === "requested") {
-        await prepareAccountDeletion(supabase, userId);
+        await prepareAccountDeletion(supabase, userId, leaseToken);
         prepared += 1;
         status = "cleaning";
       }
@@ -4877,7 +4987,9 @@ async function finalizeReadyAccountDeletions(
             skipped_external: rescan.skippedExternal,
             last_error: null,
             next_retry_at: new Date().toISOString(),
-          });
+            lease_token: null,
+            lease_expires_at: null,
+          }, leaseToken);
           continue;
         }
       }
@@ -4887,7 +4999,9 @@ async function finalizeReadyAccountDeletions(
         status: String(row.status),
         last_error: String(cleanupError),
         next_retry_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-      }).catch(() => undefined);
+        lease_token: null,
+        lease_expires_at: null,
+      }, leaseToken).catch(() => undefined);
       continue;
     }
     const { count, error: queueError } = await supabase.from("image_cleanup_queue")
@@ -4899,26 +5013,43 @@ async function finalizeReadyAccountDeletions(
       console.error("Failed to verify account deletion queue", {
         error_code: queueError?.code ?? null,
       });
+      await updateAccountDeletionRequest(supabase, userId, {
+        last_error: "Unable to verify image cleanup queue",
+        next_retry_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        lease_token: null,
+        lease_expires_at: null,
+      }, leaseToken).catch(() => undefined);
       continue;
     }
-    if (count > 0) continue;
+    if (count > 0) {
+      await updateAccountDeletionRequest(supabase, userId, {
+        remaining_images: count,
+        lease_token: null,
+        lease_expires_at: null,
+      }, leaseToken);
+      continue;
+    }
     if (status !== "deleting" && status !== "failed") {
       await updateAccountDeletionRequest(supabase, userId, {
         status: "deleting",
         remaining_images: 0,
         last_error: null,
         next_retry_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-      });
+        lease_token: null,
+        lease_expires_at: null,
+      }, leaseToken);
       continue;
     }
-    if (await finalizeAccountDeletion(supabase, userId)) completed += 1;
+    if (await finalizeAccountDeletion(supabase, userId, leaseToken)) completed += 1;
     else failed += 1;
   }
 
-  await supabase.from("account_deletion_requests")
-    .delete()
-    .eq("status", "completed")
-    .lt("completed_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+  const { error: purgeError } = await supabase.rpc("purge_completed_account_deletion_receipts");
+  if (purgeError) {
+    console.warn("Completed account deletion receipt purge will rely on the database schedule", {
+      error_code: purgeError.code ?? null,
+    });
+  }
   return { prepared, completed, failed };
 }
 
@@ -4930,35 +5061,18 @@ Deno.serve(async (req) => {
     return respondShortcut({ error: "Method not allowed" }, { mode: responseMode, status: 405 });
   }
 
-  // 在请求内层初始化客户端，避免启动崩溃
+  // Account/security actions must remain available even if the optional AI
+  // provider is temporarily misconfigured, so initialize Supabase first and
+  // defer Qwen configuration until the multipart AI path is selected.
   let supabase: ReturnType<typeof createClient>;
   let visionProviders: ProviderConfig[] = [];
   try {
     supabase = createClient(getEnv("SUPABASE_URL"), getEnv("SUPABASE_SERVICE_ROLE_KEY"));
-
-    const qwenProvider: ProviderConfig = {
-      name: "qwen",
-      model: normalizeQwenModel(getEnvOptional("QWEN_MODEL"), QWEN_DEFAULT_MODEL),
-      endpoint: getEnvOptional("QWEN_ENDPOINT") ?? QWEN_DEFAULT_ENDPOINT,
-      apiKey: getEnv("QWEN_API_KEY"),
-      enableThinking: getEnvBoolean("QWEN_ENABLE_THINKING", false),
-      photoModel: normalizeQwenModel(getEnvOptional("QWEN_PHOTO_MODEL"), QWEN_PHOTO_DEFAULT_MODEL),
-      photoEnableThinking: getEnvBoolean("QWEN_PHOTO_ENABLE_THINKING", false),
-    };
-    visionProviders = [qwenProvider];
   } catch (e) {
     return respondShortcut({ error: `Secret config error: ${String(e)}` }, { mode: responseMode, status: 500 });
   }
 
-  // 二次文案调用仍使用 Qwen，只允许单独覆盖 Qwen API Key 和白名单模型。
-  const textProvider: ProviderConfig | null = visionProviders[0]
-    ? {
-      ...visionProviders[0],
-      apiKey: Deno.env.get("FEEDBACK_TEXT_API_KEY") || visionProviders[0].apiKey,
-      model: normalizeQwenModel(Deno.env.get("FEEDBACK_TEXT_MODEL"), visionProviders[0].model),
-      enableThinking: false,
-    }
-    : null;
+  let textProvider: ProviderConfig | null = null;
 
   // 信号驱动 Voice 层开关:默认开;设 VOICE_SIGNALS_ENABLED=false 回退旧记忆注入链路
   const voiceSignalsEnabled = (Deno.env.get("VOICE_SIGNALS_ENABLED") ?? "true") !== "false";
@@ -4993,6 +5107,13 @@ Deno.serve(async (req) => {
         if (!actionUserId) {
           return new Response(JSON.stringify({ error: "未授权" }), {
             status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const consentCheck = await loadConsentStatusForUser(supabase, actionUserId);
+        if (!consentCheck.ok) {
+          return new Response(JSON.stringify(consentGateBody(consentCheck)), {
+            status: consentGateStatus(consentCheck),
+            headers: { "Content-Type": "application/json", ...corsHeaders },
           });
         }
         if (!isRecordExpressionOwnerEnabled(actionUserId)) {
@@ -5030,6 +5151,13 @@ Deno.serve(async (req) => {
         if (!actionUserId) {
           return new Response(JSON.stringify({ error: "未授权" }), {
             status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const consentCheck = await loadConsentStatusForUser(supabase, actionUserId);
+        if (!consentCheck.ok) {
+          return new Response(JSON.stringify(consentGateBody(consentCheck)), {
+            status: consentGateStatus(consentCheck),
+            headers: { "Content-Type": "application/json", ...corsHeaders },
           });
         }
         try {
@@ -5199,6 +5327,30 @@ Deno.serve(async (req) => {
         });
       }
 
+      if (action === "get_account_deletion_status") {
+        const actionUserId = await authenticatedUserId(req);
+        if (!actionUserId) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const request = await loadAccountDeletionRequest(supabase, actionUserId);
+        if (!request) {
+          return new Response(JSON.stringify({
+            status: "none",
+            deletion_status: "none",
+            request_id: null,
+            message: "当前没有账户删除请求",
+          }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const progress = await accountDeletionProgress(supabase, request);
+        return new Response(JSON.stringify(accountDeletionResponse(progress)), {
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
       if (action === "delete_account") {
         const actionUserId = await authenticatedUserId(req);
         if (!actionUserId) {
@@ -5207,44 +5359,56 @@ Deno.serve(async (req) => {
           });
         }
 
-        const requestedAt = new Date().toISOString();
-        const { error: requestError } = await supabase.from("account_deletion_requests").upsert({
-          user_id: actionUserId,
-          status: "requested",
-          requested_at: requestedAt,
-          updated_at: requestedAt,
-          completed_at: null,
-          attempts: 0,
-          next_retry_at: null,
-          last_error: null,
-        }, { onConflict: "user_id" });
-        if (requestError) {
-          throw new Error(`Failed to create account deletion request: ${requestError.message}`);
+        let request = await loadAccountDeletionRequest(supabase, actionUserId);
+        let created = false;
+        if (!request) {
+          const requestedAt = new Date().toISOString();
+          const { data: inserted, error: insertError } = await supabase.from("account_deletion_requests").insert({
+            user_id: actionUserId,
+            status: "requested",
+            requested_at: requestedAt,
+            updated_at: requestedAt,
+            completed_at: null,
+            attempts: 0,
+            next_retry_at: null,
+            last_error: null,
+          }).select("id,user_id,status,requested_at,updated_at,completed_at,estimated_completion_at,support_reference,total_images,deleted_images,remaining_images,skipped_external,last_error").maybeSingle();
+          if (insertError && insertError.code !== "23505") {
+            throw new Error(`Failed to create account deletion request: ${insertError.message}`);
+          }
+          request = (inserted ?? null) as AccountDeletionRequestRow | null;
+          created = Boolean(request);
+          if (!request) request = await loadAccountDeletionRequest(supabase, actionUserId);
+        }
+        if (!request) throw new Error("Account deletion request could not be loaded");
+
+        const active = ["requested", "cleaning", "deleting", "failed"].includes(String(request.status));
+        if (created || active) {
+          const requestedAt = request.requested_at ?? new Date().toISOString();
+          const { error: deactivateError } = await supabase.from("user_configs").update({
+            is_active: false,
+            upload_token: null,
+            updated_at: requestedAt,
+          }).eq("user_id", actionUserId);
+          if (deactivateError) {
+            throw new Error(`Failed to deactivate account credentials: ${deactivateError.message}`);
+          }
         }
 
-        const { error: deactivateError } = await supabase.from("user_configs").update({
-          is_active: false,
-          upload_token: null,
-          updated_at: requestedAt,
-        }).eq("user_id", actionUserId);
-        if (deactivateError) {
-          throw new Error(`Failed to deactivate account credentials: ${deactivateError.message}`);
-        }
-
-        const { data: workerInvoked, error: workerInvokeError } = await supabase.rpc("invoke_image_cleanup_worker");
+        const { data: workerInvoked, error: workerInvokeError } = active
+          ? await supabase.rpc("invoke_image_cleanup_worker")
+          : { data: false, error: null };
         if (workerInvokeError || workerInvoked !== true) {
           console.warn("Account deletion worker will rely on the next scheduled run", {
             error_code: workerInvokeError?.code ?? null,
           });
         }
 
-        return new Response(JSON.stringify({
-          status: "deletion_pending",
-          message: "账户删除已提交，剩余云端原图将在后台清理，完成后自动删除账户。",
-          cleanup: null,
-          worker_invoked: workerInvoked === true,
-        }), {
-          status: 202,
+        const progress = active
+          ? await accountDeletionProgress(supabase, request)
+          : request;
+        return new Response(JSON.stringify(accountDeletionResponse(progress, workerInvoked === true)), {
+          status: active ? 202 : 200,
           headers: { "Content-Type": "application/json", ...corsHeaders },
         });
       }
@@ -5253,6 +5417,27 @@ Deno.serve(async (req) => {
         status: 400,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       });
+    }
+
+    try {
+      const qwenProvider: ProviderConfig = {
+        name: "qwen",
+        model: normalizeQwenModel(getEnvOptional("QWEN_MODEL"), QWEN_DEFAULT_MODEL),
+        endpoint: getEnvOptional("QWEN_ENDPOINT") ?? QWEN_DEFAULT_ENDPOINT,
+        apiKey: getEnv("QWEN_API_KEY"),
+        enableThinking: getEnvBoolean("QWEN_ENABLE_THINKING", false),
+        photoModel: normalizeQwenModel(getEnvOptional("QWEN_PHOTO_MODEL"), QWEN_PHOTO_DEFAULT_MODEL),
+        photoEnableThinking: getEnvBoolean("QWEN_PHOTO_ENABLE_THINKING", false),
+      };
+      visionProviders = [qwenProvider];
+      textProvider = {
+        ...qwenProvider,
+        apiKey: Deno.env.get("FEEDBACK_TEXT_API_KEY") || qwenProvider.apiKey,
+        model: normalizeQwenModel(Deno.env.get("FEEDBACK_TEXT_MODEL"), qwenProvider.model),
+        enableThinking: false,
+      };
+    } catch (e) {
+      return respondShortcut({ error: `Secret config error: ${String(e)}` }, { mode: responseMode, status: 500 });
     }
 
     // 1. 接收图片（multipart/form-data，字段名 image）
@@ -5330,6 +5515,19 @@ Deno.serve(async (req) => {
         { error: "账户已停用或正在删除，不能继续上传" },
         { mode: responseMode, status: 410 },
       );
+    }
+
+    // AI processing is a separate capability from authentication. Historical
+    // accounts (and registrations made by older clients) may have a valid
+    // session but no current sensitive-data consent version. Stop before any
+    // image upload or Qwen call; deletion and other JSON actions above remain
+    // available so the user can still leave the account or manage records.
+    const consentCheck = await loadConsentStatusForUser(supabase, userId);
+    if (!consentCheck.ok) {
+      return respondShortcut(consentGateBody(consentCheck), {
+        mode: responseMode,
+        status: consentGateStatus(consentCheck),
+      });
     }
 
     let companionSettings: CompanionSettings = DEFAULT_COMPANION_SETTINGS;
