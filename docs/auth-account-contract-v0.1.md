@@ -1,13 +1,16 @@
 # 芥子账号与认证契约（PRD）
 
-版本号：V0.1.0
+版本号：V0.1.1
 日期：2026/07/31
-状态：评审稿，未应用生产配置
+状态：实现复核稿，未应用生产配置
 基线：`origin/main@f72e63b0bc5fb4d1856493b0a846e605b64c8aa0`
+
+复审记录：`docs/auth-account-prd-review-v0.1.md`。当前结论为“有条件通过”；复审中的 P0 未关闭前，不得开启生产 Confirm email 或提交 App Review。
 
 | 版本 | 时间 | 修订人 | 备注 |
 | --- | --- | --- | --- |
 | V0.1.0 | 2026/07/31 | Codex | 收口 iOS、PWA、Supabase 认证状态和发布流程 |
+| V0.1.1 | 2026/08/01 | Codex | 补齐历史同意、异步删号、客户端隔离与验证状态 |
 
 ## 一、概述
 
@@ -146,7 +149,7 @@ stateDiagram-v2
 | Auth session 成功但 `upload_token` 读取失败 | `authenticatedPendingCapability` | “已登录，快捷指令凭据稍后同步” | 设置页重试 |
 | 无网/超时 | 原状态不变 | 网络错误，不显示技术栈原文 | 重试 |
 | RLS/权限错误 | 原状态不变 | “账号权限暂时不可用” | 刷新 session 或联系客服 |
-| 删除请求已接受 | `signedOut` | 显示预计处理时长和查询编号 | 支持页查询/联系客服 |
+| 删除请求已接受 | `signedOut` | 显示非 SLA 预计完成时间和支持编号 | 查看本机回执/联系支持 |
 | 删除请求未接受 | `authenticated` 或 `signedOut`，按本地是否清理决定 | 明确说明是否已退出 | 重试或联系客服 |
 
 原始 Supabase 错误只写入内部诊断日志，用户界面使用稳定错误码映射，不展示 JWT、URL、SQL、邮箱服务商响应或内部表名。
@@ -202,11 +205,12 @@ stateDiagram-v2
 
 ### 3.5 异步删号
 
-1. 删除请求必须幂等；服务端返回 request id、当前状态和预计处理时长。
+1. 删除请求必须幂等；服务端返回 `request_id`、`deletion_status`、受理时间、非 SLA 预计完成时间和支持编号。兼容字段 `status` 只表示 `deletion_pending/deleted` 响应外壳，不作为生命周期状态。
 2. 客户端在服务端接受请求后立即 SDK signOut、清 Keychain、清快照/图片缓存并进入 `signedOut`。
 3. 客户端不得在删除完成前保留可自动恢复的 refresh token。
 4. 账号删除 worker 沿用 `requested/cleaning/deleting/completed/failed`；图片清理队列另有 `pending/processing/done/failed/dead_letter`。两套状态必须分别可查询、可重试或转人工处理。
-5. 支持页/设置页显示最近一次请求状态、失败原因的用户友好版本和联系客服入口，不显示内部队列 payload。
+5. V1 在请求受理后先把非敏感回执写入本机，再退出登录。登录页可查看最近回执与支持编号；Auth 用户最终删除后不承诺实时进度查询，客服使用支持编号从保留 30 天的服务端回执核对。
+6. `estimated_completion_at` 是按服务端受理时间计算的预计时间戳，不是 SLA。当前文案“通常在 24 小时内完成”必须由项目所有者在发布前确认与实际 cron、重试和支持能力一致。
 
 ### 3.6 认证服务接口契约
 
@@ -220,7 +224,7 @@ stateDiagram-v2
 | `updatePassword` | new password | session invalidated | 回到登录页 |
 | `fetchUploadToken` | user id、access token | capability | 后台补偿，不回滚 session |
 | `signOut` | none | local state cleared | 服务端失败不阻塞本地退出 |
-| `deleteAccount` | access token | request id/status | 幂等、可查询、可重试 |
+| `deleteAccount` | access token | 完整本地回执 | 幂等；响应不明时在退出前用同一 session 对账一次 |
 
 ### 3.7 数据字典
 
@@ -239,6 +243,10 @@ stateDiagram-v2
 | `account_deletion_requests.status` | enum | 是 | 现状为 `requested/cleaning/deleting/completed/failed`；若增加终止失败态必须单独迁移 |
 | `account_deletion_requests.created_at` | timestamp | 是 | 服务端时间 |
 | `account_deletion_requests.completed_at` | timestamp | 否 | 最终完成时间 |
+| `account_deletion_requests.estimated_completion_at` | timestamp | 是 | 服务端生成的非 SLA 预计完成时间 |
+| `account_deletion_requests.support_reference` | text | 是 | `DEL-` + 12 位大写十六进制，仅供客服核对，不是公开查询凭证 |
+| `account_deletion_requests.lease_token` | UUID | worker 领取后 | 原子任务租约；客户端不可读写 |
+| `account_deletion_requests.lease_expires_at` | timestamp | worker 领取后 | 过期后允许其他 worker 恢复处理 |
 
 密码、SMTP 凭据、Service Role key、refresh token 和真实用户记录不进入 Git、测试 fixture、PR 或日志。`sensitive_data_version` 是待评审的兼容迁移，不得在客户端先行写入不存在的列。
 
@@ -258,6 +266,7 @@ stateDiagram-v2
 - PWA 由 `App.vue` 订阅 Auth 状态；`AuthPage` 只负责表单和状态展示。
 - iOS 和 PWA 都以 Auth session 为登录真相源，`upload_token` 是独立 capability。
 - 所有回跳处理都必须区分普通登录、邮箱确认、密码恢复和错误回跳。
+- 客户端只能更新 `user_configs` 的偏好列；配置行由注册触发器创建，`is_active`、`upload_token`、套餐、额度和同意字段均为服务端管理字段。为兼容旧版设置页，已存在配置行的同用户 `INSERT ... ON CONFLICT UPDATE` 仍可写偏好列；配置行缺失时客户端 INSERT 会被拒绝，不能在删号过程中重建。
 
 ### 4.3 安全、隐私与运维
 
@@ -295,12 +304,15 @@ stateDiagram-v2
 
 | 能力 | 代码状态 | 上线前仍需 |
 | --- | --- | --- |
-| PWA 注册/会话判定 | 已改为只以 `session` 进入业务页 | 浏览器实测 Confirm email 开关后的完整流程 |
+| PWA 注册/会话判定 | 只以 `session` 进入业务页；待确认、重发、更换邮箱和恢复态已实现 | 浏览器实测 Confirm email 开关后的完整流程 |
+| PWA 同意与用户隔离 | 三版本与服务端时间 fail closed；跨标签、跨用户 generation 和签名 URL 缓存已隔离 | 真实浏览器多账号切换与弱网验收 |
 | PWA 重发与找回密码 | 已实现 60 秒冷却、回跳门禁、稳定错误文案和 URL 清理 | 使用生产域名和非项目成员邮箱验证邮件模板/过期链接 |
-| iOS 确认与恢复 | 已实现 PKCE 回跳分流、URL scheme、重发、改密和恢复态冷启动保护 | macOS CI 编译、真机从邮件打开四类链接 |
-| capability 补偿 | iOS 登录已与 `upload_token` 解耦，设置页可重试 | 弱网和跨账号切换测试 |
-| 登出/删号本地清理 | iOS 已清 SDK session、Keychain、快照及两类图片缓存 | 服务端删号状态查询、预计时长和完成确认仍未实现 |
-| 历史同意门禁 | 契约已定义 | 客户端同意页及服务端 Qwen 门禁仍未实现 |
+| iOS 确认与恢复 | 已实现 PKCE 回跳分流、URL scheme、重发、更换邮箱、改密和恢复态冷启动保护 | macOS CI 编译、XCTest、真机从邮件打开四类链接 |
+| capability 补偿 | 两端登录与 `upload_token` 解耦；最多三次退避并可在设置页重试 | 弱网和跨账号切换手工测试 |
+| 登出/删号本地清理 | 两端均要求完整回执落盘后退出并清理用户域；响应丢失会先对账一次 | macOS CI、浏览器和真机冷启动验证 |
+| 历史同意门禁 | 客户端、两个 Edge 入口和表达规划 JSON action 均已接入；PostgreSQL 17 迁移测试通过 | Deno CI 与部署后旧客户端验收 |
+| 删号 worker | 具备稳定回执、原子租约、失败重试、30 天清理和 12 位十六进制支持编号 | 测试项目执行真实 Edge/Storage/Auth 删除闭环 |
+| 配置写权限 | 新客户端 PATCH 偏好列；旧客户端对已有行的安全偏好 upsert 保持兼容；两者都不能重建配置或修改激活状态、上传凭据、套餐与额度 | 测试项目同时验证新旧客户端设置写入、缺失行拒绝和删号竞态 |
 
 当前代码可以继续进入 CI/真机联调，但不能据此直接开启生产 Confirm email，也不能提交 App Review。
 
@@ -330,23 +342,24 @@ stateDiagram-v2
 | 忘记密码/设置新密码 | ✓ | ✓ | recovery 页面不展示业务数据 |
 | 冷启动/刷新 token | ✓ | ✓ | 只恢复当前用户 |
 | 登出后冷启动 | ✓ | ✓ | 无旧快照、无旧图片、无旧 token |
-| 异步删号 | ✓ | ✓ | 本地立即退出，状态可查询，最终删除可验证 |
+| 异步删号 | ✓ | ✓ | 本地立即退出并保留回执；凭支持编号联系支持，最终删除可验证 |
 | 历史账号版本同意 | ✓ | ✓ | 未同意前不调用业务/AI 数据链路 |
 
 ## 六、评审结论与待确认项
 
 ### 6.1 多角色评审结论
 
-**结论：有条件通过进入开发；不可直接上线。**
+**结论：代码实现有条件通过；不可直接上线。**
 
 | 级别 | 问题 | 责任 | 通过条件 |
 | --- | --- | --- | --- |
 | P0 | 生产无自定义 SMTP、Site URL/redirect 不正确 | 运维/项目所有者 | 配置完成并用非项目成员邮箱实测 |
-| P0 | iOS 异步删号后未清 SDK session 与磁盘快照 | 研发 | 单测和真机冷启动均无旧数据 |
-| P0 | Confirm email 开启后 PWA 用 `user` 冒充已登录 | 研发 | 只以 `session` 进入业务，待确认页可重发 |
-| P1 | 登录与 `upload_token` 强耦合 | 研发 | capability 失败不阻塞登录，补偿可重试 |
-| P1 | 缺少恢复回跳和新密码页面 | 研发/设计 | iOS/PWA recovery 状态和过期出口齐全 |
-| P1 | 历史账号缺当前同意版本 | 产品/后端 | 服务端和客户端双重版本门禁 |
+| P0（代码已关闭） | iOS 异步删号后的 session、磁盘快照与回执 | 研发 | 代码和单测已补；仍须 macOS CI 与真机冷启动验证 |
+| P0（代码已关闭） | Confirm email 开启后 PWA 用 `user` 冒充已登录 | 研发 | 已只以 `session` 进入业务；仍须受控 Auth 配置下浏览器实测 |
+| P0（代码已关闭） | 停用账号可直接修改 `user_configs` 恢复能力 | 研发/后端 | PostgreSQL 列权限白名单与真实迁移测试已通过 |
+| P1（代码已关闭） | 登录与 `upload_token` 强耦合 | 研发 | capability 失败不阻塞登录，两端三次退避且可手工重试 |
+| P1（代码已关闭） | 缺少恢复回跳和新密码页面 | 研发/设计 | iOS/PWA recovery 状态和过期出口已实现，待真机邮件验证 |
+| P1（代码已关闭） | 历史账号缺当前同意版本 | 产品/后端 | 客户端、Edge 与数据库双重门禁已实现，待 Deno CI |
 | P2 | Apple/OTP/Passkey 尚未实现 | 产品 | 明确列为 V1.1/研究项，不阻塞 V1 |
 
 ### 6.2 状态机强制复核
@@ -369,9 +382,10 @@ stateDiagram-v2
 
 1. [待确认] 生产发信服务选 Resend 还是阿里云邮件推送；以 QQ/163/Outlook/Gmail/iCloud 合成账号实测结果决定。
 2. [已决策] iOS V1 先采用固定自定义 scheme：`jiezi://auth/confirm` 与 `jiezi://auth/recovery`；上线前完成精确 allowlist 和 PKCE 真机验证，Universal Link 放入后续加固。
-3. [待确认] 历史账号补充同意时，是否允许只在登录后拦截，还是在收到任一业务请求时由 Edge 再拦截一次；建议双层门禁。
-4. [待确认] 删除队列对用户承诺的最大处理时长和客服升级 SLA；建议文案不要承诺未验证的分钟数。
-5. [待确认] V1 是否把邮箱 OTP 放入实验开关；建议先完成密码恢复，再以独立实验评估。
+3. [已决策] 历史账号采用双层门禁：新客户端登录先拦截，所有 Qwen/表达规划入口由 Edge 再校验；失败时仍允许退出和删号。
+4. [已决策] V1 不建设匿名实时进度页，也不发送完成邮件；客户端保存本机回执，用户凭支持编号联系支持。公开查询凭证留待后续单独设计。
+5. [待确认] “通常在 24 小时内完成”与客服升级时限是否符合实际运维能力；该时间是非 SLA 预计值。
+6. [待确认] V1 是否把邮箱 OTP 放入实验开关；建议先完成密码恢复，再以独立实验评估。
 
 ### 6.4 不能合并/上线的条件
 
