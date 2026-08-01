@@ -1,8 +1,21 @@
 <template>
   <div>
     <!-- Auth gate -->
+    <AccountConsentGate
+      v-if="store.isLoggedIn.value && authGate.startsWith('consent')"
+      :key="store.currentUserId.value || 'account-consent'"
+      :loading="authGate === 'consent-checking'"
+      :submitting="consentSubmitting"
+      :deleting="consentDeleting"
+      :blocked="consentBlocked"
+      :error="consentError"
+      @accept="acceptAccountConsent"
+      @retry="retryAccountConsent"
+      @delete-account="deleteAccountFromConsentGate"
+      @sign-out="signOutFromConsentGate"
+    />
     <AuthPage
-      v-if="!store.isLoggedIn.value || authGate !== 'none'"
+      v-else-if="!store.isLoggedIn.value || authGate !== 'none'"
       :password-recovery="passwordRecoveryActive"
       :auth-callback-pending="authCallbackPending"
       :auth-callback-error="authCallbackError"
@@ -179,7 +192,7 @@
 
 <script setup>
 import { ref, provide, onMounted, onBeforeUnmount, computed } from 'vue'
-import { sb } from './lib/supabase'
+import { sb, SUPABASE_URL, SUPABASE_ANON_KEY } from './lib/supabase'
 import {
   authCallbackError as readAuthCallbackError,
   friendlyAuthError,
@@ -187,9 +200,20 @@ import {
   readAuthCallbackIntent,
   sanitizedAuthCallbackPath,
 } from './lib/authFlow.js'
+import {
+  acceptCurrentAccountConsent,
+  fetchMyAccountConsent,
+  isAccountConsentCurrent,
+} from './lib/accountConsent.js'
+import { canLoadBusinessData, isSameSessionUser } from './lib/userSessionGuard.js'
+import {
+  requestAccountDeletion,
+  saveAccountDeletionReceipt,
+} from './lib/accountDeletion.js'
 import { useStore } from './composables/useStore'
 import { usePullToRefresh } from './composables/usePullToRefresh'
 import AuthPage   from './components/pages/AuthPage.vue'
+import AccountConsentGate from './components/pages/AccountConsentGate.vue'
 import PageHome    from './components/pages/PageHome.vue'
 import PagePending from './components/pages/PagePending.vue'
 import PageDomains from './components/pages/PageDomains.vue'
@@ -211,6 +235,7 @@ import ModalWelcome from './components/ModalWelcome.vue'
 
 const store = useStore()
 provide('store', store)
+provide('authActions', { signOut: signOutLocally })
 
 const fabOpen = ref(false)
 const initialAuthURL = typeof window === 'undefined' ? '' : window.location.href
@@ -236,34 +261,212 @@ const authCallbackError = ref(initialCallbackFailure
   )
   : '')
 const authCallbackNotice = ref('')
+const consentError = ref('')
+const consentSubmitting = ref(false)
+const consentDeleting = ref(false)
+const consentBlocked = ref(false)
 const passwordRecoveryActive = computed(() => authGate.value === 'recovery')
 const authCallbackPending = computed(() => authGate.value.endsWith('-pending'))
 const callbackIntent = ref(initialCallbackFlow)
 let callbackTimeout = null
 let confirmationCompleting = false
 let authSubscription = null
+let sessionApplyGeneration = 0
+let pendingConsentSession = null
 
 // 登录态：以 supabase 的 auth 事件为唯一真相源，避免冷启动时
 // getSession() 还未完成本地恢复就进入未登录态，或 AuthPage / App
 // 同时各调一次 loadData() 产生竞态。
 async function applySession(session) {
-  if (authGate.value !== 'none') return
   if (!session?.user) return
+  const sameUser = store.isLoggedIn.value
+    && isSameSessionUser(session, store.currentUserId.value)
+  if (authGate.value !== 'none') {
+    if (!authGate.value.startsWith('consent')) return
+    if (sameUser) {
+      pendingConsentSession = session
+      return
+    }
+  }
   const switchingUser = Boolean(
     store.currentUserId.value && store.currentUserId.value !== session.user.id,
   )
-  if (switchingUser) store.resetUserData()
-  const sameUser = store.isLoggedIn.value && store.currentUserId.value === session.user.id
+  if (switchingUser) {
+    sessionApplyGeneration += 1
+    pendingConsentSession = null
+    consentSubmitting.value = false
+    consentDeleting.value = false
+    store.resetUserData()
+  }
   store.currentUserId.value = session.user.id
   store.currentUserEmail.value = session.user.email || ''
   store.isLoggedIn.value = true
-  if (!sameUser) {
-    store.navigateTo('home')
-    await store.loadData()
+  if (sameUser) return
+  store.navigateTo('home')
+  await verifyAccountConsent(session, { loadData: !sameUser })
+}
+
+function isCurrentConsentAttempt(generation, userId) {
+  return generation === sessionApplyGeneration
+    && pendingConsentSession?.user?.id === userId
+    && store.currentUserId.value === userId
+    && store.isLoggedIn.value
+}
+
+async function reconcileConsentSession(expectedUserId) {
+  const { data, error } = await sb.auth.getSession()
+  if (error) throw error
+  const liveSession = data?.session || null
+  if (isSameSessionUser(liveSession, expectedUserId)) return liveSession
+  if (liveSession?.user) await applySession(liveSession)
+  else handleSignedOut()
+  return null
+}
+
+async function verifyAccountConsent(session, { loadData = true } = {}) {
+  if (!session?.user) return
+  const userId = session.user.id
+  const generation = ++sessionApplyGeneration
+  pendingConsentSession = session
+  consentError.value = ''
+  consentBlocked.value = false
+  authGate.value = 'consent-checking'
+  try {
+    if (!await reconcileConsentSession(userId)) return
+    const status = await fetchMyAccountConsent(sb)
+    if (!await reconcileConsentSession(userId)) return
+    if (!isCurrentConsentAttempt(generation, userId)) return
+    if (!status.isActive) {
+      consentBlocked.value = true
+      consentError.value = '账户已停用或正在删除，不能继续加载数据'
+      authGate.value = 'consent-error'
+      return
+    }
+    if (!isAccountConsentCurrent(status)) {
+      authGate.value = 'consent'
+      return
+    }
+    pendingConsentSession = null
+    authGate.value = 'none'
+    if (loadData) await store.loadData()
+  } catch (error) {
+    if (!isCurrentConsentAttempt(generation, userId)) return
+    authGate.value = 'consent-error'
+    consentError.value = accountConsentError(error)
   }
 }
 
+async function acceptAccountConsent() {
+  if (!pendingConsentSession || consentSubmitting.value || consentBlocked.value) return
+  const session = pendingConsentSession
+  const userId = session.user.id
+  const generation = sessionApplyGeneration
+  consentSubmitting.value = true
+  consentError.value = ''
+  try {
+    if (!await reconcileConsentSession(userId)) return
+    await acceptCurrentAccountConsent(sb)
+    if (!await reconcileConsentSession(userId)) return
+    if (!isCurrentConsentAttempt(generation, userId)) return
+    pendingConsentSession = null
+    authGate.value = 'none'
+    store.navigateTo('home')
+    await store.loadData()
+  } catch (error) {
+    if (!isCurrentConsentAttempt(generation, userId)) return
+    authGate.value = 'consent-error'
+    consentError.value = accountConsentError(error)
+  } finally {
+    consentSubmitting.value = false
+  }
+}
+
+async function retryAccountConsent() {
+  if (consentSubmitting.value) return
+  const { data, error } = await sb.auth.getSession()
+  if (error) {
+    consentError.value = accountConsentError(error)
+    return
+  }
+  const session = data?.session || null
+  if (!session) {
+    handleSignedOut()
+    return
+  }
+  if (!isSameSessionUser(session, store.currentUserId.value)) {
+    await applySession(session)
+    return
+  }
+  await verifyAccountConsent(session)
+}
+
+async function signOutLocally() {
+  try {
+    const { error } = await sb.auth.signOut({ scope: 'local' })
+    if (error) {
+      console.warn('[auth] local sign-out failed; clearing application state', {
+        code: error.code || error.name || 'unknown',
+      })
+    }
+  } catch (error) {
+    console.warn('[auth] local sign-out failed; clearing application state', {
+      code: error?.code || error?.name || 'unknown',
+    })
+  } finally {
+    handleSignedOut()
+  }
+}
+
+async function signOutFromConsentGate() {
+  if (consentDeleting.value) return
+  sessionApplyGeneration += 1
+  pendingConsentSession = null
+  await signOutLocally()
+}
+
+async function deleteAccountFromConsentGate() {
+  if (consentDeleting.value || consentSubmitting.value) return
+  consentDeleting.value = true
+  consentError.value = ''
+  try {
+    const result = await requestAccountDeletion({
+      client: sb,
+      functionUrl: `${SUPABASE_URL}/functions/v1/ingest-receipt`,
+      anonKey: SUPABASE_ANON_KEY,
+    })
+    saveAccountDeletionReceipt(result)
+    sessionApplyGeneration += 1
+    pendingConsentSession = null
+    await signOutLocally()
+  } catch (error) {
+    consentError.value = error?.message || '账户删除请求失败，请稍后重试'
+    authGate.value = 'consent-error'
+  } finally {
+    consentDeleting.value = false
+  }
+}
+
+function accountConsentError(error) {
+  const value = String(error?.message || error || '').toLowerCase()
+  if (
+    value.includes('failed to fetch')
+      || value.includes('network')
+      || value.includes('timeout')
+  ) return '网络连接不稳定，尚未加载你的记录。请检查网络后重试'
+  if (value.includes('outdated') || value.includes('check_violation')) {
+    return '协议版本已更新，请重新核对后确认'
+  }
+  return '暂时无法核对账号同意状态。你的记录尚未加载，请稍后重试'
+}
+
 function handleSignedOut() {
+  sessionApplyGeneration += 1
+  pendingConsentSession = null
+  consentSubmitting.value = false
+  consentDeleting.value = false
+  consentBlocked.value = false
+  consentError.value = ''
+  if (authGate.value.startsWith('consent')) authGate.value = 'none'
   store.resetUserData()
   store.currentUserId.value = null
   store.currentUserEmail.value = ''
@@ -328,7 +531,7 @@ async function completeConfirmation() {
 // 下拉刷新（全局生效，仅在页面滚到顶才会触发）
 const { pullDistance, refreshing, ptrActive } = usePullToRefresh({
   onRefresh: async () => {
-    if (!store.isLoggedIn.value) return
+    if (!canLoadBusinessData(store.isLoggedIn.value, authGate.value)) return
     // 静默刷新不显示全屏 loading，配合下拉指示器即可
     await store.loadData(0, true)
   },

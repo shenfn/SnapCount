@@ -69,6 +69,34 @@
   line-height: 1.55;
 }
 
+.auth-deletion-receipt {
+  display: grid;
+  gap: 7px;
+  margin: 14px 20px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft, var(--surface));
+  color: var(--text2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.auth-deletion-receipt strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.auth-deletion-receipt small {
+  color: var(--text3);
+  font-size: 11px;
+}
+
+.auth-deletion-receipt .auth-switch-btn {
+  justify-self: start;
+  margin-top: 2px;
+}
+
 .auth-form {
   padding: 20px;
   display: flex;
@@ -107,6 +135,47 @@
   display: grid;
   gap: 12px;
   padding: 4px 2px;
+}
+
+.auth-consent-hero {
+  padding-bottom: 24px;
+}
+
+.auth-consent-gate {
+  display: grid;
+  gap: 18px;
+  padding: 0 20px 24px;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.auth-consent-summary {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft, var(--surface));
+  color: var(--text2);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.auth-consent-summary strong {
+  display: block;
+  color: var(--text);
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.auth-consent-summary p {
+  margin: 0;
+}
+
+.auth-consent-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  min-height: 32px;
 }
 
 .auth-consent-row {
@@ -231,6 +300,10 @@
 .auth-switch-btn:disabled {
   color: var(--text3);
   cursor: default;
+}
+
+.auth-switch-btn.is-danger {
+  color: var(--danger);
 }
 
 .auth-footer {

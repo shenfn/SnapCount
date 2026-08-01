@@ -67,7 +67,8 @@ final class SupabaseAuthService {
                 "legal_consent_at": .string(consent.legalAcceptedAt),
                 "sensitive_data_consent_at": .string(consent.sensitiveDataAcceptedAt),
                 "terms_version": .string(consent.termsVersion),
-                "privacy_version": .string(consent.privacyVersion)
+                "privacy_version": .string(consent.privacyVersion),
+                "sensitive_data_version": .string(consent.sensitiveDataVersion)
             ],
             redirectTo: Self.confirmationRedirectURL
         )

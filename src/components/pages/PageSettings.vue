@@ -26,6 +26,14 @@
           <div class="settings-item-sub" style="word-break:break-all;font-size:11px;">{{ uploadToken }}</div>
         </div>
       </div>
+      <div class="settings-item" v-else @click="retryUploadToken()">
+        <div class="settings-item-icon warn">钥</div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">{{ syncingUploadToken ? '正在同步快捷指令凭据' : '重新同步快捷指令凭据' }}</div>
+          <div class="settings-item-sub">App 登录不受影响；同步后可供快捷指令自动上传。</div>
+        </div>
+        <div class="settings-arrow">{{ syncingUploadToken ? '…' : '›' }}</div>
+      </div>
       <div class="settings-item" @click="handleLogout">
         <div class="settings-item-icon warn">退</div>
         <div class="settings-item-content">
@@ -50,6 +58,14 @@
         <div class="settings-item-content">
           <div class="settings-item-title">数据导入</div>
           <div class="settings-item-sub">CSV 与其他来源的历史数据导入</div>
+        </div>
+        <div class="settings-arrow">›</div>
+      </div>
+      <div class="settings-item" @click="showDeleteAccountModal = true">
+        <div class="settings-item-icon warn">删</div>
+        <div class="settings-item-content">
+          <div class="settings-item-title">删除账户及全部数据</div>
+          <div class="settings-item-sub">后台异步清理，通常在 24 小时内完成</div>
         </div>
         <div class="settings-arrow">›</div>
       </div>
@@ -131,6 +147,29 @@
         <div class="sheet-footer">
           <button class="confirm-btn" :disabled="exporting" @click="handleExport">
             {{ exporting ? '导出中...' : '开始导出' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" :class="{ open: showDeleteAccountModal }" @click.self="closeDeleteAccountModal">
+      <div class="modal-sheet">
+        <div class="sheet-drag-zone"><div class="sheet-handle"></div></div>
+        <div class="sheet-header">
+          <div class="sheet-title">永久删除账户？</div>
+          <div class="sheet-sub">请求受理后会立即退出，数据和账户无法恢复</div>
+        </div>
+        <div class="sheet-body">
+          <div class="auth-consent-summary">
+            <strong>删除范围</strong>
+            <p>云端记录、账户流水、AI 识别数据和原图会进入后台清理。处理通常在 24 小时内完成，受理编号会先保存在本机。</p>
+          </div>
+          <div v-if="deletionError" class="auth-message is-error" role="alert">{{ deletionError }}</div>
+        </div>
+        <div class="sheet-footer">
+          <button class="auth-switch-btn" type="button" :disabled="deletingAccount" @click="closeDeleteAccountModal">取消</button>
+          <button class="confirm-btn" type="button" :disabled="deletingAccount" @click="handleDeleteAccount">
+            {{ deletingAccount ? '正在提交' : '确认永久删除' }}
           </button>
         </div>
       </div>
@@ -389,10 +428,16 @@
 
 <script setup>
 import { ref, inject, onMounted, onUnmounted, watch, computed, reactive } from 'vue'
-import { sb } from '../../lib/supabase'
+import { sb, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabase'
+import {
+  requestAccountDeletion,
+  saveAccountDeletionReceipt,
+} from '../../lib/accountDeletion.js'
 
 const store = inject('store')
+const authActions = inject('authActions')
 const uploadToken = ref('')
+const syncingUploadToken = ref(false)
 const screenshotVisionPrimary = ref('auto')
 const photoVisionPrimary = ref('qwen')
 const qwenScreenshotModel = ref('qwen3.6-flash')
@@ -537,6 +582,9 @@ const companionCustomNoteSaved = ref('')
 // ── 数据导出 ──
 const showExportModal = ref(false)
 const exporting = ref(false)
+const showDeleteAccountModal = ref(false)
+const deletingAccount = ref(false)
+const deletionError = ref('')
 const exportContent = ref('expense')
 const exportRange = ref('this_month')
 const exportFormat = ref('csv')
@@ -1035,6 +1083,7 @@ onMounted(async () => {
       companionCustomNote.value = cfg.companion_custom_note || ''
       companionCustomNoteSaved.value = companionCustomNote.value
     }
+    if (!uploadToken.value) void retryUploadToken(false)
   }
 })
 
@@ -1159,7 +1208,74 @@ function copyToken() {
 }
 
 async function handleLogout() {
-  await sb.auth.signOut()
+  await authActions.signOut()
   store.showFlash('✓ 已退出登录')
+}
+
+async function retryUploadToken(showFeedback = true) {
+  if (syncingUploadToken.value) return
+  const userId = store.currentUserId.value
+  if (!userId) {
+    if (showFeedback) store.showFlash('请先登录')
+    return
+  }
+
+  syncingUploadToken.value = true
+  let lastError = null
+  try {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const { data, error } = await sb.from('user_configs')
+        .select('upload_token')
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (!error && data?.upload_token) {
+        if (store.currentUserId.value !== userId || !store.isLoggedIn.value) return
+        uploadToken.value = data.upload_token
+        if (showFeedback) store.showFlash('✓ 快捷指令凭据已同步')
+        return
+      }
+      lastError = error || new Error('upload token unavailable')
+      if (attempt < 2) {
+        await new Promise(resolve => window.setTimeout(resolve, 500 * (2 ** attempt)))
+      }
+    }
+    if (showFeedback) store.showFlash('⚠️ 凭据暂未同步，请稍后重试')
+  } catch (error) {
+    lastError = error
+    if (showFeedback) store.showFlash('⚠️ 凭据暂未同步，请稍后重试')
+  } finally {
+    syncingUploadToken.value = false
+    if (lastError && showFeedback) {
+      console.warn('[auth] upload token synchronization failed', {
+        code: lastError.code || lastError.name || 'unknown',
+      })
+    }
+  }
+}
+
+function closeDeleteAccountModal() {
+  if (deletingAccount.value) return
+  showDeleteAccountModal.value = false
+  deletionError.value = ''
+}
+
+async function handleDeleteAccount() {
+  if (deletingAccount.value) return
+  deletingAccount.value = true
+  deletionError.value = ''
+  try {
+    const result = await requestAccountDeletion({
+      client: sb,
+      functionUrl: `${SUPABASE_URL}/functions/v1/ingest-receipt`,
+      anonKey: SUPABASE_ANON_KEY,
+    })
+    saveAccountDeletionReceipt(result)
+    showDeleteAccountModal.value = false
+    await authActions.signOut()
+  } catch (error) {
+    deletionError.value = error?.message || '账户删除请求失败，请稍后重试'
+  } finally {
+    deletingAccount.value = false
+  }
 }
 </script>

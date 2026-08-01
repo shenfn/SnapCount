@@ -9,6 +9,7 @@ struct LoginView: View {
     @State private var acceptedTerms = false
     @State private var acceptedSensitiveData = false
     @State private var legalDocument: LegalDocumentKind?
+    @State private var showDeleteAccountConfirmation = false
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -18,6 +19,9 @@ struct LoginView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     header
+                    if let receipt = appState.lastAccountDeletionReceipt {
+                        accountDeletionReceiptPanel(receipt)
+                    }
                     form
                     status
                     Spacer(minLength: 20)
@@ -30,6 +34,22 @@ struct LoginView: View {
         }
         .sheet(item: $legalDocument) { document in
             NavigationStack { LegalDocumentView(kind: document) }
+        }
+        .alert("提交账户删除请求？", isPresented: $showDeleteAccountConfirmation) {
+            Button("删除账户及全部数据", role: .destructive) {
+                Task { _ = await appState.deleteAccountFromGate() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("提交后会立即退出登录，并在后台异步删除云端记录、账户流水、AI 识别数据和原图。通常在 24 小时内完成，且无法恢复。")
+        }
+        .onChange(of: appState.currentUserId) { _, _ in
+            resetConsentSelections()
+        }
+        .onChange(of: appState.requiresAccountConsent) { _, requiresConsent in
+            if requiresConsent {
+                resetConsentSelections()
+            }
         }
     }
 
@@ -44,16 +64,32 @@ struct LoginView: View {
             Text("芥子")
                 .font(.system(size: 38, weight: .bold, design: .rounded))
                 .foregroundStyle(JieziTheme.ink)
-            Text("登录后同步快捷指令凭据，用截图和照片快速生成记录。")
+            Text(headerMessage)
                 .font(.callout)
                 .foregroundStyle(JieziTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
+    private var headerMessage: String {
+        if appState.isAccountAccessBlocked {
+            return "账户暂不可用，当前不会加载你的记录。"
+        }
+        if appState.requiresAccountConsent || appState.isCheckingAccountConsent {
+            return "确认当前的数据处理说明后，才会加载你的记录。"
+        }
+        return "登录后同步快捷指令凭据，用截图和照片快速生成记录。"
+    }
+
     @ViewBuilder
     private var form: some View {
-        if appState.isHandlingAuthCallback {
+        if appState.isCheckingAccountConsent {
+            accountConsentPanel
+        } else if appState.isAccountAccessBlocked {
+            accountAccessBlockedPanel
+        } else if appState.requiresAccountConsent {
+            accountConsentPanel
+        } else if appState.isHandlingAuthCallback {
             callbackPanel
         } else if appState.isPasswordRecovery {
             recoveryForm
@@ -62,6 +98,153 @@ struct LoginView: View {
         } else {
             standardForm
         }
+    }
+
+    private var accountConsentPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if appState.isCheckingAccountConsent {
+                ProgressView()
+                Text("正在核对账号状态")
+                    .font(.headline)
+                Text("完成前不会加载你的记录或调用 AI 服务。")
+                    .font(.footnote)
+                    .foregroundStyle(JieziTheme.muted)
+            } else {
+                Label("继续使用芥子", systemImage: "hand.raised.fill")
+                    .font(.headline)
+                    .foregroundStyle(JieziTheme.ink)
+                Text("你的记录包含财务、图片、睡眠等私密信息。主要数据存储在 Supabase 新加坡区域；使用图片识别和 AI 联动分析时，必要内容会发送至阿里云百炼 Qwen 当前的中国内地接口。")
+                    .font(.footnote)
+                    .foregroundStyle(JieziTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                legalConsent
+
+                if let message = appState.accountConsentError {
+                    Label(message, systemImage: "exclamationmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(JieziTheme.coral)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Button {
+                    Task {
+                        await appState.acceptAccountConsent(
+                            acceptedTerms: acceptedTerms,
+                            acceptedSensitiveData: acceptedSensitiveData
+                        )
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        if appState.isAcceptingAccountConsent { ProgressView().tint(.white) }
+                        Image(systemName: "checkmark.shield.fill")
+                        Text(appState.isAcceptingAccountConsent ? "正在确认" : "同意并继续")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .background(JieziTheme.mint, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .opacity(acceptedTerms && acceptedSensitiveData && !appState.isAcceptingAccountConsent ? 1 : 0.55)
+                .disabled(!acceptedTerms || !acceptedSensitiveData || appState.isAcceptingAccountConsent)
+
+                HStack {
+                    if appState.accountConsentError != nil {
+                        Button("重新核对") {
+                            Task { await appState.retryAccountConsent() }
+                        }
+                        .disabled(appState.isCheckingAccountConsent || appState.isAcceptingAccountConsent)
+                    }
+                    Spacer()
+                    Button("退出登录") { appState.signOut() }
+                        .disabled(appState.isAcceptingAccountConsent)
+                }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(JieziTheme.mint)
+
+                if appState.accountConsentError != nil {
+                    Button(role: .destructive) {
+                        showDeleteAccountConfirmation = true
+                    } label: {
+                        Label("删除账户及全部数据", systemImage: "person.crop.circle.badge.xmark")
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(JieziTheme.coral)
+                    .disabled(appState.isAcceptingAccountConsent || appState.isDeletingAccount)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var accountAccessBlockedPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("账户暂不可用", systemImage: "lock.circle.fill")
+                .font(.headline)
+                .foregroundStyle(JieziTheme.ink)
+            Text(appState.accountAccessBlockedMessage ?? "账户已停用，当前不会加载你的记录或调用 AI 服务。")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if appState.isDeletingAccount {
+                ProgressView("正在提交删除请求")
+                    .font(.footnote)
+            }
+
+            HStack {
+                Button("重新核对") {
+                    Task { await appState.retryAccountConsent() }
+                }
+                .disabled(appState.isCheckingAccountConsent || appState.isDeletingAccount)
+                Spacer()
+                Button("退出登录") { appState.signOut() }
+                    .disabled(appState.isDeletingAccount)
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(JieziTheme.mint)
+
+            Button(role: .destructive) {
+                showDeleteAccountConfirmation = true
+            } label: {
+                Label("删除账户及全部数据", systemImage: "person.crop.circle.badge.xmark")
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(JieziTheme.coral)
+            .disabled(appState.isDeletingAccount)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func accountDeletionReceiptPanel(
+        _ receipt: NativeAccountDeletionResult
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(
+                receipt.isCompleted ? "账户删除已完成" : "账户删除处理中",
+                systemImage: receipt.isCompleted ? "checkmark.shield.fill" : "clock.fill"
+            )
+            .font(.headline)
+            .foregroundStyle(receipt.isCompleted ? JieziTheme.mint : JieziTheme.ink)
+
+            Text(receipt.displayMessage)
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("关闭回执") { appState.dismissAccountDeletionReceipt() }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(JieziTheme.mint)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var standardForm: some View {
@@ -224,6 +407,9 @@ struct LoginView: View {
             .buttonStyle(.borderedProminent)
             .tint(JieziTheme.mint)
             .disabled(appState.isSigningIn || appState.authResendCooldown > 0)
+            Button("更换邮箱") { appState.changeConfirmationEmail() }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(JieziTheme.mint)
             Button("返回登录") { appState.returnToLogin() }
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(JieziTheme.mint)
@@ -287,7 +473,8 @@ struct LoginView: View {
 
     @ViewBuilder
     private var status: some View {
-        if let message = appState.authMessage {
+        if appState.lastAccountDeletionReceipt == nil,
+           let message = appState.authMessage {
             Label(message, systemImage: appState.authMessageIsError ? "exclamationmark.circle" : "checkmark.circle")
                 .font(.footnote)
                 .foregroundStyle(appState.authMessageIsError ? JieziTheme.coral : JieziTheme.muted)
@@ -320,6 +507,11 @@ struct LoginView: View {
                 await appState.sendPasswordReset(email: cleanEmail)
             }
         }
+    }
+
+    private func resetConsentSelections() {
+        acceptedTerms = false
+        acceptedSensitiveData = false
     }
 
     private func maskedEmail(_ value: String) -> String {

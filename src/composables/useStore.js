@@ -23,6 +23,7 @@ import {
 } from '../utils/helpers'
 import { isLiabilityAccount, mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
 import { normalizeFinanceOptionValue } from '../domains/financeReviewOptions'
+import { createUserDataContext, isUserDataContextCurrent } from '../lib/userSessionGuard.js'
 
 const PRIMARY_EXPENSE_CATEGORIES = new Set(['餐饮', '购物', '出行', '娱乐', '生活', '健康', '教育', '其他'])
 const PENDING_QUEUE_QUERY_LIMIT = 1000
@@ -61,6 +62,14 @@ export function useStore() {
   const currentUserId = ref(null)
   const currentUserEmail = ref('')
   const isLoggedIn = ref(false)
+  let userDataGeneration = 0
+  let loadDataRunId = 0
+  const captureUserDataContext = () => createUserDataContext(currentUserId.value, userDataGeneration)
+  const isCurrentUserDataContext = context => isUserDataContextCurrent(context, {
+    userId: currentUserId.value,
+    generation: userDataGeneration,
+    isLoggedIn: isLoggedIn.value,
+  })
 
   const bills = ref([])
   const pendingBills = ref([])
@@ -428,6 +437,8 @@ export function useStore() {
   })
 
   function resetUserData() {
+    userDataGeneration += 1
+    loadDataRunId += 1
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -436,15 +447,35 @@ export function useStore() {
     stagingRecords.value = []
     processedStagingRecords.value = []
     dataRecords.value = []
+    accounts.value = []
     financeVocabulary.value = []
     financeVocabularyAvailable = true
     repaymentCycles.value = []
+    selectedAccount.value = null
+    selectedAccountEntries.value = []
+    selectedAccountPayments.value = []
     selectedAccountSourceSnapshot.value = null
+    accountEntriesLoading.value = false
+    liabilityPaymentsAvailable.value = true
+    unboundRecords.value = { expenses: [], incomes: [] }
+    unboundRecordsLoading.value = false
+    walletAccountCreatingSourceIds.clear()
     loadError.value = ''
     loadErrorDetail.value = null
     loading.value = false
+    flashMsg.value = ''
+    flashVisible.value = false
+    if (flashTimer) clearTimeout(flashTimer)
+    flashTimer = null
     selectedStagingIds.value = new Set()
     batchMode.value = false
+    currentFilter.value = 'all'
+    pendingFilter.value = 'all'
+    timelineExpanded.value = false
+    pendingExpanded.value = false
+    processedExpanded.value = false
+    imgOverlay.open = false
+    imgOverlay.src = ''
     detailRecord.value = null
     recordExpressionPlanCache.value = {}
     recordExpressionPlanLoadRequests.clear()
@@ -452,7 +483,57 @@ export function useStore() {
     recordExpressionPlanCacheRevisions.clear()
     recordExpressionPlanCacheVersion += 1
     activeDomainId.value = null
+    activeDateKey.value = ''
+    activeDayKind.value = 'all'
+    dailyCardVisibleCount.value = 8
     pageHistory.value = []
+    Object.keys(pageScrollPositions).forEach(key => delete pageScrollPositions[key])
+    dailySummary.value = []
+    dailySummaryLoading.value = false
+    dailySummaryError.value = ''
+    dailySummaryLoadedAt = 0
+    aiInsight.value = null
+    aiInsightLoading.value = false
+    aiInsightError.value = ''
+    aiInsightCached.value = false
+    signedImageUrlCache.clear()
+    signedImageUrlRequests.clear()
+    lastRefreshTs = 0
+    pendingAccountRefreshRequested = false
+    Object.assign(pendingModal, {
+      open: false, bill: null, returnToQueue: false, entryType: 'expense', merchantName: '',
+      amount: '', platform: null, category: null, payment: null, incomeCategory: 'other',
+      accountId: null, accountUnbound: false,
+    })
+    Object.assign(incomeModal, {
+      open: false, mode: 'create', id: null, cat: 'salary', amount: '', source: '', note: '',
+      date: '', imageUrl: null, imagePath: null, imageLoadError: false, accountId: null,
+      accountUnbound: false, stagingSource: null,
+    })
+    Object.assign(expenseModal, {
+      open: false, mode: 'create', id: null, amount: '', merchantName: '', platform: null,
+      category: null, payment: null, note: '', date: '', time: '', imageUrl: null,
+      imagePath: null, imageLoadError: false, accountId: null, accountUnbound: false,
+      stagingSource: null,
+    })
+    Object.keys(universalModal).forEach(key => delete universalModal[key])
+    Object.assign(universalModal, {
+      open: false, mode: 'create', id: null, domainKey: 'sport', title: '', primaryValue: '',
+      dimension: '', note: '', date: '', time: '', sleepStartTime: '', wakeTime: '',
+      imagePath: null, imageUrl: null, imageLoadError: false, originalPayload: null,
+      stagingSource: null,
+    })
+    Object.assign(deleteConfirm, { open: false, type: null, id: null, imagePath: null })
+    Object.assign(accountModal, {
+      open: false, mode: 'create', id: null, name: '', type: 'wallet_balance', institution: '',
+      last4: '', initialBalance: '', billDay: '', paymentDueDay: '', autoDebitAccountId: null,
+      autoConfirmRepayment: false, isDefaultExpense: false, isDefaultIncome: false,
+      isArchived: false,
+    })
+    pendingModalInitial = null
+    incomeModalInitial = null
+    expenseModalInitial = null
+    universalModalInitial = null
     settingsState.aiLogsEnabled = false
     settingsState.keepSourceImages = true
     settingsState.promptOptimizationEnabled = false
@@ -481,7 +562,7 @@ export function useStore() {
     }
   }
 
-  async function loadUserSettings() {
+  async function loadUserSettings(context = createUserDataContext(currentUserId.value, userDataGeneration)) {
     if (!currentUserId.value) {
       settingsState.aiLogsEnabled = false
       settingsState.keepSourceImages = true
@@ -496,6 +577,11 @@ export function useStore() {
       .select('ai_logs_enabled, keep_source_images, prompt_optimization_enabled, expression_improvement_enabled, image_retention_days, companion_enabled, companion_memory_enabled')
       .eq('user_id', currentUserId.value)
       .maybeSingle()
+    if (!isUserDataContextCurrent(context, {
+      userId: currentUserId.value,
+      generation: userDataGeneration,
+      isLoggedIn: isLoggedIn.value,
+    })) return
     if (error) {
       console.warn('加载用户设置失败:', error.message)
       return
@@ -534,7 +620,7 @@ export function useStore() {
     }
   }
 
-  async function loadFinanceVocabulary() {
+  async function loadFinanceVocabulary(context = createUserDataContext(currentUserId.value, userDataGeneration)) {
     if (!currentUserId.value || !financeVocabularyAvailable) {
       financeVocabulary.value = []
       return
@@ -546,6 +632,11 @@ export function useStore() {
       .order('usage_count', { ascending: false })
       .order('last_used_at', { ascending: false })
       .limit(200)
+    if (!isUserDataContextCurrent(context, {
+      userId: currentUserId.value,
+      generation: userDataGeneration,
+      isLoggedIn: isLoggedIn.value,
+    })) return
     if (error) {
       if (isMissingFinanceVocabularyError(error)) financeVocabularyAvailable = false
       else console.warn('加载个人财务词表失败:', error.message)
@@ -719,7 +810,6 @@ export function useStore() {
   }
 
   let lastRefreshTs = 0
-  let loadDataRunId = 0
   const REFRESH_MIN_INTERVAL = 3000
 
   // 静默刷新（用于后台切回前台时自动拉新）
@@ -757,10 +847,13 @@ export function useStore() {
   const aiInsightCached = ref(false)
 
   async function generateAiInsight({ days = 14, force = false, question = '' } = {}) {
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return null
     aiInsightLoading.value = true
     aiInsightError.value = ''
     try {
       const { data: { session } } = await sb.auth.getSession()
+      if (!isCurrentUserDataContext(userContext) || session?.user?.id !== userContext.userId) return null
       const token = session?.access_token
       if (!token) throw new Error('未登录，无法调用 AI')
 
@@ -774,22 +867,26 @@ export function useStore() {
         body: JSON.stringify({ days, force, question }),
       })
       const json = await resp.json()
+      if (!isCurrentUserDataContext(userContext)) return null
       if (!resp.ok) throw new Error(json?.error || `AI 服务返回 ${resp.status}`)
 
       aiInsight.value = json.insight
       aiInsightCached.value = !!json.cached
       return json
     } catch (e) {
+      if (!isCurrentUserDataContext(userContext)) return null
       aiInsightError.value = e?.message || String(e)
       console.warn('[ai_insight] 生成失败:', e)
       throw e
     } finally {
-      aiInsightLoading.value = false
+      if (isCurrentUserDataContext(userContext)) aiInsightLoading.value = false
     }
   }
 
   // 启动时尝试取最近一次缓存的 insight（如有），不强制
   async function loadLatestAiInsight({ days = 14 } = {}) {
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return null
     try {
       const { data } = await sb
         .from('ai_insights')
@@ -799,6 +896,7 @@ export function useStore() {
         .order('generated_at', { ascending: false })
         .limit(1)
         .maybeSingle()
+      if (!isCurrentUserDataContext(userContext)) return null
       if (data) {
         aiInsight.value = data
         aiInsightCached.value = true
@@ -810,6 +908,8 @@ export function useStore() {
   }
 
   async function loadDailySummary({ days = 30, force = false } = {}) {
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return []
     const now = Date.now()
     if (!force && dailySummary.value.length && (now - dailySummaryLoadedAt < DAILY_SUMMARY_TTL)) {
       return dailySummary.value
@@ -825,16 +925,18 @@ export function useStore() {
         .select('*')
         .gte('date', sinceStr)
         .order('date', { ascending: true })
+      if (!isCurrentUserDataContext(userContext)) return []
       if (error) throw error
       dailySummary.value = data || []
       dailySummaryLoadedAt = now
       return dailySummary.value
     } catch (e) {
+      if (!isCurrentUserDataContext(userContext)) return []
       dailySummaryError.value = humanizeDbError(e)
       console.warn('[daily_summary] 加载失败:', e?.message || e)
       return []
     } finally {
-      dailySummaryLoading.value = false
+      if (isCurrentUserDataContext(userContext)) dailySummaryLoading.value = false
     }
   }
 
@@ -855,8 +957,18 @@ export function useStore() {
     }
   }
 
-  async function loadData(attempt = 0, silent = false, runId = null) {
+  async function loadData(attempt = 0, silent = false, runId = null, userContext = null) {
     if (attempt === 0 || !runId) runId = ++loadDataRunId
+    if (!userContext) {
+      userContext = createUserDataContext(currentUserId.value, userDataGeneration)
+    }
+    const isCurrentRun = () => runId === loadDataRunId
+      && isUserDataContextCurrent(userContext, {
+        userId: currentUserId.value,
+        generation: userDataGeneration,
+        isLoggedIn: isLoggedIn.value,
+      })
+    if (!isCurrentRun()) return
     if (attempt === 0 && !silent) loading.value = true
     if (attempt === 0 && !silent) {
       loadError.value = ''
@@ -864,8 +976,8 @@ export function useStore() {
     }
     if (attempt === 0) lastRefreshTs = Date.now()
     if (attempt === 0) {
-      loadUserSettings().catch(e => console.warn('加载用户设置失败:', e?.message || e))
-      loadFinanceVocabulary().catch(e => console.warn('加载个人财务词表失败:', e?.message || e))
+      loadUserSettings(userContext).catch(e => console.warn('加载用户设置失败:', e?.message || e))
+      loadFinanceVocabulary(userContext).catch(e => console.warn('加载个人财务词表失败:', e?.message || e))
     }
     // Phase 1：拉取域协议（每会话一次，失败不阻断主流程）
     if (attempt === 0) loadDomainSchemas()
@@ -942,6 +1054,7 @@ export function useStore() {
           .order('created_at', { ascending: false })
           .limit(PENDING_QUEUE_QUERY_LIMIT),
       ])
+      if (!isCurrentRun()) return
 
       const { data: txs, error: txErr } = txResult
       if (txErr) throw new Error('账单查询失败: ' + txErr.message)
@@ -1026,7 +1139,6 @@ export function useStore() {
         processedStagingRecords.value = []
       }
 
-      const isCurrentRun = () => runId === loadDataRunId
       const cycleMonth = `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`
       const hydratePendingBillImages = async () => {
         const pendingPaths = pendingBills.value
@@ -1137,6 +1249,7 @@ export function useStore() {
       })
       if (silent) await supplementalLoad
     } catch (e) {
+      if (!isCurrentRun()) return
       console.error('[loadData 异常]', e)
       // 优先使用 supabase.js 抛出的 FriendlyNetworkError 上的结构化信息：
       //   - friendly: { title, message, userAction[], code, retryable }
@@ -1159,7 +1272,8 @@ export function useStore() {
         // 网络层错误使用指数退避重试（1s → 2s → 4s → 8s）
         const delay = isNetworkError ? Math.min(1000 * 2 ** attempt, 8000) : 1000
         await new Promise(r => setTimeout(r, delay))
-        return loadData(attempt + 1, silent, runId)
+        if (!isCurrentRun()) return
+        return loadData(attempt + 1, silent, runId, userContext)
       }
       if (silent) return
       if (friendly) {
@@ -1174,7 +1288,7 @@ export function useStore() {
         loadError.value = `加载失败: ${tip}`
       }
     } finally {
-      if (attempt === 0 && !silent) loading.value = false
+      if (attempt === 0 && !silent && isCurrentRun()) loading.value = false
     }
   }
 
@@ -1211,6 +1325,7 @@ export function useStore() {
   async function getSignedImageUrl(raw) {
     if (!raw) return null
     if (raw.startsWith('https://')) return raw
+    const userContext = createUserDataContext(currentUserId.value, userDataGeneration)
     const cached = signedImageUrlCache.get(raw)
     if (cached?.expiresAt > Date.now()) return cached.url
     if (cached) signedImageUrlCache.delete(raw)
@@ -1225,6 +1340,11 @@ export function useStore() {
         return null
       }
       const url = data?.signedUrl || null
+      if (!isUserDataContextCurrent(userContext, {
+        userId: currentUserId.value,
+        generation: userDataGeneration,
+        isLoggedIn: isLoggedIn.value,
+      })) return null
       if (url) {
         signedImageUrlCache.set(raw, {
           url,
@@ -1242,6 +1362,8 @@ export function useStore() {
   }
 
   async function getSignedImageUrlMap(rawPaths = []) {
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return {}
     const out = {}
     const storagePaths = []
     rawPaths.filter(Boolean).forEach(raw => {
@@ -1259,6 +1381,7 @@ export function useStore() {
     if (!uniquePaths.length) return out
 
     const { data, error } = await sb.storage.from('receipt-images').createSignedUrls(uniquePaths, 3600)
+    if (!isCurrentUserDataContext(userContext)) return {}
     if (error) {
       console.warn('批量生成截图预览链接失败:', error.message)
       return out
@@ -3083,6 +3206,8 @@ export function useStore() {
       selectedAccountEntries.value = []
       return
     }
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return
     accountEntriesLoading.value = true
     const { data, error } = await sb.from('account_entries')
       .select('*')
@@ -3090,6 +3215,7 @@ export function useStore() {
       .order('occurred_at', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(50)
+    if (!isCurrentUserDataContext(userContext) || selectedAccount.value?.id !== accountId) return
     accountEntriesLoading.value = false
     if (error) {
       console.warn('加载账户流水失败:', error.message)
@@ -3108,12 +3234,15 @@ export function useStore() {
       selectedAccountPayments.value = []
       return
     }
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return
     const { data, error } = await sb.from('liability_payments')
       .select('*')
       .eq('account_id', accountId)
       .order('paid_at', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(30)
+    if (!isCurrentUserDataContext(userContext) || selectedAccount.value?.id !== accountId) return
     if (error) {
       const missingTable = error.code === 'PGRST205' || /liability_payments|schema cache|Could not find the table/i.test(error.message || '')
       if (missingTable) {
@@ -3131,22 +3260,27 @@ export function useStore() {
   async function loadAccountSourceSnapshot(account) {
     selectedAccountSourceSnapshot.value = null
     if (!account?.sourceRecordId || account.sourceRecordTable !== 'data_records') return
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return
     const { data, error } = await sb.from('data_records')
       .select('id,title,summary,occurred_at,source_image_path,source_image_hash,payload_jsonb,snapshot_balance,snapshot_at,account_snapshot_kind')
       .eq('id', account.sourceRecordId)
       .maybeSingle()
+    if (!isCurrentUserDataContext(userContext) || selectedAccount.value?.id !== account.id) return
     if (error || !data) {
       if (error) console.warn('加载账户来源快照失败:', error.message)
       return
     }
     const payload = data.payload_jsonb || {}
+    const imageUrl = await getSignedImageUrl(data.source_image_path)
+    if (!isCurrentUserDataContext(userContext) || selectedAccount.value?.id !== account.id) return
     selectedAccountSourceSnapshot.value = {
       id: data.id,
       title: data.title || '来源快照',
       summary: data.summary || '',
       occurredAt: data.occurred_at,
       imagePath: data.source_image_path || '',
-      imageUrl: await getSignedImageUrl(data.source_image_path),
+      imageUrl,
       imageHash: data.source_image_hash || '',
       snapshotBalance: data.snapshot_balance ?? payload.snapshot_balance ?? null,
       snapshotAt: data.snapshot_at || data.occurred_at || null,
@@ -3157,12 +3291,15 @@ export function useStore() {
 
   async function openAccountDetail(account) {
     if (!account?.id) return
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return
     selectedAccount.value = account
     await Promise.all([
       loadAccountEntries(account.id),
       loadAccountPayments(account.id),
       loadAccountSourceSnapshot(account),
     ])
+    if (!isCurrentUserDataContext(userContext) || selectedAccount.value?.id !== account.id) return
     navigateTo('account-detail')
   }
 
@@ -3306,11 +3443,17 @@ export function useStore() {
   }
 
   function refreshAccountsFromDB() {
+    const userContext = createUserDataContext(currentUserId.value, userDataGeneration)
     return sb.from('accounts')
       .select('*')
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
       .then(({ data, error }) => {
+        if (!isUserDataContextCurrent(userContext, {
+          userId: currentUserId.value,
+          generation: userDataGeneration,
+          isLoggedIn: isLoggedIn.value,
+        })) return
         if (error) { console.warn('刷新账户失败:', error.message); return }
         accounts.value = (data || []).map(mapAccountRow)
       })
@@ -3951,6 +4094,8 @@ export function useStore() {
   }
 
   async function loadUnboundRecords() {
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return
     unboundRecordsLoading.value = true
     const padM = String(currentMonth.value).padStart(2, '0')
     const start = `${currentYear.value}-${padM}-01`
@@ -3975,6 +4120,7 @@ export function useStore() {
         .order('income_date', { ascending: false })
         .limit(100),
     ])
+    if (!isCurrentUserDataContext(userContext)) return
     unboundRecordsLoading.value = false
 
     if (txResult.error || incResult.error) {
@@ -4021,10 +4167,13 @@ export function useStore() {
 
   async function openRecordDetail(kind, record) {
     if (!record) return
+    const userContext = captureUserDataContext()
+    if (!isCurrentUserDataContext(userContext)) return
     let imageUrl = null
     const imagePath = record.image_path || record.image_url || null
       || (kind === 'universal' ? record.imagePath : null)
     if (imagePath) imageUrl = await getSignedImageUrl(imagePath)
+    if (!isCurrentUserDataContext(userContext)) return
     detailRecord.value = {
       id: record.id,
       kind,
@@ -4128,11 +4277,10 @@ export function useStore() {
     settingsState[key] = next
     try {
       await runLockedAction('settings', async () => {
-        const { error } = await sb.from('user_configs').upsert({
-          user_id: currentUserId.value,
+        const { error } = await sb.from('user_configs').update({
           [field]: next,
           updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' })
+        }).eq('user_id', currentUserId.value)
         if (error) throw error
       })
       showFlash(next ? '✓ 已开启' : '✓ 已关闭')
@@ -4156,11 +4304,10 @@ export function useStore() {
     settingsState[key] = value
     try {
       await runLockedAction('settings', async () => {
-        const { error } = await sb.from('user_configs').upsert({
-          user_id: currentUserId.value,
+        const { error } = await sb.from('user_configs').update({
           [field]: value,
           updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' })
+        }).eq('user_id', currentUserId.value)
         if (error) throw error
       })
       showFlash('✓ 已保存')
@@ -4183,12 +4330,11 @@ export function useStore() {
     settingsState.imageRetentionDays = retentionDays
     try {
       await runLockedAction('settings', async () => {
-        const { error } = await sb.from('user_configs').upsert({
-          user_id: currentUserId.value,
+        const { error } = await sb.from('user_configs').update({
           keep_source_images: keepSource,
           image_retention_days: retentionDays,
           updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' })
+        }).eq('user_id', currentUserId.value)
         if (error) throw error
       })
       showFlash('✓ 留存策略已更新')

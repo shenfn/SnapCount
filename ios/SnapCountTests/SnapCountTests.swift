@@ -2384,8 +2384,123 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(deletion.isPending)
         XCTAssertEqual(
             deletion.displayMessage,
-            "账户删除已提交；已删除 3 张云端原图，剩余 1 张将在后台清理，完成后自动删除账户"
+            "账户删除已提交；已删除 3 张云端原图，剩余 1 张将在后台清理，完成后自动删除账户。后台异步处理，通常在提交后 24 小时内完成。"
         )
+    }
+
+    func testAccountDeletionResultDecodesCompleteSnakeCaseReceipt() throws {
+        let payload = try XCTUnwrap("""
+        {
+          "status": "deletion_pending",
+          "deletion_status": "cleaning",
+          "request_id": "3a9cba14-5844-42f0-b2f9-1e6931724d60",
+          "requested_at": "2026-08-01T10:00:00Z",
+          "completed_at": null,
+          "estimated_completion_at": "2026-08-02T10:00:00Z",
+          "support_reference": "DEL-AB12CD34EF56",
+          "retryable": true,
+          "message": "账户删除已提交",
+          "cleanup": {
+            "total": 4,
+            "queued": 2,
+            "processed": 2,
+            "failed": 0,
+            "dead_letter": 0,
+            "skipped_external": 1,
+            "remaining": 2
+          }
+        }
+        """.data(using: .utf8))
+
+        let receipt = try JSONDecoder().decode(NativeAccountDeletionResult.self, from: payload)
+
+        XCTAssertTrue(receipt.hasDeletionRequest)
+        XCTAssertTrue(receipt.isPending)
+        XCTAssertFalse(receipt.isCompleted)
+        XCTAssertEqual(receipt.deletionStatus, "cleaning")
+        XCTAssertEqual(receipt.requestId, "3a9cba14-5844-42f0-b2f9-1e6931724d60")
+        XCTAssertEqual(receipt.estimatedCompletionAt, "2026-08-02T10:00:00Z")
+        XCTAssertEqual(receipt.supportReference, "DEL-AB12CD34EF56")
+        XCTAssertEqual(receipt.cleanup?.deadLetter, 0)
+        XCTAssertEqual(receipt.cleanup?.skippedExternal, 1)
+        XCTAssertTrue(receipt.displayMessage.contains("24 小时"))
+        XCTAssertTrue(receipt.displayMessage.contains("DEL-AB12CD34EF56"))
+    }
+
+    @MainActor
+    func testAccountDeletionReceiptPersistsAcrossAppStateInitialization() throws {
+        let suiteName = "SnapCountTests.AccountDeletionReceipt.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = NativeAccountDeletionReceiptStore(defaults: defaults)
+        let receipt = NativeAccountDeletionResult(
+            status: "deletion_pending",
+            message: "账户删除已提交",
+            cleanup: nil,
+            deletionStatus: "requested",
+            requestId: "3a9cba14-5844-42f0-b2f9-1e6931724d60",
+            requestedAt: "2026-08-01T10:00:00Z",
+            estimatedCompletionAt: "2026-08-02T10:00:00Z",
+            supportReference: "DEL-123456789ABC",
+            retryable: true
+        )
+
+        try store.save(receipt)
+        let restoredDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let restoredStore = NativeAccountDeletionReceiptStore(defaults: restoredDefaults)
+        let restoredState = AppState(accountDeletionReceiptStore: restoredStore)
+
+        XCTAssertEqual(restoredState.lastAccountDeletionReceipt, receipt)
+        restoredState.dismissAccountDeletionReceipt()
+        XCTAssertNil(store.load())
+    }
+
+    func testAccountDeletionReceiptRejectsIncompleteOrContradictoryContract() throws {
+        let valid = NativeAccountDeletionResult(
+            status: "deletion_pending",
+            message: "账户删除已提交",
+            cleanup: nil,
+            deletionStatus: "requested",
+            requestId: "3a9cba14-5844-42f0-b2f9-1e6931724d60",
+            requestedAt: "2026-08-01T10:00:00Z",
+            estimatedCompletionAt: "2026-08-02T10:00:00Z",
+            supportReference: "DEL-1234ABCD5678",
+            retryable: true
+        )
+        let missingSupportReference = NativeAccountDeletionResult(
+            status: "deletion_pending",
+            message: "账户删除已提交",
+            cleanup: nil,
+            deletionStatus: "requested",
+            requestId: valid.requestId,
+            requestedAt: valid.requestedAt,
+            estimatedCompletionAt: valid.estimatedCompletionAt,
+            retryable: true
+        )
+        let contradictoryLifecycle = NativeAccountDeletionResult(
+            status: "deleted",
+            message: "账户及其云端数据已删除",
+            cleanup: nil,
+            deletionStatus: "completed",
+            requestId: valid.requestId,
+            requestedAt: valid.requestedAt,
+            completedAt: nil,
+            estimatedCompletionAt: valid.estimatedCompletionAt,
+            supportReference: valid.supportReference,
+            retryable: false
+        )
+
+        XCTAssertTrue(valid.hasDeletionRequest)
+        XCTAssertFalse(missingSupportReference.hasDeletionRequest)
+        XCTAssertFalse(contradictoryLifecycle.hasDeletionRequest)
+
+        let suiteName = "SnapCountTests.InvalidAccountDeletionReceipt.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = NativeAccountDeletionReceiptStore(defaults: defaults)
+
+        XCTAssertThrowsError(try store.save(missingSupportReference))
+        XCTAssertNil(store.load())
     }
 
     @MainActor
@@ -2415,7 +2530,86 @@ final class SnapCountTests: XCTestCase {
         let consent = NativeRegistrationConsent.current(at: Date(timeIntervalSince1970: 0))
         XCTAssertEqual(consent.termsVersion, "2026-07-19")
         XCTAssertEqual(consent.privacyVersion, "2026-07-22")
+        XCTAssertEqual(consent.sensitiveDataVersion, "2026-07-22")
         XCTAssertEqual(consent.legalAcceptedAt, consent.sensitiveDataAcceptedAt)
+    }
+
+    func testHistoricalAccountConsentRequiresEveryCurrentVersion() {
+        let historical = NativeAccountConsentStatus(
+            isActive: true,
+            needsConsent: true,
+            missing: ["sensitive_data"],
+            requiredVersions: ["terms": "2026-07-19", "privacy": "2026-07-22", "sensitive_data": "2026-07-22"],
+            acceptedVersions: ["terms": "2026-07-19", "privacy": "2026-07-22", "sensitive_data": nil],
+            legalConsentAt: "2026-08-01T10:00:00Z",
+            sensitiveDataConsentAt: "2026-08-01T10:00:00Z"
+        )
+        let current = NativeAccountConsentStatus(
+            isActive: true,
+            needsConsent: false,
+            missing: [],
+            requiredVersions: historical.requiredVersions,
+            acceptedVersions: ["terms": "2026-07-19", "privacy": "2026-07-22", "sensitive_data": "2026-07-22"],
+            legalConsentAt: "2026-08-01T10:00:00Z",
+            sensitiveDataConsentAt: "2026-08-01T10:00:00Z"
+        )
+
+        XCTAssertFalse(historical.isCurrent)
+        XCTAssertTrue(current.isCurrent)
+    }
+
+    func testAccountConsentStatusRejectsServerFlagWhenVersionsOrTimesAreInvalid() {
+        let required = ["terms": "2026-07-19", "privacy": "2026-07-22", "sensitive_data": "2026-07-22"]
+        let mismatchedVersion = NativeAccountConsentStatus(
+            isActive: true,
+            needsConsent: false,
+            missing: [],
+            requiredVersions: required,
+            acceptedVersions: ["terms": "2026-07-19", "privacy": "2026-07-19", "sensitive_data": "2026-07-22"],
+            legalConsentAt: "2026-08-01T10:00:00Z",
+            sensitiveDataConsentAt: "2026-08-01T10:00:00Z"
+        )
+        let missingTimestamp = NativeAccountConsentStatus(
+            isActive: true,
+            needsConsent: false,
+            missing: [],
+            requiredVersions: required,
+            acceptedVersions: ["terms": "2026-07-19", "privacy": "2026-07-22", "sensitive_data": "2026-07-22"],
+            legalConsentAt: nil,
+            sensitiveDataConsentAt: "2026-08-01T10:00:00Z"
+        )
+
+        XCTAssertFalse(mismatchedVersion.isCurrent)
+        XCTAssertFalse(missingTimestamp.isCurrent)
+    }
+
+    func testAccountConsentStatusDecodesNullAcceptedVersion() throws {
+        let payload = try XCTUnwrap("""
+        {
+          "is_active": true,
+          "needs_consent": true,
+          "missing": ["sensitive_data"],
+          "required_versions": {
+            "terms": "2026-07-19",
+            "privacy": "2026-07-22",
+            "sensitive_data": "2026-07-22"
+          },
+          "accepted_versions": {
+            "terms": "2026-07-19",
+            "privacy": "2026-07-22",
+            "sensitive_data": null
+          },
+          "legal_consent_at": "2026-08-01T10:00:00Z",
+          "sensitive_data_consent_at": "2026-08-01T10:00:00Z"
+        }
+        """.data(using: .utf8))
+
+        let status = try JSONDecoder().decode(NativeAccountConsentStatus.self, from: payload)
+
+        XCTAssertFalse(status.isCurrent)
+        XCTAssertTrue(status.acceptedVersions.keys.contains("sensitive_data"))
+        let acceptedSensitiveVersion = try XCTUnwrap(status.acceptedVersions["sensitive_data"])
+        XCTAssertNil(acceptedSensitiveVersion)
     }
 
     private static let expressionTestSession = SupabaseAuthSession(
@@ -2605,6 +2799,22 @@ private struct SettingsRepositoryStub: SettingsRepositoryProtocol {
         return settings
     }
 
+    func fetchAccountConsentStatus(accessToken: String) async throws -> NativeAccountConsentStatus {
+        NativeAccountConsentStatus(
+            isActive: true,
+            needsConsent: false,
+            missing: [],
+            requiredVersions: ["terms": "2026-07-19", "privacy": "2026-07-22", "sensitive_data": "2026-07-22"],
+            acceptedVersions: ["terms": "2026-07-19", "privacy": "2026-07-22", "sensitive_data": "2026-07-22"],
+            legalConsentAt: "2026-08-01T10:00:00Z",
+            sensitiveDataConsentAt: "2026-08-01T10:00:00Z"
+        )
+    }
+
+    func acceptCurrentAccountConsent(accessToken: String) async throws -> NativeAccountConsentStatus {
+        try await fetchAccountConsentStatus(accessToken: accessToken)
+    }
+
     func update(userId: String, values: [String: AnyCodable], accessToken: String) async throws {}
 
     func export(_ request: NativeDataExportRequest, accessToken: String) async throws -> NativeExportedFile {
@@ -2626,6 +2836,10 @@ private struct SettingsRepositoryStub: SettingsRepositoryProtocol {
 
     func deleteAccount(accessToken: String) async throws -> NativeAccountDeletionResult {
         NativeAccountDeletionResult(status: "deleted", message: nil, cleanup: nil)
+    }
+
+    func fetchAccountDeletionStatus(accessToken: String) async throws -> NativeAccountDeletionResult {
+        NativeAccountDeletionResult(status: "none", message: nil, cleanup: nil)
     }
 }
 

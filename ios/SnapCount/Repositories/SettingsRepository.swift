@@ -1,11 +1,28 @@
 import Foundation
 
+private enum NativeContractTimestamp {
+    static func isValid(_ rawValue: String?) -> Bool {
+        guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return false }
+
+        let standard = ISO8601DateFormatter()
+        if standard.date(from: value) != nil { return true }
+
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value) != nil
+    }
+}
+
 protocol SettingsRepositoryProtocol {
     func fetch(userId: String, accessToken: String) async throws -> NativeUserSettings
+    func fetchAccountConsentStatus(accessToken: String) async throws -> NativeAccountConsentStatus
+    func acceptCurrentAccountConsent(accessToken: String) async throws -> NativeAccountConsentStatus
     func update(userId: String, values: [String: AnyCodable], accessToken: String) async throws
     func export(_ request: NativeDataExportRequest, accessToken: String) async throws -> NativeExportedFile
     func cleanupSourceImages(accessToken: String) async throws -> NativeImageCleanupResult
     func deleteAccount(accessToken: String) async throws -> NativeAccountDeletionResult
+    func fetchAccountDeletionStatus(accessToken: String) async throws -> NativeAccountDeletionResult
 }
 
 final class SettingsRepository: SettingsRepositoryProtocol {
@@ -30,14 +47,35 @@ final class SettingsRepository: SettingsRepositoryProtocol {
         return row.settings
     }
 
+    func fetchAccountConsentStatus(accessToken: String) async throws -> NativeAccountConsentStatus {
+        try await remoteClient.rpc(
+            NativeAccountConsentStatus.self,
+            name: "get_my_consent_status",
+            body: [:],
+            accessToken: accessToken
+        )
+    }
+
+    func acceptCurrentAccountConsent(accessToken: String) async throws -> NativeAccountConsentStatus {
+        let consent = NativeRegistrationConsent.current()
+        return try await remoteClient.rpc(
+            NativeAccountConsentStatus.self,
+            name: "accept_my_consent",
+            body: [
+                "p_terms_version": AnyCodable(consent.termsVersion),
+                "p_privacy_version": AnyCodable(consent.privacyVersion),
+                "p_sensitive_data_version": AnyCodable(consent.sensitiveDataVersion)
+            ],
+            accessToken: accessToken
+        )
+    }
+
     func update(userId: String, values: [String: AnyCodable], accessToken: String) async throws {
         var body = values
-        body["user_id"] = AnyCodable(userId)
         body["updated_at"] = AnyCodable(ISO8601DateFormatter().string(from: Date()))
-        _ = try await remoteClient.upsert(
-            [SettingsMutationRow].self,
+        try await remoteClient.patch(
             path: "rest/v1/user_configs",
-            queryItems: [URLQueryItem(name: "on_conflict", value: "user_id")],
+            queryItems: [URLQueryItem(name: "user_id", value: "eq.\(userId)")],
             body: body,
             accessToken: accessToken
         )
@@ -57,6 +95,15 @@ final class SettingsRepository: SettingsRepositoryProtocol {
             NativeAccountDeletionResult.self,
             path: "functions/v1/ingest-receipt",
             body: ["action": AnyCodable("delete_account")],
+            accessToken: accessToken
+        )
+    }
+
+    func fetchAccountDeletionStatus(accessToken: String) async throws -> NativeAccountDeletionResult {
+        try await remoteClient.postFunction(
+            NativeAccountDeletionResult.self,
+            path: "functions/v1/ingest-receipt",
+            body: ["action": AnyCodable("get_account_deletion_status")],
             accessToken: accessToken
         )
     }
@@ -319,27 +366,118 @@ struct NativeImageCleanupResult: Decodable, Equatable {
     }
 }
 
-struct NativeAccountDeletionResult: Decodable, Equatable {
+struct NativeAccountDeletionResult: Codable, Equatable {
     let status: String
     let message: String?
     let cleanup: NativeAccountDeletionCleanupResult?
+    let deletionStatus: String?
+    let requestId: String?
+    let requestedAt: String?
+    let completedAt: String?
+    let estimatedCompletionAt: String?
+    let supportReference: String?
+    let retryable: Bool?
 
-    var isPending: Bool { status == "deletion_pending" }
+    init(
+        status: String,
+        message: String?,
+        cleanup: NativeAccountDeletionCleanupResult?,
+        deletionStatus: String? = nil,
+        requestId: String? = nil,
+        requestedAt: String? = nil,
+        completedAt: String? = nil,
+        estimatedCompletionAt: String? = nil,
+        supportReference: String? = nil,
+        retryable: Bool? = nil
+    ) {
+        self.status = status
+        self.message = message
+        self.cleanup = cleanup
+        self.deletionStatus = deletionStatus
+        self.requestId = requestId
+        self.requestedAt = requestedAt
+        self.completedAt = completedAt
+        self.estimatedCompletionAt = estimatedCompletionAt
+        self.supportReference = supportReference
+        self.retryable = retryable
+    }
+
+    var isPending: Bool {
+        status == "deletion_pending"
+            || ["requested", "cleaning", "deleting", "failed"].contains(deletionStatus ?? "")
+    }
+
+    var isCompleted: Bool {
+        status == "deleted" || deletionStatus == "completed"
+    }
+
+    var hasDeletionRequest: Bool {
+        guard let requestId,
+              UUID(uuidString: requestId) != nil,
+              hasValidSupportReference,
+              NativeContractTimestamp.isValid(requestedAt),
+              NativeContractTimestamp.isValid(estimatedCompletionAt) else { return false }
+
+        switch deletionStatus {
+        case "requested", "cleaning", "deleting", "failed":
+            return status == "deletion_pending"
+                && retryable == true
+                && completedAt == nil
+        case "completed":
+            return status == "deleted"
+                && retryable == false
+                && NativeContractTimestamp.isValid(completedAt)
+        default:
+            return false
+        }
+    }
+
+    private var hasValidSupportReference: Bool {
+        guard let supportReference,
+              supportReference.hasPrefix("DEL-"),
+              supportReference.count == 16,
+              supportReference == supportReference.uppercased() else { return false }
+        let allowed = CharacterSet(charactersIn: "0123456789ABCDEF")
+        return supportReference.dropFirst(4).unicodeScalars.allSatisfy(allowed.contains)
+    }
 
     var displayMessage: String {
-        guard let cleanup else {
-            return isPending
+        var details: [String] = []
+        if let message, !message.isEmpty {
+            details.append(message.trimmingCharacters(in: CharacterSet(charactersIn: "。")))
+        } else if let cleanup {
+            if isPending {
+                details.append("账户删除已提交；已删除 \(cleanup.processed) 张云端原图，剩余 \(cleanup.remaining) 张将在后台清理，完成后自动删除账户")
+            } else {
+                details.append("账户及其云端数据已删除；已删除 \(cleanup.processed) 张云端原图，跳过 \(cleanup.skippedExternal) 个外部链接")
+            }
+        } else {
+            details.append(isPending
                 ? "账户删除已提交，云端原图清理完成后会自动删除全部数据"
-                : "账户及其云端数据已删除"
+                : "账户及其云端数据已删除")
         }
-        if isPending {
-            return "账户删除已提交；已删除 \(cleanup.processed) 张云端原图，剩余 \(cleanup.remaining) 张将在后台清理，完成后自动删除账户"
+
+        if isPending, deletionStatus != "failed" {
+            details.append("后台异步处理，通常在提交后 24 小时内完成")
         }
-        return "账户及其云端数据已删除；已删除 \(cleanup.processed) 张云端原图，跳过 \(cleanup.skippedExternal) 个外部链接"
+        if let supportReference, !supportReference.isEmpty {
+            details.append("支持编号：\(supportReference)")
+        }
+        return details.joined(separator: "。") + "。"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status, message, cleanup, retryable
+        case deletionStatus = "deletion_status"
+        case requestId = "request_id"
+        case requestedAt = "requested_at"
+        case completedAt = "completed_at"
+        case estimatedCompletionAt = "estimated_completion_at"
+        case supportReference = "support_reference"
     }
 }
 
-struct NativeAccountDeletionCleanupResult: Decodable, Equatable {
+struct NativeAccountDeletionCleanupResult: Codable, Equatable {
     let total: Int
     let queued: Int
     let processed: Int
@@ -350,8 +488,112 @@ struct NativeAccountDeletionCleanupResult: Decodable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case total, queued, processed, failed, remaining
-        case deadLetter = "deadLetter"
-        case skippedExternal = "skippedExternal"
+        case deadLetter = "dead_letter"
+        case skippedExternal = "skipped_external"
+    }
+}
+
+protocol NativeAccountDeletionReceiptStoreProtocol {
+    func load() -> NativeAccountDeletionResult?
+    func save(_ receipt: NativeAccountDeletionResult) throws
+    func clear()
+}
+
+enum NativeAccountDeletionReceiptStoreError: LocalizedError {
+    case invalidReceipt
+    case verificationFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidReceipt:
+            return "删除请求回执不完整"
+        case .verificationFailed:
+            return "删除请求回执未能保存到本机"
+        }
+    }
+}
+
+struct NativeAccountDeletionReceiptStore: NativeAccountDeletionReceiptStoreProtocol {
+    static let defaultKey = "account_deletion_receipt_v1"
+
+    private let defaults: UserDefaults
+    private let key: String
+
+    init(defaults: UserDefaults = .standard, key: String = Self.defaultKey) {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    func load() -> NativeAccountDeletionResult? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        guard let receipt = try? JSONDecoder().decode(NativeAccountDeletionResult.self, from: data),
+              receipt.hasDeletionRequest else { return nil }
+        return receipt
+    }
+
+    func save(_ receipt: NativeAccountDeletionResult) throws {
+        guard receipt.hasDeletionRequest else {
+            throw NativeAccountDeletionReceiptStoreError.invalidReceipt
+        }
+        defaults.set(try JSONEncoder().encode(receipt), forKey: key)
+        guard load() == receipt else {
+            throw NativeAccountDeletionReceiptStoreError.verificationFailed
+        }
+    }
+
+    func clear() {
+        defaults.removeObject(forKey: key)
+    }
+}
+
+struct NativeAccountConsentStatus: Decodable, Equatable {
+    let isActive: Bool
+    let needsConsent: Bool
+    let missing: [String]
+    let requiredVersions: [String: String]
+    let acceptedVersions: [String: String?]
+    let legalConsentAt: String?
+    let sensitiveDataConsentAt: String?
+
+    init(
+        isActive: Bool,
+        needsConsent: Bool,
+        missing: [String],
+        requiredVersions: [String: String],
+        acceptedVersions: [String: String?],
+        legalConsentAt: String? = nil,
+        sensitiveDataConsentAt: String? = nil
+    ) {
+        self.isActive = isActive
+        self.needsConsent = needsConsent
+        self.missing = missing
+        self.requiredVersions = requiredVersions
+        self.acceptedVersions = acceptedVersions
+        self.legalConsentAt = legalConsentAt
+        self.sensitiveDataConsentAt = sensitiveDataConsentAt
+    }
+
+    var isCurrent: Bool {
+        guard isActive,
+              !needsConsent,
+              missing.isEmpty,
+              NativeContractTimestamp.isValid(legalConsentAt),
+              NativeContractTimestamp.isValid(sensitiveDataConsentAt) else { return false }
+
+        return ["terms", "privacy", "sensitive_data"].allSatisfy { key in
+            guard let required = requiredVersions[key], !required.isEmpty else { return false }
+            return (acceptedVersions[key] ?? nil) == required
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case isActive = "is_active"
+        case needsConsent = "needs_consent"
+        case missing
+        case requiredVersions = "required_versions"
+        case acceptedVersions = "accepted_versions"
+        case legalConsentAt = "legal_consent_at"
+        case sensitiveDataConsentAt = "sensitive_data_consent_at"
     }
 }
 
@@ -421,8 +663,4 @@ private struct SettingsRow: Decodable {
         case keepSourceImages = "keep_source_images"
         case imageRetentionDays = "image_retention_days"
     }
-}
-
-private struct SettingsMutationRow: Decodable {
-    let id: String
 }

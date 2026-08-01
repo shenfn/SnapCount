@@ -28,6 +28,13 @@ final class AppState: ObservableObject {
     @Published var isAwaitingEmailConfirmation = false
     @Published var confirmationEmail = ""
     @Published var authResendCooldown = 0
+    @Published var requiresAccountConsent = false
+    @Published var isCheckingAccountConsent = false
+    @Published var isAcceptingAccountConsent = false
+    @Published var accountConsentError: String?
+    @Published var isAccountAccessBlocked = false
+    @Published var accountAccessBlockedMessage: String?
+    @Published private(set) var lastAccountDeletionReceipt: NativeAccountDeletionResult?
     @Published var hasUploadToken = false
     @Published var isSyncingUploadToken = false
     @Published var dashboard = DashboardSnapshot()
@@ -106,6 +113,7 @@ final class AppState: ObservableObject {
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private let insightsRepository: InsightsRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
+    private let accountDeletionReceiptStore: NativeAccountDeletionReceiptStoreProtocol
     private let financeVocabularyRepository: FinanceVocabularyRepositoryProtocol
     private let onboardingProgressStore: OnboardingProgressStore
     private let sessionProvider: NativeSessionProvider?
@@ -140,6 +148,7 @@ final class AppState: ObservableObject {
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         insightsRepository: InsightsRepositoryProtocol = InsightsRepository(),
         settingsRepository: SettingsRepositoryProtocol = SettingsRepository(),
+        accountDeletionReceiptStore: NativeAccountDeletionReceiptStoreProtocol = NativeAccountDeletionReceiptStore(),
         financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository(),
         onboardingProgressStore: OnboardingProgressStore = OnboardingProgressStore(),
         sessionProvider: NativeSessionProvider? = nil,
@@ -157,10 +166,12 @@ final class AppState: ObservableObject {
         self.walletSnapshotRepository = walletSnapshotRepository
         self.insightsRepository = insightsRepository
         self.settingsRepository = settingsRepository
+        self.accountDeletionReceiptStore = accountDeletionReceiptStore
         self.financeVocabularyRepository = financeVocabularyRepository
         self.onboardingProgressStore = onboardingProgressStore
         self.sessionProvider = sessionProvider
         self.expressionPlanAcknowledgementSleep = expressionPlanAcknowledgementSleep
+        self.lastAccountDeletionReceipt = accountDeletionReceiptStore.load()
     }
 
     func bootstrap() {
@@ -196,7 +207,7 @@ final class AppState: ObservableObject {
                 session = try await authService.restoreSession(accessToken: legacy.accessToken, refreshToken: refreshToken)
             }
             try save(session: session)
-            apply(session: session)
+            guard await prepareSessionForUse(session) else { return }
             restoreDashboardSnapshot(userId: session.user.id)
             hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
             updateShortcutCredentialMessage()
@@ -229,7 +240,10 @@ final class AppState: ObservableObject {
             let session = try await authService.signIn(email: email, password: password)
             try save(session: session)
             try? keychain.remove(KeychainKeys.uploadToken)
-            apply(session: session)
+            guard await prepareSessionForUse(session) else {
+                isSigningIn = false
+                return
+            }
             hasUploadToken = false
             authMessage = "已登录，正在同步快捷指令凭据。"
             updateShortcutCredentialMessage()
@@ -286,7 +300,7 @@ final class AppState: ObservableObject {
                 try? keychain.remove(KeychainKeys.authRecoveryPending)
                 try save(session: session)
                 try? keychain.remove(KeychainKeys.uploadToken)
-                apply(session: session)
+                guard await prepareSessionForUse(session) else { return }
                 hasUploadToken = false
                 Task { await self.synchronizeUploadToken(for: session, updateAuthMessage: false) }
                 authMessage = hasUploadToken
@@ -321,6 +335,16 @@ final class AppState: ObservableObject {
             authMessage = userFacingAuthError(error, context: "resend")
             authMessageIsError = true
         }
+    }
+
+    func changeConfirmationEmail() {
+        authResendCooldownTask?.cancel()
+        authResendCooldownTask = nil
+        authResendCooldown = 0
+        isAwaitingEmailConfirmation = false
+        confirmationEmail = ""
+        authMessage = "请修改邮箱后重新注册。"
+        authMessageIsError = false
     }
 
     func sendPasswordReset(email: String) async {
@@ -386,12 +410,86 @@ final class AppState: ObservableObject {
         isAwaitingEmailConfirmation = false
         confirmationEmail = ""
         isHandlingAuthCallback = false
+        requiresAccountConsent = false
+        isCheckingAccountConsent = false
+        isAcceptingAccountConsent = false
+        accountConsentError = nil
+        isAccountAccessBlocked = false
+        accountAccessBlockedMessage = nil
         try? keychain.remove(KeychainKeys.authRecoveryPending)
         Task {
             try? await authService.signOut()
         }
         authMessage = nil
         authMessageIsError = false
+    }
+
+    func acceptAccountConsent(
+        acceptedTerms: Bool,
+        acceptedSensitiveData: Bool
+    ) async {
+        guard requiresAccountConsent,
+              !isAccountAccessBlocked,
+              !isAcceptingAccountConsent else { return }
+        guard acceptedTerms else {
+            accountConsentError = "请先阅读并同意服务协议与隐私政策"
+            return
+        }
+        guard acceptedSensitiveData else {
+            accountConsentError = "请确认敏感数据和跨区域 AI 处理说明"
+            return
+        }
+
+        isAcceptingAccountConsent = true
+        accountConsentError = nil
+        defer { isAcceptingAccountConsent = false }
+
+        do {
+            let session = try await authService.currentSession()
+            try save(session: session)
+            let status = try await settingsRepository.acceptCurrentAccountConsent(
+                accessToken: session.accessToken
+            )
+            guard status.isActive else {
+                await presentAccountAccessBlock(
+                    session: session,
+                    message: "账户已停用，不能继续加载数据"
+                )
+                return
+            }
+            guard status.isCurrent else {
+                throw SupabaseRemoteError.requestFailed("同意状态尚未生效")
+            }
+            requiresAccountConsent = false
+            isAccountAccessBlocked = false
+            accountAccessBlockedMessage = nil
+            apply(session: session)
+            await resumeSessionAfterConsent(session)
+        } catch {
+            requiresAccountConsent = true
+            accountConsentError = accountConsentErrorMessage(error)
+        }
+    }
+
+    func retryAccountConsent() async {
+        guard (requiresAccountConsent || isAccountAccessBlocked),
+              !isCheckingAccountConsent,
+              !isAcceptingAccountConsent else { return }
+        isCheckingAccountConsent = true
+        defer { isCheckingAccountConsent = false }
+        do {
+            let session = try await authService.currentSession()
+            try save(session: session)
+            guard await prepareSessionForUse(session) else { return }
+            await resumeSessionAfterConsent(session)
+        } catch {
+            if isAccountAccessBlocked {
+                accountAccessBlockedMessage = accountConsentErrorMessage(error)
+            } else {
+                requiresAccountConsent = true
+                accountConsentError = accountConsentErrorMessage(error)
+            }
+        }
     }
 
     private func startAuthResendCooldown() {
@@ -568,7 +666,7 @@ final class AppState: ObservableObject {
         lastDashboardRefreshAt = persisted.savedAt
     }
 
-    private func fetchUploadTokenAfterRegistration(session: SupabaseAuthSession) async throws -> String {
+    private func fetchUploadTokenWithRetry(session: SupabaseAuthSession) async throws -> String {
         var lastError: Error?
         for attempt in 0..<3 {
             do {
@@ -579,7 +677,8 @@ final class AppState: ObservableObject {
             } catch {
                 lastError = error
                 if attempt < 2 {
-                    try await Task.sleep(for: .milliseconds(500))
+                    let delayMilliseconds = Int64(500 * (1 << attempt))
+                    try await Task.sleep(for: .milliseconds(delayMilliseconds))
                 }
             }
         }
@@ -2223,30 +2322,115 @@ final class AppState: ObservableObject {
     }
 
     func deleteAccount() async -> Bool {
+        await requestAccountDeletion(allowGatedSession: false)
+    }
+
+    func deleteAccountFromGate() async -> Bool {
+        await requestAccountDeletion(allowGatedSession: true)
+    }
+
+    func dismissAccountDeletionReceipt() {
+        let receiptMessage = lastAccountDeletionReceipt?.displayMessage
+        accountDeletionReceiptStore.clear()
+        lastAccountDeletionReceipt = nil
+        if authMessage == receiptMessage {
+            authMessage = nil
+            authMessageIsError = false
+        }
+    }
+
+    private func requestAccountDeletion(allowGatedSession: Bool) async -> Bool {
         guard !isDeletingAccount else { return false }
         let generation = userStateGeneration
         isDeletingAccount = true
         settingsMessage = nil
         defer { isDeletingAccount = false }
 
+        var session: SupabaseAuthSession?
+        var requestWasSent = false
+
         do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
-            let deletion = try await settingsRepository.deleteAccount(accessToken: session.accessToken)
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
-            try? await authService.signOut()
-            try? snapshotStore.remove(userId: session.user.id)
-            await RemoteImageRepository.shared.clear()
-            await SupabaseImageURLProvider.shared.clear()
-            invalidateSession(message: "")
-            authMessage = deletion.displayMessage
-            authMessageIsError = false
-            return true
+            let activeSession: SupabaseAuthSession
+            if allowGatedSession {
+                activeSession = try await authService.currentSession()
+            } else {
+                activeSession = try await validSession()
+            }
+            session = activeSession
+            if !allowGatedSession {
+                guard isCurrentUserLoad(generation, userId: activeSession.user.id) else { return false }
+            }
+            requestWasSent = true
+            let deletion = try await settingsRepository.deleteAccount(accessToken: activeSession.accessToken)
+            if !allowGatedSession {
+                guard isCurrentUserLoad(generation, userId: activeSession.user.id) else { return false }
+            }
+            guard deletion.hasDeletionRequest else {
+                throw SupabaseRemoteError.requestFailed("删除请求未返回有效回执")
+            }
+            return await finalizeAcceptedAccountDeletion(deletion, session: activeSession)
         } catch {
+            if requestWasSent,
+               let session,
+               let reconciled = try? await settingsRepository.fetchAccountDeletionStatus(
+                   accessToken: session.accessToken
+               ),
+               reconciled.hasDeletionRequest {
+                return await finalizeAcceptedAccountDeletion(reconciled, session: session)
+            }
             guard generation == userStateGeneration else { return false }
-            settingsMessage = "账户删除失败：\(error.localizedDescription)"
+            let message = requestWasSent
+                ? "暂时无法确认删除请求是否已受理。重新提交不会重复创建任务，请检查网络后重试"
+                : "账户删除失败：\(error.localizedDescription)"
+            if allowGatedSession, isAccountAccessBlocked {
+                accountAccessBlockedMessage = message
+            } else if allowGatedSession, requiresAccountConsent {
+                accountConsentError = message
+            } else {
+                settingsMessage = message
+            }
             return false
         }
+    }
+
+    private func finalizeAcceptedAccountDeletion(
+        _ deletion: NativeAccountDeletionResult,
+        session: SupabaseAuthSession
+    ) async -> Bool {
+        do {
+            try persistAccountDeletionReceipt(deletion)
+        } catch {
+            presentAccountDeletionReceiptPersistenceFailure(deletion, session: session)
+            return false
+        }
+        try? await authService.signOut()
+        try? snapshotStore.remove(userId: session.user.id)
+        await RemoteImageRepository.shared.clear()
+        await SupabaseImageURLProvider.shared.clear()
+        invalidateSession(message: "")
+        authMessage = deletion.displayMessage
+        authMessageIsError = false
+        return true
+    }
+
+    private func persistAccountDeletionReceipt(_ receipt: NativeAccountDeletionResult) throws {
+        try accountDeletionReceiptStore.save(receipt)
+        guard accountDeletionReceiptStore.load() == receipt else {
+            throw NativeAccountDeletionReceiptStoreError.verificationFailed
+        }
+        lastAccountDeletionReceipt = receipt
+    }
+
+    private func presentAccountDeletionReceiptPersistenceFailure(
+        _ receipt: NativeAccountDeletionResult,
+        session: SupabaseAuthSession
+    ) {
+        prepareSessionForGate(session)
+        requiresAccountConsent = false
+        accountConsentError = nil
+        isAccountAccessBlocked = true
+        let supportReference = receipt.supportReference ?? "未生成"
+        accountAccessBlockedMessage = "删除请求已受理，但本机无法保存回执，因此尚未退出登录。请检查可用存储空间后重新核对或再次提交；请求不会重复创建。支持编号：\(supportReference)"
     }
 
     private func updateSettings(
@@ -2355,6 +2539,118 @@ final class AppState: ObservableObject {
         currentUserEmail = session.user.email ?? ""
     }
 
+    private func prepareSessionForUse(_ session: SupabaseAuthSession) async -> Bool {
+        isCheckingAccountConsent = true
+        accountConsentError = nil
+        defer { isCheckingAccountConsent = false }
+
+        do {
+            let status = try await settingsRepository.fetchAccountConsentStatus(
+                accessToken: session.accessToken
+            )
+            guard status.isActive else {
+                await presentAccountAccessBlock(
+                    session: session,
+                    message: "账户已停用，不能继续加载数据"
+                )
+                return false
+            }
+            guard status.isCurrent else {
+                presentAccountConsentGate(
+                    session: session,
+                    message: nil
+                )
+                return false
+            }
+            requiresAccountConsent = false
+            isAccountAccessBlocked = false
+            accountAccessBlockedMessage = nil
+            accountConsentError = nil
+            apply(session: session)
+            return true
+        } catch {
+            presentAccountConsentGate(
+                session: session,
+                message: accountConsentErrorMessage(error)
+            )
+            return false
+        }
+    }
+
+    private func presentAccountConsentGate(
+        session: SupabaseAuthSession,
+        message: String?
+    ) {
+        prepareSessionForGate(session)
+        isAccountAccessBlocked = false
+        accountAccessBlockedMessage = nil
+        requiresAccountConsent = true
+        accountConsentError = message
+    }
+
+    private func presentAccountAccessBlock(
+        session: SupabaseAuthSession,
+        message: String
+    ) async {
+        prepareSessionForGate(session)
+        requiresAccountConsent = false
+        accountConsentError = nil
+        isAccountAccessBlocked = true
+        accountAccessBlockedMessage = message
+
+        guard let deletion = try? await settingsRepository.fetchAccountDeletionStatus(
+            accessToken: session.accessToken
+        ), deletion.hasDeletionRequest else { return }
+
+        _ = await finalizeAcceptedAccountDeletion(deletion, session: session)
+    }
+
+    private func prepareSessionForGate(_ session: SupabaseAuthSession) {
+        // A gated session must not retain dashboard data or pending user-scoped
+        // work from an earlier authenticated state, even when the user id is
+        // unchanged (for example after deactivation or failed receipt storage).
+        resetUserScopedState()
+        isSignedIn = false
+        currentUserId = session.user.id
+        currentUserEmail = session.user.email ?? ""
+        try? keychain.remove(KeychainKeys.uploadToken)
+        hasUploadToken = false
+        uploadTokenSyncID = nil
+        isSyncingUploadToken = false
+        updateShortcutCredentialMessage()
+        Task {
+            await RemoteImageRepository.shared.clear()
+            await SupabaseImageURLProvider.shared.clear()
+        }
+    }
+
+    private func resumeSessionAfterConsent(_ session: SupabaseAuthSession) async {
+        restoreDashboardSnapshot(userId: session.user.id)
+        hasUploadToken = (try? keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
+        updateShortcutCredentialMessage()
+        if !hasUploadToken {
+            Task { await self.synchronizeUploadToken(for: session, updateAuthMessage: false) }
+        }
+        authMessage = "确认完成，正在加载你的数据。"
+        authMessageIsError = false
+        presentOnboardingIfNeeded()
+        await refreshDashboard()
+    }
+
+    private func accountConsentErrorMessage(_ error: Error) -> String {
+        let message = error.localizedDescription.lowercased()
+        if message.contains("network")
+            || message.contains("timed out")
+            || message.contains("offline")
+            || message.contains("not connected") {
+            return "网络连接不稳定，尚未加载你的记录。请检查网络后重试"
+        }
+        if message.contains("outdated") || message.contains("check_violation") {
+            return "协议版本已更新，请重新核对后确认"
+        }
+        return "暂时无法核对账号同意状态。你的记录尚未加载，请稍后重试"
+    }
+
     private func updateShortcutCredentialMessage() {
         shortcutCredentialMessage = hasUploadToken
             ? "已同步。快捷指令会自动读取 Keychain，不需要手动填写 upload_token。"
@@ -2378,10 +2674,7 @@ final class AppState: ObservableObject {
             }
         }
         do {
-            let uploadToken = try await authService.fetchUploadToken(
-                userId: session.user.id,
-                accessToken: session.accessToken
-            )
+            let uploadToken = try await fetchUploadTokenWithRetry(session: session)
             guard isSignedIn, currentUserId == session.user.id else { return }
             try keychain.setString(uploadToken, for: KeychainKeys.uploadToken)
             hasUploadToken = true
@@ -2555,6 +2848,12 @@ final class AppState: ObservableObject {
         isSignedIn = false
         currentUserId = ""
         currentUserEmail = ""
+        requiresAccountConsent = false
+        isCheckingAccountConsent = false
+        isAcceptingAccountConsent = false
+        accountConsentError = nil
+        isAccountAccessBlocked = false
+        accountAccessBlockedMessage = nil
         hasUploadToken = false
         uploadTokenSyncID = nil
         isSyncingUploadToken = false

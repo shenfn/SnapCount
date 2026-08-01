@@ -86,6 +86,9 @@ struct NativeRegistrationConsent: Equatable {
     let sensitiveDataAcceptedAt: String
     let termsVersion: String
     let privacyVersion: String
+    let sensitiveDataVersion: String
+
+    static let currentSensitiveDataVersion = "2026-07-22"
 
     static func current(at date: Date = Date()) -> NativeRegistrationConsent {
         let acceptedAt = ISO8601DateFormatter().string(from: date)
@@ -93,7 +96,8 @@ struct NativeRegistrationConsent: Equatable {
             legalAcceptedAt: acceptedAt,
             sensitiveDataAcceptedAt: acceptedAt,
             termsVersion: LegalDocumentKind.terms.version,
-            privacyVersion: LegalDocumentKind.privacy.version
+            privacyVersion: LegalDocumentKind.privacy.version,
+            sensitiveDataVersion: currentSensitiveDataVersion
         )
     }
 }

@@ -15,6 +15,15 @@
       当前在微信内置浏览器中，注册/登录可能失败。请点击右上角「...」选择「在浏览器中打开」。
     </div>
 
+    <div v-if="deletionReceipt" class="auth-deletion-receipt" role="status">
+      <strong>{{ deletionReceiptTitle }}</strong>
+      <span>{{ deletionReceipt.message }}</span>
+      <span>支持编号：{{ deletionReceipt.supportReference }}</span>
+      <span v-if="deletionReceipt.deletionStatus !== 'completed'">预计完成：{{ deletionEstimateLabel }}</span>
+      <small>这是保存在本机的最近回执。退出后如需查询，请向支持人员提供上述编号。</small>
+      <button type="button" class="auth-switch-btn" @click="dismissDeletionReceipt">我已保存</button>
+    </div>
+
     <div v-if="authCallbackPending" class="auth-callback-panel">
       <strong>正在验证安全链接</strong>
       <span>验证完成后才能继续，请不要关闭此页面。</span>
@@ -56,6 +65,7 @@
         <button type="button" class="auth-switch-btn" :disabled="resendLoading || resendCooldown > 0" @click="resendConfirmation">
           {{ resendCooldown > 0 ? `${resendCooldown} 秒后可重发` : resendLoading ? '发送中...' : '重发确认邮件' }}
         </button>
+        <button type="button" class="auth-switch-btn" :disabled="resendLoading" @click="changeVerificationEmail">更换邮箱</button>
         <button type="button" class="auth-switch-btn" @click="returnToLogin">返回登录</button>
       </div>
 
@@ -95,6 +105,10 @@
 import { computed, onBeforeUnmount, ref, inject, watch } from 'vue'
 import { sb } from '../../lib/supabase'
 import { authRedirectURL, friendlyAuthError } from '../../lib/authFlow.js'
+import {
+  clearAccountDeletionReceipt,
+  loadAccountDeletionReceipt,
+} from '../../lib/accountDeletion.js'
 
 const props = defineProps({
   passwordRecovery: Boolean,
@@ -117,6 +131,7 @@ const awaitingVerification = ref(false)
 const verificationEmail = ref('')
 const resendLoading = ref(false)
 const resendCooldown = ref(0)
+const deletionReceipt = ref(loadAccountDeletionReceipt())
 let resendTimer = null
 const isWechatBrowser = /MicroMessenger/i.test(typeof navigator === 'undefined' ? '' : navigator.userAgent || '')
 
@@ -126,6 +141,20 @@ const maskedVerificationEmail = computed(() => {
   const visible = localPart.length <= 2 ? localPart.slice(0, 1) : localPart.slice(0, 2)
   return `${visible}***@${domain}`
 })
+const deletionReceiptTitle = computed(() => deletionReceipt.value?.deletionStatus === 'completed'
+  ? '账户删除已完成'
+  : '账户删除请求已受理')
+const deletionEstimateLabel = computed(() => {
+  const value = deletionReceipt.value?.estimatedCompletionAt
+  if (!value) return '通常在 24 小时内'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '通常在 24 小时内' : date.toLocaleString('zh-CN')
+})
+
+function dismissDeletionReceipt() {
+  clearAccountDeletionReceipt()
+  deletionReceipt.value = null
+}
 
 watch(() => props.passwordRecovery, (active) => {
   if (active) {
@@ -200,6 +229,7 @@ async function submit() {
             sensitive_data_consent_at: acceptedAt,
             terms_version: '2026-07-19',
             privacy_version: '2026-07-22',
+            sensitive_data_version: '2026-07-22',
           },
         },
       })
@@ -283,6 +313,14 @@ function returnToLogin() {
   mode.value = 'login'
   awaitingVerification.value = false
   statusMsg.value = ''
+  statusIsError.value = false
+}
+
+function changeVerificationEmail() {
+  awaitingVerification.value = false
+  verificationEmail.value = ''
+  password.value = ''
+  statusMsg.value = '请修改邮箱后重新注册。'
   statusIsError.value = false
 }
 

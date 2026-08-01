@@ -147,10 +147,19 @@ struct SettingsView: View {
                     } label: {
                         Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
                     }
+                    .disabled(appState.isDeletingAccount)
                 }
 
                 if appState.isLoadingSettings || appState.isSavingSettings || appState.isDeletingAccount {
-                    Section { ProgressView(appState.isLoadingSettings ? "正在同步设置" : "正在保存设置") }
+                    Section {
+                        if appState.isDeletingAccount {
+                            ProgressView("正在提交删除请求")
+                        } else if appState.isLoadingSettings {
+                            ProgressView("正在同步设置")
+                        } else {
+                            ProgressView("正在保存设置")
+                        }
+                    }
                 }
                 if let message = appState.settingsMessage {
                     Section {
@@ -172,7 +181,7 @@ struct SettingsView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("这会删除云端记录、账户流水、AI 识别数据和原图，且无法恢复。")
+            Text("提交后会立即退出登录，并在后台异步删除云端记录、账户流水、AI 识别数据和原图。通常在 24 小时内完成，且无法恢复。")
         }
         .task { await appState.loadUserSettings() }
     }
