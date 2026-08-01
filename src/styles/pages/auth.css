@@ -138,13 +138,57 @@
   box-shadow: var(--focus-ring);
 }
 
-.auth-error {
+.auth-message {
   font-size: 13px;
-  color: var(--danger);
   padding: 8px 12px;
-  background: var(--danger-light);
+  color: var(--text2);
+  background: var(--surface-soft, var(--surface));
   border-radius: 10px;
   line-height: 1.5;
+}
+
+.auth-callback-panel {
+  display: grid;
+  gap: 8px;
+  margin: 20px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-soft, var(--surface));
+  color: var(--text2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.auth-callback-panel strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.auth-callback-panel.is-error {
+  border-color: rgba(220, 38, 38, 0.25);
+  background: var(--danger-light);
+}
+
+.auth-message.is-error {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.auth-verification-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft, var(--surface));
+  color: var(--text2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.auth-verification-panel strong {
+  color: var(--text1);
 }
 
 .auth-btn {
@@ -182,6 +226,11 @@
   font-size: inherit;
   text-decoration: none;
   cursor: pointer;
+}
+
+.auth-switch-btn:disabled {
+  color: var(--text3);
+  cursor: default;
 }
 
 .auth-footer {

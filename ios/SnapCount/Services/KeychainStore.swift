@@ -77,5 +77,6 @@ final class KeychainStore {
 
 enum KeychainKeys {
     static let authSession = "auth_session"
+    static let authRecoveryPending = "auth_recovery_pending"
     static let uploadToken = "upload_token"
 }

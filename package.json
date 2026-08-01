@@ -14,6 +14,7 @@
     "test:image-cleanup": "node --env-file=.env.local scripts/test-image-cleanup-lifecycle.mjs",
     "test:expression-feedback": "node --env-file=.env.local scripts/test-expression-feedback.mjs",
     "test:registration-consent": "node --env-file=.env.local scripts/test-registration-consent.mjs",
+    "test:auth-flow": "node --test scripts/auth-flow.test.mjs",
     "test:finance-options": "node scripts/test-finance-review-options.mjs",
     "test:pending-queue": "node scripts/test-pending-queue.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",

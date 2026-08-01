@@ -1,7 +1,15 @@
 <template>
   <div>
     <!-- Auth gate -->
-    <AuthPage v-if="!store.isLoggedIn.value" />
+    <AuthPage
+      v-if="!store.isLoggedIn.value || authGate !== 'none'"
+      :password-recovery="passwordRecoveryActive"
+      :auth-callback-pending="authCallbackPending"
+      :auth-callback-error="authCallbackError"
+      :auth-callback-notice="authCallbackNotice"
+      @recovery-complete="completePasswordRecovery"
+      @callback-dismiss="dismissAuthCallback"
+    />
 
     <template v-else>
     <!-- 下拉刷新指示器 -->
@@ -172,6 +180,13 @@
 <script setup>
 import { ref, provide, onMounted, onBeforeUnmount, computed } from 'vue'
 import { sb } from './lib/supabase'
+import {
+  authCallbackError as readAuthCallbackError,
+  friendlyAuthError,
+  hasAuthCallbackPayload,
+  readAuthCallbackIntent,
+  sanitizedAuthCallbackPath,
+} from './lib/authFlow.js'
 import { useStore } from './composables/useStore'
 import { usePullToRefresh } from './composables/usePullToRefresh'
 import AuthPage   from './components/pages/AuthPage.vue'
@@ -198,11 +213,41 @@ const store = useStore()
 provide('store', store)
 
 const fabOpen = ref(false)
+const initialAuthURL = typeof window === 'undefined' ? '' : window.location.href
+const initialCallbackIntent = readAuthCallbackIntent(initialAuthURL)
+const initialCallbackPayload = hasAuthCallbackPayload(initialAuthURL)
+const initialCallbackFlow = initialCallbackIntent || (initialCallbackPayload ? 'unknown' : null)
+const initialCallbackFailure = initialCallbackFlow
+  ? readAuthCallbackError(initialAuthURL)
+  : null
+const authGate = ref(initialCallbackFailure
+  ? `${initialCallbackFlow}-error`
+  : initialCallbackFlow
+    ? `${initialCallbackFlow}-pending`
+    : 'none')
+const authCallbackError = ref(initialCallbackFailure
+  ? friendlyAuthError(
+    initialCallbackFailure,
+    initialCallbackFlow === 'recovery'
+      ? 'recovery'
+      : initialCallbackFlow === 'confirmation'
+        ? 'confirmation'
+        : 'default',
+  )
+  : '')
+const authCallbackNotice = ref('')
+const passwordRecoveryActive = computed(() => authGate.value === 'recovery')
+const authCallbackPending = computed(() => authGate.value.endsWith('-pending'))
+const callbackIntent = ref(initialCallbackFlow)
+let callbackTimeout = null
+let confirmationCompleting = false
+let authSubscription = null
 
 // 登录态：以 supabase 的 auth 事件为唯一真相源，避免冷启动时
 // getSession() 还未完成本地恢复就进入未登录态，或 AuthPage / App
 // 同时各调一次 loadData() 产生竞态。
 async function applySession(session) {
+  if (authGate.value !== 'none') return
   if (!session?.user) return
   const switchingUser = Boolean(
     store.currentUserId.value && store.currentUserId.value !== session.user.id,
@@ -224,6 +269,60 @@ function handleSignedOut() {
   store.currentUserEmail.value = ''
   store.isLoggedIn.value = false
   store.navigateTo('home')
+}
+
+function completePasswordRecovery() {
+  authGate.value = 'none'
+  callbackIntent.value = null
+  authCallbackError.value = ''
+  handleSignedOut()
+  clearAuthCallbackURL()
+  if (callbackTimeout) {
+    window.clearTimeout(callbackTimeout)
+    callbackTimeout = null
+  }
+}
+
+async function dismissAuthCallback() {
+  await sb.auth.signOut({ scope: 'local' }).catch(() => {})
+  authGate.value = 'none'
+  callbackIntent.value = null
+  authCallbackError.value = ''
+  authCallbackNotice.value = ''
+  handleSignedOut()
+  clearAuthCallbackURL()
+  if (callbackTimeout) {
+    window.clearTimeout(callbackTimeout)
+    callbackTimeout = null
+  }
+}
+
+function clearAuthCallbackURL() {
+  const path = sanitizedAuthCallbackPath(window.location.href)
+  window.history.replaceState({}, document.title, path)
+}
+
+async function completeConfirmation() {
+  if (confirmationCompleting) return
+  confirmationCompleting = true
+  try {
+    const { error } = await sb.auth.signOut({ scope: 'local' })
+    if (error) throw error
+  } catch (error) {
+    console.warn('[auth] confirmation callback local sign-out failed', {
+      code: error?.code || error?.name || 'unknown',
+    })
+  }
+  handleSignedOut()
+  authGate.value = 'confirmation-notice'
+  authCallbackNotice.value = '邮箱已确认'
+  callbackIntent.value = null
+  clearAuthCallbackURL()
+  if (callbackTimeout) {
+    window.clearTimeout(callbackTimeout)
+    callbackTimeout = null
+  }
+  confirmationCompleting = false
 }
 
 // 下拉刷新（全局生效，仅在页面滚到顶才会触发）
@@ -251,35 +350,80 @@ function openFabAction(action) {
 
 // 后台切回前台时静默刷新：命中快捷指令上传 → 切回 PWA 的核心动线
 function handleVisibilityChange() {
-  if (document.visibilityState === 'visible') {
+  if (document.visibilityState === 'visible' && authGate.value === 'none') {
     store.refreshIfStale()
   }
 }
 function handleWindowFocus() {
   // 兜底：部分浏览器在 tab 切换时 visibilitychange 不可靠
-  store.refreshIfStale()
+  if (authGate.value === 'none') store.refreshIfStale()
 }
 
 onMounted(async () => {
-  // 先同步读一次作为快速路径（热启动 / session 已恢复的场景）
-  const { data } = await sb.auth.getSession()
-  await applySession(data?.session)
+  if (authCallbackPending.value) {
+    callbackTimeout = window.setTimeout(() => {
+      if (!authCallbackPending.value) return
+      authGate.value = `${callbackIntent.value}-error`
+      authCallbackError.value = callbackIntent.value === 'recovery'
+        ? '重置链接验证超时，请重新发送'
+        : callbackIntent.value === 'confirmation'
+          ? '邮箱确认验证超时，请重新发送确认邮件'
+          : '安全链接验证超时，请重新发送'
+    }, 15000)
+  }
 
-  // 订阅后续变化：INITIAL_SESSION（冷启动恢复）/ SIGNED_IN /
-  // TOKEN_REFRESHED / SIGNED_OUT 都会走这里
-  sb.auth.onAuthStateChange((event, session) => {
+  // 先订阅，再读取 session，避免恢复/确认回跳事件在冷启动时丢失。
+  const { data: authData } = sb.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      callbackIntent.value = 'recovery'
+      authGate.value = 'recovery'
+      authCallbackError.value = ''
+      store.resetUserData()
+      store.isLoggedIn.value = false
+      return
+    }
+    if (
+      ['confirmation', 'unknown'].includes(callbackIntent.value)
+      && authGate.value.endsWith('-pending')
+      && event === 'SIGNED_IN'
+      && session
+    ) {
+      window.setTimeout(() => void completeConfirmation(), 0)
+      return
+    }
     if (event === 'SIGNED_OUT') {
       handleSignedOut()
     } else if (session) {
-      applySession(session)
+      window.setTimeout(() => void applySession(session), 0)
     }
   })
+  authSubscription = authData?.subscription || null
+
+  try {
+    const { data, error } = await sb.auth.getSession()
+    if (error) throw error
+    if (authGate.value === 'none') {
+      await applySession(data?.session)
+    }
+  } catch (error) {
+    if (authGate.value.endsWith('-pending')) {
+      authGate.value = `${callbackIntent.value}-error`
+      const context = callbackIntent.value === 'recovery'
+        ? 'recovery'
+        : callbackIntent.value === 'confirmation'
+          ? 'confirmation'
+          : 'default'
+      authCallbackError.value = friendlyAuthError(error, context)
+    }
+  }
 
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('focus', handleWindowFocus)
 })
 
 onBeforeUnmount(() => {
+  if (callbackTimeout) window.clearTimeout(callbackTimeout)
+  authSubscription?.unsubscribe()
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('focus', handleWindowFocus)
 })

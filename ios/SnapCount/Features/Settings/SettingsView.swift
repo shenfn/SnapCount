@@ -610,9 +610,9 @@ private struct ShortcutSetupView: View {
                             .frame(width: 38, height: 38)
                             .background(.thinMaterial, in: Circle())
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(appState.hasUploadToken ? "凭据已同步" : "凭据未同步")
+                            Text(appState.hasUploadToken ? "凭据已同步" : "可重新同步凭据")
                                 .font(.headline)
-                            Text(appState.hasUploadToken ? "快捷指令会自动读取 Keychain，不需要填写 upload_token。" : "请先返回 App 登录一次，再配置快捷指令。")
+                            Text(appState.hasUploadToken ? "快捷指令会自动读取 Keychain，不需要填写 upload_token。" : "App 登录不受影响，可在这里重新同步快捷指令凭据。")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -620,10 +620,11 @@ private struct ShortcutSetupView: View {
                     .padding(.vertical, 4)
 
                     Button {
-                        appState.verifyShortcutCredential()
+                        Task { await appState.synchronizeShortcutCredential() }
                     } label: {
-                        Label("重新检查凭据", systemImage: "arrow.clockwise")
+                        Label(appState.isSyncingUploadToken ? "同步中" : "重新同步凭据", systemImage: "arrow.clockwise")
                     }
+                    .disabled(appState.isSyncingUploadToken)
                 }
 
                 Section("系统内置动作") {

@@ -39,6 +39,11 @@ targets:
         CFBundlePackageType: APPL
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Viewer
+            CFBundleURLName: com.jiezi.app.auth
+            CFBundleURLSchemes:
+              - jiezi
         ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
         NSCameraUsageDescription: 用于拍摄账单、食物、运动等截图或照片，并上传给 AI 识别为个人记录。

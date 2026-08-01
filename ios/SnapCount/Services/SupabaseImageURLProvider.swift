@@ -49,6 +49,10 @@ actor SupabaseImageURLProvider {
         cache[path] = nil
     }
 
+    func clear() {
+        cache.removeAll()
+    }
+
     private func createSignedURLs(paths: [String], client: SupabaseClient) async throws -> [SignedURLResult] {
         do {
             return try await client.storage

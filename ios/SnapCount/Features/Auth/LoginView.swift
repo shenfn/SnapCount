@@ -4,6 +4,7 @@ struct LoginView: View {
     @EnvironmentObject private var appState: AppState
     @State private var email = ""
     @State private var password = ""
+    @State private var passwordConfirmation = ""
     @State private var mode: AuthMode = .signIn
     @State private var acceptedTerms = false
     @State private var acceptedSensitiveData = false
@@ -50,14 +51,32 @@ struct LoginView: View {
         }
     }
 
+    @ViewBuilder
     private var form: some View {
+        if appState.isHandlingAuthCallback {
+            callbackPanel
+        } else if appState.isPasswordRecovery {
+            recoveryForm
+        } else if appState.isAwaitingEmailConfirmation {
+            confirmationPanel
+        } else {
+            standardForm
+        }
+    }
+
+    private var standardForm: some View {
         VStack(spacing: 14) {
-            Picker("账号操作", selection: $mode) {
-                ForEach(AuthMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+            if mode != .resetRequest {
+                Picker("账号操作", selection: $mode) {
+                    Text(AuthMode.signIn.title).tag(AuthMode.signIn)
+                    Text(AuthMode.signUp.title).tag(AuthMode.signUp)
                 }
+                .pickerStyle(.segmented)
+            } else {
+                Text("找回密码")
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .pickerStyle(.segmented)
 
             VStack(spacing: 0) {
                 LoginField(icon: "envelope") {
@@ -71,15 +90,17 @@ struct LoginView: View {
                         .onSubmit { focusedField = .password }
                 }
 
-                Divider()
-                    .padding(.leading, 48)
+                if mode != .resetRequest {
+                    Divider()
+                        .padding(.leading, 48)
 
-                LoginField(icon: "lock") {
-                    SecureField("密码", text: $password)
-                        .textContentType(mode == .signIn ? .password : .newPassword)
-                        .focused($focusedField, equals: .password)
-                        .submitLabel(.go)
-                        .onSubmit { submit() }
+                    LoginField(icon: "lock") {
+                        SecureField("密码", text: $password)
+                            .textContentType(mode == .signIn ? .password : .newPassword)
+                            .focused($focusedField, equals: .password)
+                            .submitLabel(.go)
+                            .onSubmit { submit() }
+                    }
                 }
             }
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -113,18 +134,127 @@ struct LoginView: View {
                 legalConsent
             }
 
-            Text(mode == .signIn ? "还没有账号？切换到注册即可创建。" : "密码至少 6 位。注册即表示你同意芥子的隐私政策与服务协议。")
+            if mode == .signIn {
+                HStack {
+                    Text("还没有账号？切换到注册即可创建。")
+                    Spacer()
+                    Button("忘记密码") { mode = .resetRequest }
+                        .font(.footnote.weight(.semibold))
+                }
                 .font(.footnote)
                 .foregroundStyle(JieziTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if mode == .resetRequest {
+                HStack {
+                    Text("想起密码了？")
+                    Button("返回登录") { mode = .signIn }
+                        .font(.footnote.weight(.semibold))
+                }
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+            } else {
+                Text("密码至少 6 位。注册即表示你同意芥子的隐私政策与服务协议。")
+                    .font(.footnote)
+                    .foregroundStyle(JieziTheme.muted)
+            }
         }
     }
 
+    private var recoveryForm: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("设置新密码")
+                .font(.title3.weight(.semibold))
+            Text("此链接只用于修改密码，完成后需要重新登录。")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+
+            LoginField(icon: "lock") {
+                SecureField("新密码（至少 8 位）", text: $password)
+                    .textContentType(.newPassword)
+                    .focused($focusedField, equals: .password)
+            }
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            LoginField(icon: "lock.rotation") {
+                SecureField("再次输入新密码", text: $passwordConfirmation)
+                    .textContentType(.newPassword)
+            }
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Button(action: submit) {
+                HStack(spacing: 8) {
+                    if appState.isSigningIn { ProgressView().tint(.white) }
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(appState.isSigningIn ? "处理中" : "更新密码")
+                        .fontWeight(.semibold)
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .background(JieziTheme.mint, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .opacity(canSubmit ? 1 : 0.55)
+            .disabled(!canSubmit)
+
+            Button("取消并返回登录") { appState.returnToLogin() }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(JieziTheme.mint)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var confirmationPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("请确认邮箱后再登录", systemImage: "envelope.badge")
+                .font(.headline)
+            Text(maskedEmail(appState.confirmationEmail))
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+            Button {
+                Task { await appState.resendConfirmation() }
+            } label: {
+                Label(
+                    appState.authResendCooldown > 0
+                        ? "\(appState.authResendCooldown) 秒后可重发"
+                        : appState.isSigningIn ? "发送中" : "重发确认邮件",
+                    systemImage: "arrow.clockwise"
+                )
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(JieziTheme.mint)
+            .disabled(appState.isSigningIn || appState.authResendCooldown > 0)
+            Button("返回登录") { appState.returnToLogin() }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(JieziTheme.mint)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var callbackPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ProgressView()
+            Text("正在验证安全链接")
+                .font(.headline)
+            Text("验证完成后才能继续，请不要关闭此页面。")
+                .font(.footnote)
+                .foregroundStyle(JieziTheme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
     private var canSubmit: Bool {
-        !appState.isSigningIn
-            && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && password.count >= 6
-            && (mode == .signIn || (acceptedTerms && acceptedSensitiveData))
+        guard !appState.isSigningIn else { return false }
+        if appState.isPasswordRecovery {
+            return password.count >= 8 && password == passwordConfirmation
+        }
+        guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        if mode == .resetRequest { return appState.authResendCooldown == 0 }
+        return password.count >= 6 && (mode == .signIn || (acceptedTerms && acceptedSensitiveData))
     }
 
     private var legalConsent: some View {
@@ -172,6 +302,10 @@ struct LoginView: View {
     private func submit() {
         let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
+            if appState.isPasswordRecovery {
+                await appState.updatePassword(newPassword: password, confirmation: passwordConfirmation)
+                return
+            }
             switch mode {
             case .signIn:
                 await appState.signIn(email: cleanEmail, password: password)
@@ -182,17 +316,39 @@ struct LoginView: View {
                     acceptedTerms: acceptedTerms,
                     acceptedSensitiveData: acceptedSensitiveData
                 )
+            case .resetRequest:
+                await appState.sendPasswordReset(email: cleanEmail)
             }
         }
+    }
+
+    private func maskedEmail(_ value: String) -> String {
+        let parts = value.split(separator: "@", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return value }
+        let visible = String(parts[0].prefix(2))
+        return "\(visible)***@\(parts[1])"
     }
 
     private enum AuthMode: String, CaseIterable, Identifiable {
         case signIn
         case signUp
+        case resetRequest
 
         var id: String { rawValue }
-        var title: String { self == .signIn ? "登录" : "注册" }
-        var actionTitle: String { self == .signIn ? "登录" : "创建账号" }
+        var title: String {
+            switch self {
+            case .signIn: return "登录"
+            case .signUp: return "注册"
+            case .resetRequest: return "找回密码"
+            }
+        }
+        var actionTitle: String {
+            switch self {
+            case .signIn: return "登录"
+            case .signUp: return "创建账号"
+            case .resetRequest: return "发送重置邮件"
+            }
+        }
     }
 
     private enum Field {

@@ -4,6 +4,7 @@ import Supabase
 enum SupabaseAuthServiceError: LocalizedError {
     case missingConfig
     case invalidURL
+    case invalidAuthCallback
     case requestFailed(String)
     case emptyUploadToken
 
@@ -13,6 +14,8 @@ enum SupabaseAuthServiceError: LocalizedError {
             return "缺少 iOS Supabase 配置，请先配置 IOS_SUPABASE_URL 和 IOS_SUPABASE_ANON_KEY。"
         case .invalidURL:
             return "Supabase URL 无效"
+        case .invalidAuthCallback:
+            return "安全链接无效，请重新发送。"
         case .requestFailed(let message):
             return message
         case .emptyUploadToken:
@@ -26,7 +29,20 @@ enum SupabaseSignUpResult {
     case confirmationRequired(email: String)
 }
 
+enum SupabaseAuthCallbackKind: Equatable {
+    case confirmation
+    case passwordRecovery
+}
+
+struct SupabaseAuthCallbackResult {
+    let kind: SupabaseAuthCallbackKind
+    let session: SupabaseAuthSession
+}
+
 final class SupabaseAuthService {
+    static let confirmationRedirectURL = URL(string: "jiezi://auth/confirm")!
+    static let passwordRecoveryRedirectURL = URL(string: "jiezi://auth/recovery")!
+
     private let session: URLSession
     private let decoder = JSONDecoder()
 
@@ -52,7 +68,8 @@ final class SupabaseAuthService {
                 "sensitive_data_consent_at": .string(consent.sensitiveDataAcceptedAt),
                 "terms_version": .string(consent.termsVersion),
                 "privacy_version": .string(consent.privacyVersion)
-            ]
+            ],
+            redirectTo: Self.confirmationRedirectURL
         )
         if let session = response.session {
             return .signedIn(mapped(session))
@@ -76,6 +93,51 @@ final class SupabaseAuthService {
 
     func signOut() async throws {
         try await requireClient().auth.signOut(scope: .local)
+    }
+
+    func signOutEverywhere() async throws {
+        try await requireClient().auth.signOut(scope: .global)
+    }
+
+    func resendConfirmation(email: String) async throws {
+        try await requireClient().auth.resend(
+            email: email,
+            type: .signup,
+            emailRedirectTo: Self.confirmationRedirectURL
+        )
+    }
+
+    func sendPasswordReset(email: String) async throws {
+        try await requireClient().auth.resetPasswordForEmail(
+            email,
+            redirectTo: Self.passwordRecoveryRedirectURL
+        )
+    }
+
+    func handleAuthCallback(_ url: URL) async throws -> SupabaseAuthCallbackResult {
+        let kind = try Self.callbackKind(for: url)
+
+        let session = try await requireClient().auth.session(from: url)
+        return SupabaseAuthCallbackResult(kind: kind, session: mapped(session))
+    }
+
+    static func callbackKind(for url: URL) throws -> SupabaseAuthCallbackKind {
+        guard url.scheme?.lowercased() == "jiezi",
+              url.host?.lowercased() == "auth" else {
+            throw SupabaseAuthServiceError.invalidAuthCallback
+        }
+        switch url.path.lowercased() {
+        case "/confirm":
+            return .confirmation
+        case "/recovery":
+            return .passwordRecovery
+        default:
+            throw SupabaseAuthServiceError.invalidAuthCallback
+        }
+    }
+
+    func updatePassword(_ password: String) async throws {
+        _ = try await requireClient().auth.update(user: UserAttributes(password: password))
     }
 
     func fetchUploadToken(userId: String, accessToken: String) async throws -> String {

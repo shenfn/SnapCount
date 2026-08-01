@@ -15,6 +15,20 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(AppTab.allCases.allSatisfy { !$0.title.isEmpty })
     }
 
+    func testAuthCallbackRoutesUseSeparateExplicitFlows() throws {
+        XCTAssertEqual(
+            try SupabaseAuthService.callbackKind(for: URL(string: "jiezi://auth/confirm?code=one-time")!),
+            .confirmation
+        )
+        XCTAssertEqual(
+            try SupabaseAuthService.callbackKind(for: URL(string: "jiezi://auth/recovery?code=one-time")!),
+            .passwordRecovery
+        )
+        XCTAssertThrowsError(
+            try SupabaseAuthService.callbackKind(for: URL(string: "jiezi://auth/callback?code=one-time")!)
+        )
+    }
+
     func testInboxCategoriesKeepActionOrderAndHideEmptyGroups() {
         let pending = NativePendingExpense(
             id: "pending-1",

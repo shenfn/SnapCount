@@ -23,7 +23,13 @@ final class AppState: ObservableObject {
     @Published var isSigningIn = false
     @Published var authMessage: String?
     @Published var authMessageIsError = false
+    @Published var isHandlingAuthCallback = false
+    @Published var isPasswordRecovery = false
+    @Published var isAwaitingEmailConfirmation = false
+    @Published var confirmationEmail = ""
+    @Published var authResendCooldown = 0
     @Published var hasUploadToken = false
+    @Published var isSyncingUploadToken = false
     @Published var dashboard = DashboardSnapshot()
     @Published var dashboardMessage: String?
     @Published var isLoadingDashboard = false
@@ -118,6 +124,8 @@ final class AppState: ObservableObject {
     private var dashboardRefreshGeneration = 0
     private var userStateGeneration = 0
     private var dashboardSupplementTask: Task<Void, Never>?
+    private var authResendCooldownTask: Task<Void, Never>?
+    private var uploadTokenSyncID: UUID?
     private var isLoadingFinanceVocabulary = false
     private var shouldDeferOnboardingForExternalRoute = false
 
@@ -165,6 +173,15 @@ final class AppState: ObservableObject {
     }
 
     private func restoreAuthentication() async {
+        if (try? keychain.string(for: KeychainKeys.authRecoveryPending)) == "1" {
+            isPasswordRecovery = true
+            isSignedIn = false
+            isHandlingAuthCallback = false
+            authMessage = "请输入新的登录密码。"
+            authMessageIsError = false
+            return
+        }
+
         do {
             let session: SupabaseAuthSession
             do {
@@ -183,6 +200,9 @@ final class AppState: ObservableObject {
             restoreDashboardSnapshot(userId: session.user.id)
             hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
             updateShortcutCredentialMessage()
+            if !hasUploadToken {
+                Task { await self.synchronizeUploadToken(for: session, updateAuthMessage: false) }
+            }
             Task {
                 await refreshDashboard()
             }
@@ -190,7 +210,7 @@ final class AppState: ObservableObject {
             if isInvalidRefreshSessionError(error) {
                 invalidateSession(message: "登录状态已失效，请重新登录。")
             } else {
-                authMessage = error.localizedDescription
+                authMessage = userFacingAuthError(error, context: "restore")
                 authMessageIsError = true
             }
         }
@@ -199,24 +219,25 @@ final class AppState: ObservableObject {
     func signIn(email: String, password: String) async {
         guard !isSigningIn else { return }
         isSigningIn = true
+        isPasswordRecovery = false
+        isAwaitingEmailConfirmation = false
+        try? keychain.remove(KeychainKeys.authRecoveryPending)
         authMessage = nil
         authMessageIsError = false
 
         do {
             let session = try await authService.signIn(email: email, password: password)
-            let uploadToken = try await authService.fetchUploadToken(
-                userId: session.user.id,
-                accessToken: session.accessToken
-            )
-            try save(session: session, uploadToken: uploadToken)
+            try save(session: session)
+            try? keychain.remove(KeychainKeys.uploadToken)
             apply(session: session)
-            hasUploadToken = true
-            authMessage = "已登录，快捷指令凭据已同步。"
+            hasUploadToken = false
+            authMessage = "已登录，正在同步快捷指令凭据。"
             updateShortcutCredentialMessage()
+            Task { await self.synchronizeUploadToken(for: session, updateAuthMessage: true) }
             presentOnboardingIfNeeded()
             await refreshDashboard()
         } catch {
-            authMessage = error.localizedDescription
+            authMessage = userFacingAuthError(error, context: "signIn")
             authMessageIsError = true
         }
 
@@ -253,29 +274,136 @@ final class AppState: ObservableObject {
             )
             switch result {
             case .confirmationRequired(let address):
+                isAwaitingEmailConfirmation = true
+                confirmationEmail = address
+                startAuthResendCooldown()
                 authMessage = "注册成功。请前往 \(address) 完成邮箱确认，然后返回登录。"
                 authMessageIsError = false
 
             case .signedIn(let session):
-                let uploadToken = try? await fetchUploadTokenAfterRegistration(session: session)
-                if let uploadToken, !uploadToken.isEmpty {
-                    try save(session: session, uploadToken: uploadToken)
-                    hasUploadToken = true
-                } else {
-                    try save(session: session)
-                    hasUploadToken = false
-                }
+                isAwaitingEmailConfirmation = false
+                isPasswordRecovery = false
+                try? keychain.remove(KeychainKeys.authRecoveryPending)
+                try save(session: session)
+                try? keychain.remove(KeychainKeys.uploadToken)
                 apply(session: session)
+                hasUploadToken = false
+                Task { await self.synchronizeUploadToken(for: session, updateAuthMessage: false) }
                 authMessage = hasUploadToken
                     ? "注册成功，快捷指令凭据已同步。"
-                    : "注册成功。上传凭据正在生成，可稍后在设置中重新检查。"
+                    : "注册成功。快捷指令凭据正在同步，可稍后在设置中重试。"
                 updateShortcutCredentialMessage()
                 presentOnboardingIfNeeded()
                 await refreshDashboard()
             }
         } catch {
-            authMessage = error.localizedDescription
+            authMessage = userFacingAuthError(error, context: "signUp")
             authMessageIsError = true
+        }
+    }
+
+    func resendConfirmation() async {
+        guard isAwaitingEmailConfirmation,
+              !confirmationEmail.isEmpty,
+              !isSigningIn,
+              authResendCooldown == 0 else { return }
+        isSigningIn = true
+        authMessage = nil
+        authMessageIsError = false
+        defer { isSigningIn = false }
+
+        do {
+            try await authService.resendConfirmation(email: confirmationEmail)
+            authMessage = "确认邮件已重新发送，请检查收件箱和垃圾邮件。"
+            authMessageIsError = false
+            startAuthResendCooldown()
+        } catch {
+            authMessage = userFacingAuthError(error, context: "resend")
+            authMessageIsError = true
+        }
+    }
+
+    func sendPasswordReset(email: String) async {
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty, !isSigningIn, authResendCooldown == 0 else { return }
+        isSigningIn = true
+        authMessage = nil
+        authMessageIsError = false
+        defer { isSigningIn = false }
+
+        do {
+            try await authService.sendPasswordReset(email: address)
+            authMessage = "如果该邮箱已注册，你会收到密码重置邮件。请检查收件箱和垃圾邮件。"
+            authMessageIsError = false
+            startAuthResendCooldown()
+        } catch {
+            authMessage = userFacingAuthError(error, context: "recoveryEmail")
+            authMessageIsError = true
+        }
+    }
+
+    func updatePassword(newPassword: String, confirmation: String) async {
+        guard isPasswordRecovery, !isSigningIn else { return }
+        guard newPassword.count >= 8 else {
+            authMessage = "新密码至少需要 8 位"
+            authMessageIsError = true
+            return
+        }
+        guard newPassword == confirmation else {
+            authMessage = "两次输入的新密码不一致"
+            authMessageIsError = true
+            return
+        }
+
+        isSigningIn = true
+        authMessage = nil
+        authMessageIsError = false
+        defer { isSigningIn = false }
+
+        do {
+            try await authService.updatePassword(newPassword)
+            try? await authService.signOutEverywhere()
+            try? await authService.signOut()
+            try? keychain.remove(KeychainKeys.authSession)
+            try? keychain.remove(KeychainKeys.uploadToken)
+            try? keychain.remove(KeychainKeys.authRecoveryPending)
+            isPasswordRecovery = false
+            isAwaitingEmailConfirmation = false
+            resetUserScopedState()
+            authMessage = "密码已更新，请重新登录。"
+            authMessageIsError = false
+        } catch {
+            authMessage = userFacingAuthError(error, context: "passwordUpdate")
+            authMessageIsError = true
+        }
+    }
+
+    func returnToLogin() {
+        authResendCooldownTask?.cancel()
+        authResendCooldownTask = nil
+        authResendCooldown = 0
+        isPasswordRecovery = false
+        isAwaitingEmailConfirmation = false
+        confirmationEmail = ""
+        isHandlingAuthCallback = false
+        try? keychain.remove(KeychainKeys.authRecoveryPending)
+        Task {
+            try? await authService.signOut()
+        }
+        authMessage = nil
+        authMessageIsError = false
+    }
+
+    private func startAuthResendCooldown() {
+        authResendCooldownTask?.cancel()
+        authResendCooldown = 60
+        authResendCooldownTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while self.authResendCooldown > 0 && !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled { return }
+                self.authResendCooldown -= 1
+            }
         }
     }
 
@@ -296,6 +424,10 @@ final class AppState: ObservableObject {
             authMessageIsError = false
             hasUploadToken = false
             shortcutCredentialMessage = nil
+            isPasswordRecovery = false
+            isAwaitingEmailConfirmation = false
+            confirmationEmail = ""
+            try? keychain.remove(KeychainKeys.authRecoveryPending)
         }
     }
 
@@ -305,6 +437,17 @@ final class AppState: ObservableObject {
             updateShortcutCredentialMessage()
         } catch {
             shortcutCredentialMessage = error.localizedDescription
+        }
+    }
+
+    func synchronizeShortcutCredential() async {
+        guard isSignedIn, !isSyncingUploadToken else { return }
+        do {
+            let session = try await validSession()
+            await synchronizeUploadToken(for: session, updateAuthMessage: false)
+        } catch {
+            hasUploadToken = false
+            shortcutCredentialMessage = "快捷指令凭据同步失败，请稍后重试。"
         }
     }
 
@@ -1204,6 +1347,12 @@ final class AppState: ObservableObject {
 
     func handleDeepLink(_ url: URL) {
         guard url.scheme == "jiezi" else { return }
+
+        if url.host == "auth" {
+            handleAuthCallback(url)
+            return
+        }
+
         shouldDeferOnboardingForExternalRoute = true
         isOnboardingPresented = false
 
@@ -2085,6 +2234,10 @@ final class AppState: ObservableObject {
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
             let deletion = try await settingsRepository.deleteAccount(accessToken: session.accessToken)
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
+            try? await authService.signOut()
+            try? snapshotStore.remove(userId: session.user.id)
+            await RemoteImageRepository.shared.clear()
+            await SupabaseImageURLProvider.shared.clear()
             invalidateSession(message: "")
             authMessage = deletion.displayMessage
             authMessageIsError = false
@@ -2189,8 +2342,13 @@ final class AppState: ObservableObject {
 
     private func apply(session: SupabaseAuthSession) {
         if !currentUserId.isEmpty, currentUserId != session.user.id {
+            uploadTokenSyncID = nil
+            isSyncingUploadToken = false
             resetUserScopedState()
-            Task { await RemoteImageRepository.shared.clear() }
+            Task {
+                await RemoteImageRepository.shared.clear()
+                await SupabaseImageURLProvider.shared.clear()
+            }
         }
         isSignedIn = true
         currentUserId = session.user.id
@@ -2200,7 +2358,98 @@ final class AppState: ObservableObject {
     private func updateShortcutCredentialMessage() {
         shortcutCredentialMessage = hasUploadToken
             ? "已同步。快捷指令会自动读取 Keychain，不需要手动填写 upload_token。"
-            : "未同步。请先登录芥子。"
+            : isSignedIn
+                ? "已登录，快捷指令凭据暂未同步，可稍后重试。"
+                : "未同步。请先登录芥子。"
+    }
+
+    private func synchronizeUploadToken(
+        for session: SupabaseAuthSession,
+        updateAuthMessage: Bool
+    ) async {
+        guard uploadTokenSyncID == nil else { return }
+        let syncID = UUID()
+        uploadTokenSyncID = syncID
+        isSyncingUploadToken = true
+        defer {
+            if uploadTokenSyncID == syncID {
+                uploadTokenSyncID = nil
+                isSyncingUploadToken = false
+            }
+        }
+        do {
+            let uploadToken = try await authService.fetchUploadToken(
+                userId: session.user.id,
+                accessToken: session.accessToken
+            )
+            guard isSignedIn, currentUserId == session.user.id else { return }
+            try keychain.setString(uploadToken, for: KeychainKeys.uploadToken)
+            hasUploadToken = true
+            updateShortcutCredentialMessage()
+            if updateAuthMessage {
+                authMessage = "已登录，快捷指令凭据已同步。"
+                authMessageIsError = false
+            }
+        } catch {
+            guard isSignedIn, currentUserId == session.user.id else { return }
+            try? keychain.remove(KeychainKeys.uploadToken)
+            hasUploadToken = false
+            updateShortcutCredentialMessage()
+            if updateAuthMessage {
+                authMessage = "已登录。快捷指令凭据暂未同步，可稍后在设置中重试。"
+                authMessageIsError = false
+            }
+        }
+    }
+
+    private func handleAuthCallback(_ url: URL) {
+        guard url.path == "/confirm" || url.path == "/recovery" else {
+            authMessage = "安全链接无效，请重新发送。"
+            authMessageIsError = true
+            return
+        }
+
+        isHandlingAuthCallback = true
+        isPasswordRecovery = false
+        isAwaitingEmailConfirmation = false
+        authMessage = "正在验证安全链接，请稍候。"
+        authMessageIsError = false
+        invalidateSession(message: "")
+
+        Task { @MainActor in
+            do {
+                let result = try await authService.handleAuthCallback(url)
+                switch result.kind {
+                case .confirmation:
+                    try? await authService.signOut()
+                    try? keychain.remove(KeychainKeys.authSession)
+                    try? keychain.remove(KeychainKeys.uploadToken)
+                    try? keychain.remove(KeychainKeys.authRecoveryPending)
+                    isHandlingAuthCallback = false
+                    authMessage = "邮箱已确认，请返回登录。"
+                    authMessageIsError = false
+
+                case .passwordRecovery:
+                    try? keychain.remove(KeychainKeys.authSession)
+                    try? keychain.remove(KeychainKeys.uploadToken)
+                    try? keychain.setString("1", for: KeychainKeys.authRecoveryPending)
+                    isHandlingAuthCallback = false
+                    isPasswordRecovery = true
+                    authMessage = "请输入新的登录密码。"
+                    authMessageIsError = false
+                }
+            } catch {
+                try? await authService.signOut()
+                try? keychain.remove(KeychainKeys.authRecoveryPending)
+                isHandlingAuthCallback = false
+                isPasswordRecovery = false
+                authMessage = userFacingAuthError(
+                    error,
+                    context: url.path == "/recovery" ? "recoveryCallback" : "confirmationCallback"
+                )
+                authMessageIsError = true
+            }
+        }
     }
 
     private func save(session: SupabaseAuthSession, uploadToken: String) throws {
@@ -2252,16 +2501,69 @@ final class AppState: ObservableObject {
             || message.contains("session_not_found")
     }
 
+    private func userFacingAuthError(_ error: Error, context: String) -> String {
+        let message = error.localizedDescription.lowercased()
+        if message.contains("invalid login credentials") {
+            return "邮箱或密码不正确"
+        }
+        if message.contains("email not confirmed") {
+            return "请先完成邮箱确认，再返回登录"
+        }
+        if message.contains("user already registered") {
+            return "该邮箱已注册，请直接登录或找回密码"
+        }
+        if message.contains("invalid email") || message.contains("email_address_invalid") {
+            return "请输入有效的邮箱地址"
+        }
+        if message.contains("weak_password") || message.contains("password should") {
+            return "密码强度不足，请设置更长的密码"
+        }
+        if message.contains("same_password") {
+            return "新密码不能与当前密码相同"
+        }
+        if message.contains("rate limit") || message.contains("too many") || message.contains("over_email_send_rate_limit") {
+            return "操作过于频繁，请稍后再试"
+        }
+        if message.contains("expired") || message.contains("otp_expired") || message.contains("flow_state_not_found") || message.contains("bad_code_verifier") {
+            return context.contains("confirmation") ? "确认链接已失效，请重新发送确认邮件" : "重置链接已失效，请重新发送"
+        }
+        if message.contains("network") || message.contains("timed out") || message.contains("offline") || message.contains("not connected") {
+            return "网络连接不稳定，请检查网络后重试"
+        }
+        if context == "recoveryEmail" {
+            return "重置邮件暂时无法发送，请稍后重试"
+        }
+        if context == "resend" {
+            return "确认邮件暂时无法发送，请稍后重试"
+        }
+        if context == "passwordUpdate" {
+            return "密码更新失败，请重新打开重置链接后再试"
+        }
+        if context == "recoveryCallback" {
+            return "重置链接无效或已过期，请重新发送"
+        }
+        if context == "confirmationCallback" {
+            return "确认链接无效或已过期，请重新发送确认邮件"
+        }
+        return "操作失败，请稍后重试"
+    }
+
     private func invalidateSession(message: String) {
         try? keychain.remove(KeychainKeys.authSession)
         try? keychain.remove(KeychainKeys.uploadToken)
+        try? keychain.remove(KeychainKeys.authRecoveryPending)
         isSignedIn = false
         currentUserId = ""
         currentUserEmail = ""
         hasUploadToken = false
+        uploadTokenSyncID = nil
+        isSyncingUploadToken = false
         shortcutCredentialMessage = nil
         resetUserScopedState()
-        Task { await RemoteImageRepository.shared.clear() }
+        Task {
+            await RemoteImageRepository.shared.clear()
+            await SupabaseImageURLProvider.shared.clear()
+        }
         authMessage = message
         authMessageIsError = !message.isEmpty
     }
