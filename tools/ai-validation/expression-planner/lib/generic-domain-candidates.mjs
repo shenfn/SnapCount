@@ -184,7 +184,7 @@ function evidence(records, fields) {
   }))
 }
 
-function candidate({ id, domainKey, semanticKey, claimType = "fact", subtype = null, dimension, value, text, records, numbers, confidence = 1, dataCoverage = 1, evidenceFields }) {
+function candidate({ id, domainKey, semanticKey, claimType = "fact", subtype = null, dimension, value, text, records, numbers, confidence = 1, dataCoverage = 1, evidenceFields, selectionHints = {} }) {
   return {
     candidate_id: id, candidate_version: "candidate-v0.1", domain_key: domainKey, dimension,
     claim_type: claimType, fact_subtype: subtype, interaction_mode: "inform",
@@ -192,6 +192,7 @@ function candidate({ id, domainKey, semanticKey, claimType = "fact", subtype = n
     evidence: evidence(records, evidenceFields ?? ["occurred_at", "amount", "metric_value"]),
     numbers: numbers.map(item => typeof item === "number" ? { value: item, meaning: "verified_metric", derivation: "source_record" } : item),
     quality: { confidence, sample_count: records.length, data_coverage: dataCoverage },
+    selection_hints: selectionHints,
     eligibility: { eligible: true, blocked_reasons: [] },
   }
 }
@@ -249,7 +250,8 @@ function generateFoodCandidates(current, prior, domainProfile = {}) {
       id: `fact:food:context:${current.id}`, domainKey: "food", semanticKey: "food_record_context", subtype: "observed", dimension: "record_context",
       value: { domain_key: "food", occurred_at: current.occurred_at, meal_type: mealType, dish_names: names, dish_count: names.length },
       text: `记录于${time ?? "当前时间"}，${mealTypeLabel(mealType)}${names.length ? `，${names.slice(0, 3).join("、")}${names.length > 3 ? "等" : ""}` : ""}`,
-      records: [current], numbers: [names.length || 1], evidenceFields: ["occurred_at", "meal_type", "dishes", "time_context"],
+      records: [current], numbers: [{ value: names.length, meaning: "recognized_dish_count", derivation: "count(payload.dishes)" }], evidenceFields: ["occurred_at", "meal_type", "dishes", "time_context"],
+      selectionHints: { allowed_surfaces: ["pwa_pending_ai_card", "record_detail"] },
     }))
   }
 
@@ -269,6 +271,7 @@ function generateFoodCandidates(current, prior, domainProfile = {}) {
       text: `记录了${names.length}道菜：${names.slice(0, 3).join("、")}${names.length > 3 ? "等" : ""}；${macroText}`,
       records: [current], numbers: [names.length, ...Object.values(macroValues).filter(value => value !== null && value > 0)], confidence: 0.86,
       evidenceFields: ["occurred_at", "dishes", "is_estimated", "confidence_note"],
+      selectionHints: { allowed_surfaces: ["pwa_pending_ai_card", "record_detail"] },
     }))
   }
 
@@ -339,11 +342,17 @@ function generateSleepCandidates(current, prior, domainProfile = {}) {
   const light = num(payloadValue(current, "light_sleep_minutes"))
   const rem = num(payloadValue(current, "rem_minutes"))
   if (start || wake) {
+    const timingNumbers = [
+      { value: clockMinutes(start), meaning: "sleep_start_clock_minutes", derivation: "source_record.sleep_start_at" },
+      { value: clockMinutes(wake), meaning: "wake_clock_minutes", derivation: "source_record.wake_at" },
+    ].filter(item => item.value !== null)
     output.push(candidate({
       id: `fact:sleep:timing:${current.id}`, domainKey: "sleep", semanticKey: "sleep_timing", subtype: "observed", dimension: "temporal_rhythm",
       value: { occurred_at: current.occurred_at, sleep_start_at: start, wake_at: wake },
       text: `入睡 ${sleepClock(start) ?? "未知"}，醒来 ${sleepClock(wake) ?? "未知"}`,
-      records: [current], numbers: [clockMinutes(start) ?? 1, clockMinutes(wake) ?? 1], confidence: 0.9, evidenceFields: ["occurred_at", "sleep_start_at", "wake_at", "time_context"],
+      records: [current], numbers: timingNumbers, confidence: timingNumbers.length === 2 ? 0.9 : 0.8,
+      dataCoverage: timingNumbers.length / 2, evidenceFields: ["occurred_at", "sleep_start_at", "wake_at", "time_context"],
+      selectionHints: { allowed_surfaces: ["pwa_pending_ai_card", "record_detail"] },
     }))
     const typicalStart = clockMinutes(domainProfile?.chronotype?.typical_sleep_start)
     const typicalWake = clockMinutes(domainProfile?.chronotype?.typical_wake)
@@ -379,6 +388,7 @@ function generateSleepCandidates(current, prior, domainProfile = {}) {
       value: stages,
       text: `睡眠阶段：深睡 ${deep ?? "未知"} 分钟、浅睡 ${light ?? "未知"} 分钟、REM ${rem ?? "未知"} 分钟（设备估算）`,
       records: [current], numbers: [total, ...known], confidence: 0.74, dataCoverage: known.length / 3, evidenceFields: ["occurred_at", "deep_sleep_minutes", "light_sleep_minutes", "rem_minutes", "awake_minutes"],
+      selectionHints: { allowed_surfaces: ["pwa_pending_ai_card", "record_detail"] },
     }))
   }
   return output
@@ -416,11 +426,11 @@ export function generateBuiltinDomainCandidates(domainKey, records, currentRecor
   const current = records.find(record => record.id === currentRecordId)
   if (!current) return []
   const currentMetric = domainMetric(domainKey, current)
-  if (!currentMetric) return []
   const prior = records.filter(record => record.id !== currentRecordId)
     .map(record => ({ record, metric: domainMetric(domainKey, record) }))
     .filter(item => item.metric)
-  const output = [candidate({
+  const output = []
+  if (currentMetric) output.push(candidate({
     id: `fact:${domainKey}:${current.id}`, domainKey, semanticKey: `${domainKey}_current_metric`, subtype: "observed", dimension: "current_fact",
     value: {
       domain_key: domainKey,
@@ -438,8 +448,8 @@ export function generateBuiltinDomainCandidates(domainKey, records, currentRecor
       } : {}),
     },
     text: `本次${currentMetric.label}为 ${currentMetric.value} ${currentMetric.unit}`, records: [current], numbers: [currentMetric.value],
-  })]
-  if (domainKey !== "wallet" && prior.length >= 3 && !(domainKey === "food" && textValue(payloadValue(current, "meal_type")))) {
+  }))
+  if (currentMetric && domainKey !== "wallet" && prior.length >= 3 && !(domainKey === "food" && textValue(payloadValue(current, "meal_type")))) {
     const baseline = median(prior.map(item => item.metric.value))
     const delta = Math.round((currentMetric.value - baseline) * 100) / 100
     output.push(candidate({
@@ -451,7 +461,7 @@ export function generateBuiltinDomainCandidates(domainKey, records, currentRecor
   }
   if (domainKey === "food") output.push(...generateFoodCandidates(current, records.filter(record => record.id !== currentRecordId), domainProfile))
   if (domainKey === "sleep") output.push(...generateSleepCandidates(current, records.filter(record => record.id !== currentRecordId), domainProfile))
-  if (domainKey === "wallet") {
+  if (domainKey === "wallet" && currentMetric) {
     const previous = prior
       .filter(item => walletComparisonAllowed(current, item.record, currentMetric, item.metric))
       .sort((a, b) => walletSnapshotTime(b.record) - walletSnapshotTime(a.record))[0]

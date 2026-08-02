@@ -314,6 +314,12 @@ export async function persistPlannerExposureEvents(
   if (params.simulationOnly === true) return [];
   const renderPlans = objectValue(params.plan.render_plans) ?? {};
   const renderPlan = objectValue(renderPlans[params.surface]) ?? {};
+  const decision = objectValue(params.plan.decision) ?? {};
+  const decisionId = normalizeString(decision.decision_id);
+  const selectionProbability = typeof decision.selection_probability === "number"
+      && Number.isFinite(decision.selection_probability)
+    ? decision.selection_probability
+    : null;
   const allSelected = Array.isArray(renderPlan.selected)
     ? renderPlan.selected
     : normalizeString(params.plan.surface) === params.surface && Array.isArray(params.plan.selected)
@@ -418,6 +424,22 @@ export async function persistPlannerExposureEvents(
         scoped_exposure_key: `${params.surface}:${exposureKey}`,
         dedupe_key: dedupeKey,
         scoped_dedupe_key: `${params.surface}:${dedupeKey}`,
+        ...(decisionId
+          ? {
+            decision_id: decisionId,
+            decision_version: normalizeString(decision.decision_version),
+            decided_at: normalizeString(decision.decided_at),
+            policy_name: normalizeString(decision.policy_name),
+            policy_version: normalizeString(decision.policy_version),
+            planner_version: normalizeString(decision.planner_version),
+            decision_scoring_version: normalizeString(decision.scoring_version),
+            candidate_schema_version: normalizeString(decision.candidate_schema_version),
+            chosen_action_id: normalizeString(decision.chosen_action_id),
+            selection_probability: selectionProbability,
+            decision_selection_mode: normalizeString(decision.selection_mode),
+            action_set: Array.isArray(decision.action_set) ? decision.action_set : [],
+          }
+          : {}),
       },
       simulation_only: false,
       counts_for_novelty: true,

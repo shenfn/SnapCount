@@ -47,6 +47,58 @@ test('does not invent an insight from a single isolated expense', () => {
   assert.equal(plan.status, 'auto_planned')
   assert.equal(plan.selected.length, 0)
   assert.equal(plan.shortcut_plan.silent, true)
+  assert.equal(plan.plan_summary.record_detail.selected[0].semantic_key, 'expense_current_record_context')
+  assert.equal(plan.plan_summary.pwa_pending_ai_card.selected[0].semantic_key, 'expense_current_record_context')
+  assert.equal(plan.plan_summary.pwa_pending_ai_card.selected[0].selection_mode, 'exact_fact_fallback')
+})
+
+test('keeps a pending expense out of aggregates while exposing its verified record context', () => {
+  const plan = buildExpressionShadowPlan({
+    transactions: [
+      {
+        id: 'previous-week', type: 'expense', transaction_date: '2026-07-18', transaction_time: '10:00:00',
+        amount: 40, merchant_name: '示例记录', category: 'life', status: 'done',
+      },
+      {
+        id: 'confirmed-morning', type: 'expense', transaction_date: '2026-07-25', transaction_time: '09:00:00',
+        amount: 10, merchant_name: '示例记录', category: 'life', status: 'done',
+      },
+      {
+        id: 'confirmed-noon', type: 'expense', transaction_date: '2026-07-25', transaction_time: '12:00:00',
+        amount: 20, merchant_name: '示例记录', category: 'life', status: 'done',
+      },
+      {
+        id: 'pending-current', type: 'expense', transaction_date: '2026-07-25', transaction_time: '20:16:00',
+        amount: 32, merchant_name: '示例记录', category: 'life', status: 'pending',
+      },
+    ],
+    currentRecordId: 'pending-current',
+  })
+  const context = plan.candidates.find(candidate => candidate.claim.semantic_key === 'expense_current_record_context')
+
+  assert.equal(plan.status, 'auto_planned')
+  assert.ok(context)
+  assert.equal(context.claim.structured_value.fact_status, 'pending_review')
+  assert.match(context.claim.canonical_text, /分类仍待确认/)
+  assert.equal(context.evidence[0].ledger_status, 'pending_review')
+  assert.deepEqual(plan.candidates.map(candidate => candidate.claim.semantic_key), ['expense_current_record_context'])
+  assert.equal(plan.shortcut_plan.silent, true)
+  assert.equal(plan.plan_summary.record_detail.selected[0].semantic_key, 'expense_current_record_context')
+})
+
+test('does not expose the noon proxy when an expense has only a transaction date', () => {
+  const plan = buildExpressionShadowPlan({
+    transactions: [{
+      id: 'date-only', type: 'expense', transaction_date: '2026-07-25', transaction_time: null,
+      amount: 32, merchant_name: '示例记录', category: 'life', status: 'done',
+    }],
+    currentRecordId: 'date-only',
+  })
+  const context = plan.candidates.find(candidate => candidate.claim.semantic_key === 'expense_current_record_context')
+
+  assert.ok(context)
+  assert.equal(context.claim.structured_value.time_precision, 'date_only')
+  assert.doesNotMatch(context.claim.canonical_text, /12:00/)
 })
 
 test('current-day facts do not read same-day transactions after the current record', () => {

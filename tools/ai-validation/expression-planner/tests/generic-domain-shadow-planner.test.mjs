@@ -92,6 +92,24 @@ test('food planner reads the production total_calorie_kcal field', () => {
   assert.equal(fact.claim.structured_value.unit, '千卡')
 })
 
+test('food planner keeps meal and dish context when calories are missing', () => {
+  const current = {
+    id: 'food-context-only',
+    occurred_at: '2026-07-14T08:31:00+08:00',
+    payload: { meal_type: 'breakfast', dishes: [{ name: '全麦面包' }] },
+  }
+  const plan = buildGenericExpressionShadowPlan({ domainKey: 'food', records: [current], currentRecordId: current.id })
+  const context = candidate(plan, 'food_record_context')
+
+  assert.ok(context)
+  assert.equal(candidate(plan, 'food_current_metric'), undefined)
+  assert.equal(context.claim.structured_value.meal_type, 'breakfast')
+  assert.deepEqual(context.claim.structured_value.dish_names, ['全麦面包'])
+  assert.equal(context.numbers[0].value, 1)
+  assert.equal(plan.shortcut_plan.silent, true)
+  assert.equal(plan.plan_summary.record_detail.selected[0].semantic_key, 'food_record_context')
+})
+
 test('food planner exposes time, meal, dish, and composition facts', () => {
   const history = [1, 2, 3].map(index => ({
     id: `food-history-${index}`,
@@ -152,6 +170,37 @@ test('sleep planner exposes timing, quality, and partial stage facts', () => {
   assert.ok(stages)
   assert.equal(stages.claim.structured_value.rem_minutes, null)
   assert.equal(stages.quality.data_coverage, 2 / 3)
+})
+
+test('sleep planner keeps timing context when total duration is missing', () => {
+  const current = {
+    id: 'sleep-timing-only',
+    occurred_at: '2026-07-14T08:20:00+08:00',
+    payload: { sleep_start_at: '2026-07-14T01:10:00+08:00', wake_at: '2026-07-14T08:20:00+08:00' },
+  }
+  const plan = buildGenericExpressionShadowPlan({ domainKey: 'sleep', records: [current], currentRecordId: current.id })
+
+  assert.ok(candidate(plan, 'sleep_timing'))
+  assert.equal(candidate(plan, 'sleep_current_metric'), undefined)
+  assert.equal(plan.shortcut_plan.silent, true)
+  assert.equal(plan.plan_summary.record_detail.selected[0].semantic_key, 'sleep_timing')
+})
+
+test('sleep timing keeps only observed clock values when one endpoint is missing', () => {
+  const current = {
+    id: 'sleep-start-only',
+    occurred_at: '2026-07-14T08:20:00+08:00',
+    payload: { sleep_start_at: '2026-07-14T01:10:00+08:00' },
+  }
+  const plan = buildGenericExpressionShadowPlan({ domainKey: 'sleep', records: [current], currentRecordId: current.id })
+  const timing = candidate(plan, 'sleep_timing')
+
+  assert.ok(timing)
+  assert.equal(timing.numbers.length, 1)
+  assert.equal(timing.numbers[0].meaning, 'sleep_start_clock_minutes')
+  assert.equal(timing.numbers[0].value, 70)
+  assert.equal(timing.quality.data_coverage, 0.5)
+  assert.match(timing.claim.canonical_text, /醒来 未知/)
 })
 
 test('sleep planner compares timing with a sufficiently supported chronotype profile', () => {

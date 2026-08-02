@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
@@ -10,7 +11,12 @@ const entryPoint = path.join(root, 'supabase/functions/ingest-receipt/expression
 const userId = '11111111-1111-4111-8111-111111111111'
 
 async function loadModule(environment = {}) {
-  globalThis.Deno = { env: { get: key => environment[key] } }
+  const resolvedEnvironment = {
+    EXPRESSION_PLANNER_OWNER_ENABLED: 'true',
+    EXPRESSION_PLANNER_OWNER_USER_ID: userId,
+    ...environment,
+  }
+  globalThis.Deno = { env: { get: key => resolvedEnvironment[key] } }
   const bundle = await build({
     absWorkingDir: root,
     entryPoints: [entryPoint],
@@ -147,6 +153,80 @@ function database(seed = {}) {
   return { client, state }
 }
 
+function plannerExposure(candidate, index) {
+  const hints = candidate.selection_hints ?? {}
+  const semanticKey = candidate.claim?.semantic_key
+  const exposureKey = hints.exposure_key ?? semanticKey
+  const dedupeKey = hints.dedupe_key ?? exposureKey
+  return {
+    id: `seed-exposure-${index}`,
+    user_id: userId,
+    semantic_key: semanticKey,
+    occurred_at: `2026-07-25T07:5${index}:00+08:00`,
+    metadata: {
+      exposure_key: exposureKey,
+      scoped_exposure_key: `record_detail:${exposureKey}`,
+      dedupe_key: dedupeKey,
+      scoped_dedupe_key: `record_detail:${dedupeKey}`,
+    },
+    selection_mode: 'threshold',
+    lifecycle_state: 'client_rendered',
+    simulation_only: false,
+    counts_for_novelty: true,
+    surface: 'record_detail',
+  }
+}
+
+function expenseBaselineSeed() {
+  return {
+    transactions: [
+      {
+        id: '11000000-0000-4000-8000-000000000001', user_id: userId, type: 'expense',
+        transaction_date: '2026-07-22', transaction_time: '08:00:00', created_at: '2026-07-22T08:01:00+08:00',
+        amount: 12, merchant_name: '便利店', category: 'shopping', platform: '线下', payment_method: '微信支付', status: 'confirmed',
+      },
+      {
+        id: '11000000-0000-4000-8000-000000000002', user_id: userId, type: 'expense',
+        transaction_date: '2026-07-23', transaction_time: '08:00:00', created_at: '2026-07-23T08:01:00+08:00',
+        amount: 18, merchant_name: '便利店', category: 'shopping', platform: '线下', payment_method: '微信支付', status: 'confirmed',
+      },
+      {
+        id: '11000000-0000-4000-8000-000000000003', user_id: userId, type: 'expense',
+        transaction_date: '2026-07-24', transaction_time: '08:00:00', created_at: '2026-07-24T08:01:00+08:00',
+        amount: 24, merchant_name: '便利店', category: 'shopping', platform: '线下', payment_method: '微信支付', status: 'confirmed',
+      },
+      {
+        id: '11000000-0000-4000-8000-000000000004', user_id: userId, type: 'expense',
+        transaction_date: '2026-07-25', transaction_time: '08:30:00', created_at: '2026-07-25T08:31:00+08:00',
+        amount: 20, merchant_name: '便利店', category: 'shopping', platform: '线下', payment_method: '微信支付', status: 'confirmed',
+      },
+    ],
+  }
+}
+
+async function previewPersonalBaseline(module, client, state) {
+  const input = {
+    record_id: '11000000-0000-4000-8000-000000000004',
+    record_kind: 'expense',
+  }
+  const first = await module.getRecordExpressionPlan(client, userId, input)
+  assert.equal(first.available, true)
+  const firstCandidate = state.tables.expression_delivery_snapshots.at(-1).delivery_plan.candidates[0]
+  if (firstCandidate.claim.semantic_key === 'merchant_daily_vs_active_day_median') {
+    return { preview: first, candidate: firstCandidate, input }
+  }
+
+  state.tables.expression_exposure_events.push(
+    plannerExposure(firstCandidate, 1),
+    plannerExposure(firstCandidate, 2),
+  )
+  const preview = await module.getRecordExpressionPlan(client, userId, input)
+  assert.equal(preview.available, true)
+  const candidate = state.tables.expression_delivery_snapshots.at(-1).delivery_plan.candidates[0]
+  assert.equal(candidate.claim.semantic_key, 'merchant_daily_vs_active_day_median')
+  return { preview, candidate, input }
+}
+
 function dataRecord(id, domainKey, payload, occurredAt = '2026-07-25T08:00:00+08:00') {
   return {
     id,
@@ -233,6 +313,48 @@ const supportedCases = [
   },
 ]
 
+test('single-user owner gate defaults closed for disabled or non-owner access', async () => {
+  const item = supportedCases.find(entry => entry.name === 'expense')
+  const disabledModule = await loadModule({ EXPRESSION_PLANNER_OWNER_ENABLED: 'false' })
+  const disabledDatabase = database(item.seed)
+  const disabled = await disabledModule.getRecordExpressionPlan(disabledDatabase.client, userId, {
+    record_id: item.recordId,
+    record_kind: item.kind,
+  })
+  assert.deepEqual(disabled, { available: false, reason: 'owner_only_unavailable' })
+  assert.equal(disabledDatabase.state.tables.expression_delivery_snapshots.length, 0)
+
+  const nonOwnerModule = await loadModule({
+    EXPRESSION_PLANNER_OWNER_USER_ID: '22222222-2222-4222-8222-222222222222',
+  })
+  const nonOwnerDatabase = database(item.seed)
+  const nonOwner = await nonOwnerModule.getRecordExpressionPlan(nonOwnerDatabase.client, userId, {
+    record_id: item.recordId,
+    record_kind: item.kind,
+  })
+  assert.deepEqual(nonOwner, { available: false, reason: 'owner_only_unavailable' })
+  await assert.rejects(
+    nonOwnerModule.acknowledgeRecordExpressionPlan(nonOwnerDatabase.client, userId, {
+      record_id: item.recordId,
+      plan_token: 'not-used',
+      candidate_id: 'not-used',
+    }),
+    /当前未启用/,
+  )
+})
+
+test('edge route applies the owner gate after JWT authentication and before delivery', async () => {
+  const source = await readFile(path.join(root, 'supabase/functions/ingest-receipt/index.ts'), 'utf8')
+  const authIndex = source.indexOf('const actionUserId = await authenticatedUserId(req)')
+  const gateIndex = source.indexOf('if (!isRecordExpressionOwnerEnabled(actionUserId))')
+  const deliveryIndex = source.indexOf('? await getRecordExpressionPlan(supabase, actionUserId, jsonBody)')
+
+  assert.ok(authIndex >= 0)
+  assert.ok(gateIndex > authIndex)
+  assert.ok(deliveryIndex > gateIndex)
+  assert.match(source.slice(gateIndex, deliveryIndex), /status: 403/)
+})
+
 test('record detail builds reliable feedback for every supported domain without Shadow or improvement opt-in', async () => {
   const module = await loadModule({ EXPRESSION_PLANNER_MODE: 'off' })
   for (const item of supportedCases) {
@@ -253,7 +375,55 @@ test('record detail builds reliable feedback for every supported domain without 
     assert.ok(Date.parse(snapshot.expires_at) > Date.now())
     assert.equal('source_record' in snapshot.delivery_plan, false)
     assert.equal('structured_value' in snapshot.delivery_plan.candidates[0].claim, false)
+    assert.equal(snapshot.delivery_plan.decision.policy_name, 'deterministic_rule')
+    assert.equal(snapshot.delivery_plan.decision.selection_probability, 1)
+    assert.equal(snapshot.delivery_plan.decision.action_count, snapshot.delivery_plan.decision.action_set.length)
+    assert.ok(new TextEncoder().encode(JSON.stringify(snapshot.delivery_plan.decision)).byteLength <= 64 * 1024)
+    assert.equal(snapshot.delivery_plan.decision.action_set.every(action => action.passes_threshold === true), true)
+    assert.ok(snapshot.delivery_plan.decision.action_set.some(action => action.selection_probability === 1))
+    assert.equal(snapshot.delivery_plan.decision.action_set.every(action => action.action_id !== action.candidate_fingerprint), true)
+    assert.equal(
+      snapshot.delivery_plan.decision.action_set.find(action => action.selection_probability === 1).action_id,
+      snapshot.delivery_plan.decision.chosen_action_id,
+    )
+    assert.equal(snapshot.delivery_plan.decision.action_set.some(action => 'canonical_text' in action), false)
+    assert.equal(snapshot.delivery_plan.decision.action_set.some(action => 'candidate_id' in action), false)
+    assert.equal(snapshot.delivery_plan.decision.action_set.some(action => 'exposure_key' in action), false)
   }
+})
+
+test('pending expense returns a reviewable verified-fact candidate without entering aggregates', async () => {
+  const module = await loadModule()
+  const recordId = '12000000-0000-4000-8000-000000000001'
+  const { client, state } = database({
+    transactions: [{
+      id: recordId, user_id: userId, type: 'expense', transaction_date: '2026-07-25', transaction_time: '20:16:00',
+      created_at: '2026-07-25T20:17:00+08:00', amount: 32, merchant_name: '示例记录', category: null,
+      platform: '线下', payment_method: null, status: 'pending',
+    }],
+  })
+
+  const preview = await module.getRecordExpressionPlan(client, userId, {
+    record_id: recordId,
+    record_kind: 'expense',
+  })
+
+  assert.equal(preview.available, true)
+  assert.equal(preview.feedback.source, 'expression_planner')
+  assert.equal(preview.feedback.semantic_key, 'expense_current_record_context')
+  assert.match(preview.feedback.emotion_line, /32 元支出/)
+  assert.match(preview.feedback.emotion_line, /分类仍待确认/)
+  const candidate = state.tables.expression_delivery_snapshots[0].delivery_plan.candidates[0]
+  assert.equal(candidate.claim.structured_value, undefined)
+  assert.equal(candidate.source_dependencies.length, 1)
+
+  const acknowledged = await module.acknowledgeRecordExpressionPlan(client, userId, {
+    record_id: recordId,
+    plan_token: preview.plan_token,
+    candidate_id: preview.candidate_id,
+  })
+  assert.ok(acknowledged.exposure_event_id)
+  assert.equal(acknowledged.feedback.exposure_event_id, acknowledged.exposure_event_id)
 })
 
 test('acknowledgement persists one idempotent core-product exposure', async () => {
@@ -280,7 +450,52 @@ test('acknowledgement persists one idempotent core-product exposure', async () =
   assert.equal(state.tables.expression_exposure_events.length, 1)
   assert.equal(state.tables.expression_exposure_events[0].metadata.source, 'shared_expression_planner')
   assert.equal(state.tables.expression_exposure_events[0].surface, 'record_detail')
+  const decision = state.tables.expression_delivery_snapshots[0].delivery_plan.decision
+  const exposureMetadata = state.tables.expression_exposure_events[0].metadata
+  assert.equal(exposureMetadata.decision_id, decision.decision_id)
+  assert.equal(exposureMetadata.policy_name, 'deterministic_rule')
+  assert.equal(exposureMetadata.selection_probability, 1)
+  assert.equal(exposureMetadata.chosen_action_id, decision.chosen_action_id)
+  assert.ok(exposureMetadata.action_set.length >= 2)
+  assert.equal(exposureMetadata.action_set.filter(action => action.selection_probability === 1).length, 1)
   assert.equal(state.exposureSources.some(source => source.is_primary === true), true)
+})
+
+test('delivery skips a record-detail candidate whose scoped dedupe key reached its cap', async () => {
+  const module = await loadModule()
+  const { client, state } = database(expenseBaselineSeed())
+  const baseline = await previewPersonalBaseline(module, client, state)
+
+  state.tables.expression_exposure_events.push(plannerExposure(baseline.candidate, 3))
+  const next = await module.getRecordExpressionPlan(client, userId, baseline.input)
+  assert.equal(next.available, true)
+  const nextCandidate = state.tables.expression_delivery_snapshots.at(-1).delivery_plan.candidates[0]
+  const nextActionSet = state.tables.expression_delivery_snapshots.at(-1).delivery_plan.decision.action_set
+
+  assert.notEqual(next.candidate_id, baseline.preview.candidate_id)
+  assert.notEqual(nextCandidate.claim.semantic_key, 'merchant_daily_vs_active_day_median')
+  assert.equal(
+    nextActionSet.some(action => action.semantic_key === 'merchant_daily_vs_active_day_median'),
+    false,
+    JSON.stringify(nextActionSet, null, 2),
+  )
+})
+
+test('changing a historical dependency invalidates a frozen comparison delivery', async () => {
+  const module = await loadModule()
+  const { client, state } = database(expenseBaselineSeed())
+  const baseline = await previewPersonalBaseline(module, client, state)
+  state.tables.transactions[0].amount = 99
+
+  await assert.rejects(
+    module.acknowledgeRecordExpressionPlan(client, userId, {
+      record_id: baseline.input.record_id,
+      plan_token: baseline.preview.plan_token,
+      candidate_id: baseline.preview.candidate_id,
+    }),
+    /plan_dependency_stale/,
+  )
+  assert.equal(state.tables.expression_exposure_events.filter(row => row.id?.startsWith('exposure-')).length, 0)
 })
 
 test('editing a source record after preview invalidates the frozen delivery', async () => {

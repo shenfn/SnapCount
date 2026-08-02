@@ -43,7 +43,21 @@ function database(exposure) {
         }
         if (name === 'replace_expression_feedback_bundle') {
           state.revision += 1
-          state.feedback = [{ id: 'feedback-1', ...params.p_feedback }]
+          const reviewedExposure = exposure ?? state.exposureBundles.at(-1)?.exposure ?? {}
+          const exposureMetadata = reviewedExposure.metadata ?? {}
+          state.feedback = [{
+            id: 'feedback-1',
+            ...params.p_feedback,
+            metadata: {
+              source: 'native_or_pwa_record_detail',
+              record_id: reviewedExposure.record_id,
+              semantic_bundle: {},
+              decision_id: exposureMetadata.decision_id ?? null,
+              policy_name: exposureMetadata.policy_name ?? null,
+              policy_version: exposureMetadata.policy_version ?? null,
+              selection_probability: exposureMetadata.selection_probability ?? null,
+            },
+          }]
           state.signals = params.p_signals
           return {
             data: { feedback: state.feedback[0], source_revision: state.revision },
@@ -157,6 +171,12 @@ const exposure = {
   simulation_only: false,
   counts_for_novelty: true,
   visible_field_paths: ['rendered_feedback.emotion_line'],
+  metadata: {
+    decision_id: 'decision-1',
+    policy_name: 'deterministic_rule',
+    policy_version: 'deterministic-record-detail-v0.1',
+    selection_probability: 1,
+  },
 }
 
 test('a positive review creates a surface-semantic weight the scorer can consume', async () => {
@@ -173,6 +193,8 @@ test('a positive review creates a surface-semantic weight the scorer can consume
   assert.ok(profile.surface_semantic_weights.record_detail.expense_record_name_previous_gap > 1)
   assert.equal(profile.surface_weights.record_detail, undefined)
   assert.equal(profile.repetition_tolerance.record_detail, undefined)
+  assert.equal(state.feedback[0].metadata.decision_id, 'decision-1')
+  assert.equal(state.feedback[0].metadata.selection_probability, 1)
 })
 
 test('a factual-error review suppresses an ambiguous not-helpful preference signal', async () => {

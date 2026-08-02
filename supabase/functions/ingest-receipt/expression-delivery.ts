@@ -14,6 +14,10 @@ import {
 import type { ShadowExpenseTransaction } from "./expression-shadow-planner.ts";
 
 const RECORD_DETAIL_RENDER_VERSION = "surface-render-contract-v0.1";
+const RECORD_DETAIL_DECISION_VERSION = "record-detail-decision-v0.1";
+const RECORD_DETAIL_POLICY_NAME = "deterministic_rule";
+const RECORD_DETAIL_POLICY_VERSION = "deterministic-record-detail-v0.1";
+const RECORD_DETAIL_DECISION_MAX_BYTES = 64 * 1024;
 type RecordKind = "expense" | "income" | "data";
 
 interface DatabaseClient {
@@ -39,6 +43,22 @@ function recordKind(value: unknown): RecordKind | null {
   if (normalized === "income") return "income";
   if (["data", "universal"].includes(normalized)) return "data";
   return null;
+}
+
+function environmentText(name: string): string {
+  try {
+    return text(Deno.env.get(name), 200);
+  } catch {
+    return "";
+  }
+}
+
+export function isRecordExpressionOwnerEnabled(userId: string): boolean {
+  const enabled = ["1", "true", "yes", "on"].includes(
+    environmentText("EXPRESSION_PLANNER_OWNER_ENABLED").toLowerCase(),
+  );
+  const ownerUserId = environmentText("EXPRESSION_PLANNER_OWNER_USER_ID");
+  return enabled && Boolean(ownerUserId) && ownerUserId === userId;
 }
 
 function dimensionLabel(dimension: string): string {
@@ -75,6 +95,107 @@ function selectedRecordDetail(plan: Record<string, unknown>) {
   });
 }
 
+function recordDetailActionId(candidate: Record<string, unknown>): string {
+  const claim = object(candidate.claim);
+  return plannerSourceFingerprint({
+    action_schema_version: "record-detail-action-v0.1",
+    domain_key: text(candidate.domain_key, 80),
+    semantic_key: text(claim.semantic_key, 200),
+    dimension: text(candidate.dimension, 100),
+    claim_type: text(candidate.claim_type, 80),
+  });
+}
+
+function recordDetailDecision(
+  deliveryPlan: Record<string, unknown>,
+  primary: ReturnType<typeof selectedRecordDetail>[number],
+) {
+  const renderPlan = object(object(deliveryPlan.render_plans).record_detail);
+  const selected = Array.isArray(renderPlan.selected) ? renderPlan.selected : [];
+  const selectedById = new Map(selected.map((item: Record<string, unknown>, index: number) => [
+    text(item.candidate_id, 200),
+    { item, index },
+  ]));
+  const candidates = Array.isArray(deliveryPlan.candidates) ? deliveryPlan.candidates : [];
+  const actions = candidates.flatMap((candidate: Record<string, unknown>, sourceIndex: number) => {
+    const candidateId = text(candidate.candidate_id, 200);
+    if (!candidateId) return [];
+    const claim = object(candidate.claim);
+    const scoring = object(candidate.scoring);
+    const surfaceScore = object(object(scoring.surfaces).record_detail);
+    const isChosen = candidateId === primary.candidateId;
+    const hints = object(candidate.selection_hints);
+    const tieBreak = Number(object(hints.tie_break_priority).record_detail ?? 0);
+    const deterministicScore = Number(surfaceScore.score);
+    const selectedEntry = selectedById.get(candidateId);
+    const maxExposureCount = Number(object(hints.max_exposure_count).record_detail);
+    const dedupeExposure = object(object(scoring.dedupe_exposure_by_surface).record_detail);
+    const exposure = object(object(scoring.exposure_by_surface).record_detail);
+    const currentExposureCount = Number(dedupeExposure.count ?? exposure.count ?? 0);
+    const cooldownReached = Number.isFinite(maxExposureCount)
+      && Number.isFinite(currentExposureCount)
+      && currentExposureCount >= maxExposureCount;
+    const policyEligible = surfaceScore.eligible === true
+      && surfaceScore.passes_threshold === true
+      && !cooldownReached;
+    if (!policyEligible) {
+      if (isChosen) throw new Error("记录详情主候选未通过策略准入");
+      return [];
+    }
+    const deterministicReason = !isChosen && !selectedEntry ? "composition_not_selected" : "";
+    const exposureKey = text(hints.exposure_key, 300) || text(claim.semantic_key, 200) || candidateId;
+    const dedupeKey = text(hints.dedupe_key, 300) || exposureKey;
+    const actionId = recordDetailActionId(candidate);
+    const candidateFingerprint = plannerSourceFingerprint({ candidate_id: candidateId });
+    return [{
+      action_id: actionId,
+      candidate_fingerprint: candidateFingerprint,
+      semantic_key: text(claim.semantic_key, 200),
+      dimension: text(candidate.dimension, 100),
+      claim_type: text(candidate.claim_type, 80),
+      deterministic_score: Number.isFinite(deterministicScore) ? deterministicScore : null,
+      passes_threshold: surfaceScore.passes_threshold === true,
+      deterministic_status: isChosen
+        ? "chosen"
+        : selectedEntry ? "selected_secondary" : "eligible_not_selected",
+      deterministic_reason: deterministicReason,
+      exposure_key_fingerprint: plannerSourceFingerprint({ exposure_key: exposureKey }),
+      dedupe_key_fingerprint: plannerSourceFingerprint({ dedupe_key: dedupeKey }),
+      selection_probability: isChosen ? 1 : 0,
+      tie_break_priority: Number.isFinite(tieBreak) ? tieBreak : 0,
+      source_index: sourceIndex,
+    }];
+  }).sort((left, right) => {
+    const scoreDelta = Number(right.deterministic_score ?? -1) - Number(left.deterministic_score ?? -1);
+    return scoreDelta || right.tie_break_priority - left.tie_break_priority || left.source_index - right.source_index;
+  }).map((action, index) => {
+    const { source_index: _sourceIndex, tie_break_priority: _tieBreak, ...persisted } = action;
+    return { ...persisted, rank_before_policy: index + 1 };
+  });
+  const chosenScoring = object(primary.candidate.scoring);
+  const decision = {
+    decision_version: RECORD_DETAIL_DECISION_VERSION,
+    decision_id: crypto.randomUUID(),
+    decided_at: new Date().toISOString(),
+    surface: "record_detail",
+    policy_name: RECORD_DETAIL_POLICY_NAME,
+    policy_version: RECORD_DETAIL_POLICY_VERSION,
+    planner_version: text(deliveryPlan.planner_version, 100),
+    scoring_version: text(chosenScoring.scoring_version, 100),
+    candidate_schema_version: "candidate-v0.1",
+    chosen_action_id: recordDetailActionId(primary.candidate),
+    selection_probability: 1,
+    selection_mode: text(primary.selection.selection_mode, 100) || "threshold",
+    action_count: actions.length,
+    action_set: actions,
+  };
+  const serializedBytes = new TextEncoder().encode(JSON.stringify(decision)).byteLength;
+  if (serializedBytes > RECORD_DETAIL_DECISION_MAX_BYTES) {
+    throw new Error("记录详情决策元数据超过 64 KiB 上限");
+  }
+  return decision;
+}
+
 function frozenDeliveryPlan(
   deliveryPlan: Record<string, unknown>,
   item: ReturnType<typeof selectedRecordDetail>[number],
@@ -84,6 +205,7 @@ function frozenDeliveryPlan(
     status: "auto_planned",
     planner_version: deliveryPlan.planner_version,
     domain_key: deliveryPlan.domain_key,
+    decision: recordDetailDecision(deliveryPlan, item),
     source_dependencies: item.candidate.source_dependencies,
     candidates: [{
       candidate_id: item.candidate.candidate_id,
@@ -379,6 +501,9 @@ export async function getRecordExpressionPlan(
   userId: string,
   input: Record<string, unknown>,
 ) {
+  if (!isRecordExpressionOwnerEnabled(userId)) {
+    return { available: false, reason: "owner_only_unavailable" };
+  }
   const recordId = text(input.record_id, 100);
   const kind = recordKind(input.record_kind);
   if (!recordId || !kind) throw new Error("缺少有效的记录编号或类型");
@@ -429,6 +554,9 @@ export async function acknowledgeRecordExpressionPlan(
   userId: string,
   input: Record<string, unknown>,
 ) {
+  if (!isRecordExpressionOwnerEnabled(userId)) {
+    throw new Error("表达规划器当前未启用");
+  }
   const recordId = text(input.record_id, 100);
   const planToken = text(input.plan_token, 100);
   const candidateId = text(input.candidate_id, 200);

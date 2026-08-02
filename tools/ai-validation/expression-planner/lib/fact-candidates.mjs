@@ -21,6 +21,17 @@ function localDateOf(value, timeZone) {
   }).format(date)
 }
 
+function localEventTime(value, precision, timeZone) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return null
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: timeZone || 'Asia/Shanghai',
+    month: 'numeric',
+    day: 'numeric',
+    ...(precision === 'date_only' ? {} : { hour: '2-digit', minute: '2-digit', hour12: false }),
+  }).format(date)
+}
+
 function eventTime(event) {
   const time = new Date(event.event_at).getTime()
   return Number.isFinite(time) ? time : null
@@ -60,6 +71,50 @@ function candidate({ id, semanticKey, subtype, dimension, value, text, evidence,
     },
     eligibility: { eligible: true, blocked_reasons: [] },
   }
+}
+
+export function generateCurrentExpenseRecordCandidate(event, { timeZone = 'Asia/Shanghai' } = {}) {
+  const amount = parseFiniteNumber(event?.amount)
+  if (!event?.event_id || amount === null) return []
+  const factContract = event.fact_contract ?? {}
+  const pendingReview = factContract.fact_status === 'pending_review'
+  const categoryNeedsReview = pendingReview || factContract.comparison_scope === 'pending_review' || !event.category
+  const timeLabel = localEventTime(event.event_at, event.event_time_precision, timeZone)
+  const action = pendingReview ? '已识别到' : '已记录'
+  const canonicalText = `${timeLabel ? `${timeLabel} ` : ''}${action}一笔 ${roundMoney(amount)} 元支出${categoryNeedsReview ? '；分类仍待确认' : ''}`
+  const recordName = event.merchant?.canonical_name ?? event.merchant?.raw_name ?? null
+  const sourceEvidence = evidenceOf([event], [
+    'amount', 'event_at', 'event_time_precision', 'category', 'platform', 'payment_method', 'fact_contract',
+  ])
+  const recordId = event.target_id ?? event.event_id
+  return [candidate({
+    id: `fact:expense:record-context:${recordId}`,
+    semanticKey: 'expense_current_record_context',
+    subtype: 'observed',
+    dimension: 'record_context',
+    value: {
+      record_id: recordId,
+      amount: roundMoney(amount),
+      unit: '元',
+      occurred_at: event.event_at ?? null,
+      time_precision: event.event_time_precision ?? null,
+      record_name: recordName,
+      category: event.category ?? null,
+      platform: event.platform ?? null,
+      payment_method: event.payment_method ?? null,
+      fact_status: factContract.fact_status ?? null,
+      category_needs_review: categoryNeedsReview,
+    },
+    text: canonicalText,
+    evidence: sourceEvidence,
+    numbers: [{ value: roundMoney(amount), meaning: 'current_record_amount', derivation: 'source_event.amount' }],
+    quality: { confidence: pendingReview ? 0.9 : 1 },
+    selectionHints: {
+      allowed_surfaces: ['pwa_pending_ai_card', 'record_detail'],
+      exposure_key: `expense:record:${recordId}:context`,
+      dedupe_key: `expense:record:${recordId}:context`,
+    },
+  })]
 }
 
 /**

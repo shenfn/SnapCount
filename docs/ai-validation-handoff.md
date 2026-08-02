@@ -24,6 +24,7 @@
 - `docs/ai-validation-handoff.md`：当前这份交接说明。
 - `docs/ai-recognition-trace-console-prd-v0.1.md`：AI 识别链路追踪台 PRD。
 - `docs/ai-validation-prompt-evaluation-plan-v0.4.md`：Prompt 评测闭环设计，定义 expected/evaluation/review、评分规则和 Prompt 版本对比。
+- `docs/expression-planner-feedback-learning-rollout-v0.1.md`：规则候选灰度、点评分流、Bandit-ready 日志和在线探索准入契约；owner 门禁与记录详情确定性 decision 日志已在本地实现，尚未部署。
 - `tools/ai-validation/server/index.mjs`：追踪台本地 Express 服务（端口 5181），只读 test-results 和 test-cases。
 - `tools/ai-validation/server/extract-prompt.mjs`：Prompt 快照提取脚本，从 prompts.ts 源码提取完整 prompt 文本。
 - `tools/ai-validation/server/prompt-snapshot.json`：提取脚本生成的 prompt 快照（不要手动编辑）。

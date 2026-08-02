@@ -9,6 +9,7 @@ import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   acknowledgeRecordExpressionPlan,
   getRecordExpressionPlan,
+  isRecordExpressionOwnerEnabled,
 } from "./expression-delivery.ts";
 import {
   loadDomainProfiles,
@@ -4960,6 +4961,19 @@ Deno.serve(async (req) => {
         if (!actionUserId) {
           return new Response(JSON.stringify({ error: "未授权" }), {
             status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        if (!isRecordExpressionOwnerEnabled(actionUserId)) {
+          if (action === "get_record_expression_plan") {
+            return new Response(JSON.stringify({
+              ok: true,
+              data: { available: false, reason: "owner_only_unavailable" },
+            }), {
+              headers: { "Content-Type": "application/json", ...corsHeaders },
+            });
+          }
+          return new Response(JSON.stringify({ ok: false, error: "表达规划器当前未启用" }), {
+            status: 403, headers: { "Content-Type": "application/json", ...corsHeaders },
           });
         }
         try {

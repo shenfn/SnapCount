@@ -766,7 +766,15 @@ begin
       jsonb_build_object(
         'source', 'native_or_pwa_record_detail',
         'record_id', v_exposure.record_id,
-        'semantic_bundle', v_requested_bundle
+        'semantic_bundle', v_requested_bundle,
+        'decision_id', nullif(v_exposure.metadata ->> 'decision_id', ''),
+        'policy_name', nullif(v_exposure.metadata ->> 'policy_name', ''),
+        'policy_version', nullif(v_exposure.metadata ->> 'policy_version', ''),
+        'selection_probability', case
+          when jsonb_typeof(v_exposure.metadata -> 'selection_probability') = 'number'
+            then v_exposure.metadata -> 'selection_probability'
+          else null
+        end
       )
     )
     returning * into v_feedback;
@@ -789,7 +797,15 @@ begin
       metadata = jsonb_build_object(
         'source', 'native_or_pwa_record_detail',
         'record_id', v_exposure.record_id,
-        'semantic_bundle', v_requested_bundle
+        'semantic_bundle', v_requested_bundle,
+        'decision_id', nullif(v_exposure.metadata ->> 'decision_id', ''),
+        'policy_name', nullif(v_exposure.metadata ->> 'policy_name', ''),
+        'policy_version', nullif(v_exposure.metadata ->> 'policy_version', ''),
+        'selection_probability', case
+          when jsonb_typeof(v_exposure.metadata -> 'selection_probability') = 'number'
+            then v_exposure.metadata -> 'selection_probability'
+          else null
+        end
       )
     where id = v_feedback.id
     returning * into v_feedback;

@@ -76,6 +76,28 @@ test('PWA renders owner planner feedback before acknowledging its exposure', asy
   assert.ok(ackIndex > visibleIndex, 'detail must acknowledge only after visibility is confirmed')
 })
 
+test('PWA pending records expose the same visible acknowledgement and review loop', async () => {
+  const pending = await readFile(path.join(root, 'src/components/ModalPending.vue'), 'utf8')
+
+  assert.match(pending, /store\.loadRecordExpressionPlan\(recordId,\s*\{\s*recordKind,\s*signal\s*\}\)/)
+  assert.match(pending, /waitForVisibleElement\(pendingFeedbackCardElement\(\)/)
+  assert.match(pending, /store\.ackRecordExpressionPlan\(recordId,\s*\{\s*signal:/)
+  assert.match(pending, /:reviewable="aiFeedbackReviewable"/)
+  assert.match(pending, /:exposure-event-id="aiFeedbackExposureEventId"/)
+  assert.match(pending, /@submit-review="submitFeedbackReview"/)
+  assert.match(pending, /submitExpressionFeedback\(\{\s*recordId,\s*choice,\s*freeText,\s*exposureEventId\s*\}\)/)
+  assert.match(pending, /onCleanup\(\(\)\s*=>\s*\{\s*controller\.abort\(\)/)
+
+  const loadIndex = pending.indexOf('store.loadRecordExpressionPlan(recordId')
+  const nextTickIndex = pending.indexOf('await nextTick()', loadIndex)
+  const visibleIndex = pending.indexOf('await waitForVisibleElement(', nextTickIndex)
+  const ackIndex = pending.indexOf('store.ackRecordExpressionPlan(recordId', nextTickIndex)
+  assert.ok(loadIndex >= 0)
+  assert.ok(nextTickIndex > loadIndex)
+  assert.ok(visibleIndex > nextTickIndex)
+  assert.ok(ackIndex > visibleIndex)
+})
+
 test('bounded backoff retries plan_not_ready and stops after cancellation', async () => {
   let attempts = 0
   const ready = await retryWithBackoff(

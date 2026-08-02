@@ -961,7 +961,14 @@ private struct PendingExpenseResolutionView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         header(detail)
                         if let feedback = detail.aiFeedback {
-                            NativeAIFeedbackCard(feedback: feedback, compact: true)
+                            NativeAIFeedbackCard(
+                                feedback: feedback,
+                                compact: true,
+                                reviewable: feedback.isReviewable,
+                                reviewState: appState.recordFeedbackState
+                            ) { choice, text in
+                                Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                            }
                                 .onAppear {
                                     guard feedback.requiresExposureAcknowledgement else { return }
                                     appState.setRecordExpressionPlanCardVisible(true, reference: reference)

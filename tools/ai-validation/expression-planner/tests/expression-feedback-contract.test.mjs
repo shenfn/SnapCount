@@ -41,6 +41,8 @@ test('feedback, signals, and snapshot revisions use service-only transactional c
   assert.match(migration, /expires_at timestamptz not null default \(now\(\) \+ interval '1 hour'\)/)
   assert.match(migration, /shadow_run_id uuid references public\.expression_shadow_runs\(id\) on delete set null/)
   assert.match(migration, /cleanup_expression_delivery_snapshots/)
+  assert.match(migration, /'decision_id', nullif\(v_exposure\.metadata ->> 'decision_id', ''\)/)
+  assert.match(migration, /'selection_probability',[\s\S]*v_exposure\.metadata -> 'selection_probability'/)
   assert.match(migration, /revoke all on function public\.replace_expression_feedback_bundle[\s\S]*from public, anon, authenticated/)
   assert.match(migration, /grant execute on function public\.replace_expression_feedback_bundle[\s\S]*to service_role/)
 })

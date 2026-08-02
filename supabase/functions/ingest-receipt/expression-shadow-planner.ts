@@ -7,7 +7,10 @@ import {
 } from "../../../tools/ai-validation/expression-planner/lib/entity-normalizer.mjs";
 import merchantAliasConfig from "../../../tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json" with { type: "json" };
 // @ts-ignore See note above.
-import { generateFactCandidates } from "../../../tools/ai-validation/expression-planner/lib/fact-candidates.mjs";
+import {
+  generateCurrentExpenseRecordCandidate,
+  generateFactCandidates,
+} from "../../../tools/ai-validation/expression-planner/lib/fact-candidates.mjs";
 // @ts-ignore See note above.
 import { generateRecordNameRecurrenceCandidates } from "../../../tools/ai-validation/expression-planner/lib/recurrence-candidates.mjs";
 // @ts-ignore See note above.
@@ -216,7 +219,8 @@ function attachCandidateDependencies(
   return { ...candidate, source_dependencies: dependencies };
 }
 function toFactEvent(record: ReturnType<typeof toRecord>) {
-  return { event_id: `transaction:${record.id}`, source_type: "transaction", ledger_status: "confirmed_transaction", trust_level: "confirmed",
+  const confirmed = record.fact_contract.fact_status === "confirmed";
+  return { event_id: `transaction:${record.id}`, source_type: "transaction", ledger_status: confirmed ? "confirmed_transaction" : "pending_review", trust_level: confirmed ? "confirmed" : "provisional",
     count_in_facts: record.amount !== null && record.fact_contract.expense_total_scope === "include", event_at: record.occurred_at,
     event_time_source: record.event_time_source, event_time_precision: record.has_precise_event_time ? "second" : "date_only",
     event_time_confidence: record.event_time_confidence,
@@ -312,25 +316,31 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
     ? records.filter(row => isCausalCurrentDayRecord(row, currentRecord, currentOccurredAt)).map(toFactEvent)
     : [];
   const currentEntityDayCount = currentDayEvents.filter(event => event.count_in_facts && event.merchant.entity_id === entityId).length;
-  let factCandidates = entityId ? generateFactCandidates(currentDayEvents, {
+  const currentRecordCandidates = generateCurrentExpenseRecordCandidate(toFactEvent(currentRecord), {
+    timeZone: "Asia/Shanghai",
+  });
+  const currentRecordConfirmed = currentRecord.fact_contract.fact_status === "confirmed";
+  let factCandidates = currentRecordConfirmed && entityId ? generateFactCandidates(currentDayEvents, {
     entityId,
     localDate,
     timeZone: "Asia/Shanghai",
     currentRecordId: currentRecord.id,
   }) : [];
   if (currentEntityDayCount <= 1) factCandidates = factCandidates.filter((candidate: Record<string, unknown>) => !["merchant_daily_count_total", "merchant_daily_amount_structure"].includes((candidate.claim as Record<string, unknown>)?.semantic_key as string));
-  const recurrenceCandidates = generateRecordNameRecurrenceCandidates(records.map(toFactEvent), {
+  const recurrenceCandidates = currentRecordConfirmed ? generateRecordNameRecurrenceCandidates(records.map(toFactEvent), {
     currentEventId: `transaction:${currentRecord.id}`,
     timeZone: "Asia/Shanghai",
-  });
-  const comparisonCandidates = entityId ? generateComparisonCandidates({
+  }) : [];
+  const comparisonCandidates = currentRecordConfirmed && entityId ? generateComparisonCandidates({
     records,
     currentDayEvents,
     entityId,
     localDate,
     currentRecordId: currentRecord.id,
   }) : [];
-  const categoryComparisonCandidates = generateCategoryComparisonCandidates({ records: causalRecords, currentRecord });
+  const categoryComparisonCandidates = currentRecordConfirmed
+    ? generateCategoryComparisonCandidates({ records: causalRecords, currentRecord })
+    : [];
   return finalizePlan("expense", {
     id: currentRecord.id,
     entity_id: entityId,
@@ -342,7 +352,7 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
     category: currentRecord.category,
     fact_contract: currentRecord.fact_contract,
     occurred_at: currentRecord.occurred_at,
-  }, [...factCandidates, ...recurrenceCandidates, ...comparisonCandidates, ...categoryComparisonCandidates], input, [],
+  }, [...currentRecordCandidates, ...factCandidates, ...recurrenceCandidates, ...comparisonCandidates, ...categoryComparisonCandidates], input, [],
   buildExpensePlannerSourceRecord(input.transactions.find(row => row.id === input.currentRecordId)!), "transactions",
   input.transactions.map(buildExpensePlannerSourceRecord));
 }
