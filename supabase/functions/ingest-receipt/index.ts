@@ -5,6 +5,9 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
 import { PROMPT, buildPrompt, buildFeedbackPrompt, buildVoicePrompt } from "./prompts.ts";
+import { selectRelevantVoiceMemories, validateVoiceSemantics } from "./voice-memory.ts";
+import { buildRealtimeMerchantStats } from "./realtime-expense-profile.ts";
+import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   loadDomainProfiles,
   selectSignals,
@@ -13,7 +16,10 @@ import {
 } from "./signals.ts";
 import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
+import { scheduleExpressionShadowCapture } from "./expression-shadow.ts";
 import type { TimeContext } from "./time.ts";
+// @ts-ignore Pure shared data contract is bundled with the Edge Function.
+import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories.js";
 
 const MOONSHOT_MODEL    = "moonshot-v1-8k-vision-preview";
 const MOONSHOT_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
@@ -230,6 +236,20 @@ function respondShortcut(
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+async function authenticatedActionUserId(req: Request): Promise<string | null> {
+  const authHeader = req.headers.get("Authorization") || "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const anonKey = getEnvOptional("ANON_PUBLIC_KEY");
+  if (!bearerToken || !anonKey || bearerToken === anonKey) return null;
+  try {
+    const userClient = createClient(getEnv("SUPABASE_URL"), anonKey, { global: { headers: { Authorization: authHeader } } });
+    const { data: { user }, error } = await userClient.auth.getUser();
+    return !error && user ? user.id : null;
+  } catch {
+    return null;
+  }
 }
 
 function withTraceMeta(payload: Record<string, unknown>, trace: TraceResponseMeta): Record<string, unknown> {
@@ -2021,7 +2041,7 @@ function financeCompanionLine(ai: AIResult): string | null {
   if (leaksOtherDomain) return null;
   if (/(?:第|连续|连着)\s*[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)) return null;
   if (/(?:这周|本周|本月|近\s*\d+\s*天|30\s*天).{0,16}[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)) return null;
-  if (/(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text)) return null;
+  if (/(第几(?:笔|顿|次|单)|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text)) return null;
   return text;
 }
 
@@ -2274,6 +2294,46 @@ function buildBuiltinAIFeedback(
   return null;
 }
 
+function buildMerchantRepeatRuleFeedback(
+  ai: AIResult,
+  amount: number | null,
+  signals: DomainSignal[],
+  timingSignal: AIFeedback["timing_signal"] | null,
+  relevantMemories: string[],
+): AIFeedback | null {
+  const signal = signals.find((item) => item.kind === "merchant_repeat");
+  const merchant = normalizeString(ai.merchant_name);
+  const count = signal?.countNumbers?.[0] ?? null;
+  if (!signal || !merchant || count === null) return null;
+  const average = signal.numbers.find((value) => value !== count && value !== amount) ?? null;
+  const isDevelopmentRelay = relevantMemories.some((memory) =>
+    /(开发|编程|代码).*(API|模型|中转站)|(API|模型|中转站).*(开发|编程|代码)/i.test(memory)
+  );
+  const amountLine = amount !== null ? `${amount}元` : "这笔";
+  const utilityLine = average !== null
+    ? `本周第${count}次，近90天均价${average}元。`
+    : `本周第${count}次，重复频率已记录。`;
+  return {
+    version: "feedback-v1",
+    domain_key: "expense",
+    badge: isDevelopmentRelay ? "开发充值" : "重复商户",
+    icon: "💸",
+    band: "neutral",
+    tone: "specific_recognition",
+    emotion_line: isDevelopmentRelay
+      ? `${merchant} 这次补了${amountLine}。`
+      : `${merchant} 本周再次出现。`,
+    utility_line: utilityLine,
+    detail_reason: isDevelopmentRelay
+      ? "商户用途记忆明确为开发模型 API 中转站，本次只陈述充值与频率事实。"
+      : "merchant_repeat 仅证明重复发生，本次不推断消费必要性或生活惯性。",
+    internal_score: 72,
+    confidence: isDevelopmentRelay ? 0.9 : 0.82,
+    source: "rule",
+    timing_signal: timingSignal,
+  };
+}
+
 function buildExpenseAIFeedback(
   ai: AIResult,
   amount: number | null,
@@ -2285,8 +2345,10 @@ function buildExpenseAIFeedback(
   const category = normalizeString(ai.category);
   const merchant = normalizeString(ai.merchant_name);
   const aiLine = financeCompanionLine(ai);
-  const financeText = `${merchant ?? ""} ${category ?? ""} ${ai.platform ?? ""} ${ai.payment_method ?? ""}`;
-  const isRepayment = includesAny(financeText, ["还款", "待还", "信贷", "花呗", "白条", "月付", "信用卡"]).length > 0;
+  const financeText = `${merchant ?? ""} ${category ?? ""} ${ai.platform ?? ""}`;
+  const repaymentText = `${merchant ?? ""} ${category ?? ""} ${ai.platform ?? ""} ${ai.title ?? ""} ${ai.summary ?? ""}`;
+  const isRepayment = includesAny(repaymentText, ["还款", "待还", "应还", "最低还款", "账单还款", "欠款"]).length > 0;
+  const isFoodExpense = includesAny(`${category ?? ""} ${merchant ?? ""}`, ["food", "餐饮", "美食", "饭", "餐", "蒸饺", "菜馆", "外卖"]).length > 0;
   const isRentLike = includesAny(financeText, ["房租", "租房", "公寓", "房东", "滨江叔叔"]).length > 0
     || (amount >= 1000 && category !== null && includesAny(category, ["life", "生活", "housing", "rent"]).length > 0);
   if (possibleDuplicate) {
@@ -2318,7 +2380,7 @@ function buildExpenseAIFeedback(
         ? aiLine
         : "这笔重点不是花掉了，而是待还节奏被记录住了。",
       utility_line: `金额 ${fmtYuan(amount)}，适合和本月还款一起看。`,
-      detail_reason: "商家、分类或支付信息包含还款/信贷信号，按现金流节奏处理。",
+      detail_reason: "商家、分类、标题或摘要明确包含还款义务语义，按现金流节奏处理。",
       internal_score: 60,
       confidence: 0.76,
       source: aiLine ? "hybrid" : "rule",
@@ -2341,6 +2403,23 @@ function buildExpenseAIFeedback(
       internal_score: 64,
       confidence: 0.74,
       source: aiLine ? "hybrid" : "rule",
+      timing_signal: timingSignal,
+    };
+  }
+  if (isFoodExpense) {
+    return {
+      version: "feedback-v1",
+      domain_key: "expense",
+      badge: "餐饮入账",
+      icon: "💸",
+      band: "neutral",
+      tone: "specific_recognition",
+      emotion_line: merchant ? `${merchant} 这笔已经记下。` : "这笔餐饮已经记下。",
+      utility_line: `金额 ${fmtYuan(amount)}，已归入餐饮。`,
+      detail_reason: "商家或分类明确属于餐饮，本次只陈述入账事实，不从支付工具推断还款行为。",
+      internal_score: 68,
+      confidence: 0.78,
+      source: "rule",
       timing_signal: timingSignal,
     };
   }
@@ -2812,7 +2891,7 @@ function normalizeFeedbackPayload(
   const badge = clipChineseLen(fbObj.badge, 10) ?? "即时反馈";
   const emotionLine = clipChineseLen(fbObj.emotion_line, 30);
   const utilityLine = clipChineseLen(fbObj.utility_line, 32);
-  const detailReason = clipChineseLen(fbObj.detail_reason, 64);
+  const detailReason = clipChineseLen(fbObj.detail_reason, 160);
   const confidenceNum = typeof fbObj.confidence === "number" ? fbObj.confidence : Number(fbObj.confidence);
   const confidence = Number.isFinite(confidenceNum) ? Math.max(0, Math.min(1, confidenceNum)) : 0.7;
   if (!emotionLine || confidence < 0.5) {
@@ -3030,6 +3109,53 @@ interface VoiceCallResult extends FeedbackCallResult {
   number_violations?: string[];
 }
 
+async function withRealtimeExpenseMerchantProfile(
+  supabase: ReturnType<typeof createClient>,
+  userId: string | null,
+  profiles: DomainProfilesMap,
+  ai: AIResult,
+  amount: number | null,
+  transactionDate: string,
+): Promise<DomainProfilesMap> {
+  const merchant = normalizeString(ai.merchant_name);
+  if (!userId || !merchant || amount === null) return profiles;
+  const start = new Date(`${transactionDate}T00:00:00Z`);
+  start.setUTCDate(start.getUTCDate() - 89);
+  const startDate = start.toISOString().slice(0, 10);
+  const { data, error } = await supabase.from("transactions")
+    .select("merchant_name,amount,transaction_date")
+    .eq("user_id", userId)
+    .eq("type", "expense")
+    .eq("status", "done")
+    .gte("transaction_date", startDate)
+    .lte("transaction_date", transactionDate)
+    .limit(1000);
+  if (error) {
+    console.warn("[profile] realtime merchant query failed:", error.message);
+    return profiles;
+  }
+  const stats = buildRealtimeMerchantStats(data ?? [], { merchant, amount, transactionDate });
+  if (!stats) return profiles;
+  const existing = profiles.expense ?? { profile: { v: 1 }, source_count: 0 };
+  const profile = existing.profile ?? { v: 1 };
+  const merchantStats = profile.merchant_stats && typeof profile.merchant_stats === "object"
+    ? profile.merchant_stats as Record<string, unknown>
+    : {};
+  return {
+    ...profiles,
+    expense: {
+      ...existing,
+      profile: {
+        ...profile,
+        v: 1,
+        merchant_stats: { ...merchantStats, [merchant]: stats },
+        realtime_overlay: { merchant, computed_at: new Date().toISOString(), source: stats.source },
+      },
+      source_count: Math.max(existing.source_count ?? 0, stats.count_90d),
+    },
+  };
+}
+
 async function generateVoiceFeedback(opts: {
   ai: AIResult;
   domainKey: string;
@@ -3043,6 +3169,7 @@ async function generateVoiceFeedback(opts: {
   expressionStyle?: string | null;
   customNote?: string | null;
   recentCompanionLines?: string[];
+  memory?: Record<string, unknown> | null;
   textProvider: ProviderConfig | null;
 }): Promise<VoiceCallResult> {
   const startedAt = Date.now();
@@ -3055,6 +3182,7 @@ async function generateVoiceFeedback(opts: {
     return { companion_message: null, ai_feedback: null, raw_text: null, duration_ms: 0, error: "no_text_provider", signals };
   }
   const recordFacts = voiceRecordFacts(opts.domainKey, opts.ai, opts.builtPayload ?? null, opts.normalizedAmount ?? null);
+  const relevantMemories = selectRelevantVoiceMemories(opts.memory, recordFacts.merchant_name);
   try {
     const promptText = buildVoicePrompt({
       clientLocalTime: opts.clientLocalTime,
@@ -3066,6 +3194,7 @@ async function generateVoiceFeedback(opts: {
       expressionStyle: opts.expressionStyle ?? null,
       customNote: opts.customNote ?? null,
       recentCompanionLines: opts.recentCompanionLines ?? [],
+      relevantMemories,
     });
     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.8);
     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
@@ -3086,6 +3215,23 @@ async function generateVoiceFeedback(opts: {
         companion_message: null, ai_feedback: null, raw_text: rawText,
         duration_ms: Date.now() - startedAt, error: "number_validation_failed",
         signals, number_violations: check.violations,
+      };
+    }
+    const semanticCheck = validateVoiceSemantics(
+      signals.map((signal) => signal.kind),
+      [
+        normalized.companion_message,
+        normalized.ai_feedback?.emotion_line ?? null,
+        normalized.ai_feedback?.utility_line ?? null,
+        normalized.ai_feedback?.detail_reason ?? null,
+      ],
+    );
+    if (!semanticCheck.ok) {
+      console.warn(`[voice] semantic validation failed (${opts.domainKey}):`, semanticCheck.violations.join(" | "));
+      return {
+        companion_message: null, ai_feedback: null, raw_text: rawText,
+        duration_ms: Date.now() - startedAt, error: "semantic_validation_failed",
+        signals, number_violations: semanticCheck.violations,
       };
     }
     return {
@@ -3425,6 +3571,25 @@ Deno.serve(async (req) => {
       const jsonBody = await req.json().catch(() => ({}));
       const action = jsonBody?.action;
 
+      if (action === "submit_expression_feedback") {
+        const actionUserId = await authenticatedActionUserId(req);
+        if (!actionUserId) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        try {
+          const result = await submitExpressionFeedback(supabase, actionUserId, jsonBody);
+          return new Response(JSON.stringify({ ok: true, data: result }), {
+            status: 200, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        } catch (error) {
+          return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+      }
+
       if (action === "cleanup_all_images") {
         // 身份校验：仅 JWT
         const authHeader = req.headers.get("Authorization") || "";
@@ -3632,6 +3797,17 @@ Deno.serve(async (req) => {
       domainProfilesPromise = loadDomainProfiles(supabase, userId);
     }
 
+    const respondWithExpressionShadow = (
+      payload: Record<string, unknown>,
+      options: { mode: ShortcutResponseMode; status?: number },
+    ): Response => {
+      scheduleExpressionShadowCapture(supabase, {
+        userId,
+        payload,
+        responseMode: options.mode,
+      });
+      return respondShortcut(payload, options);
+    };
     const stagingRetryId = normalizeString(form.get("staging_record_id"));
     let file = form.get("image") as File | null;
     let retryImageBytes: Uint8Array | null = null;
@@ -3765,7 +3941,7 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       });
       const _spendSum = await summarizeTodaySpend(supabase, userId);
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "duplicate", id: txDup.id, record_type: "expense",
         message: "该截图已记账",
         notification: `🔁 该截图已记账过\n${todaySpendLine(_spendSum)}`,
@@ -3786,7 +3962,7 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
       });
       const _incSum = await summarizeMonthIncome(supabase, userId);
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "duplicate", id: incDup.id, record_type: "income",
         message: "该收入截图已记录",
         notification: `🔁 该收入截图已记录过\n${monthIncomeLine(_incSum)}`,
@@ -3809,7 +3985,7 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startedAt,
         prompt_version: promptVersion,
       });
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "duplicate", id: dataDup.id, record_type: dataDup.domain_key,
         message: "该截图已归档",
         notification: `🔁 该截图已归档过 · ${domainNameFromKey(dataDup.domain_key) ?? dataDup.domain_key}`,
@@ -3925,6 +4101,9 @@ Deno.serve(async (req) => {
       modelName: aiModel,
     });
 
+    if (ai.category !== null && ai.category !== undefined) {
+      ai.category = normalizeExpenseCategory(ai.category, "other");
+    }
     const normalizedAmount = normalizeAmount(ai.amount);
     const modelRawCompanion = typeof ai.companion_message === "string" ? ai.companion_message : null;
     let normalizedCompanion: string | null = null;
@@ -4166,7 +4345,7 @@ Deno.serve(async (req) => {
             occurredAt,
           });
           fireAndForgetProfileRefresh(supabase, userId, recordType);
-          return respondShortcut(withTraceMeta({
+          return respondWithExpressionShadow(withTraceMeta({
             status: "done", id: archivedId, record_type: recordType, retry: true,
             message: `✓ 重试成功，已归档到${_retryDomain}`,
             notification: aiFeedback ? feedbackNotification(aiFeedback, _retryNotif) : withCompanion(_retryNotif),
@@ -4202,7 +4381,7 @@ Deno.serve(async (req) => {
         prompt_version: promptVersion,
       });
 
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "staging", staging_status: "retry_failed",
         message: "⚠ 重试仍未确定，请手动选择数据域归档",
         notification: withCompanion("⚠️ 重试仍未确定\n请打开 App 在待处理中手动归档"),
@@ -4276,7 +4455,7 @@ Deno.serve(async (req) => {
       const _stgPrimary = !aiOk
         ? "❌ AI 识别失败，已进入待处理"
         : `⚠️ ${_stgAmtPart}请打开 App 补全`;
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "staging",
         staging_status: stagingStatus,
         id: staging?.id ?? null,
@@ -4309,6 +4488,7 @@ Deno.serve(async (req) => {
             expressionStyle: companionSettings.expressionStyle,
             customNote: companionSettings.customNote,
             recentCompanionLines: [],
+            memory: companionContext.memory,
             textProvider,
           });
           if (_voiceCall.duration_ms > 0) {
@@ -4395,7 +4575,7 @@ Deno.serve(async (req) => {
         const _bNotif = domain
           ? `⚠️ 已识别为${_bDomainName}\n请打开 App 确认后归档`
           : `⚠️ 未找到对应数据域\n已进入待处理`;
-        return respondShortcut(withTraceMeta({
+        return respondWithExpressionShadow(withTraceMeta({
           status: "staging",
           staging_status: domain ? "pending_review" : "routing_failed",
           id: staging?.id ?? null,
@@ -4494,7 +4674,7 @@ Deno.serve(async (req) => {
 
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
       const _domainDoneNotif = `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`;
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: builtinKey,
@@ -4564,7 +4744,7 @@ Deno.serve(async (req) => {
               if (removeErr) console.error("Cleanup duplicate income image failed:", removeErr);
             }
             const _iSum2 = await summarizeMonthIncome(supabase, userId);
-            return respondShortcut(withTraceMeta({
+            return respondWithExpressionShadow(withTraceMeta({
               status: "duplicate",
               id: refIncome.id,
               record_type: "income",
@@ -4719,7 +4899,7 @@ Deno.serve(async (req) => {
       const _iDoneSum = await summarizeMonthIncome(supabase, userId);
       const _iSourceLabel = sourceName && sourceName !== "截图识别收入" ? ` · ${sourceName}` : "";
       const _incomeNotif = `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`;
-      return respondShortcut(withTraceMeta({
+      return respondWithExpressionShadow(withTraceMeta({
         status: "done",
         id: row.id,
         record_type: "income",
@@ -4773,7 +4953,7 @@ Deno.serve(async (req) => {
             if (removeErr) console.error("Cleanup duplicate expense image failed:", removeErr);
           }
           const _eDupSum = await summarizeTodaySpend(supabase, userId);
-          return respondShortcut(withTraceMeta({
+          return respondWithExpressionShadow(withTraceMeta({
             status: "duplicate", id: refLog.target_id, record_type: "expense",
             ai_ok: aiOk, message: "该截图疑似已记录（相似图片）",
             notification: withCompanion(`🔁 该支出疑似已记录过（相似图片）\n${todaySpendLine(_eDupSum)}`),
@@ -4826,13 +5006,21 @@ Deno.serve(async (req) => {
     const isLargeTransport = ai.category === "transport" && (normalizedAmount ?? 0) >= 200;
     if (status === "done" && companionSettings.enabled) {
       // 第二次调用:信号驱动 Voice 层(事实→信号→语言);VOICE_SIGNALS_ENABLED=false 可回退旧链路
+      const expenseVoiceProfiles = voiceSignalsEnabled
+        ? await withTimeoutFallback(
+          withRealtimeExpenseMerchantProfile(supabase, userId, domainProfiles, ai, normalizedAmount, recordDate),
+          COMPANION_CONTEXT_TIMEOUT_MS,
+          domainProfiles,
+          "realtime_expense_profile",
+        )
+        : domainProfiles;
       const _secondCall = voiceSignalsEnabled
         ? await generateVoiceFeedback({
           ai,
           domainKey: "expense",
           builtPayload: null,
           normalizedAmount,
-          domainProfiles,
+          domainProfiles: expenseVoiceProfiles,
           timingSignal: timingSignalFor("expense", timeContext),
           clientLocalTime,
           weekday: _weekdayCN,
@@ -4840,6 +5028,7 @@ Deno.serve(async (req) => {
           expressionStyle: companionSettings.expressionStyle,
           customNote: companionSettings.customNote,
           recentCompanionLines: [],
+          memory: companionContext.memory,
           textProvider,
         })
         : await regenerateFeedbackWithSecondCall({
@@ -4884,7 +5073,16 @@ Deno.serve(async (req) => {
         ai.companion_message = companionMessage;
         aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
       } else {
-        aiFeedback = buildExpenseAIFeedback(
+        const merchantRepeatFallback = voiceSignalsEnabled
+          ? buildMerchantRepeatRuleFeedback(
+            ai,
+            normalizedAmount,
+            _secondCall.signals,
+            timingSignalFor("expense", timeContext),
+            selectRelevantVoiceMemories(companionContext.memory, ai.merchant_name),
+          )
+          : null;
+        aiFeedback = merchantRepeatFallback ?? buildExpenseAIFeedback(
           voiceSignalsEnabled ? { ...ai, companion_message: null } : ai,
           normalizedAmount,
           timeContext,
@@ -5017,8 +5215,9 @@ Deno.serve(async (req) => {
       _ePrimary = `⚠️ ${_ePrimary.replace(/^[💸⚠️]\s*/, "")} · 疑似 3 分钟内重复`;
     }
     const _expenseNotif = `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`;
-    return respondShortcut(withTraceMeta({
+    return respondWithExpressionShadow(withTraceMeta({
       status: row.status,
+      record_type: "expense",
       id: row.id,
       ai_ok: aiOk,
       possible_duplicate: possibleDuplicate,

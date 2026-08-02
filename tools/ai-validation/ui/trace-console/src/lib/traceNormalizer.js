@@ -68,6 +68,7 @@ function normalizeOutput(rawOutput) {
     value: rawOutput.value ?? null,
     source_step: rawOutput.source_step || null,
     user_visible: rawOutput.user_visible ?? true,
+    delivery_state: rawOutput.delivery_state || null,
   }
 }
 

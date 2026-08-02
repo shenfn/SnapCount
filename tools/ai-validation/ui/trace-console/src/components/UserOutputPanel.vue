@@ -1,8 +1,8 @@
 <template>
   <div class="user-output-panel" v-if="outputs.length > 0">
     <div class="panel-header">
-      <span class="header-title">用户可见输出</span>
-      <span class="header-desc">— 用户最终看到了什么</span>
+      <span class="header-title">实际返回输出</span>
+      <span class="header-desc">— 已进入通知或客户端响应的内容</span>
     </div>
 
     <div class="output-cards">
@@ -18,6 +18,7 @@
         <!-- iOS 快捷指令通知 -->
         <template v-if="output.output_type === 'ios_shortcut_notification'">
           <div class="notification-text">{{ output.value }}</div>
+          <div class="card-meta" v-if="output.delivery_state">状态: {{ output.delivery_state }}</div>
         </template>
 
         <!-- App 伴随文案 -->
@@ -66,17 +67,20 @@
         </template>
       </div>
 
-      <!-- 推断的记录摘要 -->
-      <InferredSummary :trace="trace" />
+
     </div>
+    <div class="system-output-divider">系统推断（非用户可见）</div>
+    <InferredSummary :trace="trace" />
   </div>
 
-  <!-- 无用户可见输出 -->
+  <!-- 无实际返回输出 -->
   <div class="user-output-panel empty" v-else>
     <div class="panel-header">
-      <span class="header-title">用户可见输出</span>
+      <span class="header-title">实际返回输出</span>
     </div>
-    <div class="empty-outputs">该样本无用户可见输出</div>
+    <div class="empty-outputs">该样本没有可确认的实际返回输出</div>
+    <div class="system-output-divider">系统推断（非用户可见）</div>
+    <InferredSummary :trace="trace" />
   </div>
 </template>
 
@@ -98,6 +102,14 @@ const props = defineProps({
   flex-shrink: 0;
   max-height: 140px;
   overflow-y: auto;
+}
+
+.system-output-divider {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px dashed var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .panel-header {

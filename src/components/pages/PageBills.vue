@@ -34,11 +34,11 @@ const store = inject('store')
 
 const filters = [
   { val: 'all', label: '全部' },
-  { val: '餐饮', label: '餐饮' },
-  { val: '购物', label: '购物' },
-  { val: '出行', label: '出行' },
-  { val: '娱乐', label: '娱乐' },
-  { val: '生活', label: '生活' },
+  { val: 'food', label: '餐饮' },
+  { val: 'shopping', label: '购物' },
+  { val: 'transport', label: '出行' },
+  { val: 'entertainment', label: '娱乐' },
+  { val: 'life', label: '生活' },
 ]
 
 const grouped = computed(() => {

@@ -1,3 +1,9 @@
+import {
+  expenseCategoryLabel,
+  expenseCategoryUiGroup,
+  normalizeExpenseCategory,
+} from '../domains/expenseCategories'
+
 export function getLocalDateKey(date = new Date()) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -35,12 +41,6 @@ export const incomeCatMap = {
   other:         { label: '其他',     icon: '💰' },
 }
 
-export const catCodeMap = {
-  food: '餐饮', shopping: '购物', transport: '出行',
-  entertainment: '娱乐', life: '生活', health: '生活',
-  education: '其他', other: '其他',
-}
-
 export const payAliasMap = {
   '拼多多先用后付': '先用后付',
   '花呗（先用后付）': '先用后付',
@@ -70,12 +70,17 @@ export function platformBg(p) {
 }
 
 export function mapTransaction(t) {
+  const categoryRaw = t.category ?? null
+  const catCode = normalizeExpenseCategory(categoryRaw)
   return {
     id: t.id,
     name: t.merchant_name || '未识别商家',
     platform: t.platform || '?',
     payment: t.payment_method || '?',
-    cat: t.category || '?',
+    cat: catCode ? expenseCategoryLabel(catCode) : (categoryRaw || '?'),
+    catCode,
+    catUiGroup: catCode ? expenseCategoryUiGroup(catCode) : null,
+    categoryRaw,
     amount: Number(t.amount),
     createdAt: t.created_at,
     date: formatDate(t.transaction_date),

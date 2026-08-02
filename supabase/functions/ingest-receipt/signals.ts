@@ -3,6 +3,9 @@
 // 铁律:模型只能引用信号里已算好的数字;闭环校验在 validateVoiceNumbers。
 // 口径与结构见 docs/profile-schema-v1.md
 
+// @ts-ignore Pure shared data contract is bundled with the Edge Function.
+import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories.js";
+
 // ============================================================
 // 画像加载 + 结构校验(v1 手写守卫,等价于 zod parse 失败即降级)
 // ============================================================
@@ -124,6 +127,7 @@ function expenseSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
   const out: DomainSignal[] = [];
   const merchantStats = isObj(profile.merchant_stats) ? profile.merchant_stats : {};
   const categoryStats = isObj(profile.category_stats) ? profile.category_stats : {};
+  const categoryCode = normalizeExpenseCategory(cur.category);
 
   // merchant_repeat:week_count 是本周已入库真数,+1 含当前这笔;≥3 才说
   if (cur.merchant && isObj(merchantStats[cur.merchant])) {
@@ -143,8 +147,8 @@ function expenseSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
   }
 
   // unusual_amount:高于该分类近30天 p90 才说,样本≥5 才可信
-  if (cur.category && cur.amount !== null && cur.amount !== undefined && isObj(categoryStats[cur.category])) {
-    const cs = categoryStats[cur.category] as Record<string, unknown>;
+  if (categoryCode && cur.amount !== null && cur.amount !== undefined && isObj(categoryStats[categoryCode])) {
+    const cs = categoryStats[categoryCode] as Record<string, unknown>;
     const p90 = num(cs.p90_amount);
     const monthCount = num(cs.month_count);
     if (p90 !== null && monthCount !== null && monthCount >= 5 && cur.amount > p90) {

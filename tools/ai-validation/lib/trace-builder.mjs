@@ -89,6 +89,18 @@ export function summarizeResult(result) {
  * @param {string|Object|null} value
  * @returns {Object|null}
  */
+export function buildActualSurfaceOutputs({ notification = null, sourceStep = 'response_build' } = {}) {
+  const value = typeof notification === 'string' ? notification.trim() : ''
+  if (!value) return []
+  return [{
+    output_type: 'ios_shortcut_notification',
+    label: 'iOS 快捷指令实际返回',
+    value,
+    source_step: sourceStep,
+    user_visible: true,
+    delivery_state: 'returned_to_shortcut',
+  }]
+}
 export function parseRawDebug(value) {
   if (!value) return null
   if (typeof value === 'object') return value
@@ -410,29 +422,9 @@ export function buildTraceFromUploadResult(payload) {
   const generatedAt = new Date().toISOString()
   const status = summary.error ? 'error' : (summary.status || parsed.status || (payload.httpStatus >= 200 && payload.httpStatus < 300 ? 'success' : 'error'))
 
-  const userVisibleOutputs = [
-    parsed.notification_text || parsed.notification ? {
-      output_type: 'ios_shortcut_notification',
-      label: 'iOS 快捷指令通知',
-      value: parsed.notification_text || parsed.notification,
-      source_step: 'response_build',
-      user_visible: true,
-    } : null,
-    summary.companion_message && summary.companion_message !== '-' ? {
-      output_type: 'app_companion_message',
-      label: 'App 伴随文案',
-      value: summary.companion_message,
-      source_step: 'companion_feedback',
-      user_visible: true,
-    } : null,
-    summary.ai_feedback ? {
-      output_type: 'app_ai_feedback',
-      label: 'App AI 弹窗反馈',
-      value: summary.ai_feedback,
-      source_step: 'companion_feedback',
-      user_visible: true,
-    } : null,
-  ].filter(Boolean)
+  const userVisibleOutputs = buildActualSurfaceOutputs({
+    notification: parsed.notification_text || parsed.notification || null,
+  })
 
   const dbTargets = parsed.id ? [{
     table: inferTargetTable(summary.record_type, parsed.status),
@@ -685,23 +677,11 @@ export function buildTraceFromAiLog(logRow, options = {}) {
   const parsed = aiResponse || {}
   const summary = summarizeResult(parsed)
 
-  // 构建 user_visible_outputs
-  const userVisibleOutputs = [
-    summary.companion_message && summary.companion_message !== '-' ? {
-      output_type: 'app_companion_message',
-      label: 'App 伴随文案',
-      value: summary.companion_message,
-      source_step: 'companion_feedback',
-      user_visible: true,
-    } : null,
-    summary.ai_feedback ? {
-      output_type: 'app_ai_feedback',
-      label: 'App AI 弹窗反馈',
-      value: summary.ai_feedback,
-      source_step: 'companion_feedback',
-      user_visible: true,
-    } : null,
-  ].filter(Boolean)
+  // 远程日志只有 raw_debug.notification.final 能证明实际进入快捷指令响应。
+  // companion_message 和完整 ai_feedback 是生成/持久化产物，不等于用户实际看到。
+  const userVisibleOutputs = buildActualSurfaceOutputs({
+    notification: rawDebug?.notification?.final || null,
+  })
 
   // 构建 steps
   let steps

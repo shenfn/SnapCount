@@ -18,9 +18,14 @@ import {
 } from '../domains/universalFormAdapter'
 import {
   formatDate, formatMonthLabel, mapTransaction,
-  incomeCatMap, catCodeMap, payAliasMap,
+  incomeCatMap, payAliasMap,
   getLocalDateKey, localDateKeyOf,
 } from '../utils/helpers'
+import {
+  expenseCategoryLabel,
+  expenseCategoryUiGroup,
+  normalizeExpenseCategory,
+} from '../domains/expenseCategories'
 import { isLiabilityAccount, mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
@@ -235,7 +240,7 @@ export function useStore() {
 
   const filteredBills = computed(() => {
     if (currentFilter.value === 'all') return bills.value
-    return bills.value.filter(b => b.cat === currentFilter.value)
+    return bills.value.filter(b => b.catUiGroup === currentFilter.value)
   })
 
   const pendingSummary = computed(() => {
@@ -822,7 +827,7 @@ export function useStore() {
 
       bills.value = (txs || []).map(mapTransaction)
       transportRecords.value = bills.value
-        .filter(b => b.cat === 'transport' && b.amount >= 200)
+        .filter(b => b.catCode === 'transport' && b.amount >= 200)
         .map(b => ({ id: b.id, type: b.transport_type || '交通', desc: b.name, amount: b.amount, date: b.date }))
 
       const { data: incs, error: incErr } = incResult
@@ -1126,7 +1131,7 @@ export function useStore() {
     pendingModal.merchantName = bill.name !== '未识别商家' ? bill.name : ''
     pendingModal.amount = String(bill.amount)
     pendingModal.platform = bill.platform !== '?' ? bill.platform : null
-    pendingModal.category = catCodeMap[bill.cat] || (bill.cat !== '?' ? bill.cat : null)
+    pendingModal.category = bill.catCode || normalizeExpenseCategory(bill.categoryRaw ?? bill.cat)
     pendingModal.payment = payAliasMap[bill.payment] || (bill.payment !== '?' ? bill.payment : null)
     pendingModal.incomeCategory = 'other'
     pendingModal.accountId = resolveAccountIdForPayment({
@@ -1344,6 +1349,7 @@ export function useStore() {
       }
 
       if (!pendingModal.platform || !pendingModal.category || !pendingModal.payment) return
+      const categoryCode = normalizeExpenseCategory(pendingModal.category, 'other')
       const expenseAccountId = pendingModal.accountUnbound
         ? autoAccountIdForPayment(pendingModal.payment, 'expense')
         : (pendingModal.accountId || autoAccountIdForPayment(pendingModal.payment, 'expense') || null)
@@ -1353,7 +1359,7 @@ export function useStore() {
         p_amount: amt,
         p_merchant_or_source_name: pendingModal.merchantName || `${pendingModal.platform}消费`,
         p_platform: pendingModal.platform,
-        p_category: pendingModal.category,
+        p_category: categoryCode,
         p_payment_method: pendingModal.payment,
         p_income_category: null,
         p_account_id: expenseAccountId,
@@ -1366,7 +1372,10 @@ export function useStore() {
         bills.value[bIdx2] = {
           ...bills.value[bIdx2],
           platform: pendingModal.platform,
-          cat: pendingModal.category,
+          cat: expenseCategoryLabel(categoryCode),
+          catCode: categoryCode,
+          catUiGroup: expenseCategoryUiGroup(categoryCode),
+          categoryRaw: categoryCode,
           payment: pendingModal.payment,
           name: pendingModal.merchantName || `${pendingModal.platform}消费`,
           amount: amt,
@@ -1633,7 +1642,7 @@ export function useStore() {
     expenseModal.amount = String(record.amount || '')
     expenseModal.merchantName = record.name || ''
     expenseModal.platform = record.platform && record.platform !== '?' ? record.platform : null
-    expenseModal.category = record.cat && record.cat !== '?' ? record.cat : null
+    expenseModal.category = record.catCode || normalizeExpenseCategory(record.categoryRaw ?? record.cat)
     expenseModal.payment = record.payment && record.payment !== '?' ? record.payment : null
     expenseModal.note = record.note || ''
     expenseModal.date = record.dateRaw || getLocalDateKey()
@@ -1663,7 +1672,8 @@ export function useStore() {
       if (!expenseModal.date) { showWarn('请选择消费日期'); return }
 
       const merchantName = expenseModal.merchantName.trim() || `${expenseModal.platform}消费`
-      const isLargeTransport = expenseModal.category === '出行' && amt >= 200
+      const categoryCode = normalizeExpenseCategory(expenseModal.category, 'other')
+      const isLargeTransport = categoryCode === 'transport' && amt >= 200
       const resolvedTime = expenseModal.time || null
 
       if (expenseModal.mode === 'edit' && expenseModal.id) {
@@ -1675,7 +1685,7 @@ export function useStore() {
           p_amount: amt,
           p_merchant_name: merchantName,
           p_platform: expenseModal.platform,
-          p_category: expenseModal.category,
+          p_category: categoryCode,
           p_payment_method: expenseModal.payment,
           p_transaction_date: expenseModal.date,
           p_transaction_time: resolvedTime,
@@ -1699,7 +1709,10 @@ export function useStore() {
             name: merchantName,
             platform: expenseModal.platform,
             payment: expenseModal.payment,
-            cat: expenseModal.category,
+            cat: expenseCategoryLabel(categoryCode),
+            catCode: categoryCode,
+            catUiGroup: expenseCategoryUiGroup(categoryCode),
+            categoryRaw: categoryCode,
             amount: amt,
             date: formatDate(expenseModal.date),
             dateRaw: expenseModal.date,
@@ -1726,7 +1739,7 @@ export function useStore() {
         p_amount: amt,
         p_merchant_name: merchantName,
         p_platform: expenseModal.platform,
-        p_category: expenseModal.category,
+        p_category: categoryCode,
         p_payment_method: expenseModal.payment,
         p_transaction_date: expenseModal.date,
         p_transaction_time: resolvedTime || (new Date().toTimeString().slice(0, 8)),
@@ -2086,18 +2099,19 @@ export function useStore() {
     if (domainKey === 'expense') {
       const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
       const paymentMethod = payload.payment_method || null
+      const categoryCode = normalizeExpenseCategory(payload.category)
       const { data: inserted, error: insertErr } = await sb.rpc('save_transaction_with_account', {
         p_id: null,
         p_amount: amount > 0 ? amount : 0.01,
         p_merchant_name: payload.merchant_name || payload.source_name || title || '待补充支出',
         p_platform: payload.platform || '微信',
-        p_category: payload.category || null,
+        p_category: categoryCode,
         p_payment_method: paymentMethod,
         p_transaction_date: normalizeDateOnly(occurredAt),
         p_transaction_time: null,
         p_note: summary,
-        p_is_large_transport: payload.category === 'transport' && amount >= 200,
-        p_transport_type: payload.category === 'transport' && amount >= 200 ? '交通' : null,
+        p_is_large_transport: categoryCode === 'transport' && amount >= 200,
+        p_transport_type: categoryCode === 'transport' && amount >= 200 ? '交通' : null,
         p_source: 'ai_scan',
         p_image_url: record.imagePath || null,
         p_image_hash: record.imageHash || null,
@@ -2886,17 +2900,18 @@ export function useStore() {
       if (error) { showFlash('补绑失败：' + humanizeDbError(error)); return false }
     } else {
       const time = record.time ? `${record.time.length === 5 ? `${record.time}:00` : record.time}` : null
+      const categoryCode = record.catCode || normalizeExpenseCategory(record.categoryRaw ?? record.cat)
       const { error } = await sb.rpc('save_transaction_with_account', {
         p_id: record.id,
         p_amount: Number(record.amount || 0),
         p_merchant_name: record.name || '支出',
         p_platform: record.platform && record.platform !== '?' ? record.platform : null,
-        p_category: record.cat && record.cat !== '?' ? record.cat : null,
+        p_category: categoryCode,
         p_payment_method: record.payment && record.payment !== '?' ? record.payment : null,
         p_transaction_date: record.dateRaw || getLocalDateKey(),
         p_transaction_time: time,
         p_note: record.note || null,
-        p_is_large_transport: record.cat === 'transport' && Number(record.amount || 0) >= 200,
+        p_is_large_transport: categoryCode === 'transport' && Number(record.amount || 0) >= 200,
         p_transport_type: record.transport_type || null,
         p_source: record.source || null,
         p_image_url: record.image_path || record.image_url || null,
@@ -3561,6 +3576,31 @@ export function useStore() {
     }
   }
 
+  async function submitExpressionFeedback({ recordId, choice, freeText = "" }) {
+    if (!recordId || !choice) throw new Error("缺少点评信息")
+    const { data: sessionData, error: sessionError } = await sb.auth.getSession()
+    if (sessionError) throw sessionError
+    const token = sessionData?.session?.access_token
+    if (!token) throw new Error("登录状态已失效，请重新登录")
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/ingest-receipt`, {
+      method: "POST",
+      keepalive: true,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "apikey": SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({
+        action: "submit_expression_feedback",
+        record_id: recordId,
+        primary_choice: choice,
+        free_text: freeText,
+      }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "点评提交失败")
+    return payload.data
+  }
   return {
     currentYear, currentMonth, currentPage, monthLabel,
     pageHistory, pageScrollPositions, currentUserId, currentUserEmail, isLoggedIn,
@@ -3616,6 +3656,6 @@ export function useStore() {
     navigateTo, goBack,
     settingsState, toggleSetting, setSetting, setRetention, loadUserSettings,
     actionState, isActionPending,
-    refreshIfStale,
+    refreshIfStale, submitExpressionFeedback,
   }
 }

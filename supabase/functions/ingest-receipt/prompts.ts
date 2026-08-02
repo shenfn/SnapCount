@@ -78,7 +78,7 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
 - band：严格从 [positive, neutral, watch, recover, ritual] 五选一
 - emotion_line：≤ 28 个汉字，共情/陪伴向，不带建议；可以与 companion_message 相同或互补
 - utility_line：≤ 30 个汉字，提供 1 个具体观察或轻微建议；与 emotion_line 不重复
-- detail_reason：≤ 60 个汉字，说明判断依据；仅当 confidence ≥ 0.7 时输出，否则为 null
+- detail_reason：≤ 120 个汉字，说明判断依据；仅当 confidence ≥ 0.7 时输出，否则为 null。该字段用于记录详情页，可完整交代数据基线、记忆和结论边界
 - confidence：0-1 之间小数，自评打分；低于 0.6 整个 ai_feedback 可返回 null
 - 若没有足够强信号产出有意义的 ai_feedback，整个对象返回 null，不要硬凑套话`;
 
@@ -379,6 +379,7 @@ export interface VoicePromptContext {
   expressionStyle?: string | null;
   customNote?: string | null;
   recentCompanionLines?: string[];
+  relevantMemories?: string[];
 }
 
 const PERSONA_HINTS: Record<string, string> = {
@@ -402,6 +403,9 @@ export function buildVoicePrompt(ctx: VoicePromptContext): string {
   const recentBlock = ctx.recentCompanionLines?.length
     ? `\n避免与最近文案句式重复：\n${ctx.recentCompanionLines.slice(0, 3).map((l) => `- ${l}`).join("\n")}`
     : "";
+  const memoryBlock = ctx.relevantMemories?.length
+    ? `\n【与本条记录直接相关的用户解释记忆】\n${ctx.relevantMemories.slice(0, 3).map((memory) => `- ${memory}`).join("\n")}\n`
+    : "";
   const timeLine = ctx.clientLocalTime
     ? `当前时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}\n`
     : "";
@@ -413,18 +417,21 @@ ${JSON.stringify(ctx.recordFacts)}
 
 【已核实的信号（数字来自数据库，可直接引用）】
 ${signalBlock}
-
+${memoryBlock}
 【铁律】
 - 只能使用上面出现过的数字，禁止自己计算、推测或回忆任何次数/对比/趋势
 - 无信号时只围绕本条记录本身写，或返回空字符串 ""
 - 不建议、不评判、不教育；禁止"加油/注意身体/记得/超标/放纵"
 - 禁止"这周第X笔"开头、禁止"又是熟悉的XX"句式
+- merchant_repeat 只证明重复发生，不证明生活惯性、成瘾、浪费或不必要
+- merchant_repeat 没有直接用途记忆时，只能中性陈述次数、金额和商户；禁止"审视必要性"、"生活惯性"、"上瘾"、"依赖"、"建议少花"
+- 有直接用途记忆时可以结合用途解释，但不得超出记忆内容，仍不得给消费必要性下判断
 - ${personaHint}
 - ${styleHint}
 ${customHint}${recentBlock}
 
 输出纯 JSON（无 markdown）：
-{"companion_message":"≤30汉字，可为空串","ai_feedback":{"badge":"4-8字","band":"positive|neutral|watch|recover|ritual","emotion_line":"≤28汉字共情","utility_line":"≤30汉字具体观察","detail_reason":"≤60汉字判断依据或null","confidence":0.0}}
+{"companion_message":"≤30汉字，可为空串","ai_feedback":{"badge":"4-8字","band":"positive|neutral|watch|recover|ritual","emotion_line":"≤28汉字共情","utility_line":"≤30汉字具体观察","detail_reason":"≤120汉字判断依据或null","confidence":0.0}}
 信号太弱时 ai_feedback 返回 null。`;
 }
 
@@ -462,7 +469,7 @@ export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
     "band": "positive | neutral | watch | recover | ritual",
     "emotion_line": "≤ 28 汉字，共情向",
     "utility_line": "≤ 30 汉字，观察或建议（与 emotion_line 不重复）",
-    "detail_reason": "≤ 60 汉字，判断依据；不确定时为 null",
+    "detail_reason": "≤ 120 汉字，判断依据；不确定时为 null",
     "confidence": 0.0
   }
 }

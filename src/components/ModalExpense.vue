@@ -126,6 +126,7 @@
 import { computed, inject } from 'vue'
 import { useBottomSheet } from '../composables/useBottomSheet'
 import { getLocalDateKey } from '../utils/helpers'
+import { EXPENSE_CATEGORY_UI_OPTIONS } from '../domains/expenseCategories'
 import AccountPicker from './AccountPicker.vue'
 const store = inject('store')
 const today = getLocalDateKey()
@@ -153,14 +154,7 @@ const platforms = [
   { val: '其他', label: '💰 其他' },
 ]
 
-const categories = [
-  { val: '餐饮', label: '🍜 餐饮' },
-  { val: '购物', label: '🛒 购物' },
-  { val: '出行', label: '🚗 出行' },
-  { val: '娱乐', label: '🎮 娱乐' },
-  { val: '生活', label: '🏠 生活' },
-  { val: '其他', label: '📌 其他' },
-]
+const categories = EXPENSE_CATEGORY_UI_OPTIONS
 
 const payments = [
   { val: '微信支付', label: '💚 微信支付', hot: true },
