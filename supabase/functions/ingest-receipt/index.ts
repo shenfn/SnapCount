@@ -23,6 +23,10 @@ import {
   type FinancialPerceptualCandidate,
   type RankedPerceptualCandidate,
 } from "./duplicate-review.ts";
+import {
+  builtinArchiveReviewReasons,
+  looksLikeJieziAppScreenshot,
+} from "./archive-review-policy.ts";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
 // 默认使用 3.6 Flash 控制上传耗时，用户可显式切换到 3.7 Plus。
@@ -5782,12 +5786,25 @@ Deno.serve(async (req) => {
     }
     normalizedCompanion = ai.companion_message;
     if (!companionSettings.enabled) ai.companion_message = null;
-    const recordType: RecordType = ai.record_type ?? "expense";
-    const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
-      ? ai.domain_key
-      : isBuiltinDomain(recordType)
-        ? recordType
-        : null;
+    const isJieziAppScreenshot = looksLikeJieziAppScreenshot({
+      title: ai.title,
+      summary: ai.summary,
+      accountName: ai.payload_jsonb?.account_name as string | null | undefined,
+    });
+    const recordType: RecordType = isJieziAppScreenshot
+      ? "uncertain"
+      : (ai.record_type ?? "expense");
+    const builtinKey: BuiltinDomainKey | null = isJieziAppScreenshot
+      ? null
+      : isBuiltinDomain(ai.domain_key)
+        ? ai.domain_key
+        : isBuiltinDomain(recordType)
+          ? recordType
+          : null;
+    if (isJieziAppScreenshot) {
+      ai.record_type = "uncertain";
+      ai.domain_key = null;
+    }
     if (builtinKey) {
       ai.record_type = builtinKey;
       ai.domain_key = builtinKey;
@@ -6141,7 +6158,21 @@ Deno.serve(async (req) => {
       const built = buildBuiltinPayload(ai);
       const domain = await getDomainByKey(supabase, builtinKey, userId);
       const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : (occurredAt ?? new Date().toISOString());
-      const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
+      const policyReasons = built
+        ? builtinArchiveReviewReasons({
+          domainKey: builtinKey,
+          title: built.title,
+          summary: built.summary,
+          payload: built.payload,
+        })
+        : [];
+      const shouldAutoArchive = Boolean(
+        domain
+        && built
+        && built.missingFields.length === 0
+        && (ai.confidence ?? 0) >= 0.75
+        && policyReasons.length === 0
+      );
       if (shouldAutoArchive && built && companionSettings.enabled) {
         // 信号驱动 Voice 层优先:个人画像信号 → 模型翻译;失败/违规 → 规则渲染兜底
         let _voiceCall: VoiceCallResult | null = null;
@@ -6214,6 +6245,9 @@ Deno.serve(async (req) => {
 
       if (!shouldAutoArchive || !domain || !built) {
         const missing = built?.missingFields ?? [];
+        const reviewMessage = missing.length > 0
+          ? `还需确认：${missing.join(", ")}`
+          : policyReasons[0]?.message ?? "整体可信度不足，需要人工确认";
         const staging = await createStagingRecord(supabase, {
           status: domain ? "pending_review" : "routing_failed",
           imagePath: path,
@@ -6225,7 +6259,7 @@ Deno.serve(async (req) => {
           errorType: domain ? "SCHEMA_REVIEW_REQUIRED" : "DOMAIN_NOT_FOUND",
           errorMessage: !domain
             ? `未找到内置数据域 ${builtinKey}，请确认 007 迁移已执行`
-            : `缺少字段或置信度不足：${missing.join(", ") || "confidence"}`,
+            : reviewMessage,
           dispatcher,
           userId,
           timeContext,

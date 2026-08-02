@@ -18,6 +18,7 @@ struct NativeUserSettings: Equatable {
     var aiLogsEnabled = false
     var promptOptimizationEnabled = false
     var expressionImprovementEnabled = false
+    var expressionImprovementAvailable = true
     var keepSourceImages = true
     var imageRetentionDays = -1
 

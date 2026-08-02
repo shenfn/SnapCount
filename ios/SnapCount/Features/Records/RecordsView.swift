@@ -141,7 +141,7 @@ struct RecordDetailView: View {
             JieziTheme.pageBackground.ignoresSafeArea()
             if let detail {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 16) {
                         if let imageURL = detail.imageURL {
                             Button {
                                 imagePreview = ImagePreviewRoute(url: imageURL)
@@ -203,6 +203,7 @@ struct RecordDetailView: View {
                         actionSection(detail)
                     }
                     .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else if let message = appState.recordDetailMessage {
                 ContentUnavailableView(
@@ -215,6 +216,8 @@ struct RecordDetailView: View {
             }
         }
         .navigationTitle("记录详情")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
             if let detail {
@@ -332,7 +335,11 @@ struct RecordDetailView: View {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 HStack(alignment: .top, spacing: 16) {
                     Text(row.label).font(.subheadline).foregroundStyle(.secondary).frame(width: 82, alignment: .leading)
-                    Text(row.value).font(.subheadline).frame(maxWidth: .infinity, alignment: .trailing).multilineTextAlignment(.trailing)
+                    Text(row.value)
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 10)
                 if index < rows.count - 1 { Divider() }
@@ -482,9 +489,7 @@ private struct RecordImagePreview: View {
                 .resizable()
                 .scaledToFit()
                 .frame(maxWidth: .infinity)
-                .frame(maxHeight: 280)
                 .background(JieziTheme.pageBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     Label("原始图片", systemImage: "photo")
                         .font(.caption.weight(.semibold))
@@ -502,16 +507,20 @@ private struct RecordImagePreview: View {
                         .padding(10)
                 }
         } placeholder: {
-            ProgressView().frame(maxWidth: .infinity, minHeight: 128)
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } failure: {
             Button(action: onRetry) {
                 Label("截图加载失败，点此重试", systemImage: "arrow.clockwise")
                     .font(.footnote)
                     .foregroundStyle(JieziTheme.brand)
-                    .frame(maxWidth: .infinity, minHeight: 128)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .buttonStyle(.plain)
         }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(3 / 4, contentMode: .fit)
+        .background(JieziTheme.pageBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

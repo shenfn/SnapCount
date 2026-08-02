@@ -351,10 +351,19 @@ private struct PrivacySettingsView: View {
                 Text("Prompt 优化开启后会保留脱敏后的模型原始输出，默认关闭。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Toggle("参与 AI 改进", isOn: asyncToggle(appState.userSettings.expressionImprovementEnabled, appState.setExpressionImprovementEnabled))
-                Text("开启后保存 30 天的脱敏语义与评分，不含原图、金额、商户或通知原文；关闭会清理未关联点评的后台数据。")
+                Toggle(
+                    "参与 AI 改进",
+                    isOn: asyncToggle(
+                        appState.userSettings.expressionImprovementEnabled,
+                        appState.setExpressionImprovementEnabled
+                    )
+                )
+                .disabled(!appState.userSettings.expressionImprovementAvailable)
+                Text(appState.userSettings.expressionImprovementAvailable
+                    ? "开启后保存 30 天的脱敏语义与评分，不含原图、金额、商户或通知原文；关闭会清理未关联点评的后台数据。"
+                    : "服务端隐私控制正在升级，此项暂不可用；AI 日志和 Prompt 优化设置仍可正常使用。")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appState.userSettings.expressionImprovementAvailable ? JieziTheme.muted : JieziTheme.coral)
             }
             Section("截图原图留存") {
                 retentionButton("不保留", value: 0)

@@ -8,6 +8,16 @@ enum NativePendingEntryKind: String, CaseIterable, Identifiable {
     var title: String { self == .expense ? "支出" : "收入" }
 }
 
+enum NativePendingResolutionField: String, CaseIterable, Identifiable {
+    case amount
+    case platform
+    case category
+    case paymentMethod
+    case incomeCategory
+
+    var id: String { rawValue }
+}
+
 struct NativePendingResolutionDraft {
     let pendingId: String
     var kind: NativePendingEntryKind
@@ -47,5 +57,34 @@ struct NativePendingResolutionDraft {
             return "请选择收入类型"
         }
         return nil
+    }
+
+    var missingFields: [NativePendingResolutionField] {
+        var fields: [NativePendingResolutionField] = []
+        if amount == nil { fields.append(.amount) }
+        if kind == .expense {
+            if platform.isEmpty { fields.append(.platform) }
+            if category.isEmpty { fields.append(.category) }
+            if paymentMethod.isEmpty { fields.append(.paymentMethod) }
+        } else if incomeCategory.isEmpty {
+            fields.append(.incomeCategory)
+        }
+        return fields
+    }
+
+    var recognizedSummary: String {
+        let amountLabel = amount.map { String(format: "%@¥%.2f", kind == .income ? "+" : "-", $0) }
+        let categoryLabel = kind == .expense
+            ? NativeFinanceOptionCatalog.categoryTitle(for: category)
+            : NativeManualRecordDraft.incomeCategories.first(where: { $0.id == incomeCategory })?.title
+        return [
+            amountLabel,
+            merchantOrSourceName.isEmpty ? nil : merchantOrSourceName,
+            kind == .expense && !platform.isEmpty ? platform : nil,
+            categoryLabel,
+            kind == .expense && !paymentMethod.isEmpty ? paymentMethod : nil
+        ]
+        .compactMap { $0 }
+        .joined(separator: " · ")
     }
 }

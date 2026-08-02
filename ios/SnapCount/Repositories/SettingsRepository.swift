@@ -10,24 +10,57 @@ protocol SettingsRepositoryProtocol {
 
 final class SettingsRepository: SettingsRepositoryProtocol {
     private let remoteClient: SupabaseRemoteClientProtocol
+    private static let settingsColumns = "plan,screenshot_vision_primary,photo_vision_primary,qwen_screenshot_model,qwen_photo_model,qwen_screenshot_enable_thinking,qwen_photo_enable_thinking,ai_insight_provider,companion_enabled,companion_memory_enabled,companion_persona,companion_memory_strength,companion_expression_style,companion_custom_note,ai_logs_enabled,prompt_optimization_enabled,expression_improvement_enabled,keep_source_images,image_retention_days"
+    private static let legacySettingsColumns = "plan,screenshot_vision_primary,photo_vision_primary,qwen_screenshot_model,qwen_photo_model,qwen_screenshot_enable_thinking,qwen_photo_enable_thinking,ai_insight_provider,companion_enabled,companion_memory_enabled,companion_persona,companion_memory_strength,companion_expression_style,companion_custom_note,ai_logs_enabled,prompt_optimization_enabled,keep_source_images,image_retention_days"
 
     init(remoteClient: SupabaseRemoteClientProtocol = SupabaseRemoteClient()) {
         self.remoteClient = remoteClient
     }
 
     func fetch(userId: String, accessToken: String) async throws -> NativeUserSettings {
-        let rows = try await remoteClient.get(
+        do {
+            let rows = try await settingsRows(
+                userId: userId,
+                columns: Self.settingsColumns,
+                accessToken: accessToken
+            )
+            guard let row = rows.first else { return NativeUserSettings() }
+            return row.settings
+        } catch {
+            guard Self.isMissingExpressionImprovementColumn(error) else { throw error }
+            let rows = try await settingsRows(
+                userId: userId,
+                columns: Self.legacySettingsColumns,
+                accessToken: accessToken
+            )
+            var settings = rows.first?.settings ?? NativeUserSettings()
+            settings.expressionImprovementEnabled = false
+            settings.expressionImprovementAvailable = false
+            return settings
+        }
+    }
+
+    static func isMissingExpressionImprovementColumn(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("expression_improvement_enabled")
+            && (message.contains("does not exist") || message.contains("schema cache") || message.contains("column"))
+    }
+
+    private func settingsRows(
+        userId: String,
+        columns: String,
+        accessToken: String
+    ) async throws -> [SettingsRow] {
+        try await remoteClient.get(
             [SettingsRow].self,
             path: "rest/v1/user_configs",
             queryItems: [
-                URLQueryItem(name: "select", value: "plan,screenshot_vision_primary,photo_vision_primary,qwen_screenshot_model,qwen_photo_model,qwen_screenshot_enable_thinking,qwen_photo_enable_thinking,ai_insight_provider,companion_enabled,companion_memory_enabled,companion_persona,companion_memory_strength,companion_expression_style,companion_custom_note,ai_logs_enabled,prompt_optimization_enabled,expression_improvement_enabled,keep_source_images,image_retention_days"),
+                URLQueryItem(name: "select", value: columns),
                 URLQueryItem(name: "user_id", value: "eq.\(userId)"),
                 URLQueryItem(name: "limit", value: "1")
             ],
             accessToken: accessToken
         )
-        guard let row = rows.first else { return NativeUserSettings() }
-        return row.settings
     }
 
     func update(userId: String, values: [String: AnyCodable], accessToken: String) async throws {
@@ -395,6 +428,7 @@ private struct SettingsRow: Decodable {
             aiLogsEnabled: aiLogsEnabled ?? false,
             promptOptimizationEnabled: promptOptimizationEnabled ?? false,
             expressionImprovementEnabled: expressionImprovementEnabled ?? false,
+            expressionImprovementAvailable: true,
             keepSourceImages: keepSourceImages ?? true,
             imageRetentionDays: imageRetentionDays ?? -1
         )

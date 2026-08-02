@@ -1432,6 +1432,9 @@ final class AppState: ObservableObject {
         do {
             let session = try await validSession()
             try await inboxRepository.confirmPending(draft, accessToken: session.accessToken)
+            let nextReference = dashboard.pendingExpenses
+                .first(where: { $0.id != draft.pendingId })?
+                .reference
             if draft.kind == .expense {
                 scheduleConfirmedExpenseVocabulary(
                     platform: draft.platform,
@@ -1443,11 +1446,18 @@ final class AppState: ObservableObject {
                 )
             }
             recordDetailCache.removeValue(forKey: "expense/\(draft.pendingId)")
+            dashboard.pendingExpenses.removeAll { $0.id == draft.pendingId }
+            dashboard.pendingCount = max(0, dashboard.pendingCount - 1)
             selectedRecordDetail = nil
-            await loadAccounts()
-            await refreshDashboard()
             inboxPath = NavigationPath()
+            if let nextReference {
+                inboxPath.append(NativeInboxRoute.record(reference: nextReference))
+            }
             pendingResolutionMessage = draft.kind == .income ? "收入已记录" : "支出已补全"
+            Task {
+                await loadAccounts()
+                await refreshDashboard()
+            }
             return true
         } catch {
             pendingResolutionMessage = "保存失败：\(error.localizedDescription)"
@@ -1561,6 +1571,10 @@ final class AppState: ObservableObject {
     }
 
     func setExpressionImprovementEnabled(_ enabled: Bool) async {
+        guard userSettings.expressionImprovementAvailable else {
+            settingsMessage = "参与 AI 改进将在服务端升级完成后开放，其他隐私设置不受影响。"
+            return
+        }
         await updateSettings(["expression_improvement_enabled": AnyCodable(enabled)]) { $0.expressionImprovementEnabled = enabled }
     }
 

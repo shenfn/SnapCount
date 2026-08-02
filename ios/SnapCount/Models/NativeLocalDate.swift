@@ -27,6 +27,12 @@ enum NativeLocalDate {
         return formatter("HH:mm").string(from: date)
     }
 
+    static func dateTimeLabel(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        guard let time = timeKey(value) else { return dateKey(value) }
+        return "\(dateKey(value)) \(time)"
+    }
+
     private static func parse(_ value: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

@@ -105,6 +105,7 @@ struct InboxView: View {
             }
         }
         .navigationTitle("中转站")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .navigationDestination(for: NativeInboxRoute.self) { route in
@@ -925,6 +926,8 @@ private struct PendingExpenseResolutionView: View {
     @Environment(\.dismiss) private var dismiss
     let reference: String
     @State private var draft: NativePendingResolutionDraft?
+    @State private var initiallyMissing: Set<NativePendingResolutionField> = []
+    @State private var showRecognizedFields = false
     @State private var showDeleteConfirm = false
 
     private var detail: NativeRecordDetail? {
@@ -937,41 +940,24 @@ private struct PendingExpenseResolutionView: View {
             JieziTheme.pageBackground.ignoresSafeArea()
             if let detail, let draftBinding = Binding($draft) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        header(detail)
+                    VStack(alignment: .leading, spacing: JieziSpacing.lg) {
+                        header(detail, draft: draftBinding.wrappedValue)
+                        evidenceSection(detail)
                         if let feedback = detail.aiFeedback {
                             NativeAIFeedbackCard(feedback: feedback, compact: true)
                         }
-                        imageSection(detail)
-                        amountSection(draftBinding)
                         typeSection(draftBinding)
+                        recognizedSection(draftBinding)
                         fieldSection(draftBinding)
                         accountSection(draftBinding)
-                        if let message = appState.pendingResolutionMessage {
-                            Label(message, systemImage: message.hasPrefix("保存失败") ? "exclamationmark.circle" : "info.circle")
-                                .font(.footnote)
-                                .foregroundStyle(message.hasPrefix("保存失败") ? JieziTheme.coral : JieziTheme.brand)
-                        }
-                        Button {
-                            Task { _ = await appState.confirmPendingRecord(draftBinding.wrappedValue) }
-                        } label: {
-                            if appState.isConfirmingPendingRecord {
-                                ProgressView().tint(.white).frame(maxWidth: .infinity)
-                            } else {
-                                Label("确认保存", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(JieziTheme.brand)
-                        .controlSize(.large)
-                        .disabled(appState.isConfirmingPendingRecord || draftBinding.wrappedValue.validationMessage != nil)
-
-                        Button(role: .destructive) { showDeleteConfirm = true } label: {
-                            Label("删除此账单", systemImage: "trash").frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
                     }
-                    .padding(16)
+                    .padding(.horizontal, JieziSpacing.lg)
+                    .padding(.top, JieziSpacing.sm)
+                    .padding(.bottom, JieziSpacing.xl)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    confirmationBar(draftBinding)
                 }
             } else if let message = appState.recordDetailMessage {
                 ContentUnavailableView("无法读取待补全账单", systemImage: "exclamationmark.triangle", description: Text(message))
@@ -981,11 +967,24 @@ private struct PendingExpenseResolutionView: View {
         }
         .navigationTitle("补充账单信息")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) { showDeleteConfirm = true } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(appState.isConfirmingPendingRecord)
+                .accessibilityLabel("删除此账单")
+            }
+        }
         .task(id: reference) {
             appState.pendingResolutionMessage = nil
             await appState.loadRecordDetail(reference: reference)
             if let detail = appState.selectedRecordDetail, detail.id == reference {
-                draft = NativePendingResolutionDraft(detail: detail)
+                let loadedDraft = NativePendingResolutionDraft(detail: detail)
+                draft = loadedDraft
+                initiallyMissing = Set(loadedDraft.missingFields)
+                showRecognizedFields = loadedDraft.missingFields.isEmpty
             }
             await appState.loadFinanceVocabulary()
         }
@@ -999,54 +998,96 @@ private struct PendingExpenseResolutionView: View {
         }
     }
 
-    private func header(_ detail: NativeRecordDetail) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "clock.badge.exclamationmark")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(JieziTheme.gold)
-                .frame(width: 40, height: 40)
-                .background(JieziTheme.gold.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(detail.title).font(.headline)
-                Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
+    private func header(_ detail: NativeRecordDetail, draft: NativePendingResolutionDraft) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle().fill(JieziTheme.gold).frame(width: 6, height: 6)
+                Text("待补全账单")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(hex: "8A6D2F"))
+                Spacer()
+                Text(NativeLocalDate.dateTimeLabel(detail.occurredAt ?? detail.createdAt) ?? detail.subtitle)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(JieziTheme.muted)
             }
-            Spacer()
-            Text("待补全").font(.caption.weight(.bold)).foregroundStyle(JieziTheme.gold)
+            Text(detail.title)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(JieziTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(reviewGuidance(for: draft))
+                .font(.subheadline)
+                .foregroundStyle(JieziTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: JieziRadius.card))
+        .overlay {
+            RoundedRectangle(cornerRadius: JieziRadius.card)
+                .stroke(JieziTheme.gold.opacity(0.22), lineWidth: 1)
+        }
     }
 
     @ViewBuilder
-    private func imageSection(_ detail: NativeRecordDetail) -> some View {
+    private func evidenceSection(_ detail: NativeRecordDetail) -> some View {
         if let imageURL = detail.imageURL {
             CachedRemoteImage(url: imageURL) { image in
-                image.resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: 240)
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } placeholder: {
-                ProgressView().frame(maxWidth: .infinity, minHeight: 160)
+                ProgressView().tint(JieziTheme.brand)
             } failure: {
-                Label("截图文件不可用", systemImage: "photo.badge.exclamationmark")
-                    .frame(maxWidth: .infinity, minHeight: 120)
+                evidenceText(detail, title: "原图暂时不可用")
             }
-            .padding(8)
-            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: .infinity)
+            .aspectRatio(3 / 4, contentMode: .fit)
+            .background(Color.white.opacity(0.58))
+            .clipShape(RoundedRectangle(cornerRadius: JieziRadius.film, style: .continuous))
+            .overlay(alignment: .bottomLeading) {
+                Label("按原图核对", systemImage: "photo")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(JieziTheme.ink)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(10)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: JieziRadius.film)
+                    .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
+            }
+        } else {
+            evidenceText(detail, title: "原图未保留，以文字事实为准")
         }
     }
 
-    private func amountSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("金额").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                Text(draft.wrappedValue.kind == .income ? "+¥" : "-¥")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(draft.wrappedValue.kind == .income ? JieziTheme.brand : JieziTheme.coral)
-                TextField("0.00", text: draft.amountText)
-                    .keyboardType(.decimalPad)
-                    .font(.title2.weight(.bold).monospacedDigit())
+    private func evidenceText(_ detail: NativeRecordDetail, title: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: "text.document")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(hex: "8A6D2F"))
+            Text(detail.aiSummary ?? detail.note ?? detail.title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(JieziTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            if !detail.subtitle.isEmpty {
+                Text(detail.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.muted)
             }
         }
-        .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .padding(18)
+        .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
+        .background(
+            LinearGradient(
+                colors: [Color(hex: "F8F4E9"), Color(hex: "F0EAD8")],
+                startPoint: .top,
+                endPoint: .bottom
+            ),
+            in: RoundedRectangle(cornerRadius: JieziRadius.film)
+        )
     }
 
     private func typeSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
@@ -1056,58 +1097,115 @@ private struct PendingExpenseResolutionView: View {
                 ForEach(NativePendingEntryKind.allCases) { kind in Text(kind.title).tag(kind) }
             }
             .pickerStyle(.segmented)
+            .onChange(of: draft.wrappedValue.kind) { _, _ in
+                showRecognizedFields = true
+            }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: JieziRadius.card))
+    }
+
+    private func recognizedSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("已识别")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(JieziTheme.muted)
+                Spacer()
+                Button(showRecognizedFields ? "收起" : "调整") {
+                    withAnimation(JieziMotion.settle) { showRecognizedFields.toggle() }
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(JieziTheme.brand)
+            }
+            Text(draft.wrappedValue.recognizedSummary.isEmpty ? "尚未识别到可用字段" : draft.wrappedValue.recognizedSummary)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(JieziTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .background(JieziTheme.brand.opacity(0.06), in: RoundedRectangle(cornerRadius: JieziRadius.card))
     }
 
     private func fieldSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(draft.wrappedValue.kind == .income ? "收入字段" : "消费字段").font(.headline)
-            TextField(draft.wrappedValue.kind == .income ? "来源名称（可选）" : "商家名称（可选）", text: draft.merchantOrSourceName)
-                .textFieldStyle(.roundedBorder)
+            HStack(alignment: .firstTextBaseline) {
+                Text(draft.wrappedValue.missingFields.isEmpty ? "核对信息" : "需要你确认")
+                    .font(.headline)
+                Spacer()
+                if !draft.wrappedValue.missingFields.isEmpty {
+                    Text("还差 \(draft.wrappedValue.missingFields.count) 项")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(hex: "8A6D2F"))
+                }
+            }
+
+            if shouldShow(.amount, draft: draft.wrappedValue) {
+                amountField(draft)
+            }
+
+            if showRecognizedFields {
+                labeledTextField(
+                    draft.wrappedValue.kind == .income ? "来源名称（可选）" : "商家名称（可选）",
+                    placeholder: draft.wrappedValue.kind == .income ? "例如：工资、报销" : "例如：餐厅或店铺名",
+                    selection: draft.merchantOrSourceName
+                )
+            }
+
             if draft.wrappedValue.kind == .expense {
-                editableOptionField(
+                if shouldShow(.platform, draft: draft.wrappedValue) {
+                    editableOptionField(
                     "消费渠道",
                     selection: draft.platform,
                     options: financeOptions(kind: .platform, currentValue: draft.wrappedValue.platform)
-                )
+                    )
+                }
+                if shouldShow(.category, draft: draft.wrappedValue) {
+                    optionMenu(
+                        "消费分类",
+                        selection: draft.category,
+                        options: financeOptions(kind: .category, currentValue: draft.wrappedValue.category)
+                    )
+                }
+                if shouldShow(.paymentMethod, draft: draft.wrappedValue) {
+                    editableOptionField(
+                        "支付方式",
+                        selection: draft.paymentMethod,
+                        options: financeOptions(kind: .payment, currentValue: draft.wrappedValue.paymentMethod)
+                    )
+                }
+            } else if shouldShow(.incomeCategory, draft: draft.wrappedValue) {
                 optionMenu(
-                    "消费分类",
-                    selection: draft.category,
-                    options: financeOptions(kind: .category, currentValue: draft.wrappedValue.category)
+                    "收入类型",
+                    selection: draft.incomeCategory,
+                    options: NativeManualRecordDraft.incomeCategories
                 )
-                editableOptionField(
-                    "支付方式",
-                    selection: draft.paymentMethod,
-                    options: financeOptions(kind: .payment, currentValue: draft.wrappedValue.paymentMethod)
-                )
-            } else {
-                optionMenu("收入类型", selection: draft.incomeCategory, options: NativeManualRecordDraft.incomeCategories)
+            }
+
+            if draft.wrappedValue.missingFields.isEmpty && !showRecognizedFields {
+                Label("字段已齐，整体过目后即可收下", systemImage: "checkmark.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(JieziTheme.brand)
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: JieziRadius.card))
     }
 
     private func optionMenu(_ title: String, selection: Binding<String>, options: [NativeManualRecordOption]) -> some View {
-        Menu {
-            ForEach(options) { option in
-                Button(option.isFrequent ? "\(option.title) · 常用" : option.title) {
-                    selection.wrappedValue = option.id
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(JieziTheme.muted)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(options) { option in
+                        choiceChip(option, selection: selection)
+                    }
                 }
             }
-        } label: {
-            HStack {
-                Text(title).foregroundStyle(JieziTheme.ink)
-                Spacer()
-                Text(options.first(where: { $0.id == selection.wrappedValue })?.title ?? "请选择")
-                    .foregroundStyle(selection.wrappedValue.isEmpty ? .secondary : JieziTheme.brand)
-                Image(systemName: "chevron.up.chevron.down").font(.caption)
-            }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
     }
 
     private func editableOptionField(
@@ -1115,26 +1213,88 @@ private struct PendingExpenseResolutionView: View {
         selection: Binding<String>,
         options: [NativeManualRecordOption]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                TextField("输入或选择", text: selection)
-                    .textFieldStyle(.roundedBorder)
-                Menu {
-                    ForEach(options) { option in
-                        Button(option.isFrequent ? "\(option.title) · 常用" : option.title) {
-                            selection.wrappedValue = option.id
-                        }
-                    }
-                } label: {
-                    Image(systemName: "chevron.up.chevron.down")
-                        .frame(width: 36, height: 36)
+                .foregroundStyle(JieziTheme.muted)
+            TextField("输入或选择", text: selection)
+                .textInputAutocapitalization(.never)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(Color.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
                 }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("选择\(title)")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(options) { option in
+                        choiceChip(option, selection: selection)
+                    }
+                }
             }
+        }
+    }
+
+    private func choiceChip(
+        _ option: NativeManualRecordOption,
+        selection: Binding<String>
+    ) -> some View {
+        Button {
+            selection.wrappedValue = option.id
+        } label: {
+            HStack(spacing: 4) {
+                Text(option.title)
+                if option.isFrequent {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.caption2)
+                }
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(selection.wrappedValue == option.id ? .white : JieziTheme.ink)
+            .padding(.horizontal, 11)
+            .frame(height: 34)
+            .background(
+                selection.wrappedValue == option.id ? JieziTheme.brand : Color.white.opacity(0.7),
+                in: Capsule()
+            )
+            .overlay(Capsule().stroke(JieziTheme.brand.opacity(0.14), lineWidth: 1))
+        }
+        .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.96))
+    }
+
+    private func amountField(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("金额")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(JieziTheme.muted)
+            HStack(spacing: 6) {
+                Text(draft.wrappedValue.kind == .income ? "+¥" : "-¥")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(draft.wrappedValue.kind == .income ? JieziTheme.brand : JieziTheme.coral)
+                TextField("0.00", text: draft.amountText)
+                    .keyboardType(.decimalPad)
+                    .font(.title2.weight(.bold).monospacedDigit())
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 52)
+            .background(Color.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func labeledTextField(
+        _ title: String,
+        placeholder: String,
+        selection: Binding<String>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(JieziTheme.muted)
+            TextField(placeholder, text: selection)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(Color.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -1150,8 +1310,19 @@ private struct PendingExpenseResolutionView: View {
     }
 
     private func accountSection(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(draft.wrappedValue.kind == .income ? "到账账户" : "出资账户").font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "wallet.pass")
+                    .foregroundStyle(JieziTheme.brand)
+                    .frame(width: 34, height: 34)
+                    .background(JieziTheme.brand.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("账户影响").font(.headline)
+                    Text(draft.wrappedValue.accountId == nil ? "暂不影响账户余额" : "确认后同步生成账户流水")
+                        .font(.caption)
+                        .foregroundStyle(JieziTheme.muted)
+                }
+            }
             Menu {
                 Button("暂不绑定") { draft.accountId.wrappedValue = nil }
                 ForEach(appState.accounts.filter { !$0.isArchived }) { account in
@@ -1159,16 +1330,76 @@ private struct PendingExpenseResolutionView: View {
                 }
             } label: {
                 HStack {
-                    Text(draft.wrappedValue.accountId.flatMap { id in appState.accounts.first(where: { $0.id == id })?.title } ?? "暂不绑定")
+                    Text(draft.wrappedValue.accountId.flatMap { id in
+                        appState.accounts.first(where: { $0.id == id })?.title
+                    } ?? "暂不绑定")
                     Spacer()
                     Image(systemName: "chevron.up.chevron.down").font(.caption)
                 }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .background(JieziTheme.brand.opacity(0.05), in: RoundedRectangle(cornerRadius: JieziRadius.card))
+    }
+
+    private func confirmationBar(_ draft: Binding<NativePendingResolutionDraft>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let message = appState.pendingResolutionMessage, message.hasPrefix("保存失败") {
+                Label(message, systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.coral)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                Task { _ = await appState.confirmPendingRecord(draft.wrappedValue) }
+            } label: {
+                if appState.isConfirmingPendingRecord {
+                    ProgressView().tint(.white).frame(maxWidth: .infinity)
+                } else {
+                    Label(primaryActionTitle, systemImage: "arrow.down.to.line")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(JieziTheme.brand)
+            .controlSize(.large)
+            .disabled(appState.isConfirmingPendingRecord || draft.wrappedValue.validationMessage != nil)
+
+            if let validationMessage = draft.wrappedValue.validationMessage {
+                Text(validationMessage)
+                    .font(.caption)
+                    .foregroundStyle(JieziTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .padding(.horizontal, JieziSpacing.lg)
+        .padding(.top, JieziSpacing.sm)
+        .padding(.bottom, JieziSpacing.sm)
+        .background(.ultraThinMaterial)
+    }
+
+    private func shouldShow(
+        _ field: NativePendingResolutionField,
+        draft: NativePendingResolutionDraft
+    ) -> Bool {
+        showRecognizedFields || initiallyMissing.contains(field) || draft.missingFields.contains(field)
+    }
+
+    private func reviewGuidance(for draft: NativePendingResolutionDraft) -> String {
+        let count = draft.missingFields.count
+        if count == 0 { return "字段已经齐全，过目后收下，后续统计会更准确。" }
+        return "再确认 \(count) 项，就能进入分类和账户统计。"
+    }
+
+    private var primaryActionTitle: String {
+        appState.dashboard.pendingExpenses.contains(where: { $0.reference != reference })
+            ? "补全并下一条"
+            : "补全并收下"
     }
 }
 
@@ -1378,6 +1609,8 @@ private struct StagingRecordDetailView: View {
             }
         }
         .navigationTitle("待处理详情")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .confirmationDialog("确认销毁这条待处理截图？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
             Button("销毁", role: .destructive) {

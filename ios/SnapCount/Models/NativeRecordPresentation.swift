@@ -35,7 +35,10 @@ enum NativeRecordDetailPresentationAdapter {
     static func basicRows(for detail: NativeRecordDetail, accountName: String?) -> [NativeDetailRow] {
         var rows = [
             NativeDetailRow(label: "数据域", value: domainLabel(for: detail)),
-            NativeDetailRow(label: "记录时间", value: detail.createdAt ?? detail.subtitle),
+            NativeDetailRow(
+                label: "记录时间",
+                value: NativeLocalDate.dateTimeLabel(detail.createdAt ?? detail.subtitle) ?? detail.subtitle
+            ),
             NativeDetailRow(label: "发生时间", value: eventTime(for: detail)),
             NativeDetailRow(label: "来源", value: sourceLabel(for: detail))
         ]
@@ -272,7 +275,8 @@ enum NativeRecordDetailPresentationAdapter {
         if detail.kind == "expense", let time = detail.transactionTime, !time.isEmpty {
             return [detail.recordDate, time].compactMap { $0 }.joined(separator: " ")
         }
-        return detail.occurredAt ?? detail.recordDate ?? ""
+        let rawValue = detail.occurredAt ?? detail.recordDate
+        return NativeLocalDate.dateTimeLabel(rawValue) ?? rawValue ?? ""
     }
 
     private static func sourceLabel(for detail: NativeRecordDetail) -> String {

@@ -8,6 +8,7 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(NativeLocalDate.dateKey("2026-07-18T00:30:00+08:00"), "2026-07-18")
         XCTAssertEqual(NativeLocalDate.dateKey("2026-07-18"), "2026-07-18")
         XCTAssertEqual(NativeLocalDate.timeKey("2026-07-17T16:30:00Z"), "00:30")
+        XCTAssertEqual(NativeLocalDate.dateTimeLabel("2026-07-22T14:14:41.413+00:00"), "2026-07-22 22:14")
     }
 
     func testAppTabsHaveTitles() {
@@ -456,10 +457,29 @@ final class SnapCountTests: XCTestCase {
         )
         var draft = NativePendingResolutionDraft(detail: detail)
         XCTAssertEqual(draft.validationMessage, "请选择消费渠道")
+        XCTAssertEqual(draft.missingFields, [.platform, .category, .paymentMethod])
         draft.platform = "微信"
         draft.category = "food"
         draft.paymentMethod = "微信支付"
         XCTAssertNil(draft.validationMessage)
+        XCTAssertTrue(draft.missingFields.isEmpty)
+        XCTAssertEqual(draft.recognizedSummary, "-¥12.00 · 微信 · 餐饮 · 微信支付")
+    }
+
+    func testSettingsRepositoryRecognizesLegacyExpressionPrivacySchema() {
+        XCTAssertTrue(SettingsRepository.isMissingExpressionImprovementColumn(
+            SupabaseRemoteError.requestFailed(
+                "column user_configs.expression_improvement_enabled does not exist"
+            )
+        ))
+        XCTAssertTrue(SettingsRepository.isMissingExpressionImprovementColumn(
+            SupabaseRemoteError.requestFailed(
+                "Could not find the 'expression_improvement_enabled' column in the schema cache"
+            )
+        ))
+        XCTAssertFalse(SettingsRepository.isMissingExpressionImprovementColumn(
+            SupabaseRemoteError.requestFailed("network request failed")
+        ))
     }
 
     func testInboxArchiveDomainsPreservePWAContract() {

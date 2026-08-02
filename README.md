@@ -124,11 +124,9 @@ supabase db push   # 推送 supabase/migrations/ 下的所有迁移文件
 
 ```bash
 # 设置 secrets（一次性）
-supabase secrets set SUPABASE_URL="https://<your-project-ref>.supabase.co"
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
-supabase secrets set QWEN_API_KEY="<your-qwen-key>"
-supabase secrets set QWEN_MODEL="qwen3.6-flash"
-supabase secrets set QWEN_PHOTO_MODEL="qwen3.7-plus"
+# 不要把真实密钥替换进命令行参数；请使用 Supabase Dashboard，
+# 或写入已被 .gitignore 忽略的临时 env 文件后导入，再立即删除该文件。
+supabase secrets set --env-file .env.supabase.local
 
 # 部署
 supabase functions deploy ingest-receipt --no-verify-jwt
