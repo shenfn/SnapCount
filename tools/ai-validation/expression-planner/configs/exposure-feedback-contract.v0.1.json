@@ -1,0 +1,23 @@
+{
+  "version": "exposure-feedback-v0.1",
+  "user_choices": [
+    { "value": "incorrect", "label": "说得不对" },
+    { "value": "not_helpful", "label": "没什么帮助" },
+    { "value": "repetitive", "label": "有点重复" },
+    { "value": "style_dislike", "label": "表达不喜欢" },
+    { "value": "other", "label": "其他" }
+  ],
+  "internal_issue_codes": [
+    "content_wrong_unspecified", "direction_wrong", "fact_wrong", "number_wrong",
+    "presentation_format_wrong", "duplicate_decision_wrong", "output_inconsistent",
+    "reasoning_overreach", "not_relevant", "not_helpful", "too_repetitive",
+    "tone_mismatch", "too_verbose", "too_vague", "bad_timing", "wrong_surface",
+    "missing_context", "should_have_asked", "recognition_wrong", "system_failure"
+  ],
+  "annotation_sources": [
+    "user_primary_choice", "user_explicit_detail", "legacy_review_tag",
+    "deterministic_note_rule", "analyst_annotation", "model_assisted"
+  ],
+  "production_requires_exposure_event_id": true,
+  "legacy_import_allows_unresolved_exposure": true
+}

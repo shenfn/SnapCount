@@ -1,0 +1,17 @@
+﻿{
+  "version": "expression-rollout-v0.1",
+  "default_mode": "off",
+  "modes": ["off", "shadow", "enforced_owner_only", "canary"],
+  "shadow": {
+    "changes_user_output": false,
+    "persist_baseline_and_proposed_scores": true
+  },
+  "enforced_owner_only": {
+    "multiplier_bounds": { "min": 0.85, "max": 1.1 },
+    "can_bypass_eligibility": false
+  },
+  "failure_policy": {
+    "block_core_recording": false,
+    "fallback_to_baseline_plan": true
+  }
+}

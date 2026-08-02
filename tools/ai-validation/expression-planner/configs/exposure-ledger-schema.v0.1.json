@@ -1,0 +1,31 @@
+﻿{
+  "version": "expression-exposure-insert-v0.1",
+  "required": [
+    "event_key",
+    "delivery_attempt_id",
+    "occurred_at",
+    "user_id",
+    "candidate_id",
+    "semantic_key",
+    "claim_type",
+    "surface",
+    "lifecycle_state",
+    "expression_plan_version",
+    "render_contract_version"
+  ],
+  "production_lifecycle_states": [
+    "returned_to_shortcut",
+    "client_rendered",
+    "client_acknowledged",
+    "user_reviewed"
+  ],
+  "surfaces": [
+    "shortcut_notification",
+    "pwa_pending_ai_card",
+    "record_detail",
+    "weekly_report"
+  ],
+  "writer": "service_role_only",
+  "reader": "authenticated_own_rows",
+  "mutation_model": "append_only"
+}
