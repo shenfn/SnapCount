@@ -1,4 +1,6 @@
 import { buildExpressionShadowPlan, buildGenericExpressionShadowPlan } from "./expression-shadow-planner.ts";
+// @ts-ignore Shared taxonomy is framework-neutral and bundled into the Edge Function.
+import { baselineSemanticKey } from "../../../tools/ai-validation/expression-planner/lib/semantic-taxonomy.mjs";
 
 type ExpressionShadowMode = "off" | "shadow" | "enforced_owner_only" | "canary";
 type ShortcutResponseMode = "json" | "text";
@@ -182,31 +184,21 @@ async function processBuiltinShadow(supabase: ShadowDatabaseClient, params: { ev
       .eq("user_id", params.userId).eq("domain_key", params.domainKey).order("occurred_at", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
     const records = (data ?? []).map((row: Record<string, unknown>) => ({
-      id: row.id, occurred_at: row.occurred_at, title: row.title, summary: row.summary, payload: row.payload_jsonb ?? {}, source_type: "data_record",
+      id: row.id, occurred_at: row.occurred_at, title: row.title, summary: row.summary, domain_key: row.domain_key, payload: row.payload_jsonb ?? {}, source_type: "data_record",
     }));
-    const personalization = await loadPlannerPersonalization(supabase, params.userId);
+    const personalization = await loadPlannerPersonalization(supabase, params.userId, params.domainKey);
     const plan = buildGenericExpressionShadowPlan({ domainKey: params.domainKey, records, currentRecordId: params.recordId, ...personalization });
     await persistShadowPlan(supabase, params, plan as Record<string, unknown>);
   } catch (error) { await persistPlannerError(supabase, params.eventKey, error); }
 }
-function baselineSemanticKey(recordType: string | null, badge: string): string {
-  const known: Record<string, string> = {
-    "高频日常": "merchant_daily_count_total",
-    "重复商户": "merchant_daily_count_total",
-    "开发充值": "merchant_daily_count_total",
-    "消费加速": "merchant_week_to_date_vs_previous_week_same_period",
-    "收入入账": "income_current_amount",
-    "工资到账": "income_current_amount",
-    "餐饮入账": "food_expense_recorded",
-  };
-  return known[badge] ?? `${recordType ?? "unknown"}_baseline_${badge.toLowerCase().replace(/\s+/g, "_").slice(0, 32)}`;
-}
-
-async function loadPlannerPersonalization(supabase: ShadowDatabaseClient, userId: string) {
-  const [{ data: snapshot }, { data: exposures }] = await Promise.all([
+async function loadPlannerPersonalization(supabase: ShadowDatabaseClient, userId: string, domainKey?: string) {
+  const [{ data: snapshot }, { data: exposures }, { data: profile }] = await Promise.all([
     supabase.from("expression_preference_snapshots").select("scoring_profile").eq("user_id", userId).maybeSingle(),
     supabase.from("expression_exposure_events").select("semantic_key,occurred_at")
       .eq("user_id", userId).eq("counts_for_novelty", true).order("occurred_at", { ascending: false }).limit(1000),
+    domainKey
+      ? supabase.from("user_domain_profiles").select("profile").eq("user_id", userId).eq("domain_key", domainKey).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
   const exposureHistory: Record<string, { count: number; last_shown_at: string | null }> = {};
   for (const item of exposures ?? []) {
@@ -217,7 +209,7 @@ async function loadPlannerPersonalization(supabase: ShadowDatabaseClient, userId
     if (!entry.last_shown_at) entry.last_shown_at = item.occurred_at ?? null;
     exposureHistory[key] = entry;
   }
-  return { preferenceProfile: objectValue(snapshot?.scoring_profile) ?? {}, exposureHistory };
+  return { preferenceProfile: objectValue(snapshot?.scoring_profile) ?? {}, exposureHistory, domainProfile: objectValue(profile?.profile) ?? {} };
 }
 
 async function captureBaselineExposure(

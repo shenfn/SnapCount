@@ -56,3 +56,18 @@ test('respects record detail capacity while retaining multiple angles', () => {
   assert.deepEqual(plans.record_detail.selected.map(item => item.candidate_id), ['daily', 'weekly', 'baseline'])
   assert.equal(plans.record_detail.excluded.find(item => item.candidate_id === 'amounts').reason, 'surface_capacity_reached')
 })
+
+test('does not fill record detail with two period comparisons from the same family', () => {
+  const categoryWeek = candidate('category-week', 'expense_category_week_to_date_vs_previous_week_same_period', 'comparison', null, {
+    record_detail: 88,
+  })
+  const merchantWeek = candidate('merchant-week', 'merchant_week_to_date_vs_previous_week_same_period', 'comparison', null, {
+    record_detail: 87,
+  })
+  const personal = candidate('personal', 'merchant_daily_vs_active_day_median', 'comparison', null, {
+    record_detail: 79,
+  })
+  const plan = buildSurfacePlan([categoryWeek, merchantWeek, personal], 'record_detail')
+  assert.deepEqual(plan.selected.map(item => item.candidate_id), ['category-week', 'personal'])
+  assert.equal(plan.excluded.find(item => item.candidate_id === 'merchant-week').reason, 'diversity_group_reached')
+})

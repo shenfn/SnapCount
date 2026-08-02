@@ -1,3 +1,8 @@
+// @ts-ignore Shared deterministic preference contract is framework-neutral.
+import { buildScoringPreferenceProfile, selectCurrentReviewSignals } from "../../../tools/ai-validation/expression-planner/lib/preference-profile.mjs";
+// @ts-ignore Shared taxonomy keeps legacy feedback identities controlled.
+import { baselineSemanticKey } from "../../../tools/ai-validation/expression-planner/lib/semantic-taxonomy.mjs";
+
 interface DatabaseClient {
   // deno-lint-ignore no-explicit-any
   from: (table: string) => any;
@@ -51,6 +56,14 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function feedbackOrCompanion(row: Record<string, unknown>, persisted: Record<string, unknown>, title = "") {
+  if (Object.keys(persisted).length > 0) return persisted;
+  const companion = text(row.companion_message, 500);
+  return companion
+    ? { version: "companion-feedback-v1", badge: "AI 陪伴", emotion_line: companion, utility_line: title }
+    : {};
+}
+
 function inferIssueAnnotations(choice: FeedbackChoice, explicitCodes: string[], notes: string) {
   const annotations = new Map<string, { issue_code: string; source: string; confidence: number; evidence: string | null }>();
   const add = (issueCode: string, source: string, confidence: number, evidence: string | null = null) => {
@@ -86,19 +99,24 @@ async function loadPersistedRecord(supabase: DatabaseClient, userId: string, rec
       table: "transactions",
       select: "id,created_at,transaction_date,ai_feedback,companion_message",
       domainKey: "expense",
-      feedback: (row: Record<string, unknown>) => object(row.ai_feedback),
+      feedback: (row: Record<string, unknown>) => feedbackOrCompanion(row, object(row.ai_feedback)),
     },
     {
       table: "income_records",
       select: "id,created_at,income_date,ai_feedback,companion_message",
       domainKey: "income",
-      feedback: (row: Record<string, unknown>) => object(row.ai_feedback),
+      feedback: (row: Record<string, unknown>) => feedbackOrCompanion(row, object(row.ai_feedback)),
     },
     {
       table: "data_records",
-      select: "id,created_at,occurred_at,domain_key,payload_jsonb",
+      select: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb",
       domainKey: "data",
-      feedback: (row: Record<string, unknown>) => object(object(row.payload_jsonb).ai_feedback),
+      feedback: (row: Record<string, unknown>) => {
+        const payload = object(row.payload_jsonb);
+        const persisted = object(payload.ai_feedback);
+        const companion = text(payload.companion_message, 500);
+        return feedbackOrCompanion({ companion_message: companion }, persisted, text(row.title, 200));
+      },
     },
   ];
   for (const target of targets) {
@@ -127,13 +145,14 @@ async function createPersistedRecordExposure(
   recordId: string,
 ) {
   const record = await loadPersistedRecord(supabase, userId, recordId);
-  const eventKey = `record-feedback:${userId}:${recordId}:record-detail`;
-  const visibleFieldPaths = ["emotion_line", "utility_line", "detail_reason"]
+  if (Object.keys(record.feedback).length === 0) throw new Error("这条记录没有可点评的 AI 反馈");
+  const eventKey = `record-feedback-v2:${userId}:${recordId}:record-detail`;
+  const visibleFieldPaths = ["icon", "badge", "band", "emotion_line", "utility_line", "detail_reason", "timing_signal"]
     .filter((key) => text(record.feedback[key], 200).length > 0)
-    .map((key) => `ai_feedback.${key}`);
+    .map((key) => `rendered_feedback.${key}`);
   const score = Number(record.feedback.internal_score);
   const { data, error } = await supabase.from("expression_exposure_events").upsert({
-    occurred_at: record.occurredAt,
+    occurred_at: new Date().toISOString(),
     user_id: userId,
     event_key: eventKey,
     delivery_attempt_id: eventKey,
@@ -141,12 +160,12 @@ async function createPersistedRecordExposure(
     record_type: record.domainKey,
     domain_key: record.domainKey,
     candidate_id: `persisted-ai-feedback:${recordId}`,
-    semantic_key: `record:${record.domainKey}:ai_feedback`,
+    semantic_key: baselineSemanticKey(record.domainKey, text(record.feedback.badge, 100)),
     claim_type: "inference",
     dimension: "record_feedback",
     surface: "record_detail",
     lifecycle_state: "user_reviewed",
-    selection_mode: "persisted_record_fallback",
+    selection_mode: "persisted_record_review",
     score: Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : null,
     expression_plan_version: "persisted-record-feedback-v1",
     render_contract_version: text(record.feedback.version, 80) || "feedback-v1",
@@ -154,8 +173,8 @@ async function createPersistedRecordExposure(
     visible_field_paths: visibleFieldPaths,
     expandable_field_paths: [],
     persisted_only_field_paths: [],
-    rendered_payload: record.feedback,
-    metadata: { source: "persisted_record_feedback", source_table: record.table },
+    rendered_payload: { rendered_feedback: record.feedback },
+    metadata: { source: "persisted_record_feedback", source_table: record.table, record_occurred_at: record.occurredAt },
     simulation_only: false,
     counts_for_novelty: true,
   }, { onConflict: "event_key" }).select().single();
@@ -171,14 +190,22 @@ async function resolveReviewedExposure(
   const exposureId = text(input.exposure_event_id, 100);
   const recordId = text(input.record_id, 100);
   if (!recordId && !exposureId) throw new Error("缺少点评记录编号");
-  let query = supabase.from("expression_exposure_events").select("*").eq("user_id", userId);
-  query = exposureId
-    ? query.eq("id", exposureId)
-    : query.eq("record_id", recordId).order("occurred_at", { ascending: false });
-  const { data, error } = exposureId ? await query.maybeSingle() : await query.limit(1).maybeSingle();
-  if (error) throw new Error(error.message);
-  if (data) return data;
-  return await createPersistedRecordExposure(supabase, userId, recordId);
+  let exposure = null;
+  if (exposureId) {
+    const { data, error } = await supabase.from("expression_exposure_events").select("*")
+      .eq("user_id", userId).eq("id", exposureId).maybeSingle();
+    if (error) throw new Error(error.message);
+    exposure = data;
+    if (exposure?.record_id && recordId && exposure.record_id !== recordId) throw new Error("点评记录与曝光记录不匹配");
+  }
+  const resolvedRecordId = recordId || text(exposure?.record_id, 100);
+  if (!resolvedRecordId) throw new Error("缺少点评记录编号");
+  const { data: detailExposure, error: detailError } = await supabase.from("expression_exposure_events").select("*")
+    .eq("user_id", userId).eq("record_id", resolvedRecordId).eq("surface", "record_detail")
+    .order("occurred_at", { ascending: false }).limit(1).maybeSingle();
+  if (detailError) throw new Error(detailError.message);
+  if (detailExposure) return detailExposure;
+  return await createPersistedRecordExposure(supabase, userId, resolvedRecordId);
 }
 
 function derivePreferenceSignals(feedback: Record<string, unknown>) {
@@ -216,36 +243,32 @@ function derivePreferenceSignals(feedback: Record<string, unknown>) {
 }
 
 async function rebuildPreferenceSnapshot(supabase: DatabaseClient, userId: string) {
-  const { data: feedbackRows, error: feedbackError } = await supabase.from("expression_feedback_events")
-    .select("feedback_key,occurred_at,primary_choice")
+  const { data: feedbackRowsRaw, error: feedbackError } = await supabase.from("expression_feedback_events")
+    .select("feedback_key,occurred_at,primary_choice,source_review_schema,exposure_event_id")
     .eq("user_id", userId)
     .order("occurred_at", { ascending: true })
     .limit(2000);
   if (feedbackError) throw new Error(feedbackError.message);
-  const { data: signalRows, error: signalError } = await supabase.from("expression_preference_signals")
-    .select("signal_key,occurred_at,semantic_key,surface,preference_dimension,direction,strength")
+  const exposureIds = (feedbackRowsRaw ?? []).map((row: Record<string, unknown>) => row.exposure_event_id).filter(Boolean);
+  let exposureRows: Record<string, unknown>[] = [];
+  if (exposureIds.length > 0) {
+    const { data, error } = await supabase.from("expression_exposure_events").select("id,surface")
+      .eq("user_id", userId).in("id", exposureIds);
+    if (error) throw new Error(error.message);
+    exposureRows = data ?? [];
+  }
+  const { data: signalRowsRaw, error: signalError } = await supabase.from("expression_preference_signals")
+    .select("signal_key,feedback_key,occurred_at,semantic_key,surface,preference_dimension,direction,strength")
     .eq("user_id", userId)
     .order("occurred_at", { ascending: true })
     .limit(2000);
   if (signalError) throw new Error(signalError.message);
+  const { feedbackRows, signalRows } = selectCurrentReviewSignals(feedbackRowsRaw ?? [], signalRowsRaw ?? [], exposureRows);
 
-  const dimensions: Record<string, { net: number; support: number }> = {};
-  for (const row of signalRows ?? []) {
-    const key = `${row.surface ?? "all"}:${row.preference_dimension}`;
-    const current = dimensions[key] ?? { net: 0, support: 0 };
-    const direction = row.direction === "increase" ? 1 : -1;
-    current.net += direction * Number(row.strength ?? 0);
-    current.support += 1;
-    dimensions[key] = current;
-  }
-  const renderingPreferences: Record<string, number> = {};
-  for (const [key, value] of Object.entries(dimensions)) {
-    const activation = value.support === 1 ? 0.35 : value.support === 2 ? 0.65 : 1;
-    renderingPreferences[key] = Math.max(0.7, Math.min(1.15, 1 + value.net * activation));
-  }
   const asOf = new Date().toISOString();
+  const scoringProfile = buildScoringPreferenceProfile(signalRows ?? [], { asOf });
   const snapshot = {
-    snapshot_version: "preference-snapshot-v0.1",
+    snapshot_version: "preference-snapshot-v0.2",
     as_of: asOf,
     signal_count: signalRows?.length ?? 0,
     feedback_choice_counts: (feedbackRows ?? []).reduce((counts: Record<string, number>, row: Record<string, unknown>) => {
@@ -253,14 +276,10 @@ async function rebuildPreferenceSnapshot(supabase: DatabaseClient, userId: strin
       counts[choice] = (counts[choice] ?? 0) + 1;
       return counts;
     }, {}),
-    rendering_preferences: renderingPreferences,
+    rendering_preferences: scoringProfile.rendering_preferences,
+    scoring_profile: scoringProfile,
   };
-  const scoringProfile = {
-    profile_version: "scoring-preference-profile-v0.1",
-    generated_from_snapshot: snapshot.snapshot_version,
-    as_of: asOf,
-    rendering_preferences: renderingPreferences,
-  };
+  scoringProfile.generated_from_snapshot = snapshot.snapshot_version;
   const { error: snapshotError } = await supabase.from("expression_preference_snapshots").upsert({
     user_id: userId,
     updated_at: asOf,

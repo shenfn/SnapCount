@@ -39,7 +39,7 @@ export interface ShadowGenericRecord {
 
 interface ShadowPlannerOptions { preferenceProfile?: Record<string, unknown>; exposureHistory?: Record<string, unknown>; }
 interface ShadowPlannerInput extends ShadowPlannerOptions { transactions: ShadowExpenseTransaction[]; currentRecordId: string; occurredAt?: string | null; }
-interface GenericPlannerInput extends ShadowPlannerOptions { domainKey: string; records: ShadowGenericRecord[]; currentRecordId: string; }
+interface GenericPlannerInput extends ShadowPlannerOptions { domainKey: string; records: ShadowGenericRecord[]; currentRecordId: string; domainProfile?: Record<string, unknown>; }
 
 const MERCHANT_ALIAS_MAP = compileMerchantAliases(merchantAliasConfig);
 
@@ -111,7 +111,7 @@ export function buildGenericExpressionShadowPlan(input: GenericPlannerInput) {
   if (!currentRecord) return { status: "skipped", reason: "current_domain_record_missing", domain_key: input.domainKey, changes_user_output: false };
   const candidates = input.domainKey === "income"
     ? generateIncomeCandidates(input.records, input.currentRecordId)
-    : generateBuiltinDomainCandidates(input.domainKey, input.records, input.currentRecordId);
+    : generateBuiltinDomainCandidates(input.domainKey, input.records, input.currentRecordId, input.domainProfile ?? {});
   const covered = input.domainKey === "income" ? ["income_current_amount", "income_month_total_count"] : [];
   return finalizePlan(input.domainKey, currentRecord, candidates, input, covered);
 }

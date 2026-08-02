@@ -14,6 +14,7 @@
   record_detail: {
     max_candidates: 3,
     allow_exact_fact_fallback: false,
+    max_per_diversity_group: 1,
     fixed_slots: ['record_fields', 'domain_destination', 'account_binding', 'record_actions'],
     covered_semantic_keys: [],
   },
@@ -35,6 +36,16 @@ function rankedCandidates(candidates, surface) {
     .sort((left, right) => surfaceScore(right, surface).score - surfaceScore(left, surface).score)
 }
 
+function diversityGroup(candidate) {
+  if (candidate.diversity_group) return candidate.diversity_group
+  const dimension = candidate.dimension
+  const semanticKey = candidate.claim?.semantic_key ?? ''
+  if (dimension === 'category_period_comparison' || dimension === 'period_comparison'
+    || semanticKey.includes('week_to_date_vs_previous_week_same_period')) return 'period_comparison'
+  if (dimension === 'meal_baseline') return 'personal_baseline:meal'
+  return dimension ?? candidate.claim?.semantic_key ?? candidate.candidate_id
+}
+
 function exactFactFallback(candidates, surface, covered) {
   return rankedCandidates(candidates, surface).find(candidate =>
     candidate.claim_type === 'fact'
@@ -50,16 +61,22 @@ export function buildSurfacePlan(candidates, surface, overrides = {}) {
   const ranked = rankedCandidates(candidates, surface)
   const selected = []
   const excluded = []
+  const selectedGroups = new Set()
 
   for (const candidate of ranked) {
     const score = surfaceScore(candidate, surface)
     const semanticKey = candidate.claim?.semantic_key
+    const group = diversityGroup(candidate)
     if (covered.has(semanticKey)) {
       excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'covered_by_fixed_content', score: score.score })
       continue
     }
     if (!score.passes_threshold) {
       excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'below_surface_threshold', score: score.score })
+      continue
+    }
+    if (profile.max_per_diversity_group && selectedGroups.has(group)) {
+      excluded.push({ candidate_id: candidate.candidate_id, semantic_key: semanticKey, reason: 'diversity_group_reached', diversity_group: group, score: score.score })
       continue
     }
     if (selected.length >= profile.max_candidates) {
@@ -75,6 +92,7 @@ export function buildSurfacePlan(candidates, surface, overrides = {}) {
       selection_mode: 'threshold',
       canonical_text: candidate.claim?.canonical_text ?? null,
     })
+    selectedGroups.add(group)
   }
 
   let fallbackUsed = false

@@ -101,20 +101,20 @@
       </div>
 
       <AiFeedbackCard
-        v-if="aiFeedback"
+        v-if="reviewFeedback"
         :key="`ai-feedback-${record.id}`"
-        :feedback="aiFeedback"
+        :feedback="reviewFeedback"
         reviewable
         :review-state="feedbackReviewState"
         :submitting="feedbackReviewSubmitting"
         @submit-review="submitFeedbackReview"
       />
 
-      <div v-if="companionMessage" class="record-detail-companion">
+      <div v-if="displayCompanionMessage" class="record-detail-companion">
         <div class="record-detail-companion-mark">💬</div>
         <div>
           <div class="record-detail-companion-title">AI 陪伴</div>
-          <div class="record-detail-companion-text">{{ companionMessage }}</div>
+          <div class="record-detail-companion-text">{{ displayCompanionMessage }}</div>
         </div>
       </div>
 
@@ -218,6 +218,17 @@ const companionMessage = computed(() => {
   if (aiFeedback.value?.emotion_line && text === aiFeedback.value.emotion_line) return ''
   return text
 })
+const reviewFeedback = computed(() => {
+  if (aiFeedback.value) return aiFeedback.value
+  if (!companionMessage.value) return null
+  return {
+    version: 'companion-feedback-v1',
+    badge: 'AI 陪伴',
+    band: 'neutral',
+    emotion_line: companionMessage.value,
+  }
+})
+const displayCompanionMessage = computed(() => aiFeedback.value ? companionMessage.value : '')
 const aiSummary = computed(() => getRecordAiSummary(store, record.value, domainLabel.value))
 
 async function submitFeedbackReview({ choice, freeText }) {

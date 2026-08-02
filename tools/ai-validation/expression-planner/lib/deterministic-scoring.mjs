@@ -33,6 +33,14 @@ export const DEFAULT_IMPORTANCE = {
   wallet_current_metric: 0.76,
   wallet_vs_personal_median: 0.82,
   wallet_change_previous: 0.88,
+  food_record_context: 0.78,
+  food_composition: 0.86,
+  food_meal_vs_personal_median: 0.82,
+  food_recurring_dish: 0.84,
+  sleep_timing: 0.84,
+  sleep_timing_vs_typical: 0.86,
+  sleep_quality_current: 0.78,
+  sleep_stage_composition: 0.72,
 }
 
 function clamp(value, min, max) {
