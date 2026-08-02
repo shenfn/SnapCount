@@ -25,3 +25,4 @@
 详细流程、提交格式、CI/CD 触发规则和异常恢复方式见：
 
 - `docs/ios-视觉美化交接.md`
+- `docs/agent-git-worktree-handoff.md`

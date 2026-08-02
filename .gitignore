@@ -23,6 +23,8 @@ supabase.exe
 node_modules/
 dist/
 vite.config.js.timestamp-*.mjs
+tmp/
+__pycache__/
 .DS_Store
 Thumbs.db
 
@@ -64,6 +66,11 @@ docs-private/
 # ═══════════════════════════════════════════════
 .trae/
 .claude/
+.agents/
+.codex/
+.workbuddy/
+.playwright-cli/
+.trae-html-share-packages/
 .npm-cache/
 .superpowers/
 .tmp/
