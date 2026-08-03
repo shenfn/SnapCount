@@ -140,7 +140,7 @@
 import { computed, inject, nextTick, ref, watch } from 'vue'
 import AiFeedbackCard from '../AiFeedbackCard.vue'
 import { getSystemDomainLabel } from '../../domains/registry'
-import { formatDateTimeLabel } from '../../utils/helpers'
+import { DEFAULT_TZ, formatDisplay, parseInstant, toInstant } from '../../lib/time-core/index.js'
 import { getRecordAiSummary, getRecordDetailFields, getRecordFoodDishes } from '../../domains/recordDetailAdapters'
 import {
   createAbortError,
@@ -186,18 +186,40 @@ const emptyMark = computed(() => {
   return domainMeta.value?.shortName?.slice(0, 1) || '记'
 })
 
+// P0-3：所有时间展示走 time-core，杜绝隐式系统 tz。
+// 08-01 星之柠案根因之一：createdAt 直接被 new Date().toString() 展示，海外用户漂移；
+// 现在统一用 formatDisplay(instant, DEFAULT_TZ)，秒精度让"记录时间"更容易和后端对账。
+function displayInstant(input, opts) {
+  const instant = toInstant(input) ?? (typeof input === 'string' ? parseInstant(input, DEFAULT_TZ) : null)
+  if (instant == null) return ''
+  return formatDisplay(instant, DEFAULT_TZ, opts)
+}
+
 const recordTime = computed(() => {
   if (!record.value?.raw) return '--'
   const raw = record.value.raw
-  if (record.value.kind === 'universal') return formatDateTimeLabel(raw.payload?.time_context?.client_captured_at || raw.createdAt || raw.occurredAt) || '--'
-  if (raw.createdAt) return formatDateTimeLabel(raw.createdAt)
-  if (raw.dateRaw) return raw.time ? `${raw.date} ${raw.time}` : raw.date
+  if (record.value.kind === 'universal') {
+    const src = raw.payload?.time_context?.client_captured_at || raw.createdAt || raw.occurredAt
+    return displayInstant(src, { withSeconds: true }) || '--'
+  }
+  if (raw.createdAt) return displayInstant(raw.createdAt, { withSeconds: true })
+  // 只有日期时不伪造 12:00；等待后端提供可验证的记录时间。
+  if (raw.dateRaw) return raw.date || raw.dateRaw
   return '--'
 })
 
+// P0-4：expense/income 的"发生时间"暂时也从 createdAt 派生。
+// 原因：transactions.transaction_time 目前存的是 UTC 时分与北京日期错位（星之柠案），
+// 直接使用会显示错误的 23:46。等 P2 DB 迁移引入 occurred_at 后再切回专用字段。
 const eventTime = computed(() => {
-  if (!record.value?.raw || record.value.kind !== 'universal') return ''
-  return formatDateTimeLabel(record.value.raw.occurredAt) || ''
+  if (!record.value?.raw) return ''
+  const raw = record.value.raw
+  if (record.value.kind === 'universal') {
+    return displayInstant(raw.occurredAt)
+  }
+  // expense / income：暂用 createdAt 兜底（去秒），不使用坏的 transaction_time 拼装。
+  if (raw.createdAt) return displayInstant(raw.createdAt)
+  return ''
 })
 
 const sourceLabel = computed(() => {
