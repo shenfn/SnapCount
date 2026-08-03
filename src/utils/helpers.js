@@ -1,28 +1,57 @@
+/**
+ * src/utils/helpers.js
+ *
+ * 时间相关函数已迁移到 src/lib/time-core/，本文件保留旧签名作为薄壳，
+ * 内部走 time-core，禁止再出现裸 new Date(str + 'T00:00:00') 之类的隐式时区代码。
+ *
+ * 迁移背景：08-01 星之柠案，UTC 时分被拼到北京日期上（详见 docs/time-and-companion-refactor-prd-v0.1.md）。
+ */
+
+import {
+  DEFAULT_TZ,
+  formatDateKey as tcFormatDateKey,
+  formatDisplay as tcFormatDisplay,
+  formatRelativeDate as tcFormatRelativeDate,
+  parseInstant,
+  parseLocalYmd,
+  toInstant,
+  zonedParts,
+} from '../lib/time-core/index.js'
+
+/**
+ * 获取本地日期键（YYYY-MM-DD）。
+ * 兼容旧签名：无参数 = 当前时刻；传 Date = 该 Date 对应本地日期键。
+ * 内部走 time-core，用 DEFAULT_TZ 保证一致性。
+ */
 export function getLocalDateKey(date = new Date()) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  const instant = date instanceof Date ? date.getTime() : toInstant(date)
+  if (instant == null) return ''
+  return tcFormatDateKey(instant, DEFAULT_TZ)
 }
 
+/**
+ * 各种输入 → YYYY-MM-DD 日期键（DEFAULT_TZ 视角）。
+ */
 export function localDateKeyOf(value) {
   if (!value) return ''
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : getLocalDateKey(value)
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : getLocalDateKey(value)
+  }
   const text = String(value)
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
-  const d = new Date(text)
-  if (Number.isNaN(d.getTime())) return text.slice(0, 10)
-  return getLocalDateKey(d)
+  const instant = parseInstant(text, DEFAULT_TZ)
+  if (instant == null) return text.slice(0, 10)
+  return tcFormatDateKey(instant, DEFAULT_TZ)
 }
 
-export function buildScopedDayKey(year, month, day = new Date().getDate()) {
-  const daysInMonth = new Date(year, month, 0).getDate()
+export function buildScopedDayKey(year, month, day = zonedParts(Date.now(), DEFAULT_TZ)?.day ?? 1) {
+  const daysInMonth = new Date(year, month, 0).getDate() // 纯日历计算，无时区含义
   const safeDay = Math.min(day, daysInMonth)
   return `${year}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`
 }
 
 export function formatDateKeyLabel(dateKey) {
-  const [, month, day] = dateKey.split('-')
+  const [, month, day] = String(dateKey).split('-')
   return `${Number(month)}月${Number(day)}日`
 }
 
@@ -46,13 +75,19 @@ export const payAliasMap = {
   '花呗（先用后付）': '先用后付',
 }
 
+/**
+ * 旧签名：入参是 "YYYY-MM-DD" 字符串（DB transaction_date）。
+ * 返回 "今天/昨天/M月D日"。
+ *
+ * 内部：把 YMD 按 DEFAULT_TZ 解析为 Instant，再交给 time-core 的 formatRelativeDate。
+ * 语义与旧实现等价（旧实现的 `new Date(str + 'T00:00:00')` 隐式吃系统 tz，
+ * 在国内环境下和 DEFAULT_TZ=Asia/Shanghai 一致；出海后旧代码会漂移，本版本不会）。
+ */
 export function formatDate(dateStr) {
-  const today = getLocalDateKey()
-  const yesterday = getLocalDateKey(new Date(Date.now() - 86400000))
-  if (dateStr === today) return '今天'
-  if (dateStr === yesterday) return '昨天'
-  const d = new Date(dateStr + 'T00:00:00')
-  return `${d.getMonth() + 1}月${d.getDate()}日`
+  if (!dateStr) return ''
+  const instant = parseLocalYmd(String(dateStr), DEFAULT_TZ)
+  if (instant == null) return String(dateStr)
+  return tcFormatRelativeDate(instant, DEFAULT_TZ)
 }
 
 export function formatMonthLabel(y, m) {
@@ -80,7 +115,7 @@ export function mapTransaction(t) {
     createdAt: t.created_at,
     date: formatDate(t.transaction_date),
     dateRaw: t.transaction_date,
-    time: t.transaction_time ? t.transaction_time.slice(0, 5) : '',
+    time: t.transaction_time ? String(t.transaction_time).slice(0, 5) : '',
     status: t.status,
     type: t.type,
     icon: platformIcon(t.platform),
@@ -102,25 +137,45 @@ export function mapTransaction(t) {
   }
 }
 
+/**
+ * 按 DEFAULT_TZ 计算本周（周一起）7 天累计消费。
+ * dateRaw = "YYYY-MM-DD"，视为 DEFAULT_TZ 本地日期。
+ * 原实现用 `new Date(dateRaw + 'T00:00:00')` 隐式取系统 tz；本版本改用日历日 key 比对，
+ * 消除时区依赖并保持语义。
+ */
 export function computeWeekData(bills) {
-  const today = new Date()
-  const dow = today.getDay()
-  const monday = new Date(today)
-  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1))
-  monday.setHours(0, 0, 0, 0)
+  const todayKey = getLocalDateKey()
+  const [y, m, d] = todayKey.split('-').map(Number)
+  // 计算本周一的日历日 key（用日历运算，不涉及 wall-clock 时间转换）
+  const jsDate = new Date(y, m - 1, d)
+  const dow = jsDate.getDay()
+  const mondayOffset = dow === 0 ? -6 : 1 - dow
+  const monday = new Date(y, m - 1, d + mondayOffset)
+  const weekKeys = []
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)
+    weekKeys.push(
+      `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`,
+    )
+  }
   const data = [0, 0, 0, 0, 0, 0, 0]
   bills.forEach(b => {
     if (b.status !== 'done' || !b.dateRaw) return
-    const d = new Date(b.dateRaw + 'T00:00:00')
-    const diff = Math.round((d - monday) / 86400000)
-    if (diff >= 0 && diff < 7) data[diff] += b.amount
+    const idx = weekKeys.indexOf(b.dateRaw)
+    if (idx >= 0) data[idx] += b.amount
   })
   return data
 }
 
+/**
+ * 旧签名：入参是 timestamp（带 tz 的 ISO 或 epoch）；返回 "M月D日 HH:MM"（DEFAULT_TZ 视角）。
+ *
+ * 这一次修复对齐 08-01 星之柠案：以前 `new Date(value)` 展示时使用系统 tz，
+ * 现在统一走 DEFAULT_TZ；后续接入用户 tz profile 时只需替换 DEFAULT_TZ。
+ */
 export function formatDateTimeLabel(value) {
   if (!value) return ''
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return ''
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const instant = toInstant(value) ?? parseInstant(String(value), DEFAULT_TZ)
+  if (instant == null) return ''
+  return tcFormatDisplay(instant, DEFAULT_TZ)
 }
