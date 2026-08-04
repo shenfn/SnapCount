@@ -29,6 +29,7 @@
           <div class="account-source-title">{{ sourceSnapshot.title }}</div>
           <div class="account-source-meta">
             {{ formatDateTimeLabel(sourceSnapshot.occurredAt) || '时间未知' }}
+            <span v-if="sourceSnapshot.snapshotBalance != null"> · 快照余额 {{ formatAccountCurrency(sourceSnapshot.snapshotBalance) }}</span>
             <span v-if="sourceSnapshot.payload?.due_date"> · {{ sourceSnapshot.payload.due_date }} 还款</span>
           </div>
           <div class="account-source-summary">{{ sourceSnapshot.summary || sourceSnapshotHint }}</div>

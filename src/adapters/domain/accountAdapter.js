@@ -59,3 +59,15 @@ export function splitAccounts(accounts) {
     liabilities: active.filter(isLiabilityAccount),
   }
 }
+
+export function shouldAdoptSnapshotAsOpeningBalance(account, activeEntryCount, snapshotBalance) {
+  const initial = Number(account?.initialBalance ?? account?.initial_balance ?? 0)
+  const current = Number(account?.currentBalance ?? account?.current_balance ?? 0)
+  const entries = Number(activeEntryCount ?? 0)
+  const amount = Number(snapshotBalance)
+  return Number.isFinite(amount)
+    && amount >= 0
+    && initial === 0
+    && current === 0
+    && entries === 0
+}
