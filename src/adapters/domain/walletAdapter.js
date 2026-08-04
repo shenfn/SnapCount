@@ -1,6 +1,6 @@
-import { WEEK_LABELS_SHORT } from '../shared/timeBuckets'
-import { formatDateTimeLabel } from '../../utils/helpers'
-import { accountTitle, formatAccountCurrency, splitAccounts } from './accountAdapter'
+import { WEEK_LABELS_SHORT } from '../shared/timeBuckets.js'
+import { formatDateTimeLabel } from '../../utils/helpers.js'
+import { accountTitle, formatAccountCurrency, splitAccounts } from './accountAdapter.js'
 
 function getWalletRecords(store) {
   return store.dataRecords.value
@@ -22,7 +22,10 @@ function latestSnapshots(records) {
 }
 
 function amountOf(record) {
-  return Number(record?.payload?.amount || 0)
+  const payload = record?.payload || {}
+  const value = payload.snapshot_balance ?? payload.amount
+  const amount = Number(value)
+  return Number.isFinite(amount) && amount >= 0 ? amount : 0
 }
 
 function isCash(record) {
