@@ -21,7 +21,12 @@ import {
   incomeCatMap, payAliasMap,
   getLocalDateKey, localDateKeyOf,
 } from '../utils/helpers'
-import { isLiabilityAccount, mapAccountRow, normalizeAccountType } from '../adapters/domain/accountAdapter'
+import {
+  isLiabilityAccount,
+  mapAccountRow,
+  normalizeAccountType,
+  shouldAdoptSnapshotAsOpeningBalance,
+} from '../adapters/domain/accountAdapter'
 import { normalizeFinanceOptionValue } from '../domains/financeReviewOptions'
 
 const PRIMARY_EXPENSE_CATEGORIES = new Set(['餐饮', '购物', '出行', '娱乐', '生活', '健康', '教育', '其他'])
@@ -980,6 +985,7 @@ export function useStore() {
         accounts.value = []
       } else {
         accounts.value = (accountRows || []).map(mapAccountRow)
+        await repairEmptyAccountSnapshotBalances(accounts.value)
       }
 
       const { data: staging, error: stagingErr } = stagingResult
@@ -3305,15 +3311,98 @@ export function useStore() {
     if (error) console.warn('作废账户流水失败:', error.message)
   }
 
-  function refreshAccountsFromDB() {
-    return sb.from('accounts')
+  async function repairEmptyAccountSnapshotBalances(accountRows = accounts.value) {
+    if (!currentUserId.value) return
+    const candidates = (accountRows || []).filter(account => (
+      !account.isArchived
+      && Number(account.initialBalance || 0) === 0
+      && Number(account.currentBalance || 0) === 0
+    ))
+    if (!candidates.length) return
+
+    const accountIds = candidates.map(account => account.id)
+    const sourceRecordIds = candidates.map(account => account.sourceRecordId).filter(Boolean)
+    const sourceSnapshotQuery = sourceRecordIds.length
+      ? sb.from('data_records')
+        .select('id,linked_account_id,occurred_at,created_at,snapshot_balance,payload_jsonb')
+        .in('id', sourceRecordIds)
+      : Promise.resolve({ data: [], error: null })
+    const [{ data: entryRows, error: entryError }, sourceSnapshotResult, { data: linkedSnapshots, error: linkedSnapshotError }] = await Promise.all([
+      sb.from('account_entries')
+        .select('account_id')
+        .in('account_id', accountIds)
+        .eq('is_voided', false)
+        .neq('entry_type', 'snapshot_initialization'),
+      sourceSnapshotQuery,
+      sb.from('data_records')
+        .select('id,linked_account_id,occurred_at,created_at,snapshot_balance,payload_jsonb')
+        .in('linked_account_id', accountIds),
+    ])
+    if (entryError) {
+      console.warn('检查空账户快照流水失败，跳过自动回填:', entryError.message)
+      return
+    }
+    if (sourceSnapshotResult.error) {
+      console.warn('读取账户来源快照失败，将回退账户快照字段:', sourceSnapshotResult.error.message)
+    }
+    if (linkedSnapshotError) {
+      console.warn('读取账户关联快照失败，将回退账户快照字段:', linkedSnapshotError.message)
+    }
+
+    const activeEntryCounts = new Map()
+    ;(entryRows || []).forEach(row => {
+      activeEntryCounts.set(row.account_id, (activeEntryCounts.get(row.account_id) || 0) + 1)
+    })
+    const snapshotById = new Map((sourceSnapshotResult.data || []).map(row => [row.id, row]))
+    const latestSnapshotByAccountId = new Map()
+    ;(linkedSnapshots || []).forEach(row => {
+      const previous = latestSnapshotByAccountId.get(row.linked_account_id)
+      const rowTime = row.occurred_at || row.created_at || ''
+      const previousTime = previous?.occurred_at || previous?.created_at || ''
+      if (!previous || rowTime >= previousTime) latestSnapshotByAccountId.set(row.linked_account_id, row)
+    })
+
+    for (const account of candidates) {
+      const snapshot = snapshotById.get(account.sourceRecordId) || latestSnapshotByAccountId.get(account.id)
+      const payload = snapshot?.payload_jsonb || {}
+      const amount = snapshot?.snapshot_balance
+        ?? payload.snapshot_balance
+        ?? payload.amount
+        ?? account.snapshotBalance
+      const activeEntryCount = activeEntryCounts.get(account.id) || 0
+      if (!shouldAdoptSnapshotAsOpeningBalance(account, activeEntryCount, amount)) continue
+
+      const { data, error } = await sb.from('accounts')
+        .update({
+          initial_balance: Number(amount),
+          current_balance: Number(amount),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', account.id)
+        .eq('user_id', currentUserId.value)
+        .eq('initial_balance', 0)
+        .eq('current_balance', 0)
+        .select('*')
+        .maybeSingle()
+      if (error) {
+        console.warn('回填账户快照余额失败:', error.message)
+        continue
+      }
+      if (data) {
+        const idx = accounts.value.findIndex(item => item.id === data.id)
+        if (idx >= 0) accounts.value[idx] = mapAccountRow(data)
+      }
+    }
+  }
+
+  async function refreshAccountsFromDB() {
+    const { data, error } = await sb.from('accounts')
       .select('*')
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
-      .then(({ data, error }) => {
-        if (error) { console.warn('刷新账户失败:', error.message); return }
-        accounts.value = (data || []).map(mapAccountRow)
-      })
+    if (error) { console.warn('刷新账户失败:', error.message); return }
+    accounts.value = (data || []).map(mapAccountRow)
+    await repairEmptyAccountSnapshotBalances(accounts.value)
   }
 
   function defaultAccountIdForKind(kind) {
@@ -3852,6 +3941,25 @@ export function useStore() {
     const isLiabilitySnapshot = walletSnapshotKindOf(record) === 'liability'
     const billDay = isLiabilitySnapshot ? walletSnapshotBillDay(record) : null
     const paymentDueDay = isLiabilitySnapshot ? walletSnapshotPaymentDueDay(record) : null
+    const { data: accountRow, error: accountReadError } = await sb.from('accounts')
+      .select('id,initial_balance,current_balance')
+      .eq('id', accountId)
+      .maybeSingle()
+    if (accountReadError || !accountRow) {
+      showError('读取账户余额失败：' + humanizeDbError(accountReadError || new Error('账户不存在')))
+      return
+    }
+    const { count: activeEntryCount, error: entryCountError } = await sb.from('account_entries')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('is_voided', false)
+      .neq('entry_type', 'snapshot_initialization')
+    if (entryCountError) console.warn('读取账户流水数量失败，将保留当前余额:', entryCountError.message)
+    const adoptAsOpeningBalance = shouldAdoptSnapshotAsOpeningBalance(
+      accountRow,
+      entryCountError ? 1 : (activeEntryCount || 0),
+      amount,
+    )
     const accountPatch = {
       snapshot_balance: amount,
       snapshot_at: snapshotAt,
@@ -3859,18 +3967,26 @@ export function useStore() {
       source_record_id: record.id,
       updated_at: new Date().toISOString(),
     }
+    if (adoptAsOpeningBalance) {
+      accountPatch.initial_balance = amount
+      accountPatch.current_balance = amount
+    }
     if (isLiabilitySnapshot) {
       if (billDay) accountPatch.bill_day = billDay
       if (paymentDueDay) accountPatch.payment_due_day = paymentDueDay
     }
 
-    const { error: accountErr } = await sb.from('accounts')
+    const { data: updatedAccount, error: accountErr } = await sb.from('accounts')
       .update(accountPatch)
       .eq('id', accountId)
+      .select('*')
+      .single()
     if (accountErr) {
       showError('更新账户快照失败：' + humanizeDbError(accountErr))
       return
     }
+    const accountIndex = accounts.value.findIndex(item => item.id === accountId)
+    if (accountIndex >= 0) accounts.value[accountIndex] = mapAccountRow(updatedAccount)
 
     const linkedPayload = {
       ...payload,

@@ -40,6 +40,13 @@ function formatCurrency(value) {
   return `¥ ${Math.round(Number(value || 0))}`
 }
 
+function accountSnapshotLabel(account) {
+  if (!account?.snapshotAt) return '暂无快照'
+  const date = account.snapshotAt.slice(0, 10)
+  if (account.snapshotBalance == null) return `最近快照 ${date}`
+  return `最近快照 ${date} · ${formatAccountCurrency(account.snapshotBalance)}`
+}
+
 function getNextDueLabel(records) {
   const due = records
     .filter(isUnpaidLiability)
@@ -183,7 +190,7 @@ export function getAccountSections(store) {
         title: accountTitle(account),
         subtitle: account.institution || account.type,
         value: formatAccountCurrency(account.currentBalance),
-        snapshot: account.snapshotAt ? `最近快照 ${account.snapshotAt.slice(0, 10)}` : '暂无快照',
+        snapshot: accountSnapshotLabel(account),
         raw: account,
       })),
     },
@@ -196,7 +203,7 @@ export function getAccountSections(store) {
         title: accountTitle(account),
         subtitle: account.institution || account.type,
         value: formatAccountCurrency(account.currentBalance),
-        snapshot: account.snapshotAt ? `最近快照 ${account.snapshotAt.slice(0, 10)}` : '暂无快照',
+        snapshot: accountSnapshotLabel(account),
         raw: account,
       })),
     },
