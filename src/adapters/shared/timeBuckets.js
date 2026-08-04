@@ -3,7 +3,7 @@
 // 把 records 按周分桶（周一~周日 = 7 个桶）
 // 按 fact 求和（如总时长）或按数量计数
 // ════════════════════════════════════════════════════════════════════
-import { safeNumber, pickPayloadValue } from './aggregations'
+import { safeNumber, pickPayloadValue } from './aggregations.js'
 
 /** 取本周一 00:00 */
 function getCurrentMonday() {
