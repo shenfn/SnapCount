@@ -969,6 +969,9 @@ private struct InboxVerdictStageView: View {
     @State private var showDiscardConfirmation = false
     @State private var editorContext: StagingEditorContext?
     @State private var pendingEditorContext: PendingEditorContext?
+    @State private var imagePreview: StagingImagePreviewRoute?
+    @State private var retryingRecordId: String?
+    @State private var actionNotice: InboxStageActionNotice?
 
     private var currentIndex: Int {
         items.firstIndex(where: { $0.id == selection }) ?? 0
@@ -977,13 +980,6 @@ private struct InboxVerdictStageView: View {
     private var current: NativeInboxItem? {
         guard !items.isEmpty else { return nil }
         return items[min(currentIndex, items.count - 1)]
-    }
-
-    private var pageSelection: Binding<String> {
-        Binding(
-            get: { selection ?? items.first?.id ?? "" },
-            set: { selection = $0 }
-        )
     }
 
     var body: some View {
@@ -1006,13 +1002,14 @@ private struct InboxVerdictStageView: View {
             } else if let current {
                 VStack(spacing: 0) {
                     stageTopBar(current)
-                    TabView(selection: pageSelection) {
-                        ForEach(items) { item in
-                            stageVisual(item)
-                                .tag(item.id)
-                        }
+                    InboxStageRecordPager(
+                        canMovePrevious: currentIndex > 0,
+                        canMoveNext: currentIndex < items.count - 1,
+                        move: movePage
+                    ) {
+                        stageVisual(current)
+                            .id(current.id)
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
                     .frame(maxHeight: .infinity)
 
                     stageInfo(current)
@@ -1025,10 +1022,21 @@ private struct InboxVerdictStageView: View {
                 }
             }
         }
+        .overlay(alignment: .top) {
+            if let actionNotice {
+                InboxStageActionNoticeView(notice: actionNotice)
+                    .padding(.top, 58)
+            }
+        }
         .onAppear {
             if selection == nil || !items.contains(where: { $0.id == selection }) {
                 selection = items.first?.id
             }
+        }
+        .task(id: actionNotice) {
+            guard actionNotice?.isWorking == false else { return }
+            try? await Task.sleep(for: .seconds(3))
+            actionNotice = nil
         }
         .onChange(of: items.map(\.id)) { oldIds, newIds in
             guard let selected = selection else {
@@ -1079,15 +1087,32 @@ private struct InboxVerdictStageView: View {
                 .environmentObject(appState)
             }
         }
+        .fullScreenCover(item: $imagePreview) { route in
+            InboxStageImagePreview(url: route.url)
+        }
     }
 
     @ViewBuilder
     private func stageVisual(_ item: NativeInboxItem) -> some View {
         if let record = item.stagingRecord {
-            StagingStageImage(record: record)
+            StagingStageImage(record: record) { url in
+                imagePreview = StagingImagePreviewRoute(url: url)
+            }
         } else if let pending = item.pendingExpense {
-            PendingStageImage(pending: pending)
+            PendingStageImage(pending: pending) { url in
+                imagePreview = StagingImagePreviewRoute(url: url)
+            }
         }
+    }
+
+    private func movePage(_ offset: Int) {
+        guard let next = NativeInboxPresentation.adjacentSelection(
+            to: selection,
+            offset: offset,
+            in: items.map(\.id)
+        ) else { return }
+        selection = next
+        JieziHaptics.tap()
     }
 
     private func stageTopBar(_ item: NativeInboxItem) -> some View {
@@ -1199,12 +1224,12 @@ private struct InboxVerdictStageView: View {
                         let domainId = record.domainKey ?? domains.first?.id ?? "expense"
                         editorContext = StagingEditorContext(record: record, domainId: domainId)
                     }
-                    stageActionButton("arrow.clockwise", title: "重试") {
-                        Task {
-                            if await appState.retryStagingRecord(record, preserveInboxNavigation: true) {
-                                finishAction(for: item.id, keepIfPresent: true)
-                            }
-                        }
+                    stageActionButton(
+                        "arrow.clockwise",
+                        title: "重试",
+                        isWorking: retryingRecordId == record.id
+                    ) {
+                        Task { await retry(item, record: record) }
                     }
                     stageActionButton("trash", title: "销毁", destructive: true) {
                         showDiscardConfirmation = true
@@ -1221,12 +1246,17 @@ private struct InboxVerdictStageView: View {
         _ systemImage: String,
         title: String,
         destructive: Bool = false,
+        isWorking: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: systemImage)
-                Text(title).font(.caption2)
+                if isWorking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: systemImage)
+                }
+                Text(isWorking ? "重试中" : title).font(.caption2)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
@@ -1275,6 +1305,21 @@ private struct InboxVerdictStageView: View {
             preserveInboxNavigation: true
         ) != nil {
             finishAction(for: item.id)
+        }
+    }
+
+    private func retry(_ item: NativeInboxItem, record: NativeStagingRecord) async {
+        retryingRecordId = record.id
+        actionNotice = InboxStageActionNotice(message: "正在重新识别…", isError: false, isWorking: true)
+        let succeeded = await appState.retryStagingRecord(record, preserveInboxNavigation: true)
+        retryingRecordId = nil
+        actionNotice = InboxStageActionNotice(
+            message: appState.inboxActionMessage ?? (succeeded ? "重新识别完成" : "重新识别失败，请稍后重试"),
+            isError: appState.inboxActionMessageIsError || !succeeded,
+            isWorking: false
+        )
+        if succeeded {
+            finishAction(for: item.id, keepIfPresent: true)
         }
     }
 
@@ -1350,12 +1395,17 @@ private struct PendingEditorContext: Identifiable {
 
 private struct PendingStageImage: View {
     let pending: NativePendingExpense
+    let onOpenImage: (URL) -> Void
 
     var body: some View {
         Group {
             if let url = pending.imageURL {
                 CachedRemoteImage(url: url) { image in
-                    image.resizable().scaledToFit()
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .contentShape(Rectangle())
+                        .onTapGesture { onOpenImage(url) }
                 } placeholder: {
                     ProgressView().tint(JieziTheme.brand)
                 } failure: {
@@ -1366,7 +1416,6 @@ private struct PendingStageImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 26)
     }
 
     private func factSheet(_ message: String) -> some View {
@@ -1410,6 +1459,9 @@ private struct StagingVerdictStageView: View {
 
     @State private var showDiscardConfirmation = false
     @State private var editorContext: StagingEditorContext?
+    @State private var imagePreview: StagingImagePreviewRoute?
+    @State private var retryingRecordId: String?
+    @State private var actionNotice: InboxStageActionNotice?
 
     private var currentIndex: Int {
         records.firstIndex(where: { $0.id == selection }) ?? 0
@@ -1418,13 +1470,6 @@ private struct StagingVerdictStageView: View {
     private var current: NativeStagingRecord? {
         guard !records.isEmpty else { return nil }
         return records[min(currentIndex, records.count - 1)]
-    }
-
-    private var pageSelection: Binding<String> {
-        Binding(
-            get: { selection ?? records.first?.id ?? "" },
-            set: { selection = $0 }
-        )
     }
 
     var body: some View {
@@ -1447,13 +1492,16 @@ private struct StagingVerdictStageView: View {
             } else if let current {
                 VStack(spacing: 0) {
                     stageTopBar(current)
-                    TabView(selection: pageSelection) {
-                        ForEach(records) { record in
-                            StagingStageImage(record: record)
-                                .tag(record.id)
+                    InboxStageRecordPager(
+                        canMovePrevious: currentIndex > 0,
+                        canMoveNext: currentIndex < records.count - 1,
+                        move: movePage
+                    ) {
+                        StagingStageImage(record: current) { url in
+                            imagePreview = StagingImagePreviewRoute(url: url)
                         }
+                        .id(current.id)
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
                     .frame(maxHeight: .infinity)
 
                     stageInfo(current)
@@ -1462,8 +1510,19 @@ private struct StagingVerdictStageView: View {
                 }
             }
         }
+        .overlay(alignment: .top) {
+            if let actionNotice {
+                InboxStageActionNoticeView(notice: actionNotice)
+                    .padding(.top, 58)
+            }
+        }
         .onAppear {
             if selection == nil { selection = records.first?.id }
+        }
+        .task(id: actionNotice) {
+            guard actionNotice?.isWorking == false else { return }
+            try? await Task.sleep(for: .seconds(3))
+            actionNotice = nil
         }
         .onChange(of: records.map(\.id)) { _, ids in
             guard let selection else {
@@ -1492,6 +1551,19 @@ private struct StagingVerdictStageView: View {
             ManualRecordSheet(staging: context.record, domainKey: context.domainId)
                 .environmentObject(appState)
         }
+        .fullScreenCover(item: $imagePreview) { route in
+            InboxStageImagePreview(url: route.url)
+        }
+    }
+
+    private func movePage(_ offset: Int) {
+        guard let next = NativeInboxPresentation.adjacentSelection(
+            to: selection,
+            offset: offset,
+            in: records.map(\.id)
+        ) else { return }
+        selection = next
+        JieziHaptics.tap()
     }
 
     private func stageTopBar(_ record: NativeStagingRecord) -> some View {
@@ -1583,11 +1655,12 @@ private struct StagingVerdictStageView: View {
                     let domainId = record.domainKey ?? domains.first?.id ?? "expense"
                     editorContext = StagingEditorContext(record: record, domainId: domainId)
                 }
-                stageActionButton("arrow.clockwise", title: "重试") {
-                    Task {
-                        await appState.retryStagingRecord(record)
-                        finishAction(for: record.id)
-                    }
+                stageActionButton(
+                    "arrow.clockwise",
+                    title: "重试",
+                    isWorking: retryingRecordId == record.id
+                ) {
+                    Task { await retry(record) }
                 }
                 stageActionButton("trash", title: "销毁", destructive: true) {
                     showDiscardConfirmation = true
@@ -1603,12 +1676,17 @@ private struct StagingVerdictStageView: View {
         _ systemImage: String,
         title: String,
         destructive: Bool = false,
+        isWorking: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: systemImage)
-                Text(title).font(.caption2)
+                if isWorking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: systemImage)
+                }
+                Text(isWorking ? "重试中" : title).font(.caption2)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
@@ -1651,6 +1729,21 @@ private struct StagingVerdictStageView: View {
 
     private func archive(_ record: NativeStagingRecord, to domainId: String) async {
         if await appState.archiveStagingRecord(record, domainKey: domainId) != nil {
+            finishAction(for: record.id)
+        }
+    }
+
+    private func retry(_ record: NativeStagingRecord) async {
+        retryingRecordId = record.id
+        actionNotice = InboxStageActionNotice(message: "正在重新识别…", isError: false, isWorking: true)
+        let succeeded = await appState.retryStagingRecord(record, preserveInboxNavigation: true)
+        retryingRecordId = nil
+        actionNotice = InboxStageActionNotice(
+            message: appState.inboxActionMessage ?? (succeeded ? "重新识别完成" : "重新识别失败，请稍后重试"),
+            isError: appState.inboxActionMessageIsError || !succeeded,
+            isWorking: false
+        )
+        if succeeded {
             finishAction(for: record.id)
         }
     }
@@ -1706,6 +1799,7 @@ private struct StagingEditorContext: Identifiable {
 private struct StagingStageImage: View {
     @EnvironmentObject private var appState: AppState
     let record: NativeStagingRecord
+    let onOpenImage: (URL) -> Void
     @State private var resolvedURL: URL?
     @State private var isResolving = false
     @State private var errorMessage: String?
@@ -1716,12 +1810,12 @@ private struct StagingStageImage: View {
         Group {
             if let imageURL {
                 CachedRemoteImage(url: imageURL) { image in
-                    InboxZoomableImage {
-                        image
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onOpenImage(imageURL) }
                 } placeholder: {
                     ProgressView().tint(JieziTheme.brand)
                 } failure: {
@@ -1734,7 +1828,6 @@ private struct StagingStageImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 26)
         .task(id: record.id) {
             guard record.imageURL == nil, record.imagePath != nil, resolvedURL == nil else { return }
             isResolving = true
@@ -1750,6 +1843,172 @@ private struct StagingStageImage: View {
     private func stageFallback(_ message: String) -> some View {
         StagingFactSheet(record: record, message: message)
     }
+}
+
+private struct InboxStageRecordPager<Content: View>: View {
+    let canMovePrevious: Bool
+    let canMoveNext: Bool
+    let move: (Int) -> Void
+    private let content: Content
+
+    @GestureState private var resistedDragOffset: CGFloat = 0
+
+    init(
+        canMovePrevious: Bool,
+        canMoveNext: Bool,
+        move: @escaping (Int) -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.canMovePrevious = canMovePrevious
+        self.canMoveNext = canMoveNext
+        self.move = move
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            pageButton(
+                systemImage: "chevron.left",
+                accessibilityLabel: "上一条记录",
+                enabled: canMovePrevious,
+                action: { move(-1) }
+            )
+
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    Color.white.opacity(0.76),
+                    in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
+                        .stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1)
+                }
+                .shadow(color: JieziTheme.space.opacity(0.1), radius: 12, x: 0, y: 7)
+                .contentShape(Rectangle())
+                .offset(x: resistedDragOffset)
+                .simultaneousGesture(horizontalSwipeGesture)
+
+            pageButton(
+                systemImage: "chevron.right",
+                accessibilityLabel: "下一条记录",
+                enabled: canMoveNext,
+                action: { move(1) }
+            )
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 10)
+    }
+
+    private var horizontalSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+            .updating($resistedDragOffset) { value, state, transaction in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                transaction.animation = nil
+                state = min(12, max(-12, value.translation.width * 0.08))
+            }
+            .onEnded { value in
+                guard let offset = NativeInboxPresentation.swipePageOffset(
+                    translationX: Double(value.translation.width),
+                    translationY: Double(value.translation.height),
+                    predictedEndTranslationX: Double(value.predictedEndTranslation.width)
+                ) else { return }
+                guard (offset < 0 && canMovePrevious) || (offset > 0 && canMoveNext) else { return }
+                move(offset)
+            }
+    }
+
+    private func pageButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        enabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 28, height: 44)
+                .foregroundStyle(JieziTheme.brand)
+                .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.22)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct InboxStageActionNotice: Equatable {
+    let message: String
+    let isError: Bool
+    let isWorking: Bool
+}
+
+private struct InboxStageActionNoticeView: View {
+    let notice: InboxStageActionNotice
+
+    var body: some View {
+        HStack(spacing: JieziSpacing.sm) {
+            if notice.isWorking {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: notice.isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+            }
+            Text(notice.message)
+                .font(.caption.weight(.medium))
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(notice.isError ? JieziTheme.coral : JieziTheme.brand)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 38)
+        .background(
+            (notice.isError ? JieziTheme.coral : JieziTheme.brand).opacity(0.08),
+            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
+        )
+        .padding(.horizontal, 26)
+        .padding(.top, JieziSpacing.sm)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct InboxStageImagePreview: View {
+    @Environment(\.dismiss) private var dismiss
+    let url: URL
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                CachedRemoteImage(url: url) { image in
+                    InboxZoomableImage {
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } placeholder: {
+                    ProgressView().tint(.white)
+                } failure: {
+                    Label("原图加载失败", systemImage: "photo.badge.exclamationmark")
+                        .foregroundStyle(.white)
+                }
+                .padding()
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("关闭原图")
+                }
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(.black, for: .navigationBar)
+        }
+    }
+
 }
 
 private struct StagingFactSheet: View {
