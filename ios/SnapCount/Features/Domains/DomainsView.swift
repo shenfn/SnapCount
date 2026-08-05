@@ -77,7 +77,7 @@ struct DomainDetailView: View {
         .navigationTitle(domain.shortName)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $snapshotForAccountPicker) { snapshot in
-            WalletSnapshotAccountPicker(snapshot: snapshot, accounts: activeAccounts)
+            WalletSnapshotAccountPicker(snapshot: snapshot)
         }
         .sheet(item: $accountDraft) { draft in
             AccountEditSheet(draft: draft)
@@ -420,7 +420,7 @@ struct DomainDetailView: View {
                                 Label("关联已有", systemImage: "link")
                             }
                             .buttonStyle(.bordered)
-                            .disabled(activeAccounts.isEmpty)
+                            .disabled(appState.walletSnapshotActionId != nil)
                         }
                         .disabled(appState.walletSnapshotActionId != nil)
                     }
@@ -447,34 +447,61 @@ private struct WalletSnapshotAccountPicker: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     let snapshot: NativeWalletSnapshot
-    let accounts: [NativeAccount]
+    private var accounts: [NativeAccount] {
+        appState.accounts.filter { !$0.isArchived }
+    }
 
     var body: some View {
         NavigationStack {
-            List(accounts) { account in
-                Button {
-                    Task {
-                        if await appState.linkWalletSnapshot(snapshot, to: account) {
-                            dismiss()
+            List {
+                if appState.isLoadingAccounts && accounts.isEmpty {
+                    ProgressView("正在加载账户…")
+                        .frame(maxWidth: .infinity)
+                } else if let message = appState.accountMessage, accounts.isEmpty {
+                    ContentUnavailableView(
+                        "账户加载失败",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(message)
+                    )
+                } else if accounts.isEmpty {
+                    ContentUnavailableView(
+                        "暂无可关联账户",
+                        systemImage: "wallet.pass",
+                        description: Text("先创建一个账户，再回到这里关联这条快照。")
+                    )
+                } else {
+                    ForEach(accounts) { account in
+                        Button {
+                            Task {
+                                if await appState.linkWalletSnapshot(snapshot, to: account) {
+                                    dismiss()
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(account.title).font(.headline)
+                                    Text(account.type.title + (account.institution.isEmpty ? "" : " · \(account.institution)"))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(String(format: "¥%.2f", account.currentBalance))
+                                    .font(.subheadline.monospacedDigit())
+                            }
                         }
-                    }
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(account.title).font(.headline)
-                            Text(account.type.title + (account.institution.isEmpty ? "" : " · \(account.institution)"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Text(String(format: "¥%.2f", account.currentBalance))
-                            .font(.subheadline.monospacedDigit())
+                        .disabled(appState.walletSnapshotActionId != nil)
                     }
                 }
-                .disabled(appState.walletSnapshotActionId != nil)
             }
             .navigationTitle("关联已有账户")
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                if appState.accounts.isEmpty {
+                    await appState.loadAccounts()
+                }
+            }
+            .refreshable { await appState.loadAccounts() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
