@@ -148,7 +148,7 @@ struct HomeMastheadView: View {
                         .font(.system(size: 15, weight: .medium, design: .serif))
                         .foregroundStyle(JieziTheme.space)
                         .multilineTextAlignment(.leading)
-                        .contentTransition(.blurReplace)
+                        .contentTransition(.opacity)
                     Text("\(whisper.source) · 查看洞察")
                         .font(JieziFont.caption2)
                         .foregroundStyle(JieziTheme.muted)
