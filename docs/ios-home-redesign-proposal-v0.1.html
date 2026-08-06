@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>芥子 iOS 首页重构设计方案 v0.1</title>
+<style>
+  :root{
+    --paper:#F5F1E7; --paper2:#FBF8F0; --brand:#426E63; --gold:#DCBF74;
+    --space:#17312D; --ink:#202A27; --muted:#6E7773; --coral:#B76555;
+    --hairline:rgba(23,49,45,.12);
+    --d-expense:#C2410C; --d-income:#1565C0; --d-sport:#B45309;
+    --d-sleep:#4338CA; --d-reading:#0369A1; --d-food:#EA580C; --d-wallet:#7C3AED;
+    --serif:"Songti SC","STSong","Noto Serif SC","Source Han Serif SC",serif;
+    --sans:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:"SF Mono","JetBrains Mono",ui-monospace,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.75;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:56px 28px 96px}
+  .doc-head{border-bottom:1px solid var(--hairline);padding-bottom:28px;margin-bottom:44px}
+  .doc-kicker{font-size:12px;letter-spacing:.22em;color:var(--brand);text-transform:uppercase;margin-bottom:10px}
+  .doc-title{font-family:var(--serif);font-size:38px;font-weight:700;letter-spacing:.02em}
+  .doc-meta{margin-top:10px;font-size:13px;color:var(--muted)}
+  h2{font-family:var(--serif);font-size:26px;margin:56px 0 8px;padding-top:18px;border-top:2px solid var(--space)}
+  h2 .no{color:var(--gold);font-family:var(--mono);font-size:15px;vertical-align:4px;margin-right:10px;letter-spacing:.1em}
+  h3{font-family:var(--serif);font-size:19px;margin:30px 0 10px}
+  p{margin:10px 0;font-size:15px}
+  .lead{font-size:16px;color:var(--space)}
+  ul{margin:8px 0 8px 22px;font-size:14.5px}
+  li{margin:5px 0}
+  b,strong{color:var(--space)}
+  .tag{display:inline-block;font-size:11px;padding:1px 9px;border-radius:99px;border:1px solid var(--hairline);color:var(--muted);margin-right:6px;vertical-align:1px}
+  .tag.bad{color:var(--coral);border-color:rgba(183,101,85,.4)}
+  .tag.good{color:var(--brand);border-color:rgba(66,110,99,.4)}
+  .card{background:var(--paper2);border:1px solid var(--hairline);border-radius:14px;padding:20px 22px;margin:16px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  @media(max-width:860px){.grid2,.grid3{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:14px 0}
+  th{font-family:var(--serif);text-align:left;padding:9px 12px;border-bottom:2px solid var(--space);font-size:14px}
+  td{padding:9px 12px;border-bottom:1px solid var(--hairline);vertical-align:top}
+  tr td:first-child{font-weight:600;color:var(--space);white-space:nowrap}
+  .mono{font-family:var(--mono);font-size:12.5px}
+  .gold{color:#A8842F}.coral{color:var(--coral)}.brand{color:var(--brand)}
+
+  /* ===== 现状解剖条 ===== */
+  .anatomy{display:flex;flex-direction:column;gap:6px;margin:18px 0}
+  .a-row{display:grid;grid-template-columns:150px 110px 1fr;gap:12px;align-items:center;background:var(--paper2);border:1px solid var(--hairline);border-radius:10px;padding:10px 14px;font-size:13px}
+  .a-row .h{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .a-row.merge{border-color:rgba(183,101,85,.45);background:rgba(183,101,85,.05)}
+  .a-row.keep{border-color:rgba(66,110,99,.35)}
+  .a-row .act{font-size:11.5px;font-weight:600}
+  .act.m{color:var(--coral)} .act.k{color:var(--brand)} .act.r{color:#A8842F}
+
+  /* ===== 手机 mockup ===== */
+  .phones{display:flex;gap:36px;flex-wrap:wrap;justify-content:center;margin:26px 0}
+  .phone{width:330px;border-radius:44px;background:#111;padding:10px;box-shadow:0 24px 60px rgba(23,49,45,.28)}
+  .screen{border-radius:36px;overflow:hidden;background:var(--paper);height:680px;position:relative;display:flex;flex-direction:column}
+  .statusbar{display:flex;justify-content:space-between;padding:12px 24px 2px;font-size:11.5px;font-weight:600;color:var(--ink);font-family:var(--mono)}
+  .scroll{flex:1;overflow-y:auto;padding:6px 16px 90px;scrollbar-width:none}
+  .scroll::-webkit-scrollbar{display:none}
+  .phone-cap{text-align:center;font-size:13px;color:var(--muted);margin-top:14px;font-family:var(--serif)}
+
+  /* 旧首页简化示意 */
+  .old-block{border:1px dashed rgba(110,119,115,.5);border-radius:12px;margin:10px 0;padding:12px 14px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.4)}
+  .old-block b{display:block;color:var(--ink);font-size:13px}
+  .old-block.x{border-color:rgba(183,101,85,.6);background:rgba(183,101,85,.06)}
+  .old-block.x b{color:var(--coral)}
+
+  /* 新首页组件 */
+  .mast{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;color:var(--muted);letter-spacing:.08em;margin:8px 0 2px}
+  .mast .gear{width:26px;height:26px;border-radius:50%;border:1px solid var(--hairline);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--brand);background:rgba(255,255,255,.6)}
+  .greet{font-family:var(--serif);font-size:30px;font-weight:700;color:var(--space);letter-spacing:.01em;line-height:1.3}
+  .greet-sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .greet-sub .dot{color:var(--gold)}
+
+  .hero{background:#FDFBF5;border:1px solid var(--hairline);border-radius:18px;padding:13px 16px 9px;margin-top:14px;position:relative;box-shadow:0 1px 0 rgba(23,49,45,.03)}
+  .hero::before{content:"";position:absolute;top:0;left:18px;right:18px;height:2px;background:linear-gradient(90deg,var(--gold),transparent 70%)}
+  .hero-label{font-size:10px;letter-spacing:.18em;color:var(--muted);display:flex;justify-content:space-between}
+  .hero-num{font-family:var(--serif);font-size:38px;font-weight:700;color:var(--space);line-height:1.15;font-variant-numeric:tabular-nums;margin-top:1px}
+  .hero-num .cur{font-size:16px;vertical-align:13px;color:var(--muted);margin-right:2px}
+  .hero-sub{font-size:10.5px;color:var(--muted)}
+  .hero-stats{display:flex;margin-top:9px;border-top:1px solid var(--hairline);padding-top:8px}
+  .hstat{flex:1;padding:0 10px}
+  .hstat+.hstat{border-left:1px solid var(--hairline)}
+  .hstat:first-child{padding-left:0}
+  .hstat .l{font-size:9.5px;color:var(--muted);letter-spacing:.06em}
+  .hstat .v{font-family:var(--serif);font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;margin-top:1px}
+  .hstat .v small{font-size:9px;color:var(--muted);font-weight:400}
+  .domains{display:flex;gap:6px;margin-top:9px;border-top:1px solid var(--hairline);padding-top:8px;overflow:hidden;flex-wrap:wrap}
+  .dchip{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--ink);background:rgba(66,110,99,.06);border-radius:99px;padding:3px 8px 3px 6px;white-space:nowrap}
+  .dchip i{width:6px;height:6px;border-radius:50%;display:inline-block}
+  .dchip .n{font-family:var(--mono);color:var(--muted);font-size:9px}
+
+  .whisper{background:var(--space);border-radius:18px;padding:14px 16px;margin-top:12px;color:#EDE6D2;position:relative;overflow:hidden}
+  .whisper::after{content:"";position:absolute;right:-30px;top:-30px;width:110px;height:110px;border-radius:50%;background:radial-gradient(circle,rgba(220,191,116,.18),transparent 70%)}
+  .whisper .w-tag{font-size:9.5px;letter-spacing:.2em;color:var(--gold);margin-bottom:6px}
+  .whisper p{font-family:var(--serif);font-size:13.5px;line-height:1.75;margin:0}
+  .whisper .w-src{font-size:9.5px;color:rgba(237,230,210,.45);margin-top:7px}
+  .foldline{display:flex;align-items:center;gap:10px;margin:14px 0 0;font-size:9.5px;color:var(--coral);letter-spacing:.15em}
+  .foldline::before,.foldline::after{content:"";flex:1;border-top:1px dashed rgba(183,101,85,.5)}
+  .wline{margin-top:10px;padding-left:12px;border-left:2px solid var(--gold);font-family:var(--serif);font-size:13.5px;color:var(--space);line-height:1.7}
+  .wline small{display:block;font-family:var(--sans);font-size:9.5px;color:var(--muted);margin-top:2px;letter-spacing:.04em}
+
+  .sec-head{display:flex;justify-content:space-between;align-items:baseline;margin:20px 2px 10px}
+  .sec-head .t{font-family:var(--serif);font-size:16px;font-weight:700;color:var(--space)}
+  .sec-head .a{font-size:11px;color:var(--muted)}
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .tile{background:#FDFBF5;border:1px solid var(--hairline);border-radius:16px;padding:13px 14px 11px}
+  .tile .tl{font-size:10.5px;color:var(--muted);display:flex;justify-content:space-between;letter-spacing:.04em}
+  .tile .tv{font-family:var(--serif);font-size:24px;font-weight:700;color:var(--ink);margin-top:2px;font-variant-numeric:tabular-nums}
+  .tile .tv small{font-size:11px;color:var(--muted);font-weight:400;margin-left:2px}
+  .tile .tc{font-size:9.5px;color:var(--muted);margin-top:4px}
+  .spark{display:flex;align-items:flex-end;gap:2.5px;height:22px;margin-top:7px}
+  .spark i{flex:1;background:rgba(66,110,99,.28);border-radius:2px}
+  .spark i.hot{background:var(--coral)}
+  .sparkline{margin-top:7px}
+
+  .todo-strip{display:flex;align-items:center;gap:10px;background:#FDFBF5;border:1px solid var(--hairline);border-radius:16px;padding:12px 15px;margin-top:14px;font-size:12.5px}
+  .todo-strip .n{font-family:var(--serif);font-size:19px;font-weight:700;color:var(--gold);filter:brightness(.82)}
+  .todo-strip .chev{margin-left:auto;color:var(--muted)}
+  .todo-dots{display:flex;gap:4px}
+  .todo-dots i{width:6px;height:6px;border-radius:50%;background:var(--gold)}
+
+  .daycard{background:#FDFBF5;border:1px solid var(--hairline);border-radius:16px;padding:14px 16px;margin-top:10px}
+  .daycard .dr{display:flex;justify-content:space-between;align-items:baseline}
+  .daycard .dd{font-family:var(--serif);font-size:20px;font-weight:700}
+  .daycard .dw{font-size:11px;color:var(--muted)}
+  .daycard .drows{margin-top:9px;border-top:1px solid var(--hairline);padding-top:8px;font-size:11.5px;display:flex;flex-direction:column;gap:4px}
+  .daycard .drow{display:flex;align-items:center;gap:7px;color:var(--muted)}
+  .daycard .drow b{margin-left:auto;color:var(--ink);font-family:var(--mono);font-weight:600;font-size:11px}
+  .daycard .drow i{width:6px;height:6px;border-radius:50%}
+
+  .fab{position:absolute;right:18px;bottom:22px;width:54px;height:54px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;box-shadow:0 8px 20px rgba(66,110,99,.4);z-index:5}
+  .tabbar{position:absolute;left:0;right:0;bottom:0;height:56px;background:rgba(245,241,231,.92);backdrop-filter:blur(12px);border-top:1px solid var(--hairline);display:flex;justify-content:space-around;align-items:center;font-size:9.5px;color:var(--muted)}
+  .tabbar .on{color:var(--brand);font-weight:700}
+
+  /* ===== 开屏动画 demo ===== */
+  .splash-stage{width:330px;margin:0 auto}
+  .splash{position:relative;height:680px;border-radius:36px;overflow:hidden;background:var(--paper);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer}
+  .splash svg{width:190px;overflow:visible;margin-bottom:6px}
+  .splash .sig{fill:none;stroke:var(--gold);stroke-width:2.6;stroke-linecap:round;stroke-dasharray:340;stroke-dashoffset:340}
+  .splash .rule{stroke:var(--gold);stroke-width:1;opacity:0;transform-origin:center}
+  .splash .word{font-family:var(--serif);font-size:34px;font-weight:700;color:var(--space);letter-spacing:.35em;margin-top:16px;opacity:0;filter:blur(8px)}
+  .splash .cap{font-size:11px;letter-spacing:.3em;color:var(--muted);margin-top:12px;opacity:0}
+  .splash.play .sig{animation:sigdraw 1s cubic-bezier(.4,0,.2,1) .15s forwards,sigfade .35s ease 1.25s forwards}
+  .splash.play .rule{animation:rulein .4s cubic-bezier(0,0,.2,1) 1.3s forwards}
+  .splash.play .word{animation:focus .6s ease-out 1.55s forwards}
+  .splash.play .cap{animation:fadeup .5s ease-out 1.85s forwards}
+  .splash.play{animation:splashout .45s ease-in-out 2.5s forwards}
+  @keyframes sigdraw{to{stroke-dashoffset:0}}
+  @keyframes sigfade{to{opacity:0}}
+  @keyframes rulein{from{opacity:0;transform:scaleX(.15)}to{opacity:1;transform:scaleX(1)}}
+  @keyframes focus{to{opacity:1;filter:blur(0)}}
+  @keyframes fadeup{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  @keyframes splashout{to{opacity:0}}
+  .splash-hint{text-align:center;font-size:11.5px;color:var(--muted);margin-top:10px}
+
+  .frames{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:18px 0}
+  @media(max-width:860px){.frames{grid-template-columns:repeat(2,1fr)}}
+  .frame{background:var(--paper2);border:1px solid var(--hairline);border-radius:12px;padding:12px;font-size:11.5px;min-height:120px}
+  .frame .ft{font-family:var(--mono);font-size:10.5px;color:var(--brand);font-weight:700;margin-bottom:6px}
+  .frame .fv{height:44px;display:flex;align-items:center;justify-content:center;margin-bottom:8px}
+  .note{background:rgba(220,191,116,.14);border-left:3px solid var(--gold);padding:12px 16px;border-radius:0 10px 10px 0;font-size:13.5px;margin:14px 0}
+  .warn{background:rgba(183,101,85,.08);border-left:3px solid var(--coral);padding:12px 16px;border-radius:0 10px 10px 0;font-size:13.5px;margin:14px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="doc-head">
+    <div class="doc-kicker">SnapCount · 芥子 · iOS</div>
+    <div class="doc-title">首页重构设计方案</div>
+    <div class="doc-meta">v0.2 · 2026-08-05 · 范围：TodayView 首页信息架构 + 交互动效 + 开屏动画 · 依据：design-tokens.json v0.2.0（芥青微光）</div>
+    <div class="doc-meta" style="margin-top:4px;color:#A8842F">v0.2 变更：主卡瘦身（解决"首屏只见一卡"）；新增 §04 参考视频逐帧拆解与 iOS 原生交互规格；开屏动画改为「一线成芥」方案<br>v0.3 变更：低语文案上移刊头（取数链 companion_message → ai_insights 首句，基于线上真实数据）；新增 §05 组件数据依据矩阵 + 新账户空态 + 昵称方案；交互规格提前至 Phase 1/2；<b>开屏动画后置待定</b></div>
+  </div>
+
+  <p class="lead">现状首页的问题一句话概括：<b>所有信息一个音量</b>。两大卡片轮播（财务 270pt + 数据域 246pt）功能同质、入口重复，"首页组件"管理条还占着首屏黄金位置。本方案把「财务状态 × 数据域」合并为一个有呼吸感的<b>主卡 + 指标网格</b>结构，引入参考设计的杂志刊头式排版，让首屏有且只有一个主角。</p>
+
+  <!-- ============ 1 现状诊断 ============ -->
+  <h2><span class="no">01</span>现状解剖：首屏空间都花在哪了</h2>
+  <p>按 TodayView 实际代码拆解，首屏从上到下共 7 个垂直块，其中标红的 3 块是本方案要合并/移位的对象：</p>
+
+  <div class="anatomy">
+    <div class="a-row keep"><div><b>Header</b> 个人数据平台</div><div class="h">~64pt</div><div><span class="act k">保留改造</span> · 标题无信息量，改为时间感知问候刊头</div></div>
+    <div class="a-row keep"><div><b>同步状态条</b></div><div class="h">~28pt</div><div><span class="act k">保留</span> · 仅异常时出现，合理</div></div>
+    <div class="a-row merge"><div><b>「留下此刻」大按钮</b></div><div class="h">~84pt</div><div><span class="act r">移位</span> · 全宽大色块抢主角，降为右下悬浮 FAB</div></div>
+    <div class="a-row merge"><div><b>「首页组件」管理条</b></div><div class="h">~52pt</div><div><span class="act r">移除</span> · 管理入口收进刊头齿轮，首屏不该放后台功能</div></div>
+    <div class="a-row merge"><div><b>财务状态 section</b></div><div class="h">~330pt</div><div><span class="act m">合并</span> · 标题+"账户›"只是入口，卡片轮播与数据域同质</div></div>
+    <div class="a-row keep"><div><b>今日记录 / 因缘流转</b></div><div class="h">~200pt</div><div><span class="act k">保留瘦身</span> · 待办 5 行折叠为一条摘要带</div></div>
+    <div class="a-row merge"><div><b>数据域 section</b></div><div class="h">~306pt</div><div><span class="act m">合并</span> · 与财务状态结构完全同构：标题入口 + 横滑卡片</div></div>
+  </div>
+
+  <div class="warn"><b>核心诊断：</b>财务状态（5 种卡）和数据域（6 种卡）本质是同一类东西——「一个洞察指标 + 点击跳详情」。现在它们各占一个 section header（纯文字入口 ≈ 60pt ×2）+ 各自一个等高轮播，首屏 ≈ 700pt 给了两个"分页器"，真正的高频信息（今天花了多少、现金够不够、有什么待办）反而要等用户横滑才看得到。</div>
+
+  <!-- ============ 2 参考设计拆解 ============ -->
+  <h2><span class="no">02</span>参考设计拆解：它为什么好看</h2>
+  <p>你在抖音看到的这个纪念页，值得借的不是皮，是<b>排版的纪律</b>。拆出 6 条可迁移的手法：</p>
+
+  <div class="grid2">
+    <div class="card"><b>① 杂志刊头（Masthead）</b><br>顶部小字日期 + 同步时间，然后一行大号衬线问候「Good evening, 敏敏」。时间感知 + 直呼其名，一秒建立"这页是写给我的"的感觉。<span class="brand">→ 我们有时段 token（7 时段+45min 插值），天然支持。</span></div>
+    <div class="card"><b>② 一句话情报行</b><br>问候下方一行小字「阴 27° 28~34° · 降雨 76%，带伞」——当天最该知道的事压缩成一行，不用点开任何卡片。<span class="brand">→ 对应我们的"今日已记 X 条 · 支出 ¥Y · Z 条待处理"。</span></div>
+    <div class="card"><b>③ 唯一主角的大数字</b><br>「Day 35」衬线巨号数字，全页视觉锚点，其余全部让位。<span class="brand">→ 我们的主角应该是「今日支出」或「本月结余」——用户自己的 Day N。</span></div>
+    <div class="card"><b>④ 细分隔线统计行</b><br>birthday 164 | anniversary 331，竖细线分隔的多栏统计，密度高但不吵。<span class="brand">→ 现金 / 本月支出 / 待还款三栏，正好替换"现金与还款"整张卡。</span></div>
+    <div class="card"><b>⑤ 深色引用卡做情绪对比</b><br>「Today's Whisper」深底金字，是全页唯一重色块，AI 生成的一句话让页面有了灵魂。<span class="brand">→ 我们的 space #17312D + gold #DCBF74 正好是这个角色，「芥子低语」AI 每日一句。</span></div>
+    <div class="card"><b>⑥ 迷你指标砖 + 迷你图</b><br>Steps 580 / Heart Rate 114 两列小砖：标签、大数字、单位、sparkline、区间小注。<span class="brand">→ 财务+数据域 11 种洞察卡全部降维成这种砖，用户自选 4 块。</span></div>
+  </div>
+
+  <div class="note">气质契合度：参考设计的米白纸感、衬线大数字、细金线，与芥子「宣纸上的数字生活」DNA 是同一路数——借鉴它不会显得像抄，反而像回家。</div>
+
+  <!-- ============ 3 新首页 ============ -->
+  <h2><span class="no">03</span>新首页 v0.3：刊头即灵魂，一个主角</h2>
+
+  <div class="phones">
+    <!-- 旧 -->
+    <div>
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>21:07</span><span>●●● 5G ▮</span></div>
+        <div class="scroll">
+          <div class="old-block"><b>个人数据平台</b>2026年8月5日 ［2026年8月 📅］</div>
+          <div class="old-block x"><b>［留下此刻］品牌色大按钮</b>拍照、选择图片或手动记录 ＋</div>
+          <div class="old-block x"><b>首页组件 ⚙ 管理</b>已启用 5 个区块 · 财务 3 张 · 数据域 3 张</div>
+          <div class="old-block x"><b>财务状态 ———— 账户›</b>◦ 现金与还款 / ◦ 消费节奏 / ◦ 月度花到哪<br>（横滑轮播 270pt）</div>
+          <div class="old-block"><b>今日记录</b>08-05 支出 ¥128 …</div>
+          <div class="old-block"><b>因缘流转 · 5 条待处理</b>待补全 / 待分类 / 待确认 / 识别失败 / 待修补</div>
+          <div class="old-block x"><b>数据域 ———— 全部›</b>◦ 睡眠恢复 / ◦ 饮食能量 / ◦ 睡眠×支出<br>（横滑轮播 246pt）</div>
+        </div>
+      </div></div>
+      <div class="phone-cap">现状 · 两个轮播吃掉首屏</div>
+    </div>
+
+    <!-- 新 -->
+    <div>
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>21:07</span><span>●●● 5G ▮</span></div>
+        <div class="scroll">
+          <!-- Z1 刊头 -->
+          <div class="mast"><span>周三 · 8月5日 · 21:04 已同步</span><span class="gear">⚙</span></div>
+          <div class="greet">晚上好，阿芥。</div>
+          <div class="greet-sub">今日已记 6 条 <span class="dot">·</span> 支出 ¥128 <span class="dot">·</span> 3 条待处理</div>
+          <div class="wline">深夜六块八，是馋了还是闲了？<small>芥子低语 · 来自你昨晚的一笔记录 · 查看洞察 ›</small></div>
+
+          <!-- Z2 主卡 -->
+          <div class="hero">
+            <div class="hero-label"><span>今日支出 · TODAY</span><span class="hero-sub">较近 7 日日均低 31%</span></div>
+            <div class="hero-num"><span class="cur">¥</span>128</div>
+            <div class="hero-stats">
+              <div class="hstat"><div class="l">可用现金</div><div class="v">12,480<small> ¥</small></div></div>
+              <div class="hstat"><div class="l">本月支出</div><div class="v">3,902<small> ¥</small></div></div>
+              <div class="hstat"><div class="l">待还款 · 8/15</div><div class="v coral" style="color:var(--coral)">1,200<small> ¥</small></div></div>
+            </div>
+            <div class="domains">
+              <span class="dchip"><i style="background:var(--d-expense)"></i>消费 <span class="n">12</span></span>
+              <span class="dchip"><i style="background:var(--d-food)"></i>饮食 <span class="n">8</span></span>
+              <span class="dchip"><i style="background:var(--d-sleep)"></i>睡眠 <span class="n">7</span></span>
+              <span class="dchip"><i style="background:var(--d-sport)"></i>运动 <span class="n">3</span></span>
+              <span class="dchip"><i style="background:var(--d-reading)"></i>阅读 <span class="n">2</span></span>
+              <span class="dchip"><i style="background:var(--d-income)"></i>收入 <span class="n">1</span></span>
+            </div>
+          </div>
+          <div class="foldline">首屏线 · 一屏看完刊头 + 主卡 + 首排砖</div>
+
+          <!-- Z4 指标砖 -->
+          <div class="sec-head"><span class="t">重点关注</span><span class="a">长按调整 ›</span></div>
+          <div class="tiles">
+            <div class="tile">
+              <div class="tl"><span>消费节奏</span><span>本周</span></div>
+              <div class="tv">186<small>¥/日</small></div>
+              <div class="spark"><i style="height:40%"></i><i style="height:65%"></i><i style="height:35%"></i><i style="height:80%"></i><i style="height:55%" class="hot"></i><i style="height:45%"></i><i style="height:30%"></i></div>
+              <div class="tc">本周 ¥1,302 · 上周同期 ¥1,105 ↑18%<br>深夜消费 2 笔</div>
+            </div>
+            <div class="tile">
+              <div class="tl"><span>睡眠恢复</span><span>昨夜</span></div>
+              <div class="tv">8:01<small>h · 89分</small></div>
+              <svg class="sparkline" width="100%" height="22" viewBox="0 0 120 22" preserveAspectRatio="none"><polyline points="0,14 17,10 34,16 51,8 68,12 85,6 102,9 120,5" fill="none" stroke="#4338CA" stroke-width="1.5" opacity=".7"/></svg>
+              <div class="tc">你的常态中位 6.5h · 昨夜更充足<br>典型入睡 01:37 · 夜猫型</div>
+            </div>
+            <div class="tile">
+              <div class="tl"><span>阅读进度</span><span>在读</span></div>
+              <div class="tv">61<small>min</small></div>
+              <div class="spark"><i style="height:30%"></i><i style="height:0%"></i><i style="height:55%"></i><i style="height:40%"></i><i style="height:0%"></i><i style="height:70%"></i><i style="height:45%"></i></div>
+              <div class="tc">《至高级特性》· 进度 30.4%</div>
+            </div>
+            <div class="tile">
+              <div class="tl"><span>饮食能量</span><span>今日</span></div>
+              <div class="tv">2<small>餐 · 780 kcal</small></div>
+              <div class="spark"><i style="height:60%"></i><i style="height:50%"></i><i style="height:65%"></i><i style="height:0%"></i><i style="height:70%"></i><i style="height:55%"></i><i style="height:60%"></i></div>
+              <div class="tc">早餐偏轻（62 kcal）· 注意午餐补充</div>
+            </div>
+          </div>
+
+          <!-- Z5 待办摘要带 -->
+          <div class="todo-strip">
+            <span class="n">5</span>
+            <span>条待处理 <span class="todo-dots"><i></i><i></i><i></i></span></span>
+            <span style="color:var(--muted);font-size:11px">补全 2 · 分类 2 · 确认 1</span>
+            <span class="chev">›</span>
+          </div>
+
+          <!-- Z6 日记 -->
+          <div class="sec-head"><span class="t">八月 · 日记</span><span class="a">‹ 2026年8月 ›</span></div>
+          <div class="daycard">
+            <div class="dr"><span class="dd">08-05</span><span class="dw">周三 ›</span></div>
+            <div class="drows">
+              <div class="drow"><i style="background:var(--coral)"></i>支出 <b>¥128</b></div>
+              <div class="drow"><i style="background:var(--d-sleep)"></i>睡眠 <b>7h12m</b></div>
+              <div class="drow"><i style="background:var(--d-reading)"></i>阅读 <b>42min</b></div>
+            </div>
+          </div>
+          <div class="daycard">
+            <div class="dr"><span class="dd">08-04</span><span class="dw">周二 ›</span></div>
+            <div class="drows">
+              <div class="drow"><i style="background:var(--coral)"></i>支出 <b>¥264</b></div>
+              <div class="drow"><i style="background:var(--d-sport)"></i>运动 <b>跑步 5km</b></div>
+            </div>
+          </div>
+        </div>
+        <div class="fab">＋</div>
+        <div class="tabbar"><span class="on">今日</span><span>记录</span><span>洞察</span><span>我的</span></div>
+      </div></div>
+      <div class="phone-cap">新首页 v0.1 · 一个主角，信息归队</div>
+    </div>
+  </div>
+
+  <h3>分区说明</h3>
+  <table>
+    <tr><th>分区</th><th>内容</th><th>合并/取代了什么</th><th>点击去向</th></tr>
+    <tr><td>Z1 刊头</td><td>日期+同步态小字行；衬线时段问候（带昵称）；一行今日情报；<b>低语行</b>（金线引的一句 AI 陪伴文案）</td><td>取代"个人数据平台"标题；齿轮吸收「首页组件管理」入口；<b>v0.3 起吸收原 Z3 低语卡</b></td><td>齿轮→组件管理 sheet；低语行→InsightsView / 来源记录</td></tr>
+    <tr><td>Z2 主卡</td><td>今日支出巨号衬线数字 + 三栏细线统计（现金/月支出/待还款）+ 数据域 chips 条</td><td><b>合并「财务状态」整段 + 「数据域」标题入口</b>；现金与还款卡、账户覆盖卡的信息都在三栏里</td><td>大数字→当日记录；现金栏→账户；待还款→最近负债账户；域 chip→对应域详情</td></tr>
+    <tr><td>Z3 低语卡</td><td colspan="3" style="color:var(--muted)">v0.3 已取消独立深色卡：文案上移刊头（见 Z1）。深色卡样式保留为资产，未来可用于周报/月报等品牌位。</td></tr>
+    <tr><td>Z4 重点关注</td><td>2×2 紧凑指标砖：标签+大数字+sparkline+小注</td><td><b>11 种洞察卡（财务5+域6）统一降维成砖</b>，自选 4 块上墙，取代两个横滑轮播（省 ≈330pt）</td><td>每砖沿用现有 destination 映射，不变</td></tr>
+    <tr><td>Z5 待办带</td><td>一行摘要：数量 + 类型分布</td><td>因缘流转 5 行折叠（有未处理时金点呼吸提醒）</td><td>整行→Inbox；展开交互可选</td></tr>
+    <tr><td>Z6 日记流</td><td>现有日卡 + 月份切换，原样保留</td><td>不动</td><td>不变</td></tr>
+    <tr><td>FAB</td><td>右下悬浮「＋」</td><td>取代「留下此刻」全宽大按钮（省 84pt，且不抢主角）</td><td>唤起现有三选菜单</td></tr>
+  </table>
+
+  <div class="note"><b>为什么不照搬参考设计：</b>参考页是"纪念册"，我们是"工具台"。所以保留了三样东西它没有的——域 chips 直达入口、待办摘要带、日记流。美学负责让人想打开，这三样负责让人每天用。</div>
+
+  <!-- ============ 4 视频动效拆解 ============ -->
+  <h2><span class="no">04</span>参考视频逐帧拆解：它"舒服"在哪</h2>
+  <p>对 45.9s 视频按时间轴抽帧分析（开头 4fps、正文 0.5fps、两次切换交互 3fps），你感觉到的"像 iPhone 原生组件"，本质是<b>六种有据可依的 iOS 原生动效惯用法</b>，全部可以用 SwiftUI 一行级 API 复现：</p>
+
+  <h3>4.1 开屏：一根线写完一个字</h3>
+  <p>0–2.5s：奶白底上，一根细线像钢笔签名一样<b>自绘出手写体 "Claude"</b>（典型的 stroke-dashoffset 描边动画）；随后字母崩解，残线<b>收拢成一条水平分割线</b>，首页随之淡入——开屏的线没有消失，它变成了版面的一部分。这个"元素不消失、而是归位"的手法，是整个视频最高级的一笔，§06 的开屏方案曾化用它（现已后置，留作素材）。</p>
+
+  <h3>4.2 交互：六种原生手感的来源</h3>
+  <table>
+    <tr><th>视频中观察到的</th><th>本质手法</th><th>SwiftUI 实现</th><th>用在芥子哪里</th></tr>
+    <tr><td>Diary 页「敏敏 / Claude」分段开关，黑底滑块跟手滑动</td><td>匹配几何：滑块是同一个 View 在两个位置间形变</td><td><span class="mono">matchedGeometryEffect</span> + spring</td><td>月份切换、域筛选、低语卡多句轮播指示器</td></tr>
+    <tr><td>切换分段/刷新时，旧内容<b>模糊→新内容聚焦</b>（抽帧可见明显的动态模糊中间态）</td><td>模糊替换过渡，iOS 17+ 系统级惯用法</td><td><span class="mono">.contentTransition(.blurReplace)</span>，配 <span class="mono">.animation</span> 触发</td><td><b>主卡大数字切日期、指标砖数据刷新、低语卡换句</b>——这是"原生感"性价比最高的一招</td></tr>
+    <tr><td>数字变化时逐位滚动而非跳变</td><td>数字文本过渡</td><td><span class="mono">.contentTransition(.numericText(countsDown:))</span></td><td>支出金额、待办计数、域 chips 数字</td></tr>
+    <tr><td>卡片按下整体轻微回缩、松手弹回</td><td>弹簧按压</td><td><span class="mono">scaleEffect(0.97)</span> + spring(0.42, 0.82)</td><td>已有 JieziPressableButtonStyle，沿用即可</td></tr>
+    <tr><td>滚动时卡片错峰入场、大列表内容分层浮现</td><td>滚动过渡</td><td><span class="mono">.scrollTransition(.animated)</span> 调 opacity/offset</td><td>日记流日卡、指标砖首屏入场</td></tr>
+    <tr><td>切换/勾选瞬间有轻微"咔哒"感</td><td>触觉反馈（haptics token 已定义）</td><td><span class="mono">.sensoryFeedback(.selection / .impact)</span></td><td>分段切换、记账成功、待办勾销</td></tr>
+  </table>
+  <div class="note"><b>结论：</b>它的舒服不靠任何黑科技，靠「spring 曲线统一 + 元素连续不跳变 + 触觉点缀」的纪律。我们的 motion token（fast 150 / normal 250 / slow 400 / spring 0.42-0.82）已经覆盖了全部所需参数。<b>v0.3 起这些接线不再后置：blurReplace / numericText 随 Phase 1 刊头与 Phase 2 主卡同步落地</b>，scrollTransition / sensoryFeedback 随日记流与待办带落地。</div>
+
+  <!-- ============ 5 数据依据与空态 ============ -->
+  <h2><span class="no">05</span>每个组件凭什么存在：数据依据矩阵 + 空态</h2>
+  <p>本节全部结论来自对线上库（igbghrhsdaolxljgiisf）的实地查询。<b>设计原则：组件要么能报出真实数据，要么就不上墙；点进去必须看到同源的详情。</b></p>
+
+  <h3>5.1 组件 ↔ 数据依据矩阵</h3>
+  <table>
+    <tr><th>组件</th><th>数据来源（真实表 / 字段）</th><th>口径与现成度</th><th>下钻页（同源）</th></tr>
+    <tr><td>低语行</td><td>staging_records / transactions / income_records / data_records.payload 的 <span class="mono">companion_message</span> → ai_insights.content_md「结论」首句</td><td>✅ 现成。真实语气样本：「深夜六块八，是馋了还是闲了？」「33.3 千卡，这早餐吃得比猫还轻」</td><td>InsightsView / 来源记录详情</td></tr>
+    <tr><td>主卡 · 今日支出</td><td>transactions(transaction_date, amount) + data_records</td><td>✅ NativeDailySummary 已算</td><td>DayDetailView 当日</td></tr>
+    <tr><td>主卡 · 现金/待还</td><td>accounts(17) + account_entries(457) + account_repayment_cycles(10) + liability_payments</td><td>✅ NativeHomeFinanceSummary 已算（含最近负债账户）</td><td>AccountsView / AccountDetailView</td></tr>
+    <tr><td>主卡 · 域 chips</td><td>data_records 按 domain_key 月计数 + transactions/income_records</td><td>✅ 现成。线上实况：睡眠 109 · 饮食 100 · 运动 28 · 钱包 27 · 阅读 7 · 支出 622 · 收入 28</td><td>各 DomainDetailView</td></tr>
+    <tr><td>砖 · 消费节奏</td><td><b>user_domain_profiles</b> expense: <span class="mono">week_velocity（本周 vs 上周同期）、today.late_night_count、category_stats、merchant_stats</span></td><td>✅ 后端已预计算周速度对比，前端零推导</td><td>RecordsView / expense 域</td></tr>
+    <tr><td>砖 · 睡眠恢复</td><td>user_domain_profiles sleep: <span class="mono">baseline.median_hours 6.5 / p25-p75 / mean_score 81、chronotype（night_owl · 典型入睡 01:37）、recent_nights[]</span>；data_records payload: quality_score、deep/light/rem</td><td>✅ 基线、睡眠类型、近期序列全是现成的，sparkline 直接用 recent_nights</td><td>sleep 域详情</td></tr>
+    <tr><td>砖 · 饮食能量</td><td>data_records food payload: <span class="mono">meal_type、total_calorie_kcal、dishes[](蛋白/碳水/脂肪)</span></td><td>✅ 现成，可出"今日餐次 + 热量 + 早餐偏轻提醒"</td><td>food 域详情</td></tr>
+    <tr><td>砖 · 阅读进度</td><td>data_records reading payload: <span class="mono">book_name、reading_minutes、progress_percent</span></td><td>✅ 现成（样本：61min · 30.42% · 换书信号）</td><td>reading 域详情</td></tr>
+    <tr><td>砖 · 运动节奏</td><td>data_records sport payload: <span class="mono">sport_type、distance_km、avg_pace、calories、steps</span></td><td>✅ 现成（样本：徒步 13.6km · 配速 7.25 · 854 kcal）</td><td>sport 域详情</td></tr>
+    <tr><td>砖 · 发薪日预算</td><td>income_records(<span class="mono">is_recurring、recurring_day</span>) → 下次发薪日倒数；ai_insights seed 期已有"每日安全预算"推算口径</td><td>⚠️ 口径已有（ai_insights 论证过），需固化成本地计算</td><td>income 域 / 钱包</td></tr>
+  </table>
+  <div class="note"><b>意外收获：</b><span class="mono">user_domain_profiles</span> 这张表就是指标砖的"预制菜"——基线分位数、周速度、睡眠类型都已按 30 天窗口算好，iOS 端只需读取渲染。指标砖不是"重新发明分析"，而是<b>把已有分析第一次真正曝光给用户</b>。</div>
+
+  <h3>5.2 问候与名字：目前没有，三步补齐</h3>
+  <table>
+    <tr><th>阶段</th><th>方案</th><th>成本</th></tr>
+    <tr><td>现在（Phase 1）</td><td>设置页加「称呼」字段，存 iOS 本地（UserDefaults）。无昵称 →「晚上好。」；有 →「晚上好，阿芥。」</td><td>零迁移、零后端</td></tr>
+    <tr><td>中期</td><td>user_configs 加 <span class="mono">display_name</span> 列，PWA/iOS 双端同步</td><td>一次轻量 migration</td></tr>
+    <tr><td>上架时</td><td>Sign in with Apple 首次授权可拿到 fullName，预填称呼（可改）</td><td>顺手为之</td></tr>
+  </table>
+
+  <h3>5.3 低语行取数链（fallback chain）</h3>
+  <div class="anatomy">
+    <div class="a-row keep"><div><b>① 最新 companion_message</b></div><div class="h">首选</div><div>取当日（无则最近一条）记录的陪伴文案，语气活、有具体数字，最像"写给我的"</div></div>
+    <div class="a-row keep"><div><b>② ai_insights 结论首句</b></div><div class="h">次选</div><div>content_md「**结论**」段第一句，如"高脂晚餐与次日睡眠波动存在关联"——跨域分析味</div></div>
+    <div class="a-row keep"><div><b>③ 引导句（seed 期）</b></div><div class="h">新账户</div><div>"再记 4 天，我就能看到你的节奏了"——进度感而非空洞问候</div></div>
+    <div class="a-row keep"><div><b>④ 时令静态句</b></div><div class="h">兜底</div><div>按 7 时段 token 配的本地文案，离线/全无可用时保证刊头不空</div></div>
+  </div>
+
+  <h3>5.4 新账户空态：不显示"¥0"，显示"尚未落笔"</h3>
+  <div class="warn"><b>反面教材就在线上：</b>ai_insights seed 期曾算出"每日安全预算 = 0 元"并自己标注"这是无效数字，请勿视为建议"。<b>空数据时显示 0，比显示空白更糟糕</b>——它伪装成信息。所以空态的原则是：没有数据的位置，要么诚实留白，要么变成引导。</div>
+  <table>
+    <tr><th>位置</th><th>空态表现</th><th>数据期表现</th></tr>
+    <tr><td>问候</td><td>「晚上好。」不带名字</td><td>设过称呼后自动带名</td></tr>
+    <tr><td>低语行</td><td>引导句："第一笔最珍贵，拍张截图开始吧"</td><td>companion_message / 洞察首句</td></tr>
+    <tr><td>主卡大数字</td><td><b>不显示 ¥0</b>，改衬线「尚未落笔」+ 今日首记 CTA（唤起 FAB 同款菜单）</td><td>今日支出</td></tr>
+    <tr><td>主卡三栏</td><td>「—」+ 小字"记一笔后亮起"</td><td>现金 / 月支出 / 待还款</td></tr>
+    <tr><td>域 chips</td><td>7 域灰点「待启封」，不显示 0 计数</td><td>点亮域色 + 计数</td></tr>
+    <tr><td>指标砖</td><td>未解锁态：域色点 + 一句"记一笔睡眠，点亮这块"</td><td>数据 + sparkline</td></tr>
+  </table>
+  <div class="note">这套"逐格点亮"的进度感，正好复用 <span class="mono">ai_insights.maturity_stage</span>（seed → rich）的分期思想：首页本身就是新用户的养成线，而不是一堵"暂无数据"的墙。</div>
+
+  <!-- ============ 6 开屏动画（后置） ============ -->
+  <h2><span class="no">06</span>开屏动画：已后置（v0.3）</h2>
+  <div class="warn"><b>状态：挂起。</b>「一线成芥」方案未获认可，开屏动画整体移出本期范围，等首页结构与交互落地、手感确立后再重新构思。本节内容保留作素材库，不代表当前方向。</div>
+  <p>概念：<b>一根金线起笔如签名，收笔成账页。</b>化用参考视频"线条自绘手写体→收拢归位"的手法：线先以毛笔笔触自绘出一段写意曲线（芥字的笔意），随后收拢拉直——它不消失，而是 <span class="mono">matchedGeometryEffect</span> 飞入首页，<b>成为主卡顶部那根金线</b>。开屏与首页由此是"同一个东西的两帧"，而不是两段拼接。点击下方画面可播放示意（演示放慢至 2.5s，实际 ≤1.2s）：</p>
+
+  <div class="phones">
+    <div>
+      <div class="phone splash-stage"><div class="screen" style="padding:0">
+        <div class="splash" id="splashDemo" onclick="replaySplash()">
+          <svg viewBox="0 0 200 60" width="190" height="57">
+            <path class="sig" d="M8,44 C30,10 46,58 66,34 C82,16 96,52 118,30 C134,14 150,48 192,22"/>
+            <line class="rule" x1="34" y1="34" x2="166" y2="34"/>
+          </svg>
+          <div class="word">芥子</div>
+          <div class="cap">随手一记 · 皆成章</div>
+        </div>
+      </div></div>
+      <div class="splash-hint">点击画面重播 · 实际实现为 SwiftUI 矢量动画（SVG/Path trim），非视频</div>
+    </div>
+    <div style="flex:1;min-width:300px">
+      <div class="frames">
+        <div class="frame"><div class="ft">F0 · 0ms</div><div class="fv" style="background:var(--paper);border:1px solid var(--hairline);border-radius:8px"></div>宣纸底色静默呈现，与 Launch Screen 首帧完全一致（无缝衔接）</div>
+        <div class="frame"><div class="ft">F1 · 80–600ms</div><div class="fv"><svg width="90" height="26" viewBox="0 0 200 60"><path d="M8,44 C30,10 46,58 66,34 C82,16 96,52 118,30 C134,14 150,48 192,22" fill="none" stroke="#DCBF74" stroke-width="6" stroke-linecap="round"/></svg></div>金线以笔触自绘（Path trim 0→1，accelerate 起笔、decelerate 收锋）</div>
+        <div class="frame"><div class="ft">F2 · 600–850ms</div><div class="fv"><div style="width:90%;height:1px;background:var(--gold)"></div></div>笔触淡出、收拢拉直为 0.5mm 金线——"写意的线归于秩序"</div>
+        <div class="frame"><div class="ft">F3 · 800–1100ms</div><div class="fv"><span style="font-family:var(--serif);font-size:19px;letter-spacing:.3em;color:var(--space)">芥子</span></div>「芥子」字标由 8px 模糊收敛至清晰，slogan 淡入；可配 haptic light</div>
+        <div class="frame"><div class="ft">F4 · 1050–1200ms</div><div class="fv" style="font-size:10px;color:var(--muted)">线 → 主卡</div>crossfade 进首页；金线 matchedGeometry 归位主卡顶线，大数字 300ms count-up 收尾</div>
+      </div>
+      <table>
+        <tr><th>约束</th><th>规格</th></tr>
+        <tr><td>总时长</td><td>≤ 1.2s 感知时长（F0 起算到首页可交互）；数据未就绪时动画循环末节呼吸，就绪即走，<b>绝不为了播动画阻塞启动</b></td></tr>
+        <tr><td>跳过</td><td>任意点击立即 crossfade 跳过</td></tr>
+        <tr><td>无障碍</td><td>Reduce Motion 开启时 → 100ms 淡入静态帧直进首页</td></tr>
+        <tr><td>频次</td><td>仅冷启动展示；后台切回不播</td></tr>
+        <tr><td>实现</td><td>Launch Screen 保持纯底色静态图 → RootView 上加一层 splash overlay，ZStack 内完成全部矢量动画后 withAnimation 移除；无第三方依赖、无视频资源</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============ 5 落地 ============ -->
+  <h2><span class="no">07</span>落地路线建议</h2>
+  <div class="grid3">
+    <div class="card"><b>Phase 1 · 结构 + 手感 ✅ 已实施</b><br>刊头（问候 + 今日情报 + 低语行 + 齿轮）+ FAB + 待办带折叠 + 空态框架（§5.4）。<b>同步接线</b>：低语行 blurReplace 换句、待办计数 numericText、卡片按压 spring。<br><span style="font-size:12px;color:var(--muted)">2026-08-05 落地于 codex/ios-home-redesign：HomeMastheadView.swift（新增）、TodayView、AppState、SettingsView。低语行为本地取数版（引导句/时令句/待处理规则句），companion_message → ai_insights 链留 Phase 3。</span></div>
+    <div class="card"><b>Phase 2 · 合并</b><br>Z2 主卡（NativeHomeFinanceSummary）+ Z4 指标砖，砖的数据按 §5.1 矩阵接 <span class="mono">user_domain_profiles</span>（偏好存储 key 升 v2）。两个轮播下线。scrollTransition 随日记流落地。</div>
+    <div class="card"><b>Phase 3 · 智能</b><br>低语取数链完整化（②③④ 级）+ 昵称体系（本地 → user_configs.display_name → Apple 登录预填）+ 洞察深化。开屏动画另行立项，不在本期。</div>
+  </div>
+  <div class="warn"><b>数据依赖确认：</b>Z2 三栏统计所需数据（可用现金、月支出、最近负债）全部已在 <span class="mono">NativeHomeFinanceSummary</span> 里算好；Z4 砖的 7 日序列来自 <span class="mono">NativeHomeInsightAnalytics.dailySummaries</span>。无需改后端、无需新接口。唯一新增是「芥子低语」的句子生成策略，Phase 3 前用模板句兜底即可。</div>
+
+  <p style="margin-top:48px;font-size:12px;color:var(--muted);border-top:1px solid var(--hairline);padding-top:16px">芥子 · 首页重构设计方案 v0.1 · 待评审：确认方向后 Phase 1 可在 ios 视觉线直接开工</p>
+</div>
+
+<script>
+function replaySplash(){
+  var s=document.getElementById('splashDemo');
+  s.classList.remove('play');
+  void s.offsetWidth;
+  s.classList.add('play');
+}
+window.addEventListener('load',function(){replaySplash()});
+</script>
+</body>
+</html>

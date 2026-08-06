@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var themeManager: JieziThemeManager
     @State private var showDeleteAccountConfirmation = false
+    @AppStorage(NativeUserDisplayPreferences.nicknameKey) private var nickname = ""
 
     var body: some View {
         ZStack {
@@ -12,6 +13,22 @@ struct SettingsView: View {
             List {
                 Section {
                     profileHeader
+                    HStack(spacing: 12) {
+                        Image(systemName: "signature")
+                            .foregroundStyle(JieziTheme.brand)
+                            .frame(width: 28)
+                        Text("称呼")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        TextField("晚上好后面叫什么", text: $nickname)
+                            .multilineTextAlignment(.trailing)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .submitLabel(.done)
+                    }
+                    .padding(.vertical, 3)
+                } footer: {
+                    Text("用于首页问候（如「晚上好，阿芥。」），目前仅保存在本机。")
                 }
 
                 Section("使用帮助") {
