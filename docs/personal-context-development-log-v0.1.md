@@ -124,11 +124,11 @@
 
 | 阶段 | 状态 | 备注 |
 | --- | --- | --- |
-| Phase 0 | 进行中 | 已修正 Voice 指令和信号数字校验，待 Edge CI 验证 |
-| Phase 1 | 进行中 | 已新增 Context Packet 和 Memory 标准化读取器，待接入旧 fallback 并跑 CI |
+| Phase 0 | 已完成 | Edge 入口、数字来源校验和最终 Guard 已通过 CI 并部署 |
+| Phase 1 | 已部署观察 | Context Packet、Memory 标准化读取器和 RLS 契约已上线；用户可见表达仍由旧链路承载 |
 | Phase 2 | 未开始 | 不批量删除旧数据 |
-| Phase 3 | 未开始 | 全域契约、分批 Canary |
-| Phase 4 | 未开始 | 需要明确发布授权 |
+| Phase 3 | Canary 观察中 | Shadow 已覆盖真实跨域记录，待完成可见输出切换门槛 |
+| Phase 4 | 部署完成，未闭环 | migration 与 Edge 已部署；需先修复 Canary 暴露的旧链路问题再全量切换 |
 
 ## 7. 2026-08-06 开发记录
 
@@ -243,3 +243,51 @@ Git 阻塞：
 - CI 通过后再做单用户 20–30 条真实记录 Canary，并决定是否进入生产发布。
 
 是否允许进入下一阶段：否，等待 Git owner 修复 worktree 并通过 CI/Postgres 门槛。
+
+## 10. 2026-08-07 生产单用户 Canary
+
+范围：对生产项目 `igbghrhsdaolxljgiisf` 中最近 30 天的现有记录做只读核对。未上传素材、未创建新记录、未修改用户数据。当前高活跃单用户按最近 30 天记录量识别；本节不记录用户 ID。
+
+### 10.1 生产链路与 Shadow 状态
+
+- 生产 Edge 部署已生效：最近识别日志仍使用 `platform-v3-builtins`，最新食物、睡眠和支出记录均成功落库；本轮未发现新的 Edge 错误。
+- 最近 30 天共观察到 96 次 Expression Shadow：89 次文本响应、7 次 JSON 响应；全部为 `rollout_mode=shadow`、`lifecycle_state=returned_to_shortcut`，错误 0、改变用户输出 0。
+- 这说明新 Planner 已经运行并写入 Shadow/Exposure，但**没有接管用户可见内容**。当前用户看到的仍是旧 `legacy_voice`/兼容反馈结果，不应把 Shadow 候选误认为已上线。
+
+### 10.2 真实数据覆盖
+
+- 交易支出 197 条；其中 104 条有 `companion_message`，86 条有结构化 `ai_feedback`，93 条仍没有陪伴文案，111 条没有反馈对象。
+- 新域记录 47 条：睡眠 32、饮食 12、钱包 2、阅读 1。
+- 睡眠记录中 18/32 有陪伴文案，12 条为 `signal_fallback`，14 条没有反馈对象；饮食 11/12 有文案，其中 7 条为 `ai_generated`；钱包 2/2、阅读 1/1 有文案。
+- 支出文案主体聚焦仍不足：按商户全名精确命中仅 27/197；这只是保守下界，但足以说明旧链路仍会产出大量泛化句式。当前 67 条 `companion_message` 与 `emotion_line` 完全相同，需在可见链路切换后继续观察是否造成事实重复，而不是在 Shadow 阶段直接改写历史记录。
+
+### 10.3 Planner 实际候选维度
+
+Shadow 不是只生成一个中位数候选。最近真实记录的候选维度包括：
+
+- 支出：`record_context`、`category_period_comparison`、`repeat_interval`、`personal_baseline`、`amount_structure`、`daily_aggregation`、`period_comparison`；
+- 睡眠：`current_fact`、`personal_baseline`、`quality`、`sleep_structure`、`temporal_rhythm`；
+- 饮食：`current_fact`、`meal_baseline`、`record_context`、`record_composition`、`recurrence`；
+- 阅读/钱包：当前事实候选已生成。
+
+因此本轮确认的根因不是“候选没有计算”，而是“候选计算与用户可见表达之间仍隔着 Shadow/旧 Voice 回退层”。
+
+### 10.4 Memory 读取结论
+
+- 语义 Memory RPC 当前返回 111 条仍有效记录；其中绝大多数带有源记录的旧派生模式，只有极少数明确用户反馈来源。
+- Context Packet 会把 `record_derived` 记忆标为 `ranking_only`，不会直接进入陪伴文案；只有用户明确确认的语义才具备 `expressible` 权限。
+- 最新饮食记录的时间为 `04:11 UTC`，而本次 Edge 部署在 `04:39 UTC` 完成；它与 `food:lunch` Memory 的同步更新属于旧链路，不能用来判断新版本是否仍在写派生 Memory。当前生产 secret 列表未发现 `COMPANION_DERIVED_MEMORY_WRITES_ENABLED`，新代码默认关闭；由于本轮约束不创建新记录，运行时关闭状态留待下一次自然请求继续观察。
+
+### 10.5 Canary 结论与发布门槛
+
+结论：**生产基础设施发布成功，个人上下文契约生效，用户可见闭环尚未完成。** 不能用本轮结果宣称“AI 陪伴已经切换到新框架”。
+
+在允许单用户可见 Canary 前必须完成：
+
+1. 为单用户设置明确的 `canary` 入口/开关，确保只影响该用户和指定 Surface；
+2. 将 `record_context` 作为每条表达的保底维度，再从候选中选择一个不重复的事实维度；
+3. 让 Voice/兼容反馈消费冻结 Packet，而不是继续返回 `legacy_voice`；
+4. 记录候选 ID、Packet 指纹、Memory 命中和最终文案来源，验证 20-30 条跨域记录；
+5. 验证失败时可回退到旧链路，且不修改历史已持久化文案。
+
+是否允许进入下一阶段：否。当前只完成“契约上线 + Shadow 观察”；下一轮应先做单用户可见 Canary 接入，再决定是否扩大 rollout。
