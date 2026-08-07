@@ -198,10 +198,19 @@ function expenseBaselineSeed() {
       {
         id: '11000000-0000-4000-8000-000000000004', user_id: userId, type: 'expense',
         transaction_date: '2026-07-25', transaction_time: '08:30:00', created_at: '2026-07-25T08:31:00+08:00',
-        amount: 20, merchant_name: '便利店', category: 'shopping', platform: '线下', payment_method: '微信支付', status: 'confirmed',
+        amount: 40, merchant_name: '便利店', category: 'shopping', platform: '线下', payment_method: '微信支付', status: 'confirmed',
       },
     ],
   }
+}
+
+function expenseNearBaselineSeed() {
+  const seed = expenseBaselineSeed()
+  const amounts = [100, 101, 99, 103.27]
+  seed.transactions.forEach((transaction, index) => {
+    transaction.amount = amounts[index]
+  })
+  return seed
 }
 
 async function previewPersonalBaseline(module, client, state) {
@@ -499,6 +508,24 @@ test('acknowledgement persists one idempotent core-product exposure', async () =
   assert.equal(state.exposureSources.some(source => source.is_primary === true), true)
 })
 
+test('delivery excludes a near-identical personal baseline from the record-detail action set', async () => {
+  const module = await loadModule()
+  const { client, state } = database(expenseNearBaselineSeed())
+  const preview = await module.getRecordExpressionPlan(client, userId, {
+    record_id: '11000000-0000-4000-8000-000000000004',
+    record_kind: 'expense',
+  })
+
+  assert.equal(preview.available, true)
+  assert.notEqual(preview.feedback.semantic_key, 'merchant_daily_vs_active_day_median')
+  const decision = state.tables.expression_delivery_snapshots.at(-1).delivery_plan.decision
+  assert.equal(
+    decision.action_set.some(action => action.semantic_key === 'merchant_daily_vs_active_day_median'),
+    false,
+    JSON.stringify(decision.action_set, null, 2),
+  )
+})
+
 test('delivery skips a record-detail candidate whose scoped dedupe key reached its cap', async () => {
   const module = await loadModule()
   const { client, state } = database(expenseBaselineSeed())
@@ -574,6 +601,26 @@ test('expired delivery snapshots cannot be acknowledged', async () => {
       candidate_id: preview.candidate_id,
     }),
     /不存在或已失效/,
+  )
+})
+
+test('delivery snapshots from the previous planner version cannot be acknowledged', async () => {
+  const module = await loadModule()
+  const item = supportedCases.find(entry => entry.name === 'sport')
+  const { client, state } = database(item.seed)
+  const preview = await module.getRecordExpressionPlan(client, userId, {
+    record_id: item.recordId,
+    record_kind: item.kind,
+  })
+  state.tables.expression_delivery_snapshots[0].delivery_plan.planner_version = 'expression-shadow-auto-v0.4'
+
+  await assert.rejects(
+    module.acknowledgeRecordExpressionPlan(client, userId, {
+      record_id: item.recordId,
+      plan_token: preview.plan_token,
+      candidate_id: preview.candidate_id,
+    }),
+    /内容已失效/,
   )
 })
 

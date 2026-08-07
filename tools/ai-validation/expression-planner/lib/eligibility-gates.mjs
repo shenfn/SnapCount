@@ -5,8 +5,67 @@
   weekly_report: { min_confidence: 0.6, min_data_coverage: 0.5 },
 }
 
+const MERCHANT_ACTIVE_DAY_MATERIALITY_POLICY = {
+  version: 'merchant-active-day-materiality-v0.1',
+  min_count_delta: 1,
+  min_amount_delta: 5,
+  min_amount_delta_percent: 15,
+  strong_amount_delta: 20,
+}
+
 function finiteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value)
+}
+
+function candidateMateriality(candidate) {
+  if (candidate?.claim?.semantic_key !== 'merchant_daily_vs_active_day_median') return null
+
+  const value = candidate.claim.structured_value
+  const currentCount = value?.current?.count
+  const currentAmount = value?.current?.total
+  const baselineCount = value?.baseline?.count
+  const baselineAmount = value?.baseline?.total
+
+  if (![currentCount, currentAmount, baselineCount, baselineAmount].every(finiteNumber)) {
+    return {
+      evaluated: true,
+      passes: false,
+      policy_version: MERCHANT_ACTIVE_DAY_MATERIALITY_POLICY.version,
+      reason: 'missing_materiality_metrics',
+    }
+  }
+
+  const countDelta = Math.abs(currentCount - baselineCount)
+  const currentAmountCents = Math.round(currentAmount * 100)
+  const baselineAmountCents = Math.round(baselineAmount * 100)
+  if (!finiteNumber(countDelta) || !Number.isSafeInteger(currentAmountCents) || !Number.isSafeInteger(baselineAmountCents)) {
+    return {
+      evaluated: true,
+      passes: false,
+      policy_version: MERCHANT_ACTIVE_DAY_MATERIALITY_POLICY.version,
+      reason: 'missing_materiality_metrics',
+    }
+  }
+  const amountDelta = Math.abs(currentAmountCents - baselineAmountCents) / 100
+  const amountDeltaPercent = baselineAmountCents > 0
+    ? amountDelta * 10000 / baselineAmountCents
+    : null
+  const countIsMaterial = countDelta >= MERCHANT_ACTIVE_DAY_MATERIALITY_POLICY.min_count_delta
+  const amountIsMaterial = amountDelta >= MERCHANT_ACTIVE_DAY_MATERIALITY_POLICY.strong_amount_delta
+    || (
+      amountDelta >= MERCHANT_ACTIVE_DAY_MATERIALITY_POLICY.min_amount_delta
+      && baselineAmount > 0
+      && amountDeltaPercent !== null
+      && amountDeltaPercent >= MERCHANT_ACTIVE_DAY_MATERIALITY_POLICY.min_amount_delta_percent
+    )
+  const passes = countIsMaterial || amountIsMaterial
+
+  return {
+    evaluated: true,
+    passes,
+    policy_version: MERCHANT_ACTIVE_DAY_MATERIALITY_POLICY.version,
+    reason: passes ? null : 'difference_below_materiality_threshold',
+  }
 }
 
 function allowedSurfacesFor(candidate) {
@@ -42,12 +101,13 @@ function hardGate(candidate) {
   return reasons
 }
 
-function surfaceDecision(candidate, surface, rule, hardBlocked, planningContext) {
+function surfaceDecision(candidate, surface, rule, hardBlocked, planningContext, materiality) {
   const reasons = [...hardBlocked]
   const confidence = candidate.quality?.confidence ?? 0
   const coverage = candidate.quality?.data_coverage ?? 0
   if (confidence < rule.min_confidence) reasons.push('confidence_below_surface_threshold')
   if (coverage < rule.min_data_coverage) reasons.push('data_coverage_below_surface_threshold')
+  if (materiality?.passes === false) reasons.push(materiality.reason)
 
   const allowedSurfaces = allowedSurfacesFor(candidate)
   if (Array.isArray(allowedSurfaces) && !allowedSurfaces.includes(surface)) {
@@ -80,14 +140,19 @@ function surfaceDecision(candidate, surface, rule, hardBlocked, planningContext)
 
 export function evaluateCandidateEligibility(candidate, { planningContext = 'surface_preview' } = {}) {
   const hardBlocked = hardGate(candidate)
+  const materiality = candidateMateriality(candidate)
   const surfaceEligibility = Object.fromEntries(
-    Object.entries(SURFACE_RULES).map(([surface, rule]) => [surface, surfaceDecision(candidate, surface, rule, hardBlocked, planningContext)]),
+    Object.entries(SURFACE_RULES).map(([surface, rule]) => [
+      surface,
+      surfaceDecision(candidate, surface, rule, hardBlocked, planningContext, materiality),
+    ]),
   )
   return {
     ...candidate,
     eligibility: {
       eligible: hardBlocked.length === 0,
       blocked_reasons: hardBlocked,
+      materiality,
       surface_eligibility: surfaceEligibility,
     },
   }
