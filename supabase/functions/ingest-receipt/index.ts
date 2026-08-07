@@ -5,6 +5,8 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.4
 import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
 import { PROMPT, buildPrompt, buildFeedbackPrompt, buildVoicePrompt } from "./prompts.ts";
+import { buildContextPacket, normalizeSemanticMemories } from "./context-packet.ts";
+import type { ContextPacket } from "./context-packet.ts";
 import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   acknowledgeRecordExpressionPlan,
@@ -17,7 +19,6 @@ import {
   selectSignals,
   validateModelTone,
   hasUnsupportedFinanceCompanionClaim,
-  hasModelOwnedStatisticalClaim,
   parsePaceMinutes,
 } from "./signals.ts";
 import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
@@ -1962,12 +1963,22 @@ async function loadCompanionContext(
   fallbackSettings: CompanionSettings = DEFAULT_COMPANION_SETTINGS,
 ): Promise<CompanionContext> {
   if (!userId) return { settings: fallbackSettings, memory: null };
-  const { data, error } = await supabase.rpc("get_companion_context", { p_user_id: userId });
+  const [{ data, error }, semanticResult] = await Promise.all([
+    supabase.rpc("get_companion_context", { p_user_id: userId }),
+    supabase.rpc("get_companion_semantic_memories", { p_user_id: userId }),
+  ]);
   if (error) {
     console.warn("Companion context fetch failed:", error.message);
     return { settings: fallbackSettings, memory: null };
   }
-  const raw = (data || {}) as Record<string, unknown>;
+  const raw = { ...((data || {}) as Record<string, unknown>) };
+  if (!semanticResult.error && Array.isArray(semanticResult.data)) {
+    raw.long_term = semanticResult.data;
+  } else if (semanticResult.error) {
+    // Before the migration is applied, fall back to the legacy rows. Their
+    // missing provenance is intentionally treated as non-expressible by the packet.
+    console.warn("Semantic memory provenance RPC unavailable; using conservative legacy memory", semanticResult.error.message);
+  }
   const settingsRaw = (raw.settings || {}) as Record<string, unknown>;
   const settings: CompanionSettings = {
     enabled: settingsRaw.enabled !== false,
@@ -1978,6 +1989,20 @@ async function loadCompanionContext(
     customNote: typeof settingsRaw.custom_note === "string" ? settingsRaw.custom_note : null,
   };
   return { settings, memory: settings.memoryEnabled ? raw : null };
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function recentCompanionLinesFromContext(memory: Record<string, unknown> | null): string[] {
+  if (!memory || !isRecordValue(memory.short_term)) return [];
+  const recent = memory.short_term.recent_companions;
+  if (!Array.isArray(recent)) return [];
+  return recent
+    .map((item) => isRecordValue(item) ? item.t : null)
+    .filter((item): item is string => typeof item === "string" && item.trim() !== "")
+    .slice(0, 5);
 }
 
 function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
@@ -2016,6 +2041,16 @@ function sanitizeCompanionMessageForTime(
     .replace(/昨晚/g, `${eventLabel}这晚`)
     .replace(/昨天|昨日/g, eventLabel)
     .slice(0, 60);
+}
+
+function sanitizeGeneratedCompanion(
+  message: string | null,
+  ai: AIResult,
+  timeContext: TimeContext | null,
+): string | null {
+  let safe = sanitizeCompanionMessageForContent(message, ai);
+  if (safe && timeContext) safe = sanitizeCompanionMessageForTime(safe, ai, timeContext);
+  return safe;
 }
 
 const COMPANION_FORBIDDEN_PATTERNS = [
@@ -2270,6 +2305,29 @@ function buildSignalFallbackAIFeedback(
     confidence: 0.7,
     source: "rule",
     timing_signal: timingSignal,
+  };
+}
+
+function mergeSignalFeedback(
+  modelFeedback: Partial<AIFeedback> | null,
+  ruleFeedback: AIFeedback,
+): AIFeedback {
+  if (!modelFeedback) return ruleFeedback;
+  return {
+    ...ruleFeedback,
+    ...modelFeedback,
+    version: "feedback-v1",
+    domain_key: modelFeedback.domain_key ?? ruleFeedback.domain_key,
+    badge: modelFeedback.badge ?? ruleFeedback.badge,
+    icon: modelFeedback.icon ?? ruleFeedback.icon,
+    band: modelFeedback.band ?? ruleFeedback.band,
+    tone: modelFeedback.tone ?? ruleFeedback.tone,
+    emotion_line: modelFeedback.emotion_line ?? ruleFeedback.emotion_line,
+    confidence: modelFeedback.confidence ?? ruleFeedback.confidence,
+    // 规则层保留已核实候选作为最后依据；模型有自己的合规判断依据时优先保留。
+    utility_line: modelFeedback.utility_line ?? ruleFeedback.utility_line,
+    detail_reason: modelFeedback.detail_reason ?? ruleFeedback.detail_reason,
+    source: "hybrid",
   };
 }
 
@@ -2702,12 +2760,22 @@ async function upsertCompanionMemory(
   },
 ): Promise<void> {
   if (!payload.userId) return;
+  const evidence = {
+    ...payload.evidence,
+    ...(payload.sourceTable ? {
+      source: payload.evidence.source ?? "record_derived",
+      source_table: payload.sourceTable,
+    } : {}),
+    ...(payload.sourceId ? {
+      source_record_id: payload.sourceId,
+    } : {}),
+  };
   const { error } = await supabase.from("user_companion_memories").upsert({
     user_id: payload.userId,
     memory_key: payload.memoryKey,
     memory_type: payload.memoryType,
     content: memoryText(payload.content),
-    evidence_jsonb: payload.evidence,
+    evidence_jsonb: evidence,
     confidence: payload.confidence ?? 0.65,
     weight: payload.weight ?? 1,
     last_seen_at: new Date().toISOString(),
@@ -2732,6 +2800,11 @@ async function rememberCompanionSignals(
   },
 ): Promise<void> {
   if (!params.userId || !params.recordId || !params.recordTable) return;
+  // Domain profiles and Signals are the authority for recomputable facts. Do
+  // not grow the semantic-memory table with one-record summaries by default.
+  // The flag remains as a temporary rollback switch; provenance is stamped as
+  // record_derived so even an explicitly enabled legacy path cannot express it.
+  if (!getEnvBoolean("COMPANION_DERIVED_MEMORY_WRITES_ENABLED", false)) return;
   const expiresSoon = new Date(Date.now() + 21 * 24 * 3600 * 1000).toISOString();
   const expiresLater = new Date(Date.now() + 60 * 24 * 3600 * 1000).toISOString();
   const writes: Promise<void>[] = [];
@@ -3307,6 +3380,8 @@ async function regenerateFeedbackWithSecondCall(opts: {
   ai: AIResult;
   domainKey: string;
   builtPayload?: Record<string, unknown> | null;
+  domainProfiles: DomainProfilesMap;
+  memory?: Record<string, unknown> | null;
   timeContext: TimeContext | null;
   timingSignal: AIFeedback["timing_signal"] | null;
   promptCtx: PromptContextLike;
@@ -3323,6 +3398,36 @@ async function regenerateFeedbackWithSecondCall(opts: {
     };
   }
   try {
+    const recordFacts = voiceRecordFacts(
+      opts.domainKey,
+      opts.ai,
+      opts.builtPayload ?? null,
+      normalizeAmount(opts.ai.amount),
+    );
+    const signals = selectSignals(
+      opts.domainKey,
+      opts.domainProfiles,
+      buildCurrentFactsFor(
+        opts.domainKey,
+        opts.ai,
+        opts.builtPayload ?? null,
+        normalizeAmount(opts.ai.amount),
+        opts.promptCtx.clientLocalTime ?? null,
+      ),
+    );
+    const contextPacket = buildContextPacket({
+      domainKey: opts.domainKey,
+      recordFacts: { ...recordFacts, time_context: opts.timeContext },
+      signals,
+      memory: opts.memory ?? null,
+      expressionPreferences: {
+        persona: opts.promptCtx.persona ?? null,
+        memory_strength: opts.promptCtx.memoryStrength ?? null,
+        expression_style: opts.promptCtx.expressionStyle ?? null,
+        custom_note: opts.promptCtx.customNote ?? null,
+      },
+      recentExpressionContext: opts.promptCtx.recentCompanionLines ?? [],
+    });
     const promptText = buildFeedbackPrompt({
       clientLocalTime: opts.promptCtx.clientLocalTime ?? null,
       weekday: opts.promptCtx.weekday ?? null,
@@ -3344,8 +3449,7 @@ async function regenerateFeedbackWithSecondCall(opts: {
       },
       builtPayload: opts.builtPayload ?? null,
       timeContext: opts.timeContext ? (opts.timeContext as unknown as Record<string, unknown>) : null,
-      memory: opts.promptCtx.memory ?? null,
-      memoryEnabled: opts.promptCtx.memoryEnabled,
+      contextPacket,
       persona: opts.promptCtx.persona ?? null,
       memoryStrength: opts.promptCtx.memoryStrength ?? null,
       expressionStyle: opts.promptCtx.expressionStyle ?? null,
@@ -3354,22 +3458,20 @@ async function regenerateFeedbackWithSecondCall(opts: {
     });
     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.85);
     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
-    const recordFacts = voiceRecordFacts(
-      opts.domainKey,
-      opts.ai,
-      opts.builtPayload ?? null,
-      normalizeAmount(opts.ai.amount),
-    );
     const check = validateModelTone([
       normalized.companion_message,
       normalized.ai_feedback?.emotion_line ?? null,
       normalized.ai_feedback?.utility_line ?? null,
       normalized.ai_feedback?.detail_reason ?? null,
       normalized.ai_feedback?.badge ?? null,
-    ], JSON.stringify(recordFacts));
+    ], JSON.stringify(recordFacts), signals);
     if (!check.ok) {
       const bad = new Set(check.badIndexes);
-      const companion = bad.has(0) ? null : normalized.companion_message;
+      const companion = sanitizeGeneratedCompanion(
+        bad.has(0) ? null : normalized.companion_message,
+        opts.ai,
+        opts.timeContext,
+      );
       let aiFeedback = normalized.ai_feedback;
       if (aiFeedback) {
         if (bad.has(1)) {
@@ -3392,7 +3494,7 @@ async function regenerateFeedbackWithSecondCall(opts: {
       };
     }
     return {
-      companion_message: normalized.companion_message,
+      companion_message: sanitizeGeneratedCompanion(normalized.companion_message, opts.ai, opts.timeContext),
       ai_feedback: normalized.ai_feedback,
       raw_text: rawText,
       duration_ms: Date.now() - startedAt,
@@ -3411,8 +3513,6 @@ async function regenerateFeedbackWithSecondCall(opts: {
 interface PromptContextLike {
   clientLocalTime?: string | null;
   weekday?: string | null;
-  memory?: Record<string, unknown> | null;
-  memoryEnabled?: boolean | null;
   persona?: string | null;
   memoryStrength?: string | null;
   expressionStyle?: string | null;
@@ -3538,12 +3638,15 @@ async function generateVoiceFeedback(opts: {
   normalizedAmount?: number | null;
   domainProfiles: DomainProfilesMap;
   timingSignal: AIFeedback["timing_signal"] | null;
+  timeContext: TimeContext | null;
   clientLocalTime: string | null;
   weekday: string | null;
   persona?: string | null;
+  memoryStrength?: string | null;
   expressionStyle?: string | null;
   customNote?: string | null;
   recentCompanionLines?: string[];
+  memory?: Record<string, unknown> | null;
   textProvider: ProviderConfig | null;
 }): Promise<VoiceCallResult> {
   const startedAt = Date.now();
@@ -3556,6 +3659,19 @@ async function generateVoiceFeedback(opts: {
     return { companion_message: null, ai_feedback: null, raw_text: null, duration_ms: 0, error: "no_text_provider", signals };
   }
   const recordFacts = voiceRecordFacts(opts.domainKey, opts.ai, opts.builtPayload ?? null, opts.normalizedAmount ?? null);
+  const contextPacket = buildContextPacket({
+    domainKey: opts.domainKey,
+    recordFacts,
+    signals,
+    memory: opts.memory ?? null,
+      expressionPreferences: {
+        persona: opts.persona ?? null,
+        memory_strength: opts.memoryStrength ?? null,
+      expression_style: opts.expressionStyle ?? null,
+      custom_note: opts.customNote ?? null,
+    },
+    recentExpressionContext: opts.recentCompanionLines ?? [],
+  });
   try {
     const promptText = buildVoicePrompt({
       clientLocalTime: opts.clientLocalTime,
@@ -3563,6 +3679,7 @@ async function generateVoiceFeedback(opts: {
       domainKey: opts.domainKey,
       recordFacts,
       signals: signals.map((s) => ({ kind: s.kind, fact: s.fact })),
+      contextPacket,
       persona: opts.persona ?? null,
       expressionStyle: opts.expressionStyle ?? null,
       customNote: opts.customNote ?? null,
@@ -3570,7 +3687,7 @@ async function generateVoiceFeedback(opts: {
     });
     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.8);
     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
-    // 模型只拥有语气：画像统计数字与时间口径由规则层直接呈现。
+    // Voice 层可以忠实转述已核实信号；数字和统计口径仍由信号白名单闭环约束。
     const check = validateModelTone(
       [
         normalized.companion_message,
@@ -3580,9 +3697,11 @@ async function generateVoiceFeedback(opts: {
         normalized.ai_feedback?.badge ?? null,
       ],
       JSON.stringify(recordFacts),
+      signals,
     );
     const bad = new Set(check.badIndexes);
-    const companion = bad.has(0) ? null : normalized.companion_message;
+    let companion = bad.has(0) ? null : normalized.companion_message;
+    companion = sanitizeGeneratedCompanion(companion, opts.ai, opts.timeContext);
     let modelFeedback = normalized.ai_feedback;
     if (modelFeedback) {
       if (bad.has(1)) {
@@ -3601,14 +3720,12 @@ async function generateVoiceFeedback(opts: {
     if (verifiedSignals.length > 0) {
       const ruleFeedback = buildSignalFallbackAIFeedback(opts.domainKey, verifiedSignals, opts.timingSignal);
       if (ruleFeedback) {
-        const tone = companion ?? modelFeedback?.emotion_line ?? null;
+        const mergedFeedback = mergeSignalFeedback(modelFeedback, ruleFeedback);
+        const fallbackTone = sanitizeGeneratedCompanion(mergedFeedback.emotion_line ?? null, opts.ai, opts.timeContext);
+        const tone = companion ?? fallbackTone;
         return {
           companion_message: tone ?? ruleFeedback.emotion_line,
-          ai_feedback: {
-            ...ruleFeedback,
-            emotion_line: tone ?? ruleFeedback.emotion_line,
-            source: tone ? "hybrid" : "rule",
-          },
+          ai_feedback: mergedFeedback,
           raw_text: rawText,
           duration_ms: Date.now() - startedAt,
           signals,
@@ -4988,6 +5105,81 @@ Deno.serve(async (req) => {
       const jsonBody = await req.json().catch(() => ({}));
       const action = jsonBody?.action;
 
+      if (action === "list_companion_memories" || action === "delete_companion_memory") {
+        const actionUserId = await authenticatedUserId(req);
+        const userClient = authenticatedSupabaseClient(req);
+        if (!actionUserId || !userClient) {
+          return new Response(JSON.stringify({ error: "未授权" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        if (action === "list_companion_memories") {
+          const { data, error: memoryError } = await userClient.from("user_companion_memories")
+            .select("id,memory_key,memory_type,content,evidence_jsonb,confidence,weight,last_seen_at,expires_at,source_table,source_id")
+            .eq("user_id", actionUserId)
+            .order("weight", { ascending: false })
+            .order("last_seen_at", { ascending: false });
+          if (memoryError) {
+            return new Response(JSON.stringify({ ok: false, error: memoryError.message }), {
+              status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+            });
+          }
+          const memories = normalizeSemanticMemories({ long_term: data ?? [] })
+            .filter((memory) => memory.claimability === "expressible")
+            .map((memory) => ({
+              id: memory.memoryId,
+              key: memory.key,
+              type: memory.type,
+              content: memory.content,
+              domain_key: memory.domainKey,
+              entity_key: memory.entityKey,
+              confidence: memory.confidence,
+              last_seen_at: memory.lastSeenAt,
+            }));
+          return new Response(JSON.stringify({ ok: true, data: { memories, count: memories.length } }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+
+        const memoryId = typeof jsonBody?.memory_id === "string" ? jsonBody.memory_id.trim() : "";
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(memoryId)) {
+          return new Response(JSON.stringify({ ok: false, error: "理解 ID 无效" }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const { data: existing, error: existingError } = await userClient.from("user_companion_memories")
+          .select("id,memory_key,memory_type,content,evidence_jsonb,confidence,weight,last_seen_at,expires_at,source_table,source_id")
+          .eq("id", memoryId)
+          .eq("user_id", actionUserId)
+          .maybeSingle();
+        if (existingError) {
+          return new Response(JSON.stringify({ ok: false, error: existingError.message }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const normalizedExisting = existing
+          ? normalizeSemanticMemories({ long_term: [existing] })[0]
+          : null;
+        if (!normalizedExisting || normalizedExisting.claimability !== "expressible") {
+          return new Response(JSON.stringify({ ok: false, error: "理解不存在或不可删除" }), {
+            status: 404, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const { error: deleteError } = await userClient.from("user_companion_memories")
+          .delete()
+          .eq("id", memoryId)
+          .eq("user_id", actionUserId);
+        if (deleteError) {
+          return new Response(JSON.stringify({ ok: false, error: deleteError.message }), {
+            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true, data: { deleted: true, memory_id: memoryId } }), {
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
       if (action === "get_record_expression_plan" || action === "ack_record_expression_plan") {
         const actionUserId = await authenticatedUserId(req);
         if (!actionUserId) {
@@ -5653,7 +5845,6 @@ Deno.serve(async (req) => {
       expressionStyle: companionSettings.expressionStyle,
       persona: companionSettings.persona,
       customNote: companionSettings.customNote,
-      memory: companionContext.memory,
     });
     const visionPromptHash = await sha256Short(visionPrompt);
 
@@ -5850,14 +6041,10 @@ Deno.serve(async (req) => {
       companion: companionDebug(),
       notification: options.notification,
     });
-    // 归一化陪伴文案：去前后空白和引号、压缩换行、截断到 60 字符（约 30 个汉字裕量）
-    if (typeof ai.companion_message === "string") {
-      const trimmed = ai.companion_message.replace(/[\r\n]+/g, " ").trim().replace(/^["'""''「『]+|["'""''」』]+$/g, "");
-      ai.companion_message = trimmed ? trimmed.slice(0, 60) : null;
-    } else {
-      ai.companion_message = null;
-    }
-    normalizedCompanion = ai.companion_message;
+    // 识别模型不再拥有最终陪伴文案权限。保留 raw 值仅供调试，用户可见内容
+    // 统一由后续 Signals/Voice 或规则兜底生成，避免先展示一版又被二次调用覆盖。
+    ai.companion_message = null;
+    normalizedCompanion = null;
     if (!companionSettings.enabled) ai.companion_message = null;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
@@ -5868,9 +6055,6 @@ Deno.serve(async (req) => {
     if (builtinKey) {
       ai.record_type = builtinKey;
       ai.domain_key = builtinKey;
-    }
-    if (ai.companion_message && hasModelOwnedStatisticalClaim(ai.companion_message)) {
-      ai.companion_message = null;
     }
     ai.companion_message = sanitizeCompanionMessageForContent(ai.companion_message, ai);
     contentGuardedCompanion = ai.companion_message;
@@ -6230,12 +6414,15 @@ Deno.serve(async (req) => {
             normalizedAmount: null,
             domainProfiles,
             timingSignal: timingSignalFor(builtinKey, timeContext),
+            timeContext,
             clientLocalTime,
             weekday: _weekdayCN,
             persona: companionSettings.persona,
+            memoryStrength: companionSettings.memoryStrength,
             expressionStyle: companionSettings.expressionStyle,
             customNote: companionSettings.customNote,
-            recentCompanionLines: [],
+            recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
+            memory: companionContext.memory,
             textProvider,
           });
           if (_voiceCall.duration_ms > 0) {
@@ -6578,30 +6765,33 @@ Deno.serve(async (req) => {
             normalizedAmount,
             domainProfiles,
             timingSignal: timingSignalFor("income", timeContext),
+            timeContext,
             clientLocalTime,
             weekday: _weekdayCN,
             persona: companionSettings.persona,
+            memoryStrength: companionSettings.memoryStrength,
             expressionStyle: companionSettings.expressionStyle,
             customNote: companionSettings.customNote,
-            recentCompanionLines: [],
+            recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
+            memory: companionContext.memory,
             textProvider,
           })
           : await regenerateFeedbackWithSecondCall({
             ai,
             domainKey: "income",
             builtPayload: null,
+            domainProfiles,
+            memory: companionContext.memory,
             timeContext,
             timingSignal: timingSignalFor("income", timeContext),
             promptCtx: {
               clientLocalTime,
               weekday: _weekdayCN,
-              memoryEnabled: companionSettings.memoryEnabled,
               memoryStrength: companionSettings.memoryStrength,
               expressionStyle: companionSettings.expressionStyle,
               persona: companionSettings.persona,
               customNote: companionSettings.customNote,
-              memory: companionContext.memory,
-              recentCompanionLines: [],
+              recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
             },
             textProvider,
           });
@@ -6828,30 +7018,33 @@ Deno.serve(async (req) => {
           normalizedAmount,
           domainProfiles,
           timingSignal: timingSignalFor("expense", timeContext),
+          timeContext,
           clientLocalTime,
           weekday: _weekdayCN,
           persona: companionSettings.persona,
+          memoryStrength: companionSettings.memoryStrength,
           expressionStyle: companionSettings.expressionStyle,
           customNote: companionSettings.customNote,
-          recentCompanionLines: [],
+          recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
+          memory: companionContext.memory,
           textProvider,
         })
         : await regenerateFeedbackWithSecondCall({
           ai,
           domainKey: "expense",
           builtPayload: null,
+          domainProfiles,
+          memory: companionContext.memory,
           timeContext,
           timingSignal: timingSignalFor("expense", timeContext),
           promptCtx: {
             clientLocalTime,
             weekday: _weekdayCN,
-            memoryEnabled: companionSettings.memoryEnabled,
             memoryStrength: companionSettings.memoryStrength,
             expressionStyle: companionSettings.expressionStyle,
             persona: companionSettings.persona,
             customNote: companionSettings.customNote,
-            memory: companionContext.memory,
-            recentCompanionLines: [],
+            recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
           },
           textProvider,
         });
