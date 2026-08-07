@@ -59,7 +59,7 @@ interface ShadowPlannerInput extends ShadowPlannerOptions {
 }
 interface GenericPlannerInput extends ShadowPlannerOptions { domainKey: string; records: ShadowGenericRecord[]; currentRecordId: string; domainProfile?: Record<string, unknown>; }
 
-export const EXPRESSION_PLANNER_VERSION = "expression-shadow-auto-v0.4";
+export const EXPRESSION_PLANNER_VERSION = "expression-shadow-auto-v0.5";
 const MERCHANT_ALIAS_MAP = compileMerchantAliases(merchantAliasConfig);
 
 export interface PlannerSourceDependency {

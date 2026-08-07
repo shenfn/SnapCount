@@ -36,6 +36,7 @@ test('shows a same-name recurrence interval only on the AI card and record detai
   assert.equal(result.eligibility.surface_eligibility.record_detail.eligible, true)
   assert.equal(result.eligibility.surface_eligibility.shortcut_notification.eligible, false)
   assert.equal(result.eligibility.surface_eligibility.weekly_report.eligible, false)
+  assert.equal(result.eligibility.materiality, null)
 })
 
 test('blocks a candidate without evidence at the claim level', () => {
@@ -56,6 +57,107 @@ test('requires three active days for a personal median comparison', () => {
   }))
   assert.equal(result.eligibility.eligible, false)
   assert.ok(result.eligibility.blocked_reasons.includes('insufficient_active_day_baseline'))
+})
+
+function merchantBaselineCandidate({
+  currentCount = 1,
+  baselineCount = 1,
+  currentTotal = 10.33,
+  baselineTotal = 10,
+  includeDelta = true,
+} = {}) {
+  const countDelta = currentCount - baselineCount
+  const totalDelta = Math.round((currentTotal - baselineTotal) * 100) / 100
+  const totalPercent = baselineTotal === 0
+    ? null
+    : Math.round(((currentTotal - baselineTotal) / baselineTotal) * 10000) / 100
+  return candidate({
+    claim_type: 'comparison',
+    claim: {
+      semantic_key: 'merchant_daily_vs_active_day_median',
+      structured_value: {
+        current: { count: currentCount, total: currentTotal },
+        baseline: { sample_days: 5, count: baselineCount, total: baselineTotal },
+        ...(includeDelta ? { delta: { count: countDelta, total: totalDelta, total_percent: totalPercent } } : {}),
+      },
+    },
+    quality: { confidence: 0.9, data_coverage: 1, sample_count: 5 },
+  })
+}
+
+test('keeps a near-identical merchant baseline in telemetry but blocks every user-facing surface', () => {
+  const result = evaluateCandidateEligibility(merchantBaselineCandidate())
+
+  assert.equal(result.eligibility.eligible, true)
+  assert.deepEqual(result.eligibility.blocked_reasons, [])
+  assert.deepEqual(result.eligibility.materiality, {
+    evaluated: true,
+    passes: false,
+    policy_version: 'merchant-active-day-materiality-v0.1',
+    reason: 'difference_below_materiality_threshold',
+  })
+  for (const decision of Object.values(result.eligibility.surface_eligibility)) {
+    assert.equal(decision.eligible, false)
+    assert.ok(decision.blocked_reasons.includes('difference_below_materiality_threshold'))
+  }
+})
+
+test('applies merchant baseline materiality boundaries symmetrically', () => {
+  const cases = [
+    { name: 'positive count boundary', input: { currentCount: 2, baselineCount: 1 }, passes: true },
+    { name: 'negative count boundary', input: { currentCount: 1, baselineCount: 2 }, passes: true },
+    { name: 'half-count median difference', input: { currentCount: 2, baselineCount: 1.5 }, passes: false },
+    { name: 'positive strong amount boundary', input: { currentTotal: 1020, baselineTotal: 1000 }, passes: true },
+    { name: 'negative strong amount boundary', input: { currentTotal: 980, baselineTotal: 1000 }, passes: true },
+    { name: 'combined absolute and relative boundary', input: { currentTotal: 38.33, baselineTotal: 33.33 }, passes: true },
+    { name: 'five-yuan floating-point boundary', input: { currentTotal: 8.04, baselineTotal: 3.04 }, passes: true },
+    { name: 'twenty-yuan floating-point boundary', input: { currentTotal: 256.02, baselineTotal: 236.02 }, passes: true },
+    { name: 'large percentage at 4.99 absolute delta', input: { currentTotal: 5.49, baselineTotal: 0.5 }, passes: false },
+    { name: 'absolute change below strong floor and relative floor', input: { currentTotal: 219.99, baselineTotal: 200 }, passes: false },
+    { name: 'ten percent change', input: { currentTotal: 110, baselineTotal: 100 }, passes: false },
+    { name: 'zero baseline below strong floor', input: { currentTotal: 5, baselineTotal: 0 }, passes: false },
+    { name: 'zero baseline at strong floor', input: { currentTotal: 20, baselineTotal: 0 }, passes: true },
+  ]
+
+  for (const item of cases) {
+    const result = evaluateCandidateEligibility(merchantBaselineCandidate(item.input))
+    assert.equal(result.eligibility.materiality.passes, item.passes, item.name)
+    assert.equal(result.eligibility.surface_eligibility.record_detail.eligible, item.passes, item.name)
+  }
+})
+
+test('derives materiality from finite source metrics instead of trusting redundant deltas', () => {
+  const withoutDelta = evaluateCandidateEligibility(merchantBaselineCandidate({ includeDelta: false }))
+  assert.equal(withoutDelta.eligibility.materiality.reason, 'difference_below_materiality_threshold')
+
+  const inconsistentDelta = merchantBaselineCandidate()
+  inconsistentDelta.claim.structured_value.delta = { count: 99, total: 999, total_percent: 9999 }
+  const inconsistentResult = evaluateCandidateEligibility(inconsistentDelta)
+  assert.equal(inconsistentResult.eligibility.materiality.reason, 'difference_below_materiality_threshold')
+  assert.equal(inconsistentResult.eligibility.surface_eligibility.record_detail.eligible, false)
+})
+
+test('blocks a merchant baseline with incomplete source metrics under a distinct reason', () => {
+  const invalidCandidates = [
+    { path: ['current', 'count'], value: Number.NaN },
+    { path: ['current', 'total'], value: Number.NaN },
+    { path: ['baseline', 'count'], value: Number.NaN },
+    { path: ['baseline', 'total'], value: Number.NaN },
+    { path: ['current', 'total'], remove: true },
+  ]
+
+  for (const item of invalidCandidates) {
+    const invalid = merchantBaselineCandidate()
+    const target = invalid.claim.structured_value[item.path[0]]
+    if (item.remove) delete target[item.path[1]]
+    else target[item.path[1]] = item.value
+    const result = evaluateCandidateEligibility(invalid)
+
+    assert.equal(result.eligibility.eligible, true)
+    assert.equal(result.eligibility.materiality.reason, 'missing_materiality_metrics')
+    assert.ok(result.eligibility.surface_eligibility.record_detail.blocked_reasons.includes('missing_materiality_metrics'))
+    assert.equal(result.eligibility.surface_eligibility.record_detail.blocked_reasons.includes('difference_below_materiality_threshold'), false)
+  }
 })
 
 test('summarizes eligibility separately by surface', () => {

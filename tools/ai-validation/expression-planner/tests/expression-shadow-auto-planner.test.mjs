@@ -52,6 +52,31 @@ test('does not invent an insight from a single isolated expense', () => {
   assert.equal(plan.plan_summary.pwa_pending_ai_card.selected[0].selection_mode, 'exact_fact_fallback')
 })
 
+test('retains a near-identical personal baseline for shadow analysis without selecting it for users', () => {
+  const plan = buildExpressionShadowPlan({
+    transactions: [
+      { id: 'baseline-a', transaction_date: '2026-07-22', transaction_time: '08:00:00', amount: 100, merchant_name: 'Near Baseline Shop', status: 'done' },
+      { id: 'baseline-b', transaction_date: '2026-07-23', transaction_time: '08:00:00', amount: 101, merchant_name: 'Near Baseline Shop', status: 'done' },
+      { id: 'baseline-c', transaction_date: '2026-07-24', transaction_time: '08:00:00', amount: 99, merchant_name: 'Near Baseline Shop', status: 'done' },
+      { id: 'current', transaction_date: '2026-07-25', transaction_time: '08:30:00', amount: 103.27, merchant_name: 'Near Baseline Shop', status: 'done' },
+    ],
+    currentRecordId: 'current',
+  })
+  const baseline = plan.candidates.find(candidate => candidate.claim.semantic_key === 'merchant_daily_vs_active_day_median')
+
+  assert.ok(baseline)
+  assert.equal(plan.planner_version, 'expression-shadow-auto-v0.5')
+  assert.equal(baseline.claim.structured_value.delta.count, 0)
+  assert.equal(baseline.claim.structured_value.delta.total_percent, 3.27)
+  assert.equal(baseline.eligibility.eligible, true)
+  assert.equal(baseline.eligibility.materiality.passes, false)
+  assert.ok(baseline.eligibility.surface_eligibility.record_detail.blocked_reasons.includes('difference_below_materiality_threshold'))
+  assert.equal(baseline.scoring.surfaces.record_detail.score, null)
+  assert.equal(plan.plan_summary.record_detail.selected.some(item => item.semantic_key === 'merchant_daily_vs_active_day_median'), false)
+  assert.equal(plan.plan_summary.pwa_pending_ai_card.selected.some(item => item.semantic_key === 'merchant_daily_vs_active_day_median'), false)
+  assert.ok(plan.plan_summary.record_detail.selected.length > 0)
+})
+
 test('keeps a pending expense out of aggregates while exposing its verified record context', () => {
   const plan = buildExpressionShadowPlan({
     transactions: [
