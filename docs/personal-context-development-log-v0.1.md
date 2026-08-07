@@ -291,3 +291,56 @@ Shadow 不是只生成一个中位数候选。最近真实记录的候选维度�
 5. 验证失败时可回退到旧链路，且不修改历史已持久化文案。
 
 是否允许进入下一阶段：否。当前只完成“契约上线 + Shadow 观察”；下一轮应先做单用户可见 Canary 接入，再决定是否扩大 rollout。
+
+## 11. 2026-08-07 owner-only 可见 Canary
+
+范围：继续使用同一生产项目和既有真实记录，只对服务端配置的单一 owner 账号开放记录详情候选。未创建测试记录，未上传新素材，未修改其他用户数据；本节不记录 owner 用户 ID、记录 ID 或商户原文。
+
+### 11.1 发布与门禁
+
+- `20260806100000_personal_context_memory_contract.sql` 已应用；`ingest-receipt` v178 与 `generate-insights` v22 为 ACTIVE。
+- `EXPRESSION_PLANNER_OWNER_ENABLED=true` 且 owner JWT 用户匹配；普通用户、开关关闭和 owner 不匹配路径仍返回不可用，不会接管用户可见输出。
+- `EXPRESSION_PLANNER_MODE` 继续保持 `shadow`；owner 的记录详情可见门禁是独立路径，不代表快捷通知、周报或其他用户已经切换。
+- Planner 141/141、Edge 35/35、`deno check`、PWA build、安全契约、迁移版本、RLS 夹具及 iOS Build Gate 均已通过。
+
+### 11.2 真实可见闭环
+
+- 部署后 owner 客户端先生成 10 个 `expression_delivery_snapshots`，覆盖 5 条真实记录；GET 只创建一小时有效的预览快照，不计曝光。
+- 第一轮没有 `client_rendered`，同期 Edge 请求无 4xx。PWA 和 iOS 都要求候选卡真正进入视口后才 ACK；记录详情中的候选位于图片、字段和陪伴语之后，因此“打开详情但未滚到候选”只产生快照，属于预期行为。
+- owner 随后打开一条已完成记录并将“AI 即时反馈”卡片滑入视口。生产新增 1 条 `record_detail` 真实曝光，并成功绑定确定性 `decision_id`、候选 ID、策略版本和可见字段。
+- 同一曝光随后成功提交点评，生命周期从 `client_rendered` 更新为 `user_reviewed`。这证明 `GET -> 真实可见 -> ACK -> 点评` 已在生产自然记录上闭环，且点评没有绑定预览快照或旧 `legacy_voice` 替代物。
+- 当前快照和曝光没有 `client_platform`/User-Agent 字段，生产侧无法仅凭数据库区分本次来自 PWA 还是 iOS；后续观测字段需要补齐，但不影响本次闭环真实性。
+
+### 11.3 首批候选质量
+
+部署后的 6 条不同记录预览已出现以下主候选：
+
+- 支出：`record_context`、`repeat_interval`、`daily_aggregation`、`personal_baseline`；
+- 饮食：`current_fact`。
+
+首批结果同时证明了框架价值和当前选择质量的缺口：
+
+- 同名记录间隔和饮食当前事实能够补充旧陪伴语没有表达的信息，方向正确；
+- 一条商户活跃日基线只有约 3.27% 的金额差异，仍以较高分入选，说明 `personal_baseline` 缺少最小实质差异 Gate；
+- 首条真实点评绑定的 `record_context` 与旧陪伴语都在复述当前金额，虽然字段和事实准确，但新增信息价值不足；
+- 当前详情页保留旧陪伴语在前、Planner 事实候选在后，Planner 不会覆盖已持久化的陪伴文案。问题是候选语义重复，不是客户端异步覆盖复发。
+
+### 11.4 客户端状态机复审
+
+- 当前零 ACK 已由真实可见冒烟排除为链路故障；无需为了计数放宽“真实可见后 ACK”的原则。
+- PWA 仍有两个非阻断的恢复风险：快速离开又返回同一记录时可能复用已取消的 in-flight 请求；预览快照超过一小时后，手动重试会继续使用旧 token，而不是重新 GET。
+- iOS/PWA 的可见性、过期 token 和快速切换仍需页面级回归；现有定向测试以模型、请求和源码契约为主，不能替代真机/真实浏览器生命周期测试。
+
+### 11.5 当前结论与下一轮
+
+结论：**owner-only 用户可见链路已经跑通，Personal Context/Planner 不再只是 Shadow；但首批样本仍不足以扩大灰度。**
+
+下一轮按以下顺序推进：
+
+1. 保持 owner-only，继续积累 20-30 条自然跨域可见样本，不制造记录；
+2. 为个人基线候选增加最小实质差异 Gate，避免几乎相同的中位数比较占据详情主位；
+3. 在 Surface 组合层加入“已由陪伴语覆盖”的语义去重，避免 `record_context` 与陪伴语复述同一事实；
+4. 补 PWA 快速切换、过期 token 自动重新 GET，以及 iOS 对应恢复路径的页面级回归；
+5. 补 `client_platform` 观测字段后，再比较 PWA 与 iOS 的 ACK、点评和失败率。
+
+是否允许进入下一阶段：允许继续 owner-only Canary 和定向质量修复；不允许扩大到其他用户，也不允许把在线选择权交给 Bandit。
