@@ -68,7 +68,7 @@ jobs:
           deno check --no-lock --node-modules-dir=auto supabase/functions/ingest-receipt/index.ts
 
       - name: Test receipt safeguards
-        run: deno test --no-lock supabase/functions/ingest-receipt/duplicate-review_test.ts supabase/functions/ingest-receipt/signals_test.ts supabase/functions/ingest-receipt/context-packet_test.ts supabase/functions/ingest-receipt/prompts_test.ts supabase/functions/ingest-receipt/expression-shadow_test.ts supabase/functions/ingest-receipt/notification-text_test.ts
+        run: deno test --no-lock supabase/functions/ingest-receipt/duplicate-review_test.ts supabase/functions/ingest-receipt/signals_test.ts supabase/functions/ingest-receipt/context-packet_test.ts supabase/functions/ingest-receipt/prompts_test.ts supabase/functions/ingest-receipt/expression-shadow_test.ts supabase/functions/ingest-receipt/notification-text_test.ts supabase/functions/ingest-receipt/time_test.ts supabase/functions/ingest-receipt/time-language_test.ts
 
       - name: Run Shadow Planner tests
         run: node --test tools/ai-validation/expression-planner/tests/*.test.mjs
@@ -78,6 +78,12 @@ jobs:
 
       - name: Validate adaptive finance options
         run: npm run test:finance-options
+
+      - name: Validate finance occurrence contract
+        run: npm run test:finance-occurred-at
+
+      - name: Validate expression presentation contract
+        run: npm run test:expression-presentation
 
       - name: Validate receipt duplicate review contracts
         run: npm run check:receipt-dedup
@@ -93,6 +99,17 @@ jobs:
           node --check scripts/test-ingest-receipt.mjs
           node --check scripts/cleanup-test-receipts.mjs
           node --check scripts/test-upload-lifecycle.mjs
+
+      - name: Execute finance occurrence migration contract
+        env:
+          PGROOT: postgresql://postgres:security-test@localhost:5432/postgres
+          PGURL: postgresql://postgres:security-test@localhost:5432/finance_time_contract
+        run: |
+          psql "$PGROOT" -v ON_ERROR_STOP=1 -c "create database finance_time_contract"
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-finance-occurred-at-migration-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260808120000_finance_occurred_at_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260808120000_finance_occurred_at_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-finance-occurred-at-migration.sql
 
       - name: Execute security migrations
         env:

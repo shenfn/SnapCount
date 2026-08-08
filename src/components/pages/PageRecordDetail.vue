@@ -35,7 +35,7 @@
           </span>
         </div>
         <div class="record-detail-field">
-          <span class="field-label">记录时间</span>
+          <span class="field-label">上传时间</span>
           <span class="field-value">{{ recordTime }}</span>
         </div>
         <div v-if="eventTime" class="record-detail-field">
@@ -100,11 +100,25 @@
         </div>
       </div>
 
-      <div v-if="companionMessage" class="record-detail-companion">
+      <div v-if="companionMessage" ref="companionContainerRef" class="record-detail-companion">
         <div class="record-detail-companion-mark">💬</div>
-        <div>
+        <div class="record-detail-companion-body">
           <div class="record-detail-companion-title">AI 陪伴</div>
           <div class="record-detail-companion-text">{{ companionMessage }}</div>
+          <AiFeedbackCard
+            v-if="companionReviewFeedback"
+            :key="`${aiFeedbackCardKey}-companion-review`"
+            :feedback="companionReviewFeedback"
+            :exposure-event-id="aiFeedbackExposureEventId"
+            :reviewable="aiFeedbackReviewable"
+            :review-unavailable="plannerReviewUnavailable"
+            :review-retrying="plannerReviewRetrying"
+            :review-state="feedbackReviewState"
+            :submitting="feedbackReviewSubmitting"
+            review-only
+            @retry-review="retryPlannerDelivery"
+            @submit-review="submitFeedbackReview"
+          />
         </div>
       </div>
 
@@ -148,6 +162,13 @@ import {
   retryWithBackoff,
   waitForVisibleElement,
 } from '../../utils/expressionDelivery'
+import {
+  companionMessageMatchesDelivery,
+  feedbackToRender,
+  isCompanionMessageDelivery,
+  isPlannerDeliveryReviewable,
+  shouldAcknowledgePlannerFeedback,
+} from '../../utils/expressionPresentation'
 
 const PLAN_NOT_READY_RETRY_DELAYS = [250, 750, 1500]
 const ACK_RETRY_DELAYS = [400, 1200]
@@ -157,6 +178,7 @@ const store = inject('store')
 const record = computed(() => store.detailRecord.value)
 const bindingAccount = ref(false)
 const aiFeedbackCardRef = ref(null)
+const companionContainerRef = ref(null)
 const feedbackReviewStates = ref({})
 const plannerDeliveryStates = ref({})
 let activePlannerDeliveryController = null
@@ -186,9 +208,8 @@ const emptyMark = computed(() => {
   return domainMeta.value?.shortName?.slice(0, 1) || '记'
 })
 
-// P0-3：所有时间展示走 time-core，杜绝隐式系统 tz。
-// 08-01 星之柠案根因之一：createdAt 直接被 new Date().toString() 展示，海外用户漂移；
-// 现在统一用 formatDisplay(instant, DEFAULT_TZ)，秒精度让"记录时间"更容易和后端对账。
+// 所有时间展示走 time-core，杜绝隐式系统 tz。当前 DEFAULT_TZ 是产品现行的
+// Asia/Shanghai 契约；后续接入用户 profile 时只需把它替换为用户 IANA 时区。
 function displayInstant(input, opts) {
   const instant = toInstant(input) ?? (typeof input === 'string' ? parseInstant(input, DEFAULT_TZ) : null)
   if (instant == null) return ''
@@ -198,28 +219,19 @@ function displayInstant(input, opts) {
 const recordTime = computed(() => {
   if (!record.value?.raw) return '--'
   const raw = record.value.raw
-  if (record.value.kind === 'universal') {
-    const src = raw.payload?.time_context?.client_captured_at || raw.createdAt || raw.occurredAt
-    return displayInstant(src, { withSeconds: true }) || '--'
-  }
-  if (raw.createdAt) return displayInstant(raw.createdAt, { withSeconds: true })
+  const src = raw.payload?.time_context?.client_captured_at || raw.createdAt
+  if (src) return displayInstant(src, { withSeconds: true })
   // 只有日期时不伪造 12:00；等待后端提供可验证的记录时间。
   if (raw.dateRaw) return raw.date || raw.dateRaw
   return '--'
 })
 
-// P0-4：expense/income 的"发生时间"暂时也从 createdAt 派生。
-// 原因：transactions.transaction_time 目前存的是 UTC 时分与北京日期错位（星之柠案），
-// 直接使用会显示错误的 23:46。等 P2 DB 迁移引入 occurred_at 后再切回专用字段。
+// 发生时间必须来自 canonical occurred_at。没有它时宁可显示“未知”，
+// 也不把上传时间伪装成业务发生时间。
 const eventTime = computed(() => {
   if (!record.value?.raw) return ''
   const raw = record.value.raw
-  if (record.value.kind === 'universal') {
-    return displayInstant(raw.occurredAt)
-  }
-  // expense / income：暂用 createdAt 兜底（去秒），不使用坏的 transaction_time 拼装。
-  if (raw.createdAt) return displayInstant(raw.createdAt)
-  return ''
+  return raw.occurredAt ? displayInstant(raw.occurredAt) : ''
 })
 
 const sourceLabel = computed(() => {
@@ -252,6 +264,10 @@ const recordExpressionPlan = computed(() => {
 const plannerAiFeedback = computed(() => (
   recordExpressionPlan.value?.available ? recordExpressionPlan.value.feedback || null : null
 ))
+const plannerTargetsCompanion = computed(() => (
+  Boolean(recordExpressionPlan.value?.available)
+  && isCompanionMessageDelivery(recordExpressionPlan.value, plannerAiFeedback.value)
+))
 const companionMessage = computed(() => {
   const raw = record.value?.raw
   if (!raw) return ''
@@ -261,11 +277,27 @@ const plannerLookupSettled = computed(() => (
   ['unavailable', 'error'].includes(recordExpressionPlan.value?.status)
 ))
 const aiFeedback = computed(() => (
-  plannerAiFeedback.value
+  feedbackToRender({
+    companionMessage: companionMessage.value,
+    feedback: plannerAiFeedback.value,
+    companionFeedback: legacyAiFeedback.value,
+    delivery: recordExpressionPlan.value,
+  })
   || (!companionMessage.value && plannerLookupSettled.value ? legacyAiFeedback.value : null)
 ))
+const companionReviewFeedback = computed(() => (
+  plannerTargetsCompanion.value
+    && companionMessageMatchesDelivery({
+      delivery: recordExpressionPlan.value,
+      feedback: plannerAiFeedback.value,
+      companionMessage: companionMessage.value,
+    })
+    ? plannerAiFeedback.value
+    : null
+))
+const reviewFeedback = computed(() => companionReviewFeedback.value || aiFeedback.value)
 const aiFeedbackExposureEventId = computed(() => (
-  aiFeedback.value?.exposure_event_id || aiFeedback.value?.exposureEventId || ''
+  reviewFeedback.value?.exposure_event_id || reviewFeedback.value?.exposureEventId || ''
 ))
 const aiFeedbackCardKey = computed(() => {
   const recordId = record.value?.id || 'none'
@@ -276,9 +308,9 @@ const aiFeedbackCardKey = computed(() => {
   return `ai-feedback-${recordId}-legacy`
 })
 const aiFeedbackReviewable = computed(() => {
-  if (!aiFeedback.value) return false
+  if (!reviewFeedback.value) return false
   if (!plannerAiFeedback.value) return true
-  return Boolean(recordExpressionPlan.value?.acknowledged && aiFeedbackExposureEventId.value)
+  return isPlannerDeliveryReviewable(recordExpressionPlan.value)
 })
 const plannerDeliveryState = computed(() => plannerDeliveryStates.value[aiFeedbackCardKey.value] || '')
 const plannerReviewUnavailable = computed(() => (
@@ -312,9 +344,23 @@ function feedbackCardElement() {
   return aiFeedbackCardRef.value?.$el || aiFeedbackCardRef.value || null
 }
 
-async function loadPlannerWithRetry(recordId, recordKind, signal) {
+function plannerPresentationElement() {
+  if (plannerTargetsCompanion.value) return companionContainerRef.value || null
+  return feedbackCardElement()
+}
+
+async function loadPlannerWithRetry(recordId, recordKind, signal, { force = false } = {}) {
+  let shouldForce = force
   return retryWithBackoff(
-    () => store.loadRecordExpressionPlan(recordId, { recordKind, signal }),
+    () => {
+      const forceThisAttempt = shouldForce
+      shouldForce = false
+      return store.loadRecordExpressionPlan(recordId, {
+        recordKind,
+        signal,
+        force: forceThisAttempt,
+      })
+    },
     {
       delays: PLAN_NOT_READY_RETRY_DELAYS,
       signal,
@@ -332,9 +378,15 @@ async function acknowledgePlannerWhenVisible(recordId, plan, controller, { manua
     const acknowledged = await retryWithBackoff(
       async () => {
         do {
-          await waitForVisibleElement(feedbackCardElement(), { signal: controller.signal })
+          await waitForVisibleElement(plannerPresentationElement(), { signal: controller.signal })
         } while (globalThis.document?.visibilityState !== 'visible')
         if (!isCurrentPlannerDetail(recordId, plan)) throw createAbortError()
+        if (!shouldAcknowledgePlannerFeedback({
+          companionMessage: companionMessage.value,
+          feedback: plan.feedback,
+          companionFeedback: legacyAiFeedback.value,
+          delivery: plan,
+        })) throw createAbortError()
         if (!manual) setPlannerDeliveryState(deliveryKey, 'acknowledging')
         return store.ackRecordExpressionPlan(recordId, { signal: controller.signal })
       },
@@ -360,9 +412,19 @@ async function acknowledgePlannerWhenVisible(recordId, plan, controller, { manua
 }
 
 watch(
-  () => [store.currentPage.value, record.value?.id || '', record.value?.kind || ''],
-  async ([page, recordId, recordKind], _previous, onCleanup) => {
+  () => [
+    store.currentPage.value,
+    record.value?.id || '',
+    record.value?.kind || '',
+    companionMessage.value,
+  ],
+  async ([page, recordId, recordKind, visibleCompanion], previous, onCleanup) => {
     if (page !== 'record-detail' || !recordId || !recordKind) return
+    const [previousPage, previousRecordId, previousRecordKind, previousCompanion] = previous || []
+    const companionChangedInPlace = previousPage === page
+      && previousRecordId === recordId
+      && previousRecordKind === recordKind
+      && previousCompanion !== visibleCompanion
     const controller = new AbortController()
     activePlannerDeliveryController = controller
     onCleanup(() => {
@@ -370,8 +432,16 @@ watch(
       if (activePlannerDeliveryController === controller) activePlannerDeliveryController = null
     })
     try {
-      const plan = await loadPlannerWithRetry(recordId, recordKind, controller.signal)
+      const plan = await loadPlannerWithRetry(recordId, recordKind, controller.signal, {
+        force: companionChangedInPlace,
+      })
       if (!isCurrentVisibleDetail(recordId) || !plan?.available || plan.acknowledged) return
+      if (!shouldAcknowledgePlannerFeedback({
+        companionMessage: companionMessage.value,
+        feedback: plan.feedback,
+        companionFeedback: legacyAiFeedback.value,
+        delivery: plan,
+      })) return
       await acknowledgePlannerWhenVisible(recordId, plan, controller)
     } catch (error) {
       if (!isAbortError(error)) console.warn('交付记录表达计划失败:', error)

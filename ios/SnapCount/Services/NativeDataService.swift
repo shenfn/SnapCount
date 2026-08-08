@@ -9,9 +9,9 @@ enum DashboardDataSection: Hashable {
 }
 
 enum NativeDashboardQueryOrder {
-    static let transactions = "transaction_date.desc,transaction_time.desc.nullslast,created_at.desc,id.desc"
+    static let transactions = "occurred_at.desc.nullslast,transaction_date.desc,created_at.desc,id.desc"
     static let pendingTransactions = transactions
-    static let incomes = "income_date.desc,created_at.desc,id.desc"
+    static let incomes = "occurred_at.desc.nullslast,income_date.desc,created_at.desc,id.desc"
     static let universal = "occurred_at.desc.nullslast,created_at.desc,id.desc"
     static let staging = "occurred_at.desc.nullslast,created_at.desc,id.desc"
 
@@ -154,6 +154,7 @@ struct NativeRecordEditDraft: Identifiable, Equatable {
     var companionMessage: String?
     var accountId: String?
     var transactionTime: String?
+    var occurredAt: String?
     var source: String?
     var isLargeTransport: Bool
     var transportType: String?
@@ -175,7 +176,8 @@ struct NativeRecordEditDraft: Identifiable, Equatable {
         imageHash = detail.imageHash
         companionMessage = detail.companionMessage
         accountId = detail.accountId
-        transactionTime = detail.transactionTime
+        transactionTime = NativeLocalDate.financeTimeKey(occurredAt: detail.occurredAt)
+        occurredAt = detail.occurredAt
         source = detail.source
         isLargeTransport = detail.isLargeTransport
         transportType = detail.transportType
@@ -265,8 +267,8 @@ final class NativeDataService {
             universal.error.map { "通用数据暂未同步：\($0.localizedDescription)" },
             staging.error.map { "中转站暂未同步：\($0.localizedDescription)" }
         ].compactMap { $0 }
-        let todayExpenseCount = txRows.filter { $0.transactionDate == today }.count
-        let todayIncomeCount = incomeRows.filter { $0.incomeDate == today }.count
+        let todayExpenseCount = txRows.filter { financeDateKey($0) == today }.count
+        let todayIncomeCount = incomeRows.filter { financeDateKey($0) == today }.count
         let todayUniversalCount = universalRows.filter { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return false }
             return NativeLocalDate.dateKey(sourceDate) == today
@@ -274,8 +276,7 @@ final class NativeDataService {
         snapshot.todayCount = todayExpenseCount + todayIncomeCount + todayUniversalCount
 
         snapshot.pendingExpenses = txRows.filter { $0.status == "pending" }.compactMap { row in
-            guard let dateKey = row.transactionDate else { return nil }
-            let occurredAtLabel = row.transactionTime.map { "\(dateKey) \(String($0.prefix(5)))" } ?? dateKey
+            guard let dateKey = financeDateKey(row) else { return nil }
             return NativePendingExpense(
                 id: row.id,
                 title: row.merchantName ?? "待补全消费",
@@ -283,7 +284,7 @@ final class NativeDataService {
                 dateKey: dateKey,
                 reference: "expense/\(row.id)",
                 imagePath: row.imageURL,
-                occurredAtLabel: occurredAtLabel,
+                occurredAtLabel: dateTimeLabel(row.occurredAt),
                 createdAtLabel: dateTimeLabel(row.createdAt) ?? "最近上传"
             )
         }
@@ -292,8 +293,8 @@ final class NativeDataService {
             txRows.filter { $0.status == "pending" }.count +
             stagingRows.filter { Self.isOpenStagingStatus($0.status) }.count
 
-        let monthExpenseCount = txRows.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.count
-        let monthIncomeCount = incomeRows.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.count
+        let monthExpenseCount = txRows.filter { financeDateKey($0)?.hasPrefix(monthPrefix) == true }.count
+        let monthIncomeCount = incomeRows.filter { financeDateKey($0)?.hasPrefix(monthPrefix) == true }.count
         let monthUniversalCount = universalRows.filter { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return false }
             return NativeLocalDate.dateKey(sourceDate).hasPrefix(monthPrefix)
@@ -302,19 +303,19 @@ final class NativeDataService {
 
         snapshot.monthExpense = txRows
             .filter {
-                $0.transactionDate?.hasPrefix(monthPrefix) == true &&
+                financeDateKey($0)?.hasPrefix(monthPrefix) == true &&
                     $0.status == "done" &&
                     $0.type == "expense"
             }
             .reduce(0) { $0 + ($1.amount ?? 0) }
         snapshot.monthIncome = incomeRows
-            .filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }
+            .filter { financeDateKey($0)?.hasPrefix(monthPrefix) == true }
             .reduce(0) { $0 + ($1.amount ?? 0) }
         snapshot.todayExpense = txRows
-            .filter { $0.transactionDate == today && $0.status == "done" && $0.type == "expense" }
+            .filter { financeDateKey($0) == today && $0.status == "done" && $0.type == "expense" }
             .reduce(0) { $0 + ($1.amount ?? 0) }
         snapshot.todayIncome = incomeRows
-            .filter { $0.incomeDate == today }
+            .filter { financeDateKey($0) == today }
             .reduce(0) { $0 + ($1.amount ?? 0) }
         snapshot.dailySummaries = dailySummaries(
             transactions: txRows,
@@ -393,9 +394,12 @@ final class NativeDataService {
             [TransactionRow].self,
             path: "rest/v1/transactions",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
-                URLQueryItem(name: "transaction_date", value: "gte.\(range.startDate)"),
-                URLQueryItem(name: "transaction_date", value: "lte.\(range.endDate)"),
+                URLQueryItem(name: "select", value: "id,created_at,occurred_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
+                URLQueryItem(name: "or", value: financeRangeFilter(
+                    occurredAtColumn: "occurred_at",
+                    legacyDateColumn: "transaction_date",
+                    range: range
+                )),
                 URLQueryItem(name: "order", value: NativeDashboardQueryOrder.transactions)
             ],
             accessToken: accessToken
@@ -407,7 +411,7 @@ final class NativeDataService {
             [TransactionRow].self,
             path: "rest/v1/transactions",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
+                URLQueryItem(name: "select", value: "id,created_at,occurred_at,transaction_date,transaction_time,type,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
                 URLQueryItem(name: "status", value: "eq.pending"),
                 URLQueryItem(name: "order", value: NativeDashboardQueryOrder.pendingTransactions)
             ],
@@ -420,9 +424,12 @@ final class NativeDataService {
             [IncomeRow].self,
             path: "rest/v1/income_records",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
-                URLQueryItem(name: "income_date", value: "gte.\(range.startDate)"),
-                URLQueryItem(name: "income_date", value: "lte.\(range.endDate)"),
+                URLQueryItem(name: "select", value: "id,created_at,occurred_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
+                URLQueryItem(name: "or", value: financeRangeFilter(
+                    occurredAtColumn: "occurred_at",
+                    legacyDateColumn: "income_date",
+                    range: range
+                )),
                 URLQueryItem(name: "order", value: NativeDashboardQueryOrder.incomes)
             ],
             accessToken: accessToken
@@ -435,8 +442,7 @@ final class NativeDataService {
             path: "rest/v1/data_records",
             queryItems: [
                 URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
-                URLQueryItem(name: "occurred_at", value: "gte.\(range.startTimestamp)"),
-                URLQueryItem(name: "occurred_at", value: "lte.\(range.endTimestamp)"),
+                URLQueryItem(name: "or", value: "and(occurred_at.gte.\(range.startTimestamp),occurred_at.lte.\(range.endTimestamp)),and(occurred_at.is.null,created_at.gte.\(range.startTimestamp),created_at.lte.\(range.endTimestamp))"),
                 URLQueryItem(name: "order", value: NativeDashboardQueryOrder.universal)
             ],
             accessToken: accessToken
@@ -473,6 +479,15 @@ final class NativeDataService {
         let endDate: String
         let startTimestamp: String
         let endTimestamp: String
+    }
+
+    private func financeRangeFilter(
+        occurredAtColumn: String,
+        legacyDateColumn: String,
+        range: MonthRange
+    ) -> String {
+        "and(\(occurredAtColumn).gte.\(range.startTimestamp),\(occurredAtColumn).lte.\(range.endTimestamp))," +
+            "and(\(occurredAtColumn).is.null,\(legacyDateColumn).gte.\(range.startDate),\(legacyDateColumn).lte.\(range.endDate))"
     }
 
     private func monthRange(for monthKey: String) throws -> MonthRange {
@@ -548,7 +563,6 @@ final class NativeDataService {
         let payload = record.archivePayload
         let occurredAt = payload.string("occurred_at")
             ?? payload.string("order_finished_at")
-            ?? ISO8601DateFormatter().string(from: Date())
         if ["expense", "income"].contains(domainKey), !(payload.double("amount").map { $0 > 0 } ?? false) {
             let title = domainKey == "expense" ? "消费" : "收入"
             throw SupabaseRemoteError.requestFailed("未识别到有效金额，请先重新识别或补全后再归档到\(title)")
@@ -587,7 +601,7 @@ final class NativeDataService {
                 [TransactionDetailRow].self,
                 path: "rest/v1/transactions",
                 queryItems: [
-                    URLQueryItem(name: "select", value: "id,created_at,transaction_date,transaction_time,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
+                    URLQueryItem(name: "select", value: "id,created_at,occurred_at,transaction_date,transaction_time,amount,merchant_name,platform,category,payment_method,status,source,image_url,image_hash,companion_message,note,is_large_transport,transport_type,account_id,ai_feedback"),
                     URLQueryItem(name: "id", value: "eq.\(id)"),
                     URLQueryItem(name: "limit", value: "1")
                 ],
@@ -601,13 +615,16 @@ final class NativeDataService {
                 rawId: row.id,
                 kind: "expense",
                 title: row.merchantName ?? row.category ?? "消费记录",
-                subtitle: row.transactionDate ?? row.createdAt ?? "",
+                subtitle: financeDateTimeLabel(
+                    occurredAt: row.occurredAt,
+                    date: row.transactionDate,
+                    fallback: row.createdAt
+                ),
                 value: currency(row.amount),
                 detailRows: [
                     NativeDetailRow(label: "平台", value: row.platform ?? "未填写"),
                     NativeDetailRow(label: "分类", value: row.category ?? "未填写"),
                     NativeDetailRow(label: "支付方式", value: row.paymentMethod ?? "未填写"),
-                    NativeDetailRow(label: "交易时间", value: row.transactionTime ?? ""),
                     NativeDetailRow(label: "关联账户", value: row.accountId ?? "未绑定"),
                     NativeDetailRow(label: "状态", value: row.status ?? "done"),
                     NativeDetailRow(label: "来源", value: row.source ?? ""),
@@ -622,15 +639,18 @@ final class NativeDataService {
                 platform: row.platform,
                 category: row.category,
                 paymentMethod: row.paymentMethod,
-                recordDate: row.transactionDate,
+                recordDate: NativeLocalDate.financeDateKey(
+                    occurredAt: row.occurredAt,
+                    legacyDate: row.transactionDate
+                ),
                 note: row.note,
                 companionMessage: row.companionMessage,
                 accountId: row.accountId,
                 systemImage: "creditcard",
                 payload: nil,
                 createdAt: row.createdAt,
-                occurredAt: row.transactionDate,
-                transactionTime: row.transactionTime,
+                occurredAt: row.occurredAt,
+                transactionTime: NativeLocalDate.financeTimeKey(occurredAt: row.occurredAt),
                 domainKey: "expense",
                 source: row.source,
                 status: row.status,
@@ -644,7 +664,7 @@ final class NativeDataService {
                 [IncomeDetailRow].self,
                 path: "rest/v1/income_records",
                 queryItems: [
-                    URLQueryItem(name: "select", value: "id,created_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
+                    URLQueryItem(name: "select", value: "id,created_at,occurred_at,income_date,amount,category,source_name,source,image_url,image_hash,companion_message,note,account_id,ai_feedback"),
                     URLQueryItem(name: "id", value: "eq.\(id)"),
                     URLQueryItem(name: "limit", value: "1")
                 ],
@@ -658,7 +678,11 @@ final class NativeDataService {
                 rawId: row.id,
                 kind: "income",
                 title: row.sourceName ?? "收入记录",
-                subtitle: row.incomeDate ?? row.createdAt ?? "",
+                subtitle: financeDateTimeLabel(
+                    occurredAt: row.occurredAt,
+                    date: row.incomeDate,
+                    fallback: row.createdAt
+                ),
                 value: "+\(currency(row.amount))",
                 detailRows: [
                     NativeDetailRow(label: "收入类型", value: row.category ?? "other"),
@@ -677,14 +701,17 @@ final class NativeDataService {
                 platform: nil,
                 category: row.category,
                 paymentMethod: nil,
-                recordDate: row.incomeDate,
+                recordDate: NativeLocalDate.financeDateKey(
+                    occurredAt: row.occurredAt,
+                    legacyDate: row.incomeDate
+                ),
                 note: row.note,
                 companionMessage: row.companionMessage,
                 accountId: row.accountId,
                 systemImage: "arrow.down.circle",
                 payload: nil,
                 createdAt: row.createdAt,
-                occurredAt: row.incomeDate,
+                occurredAt: row.occurredAt,
                 domainKey: "income",
                 source: row.source,
                 aiFeedback: NativeAIFeedback(payload: row.aiFeedback)
@@ -757,6 +784,10 @@ final class NativeDataService {
         switch draft.kind {
         case "expense":
             let isLargeTransport = ["transport", "出行"].contains(draft.category) && amount >= 200
+            let occurredAt = NativeLocalDate.financeOccurredAt(
+                dateKey: recordDate,
+                timeKey: draft.transactionTime
+            )
             let response = try await rpc(
                 RPCRecordResponse.self,
                 name: "save_transaction_with_account",
@@ -776,13 +807,18 @@ final class NativeDataService {
                     "p_image_url": AnyCodable(nullable(draft.imagePath)),
                     "p_image_hash": AnyCodable(nullable(draft.imageHash)),
                     "p_companion_message": AnyCodable(nullable(draft.companionMessage)),
-                    "p_account_id": AnyCodable(nullable(draft.accountId))
+                    "p_account_id": AnyCodable(nullable(draft.accountId)),
+                    "p_occurred_at": AnyCodable(nullable(occurredAt))
                 ],
                 accessToken: accessToken
             )
             return "expense/\(response.id)"
 
         case "income":
+            let occurredAt = NativeLocalDate.financeDateKey(
+                occurredAt: draft.occurredAt,
+                legacyDate: nil
+            ) == recordDate ? draft.occurredAt : nil
             let response = try await rpc(
                 RPCRecordResponse.self,
                 name: "save_income_with_account",
@@ -797,7 +833,8 @@ final class NativeDataService {
                     "p_image_url": AnyCodable(nullable(draft.imagePath)),
                     "p_image_hash": AnyCodable(nullable(draft.imageHash)),
                     "p_companion_message": AnyCodable(nullable(draft.companionMessage)),
-                    "p_account_id": AnyCodable(nullable(draft.accountId))
+                    "p_account_id": AnyCodable(nullable(draft.accountId)),
+                    "p_occurred_at": AnyCodable(nullable(occurredAt))
                 ],
                 accessToken: accessToken
             )
@@ -917,7 +954,7 @@ final class NativeDataService {
         record: NativeStagingRecord,
         domainKey: String,
         payload: [String: AnyCodable],
-        occurredAt: String
+        occurredAt: String?
     ) -> [String: AnyCodable] {
         let amount: Any = payload.double("amount").map { $0 as Any } ?? NSNull()
         let accountId: Any = payload.string("account_id").map { $0 as Any } ?? NSNull()
@@ -935,9 +972,15 @@ final class NativeDataService {
             "p_category": AnyCodable(category),
             "p_payment_method": AnyCodable(paymentMethod),
             "p_income_category": AnyCodable(incomeCategory),
-            "p_record_date": AnyCodable(NativeLocalDate.dateKey(occurredAt)),
+            "p_record_date": AnyCodable(
+                occurredAt.map(NativeLocalDate.dateKey)
+                    ?? payload.string("transaction_date")
+                    ?? payload.string("income_date")
+                    ?? payload.string("record_date")
+                    ?? record.dateKey
+            ),
             "p_record_time": AnyCodable(recordTime),
-            "p_occurred_at": AnyCodable(occurredAt),
+            "p_occurred_at": AnyCodable(occurredAt.map { $0 as Any } ?? NSNull()),
             "p_summary": AnyCodable(record.summary),
             "p_payload": AnyCodable(payload.mapValues(\.value)),
             "p_account_id": AnyCodable(accountId)
@@ -952,14 +995,14 @@ final class NativeDataService {
         monthPrefix: String
     ) -> [NativeDailySummary] {
         var dates = Set<String>()
-        transactions.compactMap(\.transactionDate).filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
-        incomes.compactMap(\.incomeDate).filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
+        transactions.compactMap(financeDateKey).filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
+        incomes.compactMap(financeDateKey).filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
         universal.compactMap { ($0.occurredAt ?? $0.createdAt).map(dateOnly) }.filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
         staging.compactMap { ($0.occurredAt ?? $0.createdAt).map(dateOnly) }.filter { $0.hasPrefix(monthPrefix) }.forEach { dates.insert($0) }
 
         return dates.sorted(by: >).map { date in
-            let dayTransactions = transactions.filter { $0.transactionDate == date }
-            let dayIncomes = incomes.filter { $0.incomeDate == date }
+            let dayTransactions = transactions.filter { financeDateKey($0) == date }
+            let dayIncomes = incomes.filter { financeDateKey($0) == date }
             let dayUniversal = universal.filter { ($0.occurredAt ?? $0.createdAt).map(dateOnly) == date }
             let dayStaging = staging.filter {
                 ($0.occurredAt ?? $0.createdAt).map(dateOnly) == date
@@ -981,13 +1024,13 @@ final class NativeDataService {
         transactions: [TransactionRow], incomes: [IncomeRow], universal: [DataRecordRow], staging: [StagingRow], monthPrefix: String
     ) -> [NativeDayRecordGroup] {
         var records: [NativeDayRecord] = []
-        transactions.filter { $0.transactionDate?.hasPrefix(monthPrefix) == true }.forEach { row in
-            guard let dateKey = row.transactionDate else { return }
-            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "expense/\(row.id)", dateKey: dateKey, kind: .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: row.transactionTime, systemImage: row.status == "pending" ? "clock" : "creditcard", transactionType: row.type, status: row.status))
+        transactions.filter { financeDateKey($0)?.hasPrefix(monthPrefix) == true }.forEach { row in
+            guard let dateKey = financeDateKey(row) else { return }
+            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "expense/\(row.id)", dateKey: dateKey, kind: .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: NativeLocalDate.financeTimeKey(occurredAt: row.occurredAt), systemImage: row.status == "pending" ? "clock" : "creditcard", transactionType: row.type, status: row.status))
         }
-        incomes.filter { $0.incomeDate?.hasPrefix(monthPrefix) == true }.forEach { row in
-            guard let dateKey = row.incomeDate else { return }
-            records.append(NativeDayRecord(id: "income-\(row.id)", reference: "income/\(row.id)", dateKey: dateKey, kind: .income, domainKey: "income", title: row.sourceName ?? "收入记录", subtitle: row.category ?? "收入", value: "+\(currency(row.amount))", timeLabel: nil, systemImage: "arrow.down.circle"))
+        incomes.filter { financeDateKey($0)?.hasPrefix(monthPrefix) == true }.forEach { row in
+            guard let dateKey = financeDateKey(row) else { return }
+            records.append(NativeDayRecord(id: "income-\(row.id)", reference: "income/\(row.id)", dateKey: dateKey, kind: .income, domainKey: "income", title: row.sourceName ?? "收入记录", subtitle: row.category ?? "收入", value: "+\(currency(row.amount))", timeLabel: NativeLocalDate.financeTimeKey(occurredAt: row.occurredAt), systemImage: "arrow.down.circle"))
         }
         universal.filter { ($0.occurredAt ?? $0.createdAt).map(dateOnly)?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
@@ -1018,6 +1061,9 @@ final class NativeDataService {
         switch draft.kind {
         case .expense:
             let amount = draft.amount ?? 0
+            let occurredAt = draft.includesTime
+                ? NativeLocalDate.financeOccurredAt(dateKey: draft.dateKey, timeKey: draft.timeKey)
+                : nil
             let response = try await rpc(
                 RPCRecordResponse.self,
                 name: "save_transaction_with_account",
@@ -1037,13 +1083,17 @@ final class NativeDataService {
                     "p_image_url": AnyCodable(NSNull()),
                     "p_image_hash": AnyCodable(NSNull()),
                     "p_companion_message": AnyCodable(NSNull()),
-                    "p_account_id": AnyCodable(nullable(draft.accountId))
+                    "p_account_id": AnyCodable(nullable(draft.accountId)),
+                    "p_occurred_at": AnyCodable(nullable(occurredAt))
                 ],
                 accessToken: accessToken
             )
             return "expense/\(response.id)"
 
         case .income:
+            let occurredAt = draft.includesTime
+                ? NativeLocalDate.financeOccurredAt(dateKey: draft.dateKey, timeKey: draft.timeKey)
+                : nil
             let response = try await rpc(
                 RPCRecordResponse.self,
                 name: "save_income_with_account",
@@ -1058,7 +1108,8 @@ final class NativeDataService {
                     "p_image_url": AnyCodable(NSNull()),
                     "p_image_hash": AnyCodable(NSNull()),
                     "p_companion_message": AnyCodable(NSNull()),
-                    "p_account_id": AnyCodable(nullable(draft.accountId))
+                    "p_account_id": AnyCodable(nullable(draft.accountId)),
+                    "p_occurred_at": AnyCodable(nullable(occurredAt))
                 ],
                 accessToken: accessToken
             )
@@ -1070,7 +1121,7 @@ final class NativeDataService {
                 "domain_id": AnyCodable(domainRow.id),
                 "domain_key": AnyCodable(domainRow.key),
                 "domain_version": AnyCodable(domainRow.version ?? "1.0"),
-                "occurred_at": AnyCodable(draft.occurredAt),
+                "occurred_at": AnyCodable(nullable(draft.occurredAt)),
                 "title": AnyCodable(draft.resolvedTitle(domain: domain)),
                 "summary": AnyCodable(draft.resolvedSummary(domain: domain)),
                 "payload_jsonb": AnyCodable(draft.universalPayload(domain: domain).mapValues(\.value)),
@@ -1117,7 +1168,7 @@ final class NativeDataService {
             let reference = "expense/\(row.id)"
             details[reference] = NativeRecordDetail(
                 id: reference, rawId: row.id, kind: "expense",
-                title: row.merchantName ?? "消费记录", subtitle: row.transactionDate ?? row.createdAt ?? "", value: currency(row.amount),
+                title: row.merchantName ?? "消费记录", subtitle: financeDateTimeLabel(occurredAt: row.occurredAt, date: row.transactionDate, fallback: row.createdAt), value: currency(row.amount),
                 detailRows: [
                     NativeDetailRow(label: "平台", value: row.platform ?? "未填写"),
                     NativeDetailRow(label: "分类", value: row.category ?? "未填写"),
@@ -1126,8 +1177,8 @@ final class NativeDataService {
                     NativeDetailRow(label: "来源", value: row.source ?? "")
                 ].filter { !$0.value.isEmpty },
                 imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: false, imagePath: row.imageURL, imageHash: row.imageHash,
-                amount: row.amount, merchantName: row.merchantName, platform: row.platform, category: row.category, paymentMethod: row.paymentMethod, recordDate: row.transactionDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: row.status == "pending" ? "clock" : "creditcard", payload: nil,
-                createdAt: row.createdAt, occurredAt: row.transactionDate, transactionTime: row.transactionTime,
+                amount: row.amount, merchantName: row.merchantName, platform: row.platform, category: row.category, paymentMethod: row.paymentMethod, recordDate: financeDateKey(row), note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: row.status == "pending" ? "clock" : "creditcard", payload: nil,
+                createdAt: row.createdAt, occurredAt: row.occurredAt, transactionTime: NativeLocalDate.financeTimeKey(occurredAt: row.occurredAt),
                 domainKey: "expense", source: row.source, status: row.status,
                 isLargeTransport: row.isLargeTransport ?? false, transportType: row.transportType,
                 aiFeedback: NativeAIFeedback(payload: row.aiFeedback)
@@ -1136,11 +1187,11 @@ final class NativeDataService {
         incomes.forEach { row in
             let reference = "income/\(row.id)"
             details[reference] = NativeRecordDetail(
-                id: reference, rawId: row.id, kind: "income", title: row.sourceName ?? "收入记录", subtitle: row.incomeDate ?? row.createdAt ?? "", value: "+\(currency(row.amount))",
+                id: reference, rawId: row.id, kind: "income", title: row.sourceName ?? "收入记录", subtitle: financeDateTimeLabel(occurredAt: row.occurredAt, date: row.incomeDate, fallback: row.createdAt), value: "+\(currency(row.amount))",
                 detailRows: [NativeDetailRow(label: "收入类型", value: row.category ?? "未填写"), NativeDetailRow(label: "来源", value: row.source ?? "")].filter { !$0.value.isEmpty },
                 imageURL: signedURLs[row.imageURL ?? ""], imageLoadError: false, imagePath: row.imageURL, imageHash: row.imageHash,
-                amount: row.amount, merchantName: row.sourceName, platform: nil, category: row.category, paymentMethod: nil, recordDate: row.incomeDate, note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: "arrow.down.circle", payload: nil,
-                createdAt: row.createdAt, occurredAt: row.incomeDate, domainKey: "income", source: row.source,
+                amount: row.amount, merchantName: row.sourceName, platform: nil, category: row.category, paymentMethod: nil, recordDate: financeDateKey(row), note: row.note, companionMessage: row.companionMessage, accountId: row.accountId, systemImage: "arrow.down.circle", payload: nil,
+                createdAt: row.createdAt, occurredAt: row.occurredAt, domainKey: "income", source: row.source,
                 aiFeedback: NativeAIFeedback(payload: row.aiFeedback)
             )
         }
@@ -1165,21 +1216,21 @@ final class NativeDataService {
         universal: [DataRecordRow],
         staging: [StagingRow]
     ) -> [NativeRecordSummary] {
-        let txItems = transactions.prefix(8).map {
+        let txItems = transactions.sorted { financeSortKey($0) > financeSortKey($1) }.prefix(8).map {
             NativeRecordSummary(
                 id: "expense/\($0.id)",
                 title: $0.merchantName ?? $0.category ?? "消费记录",
-                subtitle: $0.transactionDate ?? "最近",
+                subtitle: financeDateTimeLabel(occurredAt: $0.occurredAt, date: $0.transactionDate, fallback: nil),
                 value: currency($0.amount),
                 systemImage: $0.status == "pending" ? "clock" : "creditcard"
             )
         }
 
-        let incomeItems = incomes.prefix(4).map {
+        let incomeItems = incomes.sorted { financeSortKey($0) > financeSortKey($1) }.prefix(4).map {
             NativeRecordSummary(
                 id: "income/\($0.id)",
                 title: $0.sourceName ?? "收入记录",
-                subtitle: $0.incomeDate ?? "最近",
+                subtitle: financeDateTimeLabel(occurredAt: $0.occurredAt, date: $0.incomeDate, fallback: nil),
                 value: "+\(currency($0.amount))",
                 systemImage: "arrow.down.circle"
             )
@@ -1294,11 +1345,47 @@ final class NativeDataService {
     }
 
     private func dateTimeLabel(_ value: String?) -> String? {
-        guard let value, !value.isEmpty else { return nil }
-        if let time = NativeLocalDate.timeKey(value) {
-            return "\(NativeLocalDate.dateKey(value)) \(time)"
+        NativeLocalDate.dateTimeLabel(value)
+    }
+
+    private func financeDateTimeLabel(
+        occurredAt: String?,
+        date: String?,
+        fallback: String?
+    ) -> String {
+        if let occurredAt = NativeLocalDate.dateTimeLabel(occurredAt) {
+            return occurredAt
         }
-        return NativeLocalDate.dateKey(value)
+        if let date, !date.isEmpty {
+            return NativeLocalDate.dateKey(date)
+        }
+        return NativeLocalDate.dateTimeLabel(fallback) ?? ""
+    }
+
+    private func financeDateKey(_ row: TransactionRow) -> String? {
+        NativeLocalDate.financeDateKey(
+            occurredAt: row.occurredAt,
+            legacyDate: row.transactionDate
+        )
+    }
+
+    private func financeDateKey(_ row: IncomeRow) -> String? {
+        NativeLocalDate.financeDateKey(
+            occurredAt: row.occurredAt,
+            legacyDate: row.incomeDate
+        )
+    }
+
+    private func financeSortKey(_ row: TransactionRow) -> String {
+        let date = financeDateKey(row) ?? ""
+        let time = NativeLocalDate.financeTimeKey(occurredAt: row.occurredAt) ?? ""
+        return "\(date)T\(time)|\(row.createdAt ?? "")|\(row.id)"
+    }
+
+    private func financeSortKey(_ row: IncomeRow) -> String {
+        let date = financeDateKey(row) ?? ""
+        let time = NativeLocalDate.financeTimeKey(occurredAt: row.occurredAt) ?? ""
+        return "\(date)T\(time)|\(row.createdAt ?? "")|\(row.id)"
     }
 
     private func dateOnly(_ value: String) -> String {
@@ -1353,6 +1440,7 @@ final class NativeDataService {
 private struct TransactionRow: Decodable {
     let id: String
     let createdAt: String?
+    let occurredAt: String?
     let transactionDate: String?
     let transactionTime: String?
     let type: String?
@@ -1375,6 +1463,7 @@ private struct TransactionRow: Decodable {
     enum CodingKeys: String, CodingKey {
         case id
         case createdAt = "created_at"
+        case occurredAt = "occurred_at"
         case transactionDate = "transaction_date"
         case transactionTime = "transaction_time"
         case type
@@ -1399,6 +1488,7 @@ private struct TransactionRow: Decodable {
 private struct IncomeRow: Decodable {
     let id: String
     let createdAt: String?
+    let occurredAt: String?
     let incomeDate: String?
     let amount: Double?
     let category: String?
@@ -1414,6 +1504,7 @@ private struct IncomeRow: Decodable {
     enum CodingKeys: String, CodingKey {
         case id
         case createdAt = "created_at"
+        case occurredAt = "occurred_at"
         case incomeDate = "income_date"
         case amount
         case category
@@ -1457,6 +1548,7 @@ private struct DataRecordRow: Decodable {
 private struct TransactionDetailRow: Decodable {
     let id: String
     let createdAt: String?
+    let occurredAt: String?
     let transactionDate: String?
     let transactionTime: String?
     let amount: Double?
@@ -1478,6 +1570,7 @@ private struct TransactionDetailRow: Decodable {
     enum CodingKeys: String, CodingKey {
         case id
         case createdAt = "created_at"
+        case occurredAt = "occurred_at"
         case transactionDate = "transaction_date"
         case transactionTime = "transaction_time"
         case amount
@@ -1501,6 +1594,7 @@ private struct TransactionDetailRow: Decodable {
 private struct IncomeDetailRow: Decodable {
     let id: String
     let createdAt: String?
+    let occurredAt: String?
     let incomeDate: String?
     let amount: Double?
     let category: String?
@@ -1516,6 +1610,7 @@ private struct IncomeDetailRow: Decodable {
     enum CodingKeys: String, CodingKey {
         case id
         case createdAt = "created_at"
+        case occurredAt = "occurred_at"
         case incomeDate = "income_date"
         case amount
         case category

@@ -30,6 +30,34 @@ test('scores a new precise daily fact above notification threshold', () => {
   assert.equal(result.scoring.components.novelty, 1)
 })
 
+test('keeps first occurrence importance between history insights and record context fallback', () => {
+  const firstOccurrence = scoreCandidate(candidate({
+    candidate_id: 'first-occurrence',
+    dimension: 'first_occurrence',
+    claim: { semantic_key: 'expense_merchant_first_occurrence', structured_value: { entity_id: 'merchant_fixture_alpha' } },
+  }))
+  const recurrence = scoreCandidate(candidate({
+    candidate_id: 'recurrence',
+    dimension: 'repeat_interval',
+    claim: { semantic_key: 'expense_record_name_previous_gap', structured_value: { entity_id: 'merchant_fixture_alpha' } },
+  }))
+  const baseline = scoreCandidate(candidate({
+    candidate_id: 'baseline',
+    dimension: 'personal_baseline',
+    claim: { semantic_key: 'merchant_daily_vs_active_day_median', structured_value: { entity_id: 'merchant_fixture_alpha' } },
+  }))
+  const recordContext = scoreCandidate(candidate({
+    candidate_id: 'record-context',
+    dimension: 'record_context',
+    claim: { semantic_key: 'expense_current_record_context', structured_value: { entity_id: 'merchant_fixture_alpha' } },
+  }))
+
+  assert.equal(firstOccurrence.scoring.components.importance, 0.8)
+  assert.ok(baseline.scoring.surfaces.record_detail.score > firstOccurrence.scoring.surfaces.record_detail.score)
+  assert.ok(recurrence.scoring.surfaces.record_detail.score > firstOccurrence.scoring.surfaces.record_detail.score)
+  assert.ok(firstOccurrence.scoring.surfaces.record_detail.score > recordContext.scoring.surfaces.record_detail.score)
+})
+
 test('allows occasional repetition but lowers its score deterministically', () => {
   const result = scoreCandidate(candidate(), {
     context: { entity_id: 'merchant_fixture_alpha' },

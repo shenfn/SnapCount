@@ -127,13 +127,13 @@ async function loadPersistedRecord(supabase: DatabaseClient, userId: string, rec
   const targets = [
     {
       table: "transactions",
-      select: "id,created_at,transaction_date,ai_feedback,companion_message",
+      select: "id,created_at,occurred_at,transaction_date,ai_feedback,companion_message",
       domainKey: "expense",
       feedback: (row: Record<string, unknown>) => object(row.ai_feedback),
     },
     {
       table: "income_records",
-      select: "id,created_at,income_date,ai_feedback,companion_message",
+      select: "id,created_at,occurred_at,income_date,ai_feedback,companion_message",
       domainKey: "income",
       feedback: (row: Record<string, unknown>) => object(row.ai_feedback),
     },

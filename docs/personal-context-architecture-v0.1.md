@@ -1,10 +1,10 @@
 # Personal Context Architecture v0.1
 
-> 状态：Phase 0-1 实施中
+> 状态：Phase 1 owner-only 生产闭环；v2 首候选正式 delivery 本地回归中
 > 范围：个人上下文、域画像、Planner、陪伴表达之间的职责与数据契约
 > 本文是实现约束与评审基线；生产部署、迁移执行和 TestFlight 仍需单独授权
 
-截至 2026-08-07，`context-packet-v1`、Signals 数字闭环、识别/表达分离、语义 Memory 读取与删除契约已经落到 Edge Function 和迁移草案中。本文中标记为“目标/待接入”的 Planner Surface、六域完整候选和生产 Canary 仍未视为完成。
+截至 2026-08-08，owner-only `record_detail` 已完成生产 Canary 的 `GET -> 可见 ACK -> 点评` 基础闭环。本地分支已升级到 `context-packet-v2` 与 `expression-shadow-auto-v0.6`：插入前 Planner 只读选角度，一次 Voice 负责表达，落库后同一正式候选以 `companion_message` 或 `feedback_card` 作为 presentation target 创建快照；只有真实容器进入视口后才 ACK 和计曝光。该版本尚未部署，六域共享框架已接通，候选完整度仍需继续用真实样本验证。
 
 ## 1. 目标
 
@@ -234,15 +234,15 @@ recent_expression_context:
 
 | 字段 | 必填 | 内容边界 | 最大规模 |
 | --- | --- | --- | --- |
-| `packet_version` | 是 | 契约版本，例如 `context-packet-v1` | 1 个 |
+| `packet_version` | 是 | 契约版本，例如 `context-packet-v2` | 1 个 |
 | `record_facts` | 是 | 当前记录已确认字段、事件时间、域、识别状态 | 当前记录 1 条 |
-| `selected_candidates` | 否 | Planner 已选事实、数字、口径、证据和 Surface | 每个域最多 2 条，总计最多 4 条 |
+| `selected_candidates` | 否 | Planner 已选事实、数字、口径、证据和 Surface | 单次 Packet 总计最多 2 条；当前 Voice 只接收 1 条主候选 |
 | `semantic_context` | 否 | 当前实体匹配且有权使用的语义记忆 | 最多 3 条 |
 | `expression_preferences` | 是 | 人格、风格、长度、禁区和当前 Surface | 只传当前 Surface 所需字段 |
 | `recent_expression_context` | 否 | 最近展示的候选指纹和短句指纹 | 最近 5 条或 7 天内，以较小者为准 |
 | `trace` | 是 | 来源域、候选类型、Memory ID、计算时间和内容指纹 | 不向用户展示 |
 
-Packet 生成失败时必须返回可审计的 `fallback_reason`，并退回规则表达；不能把原始 Memory JSON 作为备用输入。当前 v1 已生成同步内容指纹，用于追踪 Packet 是否被重复或覆盖；时间戳只放在 trace，不参与指纹。后续接入画像/候选版本后，版本字段必须加入指纹输入。
+Packet 生成失败或 Planner 没有合格候选时，`trace.fallback_reason` 必须记录稳定原因，并退回当前记录/规则表达；不能把原始 Memory JSON 作为备用输入。v2 已把候选 `semantic_key`、来源、Surface、Planner 版本以及 `number_facts.role=count|measure` 纳入同步内容指纹；时间戳只放在 trace，不参与指纹。
 
 ### 6.2 候选与语义记忆的组合规则
 
@@ -269,6 +269,17 @@ Packet 生成失败时必须返回可审计的 `fallback_reason`，并退回规�
 | `buildFeedbackPrompt` | `VOICE_SIGNALS_ENABLED=false` 时的兼容 fallback | 只接收由代码构造的同一 Packet；旧开关关闭后逐步下线，不能恢复原始 Memory JSON 注入 |
 
 识别调用和表达调用可以是同一次请求中的两次模型调用，但职责必须分开：第一次识别出当前事实，代码随后计算画像、信号、候选和语义匹配，第二次才表达。不存在“先把完整 Memory 交给视觉模型，让它自己判断”的兜底路径。
+
+### 6.5 可见表达与候选 delivery
+
+Voice 已经表达 Planner 首候选时，不应把该候选从学习闭环中删除。正确关系是“同一候选、不同承载位置”：
+
+- `presentation_target=companion_message`：正文只出现在原 AI 陪伴容器，候选身份和点评控件复用同一 delivery；
+- `presentation_target=feedback_card`：客户端渲染独立 Planner 卡片；
+- 两种 target 都必须先创建只读 snapshot，真实容器进入视口后才 ACK 和写曝光；
+- snapshot 必须冻结实际可见 payload、visible field paths、claim 指纹和文本指纹；
+- coverage 只能把最终可见文案关联到正式首候选，不能用于选择第二候选，也不能直接计曝光；
+- 记录、候选、持久文案或指纹变化时，旧 snapshot 失效并重新 GET，客户端不得继续复用 stale pending。
 
 ## 7. 写入与生命周期
 
@@ -487,7 +498,9 @@ Packet 生成失败时必须返回可审计的 `fallback_reason`，并退回规�
 ### 14.1 必须记录的内部指标
 
 - `context_packet_version` 与 `memory_schema_version`；
-- 当前记录域、候选 ID、候选来源和候选口径；
+- 当前记录域、候选 ID、候选来源、候选口径和 `planner_version`；
+- `packet_fingerprint`、`coverage_version`、`expressed_semantic_key(s)`、`claim_fingerprint`、`presentation_target`、`rendered_text_fingerprint` 与 `source_surface`；
+- 插入前 synthetic 候选只用稳定 `semantic_key` 与落库后计划关联，不以会变化的 `candidate_id` 关联；正式曝光仍记录真实候选 ID；
 - 语义记忆命中数、被过滤数及过滤原因；
 - 模型表达成功率、规则兜底率、数字校验失败率；
 - 用户纠错率、候选价值正负反馈和表达风格反馈；
@@ -529,14 +542,14 @@ Packet 生成失败时必须返回可审计的 `fallback_reason`，并退回规�
 
 六个域都必须至少有一组上述用例；不能只用 expense 域证明框架正确。
 
-## 16. 开发前冻结清单
+## 16. 开发前冻结清单（历史门槛）
 
 以下事项完成后，文档才进入“可开发”状态：
 
-- [ ] 确定 Context Packet 的最终字段名、版本和空值规则；
-- [ ] 确定旧 Memory 行的标准化映射和未知来源处理；
-- [ ] 确定查看/删除页面的接口行为和删除后的缓存失效范围；
-- [ ] 确定候选、语义记忆、偏好和近期上下文的日志字段；
-- [ ] 为六个域准备契约样本和失败样本；
-- [ ] 确定 Shadow、canary、回滚开关和上线门槛；
-- [ ] 通过一次代码评审，确认任何模型调用都不能绕过 Context Assembler。
+- [x] 确定 Context Packet v2 的字段名、版本、空值和 `fallback_reason` 规则；
+- [x] 确定旧 Memory 行的标准化映射和未知来源处理；
+- [x] 确定查看/删除页面的接口行为和删除后的缓存失效范围；
+- [x] 确定候选、语义记忆、偏好、近期上下文和表达来源日志字段；
+- [ ] 补齐六个域的全部候选质量样本；共享契约与基础正反例已具备，真实覆盖仍在积累；
+- [x] 确定 Shadow、owner-only canary、回滚开关和上线门槛；
+- [x] 通过架构与代码复审，模型调用统一经过 Context Assembler；coverage 不信任模型声明，只有最终可见陪伴语通过候选事实、claim 与文本指纹校验时成立。

@@ -10,6 +10,7 @@ import merchantAliasConfig from "../../../tools/ai-validation/expression-planner
 import {
   generateCurrentExpenseRecordCandidate,
   generateFactCandidates,
+  generateMerchantFirstOccurrenceCandidate,
 } from "../../../tools/ai-validation/expression-planner/lib/fact-candidates.mjs";
 // @ts-ignore See note above.
 import { generateRecordNameRecurrenceCandidates } from "../../../tools/ai-validation/expression-planner/lib/recurrence-candidates.mjs";
@@ -29,14 +30,19 @@ import { evaluateCandidates, summarizeEligibility } from "../../../tools/ai-vali
 // @ts-ignore See note above.
 import { scoreCandidates, summarizeScores } from "../../../tools/ai-validation/expression-planner/lib/deterministic-scoring.mjs";
 // @ts-ignore See note above.
-import { buildExpressionPlans, summarizePlans } from "../../../tools/ai-validation/expression-planner/lib/expression-plan.mjs";
+import {
+  buildExpressionPlans,
+  buildSurfacePlan,
+  summarizePlans,
+  SURFACE_CAPACITY,
+} from "../../../tools/ai-validation/expression-planner/lib/expression-plan.mjs";
 // @ts-ignore See note above.
 import { buildRenderPlans } from "../../../tools/ai-validation/expression-planner/lib/render-contract.mjs";
 // @ts-ignore Pure shared data contract is bundled with the Edge Function.
 import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories.js";
 
 export interface ShadowExpenseTransaction {
-  id: string; transaction_date: string; transaction_time?: string | null; created_at?: string | null;
+  id: string; transaction_date: string; transaction_time?: string | null; occurred_at?: string | null; created_at?: string | null;
   amount: number | string | null; merchant_name?: string | null; category?: string | null;
   platform?: string | null; payment_method?: string | null; status?: string | null; type?: string | null;
   staging_record_id?: string | null; image_hash?: string | null; batch_alias?: string | null;
@@ -59,7 +65,7 @@ interface ShadowPlannerInput extends ShadowPlannerOptions {
 }
 interface GenericPlannerInput extends ShadowPlannerOptions { domainKey: string; records: ShadowGenericRecord[]; currentRecordId: string; domainProfile?: Record<string, unknown>; }
 
-export const EXPRESSION_PLANNER_VERSION = "expression-shadow-auto-v0.5";
+export const EXPRESSION_PLANNER_VERSION = "expression-shadow-auto-v0.6";
 const MERCHANT_ALIAS_MAP = compileMerchantAliases(merchantAliasConfig);
 
 export interface PlannerSourceDependency {
@@ -80,23 +86,22 @@ function objectOrEmpty(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function explicitTransactionTime(row: ShadowExpenseTransaction): string | null {
-  if (typeof row.transaction_time !== "string" || !row.transaction_time.trim() || !row.transaction_date) return null;
-  const occurredAt = `${row.transaction_date}T${row.transaction_time.trim()}+08:00`;
-  return Number.isFinite(new Date(occurredAt).getTime()) ? occurredAt : null;
+function canonicalOccurredAt(row: ShadowExpenseTransaction): string | null {
+  const occurredAt = stringOrNull(row.occurred_at);
+  return occurredAt && Number.isFinite(new Date(occurredAt).getTime()) ? occurredAt : null;
 }
 function occurredAtOf(row: ShadowExpenseTransaction): string {
-  return explicitTransactionTime(row)
-    ?? (row.transaction_date ? `${row.transaction_date}T12:00:00+08:00` : row.created_at || "");
+  return canonicalOccurredAt(row)
+    ?? (row.transaction_date ? `${row.transaction_date}T12:00:00+08:00` : "");
 }
 function toRecord(row: ShadowExpenseTransaction, aliasMap: Map<string, unknown>) {
   const category = normalizeExpenseCategory(row.category);
-  const hasPreciseEventTime = explicitTransactionTime(row) !== null;
+  const hasPreciseEventTime = canonicalOccurredAt(row) !== null;
   return { id: row.id, transaction_date: row.transaction_date, occurred_at: occurredAtOf(row), amount: numberOrNull(row.amount),
     merchant: resolveMerchant(row.merchant_name, aliasMap), category, platform: row.platform ?? null, payment_method: row.payment_method ?? null,
     status: row.status ?? null, created_at: row.created_at ?? null,
     has_precise_event_time: hasPreciseEventTime,
-    event_time_source: hasPreciseEventTime ? "transaction_time" : "date_noon_proxy",
+    event_time_source: hasPreciseEventTime ? "occurred_at" : "date_noon_proxy",
     event_time_confidence: hasPreciseEventTime ? 0.95 : 0.35,
     observation_group: row.staging_record_id ?? row.image_hash ?? row.batch_alias ?? null,
     fact_contract: buildExpenseFactContract({ status: row.status, category }) };
@@ -121,12 +126,14 @@ export function buildExpensePlannerSourceRecord(row: ShadowExpenseTransaction) {
 
 export function buildIncomePlannerSourceRecord(row: Record<string, unknown>): ShadowGenericRecord {
   const incomeDate = stringOrNull(row.income_date);
+  const canonicalOccurredAt = stringOrNull(row.occurred_at);
   return {
     id: stringOrNull(row.id) ?? "",
     created_at: stringOrNull(row.created_at),
-    occurred_at: incomeDate
+    occurred_at: canonicalOccurredAt
+      ?? (incomeDate
       ? `${incomeDate}T12:00:00+08:00`
-      : stringOrNull(row.created_at) ?? "",
+      : ""),
     amount: numberOrNull(row.amount),
     source_name: stringOrNull(row.source_name),
     payload: { category: stringOrNull(row.category) },
@@ -176,6 +183,13 @@ export function plannerSourceFingerprint(value: unknown): string {
     hash = BigInt.asUintN(64, hash * 0x100000001b3n);
   }
   return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
+}
+
+export function plannerClaimFingerprint(semanticKey: string, canonicalText: string): string {
+  return plannerSourceFingerprint({
+    semantic_key: semanticKey.trim(),
+    canonical_text: canonicalText.trim(),
+  });
 }
 
 function evidenceRecordId(value: unknown): string | null {
@@ -306,6 +320,46 @@ function finalizePlan(
   };
 }
 
+export function recomposeExpressionPlanSurface(
+  plan: Record<string, unknown>,
+  surface: string,
+  coveredSemanticKeys: string[],
+) {
+  const candidates = Array.isArray(plan.candidates)
+    ? plan.candidates as Record<string, unknown>[]
+    : [];
+  const surfaceCapacity = (SURFACE_CAPACITY as Record<string, Record<string, unknown>>)[surface] ?? {};
+  const existingSurfacePlan = surface === "shortcut_notification"
+    ? objectOrEmpty(plan.shortcut_plan)
+    : objectOrEmpty(objectOrEmpty(plan.render_plans)[surface]);
+  const configuredCoverage = Array.isArray(existingSurfacePlan.covered_semantic_keys)
+    ? existingSurfacePlan.covered_semantic_keys
+    : surfaceCapacity.covered_semantic_keys;
+  const fixedCoverage = Array.isArray(configuredCoverage)
+    ? configuredCoverage.filter((value): value is string => typeof value === "string")
+    : [];
+  const coverage = [...new Set([...fixedCoverage, ...coveredSemanticKeys.filter(Boolean)])];
+  const expressionPlan = buildSurfacePlan(candidates, surface, { covered_semantic_keys: coverage });
+  const renderPlan = buildRenderPlans({ [surface]: expressionPlan }, candidates)[surface];
+  return {
+    ...plan,
+    render_plans: {
+      ...objectOrEmpty(plan.render_plans),
+      [surface]: {
+        ...renderPlan,
+        covered_semantic_keys: coverage,
+      },
+    },
+    surface_composition: {
+      ...objectOrEmpty(plan.surface_composition),
+      [surface]: {
+        covered_semantic_keys: coverage,
+        reason: coveredSemanticKeys.length > 0 ? "covered_by_companion" : "fixed_surface_content",
+      },
+    },
+  };
+}
+
 export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
   const normalizedRecords = input.transactions
     .filter(row => row.type === undefined || row.type === null || row.type === "expense")
@@ -316,8 +370,11 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
   const currentOccurredAt = new Date(currentRecord.occurred_at).getTime();
   const causalRecords = normalizedRecords.filter(row => row.id === currentRecord.id || wasKnownBeforeCurrent(row, currentRecord, currentOccurredAt));
   const records = causalRecords.filter(row => row.amount !== null && row.fact_contract.fact_status === "confirmed" && row.merchant.entity_id);
-  const priorMerchants = records
-    .filter(row => row.id !== currentRecord.id && new Date(row.occurred_at).getTime() < currentOccurredAt)
+  // Merchant novelty is about whether the entity was seen before, not whether
+  // the earlier record was complete enough for financial aggregation.
+  const priorMerchants = causalRecords
+    .filter(row => row.id !== currentRecord.id)
+    .filter(row => Boolean(row.merchant.entity_id))
     .map(row => row.merchant);
   const merchantObservation = summarizeMerchantObservation(currentRecord.merchant, priorMerchants);
   const currentDayEvents = entityId
@@ -327,6 +384,10 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
   const currentRecordCandidates = generateCurrentExpenseRecordCandidate(toFactEvent(currentRecord), {
     timeZone: "Asia/Shanghai",
   });
+  const firstOccurrenceCandidates = generateMerchantFirstOccurrenceCandidate(
+    toFactEvent(currentRecord),
+    merchantObservation,
+  );
   const currentRecordConfirmed = currentRecord.fact_contract.fact_status === "confirmed";
   let factCandidates = currentRecordConfirmed && entityId ? generateFactCandidates(currentDayEvents, {
     entityId,
@@ -360,7 +421,7 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
     category: currentRecord.category,
     fact_contract: currentRecord.fact_contract,
     occurred_at: currentRecord.occurred_at,
-  }, [...currentRecordCandidates, ...factCandidates, ...recurrenceCandidates, ...comparisonCandidates, ...categoryComparisonCandidates], input, [],
+  }, [...currentRecordCandidates, ...firstOccurrenceCandidates, ...factCandidates, ...recurrenceCandidates, ...comparisonCandidates, ...categoryComparisonCandidates], input, [],
   buildExpensePlannerSourceRecord(input.transactions.find(row => row.id === input.currentRecordId)!), "transactions",
   input.transactions.map(buildExpensePlannerSourceRecord));
 }

@@ -14,16 +14,17 @@ final class UnboundRecordRepository: UnboundRecordRepositoryProtocol {
 
     func fetch(monthKey: String, accessToken: String) async throws -> [NativeUnboundRecord] {
         let range = try monthRange(monthKey)
+        let startTimestamp = NativeLocalDate.financeOccurredAt(dateKey: range.start, timeKey: "00:00:00") ?? ""
+        let endTimestamp = NativeLocalDate.financeOccurredAt(dateKey: range.end, timeKey: "23:59:59") ?? ""
         async let expenses = remoteClient.get(
             [UnboundExpenseRow].self,
             path: "rest/v1/transactions",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,amount,merchant_name,platform,category,payment_method,transaction_date,transaction_time,note,source,image_url,image_hash,companion_message"),
+                URLQueryItem(name: "select", value: "id,amount,merchant_name,platform,category,payment_method,occurred_at,transaction_date,transaction_time,note,source,image_url,image_hash,companion_message"),
                 URLQueryItem(name: "status", value: "eq.done"),
                 URLQueryItem(name: "account_id", value: "is.null"),
-                URLQueryItem(name: "transaction_date", value: "gte.\(range.start)"),
-                URLQueryItem(name: "transaction_date", value: "lte.\(range.end)"),
-                URLQueryItem(name: "order", value: "transaction_date.desc,transaction_time.desc"),
+                URLQueryItem(name: "or", value: "and(occurred_at.gte.\(startTimestamp),occurred_at.lte.\(endTimestamp)),and(occurred_at.is.null,transaction_date.gte.\(range.start),transaction_date.lte.\(range.end))"),
+                URLQueryItem(name: "order", value: "occurred_at.desc.nullslast,transaction_date.desc,id.desc"),
                 URLQueryItem(name: "limit", value: "100")
             ],
             accessToken: accessToken
@@ -32,11 +33,10 @@ final class UnboundRecordRepository: UnboundRecordRepositoryProtocol {
             [UnboundIncomeRow].self,
             path: "rest/v1/income_records",
             queryItems: [
-                URLQueryItem(name: "select", value: "id,amount,category,source_name,income_date,note,source,image_url,image_hash,companion_message"),
+                URLQueryItem(name: "select", value: "id,amount,category,source_name,occurred_at,income_date,note,source,image_url,image_hash,companion_message"),
                 URLQueryItem(name: "account_id", value: "is.null"),
-                URLQueryItem(name: "income_date", value: "gte.\(range.start)"),
-                URLQueryItem(name: "income_date", value: "lte.\(range.end)"),
-                URLQueryItem(name: "order", value: "income_date.desc"),
+                URLQueryItem(name: "or", value: "and(occurred_at.gte.\(startTimestamp),occurred_at.lte.\(endTimestamp)),and(occurred_at.is.null,income_date.gte.\(range.start),income_date.lte.\(range.end))"),
+                URLQueryItem(name: "order", value: "occurred_at.desc.nullslast,income_date.desc,id.desc"),
                 URLQueryItem(name: "limit", value: "100")
             ],
             accessToken: accessToken
@@ -73,7 +73,8 @@ final class UnboundRecordRepository: UnboundRecordRepositoryProtocol {
                     "p_image_url": AnyCodable(nullable(record.imagePath)),
                     "p_image_hash": AnyCodable(nullable(record.imageHash)),
                     "p_companion_message": AnyCodable(nullable(record.companionMessage)),
-                    "p_account_id": AnyCodable(accountId)
+                    "p_account_id": AnyCodable(accountId),
+                    "p_occurred_at": AnyCodable(nullable(record.occurredAt))
                 ],
                 accessToken: accessToken
             )
@@ -92,7 +93,8 @@ final class UnboundRecordRepository: UnboundRecordRepositoryProtocol {
                     "p_image_url": AnyCodable(nullable(record.imagePath)),
                     "p_image_hash": AnyCodable(nullable(record.imageHash)),
                     "p_companion_message": AnyCodable(nullable(record.companionMessage)),
-                    "p_account_id": AnyCodable(accountId)
+                    "p_account_id": AnyCodable(accountId),
+                    "p_occurred_at": AnyCodable(nullable(record.occurredAt))
                 ],
                 accessToken: accessToken
             )
@@ -126,6 +128,7 @@ private struct UnboundExpenseRow: Decodable {
     let platform: String?
     let category: String?
     let paymentMethod: String?
+    let occurredAt: String?
     let transactionDate: String?
     let transactionTime: String?
     let note: String?
@@ -138,6 +141,7 @@ private struct UnboundExpenseRow: Decodable {
         case id, amount, platform, category, note, source
         case merchantName = "merchant_name"
         case paymentMethod = "payment_method"
+        case occurredAt = "occurred_at"
         case transactionDate = "transaction_date"
         case transactionTime = "transaction_time"
         case imageURL = "image_url"
@@ -148,7 +152,9 @@ private struct UnboundExpenseRow: Decodable {
     var native: NativeUnboundRecord {
         NativeUnboundRecord(
             id: id, kind: .expense, title: merchantName ?? "未命名支出", amount: amount ?? 0,
-            date: transactionDate ?? "", time: transactionTime, platform: platform, category: category,
+            date: NativeLocalDate.financeDateKey(occurredAt: occurredAt, legacyDate: transactionDate) ?? "",
+            time: NativeLocalDate.financeTimeKey(occurredAt: occurredAt), occurredAt: occurredAt,
+            platform: platform, category: category,
             paymentMethod: paymentMethod, note: note, source: source, imagePath: imageURL,
             imageHash: imageHash, companionMessage: companionMessage
         )
@@ -160,6 +166,7 @@ private struct UnboundIncomeRow: Decodable {
     let amount: Double?
     let category: String?
     let sourceName: String?
+    let occurredAt: String?
     let incomeDate: String?
     let note: String?
     let source: String?
@@ -170,6 +177,7 @@ private struct UnboundIncomeRow: Decodable {
     enum CodingKeys: String, CodingKey {
         case id, amount, category, note, source
         case sourceName = "source_name"
+        case occurredAt = "occurred_at"
         case incomeDate = "income_date"
         case imageURL = "image_url"
         case imageHash = "image_hash"
@@ -179,7 +187,9 @@ private struct UnboundIncomeRow: Decodable {
     var native: NativeUnboundRecord {
         NativeUnboundRecord(
             id: id, kind: .income, title: sourceName ?? "未命名收入", amount: amount ?? 0,
-            date: incomeDate ?? "", time: nil, platform: nil, category: category,
+            date: NativeLocalDate.financeDateKey(occurredAt: occurredAt, legacyDate: incomeDate) ?? "",
+            time: NativeLocalDate.financeTimeKey(occurredAt: occurredAt), occurredAt: occurredAt,
+            platform: nil, category: category,
             paymentMethod: nil, note: note, source: source, imagePath: imageURL,
             imageHash: imageHash, companionMessage: companionMessage
         )

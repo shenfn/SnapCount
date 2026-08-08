@@ -57,7 +57,7 @@ export function getRecentRecords(store, domain) {
     title: item.name,
     subtitle: `${item.platform || '其他'} · ${item.cat || '其他'}`,
     value: `-¥${item.amount.toFixed(2)}`,
-    date: item.createdAt ? formatDateTimeLabel(item.createdAt) : item.date,
+    date: item.occurredAt ? formatDateTimeLabel(item.occurredAt) : item.date,
   }))
 }
 

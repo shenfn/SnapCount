@@ -194,17 +194,16 @@ struct NativeManualRecordDraft {
         note = payload.string("note")
             ?? (kind == .universal ? payload.string("summary") ?? "" : record.summary)
 
-        if let parsedDate = Self.dateFormatter.date(from: record.dateKey) {
+        let occurredAt = payload.string("occurred_at") ?? payload.string("order_finished_at")
+        let preferredDate = NativeLocalDate.financeDateKey(
+            occurredAt: occurredAt,
+            legacyDate: record.dateKey
+        ) ?? record.dateKey
+        if let parsedDate = Self.dateFormatter.date(from: preferredDate) {
             date = parsedDate
         }
-        let occurredAt = payload.string("occurred_at") ?? payload.string("order_finished_at")
-        let rawTime = payload.string("transaction_time")
-            ?? occurredAt.flatMap { value in
-                guard value.count >= 16 else { return nil }
-                let start = value.index(value.startIndex, offsetBy: 11)
-                let end = value.index(start, offsetBy: 5)
-                return String(value[start..<end]) + ":00"
-            }
+        let rawTime = NativeLocalDate.financeTimeKey(occurredAt: occurredAt).map { $0 + ":00" }
+            ?? payload.string("transaction_time")
         if let rawTime, let parsedTime = Self.timeFormatter.date(from: rawTime.count == 5 ? rawTime + ":00" : rawTime) {
             time = parsedTime
             includesTime = true
@@ -291,9 +290,9 @@ struct NativeManualRecordDraft {
     var dateKey: String { Self.dateFormatter.string(from: date) }
     var timeKey: String? { includesTime ? Self.timeFormatter.string(from: time) : nil }
 
-    var occurredAt: String {
-        let timeValue = includesTime ? Self.timeFormatter.string(from: time) : "12:00:00"
-        return "\(dateKey)T\(timeValue)\(Self.timeZoneOffset)"
+    var occurredAt: String? {
+        guard includesTime else { return nil }
+        return NativeLocalDate.financeOccurredAt(dateKey: dateKey, timeKey: timeKey)
     }
 
     private func positiveNumber(_ text: String) -> Double? {
@@ -305,6 +304,7 @@ struct NativeManualRecordDraft {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
@@ -313,16 +313,11 @@ struct NativeManualRecordDraft {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
         formatter.dateFormat = "HH:mm:ss"
         return formatter
     }()
 
-    private static var timeZoneOffset: String {
-        let seconds = TimeZone.current.secondsFromGMT()
-        let sign = seconds >= 0 ? "+" : "-"
-        let absolute = abs(seconds)
-        return String(format: "%@%02d:%02d", sign, absolute / 3600, (absolute % 3600) / 60)
-    }
 }
 
 extension NativeStagingRecord {
@@ -353,7 +348,7 @@ extension NativeStagingRecord {
             payload["title"] = AnyCodable(draft.resolvedTitle(domain: domain))
         }
 
-        payload["occurred_at"] = AnyCodable(draft.occurredAt)
+        payload["occurred_at"] = AnyCodable(draft.occurredAt.map { $0 as Any } ?? NSNull())
         payload["summary"] = AnyCodable(cleanSummary)
 
         return NativeStagingRecord(

@@ -78,6 +78,15 @@ export interface DomainSignal {
   fact: string;     // 已算好数字的中文事实句,模型只能转述
   numbers: number[]; // 本信号允许出现在文案里的数字
   countNumbers?: number[]; // 允许出现在"第X次/连续X天"计数表达里的数(严格白名单)
+  numberFacts?: DomainSignalNumberFact[]; // 数字与语义、单位、统计口径的候选级绑定
+}
+
+export interface DomainSignalNumberFact {
+  value: number;
+  meaning: string | null;
+  role: "count" | "measure";
+  unit?: string;
+  scope?: string;
 }
 
 export interface CurrentFacts {
@@ -179,6 +188,33 @@ function expenseSignals(profile: Record<string, unknown>, cur: CurrentFacts): Do
         fact: `本自然周(周一起算)在「${cur.merchant}」已是第 ${n} 次消费(含本笔);该店近90天平均单笔 ${merchantSummary?.averageAmount ?? "?"} 元`,
         numbers: nums,
         countNumbers: [n],
+        numberFacts: [
+          {
+            value: n,
+            meaning: "current_week_merchant_occurrence_count",
+            role: "count",
+            unit: "occurrence",
+            scope: "week:current",
+          },
+          ...(merchantSummary?.averageAmount !== null && merchantSummary?.averageAmount !== undefined
+            ? [{
+              value: merchantSummary.averageAmount,
+              meaning: "rolling_90d_merchant_average_amount",
+              role: "measure" as const,
+              unit: "currency",
+              scope: "rolling:90d",
+            }]
+            : []),
+          ...(cur.amount !== null && cur.amount !== undefined
+            ? [{
+              value: cur.amount,
+              meaning: "current_record_amount",
+              role: "measure" as const,
+              unit: "currency",
+              scope: "record:current",
+            }]
+            : []),
+        ],
       });
     }
   }
@@ -702,6 +738,23 @@ export function hasModelOwnedStatisticalClaim(text: string): boolean {
 
 type StatisticalScope = string;
 
+type StatisticalUnit = "occurrence" | "day" | "week" | "month" | "currency";
+
+interface BoundStatisticalClaim {
+  value: number;
+  meaning: string;
+  unit: StatisticalUnit | string;
+  scope: StatisticalScope;
+}
+
+interface ScopeMarker {
+  start: number;
+  end: number;
+  scope: StatisticalScope;
+  numberStart?: number;
+  numberEnd?: number;
+}
+
 function parseChineseCardinal(s: string): number | null {
   if (/^\d+$/.test(s)) return Number(s);
   const digits: Record<string, number> = {
@@ -734,6 +787,240 @@ function rollingWindowKey(value: string, unit: string): string | null {
   return null;
 }
 
+function scopeMarkers(text: string): ScopeMarker[] {
+  const markers: ScopeMarker[] = [];
+  const pushStatic = (pattern: RegExp, scope: StatisticalScope) => {
+    for (const match of text.matchAll(pattern)) {
+      const start = match.index ?? 0;
+      markers.push({ start, end: start + match[0].length, scope });
+    }
+  };
+  pushStatic(/(?:本|这)(?:自然)?周/g, "week:current");
+  pushStatic(/上(?:自然)?周/g, "week:previous");
+  pushStatic(/(?:本|这)个?月|本月/g, "month:current");
+  pushStatic(/上个?月|上月/g, "month:previous");
+  pushStatic(/(?:今天|今晚|今早)/g, "day:today");
+  pushStatic(/(?:本|这)(?:笔|次|晚|顿|条)|当前记录/g, "record:current");
+  pushStatic(/历史/g, "history");
+  for (const match of text.matchAll(/(?:近|过去)([一二两三四五六七八九十百\d]+)(天|周|月|晚)/g)) {
+    const scope = rollingWindowKey(match[1], match[2]);
+    if (!scope) continue;
+    const start = match.index ?? 0;
+    const relativeNumberStart = match[0].indexOf(match[1]);
+    markers.push({
+      start,
+      end: start + match[0].length,
+      scope,
+      numberStart: start + relativeNumberStart,
+      numberEnd: start + relativeNumberStart + match[1].length,
+    });
+  }
+  return markers.sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+function segmentBounds(text: string, index: number): { start: number; end: number } {
+  const separators = /[;；。！？!?\n]/;
+  let start = 0;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (separators.test(text[cursor])) {
+      start = cursor + 1;
+      break;
+    }
+  }
+  let end = text.length;
+  for (let cursor = index; cursor < text.length; cursor += 1) {
+    if (separators.test(text[cursor])) {
+      end = cursor;
+      break;
+    }
+  }
+  return { start, end };
+}
+
+function scopeNearNumber(text: string, numberStart: number, markers: ScopeMarker[]): StatisticalScope {
+  const bounds = segmentBounds(text, numberStart);
+  const before = markers.filter((marker) =>
+    marker.start >= bounds.start && marker.end <= numberStart
+  );
+  if (before.length > 0) return before[before.length - 1].scope;
+  const after = markers.find((marker) => marker.start >= numberStart && marker.end <= bounds.end);
+  return after?.scope ?? "unspecified";
+}
+
+function isWindowNumber(start: number, end: number, markers: ScopeMarker[]): boolean {
+  return markers.some((marker) =>
+    marker.numberStart !== undefined && marker.numberEnd !== undefined &&
+    start >= marker.numberStart && end <= marker.numberEnd
+  );
+}
+
+function numberValue(value: string): number | null {
+  const normalized = value.replace(/,/g, "");
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : parseChineseCardinal(normalized);
+}
+
+function countMeaning(
+  text: string,
+  numberStart: number,
+  unit: string,
+  value: number,
+): string {
+  const bounds = segmentBounds(text, numberStart);
+  const before = text.slice(Math.max(bounds.start, numberStart - 20), numberStart);
+  if (/样本[^一二两三四五六七八九十百千\d]*$/.test(before)) return "sample_count";
+  if (/平均每(?:天|周|月)[^一二两三四五六七八九十百千\d]*$|平均[^一二两三四五六七八九十百千\d]*$/.test(before)) {
+    return "average_occurrence_count";
+  }
+  if (/(?:连续|连着)[^一二两三四五六七八九十百千\d]*$/.test(before)) return "consecutive_count";
+  if (/至少[^一二两三四五六七八九十百千\d]*$/.test(before)) return "minimum_occurrence_count";
+  if (value === 1 && /第[^一二两三四五六七八九十百千\d]*$/.test(before)) return "first_occurrence_count";
+  if (unit === "天" || unit === "晚") return "day_count";
+  if (unit === "周") return "week_count";
+  if (unit === "月") return "month_count";
+  return "occurrence_count";
+}
+
+function amountMeaning(text: string, numberStart: number): string {
+  const bounds = segmentBounds(text, numberStart);
+  const before = text.slice(Math.max(bounds.start, numberStart - 24), numberStart);
+  if (/(?:平均单笔|平均每笔|均价|平均)[^\d]*$/.test(before)) return "average_amount";
+  if (/(?:中位数?|中位)[^\d]*$/.test(before)) return "median_amount";
+  if (/(?:p\s*90|百分位)[^\d]*$/i.test(before)) return "percentile_amount";
+  if (/(?:相差|差额|增加|减少|多了|少了|涨了|降了)[^\d]*$/.test(before)) return "delta_amount";
+  if (/(?:累计|总额|合计|共|已消费|已支出|已收入)[^\d]*$/.test(before)) return "total_amount";
+  if (/(?:本笔|本次|这笔|这次|当前)[^\d]*$/.test(before)) return "current_amount";
+  return "amount";
+}
+
+function claimIsStatistical(claim: BoundStatisticalClaim): boolean {
+  if (claim.unit !== "currency") return true;
+  return claim.scope !== "record:current" && claim.scope !== "unspecified";
+}
+
+function boundStatisticalClaims(text: string): BoundStatisticalClaim[] {
+  const compact = text.replace(/\s+/g, "");
+  const markers = scopeMarkers(compact);
+  const claims: BoundStatisticalClaim[] = [];
+  const countPattern = /(第|连续|连着|已有|已经|已是|累计|至少|超过|共|样本)?([一二两三四五六七八九十百千\d]{1,8})(次|笔|顿|天|晚|家|周|月|回)/g;
+  for (const match of compact.matchAll(countPattern)) {
+    const rawValue = match[2];
+    const relativeStart = match[0].indexOf(rawValue);
+    const start = (match.index ?? 0) + relativeStart;
+    const end = start + rawValue.length;
+    if (isWindowNumber(start, end, markers)) continue;
+    const value = numberValue(rawValue);
+    if (value === null) continue;
+    const rawUnit = match[3];
+    const unit: StatisticalUnit = rawUnit === "天" || rawUnit === "晚"
+      ? "day"
+      : rawUnit === "周"
+        ? "week"
+        : rawUnit === "月"
+          ? "month"
+          : "occurrence";
+    const meaning = countMeaning(compact, start, rawUnit, value);
+    let scope = scopeNearNumber(compact, start, markers);
+    if (scope === "unspecified" && meaning === "first_occurrence_count") scope = "lifetime";
+    // “本笔 11 元，先把这一顿记下”里的“一顿”是指代当前对象，不是历史计数。
+    if (scope === "record:current" && !match[1] && meaning === "occurrence_count") continue;
+    claims.push({ value, meaning, unit, scope });
+  }
+  const amountPattern = /([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?:元|块钱|块)/g;
+  for (const match of compact.matchAll(amountPattern)) {
+    const start = match.index ?? 0;
+    const value = numberValue(match[1]);
+    if (value === null) continue;
+    const claim = {
+      value,
+      meaning: amountMeaning(compact, start),
+      unit: "currency" as const,
+      scope: scopeNearNumber(compact, start, markers),
+    };
+    if (claimIsStatistical(claim)) claims.push(claim);
+  }
+  return claims;
+}
+
+function meaningFromNumberFact(fact: DomainSignalNumberFact): string {
+  const meaning = fact.meaning?.toLocaleLowerCase() ?? "";
+  if (/first.*occurrence/.test(meaning)) return "first_occurrence_count";
+  if (/(?:sample).*count/.test(meaning)) return "sample_count";
+  if (/(?:average|avg).*(?:occurrence|count|session)/.test(meaning)) return "average_occurrence_count";
+  if (/(?:consecutive|streak).*(?:count|day)/.test(meaning)) return "consecutive_count";
+  if (/(?:occurrence|transaction|session|meal).*count|(?:^|_)count$/.test(meaning)) return "occurrence_count";
+  if (/(?:average|avg|mean).*amount/.test(meaning)) return "average_amount";
+  if (/median.*amount/.test(meaning)) return "median_amount";
+  if (/(?:p\d+|percentile).*amount/.test(meaning)) return "percentile_amount";
+  if (/(?:delta|difference|change).*amount/.test(meaning)) return "delta_amount";
+  if (/(?:total|sum|cumulative).*amount/.test(meaning)) return "total_amount";
+  if (/current.*amount/.test(meaning)) return "current_amount";
+  return fact.role === "count" ? "occurrence_count" : meaning;
+}
+
+function scopeFromNumberFact(fact: DomainSignalNumberFact): StatisticalScope | null {
+  if (fact.scope) return fact.scope;
+  const meaning = fact.meaning?.toLocaleLowerCase() ?? "";
+  if (/previous_week|last_week/.test(meaning)) return "week:previous";
+  if (/current_week|week_to_date/.test(meaning)) return "week:current";
+  if (/previous_month|last_month/.test(meaning)) return "month:previous";
+  if (/current_month|month_to_date/.test(meaning)) return "month:current";
+  const rolling = meaning.match(/(?:rolling_?)?(\d+)d/);
+  if (rolling) return `rolling:${Number(rolling[1])}d`;
+  if (/current_record|current_expense|current_income/.test(meaning)) return "record:current";
+  if (/first_occurrence/.test(meaning)) return "lifetime";
+  if (/historical|history|prior_/.test(meaning)) return "history";
+  return null;
+}
+
+function unitFromNumberFact(fact: DomainSignalNumberFact): StatisticalUnit | string {
+  if (fact.unit) return fact.unit;
+  const meaning = fact.meaning?.toLocaleLowerCase() ?? "";
+  if (/amount|price|cost|balance/.test(meaning)) return "currency";
+  if (/day/.test(meaning)) return "day";
+  if (/week/.test(meaning) && fact.role === "count") return "week";
+  if (/month/.test(meaning) && fact.role === "count") return "month";
+  return fact.role === "count" ? "occurrence" : "unknown";
+}
+
+function sameNumber(left: number, right: number): boolean {
+  return Math.abs(left - right) <= Number.EPSILON * Math.max(1, Math.abs(left), Math.abs(right));
+}
+
+function signalBoundClaims(signal: DomainSignal): BoundStatisticalClaim[] {
+  const parsed = boundStatisticalClaims(signal.fact);
+  const explicit = (signal.numberFacts ?? []).flatMap((fact): BoundStatisticalClaim[] => {
+    if (!Number.isFinite(fact.value)) return [];
+    const parsedMatch = parsed.find((claim) => sameNumber(claim.value, fact.value));
+    const claim: BoundStatisticalClaim = {
+      value: fact.value,
+      meaning: meaningFromNumberFact(fact),
+      unit: fact.unit ?? parsedMatch?.unit ?? unitFromNumberFact(fact),
+      scope: fact.scope ?? scopeFromNumberFact(fact) ?? parsedMatch?.scope ?? "unspecified",
+    };
+    return claimIsStatistical(claim) ? [claim] : [];
+  });
+  const combined = [...explicit, ...parsed];
+  return combined.filter((claim, index) => combined.findIndex((other) =>
+    sameNumber(claim.value, other.value) && claim.meaning === other.meaning &&
+    claim.unit === other.unit && claim.scope === other.scope
+  ) === index);
+}
+
+function signalSupportsBoundClaims(text: string, signals: DomainSignal[]): boolean {
+  const requested = boundStatisticalClaims(text);
+  if (requested.length === 0) return true;
+  return signals.some((signal) => {
+    const available = signalBoundClaims(signal);
+    return requested.every((claim) => available.some((candidateClaim) =>
+      sameNumber(claim.value, candidateClaim.value) &&
+      claim.meaning === candidateClaim.meaning &&
+      claim.unit === candidateClaim.unit &&
+      claim.scope === candidateClaim.scope
+    ));
+  });
+}
+
 function statisticalScopes(text: string): Set<StatisticalScope> {
   const compact = text.replace(/\s+/g, "");
   const scopes = new Set<StatisticalScope>();
@@ -761,8 +1048,10 @@ function signalSupportsStatisticalClaim(text: string, signals: DomainSignal[]): 
   const requested = statisticalScopes(text);
   if (requested.size === 0) return true;
   // 必须由同一个候选提供完整口径，避免把一个候选的周次数和另一个候选的
-  // 月度比较拼成模型从未得到过的组合。
+  // 月度比较拼成模型从未得到过的组合。显式数字还必须与这个候选里的
+  // meaning + unit + scope 同时一致，不能再用全局数字集与全局 scope 集自由组合。
   return signals.some((signal) => {
+    if (!signalSupportsBoundClaims(text, [signal])) return false;
     const available = statisticalScopes(signal.fact);
     return [...requested].every((scope) => available.has(scope));
   });
@@ -814,6 +1103,12 @@ export function validateVoiceNumbers(
         bad = true;
       }
     }
+    // 3) 统计数字必须与同一候选中的 value + meaning + unit + scope 整体匹配。
+    // 单纯出现在全局 allowed/countAllowed 中，不代表可以换一个周期或统计含义使用。
+    if (!signalSupportsBoundClaims(text, signals)) {
+      violations.push(`统计数字未绑定到同一候选的语义/单位/口径: "${text.slice(0, 40)}"`);
+      bad = true;
+    }
     if (bad) badIndexes.push(idx);
   });
   return { ok: violations.length === 0, violations, badIndexes };
@@ -831,6 +1126,7 @@ export function validateModelTone(
 
   generatedTexts.forEach((text, index) => {
     if (!text || !hasModelOwnedStatisticalClaim(text)) return;
+    if (badIndexes.has(index)) return;
     if (signals.length > 0 && signalSupportsStatisticalClaim(text, signals)) return;
     violations.push(`模型试图改写代码统计口径: "${text.slice(0, 40)}"`);
     badIndexes.add(index);

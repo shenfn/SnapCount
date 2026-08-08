@@ -1440,7 +1440,16 @@ final class AppState: ObservableObject {
         session: SupabaseAuthSession,
         generation: Int
     ) async {
-        var baseDetail = detailPreservingExpressionFeedback(detail)
+        var currentDetail = detail
+        if let pending = pendingRecordExpressionPlans[canonicalReference],
+           pending.plan.feedback.isCompanionMessageDelivery,
+           !pending.plan.feedback.matchesVisibleCompanionMessage(detail.companionMessage) {
+            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
+            if currentDetail.aiFeedback == pending.plan.feedback {
+                currentDetail.aiFeedback = pending.previousFeedback
+            }
+        }
+        var baseDetail = detailPreservingExpressionFeedback(currentDetail)
         let selectedFeedback = selectedRecordDetail.flatMap { selected -> NativeAIFeedback? in
             NativeRecordReference(selected.id).canonicalValue == canonicalReference
                 ? selected.aiFeedback
@@ -1468,7 +1477,8 @@ final class AppState: ObservableObject {
            pending.generation == generation {
             let selected = NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
                 existing: baseDetail.aiFeedback,
-                preview: pending.plan.feedback
+                preview: pending.plan.feedback,
+                companionMessage: baseDetail.companionMessage
             )
             if selected == pending.plan.feedback {
                 baseDetail.aiFeedback = selected
@@ -1539,7 +1549,8 @@ final class AppState: ObservableObject {
         )
         let selected = NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
             existing: previousFeedback,
-            preview: preview.feedback
+            preview: preview.feedback,
+            companionMessage: baseDetail.companionMessage
         )
         baseDetail.aiFeedback = selected
         guard selected == preview.feedback else {
@@ -1675,6 +1686,13 @@ final class AppState: ObservableObject {
             pending,
             canonicalReference: canonicalReference
         ) else { return }
+        guard pending.plan.feedback.hasSameDeliveryIdentity(as: acknowledgedFeedback) else {
+            handleExpressionPlanAcknowledgementFailure(
+                pending,
+                canonicalReference: canonicalReference
+            )
+            return
+        }
         if pendingRecordExpressionPlans[canonicalReference]?.id == pending.id {
             pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
         }
@@ -1741,6 +1759,7 @@ final class AppState: ObservableObject {
     ) {
         guard pendingRecordExpressionPlans[canonicalReference]?.id == pending.id else { return }
         pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
+        expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
         visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
         restoreUnacknowledgedExpressionPreview(
             pending.plan.feedback,
@@ -1775,7 +1794,8 @@ final class AppState: ObservableObject {
         }
         guard let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
             existing: [selectedFeedback, recordDetailCache[canonicalReference]?.aiFeedback],
-            pending: pendingRecordExpressionPlans[canonicalReference]?.plan.feedback
+            pending: pendingRecordExpressionPlans[canonicalReference]?.plan.feedback,
+            companionMessage: detail.companionMessage
         ) else { return detail }
         var preserved = detail
         preserved.aiFeedback = feedback

@@ -320,7 +320,12 @@ function generateFoodCandidates(current, prior, domainProfile = {}) {
       id: `fact:food:composition:${current.id}`, domainKey: "food", semanticKey: "food_composition", subtype: "derived", dimension: "record_composition",
       value: { dish_names: names, dish_count: names.length, macros: macroValues, estimated: payloadValue(current, "is_estimated") ?? null },
       text: `记录了${names.length}道菜：${names.slice(0, 3).join("、")}${names.length > 3 ? "等" : ""}；${macroText}`,
-      records: [current], numbers: [names.length, ...Object.values(macroValues).filter(value => value !== null && value > 0)], confidence: 0.86,
+      records: [current], numbers: [
+        { value: names.length, meaning: "recognized_dish_count", role: "count", derivation: "count(payload.dishes)" },
+        ...Object.entries(macroValues)
+          .filter(([, value]) => value !== null && value > 0)
+          .map(([meaning, value]) => ({ value, meaning, derivation: `sum(payload.dishes.${meaning})` })),
+      ], confidence: 0.86,
       evidenceFields: ["occurred_at", "dishes", "is_estimated", "confidence_note"],
       selectionHints: { allowed_surfaces: ["pwa_pending_ai_card", "record_detail"] },
     }))
@@ -340,7 +345,11 @@ function generateFoodCandidates(current, prior, domainProfile = {}) {
         id: `comparison:food:meal-median:${current.id}`, domainKey: "food", semanticKey: "food_meal_vs_personal_median", claimType: "comparison", dimension: "meal_baseline",
         value: { meal_type: mealType, current: currentKcal, median: baseline, delta: round(currentKcal - baseline), unit: "千卡", sample_count: sampleCount, baseline_source: useProfile ? "domain_profile" : "record_history" },
         text: `这顿${mealTypeLabel(mealType)}约 ${round(currentKcal)} 千卡；你历史同餐次中位数为 ${baseline} 千卡`,
-        records: [current, ...prior.filter(record => textValue(payloadValue(record, "meal_type")) === mealType)], numbers: [currentKcal, baseline, sampleCount], confidence: sampleCount >= 7 ? 0.92 : 0.82,
+        records: [current, ...prior.filter(record => textValue(payloadValue(record, "meal_type")) === mealType)], numbers: [
+          { value: currentKcal, meaning: "current_meal_calorie_kcal", derivation: "source_record.total_calorie_kcal" },
+          { value: baseline, meaning: "historical_meal_median_calorie_kcal", derivation: "median(meal_history.total_calorie_kcal)" },
+          { value: sampleCount, meaning: "meal_baseline_sample_count", role: "count", derivation: "count(meal_history)" },
+        ], confidence: sampleCount >= 7 ? 0.92 : 0.82,
         evidenceFields: ["occurred_at", "meal_type", "total_calorie_kcal"],
       }))
     }
@@ -355,7 +364,9 @@ function generateFoodCandidates(current, prior, domainProfile = {}) {
     output.push(candidate({
       id: `pattern:food:recurring-dish:${current.id}`, domainKey: "food", semanticKey: "food_recurring_dish", claimType: "pattern", dimension: "recurrence",
       value: { dish_name: recurring, prior_count: priorDishCounts.get(recurring), window: "available_history" },
-      text: `「${recurring}」在你的历史饮食中已出现 ${priorDishCounts.get(recurring)} 次`, records: [current, ...prior.filter(record => dishNames(record).includes(recurring))], numbers: [priorDishCounts.get(recurring)], confidence: 0.9,
+      text: `「${recurring}」在你的历史饮食中已出现 ${priorDishCounts.get(recurring)} 次`, records: [current, ...prior.filter(record => dishNames(record).includes(recurring))], numbers: [{
+        value: priorDishCounts.get(recurring), meaning: "prior_dish_occurrence_count", role: "count", derivation: "count(prior_records_with_dish)",
+      }], confidence: 0.9,
       evidenceFields: ["occurred_at", "meal_type", "dishes"],
     }))
   }
@@ -415,7 +426,10 @@ function generateSleepCandidates(current, prior, domainProfile = {}) {
         id: `comparison:sleep:timing-baseline:${current.id}`, domainKey: "sleep", semanticKey: "sleep_timing_vs_typical", claimType: "comparison", dimension: "timing_baseline",
         value: { sleep_start_delta_minutes: startDelta, wake_delta_minutes: wakeDelta, baseline: domainProfile.chronotype },
         text: `入睡${describeDelta(startDelta) ?? "时间未知"}，醒来${describeDelta(wakeDelta) ?? "时间未知"}（相对你的典型作息）`,
-        records: [current], numbers: [startDelta, wakeDelta].filter(value => value !== null), confidence: 0.86, evidenceFields: ["occurred_at", "sleep_start_at", "wake_at"],
+        records: [current], numbers: [
+          startDelta === null ? null : { value: startDelta, meaning: "sleep_start_delta_minutes", derivation: "current_start - typical_start" },
+          wakeDelta === null ? null : { value: wakeDelta, meaning: "wake_delta_minutes", derivation: "current_wake - typical_wake" },
+        ].filter(Boolean), confidence: 0.86, evidenceFields: ["occurred_at", "sleep_start_at", "wake_at"],
       }))
     }
   }
@@ -426,7 +440,13 @@ function generateSleepCandidates(current, prior, domainProfile = {}) {
       id: `fact:sleep:quality:${current.id}`, domainKey: "sleep", semanticKey: "sleep_quality_current", subtype: baseline === null ? "observed" : "comparison", dimension: "quality",
       value: { current: score, median: baseline, sample_count: priorScores.length },
       text: baseline === null ? `设备睡眠评分 ${score}` : `设备睡眠评分 ${score}，历史中位数 ${baseline}`,
-      records: [current, ...prior.filter(record => num(payloadValue(record, "quality_score")) !== null)], numbers: baseline === null ? [score] : [score, baseline, priorScores.length], confidence: baseline === null ? 0.82 : 0.86,
+      records: [current, ...prior.filter(record => num(payloadValue(record, "quality_score")) !== null)], numbers: [
+        { value: score, meaning: "current_sleep_quality_score", derivation: "source_record.quality_score" },
+        ...(baseline === null ? [] : [
+          { value: baseline, meaning: "historical_median_sleep_quality_score", derivation: "median(prior.quality_score)" },
+          { value: priorScores.length, meaning: "sleep_quality_baseline_sample_count", role: "count", derivation: "count(prior.quality_score)" },
+        ]),
+      ], confidence: baseline === null ? 0.82 : 0.86,
       evidenceFields: ["occurred_at", "quality_score", "quality_level"],
     }))
   }
@@ -438,7 +458,11 @@ function generateSleepCandidates(current, prior, domainProfile = {}) {
       id: `fact:sleep:stages:${current.id}`, domainKey: "sleep", semanticKey: "sleep_stage_composition", subtype: "derived", dimension: "sleep_structure",
       value: stages,
       text: `睡眠阶段：深睡 ${deep ?? "未知"} 分钟、浅睡 ${light ?? "未知"} 分钟、REM ${rem ?? "未知"} 分钟（设备估算）`,
-      records: [current], numbers: [total, ...known], confidence: 0.74, dataCoverage: known.length / 3, evidenceFields: ["occurred_at", "deep_sleep_minutes", "light_sleep_minutes", "rem_minutes", "awake_minutes"],
+      records: [current], numbers: [
+        deep === null ? null : { value: deep, meaning: "deep_sleep_minutes", derivation: "source_record.deep_sleep_minutes" },
+        light === null ? null : { value: light, meaning: "light_sleep_minutes", derivation: "source_record.light_sleep_minutes" },
+        rem === null ? null : { value: rem, meaning: "rem_sleep_minutes", derivation: "source_record.rem_minutes" },
+      ].filter(Boolean), confidence: 0.74, dataCoverage: known.length / 3, evidenceFields: ["occurred_at", "deep_sleep_minutes", "light_sleep_minutes", "rem_minutes", "awake_minutes"],
       selectionHints: { allowed_surfaces: ["pwa_pending_ai_card", "record_detail"] },
     }))
   }
@@ -459,16 +483,21 @@ export function generateIncomeCandidates(records, currentRecordId) {
   const output = [candidate({
     id: `fact:income:${current.id}`, domainKey: "income", semanticKey: "income_current_amount",
     subtype: "observed", dimension: "current_fact", value: { amount, source_name: source, date },
-    text: `${source} 本次收入 ${amount} 元`, records: [current], numbers: [amount],
+    text: `${source} 本次收入 ${amount} 元`, records: [current], numbers: [{ value: amount, meaning: "current_income_amount", derivation: "source_record.amount" }],
   }), candidate({
     id: `fact:income:month:${date}`, domainKey: "income", semanticKey: "income_month_total_count",
     subtype: "aggregated", dimension: "period_aggregation", value: { count: monthRecords.length, total_amount: monthTotal, month: date.slice(0, 7) },
-    text: `${date.slice(0, 7)} 已记录 ${monthRecords.length} 笔收入，累计 ${monthTotal} 元`, records: monthRecords, numbers: [monthRecords.length, monthTotal],
+    text: `${date.slice(0, 7)} 已记录 ${monthRecords.length} 笔收入，累计 ${monthTotal} 元`, records: monthRecords, numbers: [
+      { value: monthRecords.length, meaning: "current_month_income_count", role: "count", derivation: "count(month_records)" },
+      { value: monthTotal, meaning: "current_month_income_total_amount", derivation: "sum(month_records.amount)" },
+    ],
   })]
   if (sourceRecords.length >= 2) output.push(candidate({
     id: `pattern:income:source:${String(source).toLowerCase()}:${date}`, domainKey: "income", semanticKey: "income_source_month_pattern",
     claimType: "pattern", dimension: "source_pattern", value: { source_name: source, count: sourceRecords.length, month: date.slice(0, 7) },
-    text: `本月来自「${source}」的收入已出现 ${sourceRecords.length} 次`, records: sourceRecords, numbers: [sourceRecords.length], confidence: 0.9,
+    text: `${date.slice(0, 7)} 来自「${source}」的收入已出现 ${sourceRecords.length} 次`, records: sourceRecords, numbers: [{
+      value: sourceRecords.length, meaning: "current_month_source_occurrence_count", role: "count", derivation: "count(month_source_records)",
+    }], confidence: 0.9,
   }))
   return output
 }
@@ -498,7 +527,9 @@ export function generateBuiltinDomainCandidates(domainKey, records, currentRecor
         kind_conflict: currentMetric.wallet.kindConflict,
       } : {}),
     },
-    text: `本次${currentMetric.label}为 ${currentMetric.value} ${currentMetric.unit}`, records: [current], numbers: [currentMetric.value],
+    text: `本次${currentMetric.label}为 ${currentMetric.value} ${currentMetric.unit}`, records: [current], numbers: [{
+      value: currentMetric.value, meaning: `current_${domainKey}_metric`, derivation: "source_record.metric",
+    }],
   }))
   if (currentMetric && domainKey !== "wallet" && prior.length >= 3 && !(domainKey === "food" && textValue(payloadValue(current, "meal_type")))) {
     const baseline = median(prior.map(item => item.metric.value))
@@ -507,7 +538,10 @@ export function generateBuiltinDomainCandidates(domainKey, records, currentRecor
       id: `comparison:${domainKey}:median:${current.id}`, domainKey, semanticKey: `${domainKey}_vs_personal_median`, claimType: "comparison", dimension: "personal_baseline",
       value: { current: currentMetric.value, median: baseline, delta, unit: currentMetric.unit, sample_count: prior.length },
       text: `本次${currentMetric.label} ${currentMetric.value} ${currentMetric.unit}，历史中位数 ${baseline} ${currentMetric.unit}`,
-      records: [current, ...prior.map(item => item.record)], numbers: [currentMetric.value, baseline], confidence: prior.length >= 7 ? 0.92 : 0.82,
+      records: [current, ...prior.map(item => item.record)], numbers: [
+        { value: currentMetric.value, meaning: `current_${domainKey}_metric`, derivation: "source_record.metric" },
+        { value: baseline, meaning: `historical_median_${domainKey}_metric`, derivation: "median(prior.metric)" },
+      ], confidence: prior.length >= 7 ? 0.92 : 0.82,
     }))
   }
   if (domainKey === "food") output.push(...generateFoodCandidates(current, records.filter(record => record.id !== currentRecordId), domainProfile))
@@ -534,7 +568,11 @@ export function generateBuiltinDomainCandidates(domainKey, records, currentRecor
         previous_account_name: previous.metric.wallet.identity.accountName,
         previous_linked_account_id: previous.metric.wallet.identity.linkedAccountId,
       },
-      text: `${amountLabel}较上次变化 ${deltaText} 元，当前 ${currentMetric.value} 元`, records: [current, previous.record], numbers: [delta, currentMetric.value, previous.metric.value], confidence: 0.9,
+      text: `${currentMetric.wallet.identity.accountName ? `「${currentMetric.wallet.identity.accountName}」` : ""}${amountLabel}较上次变化 ${deltaText} 元，当前 ${currentMetric.value} 元`, records: [current, previous.record], numbers: [
+        { value: delta, meaning: "wallet_delta_amount", derivation: "current_wallet_amount - previous_wallet_amount" },
+        { value: currentMetric.value, meaning: "current_wallet_amount", derivation: "source_record.wallet_amount" },
+        { value: previous.metric.value, meaning: "previous_wallet_amount", derivation: "previous_record.wallet_amount" },
+      ], confidence: 0.9,
     }))
   }
   return output

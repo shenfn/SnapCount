@@ -1,4 +1,5 @@
 import type { ContextPacket } from "./context-packet.ts";
+import type { TimeContext } from "./time.ts";
 
 export interface PromptContext {
   clientLocalTime?: string | null;
@@ -265,7 +266,7 @@ order_finished_at（订单完成时间）：
   - quality_level：>=80 为“优秀”，>=70 为“良好”，>=60 为“一般”，否则“较差”；没有评分时可根据页面描述返回 null
   - source_app：来源 App，无法判断可返回“健康”
 - 若图片可见，还要提取 sleep_start_at、wake_at、deep_sleep_minutes、light_sleep_minutes、rem_minutes、awake_minutes。
-- occurred_at 使用页面显示日期，若只有日期无具体时间，返回该日期 T12:00:00+08:00。
+- occurred_at 只有在页面同时提供完整日期和具体时分时才返回；只有日期或无法确认时分时返回 null，不得用 12:00 代替。上传时刻只写入 client_captured_at。
 
 当 record_type 为 reading 时：
 - domain_key 返回 "reading"
@@ -277,7 +278,7 @@ order_finished_at（订单完成时间）：
   - progress_percent：进度百分比，无法识别返回 null
   - source_app：来源 App，无法判断可返回“阅读 App”
 - 若图片可见，还要提取 author、book_type、previous_book_name、daily_goal_minutes。
-- 阅读首页通常没有业务日期，occurred_at 无法看到完整日期时返回 null，由系统使用上传日期归档。
+- 阅读首页通常没有业务日期，occurred_at 无法看到完整日期和时分时返回 null；上传时刻只写入 client_captured_at，不得冒充阅读发生时间。
 
 当 record_type 为 food 时：
 - domain_key 返回 "food"
@@ -291,7 +292,7 @@ order_finished_at（订单完成时间）：
 - **重要**：热量估算是基于视觉的近似值，误差通常 ±20-40%，请尽量保守；不要编造未出现的菜品。
 - 对于零食、小袋装、独立包装食品，如果画面里看起来只是 1-3 份小包装，不要仅凭包装外观假设“每包 50g / 100g”之类的大克重；除非标签文字清晰可读，否则单包优先按 5-25g 的保守范围估算。
 - 如果是西梅、果脯、坚果、糖果、海苔、肉干等小包装零食，优先根据“可见包数/颗数”估算总重量，而不是套用大袋商品规格。
-- occurred_at：优先使用图片 EXIF 拍摄时间；若不可见则返回 null，由系统使用上传时间。
+- occurred_at：优先使用图片 EXIF 拍摄时间；若不可见则返回 null，上传时刻只写入 client_captured_at。
 
 当 record_type 为 wallet 时：
 - domain_key 返回 "wallet"
@@ -335,7 +336,7 @@ export interface FeedbackPromptContext {
   clientLocalTime?: string | null;
   weekday?: string | null;
   recognizedFields?: Record<string, unknown>; // 第一阶段识别出的字段
-  timeContext?: Record<string, unknown> | null;
+  timeContext?: TimeContext | Record<string, unknown> | null;
   builtPayload?: Record<string, unknown> | null;
   contextPacket?: ContextPacket | null;
   persona?: string | null;
@@ -347,16 +348,17 @@ export interface FeedbackPromptContext {
 
 // ============================================================
 // Voice 层 Prompt(信号驱动,~600 token)
-// 铁律:模型只负责把信号翻译成人话,不做任何计算或回忆。
+// 铁律:模型基于代码事实自然表达,可做显式不确定的定性推理,不做计算或回忆。
 // 数字闭环校验在 signals.ts 的 validateVoiceNumbers,违规即弃用。
 // ============================================================
 
 export interface VoicePromptContext {
   clientLocalTime?: string | null;
   weekday?: string | null;
+  timeContext?: TimeContext | Record<string, unknown> | null;
   domainKey: string;
   recordFacts: Record<string, unknown>;   // 本条记录的关键字段(白名单后)
-  signals: Array<{ kind: string; fact: string }>;  // 信号层已算好的事实句
+  signals: Array<{ kind: string; fact: string }>;  // 兼容校验使用；v2 Packet 以 selected_candidates 为准
   contextPacket?: ContextPacket | null;
   persona?: string | null;
   expressionStyle?: string | null;
@@ -370,6 +372,21 @@ const PERSONA_HINTS: Record<string, string> = {
   sharp: "毒舌损友，一针见血，只损行为模式不攻击人；信号不够就平静陈述。",
   minimal: "惜字如金，只有信号明确时才写一句极短的话（≤15 汉字），否则返回空。",
 };
+
+function buildTimeContextPrompt(timeContext: TimeContext | Record<string, unknown> | null | undefined): string {
+  if (!timeContext) return "";
+  return `【代码计算的时间上下文】
+${JSON.stringify(timeContext)}
+
+【时间口径】
+- 发生时间是描述记录何时发生的唯一优先依据；使用 event_time、event_local_date、event_local_time 和 event_daypart，不得自行从图片角落、历史记录或上传时间另猜一个时刻
+- 上传时间只用于判断实时记录或补录关系；client_captured_at、client_local_time 和 client_daypart 不得替代发生时间
+- time_relation 和 delta_minutes 只描述发生时间到上传时间的关系；只有字段明确存在时才可以轻轻提及补录，不能把补录时间说成事件发生时间
+- event_time 为空或 event_daypart=unknown 时，不要猜测早晨、凌晨、中午、下午、晚上等时段
+- event_daypart=morning 时，只能写“早晨”或“早上”，禁止写成“凌晨”“深夜”或“夜里”
+- event_daypart=noon 时只能写中午；afternoon 只能写下午；evening 只能写傍晚或晚上；night 只能写夜间或深夜；late_night 只能写凌晨或深夜
+`;
+}
 
 export function buildVoicePrompt(ctx: VoicePromptContext): string {
   const personaHint = PERSONA_HINTS[ctx.persona ?? "observer"] ?? PERSONA_HINTS.observer;
@@ -386,32 +403,38 @@ export function buildVoicePrompt(ctx: VoicePromptContext): string {
     ? `\n避免与最近文案句式重复：\n${ctx.recentCompanionLines.slice(0, 3).map((l) => `- ${l}`).join("\n")}`
     : "";
   const timeLine = ctx.clientLocalTime
-    ? `当前时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}\n`
+    ? `上传/截图时间（仅用于补录关系）：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}\n`
     : "";
+  const timeContextBlock = buildTimeContextPrompt(ctx.timeContext);
   const contextBlock = ctx.contextPacket
     ? `【冻结的 Context Packet】\n${JSON.stringify(ctx.contextPacket)}`
     : `【本条记录】\n${JSON.stringify(ctx.recordFacts)}\n\n【已核实的信号（可自然转述，但不得新增、计算或改变数字、周期和趋势）】\n${signalBlock}`;
 
-  return `你为用户刚归档的一条${ctx.domainKey}记录写陪伴语气。统计事实已经由代码核实，你只能自然转述下方信号明确提供的事实，不能自行计算或改变口径。
+  return `你为用户刚归档的一条${ctx.domainKey}记录写陪伴语气。下方记录和已选候选是唯一事实来源；你可以基于这些线索作轻量定性推理，但不能自行计算、补充精确事实或改变统计口径。
 
-${timeLine}${contextBlock}
+${timeLine}${timeContextBlock}${contextBlock}
 
 【铁律】
-- 只能引用【本条记录】或【已核实的信号】中明确存在的数字、次数、周期、对比和趋势；禁止自己计算、推测、回忆或混用不同口径
-- 如果引用信号中的统计事实，必须保持它的时间范围、对象和方向；例如信号说“本自然周第 4 次”，不能改成“近 30 天第 4 次”
-- 没有信号支撑的历史统计、次数、周期、平均值和趋势不得出现
-- 无信号时只围绕本条记录本身写，或返回空字符串 ""
+- 只能引用 record_facts 或 selected_candidates 中明确存在的数字、次数、周期、对比和趋势；禁止自己计算、回忆或混用不同口径
+- 如果引用已选候选的统计事实，必须保持它的时间范围、对象和方向；例如候选说“本自然周第 4 次”，不能改成“近 30 天第 4 次”
+- 没有 selected_candidates 支撑的历史统计、次数、周期、平均值和趋势不得出现
+- 可以结合已提供的商户、类别、金额、时间和场景作非精确的定性推理；必须用“像是”“可能”“看起来”“也许”等措辞表明这只是理解，不得冒充记录事实
+- 定性推理可以说“这个价格看起来像碰上优惠”；如需带金额，只能原样使用 record_facts 中的当前金额。不得把未提供的内容写成精确事实，例如擅自补商品名、规格、金额、次数、优惠金额或历史统计
+- “优惠了 20 元”“本周第 3 次”这类精确说法，只有在记录或同一条已核实信号明确提供相同数字和口径时才能出现
+- 没有已选候选时只围绕本条记录本身写，或返回空字符串 ""
 - 不建议、不评判、不教育；禁止"加油/注意身体/记得/超标/放纵"
 - 禁止质问式反问（如"心里没点数吗"）；反问只允许出现在明显角色扮演的语气里，且不得带指责感
-- 不要只用"这周第X笔/次"或"又是熟悉的XX"凑成全文；有信号支撑时可以把准确统计和当前实体自然结合
+- 不要只用"这周第X笔/次"或"又是熟悉的XX"凑成全文；有候选支撑时可以把准确统计和当前实体自然结合
+- selected_candidates 非空时，companion_message 必须围绕第一条候选的角度表达；若确实表达了它，expressed_semantic_key 必须原样返回该候选的 semantic_key，否则返回 null
+- companion_message 是主表达；ai_feedback 只有能补充不同信息时才输出，禁止换句话重复同一候选
 - companion_message ≤30 字，必须是完整句子自然收尾，宁短勿长
 - ${personaHint}
 - ${styleHint}
 ${customHint}${recentBlock}
 
 输出纯 JSON（无 markdown）：
-{"companion_message":"≤30汉字，可为空串","ai_feedback":{"badge":"4-8字","band":"positive|neutral|watch|recover|ritual","emotion_line":"≤28汉字共情","utility_line":"≤30汉字具体观察","detail_reason":"≤60汉字判断依据或null","confidence":0.0}}
-信号太弱时 ai_feedback 返回 null。`;
+{"companion_message":"≤30汉字，可为空串","expressed_semantic_key":"实际由 companion_message 表达的首条候选 semantic_key，否则为null","ai_feedback":{"badge":"4-8字","band":"positive|neutral|watch|recover|ritual","emotion_line":"≤28汉字共情","utility_line":"≤30汉字具体观察","detail_reason":"≤60汉字，引用事实依据；如含定性推理须标明不确定性，否则为null","confidence":0.0}}
+候选太弱或没有新增依据时 ai_feedback 返回 null。`;
 }
 
 export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
@@ -432,11 +455,11 @@ export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
     ? `\n\n【最近陪伴文案（请避免句式重复）】\n${ctx.recentCompanionLines.slice(0, 5).map((l) => `- ${l}`).join("\n")}`
     : "";
   const timeBlock = ctx.clientLocalTime
-    ? `截图时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}`
+    ? `上传/截图时间（仅用于补录关系）：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}`
     : "";
   const recognizedBlock = hasPacket ? "" : JSON.stringify(ctx.recognizedFields ?? {}, null, 2);
   const builtBlock = !hasPacket && ctx.builtPayload ? `\n\n【内置数据域 payload】\n${JSON.stringify(ctx.builtPayload, null, 2)}` : "";
-  const timeContextBlock = !hasPacket && ctx.timeContext ? `\n\n【时间上下文】\n${JSON.stringify(ctx.timeContext, null, 2)}` : "";
+  const timeContextBlock = buildTimeContextPrompt(ctx.timeContext);
 
   return `你是个人 AI 记忆助手，正在为用户的本条记录生成「陪伴文案」和「AI 即时反馈」。
 
@@ -444,6 +467,7 @@ export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
 基于下方已识别的字段、冻结的 Context Packet 和时间上下文，输出符合规范的 JSON：
 {
   "companion_message": "1 句话，≤ 30 汉字，可以为空字符串",
+  "expressed_semantic_key": "companion_message 实际表达的首条候选 semantic_key；未表达则为 null",
   "ai_feedback": {
     "badge": "4-8 字标签",
     "band": "positive | neutral | watch | recover | ritual",
@@ -453,7 +477,7 @@ export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
     "confidence": 0.0
   }
 }
-若信号太弱无法产出有意义文案：companion_message 返回 ""，ai_feedback 整个返回 null。
+selected_candidates 非空时，companion_message 必须围绕第一条候选；只有确实表达该候选时才回填其 semantic_key。若信号太弱无法产出有意义文案：companion_message 返回 ""，expressed_semantic_key 和 ai_feedback 都返回 null。
 
 【你的人格】
 ${personaText}
@@ -464,9 +488,10 @@ ${customLine}
 ${COMPANION_RULES}
 
 ${timeBlock}
+${timeContextBlock}
 
 【本条记录已识别字段】
-${hasPacket ? "" : `${recognizedBlock}${builtBlock}${timeContextBlock}`}\n${packetBlock}${recentLines}
+${hasPacket ? "" : `${recognizedBlock}${builtBlock}`}\n${packetBlock}${recentLines}
 
 仅输出上述 JSON 结构，不要任何 markdown 包裹或额外解释。`;
 }

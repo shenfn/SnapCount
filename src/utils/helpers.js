@@ -105,6 +105,11 @@ export function platformBg(p) {
 }
 
 export function mapTransaction(t) {
+  const occurredParts = t.occurred_at ? zonedParts(t.occurred_at, DEFAULT_TZ) : null
+  const source = String(t.source || 'manual').trim().toLowerCase()
+  const legacyManualTime = source === 'manual' && t.transaction_time
+    ? String(t.transaction_time).slice(0, 5)
+    : ''
   return {
     id: t.id,
     name: t.merchant_name || '未识别商家',
@@ -113,9 +118,14 @@ export function mapTransaction(t) {
     cat: t.category || '?',
     amount: Number(t.amount),
     createdAt: t.created_at,
-    date: formatDate(t.transaction_date),
-    dateRaw: t.transaction_date,
-    time: t.transaction_time ? String(t.transaction_time).slice(0, 5) : '',
+    occurredAt: t.occurred_at || null,
+    date: occurredParts ? tcFormatRelativeDate(parseInstant(t.occurred_at, DEFAULT_TZ), DEFAULT_TZ) : formatDate(t.transaction_date),
+    dateRaw: occurredParts
+      ? tcFormatDateKey(parseInstant(t.occurred_at, DEFAULT_TZ), DEFAULT_TZ)
+      : t.transaction_date,
+    time: occurredParts
+      ? `${String(occurredParts.hour).padStart(2, '0')}:${String(occurredParts.minute).padStart(2, '0')}`
+      : legacyManualTime,
     status: t.status,
     type: t.type,
     icon: platformIcon(t.platform),

@@ -15,6 +15,7 @@ export const INTERRUPTION_COSTS = {
 export const DEFAULT_IMPORTANCE = {
   merchant_daily_count_total: 0.9,
   merchant_daily_amount_structure: 0.68,
+  expense_merchant_first_occurrence: 0.8,
   expense_record_name_previous_gap: 0.84,
   merchant_daily_vs_active_day_median: 0.88,
   merchant_week_to_date_vs_previous_week_same_period: 0.92,

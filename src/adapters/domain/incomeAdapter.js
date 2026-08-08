@@ -57,7 +57,7 @@ export function getRecentRecords(store, domain) {
     title: item.source || incomeCatMap[item.cat]?.label || '收入',
     subtitle: incomeCatMap[item.cat]?.label || '收入记录',
     value: `+¥${item.amount.toFixed(2)}`,
-    date: item.createdAt ? formatDateTimeLabel(item.createdAt) : item.date,
+    date: item.occurredAt ? formatDateTimeLabel(item.occurredAt) : item.date,
   }))
 }
 

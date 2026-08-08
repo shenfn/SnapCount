@@ -698,11 +698,178 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
-    func testPlannerFeedbackStillRendersAfterCompanionMessage() throws {
+    func testPlannerCurrentRecordFallbackIsHiddenAfterCompanionMessage() throws {
         let plannerFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("expression_planner"),
             "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
             "emotion_line": AnyCodable("7/28 19:15 已记录一笔 6.8 元支出。")
+        ]))
+
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: "支付宝的 6.8 元支出已归档，平静收尾。",
+                feedback: plannerFeedback
+            )
+        )
+    }
+
+    func testAuthoritativeFeedbackCardIsNotHiddenByLegacyClientHeuristics() throws {
+        let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-card"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
+            "claim_fingerprint": AnyCodable("fnv1a64:current-record"),
+            "dimension": AnyCodable("current_fact"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:card-text"),
+            "emotion_line": AnyCodable("本次记录发生在今天 09:43。")
+        ]))
+        let legacyCoverage = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "emotion_line": AnyCodable("这笔已经记下。"),
+            "expression_coverage": AnyCodable([
+                "coverage_version": "expression-coverage-v1",
+                "expressed_semantic_key": "expense_current_record_context",
+                "source_surface": "record_detail",
+                "planner_version": "expression-shadow-auto-v0.6",
+                "packet_fingerprint": "fnv1a32:legacy",
+                "claim_fingerprint": "fnv1a64:current-record"
+            ])
+        ]))
+
+        XCTAssertTrue(feedback.hasExplicitPresentationTarget)
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: legacyCoverage,
+                preview: feedback,
+                companionMessage: "这笔已经记下。"
+            ),
+            feedback
+        )
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: "这笔已经记下。",
+                feedback: feedback,
+                companionFeedback: legacyCoverage
+            ),
+            feedback
+        )
+        let acknowledged = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-card"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
+            "claim_fingerprint": AnyCodable("fnv1a64:current-record"),
+            "dimension": AnyCodable("current_fact"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:card-text"),
+            "emotion_line": AnyCodable("本次记录发生在今天 09:43。"),
+            "exposure_event_id": AnyCodable("exposure-card")
+        ]))
+        let rewrittenAcknowledgement = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-card"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
+            "claim_fingerprint": AnyCodable("fnv1a64:current-record"),
+            "dimension": AnyCodable("current_fact"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:rewritten-card"),
+            "emotion_line": AnyCodable("确认时被改写的卡片文案。"),
+            "exposure_event_id": AnyCodable("exposure-card")
+        ]))
+        XCTAssertTrue(feedback.hasSameDeliveryIdentity(as: acknowledged))
+        XCTAssertFalse(feedback.hasSameDeliveryIdentity(as: rewrittenAcknowledgement))
+    }
+
+    func testCompanionTargetUsesVisibleMessageForExposureWithoutRenderingDuplicateBody() throws {
+        let message = "这周第 4 次点沙县，熟悉的味道又出现了。"
+        let existing = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "emotion_line": AnyCodable(message)
+        ]))
+        let preview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-voice"),
+            "semantic_key": AnyCodable("merchant_weekly_repeat"),
+            "claim_fingerprint": AnyCodable("fnv1a64:merchant-repeat"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:voice-text"),
+            "emotion_line": AnyCodable(message)
+        ]))
+        let acknowledged = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-voice"),
+            "semantic_key": AnyCodable("merchant_weekly_repeat"),
+            "claim_fingerprint": AnyCodable("fnv1a64:merchant-repeat"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:voice-text"),
+            "emotion_line": AnyCodable(message),
+            "exposure_event_id": AnyCodable("exposure-voice")
+        ]))
+
+        XCTAssertTrue(preview.isCompanionMessageDelivery)
+        XCTAssertTrue(preview.matchesVisibleCompanionMessage(message))
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: existing,
+                preview: preview,
+                companionMessage: message
+            ),
+            preview
+        )
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: message,
+                feedback: preview
+            )
+        )
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.companionFeedbackToReview(
+                companionMessage: message,
+                feedback: preview
+            ),
+            preview
+        )
+        XCTAssertTrue(preview.hasSameDeliveryIdentity(as: acknowledged))
+        XCTAssertTrue(acknowledged.isReviewable)
+    }
+
+    func testCompanionTargetRejectsVisibleTextAndFingerprintDrift() throws {
+        let preview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-voice"),
+            "claim_fingerprint": AnyCodable("fnv1a64:merchant-repeat"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:voice-text"),
+            "emotion_line": AnyCodable("本周第 4 次记录沙县。")
+        ]))
+        let wrongFingerprint = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-voice"),
+            "claim_fingerprint": AnyCodable("fnv1a64:merchant-repeat"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:different-text"),
+            "emotion_line": AnyCodable("本周第 4 次记录沙县。"),
+            "exposure_event_id": AnyCodable("exposure-voice")
+        ]))
+
+        XCTAssertFalse(preview.matchesVisibleCompanionMessage("本周第 11 次记录沙县。"))
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.companionFeedbackToReview(
+                companionMessage: "本周第 11 次记录沙县。",
+                feedback: preview
+            )
+        )
+        XCTAssertFalse(preview.hasSameDeliveryIdentity(as: wrongFingerprint))
+    }
+
+    func testPlannerRicherAngleStillRendersAfterCompanionMessage() throws {
+        let plannerFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("comparison:merchant:daily-active-median:record-1"),
+            "semantic_key": AnyCodable("merchant_daily_vs_active_day_median"),
+            "dimension": AnyCodable("personal_baseline"),
+            "emotion_line": AnyCodable("今天的消费低于你的活跃日中位数。")
         ]))
 
         XCTAssertEqual(
@@ -711,6 +878,164 @@ final class SnapCountTests: XCTestCase {
                 feedback: plannerFeedback
             ),
             plannerFeedback
+        )
+    }
+
+    func testPlannerAngleCoveredByVoiceProvenanceDoesNotReplaceOrRenderBesideCompanion() throws {
+        let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "emotion_line": AnyCodable("第一次记下青禾茶饮，像是碰上了小惊喜。"),
+            "expression_coverage": AnyCodable([
+                "coverage_version": "expression-coverage-v1",
+                "expressed_semantic_key": " Expense_Merchant_First_Occurrence ",
+                "expressed_semantic_keys": ["expense_merchant_first_occurrence"],
+                "source_surface": "record_detail",
+                "planner_version": "expression-shadow-auto-v0.6",
+                "packet_fingerprint": "fnv1a32:test",
+                "claim_fingerprint": "fnv1a64:first-occurrence"
+            ])
+        ]))
+        let plannerFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:expense:merchant-first-occurrence:record-1"),
+            "semantic_key": AnyCodable("expense_merchant_first_occurrence"),
+            "claim_fingerprint": AnyCodable("fnv1a64:first-occurrence"),
+            "dimension": AnyCodable("first_occurrence"),
+            "emotion_line": AnyCodable("第一次记录「青禾茶饮」")
+        ]))
+
+        XCTAssertEqual(
+            companionFeedback.expressionCoverageSemanticKeys,
+            ["expense_merchant_first_occurrence"]
+        )
+        let selected = NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+            existing: companionFeedback,
+            preview: plannerFeedback,
+            companionMessage: "第一次记下青禾茶饮，像是碰上了小惊喜。"
+        )
+        XCTAssertEqual(selected, companionFeedback)
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: "第一次记下青禾茶饮，像是碰上了小惊喜。",
+                feedback: selected
+            )
+        )
+    }
+
+    func testExpressionCoverageDecodesFromRealJSONAndNormalizesKeys() throws {
+        let json = #"""
+        {
+          "source": "hybrid",
+          "emotion_line": "第一次记下青禾茶饮。",
+          "expression_coverage": {
+            "coverage_version": "expression-coverage-v1",
+            "expressed_semantic_key": " Expense_Merchant_First_Occurrence ",
+            "expressed_semantic_keys": [
+              "expense_merchant_first_occurrence",
+              " merchant_daily_count_total ",
+              "",
+              42
+            ],
+            "source_surface": "record_detail",
+            "planner_version": "expression-shadow-auto-v0.6",
+            "packet_fingerprint": "fnv1a32:test",
+            "claim_fingerprint": "fnv1a64:first-occurrence"
+          }
+        }
+        """#
+        let payload = try JSONDecoder().decode(
+            [String: AnyCodable].self,
+            from: Data(json.utf8)
+        )
+        let feedback = try XCTUnwrap(NativeAIFeedback(payload: payload))
+
+        XCTAssertEqual(
+            feedback.expressionCoverageSemanticKeys,
+            ["expense_merchant_first_occurrence", "merchant_daily_count_total"]
+        )
+        XCTAssertEqual(feedback.expressionCoverageClaimFingerprint, "fnv1a64:first-occurrence")
+    }
+
+    func testEditedClaimFingerprintFailsOpenForSameSemanticKey() throws {
+        let existing = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "emotion_line": AnyCodable("第一次记下旧商户。"),
+            "expression_coverage": AnyCodable([
+                "coverage_version": "expression-coverage-v1",
+                "expressed_semantic_key": "expense_merchant_first_occurrence",
+                "expressed_semantic_keys": ["expense_merchant_first_occurrence"],
+                "source_surface": "record_detail",
+                "planner_version": "expression-shadow-auto-v0.6",
+                "packet_fingerprint": "fnv1a32:before-edit",
+                "claim_fingerprint": "fnv1a64:before-edit"
+            ])
+        ]))
+        let preview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "semantic_key": AnyCodable("expense_merchant_first_occurrence"),
+            "claim_fingerprint": AnyCodable("fnv1a64:after-edit"),
+            "emotion_line": AnyCodable("第一次记录「新商户」")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: existing,
+                preview: preview,
+                companionMessage: "第一次记下旧商户。"
+            ),
+            preview
+        )
+    }
+
+    func testCurrentRecordPreviewIsDiscardedWhenCompanionAlreadyOwnsThatSlot() throws {
+        let preview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
+            "semantic_key": AnyCodable("expense_current_record_context"),
+            "emotion_line": AnyCodable("已记录一笔 6.8 元支出。")
+        ]))
+
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
+                existing: nil,
+                preview: preview,
+                companionMessage: "支付宝的 6.8 元支出已归档。"
+            )
+        )
+    }
+
+    func testPlannerObjectContextStillRendersAfterCompanionMessage() throws {
+        let plannerFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:food:context:record-1"),
+            "semantic_key": AnyCodable("food_record_context"),
+            "dimension": AnyCodable("record_context"),
+            "emotion_line": AnyCodable("这顿早餐记录了全麦面包。")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: "早餐已经记下。",
+                feedback: plannerFeedback
+            ),
+            plannerFeedback
+        )
+    }
+
+    func testPlannerCurrentMetricIsHiddenAfterCompanionMessage() throws {
+        let plannerFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:sleep:record-1"),
+            "semantic_key": AnyCodable("sleep_current_metric"),
+            "dimension": AnyCodable("current_fact"),
+            "emotion_line": AnyCodable("本次睡眠为 7.18 小时。")
+        ]))
+
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: "昨晚的睡眠已经收好。",
+                feedback: plannerFeedback
+            )
         )
     }
 
@@ -810,40 +1135,40 @@ final class SnapCountTests: XCTestCase {
     }
 
     @MainActor
-    func testCompanionMessageCoexistsWithPlannerPreviewAndAcknowledgement() async throws {
+    func testCompanionTargetAcknowledgesWhenCompanionContainerBecomesVisible() async throws {
+        let companionMessage = "这周第 4 次点沙县，熟悉的味道又出现了。"
         let legacyFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),
-            "badge": AnyCodable("金额偏高"),
-            "emotion_line": AnyCodable("这笔比你平时的同类消费高一些。"),
-            "detail_reason": AnyCodable("结合当前金额和历史消费判断。")
+            "emotion_line": AnyCodable(companionMessage)
         ]))
-        let contextPreview = try XCTUnwrap(NativeAIFeedback(payload: [
+        let companionPreview = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("expression_planner"),
-            "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
-            "semantic_key": AnyCodable("expense_current_record_context"),
-            "dimension": AnyCodable("record_context"),
-            "emotion_line": AnyCodable("记录于今天 09:43。"),
-            "detail_reason": AnyCodable("基于当前记录计算。")
+            "candidate_id": AnyCodable("candidate-voice"),
+            "semantic_key": AnyCodable("merchant_weekly_repeat"),
+            "claim_fingerprint": AnyCodable("fnv1a64:merchant-repeat"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:voice-text"),
+            "emotion_line": AnyCodable(companionMessage)
         ]))
         let acknowledgedFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("expression_planner"),
-            "candidate_id": AnyCodable("fact:expense:record-context:record-1"),
-            "semantic_key": AnyCodable("expense_current_record_context"),
-            "dimension": AnyCodable("record_context"),
-            "emotion_line": AnyCodable("记录于今天 09:43。"),
-            "detail_reason": AnyCodable("基于当前记录计算。"),
-            "exposure_event_id": AnyCodable("exposure-context")
+            "candidate_id": AnyCodable("candidate-voice"),
+            "semantic_key": AnyCodable("merchant_weekly_repeat"),
+            "claim_fingerprint": AnyCodable("fnv1a64:merchant-repeat"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:voice-text"),
+            "emotion_line": AnyCodable(companionMessage),
+            "exposure_event_id": AnyCodable("exposure-voice")
         ]))
-        let companionMessage = "支付宝的 6.8 元支出已归档，平静收尾。"
         let repository = RecordRepositoryStub(
             details: [expressionRecordDetail(
                 feedback: legacyFeedback,
                 companionMessage: companionMessage
             )],
             expressionPlanLookups: [.available(NativeRecordExpressionPlan(
-                planToken: "plan-context",
-                candidateId: "fact:expense:record-context:record-1",
-                feedback: contextPreview
+                planToken: "plan-voice",
+                candidateId: "candidate-voice",
+                feedback: companionPreview
             ))],
             acknowledgedFeedback: acknowledgedFeedback
         )
@@ -854,18 +1179,154 @@ final class SnapCountTests: XCTestCase {
 
         await state.loadRecordDetail(reference: "expense/record-1", force: true)
         XCTAssertEqual(state.selectedRecordDetail?.companionMessage, companionMessage)
-        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, contextPreview)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, companionPreview)
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: companionMessage,
+                feedback: state.selectedRecordDetail?.aiFeedback
+            )
+        )
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
+        XCTAssertEqual(repository.acknowledgementCount, 0)
+        XCTAssertFalse(companionPreview.isReviewable)
         state.setRecordExpressionPlanCardVisible(
             true,
             reference: "expense/record-1",
-            feedbackIdentity: contextPreview.renderIdentity
+            feedbackIdentity: companionPreview.renderIdentity
         )
         await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
 
         XCTAssertEqual(state.selectedRecordDetail?.companionMessage, companionMessage)
         XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, acknowledgedFeedback)
         XCTAssertEqual(repository.acknowledgementCount, 1)
+        XCTAssertTrue(state.selectedRecordDetail?.aiFeedback?.isReviewable == true)
         XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
+    }
+
+    @MainActor
+    func testCompanionTargetRejectsAcknowledgementWithDifferentRenderedFingerprint() async throws {
+        let message = "这周第 4 次点沙县，熟悉的味道又出现了。"
+        let preview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-voice"),
+            "claim_fingerprint": AnyCodable("fnv1a64:merchant-repeat"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:voice-text"),
+            "emotion_line": AnyCodable(message)
+        ]))
+        let mismatchedAcknowledgement = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-voice"),
+            "claim_fingerprint": AnyCodable("fnv1a64:merchant-repeat"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:other-text"),
+            "emotion_line": AnyCodable(message),
+            "exposure_event_id": AnyCodable("exposure-wrong")
+        ]))
+        let repository = RecordRepositoryStub(
+            details: [expressionRecordDetail(companionMessage: message)],
+            expressionPlanLookups: [.available(NativeRecordExpressionPlan(
+                planToken: "plan-voice",
+                candidateId: "candidate-voice",
+                feedback: preview
+            ))],
+            acknowledgedFeedback: mismatchedAcknowledgement
+        )
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+        state.setRecordExpressionPlanCardVisible(
+            true,
+            reference: "expense/record-1",
+            feedbackIdentity: preview.renderIdentity
+        )
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
+
+        XCTAssertEqual(repository.acknowledgementCount, 1)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, preview)
+        XCTAssertEqual(state.recordExpressionPlanExposureState, .failed)
+    }
+
+    @MainActor
+    func testCompanionRefreshDropsStalePendingAndLoadsPlanForNewVisibleText() async throws {
+        let oldMessage = "本周第 4 次记录沙县。"
+        let newMessage = "本周第 5 次记录沙县。"
+        let oldPreview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-old"),
+            "claim_fingerprint": AnyCodable("fnv1a64:old-claim"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:old-text"),
+            "emotion_line": AnyCodable(oldMessage)
+        ]))
+        let newPreview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-new"),
+            "claim_fingerprint": AnyCodable("fnv1a64:new-claim"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:new-text"),
+            "emotion_line": AnyCodable(newMessage)
+        ]))
+        let acknowledged = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-new"),
+            "claim_fingerprint": AnyCodable("fnv1a64:new-claim"),
+            "presentation_target": AnyCodable("companion_message"),
+            "rendered_text_fingerprint": AnyCodable("fnv1a64:new-text"),
+            "emotion_line": AnyCodable(newMessage),
+            "exposure_event_id": AnyCodable("exposure-new")
+        ]))
+        let repository = RecordRepositoryStub(
+            details: [
+                expressionRecordDetail(companionMessage: oldMessage),
+                expressionRecordDetail(companionMessage: newMessage)
+            ],
+            expressionPlanLookups: [
+                .available(NativeRecordExpressionPlan(
+                    planToken: "plan-old",
+                    candidateId: "candidate-old",
+                    feedback: oldPreview
+                )),
+                .available(NativeRecordExpressionPlan(
+                    planToken: "plan-new",
+                    candidateId: "candidate-new",
+                    feedback: newPreview
+                ))
+            ],
+            acknowledgedFeedback: acknowledged
+        )
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, oldPreview)
+
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+        XCTAssertEqual(repository.expressionPlanLookupCount, 2)
+        XCTAssertEqual(state.selectedRecordDetail?.companionMessage, newMessage)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, newPreview)
+
+        state.setRecordExpressionPlanCardVisible(
+            true,
+            reference: "expense/record-1",
+            feedbackIdentity: oldPreview.renderIdentity
+        )
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
+        XCTAssertEqual(repository.acknowledgementCount, 0)
+
+        state.setRecordExpressionPlanCardVisible(
+            true,
+            reference: "expense/record-1",
+            feedbackIdentity: newPreview.renderIdentity
+        )
+        await state.acknowledgeRecordExpressionPlanIfVisible(reference: "expense/record-1")
+        XCTAssertEqual(repository.acknowledgementCount, 1)
+        XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, acknowledged)
     }
 
     @MainActor
