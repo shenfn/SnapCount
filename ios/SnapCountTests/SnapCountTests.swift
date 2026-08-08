@@ -271,7 +271,7 @@ final class SnapCountTests: XCTestCase {
     }
 
     func testFinanceRangeFilterUsesPostgRESTOrGrouping() {
-        let filter = NativeDataService.financeRangeFilter(
+        let financeFilter = NativeDataService.financeRangeFilter(
             occurredAtColumn: "occurred_at",
             legacyDateColumn: "transaction_date",
             fallbackStart: "2026-08-01",
@@ -281,11 +281,25 @@ final class SnapCountTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            filter,
+            financeFilter,
             "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,transaction_date.gte.2026-08-01,transaction_date.lte.2026-08-31))"
         )
-        XCTAssertTrue(filter.hasPrefix("(and("))
-        XCTAssertTrue(filter.hasSuffix("))"))
+        XCTAssertTrue(financeFilter.hasPrefix("(and("))
+        XCTAssertTrue(financeFilter.hasSuffix("))"))
+
+        let universalFilter = NativeDataService.financeRangeFilter(
+            occurredAtColumn: "occurred_at",
+            legacyDateColumn: "created_at",
+            fallbackStart: "2026-07-31T16:00:00Z",
+            fallbackEnd: "2026-08-31T15:59:59Z",
+            startTimestamp: "2026-07-31T16:00:00Z",
+            endTimestamp: "2026-08-31T15:59:59Z"
+        )
+
+        XCTAssertEqual(
+            universalFilter,
+            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,created_at.gte.2026-07-31T16:00:00Z,created_at.lte.2026-08-31T15:59:59Z))"
+        )
     }
 
     func testCameraUploadUsesSmallerPhotoPreset() throws {

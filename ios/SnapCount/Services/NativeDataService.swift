@@ -443,11 +443,13 @@ final class NativeDataService {
             path: "rest/v1/data_records",
             queryItems: [
                 URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
-                URLQueryItem(name: "or", value: financeRangeFilter(
+                URLQueryItem(name: "or", value: Self.financeRangeFilter(
                     occurredAtColumn: "occurred_at",
                     legacyDateColumn: "created_at",
                     fallbackStart: range.startTimestamp,
-                    fallbackEnd: range.endTimestamp
+                    fallbackEnd: range.endTimestamp,
+                    startTimestamp: range.startTimestamp,
+                    endTimestamp: range.endTimestamp
                 )),
                 URLQueryItem(name: "order", value: NativeDashboardQueryOrder.universal)
             ],
