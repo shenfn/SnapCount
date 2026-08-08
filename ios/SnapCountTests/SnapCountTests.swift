@@ -2965,6 +2965,10 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
         return details.removeFirst()
     }
 
+    func hydrateDetailImage(_ detail: NativeRecordDetail, accessToken: String) async throws -> NativeRecordDetail {
+        detail
+    }
+
     func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {
         expressionPlanLookupCount += 1
         return expressionPlanLookups.isEmpty

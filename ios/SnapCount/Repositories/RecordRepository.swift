@@ -3,6 +3,7 @@ import Foundation
 protocol RecordRepositoryProtocol {
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail
+    func hydrateDetailImage(_ detail: NativeRecordDetail, accessToken: String) async throws -> NativeRecordDetail
     func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup
     func acknowledgeRecordExpressionPlan(
         recordId: String,
@@ -153,6 +154,10 @@ final class RecordRepository: RecordRepositoryProtocol {
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
         try await remoteService.fetchRecordDetail(reference: reference, accessToken: accessToken)
+    }
+
+    func hydrateDetailImage(_ detail: NativeRecordDetail, accessToken: String) async throws -> NativeRecordDetail {
+        try await remoteService.hydrateRecordDetailImage(detail, accessToken: accessToken)
     }
 
     func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {

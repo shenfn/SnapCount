@@ -1053,7 +1053,18 @@ function signalSupportsStatisticalClaim(text: string, signals: DomainSignal[]): 
   return signals.some((signal) => {
     if (!signalSupportsBoundClaims(text, [signal])) return false;
     const available = statisticalScopes(signal.fact);
-    return [...requested].every((scope) => available.has(scope));
+    return [...requested].every((scope) => {
+      if (available.has(scope)) return true;
+      // A qualitative comparison such as “比平时短些” is a valid rendering
+      // of a verified baseline signal. It does not invent a new window or
+      // number; the exact baseline remains in the selected candidate.
+      if (scope === "comparison:reference") {
+        return available.has("baseline:average")
+          || available.has("baseline:median")
+          || available.has("baseline:percentile");
+      }
+      return false;
+    });
   });
 }
 

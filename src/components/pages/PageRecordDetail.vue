@@ -21,8 +21,8 @@
           <div class="record-detail-image-label">点击查看原始图片</div>
         </template>
         <div v-else class="record-detail-image-empty">
-          <div class="record-detail-image-empty-mark">{{ emptyMark }}</div>
-          <div class="record-detail-image-label">{{ record.imageLoadError ? '图片文件不可用' : '暂无图片预览' }}</div>
+          <div class="record-detail-image-empty-mark">{{ record.imageLoadError ? emptyMark : '…' }}</div>
+          <div class="record-detail-image-label">{{ record.imageLoadError ? '图片文件不可用' : (record.imagePath ? '正在加载图片…' : '暂无图片预览') }}</div>
         </div>
       </div>
 
