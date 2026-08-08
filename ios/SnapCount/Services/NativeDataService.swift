@@ -443,7 +443,14 @@ final class NativeDataService {
             path: "rest/v1/data_records",
             queryItems: [
                 URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
-                URLQueryItem(name: "or", value: "and(occurred_at.gte.\(range.startTimestamp),occurred_at.lte.\(range.endTimestamp)),and(occurred_at.is.null,created_at.gte.\(range.startTimestamp),created_at.lte.\(range.endTimestamp))"),
+                URLQueryItem(name: "or", value: Self.financeRangeFilter(
+                    occurredAtColumn: "occurred_at",
+                    legacyDateColumn: "created_at",
+                    fallbackStart: range.startTimestamp,
+                    fallbackEnd: range.endTimestamp,
+                    startTimestamp: range.startTimestamp,
+                    endTimestamp: range.endTimestamp
+                )),
                 URLQueryItem(name: "order", value: NativeDashboardQueryOrder.universal)
             ],
             accessToken: accessToken
@@ -487,8 +494,26 @@ final class NativeDataService {
         legacyDateColumn: String,
         range: MonthRange
     ) -> String {
-        "and(\(occurredAtColumn).gte.\(range.startTimestamp),\(occurredAtColumn).lte.\(range.endTimestamp))," +
-            "and(\(occurredAtColumn).is.null,\(legacyDateColumn).gte.\(range.startDate),\(legacyDateColumn).lte.\(range.endDate))"
+        Self.financeRangeFilter(
+            occurredAtColumn: occurredAtColumn,
+            legacyDateColumn: legacyDateColumn,
+            fallbackStart: range.startDate,
+            fallbackEnd: range.endDate,
+            startTimestamp: range.startTimestamp,
+            endTimestamp: range.endTimestamp
+        )
+    }
+
+    static func financeRangeFilter(
+        occurredAtColumn: String,
+        legacyDateColumn: String,
+        fallbackStart: String,
+        fallbackEnd: String,
+        startTimestamp: String,
+        endTimestamp: String
+    ) -> String {
+        "(and(\(occurredAtColumn).gte.\(startTimestamp),\(occurredAtColumn).lte.\(endTimestamp))," +
+            "and(\(occurredAtColumn).is.null,\(legacyDateColumn).gte.\(fallbackStart),\(legacyDateColumn).lte.\(fallbackEnd)))"
     }
 
     private func monthRange(for monthKey: String) throws -> MonthRange {
@@ -609,8 +634,6 @@ final class NativeDataService {
                 accessToken: accessToken
             )
             guard let row = rows.first else { throw SupabaseRemoteError.requestFailed("记录不存在或已被删除") }
-            let signedURLs = try? await signedImageURLMap(paths: [row.imageURL].compactMap { $0 }, accessToken: accessToken)
-            let imageURL = signedURLs?[row.imageURL ?? ""]
             return NativeRecordDetail(
                 id: "expense/\(row.id)",
                 rawId: row.id,
@@ -631,8 +654,8 @@ final class NativeDataService {
                     NativeDetailRow(label: "来源", value: row.source ?? ""),
                     NativeDetailRow(label: "备注", value: row.note ?? "")
                 ].filter { !$0.value.isEmpty },
-                imageURL: imageURL,
-                imageLoadError: row.imageURL != nil && imageURL == nil,
+                imageURL: nil,
+                imageLoadError: false,
                 imagePath: row.imageURL,
                 imageHash: row.imageHash,
                 amount: row.amount,
@@ -672,8 +695,6 @@ final class NativeDataService {
                 accessToken: accessToken
             )
             guard let row = rows.first else { throw SupabaseRemoteError.requestFailed("记录不存在或已被删除") }
-            let signedURLs = try? await signedImageURLMap(paths: [row.imageURL].compactMap { $0 }, accessToken: accessToken)
-            let imageURL = signedURLs?[row.imageURL ?? ""]
             return NativeRecordDetail(
                 id: "income/\(row.id)",
                 rawId: row.id,
@@ -693,8 +714,8 @@ final class NativeDataService {
                     NativeDetailRow(label: "备注", value: row.note ?? ""),
                     NativeDetailRow(label: "AI 陪伴", value: row.companionMessage ?? "")
                 ].filter { !$0.value.isEmpty },
-                imageURL: imageURL,
-                imageLoadError: row.imageURL != nil && imageURL == nil,
+                imageURL: nil,
+                imageLoadError: false,
                 imagePath: row.imageURL,
                 imageHash: row.imageHash,
                 amount: row.amount,
@@ -730,8 +751,6 @@ final class NativeDataService {
                 accessToken: accessToken
             )
             guard let row = rows.first else { throw SupabaseRemoteError.requestFailed("记录不存在或已被删除") }
-            let signedURLs = try? await signedImageURLMap(paths: [row.sourceImagePath].compactMap { $0 }, accessToken: accessToken)
-            let imageURL = signedURLs?[row.sourceImagePath ?? ""]
             let payloadRows = (row.payloadJSONB ?? [:])
                 .filter { !$0.value.displayValue.isEmpty }
                 .sorted { $0.key < $1.key }
@@ -749,8 +768,8 @@ final class NativeDataService {
                     NativeDetailRow(label: "领域 Key", value: row.domainKey ?? ""),
                     NativeDetailRow(label: "摘要", value: row.summary ?? "")
                 ].filter { !$0.value.isEmpty } + payloadRows,
-                imageURL: imageURL,
-                imageLoadError: row.sourceImagePath != nil && imageURL == nil,
+                imageURL: nil,
+                imageLoadError: false,
                 imagePath: row.sourceImagePath,
                 imageHash: row.sourceImageHash,
                 amount: nil,
@@ -773,6 +792,15 @@ final class NativeDataService {
                 aiSummary: row.summary
             )
         }
+    }
+
+    func hydrateRecordDetailImage(_ detail: NativeRecordDetail, accessToken: String) async throws -> NativeRecordDetail {
+        guard let path = detail.imagePath, !path.isEmpty else { return detail }
+        let signed = try await signedImageURLMap(paths: [path], accessToken: accessToken)
+        var hydrated = detail
+        hydrated.imageURL = signed[path]
+        hydrated.imageLoadError = signed[path] == nil
+        return hydrated
     }
 
     func saveRecordDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String {

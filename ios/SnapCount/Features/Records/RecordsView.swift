@@ -317,6 +317,10 @@ struct RecordDetailView: View {
                                 .buttonStyle(.plain)
                             } else if detail.imageLoadError {
                                 unavailableImageView
+                            } else if detail.imagePath != nil {
+                                ProgressView("正在加载截图…")
+                                    .frame(maxWidth: .infinity, minHeight: 180)
+                                    .background(JieziTheme.pageBackground, in: RoundedRectangle(cornerRadius: 8))
                             }
 
                             recordHeader(detail)

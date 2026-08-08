@@ -270,6 +270,38 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    func testFinanceRangeFilterUsesPostgRESTOrGrouping() {
+        let financeFilter = NativeDataService.financeRangeFilter(
+            occurredAtColumn: "occurred_at",
+            legacyDateColumn: "transaction_date",
+            fallbackStart: "2026-08-01",
+            fallbackEnd: "2026-08-31",
+            startTimestamp: "2026-07-31T16:00:00Z",
+            endTimestamp: "2026-08-31T15:59:59Z"
+        )
+
+        XCTAssertEqual(
+            financeFilter,
+            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,transaction_date.gte.2026-08-01,transaction_date.lte.2026-08-31))"
+        )
+        XCTAssertTrue(financeFilter.hasPrefix("(and("))
+        XCTAssertTrue(financeFilter.hasSuffix("))"))
+
+        let universalFilter = NativeDataService.financeRangeFilter(
+            occurredAtColumn: "occurred_at",
+            legacyDateColumn: "created_at",
+            fallbackStart: "2026-07-31T16:00:00Z",
+            fallbackEnd: "2026-08-31T15:59:59Z",
+            startTimestamp: "2026-07-31T16:00:00Z",
+            endTimestamp: "2026-08-31T15:59:59Z"
+        )
+
+        XCTAssertEqual(
+            universalFilter,
+            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,created_at.gte.2026-07-31T16:00:00Z,created_at.lte.2026-08-31T15:59:59Z))"
+        )
+    }
+
     func testCameraUploadUsesSmallerPhotoPreset() throws {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1_800, height: 1_200))
         let source = renderer.image { context in
@@ -2963,6 +2995,10 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
             throw SupabaseRemoteError.requestFailed("unused")
         }
         return details.removeFirst()
+    }
+
+    func hydrateDetailImage(_ detail: NativeRecordDetail, accessToken: String) async throws -> NativeRecordDetail {
+        detail
     }
 
     func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {

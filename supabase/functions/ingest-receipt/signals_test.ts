@@ -92,6 +92,21 @@ Deno.test("signal-backed tone may repeat the verified weekly count", () => {
   assert(result.ok, "the model may faithfully repeat a signal-backed weekly count");
 });
 
+Deno.test("baseline-backed qualitative sleep advice is retained", () => {
+  const signals: DomainSignal[] = [{
+    kind: "consecutive_short",
+    priority: 1,
+    fact: "本次睡眠 5.73 小时，比历史中位数 6.78 小时短些",
+    numbers: [5.73, 6.78],
+  }];
+  const result = validateModelTone(
+    ["睡了 5.73 小时，比平时短些。下午补个觉吧。"],
+    JSON.stringify({ record_type: "sleep", sleep_hours: 5.73 }),
+    signals,
+  );
+  assert(result.ok, "a grounded qualitative suggestion should survive tone validation");
+});
+
 Deno.test("statistical numbers stay bound to one candidate meaning unit and scope", () => {
   const signals: DomainSignal[] = [{
     kind: "merchant_repeat",

@@ -38,7 +38,10 @@ final class InsightsRepository: InsightsRepositoryProtocol {
             [NativeDailyDomainSummary].self,
             path: "rest/v1/daily_domain_summary",
             queryItems: [
-                URLQueryItem(name: "select", value: "*"),
+                // Keep the contract explicit. `select=*` made this view
+                // fragile when Supabase refreshed its schema cache and added
+                // an internal column that the iOS decoder does not know.
+                URLQueryItem(name: "select", value: "date,expense_total,expense_count,income_total,income_count,sleep_minutes,sleep_score_avg,sleep_count,sport_minutes,sport_count,reading_minutes,reading_count,food_calories,food_meals,has_any_data"),
                 URLQueryItem(name: "date", value: "gte.\(formatter.string(from: since))"),
                 URLQueryItem(name: "order", value: "date.asc")
             ],
