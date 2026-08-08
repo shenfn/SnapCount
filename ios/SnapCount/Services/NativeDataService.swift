@@ -177,6 +177,7 @@ struct NativeRecordEditDraft: Identifiable, Equatable {
         companionMessage = detail.companionMessage
         accountId = detail.accountId
         transactionTime = NativeLocalDate.financeTimeKey(occurredAt: detail.occurredAt)
+            ?? detail.transactionTime
         occurredAt = detail.occurredAt
         source = detail.source
         isLargeTransport = detail.isLargeTransport
