@@ -270,6 +270,24 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    func testFinanceRangeFilterUsesPostgRESTOrGrouping() {
+        let filter = NativeDataService.financeRangeFilter(
+            occurredAtColumn: "occurred_at",
+            legacyDateColumn: "transaction_date",
+            fallbackStart: "2026-08-01",
+            fallbackEnd: "2026-08-31",
+            startTimestamp: "2026-07-31T16:00:00Z",
+            endTimestamp: "2026-08-31T15:59:59Z"
+        )
+
+        XCTAssertEqual(
+            filter,
+            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,transaction_date.gte.2026-08-01,transaction_date.lte.2026-08-31))"
+        )
+        XCTAssertTrue(filter.hasPrefix("(and("))
+        XCTAssertTrue(filter.hasSuffix("))"))
+    }
+
     func testCameraUploadUsesSmallerPhotoPreset() throws {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1_800, height: 1_200))
         let source = renderer.image { context in

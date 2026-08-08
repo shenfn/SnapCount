@@ -443,7 +443,12 @@ final class NativeDataService {
             path: "rest/v1/data_records",
             queryItems: [
                 URLQueryItem(name: "select", value: "id,created_at,occurred_at,domain_key,title,summary,payload_jsonb,source_image_path,source_image_hash,source"),
-                URLQueryItem(name: "or", value: "and(occurred_at.gte.\(range.startTimestamp),occurred_at.lte.\(range.endTimestamp)),and(occurred_at.is.null,created_at.gte.\(range.startTimestamp),created_at.lte.\(range.endTimestamp))"),
+                URLQueryItem(name: "or", value: financeRangeFilter(
+                    occurredAtColumn: "occurred_at",
+                    legacyDateColumn: "created_at",
+                    fallbackStart: range.startTimestamp,
+                    fallbackEnd: range.endTimestamp
+                )),
                 URLQueryItem(name: "order", value: NativeDashboardQueryOrder.universal)
             ],
             accessToken: accessToken
@@ -487,8 +492,26 @@ final class NativeDataService {
         legacyDateColumn: String,
         range: MonthRange
     ) -> String {
-        "and(\(occurredAtColumn).gte.\(range.startTimestamp),\(occurredAtColumn).lte.\(range.endTimestamp))," +
-            "and(\(occurredAtColumn).is.null,\(legacyDateColumn).gte.\(range.startDate),\(legacyDateColumn).lte.\(range.endDate))"
+        Self.financeRangeFilter(
+            occurredAtColumn: occurredAtColumn,
+            legacyDateColumn: legacyDateColumn,
+            fallbackStart: range.startDate,
+            fallbackEnd: range.endDate,
+            startTimestamp: range.startTimestamp,
+            endTimestamp: range.endTimestamp
+        )
+    }
+
+    static func financeRangeFilter(
+        occurredAtColumn: String,
+        legacyDateColumn: String,
+        fallbackStart: String,
+        fallbackEnd: String,
+        startTimestamp: String,
+        endTimestamp: String
+    ) -> String {
+        "(and(\(occurredAtColumn).gte.\(startTimestamp),\(occurredAtColumn).lte.\(endTimestamp))," +
+            "and(\(occurredAtColumn).is.null,\(legacyDateColumn).gte.\(fallbackStart),\(legacyDateColumn).lte.\(fallbackEnd)))"
     }
 
     private func monthRange(for monthKey: String) throws -> MonthRange {
