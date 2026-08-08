@@ -973,7 +973,7 @@ final class NativeDataService {
             "p_payment_method": AnyCodable(paymentMethod),
             "p_income_category": AnyCodable(incomeCategory),
             "p_record_date": AnyCodable(
-                occurredAt.map(NativeLocalDate.dateKey)
+                occurredAt.map { NativeLocalDate.dateKey($0) }
                     ?? payload.string("transaction_date")
                     ?? payload.string("income_date")
                     ?? payload.string("record_date")

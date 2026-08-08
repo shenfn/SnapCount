@@ -17,6 +17,7 @@ Deno.test("recognition prompt does not receive raw companion memory", () => {
   assert(!prompt.includes("frequent_merchants_30d"), "recognition prompt must not receive short-term statistics");
   assert(prompt.includes("识别阶段上下文边界"), "recognition prompt must declare its context boundary");
   assert(!prompt.includes("陪伴文案 companion_message"), "recognition prompt must not own the final companion copy");
+  assert(prompt.includes("上传时刻只写入 client_captured_at"), "recognition prompt must not promote capture time to event time");
 });
 
 Deno.test("feedback and voice prompts consume a frozen packet", () => {
@@ -101,7 +102,6 @@ Deno.test("voice prompt receives complete time context and prioritizes event tim
   assert(prompt.includes("发生时间是描述记录何时发生的唯一优先依据"), "voice prompt must prioritize event time");
   assert(prompt.includes("上传时间只用于判断实时记录或补录关系"), "voice prompt must limit capture-time semantics");
   assert(prompt.includes("禁止写成“凌晨”“深夜”或“夜里”"), "voice prompt must prohibit morning/night contradictions");
-  assert(prompt.includes("上传时刻只写入 client_captured_at"), "recognition prompt must not promote capture time to event time");
 });
 
 Deno.test("feedback prompt keeps time context when a frozen packet exists", () => {
