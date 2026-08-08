@@ -152,6 +152,7 @@ create table public.data_domains (
 
 create table public.data_records (
   id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
   domain_id uuid references public.data_domains(id),
   domain_key text,
   domain_version text,

@@ -547,3 +547,5 @@ PR #28 首轮 CI 暴露了三处收口问题，均未改变既定产品范围：
 - iOS 将带默认参数的 `NativeLocalDate.dateKey` 直接传给 `Optional.map`，Swift 类型推断要求两个参数；改为显式闭包调用，不改变日期语义。
 
 修复后本地验证：Edge safeguards `71/71`、Planner `171/171`、PWA 表达 `16/16`，财务发生时间、待处理队列、财务选项、重复记录和安全契约均通过。Windows 仍不能替代 macOS Swift 编译，修复后的 iOS Build 与单测必须由 PR CI 再验证。
+
+第二轮 Release Validation 继续执行到 PostgreSQL 实际迁移演练后，发现测试夹具的 `data_records` 缺少生产 schema 自 007 migration 起就存在的 `created_at`。归档 RPC 的同图幂等查询长期按该列排序，因此本轮仅补齐夹具字段，不修改生产 RPC 或时间契约。
