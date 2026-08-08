@@ -153,18 +153,23 @@ create table public.data_domains (
 create table public.data_records (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
-  domain_id uuid references public.data_domains(id),
-  domain_key text,
-  domain_version text,
-  occurred_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  domain_id uuid not null references public.data_domains(id),
+  domain_key text not null,
+  domain_version text not null default '1.0',
+  occurred_at timestamptz,
   title text,
   summary text,
   payload_jsonb jsonb not null default '{}'::jsonb,
-  source text,
+  source text not null default 'staging',
   source_image_path text,
   source_image_hash text,
   staging_record_id uuid references public.staging_records(id),
-  user_id uuid not null references auth.users(id)
+  user_id uuid not null references auth.users(id),
+  linked_account_id uuid references public.accounts(id),
+  account_snapshot_kind text,
+  snapshot_balance numeric(14,2),
+  snapshot_at timestamptz
 );
 
 create table public.user_routing_feedback (

@@ -549,3 +549,5 @@ PR #28 首轮 CI 暴露了三处收口问题，均未改变既定产品范围：
 修复后本地验证：Edge safeguards `71/71`、Planner `171/171`、PWA 表达 `16/16`，财务发生时间、待处理队列、财务选项、重复记录和安全契约均通过。Windows 仍不能替代 macOS Swift 编译，修复后的 iOS Build 与单测必须由 PR CI 再验证。
 
 第二轮 Release Validation 继续执行到 PostgreSQL 实际迁移演练后，发现测试夹具的 `data_records` 缺少生产 schema 自 007 migration 起就存在的 `created_at`。归档 RPC 的同图幂等查询长期按该列排序，因此本轮仅补齐夹具字段，不修改生产 RPC 或时间契约。
+
+第三轮演练进一步发现该夹具把 `data_records.occurred_at` 错设为 `NOT NULL DEFAULT now()`，与生产从建表起允许未知时刻的定义相反。夹具现已同步生产的基础时间列和钱包扩展列，确保“日期已知、时刻未知”能以 `occurred_at = null` 归档，而不是被测试 schema 自动伪造当前时间。
