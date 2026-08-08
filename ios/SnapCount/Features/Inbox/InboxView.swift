@@ -1910,7 +1910,14 @@ private struct PendingExpenseResolutionView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             header(detail)
                             if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
-                                companionSection(companionMessage)
+                                companionSection(
+                                    companionMessage,
+                                    feedback: NativeRecordExpressionFeedbackPolicy.companionFeedbackToReview(
+                                        companionMessage: companionMessage,
+                                        feedback: detail.aiFeedback
+                                    ),
+                                    viewportFrame: scrollViewport.frame(in: .global)
+                                )
                             }
                             if let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToRender(
                                 companionMessage: detail.companionMessage,
@@ -2041,22 +2048,64 @@ private struct PendingExpenseResolutionView: View {
         .jieziCard(palette: palette, solid: true)
     }
 
-    private func companionSection(_ message: String) -> some View {
+    private func companionSection(
+        _ message: String,
+        feedback: NativeAIFeedback?,
+        viewportFrame: CGRect
+    ) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "quote.bubble.fill")
                 .foregroundStyle(JieziTheme.brand)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("AI 陪伴")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                Text(message)
-                    .font(.subheadline)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("AI 陪伴")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text(message)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let feedback {
+                    NativeAIFeedbackCard(
+                        feedback: feedback,
+                        compact: true,
+                        reviewOnly: true,
+                        reviewable: feedback.isReviewable,
+                        reviewState: appState.recordFeedbackState,
+                        exposureState: appState.recordExpressionPlanExposureState,
+                        onRetryExposure: {
+                            appState.setRecordExpressionPlanCardVisible(
+                                true,
+                                reference: reference,
+                                feedbackIdentity: feedback.renderIdentity
+                            )
+                            Task {
+                                await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
+                            }
+                        }
+                    ) { choice, text in
+                        Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                    }
+                }
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(JieziTheme.brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .onNativeAIFeedbackCardVisibilityChange(in: viewportFrame) { isVisible in
+            guard let feedback, feedback.source == "expression_planner" else { return }
+            appState.setRecordExpressionPlanCardVisible(
+                isVisible,
+                reference: reference,
+                feedbackIdentity: feedback.renderIdentity
+            )
+            if isVisible, feedback.requiresExposureAcknowledgement {
+                Task {
+                    await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
+                }
+            }
+        }
+        .id(feedback.map { "companion-\($0.renderIdentity)" } ?? "companion-message")
     }
 
     @ViewBuilder
@@ -2395,13 +2444,16 @@ private struct StagingRecordDetailView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     stagingHeader
                     stagingImageSection
-                    if let aiFeedback {
-                        NativeAIFeedbackCard(feedback: aiFeedback, compact: true)
-                    }
-                    recognitionSection
                     if let companionMessage = record.companionMessage, !companionMessage.isEmpty {
                         companionSection(companionMessage)
                     }
+                    if let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                        companionMessage: record.companionMessage,
+                        feedback: aiFeedback
+                    ) {
+                        NativeAIFeedbackCard(feedback: feedback, compact: true)
+                    }
+                    recognitionSection
                     if !NativeStagingDetailPresentation.fields(for: record).isEmpty {
                         extractedSection
                     }

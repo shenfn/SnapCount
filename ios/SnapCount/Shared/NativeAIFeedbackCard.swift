@@ -148,6 +148,7 @@ extension View {
 struct NativeAIFeedbackCard: View {
     let feedback: NativeAIFeedback
     var compact = false
+    var reviewOnly = false
     var reviewable = false
     var reviewState: NativeAIFeedbackReviewState = .idle
     var exposureState: NativeRecordExpressionPlanExposureState = .idle
@@ -161,69 +162,73 @@ struct NativeAIFeedbackCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 10 : 14) {
-            HStack(spacing: 12) {
-                feedbackIcon
-                    .frame(width: compact ? 32 : 38, height: compact ? 32 : 38)
-                    .background(JieziTheme.brand.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("AI 即时反馈")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Text(feedback.badge)
-                        .font(compact ? .subheadline.weight(.bold) : .headline)
-                }
-                Spacer()
-                Text(feedback.bandLabel)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(bandColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(bandColor.opacity(0.1), in: Capsule())
-            }
-
-            if !feedback.emotionLine.isEmpty {
-                Text(feedback.emotionLine)
-                    .font(compact ? .subheadline.weight(.semibold) : .body.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if !feedback.utilityLine.isEmpty {
-                Text(feedback.utilityLine)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 8))
-            }
-
-            if !feedback.detailReason.isEmpty {
-                if compact {
-                    Button(showReason ? "收起依据" : "为什么这么说") {
-                        showReason.toggle()
+            if !reviewOnly {
+                HStack(spacing: 12) {
+                    feedbackIcon
+                        .frame(width: compact ? 32 : 38, height: compact ? 32 : 38)
+                        .background(JieziTheme.brand.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AI 即时反馈")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Text(feedback.badge)
+                            .font(compact ? .subheadline.weight(.bold) : .headline)
                     }
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(JieziTheme.brand)
+                    Spacer()
+                    Text(feedback.bandLabel)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(bandColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(bandColor.opacity(0.1), in: Capsule())
                 }
-                if !compact || showReason {
-                    Text("判断依据  \(feedback.detailReason)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+                if !feedback.emotionLine.isEmpty {
+                    Text(feedback.emotionLine)
+                        .font(compact ? .subheadline.weight(.semibold) : .body.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
 
-            if !feedback.timingLabel.isEmpty {
-                Label(feedback.timingLabel, systemImage: "clock")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(JieziTheme.brand)
+                if !feedback.utilityLine.isEmpty {
+                    Text(feedback.utilityLine)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                if !feedback.detailReason.isEmpty {
+                    if compact {
+                        Button(showReason ? "收起依据" : "为什么这么说") {
+                            showReason.toggle()
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(JieziTheme.brand)
+                    }
+                    if !compact || showReason {
+                        Text("判断依据  \(feedback.detailReason)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if !feedback.timingLabel.isEmpty {
+                    Label(feedback.timingLabel, systemImage: "clock")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(JieziTheme.brand)
+                }
             }
 
             if NativeAIFeedbackReviewPresentation.shouldShowSection(
                 reviewable: reviewable,
                 requiresExposureAcknowledgement: feedback.requiresExposureAcknowledgement
             ) {
-                Divider()
+                if !reviewOnly {
+                    Divider()
+                }
                 if reviewable {
                     reviewContent
                 } else {
@@ -231,11 +236,18 @@ struct NativeAIFeedbackCard: View {
                 }
             }
         }
-        .padding(compact ? 14 : 16)
-        .background(bandBackground, in: RoundedRectangle(cornerRadius: 8))
+        .padding(reviewOnly ? 0 : (compact ? 14 : 16))
+        .background {
+            if !reviewOnly {
+                bandBackground
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(bandColor.opacity(0.18), lineWidth: 1)
+            if !reviewOnly {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(bandColor.opacity(0.18), lineWidth: 1)
+            }
         }
         .onChange(of: reviewState) { _, state in
             if case .submitted = state {

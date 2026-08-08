@@ -1,6 +1,6 @@
 # 时间与陪伴文案重构 — 交接文档 v0.1
 
-- **状态**：待开工（因 Git 写入异常暂停，见 §7）
+- **状态**：核心实现已在 `codex/陪伴候选统一出口` 收口；本文的国际多时区部分暂缓
 - **建立日期**：2026-08-03
 - **责任 Agent**：芥舟
 - **对应 PRD**：`docs/time-and-companion-refactor-prd-v0.1.md`
@@ -116,3 +116,10 @@ cd .worktrees/time-companion-refactor
 - 恢复点：`D:\Business\count-final-cleanup-20260802\`
 - 事故记录：`.workbuddy/memory/2026-08-02.md`
 - 案例数据：`transactions` 表 merchant='星之柠网络科技工作室' 最新一笔
+
+## 11. 2026-08-08 决策更新
+
+- 本轮不继续推进用户时区配置、IANA 时区持久化或 DST 迁移；当前线上契约固定为 `Asia/Shanghai`。
+- 已采用 `occurred_at`（业务发生时刻）与 `client_captured_at`（上传时刻）双时间模型。发生时刻缺失时保持未知，不以上传时刻代替。
+- PWA/iOS 已按“发生时间、上传时间”分开显示；Edge Prompt、Voice 和最终清洗均以代码生成的 `TimeContext` 为唯一时段依据。
+- 本文第 4 节的 P0-P3 原计划作为历史记录保留，不代表本批次仍需按旧顺序重做；后续国际化应另开版本化设计和迁移计划。

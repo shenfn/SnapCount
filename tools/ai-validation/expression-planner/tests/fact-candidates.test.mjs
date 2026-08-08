@@ -1,6 +1,10 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
-import { generateCurrentExpenseRecordCandidate, generateFactCandidates } from '../lib/fact-candidates.mjs'
+import {
+  generateCurrentExpenseRecordCandidate,
+  generateFactCandidates,
+  generateMerchantFirstOccurrenceCandidate,
+} from '../lib/fact-candidates.mjs'
 
 const events = [
   ['1', 10, '2026-07-12T12:46:00+08:00'],
@@ -101,4 +105,72 @@ test('does not mark a confirmed categorized expense as awaiting category review'
 
   assert.equal(current.claim.structured_value.category_needs_review, false)
   assert.doesNotMatch(current.claim.canonical_text, /分类仍待确认/)
+})
+
+test('generates a stable first-occurrence candidate for a new merchant entity', () => {
+  const [first] = generateMerchantFirstOccurrenceCandidate({
+    event_id: 'transaction:first-merchant',
+    target_id: 'first-merchant',
+    amount: 6.28,
+    event_at: '2026-08-05T10:20:00+08:00',
+    merchant: {
+      entity_id: 'merchant_example',
+      canonical_name: '示例茶饮',
+      raw_name: '示例茶饮',
+      normalized_key: '示例茶饮',
+    },
+  }, {
+    entity_id: 'merchant_example',
+    canonical_name: '示例茶饮',
+    raw_name: '示例茶饮',
+    normalized_key: '示例茶饮',
+    entity_first_seen: true,
+    alias_first_seen: true,
+  })
+
+  assert.equal(first.claim.semantic_key, 'expense_merchant_first_occurrence')
+  assert.equal(first.dimension, 'first_occurrence')
+  assert.equal(first.claim.structured_value.first_seen_kind, 'entity')
+  assert.match(first.claim.canonical_text, /第一次记录/)
+  assert.deepEqual(first.selection_hints.allowed_surfaces, ['pwa_pending_ai_card', 'record_detail'])
+  assert.equal(first.selection_hints.exposure_key, 'expense:merchant:entity:merchant_example:first-occurrence')
+  assert.equal(first.selection_hints.dedupe_key, first.selection_hints.exposure_key)
+  assert.deepEqual(first.numbers, [
+    { value: 1, meaning: 'first_occurrence_count', role: 'count', derivation: 'merchant_observation.entity_first_seen' },
+    { value: 6.28, meaning: 'current_record_amount', role: 'measure', derivation: 'source_event.amount' },
+  ])
+})
+
+test('does not turn a new alias of an existing merchant into a first-occurrence insight', () => {
+  const candidates = generateMerchantFirstOccurrenceCandidate({
+    event_id: 'transaction:first-alias',
+    target_id: 'first-alias',
+    amount: 12,
+    event_at: '2026-08-05T10:20:00+08:00',
+    merchant: {
+      entity_id: 'merchant_example',
+      canonical_name: '示例茶饮',
+      raw_name: '示例茶饮（外卖）',
+      normalized_key: '示例茶饮外卖',
+    },
+  }, {
+    entity_id: 'merchant_example',
+    canonical_name: '示例茶饮',
+    raw_name: '示例茶饮（外卖）',
+    normalized_key: '示例茶饮外卖',
+    entity_first_seen: false,
+    alias_first_seen: true,
+  })
+
+  assert.deepEqual(candidates, [])
+})
+
+test('does not generate a first-occurrence candidate without a first-seen observation', () => {
+  assert.deepEqual(generateMerchantFirstOccurrenceCandidate({
+    event_id: 'transaction:known-merchant', amount: 12,
+    merchant: { entity_id: 'merchant_example', canonical_name: '示例茶饮' },
+  }, {
+    entity_id: 'merchant_example', canonical_name: '示例茶饮',
+    entity_first_seen: false, alias_first_seen: false,
+  }), [])
 })

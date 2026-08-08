@@ -28,9 +28,23 @@ import {
   shouldAdoptSnapshotAsOpeningBalance,
 } from '../adapters/domain/accountAdapter'
 import { normalizeFinanceOptionValue } from '../domains/financeReviewOptions'
+import {
+  isPlannerDeliveryEnvelopeValid,
+  plannerDeliveryIdentityMatches,
+} from '../utils/expressionPresentation'
+import {
+  buildShanghaiOccurredAt,
+  resolveFinanceOccurrence,
+} from '../utils/financeOccurrence'
 
 const PRIMARY_EXPENSE_CATEGORIES = new Set(['餐饮', '购物', '出行', '娱乐', '生活', '健康', '教育', '其他'])
 const PENDING_QUEUE_QUERY_LIMIT = 1000
+
+function financeMonthFilter(legacyDateColumn, start, end) {
+  const startTimestamp = buildShanghaiOccurredAt(start, '00:00:00')
+  const endTimestamp = buildShanghaiOccurredAt(end, '23:59:59')
+  return `and(occurred_at.gte.${startTimestamp},occurred_at.lte.${endTimestamp}),and(occurred_at.is.null,${legacyDateColumn}.gte.${start},${legacyDateColumn}.lte.${end})`
+}
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
 function humanizeDbError(err) {
@@ -252,8 +266,8 @@ export function useStore() {
   })
 
   const recentEntries = computed(() => {
-    const expenseItems = bills.value.map(b => ({ ...b, entryKind: 'expense', sortDate: b.createdAt || `${b.dateRaw || ''} ${b.time || ''}` }))
-    const incomeItems = recentIncomeRecords.value.map(r => ({ ...r, entryKind: 'income', sortDate: r.createdAt || `${r.dateRaw || ''} ${r.time || ''}` }))
+    const expenseItems = bills.value.map(b => ({ ...b, entryKind: 'expense', sortDate: b.occurredAt || b.createdAt || `${b.dateRaw || ''} ${b.time || ''}` }))
+    const incomeItems = recentIncomeRecords.value.map(r => ({ ...r, entryKind: 'income', sortDate: r.occurredAt || r.createdAt || `${r.dateRaw || ''} ${r.time || ''}` }))
     return [...expenseItems, ...incomeItems].sort((a, b) => (b.sortDate || '').localeCompare(a.sortDate || ''))
   })
 
@@ -880,25 +894,6 @@ export function useStore() {
       const lastDay = new Date(currentYear.value, currentMonth.value, 0).getDate()
       const end = `${currentYear.value}-${padM}-${String(lastDay).padStart(2, '0')}`
 
-      const mapIncomeRow = (r) => ({
-        id: r.id,
-        cat: r.category,
-        source: r.source_name,
-        amount: Number(r.amount),
-        date: formatDate(r.income_date),
-        dateRaw: r.income_date,
-        createdAt: r.created_at,
-        time: '',
-        icon: incomeCatMap[r.category]?.icon || '💰',
-        note: r.note,
-        image_url: r.image_url,
-        image_path: r.image_url,
-        sourceType: r.source || 'manual',
-        companionMessage: r.companion_message || '',
-        aiFeedback: r.ai_feedback || null,
-        accountId: r.account_id || null,
-      })
-
       const [
         txResult,
         pendingTxResult,
@@ -910,29 +905,30 @@ export function useStore() {
       ] = await Promise.all([
         sb.from('transactions')
           .select('*')
-          .gte('transaction_date', start)
-          .lte('transaction_date', end)
+          .or(financeMonthFilter('transaction_date', start, end))
+          .order('occurred_at', { ascending: false, nullsFirst: false })
           .order('transaction_date', { ascending: false })
-          .order('transaction_time', { ascending: false }),
+          .order('created_at', { ascending: false }),
         sb.from('transactions')
           .select('*')
           .eq('status', 'pending')
+          .order('occurred_at', { ascending: false, nullsFirst: false })
           .order('transaction_date', { ascending: false })
-          .order('transaction_time', { ascending: false })
+          .order('created_at', { ascending: false })
           .limit(PENDING_QUEUE_QUERY_LIMIT),
         sb.from('income_records')
           .select('*')
-          .gte('income_date', start)
-          .lte('income_date', end)
-          .order('income_date', { ascending: false }),
+          .or(financeMonthFilter('income_date', start, end))
+          .order('occurred_at', { ascending: false, nullsFirst: false })
+          .order('income_date', { ascending: false })
+          .order('created_at', { ascending: false }),
         sb.from('income_records')
           .select('*')
           .order('created_at', { ascending: false })
           .limit(10),
         sb.from('data_records')
           .select('*')
-          .gte('occurred_at', `${start}T00:00:00+08:00`)
-          .lte('occurred_at', `${end}T23:59:59+08:00`)
+          .or(`and(occurred_at.gte.${buildShanghaiOccurredAt(start, '00:00:00')},occurred_at.lte.${buildShanghaiOccurredAt(end, '23:59:59')}),and(occurred_at.is.null,created_at.gte.${buildShanghaiOccurredAt(start, '00:00:00')},created_at.lte.${buildShanghaiOccurredAt(end, '23:59:59')})`)
           .order('occurred_at', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
           .limit(120),
@@ -1754,9 +1750,13 @@ export function useStore() {
     return { ...nested, ...direct }
   }
 
-  function stagingOccurredAt(date, time = '') {
-    if (!date) return new Date().toISOString()
-    return `${date}T${time || '12:00'}:00+08:00`
+  function stagingFinanceOccurrence(record, payload = {}) {
+    return resolveFinanceOccurrence({
+      occurredAt: payload.occurred_at || payload.order_finished_at || record?.occurredAt || null,
+      date: payload.transaction_date || payload.income_date || payload.record_date || payload.date || null,
+      time: payload.transaction_time || payload.record_time || payload.time || null,
+      fallbackInstant: record?.createdAt || null,
+    })
   }
 
   function openIncomeModal() {
@@ -1780,6 +1780,7 @@ export function useStore() {
   function openIncomeStagingModal(record) {
     if (!record?.id) return false
     const payload = stagingArchivePayload(record)
+    const occurrence = stagingFinanceOccurrence(record, payload)
     const hasAccountChoice = Object.prototype.hasOwnProperty.call(payload, 'account_id')
     incomeModal.open = true
     incomeModal.mode = 'staging'
@@ -1788,7 +1789,7 @@ export function useStore() {
     incomeModal.amount = payload.amount == null ? '' : String(payload.amount)
     incomeModal.source = payload.source_name || payload.merchant_name || payload.title || ''
     incomeModal.note = payload.note || record.summary || ''
-    incomeModal.date = localDateKeyOf(payload.occurred_at || record.occurredAt || record.createdAt) || getLocalDateKey()
+    incomeModal.date = occurrence.date || getLocalDateKey()
     incomeModal.imagePath = record.imagePath || null
     incomeModal.imageUrl = record.imageUrl || null
     incomeModal.imageLoadError = Boolean(record.imagePath && !record.imageUrl)
@@ -1832,6 +1833,10 @@ export function useStore() {
       const source = incomeModal.source.trim() || (incomeCatMap[incomeModal.cat]?.label || '收入')
       if (incomeModal.mode === 'staging' && incomeModal.stagingSource) {
         const stagingSource = incomeModal.stagingSource
+        const originalOccurrence = stagingFinanceOccurrence(stagingSource, stagingArchivePayload(stagingSource))
+        const incomeOccurrence = originalOccurrence.date === incomeModal.date
+          ? originalOccurrence
+          : resolveFinanceOccurrence({ date: incomeModal.date })
         const result = await archiveStagingRecord(stagingSource, 'income', {
           confirm: false,
           payloadOverrides: {
@@ -1839,17 +1844,20 @@ export function useStore() {
             source_name: source,
             income_category: incomeModal.cat,
             account_id: incomeModal.accountUnbound ? null : incomeModal.accountId || null,
-            occurred_at: stagingOccurredAt(incomeModal.date),
+            occurred_at: incomeOccurrence.occurredAt,
+            income_date: incomeOccurrence.date,
             note: incomeModal.note.trim() || null,
           },
           summaryOverride: incomeModal.note.trim() || stagingSource.summary,
           explicitAccount: true,
+          financeOccurrence: incomeOccurrence,
         })
         if (!result) return null
         closeIncomeModal()
         return result
       }
       if (incomeModal.mode === 'edit' && incomeModal.id) {
+        const incomeOccurrence = resolveFinanceOccurrence({ date: incomeModal.date })
         const incomeAccountId = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
         const { error } = await sb.rpc('save_income_with_account', {
           p_id: incomeModal.id,
@@ -1857,6 +1865,7 @@ export function useStore() {
           p_source_name: source,
           p_amount: amt,
           p_income_date: incomeModal.date,
+          p_occurred_at: incomeOccurrence.occurredAt,
           p_note: incomeModal.note.trim() || null,
           p_source: null,
           p_image_url: incomeModal.imagePath || null,
@@ -1897,12 +1906,14 @@ export function useStore() {
         return
       }
       const incomeAccountIdNew = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
+      const incomeOccurrence = resolveFinanceOccurrence({ date: incomeModal.date })
       const { data: newRow, error } = await sb.rpc('save_income_with_account', {
         p_id: null,
         p_category: incomeModal.cat,
         p_source_name: source,
         p_amount: amt,
         p_income_date: incomeModal.date,
+        p_occurred_at: incomeOccurrence.occurredAt,
         p_note: incomeModal.note.trim() || null,
         p_source: 'manual',
         p_image_url: incomeModal.imagePath || null,
@@ -1923,6 +1934,7 @@ export function useStore() {
         date: formatDate(newRow.income_date),
         dateRaw: newRow.income_date,
         createdAt: newRow.created_at,
+        occurredAt: newRow.occurred_at || null,
         time: '',
         icon: incomeCatMap[newRow.category]?.icon || '💰',
         note: newRow.note,
@@ -2028,6 +2040,7 @@ export function useStore() {
   function openExpenseStagingModal(record) {
     if (!record?.id) return false
     const payload = stagingArchivePayload(record)
+    const occurrence = stagingFinanceOccurrence(record, payload)
     const hasAccountChoice = Object.prototype.hasOwnProperty.call(payload, 'account_id')
     expenseModal.open = true
     expenseModal.mode = 'staging'
@@ -2038,9 +2051,8 @@ export function useStore() {
     expenseModal.category = normalizeFinanceOptionValue('category', payload.category) || payload.category || null
     expenseModal.payment = normalizeFinanceOptionValue('payment', payload.payment_method) || payload.payment_method || null
     expenseModal.note = payload.note || record.summary || ''
-    expenseModal.date = localDateKeyOf(payload.occurred_at || record.occurredAt || record.createdAt) || getLocalDateKey()
-    expenseModal.time = String(payload.transaction_time || payload.occurred_at || '').slice(11, 16)
-    if (!/^\d{2}:\d{2}$/.test(expenseModal.time)) expenseModal.time = String(payload.transaction_time || '').slice(0, 5)
+    expenseModal.date = occurrence.date || getLocalDateKey()
+    expenseModal.time = occurrence.time?.slice(0, 5) || ''
     expenseModal.imagePath = record.imagePath || null
     expenseModal.imageUrl = record.imageUrl || null
     expenseModal.imageLoadError = Boolean(record.imagePath && !record.imageUrl)
@@ -2100,6 +2112,10 @@ export function useStore() {
 
       if (expenseModal.mode === 'staging' && expenseModal.stagingSource) {
         const stagingSource = expenseModal.stagingSource
+        const expenseOccurrence = resolveFinanceOccurrence({
+          date: expenseModal.date,
+          time: resolvedTime,
+        })
         const result = await archiveStagingRecord(stagingSource, 'expense', {
           confirm: false,
           payloadOverrides: {
@@ -2110,11 +2126,12 @@ export function useStore() {
             payment_method: expenseModal.payment,
             account_id: expenseModal.accountUnbound ? null : expenseModal.accountId || null,
             transaction_time: resolvedTime,
-            occurred_at: stagingOccurredAt(expenseModal.date, resolvedTime),
+            occurred_at: expenseOccurrence.occurredAt,
             note: expenseModal.note.trim() || null,
           },
           summaryOverride: expenseModal.note.trim() || stagingSource.summary,
           explicitAccount: true,
+          financeOccurrence: expenseOccurrence,
         })
         if (!result) return null
         closeExpenseModal()
@@ -2122,6 +2139,10 @@ export function useStore() {
       }
 
       if (expenseModal.mode === 'edit' && expenseModal.id) {
+        const expenseOccurrence = resolveFinanceOccurrence({
+          date: expenseModal.date,
+          time: resolvedTime,
+        })
         const expenseAccountId = expenseModal.accountUnbound
           ? null
           : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
@@ -2134,6 +2155,7 @@ export function useStore() {
           p_payment_method: expenseModal.payment,
           p_transaction_date: expenseModal.date,
           p_transaction_time: resolvedTime,
+          p_occurred_at: expenseOccurrence.occurredAt,
           p_note: expenseModal.note.trim() || null,
           p_is_large_transport: isLargeTransport,
           p_transport_type: isLargeTransport ? '交通' : null,
@@ -2183,6 +2205,11 @@ export function useStore() {
       const expenseAccountIdNew = expenseModal.accountUnbound
         ? null
         : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
+      const createdTime = resolvedTime || (new Date().toTimeString().slice(0, 8))
+      const expenseOccurrence = resolveFinanceOccurrence({
+        date: expenseModal.date,
+        time: createdTime,
+      })
       const { data: newRow, error } = await sb.rpc('save_transaction_with_account', {
         p_id: null,
         p_amount: amt,
@@ -2191,7 +2218,8 @@ export function useStore() {
         p_category: expenseModal.category,
         p_payment_method: expenseModal.payment,
         p_transaction_date: expenseModal.date,
-        p_transaction_time: resolvedTime || (new Date().toTimeString().slice(0, 8)),
+        p_transaction_time: createdTime,
+        p_occurred_at: expenseOccurrence.occurredAt,
         p_note: expenseModal.note.trim() || null,
         p_is_large_transport: isLargeTransport,
         p_transport_type: isLargeTransport ? '交通' : null,
@@ -2648,13 +2676,15 @@ export function useStore() {
       failure_reason: record.failureReason || null,
     }
 
-    const occurredAt = payload.occurred_at || payload.order_finished_at || record.createdAt || new Date().toISOString()
+    const financeOccurrence = options.financeOccurrence || stagingFinanceOccurrence(record, payload)
+    const occurredAt = payload.occurred_at || payload.order_finished_at || record.occurredAt || null
     const title = buildUniversalRecordTitle(domainKey, payload, record)
     const summary = options.summaryOverride || record.summary || `${domain.name}截图归档`
     const companionMessage = record.companionMessage || payload.companion_message || payload.payload_jsonb?.companion_message || null
     const aiFeedback = payload.ai_feedback || payload.payload_jsonb?.ai_feedback || null
 
     if (domainKey === 'expense') {
+      const expenseOccurrence = financeOccurrence
       const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
       const paymentMethod = payload.payment_method || null
       const { data: inserted, error: insertErr } = await sb.rpc('save_transaction_with_account', {
@@ -2664,8 +2694,9 @@ export function useStore() {
         p_platform: payload.platform || '微信',
         p_category: payload.category || null,
         p_payment_method: paymentMethod,
-        p_transaction_date: normalizeDateOnly(occurredAt),
-        p_transaction_time: null,
+        p_transaction_date: expenseOccurrence.date || normalizeDateOnly(record.createdAt),
+        p_transaction_time: expenseOccurrence.time,
+        p_occurred_at: expenseOccurrence.occurredAt,
         p_note: summary,
         p_is_large_transport: payload.category === 'transport' && amount >= 200,
         p_transport_type: payload.category === 'transport' && amount >= 200 ? '交通' : null,
@@ -2705,13 +2736,15 @@ export function useStore() {
     }
 
     if (domainKey === 'income') {
+      const incomeOccurrence = financeOccurrence
       const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
       const { data: inserted, error: insertErr } = await sb.rpc('save_income_with_account', {
         p_id: null,
         p_category: payload.income_category || 'other',
         p_source_name: payload.source_name || title || '截图识别收入',
         p_amount: amount > 0 ? amount : 0.01,
-        p_income_date: normalizeDateOnly(occurredAt),
+        p_income_date: incomeOccurrence.date || normalizeDateOnly(record.createdAt),
+        p_occurred_at: incomeOccurrence.occurredAt,
         p_note: summary,
         p_source: 'ai_scan',
         p_image_url: record.imagePath || null,
@@ -3643,6 +3676,8 @@ export function useStore() {
         p_image_hash: null,
         p_companion_message: record.companionMessage || null,
         p_account_id: accountId,
+        p_occurred_at: record.occurredAt || null,
+        p_occurred_at: record.occurredAt || null,
       })
       if (error) { showFlash('补绑失败：' + humanizeDbError(error)); return false }
     } else {
@@ -3664,6 +3699,8 @@ export function useStore() {
         p_image_hash: record.image_hash || null,
         p_companion_message: record.companionMessage || null,
         p_account_id: accountId,
+        p_occurred_at: record.occurredAt || null,
+        p_occurred_at: record.occurredAt || null,
       })
       if (error) { showFlash('补绑失败：' + humanizeDbError(error)); return false }
     }
@@ -4018,15 +4055,17 @@ export function useStore() {
   }
 
   function mapIncomeRow(row) {
+    const occurrence = resolveFinanceOccurrence({ occurredAt: row.occurred_at, date: row.income_date })
     return {
       id: row.id,
       cat: row.category,
       source: row.source_name,
       amount: Number(row.amount),
-      date: formatDate(row.income_date),
-      dateRaw: row.income_date,
+      date: occurrence.date ? formatDate(occurrence.date) : '',
+      dateRaw: occurrence.date || row.income_date,
       createdAt: row.created_at,
-      time: '',
+      occurredAt: row.occurred_at || null,
+      time: occurrence.time?.slice(0, 5) || '',
       icon: incomeCatMap[row.category]?.icon || '💰',
       note: row.note,
       image_url: row.image_url,
@@ -4078,16 +4117,15 @@ export function useStore() {
         .select('*')
         .eq('status', 'done')
         .is('account_id', null)
-        .gte('transaction_date', start)
-        .lte('transaction_date', end)
+        .or(financeMonthFilter('transaction_date', start, end))
+        .order('occurred_at', { ascending: false, nullsFirst: false })
         .order('transaction_date', { ascending: false })
-        .order('transaction_time', { ascending: false })
         .limit(100),
       sb.from('income_records')
         .select('*')
         .is('account_id', null)
-        .gte('income_date', start)
-        .lte('income_date', end)
+        .or(financeMonthFilter('income_date', start, end))
+        .order('occurred_at', { ascending: false, nullsFirst: false })
         .order('income_date', { ascending: false })
         .limit(100),
     ])
@@ -4453,7 +4491,12 @@ export function useStore() {
     if (!normalizedRecordId) throw new Error('缺少记录编号')
     if (!['expense', 'income', 'data'].includes(normalizedRecordKind)) throw new Error('缺少有效的记录类型')
     const requestKey = `${normalizedRecordKind}:${normalizedRecordId}`
-    if (recordExpressionPlanLoadRequests.has(requestKey)) {
+    if (force) {
+      // A visible record may receive its persisted companion copy after the
+      // first detail payload. Invalidate both the cache and any in-flight GET
+      // so its stale presentation snapshot cannot win the race.
+      invalidateRecordExpressionPlan(normalizedRecordId)
+    } else if (recordExpressionPlanLoadRequests.has(requestKey)) {
       return recordExpressionPlanLoadRequests.get(requestKey)
     }
     const cached = recordExpressionPlanCache.value[normalizedRecordId]
@@ -4490,7 +4533,7 @@ export function useStore() {
         }
         const planToken = String(data.plan_token || '').trim()
         const candidateId = String(data.candidate_id || '').trim()
-        if (!planToken || !candidateId || !data.feedback || typeof data.feedback !== 'object') {
+        if (!planToken || !candidateId || !isPlannerDeliveryEnvelopeValid(data)) {
           throw new Error('表达计划响应不完整')
         }
         return setRecordExpressionPlan(normalizedRecordId, {
@@ -4501,6 +4544,11 @@ export function useStore() {
           planToken,
           candidateId,
           feedback: data.feedback,
+          presentationTarget: data.presentation_target || data.presentationTarget || '',
+          renderedPayload: data.rendered_payload || data.renderedPayload || null,
+          visibleFieldPaths: data.visible_field_paths || data.visibleFieldPaths || [],
+          renderedTextFingerprint: data.rendered_text_fingerprint || data.renderedTextFingerprint || '',
+          claimFingerprint: data.claim_fingerprint || data.claimFingerprint || data.feedback?.claim_fingerprint || '',
           error: '',
         })
       } catch (error) {
@@ -4553,7 +4601,18 @@ export function useStore() {
         const current = recordExpressionPlanCache.value[normalizedRecordId]
         if (current?.planToken !== planToken || current?.candidateId !== candidateId) return current || null
         const exposureEventId = String(data?.feedback?.exposure_event_id || data?.exposure_event_id || '').trim()
-        if (!exposureEventId) throw new Error('表达曝光确认响应不完整')
+        const acknowledgedDelivery = {
+          candidateId: String(data?.candidate_id || '').trim(),
+          feedback: data?.feedback,
+          presentationTarget: data?.presentation_target || data?.presentationTarget || '',
+          renderedPayload: data?.rendered_payload || data?.renderedPayload || null,
+          visibleFieldPaths: data?.visible_field_paths || data?.visibleFieldPaths || [],
+          renderedTextFingerprint: data?.rendered_text_fingerprint || data?.renderedTextFingerprint || '',
+          claimFingerprint: data?.claim_fingerprint || data?.claimFingerprint || data?.feedback?.claim_fingerprint || '',
+        }
+        if (!exposureEventId || !plannerDeliveryIdentityMatches(current, acknowledgedDelivery)) {
+          throw new Error('表达曝光确认响应不完整')
+        }
         return updateRecordExpressionPlan(normalizedRecordId, {
           status: 'acknowledged',
           acknowledged: true,

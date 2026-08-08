@@ -5,15 +5,22 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.4
 import jpeg from "npm:jpeg-js@0.4.4";
 import { decode as decodePng } from "npm:fast-png@6.2.0";
 import { PROMPT, buildPrompt, buildFeedbackPrompt, buildVoicePrompt } from "./prompts.ts";
-import { buildContextPacket, normalizeSemanticMemories } from "./context-packet.ts";
-import type { ContextPacket } from "./context-packet.ts";
+import {
+  buildContextPacket,
+  normalizeSemanticMemories,
+  resolveExpressedSemanticKey,
+} from "./context-packet.ts";
+import type { ContextPacket, ContextPacketCandidate } from "./context-packet.ts";
 import { submitExpressionFeedback } from "./expression-feedback.ts";
 import {
   acknowledgeRecordExpressionPlan,
+  buildPreInsertPlannerVoiceBrief,
   deliverShortcutExpressionPlan,
+  expressionRenderedTextFingerprint,
   getRecordExpressionPlan,
   isRecordExpressionOwnerEnabled,
 } from "./expression-delivery.ts";
+import type { PlannerVoiceBrief } from "./expression-delivery.ts";
 import {
   loadDomainProfiles,
   selectSignals,
@@ -23,6 +30,7 @@ import {
 } from "./signals.ts";
 import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
 import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.ts";
+import { sanitizeTextForTimeContext } from "./time-language.ts";
 import { scheduleExpressionShadowCapture } from "./expression-shadow.ts";
 import type { TimeContext } from "./time.ts";
 import {
@@ -250,6 +258,7 @@ interface TransactionPerceptualRow extends IdRow {
   merchant_name: string | null;
   platform: string | null;
   payment_method: string | null;
+  occurred_at: string | null;
   transaction_date: string | null;
   transaction_time: string | null;
   created_at: string | null;
@@ -259,6 +268,7 @@ interface IncomePerceptualRow extends IdRow {
   perceptual_hash: string | null;
   amount: string | number | null;
   source_name: string | null;
+  occurred_at: string | null;
   income_date: string | null;
   created_at: string | null;
 }
@@ -289,6 +299,7 @@ interface FinancialPerceptualLookupResult {
 }
 
 interface TransactionCandidateRow extends IdRow {
+  occurred_at: string | null;
   transaction_time: string | null;
 }
 
@@ -621,6 +632,17 @@ interface AIFeedback {
   internal_score?: number | null;
   confidence: number;
   source: "rule" | "hybrid";
+  expression_coverage?: {
+    coverage_version: "expression-coverage-v1";
+    expressed_semantic_key: string;
+    expressed_semantic_keys: string[];
+    source_surface: string;
+    planner_version: string;
+    packet_fingerprint: string;
+    claim_fingerprint: string;
+    presentation_target: "companion_message";
+    rendered_text_fingerprint: string;
+  } | null;
   timing_signal?: {
     key: string;
     label: string;
@@ -1026,7 +1048,6 @@ async function createAutoAccountEntry(
 ): Promise<void> {
   if (!payload.userId) return;
   const direction = resolveEntryDirectionForAccountType(payload.accountType, payload.recordType);
-  const occurredAt = payload.occurredAt ?? new Date().toISOString();
   const { error } = await supabase.from("account_entries").insert({
     user_id: payload.userId,
     account_id: payload.accountId,
@@ -1035,7 +1056,7 @@ async function createAutoAccountEntry(
     entry_type: payload.recordType,
     source_table: payload.recordType === "income" ? "income_records" : "transactions",
     source_id: payload.sourceId,
-    occurred_at: occurredAt,
+    occurred_at: payload.occurredAt,
     note: payload.recordType === "income" ? "截图识别自动绑定账户" : "截图识别自动绑定出资账户",
   });
   if (error) throw new Error(`Account entry insert failed: ${error.message}`);
@@ -1165,6 +1186,12 @@ function normalizeDateOnlyValue(value: unknown): string | null {
   return dt?.date ?? null;
 }
 
+function exactNormalizedIso(
+  value: ReturnType<typeof normalizeAiDateTime>,
+): string | null {
+  return value?.hasExactTime ? value.iso : null;
+}
+
 function normalizeMonthKeyValue(value: unknown): string | null {
   const text = normalizeString(value);
   const match = text?.match(/^(\d{4})[-/年](\d{1,2})/);
@@ -1202,7 +1229,7 @@ function correctWalletStatementDateYear(statementDate: string | null, dueDate: s
 
 function normalizeSleepClockTime(value: unknown, dateHint: string | null): string | null {
   const normalized = normalizeAiDateTime(value);
-  if (normalized) return normalized.iso;
+  if (normalized?.hasExactTime) return normalized.iso;
   if (typeof value !== "string" || !dateHint) return null;
   const text = value.trim();
   const clock = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
@@ -1460,13 +1487,13 @@ function buildBuiltinPayload(ai: AIResult): {
   return { payload, title, summary, missingFields };
 }
 
-function resolveBuiltinOccurredAt(domainKey: BuiltinDomainKey, occurredAt: string | null, payload: Record<string, unknown>): string {
+function resolveBuiltinOccurredAt(domainKey: BuiltinDomainKey, occurredAt: string | null, payload: Record<string, unknown>): string | null {
   if (domainKey === "sleep") {
-    const wakeAt = normalizeAiDate(payload.wake_at);
-    const sleepStartAt = normalizeAiDate(payload.sleep_start_at);
-    return wakeAt ?? sleepStartAt ?? occurredAt ?? new Date().toISOString();
+    const wakeAt = exactNormalizedIso(normalizeAiDateTime(payload.wake_at));
+    const sleepStartAt = exactNormalizedIso(normalizeAiDateTime(payload.sleep_start_at));
+    return wakeAt ?? sleepStartAt ?? occurredAt;
   }
-  return occurredAt ?? new Date().toISOString();
+  return occurredAt;
 }
 
 async function getDomainByKey(
@@ -1765,12 +1792,7 @@ interface AiRawDebugPayload {
     fallback_used?: boolean | null;
     feedback_used?: boolean | null;
     ai_feedback?: AIFeedback | null;
-    voice?: {
-      enabled: boolean;
-      error?: string | null;
-      signals?: string[];
-      number_violations?: string[];
-    } | null;
+    voice?: CompanionVoiceDebug | null;
   } | null;
   notification?: {
     final?: string | null;
@@ -2031,16 +2053,31 @@ function sanitizeCompanionMessageForTime(
   timeContext: ReturnType<typeof buildTimeContext>,
 ): string | null {
   if (!message) return null;
+  let sanitized = message;
   const recordType = ai.domain_key ?? ai.record_type;
-  if (recordType !== "sleep" || !timeContext.is_backfill) return message;
-  if (!/(昨晚|昨天|昨日)/.test(message)) return message;
+  if (recordType === "sleep" && timeContext.is_backfill && /(昨晚|昨天|昨日)/.test(sanitized)) {
+    const eventLabel = formatChinaMonthDay(timeContext.event_time);
+    if (eventLabel) {
+      sanitized = sanitized
+        .replace(/昨晚/g, `${eventLabel}这晚`)
+        .replace(/昨天|昨日/g, eventLabel);
+    }
+  }
+  return sanitizeTextForTimeContext(sanitized, timeContext)?.slice(0, 60) ?? null;
+}
 
-  const eventLabel = formatChinaMonthDay(timeContext.event_time);
-  if (!eventLabel) return message;
-  return message
-    .replace(/昨晚/g, `${eventLabel}这晚`)
-    .replace(/昨天|昨日/g, eventLabel)
-    .slice(0, 60);
+function sanitizeAIFeedbackForTime(
+  feedback: AIFeedback | null,
+  timeContext: TimeContext | null,
+): AIFeedback | null {
+  if (!feedback || !timeContext) return feedback;
+  return {
+    ...feedback,
+    badge: sanitizeTextForTimeContext(feedback.badge, timeContext) ?? feedback.badge,
+    emotion_line: sanitizeTextForTimeContext(feedback.emotion_line, timeContext) ?? feedback.emotion_line,
+    utility_line: sanitizeTextForTimeContext(feedback.utility_line, timeContext),
+    detail_reason: sanitizeTextForTimeContext(feedback.detail_reason, timeContext),
+  };
 }
 
 function sanitizeGeneratedCompanion(
@@ -2183,6 +2220,48 @@ function feedbackNotification(
   return lines.join("\n");
 }
 
+interface CompanionVoiceDebug {
+  enabled: boolean;
+  error?: string | null;
+  signals?: string[];
+  number_violations?: string[];
+  context_packet_version?: string | null;
+  packet_fingerprint?: string | null;
+  planner_brief_status?: string | null;
+  planner_semantic_key?: string | null;
+  planner_version?: string | null;
+  source_surface?: string | null;
+}
+
+function composedCompanionNotification(
+  companionMessage: string | null,
+  feedback: AIFeedback | null,
+  fallback: string,
+): string {
+  const companionLine = compactFeedbackText(companionMessage, 34);
+  if (!companionLine) {
+    return feedback
+      ? feedbackNotification(feedback, fallback, { preserveFallbackAll: true })
+      : fallback;
+  }
+  return uniqueNotificationLines([
+    companionLine,
+    ...fallback.split("\n").map((line) => line.trim()).filter(Boolean),
+  ]).join("\n");
+}
+
+interface ShortcutPlannerDelivery {
+  available: boolean;
+  reason?: string;
+  message?: string;
+  candidate_id?: string;
+  semantic_key?: string;
+  claim_fingerprint?: string;
+  presentation_target?: "feedback_card" | "companion_message";
+  rendered_text_fingerprint?: string;
+  exposure_event_id?: string;
+}
+
 async function shortcutPlannerMessage(
   supabase: SupabaseClient,
   userId: string,
@@ -2192,7 +2271,7 @@ async function shortcutPlannerMessage(
     occurredAt: string | null;
     deliveryAttemptId: string;
   },
-): Promise<string | null> {
+): Promise<ShortcutPlannerDelivery | null> {
   if (!isRecordExpressionOwnerEnabled(userId)) return null;
   try {
     const delivery = await deliverShortcutExpressionPlan(supabase, userId, {
@@ -2201,14 +2280,12 @@ async function shortcutPlannerMessage(
       occurred_at: input.occurredAt ?? new Date().toISOString(),
       delivery_attempt_id: input.deliveryAttemptId,
     });
-    return delivery.available && typeof delivery.message === "string"
-      ? delivery.message
-      : null;
+    return delivery as ShortcutPlannerDelivery;
   } catch (error) {
     console.warn("[expression-delivery] shortcut fallback", {
       error_type: error instanceof Error ? error.name : typeof error,
     });
-    return null;
+    return { available: false, reason: "shortcut_delivery_failed" };
   }
 }
 
@@ -2275,6 +2352,7 @@ function buildSignalFallbackAIFeedback(
     liability_delta: "负债变化",
     due_reminder: "还款临近",
     record_acknowledge: "记录已归档",
+    expense_merchant_first_occurrence: "首次记录",
   };
   const bandByKind: Record<string, AIFeedback["band"]> = {
     unusual_amount: "watch",
@@ -2300,7 +2378,8 @@ function buildSignalFallbackAIFeedback(
     tone: "signal_fallback",
     emotion_line: fact,
     utility_line: null,
-    detail_reason: signal.fact,
+    // emotion_line 已经完整呈现规则事实，依据行不再重复同一句。
+    detail_reason: null,
     internal_score: 68,
     confidence: 0.7,
     source: "rule",
@@ -2953,12 +3032,6 @@ function storedJsonObject(value: unknown): Record<string, unknown> {
   }
 }
 
-function transactionOccurredAt(date: string | null, time: string | null): string | null {
-  if (!date || !time) return null;
-  const normalizedTime = time.length === 5 ? `${time}:00` : time.slice(0, 8);
-  return `${date}T${normalizedTime}+08:00`;
-}
-
 async function loadRecentFinancialPerceptualCandidates(
   supabase: ReturnType<typeof createClient>,
   userId: string,
@@ -2992,14 +3065,14 @@ async function loadRecentFinancialPerceptualCandidates(
   const [transactionResult, incomeResult, stagingResult, legacyLogResult] = await Promise.all([
     supabase
       .from("transactions")
-      .select("id,perceptual_hash,amount,merchant_name,platform,payment_method,transaction_date,transaction_time,created_at")
+      .select("id,perceptual_hash,amount,merchant_name,platform,payment_method,occurred_at,transaction_date,transaction_time,created_at")
       .eq("user_id", userId)
       .not("perceptual_hash", "is", null)
       .order("created_at", { ascending: false })
       .limit(60),
     supabase
       .from("income_records")
-      .select("id,perceptual_hash,amount,source_name,income_date,created_at")
+      .select("id,perceptual_hash,amount,source_name,occurred_at,income_date,created_at")
       .eq("user_id", userId)
       .not("perceptual_hash", "is", null)
       .order("created_at", { ascending: false })
@@ -3047,9 +3120,9 @@ async function loadRecentFinancialPerceptualCandidates(
       merchantOrSource: row.merchant_name,
       platform: row.platform,
       paymentMethod: row.payment_method,
-      occurredAt: transactionOccurredAt(row.transaction_date, row.transaction_time),
+      occurredAt: row.occurred_at,
       occurredDate: row.transaction_date,
-      timePrecision: row.transaction_time ? "datetime" : row.transaction_date ? "date" : "none",
+      timePrecision: row.occurred_at ? "datetime" : row.transaction_date ? "date" : "none",
       createdAt: row.created_at,
     });
   }
@@ -3063,8 +3136,9 @@ async function loadRecentFinancialPerceptualCandidates(
       referenceId: row.id,
       amount: normalizeAmount(row.amount),
       merchantOrSource: row.source_name,
+      occurredAt: row.occurred_at,
       occurredDate: row.income_date,
-      timePrecision: row.income_date ? "date" : "none",
+      timePrecision: row.occurred_at ? "datetime" : row.income_date ? "date" : "none",
       createdAt: row.created_at,
     });
   }
@@ -3268,10 +3342,20 @@ function extractJson(text: string): string {
 // ============================================================
 interface FeedbackCallResult {
   companion_message: string | null;
-  ai_feedback: Partial<AIFeedback> | null;
+  ai_feedback: AIFeedback | null;
   raw_text: string | null;
   duration_ms: number;
   error?: string;
+  expression_trace?: VoiceExpressionTrace;
+}
+
+interface VoiceExpressionTrace {
+  context_packet_version: ContextPacket["packet_version"];
+  packet_fingerprint: string;
+  planner_brief_status: "selected" | "no_candidate" | "legacy_signals";
+  planner_semantic_key: string | null;
+  planner_version: string | null;
+  source_surface: string | null;
 }
 
 async function callTextOnlyJsonGeneration(
@@ -3327,13 +3411,24 @@ function normalizeFeedbackPayload(
   parsed: Record<string, unknown>,
   domainKey: string,
   timingSignal: AIFeedback["timing_signal"] | null,
-): { companion_message: string | null; ai_feedback: Partial<AIFeedback> | null } {
+): {
+  companion_message: string | null;
+  ai_feedback: AIFeedback | null;
+  expressed_semantic_key: string | null;
+} {
   const companionRaw = parsed.companion_message;
   const companion = typeof companionRaw === "string" ? clipChineseLen(companionRaw, 30) : null;
+  const expressedSemanticKey = typeof parsed.expressed_semantic_key === "string"
+    ? parsed.expressed_semantic_key.trim().slice(0, 200) || null
+    : null;
 
   const fb = parsed.ai_feedback;
   if (!fb || typeof fb !== "object") {
-    return { companion_message: companion, ai_feedback: null };
+    return {
+      companion_message: companion,
+      ai_feedback: null,
+      expressed_semantic_key: expressedSemanticKey,
+    };
   }
   const fbObj = fb as Record<string, unknown>;
   const band = typeof fbObj.band === "string" && ALLOWED_BANDS.has(fbObj.band) ? fbObj.band : "neutral";
@@ -3344,10 +3439,15 @@ function normalizeFeedbackPayload(
   const confidenceNum = typeof fbObj.confidence === "number" ? fbObj.confidence : Number(fbObj.confidence);
   const confidence = Number.isFinite(confidenceNum) ? Math.max(0, Math.min(1, confidenceNum)) : 0.7;
   if (!emotionLine || confidence < 0.5) {
-    return { companion_message: companion, ai_feedback: null };
+    return {
+      companion_message: companion,
+      ai_feedback: null,
+      expressed_semantic_key: expressedSemanticKey,
+    };
   }
   return {
     companion_message: companion,
+    expressed_semantic_key: expressedSemanticKey,
     ai_feedback: {
       version: "feedback-v1",
       domain_key: domainKey,
@@ -3376,6 +3476,98 @@ function iconForDomain(domainKey: string): string {
   return "💸";
 }
 
+function plannerBriefSignal(brief: PlannerVoiceBrief): DomainSignal {
+  return {
+    kind: brief.semantic_key,
+    priority: 1,
+    fact: brief.canonical_text,
+    numbers: brief.numbers,
+    countNumbers: brief.count_numbers,
+    numberFacts: brief.number_facts,
+  };
+}
+
+function plannerBriefContextCandidate(brief: PlannerVoiceBrief): ContextPacketCandidate {
+  return {
+    candidate_id: brief.candidate_id,
+    semantic_key: brief.semantic_key,
+    kind: brief.semantic_key,
+    dimension: brief.dimension,
+    fact: brief.canonical_text,
+    numbers: brief.numbers,
+    count_numbers: brief.count_numbers,
+    number_facts: brief.number_facts,
+    source: "expression_planner",
+    source_surface: brief.source_surface,
+    planner_version: brief.planner_version,
+    claim_fingerprint: brief.claim_fingerprint,
+  };
+}
+
+function voiceExpressionTrace(
+  contextPacket: ContextPacket,
+  brief: PlannerVoiceBrief | null | undefined,
+): VoiceExpressionTrace {
+  return {
+    context_packet_version: contextPacket.packet_version,
+    packet_fingerprint: contextPacket.trace.content_fingerprint,
+    planner_brief_status: brief === undefined
+      ? "legacy_signals"
+      : brief === null ? "no_candidate" : "selected",
+    planner_semantic_key: brief?.semantic_key ?? null,
+    planner_version: brief?.planner_version ?? null,
+    source_surface: brief?.source_surface ?? null,
+  };
+}
+
+function withExpressionCoverage(
+  feedback: AIFeedback,
+  brief: PlannerVoiceBrief | null | undefined,
+  contextPacket: ContextPacket,
+  visibleCompanionMessage: string | null,
+): AIFeedback {
+  if (!brief || !visibleCompanionMessage) return feedback;
+  const expressedSemanticKey = resolveExpressedSemanticKey({
+    declaredSemanticKey: brief.semantic_key,
+    companionMessage: visibleCompanionMessage,
+    selectedCandidates: contextPacket.selected_candidates,
+    recordFacts: contextPacket.record_facts,
+  });
+  if (expressedSemanticKey !== brief.semantic_key) return feedback;
+  return {
+    ...feedback,
+    expression_coverage: {
+      coverage_version: "expression-coverage-v1",
+      expressed_semantic_key: brief.semantic_key,
+      expressed_semantic_keys: [brief.semantic_key],
+      source_surface: brief.source_surface,
+      planner_version: brief.planner_version,
+      packet_fingerprint: contextPacket.trace.content_fingerprint,
+      claim_fingerprint: brief.claim_fingerprint,
+      presentation_target: "companion_message",
+      rendered_text_fingerprint: expressionRenderedTextFingerprint(visibleCompanionMessage),
+    },
+  };
+}
+
+function deterministicPlannerFallback(
+  domainKey: string,
+  signals: DomainSignal[],
+  timingSignal: AIFeedback["timing_signal"] | null,
+  brief: PlannerVoiceBrief | null | undefined,
+  contextPacket: ContextPacket,
+) {
+  if (!brief) return null;
+  const ruleFeedback = buildSignalFallbackAIFeedback(domainKey, signals, timingSignal);
+  if (!ruleFeedback) return null;
+  return withExpressionCoverage(
+    ruleFeedback,
+    brief,
+    contextPacket,
+    ruleFeedback.emotion_line,
+  );
+}
+
 async function regenerateFeedbackWithSecondCall(opts: {
   ai: AIResult;
   domainKey: string;
@@ -3386,25 +3578,23 @@ async function regenerateFeedbackWithSecondCall(opts: {
   timingSignal: AIFeedback["timing_signal"] | null;
   promptCtx: PromptContextLike;
   textProvider: ProviderConfig | null;
+  plannerBrief?: PlannerVoiceBrief | null;
+  plannerFallbackReason?: string | null;
 }): Promise<FeedbackCallResult> {
   const startedAt = Date.now();
-  if (!opts.textProvider) {
-    return {
-      companion_message: null,
-      ai_feedback: null,
-      raw_text: null,
-      duration_ms: 0,
-      error: "no_text_provider",
-    };
-  }
-  try {
-    const recordFacts = voiceRecordFacts(
-      opts.domainKey,
-      opts.ai,
-      opts.builtPayload ?? null,
-      normalizeAmount(opts.ai.amount),
-    );
-    const signals = selectSignals(
+  const baseRecordFacts = voiceRecordFacts(
+    opts.domainKey,
+    opts.ai,
+    opts.builtPayload ?? null,
+    normalizeAmount(opts.ai.amount),
+  );
+  const recordFacts = {
+    ...baseRecordFacts,
+    occurred_at: opts.timeContext?.event_time ?? baseRecordFacts.occurred_at ?? null,
+    time_context: opts.timeContext,
+  };
+  const signals = opts.plannerBrief === undefined
+    ? selectSignals(
       opts.domainKey,
       opts.domainProfiles,
       buildCurrentFactsFor(
@@ -3413,21 +3603,48 @@ async function regenerateFeedbackWithSecondCall(opts: {
         opts.builtPayload ?? null,
         normalizeAmount(opts.ai.amount),
         opts.promptCtx.clientLocalTime ?? null,
+        opts.timeContext,
       ),
-    );
-    const contextPacket = buildContextPacket({
-      domainKey: opts.domainKey,
-      recordFacts: { ...recordFacts, time_context: opts.timeContext },
+    )
+    : opts.plannerBrief ? [plannerBriefSignal(opts.plannerBrief)] : [];
+  const contextPacket = buildContextPacket({
+    domainKey: opts.domainKey,
+    recordFacts,
+    signals,
+    ...(opts.plannerBrief
+      ? { selectedCandidates: [plannerBriefContextCandidate(opts.plannerBrief)] }
+      : {}),
+    memory: opts.memory ?? null,
+    expressionPreferences: {
+      persona: opts.promptCtx.persona ?? null,
+      memory_strength: opts.promptCtx.memoryStrength ?? null,
+      expression_style: opts.promptCtx.expressionStyle ?? null,
+      custom_note: opts.promptCtx.customNote ?? null,
+    },
+    recentExpressionContext: opts.promptCtx.recentCompanionLines ?? [],
+    fallbackReason: opts.plannerFallbackReason ?? null,
+  });
+  const expressionTrace = voiceExpressionTrace(contextPacket, opts.plannerBrief);
+  const fallbackResult = (error: string, durationMs: number): FeedbackCallResult => {
+    const feedback = deterministicPlannerFallback(
+      opts.domainKey,
       signals,
-      memory: opts.memory ?? null,
-      expressionPreferences: {
-        persona: opts.promptCtx.persona ?? null,
-        memory_strength: opts.promptCtx.memoryStrength ?? null,
-        expression_style: opts.promptCtx.expressionStyle ?? null,
-        custom_note: opts.promptCtx.customNote ?? null,
-      },
-      recentExpressionContext: opts.promptCtx.recentCompanionLines ?? [],
-    });
+      opts.timingSignal,
+      opts.plannerBrief,
+      contextPacket,
+    );
+    return {
+      companion_message: feedback?.emotion_line ?? null,
+      ai_feedback: feedback,
+      raw_text: null,
+      duration_ms: durationMs,
+      error,
+      expression_trace: expressionTrace,
+    };
+  };
+  if (!opts.textProvider) return fallbackResult("no_text_provider", 0);
+
+  try {
     const promptText = buildFeedbackPrompt({
       clientLocalTime: opts.promptCtx.clientLocalTime ?? null,
       weekday: opts.promptCtx.weekday ?? null,
@@ -3465,48 +3682,56 @@ async function regenerateFeedbackWithSecondCall(opts: {
       normalized.ai_feedback?.detail_reason ?? null,
       normalized.ai_feedback?.badge ?? null,
     ], JSON.stringify(recordFacts), signals);
-    if (!check.ok) {
-      const bad = new Set(check.badIndexes);
-      const companion = sanitizeGeneratedCompanion(
-        bad.has(0) ? null : normalized.companion_message,
-        opts.ai,
-        opts.timeContext,
-      );
-      let aiFeedback = normalized.ai_feedback;
-      if (aiFeedback) {
-        if (bad.has(1)) {
-          aiFeedback = null;
-        } else {
-          aiFeedback = {
-            ...aiFeedback,
-            badge: bad.has(4) ? "即时反馈" : aiFeedback.badge,
-            utility_line: bad.has(2) ? null : aiFeedback.utility_line,
-            detail_reason: bad.has(3) ? null : aiFeedback.detail_reason,
-          };
-        }
+    const bad = new Set(check.badIndexes);
+    let companion = sanitizeGeneratedCompanion(
+      bad.has(0) ? null : normalized.companion_message,
+      opts.ai,
+      opts.timeContext,
+    );
+    let aiFeedback = normalized.ai_feedback;
+    if (aiFeedback) {
+      if (bad.has(1)) {
+        aiFeedback = null;
+      } else {
+        aiFeedback = {
+          ...aiFeedback,
+          badge: bad.has(4) ? "即时反馈" : aiFeedback.badge,
+          utility_line: bad.has(2) ? null : aiFeedback.utility_line,
+          detail_reason: bad.has(3) ? null : aiFeedback.detail_reason,
+        };
       }
-      return {
-        companion_message: companion,
-        ai_feedback: aiFeedback,
-        raw_text: rawText,
-        duration_ms: Date.now() - startedAt,
-        ...(!companion && !aiFeedback ? { error: "evidence_validation_failed" } : {}),
-      };
+    }
+    aiFeedback = sanitizeAIFeedbackForTime(aiFeedback, opts.timeContext);
+    const ruleFeedback = opts.plannerBrief
+      ? buildSignalFallbackAIFeedback(opts.domainKey, signals, opts.timingSignal)
+      : null;
+    if (ruleFeedback) aiFeedback = mergeSignalFeedback(aiFeedback, ruleFeedback);
+    aiFeedback = sanitizeAIFeedbackForTime(aiFeedback, opts.timeContext);
+
+    if (!companion && ruleFeedback && opts.plannerBrief) {
+      companion = sanitizeGeneratedCompanion(ruleFeedback.emotion_line, opts.ai, opts.timeContext)
+        ?? ruleFeedback.emotion_line;
     }
     return {
-      companion_message: sanitizeGeneratedCompanion(normalized.companion_message, opts.ai, opts.timeContext),
-      ai_feedback: normalized.ai_feedback,
+      companion_message: companion,
+      ai_feedback: aiFeedback
+        ? withExpressionCoverage(
+          aiFeedback as AIFeedback,
+          opts.plannerBrief,
+          contextPacket,
+          companion,
+        )
+        : null,
       raw_text: rawText,
       duration_ms: Date.now() - startedAt,
+      expression_trace: expressionTrace,
+      ...(!check.ok && !companion && !aiFeedback ? { error: "evidence_validation_failed" } : {}),
     };
   } catch (err) {
-    return {
-      companion_message: null,
-      ai_feedback: null,
-      raw_text: null,
-      duration_ms: Date.now() - startedAt,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    return fallbackResult(
+      err instanceof Error ? err.message : String(err),
+      Date.now() - startedAt,
+    );
   }
 }
 
@@ -3537,9 +3762,15 @@ function buildCurrentFactsFor(
   builtPayload: Record<string, unknown> | null,
   normalizedAmount: number | null,
   clientLocalTime: string | null,
+  timeContext: TimeContext | null,
 ): CurrentFacts {
   const p = builtPayload ?? {};
-  const late = isLateNightLocal(clientLocalTime);
+  const eventHour = timeContext?.event_local_time
+    ? Number(timeContext.event_local_time.slice(0, 2))
+    : null;
+  const late = eventHour !== null && Number.isFinite(eventHour)
+    ? eventHour >= 21 || eventHour < 5
+    : isLateNightLocal(clientLocalTime);
   if (domainKey === "expense") {
     return {
       amount: normalizedAmount,
@@ -3631,6 +3862,26 @@ interface VoiceCallResult extends FeedbackCallResult {
   number_violations?: string[];
 }
 
+function companionVoiceDebugFromResult(
+  result: FeedbackCallResult,
+  enabled: boolean,
+): CompanionVoiceDebug {
+  const voiceResult = result as Partial<VoiceCallResult>;
+  const trace = result.expression_trace;
+  return {
+    enabled,
+    error: result.error ?? null,
+    signals: voiceResult.signals?.map((signal) => signal.kind) ?? [],
+    number_violations: voiceResult.number_violations ?? [],
+    context_packet_version: trace?.context_packet_version ?? null,
+    packet_fingerprint: trace?.packet_fingerprint ?? null,
+    planner_brief_status: trace?.planner_brief_status ?? null,
+    planner_semantic_key: trace?.planner_semantic_key ?? null,
+    planner_version: trace?.planner_version ?? null,
+    source_surface: trace?.source_surface ?? null,
+  };
+}
+
 async function generateVoiceFeedback(opts: {
   ai: AIResult;
   domainKey: string;
@@ -3648,34 +3899,69 @@ async function generateVoiceFeedback(opts: {
   recentCompanionLines?: string[];
   memory?: Record<string, unknown> | null;
   textProvider: ProviderConfig | null;
+  plannerBrief?: PlannerVoiceBrief | null;
+  plannerFallbackReason?: string | null;
 }): Promise<VoiceCallResult> {
   const startedAt = Date.now();
   const cur = buildCurrentFactsFor(
     opts.domainKey, opts.ai, opts.builtPayload ?? null,
-    opts.normalizedAmount ?? null, opts.clientLocalTime,
+    opts.normalizedAmount ?? null, opts.clientLocalTime, opts.timeContext,
   );
-  const signals = selectSignals(opts.domainKey, opts.domainProfiles, cur);
-  if (!opts.textProvider) {
-    return { companion_message: null, ai_feedback: null, raw_text: null, duration_ms: 0, error: "no_text_provider", signals };
-  }
-  const recordFacts = voiceRecordFacts(opts.domainKey, opts.ai, opts.builtPayload ?? null, opts.normalizedAmount ?? null);
+  const signals = opts.plannerBrief === undefined
+    ? selectSignals(opts.domainKey, opts.domainProfiles, cur)
+    : opts.plannerBrief ? [plannerBriefSignal(opts.plannerBrief)] : [];
+  const baseRecordFacts = voiceRecordFacts(
+    opts.domainKey,
+    opts.ai,
+    opts.builtPayload ?? null,
+    opts.normalizedAmount ?? null,
+  );
+  const recordFacts = {
+    ...baseRecordFacts,
+    occurred_at: opts.timeContext?.event_time ?? baseRecordFacts.occurred_at ?? null,
+    time_context: opts.timeContext,
+  };
   const contextPacket = buildContextPacket({
     domainKey: opts.domainKey,
     recordFacts,
     signals,
+    ...(opts.plannerBrief
+      ? { selectedCandidates: [plannerBriefContextCandidate(opts.plannerBrief)] }
+      : {}),
     memory: opts.memory ?? null,
-      expressionPreferences: {
-        persona: opts.persona ?? null,
-        memory_strength: opts.memoryStrength ?? null,
+    expressionPreferences: {
+      persona: opts.persona ?? null,
+      memory_strength: opts.memoryStrength ?? null,
       expression_style: opts.expressionStyle ?? null,
       custom_note: opts.customNote ?? null,
     },
     recentExpressionContext: opts.recentCompanionLines ?? [],
+    fallbackReason: opts.plannerFallbackReason ?? null,
   });
+  const expressionTrace = voiceExpressionTrace(contextPacket, opts.plannerBrief);
+  if (!opts.textProvider) {
+    const feedback = deterministicPlannerFallback(
+      opts.domainKey,
+      signals,
+      opts.timingSignal,
+      opts.plannerBrief,
+      contextPacket,
+    ) ?? buildSignalFallbackAIFeedback(opts.domainKey, signals, opts.timingSignal);
+    return {
+      companion_message: feedback?.emotion_line ?? null,
+      ai_feedback: feedback,
+      raw_text: null,
+      duration_ms: 0,
+      error: "no_text_provider",
+      signals,
+      expression_trace: expressionTrace,
+    };
+  }
   try {
     const promptText = buildVoicePrompt({
       clientLocalTime: opts.clientLocalTime,
       weekday: opts.weekday,
+      timeContext: opts.timeContext,
       domainKey: opts.domainKey,
       recordFacts,
       signals: signals.map((s) => ({ kind: s.kind, fact: s.fact })),
@@ -3715,20 +4001,29 @@ async function generateVoiceFeedback(opts: {
         };
       }
     }
+    modelFeedback = sanitizeAIFeedbackForTime(modelFeedback, opts.timeContext);
 
     const verifiedSignals = signals.filter((signal) => signal.kind !== "record_acknowledge");
     if (verifiedSignals.length > 0) {
       const ruleFeedback = buildSignalFallbackAIFeedback(opts.domainKey, verifiedSignals, opts.timingSignal);
       if (ruleFeedback) {
-        const mergedFeedback = mergeSignalFeedback(modelFeedback, ruleFeedback);
+        let mergedFeedback = mergeSignalFeedback(modelFeedback, ruleFeedback);
+        mergedFeedback = sanitizeAIFeedbackForTime(mergedFeedback, opts.timeContext) ?? mergedFeedback;
         const fallbackTone = sanitizeGeneratedCompanion(mergedFeedback.emotion_line ?? null, opts.ai, opts.timeContext);
         const tone = companion ?? fallbackTone;
+        mergedFeedback = withExpressionCoverage(
+          mergedFeedback,
+          opts.plannerBrief,
+          contextPacket,
+          tone,
+        );
         return {
           companion_message: tone ?? ruleFeedback.emotion_line,
           ai_feedback: mergedFeedback,
           raw_text: rawText,
           duration_ms: Date.now() - startedAt,
           signals,
+          expression_trace: expressionTrace,
           ...(!check.ok ? { number_violations: check.violations } : {}),
         };
       }
@@ -3741,12 +4036,13 @@ async function generateVoiceFeedback(opts: {
         return {
           companion_message: null, ai_feedback: null, raw_text: rawText,
           duration_ms: Date.now() - startedAt, error: "evidence_validation_failed",
-          signals, number_violations: check.violations,
+          signals, number_violations: check.violations, expression_trace: expressionTrace,
         };
       }
       return {
         companion_message: companion, ai_feedback: modelFeedback, raw_text: rawText,
         duration_ms: Date.now() - startedAt, signals, number_violations: check.violations,
+        expression_trace: expressionTrace,
       };
     }
     return {
@@ -3755,13 +4051,58 @@ async function generateVoiceFeedback(opts: {
       raw_text: rawText,
       duration_ms: Date.now() - startedAt,
       signals,
+      expression_trace: expressionTrace,
     };
   } catch (err) {
+    const feedback = deterministicPlannerFallback(
+      opts.domainKey,
+      signals,
+      opts.timingSignal,
+      opts.plannerBrief,
+      contextPacket,
+    ) ?? buildSignalFallbackAIFeedback(opts.domainKey, signals, opts.timingSignal);
     return {
-      companion_message: null, ai_feedback: null, raw_text: null,
+      companion_message: feedback?.emotion_line ?? null, ai_feedback: feedback, raw_text: null,
       duration_ms: Date.now() - startedAt,
       error: err instanceof Error ? err.message : String(err),
       signals,
+      expression_trace: expressionTrace,
+    };
+  }
+}
+
+interface PlannerVoicePreparation {
+  brief: PlannerVoiceBrief | null | undefined;
+  fallback_reason: string | null;
+}
+
+async function preparePlannerVoiceBrief(
+  supabase: SupabaseClient,
+  userId: string,
+  input: {
+    record_kind: "expense" | "income" | "data";
+    domain_key: string;
+    current_record: Record<string, unknown>;
+    domain_profile?: Record<string, unknown>;
+  },
+): Promise<PlannerVoicePreparation> {
+  if (!isRecordExpressionOwnerEnabled(userId)) {
+    return { brief: undefined, fallback_reason: null };
+  }
+  try {
+    const brief = await buildPreInsertPlannerVoiceBrief(supabase, userId, input);
+    return {
+      brief,
+      fallback_reason: brief ? null : "no_selected_planner_candidate",
+    };
+  } catch (error) {
+    console.warn("[expression-planner] pre-insert Voice brief unavailable", {
+      domain_key: input.domain_key,
+      error_type: error instanceof Error ? error.name : typeof error,
+    });
+    return {
+      brief: null,
+      fallback_reason: `planner_brief_error:${error instanceof Error ? error.name : typeof error}`,
     };
   }
 }
@@ -5658,7 +5999,6 @@ Deno.serve(async (req) => {
     // Deno 运行在 UTC 环境，显式换算为 UTC+8 时间
     const chinaNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
     const today = chinaNow.toISOString().slice(0, 10);
-    const nowTime = `${String(chinaNow.getUTCHours()).padStart(2, '0')}:${String(chinaNow.getUTCMinutes()).padStart(2, '0')}:00`;
     // 优先用客户端截图时间（已校验），否则退化到服务端北京时间
     const clientCapturedIso = normalizeAiDate(clientCapturedAt);
     const referenceLocal = clientCapturedIso
@@ -5995,12 +6335,7 @@ Deno.serve(async (req) => {
     let companionFeedbackUsed = false;
     let companionMessage: string | null = null;
     let aiFeedback: AIFeedback | null = null;
-    let companionVoiceDebug: {
-      enabled: boolean;
-      error?: string | null;
-      signals?: string[];
-      number_violations?: string[];
-    } | null = null;
+    let companionVoiceDebug: CompanionVoiceDebug | null = null;
     const companionDebug = () => ({
       model_raw: modelRawCompanion,
       normalized: normalizedCompanion,
@@ -6088,11 +6423,16 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .maybeSingle()).data as { retry_count: number | null } | null;
       const retryCount = retryCountRow?.retry_count ?? 0;
-      const retryOccurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
-      const retryOccurredAt = retryOccurredDateTime?.iso ?? null;
+      const retryAiOccurredDateTime = normalizeAiDateTime(ai.occurred_at);
+      const retryAiOrderFinishedDateTime = normalizeAiDateTime(ai.order_finished_at);
+      const retryReferenceDateTime = normalizeAiDateTime(clientCapturedAt)
+        ?? normalizeAiDateTime(requestReceivedAt);
+      const retryOccurredDateTime = retryAiOccurredDateTime
+        ?? retryAiOrderFinishedDateTime;
+      const retryOccurredAt = exactNormalizedIso(retryOccurredDateTime);
       const retryTimeContext = buildTimeContext({
-        occurredAt: retryOccurredAt,
-        orderFinishedAt: retryOccurredAt,
+        occurredAt: exactNormalizedIso(retryAiOccurredDateTime),
+        orderFinishedAt: exactNormalizedIso(retryAiOrderFinishedDateTime),
         clientCapturedAt,
         requestReceivedAt,
       });
@@ -6106,11 +6446,11 @@ Deno.serve(async (req) => {
         // 重试成功：按 recordType 归档
         let archivedTo: string | null = null;
         let archivedId: string | null = null;
-        const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
-        const occurredAt = occurredDateTime?.iso ?? new Date().toISOString();
+        const occurredDateTime = retryOccurredDateTime ?? retryReferenceDateTime;
+        const occurredAt = exactNormalizedIso(retryOccurredDateTime);
         const timeContext = buildTimeContext({
-          occurredAt,
-          orderFinishedAt: occurredAt,
+          occurredAt: exactNormalizedIso(retryAiOccurredDateTime),
+          orderFinishedAt: exactNormalizedIso(retryAiOrderFinishedDateTime),
           clientCapturedAt,
           requestReceivedAt,
         });
@@ -6120,14 +6460,16 @@ Deno.serve(async (req) => {
         ai.companion_message = companionMessage;
         let aiWithTimeContext: Record<string, unknown> = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
         const recordDate = occurredDateTime?.date ?? today;
-        const recordTime = occurredDateTime?.time ?? nowTime;
+        const recordTime = retryOccurredDateTime?.hasExactTime
+          ? retryOccurredDateTime.time
+          : null;
 
         if (recordType === "income") {
           const incomeCat = ["salary","bonus","freelance","investment","reimbursement","other"].includes(ai.income_category ?? "") ? ai.income_category! : "other";
           const { data: rawIncomeRow } = await supabase.from("income_records").insert({
             amount: normalizedAmount, category: incomeCat,
             source_name: ai.source_name ?? ai.merchant_name ?? "截图识别收入",
-            income_date: recordDate, image_url: path, image_hash: hash,
+            income_date: recordDate, occurred_at: occurredAt, image_url: path, image_hash: hash,
             ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
             user_id: userId || null, source: "ai_scan",
             account_id: autoBoundAccount?.id ?? null,
@@ -6187,7 +6529,8 @@ Deno.serve(async (req) => {
             payment_method: ai.payment_method, status: isComplete ? "done" : "pending",
             image_url: path, image_hash: hash,
             ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
-            transaction_date: recordDate, transaction_time: recordTime, user_id: userId || null, source: "ai_scan",
+            transaction_date: recordDate, transaction_time: recordTime, occurred_at: occurredAt,
+            user_id: userId || null, source: "ai_scan",
             account_id: autoBoundAccount?.id ?? null,
             companion_message: companionMessage,
             ai_feedback: aiFeedback,
@@ -6296,12 +6639,18 @@ Deno.serve(async (req) => {
         companion_message: companionMessage,
       }, responseTraceMeta(aiLogId)), { mode: responseMode });
     }
-    const occurredDateTime = normalizeAiDateTime(ai.occurred_at) ?? normalizeAiDateTime(ai.order_finished_at);
-    const orderFinishedDateTime = normalizeAiDateTime(ai.order_finished_at) ?? occurredDateTime;
-    const occurredAt = occurredDateTime?.iso ?? null;
-    const orderFinishedAt = orderFinishedDateTime?.iso ?? occurredAt;
+    const aiOccurredDateTime = normalizeAiDateTime(ai.occurred_at);
+    const aiOrderFinishedDateTime = normalizeAiDateTime(ai.order_finished_at);
+    const referenceDateTime = normalizeAiDateTime(clientCapturedAt)
+      ?? normalizeAiDateTime(requestReceivedAt);
+    const recognizedOccurredDateTime = aiOccurredDateTime
+      ?? aiOrderFinishedDateTime;
+    const recordDateTime = recognizedOccurredDateTime ?? referenceDateTime;
+    const orderFinishedDateTime = aiOrderFinishedDateTime ?? aiOccurredDateTime;
+    const occurredAt = exactNormalizedIso(recognizedOccurredDateTime);
+    const orderFinishedAt = exactNormalizedIso(orderFinishedDateTime);
     const timeContext = buildTimeContext({
-      occurredAt,
+      occurredAt: exactNormalizedIso(aiOccurredDateTime),
       orderFinishedAt,
       clientCapturedAt,
       requestReceivedAt,
@@ -6311,12 +6660,13 @@ Deno.serve(async (req) => {
     timeGuardedCompanion = companionMessage;
     ai.companion_message = companionMessage;
     let aiWithTimeContext: Record<string, unknown> = { ...ai, time_context: timeContext };
-    const recordDate = occurredDateTime?.date ?? today;
-    const recordTime = occurredDateTime?.time ?? nowTime;
+    const recordDate = recordDateTime?.date ?? today;
+    const recordTime = recognizedOccurredDateTime?.hasExactTime
+      ? recognizedOccurredDateTime.time
+      : null;
 
     if (!isRetry && perceptualHash && (recordType === "expense" || recordType === "income")) {
-      const currentOccurredAt = occurredAt
-        || (recordType === "expense" ? transactionOccurredAt(recordDate, recordTime) : null);
+      const currentOccurredAt = occurredAt;
       perceptualMatch = findLikelyFinancialDuplicate(perceptualHash, {
         recordType,
         amount: normalizedAmount,
@@ -6401,12 +6751,30 @@ Deno.serve(async (req) => {
     if (builtinKey) {
       const built = buildBuiltinPayload(ai);
       const domain = await getDomainByKey(supabase, builtinKey, userId);
-      const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : (occurredAt ?? new Date().toISOString());
+      const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : occurredAt;
       const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
       if (shouldAutoArchive && built && companionSettings.enabled) {
         // 信号驱动 Voice 层优先:个人画像信号 → 模型翻译;失败/违规 → 规则渲染兜底
         let _voiceCall: VoiceCallResult | null = null;
         if (voiceSignalsEnabled) {
+          const plannerVoice = await preparePlannerVoiceBrief(supabase, userId!, {
+            record_kind: "data",
+            domain_key: builtinKey,
+            current_record: {
+              id: `preinsert:${traceId}`,
+              created_at: requestReceivedAt,
+              occurred_at: fallbackOccurredAt,
+              title: built.title,
+              summary: built.summary,
+              payload_jsonb: built.payload,
+              domain_key: builtinKey,
+              linked_account_id: normalizeString(built.payload.linked_account_id),
+              account_snapshot_kind: normalizeString(built.payload.account_snapshot_kind),
+              snapshot_balance: normalizeNumber(built.payload.snapshot_balance),
+              snapshot_at: normalizeString(built.payload.snapshot_at),
+            },
+            domain_profile: domainProfiles[builtinKey]?.profile ?? {},
+          });
           _voiceCall = await generateVoiceFeedback({
             ai,
             domainKey: builtinKey,
@@ -6424,16 +6792,13 @@ Deno.serve(async (req) => {
             recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
             memory: companionContext.memory,
             textProvider,
+            plannerBrief: plannerVoice.brief,
+            plannerFallbackReason: plannerVoice.fallback_reason,
           });
           if (_voiceCall.duration_ms > 0) {
             console.log(`[feedback] voice ${builtinKey} ok=${!_voiceCall.error} signals=${_voiceCall.signals.map((s) => s.kind).join(",") || "none"} duration=${_voiceCall.duration_ms}ms`);
           }
-          companionVoiceDebug = {
-            enabled: true,
-            error: _voiceCall.error ?? null,
-            signals: _voiceCall.signals.map((s) => s.kind),
-            number_violations: _voiceCall.number_violations ?? [],
-          };
+          companionVoiceDebug = companionVoiceDebugFromResult(_voiceCall, true);
           if (_voiceCall.ai_feedback) {
             aiFeedback = _voiceCall.ai_feedback as AIFeedback;
             companionFeedbackUsed = true;
@@ -6484,7 +6849,7 @@ Deno.serve(async (req) => {
           imageHash: hash,
           perceptualHash,
           ai,
-          occurredAt: fallbackOccurredAt,
+          occurredAt,
           orderFinishedAt,
           errorType: domain ? "SCHEMA_REVIEW_REQUIRED" : "DOMAIN_NOT_FOUND",
           errorMessage: !domain
@@ -6502,7 +6867,7 @@ Deno.serve(async (req) => {
           image_url: path,
           image_type: ai.image_type,
           record_type: builtinKey,
-          occurred_at: fallbackOccurredAt,
+          occurred_at: occurredAt,
           order_finished_at: orderFinishedAt,
           duplicate_kind: duplicateKind,
           duplicate_ref_table: duplicateRefTable,
@@ -6625,10 +6990,8 @@ Deno.serve(async (req) => {
 
       const _domainEmoji = builtinKey === "sport" ? "🏃" : builtinKey === "sleep" ? "🌙" : builtinKey === "reading" ? "📚" : builtinKey === "food" ? "🍱" : "✓";
       const _domainDoneNotif = `${_domainEmoji} 已归档到${domainNameFromKey(builtinKey) ?? builtinKey}`;
-      const _domainLegacyNotif = aiFeedback
-        ? feedbackNotification(aiFeedback, _domainDoneNotif, { preserveFallbackAll: true })
-        : withCompanion(_domainDoneNotif);
-      const _domainPlannerMessage = await shortcutPlannerMessage(supabase, userId, {
+      const _domainLegacyNotif = composedCompanionNotification(companionMessage, aiFeedback, _domainDoneNotif);
+       const _domainPlannerDelivery = await shortcutPlannerMessage(supabase, userId, {
         recordId: row.id,
         recordKind: "data",
         occurredAt: fallbackOccurredAt,
@@ -6640,13 +7003,19 @@ Deno.serve(async (req) => {
         record_type: builtinKey,
         ai_ok: aiOk,
         message: `✓ ${domainNameFromKey(builtinKey) ?? "记录"}已归档`,
-        notification: _domainPlannerMessage
-          ? mergePlannerNotification(
-            _domainPlannerMessage,
-            _domainDoneNotif,
-            aiFeedback ? feedbackNotification(aiFeedback, "") || companionMessage : companionMessage,
-          )
-          : _domainLegacyNotif,
+         notification: _domainPlannerDelivery?.available
+           ? mergePlannerNotification(
+             _domainPlannerDelivery.message ?? null,
+             _domainDoneNotif,
+             _domainPlannerDelivery.presentation_target === "companion_message" ? companionMessage : null,
+             {
+               companion_claim: _domainPlannerDelivery.presentation_target === "companion_message"
+                 ? { semantic_key: _domainPlannerDelivery.semantic_key, claim_fingerprint: _domainPlannerDelivery.claim_fingerprint }
+                 : null,
+               planner_claim: { semantic_key: _domainPlannerDelivery.semantic_key, claim_fingerprint: _domainPlannerDelivery.claim_fingerprint },
+             },
+           )
+           : _domainPlannerDelivery ? _domainDoneNotif : _domainLegacyNotif,
         time_context: timeContext,
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
@@ -6757,6 +7126,19 @@ Deno.serve(async (req) => {
       const sourceName = ai.source_name ?? ai.merchant_name ?? "截图识别收入";
 
       if (companionSettings.enabled) {
+        const plannerVoice = await preparePlannerVoiceBrief(supabase, userId!, {
+          record_kind: "income",
+          domain_key: "income",
+          current_record: {
+            id: `preinsert:${traceId}`,
+            created_at: requestReceivedAt,
+            income_date: recordDate,
+            occurred_at: occurredAt,
+            amount: normalizedAmount,
+            source_name: sourceName,
+            category: incomeCategory,
+          },
+        });
         const _secondCallIncome = voiceSignalsEnabled
           ? await generateVoiceFeedback({
             ai,
@@ -6775,6 +7157,8 @@ Deno.serve(async (req) => {
             recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
             memory: companionContext.memory,
             textProvider,
+            plannerBrief: plannerVoice.brief,
+            plannerFallbackReason: plannerVoice.fallback_reason,
           })
           : await regenerateFeedbackWithSecondCall({
             ai,
@@ -6794,19 +7178,13 @@ Deno.serve(async (req) => {
               recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
             },
             textProvider,
+            plannerBrief: plannerVoice.brief,
+            plannerFallbackReason: plannerVoice.fallback_reason,
           });
         if (_secondCallIncome.duration_ms > 0) {
           console.log(`[feedback] second_call income ok=${!_secondCallIncome.error} duration=${_secondCallIncome.duration_ms}ms`);
         }
-        if (voiceSignalsEnabled) {
-          const voiceCall = _secondCallIncome as VoiceCallResult;
-          companionVoiceDebug = {
-            enabled: true,
-            error: voiceCall.error ?? null,
-            signals: voiceCall.signals.map((signal) => signal.kind),
-            number_violations: voiceCall.number_violations ?? [],
-          };
-        }
+        companionVoiceDebug = companionVoiceDebugFromResult(_secondCallIncome, voiceSignalsEnabled);
         if (_secondCallIncome.ai_feedback) {
           aiFeedback = _secondCallIncome.ai_feedback as AIFeedback;
           companionFeedbackUsed = true;
@@ -6840,6 +7218,7 @@ Deno.serve(async (req) => {
         category: incomeCategory,
         source_name: sourceName,
         income_date: recordDate,
+        occurred_at: occurredAt,
         image_url: path,
         image_hash: hash,
         ...(perceptualStorageAvailable ? { perceptual_hash: perceptualHash } : {}),
@@ -6938,10 +7317,8 @@ Deno.serve(async (req) => {
       const _iDoneSum = await summarizeMonthIncome(supabase, userId);
       const _iSourceLabel = sourceName && sourceName !== "截图识别收入" ? ` · ${sourceName}` : "";
       const _incomeNotif = `💰 +${fmtYuan(normalizedAmount)}${_iSourceLabel}\n${monthIncomeLine(_iDoneSum)}`;
-      const _incomeLegacyNotif = aiFeedback
-        ? feedbackNotification(aiFeedback, _incomeNotif, { preserveFallbackAll: true })
-        : withCompanion(_incomeNotif);
-      const _incomePlannerMessage = await shortcutPlannerMessage(supabase, userId, {
+      const _incomeLegacyNotif = composedCompanionNotification(companionMessage, aiFeedback, _incomeNotif);
+       const _incomePlannerDelivery = await shortcutPlannerMessage(supabase, userId, {
         recordId: row.id,
         recordKind: "income",
         occurredAt,
@@ -6953,13 +7330,19 @@ Deno.serve(async (req) => {
         record_type: "income",
         ai_ok: aiOk,
         message: "✓ 收入已记录",
-        notification: _incomePlannerMessage
-          ? mergePlannerNotification(
-            _incomePlannerMessage,
-            _incomeNotif,
-            aiFeedback ? feedbackNotification(aiFeedback, "") || companionMessage : companionMessage,
-          )
-          : _incomeLegacyNotif,
+         notification: _incomePlannerDelivery?.available
+           ? mergePlannerNotification(
+             _incomePlannerDelivery.message ?? null,
+             _incomeNotif,
+             _incomePlannerDelivery.presentation_target === "companion_message" ? companionMessage : null,
+             {
+               companion_claim: _incomePlannerDelivery.presentation_target === "companion_message"
+                 ? { semantic_key: _incomePlannerDelivery.semantic_key, claim_fingerprint: _incomePlannerDelivery.claim_fingerprint }
+                 : null,
+               planner_claim: { semantic_key: _incomePlannerDelivery.semantic_key, claim_fingerprint: _incomePlannerDelivery.claim_fingerprint },
+             },
+           )
+           : _incomePlannerDelivery ? _incomeNotif : _incomeLegacyNotif,
         time_context: timeContext,
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
@@ -6975,7 +7358,7 @@ Deno.serve(async (req) => {
       const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
       const duplicateDate = recordDate;
       let dupQuery = supabase.from("transactions")
-        .select("id,transaction_time")
+        .select("id,occurred_at,transaction_date,transaction_time")
         .eq("user_id", userId)
         .eq("transaction_date", duplicateDate)
         .eq("payment_method", ai.payment_method)
@@ -6990,9 +7373,10 @@ Deno.serve(async (req) => {
       }
       const { data: candidates } = await dupQuery.limit(5);
       const dup = ((candidates ?? []) as TransactionCandidateRow[]).find((item) => {
-        if (!occurredAt || !item.transaction_time) return true;
+        if (!occurredAt) return true;
+        if (!item.occurred_at) return false;
         const current = new Date(occurredAt);
-        const existing = new Date(`${duplicateDate}T${item.transaction_time}`);
+        const existing = new Date(item.occurred_at);
         return Math.abs(current.getTime() - existing.getTime()) <= 3 * 60 * 1000;
       });
       if (dup) {
@@ -7009,6 +7393,25 @@ Deno.serve(async (req) => {
     const status = isComplete && (ai.confidence ?? 0) >= 0.7 ? "done" : "pending";
     const isLargeTransport = ai.category === "transport" && (normalizedAmount ?? 0) >= 200;
     if (status === "done" && companionSettings.enabled) {
+      const plannerVoice = await preparePlannerVoiceBrief(supabase, userId!, {
+        record_kind: "expense",
+        domain_key: "expense",
+        current_record: {
+          id: `preinsert:${traceId}`,
+          created_at: requestReceivedAt,
+          transaction_date: recordDate,
+          transaction_time: recordTime,
+          occurred_at: occurredAt,
+          amount: normalizedAmount,
+          merchant_name: ai.merchant_name,
+          category: ai.category,
+          platform: ai.platform,
+          payment_method: ai.payment_method,
+          status: "done",
+          type: "expense",
+          image_hash: hash,
+        },
+      });
       // 第二次调用:信号驱动 Voice 层(事实→信号→语言);VOICE_SIGNALS_ENABLED=false 可回退旧链路
       const _secondCall = voiceSignalsEnabled
         ? await generateVoiceFeedback({
@@ -7028,6 +7431,8 @@ Deno.serve(async (req) => {
           recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
           memory: companionContext.memory,
           textProvider,
+          plannerBrief: plannerVoice.brief,
+          plannerFallbackReason: plannerVoice.fallback_reason,
         })
         : await regenerateFeedbackWithSecondCall({
           ai,
@@ -7047,19 +7452,13 @@ Deno.serve(async (req) => {
             recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
           },
           textProvider,
+          plannerBrief: plannerVoice.brief,
+          plannerFallbackReason: plannerVoice.fallback_reason,
         });
       if (_secondCall.duration_ms > 0) {
         console.log(`[feedback] second_call expense ok=${!_secondCall.error} duration=${_secondCall.duration_ms}ms`);
       }
-      if (voiceSignalsEnabled) {
-        const voiceCall = _secondCall as VoiceCallResult;
-        companionVoiceDebug = {
-          enabled: true,
-          error: voiceCall.error ?? null,
-          signals: voiceCall.signals.map((signal) => signal.kind),
-          number_violations: voiceCall.number_violations ?? [],
-        };
-      }
+      companionVoiceDebug = companionVoiceDebugFromResult(_secondCall, voiceSignalsEnabled);
       // 如果二次调用成功产出有效反馈，优先使用；否则回退到规则生成
       if (_secondCall.ai_feedback) {
         aiFeedback = _secondCall.ai_feedback as AIFeedback;
@@ -7127,6 +7526,7 @@ Deno.serve(async (req) => {
       is_large_transport: isLargeTransport,
       transaction_date: recordDate,
       transaction_time: recordTime,
+      occurred_at: occurredAt,
       source: "ai_scan",
       account_id: autoBoundAccount?.id ?? null,
       companion_message: companionMessage,
@@ -7231,10 +7631,8 @@ Deno.serve(async (req) => {
       _ePrimary = `⚠️ ${_ePrimary.replace(/^[💸⚠️]\s*/, "")} · 疑似 3 分钟内重复`;
     }
     const _expenseNotif = `${_ePrimary}\n${todaySpendLine(_eDoneSum)}`;
-    const _expenseLegacyNotif = aiFeedback
-      ? feedbackNotification(aiFeedback, _expenseNotif, { preserveFallbackAll: true })
-      : withCompanion(_expenseNotif);
-    const _expensePlannerMessage = await shortcutPlannerMessage(supabase, userId, {
+    const _expenseLegacyNotif = composedCompanionNotification(companionMessage, aiFeedback, _expenseNotif);
+     const _expensePlannerDelivery = await shortcutPlannerMessage(supabase, userId, {
       recordId: row.id,
       recordKind: "expense",
       occurredAt,
@@ -7249,13 +7647,19 @@ Deno.serve(async (req) => {
       message: possibleDuplicate
         ? `✓ 已记账（⚠ 3 分钟内有相同消费，请确认是否重复，参考 id: ${dupRefId}）`
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
-      notification: _expensePlannerMessage
-        ? mergePlannerNotification(
-          _expensePlannerMessage,
-          _expenseNotif,
-          aiFeedback ? feedbackNotification(aiFeedback, "") || companionMessage : companionMessage,
-        )
-        : _expenseLegacyNotif,
+       notification: _expensePlannerDelivery?.available
+         ? mergePlannerNotification(
+           _expensePlannerDelivery.message ?? null,
+           _expenseNotif,
+           _expensePlannerDelivery.presentation_target === "companion_message" ? companionMessage : null,
+           {
+             companion_claim: _expensePlannerDelivery.presentation_target === "companion_message"
+               ? { semantic_key: _expensePlannerDelivery.semantic_key, claim_fingerprint: _expensePlannerDelivery.claim_fingerprint }
+               : null,
+             planner_claim: { semantic_key: _expensePlannerDelivery.semantic_key, claim_fingerprint: _expensePlannerDelivery.claim_fingerprint },
+           },
+         )
+         : _expensePlannerDelivery ? _expenseNotif : _expenseLegacyNotif,
       time_context: timeContext,
       companion_message: companionMessage,
       ai_feedback: aiFeedback,

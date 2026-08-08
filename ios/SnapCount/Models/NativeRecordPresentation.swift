@@ -33,12 +33,15 @@ struct NativeRecordAccountBindingPresentation {
 
 enum NativeRecordDetailPresentationAdapter {
     static func basicRows(for detail: NativeRecordDetail, accountName: String?) -> [NativeDetailRow] {
-        var rows = [
-            NativeDetailRow(label: "数据域", value: domainLabel(for: detail)),
-            NativeDetailRow(label: "记录时间", value: detail.createdAt ?? detail.subtitle),
-            NativeDetailRow(label: "发生时间", value: eventTime(for: detail)),
+        var rows = [NativeDetailRow(label: "数据域", value: domainLabel(for: detail))]
+        let eventTime = eventTime(for: detail)
+        if !eventTime.isEmpty {
+            rows.append(NativeDetailRow(label: "发生时间", value: eventTime))
+        }
+        rows.append(contentsOf: [
+            NativeDetailRow(label: "上传时间", value: NativeLocalDate.dateTimeLabel(detail.createdAt) ?? ""),
             NativeDetailRow(label: "来源", value: sourceLabel(for: detail))
-        ]
+        ])
         if detail.kind == "expense" {
             rows.append(NativeDetailRow(label: "状态", value: detail.status == "pending" ? "待补充" : "已完成"))
         }
@@ -57,7 +60,13 @@ enum NativeRecordDetailPresentationAdapter {
                 NativeDetailRow(label: "金额", value: detail.amount.map { String(format: "+¥%.2f", $0) } ?? "--"),
                 NativeDetailRow(label: "收入类型", value: incomeCategoryLabel(detail.category)),
                 NativeDetailRow(label: "来源名称", value: detail.merchantName ?? "未填写"),
-                NativeDetailRow(label: "到账日期", value: detail.recordDate ?? "--"),
+                NativeDetailRow(
+                    label: "到账日期",
+                    value: NativeLocalDate.financeDateKey(
+                        occurredAt: detail.occurredAt,
+                        legacyDate: detail.recordDate
+                    ) ?? "--"
+                ),
                 NativeDetailRow(label: "备注", value: detail.note ?? "无")
             ]
         }
@@ -72,7 +81,13 @@ enum NativeRecordDetailPresentationAdapter {
             NativeDetailRow(label: "消费渠道", value: detail.platform ?? "未知"),
             NativeDetailRow(label: "消费分类", value: detail.category ?? "未知"),
             NativeDetailRow(label: "支付方式", value: detail.paymentMethod ?? "未知"),
-            NativeDetailRow(label: "交易日期", value: detail.recordDate ?? "--"),
+            NativeDetailRow(
+                label: "交易日期",
+                value: NativeLocalDate.financeDateKey(
+                    occurredAt: detail.occurredAt,
+                    legacyDate: detail.recordDate
+                ) ?? "--"
+            ),
             NativeDetailRow(label: "备注", value: detail.note ?? "无")
         ]
     }
@@ -119,8 +134,12 @@ enum NativeRecordDetailPresentationAdapter {
             kind: kind,
             title: detail.title,
             amount: detail.amount ?? 0,
-            date: detail.recordDate ?? "",
-            time: detail.transactionTime,
+            date: NativeLocalDate.financeDateKey(
+                occurredAt: detail.occurredAt,
+                legacyDate: detail.recordDate
+            ) ?? "",
+            time: NativeLocalDate.financeTimeKey(occurredAt: detail.occurredAt),
+            occurredAt: detail.occurredAt,
             platform: detail.platform,
             category: detail.category,
             paymentMethod: detail.paymentMethod,
@@ -269,10 +288,10 @@ enum NativeRecordDetailPresentationAdapter {
     }
 
     private static func eventTime(for detail: NativeRecordDetail) -> String {
-        if detail.kind == "expense", let time = detail.transactionTime, !time.isEmpty {
-            return [detail.recordDate, time].compactMap { $0 }.joined(separator: " ")
+        if let occurredAt = NativeLocalDate.dateTimeLabel(detail.occurredAt) {
+            return occurredAt
         }
-        return detail.occurredAt ?? detail.recordDate ?? ""
+        return ""
     }
 
     private static func sourceLabel(for detail: NativeRecordDetail) -> String {

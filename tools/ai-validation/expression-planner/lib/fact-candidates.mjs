@@ -119,6 +119,76 @@ export function generateCurrentExpenseRecordCandidate(event, { timeZone = 'Asia/
 }
 
 /**
+ * Build a first-seen merchant observation from the normalized entity. A new
+ * alias for an existing entity is not a new user event, so alias-first alone
+ * never produces a user-facing candidate.
+ *
+ * @param {any} event
+ * @param {{
+ *   entity_id?: string | null,
+ *   canonical_name?: string | null,
+ *   raw_name?: string | null,
+ *   normalized_key?: string | null,
+ *   entity_first_seen?: boolean | null,
+ *   alias_first_seen?: boolean | null,
+ *   observed_aliases?: string[],
+ * }} merchantObservation
+ */
+export function generateMerchantFirstOccurrenceCandidate(event, merchantObservation = {}) {
+  const amount = parseFiniteNumber(event?.amount)
+  const entityFirstSeen = merchantObservation?.entity_first_seen === true
+  if (!event?.event_id || amount === null || !entityFirstSeen) return []
+
+  const merchant = event.merchant ?? {}
+  const entityId = merchantObservation.entity_id ?? merchant.entity_id ?? null
+  const canonicalName = merchantObservation.canonical_name ?? merchant.canonical_name ?? merchant.raw_name ?? null
+  const rawName = merchantObservation.raw_name ?? merchant.raw_name ?? canonicalName
+  const normalizedKey = merchantObservation.normalized_key ?? merchant.normalized_key ?? null
+  if (!canonicalName && !rawName) return []
+
+  const firstSeenKind = 'entity'
+  const firstSeenKey = `entity:${entityId ?? normalizedKey ?? canonicalName}`
+  const recordId = event.target_id ?? event.event_id
+  const displayName = canonicalName ?? rawName
+  const canonicalText = `第一次记录「${displayName}」`
+  const sourceEvidence = evidenceOf([event], [
+    'amount', 'event_at', 'event_time_precision', 'known_at', 'transaction_date', 'merchant',
+  ])
+
+  return [candidate({
+    id: `fact:expense:merchant-first-occurrence:${recordId}`,
+    semanticKey: 'expense_merchant_first_occurrence',
+    subtype: 'derived',
+    dimension: 'first_occurrence',
+    value: {
+      record_id: recordId,
+      entity_id: entityId,
+      merchant_name: displayName,
+      raw_merchant_name: rawName,
+      normalized_merchant_name: normalizedKey,
+      first_seen_kind: firstSeenKind,
+      first_seen_basis: 'known_at',
+      entity_first_seen: entityFirstSeen,
+      alias_first_seen: merchantObservation.alias_first_seen === true,
+      observed_aliases: Array.isArray(merchantObservation.observed_aliases)
+        ? merchantObservation.observed_aliases
+        : [],
+    },
+    text: canonicalText,
+    evidence: sourceEvidence,
+    numbers: [
+      { value: 1, meaning: 'first_occurrence_count', role: 'count', derivation: 'merchant_observation.entity_first_seen' },
+      { value: roundMoney(amount), meaning: 'current_record_amount', role: 'measure', derivation: 'source_event.amount' },
+    ],
+    selectionHints: {
+      allowed_surfaces: ['pwa_pending_ai_card', 'record_detail'],
+      exposure_key: `expense:merchant:${firstSeenKey}:first-occurrence`,
+      dedupe_key: `expense:merchant:${firstSeenKey}:first-occurrence`,
+    },
+  })]
+}
+
+/**
  * @param {any[]} events
  * @param {{
  *   entityId?: string | null,
@@ -165,7 +235,7 @@ export function generateFactCandidates(events, { entityId, localDate, timeZone, 
       subtype: 'aggregated',
       dimension: 'amount_structure',
       value: { amounts, min_amount: Math.min(...amounts), max_amount: Math.max(...amounts) },
-      text: `金额分布为 ${amounts.join('、')} 元，最高单笔 ${Math.max(...amounts)} 元`,
+      text: `「${entityName}」的金额分布为 ${amounts.map(value => `${value} 元`).join('、')}，最高单笔 ${Math.max(...amounts)} 元`,
       evidence: commonEvidence,
       numbers: amounts.map(value => ({ value, meaning: 'transaction_amount', derivation: 'source_event.amount' })),
       selectionHints: {

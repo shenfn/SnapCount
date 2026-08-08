@@ -3,7 +3,7 @@
 > 对应设计：[personal-context-architecture-v0.1.md](./personal-context-architecture-v0.1.md)
 > 状态：开发中
 > 范围：Supabase Edge Function、Planner/Signals 上下文边界、语义 Memory 读取与测试
-> 发布边界：本轮不自动 push、部署或触发 TestFlight；需通过本日志的发布门槛后单独授权
+> 发布边界：本轮已获用户授权；仍须先通过 CI，按迁移→Edge→PWA→TestFlight 顺序发布
 
 ## 1. 目标
 
@@ -128,7 +128,7 @@
 | Phase 1 | 已部署观察 | Context Packet、Memory 标准化读取器和 RLS 契约已上线；用户可见表达仍由旧链路承载 |
 | Phase 2 | 未开始 | 不批量删除旧数据 |
 | Phase 3 | Canary 观察中 | Shadow 已覆盖真实跨域记录，待完成可见输出切换门槛 |
-| Phase 4 | 部署完成，未闭环 | migration 与 Edge 已部署；需先修复 Canary 暴露的旧链路问题再全量切换 |
+| Phase 4 | 本地收口，待 CI/发布 | 时间事实与 Planner/Voice 统一出口已在同一工作树完成；生产发布按固定顺序进行 |
 
 ## 7. 2026-08-06 开发记录
 
@@ -382,3 +382,174 @@ Shadow 不是只生成一个中位数候选。最近真实记录的候选维度�
 下一轮应先进入 PR/CI，再保持 owner-only 观察自然样本。随后处理“Planner 候选与旧陪伴语语义重复”，该问题属于 Surface 组合去重，不应继续扩大本门禁的职责。
 
 是否允许进入下一阶段：允许提交并进入 CI；生产部署仍需单独授权。
+
+## 13. 2026-08-07 Planner 与 Voice 统一出口
+
+> 历史中间状态：本节记录了“coverage 后选择下一候选”的第一版实现。该做法会让用户看到的 Voice 首候选无法获得曝光和候选级点评，已由第 15 节的正式 delivery 契约替代。
+
+范围：保持五因子评分与一次表达调用不变，把插入前 Planner 主候选、Context Packet、Voice、Surface 组合及现有 ACK/点评闭环接成同一条可追溯链路。
+
+### 13.1 契约升级
+
+- Context Packet 升级到 `context-packet-v2`，候选携带 `candidate_id`、`semantic_key`、`dimension`、来源 Surface、Planner 版本与严格的 `count/measure` 数字角色；
+- Planner 升级到 `expression-shadow-auto-v0.6`，新增正式的 `expense_merchant_first_occurrence` 候选；新别名不等于新商户，历史待补全记录也会阻止误报“第一次记录”；
+- 支出、收入、睡眠、饮食、运动、阅读和钱包在落库前运行只读 Planner brief，仍只调用一次 Voice；synthetic ID 不产生曝光；
+- Voice 通过 `expression-coverage-v1` 声明实际表达的稳定 `semantic_key`。声明必须匹配首条候选且主陪伴语真实存在；Provider/解析失败时才由代码事实兜底。旧版本、缺失指纹或 Surface 不符的 coverage 一律 fail-open；
+- 落库后的正式 Planner 按 coverage 重组详情和通知，已表达候选不进入详情 `action_set`，下一条不同角度仍按原评分和门禁选择。
+
+### 13.2 客户端组合
+
+- PWA 与 iOS 都隐藏陪伴语旁边的纯当前事实兜底，但保留首次出现、历史比较、对象和情境候选；
+- 隐藏的 PWA 卡不 ACK；iOS 会丢弃被组合策略隐藏的未曝光预览，避免旧 token 卡住后续计划；
+- coverage 解析统一校验版本、Planner 版本、来源 Surface 和 Packet 指纹，过期客户端宁可重新展示，也不静默丢候选。
+
+### 13.3 当前验证与边界
+
+- Planner `163/163`、Edge/Deno `45/45`、PWA Surface 组合与候选身份 `9/9`、PWA production build、安全契约和重复记录契约均已通过；
+- `regenerateFeedbackWithSecondCall` 已有直接契约测试覆盖无 Provider、HTTP 失败和坏 JSON，三条路径均保留已核实 Planner 事实与完整 coverage；
+- iOS 已完成静态契约复审，并覆盖真实 `JSONDecoder -> AnyCodable` 解码、coverage 规范化和隐藏预览状态；Windows 没有 Swift 或 Xcode，iOS Build/单测仍必须由 GitHub Actions 的 macOS 环境验证；
+- 已使用生产只读聚合生成本地等价脱敏回放。一条真实低价茶饮记录此前同名和同品牌计数均为 0；生产 v0.5 重复呈现商户和金额，本地 v0.6 新增并选择 `expense_merchant_first_occurrence`，当前事实退回兜底。精确商户、金额和时间不进入 Git；
+- 回放输入、结果和新旧对照保存在 Git 忽略的 `local-only/expression-planner/`，不含用户 ID、生产记录 ID、图片、路径和其他原始商户名，不进入提交或 CI artifact；
+- 当前尚未推送、部署生产 Edge 或触发 TestFlight；真实模型措辞、macOS iOS Build/单测和发布仍属于下一门禁。
+
+## 14. 2026-08-08 统一出口阻断项收口
+
+> 历史中间状态：本节完成了 coverage 事实校验，但“隐藏首候选、交付下一候选”的生命周期仍未闭环。最终行为以第 15 节为准。
+
+完成：
+
+- coverage 不再信任模型自报的 `semantic_key`；只有文案实际包含对应对象、语义锚点以及来自候选的准确数字和单位时，才会隐藏同角度 Planner 卡片；
+- coverage 与正式详情候选增加稳定 `claim_fingerprint`。记录编辑后旧 coverage 自动 fail-open，ACK 前重新规划并以 `plan_claim_stale` 拒绝已经变化的 claim；
+- 支出、收入和数据域历史读取改为 500 条一页的完整分页，避免第 501 条之外的历史导致“第一次记录”误报；
+- 插入前与落库后的数据域 Planner 使用同一画像来源。回归确认饮食餐次基线会进入正式 `decision.action_set`；快照 `candidates` 仍按安全契约只冻结实际下发的主候选；
+- PWA 在预览和 ACK 两个阶段校验 `feedback.source` 与顶层 `candidate_id`，避免展示与曝光串候选；iOS 现有 Repository 已保持同类候选身份校验；
+- 回放器按账号隔离支出和数据域历史，输出递归移除用户 ID，避免多账号历史污染首次出现或个人基线。
+
+测试：
+
+- Planner：`163/163`；Edge/Deno：`45/45`；PWA 表达组合：`9/9`；
+- `ingest-receipt`、`generate-insights` Deno 类型检查通过，PWA production build 通过；
+- 安全契约、重复记录、待处理队列、财务选项、钱包快照金额、注册元数据、migration version 和 `git diff --check` 通过；
+- Windows 不能验证 Swift/Xcode；iOS 编译与单测仍必须由 GitHub Actions macOS runner 完成。
+
+已知边界：
+
+- 本轮没有新增 migration，也没有执行生产迁移、Edge 部署、push 或 TestFlight；
+- migration version 检查把 `20260806100000_personal_context_memory_contract.sql` 列为超出仓库记录基线 `20260726121000` 的 active migration；本日志此前已记录其生产应用结果，因此需要由发布流程单独核对并更新 baseline 元数据，本轮不重复执行迁移；
+- 真实模型的最终措辞质量只能在 owner-only 发布后用自然记录验证，本地不把规则兜底示例当成模型实测。
+
+下一轮：
+
+- 进入独立 PR 和 GitHub CI，先取得 macOS iOS Build/单测结果；
+- CI 通过后再决定是否部署 owner-only Edge Canary，不扩大到其他账号，不启用在线 Bandit；
+- 发布后观察“陪伴语保留 + 新角度候选不重复 + 点评绑定正确候选”三项闭环。
+
+是否允许进入下一阶段：允许提交并进入 CI；生产部署和 TestFlight 仍需单独授权。
+
+## 15. 2026-08-08 Voice 首候选正式 delivery 闭环
+
+范围：不增加模型调用、不修改五因子评分、不新增 migration，把用户实际看到的陪伴语与正式 Planner 候选、曝光和点评绑定为同一份交付。
+
+### 15.1 根因与修正
+
+第一版统一出口把 Voice 已表达的首候选从正式详情计划中排除，再为第二候选创建 snapshot。结果是用户看到首候选，但疲劳计数、ACK 和点评都绑定第二候选。现在改为：
+
+- 插入前 Planner 仍只读，不创建快照或曝光；
+- 最终 `companion_message` 通过候选事实验证后写入 coverage；
+- 落库后的正式 Planner 必须再次选中同一 claim，才能创建 `presentation_target=companion_message` 的 delivery snapshot；
+- 客户端不重复绘制正文，只在原“AI 陪伴”容器中承载可见性 ACK 和点评控件；
+- ACK 后曝光的 `rendered_payload` 就是实际陪伴语，点评使用同一候选的 `exposure_event_id`；
+- coverage、文本指纹、持久文案、候选依赖或 claim 任一变化时，回退到普通 Planner 卡，不静默丢内容。
+
+### 15.2 数字与通知
+
+- 统计数字改为同候选的 `value + meaning + unit + scope` 绑定，拒绝把“本周第 4 次”和“近 90 天均价 9.54 元”交换口径；
+- 通知改为 `slot + semantic_key + claim_fingerprint` 组合，同 claim 的不同说法只出现一次，固定记账结果始终保留；
+- Voice 首候选只有通过快捷通知准入时才进入通知，并为实际展示的陪伴语写 `returned_to_shortcut` 曝光；不满足准入时由真正选中的快捷通知候选负责展示和曝光。
+
+### 15.3 首次记录与回放
+
+- “第一次记录某商户”统一解释为“芥子第一次见到”，按 `known_at/created_at` 判断；补录更早事件不会把已经见过的商户误报为第一次；
+- 回放器修复 `--baseline` 变量错误，并覆盖无变化、候选变化、选择变化及非零候选变零候选；
+- 真实素材仍只保存在 Git 忽略的 `local-only/`，测试和文档只使用合成或脱敏事实。
+
+### 15.4 当前门槛
+
+- 服务端 delivery、fingerprint、编辑失效、快捷通知曝光和通用文案无 coverage 的定向测试已通过；
+- Edge 全量测试、PWA 组合测试、Planner 全量、PWA build、安全与业务契约仍需在本轮最终状态统一复跑；
+- iOS 只完成本地源码和静态测试，必须由 GitHub Actions macOS runner 验证编译与单测；
+- 本轮未提交、未 push、未部署 Edge、未执行生产迁移，也未触发 TestFlight。
+
+是否允许进入下一阶段：等待最终全量回归；通过后只允许进入 PR/CI，生产发布仍需当前任务中的单独授权。
+
+## 16. 2026-08-08 表达出口客户端最终收口
+
+本轮补齐了最后一层客户端活性与身份约束：
+
+- PWA 详情页和待补充弹窗现在依赖陪伴文案身份。文案异步刷新会废弃旧计划、取消旧 in-flight 请求并重取；ACK 前会再次校验可见文案。
+- `feedback_card` 和 `companion_message` 都使用候选、claim、target 与渲染文本指纹进行确认；旧响应仅在没有显式 target 时走兼容规则。
+- iOS 在废弃 stale pending 时同时清理 ACK token，避免旧请求完成后新计划没有点评入口。
+
+最终本地验证：Planner `170/170`、Edge/Deno `59/59`、PWA 表达展示 `16/16`、PWA exposure 契约 `10/10`、PWA production build、Deno 类型检查、安全/重复/待处理/财务/钱包/注册/migration 契约和 `git diff --check` 全部通过。Windows 不能运行 Swift/Xcode，未执行 iOS Build。
+
+本轮未提交、未 push、未部署 Edge、未执行 migration、未触发 TestFlight。
+
+## 17. 2026-08-08 时间与统一出口发布批次
+
+完成：
+
+- 将 `occurred_at` 作为财务业务发生时间的 canonical 字段，保留旧日期/时分字段作为兼容展示；历史只从 staging/AI 日志的明确证据回填。
+- Voice、Feedback、PWA 和 iOS 详情统一消费冻结 Context Packet 与 Planner delivery；陪伴语已表达的候选复用同一点评曝光，不再绘制重复卡片。
+- PWA/iOS 详情同时展示上传时间与发生时间；发生时间缺失时显示未知或日期，不把上传时间伪装成发生时间。
+- 当前阶段固定 `Asia/Shanghai`；海外时区、用户时区设置和 DST 作为后续独立项目，不混入本批次。
+- 未知发生时间的时段词清洗为无时段表达，保留可验证的句子主体。
+
+修改文件：
+
+- Edge：`supabase/functions/ingest-receipt/{index.ts,time.ts,time-language.ts,prompts.ts,expression-delivery.ts,...}`
+- 数据库：`supabase/migrations/20260808120000_finance_occurred_at_contract.sql`
+- PWA：`src/utils/{financeOccurrence.js,expressionPresentation.js,helpers.js}` 及详情/状态适配器
+- iOS：记录查询、详情展示、Planner feedback envelope 与时间单测
+- Planner/测试：候选、去重、曝光、回放和时间契约测试
+
+测试：
+
+- Planner 171/171；PWA 表达 16/16；PWA 时间辅助函数 13/13；业务契约、安全/重复/待处理/财务选项、生产构建和 `git diff --check` 通过。
+- 本机缺少 Deno 与 Swift/Xcode，Edge 类型检查、PostgreSQL/RLS 和 iOS Build 留给 GitHub CI。
+
+已知风险：
+
+- migration 必须先于包含 `occurred_at` 查询的客户端和 Edge 发布；否则旧生产 schema 会导致查询失败。
+- 历史记录没有明确发生时间证据时保持 null，不能自动猜测；线上 Canary 需确认 UI 对该空值的文案可接受。
+- 海外时区暂缓，不把当前 Shanghai 契约误称为国际化完成。
+
+最终收口补充：
+
+- PWA 仅允许明确的手动旧记录回退展示 `transaction_time`；`ai_scan` 等旧 AI 记录缺少 canonical `occurred_at` 时不再显示可能错位的时分。
+- iOS 手动/中转记录未选择具体时分时，`occurred_at` 保持 `null`，不再自动补成 `12:00`。
+- 修正时间文案清洗器的替换回调参数，补录场景可以保留明确描述“上传/补录时刻”的措辞，同时仍以发生时段约束主句。
+- `test:expression-presentation` 已纳入 Release Validation；当前本地没有 Deno、PostgreSQL 或 Xcode，相关结果必须由 PR CI 给出。
+
+下一步：
+
+- 逐路径暂存并提交，推送 Draft PR；等待 Edge/Postgres/macOS CI。
+- CI 固定提交通过后执行生产 migration、Edge、PWA，再手动触发 TestFlight。
+- 用一条真实 06:xx 记录验收时间、去重和点评闭环。
+
+是否允许进入下一阶段：是，进入 CI 和固定提交发布门禁。
+
+### 17.1 首轮 CI 失败与修复
+
+PR #28 首轮 CI 暴露了三处收口问题，均未改变既定产品范围：
+
+- Voice 时间测试误把识别 Prompt 的 `client_captured_at` 约束断言放在 Voice Prompt 上；断言已移回识别阶段测试，识别与表达边界保持不变。
+- 时间文案清洗的普通时段正则含捕获组，导致 JavaScript `replace` 回调把捕获文本误当字符下标；改为非捕获组后，“早上才补录”可以保留上传时段，而记录主体仍服从代码计算的发生时段。
+- iOS 将带默认参数的 `NativeLocalDate.dateKey` 直接传给 `Optional.map`，Swift 类型推断要求两个参数；改为显式闭包调用，不改变日期语义。
+
+修复后本地验证：Edge safeguards `71/71`、Planner `171/171`、PWA 表达 `16/16`，财务发生时间、待处理队列、财务选项、重复记录和安全契约均通过。Windows 仍不能替代 macOS Swift 编译，修复后的 iOS Build 与单测必须由 PR CI 再验证。
+
+第二轮 Release Validation 继续执行到 PostgreSQL 实际迁移演练后，发现测试夹具的 `data_records` 缺少生产 schema 自 007 migration 起就存在的 `created_at`。归档 RPC 的同图幂等查询长期按该列排序，因此本轮仅补齐夹具字段，不修改生产 RPC 或时间契约。
+
+第三轮演练进一步发现该夹具把 `data_records.occurred_at` 错设为 `NOT NULL DEFAULT now()`，与生产从建表起允许未知时刻的定义相反。夹具现已同步生产的基础时间列和钱包扩展列，确保“日期已知、时刻未知”能以 `occurred_at = null` 归档，而不是被测试 schema 自动伪造当前时间。
+
+iOS 模拟器编译已通过，单测发现编辑草稿只从 canonical `occurred_at` 派生时分，导致合法的手动旧记录 `transaction_time` 在打开编辑后丢失。修复后仍优先 canonical 时间，仅在其缺失时保留详情中已判定可兼容的旧手动时分；AI 扫描记录不会因此重新信任旧错位字段。

@@ -92,6 +92,55 @@ Deno.test("signal-backed tone may repeat the verified weekly count", () => {
   assert(result.ok, "the model may faithfully repeat a signal-backed weekly count");
 });
 
+Deno.test("statistical numbers stay bound to one candidate meaning unit and scope", () => {
+  const signals: DomainSignal[] = [{
+    kind: "merchant_repeat",
+    priority: 1,
+    fact: "本自然周在沙县小吃已是第 4 次消费；该店近90天平均单笔 9.54 元",
+    numbers: [4, 9.54],
+    countNumbers: [4],
+    numberFacts: [{
+      value: 4,
+      meaning: "current_week_merchant_occurrence_count",
+      role: "count",
+      unit: "occurrence",
+      scope: "week:current",
+    }, {
+      value: 9.54,
+      meaning: "rolling_90d_merchant_average_amount",
+      role: "measure",
+      unit: "currency",
+      scope: "rolling:90d",
+    }],
+  }];
+  const recordFacts = JSON.stringify({
+    record_type: "expense",
+    amount: 11,
+    merchant_name: "沙县小吃",
+  });
+
+  const accepted = [
+    "本周第4次来沙县小吃，熟悉的味道又出现了。",
+    "近90天在沙县小吃的平均单笔是9.54元。",
+    "本笔11元，先把这一顿稳稳记下。",
+  ];
+  const rejected = [
+    "近90天第4次来沙县小吃。",
+    "本周已经消费90次。",
+    "本周累计9.54元。",
+  ];
+
+  for (const text of accepted) {
+    const result = validateVoiceNumbers([text], signals, recordFacts);
+    assert(result.ok, `grounded claim must pass: ${text}; ${result.violations.join(" | ")}`);
+  }
+  for (const text of rejected) {
+    const result = validateVoiceNumbers([text], signals, recordFacts);
+    assert(!result.ok, `scope-swapped claim must fail: ${text}`);
+    assert(result.badIndexes.includes(0), `rejected claim must identify its field: ${text}`);
+  }
+});
+
 Deno.test("signal-backed tone cannot change the verified time window", () => {
   const signals: DomainSignal[] = [{
     kind: "merchant_repeat",
@@ -231,6 +280,60 @@ Deno.test("model tone may use current record facts without history", () => {
   );
 
   assert(result.ok, "current-record numbers may remain in tone after validation");
+});
+
+Deno.test("grounded qualitative inference keeps record facts but rejects invented precision", () => {
+  const recordFacts = JSON.stringify({
+    record_type: "expense",
+    amount: 6.28,
+    merchant_name: "青禾茶饮",
+    category: "food",
+  });
+
+  const grounded = validateModelTone(
+    ["6.28 元看起来像碰上优惠。"],
+    recordFacts,
+  );
+  const inventedDiscount = validateModelTone(
+    ["这次优惠了 20 元。"],
+    recordFacts,
+  );
+  const inventedFrequency = validateModelTone(
+    ["这已经是本周第 3 次了。"],
+    recordFacts,
+  );
+
+  assert(grounded.ok, "qualitative inference anchored to a current-record amount must survive");
+  assert(!inventedDiscount.ok, "an unsupported precise discount amount must be rejected");
+  assert(!inventedFrequency.ok, "an unsupported weekly count must be rejected");
+});
+
+Deno.test("Planner numeric roles allow first occurrence but do not turn a duration into a count", () => {
+  const firstOccurrence = validateModelTone(
+    ["第一次记录青禾茶饮，像是碰上了一个小惊喜。"],
+    JSON.stringify({ record_type: "expense", amount: 6.28, merchant_name: "青禾茶饮" }),
+    [{
+      kind: "expense_merchant_first_occurrence",
+      priority: 1,
+      fact: "第一次记录「青禾茶饮」",
+      numbers: [1, 6.28],
+      countNumbers: [1],
+    }],
+  );
+  const durationAsCount = validateModelTone(
+    ["这已经是第 27 次了。"],
+    JSON.stringify({ record_type: "expense", merchant_name: "示例商户" }),
+    [{
+      kind: "merchant_previous_transaction_gap",
+      priority: 1,
+      fact: "距离上一次同名记录已经过去 27 天",
+      numbers: [27],
+      countNumbers: [],
+    }],
+  );
+
+  assert(firstOccurrence.ok, "a Planner count role must authorize the matching first-occurrence expression");
+  assert(!durationAsCount.ok, "a measured day gap must not authorize an occurrence count");
 });
 
 Deno.test("model tone may stay qualitative while code renders the count", () => {

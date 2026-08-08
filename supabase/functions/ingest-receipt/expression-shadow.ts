@@ -306,6 +306,8 @@ export async function persistPlannerExposureEvents(
       visible_field_paths?: string[];
       expandable_field_paths?: string[];
       persisted_only_field_paths?: string[];
+      presentation_target?: string;
+      rendered_text_fingerprint?: string;
     }>;
     lifecycleState?: string;
     simulationOnly?: boolean;
@@ -373,6 +375,8 @@ export async function persistPlannerExposureEvents(
       exposure_key: exposureKey,
       dedupe_key: dedupeKey,
       rendered_payload: renderedPayload,
+      presentation_target: normalizeString(deliveryEvidence?.presentation_target),
+      rendered_text_fingerprint: normalizeString(deliveryEvidence?.rendered_text_fingerprint),
       sources,
     });
     const eventKey = [
@@ -424,6 +428,12 @@ export async function persistPlannerExposureEvents(
         scoped_exposure_key: `${params.surface}:${exposureKey}`,
         dedupe_key: dedupeKey,
         scoped_dedupe_key: `${params.surface}:${dedupeKey}`,
+        ...(normalizeString(deliveryEvidence?.presentation_target)
+          ? { presentation_target: normalizeString(deliveryEvidence?.presentation_target) }
+          : {}),
+        ...(normalizeString(deliveryEvidence?.rendered_text_fingerprint)
+          ? { rendered_text_fingerprint: normalizeString(deliveryEvidence?.rendered_text_fingerprint) }
+          : {}),
         ...(decisionId
           ? {
             decision_id: decisionId,
@@ -459,12 +469,12 @@ export async function persistPlannerExposureEvents(
   }));
 }
 
-async function processExpenseShadow(supabase: ShadowDatabaseClient, params: { eventKey: string; userId: string; recordId: string; occurredAt: string; collectorResult: Record<string, unknown> }): Promise<void> {
+async function processExpenseShadow(supabase: ShadowDatabaseClient, params: { eventKey: string; userId: string; recordId: string; occurredAt: string | null; collectorResult: Record<string, unknown> }): Promise<void> {
   try {
     const { data, error } = await supabase.from("transactions")
-      .select("id,transaction_date,transaction_time,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash")
+      .select("id,transaction_date,transaction_time,occurred_at,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash")
       .eq("user_id", params.userId).eq("type", "expense")
-      .order("transaction_date", { ascending: false }).order("transaction_time", { ascending: false }).limit(500);
+      .order("occurred_at", { ascending: false }).order("transaction_date", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
     const personalization = await loadPlannerPersonalization(supabase, params.userId);
     const plan = buildExpressionShadowPlan({ transactions: data ?? [], currentRecordId: params.recordId, occurredAt: params.occurredAt, ...personalization });
@@ -475,8 +485,8 @@ async function processExpenseShadow(supabase: ShadowDatabaseClient, params: { ev
 async function processIncomeShadow(supabase: ShadowDatabaseClient, params: { eventKey: string; userId: string; recordId: string; collectorResult: Record<string, unknown> }): Promise<void> {
   try {
     const { data, error } = await supabase.from("income_records")
-      .select("id,income_date,created_at,amount,source_name,category")
-      .eq("user_id", params.userId).order("income_date", { ascending: false }).limit(500);
+      .select("id,income_date,occurred_at,created_at,amount,source_name,category")
+      .eq("user_id", params.userId).order("occurred_at", { ascending: false }).order("income_date", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
     const records = (data ?? []).map(buildIncomePlannerSourceRecord);
     const personalization = await loadPlannerPersonalization(supabase, params.userId);
@@ -660,7 +670,7 @@ async function captureExpressionShadow(
   if (normalizeString(input.payload.status) === "done" && identity.recordId) {
     const plannerParams = { eventKey, userId: input.userId, recordId: identity.recordId, collectorResult };
     if (identity.recordType === "expense") {
-      await processExpenseShadow(supabase, { ...plannerParams, occurredAt: input.occurredAt ?? new Date().toISOString() });
+      await processExpenseShadow(supabase, { ...plannerParams, occurredAt: input.occurredAt ?? null });
     } else if (identity.recordType === "income") {
       await processIncomeShadow(supabase, plannerParams);
     } else if (["sleep", "sport", "food", "reading", "wallet"].includes(identity.recordType ?? "")) {

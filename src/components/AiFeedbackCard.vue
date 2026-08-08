@@ -1,6 +1,6 @@
 <template>
-  <div v-if="feedback" class="ai-feedback-card" :class="[bandClass, { compact }]">
-    <div class="ai-feedback-head">
+  <div v-if="feedback" class="ai-feedback-card" :class="[bandClass, { compact, 'review-only': reviewOnly }]">
+    <div v-if="!reviewOnly" class="ai-feedback-head">
       <div class="ai-feedback-icon">{{ feedback.icon || '✨' }}</div>
       <div class="ai-feedback-main">
         <div class="ai-feedback-kicker">{{ kicker }}</div>
@@ -8,18 +8,18 @@
       </div>
       <div class="ai-feedback-band">{{ bandLabel }}</div>
     </div>
-    <div v-if="feedback.emotion_line" class="ai-feedback-emotion">{{ feedback.emotion_line }}</div>
-    <div v-if="feedback.utility_line" class="ai-feedback-action">{{ feedback.utility_line }}</div>
+    <div v-if="!reviewOnly && feedback.emotion_line" class="ai-feedback-emotion">{{ feedback.emotion_line }}</div>
+    <div v-if="!reviewOnly && feedback.utility_line" class="ai-feedback-action">{{ feedback.utility_line }}</div>
     <button
-      v-if="feedback.detail_reason && compact"
+      v-if="!reviewOnly && feedback.detail_reason && compact"
       type="button"
       class="ai-feedback-toggle"
       @click="showReason = !showReason"
     >{{ showReason ? '收起依据' : '为什么这么说' }}</button>
-    <div v-if="feedback.detail_reason && (!compact || showReason)" class="ai-feedback-reason">
+    <div v-if="!reviewOnly && feedback.detail_reason && (!compact || showReason)" class="ai-feedback-reason">
       <span>判断依据</span>{{ feedback.detail_reason }}
     </div>
-    <div v-if="timingLabel" class="ai-feedback-meta">
+    <div v-if="!reviewOnly && timingLabel" class="ai-feedback-meta">
       <span>{{ timingLabel }}</span>
     </div>
     <div v-if="reviewable" class="ai-feedback-review">
@@ -76,6 +76,7 @@ const props = defineProps({
   exposureEventId: { type: String, default: '' },
   reviewUnavailable: { type: Boolean, default: false },
   reviewRetrying: { type: Boolean, default: false },
+  reviewOnly: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['submit-review', 'retry-review'])
@@ -147,6 +148,18 @@ const timingLabel = computed(() => props.feedback?.timing_signal?.label || '')
   border-radius: 18px;
   box-shadow: none;
   border-color: rgba(33, 79, 61, 0.1);
+}
+
+.ai-feedback-card.review-only {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ai-feedback-card.review-only .ai-feedback-review {
+  margin-top: 12px;
 }
 
 .ai-feedback-card.band-positive {

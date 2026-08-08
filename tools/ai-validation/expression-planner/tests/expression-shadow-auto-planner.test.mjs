@@ -12,12 +12,20 @@ const bundle = await build({
 const url = 'data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64')
 const { buildExpressionShadowPlan } = await import(url)
 
+function withCanonicalOccurrence(row) {
+  if (!row.transaction_date || !row.transaction_time) return row
+  return {
+    ...row,
+    occurred_at: `${row.transaction_date}T${row.transaction_time}+08:00`,
+  }
+}
+
 const repeatedApiMerchant = [
   { id: 'a', transaction_date: '2026-07-13', transaction_time: '10:00:00', amount: 10, merchant_name: 'ExampleAPIHub', status: 'done' },
   { id: 'b', transaction_date: '2026-07-13', transaction_time: '13:00:00', amount: 10, merchant_name: 'Example API Hub', status: 'done' },
   { id: 'c', transaction_date: '2026-07-13', transaction_time: '16:00:00', amount: 15, merchant_name: 'ExampleAPIHub', status: 'done' },
   { id: 'd', transaction_date: '2026-07-13', transaction_time: '19:07:00', amount: 12, merchant_name: 'Example API Hub', status: 'done' },
- ]
+].map(withCanonicalOccurrence)
 
 test('automatically plans a synthetic repeated merchant shadow sample', () => {
   const plan = buildExpressionShadowPlan({ transactions: repeatedApiMerchant, currentRecordId: 'd' })
@@ -39,7 +47,7 @@ test('automatically plans a synthetic repeated merchant shadow sample', () => {
   )
 })
 
-test('does not invent an insight from a single isolated expense', () => {
+test('uses first occurrence as the insight for a single isolated expense', () => {
   const plan = buildExpressionShadowPlan({
     transactions: [{ id: 'only', transaction_date: '2026-07-13', amount: 14.98, merchant_name: '晚饭', status: 'done' }],
     currentRecordId: 'only',
@@ -47,9 +55,55 @@ test('does not invent an insight from a single isolated expense', () => {
   assert.equal(plan.status, 'auto_planned')
   assert.equal(plan.selected.length, 0)
   assert.equal(plan.shortcut_plan.silent, true)
-  assert.equal(plan.plan_summary.record_detail.selected[0].semantic_key, 'expense_current_record_context')
-  assert.equal(plan.plan_summary.pwa_pending_ai_card.selected[0].semantic_key, 'expense_current_record_context')
-  assert.equal(plan.plan_summary.pwa_pending_ai_card.selected[0].selection_mode, 'exact_fact_fallback')
+  assert.equal(plan.current_record.merchant_observation.entity_first_seen, true)
+  assert.equal(plan.current_record.merchant_observation.alias_first_seen, true)
+  assert.equal(plan.plan_summary.record_detail.selected[0].semantic_key, 'expense_merchant_first_occurrence')
+  assert.equal(plan.plan_summary.pwa_pending_ai_card.selected[0].semantic_key, 'expense_merchant_first_occurrence')
+  assert.equal(plan.plan_summary.pwa_pending_ai_card.selected[0].selection_mode, 'threshold')
+  assert.equal(plan.plan_summary.record_detail.selected[0].selection_mode, 'threshold')
+  assert.equal(plan.plan_summary.weekly_report.selected.length, 0)
+})
+
+test('a prior pending record prevents a false first-occurrence claim', () => {
+  const plan = buildExpressionShadowPlan({
+    currentRecordId: 'current-after-pending',
+    transactions: [
+      {
+        id: 'prior-pending', type: 'expense', transaction_date: '2026-08-06',
+        transaction_time: '12:00:00', created_at: '2026-08-06T12:01:00+08:00',
+        amount: 6.28, merchant_name: '示例茶饮', category: null,
+        platform: '外卖', payment_method: '微信支付', status: 'pending',
+      },
+      {
+        id: 'current-after-pending', type: 'expense', transaction_date: '2026-08-07',
+        transaction_time: '12:00:00', created_at: '2026-08-07T12:01:00+08:00',
+        amount: 6.01, merchant_name: '示例茶饮', category: 'food',
+        platform: '外卖', payment_method: '微信支付', status: 'done',
+      },
+    ],
+  })
+
+  assert.equal(plan.current_record.merchant_observation.entity_first_seen, false)
+  assert.equal(
+    plan.candidates.some(candidate => candidate.claim?.semantic_key === 'expense_merchant_first_occurrence'),
+    false,
+  )
+})
+
+test('a later event already known to Jiezi prevents a backfill from being called first', () => {
+  const plan = buildExpressionShadowPlan({
+    currentRecordId: 'backfilled-current',
+    transactions: [{
+      id: 'known-later-event', type: 'expense', transaction_date: '2026-08-07', transaction_time: '12:00:00',
+      created_at: '2026-08-07T12:01:00+08:00', amount: 8, merchant_name: '示例茶饮', category: 'food', status: 'done',
+    }, {
+      id: 'backfilled-current', type: 'expense', transaction_date: '2026-08-01', transaction_time: '08:00:00',
+      created_at: '2026-08-08T08:01:00+08:00', amount: 6.28, merchant_name: '示例茶饮', category: 'food', status: 'done',
+    }],
+  })
+
+  assert.equal(plan.current_record.merchant_observation.entity_first_seen, false)
+  assert.equal(plan.candidates.some(candidate => candidate.claim?.semantic_key === 'expense_merchant_first_occurrence'), false)
 })
 
 test('retains a near-identical personal baseline for shadow analysis without selecting it for users', () => {
@@ -65,7 +119,7 @@ test('retains a near-identical personal baseline for shadow analysis without sel
   const baseline = plan.candidates.find(candidate => candidate.claim.semantic_key === 'merchant_daily_vs_active_day_median')
 
   assert.ok(baseline)
-  assert.equal(plan.planner_version, 'expression-shadow-auto-v0.5')
+  assert.equal(plan.planner_version, 'expression-shadow-auto-v0.6')
   assert.equal(baseline.claim.structured_value.delta.count, 0)
   assert.equal(baseline.claim.structured_value.delta.total_percent, 3.27)
   assert.equal(baseline.eligibility.eligible, true)
@@ -132,7 +186,7 @@ test('current-day facts do not read same-day transactions after the current reco
       { id: 'past', transaction_date: '2026-07-23', transaction_time: '08:00:00', amount: 10, merchant_name: 'Causal Shop', status: 'done' },
       { id: 'current', transaction_date: '2026-07-23', transaction_time: '10:00:00', amount: 20, merchant_name: 'Causal Shop', status: 'done' },
       { id: 'future', transaction_date: '2026-07-23', transaction_time: '18:00:00', amount: 30, merchant_name: 'Causal Shop', status: 'done' },
-    ],
+    ].map(withCanonicalOccurrence),
     currentRecordId: 'current',
   })
   const daily = plan.candidates.find(candidate => candidate.claim.semantic_key === 'merchant_daily_count_total')
@@ -151,7 +205,7 @@ test('does not use a same-name income transaction as previous expense', () => {
       { id: 'previous-expense', type: 'expense', transaction_date: '2026-07-10', transaction_time: '08:00:00', amount: 10, merchant_name: 'Mixed Type Name', status: 'done' },
       { id: 'recent-income', type: 'income', transaction_date: '2026-07-11', transaction_time: '08:00:00', amount: 20, merchant_name: 'Mixed Type Name', status: 'done' },
       { id: 'current-expense', type: 'expense', transaction_date: '2026-07-12', transaction_time: '08:00:00', amount: 30, merchant_name: 'Mixed Type Name', status: 'done' },
-    ],
+    ].map(withCanonicalOccurrence),
     currentRecordId: 'current-expense',
   })
   const recurrence = plan.candidates.find(candidate => candidate.claim.semantic_key === 'expense_record_name_previous_gap')
@@ -164,7 +218,7 @@ test('selects a same-name interval for the AI card and detail without interrupti
     transactions: [
       { id: 'previous', transaction_date: '2026-06-15', transaction_time: '08:10:00', created_at: '2026-06-15T00:11:00Z', amount: 12, merchant_name: 'Named Record', status: 'done' },
       { id: 'current', transaction_date: '2026-07-12', transaction_time: '17:47:00', created_at: '2026-07-12T09:48:00Z', amount: 18, merchant_name: 'Named Record', status: 'done' },
-    ],
+    ].map(withCanonicalOccurrence),
     currentRecordId: 'current',
   })
   const recurrence = plan.candidates.find(candidate => candidate.claim.semantic_key === 'expense_record_name_previous_gap')
@@ -193,6 +247,23 @@ test('same-day date-only records stay in totals without inventing a recurrence i
   assert.equal(daily.claim.structured_value.total_amount, 30)
   assert.equal(plan.candidates.some(candidate => candidate.claim.semantic_key === 'merchant_daily_activity_span'), false)
   assert.equal(plan.candidates.some(candidate => candidate.claim.semantic_key === 'expense_record_name_previous_gap'), false)
+})
+
+test('legacy transaction_time alone never restores minute precision', () => {
+  const plan = buildExpressionShadowPlan({
+    transactions: [
+      { id: 'legacy-a', transaction_date: '2026-07-22', transaction_time: '23:46:00', amount: 10, merchant_name: 'Legacy Time Shop', status: 'done' },
+      { id: 'legacy-b', transaction_date: '2026-07-23', transaction_time: '06:41:00', amount: 20, merchant_name: 'Legacy Time Shop', status: 'done' },
+    ],
+    currentRecordId: 'legacy-b',
+  })
+
+  const recurrence = plan.candidates.find(candidate => candidate.claim.semantic_key === 'expense_record_name_previous_gap')
+  assert.ok(recurrence)
+  assert.equal(recurrence.claim.structured_value.elapsed_minutes, null)
+  assert.deepEqual(recurrence.claim.structured_value.elapsed_duration, {
+    days: 1, hours: null, minutes: null, display_text: '1 天',
+  })
 })
 
 test('same-time records remain in daily totals without inventing a positive recurrence interval', () => {

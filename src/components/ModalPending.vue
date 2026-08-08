@@ -258,11 +258,25 @@
           </div>
         </section>
 
-        <div v-if="companionMessage" class="pending-companion">
+        <div v-if="companionMessage" ref="pendingCompanionRef" class="pending-companion">
           <div class="pending-companion-mark">💬</div>
-          <div>
+          <div class="pending-companion-body">
             <strong>AI 陪伴</strong>
             <p>{{ companionMessage }}</p>
+            <AiFeedbackCard
+              v-if="companionReviewFeedback"
+              :key="`${aiFeedbackCardKey}-companion-review`"
+              :feedback="companionReviewFeedback"
+              :reviewable="aiFeedbackReviewable"
+              :review-state="feedbackReviewState"
+              :submitting="feedbackReviewSubmitting"
+              :exposure-event-id="aiFeedbackExposureEventId"
+              :review-unavailable="plannerReviewUnavailable"
+              :review-retrying="plannerReviewRetrying"
+              review-only
+              @submit-review="submitFeedbackReview"
+              @retry-review="retryPlannerDelivery"
+            />
           </div>
         </div>
 
@@ -319,6 +333,13 @@ import {
   retryWithBackoff,
   waitForVisibleElement,
 } from '../utils/expressionDelivery'
+import {
+  companionMessageMatchesDelivery,
+  feedbackToRender,
+  isCompanionMessageDelivery,
+  isPlannerDeliveryReviewable,
+  shouldAcknowledgePlannerFeedback,
+} from '../utils/expressionPresentation'
 
 const PLAN_NOT_READY_RETRY_DELAYS = [250, 750, 1500]
 const ACK_RETRY_DELAYS = [400, 1200]
@@ -332,6 +353,7 @@ const showAccountPicker = ref(false)
 const customOptionKind = ref('')
 const customOptionValue = ref('')
 const pendingAiFeedbackCardRef = ref(null)
+const pendingCompanionRef = ref(null)
 const plannerDeliveryStates = ref({})
 const feedbackReviewStates = ref({})
 let activePlannerDeliveryController = null
@@ -354,6 +376,10 @@ const recordExpressionPlan = computed(() => {
 const plannerAiFeedback = computed(() => (
   recordExpressionPlan.value?.available ? recordExpressionPlan.value.feedback || null : null
 ))
+const plannerTargetsCompanion = computed(() => (
+  Boolean(recordExpressionPlan.value?.available)
+  && isCompanionMessageDelivery(recordExpressionPlan.value, plannerAiFeedback.value)
+))
 const companionMessage = computed(() => {
   const bill = store.pendingModal.bill
   if (!bill) return ''
@@ -363,11 +389,27 @@ const plannerLookupSettled = computed(() => (
   ['unavailable', 'error'].includes(recordExpressionPlan.value?.status)
 ))
 const aiFeedback = computed(() => (
-  plannerAiFeedback.value
+  feedbackToRender({
+    companionMessage: companionMessage.value,
+    feedback: plannerAiFeedback.value,
+    companionFeedback: legacyAiFeedback.value,
+    delivery: recordExpressionPlan.value,
+  })
   || (!companionMessage.value && plannerLookupSettled.value ? legacyAiFeedback.value : null)
 ))
+const companionReviewFeedback = computed(() => (
+  plannerTargetsCompanion.value
+    && companionMessageMatchesDelivery({
+      delivery: recordExpressionPlan.value,
+      feedback: plannerAiFeedback.value,
+      companionMessage: companionMessage.value,
+    })
+    ? plannerAiFeedback.value
+    : null
+))
+const reviewFeedback = computed(() => companionReviewFeedback.value || aiFeedback.value)
 const aiFeedbackExposureEventId = computed(() => (
-  aiFeedback.value?.exposure_event_id || aiFeedback.value?.exposureEventId || ''
+  reviewFeedback.value?.exposure_event_id || reviewFeedback.value?.exposureEventId || ''
 ))
 const aiFeedbackCardKey = computed(() => {
   const recordId = expressionRecordId.value || 'none'
@@ -378,9 +420,9 @@ const aiFeedbackCardKey = computed(() => {
   return `pending-ai-feedback-${recordId}-legacy`
 })
 const aiFeedbackReviewable = computed(() => {
-  if (!aiFeedback.value) return false
+  if (!reviewFeedback.value) return false
   if (!plannerAiFeedback.value) return true
-  return Boolean(recordExpressionPlan.value?.acknowledged && aiFeedbackExposureEventId.value)
+  return isPlannerDeliveryReviewable(recordExpressionPlan.value)
 })
 const plannerDeliveryState = computed(() => plannerDeliveryStates.value[aiFeedbackCardKey.value] || '')
 const plannerReviewUnavailable = computed(() => (
@@ -648,9 +690,23 @@ function pendingFeedbackCardElement() {
   return pendingAiFeedbackCardRef.value?.$el || pendingAiFeedbackCardRef.value || null
 }
 
-async function loadPlannerWithRetry(recordId, recordKind, signal) {
+function pendingPlannerPresentationElement() {
+  if (plannerTargetsCompanion.value) return pendingCompanionRef.value || null
+  return pendingFeedbackCardElement()
+}
+
+async function loadPlannerWithRetry(recordId, recordKind, signal, { force = false } = {}) {
+  let shouldForce = force
   return retryWithBackoff(
-    () => store.loadRecordExpressionPlan(recordId, { recordKind, signal }),
+    () => {
+      const forceThisAttempt = shouldForce
+      shouldForce = false
+      return store.loadRecordExpressionPlan(recordId, {
+        recordKind,
+        signal,
+        force: forceThisAttempt,
+      })
+    },
     {
       delays: PLAN_NOT_READY_RETRY_DELAYS,
       signal,
@@ -667,8 +723,14 @@ async function acknowledgePlannerWhenVisible(recordId, recordKind, plan, control
     await nextTick()
     const acknowledged = await retryWithBackoff(
       async () => {
-        await waitForVisibleElement(pendingFeedbackCardElement(), { signal: controller.signal })
+        await waitForVisibleElement(pendingPlannerPresentationElement(), { signal: controller.signal })
         if (!isCurrentPendingPlanner(recordId, recordKind, plan)) throw createAbortError()
+        if (!shouldAcknowledgePlannerFeedback({
+          companionMessage: companionMessage.value,
+          feedback: plan.feedback,
+          companionFeedback: legacyAiFeedback.value,
+          delivery: plan,
+        })) throw createAbortError()
         if (!manual) setPlannerDeliveryState(deliveryKey, 'acknowledging')
         return store.ackRecordExpressionPlan(recordId, { signal: controller.signal })
       },
@@ -694,9 +756,19 @@ async function acknowledgePlannerWhenVisible(recordId, recordKind, plan, control
 }
 
 watch(
-  () => [store.pendingModal.open, expressionRecordId.value, expressionRecordKind.value],
-  async ([open, recordId, recordKind], _previous, onCleanup) => {
+  () => [
+    store.pendingModal.open,
+    expressionRecordId.value,
+    expressionRecordKind.value,
+    companionMessage.value,
+  ],
+  async ([open, recordId, recordKind, visibleCompanion], previous, onCleanup) => {
     if (!open || !recordId || !recordKind) return
+    const [previousOpen, previousRecordId, previousRecordKind, previousCompanion] = previous || []
+    const companionChangedInPlace = previousOpen === open
+      && previousRecordId === recordId
+      && previousRecordKind === recordKind
+      && previousCompanion !== visibleCompanion
     const controller = new AbortController()
     activePlannerDeliveryController = controller
     onCleanup(() => {
@@ -704,8 +776,16 @@ watch(
       if (activePlannerDeliveryController === controller) activePlannerDeliveryController = null
     })
     try {
-      const plan = await loadPlannerWithRetry(recordId, recordKind, controller.signal)
+      const plan = await loadPlannerWithRetry(recordId, recordKind, controller.signal, {
+        force: companionChangedInPlace,
+      })
       if (!isCurrentPendingPlanner(recordId, recordKind, plan) || !plan?.available || plan.acknowledged) return
+      if (!shouldAcknowledgePlannerFeedback({
+        companionMessage: companionMessage.value,
+        feedback: plan.feedback,
+        companionFeedback: legacyAiFeedback.value,
+        delivery: plan,
+      })) return
       await acknowledgePlannerWhenVisible(recordId, recordKind, plan, controller)
     } catch (error) {
       if (!isAbortError(error)) console.warn('交付待补充记录表达计划失败:', error)
@@ -1390,6 +1470,11 @@ const incomeTypes = [
   place-items: center;
   border-radius: 8px;
   background: rgba(45, 106, 79, 0.1);
+}
+
+.pending-companion-body {
+  min-width: 0;
+  flex: 1;
 }
 
 .pending-companion strong {

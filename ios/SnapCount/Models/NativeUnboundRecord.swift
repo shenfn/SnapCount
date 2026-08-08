@@ -16,6 +16,7 @@ struct NativeUnboundRecord: Identifiable {
     let amount: Double
     let date: String
     let time: String?
+    var occurredAt: String? = nil
     let platform: String?
     let category: String?
     let paymentMethod: String?

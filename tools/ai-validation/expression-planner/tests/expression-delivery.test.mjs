@@ -8,6 +8,7 @@ import { build } from 'esbuild'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '../../../..')
 const entryPoint = path.join(root, 'supabase/functions/ingest-receipt/expression-delivery.ts')
+const ingestEntryPoint = path.join(root, 'supabase/functions/ingest-receipt/index.ts')
 const userId = '11111111-1111-4111-8111-111111111111'
 
 async function loadModule(environment = {}) {
@@ -29,6 +30,42 @@ async function loadModule(environment = {}) {
   return import(url)
 }
 
+async function loadIngestFeedbackModule() {
+  const source = await readFile(ingestEntryPoint, 'utf8')
+  const serverStart = source.indexOf('Deno.serve(async (req) => {')
+  assert.ok(serverStart > 0, 'Edge request handler boundary must remain discoverable')
+  const testableSource = `${source.slice(0, serverStart)}\nexport { generateVoiceFeedback, regenerateFeedbackWithSecondCall };\n`
+  const bundle = await build({
+    absWorkingDir: root,
+    stdin: {
+      contents: testableSource,
+      resolveDir: path.dirname(ingestEntryPoint),
+      sourcefile: ingestEntryPoint,
+      loader: 'ts',
+    },
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    write: false,
+    plugins: [{
+      name: 'stub-deno-npm-imports',
+      setup(buildContext) {
+        buildContext.onResolve({ filter: /^npm:/ }, args => ({
+          path: args.path,
+          namespace: 'deno-npm-stub',
+          sideEffects: false,
+        }))
+        buildContext.onLoad({ filter: /.*/, namespace: 'deno-npm-stub' }, () => ({
+          contents: 'export const createClient = () => null; export const decode = () => null; export default {};',
+          loader: 'js',
+        }))
+      },
+    }],
+  })
+  const url = `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}#${Math.random()}`
+  return import(url)
+}
+
 function compare(left, operator, right) {
   if (operator === 'eq') return left === right
   if (operator === 'in') return right.includes(left)
@@ -42,6 +79,8 @@ function createQuery(table, state) {
   const filters = []
   const orders = []
   let limit = Number.POSITIVE_INFINITY
+  let rangeStart = 0
+  let rangeEnd = Number.POSITIVE_INFINITY
   let inserted = null
 
   function rows() {
@@ -56,7 +95,8 @@ function createQuery(table, state) {
       }
       return 0
     })
-    return filtered.slice(0, limit)
+    const upper = Math.min(filtered.length, rangeEnd + 1, rangeStart + limit)
+    return filtered.slice(rangeStart, upper)
   }
 
   const query = {
@@ -89,6 +129,11 @@ function createQuery(table, state) {
       limit = value
       return this
     },
+    range(from, to) {
+      rangeStart = from
+      rangeEnd = to
+      return this
+    },
     async maybeSingle() {
       if (inserted) {
         const row = {
@@ -114,6 +159,7 @@ function database(seed = {}) {
       transactions: [],
       income_records: [],
       data_records: [],
+      user_domain_profiles: [],
       expression_preference_revisions: [],
       expression_preference_snapshots: [],
       expression_exposure_events: [],
@@ -360,6 +406,527 @@ test('shortcut delivery consumes a planner candidate and persists one real expos
   assert.notEqual(state.tables.expression_exposure_events[0].selection_mode, 'legacy_voice')
 })
 
+test('shortcut exposes the actual companion text when the covered claim is shortcut-eligible', async () => {
+  const module = await loadModule()
+  const currentId = '90500000-0000-4000-8000-000000000004'
+  const transactions = [1, 2, 3, 4].map((index) => ({
+    id: `90500000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    user_id: userId,
+    type: 'expense',
+    transaction_date: '2026-07-25',
+    transaction_time: `${String(8 + index).padStart(2, '0')}:00:00`,
+    created_at: `2026-07-25T${String(8 + index).padStart(2, '0')}:01:00+08:00`,
+    amount: 10,
+    merchant_name: '便利店',
+    category: 'shopping',
+    platform: '线下',
+    payment_method: '微信支付',
+    status: 'done',
+  }))
+  const { client, state } = database({ transactions })
+  const first = await module.deliverShortcutExpressionPlan(client, userId, {
+    record_id: currentId,
+    record_kind: 'expense',
+    occurred_at: '2026-07-25T12:00:00+08:00',
+    delivery_attempt_id: 'shortcut-discovery',
+  })
+  assert.equal(first.available, true)
+  state.tables.expression_exposure_events.length = 0
+
+  const visibleCompanion = first.message
+  const current = state.tables.transactions.find(row => row.id === currentId)
+  current.companion_message = visibleCompanion
+  current.ai_feedback = {
+    expression_coverage: {
+      coverage_version: 'expression-coverage-v1',
+      expressed_semantic_key: first.semantic_key,
+      expressed_semantic_keys: [first.semantic_key],
+      source_surface: 'record_detail',
+      planner_version: 'expression-shadow-auto-v0.6',
+      packet_fingerprint: 'shortcut-covered-packet',
+      claim_fingerprint: first.claim_fingerprint,
+      presentation_target: 'companion_message',
+      rendered_text_fingerprint: module.expressionRenderedTextFingerprint(visibleCompanion),
+    },
+  }
+
+  const delivered = await module.deliverShortcutExpressionPlan(client, userId, {
+    record_id: currentId,
+    record_kind: 'expense',
+    occurred_at: '2026-07-25T12:00:00+08:00',
+    delivery_attempt_id: 'shortcut-companion',
+  })
+  assert.equal(delivered.available, true)
+  assert.equal(delivered.presentation_target, 'companion_message')
+  assert.equal(delivered.semantic_key, first.semantic_key)
+  assert.equal(delivered.message, visibleCompanion)
+  assert.equal(state.tables.expression_exposure_events.length, 1)
+  assert.deepEqual(state.tables.expression_exposure_events[0].rendered_payload, {
+    companion_message: visibleCompanion,
+  })
+  assert.deepEqual(state.tables.expression_exposure_events[0].visible_field_paths, ['companion_message'])
+  assert.equal(state.tables.expression_exposure_events[0].metadata.presentation_target, 'companion_message')
+  assert.equal(
+    state.tables.expression_exposure_events[0].metadata.rendered_text_fingerprint,
+    delivered.rendered_text_fingerprint,
+  )
+})
+
+test('pre-insert Voice brief becomes the same persisted companion delivery and is exposed only after ACK', async () => {
+  const module = await loadModule()
+  const realId = '91000000-0000-4000-8000-000000000002'
+  const synthetic = {
+    id: 'preinsert:voice-brief-1',
+    type: 'expense',
+    transaction_date: '2026-08-07',
+    transaction_time: '12:10:00',
+    created_at: '2026-08-07T12:11:00+08:00',
+    amount: 6.28,
+    merchant_name: '青禾茶饮',
+    category: 'dining',
+    platform: '外卖',
+    payment_method: '微信支付',
+    status: 'done',
+  }
+  const { client, state } = database({
+    transactions: [{
+      id: '91000000-0000-4000-8000-000000000001',
+      user_id: userId,
+      type: 'expense',
+      transaction_date: '2026-08-06',
+      transaction_time: '08:00:00',
+      created_at: '2026-08-06T08:01:00+08:00',
+      amount: 12,
+      merchant_name: '便利店',
+      category: 'shopping',
+      platform: '线下',
+      payment_method: '微信支付',
+      status: 'done',
+    }],
+  })
+
+  const brief = await module.buildPreInsertPlannerVoiceBrief(client, userId, {
+    record_kind: 'expense',
+    domain_key: 'expense',
+    current_record: synthetic,
+  })
+  assert.equal(brief.semantic_key, 'expense_merchant_first_occurrence')
+  assert.deepEqual(brief.count_numbers, [1])
+
+  state.tables.transactions.push({ ...synthetic, id: realId, user_id: userId })
+  const persisted = await module.getRecordExpressionPlan(client, userId, {
+    record_id: realId,
+    record_kind: 'expense',
+  })
+  assert.equal(persisted.available, true)
+  assert.equal(persisted.feedback.semantic_key, brief.semantic_key)
+  assert.notEqual(persisted.candidate_id, brief.candidate_id)
+
+  const visibleCompanion = '第一次记录「青禾茶饮」，这家外卖商户是芥子新见到的。'
+  state.tables.transactions.at(-1).companion_message = visibleCompanion
+  state.tables.transactions.at(-1).ai_feedback = {
+    expression_coverage: {
+      coverage_version: 'expression-coverage-v1',
+      expressed_semantic_key: brief.semantic_key,
+      expressed_semantic_keys: [brief.semantic_key],
+      source_surface: 'record_detail',
+      planner_version: 'expression-shadow-auto-v0.6',
+      packet_fingerprint: 'fnv1a32:test-packet',
+      claim_fingerprint: brief.claim_fingerprint,
+      presentation_target: 'companion_message',
+      rendered_text_fingerprint: module.expressionRenderedTextFingerprint(visibleCompanion),
+    },
+  }
+  const composed = await module.getRecordExpressionPlan(client, userId, {
+    record_id: realId,
+    record_kind: 'expense',
+  })
+  assert.equal(composed.available, true)
+  assert.equal(composed.feedback.semantic_key, brief.semantic_key)
+  assert.equal(composed.presentation_target, 'companion_message')
+  assert.equal(composed.feedback.emotion_line, visibleCompanion)
+  assert.equal(state.tables.expression_exposure_events.length, 0)
+  const decision = state.tables.expression_delivery_snapshots.at(-1).delivery_plan.decision
+  assert.equal(decision.action_set.some(action => action.semantic_key === brief.semantic_key), true)
+  const ack = await module.acknowledgeRecordExpressionPlan(client, userId, {
+    record_id: realId,
+    plan_token: composed.plan_token,
+    candidate_id: composed.candidate_id,
+  })
+  assert.equal(ack.presentation_target, 'companion_message')
+  assert.equal(ack.feedback.emotion_line, visibleCompanion)
+  assert.equal(state.tables.expression_exposure_events.length, 1)
+  assert.deepEqual(state.tables.expression_exposure_events[0].rendered_payload, {
+    companion_message: visibleCompanion,
+  })
+  assert.deepEqual(state.tables.expression_exposure_events[0].visible_field_paths, ['companion_message'])
+  assert.equal(state.tables.expression_exposure_events[0].metadata.presentation_target, 'companion_message')
+  assert.equal(
+    state.tables.expression_exposure_events[0].metadata.rendered_text_fingerprint,
+    composed.rendered_text_fingerprint,
+  )
+})
+
+test('coverage fails open when its contract or Planner version is stale', async () => {
+  const module = await loadModule()
+  const valid = {
+    expression_coverage: {
+      coverage_version: 'expression-coverage-v1',
+      expressed_semantic_key: 'expense_merchant_first_occurrence',
+      expressed_semantic_keys: ['expense_merchant_first_occurrence'],
+      source_surface: 'record_detail',
+      planner_version: 'expression-shadow-auto-v0.6',
+      packet_fingerprint: 'fnv1a32:valid',
+      claim_fingerprint: 'fnv1a64:valid',
+      presentation_target: 'companion_message',
+      rendered_text_fingerprint: 'fnv1a64:valid-text',
+    },
+  }
+
+  assert.deepEqual(module.expressedSemanticKeysFromFeedback(valid), ['expense_merchant_first_occurrence'])
+  assert.deepEqual(module.expressedSemanticKeysFromFeedback({
+    expression_coverage: { ...valid.expression_coverage, planner_version: 'expression-shadow-auto-v0.5' },
+  }), [])
+  assert.deepEqual(module.expressedSemanticKeysFromFeedback({
+    expression_coverage: { ...valid.expression_coverage, packet_fingerprint: '' },
+  }), [])
+})
+
+test('coverage fails open when the same semantic key belongs to an edited claim', async () => {
+  const module = await loadModule()
+  const { client, state } = database()
+  const oldBrief = await module.buildPreInsertPlannerVoiceBrief(client, userId, {
+    record_kind: 'expense',
+    domain_key: 'expense',
+    current_record: {
+      id: 'preinsert:old-merchant', type: 'expense', transaction_date: '2026-08-07',
+      transaction_time: '12:00:00', created_at: '2026-08-07T12:01:00+08:00', amount: 6.28,
+      merchant_name: '旧商户', category: 'food', platform: '外卖', payment_method: '支付宝', status: 'done',
+    },
+  })
+  assert.equal(oldBrief.semantic_key, 'expense_merchant_first_occurrence')
+
+  const staleCompanion = '第一次记录旧商户，芥子先把它记下来。'
+  state.tables.transactions.push({
+    id: '92000000-0000-4000-8000-000000000001', user_id: userId, type: 'expense',
+    transaction_date: '2026-08-07', transaction_time: '12:00:00', created_at: '2026-08-07T12:01:00+08:00',
+    amount: 6.28, merchant_name: '新商户', category: 'food', platform: '外卖', payment_method: '支付宝', status: 'done',
+    companion_message: staleCompanion,
+    ai_feedback: {
+      expression_coverage: {
+        coverage_version: 'expression-coverage-v1',
+        expressed_semantic_key: oldBrief.semantic_key,
+        expressed_semantic_keys: [oldBrief.semantic_key],
+        source_surface: 'record_detail',
+        planner_version: 'expression-shadow-auto-v0.6',
+        packet_fingerprint: 'before-edit',
+        claim_fingerprint: oldBrief.claim_fingerprint,
+        presentation_target: 'companion_message',
+        rendered_text_fingerprint: module.expressionRenderedTextFingerprint(staleCompanion),
+      },
+    },
+  })
+
+  const preview = await module.getRecordExpressionPlan(client, userId, {
+    record_id: '92000000-0000-4000-8000-000000000001',
+    record_kind: 'expense',
+  })
+  assert.equal(preview.available, true)
+  assert.equal(preview.presentation_target, 'feedback_card')
+  assert.equal(preview.feedback.semantic_key, 'expense_merchant_first_occurrence')
+  assert.notEqual(preview.feedback.claim_fingerprint, oldBrief.claim_fingerprint)
+})
+
+test('forged coverage and rendered text fingerprints cannot turn generic copy into a companion delivery', async () => {
+  const module = await loadModule()
+  const recordId = '92500000-0000-4000-8000-000000000001'
+  const current = {
+    id: recordId, user_id: userId, type: 'expense', transaction_date: '2026-08-07',
+    transaction_time: '12:00:00', created_at: '2026-08-07T12:01:00+08:00', amount: 6.28,
+    merchant_name: '青禾茶饮', category: 'food', platform: '外卖', payment_method: '支付宝', status: 'done',
+  }
+  const { client, state } = database()
+  const brief = await module.buildPreInsertPlannerVoiceBrief(client, userId, {
+    record_kind: 'expense', domain_key: 'expense', current_record: { ...current, id: 'preinsert:forged-coverage' },
+  })
+  const genericCompanion = '日常琐碎也被妥善归档，生活自有其节奏。'
+  state.tables.transactions.push({
+    ...current,
+    companion_message: genericCompanion,
+    ai_feedback: {
+      expression_coverage: {
+        coverage_version: 'expression-coverage-v1',
+        expressed_semantic_key: brief.semantic_key,
+        expressed_semantic_keys: [brief.semantic_key],
+        source_surface: 'record_detail',
+        planner_version: 'expression-shadow-auto-v0.6',
+        packet_fingerprint: 'forged-packet',
+        claim_fingerprint: brief.claim_fingerprint,
+        presentation_target: 'companion_message',
+        rendered_text_fingerprint: module.expressionRenderedTextFingerprint(genericCompanion),
+      },
+    },
+  })
+  const genericPreview = await module.getRecordExpressionPlan(client, userId, {
+    record_id: recordId, record_kind: 'expense',
+  })
+  assert.equal(genericPreview.presentation_target, 'feedback_card')
+
+  const groundedCompanion = '第一次记录青禾茶饮，芥子先把这个新商户记下来。'
+  state.tables.transactions[0].companion_message = groundedCompanion
+  state.tables.transactions[0].ai_feedback.expression_coverage.rendered_text_fingerprint = 'fnv1a64:wrong-text'
+  const wrongFingerprintPreview = await module.getRecordExpressionPlan(client, userId, {
+    record_id: recordId, record_kind: 'expense',
+  })
+  assert.equal(wrongFingerprintPreview.presentation_target, 'feedback_card')
+})
+
+test('expense novelty reads beyond the first 500 history rows before claiming first occurrence', async () => {
+  const module = await loadModule()
+  const history = Array.from({ length: 501 }, (_, index) => ({
+    id: `history-${String(index).padStart(4, '0')}`,
+    user_id: userId,
+    type: 'expense',
+    transaction_date: '2026-08-01',
+    transaction_time: `${String(Math.floor(index / 60) % 24).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}:00`,
+    created_at: `2026-08-01T${String(Math.floor(index / 60) % 24).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}:00+08:00`,
+    amount: 10,
+    merchant_name: index === 0 ? '远期旧商户' : `其他商户-${index}`,
+    category: 'shopping',
+    platform: '线下',
+    payment_method: '支付宝',
+    status: 'done',
+  }))
+  const { client } = database({ transactions: history })
+  const brief = await module.buildPreInsertPlannerVoiceBrief(client, userId, {
+    record_kind: 'expense',
+    domain_key: 'expense',
+    current_record: {
+      id: 'preinsert:page-two', type: 'expense', transaction_date: '2026-08-07',
+      transaction_time: '12:00:00', created_at: '2026-08-07T12:01:00+08:00', amount: 12,
+      merchant_name: '远期旧商户', category: 'shopping', platform: '线下', payment_method: '支付宝', status: 'done',
+    },
+  })
+
+  assert.notEqual(brief?.semantic_key, 'expense_merchant_first_occurrence')
+})
+
+test('persisted domain planning consumes the same profile-backed candidates as pre-insert Voice', async () => {
+  const module = await loadModule()
+  const recordId = '93000000-0000-4000-8000-000000000001'
+  const profile = { meal_baseline: { dinner: { n: 11, median_kcal: 750 } } }
+  const current = dataRecord(recordId, 'food', {
+    total_calorie_kcal: 638,
+    meal_type: 'dinner',
+  }, '2026-08-07T19:00:00+08:00')
+  const { client, state } = database({
+    user_domain_profiles: [{ user_id: userId, domain_key: 'food', profile }],
+  })
+  const profileProbe = await client.from('user_domain_profiles')
+    .select('profile')
+    .eq('user_id', userId)
+    .eq('domain_key', 'food')
+    .maybeSingle()
+  assert.deepEqual(profileProbe.data?.profile, profile)
+
+  const brief = await module.buildPreInsertPlannerVoiceBrief(client, userId, {
+    record_kind: 'data',
+    domain_key: 'food',
+    current_record: current,
+    domain_profile: profile,
+  })
+  state.tables.data_records.push(current)
+  const preview = await module.getRecordExpressionPlan(client, userId, {
+    record_id: recordId,
+    record_kind: 'data',
+  })
+  assert.equal(preview.available, true)
+  assert.equal(preview.feedback.semantic_key, brief.semantic_key)
+  const persistedKeys = state.tables.expression_delivery_snapshots.at(-1).delivery_plan.decision.action_set
+    .map(action => action.semantic_key)
+  assert.ok(persistedKeys.includes('food_meal_vs_personal_median'))
+  assert.ok(persistedKeys.includes(brief.semantic_key))
+})
+
+test('second-call failures deterministically express the verified Planner candidate with coverage', async () => {
+  const module = await loadIngestFeedbackModule()
+  const semanticKey = 'expense_merchant_first_occurrence'
+  const plannerBrief = {
+    candidate_id: 'fact:expense:merchant-first-occurrence:preinsert-test',
+    semantic_key: semanticKey,
+    dimension: 'first_occurrence',
+    canonical_text: '第一次记录「青禾茶饮」',
+    source_surface: 'record_detail',
+    planner_version: 'expression-shadow-auto-v0.6',
+    numbers: [1, 6.28],
+    count_numbers: [1],
+    number_facts: [
+      { value: 1, meaning: 'first_occurrence_count', role: 'count' },
+      { value: 6.28, meaning: 'current_record_amount', role: 'measure' },
+    ],
+    claim_fingerprint: 'fnv1a64:first-occurrence',
+  }
+  const baseOptions = {
+    ai: {
+      record_type: 'expense',
+      domain_key: 'expense',
+      image_type: 'screenshot',
+      amount: 6.28,
+      merchant_name: '青禾茶饮',
+      category: 'dining',
+      platform: '外卖',
+      occurred_at: '2026-08-07T12:10:00+08:00',
+      confidence: 0.98,
+    },
+    domainKey: 'expense',
+    builtPayload: null,
+    domainProfiles: {},
+    memory: null,
+    timeContext: null,
+    timingSignal: null,
+    promptCtx: {
+      clientLocalTime: '2026-08-07 12:10:00',
+      weekday: '星期五',
+      persona: 'observer',
+      memoryStrength: 'balanced',
+      expressionStyle: 'plain',
+    },
+    plannerBrief,
+    plannerFallbackReason: null,
+  }
+  const provider = {
+    name: 'qwen',
+    model: 'qwen3.6-flash',
+    endpoint: 'https://example.invalid/v1/chat/completions',
+    apiKey: 'fixture',
+  }
+  const assertVerifiedFallback = (result, errorPattern) => {
+    assert.match(result.error, errorPattern)
+    assert.equal(result.companion_message, plannerBrief.canonical_text)
+    assert.equal(result.raw_text, null)
+    assert.equal(result.ai_feedback.source, 'rule')
+    assert.equal(result.ai_feedback.tone, 'signal_fallback')
+    assert.equal(result.ai_feedback.detail_reason, null)
+    const {
+      presentation_target: presentationTarget,
+      rendered_text_fingerprint: renderedTextFingerprint,
+      ...coverage
+    } = result.ai_feedback.expression_coverage
+    assert.deepEqual(coverage, {
+      coverage_version: 'expression-coverage-v1',
+      expressed_semantic_key: semanticKey,
+      expressed_semantic_keys: [semanticKey],
+      source_surface: plannerBrief.source_surface,
+      planner_version: plannerBrief.planner_version,
+      packet_fingerprint: result.expression_trace.packet_fingerprint,
+      claim_fingerprint: plannerBrief.claim_fingerprint,
+    })
+    assert.equal(presentationTarget, 'companion_message')
+    assert.match(renderedTextFingerprint, /^fnv1a64:[0-9a-f]{16}$/)
+    assert.equal(result.expression_trace.context_packet_version, 'context-packet-v2')
+    assert.equal(result.expression_trace.planner_brief_status, 'selected')
+    assert.equal(result.expression_trace.planner_semantic_key, semanticKey)
+    assert.match(result.expression_trace.packet_fingerprint, /^[0-9a-f]{8}$/)
+  }
+
+  const noProvider = await module.regenerateFeedbackWithSecondCall({
+    ...baseOptions,
+    textProvider: null,
+  })
+  assertVerifiedFallback(noProvider, /^no_text_provider$/)
+
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async () => new Response(null, { status: 503 })
+    const httpFailure = await module.regenerateFeedbackWithSecondCall({
+      ...baseOptions,
+      textProvider: provider,
+    })
+    assertVerifiedFallback(httpFailure, /qwen text API error 503/)
+
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      choices: [{ message: { content: 'not-json' } }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const jsonFailure = await module.regenerateFeedbackWithSecondCall({
+      ...baseOptions,
+      textProvider: provider,
+    })
+    assertVerifiedFallback(jsonFailure, /Failed to parse feedback JSON/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('generic model copy cannot claim Planner coverage while grounded copy can', async () => {
+  const module = await loadIngestFeedbackModule()
+  const plannerBrief = {
+    candidate_id: 'fact:expense:merchant-first-occurrence:voice-coverage-test',
+    semantic_key: 'expense_merchant_first_occurrence',
+    dimension: 'first_occurrence',
+    canonical_text: '第一次记录「青禾茶饮」',
+    source_surface: 'record_detail',
+    planner_version: 'expression-shadow-auto-v0.6',
+    numbers: [1],
+    count_numbers: [1],
+    number_facts: [{ value: 1, meaning: 'first_occurrence_count', role: 'count' }],
+    claim_fingerprint: 'fnv1a64:first-occurrence-voice',
+  }
+  const options = {
+    ai: {
+      record_type: 'expense', domain_key: 'expense', image_type: 'screenshot', amount: 6.28,
+      merchant_name: '青禾茶饮', category: 'dining', platform: '外卖', payment_method: '微信支付',
+      occurred_at: '2026-08-07T12:10:00+08:00', confidence: 0.98,
+    },
+    domainKey: 'expense',
+    builtPayload: null,
+    normalizedAmount: 6.28,
+    domainProfiles: {},
+    timingSignal: null,
+    timeContext: null,
+    clientLocalTime: '2026-08-07 12:10:00',
+    weekday: '星期五',
+    persona: 'observer',
+    memoryStrength: 'balanced',
+    expressionStyle: 'plain',
+    recentCompanionLines: [],
+    memory: null,
+    plannerBrief,
+    plannerFallbackReason: null,
+    textProvider: {
+      name: 'qwen', model: 'qwen3.6-flash', endpoint: 'https://example.invalid/v1/chat/completions', apiKey: 'fixture',
+    },
+  }
+  const modelPayload = (emotionLine) => JSON.stringify({
+    companion_message: null,
+    ai_feedback: {
+      version: 'feedback-v1', domain_key: 'expense', badge: '即时反馈', icon: '💸', band: 'neutral',
+      tone: 'warm', emotion_line: emotionLine, utility_line: null, detail_reason: null,
+      confidence: 0.8, source: 'hybrid',
+    },
+  })
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      choices: [{ message: { content: modelPayload('日常琐碎也被妥善归档，生活自有其节奏。') } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    const generic = await module.generateVoiceFeedback(options)
+    assert.equal(generic.companion_message, '日常琐碎也被妥善归档，生活自有其节奏。')
+    assert.equal(generic.ai_feedback.expression_coverage, undefined)
+
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      choices: [{ message: { content: modelPayload('第一次记录青禾茶饮，芥子记住这个新商户了。') } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    const grounded = await module.generateVoiceFeedback(options)
+    assert.equal(grounded.ai_feedback.expression_coverage.expressed_semantic_key, plannerBrief.semantic_key)
+    assert.equal(grounded.ai_feedback.expression_coverage.presentation_target, 'companion_message')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('single-user owner gate defaults closed for disabled or non-owner access', async () => {
   const item = supportedCases.find(entry => entry.name === 'expense')
   const disabledModule = await loadModule({ EXPRESSION_PLANNER_OWNER_ENABLED: 'false' })
@@ -457,9 +1024,8 @@ test('pending expense returns a reviewable verified-fact candidate without enter
 
   assert.equal(preview.available, true)
   assert.equal(preview.feedback.source, 'expression_planner')
-  assert.equal(preview.feedback.semantic_key, 'expense_current_record_context')
-  assert.match(preview.feedback.emotion_line, /32 元支出/)
-  assert.match(preview.feedback.emotion_line, /分类仍待确认/)
+  assert.equal(preview.feedback.semantic_key, 'expense_merchant_first_occurrence')
+  assert.match(preview.feedback.emotion_line, /第一次记录/)
   const candidate = state.tables.expression_delivery_snapshots[0].delivery_plan.candidates[0]
   assert.equal(candidate.claim.structured_value, undefined)
   assert.equal(candidate.source_dependencies.length, 1)
@@ -584,6 +1150,89 @@ test('editing a source record after preview invalidates the frozen delivery', as
   assert.equal(state.tables.expression_exposure_events.length, 0)
 })
 
+test('changing the persisted companion after preview invalidates companion acknowledgement', async () => {
+  const module = await loadModule()
+  const recordId = '93500000-0000-4000-8000-000000000001'
+  const current = {
+    id: recordId, user_id: userId, type: 'expense', transaction_date: '2026-08-07',
+    transaction_time: '12:00:00', created_at: '2026-08-07T12:01:00+08:00', amount: 6.28,
+    merchant_name: '青禾茶饮', category: 'food', platform: '外卖', payment_method: '支付宝', status: 'done',
+  }
+  const { client, state } = database()
+  const brief = await module.buildPreInsertPlannerVoiceBrief(client, userId, {
+    record_kind: 'expense', domain_key: 'expense', current_record: { ...current, id: 'preinsert:companion-stale' },
+  })
+  const visibleCompanion = '第一次记录青禾茶饮，芥子先把这个新商户记下来。'
+  state.tables.transactions.push({
+    ...current,
+    companion_message: visibleCompanion,
+    ai_feedback: {
+      expression_coverage: {
+        coverage_version: 'expression-coverage-v1',
+        expressed_semantic_key: brief.semantic_key,
+        expressed_semantic_keys: [brief.semantic_key],
+        source_surface: 'record_detail',
+        planner_version: 'expression-shadow-auto-v0.6',
+        packet_fingerprint: 'companion-stale-packet',
+        claim_fingerprint: brief.claim_fingerprint,
+        presentation_target: 'companion_message',
+        rendered_text_fingerprint: module.expressionRenderedTextFingerprint(visibleCompanion),
+      },
+    },
+  })
+  const preview = await module.getRecordExpressionPlan(client, userId, {
+    record_id: recordId, record_kind: 'expense',
+  })
+  assert.equal(preview.presentation_target, 'companion_message')
+  state.tables.transactions[0].companion_message = '这段文案在预览后被改写了。'
+
+  await assert.rejects(
+    module.acknowledgeRecordExpressionPlan(client, userId, {
+      record_id: recordId,
+      plan_token: preview.plan_token,
+      candidate_id: preview.candidate_id,
+    }),
+    /plan_companion_stale/,
+  )
+  assert.equal(state.tables.expression_exposure_events.length, 0)
+})
+
+test('editing an older merchant into a first occurrence invalidates acknowledgement', async () => {
+  const module = await loadModule()
+  const oldId = '94000000-0000-4000-8000-000000000001'
+  const currentId = '94000000-0000-4000-8000-000000000002'
+  const { client, state } = database({
+    transactions: [
+      {
+        id: oldId, user_id: userId, type: 'expense', transaction_date: '2026-08-06', transaction_time: '08:00:00',
+        created_at: '2026-08-06T08:01:00+08:00', amount: 12, merchant_name: '其他商户', category: 'shopping',
+        platform: '线下', payment_method: '支付宝', status: 'done',
+      },
+      {
+        id: currentId, user_id: userId, type: 'expense', transaction_date: '2026-08-07', transaction_time: '08:00:00',
+        created_at: '2026-08-07T08:01:00+08:00', amount: 6.28, merchant_name: '新商户', category: 'food',
+        platform: '外卖', payment_method: '支付宝', status: 'done',
+      },
+    ],
+  })
+  const preview = await module.getRecordExpressionPlan(client, userId, {
+    record_id: currentId,
+    record_kind: 'expense',
+  })
+  assert.equal(preview.feedback.semantic_key, 'expense_merchant_first_occurrence')
+  state.tables.transactions.find(row => row.id === oldId).merchant_name = '新商户'
+
+  await assert.rejects(
+    module.acknowledgeRecordExpressionPlan(client, userId, {
+      record_id: currentId,
+      plan_token: preview.plan_token,
+      candidate_id: preview.candidate_id,
+    }),
+    /plan_claim_stale/,
+  )
+  assert.equal(state.tables.expression_exposure_events.length, 0)
+})
+
 test('expired delivery snapshots cannot be acknowledged', async () => {
   const module = await loadModule()
   const item = supportedCases.find(entry => entry.name === 'sport')
@@ -612,7 +1261,7 @@ test('delivery snapshots from the previous planner version cannot be acknowledge
     record_id: item.recordId,
     record_kind: item.kind,
   })
-  state.tables.expression_delivery_snapshots[0].delivery_plan.planner_version = 'expression-shadow-auto-v0.4'
+  state.tables.expression_delivery_snapshots[0].delivery_plan.planner_version = 'expression-shadow-auto-v0.5'
 
   await assert.rejects(
     module.acknowledgeRecordExpressionPlan(client, userId, {

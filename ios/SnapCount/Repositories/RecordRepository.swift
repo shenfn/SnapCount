@@ -176,7 +176,8 @@ final class RecordRepository: RecordRepositoryProtocol {
               !candidateId.isEmpty,
               let feedback = NativeAIFeedback(payload: data.feedback),
               feedback.source == "expression_planner",
-              feedback.candidateId == candidateId else {
+              feedback.candidateId == candidateId,
+              data.hasMatchingDeliveryIdentity(feedback: feedback) else {
             throw SupabaseRemoteError.requestFailed("表达计划响应不完整")
         }
         return .available(
@@ -207,9 +208,12 @@ final class RecordRepository: RecordRepositoryProtocol {
         guard response.ok else {
             throw SupabaseRemoteError.requestFailed(response.error ?? "表达曝光确认失败")
         }
-        guard let feedback = NativeAIFeedback(payload: response.data?.feedback),
+        guard let data = response.data,
+              let feedback = NativeAIFeedback(payload: data.feedback),
               feedback.isAcknowledgedPlannerFeedback,
-              feedback.candidateId == candidateId else {
+              feedback.candidateId == candidateId,
+              data.candidateId?.trimmingCharacters(in: .whitespacesAndNewlines) == candidateId,
+              data.hasMatchingDeliveryIdentity(feedback: feedback) else {
             throw SupabaseRemoteError.requestFailed("表达曝光确认响应不完整")
         }
         return feedback
@@ -316,6 +320,8 @@ private struct RecordExpressionPlanData: Decodable {
     let planToken: String?
     let candidateId: String?
     let feedback: [String: AnyCodable]?
+    let presentationTarget: String?
+    let renderedTextFingerprint: String?
 
     private enum CodingKeys: String, CodingKey {
         case available
@@ -323,6 +329,28 @@ private struct RecordExpressionPlanData: Decodable {
         case planToken = "plan_token"
         case candidateId = "candidate_id"
         case feedback
+        case presentationTarget = "presentation_target"
+        case renderedTextFingerprint = "rendered_text_fingerprint"
+    }
+
+    func hasMatchingDeliveryIdentity(feedback: NativeAIFeedback) -> Bool {
+        let envelopeTarget = presentationTarget?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? "feedback_card"
+        let envelopeFingerprint = renderedTextFingerprint?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        guard ["feedback_card", "companion_message"].contains(envelopeTarget),
+              envelopeTarget == feedback.presentationTarget else { return false }
+        if envelopeTarget == "companion_message" {
+            return !envelopeFingerprint.isEmpty
+                && envelopeFingerprint == feedback.renderedTextFingerprint
+                && !feedback.claimFingerprint.isEmpty
+                && !feedback.emotionLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return envelopeFingerprint.isEmpty
+            || feedback.renderedTextFingerprint.isEmpty
+            || envelopeFingerprint == feedback.renderedTextFingerprint
     }
 }
 

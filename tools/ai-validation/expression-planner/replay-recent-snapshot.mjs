@@ -1,7 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
+const anonymousAccountKey = Symbol('single-account-without-user-id')
 
 function argument(name) {
   const prefix = `--${name}=`
@@ -26,6 +30,38 @@ function isInEvaluationWindow(record, window) {
   return value !== null && start !== null && end !== null && value >= start && value < end
 }
 
+function accountKey(record) {
+  const userId = typeof record?.user_id === 'string' ? record.user_id.trim() : ''
+  return userId || anonymousAccountKey
+}
+
+function groupByAccount(records) {
+  const groups = new Map()
+  for (const record of records) {
+    const key = accountKey(record)
+    const group = groups.get(key) ?? []
+    group.push(record)
+    groups.set(key, group)
+  }
+  return groups
+}
+
+function withoutUserId(value) {
+  if (Array.isArray(value)) return value.map(withoutUserId)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== 'user_id')
+    .map(([key, item]) => [key, withoutUserId(item)]))
+}
+
+function domainPlannerRecord(record) {
+  const { user_id: _userId, payload_jsonb: payloadJson, ...rest } = record
+  return {
+    ...rest,
+    payload: record.payload ?? payloadJson ?? {},
+  }
+}
+
 function selectedSurfaces(plan, semanticKey) {
   return Object.entries(plan.plan_summary ?? {})
     .filter(([, summary]) => summary.selected?.some(item => item.semantic_key === semanticKey))
@@ -39,9 +75,9 @@ function compactCandidate(candidate, plan) {
     dimension: candidate.dimension ?? null,
     claim_type: candidate.claim_type ?? null,
     canonical_text: candidate.claim?.canonical_text ?? null,
-    structured_value: candidate.claim?.structured_value ?? null,
-    quality: candidate.quality ?? null,
-    surface_scores: candidate.scoring?.surfaces ?? {},
+    structured_value: withoutUserId(candidate.claim?.structured_value ?? null),
+    quality: withoutUserId(candidate.quality ?? null),
+    surface_scores: withoutUserId(candidate.scoring?.surfaces ?? {}),
     selected_surfaces: selectedSurfaces(plan, semanticKey),
   }
 }
@@ -56,7 +92,7 @@ function compactPlan(record, domainKey, plan) {
     reason: plan.reason ?? null,
     candidate_count: plan.candidate_count ?? 0,
     candidates: (plan.candidates ?? []).map(candidate => compactCandidate(candidate, plan)),
-    plan_summary: plan.plan_summary ?? null,
+    plan_summary: withoutUserId(plan.plan_summary ?? null),
   }
 }
 
@@ -98,7 +134,7 @@ function selectedSignature(record) {
   ]))
 }
 
-function compareRecords(baselineRecords, currentRecords) {
+export function compareRecords(baselineRecords, currentRecords) {
   const baselineById = new Map(baselineRecords.map(record => [record.record_id, record]))
   const candidate_changes = []
   const selection_changes = []
@@ -134,6 +170,7 @@ function compareRecords(baselineRecords, currentRecords) {
 
 async function loadPlanner() {
   const bundle = await build({
+    absWorkingDir: projectRoot,
     entryPoints: ['supabase/functions/ingest-receipt/expression-shadow-planner.ts'],
     bundle: true,
     platform: 'node',
@@ -144,37 +181,39 @@ async function loadPlanner() {
   return import(url)
 }
 
-async function main() {
-  const inputPath = requireArgument('input')
-  const outputPath = path.resolve(argument('output') ?? path.join(path.dirname(inputPath), 'replay-results.json'))
-  const snapshot = JSON.parse(await readFile(inputPath, 'utf8'))
+export async function replaySnapshot(snapshot) {
   const { buildExpressionShadowPlan, buildGenericExpressionShadowPlan } = await loadPlanner()
   const evaluated = []
 
-  for (const record of snapshot.transactions ?? []) {
-    if (!isInEvaluationWindow(record, snapshot.window)) continue
-    const plan = buildExpressionShadowPlan({
-      transactions: snapshot.transactions,
-      currentRecordId: record.id,
-    })
-    evaluated.push(compactPlan(record, 'expense', plan))
-  }
-
-  const recordsByDomain = new Map()
-  for (const record of snapshot.domain_records ?? []) {
-    const records = recordsByDomain.get(record.domain_key) ?? []
-    records.push(record)
-    recordsByDomain.set(record.domain_key, records)
-  }
-  for (const [domainKey, records] of recordsByDomain) {
-    for (const record of records) {
+  for (const transactions of groupByAccount(snapshot.transactions ?? []).values()) {
+    for (const record of transactions) {
       if (!isInEvaluationWindow(record, snapshot.window)) continue
-      const plan = buildGenericExpressionShadowPlan({
-        domainKey,
-        records,
+      const plan = buildExpressionShadowPlan({
+        transactions,
         currentRecordId: record.id,
       })
-      evaluated.push(compactPlan(record, domainKey, plan))
+      evaluated.push(compactPlan(record, 'expense', plan))
+    }
+  }
+
+  for (const accountRecords of groupByAccount(snapshot.domain_records ?? []).values()) {
+    const recordsByDomain = new Map()
+    for (const record of accountRecords) {
+      const records = recordsByDomain.get(record.domain_key) ?? []
+      records.push(record)
+      recordsByDomain.set(record.domain_key, records)
+    }
+    for (const [domainKey, records] of recordsByDomain) {
+      const plannerRecords = records.map(domainPlannerRecord)
+      for (const record of records) {
+        if (!isInEvaluationWindow(record, snapshot.window)) continue
+        const plan = buildGenericExpressionShadowPlan({
+          domainKey,
+          records: plannerRecords,
+          currentRecordId: record.id,
+        })
+        evaluated.push(compactPlan(record, domainKey, plan))
+      }
     }
   }
 
@@ -182,7 +221,7 @@ async function main() {
     String(left.created_at ?? left.occurred_at).localeCompare(String(right.created_at ?? right.occurred_at))
     || left.record_id.localeCompare(right.record_id))
 
-  const output = {
+  return {
     schema_version: 'recent-snapshot-replay-v0.1',
     source_schema_version: snapshot.schema_version ?? null,
     generated_at: new Date().toISOString(),
@@ -190,13 +229,22 @@ async function main() {
     summary: summarize(evaluated),
     records: evaluated,
   }
+}
+
+async function main() {
+  const inputPath = requireArgument('input')
+  const outputPath = path.resolve(argument('output') ?? path.join(path.dirname(inputPath), 'replay-results.json'))
+  const snapshot = JSON.parse(await readFile(inputPath, 'utf8'))
+  const output = await replaySnapshot(snapshot)
   const baselinePath = argument('baseline')
   if (baselinePath) {
     const baseline = JSON.parse(await readFile(path.resolve(baselinePath), 'utf8'))
-    output.comparison = compareRecords(baseline.records ?? [], evaluated)
+    output.comparison = compareRecords(baseline.records ?? [], output.records)
   }
   await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`, 'utf8')
   process.stdout.write(`${JSON.stringify({ output: outputPath, ...output.summary }, null, 2)}\n`)
 }
 
-await main()
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main()
+}
