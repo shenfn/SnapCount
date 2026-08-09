@@ -2216,6 +2216,57 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    func testInboxAdjacentSelectionStopsAtQueueEdges() {
+        let ids = ["first", "middle", "last"]
+
+        XCTAssertEqual(
+            NativeInboxPresentation.adjacentSelection(to: "middle", offset: -1, in: ids),
+            "first"
+        )
+        XCTAssertEqual(
+            NativeInboxPresentation.adjacentSelection(to: "middle", offset: 1, in: ids),
+            "last"
+        )
+        XCTAssertNil(NativeInboxPresentation.adjacentSelection(to: "first", offset: -1, in: ids))
+        XCTAssertNil(NativeInboxPresentation.adjacentSelection(to: "last", offset: 1, in: ids))
+    }
+
+    func testInboxSwipePageOffsetAcceptsDistanceAndFastFlicks() {
+        XCTAssertEqual(
+            NativeInboxPresentation.swipePageOffset(
+                translationX: -52,
+                translationY: 8,
+                predictedEndTranslationX: -68
+            ),
+            1
+        )
+        XCTAssertEqual(
+            NativeInboxPresentation.swipePageOffset(
+                translationX: 22,
+                translationY: 4,
+                predictedEndTranslationX: 118
+            ),
+            -1
+        )
+    }
+
+    func testInboxSwipePageOffsetRejectsShortAndVerticalDrags() {
+        XCTAssertNil(
+            NativeInboxPresentation.swipePageOffset(
+                translationX: 30,
+                translationY: 5,
+                predictedEndTranslationX: 70
+            )
+        )
+        XCTAssertNil(
+            NativeInboxPresentation.swipePageOffset(
+                translationX: -60,
+                translationY: 70,
+                predictedEndTranslationX: -72
+            )
+        )
+    }
+
     func testAtomicArchiveBodyUsesStagingIdentityAndDomain() {
         let record = NativeStagingRecord(
             id: "staging-1", dateKey: "2026-07-16", title: "骑行记录", summary: "骑行 30 分钟",
