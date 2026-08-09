@@ -270,6 +270,38 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    func testFinanceRangeFilterUsesPostgRESTOrGrouping() {
+        let financeFilter = NativeDataService.financeRangeFilter(
+            occurredAtColumn: "occurred_at",
+            legacyDateColumn: "transaction_date",
+            fallbackStart: "2026-08-01",
+            fallbackEnd: "2026-08-31",
+            startTimestamp: "2026-07-31T16:00:00Z",
+            endTimestamp: "2026-08-31T15:59:59Z"
+        )
+
+        XCTAssertEqual(
+            financeFilter,
+            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,transaction_date.gte.2026-08-01,transaction_date.lte.2026-08-31))"
+        )
+        XCTAssertTrue(financeFilter.hasPrefix("(and("))
+        XCTAssertTrue(financeFilter.hasSuffix("))"))
+
+        let universalFilter = NativeDataService.financeRangeFilter(
+            occurredAtColumn: "occurred_at",
+            legacyDateColumn: "created_at",
+            fallbackStart: "2026-07-31T16:00:00Z",
+            fallbackEnd: "2026-08-31T15:59:59Z",
+            startTimestamp: "2026-07-31T16:00:00Z",
+            endTimestamp: "2026-08-31T15:59:59Z"
+        )
+
+        XCTAssertEqual(
+            universalFilter,
+            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,created_at.gte.2026-07-31T16:00:00Z,created_at.lte.2026-08-31T15:59:59Z))"
+        )
+    }
+
     func testCameraUploadUsesSmallerPhotoPreset() throws {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1_800, height: 1_200))
         let source = renderer.image { context in
@@ -954,6 +986,121 @@ final class SnapCountTests: XCTestCase {
             ["expense_merchant_first_occurrence", "merchant_daily_count_total"]
         )
         XCTAssertEqual(feedback.expressionCoverageClaimFingerprint, "fnv1a64:first-occurrence")
+    }
+
+    func testHybridCompanionKeepsNestedCoverageAndSupportingCopyVisible() throws {
+        let json = #"""
+        {
+          "source": "hybrid",
+          "badge": "生活新记",
+          "emotion_line": "初次遇见的小确幸，值得被温柔记录。",
+          "utility_line": "标记为首次光顾，方便日后回顾变化。",
+          "detail_reason": "候选明确显示这是第一次记录青集便利店。",
+          "expression_coverage": {
+            "coverage_version": "expression-coverage-v1",
+            "planner_version": "expression-shadow-auto-v0.6",
+            "source_surface": "record_detail",
+            "packet_fingerprint": "packet-first-shop",
+            "claim_fingerprint": "claim-first-shop",
+            "presentation_target": "companion_message",
+            "expressed_semantic_key": "expense_merchant_first_occurrence",
+            "expressed_semantic_keys": ["expense_merchant_first_occurrence"]
+          }
+        }
+        """#
+        let payload = try JSONDecoder().decode([String: AnyCodable].self, from: Data(json.utf8))
+        let feedback = try XCTUnwrap(NativeAIFeedback(payload: payload))
+        let companion = "第一次见青集便利店，8元买份踏实。"
+
+        XCTAssertTrue(feedback.hasExplicitPresentationTarget)
+        XCTAssertEqual(feedback.presentationTarget, "companion_message")
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.companionFeedbackToRender(
+                companionMessage: companion,
+                feedback: feedback
+            ),
+            feedback
+        )
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.companionFeedbackToReview(
+                companionMessage: companion,
+                feedback: feedback
+            ),
+            feedback
+        )
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: companion,
+                feedback: feedback
+            )
+        )
+    }
+
+    func testFeedbackCardTargetDoesNotMoveIntoCompanionCard() throws {
+        let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "emotion_line": AnyCodable("这是一个独立的新角度。")
+        ]))
+
+        XCTAssertNil(
+            NativeRecordExpressionFeedbackPolicy.companionFeedbackToRender(
+                companionMessage: "主陪伴文案",
+                feedback: feedback
+            )
+        )
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: "主陪伴文案",
+                feedback: feedback
+            ),
+            feedback
+        )
+    }
+
+    func testShortcutNotificationPrependsCompanionWhenServerOnlyReturnsReceiptFacts() throws {
+        let json = #"""
+        {
+          "id": "record-1",
+          "status": "done",
+          "record_type": "expense",
+          "notification_text": "💸 -¥8.00 · 青集便利店 · life\n今日已花 ¥117.06（10 笔）",
+          "companion_message": "第一次见青集便利店，8元买份踏实。",
+          "ai_feedback": {
+            "emotion_line": "初次遇见的小确幸，值得被温柔记录。",
+            "utility_line": "标记为首次光顾，方便日后回顾变化。"
+          }
+        }
+        """#
+        let payload = try JSONDecoder().decode(ShortcutUploadPayload.self, from: Data(json.utf8))
+        let result = ShortcutUploadResult(payload: payload)
+
+        XCTAssertEqual(
+            result.notificationText.split(separator: "\n").map(String.init),
+            [
+                "第一次见青集便利店，8元买份踏实。",
+                "💸 -¥8.00 · 青集便利店 · life",
+                "今日已花 ¥117.06（10 笔）"
+            ]
+        )
+        XCTAssertTrue(result.displayText.contains("观察：标记为首次光顾，方便日后回顾变化。"))
+    }
+
+    func testShortcutNotificationUsesFeedbackEmotionWhenCompanionIsMissing() throws {
+        let json = #"""
+        {
+          "status": "done",
+          "record_type": "sleep",
+          "notification_text": "🌙 已归档到睡眠记录",
+          "ai_feedback": {
+            "emotion_line": "睡了5.73小时，比平时短些。下午补个觉吧。"
+          }
+        }
+        """#
+        let payload = try JSONDecoder().decode(ShortcutUploadPayload.self, from: Data(json.utf8))
+        let result = ShortcutUploadResult(payload: payload)
+
+        XCTAssertTrue(result.notificationText.hasPrefix("睡了5.73小时，比平时短些。下午补个觉吧。\n"))
     }
 
     func testEditedClaimFingerprintFailsOpenForSameSemanticKey() throws {
@@ -3014,6 +3161,10 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
             throw SupabaseRemoteError.requestFailed("unused")
         }
         return details.removeFirst()
+    }
+
+    func hydrateDetailImage(_ detail: NativeRecordDetail, accessToken: String) async throws -> NativeRecordDetail {
+        detail
     }
 
     func getRecordExpressionPlan(reference: String, accessToken: String) async throws -> NativeRecordExpressionPlanLookup {

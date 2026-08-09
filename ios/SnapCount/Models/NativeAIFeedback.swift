@@ -37,7 +37,19 @@ struct NativeAIFeedback: Equatable {
         self.claimFingerprint = payload.string("claim_fingerprint")?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
-        let rawPresentationTarget = payload.string("presentation_target")?
+        let coverage = payload.dictionary("expression_coverage")
+        let rawCoverageClaimFingerprint = coverage?.string("claim_fingerprint")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let coverageIsCurrent = coverage?.string("coverage_version") == "expression-coverage-v1"
+            && coverage?.string("planner_version") == "expression-shadow-auto-v0.6"
+            && coverage?.string("source_surface") == "record_detail"
+            && coverage?.string("packet_fingerprint")?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty == false
+            && rawCoverageClaimFingerprint?.isEmpty == false
+        let rawPresentationTarget = (payload.string("presentation_target")
+            ?? (coverageIsCurrent ? coverage?.string("presentation_target") : nil))?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
         self.hasExplicitPresentationTarget = !rawPresentationTarget.isEmpty
@@ -56,17 +68,6 @@ struct NativeAIFeedback: Equatable {
         self.utilityLine = utilityLine
         self.detailReason = detailReason
         self.timingLabel = payload.dictionary("timing_signal")?.string("label") ?? ""
-        let coverage = payload.dictionary("expression_coverage")
-        let rawCoverageClaimFingerprint = coverage?.string("claim_fingerprint")?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let coverageIsCurrent = coverage?.string("coverage_version") == "expression-coverage-v1"
-            && coverage?.string("planner_version") == "expression-shadow-auto-v0.6"
-            && coverage?.string("source_surface") == "record_detail"
-            && coverage?.string("packet_fingerprint")?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .isEmpty == false
-            && rawCoverageClaimFingerprint?.isEmpty == false
         let rawCoverageKeys = coverageIsCurrent
             ? coverage?.array("expressed_semantic_keys") ?? []
             : []
@@ -248,9 +249,28 @@ enum NativeRecordExpressionFeedbackPolicy {
         companionMessage: String?,
         feedback: NativeAIFeedback?
     ) -> NativeAIFeedback? {
+        guard let feedback else { return nil }
+        if feedback.source == "expression_planner" {
+            return feedback.matchesVisibleCompanionMessage(companionMessage) ? feedback : nil
+        }
+        return companionFeedbackToRender(
+            companionMessage: companionMessage,
+            feedback: feedback
+        )
+    }
+
+    static func companionFeedbackToRender(
+        companionMessage: String?,
+        feedback: NativeAIFeedback?
+    ) -> NativeAIFeedback? {
         guard let feedback,
-              feedback.matchesVisibleCompanionMessage(companionMessage) else { return nil }
-        return feedback
+              companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            return nil
+        }
+        if feedback.hasExplicitPresentationTarget {
+            return feedback.isCompanionMessageDelivery ? feedback : nil
+        }
+        return feedback.source == "expression_planner" ? nil : feedback
     }
 
     static func feedbackToPreserve(

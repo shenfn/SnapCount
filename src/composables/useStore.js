@@ -4175,20 +4175,34 @@ export function useStore() {
 
   async function openRecordDetail(kind, record) {
     if (!record) return
-    let imageUrl = null
     const imagePath = record.image_path || record.image_url || null
       || (kind === 'universal' ? record.imagePath : null)
-    if (imagePath) imageUrl = await getSignedImageUrl(imagePath)
+    // Open the detail shell immediately. Signing a source image is a separate
+    // network operation and must not delay the user's first meaningful view.
     detailRecord.value = {
       id: record.id,
       kind,
       domainId: kind === 'universal' ? record.domainKey : kind,
       imagePath,
-      imageUrl,
-      imageLoadError: !!imagePath && !imageUrl,
+      imageUrl: null,
+      imageLoadError: false,
       raw: { ...record },
     }
     navigateTo('record-detail')
+    if (imagePath) {
+      const recordId = record.id
+      getSignedImageUrl(imagePath).then((imageUrl) => {
+        if (detailRecord.value?.id !== recordId) return
+        detailRecord.value = {
+          ...detailRecord.value,
+          imageUrl,
+          imageLoadError: !imageUrl,
+        }
+      }).catch(() => {
+        if (detailRecord.value?.id !== recordId) return
+        detailRecord.value = { ...detailRecord.value, imageLoadError: true }
+      })
+    }
   }
 
   function closeRecordDetail() {

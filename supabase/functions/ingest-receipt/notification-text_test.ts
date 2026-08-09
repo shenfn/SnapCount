@@ -1,6 +1,7 @@
 import {
   composeNotificationSlots,
   mergePlannerNotification,
+  resolvePlannerNotification,
   uniqueNotificationLines,
 } from "./notification-text.ts";
 
@@ -75,6 +76,54 @@ Deno.test("companion copy stays before planner and stable shortcut facts", () =>
     ],
     "companion copy should remain the first visible layer without duplication",
   );
+});
+
+Deno.test("unavailable Planner keeps the generated companion instead of bare receipt facts", () => {
+  const legacy = "第一次见青集便利店，8元买份踏实。\n💸 -¥8.00 · 青集便利店 · life\n今日已花 ¥117.06（10 笔）";
+  const notification = resolvePlannerNotification(
+    { available: false },
+    "💸 -¥8.00 · 青集便利店 · life\n今日已花 ¥117.06（10 笔）",
+    legacy,
+    "第一次见青集便利店，8元买份踏实。",
+  );
+
+  assertEquals(notification, legacy, "a failed Planner lookup must not erase successful Voice output");
+});
+
+Deno.test("missing or empty Planner delivery keeps the legacy AI notification", () => {
+  const legacy = "今天这笔收入值得留好。\n💰 +¥20.00";
+  assertEquals(
+    resolvePlannerNotification(null, "💰 +¥20.00", legacy),
+    legacy,
+    "owner-disabled delivery should preserve Voice",
+  );
+  assertEquals(
+    resolvePlannerNotification({ available: true, message: "  " }, "💰 +¥20.00", legacy),
+    legacy,
+    "an empty Planner rendering should preserve Voice",
+  );
+});
+
+Deno.test("available companion-target Planner keeps one companion and stable receipt facts", () => {
+  const companion = "第一次见青集便利店，8元买份踏实。";
+  const notification = resolvePlannerNotification(
+    {
+      available: true,
+      message: "第一次记录「青集便利店」",
+      semantic_key: "expense_merchant_first_occurrence",
+      claim_fingerprint: "first-occurrence-8",
+      presentation_target: "companion_message",
+    },
+    "💸 -¥8.00 · 青集便利店 · life\n今日已花 ¥117.06（10 笔）",
+    `${companion}\n💸 -¥8.00 · 青集便利店 · life\n今日已花 ¥117.06（10 笔）`,
+    companion,
+  );
+
+  assertEquals(notification.split("\n"), [
+    companion,
+    "💸 -¥8.00 · 青集便利店 · life",
+    "今日已花 ¥117.06（10 笔）",
+  ], "the companion-target claim should own the expression slot without losing receipt facts");
 });
 
 Deno.test("same claim with different wording is rendered once", () => {

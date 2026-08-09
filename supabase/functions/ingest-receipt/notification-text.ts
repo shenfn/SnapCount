@@ -18,6 +18,14 @@ export interface MergePlannerNotificationOptions {
   planner_claim?: NotificationClaimIdentity | null;
 }
 
+export interface ShortcutPlannerNotificationDelivery {
+  available?: boolean;
+  message?: string | null;
+  semantic_key?: string | null;
+  claim_fingerprint?: string | null;
+  presentation_target?: "feedback_card" | "companion_message" | null;
+}
+
 const EXPRESSION_CLAIM_SLOT = "expression_claim";
 const FIXED_RECEIPT_SLOT = "fixed_receipt_result";
 const STABLE_FACT_SLOT = "stable_shortcut_fact";
@@ -113,4 +121,34 @@ export function mergePlannerNotification(
       text: line,
     })),
   ]).join("\n");
+}
+
+/**
+ * A delivery lookup can fail after the record and legacy Voice copy already
+ * succeeded. Keep that copy visible instead of treating an unavailable
+ * Planner response as permission to show only the fixed receipt facts.
+ */
+export function resolvePlannerNotification(
+  delivery: ShortcutPlannerNotificationDelivery | null | undefined,
+  fallbackNotification: string,
+  legacyNotification: string,
+  companionMessage?: string | null,
+): string {
+  if (!delivery?.available || !delivery.message?.trim()) return legacyNotification;
+
+  const companionClaim = delivery.presentation_target === "companion_message"
+    ? { semantic_key: delivery.semantic_key, claim_fingerprint: delivery.claim_fingerprint }
+    : null;
+  return mergePlannerNotification(
+    delivery.message,
+    fallbackNotification,
+    delivery.presentation_target === "companion_message" ? companionMessage : null,
+    {
+      companion_claim: companionClaim,
+      planner_claim: {
+        semantic_key: delivery.semantic_key,
+        claim_fingerprint: delivery.claim_fingerprint,
+      },
+    },
+  );
 }

@@ -317,6 +317,10 @@ struct RecordDetailView: View {
                                 .buttonStyle(.plain)
                             } else if detail.imageLoadError {
                                 unavailableImageView
+                            } else if detail.imagePath != nil {
+                                ProgressView("正在加载截图…")
+                                    .frame(maxWidth: .infinity, minHeight: 180)
+                                    .background(JieziTheme.pageBackground, in: RoundedRectangle(cornerRadius: 8))
                             }
 
                             recordHeader(detail)
@@ -633,10 +637,24 @@ struct RecordDetailView: View {
             Image(systemName: "quote.bubble.fill").foregroundStyle(JieziTheme.brand)
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("AI 陪伴").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text("AI 陪伴")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        if let feedback, !feedback.badge.isEmpty {
+                            Text(feedback.badge)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(JieziTheme.brand)
+                        }
+                    }
                     Text(message).font(.subheadline).fixedSize(horizontal: false, vertical: true)
                 }
                 if let feedback {
+                    NativeAIFeedbackSupportingContent(
+                        feedback: feedback,
+                        primaryMessage: message,
+                        compact: true
+                    )
                     NativeAIFeedbackCard(
                         feedback: feedback,
                         reviewOnly: true,
