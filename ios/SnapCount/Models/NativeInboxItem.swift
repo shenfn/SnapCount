@@ -249,6 +249,40 @@ enum NativeInboxPresentation {
         return remaining[min(removedIndex, remaining.count - 1)]
     }
 
+    static func adjacentSelection(
+        to selectedId: String?,
+        offset: Int,
+        in orderedIds: [String]
+    ) -> String? {
+        guard !orderedIds.isEmpty else { return nil }
+        let currentIndex = selectedId.flatMap { orderedIds.firstIndex(of: $0) } ?? 0
+        let nextIndex = currentIndex + offset
+        guard orderedIds.indices.contains(nextIndex) else { return nil }
+        return orderedIds[nextIndex]
+    }
+
+    static func swipePageOffset(
+        translationX: Double,
+        translationY: Double,
+        predictedEndTranslationX: Double,
+        distanceThreshold: Double = 44,
+        projectedThreshold: Double = 96
+    ) -> Int? {
+        let horizontalExtent = max(abs(translationX), abs(predictedEndTranslationX))
+        guard horizontalExtent > abs(translationY) * 1.15 else { return nil }
+
+        let acceptedTranslation: Double
+        if abs(translationX) >= distanceThreshold {
+            acceptedTranslation = translationX
+        } else if abs(predictedEndTranslationX) >= projectedThreshold {
+            acceptedTranslation = predictedEndTranslationX
+        } else {
+            return nil
+        }
+
+        return acceptedTranslation < 0 ? 1 : -1
+    }
+
     static func filtered(_ items: [NativeInboxItem], by filter: NativeInboxFilter) -> [NativeInboxItem] {
         switch filter {
         case .all: return items
