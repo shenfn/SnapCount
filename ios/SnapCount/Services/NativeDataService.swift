@@ -88,7 +88,17 @@ struct NativeRecordDetail: Identifiable {
     var transportType: String? = nil
     var domainVersion: String? = nil
     var aiFeedback: NativeAIFeedback? = nil
+    var legacyAiFeedback: NativeAIFeedback? = nil
+    var plannerAiFeedback: NativeAIFeedback? = nil
     var aiSummary: String? = nil
+
+    var voiceAiFeedback: NativeAIFeedback? {
+        legacyAiFeedback ?? aiFeedback.flatMap { $0.source == "expression_planner" ? nil : $0 }
+    }
+
+    var expressionPlannerAiFeedback: NativeAIFeedback? {
+        plannerAiFeedback ?? aiFeedback.flatMap { $0.source == "expression_planner" ? $0 : nil }
+    }
 
     var isEditable: Bool {
         kind == "expense" || kind == "income" || kind == "data"

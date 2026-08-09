@@ -90,6 +90,60 @@ test('a prior pending record prevents a false first-occurrence claim', () => {
   )
 })
 
+test('EXP-001 treats an administrative legal-name variant as the 26th record and the 22nd record this week', () => {
+  const historicalName = '晨光网络科技工作室'
+  const previousWeek = Array.from({ length: 4 }, (_, index) => ({
+    id: `previous-week-${index + 1}`,
+    type: 'expense',
+    transaction_date: `2026-07-${String(27 + index).padStart(2, '0')}`,
+    transaction_time: '12:00:00',
+    amount: 6.8,
+    merchant_name: historicalName,
+    category: 'life',
+    status: 'done',
+  }))
+  const currentWeek = Array.from({ length: 21 }, (_, index) => ({
+    id: `current-week-${index + 1}`,
+    type: 'expense',
+    transaction_date: `2026-08-${String(3 + Math.floor(index / 4)).padStart(2, '0')}`,
+    transaction_time: `${String(8 + (index % 4) * 3).padStart(2, '0')}:00:00`,
+    amount: 6.8,
+    merchant_name: historicalName,
+    category: 'life',
+    status: 'done',
+  }))
+  const current = {
+    id: 'current-legal-name',
+    type: 'expense',
+    transaction_date: '2026-08-09',
+    transaction_time: '12:00:00',
+    amount: 6.8,
+    merchant_name: '示例区晨光网络科技工作室（个体工商户）',
+    category: 'life',
+    status: 'done',
+  }
+  const plan = buildExpressionShadowPlan({
+    transactions: [...previousWeek, ...currentWeek, current].map(withCanonicalOccurrence),
+    currentRecordId: current.id,
+  })
+  const weekly = plan.candidates.find(candidate =>
+    candidate.claim?.semantic_key === 'merchant_week_to_date_vs_previous_week_same_period'
+  )
+
+  assert.equal(plan.current_record.entity_id, 'merchant_unmapped_晨光网络科技工作室')
+  assert.equal(plan.current_record.merchant_observation.entity_first_seen, false)
+  assert.equal(plan.current_record.merchant_observation.alias_first_seen, true)
+  assert.equal(plan.current_record.merchant_observation.historical_record_count, 25)
+  assert.equal(plan.current_record.merchant_observation.total_record_count, 26)
+  assert.equal(
+    plan.candidates.some(candidate => candidate.claim?.semantic_key === 'expense_merchant_first_occurrence'),
+    false,
+  )
+  assert.ok(weekly)
+  assert.equal(weekly.claim.structured_value.current_period.count, 22)
+  assert.equal(weekly.claim.structured_value.baseline_period.count, 4)
+})
+
 test('a later event already known to Jiezi prevents a backfill from being called first', () => {
   const plan = buildExpressionShadowPlan({
     currentRecordId: 'backfilled-current',

@@ -1327,6 +1327,8 @@ final class SnapCountTests: XCTestCase {
         await state.loadRecordDetail(reference: "expense/record-1", force: true)
         XCTAssertEqual(state.selectedRecordDetail?.companionMessage, companionMessage)
         XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, companionPreview)
+        XCTAssertEqual(state.selectedRecordDetail?.legacyAiFeedback, legacyFeedback)
+        XCTAssertEqual(state.selectedRecordDetail?.plannerAiFeedback, companionPreview)
         XCTAssertNil(
             NativeRecordExpressionFeedbackPolicy.feedbackToRender(
                 companionMessage: companionMessage,
@@ -1345,9 +1347,66 @@ final class SnapCountTests: XCTestCase {
 
         XCTAssertEqual(state.selectedRecordDetail?.companionMessage, companionMessage)
         XCTAssertEqual(state.selectedRecordDetail?.aiFeedback, acknowledgedFeedback)
+        XCTAssertEqual(state.selectedRecordDetail?.legacyAiFeedback, legacyFeedback)
+        XCTAssertEqual(state.selectedRecordDetail?.plannerAiFeedback, acknowledgedFeedback)
         XCTAssertEqual(repository.acknowledgementCount, 1)
         XCTAssertTrue(state.selectedRecordDetail?.aiFeedback?.isReviewable == true)
         XCTAssertEqual(state.recordExpressionPlanExposureState, .idle)
+    }
+
+    @MainActor
+    func testPlannerFeedbackCardPreservesVoiceSupportingContent() async throws {
+        let companionMessage = "第一次见示例便利店，8元买份踏实。"
+        let voiceFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "emotion_line": AnyCodable("初次遇见的小确幸，值得被温柔记录。"),
+            "utility_line": AnyCodable("标记为首次光顾，方便日后回顾变化。"),
+            "detail_reason": AnyCodable("依据当前记录，推测是一次随手补给。")
+        ]))
+        let plannerPreview = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-first"),
+            "semantic_key": AnyCodable("expense_merchant_first_occurrence"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "emotion_line": AnyCodable("第一次记录示例便利店。"),
+            "detail_reason": AnyCodable("依据当前记录与可用商户历史。")
+        ]))
+        let repository = RecordRepositoryStub(
+            details: [expressionRecordDetail(
+                feedback: voiceFeedback,
+                companionMessage: companionMessage
+            )],
+            expressionPlanLookups: [.available(NativeRecordExpressionPlan(
+                planToken: "plan-first",
+                candidateId: "candidate-first",
+                feedback: plannerPreview
+            ))]
+        )
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+
+        await state.loadRecordDetail(reference: "expense/record-1", force: true)
+
+        let detail = try XCTUnwrap(state.selectedRecordDetail)
+        XCTAssertEqual(detail.legacyAiFeedback, voiceFeedback)
+        XCTAssertEqual(detail.plannerAiFeedback, plannerPreview)
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.companionFeedbackToRender(
+                companionMessage: companionMessage,
+                feedback: detail.voiceAiFeedback
+            ),
+            voiceFeedback
+        )
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                companionMessage: companionMessage,
+                feedback: detail.expressionPlannerAiFeedback,
+                companionFeedback: detail.voiceAiFeedback
+            ),
+            plannerPreview
+        )
     }
 
     @MainActor

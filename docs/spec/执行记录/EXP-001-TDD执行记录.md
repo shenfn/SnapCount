@@ -1,0 +1,21 @@
+# EXP-001 TDD 执行记录
+
+- 目标行为：工商名称唯一高置信变体沿用历史实体，不误报首次；歧义匹配只抑制首次，不擅自合并统计。
+- 当前行为：实体层只做配置别名或清理标点后的完全相等匹配，地区前缀与工商后缀会产生新实体。
+- 权威来源：`docs/spec/20-陪伴表达事实契约.md` 场景 `EXP-001`。
+- 基线提交：`origin/main@6ae2d5c`。
+- 工作树：`D:\Business\count\.worktrees\事实与表达正确性TDD`。
+- 分支：`codex/事实与表达正确性TDD`。
+- 本轮范围：实体归一化、历史变体消歧、首次候选、实体统计与 Planner 测试。
+- 非范围：Prompt、时间、金额、餐次推理、跨记录关系、iOS、数据库迁移和生产发布。
+- 预计修改文件：表达事实 Spec、执行记录、`entity-normalizer.mjs`、相关 Node/Planner 测试，必要时调整 Planner 当前实体装配。
+- 基线测试结果：`node --test tools/ai-validation/expression-planner/tests`，171/171 通过。
+- 环境说明：首次运行因新工作树未安装 `esbuild` 导致 5 个测试文件无法加载；执行 `npm ci` 后基线全绿，该环境失败不计为业务红灯。
+- 红灯测试及失败原因：`node --test tools/ai-validation/expression-planner/tests/entity-normalizer.test.mjs tools/ai-validation/expression-planner/tests/expression-shadow-auto-planner.test.mjs`；23 项中 20 项通过、3 项按预期失败。唯一工商变体仍生成独立 `merchant_unmapped_*` 实体，歧义变体仍被标记 `entity_first_seen=true`，Planner 集成因此无法得到历史实体和本周 22 笔统计。
+- 最小实现：实体观察层剥离有限集合的工商法律后缀，并仅在剩余差异为行政区划前缀且唯一指向一个历史实体时复用该实体；多个历史实体命中时标记歧义并抑制首次。Planner 只将解析后的当前商户加入本次确定性统计，不修改原始记录。
+- 绿灯结果：定向测试最初 23/23 通过；补充“非行政营销前缀不得合并”反例后，Planner 全量 `node --test tools/ai-validation/expression-planner/tests` 为 174/174 通过。
+- 本分支最终回归：Edge 相关 Deno 测试 85/85、Planner 全量 176/176、PWA 生产构建和 `git diff --check` 均通过。
+- PWA/iOS 差异：实体事实由 Planner 权威层证明；客户端本场景无需重复计算。
+- GitHub CI 结果：未运行。
+- 未解决风险：本轮只识别有限法律后缀和行政前缀；品牌门店、分公司和非标准简称仍保持独立，需通过确认别名或后续独立场景处理。
+- 对应提交：随本次 PR 提交。

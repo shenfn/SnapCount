@@ -550,8 +550,6 @@ function feedbackPayload(
   presentation?: ExpressionPresentation,
 ) {
   const claim = object(item.candidate.claim);
-  const quality = object(item.candidate.quality);
-  const sampleCount = Number(quality.sample_count ?? 0);
   const companionMessage = presentation?.target === "companion_message"
     ? text(presentation.renderedPayload.companion_message, 4000)
     : "";
@@ -566,9 +564,7 @@ function feedbackPayload(
     band: "neutral",
     emotion_line: companionMessage || item.canonicalText,
     utility_line: "",
-    detail_reason: Number.isFinite(sampleCount) && sampleCount > 1
-      ? `基于 ${sampleCount} 条可用记录计算`
-      : "",
+    detail_reason: candidateDetailReason(item),
     candidate_id: item.candidateId,
     semantic_key: text(claim.semantic_key, 200),
     claim_fingerprint: claimFingerprintFromCandidate(item.candidate),
@@ -577,6 +573,34 @@ function feedbackPayload(
     rendered_text_fingerprint: renderedTextFingerprint,
     ...(exposureEventId ? { exposure_event_id: exposureEventId } : {}),
   };
+}
+
+function candidateDetailReason(
+  item: ReturnType<typeof selectedRecordDetail>[number],
+): string {
+  const candidate = item.candidate;
+  const claim = object(candidate.claim);
+  const quality = object(candidate.quality);
+  const sampleCount = Number(quality.sample_count ?? 0);
+  if (Number.isFinite(sampleCount) && sampleCount > 1) {
+    return `基于 ${sampleCount} 条可用记录计算`;
+  }
+
+  const semanticKey = text(claim.semantic_key, 200);
+  const dimension = text(candidate.dimension, 100);
+  if (/first_occurrence/.test(semanticKey) || dimension === "first_occurrence") {
+    return "依据当前记录与可用商户历史，未找到同一实体的更早记录";
+  }
+  if (/(?:previous_gap|recurrence|repeat)/.test(semanticKey)) {
+    return "依据本条记录与上一条同类记录的发生时间";
+  }
+  if (/(?:current_record|current_metric|record_context)/.test(semanticKey) || dimension === "current_fact") {
+    return "依据本条记录中已确认的对象、金额或时间字段";
+  }
+
+  const evidenceCount = Array.isArray(candidate.evidence) ? candidate.evidence.length : 0;
+  if (evidenceCount > 0) return `依据 ${evidenceCount} 条可追溯记录证据`;
+  return "依据代码已核实的当前候选事实";
 }
 
 function feedbackCardPresentation(
