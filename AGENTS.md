@@ -22,6 +22,15 @@
 - 新页面优先使用 `JieziType`、`JieziSpacing`、`JieziRadius`、`JieziCard`、`JieziSectionHeader`、`JieziListRow`、`JieziMetric` 和 `JieziEmptyState`。
 - 视觉改动必须保留 AppState、Repository、导航、保存、删除和确认门禁逻辑。
 
+## Spec 与 TDD
+
+- 核心业务状态、金额、时间、权限、幂等、账户影响、删除级联或跨端契约变更，开始前必须阅读对应中文 Spec 和 `docs/spec/02-TDD实施与交接规范.md`。
+- 没有场景编号、范围说明和测试层映射，不开始业务实现；实际改动超出预先说明的模块时，先暂停并重新确认范围。
+- 已有行为先用特征测试固定；新增或修复行为按红灯、最小实现、绿灯和回归顺序执行，不把环境失败当作业务红灯。
+- PWA 与 iOS 使用同一场景编号验证共享业务含义；iOS 最终结果仍以 GitHub macOS CI 为准。
+- 生成式 AI 测试固定事实、候选、证据和语义边界，不把某一句模型文案写成唯一正确答案。
+
 详细流程、提交格式、CI/CD 触发规则和异常恢复方式见：
 
 - `docs/ios-视觉美化交接.md`
+- `docs/spec/02-TDD实施与交接规范.md`
