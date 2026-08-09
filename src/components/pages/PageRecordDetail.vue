@@ -106,16 +106,18 @@
           <div class="record-detail-companion-title">AI 陪伴</div>
           <div class="record-detail-companion-text">{{ companionMessage }}</div>
           <AiFeedbackCard
-            v-if="companionReviewFeedback"
-            :key="`${aiFeedbackCardKey}-companion-review`"
-            :feedback="companionReviewFeedback"
-            :exposure-event-id="aiFeedbackExposureEventId"
-            :reviewable="aiFeedbackReviewable"
-            :review-unavailable="plannerReviewUnavailable"
+            v-if="companionSupportingFeedback"
+            :key="`${aiFeedbackCardKey}-companion-support`"
+            :feedback="companionSupportingFeedback"
+            :exposure-event-id="companionFeedbackExposureEventId"
+            :reviewable="companionFeedbackReviewable"
+            :review-unavailable="companionReviewFeedback ? plannerReviewUnavailable : false"
             :review-retrying="plannerReviewRetrying"
             :review-state="feedbackReviewState"
             :submitting="feedbackReviewSubmitting"
-            review-only
+            :primary-text="companionMessage"
+            compact
+            embedded
             @retry-review="retryPlannerDelivery"
             @submit-review="submitFeedbackReview"
           />
@@ -164,6 +166,7 @@ import {
 } from '../../utils/expressionDelivery'
 import {
   companionMessageMatchesDelivery,
+  feedbackForCompanion,
   feedbackToRender,
   isCompanionMessageDelivery,
   isPlannerDeliveryReviewable,
@@ -295,7 +298,22 @@ const companionReviewFeedback = computed(() => (
     ? plannerAiFeedback.value
     : null
 ))
-const reviewFeedback = computed(() => companionReviewFeedback.value || aiFeedback.value)
+const companionSupportingFeedback = computed(() => (
+  feedbackForCompanion({
+    companionMessage: companionMessage.value,
+    feedback: legacyAiFeedback.value,
+  }) || companionReviewFeedback.value
+))
+const companionFeedbackExposureEventId = computed(() => (
+  companionReviewFeedback.value?.exposure_event_id
+    || companionReviewFeedback.value?.exposureEventId
+    || ''
+))
+const companionFeedbackReviewable = computed(() => {
+  if (companionReviewFeedback.value) return isPlannerDeliveryReviewable(recordExpressionPlan.value)
+  return Boolean(companionSupportingFeedback.value) && !plannerAiFeedback.value
+})
+const reviewFeedback = computed(() => companionReviewFeedback.value || aiFeedback.value || companionSupportingFeedback.value)
 const aiFeedbackExposureEventId = computed(() => (
   reviewFeedback.value?.exposure_event_id || reviewFeedback.value?.exposureEventId || ''
 ))

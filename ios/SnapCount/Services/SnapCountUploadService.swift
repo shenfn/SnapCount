@@ -185,11 +185,15 @@ struct ShortcutUploadResult {
     }
 
     init(payload: ShortcutUploadPayload) {
-        let text = payload.notificationText
+        let baseText = payload.notificationText
             ?? payload.notification
             ?? payload.message
             ?? payload.error
             ?? "截图已上传，打开芥子查看结果。"
+        let text = ShortcutUploadResult.notificationText(
+            baseText: baseText,
+            payload: payload
+        )
         notificationText = text
         displayText = ShortcutUploadResult.shortcutDisplayText(
             notificationText: text,
@@ -252,6 +256,26 @@ struct ShortcutUploadResult {
 
         lines.append("提示：点通知可回到芥子；这张卡片只负责确认。")
         return lines.joined(separator: "\n")
+    }
+
+    private static func notificationText(baseText: String, payload: ShortcutUploadPayload) -> String {
+        var lines: [String] = []
+        let companion = payload.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let emotion = payload.aiFeedback?.emotionLine?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let expression = companion.isEmpty ? emotion : companion
+        if !expression.isEmpty, !baseText.contains(expression) {
+            lines.append(expression)
+        }
+        lines.append(contentsOf: baseText.split(whereSeparator: \.isNewline).map(String.init))
+
+        var seen = Set<String>()
+        return lines.compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let key = trimmed.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            guard seen.insert(key).inserted else { return nil }
+            return trimmed
+        }.joined(separator: "\n")
     }
 }
 

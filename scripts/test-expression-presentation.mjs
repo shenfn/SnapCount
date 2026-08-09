@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   companionMessageMatchesDelivery,
   expressedSemanticKeys,
+  feedbackForCompanion,
   feedbackToRender,
   isCompanionMessageDelivery,
   isPlannerDeliveryEnvelopeValid,
@@ -147,6 +148,37 @@ test('keeps food record context because it adds meal or dish context', () => {
 test('hides legacy feedback when a companion message already exists', () => {
   const feedback = { source: 'legacy_voice', emotion_line: '已记录这笔支出。' }
   assert.equal(feedbackToRender({ companionMessage: '这笔已记下。', feedback }), null)
+})
+
+test('keeps hybrid supporting copy inside the companion surface', () => {
+  const feedback = {
+    source: 'hybrid',
+    badge: '生活新记',
+    emotion_line: '初次遇见的小确幸，值得被温柔记录。',
+    utility_line: '标记为首次光顾，方便日后回顾变化。',
+    detail_reason: '候选明确显示这是第一次记录青集便利店。',
+    expression_coverage: {
+      coverage_version: 'expression-coverage-v1',
+      planner_version: 'expression-shadow-auto-v0.6',
+      source_surface: 'record_detail',
+      packet_fingerprint: 'packet-first-shop',
+      claim_fingerprint: 'claim-first-shop',
+      presentation_target: 'companion_message',
+    },
+  }
+  const companionMessage = '第一次见青集便利店，8元买份踏实。'
+
+  assert.equal(feedbackForCompanion({ companionMessage, feedback }), feedback)
+  assert.equal(feedbackToRender({ companionMessage, feedback }), null)
+})
+
+test('does not move an explicit feedback card into the companion surface', () => {
+  const feedback = {
+    source: 'expression_planner',
+    presentation_target: 'feedback_card',
+    emotion_line: '这是一个独立的新角度。',
+  }
+  assert.equal(feedbackForCompanion({ companionMessage: '主陪伴文案', feedback }), null)
 })
 
 test('requires the feedback candidate identity to match the API envelope', () => {

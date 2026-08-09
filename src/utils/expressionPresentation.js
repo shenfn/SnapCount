@@ -199,6 +199,33 @@ export function hasCompanionMessage(value) {
   return String(value || '').trim().length > 0
 }
 
+function feedbackCoveragePresentationTarget(feedback) {
+  const coverage = feedback?.expression_coverage ?? feedback?.expressionCoverage
+  if (!coverage || typeof coverage !== 'object') return ''
+  const coverageVersion = normalized(coverage.coverage_version ?? coverage.coverageVersion)
+  const plannerVersion = normalized(coverage.planner_version ?? coverage.plannerVersion)
+  const sourceSurface = normalized(coverage.source_surface ?? coverage.sourceSurface)
+  const packetFingerprint = String(coverage.packet_fingerprint ?? coverage.packetFingerprint ?? '').trim()
+  const claimFingerprint = normalized(coverage.claim_fingerprint ?? coverage.claimFingerprint)
+  if (coverageVersion !== EXPRESSION_COVERAGE_VERSION
+    || plannerVersion !== EXPRESSION_PLANNER_VERSION
+    || sourceSurface !== 'record_detail'
+    || !packetFingerprint
+    || !claimFingerprint) return ''
+  return normalized(coverage.presentation_target ?? coverage.presentationTarget)
+}
+
+export function feedbackForCompanion({ companionMessage, feedback, delivery } = {}) {
+  if (!hasCompanionMessage(companionMessage) || !feedback || typeof feedback !== 'object') return null
+  const source = normalized(feedback.source)
+  if (source === PLANNER_SOURCE) {
+    return companionMessageMatchesDelivery({ delivery, feedback, companionMessage }) ? feedback : null
+  }
+  const target = normalized(feedback.presentation_target ?? feedback.presentationTarget)
+    || feedbackCoveragePresentationTarget(feedback)
+  return target === FEEDBACK_CARD_TARGET ? null : feedback
+}
+
 /**
  * The API returns the selected candidate both at the envelope level and in
  * feedback. Keep the two identities tied together before a client renders or

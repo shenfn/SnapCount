@@ -155,7 +155,6 @@ struct NativeAIFeedbackCard: View {
     var onRetryExposure: (() -> Void)?
     var onSubmit: ((NativeAIFeedbackReviewChoice, String) -> Void)?
 
-    @State private var showReason = false
     @State private var selectedChoice: NativeAIFeedbackReviewChoice?
     @State private var reviewText = ""
     @State private var isRevisingSubmittedReview = false
@@ -183,43 +182,7 @@ struct NativeAIFeedbackCard: View {
                         .background(bandColor.opacity(0.1), in: Capsule())
                 }
 
-                if !feedback.emotionLine.isEmpty {
-                    Text(feedback.emotionLine)
-                        .font(compact ? .subheadline.weight(.semibold) : .body.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if !feedback.utilityLine.isEmpty {
-                    Text(feedback.utilityLine)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 8))
-                }
-
-                if !feedback.detailReason.isEmpty {
-                    if compact {
-                        Button(showReason ? "收起依据" : "为什么这么说") {
-                            showReason.toggle()
-                        }
-                        .font(.caption.weight(.semibold))
-                        .buttonStyle(.plain)
-                        .foregroundStyle(JieziTheme.brand)
-                    }
-                    if !compact || showReason {
-                        Text("判断依据  \(feedback.detailReason)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                if !feedback.timingLabel.isEmpty {
-                    Label(feedback.timingLabel, systemImage: "clock")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(JieziTheme.brand)
-                }
+                NativeAIFeedbackSupportingContent(feedback: feedback, compact: compact)
             }
 
             if NativeAIFeedbackReviewPresentation.shouldShowSection(
@@ -379,5 +342,61 @@ struct NativeAIFeedbackCard: View {
 
     private var bandBackground: Color {
         bandColor.opacity(0.08)
+    }
+}
+
+struct NativeAIFeedbackSupportingContent: View {
+    let feedback: NativeAIFeedback
+    var primaryMessage: String? = nil
+    var compact = false
+
+    @State private var showReason = false
+
+    private var showsEmotionLine: Bool {
+        let emotion = feedback.emotionLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let primary = primaryMessage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !emotion.isEmpty && emotion != primary
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 8 : 10) {
+            if showsEmotionLine {
+                Text(feedback.emotionLine)
+                    .font(compact ? .subheadline.weight(.semibold) : .body.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !feedback.utilityLine.isEmpty {
+                Text(feedback.utilityLine)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            if !feedback.detailReason.isEmpty {
+                if compact {
+                    Button(showReason ? "收起依据" : "为什么这么说") {
+                        showReason.toggle()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(JieziTheme.brand)
+                }
+                if !compact || showReason {
+                    Text("判断依据  \(feedback.detailReason)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if !feedback.timingLabel.isEmpty {
+                Label(feedback.timingLabel, systemImage: "clock")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(JieziTheme.brand)
+            }
+        }
     }
 }
