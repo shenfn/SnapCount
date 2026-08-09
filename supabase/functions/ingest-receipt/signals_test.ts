@@ -1,5 +1,6 @@
 import {
   type DomainSignal,
+  extractDigitNumbers,
   hasModelOwnedStatisticalClaim,
   hasUnsupportedFinanceCompanionClaim,
   selectSignals,
@@ -405,4 +406,106 @@ Deno.test("merchant statistics merge harmless spacing variants", () => {
 
   assert(signals[0].kind === "merchant_repeat", "merged aliases must still produce the merchant signal");
   assert(signals[0].fact.includes("第 6 次"), "weekly counts from normalized aliases must be summed");
+});
+
+Deno.test("EXP-003 noon alone cannot authorize meal or eating claims", () => {
+  const result = validateModelTone(
+    [
+      "中午这笔支出已经记下。",
+      "忙碌间隙好好吃饭，是对自己的犒劳。",
+      "这顿午餐记得趁热吃。",
+    ],
+    JSON.stringify({
+      record_type: "expense",
+      image_type: "alipay_bill",
+      amount: 6.8,
+      merchant_name: "示例网络科技工作室",
+      category: "life",
+      platform: "支付宝",
+      time_context: { event_daypart: "noon", event_local_time: "12:10:00" },
+    }),
+  );
+
+  assert(!result.ok, "a compatible daypart must not become evidence that a meal happened");
+  assert(!result.badIndexes.includes(0), "the grounded time-only field must survive");
+  assert(result.badIndexes.includes(1), "unsupported eating language must be rejected by field");
+  assert(result.badIndexes.includes(2), "unsupported meal and serving advice must be rejected by field");
+});
+
+Deno.test("EXP-003 independent food evidence allows natural meal language", () => {
+  const categorizedExpense = validateModelTone(
+    ["午餐稳稳记下了，记得趁热吃。"],
+    JSON.stringify({
+      record_type: "expense",
+      image_type: "order_list",
+      amount: 18.5,
+      merchant_name: "示例饺子馆",
+      category: "food",
+      platform: "美团",
+      time_context: { event_daypart: "noon", event_local_time: "12:10:00" },
+    }),
+  );
+  const foodPhoto = validateModelTone(
+    ["这顿午餐有饺子，趁热吃正好。"],
+    JSON.stringify({
+      record_type: "food",
+      image_type: "food_photo",
+      title: "饺子",
+      payload: {
+        meal_type: "lunch",
+        dishes: [{ name: "饺子" }],
+      },
+    }),
+  );
+
+  assert(categorizedExpense.ok, "an explicit food category may support meal wording");
+  assert(foodPhoto.ok, "structured dishes and meal type may support meal wording");
+});
+
+Deno.test("EXP-004 colloquial yuan-jiao forms normalize to the current amount", () => {
+  const recordFacts = JSON.stringify({
+    record_type: "expense",
+    amount: 6.8,
+    merchant_name: "示例商户",
+  });
+  const equivalentForms = ["6块8", "6块八", "6元8角", "六块八", "6.80元"];
+
+  for (const amountText of equivalentForms) {
+    const result = validateModelTone([`这笔 ${amountText} 记下了。`], recordFacts);
+    assert(result.ok, `${amountText} must be treated as the verified 6.8 yuan amount: ${result.violations.join(" | ")}`);
+  }
+});
+
+Deno.test("EXP-004 colloquial amount keeps its statistical meaning and scope", () => {
+  const signals: DomainSignal[] = [{
+    kind: "merchant_repeat",
+    priority: 1,
+    fact: "近90天平均单笔 6.8 元",
+    numbers: [6.8],
+    numberFacts: [{
+      value: 6.8,
+      meaning: "rolling_90d_merchant_average_amount",
+      role: "measure",
+      unit: "currency",
+      scope: "rolling:90d",
+    }],
+  }];
+  const result = validateModelTone(
+    ["近90天平均单笔6块8。"],
+    JSON.stringify({ record_type: "expense", amount: 9.2 }),
+    signals,
+  );
+
+  assert(result.ok, `a colloquial statistical amount must retain its meaning and scope: ${result.violations.join(" | ")}`);
+});
+
+Deno.test("EXP-004 separate item quantities never become a decimal amount", () => {
+  const parsed = extractDigitNumbers("6块商品、8份");
+  const result = validateModelTone(
+    ["一共6块商品、8份。"],
+    JSON.stringify({ record_type: "expense", amount: 6.8 }),
+  );
+
+  assert(parsed.length === 2 && parsed[0] === 6 && parsed[1] === 8, "separate quantities must stay separate");
+  assert(!result.ok, "separate quantities must not be authorized by a 6.8 yuan record amount");
 });

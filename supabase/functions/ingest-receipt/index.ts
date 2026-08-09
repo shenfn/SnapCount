@@ -3840,16 +3840,21 @@ function voiceRecordFacts(
   if (domainKey === "expense" || domainKey === "income") {
     return {
       record_type: domainKey,
+      domain_key: ai.domain_key ?? null,
+      image_type: ai.image_type ?? null,
       amount: normalizedAmount ?? ai.amount ?? null,
       merchant_name: ai.merchant_name ?? null,
       source_name: ai.source_name ?? null,
       category: ai.category ?? null,
       platform: ai.platform ?? null,
+      payload: builtPayload ?? ai.payload_jsonb ?? null,
       occurred_at: ai.occurred_at ?? null,
     };
   }
   return {
     record_type: domainKey,
+    domain_key: ai.domain_key ?? domainKey,
+    image_type: ai.image_type ?? null,
     title: ai.title ?? null,
     summary: ai.summary ?? null,
     payload: builtPayload ?? null,

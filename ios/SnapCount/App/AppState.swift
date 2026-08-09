@@ -1448,9 +1448,10 @@ final class AppState: ObservableObject {
                   self.activeRecordReference == reference,
                   self.isSignedIn,
                   self.currentUserId == session.user.id else { return }
-            self.recordDetailCache[reference] = self.detailPreservingExpressionFeedback(hydrated)
+            let mergedDetail = self.detailPreservingExpressionFeedback(hydrated)
+            self.recordDetailCache[reference] = mergedDetail
             if self.selectedRecordDetail?.id == hydrated.id {
-                self.selectedRecordDetail = hydrated
+                self.selectedRecordDetail = mergedDetail
             }
         }
     }
@@ -1468,6 +1469,7 @@ final class AppState: ObservableObject {
             discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
             if currentDetail.aiFeedback == pending.plan.feedback {
                 currentDetail.aiFeedback = pending.previousFeedback
+                currentDetail.plannerAiFeedback = nil
             }
         }
         var baseDetail = detailPreservingExpressionFeedback(currentDetail)
@@ -1503,6 +1505,7 @@ final class AppState: ObservableObject {
             )
             if selected == pending.plan.feedback {
                 baseDetail.aiFeedback = selected
+                baseDetail.plannerAiFeedback = pending.plan.feedback
                 publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
             } else {
                 discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
@@ -1574,6 +1577,9 @@ final class AppState: ObservableObject {
             companionMessage: baseDetail.companionMessage
         )
         baseDetail.aiFeedback = selected
+        if selected == preview.feedback {
+            baseDetail.plannerAiFeedback = preview.feedback
+        }
         guard selected == preview.feedback else {
             publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
             recordExpressionPlanExposureState = .idle
@@ -1597,9 +1603,10 @@ final class AppState: ObservableObject {
         _ detail: NativeRecordDetail,
         canonicalReference: String
     ) {
-        recordDetailCache[canonicalReference] = detail
+        let synchronized = synchronizeAIFeedbackSlots(detail)
+        recordDetailCache[canonicalReference] = synchronized
         guard activeRecordReference == canonicalReference else { return }
-        selectedRecordDetail = detail
+        selectedRecordDetail = synchronized
     }
 
     func setRecordExpressionPlanCardVisible(
@@ -1719,6 +1726,7 @@ final class AppState: ObservableObject {
         }
         guard var finalDetail = recordDetailCache[canonicalReference] else { return }
         finalDetail.aiFeedback = acknowledgedFeedback
+        finalDetail.plannerAiFeedback = acknowledgedFeedback
         recordDetailCache[canonicalReference] = finalDetail
         if activeRecordReference == canonicalReference,
            selectedRecordDetail.map({ NativeRecordReference($0.id).canonicalValue == canonicalReference }) == true {
@@ -1735,12 +1743,18 @@ final class AppState: ObservableObject {
     ) {
         if var cached = recordDetailCache[canonicalReference], cached.aiFeedback == previewFeedback {
             cached.aiFeedback = previousFeedback
+            if cached.plannerAiFeedback == previewFeedback {
+                cached.plannerAiFeedback = nil
+            }
             recordDetailCache[canonicalReference] = cached
         }
         if activeRecordReference == canonicalReference,
            var selected = selectedRecordDetail,
            selected.aiFeedback == previewFeedback {
             selected.aiFeedback = previousFeedback
+            if selected.plannerAiFeedback == previewFeedback {
+                selected.plannerAiFeedback = nil
+            }
             selectedRecordDetail = selected
         }
     }
@@ -1807,7 +1821,8 @@ final class AppState: ObservableObject {
     private func detailPreservingExpressionFeedback(
         _ detail: NativeRecordDetail
     ) -> NativeRecordDetail {
-        let canonicalReference = NativeRecordReference(detail.id).canonicalValue
+        let synchronizedDetail = synchronizeAIFeedbackSlots(detail)
+        let canonicalReference = NativeRecordReference(synchronizedDetail.id).canonicalValue
         let selectedFeedback = selectedRecordDetail.flatMap { selected -> NativeAIFeedback? in
             NativeRecordReference(selected.id).canonicalValue == canonicalReference
                 ? selected.aiFeedback
@@ -1816,11 +1831,24 @@ final class AppState: ObservableObject {
         guard let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
             existing: [selectedFeedback, recordDetailCache[canonicalReference]?.aiFeedback],
             pending: pendingRecordExpressionPlans[canonicalReference]?.plan.feedback,
-            companionMessage: detail.companionMessage
-        ) else { return detail }
-        var preserved = detail
+            companionMessage: synchronizedDetail.companionMessage
+        ) else { return synchronizedDetail }
+        var preserved = synchronizedDetail
         preserved.aiFeedback = feedback
-        return preserved
+        return synchronizeAIFeedbackSlots(preserved)
+    }
+
+    private func synchronizeAIFeedbackSlots(
+        _ detail: NativeRecordDetail
+    ) -> NativeRecordDetail {
+        var synchronized = detail
+        guard let feedback = synchronized.aiFeedback else { return synchronized }
+        if feedback.source == "expression_planner" {
+            synchronized.plannerAiFeedback = feedback
+        } else if synchronized.legacyAiFeedback == nil {
+            synchronized.legacyAiFeedback = feedback
+        }
+        return synchronized
     }
 
     func recordDetail(matching reference: String) -> NativeRecordDetail? {
@@ -1953,7 +1981,7 @@ final class AppState: ObservableObject {
     func submitRecordFeedback(choice: NativeAIFeedbackReviewChoice, freeText: String) async {
         if case .submitting = recordFeedbackState { return }
         guard let detail = selectedRecordDetail,
-              let feedback = detail.aiFeedback,
+              let feedback = detail.expressionPlannerAiFeedback ?? detail.voiceAiFeedback ?? detail.aiFeedback,
               feedback.isReviewable else { return }
         recordFeedbackState = .submitting
         do {

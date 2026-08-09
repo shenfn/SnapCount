@@ -364,19 +364,30 @@ export function buildExpressionShadowPlan(input: ShadowPlannerInput) {
   const normalizedRecords = input.transactions
     .filter(row => row.type === undefined || row.type === null || row.type === "expense")
     .map(row => toRecord(row, MERCHANT_ALIAS_MAP));
-  const currentRecord = normalizedRecords.find(row => row.id === input.currentRecordId) ?? null;
-  if (!currentRecord || currentRecord.amount === null) return { status: "skipped", reason: "current_expense_record_missing", changes_user_output: false };
-  const localDate = currentRecord.transaction_date; const entityId = currentRecord.merchant.entity_id;
-  const currentOccurredAt = new Date(currentRecord.occurred_at).getTime();
-  const causalRecords = normalizedRecords.filter(row => row.id === currentRecord.id || wasKnownBeforeCurrent(row, currentRecord, currentOccurredAt));
-  const records = causalRecords.filter(row => row.amount !== null && row.fact_contract.fact_status === "confirmed" && row.merchant.entity_id);
+  const unresolvedCurrentRecord = normalizedRecords.find(row => row.id === input.currentRecordId) ?? null;
+  if (!unresolvedCurrentRecord || unresolvedCurrentRecord.amount === null) return { status: "skipped", reason: "current_expense_record_missing", changes_user_output: false };
+  const currentOccurredAt = new Date(unresolvedCurrentRecord.occurred_at).getTime();
+  const causalRecords = normalizedRecords.filter(row => row.id === unresolvedCurrentRecord.id || wasKnownBeforeCurrent(row, unresolvedCurrentRecord, currentOccurredAt));
   // Merchant novelty is about whether the entity was seen before, not whether
   // the earlier record was complete enough for financial aggregation.
   const priorMerchants = causalRecords
-    .filter(row => row.id !== currentRecord.id)
+    .filter(row => row.id !== unresolvedCurrentRecord.id)
     .filter(row => Boolean(row.merchant.entity_id))
     .map(row => row.merchant);
-  const merchantObservation = summarizeMerchantObservation(currentRecord.merchant, priorMerchants);
+  const merchantObservation = summarizeMerchantObservation(unresolvedCurrentRecord.merchant, priorMerchants);
+  const currentRecord = {
+    ...unresolvedCurrentRecord,
+    merchant: {
+      ...unresolvedCurrentRecord.merchant,
+      entity_id: merchantObservation.entity_id,
+      canonical_name: merchantObservation.canonical_name,
+      resolution: merchantObservation.resolution,
+      confidence: merchantObservation.confidence,
+    },
+  };
+  const planningRecords = causalRecords.map(row => row.id === currentRecord.id ? currentRecord : row);
+  const records = planningRecords.filter(row => row.amount !== null && row.fact_contract.fact_status === "confirmed" && row.merchant.entity_id);
+  const localDate = currentRecord.transaction_date; const entityId = currentRecord.merchant.entity_id;
   const currentDayEvents = entityId
     ? records.filter(row => isCausalCurrentDayRecord(row, currentRecord, currentOccurredAt)).map(toFactEvent)
     : [];

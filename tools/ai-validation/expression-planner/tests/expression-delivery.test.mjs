@@ -520,6 +520,11 @@ test('pre-insert Voice brief becomes the same persisted companion delivery and i
   })
   assert.equal(persisted.available, true)
   assert.equal(persisted.feedback.semantic_key, brief.semantic_key)
+  assert.match(
+    persisted.feedback.detail_reason,
+    /商户历史|当前记录/,
+    'EXP-005 first-occurrence delivery must explain its deterministic evidence source',
+  )
   assert.notEqual(persisted.candidate_id, brief.candidate_id)
 
   const visibleCompanion = '第一次记录「青禾茶饮」，这家外卖商户是芥子新见到的。'
@@ -555,6 +560,7 @@ test('pre-insert Voice brief becomes the same persisted companion delivery and i
   })
   assert.equal(ack.presentation_target, 'companion_message')
   assert.equal(ack.feedback.emotion_line, visibleCompanion)
+  assert.equal(ack.feedback.detail_reason, composed.feedback.detail_reason)
   assert.equal(state.tables.expression_exposure_events.length, 1)
   assert.deepEqual(state.tables.expression_exposure_events[0].rendered_payload, {
     companion_message: visibleCompanion,
@@ -981,6 +987,7 @@ test('record detail builds reliable feedback for every supported domain without 
     assert.equal(preview.record_kind, item.kind)
     assert.equal(preview.feedback.source, 'expression_planner')
     assert.ok(preview.feedback.emotion_line, item.name)
+    assert.ok(preview.feedback.detail_reason, `${item.name}: Planner feedback must expose an evidence summary`)
     assert.equal(state.shadowReads, 0)
     assert.equal(state.tables.expression_delivery_snapshots.length, 1)
     const snapshot = state.tables.expression_delivery_snapshots[0]

@@ -701,13 +701,48 @@ export function selectSignals(
 // 违规 → 调用方丢弃 AI 文案,退回规则渲染
 // ============================================================
 
-export function extractDigitNumbers(text: string): number[] {
-  const out: number[] = [];
-  for (const m of text.matchAll(/\d+(?:\.\d+)?/g)) {
-    const n = Number(m[0]);
-    if (Number.isFinite(n)) out.push(n);
+interface ExtractedNumber {
+  start: number;
+  end: number;
+  value: number;
+}
+
+function singleChineseDigit(value: string): number | null {
+  if (/^\d$/.test(value)) return Number(value);
+  const digits: Record<string, number> = {
+    "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+  };
+  return value in digits ? digits[value] : null;
+}
+
+function colloquialCurrencyNumbers(text: string): ExtractedNumber[] {
+  const matches: ExtractedNumber[] = [];
+  const pattern = /([一二两三四五六七八九十百千\d]+)\s*(?:元|块)\s*([零一二三四五六七八九\d])(?:\s*(?:角|毛))?/g;
+  for (const match of text.matchAll(pattern)) {
+    const yuan = /^\d+$/.test(match[1]) ? Number(match[1]) : parseChineseCardinal(match[1]);
+    const jiao = singleChineseDigit(match[2]);
+    if (yuan === null || !Number.isFinite(yuan) || jiao === null) continue;
+    const start = match.index ?? 0;
+    matches.push({
+      start,
+      end: start + match[0].length,
+      value: Math.round((yuan + jiao / 10) * 100) / 100,
+    });
   }
-  return out;
+  return matches;
+}
+
+export function extractDigitNumbers(text: string): number[] {
+  const extracted = colloquialCurrencyNumbers(text);
+  for (const match of text.matchAll(/\d+(?:\.\d+)?/g)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    if (extracted.some((item) => start >= item.start && end <= item.end)) continue;
+    const value = Number(match[0]);
+    if (Number.isFinite(value)) extracted.push({ start, end, value });
+  }
+  return extracted.sort((left, right) => left.start - right.start).map((item) => item.value);
 }
 
 export interface NumberValidationResult {
@@ -926,9 +961,21 @@ function boundStatisticalClaims(text: string): BoundStatisticalClaim[] {
     if (scope === "record:current" && !match[1] && meaning === "occurrence_count") continue;
     claims.push({ value, meaning, unit, scope });
   }
+  const colloquialAmounts = colloquialCurrencyNumbers(compact);
+  for (const amount of colloquialAmounts) {
+    const claim = {
+      value: amount.value,
+      meaning: amountMeaning(compact, amount.start),
+      unit: "currency" as const,
+      scope: scopeNearNumber(compact, amount.start, markers),
+    };
+    if (claimIsStatistical(claim)) claims.push(claim);
+  }
   const amountPattern = /([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?:元|块钱|块)/g;
   for (const match of compact.matchAll(amountPattern)) {
     const start = match.index ?? 0;
+    const end = start + match[0].length;
+    if (colloquialAmounts.some((amount) => start >= amount.start && end <= amount.end)) continue;
     const value = numberValue(match[1]);
     if (value === null) continue;
     const claim = {
@@ -1068,6 +1115,53 @@ function signalSupportsStatisticalClaim(text: string, signals: DomainSignal[]): 
   });
 }
 
+const MEAL_CLAIM_PATTERN = /(?:早餐|早饭|午餐|午饭|晚餐|晚饭|夜宵|宵夜|加餐|正餐|这一顿|这顿|本餐|用餐|吃饭|开饭|填饱肚子|趁热(?:吃|喝)|好好吃(?:饭|一顿)|吃(?:点|一口|一顿)|喝(?:点|一口))/;
+const MEAL_SIGNAL_KINDS = new Set([
+  "meal_vs_baseline",
+  "dish_ritual",
+  "late_snack_streak",
+]);
+
+function recordFacts(recordFactsJson: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(recordFactsJson);
+    return isObj(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function hasStructuredMealObject(value: unknown): boolean {
+  if (!isObj(value)) return false;
+  const mealType = str(value.meal_type);
+  if (mealType && ["breakfast", "lunch", "dinner", "snack", "早餐", "午餐", "晚餐", "加餐"].includes(mealType)) {
+    return true;
+  }
+  if (value.is_food === true) return true;
+  for (const key of ["dishes", "food_items"]) {
+    const items = value[key];
+    if (Array.isArray(items) && items.some((item) =>
+      typeof item === "string" ? item.trim().length > 0 : isObj(item) && !!str(item.name)
+    )) return true;
+  }
+  return !!str(value.dish_name) || !!str(value.food_name) || !!str(value.meal_name);
+}
+
+function hasMealEvidence(recordFactsJson: string, signals: DomainSignal[]): boolean {
+  const facts = recordFacts(recordFactsJson);
+  const recordType = str(facts.record_type)?.toLocaleLowerCase();
+  const domainKey = str(facts.domain_key)?.toLocaleLowerCase();
+  const category = str(facts.category)?.toLocaleLowerCase();
+  const imageType = str(facts.image_type)?.toLocaleLowerCase();
+  if (recordType === "food" || domainKey === "food") return true;
+  if (category && ["food", "餐饮", "美食", "餐厅"].includes(category)) return true;
+  if (imageType === "food_photo") return true;
+  if (hasStructuredMealObject(facts) || hasStructuredMealObject(facts.payload)) return true;
+  return signals.some((signal) =>
+    MEAL_SIGNAL_KINDS.has(signal.kind) || /(?:本次(?:早餐|午餐|晚餐|加餐)|菜品：)/.test(signal.fact)
+  );
+}
+
 // allowedSources:信号 fact 文本 + 本条记录字段 JSON。数字必须与代码事实一致；
 // 不再把金额/均值自动取整，避免模型把 9.54 元改写成 10 元后仍被放行。
 // 计数表达("第X次/连续X天")单独用严格白名单 countNumbers:
@@ -1140,6 +1234,13 @@ export function validateModelTone(
     if (badIndexes.has(index)) return;
     if (signals.length > 0 && signalSupportsStatisticalClaim(text, signals)) return;
     violations.push(`模型试图改写代码统计口径: "${text.slice(0, 40)}"`);
+    badIndexes.add(index);
+  });
+
+  const mealEvidenceAvailable = hasMealEvidence(recordFactsJson, signals);
+  generatedTexts.forEach((text, index) => {
+    if (!text || mealEvidenceAvailable || !MEAL_CLAIM_PATTERN.test(text)) return;
+    violations.push(`餐次或进食断言缺少独立对象证据: "${text.slice(0, 40)}"`);
     badIndexes.add(index);
   });
 

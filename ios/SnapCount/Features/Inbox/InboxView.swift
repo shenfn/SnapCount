@@ -2013,18 +2013,25 @@ private struct PendingExpenseResolutionView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             header(detail)
                             if let companionMessage = detail.companionMessage, !companionMessage.isEmpty {
+                                let supportingFeedback = NativeRecordExpressionFeedbackPolicy.companionFeedbackToRender(
+                                    companionMessage: companionMessage,
+                                    feedback: detail.voiceAiFeedback
+                                )
+                                let plannerInteractionFeedback = NativeRecordExpressionFeedbackPolicy.companionFeedbackToReview(
+                                    companionMessage: companionMessage,
+                                    feedback: detail.expressionPlannerAiFeedback
+                                )
                                 companionSection(
                                     companionMessage,
-                                    feedback: NativeRecordExpressionFeedbackPolicy.companionFeedbackToReview(
-                                        companionMessage: companionMessage,
-                                        feedback: detail.aiFeedback
-                                    ),
+                                    supportingFeedback: supportingFeedback ?? plannerInteractionFeedback,
+                                    interactionFeedback: plannerInteractionFeedback ?? supportingFeedback,
                                     viewportFrame: scrollViewport.frame(in: .global)
                                 )
                             }
                             if let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToRender(
                                 companionMessage: detail.companionMessage,
-                                feedback: detail.aiFeedback
+                                feedback: detail.expressionPlannerAiFeedback ?? detail.voiceAiFeedback,
+                                companionFeedback: detail.voiceAiFeedback
                             ) {
                                 NativeAIFeedbackCard(
                                     feedback: feedback,
@@ -2153,7 +2160,8 @@ private struct PendingExpenseResolutionView: View {
 
     private func companionSection(
         _ message: String,
-        feedback: NativeAIFeedback?,
+        supportingFeedback: NativeAIFeedback?,
+        interactionFeedback: NativeAIFeedback?,
         viewportFrame: CGRect
     ) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -2165,8 +2173,9 @@ private struct PendingExpenseResolutionView: View {
                         Text("AI 陪伴")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.secondary)
-                        if let feedback, !feedback.badge.isEmpty {
-                            Text(feedback.badge)
+                        if let badgeFeedback = supportingFeedback ?? interactionFeedback,
+                           !badgeFeedback.badge.isEmpty {
+                            Text(badgeFeedback.badge)
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(JieziTheme.brand)
                         }
@@ -2175,24 +2184,26 @@ private struct PendingExpenseResolutionView: View {
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let feedback {
+                if let supportingFeedback {
                     NativeAIFeedbackSupportingContent(
-                        feedback: feedback,
+                        feedback: supportingFeedback,
                         primaryMessage: message,
                         compact: true
                     )
+                }
+                if let interactionFeedback {
                     NativeAIFeedbackCard(
-                        feedback: feedback,
+                        feedback: interactionFeedback,
                         compact: true,
                         reviewOnly: true,
-                        reviewable: feedback.isReviewable,
+                        reviewable: interactionFeedback.isReviewable,
                         reviewState: appState.recordFeedbackState,
                         exposureState: appState.recordExpressionPlanExposureState,
                         onRetryExposure: {
                             appState.setRecordExpressionPlanCardVisible(
                                 true,
                                 reference: reference,
-                                feedbackIdentity: feedback.renderIdentity
+                                feedbackIdentity: interactionFeedback.renderIdentity
                             )
                             Task {
                                 await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
@@ -2208,19 +2219,20 @@ private struct PendingExpenseResolutionView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(JieziTheme.brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
         .onNativeAIFeedbackCardVisibilityChange(in: viewportFrame) { isVisible in
-            guard let feedback, feedback.source == "expression_planner" else { return }
+            guard let interactionFeedback,
+                  interactionFeedback.source == "expression_planner" else { return }
             appState.setRecordExpressionPlanCardVisible(
                 isVisible,
                 reference: reference,
-                feedbackIdentity: feedback.renderIdentity
+                feedbackIdentity: interactionFeedback.renderIdentity
             )
-            if isVisible, feedback.requiresExposureAcknowledgement {
+            if isVisible, interactionFeedback.requiresExposureAcknowledgement {
                 Task {
                     await appState.acknowledgeRecordExpressionPlanIfVisible(reference: reference)
                 }
             }
         }
-        .id(feedback.map { "companion-\($0.renderIdentity)" } ?? "companion-message")
+        .id((interactionFeedback ?? supportingFeedback).map { "companion-\($0.renderIdentity)" } ?? "companion-message")
     }
 
     @ViewBuilder
