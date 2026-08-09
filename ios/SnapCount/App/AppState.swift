@@ -1396,17 +1396,16 @@ final class AppState: ObservableObject {
         }
         if !force, let cached = recordDetailCache[canonicalReference] {
             selectedRecordDetail = cached
-            if cached.imagePath == nil || cached.imageURL != nil || cached.imageLoadError {
-                if let session = try? await validSession() {
-                    await prepareRecordExpressionPlan(
-                        for: cached,
-                        canonicalReference: canonicalReference,
-                        session: session,
-                        generation: generation
-                    )
-                }
-                return
+            if let session = try? await validSession() {
+                hydrateRecordDetailImageIfNeeded(cached, reference: canonicalReference, session: session, generation: generation)
+                await prepareRecordExpressionPlan(
+                    for: cached,
+                    canonicalReference: canonicalReference,
+                    session: session,
+                    generation: generation
+                )
             }
+            return
         }
         if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
             selectedRecordDetail = nil
@@ -1421,6 +1420,7 @@ final class AppState: ObservableObject {
             recordDetailCache[canonicalReference] = mergedDetail
             guard activeRecordReference == canonicalReference else { return }
             selectedRecordDetail = mergedDetail
+            hydrateRecordDetailImageIfNeeded(mergedDetail, reference: canonicalReference, session: session, generation: generation)
             await prepareRecordExpressionPlan(
                 for: mergedDetail,
                 canonicalReference: canonicalReference,
@@ -1430,6 +1430,27 @@ final class AppState: ObservableObject {
         } catch {
             if activeRecordReference == canonicalReference {
                 recordDetailMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func hydrateRecordDetailImageIfNeeded(
+        _ detail: NativeRecordDetail,
+        reference: String,
+        session: SupabaseAuthSession?,
+        generation: Int
+    ) {
+        guard detail.imagePath != nil, detail.imageURL == nil, let session else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let hydrated = try? await self.recordRepository.hydrateDetailImage(detail, accessToken: session.accessToken) else { return }
+            guard self.userStateGeneration == generation,
+                  self.activeRecordReference == reference,
+                  self.isSignedIn,
+                  self.currentUserId == session.user.id else { return }
+            self.recordDetailCache[reference] = self.detailPreservingExpressionFeedback(hydrated)
+            if self.selectedRecordDetail?.id == hydrated.id {
+                self.selectedRecordDetail = hydrated
             }
         }
     }

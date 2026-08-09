@@ -1,6 +1,6 @@
 <template>
-  <div v-if="feedback" class="ai-feedback-card" :class="[bandClass, { compact, 'review-only': reviewOnly }]">
-    <div v-if="!reviewOnly" class="ai-feedback-head">
+  <div v-if="feedback" class="ai-feedback-card" :class="[bandClass, { compact, embedded, 'review-only': reviewOnly }]">
+    <div v-if="!reviewOnly && !embedded" class="ai-feedback-head">
       <div class="ai-feedback-icon">{{ feedback.icon || '✨' }}</div>
       <div class="ai-feedback-main">
         <div class="ai-feedback-kicker">{{ kicker }}</div>
@@ -8,7 +8,8 @@
       </div>
       <div class="ai-feedback-band">{{ bandLabel }}</div>
     </div>
-    <div v-if="!reviewOnly && feedback.emotion_line" class="ai-feedback-emotion">{{ feedback.emotion_line }}</div>
+    <div v-if="!reviewOnly && embedded && feedback.badge" class="ai-feedback-embedded-badge">{{ feedback.badge }}</div>
+    <div v-if="!reviewOnly && showEmotion" class="ai-feedback-emotion">{{ feedback.emotion_line }}</div>
     <div v-if="!reviewOnly && feedback.utility_line" class="ai-feedback-action">{{ feedback.utility_line }}</div>
     <button
       v-if="!reviewOnly && feedback.detail_reason && compact"
@@ -77,6 +78,8 @@ const props = defineProps({
   reviewUnavailable: { type: Boolean, default: false },
   reviewRetrying: { type: Boolean, default: false },
   reviewOnly: { type: Boolean, default: false },
+  embedded: { type: Boolean, default: false },
+  primaryText: { type: String, default: '' },
 })
 
 const emit = defineEmits(['submit-review', 'retry-review'])
@@ -132,6 +135,10 @@ const bandLabel = computed(() => {
 })
 
 const timingLabel = computed(() => props.feedback?.timing_signal?.label || '')
+const showEmotion = computed(() => {
+  const emotion = String(props.feedback?.emotion_line || '').trim()
+  return Boolean(emotion) && emotion !== String(props.primaryText || '').trim()
+})
 </script>
 
 <style scoped>
@@ -176,6 +183,25 @@ const timingLabel = computed(() => props.feedback?.timing_signal?.label || '')
 .ai-feedback-card.band-ritual {
   border-color: rgba(37, 99, 235, 0.18);
   background: linear-gradient(135deg, rgba(219, 234, 254, 0.88), rgba(255, 255, 255, 0.96));
+}
+
+.ai-feedback-card.embedded,
+.ai-feedback-card.embedded.band-positive,
+.ai-feedback-card.embedded.band-watch,
+.ai-feedback-card.embedded.band-recover,
+.ai-feedback-card.embedded.band-ritual {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ai-feedback-embedded-badge {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--primary);
 }
 
 .ai-feedback-head {

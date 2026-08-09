@@ -38,7 +38,7 @@ import {
   type FinancialPerceptualCandidate,
   type RankedPerceptualCandidate,
 } from "./duplicate-review.ts";
-import { mergePlannerNotification, uniqueNotificationLines } from "./notification-text.ts";
+import { resolvePlannerNotification, uniqueNotificationLines } from "./notification-text.ts";
 import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories.js";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
@@ -7003,19 +7003,12 @@ Deno.serve(async (req) => {
         record_type: builtinKey,
         ai_ok: aiOk,
         message: `✓ ${domainNameFromKey(builtinKey) ?? "记录"}已归档`,
-         notification: _domainPlannerDelivery?.available
-           ? mergePlannerNotification(
-             _domainPlannerDelivery.message ?? null,
-             _domainDoneNotif,
-             _domainPlannerDelivery.presentation_target === "companion_message" ? companionMessage : null,
-             {
-               companion_claim: _domainPlannerDelivery.presentation_target === "companion_message"
-                 ? { semantic_key: _domainPlannerDelivery.semantic_key, claim_fingerprint: _domainPlannerDelivery.claim_fingerprint }
-                 : null,
-               planner_claim: { semantic_key: _domainPlannerDelivery.semantic_key, claim_fingerprint: _domainPlannerDelivery.claim_fingerprint },
-             },
-           )
-           : _domainPlannerDelivery ? _domainDoneNotif : _domainLegacyNotif,
+        notification: resolvePlannerNotification(
+          _domainPlannerDelivery,
+          _domainDoneNotif,
+          _domainLegacyNotif,
+          companionMessage,
+        ),
         time_context: timeContext,
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
@@ -7330,19 +7323,12 @@ Deno.serve(async (req) => {
         record_type: "income",
         ai_ok: aiOk,
         message: "✓ 收入已记录",
-         notification: _incomePlannerDelivery?.available
-           ? mergePlannerNotification(
-             _incomePlannerDelivery.message ?? null,
-             _incomeNotif,
-             _incomePlannerDelivery.presentation_target === "companion_message" ? companionMessage : null,
-             {
-               companion_claim: _incomePlannerDelivery.presentation_target === "companion_message"
-                 ? { semantic_key: _incomePlannerDelivery.semantic_key, claim_fingerprint: _incomePlannerDelivery.claim_fingerprint }
-                 : null,
-               planner_claim: { semantic_key: _incomePlannerDelivery.semantic_key, claim_fingerprint: _incomePlannerDelivery.claim_fingerprint },
-             },
-           )
-           : _incomePlannerDelivery ? _incomeNotif : _incomeLegacyNotif,
+        notification: resolvePlannerNotification(
+          _incomePlannerDelivery,
+          _incomeNotif,
+          _incomeLegacyNotif,
+          companionMessage,
+        ),
         time_context: timeContext,
         companion_message: companionMessage,
         ai_feedback: aiFeedback,
@@ -7647,19 +7633,12 @@ Deno.serve(async (req) => {
       message: possibleDuplicate
         ? `✓ 已记账（⚠ 3 分钟内有相同消费，请确认是否重复，参考 id: ${dupRefId}）`
         : row.status === "done" ? "✓ 已记账" : "⚠ 信息不全，请打开 PWA 补全",
-       notification: _expensePlannerDelivery?.available
-         ? mergePlannerNotification(
-           _expensePlannerDelivery.message ?? null,
-           _expenseNotif,
-           _expensePlannerDelivery.presentation_target === "companion_message" ? companionMessage : null,
-           {
-             companion_claim: _expensePlannerDelivery.presentation_target === "companion_message"
-               ? { semantic_key: _expensePlannerDelivery.semantic_key, claim_fingerprint: _expensePlannerDelivery.claim_fingerprint }
-               : null,
-             planner_claim: { semantic_key: _expensePlannerDelivery.semantic_key, claim_fingerprint: _expensePlannerDelivery.claim_fingerprint },
-           },
-         )
-         : _expensePlannerDelivery ? _expenseNotif : _expenseLegacyNotif,
+      notification: resolvePlannerNotification(
+        _expensePlannerDelivery,
+        _expenseNotif,
+        _expenseLegacyNotif,
+        companionMessage,
+      ),
       time_context: timeContext,
       companion_message: companionMessage,
       ai_feedback: aiFeedback,
