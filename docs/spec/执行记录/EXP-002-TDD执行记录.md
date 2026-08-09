@@ -15,6 +15,6 @@
 - 绿灯结果：`npx --yes deno test --no-lock supabase/functions/ingest-receipt/time_test.ts supabase/functions/ingest-receipt/time-language_test.ts`，15/15 通过。
 - 本分支最终回归：Edge 相关 Deno 测试 85/85、Planner 全量 176/176、PWA 生产构建和 `git diff --check` 均通过。
 - PWA/iOS 差异：时间文案在 Edge 持久化前统一清洗，客户端只展示结果，无需重复解析。
-- GitHub CI 结果：未运行。
+- GitHub CI 结果：PR #32 的 Release Validation（run `31314020801`）与 iOS Build（run `31314020808`）全部通过。
 - 未解决风险：自然语言钟点无法穷举；本轮采用有限、可审计的高频短语语法，未识别表达继续由宽时段门禁处理。
-- 对应提交：随本次 PR 提交。
+- 对应提交：`1bc416e`。

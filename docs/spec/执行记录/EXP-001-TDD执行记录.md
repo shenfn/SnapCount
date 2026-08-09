@@ -16,6 +16,6 @@
 - 绿灯结果：定向测试最初 23/23 通过；补充“非行政营销前缀不得合并”反例后，Planner 全量 `node --test tools/ai-validation/expression-planner/tests` 为 174/174 通过。
 - 本分支最终回归：Edge 相关 Deno 测试 85/85、Planner 全量 176/176、PWA 生产构建和 `git diff --check` 均通过。
 - PWA/iOS 差异：实体事实由 Planner 权威层证明；客户端本场景无需重复计算。
-- GitHub CI 结果：未运行。
+- GitHub CI 结果：PR #32 的 Release Validation（run `31314020801`）与 iOS Build（run `31314020808`）全部通过。
 - 未解决风险：本轮只识别有限法律后缀和行政前缀；品牌门店、分公司和非标准简称仍保持独立，需通过确认别名或后续独立场景处理。
-- 对应提交：随本次 PR 提交。
+- 对应提交：`1bc416e`。

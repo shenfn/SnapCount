@@ -15,6 +15,6 @@
 - 绿灯结果：`node --test tools/ai-validation/expression-planner/tests/expression-delivery.test.mjs`，25/25 通过。
 - 本分支最终回归：Edge 相关 Deno 测试 85/85、Planner 全量 176/176、PWA 生产构建和 `git diff --check` 均通过。
 - PWA/iOS 差异：服务端统一生成依据；iOS 另用客户端场景保护异步反馈槽，PWA 只消费字段。
-- GitHub CI 结果：未运行。
+- GitHub CI 结果：PR #32 的 Release Validation（run `31314020801`）与 iOS Build（run `31314020808`）全部通过。
 - 未解决风险：未知新候选会使用通用可追溯依据，后续新增高价值语义时应补充更具体映射。
-- 对应提交：随本次 PR 提交。
+- 对应提交：`1bc416e`。

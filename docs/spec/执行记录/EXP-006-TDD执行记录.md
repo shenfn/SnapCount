@@ -15,6 +15,6 @@
 - 绿灯结果：Windows 静态契约 `node --test tools/ai-validation/expression-planner/tests/ios-feedback-slot-contract.test.mjs` 1/1 通过；新增 XCTest 覆盖 Planner 主陪伴与独立卡片两条路径，待 macOS CI 执行。
 - 本分支最终回归：Edge 相关 Deno 测试 85/85、Planner 全量 176/176、PWA 生产构建和 `git diff --check` 均通过；这些本地结果不替代 Swift 编译与 XCTest。
 - PWA/iOS 差异：PWA 已有独立 `legacyAiFeedback` / `plannerAiFeedback`；本轮只补齐 iOS 同一契约。
-- GitHub CI 结果：未运行。
+- GitHub CI 结果：PR #32 的 macOS SwiftUI Build、XCTest 和 iOS Build Gate（run `31314020808`）通过；Release Validation（run `31314020801`）通过。
 - 未解决风险：Windows 无法执行 XCTest，最终 Swift 行为以 PR 的 macOS CI 为准。
-- 对应提交：随本次 PR 提交。
+- 对应提交：`1bc416e`。
