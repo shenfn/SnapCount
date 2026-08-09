@@ -116,12 +116,12 @@ test('PWA keeps companion-target review controls inside companion while card tar
   ])
 
   const detailCompanionIndex = detail.indexOf('class="record-detail-companion"')
-  const detailCompanionReviewIndex = detail.indexOf('v-if="companionReviewFeedback"', detailCompanionIndex)
+  const detailCompanionReviewIndex = detail.indexOf('v-if="companionSupportingFeedback"', detailCompanionIndex)
   const detailPlannerIndex = detail.indexOf('v-if="aiFeedback"', detailCompanionReviewIndex)
   assert.ok(detailCompanionIndex >= 0, 'record detail must render companion copy')
   assert.ok(detailCompanionReviewIndex > detailCompanionIndex, 'companion review controls must stay in the companion container')
   assert.ok(detailPlannerIndex > detailCompanionReviewIndex, 'feedback-card targets must retain an independent slot')
-  assert.match(detail, /v-if="companionReviewFeedback"[\s\S]*?review-only/)
+  assert.match(detail, /v-if="companionSupportingFeedback"[\s\S]*?:reviewable="companionFeedbackReviewable"[\s\S]*?embedded/)
 
   const pendingCompanionIndex = pending.indexOf('class="pending-companion"')
   const pendingCompanionReviewIndex = pending.indexOf('v-if="companionReviewFeedback"', pendingCompanionIndex)
