@@ -717,6 +717,91 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
+    func testEXP008IndependentPlannerCardKeepsVoiceSupportStable() throws {
+        let voice = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "emotion_line": AnyCodable("第一次打卡新店铺，这份探索的小确幸很踏实。"),
+            "utility_line": AnyCodable("今晚吃口热乎的鲜肉饼。"),
+            "detail_reason": AnyCodable("来自本次记录的商户和发生时间。")
+        ]))
+        let planner = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("fact:merchant:first"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "emotion_line": AnyCodable("首次记录这家店。"),
+            "detail_reason": AnyCodable("这是该商户的首次可见记录。")
+        ]))
+
+        let selected = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
+            existingVoice: voice,
+            plannerPreview: planner,
+            companionMessage: "第一次遇见这家店。"
+        )
+
+        XCTAssertEqual(selected, voice)
+        XCTAssertNotEqual(selected, planner)
+    }
+
+    func testEXP008FeedbackCardsAppendPlannerWithoutReplacingVoice() throws {
+        let voice = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "emotion_line": AnyCodable("这笔记录有自己的节奏。"),
+            "utility_line": AnyCodable("保留这份记录，方便之后回看。")
+        ]))
+        let planner = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "candidate_id": AnyCodable("hypothesis:cross-record"),
+            "emotion_line": AnyCodable("前后两条记录可能接成一条生活安排。"),
+            "detail_reason": AnyCodable("两条记录间隔较短且对象线索重合。")
+        ]))
+
+        let cards = NativeRecordExpressionFeedbackPolicy.feedbackCardsToRender(
+            companionMessage: nil,
+            voiceFeedback: voice,
+            plannerFeedback: planner
+        )
+
+        XCTAssertEqual(cards.count, 2)
+        XCTAssertEqual(cards.first, voice)
+        XCTAssertEqual(cards.last, planner)
+    }
+
+    func testEXP008ReviewTargetsTheCardTheUserActuallySelected() throws {
+        let voice = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "emotion_line": AnyCodable("Voice 内容")
+        ]))
+        let planner = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "candidate_id": AnyCodable("candidate-1"),
+            "exposure_event_id": AnyCodable("exposure-1"),
+            "emotion_line": AnyCodable("Planner 内容")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackForReview(
+                voiceFeedback: voice,
+                plannerFeedback: planner,
+                fallbackFeedback: nil,
+                renderIdentity: voice.renderIdentity
+            ),
+            voice
+        )
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.feedbackForReview(
+                voiceFeedback: voice,
+                plannerFeedback: planner,
+                fallbackFeedback: nil,
+                renderIdentity: planner.renderIdentity
+            ),
+            planner
+        )
+    }
+
     func testLegacyFeedbackIsHiddenWhenRecordHasCompanionMessage() throws {
         let companionFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),

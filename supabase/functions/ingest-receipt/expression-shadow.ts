@@ -1,5 +1,6 @@
 import {
   buildDataPlannerSourceRecord,
+  buildCrossRecordSourceRecord,
   buildExpressionShadowPlan,
   buildGenericExpressionShadowPlan,
   buildIncomePlannerSourceRecord,
@@ -472,12 +473,13 @@ export async function persistPlannerExposureEvents(
 async function processExpenseShadow(supabase: ShadowDatabaseClient, params: { eventKey: string; userId: string; recordId: string; occurredAt: string | null; collectorResult: Record<string, unknown> }): Promise<void> {
   try {
     const { data, error } = await supabase.from("transactions")
-      .select("id,transaction_date,transaction_time,occurred_at,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash")
+      .select("id,transaction_date,transaction_time,occurred_at,created_at,amount,merchant_name,category,platform,payment_method,note,status,type,staging_record_id,image_hash")
       .eq("user_id", params.userId).eq("type", "expense")
       .order("occurred_at", { ascending: false }).order("transaction_date", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
+    const relatedRecords = await loadCrossDomainRecords(supabase, params.userId);
     const personalization = await loadPlannerPersonalization(supabase, params.userId);
-    const plan = buildExpressionShadowPlan({ transactions: data ?? [], currentRecordId: params.recordId, occurredAt: params.occurredAt, ...personalization });
+    const plan = buildExpressionShadowPlan({ transactions: data ?? [], currentRecordId: params.recordId, occurredAt: params.occurredAt, relatedRecords, ...personalization });
     await persistShadowPlan(supabase, params, plan as Record<string, unknown>);
   } catch (error) { await persistPlannerError(supabase, params.eventKey, error); }
 }
@@ -489,8 +491,9 @@ async function processIncomeShadow(supabase: ShadowDatabaseClient, params: { eve
       .eq("user_id", params.userId).order("occurred_at", { ascending: false }).order("income_date", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
     const records = (data ?? []).map(buildIncomePlannerSourceRecord);
+    const relatedRecords = await loadCrossDomainRecords(supabase, params.userId);
     const personalization = await loadPlannerPersonalization(supabase, params.userId);
-    const plan = buildGenericExpressionShadowPlan({ domainKey: "income", records, currentRecordId: params.recordId, ...personalization });
+    const plan = buildGenericExpressionShadowPlan({ domainKey: "income", records, currentRecordId: params.recordId, relatedRecords, ...personalization });
     await persistShadowPlan(supabase, params, plan as Record<string, unknown>);
   } catch (error) { await persistPlannerError(supabase, params.eventKey, error); }
 }
@@ -502,10 +505,33 @@ async function processBuiltinShadow(supabase: ShadowDatabaseClient, params: { ev
       .eq("user_id", params.userId).eq("domain_key", params.domainKey).order("occurred_at", { ascending: false }).limit(500);
     if (error) throw new Error(error.message);
     const records = (data ?? []).map(buildDataPlannerSourceRecord);
+    const relatedRecords = await loadCrossDomainRecords(supabase, params.userId);
     const personalization = await loadPlannerPersonalization(supabase, params.userId);
-    const plan = buildGenericExpressionShadowPlan({ domainKey: params.domainKey, records, currentRecordId: params.recordId, ...personalization });
+    const plan = buildGenericExpressionShadowPlan({ domainKey: params.domainKey, records, currentRecordId: params.recordId, relatedRecords, ...personalization });
     await persistShadowPlan(supabase, params, plan as Record<string, unknown>);
   } catch (error) { await persistPlannerError(supabase, params.eventKey, error); }
+}
+
+async function loadCrossDomainRecords(supabase: ShadowDatabaseClient, userId: string): Promise<import("./expression-shadow-planner.ts").ShadowRelatedRecord[]> {
+  const [transactions, income, data] = await Promise.all([
+    supabase.from("transactions")
+      .select("id,occurred_at,created_at,merchant_name,note,status,type")
+      .eq("user_id", userId).eq("type", "expense").order("occurred_at", { ascending: false }).limit(250),
+    supabase.from("income_records")
+      .select("id,occurred_at,created_at,source_name")
+      .eq("user_id", userId).order("occurred_at", { ascending: false }).limit(250),
+    supabase.from("data_records")
+      .select("id,domain_key,occurred_at,created_at,title,summary,payload_jsonb")
+      .eq("user_id", userId).order("occurred_at", { ascending: false }).limit(500),
+  ]);
+  for (const result of [transactions, income, data]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+  return [
+    ...(transactions.data ?? []).map((row: Record<string, unknown>) => buildCrossRecordSourceRecord(row, "transactions")),
+    ...(income.data ?? []).map((row: Record<string, unknown>) => buildCrossRecordSourceRecord(row, "income_records")),
+    ...(data.data ?? []).map((row: Record<string, unknown>) => buildCrossRecordSourceRecord(row, "data_records")),
+  ];
 }
 function baselineSemanticKey(recordType: string | null, badge: string): string {
   const known: Record<string, string> = {

@@ -281,6 +281,19 @@
         </div>
 
         <AiFeedbackCard
+          v-if="legacyFeedbackCard"
+          :key="legacyFeedbackCardKey"
+          :feedback="legacyFeedbackCard"
+          :reviewable="!plannerAiFeedback && Boolean(legacyFeedbackCard)"
+          :review-state="!plannerAiFeedback ? feedbackReviewState : ''"
+          :submitting="!plannerAiFeedback ? feedbackReviewSubmitting : false"
+          :exposure-event-id="''"
+          compact
+          class="pending-legacy-ai-feedback"
+          @submit-review="submitFeedbackReview"
+        />
+
+        <AiFeedbackCard
           v-if="aiFeedback"
           ref="pendingAiFeedbackCardRef"
           :key="aiFeedbackCardKey"
@@ -335,6 +348,7 @@ import {
 } from '../utils/expressionDelivery'
 import {
   companionMessageMatchesDelivery,
+  feedbackForCompanion,
   feedbackToRender,
   isCompanionMessageDelivery,
   isPlannerDeliveryReviewable,
@@ -397,6 +411,23 @@ const aiFeedback = computed(() => (
   })
   || (!companionMessage.value && plannerLookupSettled.value ? legacyAiFeedback.value : null)
 ))
+const legacyFeedbackCard = computed(() => {
+  const legacy = legacyAiFeedback.value
+  if (!legacy || aiFeedback.value === legacy) return null
+  const supporting = feedbackToCompanion({
+    companionMessage: companionMessage.value,
+    feedback: legacy,
+  })
+  if (supporting) return null
+  return feedbackToRender({ companionMessage: '', feedback: legacy })
+})
+const legacyFeedbackCardKey = computed(() => {
+  const recordId = expressionRecordId.value || 'none'
+  const fingerprint = legacyFeedbackCard.value?.rendered_text_fingerprint
+    || legacyFeedbackCard.value?.emotion_line
+    || 'legacy'
+  return `pending-ai-feedback-${recordId}-legacy-${fingerprint}`
+})
 const companionReviewFeedback = computed(() => (
   plannerTargetsCompanion.value
     && companionMessageMatchesDelivery({

@@ -1194,7 +1194,9 @@ final class AppState: ObservableObject {
 
     func openPendingExpense(_ pending: NativePendingExpense) {
         selectedTab = .inbox
-        inboxPath = NavigationPath([NativeInboxRoute.record(reference: pending.reference)])
+        // Keep completion inside the inbox queue. The card opens the inline
+        // editor, while the queue remains responsible for next-item routing.
+        inboxPath = NavigationPath([NativeInboxRoute.category(filter: .pendingExpense)])
     }
 
     func openInbox(filter: NativeInboxFilter) {
@@ -1498,18 +1500,19 @@ final class AppState: ObservableObject {
         if let pending = pendingRecordExpressionPlans[canonicalReference],
            pending.userId == session.user.id,
            pending.generation == generation {
-            let selected = NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
-                existing: baseDetail.aiFeedback,
-                preview: pending.plan.feedback,
+            let selected = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
+                existingVoice: baseDetail.voiceAiFeedback,
+                plannerPreview: pending.plan.feedback,
                 companionMessage: baseDetail.companionMessage
             )
-            if selected == pending.plan.feedback {
-                baseDetail.aiFeedback = selected
-                baseDetail.plannerAiFeedback = pending.plan.feedback
-                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
-            } else {
+            let plannerIsIndependentCard = pending.plan.feedback.presentationTarget == "feedback_card"
+            if !plannerIsIndependentCard, selected != pending.plan.feedback {
                 discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
                 baseDetail.aiFeedback = selected
+                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
+            } else {
+                baseDetail.aiFeedback = selected
+                baseDetail.plannerAiFeedback = pending.plan.feedback
                 publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
             }
             return
@@ -1571,16 +1574,17 @@ final class AppState: ObservableObject {
             ],
             pending: nil
         )
-        let selected = NativeRecordExpressionFeedbackPolicy.feedbackToDisplay(
-            existing: previousFeedback,
-            preview: preview.feedback,
+        let selected = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
+            existingVoice: baseDetail.voiceAiFeedback ?? previousFeedback,
+            plannerPreview: preview.feedback,
             companionMessage: baseDetail.companionMessage
         )
         baseDetail.aiFeedback = selected
-        if selected == preview.feedback {
+        let plannerIsIndependentCard = preview.feedback.presentationTarget == "feedback_card"
+        if selected == preview.feedback || plannerIsIndependentCard {
             baseDetail.plannerAiFeedback = preview.feedback
         }
-        guard selected == preview.feedback else {
+        guard selected == preview.feedback || plannerIsIndependentCard else {
             publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
             recordExpressionPlanExposureState = .idle
             return
@@ -1725,8 +1729,10 @@ final class AppState: ObservableObject {
             pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
         }
         guard var finalDetail = recordDetailCache[canonicalReference] else { return }
-        finalDetail.aiFeedback = acknowledgedFeedback
         finalDetail.plannerAiFeedback = acknowledgedFeedback
+        finalDetail.aiFeedback = acknowledgedFeedback.presentationTarget == "feedback_card"
+            ? (finalDetail.voiceAiFeedback ?? acknowledgedFeedback)
+            : acknowledgedFeedback
         recordDetailCache[canonicalReference] = finalDetail
         if activeRecordReference == canonicalReference,
            selectedRecordDetail.map({ NativeRecordReference($0.id).canonicalValue == canonicalReference }) == true {
@@ -1741,8 +1747,11 @@ final class AppState: ObservableObject {
         previousFeedback: NativeAIFeedback?,
         canonicalReference: String
     ) {
-        if var cached = recordDetailCache[canonicalReference], cached.aiFeedback == previewFeedback {
-            cached.aiFeedback = previousFeedback
+        if var cached = recordDetailCache[canonicalReference],
+           cached.aiFeedback == previewFeedback || cached.plannerAiFeedback == previewFeedback {
+            if cached.aiFeedback == previewFeedback {
+                cached.aiFeedback = previousFeedback
+            }
             if cached.plannerAiFeedback == previewFeedback {
                 cached.plannerAiFeedback = nil
             }
@@ -1750,8 +1759,10 @@ final class AppState: ObservableObject {
         }
         if activeRecordReference == canonicalReference,
            var selected = selectedRecordDetail,
-           selected.aiFeedback == previewFeedback {
-            selected.aiFeedback = previousFeedback
+           selected.aiFeedback == previewFeedback || selected.plannerAiFeedback == previewFeedback {
+            if selected.aiFeedback == previewFeedback {
+                selected.aiFeedback = previousFeedback
+            }
             if selected.plannerAiFeedback == previewFeedback {
                 selected.plannerAiFeedback = nil
             }
@@ -1769,8 +1780,11 @@ final class AppState: ObservableObject {
             && currentUserId == pending.userId
             && activeRecordReference == canonicalReference
             && selectedRecordDetail.map {
-                NativeRecordReference($0.id).canonicalValue == canonicalReference
-                    && $0.aiFeedback == pending.plan.feedback
+                guard NativeRecordReference($0.id).canonicalValue == canonicalReference else { return false }
+                if pending.plan.feedback.presentationTarget == "feedback_card" {
+                    return $0.plannerAiFeedback == pending.plan.feedback
+                }
+                return $0.aiFeedback == pending.plan.feedback
             } == true
     }
 
@@ -1978,11 +1992,19 @@ final class AppState: ObservableObject {
         }
     }
 
-    func submitRecordFeedback(choice: NativeAIFeedbackReviewChoice, freeText: String) async {
+    func submitRecordFeedback(
+        choice: NativeAIFeedbackReviewChoice,
+        freeText: String,
+        feedbackIdentity: String? = nil
+    ) async {
         if case .submitting = recordFeedbackState { return }
         guard let detail = selectedRecordDetail,
-              let feedback = detail.expressionPlannerAiFeedback ?? detail.voiceAiFeedback ?? detail.aiFeedback,
-              feedback.isReviewable else { return }
+              let feedback = NativeRecordExpressionFeedbackPolicy.feedbackForReview(
+                  voiceFeedback: detail.voiceAiFeedback,
+                  plannerFeedback: detail.expressionPlannerAiFeedback,
+                  fallbackFeedback: detail.aiFeedback,
+                  renderIdentity: feedbackIdentity
+              ) else { return }
         recordFeedbackState = .submitting
         do {
             let session = try await validSession()

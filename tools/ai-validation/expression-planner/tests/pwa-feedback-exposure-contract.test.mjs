@@ -81,6 +81,13 @@ test('PWA renders owner planner feedback before acknowledging its exposure', asy
   assert.match(detail, /plannerLookupSettled\s*=\s*computed/)
   assert.match(detail, /!companionMessage\.value\s*&&\s*plannerLookupSettled\.value\s*\?\s*legacyAiFeedback\.value/)
   assert.match(detail, /isCompanionMessageDelivery\(recordExpressionPlan\.value,\s*plannerAiFeedback\.value\)/)
+  assert.match(detail, /legacyFeedbackCard\s*=\s*computed/)
+  assert.match(detail, /v-if="legacyFeedbackCard"/)
+  assert.match(detail, /v-if="aiFeedback"/)
+  assert.ok(
+    detail.indexOf('v-if="legacyFeedbackCard"') < detail.indexOf('v-if="aiFeedback"'),
+    'PWA should retain the legacy Voice card before the Planner card',
+  )
   assert.match(detail, /if \(plannerTargetsCompanion\.value\) return companionContainerRef\.value/)
   assert.match(detail, /record\.value\?\.kind \|\| '',\s*companionMessage\.value/)
   assert.match(detail, /force:\s*companionChangedInPlace/)
@@ -130,6 +137,13 @@ test('PWA keeps companion-target review controls inside companion while card tar
   assert.ok(pendingCompanionReviewIndex > pendingCompanionIndex, 'pending companion review controls must share the companion container')
   assert.ok(pendingPlannerIndex > pendingCompanionReviewIndex, 'pending feedback-card targets must retain an independent slot')
   assert.match(pending, /v-if="companionReviewFeedback"[\s\S]*?review-only/)
+  assert.match(pending, /legacyFeedbackCard\s*=\s*computed/)
+  assert.match(pending, /v-if="legacyFeedbackCard"/)
+  assert.match(pending, /v-if="aiFeedback"/)
+  assert.ok(
+    pending.indexOf('v-if="legacyFeedbackCard"') < pending.indexOf('v-if="aiFeedback"'),
+    'pending PWA should retain the legacy Voice card before the Planner card',
+  )
 })
 
 test('PWA pending records expose the same visible acknowledgement and review loop', async () => {

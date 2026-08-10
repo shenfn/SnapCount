@@ -125,6 +125,19 @@
       </div>
 
       <AiFeedbackCard
+        v-if="legacyFeedbackCard"
+        :key="legacyFeedbackCardKey"
+        :feedback="legacyFeedbackCard"
+        :reviewable="!plannerAiFeedback && Boolean(legacyFeedbackCard)"
+        :review-state="!plannerAiFeedback ? feedbackReviewState : ''"
+        :submitting="!plannerAiFeedback ? feedbackReviewSubmitting : false"
+        :exposure-event-id="''"
+        compact
+        class="record-detail-legacy-ai-feedback"
+        @submit-review="submitFeedbackReview"
+      />
+
+      <AiFeedbackCard
         v-if="aiFeedback"
         ref="aiFeedbackCardRef"
         :key="aiFeedbackCardKey"
@@ -288,6 +301,23 @@ const aiFeedback = computed(() => (
   })
   || (!companionMessage.value && plannerLookupSettled.value ? legacyAiFeedback.value : null)
 ))
+const legacyFeedbackCard = computed(() => {
+  const legacy = legacyAiFeedback.value
+  if (!legacy || aiFeedback.value === legacy) return null
+  const supporting = feedbackForCompanion({
+    companionMessage: companionMessage.value,
+    feedback: legacy,
+  })
+  if (supporting) return null
+  return feedbackToRender({ companionMessage: '', feedback: legacy })
+})
+const legacyFeedbackCardKey = computed(() => {
+  const recordId = record.value?.id || 'none'
+  const fingerprint = legacyFeedbackCard.value?.rendered_text_fingerprint
+    || legacyFeedbackCard.value?.emotion_line
+    || 'legacy'
+  return `ai-feedback-${recordId}-legacy-${fingerprint}`
+})
 const companionReviewFeedback = computed(() => (
   plannerTargetsCompanion.value
     && companionMessageMatchesDelivery({

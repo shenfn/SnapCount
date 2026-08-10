@@ -4,6 +4,7 @@ import {
 } from "./expression-shadow.ts";
 import {
   buildDataPlannerSourceRecord,
+  buildCrossRecordSourceRecord,
   buildExpensePlannerSourceRecord,
   buildExpressionShadowPlan,
   buildGenericExpressionShadowPlan,
@@ -685,7 +686,7 @@ function expenseHistoryQuery(
   to: number,
 ) {
   return supabase.from("transactions")
-    .select("id,transaction_date,transaction_time,occurred_at,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash,companion_message,ai_feedback")
+    .select("id,transaction_date,transaction_time,occurred_at,created_at,amount,merchant_name,category,platform,payment_method,note,status,type,staging_record_id,image_hash,companion_message,ai_feedback")
     .eq("user_id", userId)
     .eq("type", "expense")
     .order("occurred_at", { ascending: false })
@@ -733,6 +734,22 @@ function dataHistoryQuery(
     .range(from, to);
 }
 
+async function loadCrossDomainRecords(supabase: DatabaseClient, userId: string) {
+  const [transactions, income, data] = await Promise.all([
+    supabase.from("transactions").select("id,occurred_at,created_at,merchant_name,note,status,type").eq("user_id", userId).eq("type", "expense").order("occurred_at", { ascending: false }).limit(250),
+    supabase.from("income_records").select("id,occurred_at,created_at,source_name").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(250),
+    supabase.from("data_records").select("id,domain_key,occurred_at,created_at,title,summary,payload_jsonb").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(500),
+  ]);
+  for (const result of [transactions, income, data]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+  return [
+    ...(transactions.data ?? []).map((row: Record<string, unknown>) => buildCrossRecordSourceRecord(row, "transactions")),
+    ...(income.data ?? []).map((row: Record<string, unknown>) => buildCrossRecordSourceRecord(row, "income_records")),
+    ...(data.data ?? []).map((row: Record<string, unknown>) => buildCrossRecordSourceRecord(row, "data_records")),
+  ];
+}
+
 export async function buildPreInsertPlannerVoiceBrief(
   supabase: DatabaseClient,
   userId: string,
@@ -756,10 +773,12 @@ export async function buildPreInsertPlannerVoiceBrief(
       expenseHistoryQuery(supabase, userId, transactionDate, from, to)
     );
     const transactions = includeCurrentRecord(history ?? [], current) as unknown as ShadowExpenseTransaction[];
+    const relatedRecords = await loadCrossDomainRecords(supabase, userId);
     const plan = buildExpressionShadowPlan({
       transactions,
       currentRecordId,
       occurredAt: text(buildExpensePlannerSourceRecord(current as unknown as ShadowExpenseTransaction).occurred_at, 100),
+      relatedRecords,
       ...personalization,
     }) as Record<string, unknown>;
     return plannerVoiceBriefFromPlan(plan);
@@ -772,10 +791,12 @@ export async function buildPreInsertPlannerVoiceBrief(
       incomeHistoryQuery(supabase, userId, incomeDate, from, to)
     );
     const records = includeCurrentRecord(history ?? [], current).map(buildIncomePlannerSourceRecord);
+    const relatedRecords = await loadCrossDomainRecords(supabase, userId);
     const plan = buildGenericExpressionShadowPlan({
       domainKey: "income",
       records,
       currentRecordId,
+      relatedRecords,
       ...personalization,
     }) as Record<string, unknown>;
     return plannerVoiceBriefFromPlan(plan);
@@ -788,12 +809,14 @@ export async function buildPreInsertPlannerVoiceBrief(
     dataHistoryQuery(supabase, userId, domainKey, occurredAt, from, to)
   );
   const records = includeCurrentRecord(history ?? [], current).map(buildDataPlannerSourceRecord);
+  const relatedRecords = await loadCrossDomainRecords(supabase, userId);
   const domainProfile = input.domain_profile ?? await loadDomainProfile(supabase, userId, domainKey);
   const plan = buildGenericExpressionShadowPlan({
     domainKey,
     records,
     currentRecordId,
     domainProfile,
+    relatedRecords,
     ...personalization,
   }) as Record<string, unknown>;
   return plannerVoiceBriefFromPlan(plan);
@@ -807,7 +830,7 @@ async function buildCurrentRecordPlan(
 ) {
   if (kind === "expense") {
     const { data: current, error } = await supabase.from("transactions")
-      .select("id,transaction_date,transaction_time,occurred_at,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash,companion_message,ai_feedback")
+      .select("id,transaction_date,transaction_time,occurred_at,created_at,amount,merchant_name,category,platform,payment_method,note,status,type,staging_record_id,image_hash,companion_message,ai_feedback")
       .eq("user_id", userId)
       .eq("id", recordId)
       .eq("type", "expense")
@@ -819,11 +842,13 @@ async function buildCurrentRecordPlan(
     );
     const personalization = await loadPlannerPersonalization(supabase, userId);
     const transactions = includeCurrentRecord(history ?? [], current) as unknown as ShadowExpenseTransaction[];
+    const relatedRecords = await loadCrossDomainRecords(supabase, userId);
     const sourceRecord = buildExpensePlannerSourceRecord(current as ShadowExpenseTransaction);
     const plan = buildExpressionShadowPlan({
       transactions,
       currentRecordId: recordId,
       occurredAt: text(sourceRecord.occurred_at, 100),
+      relatedRecords,
       ...personalization,
     }) as Record<string, unknown>;
     const companionMessage = text(current.companion_message, 4000);
@@ -853,10 +878,12 @@ async function buildCurrentRecordPlan(
     );
     const personalization = await loadPlannerPersonalization(supabase, userId);
     const records = includeCurrentRecord(history ?? [], current).map(buildIncomePlannerSourceRecord);
+    const relatedRecords = await loadCrossDomainRecords(supabase, userId);
     const plan = buildGenericExpressionShadowPlan({
       domainKey: "income",
       records,
       currentRecordId: recordId,
+      relatedRecords,
       ...personalization,
     }) as Record<string, unknown>;
     const companionMessage = text(current.companion_message, 4000);
@@ -887,6 +914,7 @@ async function buildCurrentRecordPlan(
   );
   const personalization = await loadPlannerPersonalization(supabase, userId);
   const records = includeCurrentRecord(history ?? [], current).map(buildDataPlannerSourceRecord);
+  const relatedRecords = await loadCrossDomainRecords(supabase, userId);
   const payload = object(current.payload_jsonb);
   const domainProfile = await loadDomainProfile(supabase, userId, domainKey);
   const plan = buildGenericExpressionShadowPlan({
@@ -894,6 +922,7 @@ async function buildCurrentRecordPlan(
     records,
     currentRecordId: recordId,
     domainProfile,
+    relatedRecords,
     ...personalization,
   }) as Record<string, unknown>;
   const companionMessage = text(payload.companion_message, 4000);
@@ -946,7 +975,7 @@ async function currentDependencyRecords(
 ) {
   if (!recordIds.length) return [];
   const fields = sourceTable === "transactions"
-    ? "id,transaction_date,transaction_time,occurred_at,created_at,amount,merchant_name,category,platform,payment_method,status,type,staging_record_id,image_hash"
+    ? "id,transaction_date,transaction_time,occurred_at,created_at,amount,merchant_name,category,platform,payment_method,note,status,type,staging_record_id,image_hash"
     : sourceTable === "income_records"
     ? "id,income_date,occurred_at,created_at,amount,source_name,category"
     : "id,created_at,occurred_at,title,summary,payload_jsonb,domain_key,linked_account_id,account_snapshot_kind,snapshot_balance,snapshot_at";

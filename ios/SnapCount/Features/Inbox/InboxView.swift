@@ -454,6 +454,7 @@ private struct InboxCategoryView: View {
 
     @State private var columnCount = 2
     @State private var stageRecordId: String?
+    @State private var pendingInlineContext: PendingEditorContext?
 
     private var allItems: [NativeInboxItem] {
         NativeInboxPresentation.items(
@@ -563,6 +564,18 @@ private struct InboxCategoryView: View {
             )
             .environmentObject(appState)
         }
+        .sheet(item: $pendingInlineContext) { context in
+            NavigationStack {
+                InboxPendingExpenseEditor(
+                    reference: context.reference,
+                    onResolved: {
+                        pendingInlineContext = nil
+                        Task { await appState.refreshDashboard() }
+                    }
+                )
+                .environmentObject(appState)
+            }
+        }
         .task { await appState.loadInboxRepaymentCandidates() }
     }
 
@@ -609,7 +622,9 @@ private struct InboxCategoryView: View {
     @ViewBuilder
     private func inboxCell(_ item: NativeInboxItem) -> some View {
         if let pending = item.pendingExpense {
-            NavigationLink(value: NativeInboxRoute.record(reference: pending.reference)) {
+            Button {
+                pendingInlineContext = PendingEditorContext(itemId: item.id, reference: pending.reference)
+            } label: {
                 NativeInboxFilmCard(
                     item: item,
                     repaymentCandidate: nil,
@@ -1064,14 +1079,11 @@ private struct InboxVerdictStageView: View {
             .environmentObject(appState)
         }
         .sheet(item: $pendingEditorContext) { context in
-            NavigationStack {
-                PendingExpenseResolutionView(
-                    reference: context.reference,
-                    preserveInboxNavigation: true,
-                    onResolved: { finishAction(for: context.itemId) }
-                )
-                .environmentObject(appState)
-            }
+            InboxPendingExpenseEditor(
+                reference: context.reference,
+                onResolved: { finishAction(for: context.itemId) }
+            )
+            .environmentObject(appState)
         }
     }
 
@@ -1978,6 +1990,24 @@ private struct InboxZoomableImage<Content: View>: View {
     }
 }
 
+private struct InboxPendingExpenseEditor: View {
+    let reference: String
+    let onResolved: (() -> Void)?
+
+    init(reference: String, onResolved: (() -> Void)? = nil) {
+        self.reference = reference
+        self.onResolved = onResolved
+    }
+
+    var body: some View {
+        PendingExpenseResolutionView(
+            reference: reference,
+            preserveInboxNavigation: true,
+            onResolved: onResolved
+        )
+    }
+}
+
 private struct PendingExpenseResolutionView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var themeManager: JieziThemeManager
@@ -2028,11 +2058,12 @@ private struct PendingExpenseResolutionView: View {
                                     viewportFrame: scrollViewport.frame(in: .global)
                                 )
                             }
-                            if let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                            let feedbackCards = NativeRecordExpressionFeedbackPolicy.feedbackCardsToRender(
                                 companionMessage: detail.companionMessage,
-                                feedback: detail.expressionPlannerAiFeedback ?? detail.voiceAiFeedback,
-                                companionFeedback: detail.voiceAiFeedback
-                            ) {
+                                voiceFeedback: detail.voiceAiFeedback,
+                                plannerFeedback: detail.expressionPlannerAiFeedback
+                            )
+                            ForEach(Array(feedbackCards.enumerated()), id: \.offset) { _, feedback in
                                 NativeAIFeedbackCard(
                                     feedback: feedback,
                                     compact: true,
@@ -2050,7 +2081,13 @@ private struct PendingExpenseResolutionView: View {
                                         }
                                     }
                                 ) { choice, text in
-                                    Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                                    Task {
+                                        await appState.submitRecordFeedback(
+                                            choice: choice,
+                                            freeText: text,
+                                            feedbackIdentity: feedback.renderIdentity
+                                        )
+                                    }
                                 }
                                 .onNativeAIFeedbackCardVisibilityChange(
                                     in: scrollViewport.frame(in: .global)
@@ -2210,7 +2247,13 @@ private struct PendingExpenseResolutionView: View {
                             }
                         }
                     ) { choice, text in
-                        Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                        Task {
+                            await appState.submitRecordFeedback(
+                                choice: choice,
+                                freeText: text,
+                                feedbackIdentity: interactionFeedback.renderIdentity
+                            )
+                        }
                     }
                 }
             }
