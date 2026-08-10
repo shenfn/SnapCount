@@ -71,6 +71,13 @@ function candidateId(current, related) {
  * Produce only high-signal, still-unconfirmed relationships. The caller may
  * provide records from any domain; this function never infers a beneficiary
  * or a completed causal chain.
+ *
+ * @param {{
+ *   currentRecord?: Record<string, unknown>,
+ *   relatedRecords?: Array<Record<string, unknown>>,
+ *   maxGapMinutes?: number,
+ * }} options
+ * @returns {Array<Record<string, unknown>>}
  */
 export function generateCrossRecordRelationshipCandidates({
   currentRecord,

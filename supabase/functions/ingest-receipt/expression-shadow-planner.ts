@@ -61,7 +61,7 @@ export interface ShadowGenericRecord {
 }
 
 interface ShadowPlannerOptions { preferenceProfile?: Record<string, unknown>; exposureHistory?: Record<string, unknown>; }
-interface ShadowRelatedRecord {
+export interface ShadowRelatedRecord extends Record<string, unknown> {
   id: string; domain_key?: string | null; occurred_at?: string | null; created_at?: string | null;
   title?: string | null; summary?: string | null; merchant_name?: string | null; source_name?: string | null;
   source_table?: "transactions" | "income_records" | "data_records" | null;
@@ -494,7 +494,7 @@ export function buildGenericExpressionShadowPlan(input: GenericPlannerInput) {
 export function buildCrossRecordSourceRecord(
   row: Record<string, unknown>,
   sourceTable: "transactions" | "income_records" | "data_records",
-): Record<string, unknown> {
+): ShadowRelatedRecord {
   const domainKey = sourceTable === "transactions"
     ? "expense"
     : sourceTable === "income_records"

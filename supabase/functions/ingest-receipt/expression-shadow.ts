@@ -512,7 +512,7 @@ async function processBuiltinShadow(supabase: ShadowDatabaseClient, params: { ev
   } catch (error) { await persistPlannerError(supabase, params.eventKey, error); }
 }
 
-async function loadCrossDomainRecords(supabase: ShadowDatabaseClient, userId: string): Promise<Record<string, unknown>[]> {
+async function loadCrossDomainRecords(supabase: ShadowDatabaseClient, userId: string): Promise<import("./expression-shadow-planner.ts").ShadowRelatedRecord[]> {
   const [transactions, income, data] = await Promise.all([
     supabase.from("transactions")
       .select("id,occurred_at,created_at,merchant_name,note,status,type")
