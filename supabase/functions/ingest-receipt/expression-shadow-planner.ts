@@ -218,6 +218,7 @@ function sourceDependencies(
   records: Record<string, unknown>[],
   primaryRecordId: string,
 ) {
+  const seen = new Set<string>();
   const dependencies = records.flatMap((record) => {
     const sourceRecordId = typeof record.id === "string" ? record.id : "";
     if (!sourceRecordId) return [];
@@ -226,6 +227,9 @@ function sourceDependencies(
       || record.source_table === "data_records"
       ? record.source_table
       : sourceTable;
+    const dedupeKey = `${candidateTable}:${sourceRecordId}`;
+    if (seen.has(dedupeKey)) return [];
+    seen.add(dedupeKey);
     return [{
       source_table: candidateTable,
       source_record_id: sourceRecordId,
