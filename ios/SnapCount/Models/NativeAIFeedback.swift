@@ -178,6 +178,80 @@ struct NativeAIFeedback: Equatable {
 }
 
 enum NativeRecordExpressionFeedbackPolicy {
+    /// Planner feedback cards are an additional angle. They must not replace
+    /// the persisted Voice support content that was already rendered.
+    static func plannerFeedbackToDisplayWithoutReplacingVoice(
+        existingVoice: NativeAIFeedback?,
+        plannerPreview: NativeAIFeedback?,
+        companionMessage: String? = nil
+    ) -> NativeAIFeedback? {
+        guard let plannerPreview else { return existingVoice }
+        if plannerPreview.source == "expression_planner",
+           plannerPreview.presentationTarget == "feedback_card" {
+            return existingVoice ?? plannerPreview
+        }
+        return feedbackToDisplay(
+            existing: existingVoice,
+            preview: plannerPreview,
+            companionMessage: companionMessage
+        )
+    }
+
+    /// Keep the already-rendered Voice card stable when an asynchronous
+    /// Planner card arrives. Planner feedback cards are appended as a second
+    /// angle instead of replacing the first visible card.
+    static func feedbackCardsToRender(
+        companionMessage: String?,
+        voiceFeedback: NativeAIFeedback?,
+        plannerFeedback: NativeAIFeedback?
+    ) -> [NativeAIFeedback] {
+        var cards: [NativeAIFeedback] = []
+        if let voiceFeedback = feedbackToRender(
+            companionMessage: companionMessage,
+            feedback: voiceFeedback,
+            companionFeedback: voiceFeedback
+        ) {
+            cards.append(voiceFeedback)
+        }
+
+        guard let plannerFeedback else { return cards }
+        if plannerFeedback.source == "expression_planner",
+           plannerFeedback.presentationTarget == "feedback_card" {
+            let alreadyRendered = cards.contains {
+                $0.visibleContentIdentity == plannerFeedback.visibleContentIdentity
+                    || $0.hasSameDeliveryIdentity(as: plannerFeedback)
+            }
+            if !alreadyRendered { cards.append(plannerFeedback) }
+            return cards
+        }
+
+        if cards.isEmpty,
+           let fallback = feedbackToRender(
+               companionMessage: companionMessage,
+               feedback: plannerFeedback,
+               companionFeedback: voiceFeedback
+           ) {
+            cards.append(fallback)
+        }
+        return cards
+    }
+
+    static func feedbackForReview(
+        voiceFeedback: NativeAIFeedback?,
+        plannerFeedback: NativeAIFeedback?,
+        fallbackFeedback: NativeAIFeedback?,
+        renderIdentity: String?
+    ) -> NativeAIFeedback? {
+        let candidates = [plannerFeedback, voiceFeedback, fallbackFeedback]
+            .compactMap { $0 }
+        if let renderIdentity {
+            return candidates.first {
+                $0.renderIdentity == renderIdentity && $0.isReviewable
+            }
+        }
+        return candidates.first(where: \.isReviewable)
+    }
+
     static func hasAcknowledgedPlannerFeedback(_ feedback: [NativeAIFeedback?]) -> Bool {
         feedback.compactMap { $0 }.contains { $0.isAcknowledgedPlannerFeedback }
     }

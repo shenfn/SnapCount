@@ -370,11 +370,12 @@ struct RecordDetailView: View {
                                 )
                             }
 
-                            if let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToRender(
+                            let feedbackCards = NativeRecordExpressionFeedbackPolicy.feedbackCardsToRender(
                                 companionMessage: detail.companionMessage,
-                                feedback: detail.expressionPlannerAiFeedback ?? detail.voiceAiFeedback,
-                                companionFeedback: detail.voiceAiFeedback
-                            ) {
+                                voiceFeedback: detail.voiceAiFeedback,
+                                plannerFeedback: detail.expressionPlannerAiFeedback
+                            )
+                            ForEach(Array(feedbackCards.enumerated()), id: \.offset) { _, feedback in
                                 NativeAIFeedbackCard(
                                     feedback: feedback,
                                     reviewable: feedback.isReviewable,
@@ -391,7 +392,13 @@ struct RecordDetailView: View {
                                         }
                                     }
                                 ) { choice, text in
-                                    Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                                    Task {
+                                        await appState.submitRecordFeedback(
+                                            choice: choice,
+                                            freeText: text,
+                                            feedbackIdentity: feedback.renderIdentity
+                                        )
+                                    }
                                 }
                                 .onNativeAIFeedbackCardVisibilityChange(
                                     in: scrollViewport.frame(in: .global)
@@ -683,7 +690,13 @@ struct RecordDetailView: View {
                             }
                         }
                     ) { choice, text in
-                        Task { await appState.submitRecordFeedback(choice: choice, freeText: text) }
+                        Task {
+                            await appState.submitRecordFeedback(
+                                choice: choice,
+                                freeText: text,
+                                feedbackIdentity: interactionFeedback.renderIdentity
+                            )
+                        }
                     }
                 }
             }
