@@ -1188,6 +1188,51 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(result.notificationText.hasPrefix("睡了5.73小时，比平时短些。下午补个觉吧。\n"))
     }
 
+    func testEXP012NativeUploadRequestsStructuredResultAndPreservesFoodVoice() async throws {
+        let json = #"""
+        {
+          "id": "food-record-1",
+          "status": "done",
+          "record_type": "food",
+          "notification_text": "本次饮食热量为 650 千卡\n🍱 已归档到饮食记录",
+          "companion_message": "纸碗里的炒蛋盖饭，看着就踏实。",
+          "ai_feedback": {
+            "emotion_line": "这份朴实的晚餐，是忙碌后的慰藉。",
+            "utility_line": "绿叶菜补充了纤维，营养很均衡。"
+          }
+        }
+        """#
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [UploadResultURLProtocolStub.self]
+        let session = URLSession(configuration: configuration)
+        UploadResultURLProtocolStub.responseData = Data(json.utf8)
+        UploadResultURLProtocolStub.capturedRequest = nil
+        defer {
+            UploadResultURLProtocolStub.responseData = Data()
+            UploadResultURLProtocolStub.capturedRequest = nil
+        }
+
+        let result = try await SnapCountUploadService(session: session).uploadNativeImageResult(
+            data: Data([0x01, 0x02]),
+            uploadToken: "test-upload-token",
+            captureKind: "photo_library",
+            filename: "food.jpg"
+        )
+
+        let requestBody = try XCTUnwrap(UploadResultURLProtocolStub.capturedRequest?.httpBody)
+        let bodyText = String(decoding: requestBody, as: UTF8.self)
+        XCTAssertTrue(bodyText.contains("name=\"response_mode\""))
+        XCTAssertTrue(bodyText.contains("json"))
+        XCTAssertEqual(
+            result.notificationText.split(separator: "\n").map(String.init),
+            [
+                "纸碗里的炒蛋盖饭，看着就踏实。",
+                "本次饮食热量为 650 千卡",
+                "🍱 已归档到饮食记录"
+            ]
+        )
+    }
+
     func testEditedClaimFingerprintFailsOpenForSameSemanticKey() throws {
         let existing = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),
@@ -3489,4 +3534,27 @@ private func makeInsightDay(
         sportMinutes: 0, sportCount: 0, readingMinutes: 0, readingCount: 0,
         foodCalories: food, foodMeals: food > 0 ? 1 : 0, hasAnyData: true
     )
+}
+
+private final class UploadResultURLProtocolStub: URLProtocol {
+    static var responseData = Data()
+    static var capturedRequest: URLRequest?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.capturedRequest = request
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.responseData)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }

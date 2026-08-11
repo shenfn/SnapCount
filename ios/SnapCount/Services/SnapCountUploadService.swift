@@ -75,14 +75,40 @@ final class SnapCountUploadService {
         filename: String = "native-upload.jpg",
         mimeType: String = "image/jpeg"
     ) async throws -> String {
-        try await uploadImage(
+        let result = try await uploadNativeImageResult(
+            data: data,
+            uploadToken: uploadToken,
+            captureKind: captureKind,
+            filename: filename,
+            mimeType: mimeType
+        )
+        return result.notificationText
+    }
+
+    func uploadNativeImageResult(
+        data: Data,
+        uploadToken: String,
+        captureKind: String = "photo_library",
+        filename: String = "native-upload.jpg",
+        mimeType: String = "image/jpeg"
+    ) async throws -> ShortcutUploadResult {
+        let responseData = try await uploadImageResponse(
             data: data,
             uploadToken: uploadToken,
             sourceApp: "ios_native",
             captureKind: captureKind,
             filename: filename,
-            mimeType: mimeType
+            mimeType: mimeType,
+            responseMode: "json"
         )
+
+        guard let payload = try? decoder.decode(ShortcutUploadPayload.self, from: responseData) else {
+            let text = String(data: responseData, encoding: .utf8) ?? ""
+            return ShortcutUploadResult(
+                displayText: text.isEmpty ? "截图已上传，打开芥子查看结果。" : text
+            )
+        }
+        return ShortcutUploadResult(payload: payload)
     }
 
     private func uploadImage(
