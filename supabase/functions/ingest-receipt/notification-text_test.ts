@@ -79,7 +79,8 @@ Deno.test("companion copy stays before planner and stable shortcut facts", () =>
 });
 
 Deno.test("unavailable Planner keeps the generated companion instead of bare receipt facts", () => {
-  const legacy = "第一次见青集便利店，8元买份踏实。\n💸 -¥8.00 · 青集便利店 · life\n今日已花 ¥117.06（10 笔）";
+  const legacy =
+    "第一次见青集便利店，8元买份踏实。\n💸 -¥8.00 · 青集便利店 · life\n今日已花 ¥117.06（10 笔）";
   const notification = resolvePlannerNotification(
     { available: false },
     "💸 -¥8.00 · 青集便利店 · life\n今日已花 ¥117.06（10 笔）",
@@ -87,7 +88,11 @@ Deno.test("unavailable Planner keeps the generated companion instead of bare rec
     "第一次见青集便利店，8元买份踏实。",
   );
 
-  assertEquals(notification, legacy, "a failed Planner lookup must not erase successful Voice output");
+  assertEquals(
+    notification,
+    legacy,
+    "a failed Planner lookup must not erase successful Voice output",
+  );
 });
 
 Deno.test("missing or empty Planner delivery keeps the legacy AI notification", () => {
@@ -98,7 +103,11 @@ Deno.test("missing or empty Planner delivery keeps the legacy AI notification", 
     "owner-disabled delivery should preserve Voice",
   );
   assertEquals(
-    resolvePlannerNotification({ available: true, message: "  " }, "💰 +¥20.00", legacy),
+    resolvePlannerNotification(
+      { available: true, message: "  " },
+      "💰 +¥20.00",
+      legacy,
+    ),
     legacy,
     "an empty Planner rendering should preserve Voice",
   );
@@ -119,11 +128,37 @@ Deno.test("available companion-target Planner keeps one companion and stable rec
     companion,
   );
 
+  assertEquals(
+    notification.split("\n"),
+    [
+      companion,
+      "💸 -¥8.00 · 青集便利店 · life",
+      "今日已花 ¥117.06（10 笔）",
+    ],
+    "the companion-target claim should own the expression slot without losing receipt facts",
+  );
+});
+
+Deno.test("EXP-012 feedback-card Planner keeps Voice before the independent food insight", () => {
+  const companion = "纸碗里的炒蛋盖饭，看着就踏实。";
+  const notification = resolvePlannerNotification(
+    {
+      available: true,
+      message: "本次饮食热量为 650 千卡",
+      semantic_key: "food_current_calories",
+      claim_fingerprint: "food-calories-650",
+      presentation_target: "feedback_card",
+    },
+    "🍱 已归档到饮食记录",
+    `${companion}\n🍱 已归档到饮食记录`,
+    companion,
+  );
+
   assertEquals(notification.split("\n"), [
     companion,
-    "💸 -¥8.00 · 青集便利店 · life",
-    "今日已花 ¥117.06（10 笔）",
-  ], "the companion-target claim should own the expression slot without losing receipt facts");
+    "本次饮食热量为 650 千卡",
+    "🍱 已归档到饮食记录",
+  ], "an independent Planner card must supplement rather than replace Voice");
 });
 
 Deno.test("same claim with different wording is rendered once", () => {

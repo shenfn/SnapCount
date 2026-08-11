@@ -134,15 +134,20 @@ export function resolvePlannerNotification(
   legacyNotification: string,
   companionMessage?: string | null,
 ): string {
-  if (!delivery?.available || !delivery.message?.trim()) return legacyNotification;
+  if (!delivery?.available || !delivery.message?.trim()) {
+    return legacyNotification;
+  }
 
   const companionClaim = delivery.presentation_target === "companion_message"
-    ? { semantic_key: delivery.semantic_key, claim_fingerprint: delivery.claim_fingerprint }
+    ? {
+      semantic_key: delivery.semantic_key,
+      claim_fingerprint: delivery.claim_fingerprint,
+    }
     : null;
   return mergePlannerNotification(
     delivery.message,
     fallbackNotification,
-    delivery.presentation_target === "companion_message" ? companionMessage : null,
+    companionMessage,
     {
       companion_claim: companionClaim,
       planner_claim: {
