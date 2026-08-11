@@ -499,6 +499,17 @@ Deno.test("EXP-004 colloquial amount keeps its statistical meaning and scope", (
   assert(result.ok, `a colloquial statistical amount must retain its meaning and scope: ${result.violations.join(" | ")}`);
 });
 
+Deno.test("EXP-004 two-digit colloquial cents normalize to the current amount", () => {
+  const recordFacts = JSON.stringify({
+    record_type: "expense",
+    amount: 10.48,
+    merchant_name: "示例餐厅",
+  });
+  const result = validateModelTone(["中午示例餐厅，10块48，这笔记下了。"], recordFacts);
+
+  assert(result.ok, `10块48 must be treated as 10.48 yuan: ${result.violations.join(" | ")}`);
+});
+
 Deno.test("EXP-004 separate item quantities never become a decimal amount", () => {
   const parsed = extractDigitNumbers("6块商品、8份");
   const result = validateModelTone(

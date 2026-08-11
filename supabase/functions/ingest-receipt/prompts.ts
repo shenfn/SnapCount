@@ -426,14 +426,16 @@ ${timeLine}${timeContextBlock}${contextBlock}
 - 禁止质问式反问（如"心里没点数吗"）；反问只允许出现在明显角色扮演的语气里，且不得带指责感
 - 不要只用"这周第X笔/次"或"又是熟悉的XX"凑成全文；有候选支撑时可以把准确统计和当前实体自然结合
 - selected_candidates 非空时，companion_message 必须围绕第一条候选的角度表达；若确实表达了它，expressed_semantic_key 必须原样返回该候选的 semantic_key，否则返回 null
-- companion_message 是主表达；ai_feedback 只有能补充不同信息时才输出，禁止换句话重复同一候选
+- companion_message 是首选主表达；companion_candidates 再给 2 条围绕同一首候选、措辞明显不同的完整备选，供代码在同一次调用内通过事实和重复门禁选择
+- 三条主表达不得只替换商户、金额或连接词；不要复用最近文案中的比喻、句尾和情绪骨架
+- ai_feedback 只有能补充不同信息时才输出，禁止换句话重复同一候选
 - companion_message ≤30 字，必须是完整句子自然收尾，宁短勿长
 - ${personaHint}
 - ${styleHint}
 ${customHint}${recentBlock}
 
 输出纯 JSON（无 markdown）：
-{"companion_message":"≤30汉字，可为空串","expressed_semantic_key":"实际由 companion_message 表达的首条候选 semantic_key，否则为null","ai_feedback":{"badge":"4-8字","band":"positive|neutral|watch|recover|ritual","emotion_line":"≤28汉字共情","utility_line":"≤30汉字具体观察","detail_reason":"≤60汉字，引用事实依据；如含定性推理须标明不确定性，否则为null","confidence":0.0}}
+{"companion_message":"≤30汉字的首选完整句，可为空串","companion_candidates":["≤30汉字备选一","≤30汉字备选二"],"expressed_semantic_key":"三条主表达共同围绕的首候选 semantic_key，否则为null","ai_feedback":{"badge":"4-8字","band":"positive|neutral|watch|recover|ritual","emotion_line":"≤28汉字共情","utility_line":"≤30汉字具体观察","detail_reason":"≤60汉字，引用事实依据；如含定性推理须标明不确定性，否则为null","confidence":0.0}}
 候选太弱或没有新增依据时 ai_feedback 返回 null。`;
 }
 

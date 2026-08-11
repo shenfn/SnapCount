@@ -39,6 +39,12 @@ import {
   type RankedPerceptualCandidate,
 } from "./duplicate-review.ts";
 import { resolvePlannerNotification, uniqueNotificationLines } from "./notification-text.ts";
+import {
+  collectVoiceCandidateTexts,
+  isStructurallyCompleteVoiceText,
+  selectVoiceCandidate,
+  voiceExpressionSimilarity,
+} from "./voice-output.ts";
 import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories.js";
 
 // 阿里云百炼 Qwen Vision（OpenAI 兼容协议）
@@ -3413,11 +3419,14 @@ function normalizeFeedbackPayload(
   timingSignal: AIFeedback["timing_signal"] | null,
 ): {
   companion_message: string | null;
+  companion_candidates: string[];
   ai_feedback: AIFeedback | null;
   expressed_semantic_key: string | null;
 } {
-  const companionRaw = parsed.companion_message;
-  const companion = typeof companionRaw === "string" ? clipChineseLen(companionRaw, 30) : null;
+  const companionCandidates = collectVoiceCandidateTexts(parsed)
+    .map((item) => clipChineseLen(item, 30))
+    .filter((item): item is string => !!item);
+  const companion = companionCandidates[0] ?? null;
   const expressedSemanticKey = typeof parsed.expressed_semantic_key === "string"
     ? parsed.expressed_semantic_key.trim().slice(0, 200) || null
     : null;
@@ -3426,6 +3435,7 @@ function normalizeFeedbackPayload(
   if (!fb || typeof fb !== "object") {
     return {
       companion_message: companion,
+      companion_candidates: companionCandidates,
       ai_feedback: null,
       expressed_semantic_key: expressedSemanticKey,
     };
@@ -3441,12 +3451,14 @@ function normalizeFeedbackPayload(
   if (!emotionLine || confidence < 0.5) {
     return {
       companion_message: companion,
+      companion_candidates: companionCandidates,
       ai_feedback: null,
       expressed_semantic_key: expressedSemanticKey,
     };
   }
   return {
     companion_message: companion,
+    companion_candidates: companionCandidates,
     expressed_semantic_key: expressedSemanticKey,
     ai_feedback: {
       version: "feedback-v1",
@@ -3978,10 +3990,11 @@ async function generateVoiceFeedback(opts: {
     });
     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.8);
     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
+    const candidateCount = normalized.companion_candidates.length;
     // Voice 层可以忠实转述已核实信号；数字和统计口径仍由信号白名单闭环约束。
     const check = validateModelTone(
       [
-        normalized.companion_message,
+        ...normalized.companion_candidates,
         normalized.ai_feedback?.emotion_line ?? null,
         normalized.ai_feedback?.utility_line ?? null,
         normalized.ai_feedback?.detail_reason ?? null,
@@ -3991,31 +4004,71 @@ async function generateVoiceFeedback(opts: {
       signals,
     );
     const bad = new Set(check.badIndexes);
-    let companion = bad.has(0) ? null : normalized.companion_message;
-    companion = sanitizeGeneratedCompanion(companion, opts.ai, opts.timeContext);
-    let modelFeedback = normalized.ai_feedback;
-    if (modelFeedback) {
-      if (bad.has(1)) {
-        modelFeedback = null;
-      } else {
-        modelFeedback = {
-          ...modelFeedback,
-          badge: bad.has(4) ? "即时反馈" : modelFeedback.badge,
-          utility_line: bad.has(2) ? null : modelFeedback.utility_line,
-          detail_reason: bad.has(3) ? null : modelFeedback.detail_reason,
-        };
-      }
+    const candidateEntries = normalized.companion_candidates
+      .map((candidate, index) => ({
+        index,
+        text: sanitizeGeneratedCompanion(candidate, opts.ai, opts.timeContext),
+      }))
+      .filter((entry): entry is { index: number; text: string } => !!entry.text);
+    const candidateEntryByText = new Map(candidateEntries.map((entry) => [entry.text, entry]));
+    const selection = selectVoiceCandidate({
+      candidates: candidateEntries.map((entry) => entry.text),
+      recentExpressions: opts.recentCompanionLines ?? [],
+      isAllowed: (candidate) => {
+        const entry = candidateEntryByText.get(candidate);
+        if (!entry || bad.has(entry.index)) return false;
+        if (!opts.plannerBrief) return true;
+        return resolveExpressedSemanticKey({
+          declaredSemanticKey: opts.plannerBrief.semantic_key,
+          companionMessage: candidate,
+          selectedCandidates: contextPacket.selected_candidates,
+          recordFacts: contextPacket.record_facts,
+        }) === opts.plannerBrief.semantic_key;
+      },
+    });
+    const companion = selection.text;
+    if (selection.rejected.length > 0) {
+      console.info(`[voice] rejected ${selection.rejected.length} companion candidate(s): ${selection.rejected.map((item) => item.reason).join(",")}`);
     }
-    modelFeedback = sanitizeAIFeedbackForTime(modelFeedback, opts.timeContext);
+    let modelFeedback = sanitizeAIFeedbackForTime(normalized.ai_feedback, opts.timeContext);
+    let modelFeedbackForMerge: Partial<AIFeedback> | null = modelFeedback;
+    const feedbackOffset = candidateCount;
+    if (modelFeedback) {
+      const repeatedOrIncompleteEmotion = !isStructurallyCompleteVoiceText(modelFeedback.emotion_line)
+        || (opts.recentCompanionLines ?? []).some((line) => voiceExpressionSimilarity(modelFeedback!.emotion_line, line) >= 0.64);
+      const emotionRejected = bad.has(feedbackOffset) || repeatedOrIncompleteEmotion;
+      const sanitizedFeedback = {
+        ...modelFeedback,
+        badge: bad.has(feedbackOffset + 3) ? "即时反馈" : modelFeedback.badge,
+        utility_line: bad.has(feedbackOffset + 1) ? null : modelFeedback.utility_line,
+        detail_reason: bad.has(feedbackOffset + 2) ? null : modelFeedback.detail_reason,
+      };
+      modelFeedbackForMerge = emotionRejected
+        ? { ...sanitizedFeedback, emotion_line: undefined }
+        : sanitizedFeedback;
+      modelFeedback = emotionRejected ? null : sanitizedFeedback;
+    }
 
     const verifiedSignals = signals.filter((signal) => signal.kind !== "record_acknowledge");
     if (verifiedSignals.length > 0) {
       const ruleFeedback = buildSignalFallbackAIFeedback(opts.domainKey, verifiedSignals, opts.timingSignal);
       if (ruleFeedback) {
-        let mergedFeedback = mergeSignalFeedback(modelFeedback, ruleFeedback);
+        let mergedFeedback = mergeSignalFeedback(modelFeedbackForMerge, ruleFeedback);
         mergedFeedback = sanitizeAIFeedbackForTime(mergedFeedback, opts.timeContext) ?? mergedFeedback;
         const fallbackTone = sanitizeGeneratedCompanion(mergedFeedback.emotion_line ?? null, opts.ai, opts.timeContext);
-        const tone = companion ?? fallbackTone;
+        const selectedFallbackTone = fallbackTone
+          ? selectVoiceCandidate({
+            candidates: [fallbackTone],
+            recentExpressions: opts.recentCompanionLines ?? [],
+            isAllowed: (candidate) => !opts.plannerBrief || resolveExpressedSemanticKey({
+              declaredSemanticKey: opts.plannerBrief.semantic_key,
+              companionMessage: candidate,
+              selectedCandidates: contextPacket.selected_candidates,
+              recordFacts: contextPacket.record_facts,
+            }) === opts.plannerBrief.semantic_key,
+          }).text
+          : null;
+        const tone = companion ?? selectedFallbackTone ?? ruleFeedback.emotion_line;
         mergedFeedback = withExpressionCoverage(
           mergedFeedback,
           opts.plannerBrief,
