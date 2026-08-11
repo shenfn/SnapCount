@@ -137,6 +137,18 @@
         @submit-review="submitFeedbackReview"
       />
 
+      <div v-if="plannerFeedbackLoading" class="record-detail-planner-status" role="status" aria-live="polite">
+        <span class="record-detail-planner-spinner" aria-hidden="true"></span>
+        <span>AI 即时反馈正在准备…</span>
+      </div>
+
+      <div v-else-if="plannerFeedbackLoadError" class="record-detail-planner-status is-error" role="status">
+        <span>AI 即时反馈暂时没有加载出来</span>
+        <button type="button" :disabled="plannerFeedbackRetrying" @click="retryPlannerLookup">
+          {{ plannerFeedbackRetrying ? '重试中…' : '重试' }}
+        </button>
+      </div>
+
       <AiFeedbackCard
         v-if="aiFeedback"
         ref="aiFeedbackCardRef"
@@ -174,6 +186,7 @@ import { getRecordAiSummary, getRecordDetailFields, getRecordFoodDishes } from '
 import {
   createAbortError,
   isAbortError,
+  isRetryableDeliveryError,
   retryWithBackoff,
   waitForVisibleElement,
 } from '../../utils/expressionDelivery'
@@ -183,6 +196,8 @@ import {
   feedbackToRender,
   isCompanionMessageDelivery,
   isPlannerDeliveryReviewable,
+  plannerFeedbackSurfaceState,
+  recordExpressionPlanForDetail,
   shouldAcknowledgePlannerFeedback,
 } from '../../utils/expressionPresentation'
 
@@ -197,6 +212,7 @@ const aiFeedbackCardRef = ref(null)
 const companionContainerRef = ref(null)
 const feedbackReviewStates = ref({})
 const plannerDeliveryStates = ref({})
+const plannerFeedbackRetrying = ref(false)
 let activePlannerDeliveryController = null
 const deleteType = computed(() => {
   if (record.value?.kind === 'income') return 'income'
@@ -269,13 +285,9 @@ const legacyAiFeedback = computed(() => {
   if (!raw) return null
   return raw.aiFeedback || raw.ai_feedback || raw.payload?.ai_feedback || raw.extracted?.ai_feedback || raw.extracted_json?.ai_feedback || null
 })
-const expectedExpressionRecordKind = computed(() => (
-  record.value?.kind === 'universal' ? 'data' : record.value?.kind || ''
-))
 const recordExpressionPlan = computed(() => {
   const recordId = record.value?.id
-  const plan = recordId ? store.recordExpressionPlanCache.value[recordId] || null : null
-  return plan?.recordKind === expectedExpressionRecordKind.value ? plan : null
+  return recordExpressionPlanForDetail(store.recordExpressionPlanCache.value, recordId)
 })
 const plannerAiFeedback = computed(() => (
   recordExpressionPlan.value?.available ? recordExpressionPlan.value.feedback || null : null
@@ -292,13 +304,15 @@ const companionMessage = computed(() => {
 const plannerLookupSettled = computed(() => (
   ['unavailable', 'error'].includes(recordExpressionPlan.value?.status)
 ))
+const plannerFeedbackSurface = computed(() => plannerFeedbackSurfaceState({
+  delivery: recordExpressionPlan.value,
+  companionMessage: companionMessage.value,
+  companionFeedback: legacyAiFeedback.value,
+}))
+const plannerFeedbackLoading = computed(() => plannerFeedbackSurface.value.state === 'loading')
+const plannerFeedbackLoadError = computed(() => plannerFeedbackSurface.value.state === 'error')
 const aiFeedback = computed(() => (
-  feedbackToRender({
-    companionMessage: companionMessage.value,
-    feedback: plannerAiFeedback.value,
-    companionFeedback: legacyAiFeedback.value,
-    delivery: recordExpressionPlan.value,
-  })
+  plannerFeedbackSurface.value.feedback
   || (!companionMessage.value && plannerLookupSettled.value ? legacyAiFeedback.value : null)
 ))
 const legacyFeedbackCard = computed(() => {
@@ -413,7 +427,7 @@ async function loadPlannerWithRetry(recordId, recordKind, signal, { force = fals
       delays: PLAN_NOT_READY_RETRY_DELAYS,
       signal,
       shouldRetryResult: plan => !plan?.available && plan?.reason === 'plan_not_ready',
-      shouldRetryError: () => false,
+      shouldRetryError: isRetryableDeliveryError,
     },
   )
 }
@@ -508,6 +522,29 @@ async function retryPlannerDelivery() {
     await acknowledgePlannerWhenVisible(recordId, plan, controller, { manual: true })
   } catch (error) {
     if (!isAbortError(error)) console.warn('重新确认记录表达曝光失败:', error)
+  }
+}
+
+async function retryPlannerLookup() {
+  const recordId = record.value?.id
+  const recordKind = record.value?.kind
+  const controller = activePlannerDeliveryController
+  if (!recordId || !recordKind || !controller || controller.signal.aborted || plannerFeedbackRetrying.value) return
+  plannerFeedbackRetrying.value = true
+  try {
+    const plan = await loadPlannerWithRetry(recordId, recordKind, controller.signal, { force: true })
+    if (!isCurrentVisibleDetail(recordId) || !plan?.available || plan.acknowledged) return
+    if (!shouldAcknowledgePlannerFeedback({
+      companionMessage: companionMessage.value,
+      feedback: plan.feedback,
+      companionFeedback: legacyAiFeedback.value,
+      delivery: plan,
+    })) return
+    await acknowledgePlannerWhenVisible(recordId, plan, controller)
+  } catch (error) {
+    if (!isAbortError(error)) console.warn('重新加载记录表达计划失败:', error)
+  } finally {
+    plannerFeedbackRetrying.value = false
   }
 }
 

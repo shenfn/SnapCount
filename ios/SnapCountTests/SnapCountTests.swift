@@ -2011,6 +2011,37 @@ final class SnapCountTests: XCTestCase {
     }
 
     @MainActor
+    func testExpressionPlanRetryRecoversFromTransientNetworkFailure() async throws {
+        let previewFeedback = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "candidate_id": AnyCodable("candidate-network"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "emotion_line": AnyCodable("本次睡眠为 6.52 小时")
+        ]))
+        let expected = NativeRecordExpressionPlan(
+            planToken: "plan-network",
+            candidateId: "candidate-network",
+            feedback: previewFeedback
+        )
+        var fetchCount = 0
+        var observedDelays: [UInt64] = []
+
+        let resolved = await NativeRecordExpressionPlanRetryPolicy.resolve(
+            fetch: {
+                fetchCount += 1
+                if fetchCount == 1 { throw URLError(.timedOut) }
+                return .available(expected)
+            },
+            shouldContinue: { true },
+            sleep: { observedDelays.append($0) }
+        )
+
+        XCTAssertEqual(resolved, expected)
+        XCTAssertEqual(fetchCount, 2)
+        XCTAssertEqual(observedDelays, [NativeRecordExpressionPlanRetryPolicy.delaysNanoseconds[0]])
+    }
+
+    @MainActor
     func testExpressionPlanAcknowledgementRetriesTransientFailuresWithinBound() async throws {
         let feedback = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("expression_planner"),

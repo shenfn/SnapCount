@@ -45,6 +45,20 @@ enum NativeRecordExpressionPlanRetryPolicy {
         2_000_000_000
     ]
 
+    private static func isRetryable(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return [
+            .timedOut,
+            .cannotConnectToHost,
+            .networkConnectionLost,
+            .notConnectedToInternet,
+            .dnsLookupFailed,
+            .cannotFindHost,
+            .secureConnectionFailed,
+            .serverCertificateUntrusted
+        ].contains(urlError.code)
+    }
+
     static func resolve(
         fetch: () async throws -> NativeRecordExpressionPlanLookup,
         shouldContinue: () -> Bool
@@ -67,7 +81,18 @@ enum NativeRecordExpressionPlanRetryPolicy {
             do {
                 lookup = try await fetch()
             } catch {
-                return nil
+                guard isRetryable(error),
+                      shouldContinue(),
+                      !Task.isCancelled,
+                      retryIndex < delaysNanoseconds.count else { return nil }
+                let delay = delaysNanoseconds[retryIndex]
+                retryIndex += 1
+                do {
+                    try await sleep(delay)
+                } catch {
+                    return nil
+                }
+                continue
             }
             guard shouldContinue(), !Task.isCancelled else { return nil }
             switch lookup {
