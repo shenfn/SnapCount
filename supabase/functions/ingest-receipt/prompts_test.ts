@@ -79,6 +79,10 @@ Deno.test("voice prompt permits grounded qualitative inference without yielding 
     prompt.includes("expressed_semantic_key"),
     "voice prompt must require explicit candidate-expression provenance",
   );
+  assert(
+    prompt.includes("companion_candidates") && prompt.includes("同一次调用"),
+    "voice prompt must request bounded alternatives without adding another model call",
+  );
 });
 
 Deno.test("voice prompt receives complete time context and prioritizes event time", () => {

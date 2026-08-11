@@ -866,7 +866,7 @@ test('second-call failures deterministically express the verified Planner candid
   }
 })
 
-test('generic model copy cannot claim Planner coverage while grounded copy can', async () => {
+test('generic model copy yields a verified Planner fallback while grounded copy can claim coverage', async () => {
   const module = await loadIngestFeedbackModule()
   const plannerBrief = {
     candidate_id: 'fact:expense:merchant-first-occurrence:voice-coverage-test',
@@ -919,8 +919,9 @@ test('generic model copy cannot claim Planner coverage while grounded copy can',
       choices: [{ message: { content: modelPayload('日常琐碎也被妥善归档，生活自有其节奏。') } }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     const generic = await module.generateVoiceFeedback(options)
-    assert.equal(generic.companion_message, '日常琐碎也被妥善归档，生活自有其节奏。')
-    assert.equal(generic.ai_feedback.expression_coverage, undefined)
+    assert.equal(generic.companion_message, plannerBrief.canonical_text)
+    assert.equal(generic.ai_feedback.expression_coverage.expressed_semantic_key, plannerBrief.semantic_key)
+    assert.equal(generic.ai_feedback.expression_coverage.presentation_target, 'companion_message')
 
     globalThis.fetch = async () => new Response(JSON.stringify({
       choices: [{ message: { content: modelPayload('第一次记录青禾茶饮，芥子记住这个新商户了。') } }],

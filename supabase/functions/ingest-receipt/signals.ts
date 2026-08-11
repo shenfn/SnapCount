@@ -718,17 +718,29 @@ function singleChineseDigit(value: string): number | null {
 
 function colloquialCurrencyNumbers(text: string): ExtractedNumber[] {
   const matches: ExtractedNumber[] = [];
-  const pattern = /([一二两三四五六七八九十百千\d]+)\s*(?:元|块)\s*([零一二三四五六七八九\d])(?:\s*(?:角|毛))?/g;
-  for (const match of text.matchAll(pattern)) {
+  const explicitPattern = /([一二两三四五六七八九十百千\d]+)\s*(?:元|块)\s*([零一二三四五六七八九\d])\s*(?:角|毛)(?:\s*([零一二三四五六七八九\d])\s*分)?/g;
+  for (const match of text.matchAll(explicitPattern)) {
     const yuan = /^\d+$/.test(match[1]) ? Number(match[1]) : parseChineseCardinal(match[1]);
     const jiao = singleChineseDigit(match[2]);
-    if (yuan === null || !Number.isFinite(yuan) || jiao === null) continue;
+    const fen = match[3] ? singleChineseDigit(match[3]) : 0;
+    if (yuan === null || !Number.isFinite(yuan) || jiao === null || fen === null) continue;
     const start = match.index ?? 0;
     matches.push({
       start,
       end: start + match[0].length,
-      value: Math.round((yuan + jiao / 10) * 100) / 100,
+      value: Math.round((yuan + jiao / 10 + fen / 100) * 100) / 100,
     });
+  }
+  const compactPattern = /([一二两三四五六七八九十百千\d]+)\s*(?:元|块)\s*([零一二三四五六七八九\d]{1,2})(?![零一二三四五六七八九\d角毛分])/g;
+  for (const match of text.matchAll(compactPattern)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    if (matches.some((item) => start < item.end && end > item.start)) continue;
+    const yuan = /^\d+$/.test(match[1]) ? Number(match[1]) : parseChineseCardinal(match[1]);
+    const fractionDigits = [...match[2]].map(singleChineseDigit);
+    if (yuan === null || !Number.isFinite(yuan) || fractionDigits.some((item) => item === null)) continue;
+    const fraction = Number(fractionDigits.join("")) / (fractionDigits.length === 1 ? 10 : 100);
+    matches.push({ start, end, value: Math.round((yuan + fraction) * 100) / 100 });
   }
   return matches;
 }
