@@ -12,20 +12,20 @@ enum NativeHomeWidgetKey: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .finance: return "财务状态"
-        case .today: return "今日记录"
+        case .today: return "今日轨迹"
         case .pending: return "因缘流转"
-        case .domains: return "数据域"
-        case .daily: return "每日明细"
+        case .domains: return "生活切面"
+        case .daily: return "近 14 天与历史"
         }
     }
 
     var detail: String {
         switch self {
         case .finance: return "现金、欠款与收支概览"
-        case .today: return "今天各数据域的记录"
+        case .today: return "按发生时间查看当天记录"
         case .pending: return "待补全、待分类与识别失败"
-        case .domains: return "睡眠、运动、饮食与阅读组合"
-        case .daily: return "按日期浏览本月记录"
+        case .domains: return "睡眠、运动、饮食与阅读观察"
+        case .daily: return "跨月查看记录密度与较早历史"
         }
     }
 
@@ -360,6 +360,37 @@ struct NativeHomeSleepSpendingObservation: Equatable {
     let allDayAverage: Double
 }
 
+enum NativeHomeCaptureAction: String, CaseIterable, Identifiable, Equatable {
+    case camera
+    case photoLibrary
+    case manual
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .camera: return "拍摄照片"
+        case .photoLibrary: return "从相册选择"
+        case .manual: return "手动记录"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .camera: return "camera"
+        case .photoLibrary: return "photo.on.rectangle"
+        case .manual: return "square.and.pencil"
+        }
+    }
+}
+
+struct NativeHomeActivityDay: Identifiable, Equatable {
+    let dateKey: String
+    let recordCount: Int
+
+    var id: String { dateKey }
+}
+
 enum NativeHomeInsightAnalytics {
     static func dailySummaries(from snapshot: DashboardSnapshot) -> [NativeDailySummary] {
         guard !snapshot.dayRecordGroups.isEmpty else {
@@ -437,6 +468,57 @@ enum NativeHomeInsightAnalytics {
             let key = dateFormatter.string(from: date)
             return summaries[key] ?? NativeDailySummary(dateKey: key, expense: 0, income: 0, pendingCount: 0, recordCount: 0)
         }
+    }
+
+    static func timelineRecords(on dateKey: String, from snapshot: DashboardSnapshot) -> [NativeDayRecord] {
+        let records = snapshot.dayRecordGroups.first(where: { $0.dateKey == dateKey })?.records ?? []
+        return records
+            .filter { record in
+                record.kind != .staging && (record.kind != .expense || isConfirmedExpense(record, snapshot: snapshot))
+            }
+            .sorted { left, right in
+                switch (left.timeLabel, right.timeLabel) {
+                case let (leftTime?, rightTime?) where leftTime != rightTime:
+                    return leftTime > rightTime
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                default:
+                    return left.id > right.id
+                }
+            }
+    }
+
+    static func activityDays(
+        from snapshot: DashboardSnapshot,
+        endingAt dateKey: String,
+        dayCount: Int = 14
+    ) -> [NativeHomeActivityDay] {
+        guard dayCount > 0, let endDate = dateFormatter.date(from: dateKey) else { return [] }
+        return (0..<dayCount).compactMap { offset in
+            guard let date = chinaCalendar.date(byAdding: .day, value: offset - (dayCount - 1), to: endDate) else {
+                return nil
+            }
+            let key = dateFormatter.string(from: date)
+            return NativeHomeActivityDay(
+                dateKey: key,
+                recordCount: timelineRecords(on: key, from: snapshot).count
+            )
+        }
+    }
+
+    static func earlierDailySummaries(
+        before dateKey: String,
+        from snapshot: DashboardSnapshot,
+        limit: Int = 4
+    ) -> [NativeDailySummary] {
+        guard limit > 0 else { return [] }
+        return Array(
+            dailySummaries(from: snapshot)
+                .filter { $0.dateKey < dateKey && ($0.recordCount > 0 || $0.pendingCount > 0) }
+                .prefix(limit)
+        )
     }
 
     static func expenseBreakdown(from snapshot: DashboardSnapshot) -> [NativeHomeExpenseCategory] {

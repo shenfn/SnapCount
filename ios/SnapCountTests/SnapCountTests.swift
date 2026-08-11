@@ -3138,6 +3138,104 @@ final class SnapCountTests: XCTestCase {
         XCTAssertTrue(NativeHomeInsightAnalytics.hasHydratedDetails(for: "sleep", in: hydrated))
     }
 
+    func testHomeTimelineShowsStableSelectedDayRecordsNewestFirst() {
+        let breakfast = NativeDayRecord(
+            id: "expense-breakfast", reference: "expense/breakfast", dateKey: "2026-08-10", kind: .expense,
+            domainKey: "expense", title: "早餐", subtitle: "", value: "¥18", timeLabel: "08:10",
+            systemImage: "creditcard", transactionType: "expense", status: "done"
+        )
+        let reading = NativeDayRecord(
+            id: "reading", reference: "data/reading", dateKey: "2026-08-10", kind: .reading,
+            domainKey: "reading", title: "阅读", subtitle: "", value: "30 分钟", timeLabel: "21:30",
+            systemImage: "book"
+        )
+        let pending = NativeDayRecord(
+            id: "expense-pending", reference: "expense/pending", dateKey: "2026-08-10", kind: .expense,
+            domainKey: "expense", title: "待补全", subtitle: "", value: "¥88", timeLabel: "22:00",
+            systemImage: "clock", transactionType: "expense", status: "pending"
+        )
+        let staging = NativeDayRecord(
+            id: "staging", reference: "staging-1", dateKey: "2026-08-10", kind: .staging,
+            domainKey: nil, title: "待识别", subtitle: "", value: "", timeLabel: "23:00",
+            systemImage: "tray"
+        )
+        let otherDay = NativeDayRecord(
+            id: "other-day", reference: "data/other", dateKey: "2026-08-09", kind: .sleep,
+            domainKey: "sleep", title: "睡眠", subtitle: "", value: "8 小时", timeLabel: "07:00",
+            systemImage: "moon"
+        )
+        let snapshot = DashboardSnapshot(dayRecordGroups: [
+            NativeDayRecordGroup(dateKey: "2026-08-10", records: [breakfast, pending, staging, reading]),
+            NativeDayRecordGroup(dateKey: "2026-08-09", records: [otherDay])
+        ])
+
+        XCTAssertEqual(
+            NativeHomeInsightAnalytics.timelineRecords(on: "2026-08-10", from: snapshot).map(\.id),
+            ["reading", "expense-breakfast"]
+        )
+    }
+
+    func testHomeActivityDaysSpanFourteenDaysAcrossMonthAndExcludePendingRecords() {
+        let juneRecord = NativeDayRecord(
+            id: "june", reference: "expense/june", dateKey: "2026-06-30", kind: .expense,
+            domainKey: "expense", title: "晚餐", subtitle: "", value: "¥40", timeLabel: "20:00",
+            systemImage: "creditcard", transactionType: "expense", status: "done"
+        )
+        let julyRecord = NativeDayRecord(
+            id: "july", reference: "data/july", dateKey: "2026-07-01", kind: .sport,
+            domainKey: "sport", title: "跑步", subtitle: "", value: "30 分钟", timeLabel: "07:00",
+            systemImage: "figure.run"
+        )
+        let pending = NativeDayRecord(
+            id: "pending", reference: "expense/pending", dateKey: "2026-07-01", kind: .expense,
+            domainKey: "expense", title: "待补全", subtitle: "", value: "¥99", timeLabel: "21:00",
+            systemImage: "clock", transactionType: "expense", status: "pending"
+        )
+        let snapshot = DashboardSnapshot(dayRecordGroups: [
+            NativeDayRecordGroup(dateKey: "2026-06-30", records: [juneRecord]),
+            NativeDayRecordGroup(dateKey: "2026-07-01", records: [pending, julyRecord])
+        ])
+
+        let days = NativeHomeInsightAnalytics.activityDays(
+            from: snapshot,
+            endingAt: "2026-07-02",
+            dayCount: 14
+        )
+
+        XCTAssertEqual(days.count, 14)
+        XCTAssertEqual(days.first?.dateKey, "2026-06-19")
+        XCTAssertEqual(days.last?.dateKey, "2026-07-02")
+        XCTAssertEqual(days.first(where: { $0.dateKey == "2026-06-30" })?.recordCount, 1)
+        XCTAssertEqual(days.first(where: { $0.dateKey == "2026-07-01" })?.recordCount, 1)
+        XCTAssertEqual(days.first(where: { $0.dateKey == "2026-07-02" })?.recordCount, 0)
+    }
+
+    func testHomeEarlierSummariesExcludeSelectedAndEmptyDays() {
+        let snapshot = DashboardSnapshot(dailySummaries: [
+            NativeDailySummary(dateKey: "2026-08-11", expense: 20, income: 0, pendingCount: 0, recordCount: 1),
+            NativeDailySummary(dateKey: "2026-08-10", expense: 0, income: 0, pendingCount: 0, recordCount: 0),
+            NativeDailySummary(dateKey: "2026-08-09", expense: 0, income: 0, pendingCount: 1, recordCount: 1),
+            NativeDailySummary(dateKey: "2026-08-08", expense: 12, income: 0, pendingCount: 0, recordCount: 1),
+            NativeDailySummary(dateKey: "2026-08-07", expense: 8, income: 0, pendingCount: 0, recordCount: 1)
+        ])
+
+        XCTAssertEqual(
+            NativeHomeInsightAnalytics.earlierDailySummaries(
+                before: "2026-08-11",
+                from: snapshot,
+                limit: 2
+            ).map(\.dateKey),
+            ["2026-08-09", "2026-08-08"]
+        )
+    }
+
+    func testHomeCaptureActionsKeepNativeCameraPhotoLibraryAndManualEntry() {
+        XCTAssertEqual(NativeHomeCaptureAction.allCases, [.camera, .photoLibrary, .manual])
+        XCTAssertEqual(NativeHomeCaptureAction.camera.systemImage, "camera")
+        XCTAssertEqual(NativeHomeCaptureAction.photoLibrary.systemImage, "photo.on.rectangle")
+        XCTAssertEqual(NativeHomeCaptureAction.manual.systemImage, "square.and.pencil")
+    }
+
     func testAccountTypeNormalizationMatchesPWAAdapter() {
         XCTAssertEqual(NativeAccountType.normalized("wechat"), .walletBalance)
         XCTAssertEqual(NativeAccountType.normalized("bank_card"), .debitCard)

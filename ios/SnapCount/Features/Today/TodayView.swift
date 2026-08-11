@@ -2,7 +2,6 @@ import SwiftUI
 
 struct TodayView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var showUploadOptions = false
     @State private var showCameraPicker = false
     @State private var showPhotoLibraryPicker = false
     @State private var showManualRecordSheet = false
@@ -51,18 +50,18 @@ struct TodayView: View {
         appState.reportSnapshot(monthKey: selectedMonthKey)
     }
 
-    private var recentFinanceMonthKeys: [String] {
-        NativeHomeInsightAnalytics.monthKeysForRecentWindow(endingAt: selectedDateKey)
+    private var recentHomeMonthKeys: [String] {
+        NativeHomeInsightAnalytics.monthKeysForRecentWindow(endingAt: selectedDateKey, dayCount: 14)
     }
 
-    private var recentFinanceSnapshot: DashboardSnapshot {
+    private var recentHomeSnapshot: DashboardSnapshot {
         NativeHomeInsightAnalytics.combining(
-            recentFinanceMonthKeys.map { appState.reportSnapshot(monthKey: $0) }
+            recentHomeMonthKeys.map { appState.reportSnapshot(monthKey: $0) }
         )
     }
 
     private var requiredMonthKeys: [String] {
-        ([selectedMonthKey] + recentFinanceMonthKeys).reduce(into: [String]()) { result, monthKey in
+        ([selectedMonthKey] + recentHomeMonthKeys).reduce(into: [String]()) { result, monthKey in
             if !result.contains(monthKey) { result.append(monthKey) }
         }
     }
@@ -83,20 +82,37 @@ struct TodayView: View {
         NativeHomeInsightAnalytics.dailySummary(on: selectedDateKey, from: selectedInsightSnapshot)
     }
 
-    private var selectedMonthSummaries: [NativeDailySummary] {
-        let summaries = NativeHomeInsightAnalytics.dailySummaries(from: selectedInsightSnapshot)
-        return summaries.isEmpty ? [selectedDaySummary] : summaries
+    private var timelineRecords: [NativeDayRecord] {
+        NativeHomeInsightAnalytics.timelineRecords(on: selectedDateKey, from: selectedInsightSnapshot)
+    }
+
+    private var activityDays: [NativeHomeActivityDay] {
+        NativeHomeInsightAnalytics.activityDays(from: recentHomeSnapshot, endingAt: selectedDateKey)
+    }
+
+    private var earlierSummaries: [NativeDailySummary] {
+        NativeHomeInsightAnalytics.earlierDailySummaries(
+            before: selectedDateKey,
+            from: recentHomeSnapshot
+        )
     }
 
     var body: some View {
         ZStack {
             JieziPageBackground()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    header
+                LazyVStack(alignment: .leading, spacing: JieziSpacing.xl3) {
+                    HomeMastheadView(
+                        selectedDate: selectedDate,
+                        isToday: selectedDateKey == Self.todayKey,
+                        summary: selectedDaySummary,
+                        stableRecordCount: timelineRecords.count,
+                        isLoading: appState.isLoadingDashboard,
+                        isShowingCachedData: appState.isShowingCachedDashboard,
+                        onSelectDate: { showDatePicker = true },
+                        onManageWidgets: { showWidgetManager = true }
+                    )
                     dashboardStatus
-                    captureButton
-                    widgetManagerHeader
                     if enabledWidgets.isEmpty {
                         emptyWidgetState
                     } else {
@@ -105,21 +121,19 @@ struct TodayView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 36)
+                .padding(.horizontal, JieziSpacing.Semantic.page_padding)
+                .padding(.top, JieziSpacing.md)
+                .padding(.bottom, JieziSpacing.xl3)
             }
+            .scrollIndicators(.hidden)
             .refreshable {
                 await appState.refreshDashboard()
                 await appState.loadAccounts()
             }
         }
         .navigationBarHidden(true)
-        .confirmationDialog("留下此刻", isPresented: $showUploadOptions, titleVisibility: .visible) {
-            Button("手动记录") { showManualRecordSheet = true }
-            Button("从相册选择") { showPhotoLibraryPicker = true }
-            Button("拍摄照片") { showCameraPicker = true }
-            Button("取消", role: .cancel) {}
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            captureDock
         }
         .fullScreenCover(isPresented: $showCameraPicker) {
             CameraPicker { data in
@@ -184,6 +198,9 @@ struct TodayView: View {
         .onChange(of: domainCardConfiguration) { _ in
             normalizeInsightSelections()
         }
+        .sensoryFeedback(.selection, trigger: selectedDateKey)
+        .sensoryFeedback(.selection, trigger: selectedFinanceCard)
+        .sensoryFeedback(.selection, trigger: selectedDomainCard)
     }
 
     @ViewBuilder
@@ -191,7 +208,7 @@ struct TodayView: View {
         if appState.isLoadingDashboard && appState.dashboard.monthCount == 0 {
             HStack(spacing: 10) {
                 ProgressView()
-                Text("正在同步 PWA 数据")
+                Text("正在同步数据")
             }
             .font(.subheadline)
             .foregroundStyle(JieziTheme.muted)
@@ -211,56 +228,6 @@ struct TodayView: View {
             Text("部分数据域暂未同步，已显示可用数据")
                 .font(.footnote)
                 .foregroundStyle(JieziTheme.gold)
-        }
-    }
-
-    private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("个人数据平台")
-                    .font(JieziType.display)
-                    .foregroundStyle(JieziTheme.ink)
-                Text(Self.fullDateFormatter.string(from: selectedDate))
-                    .font(.subheadline)
-                    .foregroundStyle(JieziTheme.muted)
-            }
-            Spacer()
-            Button {
-                showDatePicker = true
-            } label: {
-                HStack(spacing: 7) {
-                    Text(Self.monthFormatter.string(from: selectedDate))
-                        .font(.headline)
-                    Image(systemName: "calendar")
-                        .font(.caption.bold())
-                }
-                .foregroundStyle(JieziTheme.ink)
-                .padding(.horizontal, 16)
-                .frame(minHeight: 44)
-                .background(.white.opacity(0.82), in: Capsule())
-                .overlay(Capsule().stroke(JieziTheme.brand.opacity(0.08)))
-            }
-            .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.96))
-            .accessibilityLabel("选择首页日期")
-        }
-    }
-
-    private var widgetManagerHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("首页组件")
-                    .font(.headline)
-                Text("已启用 \(enabledWidgets.count) 个区块 · 财务 \(enabledFinanceCards.count) 张 · 数据域 \(enabledDomainCards.count) 张")
-                    .font(.caption)
-                    .foregroundStyle(JieziTheme.muted)
-            }
-            Spacer()
-            Button {
-                showWidgetManager = true
-            } label: {
-                Label("管理", systemImage: "slider.horizontal.3")
-            }
-            .buttonStyle(.bordered)
         }
     }
 
@@ -293,7 +260,7 @@ struct TodayView: View {
     }
 
     private var financeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: JieziSpacing.md) {
             sectionHeader(title: "财务状态", subtitle: financeScopeLabel) {
                 NavigationLink {
                     AccountsView()
@@ -313,7 +280,7 @@ struct TodayView: View {
                                 key: configuration.key,
                                 summary: financeSummary,
                                 snapshot: selectedInsightSnapshot,
-                                recentSnapshot: recentFinanceSnapshot,
+                                recentSnapshot: recentHomeSnapshot,
                                 accounts: appState.accounts,
                                 selectedDateKey: selectedDateKey
                             )
@@ -325,14 +292,22 @@ struct TodayView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .automatic))
                 .frame(height: 270)
+                .accessibilityLabel("财务状态卡片")
             }
         }
     }
 
     private var todaySection: some View {
-        return VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: selectedDateKey == Self.todayKey ? "今日记录" : "当天记录", subtitle: "按数据域查看所选日期")
-            dailyCard(selectedDaySummary)
+        VStack(alignment: .leading, spacing: JieziSpacing.md) {
+            sectionHeader(
+                title: selectedDateKey == Self.todayKey ? "今日轨迹" : "当天轨迹",
+                subtitle: "按发生时间排列的已确认记录"
+            ) {
+                NavigationLink(value: NativeDayDetailRoute(dateKey: selectedDateKey, kind: .all)) {
+                    Label("全部", systemImage: "chevron.right")
+                }
+            }
+            HomeTimelineView(records: timelineRecords, dateKey: selectedDateKey)
         }
     }
 
@@ -343,22 +318,45 @@ struct TodayView: View {
     }
 
     private var pendingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "因缘流转", subtitle: "\(pendingSummary.total) 条待处理")
-            VStack(spacing: 12) {
-                pendingNavigationRow("待补全账单", count: pendingSummary.pendingExpenses, systemImage: "clock.badge.exclamationmark", filter: .pendingExpense)
-                pendingNavigationRow("待分类", count: pendingSummary.routing, systemImage: "questionmark.folder", filter: .routing)
-                pendingNavigationRow("待确认", count: pendingSummary.review, systemImage: "checklist", filter: .review)
-                pendingNavigationRow("识别失败", count: pendingSummary.failed, systemImage: "exclamationmark.triangle", filter: .failed)
-                pendingNavigationRow("待修补", count: pendingSummary.repair, systemImage: "wrench.and.screwdriver", filter: .repair)
+        Menu {
+            pendingAction("待补全账单", count: pendingSummary.pendingExpenses, systemImage: "clock.badge.exclamationmark", filter: .pendingExpense)
+            pendingAction("待分类", count: pendingSummary.routing, systemImage: "questionmark.folder", filter: .routing)
+            pendingAction("待确认", count: pendingSummary.review, systemImage: "checklist", filter: .review)
+            pendingAction("识别失败", count: pendingSummary.failed, systemImage: "exclamationmark.triangle", filter: .failed)
+            pendingAction("待修补", count: pendingSummary.repair, systemImage: "wrench.and.screwdriver", filter: .repair)
+        } label: {
+            HStack(spacing: JieziSpacing.md) {
+                Image(systemName: pendingSummary.total > 0 ? "tray.full" : "checkmark.circle")
+                    .font(JieziFont.title3)
+                    .foregroundStyle(pendingSummary.total > 0 ? JieziTheme.gold : JieziTheme.brand)
+                    .frame(width: 36)
+                VStack(alignment: .leading, spacing: JieziSpacing.xxs) {
+                    Text("因缘流转")
+                        .font(JieziType.cardTitle)
+                        .foregroundStyle(JieziTheme.ink)
+                    Text(pendingSummary.total > 0 ? "\(pendingSummary.total) 条等待处理，点按查看分类" : "目前没有待处理事项")
+                        .font(JieziFont.caption)
+                        .foregroundStyle(JieziTheme.muted)
+                }
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(JieziFont.caption2.weight(.semibold))
+                    .foregroundStyle(JieziTheme.muted)
             }
-            .jieziCard(palette: JieziTheme.palette, solid: true)
+            .padding(JieziSpacing.md)
+            .background(JieziTheme.palette.paper.opacity(0.58), in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
+                    .stroke(JieziTheme.brand.opacity(0.08), lineWidth: 1)
+            }
         }
+        .buttonStyle(JieziPressableButtonStyle())
+        .accessibilityLabel("因缘流转，\(pendingSummary.total) 条待处理")
     }
 
     private var domainsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "数据域", subtitle: "所选月记录分布") {
+        VStack(alignment: .leading, spacing: JieziSpacing.md) {
+            sectionHeader(title: "生活切面", subtitle: "来自所选月份的稳定数据") {
                 NavigationLink {
                     DomainsView()
                 } label: {
@@ -390,6 +388,7 @@ struct TodayView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .automatic))
                 .frame(height: 246)
+                .accessibilityLabel("生活数据卡片")
             }
         }
     }
@@ -470,138 +469,56 @@ struct TodayView: View {
         sectionHeader(title: title, subtitle: subtitle) { EmptyView() }
     }
 
-    private func metric(title: String, value: String) -> some View {
-        JieziMetric(label: title, value: value)
-    }
-
-    private var captureButton: some View {
-        Button { showUploadOptions = true } label: {
-            HStack(spacing: 14) {
-                Image(systemName: isUploading ? "hourglass" : "camera.viewfinder")
-                    .font(.title2)
-                    .frame(width: 48, height: 48)
-                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(isUploading ? "正在识别" : "留下此刻").font(.headline)
-                    Text("拍照、选择图片或手动记录").font(.subheadline).opacity(0.72)
-                }
-                Spacer()
-                Image(systemName: "plus").font(.title2)
-            }
-            .foregroundStyle(.white)
-            .padding(18)
-            .background(JieziTheme.brand, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(isUploading)
-    }
-
     private var dailySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "因缘流转", subtitle: "按日期汇总\(NativeMonthKey.title(selectedMonthKey))") {
-                Button {
-                    showDatePicker = true
-                } label: {
-                    Label("选日期", systemImage: "calendar")
-                }
+        VStack(alignment: .leading, spacing: JieziSpacing.xl2) {
+            VStack(alignment: .leading, spacing: JieziSpacing.md) {
+                sectionHeader(title: "近 14 天", subtitle: "只统计已确认记录，点按日期可回看")
+                HomeActivityDensityView(
+                    days: activityDays,
+                    selectedDateKey: selectedDateKey,
+                    onSelectDate: selectDateKey
+                )
             }
 
-            JieziMonthSwitcher(
-                title: NativeMonthKey.title(selectedMonthKey),
-                selectionToken: selectedMonthKey,
-                canAdvance: selectedMonthKey < Self.currentMonthKey,
-                onPrevious: { shiftSelectedMonth(-1) },
-                onNext: { shiftSelectedMonth(1) }
-            )
-
-            ForEach(selectedMonthSummaries) { dailyCard($0) }
-        }
-    }
-
-    private func dailyCard(_ day: NativeDailySummary) -> some View {
-        let group = appState.recordGroups(monthKey: String(day.dateKey.prefix(7))).first { $0.dateKey == day.dateKey }
-        return NavigationLink(value: NativeDayDetailRoute(dateKey: day.dateKey, kind: .all)) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text(String(day.dateKey.suffix(5)))
-                        .font(.system(size: 26, weight: .black, design: .rounded))
-                        .monospacedDigit()
-                    Spacer()
-                    Text(weekday(day.dateKey))
-                        .font(.headline)
-                        .foregroundStyle(JieziTheme.muted)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.bold())
-                        .foregroundStyle(JieziTheme.muted)
-                }
-                Divider().overlay(JieziTheme.muted.opacity(0.2))
-                if day.expense > 0 {
-                    daySummaryRow(color: JieziTheme.coral, title: "支出", value: money(day.expense))
-                }
-                if day.income > 0 {
-                    daySummaryRow(color: JieziTheme.brand, title: "收入", value: money(day.income, signed: true))
-                }
-                ForEach(group?.availableKinds.filter { ![.all, .expense, .income, .staging].contains($0) } ?? []) { kind in
-                    daySummaryRow(color: JieziTheme.mint, title: kind.title, value: "\(group?.records(for: kind).count ?? 0)条")
-                }
-                if day.pendingCount > 0 {
-                    daySummaryRow(color: JieziTheme.gold, title: "待处理", value: "\(day.pendingCount)条")
-                }
-                if day.recordCount == 0 && day.pendingCount == 0 {
-                    summaryRow(color: JieziTheme.muted, title: "记录", value: "0条")
-                }
+            VStack(alignment: .leading, spacing: JieziSpacing.sm) {
+                sectionHeader(title: "早前历史", subtitle: "所选日期之前的最近记录")
+                HomeEarlierHistoryView(summaries: earlierSummaries)
             }
-            .foregroundStyle(JieziTheme.ink)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous))
-            .jieziCard(palette: JieziTheme.palette, solid: true)
         }
-        .buttonStyle(JieziPressableButtonStyle())
-        .accessibilityHint("打开当天全部记录")
     }
 
-    private func daySummaryRow(color: Color, title: String, value: String) -> some View {
+    private var captureDock: some View {
         HStack {
-            summaryRow(color: color, title: title, value: value)
-            Image(systemName: "chevron.right")
-                .font(.caption2.bold())
-                .foregroundStyle(JieziTheme.muted)
-        }
-    }
-
-    private func summaryRow(color: Color, title: String, value: String) -> some View {
-        HStack {
-            Circle().fill(color).frame(width: 9, height: 9)
-            Text(title).foregroundStyle(JieziTheme.muted)
             Spacer()
-            Text(value).font(.headline.monospacedDigit())
+            Menu {
+                ForEach(NativeHomeCaptureAction.allCases) { action in
+                    Button {
+                        JieziHaptics.confirm()
+                        performCaptureAction(action)
+                    } label: {
+                        Label(action.title, systemImage: action.systemImage)
+                    }
+                }
+            } label: {
+                Label(isUploading ? "识别中" : "留下此刻", systemImage: isUploading ? "hourglass" : "camera.badge.ellipsis")
+                    .font(JieziType.button)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, JieziSpacing.lg)
+                    .frame(minHeight: 50)
+                    .background(JieziTheme.brand, in: Capsule())
+                    .shadow(color: JieziTheme.space.opacity(0.16), radius: 16, x: 0, y: 8)
+            }
+            .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.94))
+            .disabled(isUploading)
+            .accessibilityHint("可选择拍照、相册或手动记录")
         }
+        .padding(.horizontal, JieziSpacing.Semantic.page_padding)
+        .padding(.vertical, JieziSpacing.sm)
+        .background(.ultraThinMaterial)
     }
 
-    private func shiftSelectedMonth(_ offset: Int) {
-        guard let shiftedMonth = NativeMonthKey.shifted(selectedMonthKey, by: offset),
-              let shiftedDate = Self.dateKeyFormatter.date(from: "\(shiftedMonth)-01") else { return }
-        selectedDate = shiftedDate
-    }
-
-    private func pendingRow(_ title: String, count: Int, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .foregroundStyle(count > 0 ? JieziTheme.gold : JieziTheme.muted)
-                .frame(width: 28)
-            Text(title)
-                .foregroundStyle(JieziTheme.ink)
-            Spacer()
-            Text("\(count)")
-                .font(.headline.monospacedDigit())
-                .foregroundStyle(JieziTheme.ink)
-            Image(systemName: "chevron.right")
-                .font(.caption.bold())
-                .foregroundStyle(JieziTheme.muted)
-        }
-    }
-
-    private func pendingNavigationRow(
+    @ViewBuilder
+    private func pendingAction(
         _ title: String,
         count: Int,
         systemImage: String,
@@ -610,21 +527,27 @@ struct TodayView: View {
         Button {
             appState.openInbox(filter: filter)
         } label: {
-            pendingRow(title, count: count, systemImage: systemImage)
-                .contentShape(Rectangle())
+            Label("\(title) · \(count)", systemImage: systemImage)
         }
-        .buttonStyle(.plain)
-        .accessibilityHint("打开\(title)分类")
+        .disabled(count == 0)
+    }
+
+    private func performCaptureAction(_ action: NativeHomeCaptureAction) {
+        switch action {
+        case .camera: showCameraPicker = true
+        case .photoLibrary: showPhotoLibraryPicker = true
+        case .manual: showManualRecordSheet = true
+        }
+    }
+
+    private func selectDateKey(_ dateKey: String) {
+        guard let date = Self.dateKeyFormatter.date(from: dateKey) else { return }
+        selectedDate = date
     }
 
     private func money(_ value: Double, signed: Bool = false) -> String {
         let prefix = signed && value > 0 ? "+" : ""
         return "\(prefix)¥\(Int(value.rounded()))"
-    }
-
-    private func weekday(_ dateKey: String) -> String {
-        guard let date = Self.dateKeyFormatter.date(from: dateKey) else { return "" }
-        return Self.weekdayFormatter.string(from: date)
     }
 
     private func uploadImageData(_ data: Data, captureKind: String, filename: String) async {
@@ -648,23 +571,13 @@ struct TodayView: View {
         showUploadResult = true
     }
 
-    private static let fullDateFormatter: DateFormatter = {
-        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "yyyy年M月d日"; return formatter
-    }()
-    private static let monthFormatter: DateFormatter = {
-        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "yyyy年M月"; return formatter
-    }()
     private static let dateKeyFormatter: DateFormatter = {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd"; return formatter
-    }()
-    private static let weekdayFormatter: DateFormatter = {
-        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "EEE"; return formatter
     }()
     private static let monthDayFormatter: DateFormatter = {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "M月d日"; return formatter
     }()
     private static var todayKey: String { dateKeyFormatter.string(from: Date()) }
-    private static var currentMonthKey: String { NativeMonthKey.current() }
 }
 
 private struct HomeWidgetManagerSheet: View {
