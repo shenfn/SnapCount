@@ -11,6 +11,6 @@
 - 最小实现：`resolvePlannerNotification` 对独立 `feedback_card` 也保留 Voice 输入；iOS 首页上传改用 JSON 响应并复用 `ShortcutUploadResult` 结构化合成。
 - 绿灯结果：通知专项 14/14、完整 Edge 集合 92/92、PWA 表达契约 22/22、`deno check` 与 PWA 生产构建通过。Windows 无法执行 XCTest，待 GitHub macOS CI。
 - PWA/iOS 差异：PWA 与快捷指令已消费 JSON；iOS 首页原生上传当前消费纯文本，需要收敛到同一结构化结果。
-- GitHub CI 结果：首次 macOS 编译通过；XCTest 因测试桩读取 multipart `httpBody` 为 nil 失败，属于测试实现问题。已改为通过兼容上传入口的可观察输出验证 JSON 解码，等待复跑。
+- GitHub CI 结果：首次 macOS 编译通过，测试桩因读取 multipart `httpBody` 为 nil 暴露测试实现问题；调整为可观察输出断言后，第二轮模拟器编译、143 项 XCTest、iOS Build Gate 与完整 Release Validation 全部通过。iOS run：`31501099929`。
 - 未解决风险：现有已生成记录不会重新触发上传弹窗；修复对部署后的新上传生效，历史详情仍直接读取已保存 Voice。
-- 对应提交：待记录。
+- 对应提交：`a9ef232`（实现与红绿测试）、`719ef3a`（稳定 iOS 可观察输出测试）。
