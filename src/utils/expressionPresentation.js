@@ -199,6 +199,15 @@ export function hasCompanionMessage(value) {
   return String(value || '').trim().length > 0
 }
 
+export function recordExpressionPlanForDetail(cache, recordId) {
+  const normalizedRecordId = String(recordId || '').trim()
+  if (!normalizedRecordId || !cache || typeof cache !== 'object') return null
+  const plan = cache[normalizedRecordId]
+  if (!plan || typeof plan !== 'object') return null
+  const planRecordId = String(plan.recordId ?? plan.record_id ?? '').trim()
+  return planRecordId && planRecordId !== normalizedRecordId ? null : plan
+}
+
 function feedbackCoveragePresentationTarget(feedback) {
   const coverage = feedback?.expression_coverage ?? feedback?.expressionCoverage
   if (!coverage || typeof coverage !== 'object') return ''
@@ -290,6 +299,37 @@ export function feedbackToRender({ companionMessage, feedback, companionFeedback
   if (semanticKey && expressedSemanticKeys(companionFeedback, feedback).includes(semanticKey)) return null
   if (isCurrentRecordContextFeedback(feedback)) return null
   return feedback
+}
+
+export function plannerFeedbackSurfaceState({
+  delivery,
+  companionMessage,
+  companionFeedback,
+} = {}) {
+  if (!delivery || typeof delivery !== 'object') {
+    return { state: 'idle', feedback: null, error: '' }
+  }
+  const status = normalized(delivery.status)
+  if (status === 'loading') {
+    return { state: 'loading', feedback: null, error: '' }
+  }
+  if (status === 'error') {
+    return { state: 'error', feedback: null, error: String(delivery.error || '').trim() }
+  }
+  if (!delivery.available) {
+    return { state: status || 'unavailable', feedback: null, error: '' }
+  }
+  const feedback = feedbackToRender({
+    companionMessage,
+    feedback: delivery.feedback,
+    companionFeedback,
+    delivery,
+  })
+  return {
+    state: feedback ? 'ready' : isCompanionMessageDelivery(delivery) ? 'companion' : 'hidden',
+    feedback,
+    error: '',
+  }
 }
 
 export function shouldAcknowledgePlannerFeedback({

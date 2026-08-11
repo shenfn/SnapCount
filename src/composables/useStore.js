@@ -4450,7 +4450,12 @@ export function useStore() {
       }),
     })
     const payload = await response.json().catch(() => ({}))
-    if (!response.ok || !payload?.ok) throw new Error(payload?.error || '表达服务请求失败')
+    if (!response.ok || !payload?.ok) {
+      const error = new Error(payload?.error || '表达服务请求失败')
+      error.status = response.status
+      error.retryable = [408, 425, 429].includes(response.status) || response.status >= 500
+      throw error
+    }
     return payload.data || null
   }
 
@@ -4524,6 +4529,7 @@ export function useStore() {
       available: false,
       acknowledged: false,
       feedback: null,
+      recordId: normalizedRecordId,
       recordKind: normalizedRecordKind,
       error: '',
     })
@@ -4540,6 +4546,7 @@ export function useStore() {
             available: false,
             acknowledged: false,
             feedback: null,
+            recordId: normalizedRecordId,
             recordKind: normalizedRecordKind,
             reason: data?.reason || 'not_available',
             error: '',
@@ -4554,6 +4561,7 @@ export function useStore() {
           status: 'ready',
           available: true,
           acknowledged: false,
+          recordId: normalizedRecordId,
           recordKind: normalizedRecordKind,
           planToken,
           candidateId,
@@ -4572,6 +4580,7 @@ export function useStore() {
             available: false,
             acknowledged: false,
             feedback: null,
+            recordId: normalizedRecordId,
             recordKind: normalizedRecordKind,
             error: error?.message || String(error),
           })
