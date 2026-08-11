@@ -1206,25 +1206,19 @@ final class SnapCountTests: XCTestCase {
         configuration.protocolClasses = [UploadResultURLProtocolStub.self]
         let session = URLSession(configuration: configuration)
         UploadResultURLProtocolStub.responseData = Data(json.utf8)
-        UploadResultURLProtocolStub.capturedRequest = nil
         defer {
             UploadResultURLProtocolStub.responseData = Data()
-            UploadResultURLProtocolStub.capturedRequest = nil
         }
 
-        let result = try await SnapCountUploadService(session: session).uploadNativeImageResult(
+        let notification = try await SnapCountUploadService(session: session).uploadNativeImage(
             data: Data([0x01, 0x02]),
             uploadToken: "test-upload-token",
             captureKind: "photo_library",
             filename: "food.jpg"
         )
 
-        let requestBody = try XCTUnwrap(UploadResultURLProtocolStub.capturedRequest?.httpBody)
-        let bodyText = String(decoding: requestBody, as: UTF8.self)
-        XCTAssertTrue(bodyText.contains("name=\"response_mode\""))
-        XCTAssertTrue(bodyText.contains("json"))
         XCTAssertEqual(
-            result.notificationText.split(separator: "\n").map(String.init),
+            notification.split(separator: "\n").map(String.init),
             [
                 "纸碗里的炒蛋盖饭，看着就踏实。",
                 "本次饮食热量为 650 千卡",
@@ -3538,13 +3532,11 @@ private func makeInsightDay(
 
 private final class UploadResultURLProtocolStub: URLProtocol {
     static var responseData = Data()
-    static var capturedRequest: URLRequest?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        Self.capturedRequest = request
         let response = HTTPURLResponse(
             url: request.url!,
             statusCode: 200,
