@@ -8,6 +8,15 @@ export function isAbortError(error) {
   return error?.name === 'AbortError'
 }
 
+export function isRetryableDeliveryError(error) {
+  if (!error || isAbortError(error)) return false
+  if (error.retryable === true) return true
+  const status = Number(error.status || error.statusCode || 0)
+  if ([408, 425, 429].includes(status) || status >= 500) return true
+  const message = String(error.message || error).toLowerCase()
+  return /failed to fetch|load failed|networkerror|network error|timeout|timed out|connection reset|socket hang up|temporarily unavailable/.test(message)
+}
+
 function throwIfAborted(signal) {
   if (signal?.aborted) throw createAbortError()
 }

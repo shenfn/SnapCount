@@ -14,3 +14,13 @@
 - 绿灯结果：`ios-expression-stability-contract.test.mjs` 通过；新增 XCTest `testEXP008IndependentPlannerCardKeepsVoiceSupportStable`、`testEXP008FeedbackCardsAppendPlannerWithoutReplacingVoice` 和 `testEXP008ReviewTargetsTheCardTheUserActuallySelected` 待 macOS CI 编译执行。
 - 环境限制：Windows 无法编译 Swift，不能把本地静态契约当作 XCTest 结论。
 - GitHub CI 结果：待提交后执行。
+
+## 追加执行：多域异步展示与瞬时失败恢复
+
+- 基线提交：`origin/main@31ccefa`。
+- 工作树：`D:\Business\count\.worktrees\多域陪伴展示修复`。
+- 复现证据：线上 `get_record_expression_plan` 对睡眠记录返回合法的 `feedback_card`、候选 ID 和渲染指纹；PWA 首次请求出现瞬时网络错误时，旧实现直接缓存 `error`，页面没有加载或失败反馈，因此用户只看到 Voice 卡片。
+- 代码事实：睡眠、饮食和其他通用域都使用 `data_records`，UI 的 `universal` 只是入口类型，不应成为展示层二次门禁。
+- RED：增加记录 ID 绑定、`loading` Surface、多域 `feedback_card` 独立展示，以及瞬时传输错误有限重试的契约测试。
+- GREEN：PWA 计划缓存保存 `recordId`，按记录身份解析；详情页显示准备中和可重试失败态；Planner 请求对 `Failed to fetch`、超时、连接重置和 408/425/429/5xx 做有限退避重试；iOS 计划解析对 `URLError` 瞬时错误做同样的有限重试。
+- 验证：`npm run test:expression-presentation` 22/22 通过；`npm run build` 通过；`git diff --check` 通过。真实本地页面验证过加载态、失败态和手动重试后睡眠双卡片；Windows 无法执行 Swift 编译，iOS XCTest 待 macOS CI。

@@ -11,9 +11,15 @@ import {
   isPlannerFeedbackForCandidate,
   isCurrentRecordContextFeedback,
   plannerDeliveryIdentityMatches,
+  plannerFeedbackSurfaceState,
+  recordExpressionPlanForDetail,
   shouldAcknowledgePlannerFeedback,
 } from '../src/utils/expressionPresentation.js'
-import { waitForVisibleElement } from '../src/utils/expressionDelivery.js'
+import {
+  isRetryableDeliveryError,
+  retryWithBackoff,
+  waitForVisibleElement,
+} from '../src/utils/expressionDelivery.js'
 
 const planner = (overrides = {}) => ({
   source: 'expression_planner',
@@ -379,6 +385,90 @@ test('legacy planner delivery without an explicit target still uses composition 
     feedback,
     delivery,
   }), false)
+})
+
+test('resolves a universal-domain plan by record identity instead of UI record-kind vocabulary', () => {
+  const sleepPlan = {
+    status: 'ready',
+    available: true,
+    recordId: 'sleep-record-1',
+    recordKind: 'data',
+  }
+  const cache = { 'sleep-record-1': sleepPlan }
+
+  assert.equal(recordExpressionPlanForDetail(cache, 'sleep-record-1'), sleepPlan)
+  assert.equal(recordExpressionPlanForDetail({
+    'sleep-record-1': { ...sleepPlan, recordId: 'food-record-1' },
+  }, 'sleep-record-1'), null)
+})
+
+test('reports Planner loading before a multi-domain feedback card arrives', () => {
+  assert.deepEqual(plannerFeedbackSurfaceState({
+    delivery: {
+      status: 'loading',
+      available: false,
+      recordId: 'sleep-record-1',
+      recordKind: 'data',
+    },
+  }), {
+    state: 'loading',
+    feedback: null,
+    error: '',
+  })
+})
+
+test('renders authoritative sleep and food feedback-card deliveries beside Voice', () => {
+  for (const domain of ['sleep', 'food']) {
+    const candidateId = `fact:${domain}:current-metric:record-1`
+    const feedback = planner({
+      candidate_id: candidateId,
+      semantic_key: `${domain}_current_metric`,
+      dimension: 'current_fact',
+      presentation_target: 'feedback_card',
+      rendered_text_fingerprint: `fnv1a64:${domain}-card`,
+    })
+    const delivery = {
+      status: 'ready',
+      available: true,
+      candidateId,
+      presentationTarget: 'feedback_card',
+      renderedTextFingerprint: `fnv1a64:${domain}-card`,
+      feedback,
+    }
+
+    assert.deepEqual(plannerFeedbackSurfaceState({
+      delivery,
+      companionMessage: `${domain} Voice support copy`,
+    }), {
+      state: 'ready',
+      feedback,
+      error: '',
+    })
+  }
+})
+
+test('retries transient Planner transport failures but not authorization or business errors', async () => {
+  const failedFetch = new TypeError('Failed to fetch')
+  const overloaded = Object.assign(new Error('服务暂时繁忙'), { status: 503 })
+  const unauthorized = Object.assign(new Error('未授权'), { status: 401 })
+  const businessError = new Error('表达计划响应不完整')
+
+  assert.equal(isRetryableDeliveryError(failedFetch), true)
+  assert.equal(isRetryableDeliveryError(overloaded), true)
+  assert.equal(isRetryableDeliveryError(unauthorized), false)
+  assert.equal(isRetryableDeliveryError(businessError), false)
+
+  let attempts = 0
+  const result = await retryWithBackoff(async () => {
+    attempts += 1
+    if (attempts === 1) throw failedFetch
+    return { available: true }
+  }, {
+    delays: [0],
+    shouldRetryError: isRetryableDeliveryError,
+  })
+  assert.deepEqual(result, { available: true })
+  assert.equal(attempts, 2)
 })
 
 test('companion exposure waits until its container enters the visible viewport', async () => {
