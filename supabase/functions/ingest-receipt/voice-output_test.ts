@@ -4,7 +4,6 @@ import {
   selectVoiceCandidate,
   voiceExpressionSimilarity,
 } from "./voice-output.ts";
-import { resolveExpressedSemanticKey, type ContextPacketCandidate } from "./context-packet.ts";
 
 const assert = (condition: boolean, message: string) => {
   if (!condition) throw new Error(message);
@@ -66,35 +65,11 @@ Deno.test("EXP-009 to EXP-011 select the first complete distinct grounded altern
   assert(selection.rejected.some((item) => item.reason === "not_allowed"), "the Planner alignment rejection must be observable");
 });
 
-Deno.test("EXP-011 generic prose cannot bypass a selected Planner repeat interval", () => {
-  const selectedCandidate: ContextPacketCandidate = {
-    candidate_id: "fact:record-name:previous-gap:example",
-    semantic_key: "expense_record_name_previous_gap",
-    kind: "expense_record_name_previous_gap",
-    dimension: "repeat_interval",
-    fact: "距离上一次同名记录已经过去约1天",
-    numbers: [1],
-    count_numbers: [],
-    number_facts: [{
-      value: 1,
-      meaning: "elapsed_calendar_days",
-      role: "measure",
-    }],
-    source: "expression_planner",
-    source_surface: "record_detail",
-    planner_version: "expression-shadow-auto-v0.6",
-  };
+Deno.test("EXP-011 Planner context does not force the main Voice expression", () => {
   const generic = "这点花费，给忙碌生活留了个小口。";
-  const grounded = "距离上一次同名记录约1天，这次又记下了。";
   const selection = selectVoiceCandidate({
-    candidates: [generic, grounded],
-    isAllowed: (candidate) => resolveExpressedSemanticKey({
-      declaredSemanticKey: selectedCandidate.semantic_key,
-      companionMessage: candidate,
-      selectedCandidates: [selectedCandidate],
-      recordFacts: { merchant_name: "示例商户", amount: 3 },
-    }) === selectedCandidate.semantic_key,
+    candidates: [generic],
   });
 
-  assert(selection.text === grounded, "the selected Planner fact must constrain the visible main expression");
+  assert(selection.text === generic, "a complete Voice expression may survive without restating Planner prose");
 });

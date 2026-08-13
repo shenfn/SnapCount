@@ -765,8 +765,7 @@ export interface NumberValidationResult {
 }
 
 export function hasUnsupportedFinanceCompanionClaim(text: string): boolean {
-  // 统计次数不在这里拦截：是否有来源、数字和时间口径由 validateModelTone
-  // 按 Context Packet/Signals 校验。这里仅保留与事实来源无关的空泛或判决式套话。
+  // 统计、金额和时间由结构化事实校验负责；这里只保留明确的套话/判决式表达。
   return /(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text);
 }
 
@@ -1080,53 +1079,6 @@ function signalSupportsBoundClaims(text: string, signals: DomainSignal[]): boole
   });
 }
 
-function statisticalScopes(text: string): Set<StatisticalScope> {
-  const compact = text.replace(/\s+/g, "");
-  const scopes = new Set<StatisticalScope>();
-  if (/(?:本|这)(?:自然)?周/.test(compact)) scopes.add("week:current");
-  if (/上(?:自然)?周/.test(compact)) scopes.add("week:previous");
-  if (/(?:本|这)个?月|本月/.test(compact)) scopes.add("month:current");
-  if (/(?:上)个?月|上月/.test(compact)) scopes.add("month:previous");
-  for (const match of compact.matchAll(/(?:近|过去)([一二两三四五六七八九十百\d]+)(天|周|月|晚)/g)) {
-    const key = rollingWindowKey(match[1], match[2]);
-    if (key) scopes.add(key);
-  }
-  if (/(?:第|连续|连着|已有|累计)[一二两三四五六七八九十百\d]+(?:次|笔|顿|天|晚|家|周|月)|[一二两三四五六七八九十百\d]+(?:次|笔|顿|天|晚|家|周|月|回)/.test(compact)) scopes.add("count");
-  if (/(?:平均|均值)/.test(compact)) scopes.add("baseline:average");
-  if (/(?:中位数?|中位)/.test(compact)) scopes.add("baseline:median");
-  if (/(?:四分位|百分位|p\d{1,3})/i.test(compact)) scopes.add("baseline:percentile");
-  if (/(?:历史最好|历史最高|历史最低|最好|最高|最低)/.test(compact)) scopes.add("baseline:extreme");
-  if (/(?:比|较)(?:昨天|之前|过去|上次|上周|上月|平时|常态|平均|中位|历史)/.test(compact)) scopes.add("comparison:reference");
-  if (/(?:高于|低于|涨了|降了|增加|减少|相差|多了|少了)/.test(compact)) scopes.add("comparison:direction");
-  if (/(?:今天|今晚|今早).{0,12}(?:已有|累计|第[一二两三四五六七八九十百\d]+|连续)/.test(compact)) scopes.add("day:today");
-  if (/(?:最近|近来).{0,12}(?:总是|一直|经常|频繁|反复|又)|(?:反复出现|高频|常点)/.test(compact)) scopes.add("frequency");
-  return scopes;
-}
-
-function signalSupportsStatisticalClaim(text: string, signals: DomainSignal[]): boolean {
-  const requested = statisticalScopes(text);
-  if (requested.size === 0) return true;
-  // 必须由同一个候选提供完整口径，避免把一个候选的周次数和另一个候选的
-  // 月度比较拼成模型从未得到过的组合。显式数字还必须与这个候选里的
-  // meaning + unit + scope 同时一致，不能再用全局数字集与全局 scope 集自由组合。
-  return signals.some((signal) => {
-    if (!signalSupportsBoundClaims(text, [signal])) return false;
-    const available = statisticalScopes(signal.fact);
-    return [...requested].every((scope) => {
-      if (available.has(scope)) return true;
-      // A qualitative comparison such as “比平时短些” is a valid rendering
-      // of a verified baseline signal. It does not invent a new window or
-      // number; the exact baseline remains in the selected candidate.
-      if (scope === "comparison:reference") {
-        return available.has("baseline:average")
-          || available.has("baseline:median")
-          || available.has("baseline:percentile");
-      }
-      return false;
-    });
-  });
-}
-
 const MEAL_CLAIM_PATTERN = /(?:早餐|早饭|午餐|午饭|晚餐|晚饭|夜宵|宵夜|加餐|正餐|这一顿|这顿|本餐|用餐|吃饭|开饭|填饱肚子|趁热(?:吃|喝)|好好吃(?:饭|一顿)|吃(?:点|一口|一顿)|喝(?:点|一口))/;
 const MEAL_SIGNAL_KINDS = new Set([
   "meal_vs_baseline",
@@ -1242,11 +1194,14 @@ export function validateModelTone(
   const badIndexes = new Set(numericCheck.badIndexes);
 
   generatedTexts.forEach((text, index) => {
-    if (!text || !hasModelOwnedStatisticalClaim(text)) return;
-    if (badIndexes.has(index)) return;
-    if (signals.length > 0 && signalSupportsStatisticalClaim(text, signals)) return;
-    violations.push(`模型试图改写代码统计口径: "${text.slice(0, 40)}"`);
-    badIndexes.add(index);
+    // 历史统计只在出现数字时由 validateVoiceNumbers 校验；不再用宽泛
+    // 的周期/次数正则拒绝自然语言表达。
+    if (!text || badIndexes.has(index)) return;
+    if (signals.length === 0 && hasModelOwnedStatisticalClaim(text)
+      && /(最近|频率|比平时|平均|历史|常态)/.test(text.replace(/\s+/gu, ""))) {
+      violations.push(`无证据的历史比较: "${text.slice(0, 40)}"`);
+      badIndexes.add(index);
+    }
   });
 
   const mealEvidenceAvailable = hasMealEvidence(recordFactsJson, signals);

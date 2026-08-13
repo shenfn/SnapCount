@@ -25,7 +25,6 @@ import {
   loadDomainProfiles,
   selectSignals,
   validateModelTone,
-  hasUnsupportedFinanceCompanionClaim,
   parsePaceMinutes,
 } from "./signals.ts";
 import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
@@ -33,6 +32,7 @@ import { buildTimeContext, normalizeAiDate, normalizeAiDateTime } from "./time.t
 import { sanitizeTextForTimeContext } from "./time-language.ts";
 import { scheduleExpressionShadowCapture } from "./expression-shadow.ts";
 import type { TimeContext } from "./time.ts";
+import { extractLabeledFoodNutrition } from "./food-nutrition.ts";
 import {
   findLikelyFinancialDuplicate,
   type FinancialPerceptualCandidate,
@@ -1294,7 +1294,7 @@ function cleanPayload(ai: AIResult): Record<string, unknown> {
   return payload;
 }
 
-function buildBuiltinPayload(ai: AIResult): {
+function buildBuiltinPayload(ai: AIResult, visionRawText: string | null = null): {
   payload: Record<string, unknown>;
   title: string;
   summary: string;
@@ -1387,13 +1387,37 @@ function buildBuiltinPayload(ai: AIResult): {
       };
     }).filter((d): d is NonNullable<typeof d> => d !== null);
 
-    const compactPackAdjustment = applyCompactPackHeuristic(dishes, payload, ai);
+    const labelText = [
+      normalizeString(payload.confidence_note),
+      normalizeString(ai.summary),
+      JSON.stringify(ai),
+      visionRawText,
+    ].filter(Boolean).join(" ");
+    const labeledNutrition = extractLabeledFoodNutrition(labelText);
+    const compactPackAdjustment = labeledNutrition
+      ? { dishes, note: null }
+      : applyCompactPackHeuristic(dishes, payload, ai);
     dishes = compactPackAdjustment.dishes;
+
+    if (labeledNutrition?.grams && dishes.length === 1) {
+      const dish = dishes[0];
+      const scale = labeledNutrition.grams / Math.max(1, dish.estimated_grams ?? labeledNutrition.grams);
+      dishes[0] = {
+        ...dish,
+        estimated_grams: labeledNutrition.grams,
+        calorie_kcal: labeledNutrition.calorieKcal ?? scaleNutritionValue(dish.calorie_kcal, scale),
+        protein_g: labeledNutrition.proteinG ?? scaleNutritionValue(dish.protein_g, scale),
+        carb_g: labeledNutrition.carbG ?? scaleNutritionValue(dish.carb_g, scale),
+        fat_g: labeledNutrition.fatG ?? scaleNutritionValue(dish.fat_g, scale),
+      };
+    }
 
     // 总热量：优先用 AI 给的，回落到 dishes 累加
     const dishCalorieSum = dishes.reduce((acc, d) => acc + (d.calorie_kcal ?? 0), 0);
     let totalCalorie = normalizeNumber(payload.total_calorie_kcal);
-    if (compactPackAdjustment.note && dishCalorieSum > 0) {
+    if (labeledNutrition?.calorieKcal != null) {
+      totalCalorie = labeledNutrition.calorieKcal;
+    } else if (compactPackAdjustment.note && dishCalorieSum > 0) {
       totalCalorie = Math.round(dishCalorieSum * 10) / 10;
     } else if (totalCalorie === null && dishes.length > 0) {
       totalCalorie = dishCalorieSum > 0 ? Math.round(dishCalorieSum * 10) / 10 : null;
@@ -2146,8 +2170,6 @@ function sanitizeCompanionMessageForContent(message: string | null, ai: AIResult
   if (COMPANION_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(text))) return null;
 
   const recordType = ai.domain_key ?? ai.record_type;
-  if ((recordType === "expense" || recordType === "income")
-    && hasUnsupportedFinanceCompanionClaim(text)) return null;
   const allowedText = collectCompanionAllowedText(ai);
   if (recordType === "food" && ai.image_type === "food_photo") {
     const unrelatedMerchant = FOOD_MERCHANT_HINTS.find((hint) => text.includes(hint) && !allowedText.includes(hint));
@@ -2325,7 +2347,6 @@ function financeCompanionLine(ai: AIResult): string | null {
   const leaksOtherDomain = /(运动|骑行|跑步|睡眠|饮食记录|热量|蛋白|碳水|外婆家|老婆大人)/.test(text)
     && !/(餐饮|food|美食|饭|餐|外卖)/i.test(financeText);
   if (leaksOtherDomain) return null;
-  if (hasUnsupportedFinanceCompanionClaim(text)) return null;
   return text;
 }
 
@@ -3646,7 +3667,7 @@ async function regenerateFeedbackWithSecondCall(opts: {
       contextPacket,
     );
     return {
-      companion_message: feedback?.emotion_line ?? null,
+      companion_message: null,
       ai_feedback: feedback,
       raw_text: null,
       duration_ms: durationMs,
@@ -3720,10 +3741,6 @@ async function regenerateFeedbackWithSecondCall(opts: {
     if (ruleFeedback) aiFeedback = mergeSignalFeedback(aiFeedback, ruleFeedback);
     aiFeedback = sanitizeAIFeedbackForTime(aiFeedback, opts.timeContext);
 
-    if (!companion && ruleFeedback && opts.plannerBrief) {
-      companion = sanitizeGeneratedCompanion(ruleFeedback.emotion_line, opts.ai, opts.timeContext)
-        ?? ruleFeedback.emotion_line;
-    }
     return {
       companion_message: companion,
       ai_feedback: aiFeedback
@@ -3965,7 +3982,7 @@ async function generateVoiceFeedback(opts: {
       contextPacket,
     ) ?? buildSignalFallbackAIFeedback(opts.domainKey, signals, opts.timingSignal);
     return {
-      companion_message: feedback?.emotion_line ?? null,
+      companion_message: null,
       ai_feedback: feedback,
       raw_text: null,
       duration_ms: 0,
@@ -4017,13 +4034,7 @@ async function generateVoiceFeedback(opts: {
       isAllowed: (candidate) => {
         const entry = candidateEntryByText.get(candidate);
         if (!entry || bad.has(entry.index)) return false;
-        if (!opts.plannerBrief) return true;
-        return resolveExpressedSemanticKey({
-          declaredSemanticKey: opts.plannerBrief.semantic_key,
-          companionMessage: candidate,
-          selectedCandidates: contextPacket.selected_candidates,
-          recordFacts: contextPacket.record_facts,
-        }) === opts.plannerBrief.semantic_key;
+        return true;
       },
     });
     const companion = selection.text;
@@ -4060,15 +4071,10 @@ async function generateVoiceFeedback(opts: {
           ? selectVoiceCandidate({
             candidates: [fallbackTone],
             recentExpressions: opts.recentCompanionLines ?? [],
-            isAllowed: (candidate) => !opts.plannerBrief || resolveExpressedSemanticKey({
-              declaredSemanticKey: opts.plannerBrief.semantic_key,
-              companionMessage: candidate,
-              selectedCandidates: contextPacket.selected_candidates,
-              recordFacts: contextPacket.record_facts,
-            }) === opts.plannerBrief.semantic_key,
+            isAllowed: () => true,
           }).text
           : null;
-        const tone = companion ?? selectedFallbackTone ?? ruleFeedback.emotion_line;
+        const tone = companion ?? selectedFallbackTone;
         mergedFeedback = withExpressionCoverage(
           mergedFeedback,
           opts.plannerBrief,
@@ -4076,7 +4082,7 @@ async function generateVoiceFeedback(opts: {
           tone,
         );
         return {
-          companion_message: tone ?? ruleFeedback.emotion_line,
+          companion_message: tone,
           ai_feedback: mergedFeedback,
           raw_text: rawText,
           duration_ms: Date.now() - startedAt,
@@ -4120,7 +4126,7 @@ async function generateVoiceFeedback(opts: {
       contextPacket,
     ) ?? buildSignalFallbackAIFeedback(opts.domainKey, signals, opts.timingSignal);
     return {
-      companion_message: feedback?.emotion_line ?? null, ai_feedback: feedback, raw_text: null,
+      companion_message: null, ai_feedback: feedback, raw_text: null,
       duration_ms: Date.now() - startedAt,
       error: err instanceof Error ? err.message : String(err),
       signals,
@@ -6434,10 +6440,9 @@ Deno.serve(async (req) => {
       companion: companionDebug(),
       notification: options.notification,
     });
-    // 识别模型不再拥有最终陪伴文案权限。保留 raw 值仅供调试，用户可见内容
-    // 统一由后续 Signals/Voice 或规则兜底生成，避免先展示一版又被二次调用覆盖。
-    ai.companion_message = null;
-    normalizedCompanion = null;
+    // 视觉模型文案保留为 Voice 失败时的受校验 fallback；Voice 成功时优先。
+    ai.companion_message = modelRawCompanion;
+    normalizedCompanion = modelRawCompanion;
     if (!companionSettings.enabled) ai.companion_message = null;
     const recordType: RecordType = ai.record_type ?? "expense";
     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
@@ -6453,7 +6458,7 @@ Deno.serve(async (req) => {
     contentGuardedCompanion = ai.companion_message;
     if (ai.companion_message) {
       const evidenceDomainKey = builtinKey ?? recordType;
-      const builtPayload = builtinKey ? buildBuiltinPayload(ai)?.payload ?? null : null;
+      const builtPayload = builtinKey ? buildBuiltinPayload(ai, visionRawText)?.payload ?? null : null;
       const evidenceCheck = validateModelTone(
         [ai.companion_message],
         JSON.stringify(voiceRecordFacts(evidenceDomainKey, ai, builtPayload, normalizedAmount)),
@@ -6557,7 +6562,7 @@ Deno.serve(async (req) => {
             archivedId = incRow.id;
           }
         } else if (builtinKey) {
-          const built = buildBuiltinPayload(ai);
+          const built = buildBuiltinPayload(ai, visionRawText);
           const domain = await getDomainByKey(supabase, builtinKey, userId);
           if (domain && built) {
             const retryFeedback = built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75 && companionSettings.enabled
@@ -6566,8 +6571,7 @@ Deno.serve(async (req) => {
             if (retryFeedback) {
               aiFeedback = retryFeedback;
               companionFeedbackUsed = true;
-              companionMessage = retryFeedback.emotion_line;
-              ai.companion_message = companionMessage;
+              // Retry feedback is a fact card; preserve only an existing Voice line.
               aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
             }
             const { data: rawDataRow } = await supabase.from("data_records").insert({
@@ -6807,7 +6811,7 @@ Deno.serve(async (req) => {
     }
 
     if (builtinKey) {
-      const built = buildBuiltinPayload(ai);
+      const built = buildBuiltinPayload(ai, visionRawText);
       const domain = await getDomainByKey(supabase, builtinKey, userId);
       const fallbackOccurredAt = built ? resolveBuiltinOccurredAt(builtinKey, occurredAt, built.payload) : occurredAt;
       const shouldAutoArchive = Boolean(domain && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75);
@@ -6860,7 +6864,7 @@ Deno.serve(async (req) => {
           if (_voiceCall.ai_feedback) {
             aiFeedback = _voiceCall.ai_feedback as AIFeedback;
             companionFeedbackUsed = true;
-            companionMessage = _voiceCall.companion_message ?? aiFeedback.emotion_line;
+            companionMessage = _voiceCall.companion_message ?? companionMessage;
             ai.companion_message = companionMessage;
             aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
           } else if (_voiceCall.companion_message) {
@@ -6869,9 +6873,7 @@ Deno.serve(async (req) => {
             ai.companion_message = companionMessage;
             aiWithTimeContext = { ...ai, time_context: timeContext };
           } else {
-            // Voice 完全失败,清除视觉模型文案防止幻觉数字泄漏
-            companionMessage = null;
-            ai.companion_message = null;
+            // Voice 完全失败时保留已通过硬事实校验的视觉文案。
           }
         }
         if (!aiFeedback) {
@@ -6884,15 +6886,11 @@ Deno.serve(async (req) => {
           if (aiFeedback) {
             companionFeedbackUsed = true;
             // 仅当 companionMessage 未从 Voice 存活时才用规则兜底的 emotion_line
-            if (!companionMessage) {
-              companionMessage = aiFeedback.emotion_line;
-              ai.companion_message = companionMessage;
-            }
             aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
           }
         }
       }
-      if (!companionMessage && built) {
+      if (!companionMessage && built && !voiceSignalsEnabled) {
         companionMessage = sanitizeCompanionMessageForContent(buildBuiltinCompanionFallback(builtinKey, built), ai);
         companionFallbackUsed = true;
         ai.companion_message = companionMessage;
@@ -7091,8 +7089,8 @@ Deno.serve(async (req) => {
           : baseDuplicateFeedback;
         if (aiFeedback) {
           companionFeedbackUsed = true;
-          companionMessage = aiFeedback.emotion_line;
-          ai.companion_message = companionMessage;
+          companionMessage = null;
+          ai.companion_message = null;
           aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
         }
       }
@@ -7239,7 +7237,7 @@ Deno.serve(async (req) => {
         if (_secondCallIncome.ai_feedback) {
           aiFeedback = _secondCallIncome.ai_feedback as AIFeedback;
           companionFeedbackUsed = true;
-          companionMessage = _secondCallIncome.companion_message || aiFeedback.emotion_line;
+          companionMessage = _secondCallIncome.companion_message ?? companionMessage;
           ai.companion_message = companionMessage;
           aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
         } else {
@@ -7257,8 +7255,6 @@ Deno.serve(async (req) => {
           );
           if (aiFeedback) {
             companionFeedbackUsed = true;
-            companionMessage = companionMessage ?? aiFeedback.emotion_line;
-            ai.companion_message = companionMessage;
             aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
           }
         }
@@ -7509,8 +7505,6 @@ Deno.serve(async (req) => {
         companionFeedbackUsed = true;
         if (_secondCall.companion_message) {
           companionMessage = _secondCall.companion_message;
-        } else {
-          companionMessage = aiFeedback.emotion_line;
         }
         ai.companion_message = companionMessage;
         aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
@@ -7520,10 +7514,8 @@ Deno.serve(async (req) => {
         if (_secondCall.companion_message) {
           companionMessage = _secondCall.companion_message;
           ai.companion_message = companionMessage;
-        } else if (voiceSignalsEnabled) {
-          // Voice 完全失败,清除视觉模型文案防止幻觉数字泄漏
-          companionMessage = null;
-          ai.companion_message = null;
+          } else if (voiceSignalsEnabled) {
+          // Voice 完全失败时保留已通过硬事实校验的视觉文案。
         }
         aiFeedback = voiceSignalsEnabled
           ? buildSignalFallbackAIFeedback(
@@ -7545,11 +7537,7 @@ Deno.serve(async (req) => {
       // 改为:Voice 未产出 ai_feedback 时,确保规则兜底的 aiFeedback 写入上下文。
       if (!_secondCall.ai_feedback && aiFeedback) {
         companionFeedbackUsed = true;
-        // companionMessage 未从 Voice 存活时,用规则兜底的 emotion_line
-        if (!companionMessage) {
-          companionMessage = aiFeedback.emotion_line;
-          ai.companion_message = companionMessage;
-        }
+        // 规则反馈只作为独立事实卡保存，不冒充 Voice 主陪伴语。
         aiWithTimeContext = { ...ai, time_context: timeContext, ai_feedback: aiFeedback };
       }
     }
