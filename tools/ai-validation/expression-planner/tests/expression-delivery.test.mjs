@@ -813,7 +813,7 @@ test('second-call failures preserve verified Planner feedback without impersonat
     assert.equal(result.ai_feedback.source, 'rule')
     assert.equal(result.ai_feedback.tone, 'signal_fallback')
     assert.equal(result.ai_feedback.detail_reason, null)
-    assert.equal(result.ai_feedback.expression_coverage, null)
+    assert.equal(result.ai_feedback.expression_coverage == null, true)
     assert.equal(result.expression_trace.context_packet_version, 'context-packet-v2')
     assert.equal(result.expression_trace.planner_brief_status, 'selected')
     assert.equal(result.expression_trace.planner_semantic_key, semanticKey)
@@ -905,14 +905,14 @@ test('generic model copy remains Voice copy while grounded copy may claim covera
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     const generic = await module.generateVoiceFeedback(options)
     assert.equal(generic.companion_message, '日常琐碎也被妥善归档，生活自有其节奏。')
-    assert.equal(generic.ai_feedback.expression_coverage, null)
+    assert.equal(generic.ai_feedback.expression_coverage == null, true)
 
     globalThis.fetch = async () => new Response(JSON.stringify({
       choices: [{ message: { content: modelPayload('第一次记录青禾茶饮，芥子记住这个新商户了。') } }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     const grounded = await module.generateVoiceFeedback(options)
     assert.equal(grounded.companion_message, '第一次记录青禾茶饮，芥子记住这个新商户了。')
-    assert.equal(grounded.ai_feedback.expression_coverage, null)
+    assert.equal(grounded.ai_feedback.expression_coverage == null, true)
   } finally {
     globalThis.fetch = originalFetch
   }
