@@ -3597,7 +3597,7 @@ function deterministicPlannerFallback(
     ruleFeedback,
     brief,
     contextPacket,
-    ruleFeedback.emotion_line,
+    null,
   );
 }
 
