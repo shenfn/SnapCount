@@ -912,7 +912,8 @@ test('generic model copy remains Voice copy while grounded copy may claim covera
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     const grounded = await module.generateVoiceFeedback(options)
     assert.equal(grounded.companion_message, '第一次记录青禾茶饮，芥子记住这个新商户了。')
-    assert.equal(grounded.ai_feedback.expression_coverage == null, true)
+    assert.equal(grounded.ai_feedback.expression_coverage.expressed_semantic_key, plannerBrief.semantic_key)
+    assert.equal(grounded.ai_feedback.expression_coverage.presentation_target, 'companion_message')
   } finally {
     globalThis.fetch = originalFetch
   }
