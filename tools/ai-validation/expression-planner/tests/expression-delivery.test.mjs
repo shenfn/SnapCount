@@ -754,7 +754,7 @@ test('persisted domain planning consumes the same profile-backed candidates as p
   assert.ok(persistedKeys.includes(brief.semantic_key))
 })
 
-test('second-call failures deterministically express the verified Planner candidate with coverage', async () => {
+test('second-call failures preserve verified Planner feedback without impersonating Voice', async () => {
   const module = await loadIngestFeedbackModule()
   const semanticKey = 'expense_merchant_first_occurrence'
   const plannerBrief = {
@@ -808,27 +808,12 @@ test('second-call failures deterministically express the verified Planner candid
   }
   const assertVerifiedFallback = (result, errorPattern) => {
     assert.match(result.error, errorPattern)
-    assert.equal(result.companion_message, plannerBrief.canonical_text)
+    assert.equal(result.companion_message, null)
     assert.equal(result.raw_text, null)
     assert.equal(result.ai_feedback.source, 'rule')
     assert.equal(result.ai_feedback.tone, 'signal_fallback')
     assert.equal(result.ai_feedback.detail_reason, null)
-    const {
-      presentation_target: presentationTarget,
-      rendered_text_fingerprint: renderedTextFingerprint,
-      ...coverage
-    } = result.ai_feedback.expression_coverage
-    assert.deepEqual(coverage, {
-      coverage_version: 'expression-coverage-v1',
-      expressed_semantic_key: semanticKey,
-      expressed_semantic_keys: [semanticKey],
-      source_surface: plannerBrief.source_surface,
-      planner_version: plannerBrief.planner_version,
-      packet_fingerprint: result.expression_trace.packet_fingerprint,
-      claim_fingerprint: plannerBrief.claim_fingerprint,
-    })
-    assert.equal(presentationTarget, 'companion_message')
-    assert.match(renderedTextFingerprint, /^fnv1a64:[0-9a-f]{16}$/)
+    assert.equal(result.ai_feedback.expression_coverage == null, true)
     assert.equal(result.expression_trace.context_packet_version, 'context-packet-v2')
     assert.equal(result.expression_trace.planner_brief_status, 'selected')
     assert.equal(result.expression_trace.planner_semantic_key, semanticKey)
@@ -866,7 +851,7 @@ test('second-call failures deterministically express the verified Planner candid
   }
 })
 
-test('generic model copy yields a verified Planner fallback while grounded copy can claim coverage', async () => {
+test('generic model copy remains Voice copy while grounded copy may claim coverage', async () => {
   const module = await loadIngestFeedbackModule()
   const plannerBrief = {
     candidate_id: 'fact:expense:merchant-first-occurrence:voice-coverage-test',
@@ -919,14 +904,14 @@ test('generic model copy yields a verified Planner fallback while grounded copy 
       choices: [{ message: { content: modelPayload('日常琐碎也被妥善归档，生活自有其节奏。') } }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     const generic = await module.generateVoiceFeedback(options)
-    assert.equal(generic.companion_message, plannerBrief.canonical_text)
-    assert.equal(generic.ai_feedback.expression_coverage.expressed_semantic_key, plannerBrief.semantic_key)
-    assert.equal(generic.ai_feedback.expression_coverage.presentation_target, 'companion_message')
+    assert.equal(generic.companion_message, '日常琐碎也被妥善归档，生活自有其节奏。')
+    assert.equal(generic.ai_feedback.expression_coverage == null, true)
 
     globalThis.fetch = async () => new Response(JSON.stringify({
       choices: [{ message: { content: modelPayload('第一次记录青禾茶饮，芥子记住这个新商户了。') } }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     const grounded = await module.generateVoiceFeedback(options)
+    assert.equal(grounded.companion_message, '第一次记录青禾茶饮，芥子记住这个新商户了。')
     assert.equal(grounded.ai_feedback.expression_coverage.expressed_semantic_key, plannerBrief.semantic_key)
     assert.equal(grounded.ai_feedback.expression_coverage.presentation_target, 'companion_message')
   } finally {
