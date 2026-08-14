@@ -15,7 +15,7 @@ test('day records use the event time when it exists', () => {
 test('day records mark upload time when the event time is unavailable', () => {
   const [record] = buildDayRecords({
     dateKey: '2026-08-14',
-    bills: [{ id: 'upload', dateRaw: '2026-08-14', name: '商户', amount: 6.8, time: '', createdAt: '2026-08-14T11:36:44+08:00' }],
+    bills: [{ id: 'upload', dateRaw: '2026-08-14', name: '商户', amount: 6.8, time: '', createdAt: '2026-08-14T11:36:44' }],
   })
 
   assert.equal(record.time, '上传 11:36')
