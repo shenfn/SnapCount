@@ -1,6 +1,6 @@
-import { incomeCatMap } from '../utils/helpers'
-import { formatCurrency, formatDuration } from '../utils/format'
-import { getSystemDomainLabel } from './registry'
+import { incomeCatMap } from '../utils/helpers.js'
+import { formatCurrency, formatDuration } from '../utils/format.js'
+import { getSystemDomainLabel } from './registry.js'
 
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const DOMAIN_COLORS = {
@@ -31,7 +31,8 @@ export function buildDayRecords({ dateKey, bills = [], incomeRecords = [], dataR
       title: item.name || '支出',
       subtitle: `${item.platform || '其他'} · ${item.cat || '其他'}`,
       value: `-${formatCurrency(item.amount || 0)}`,
-      time: item.time || '',
+      time: displayRecordTime(item.time, item.createdAt),
+      sortTime: item.time || timePart(item.createdAt),
       color: DOMAIN_COLORS.expense,
       raw: item,
     }))
@@ -46,7 +47,8 @@ export function buildDayRecords({ dateKey, bills = [], incomeRecords = [], dataR
       title: item.source || incomeCatMap[item.cat]?.label || '收入',
       subtitle: incomeCatMap[item.cat]?.label || getSystemDomainLabel('income'),
       value: `+${formatCurrency(item.amount || 0)}`,
-      time: item.time || '',
+      time: displayRecordTime(item.time, item.createdAt),
+      sortTime: item.time || timePart(item.createdAt),
       color: DOMAIN_COLORS.income,
       raw: item,
     }))
@@ -64,7 +66,8 @@ export function buildDayRecords({ dateKey, bills = [], incomeRecords = [], dataR
         title: item.title || info.title || domain?.name || '记录',
         subtitle: item.summary || info.subtitle || domain?.description || '通用记录',
         value: info.value || domain?.shortName || '已记录',
-        time: timePart(item.occurredAt || item.createdAt),
+        time: displayRecordTime(timePart(item.occurredAt), item.createdAt),
+        sortTime: timePart(item.occurredAt || item.createdAt),
         color: domain?.color || DOMAIN_COLORS[item.domainKey] || '#2d6a4f',
         raw: item,
       }
@@ -80,7 +83,8 @@ export function buildDayRecords({ dateKey, bills = [], incomeRecords = [], dataR
       title: item.domainName || '待处理截图',
       subtitle: item.summary || '等待处理',
       value: item.recordType === 'income' ? '+ 待确认' : item.recordType === 'expense' ? '- 待确认' : '待分类',
-      time: timePart(item.occurredAt || item.createdAt),
+      time: displayRecordTime(timePart(item.occurredAt), item.createdAt),
+      sortTime: timePart(item.occurredAt || item.createdAt),
       color: item.status === 'ai_error' ? '#b91c1c' : DOMAIN_COLORS.staging,
       raw: item,
     }))
@@ -213,7 +217,13 @@ function timePart(value) {
 }
 
 function timeSortValue(item) {
-  return item.time || '12:00'
+  return item.sortTime || '12:00'
+}
+
+function displayRecordTime(eventTime, uploadedAt) {
+  if (eventTime) return eventTime
+  const uploadTime = timePart(uploadedAt)
+  return uploadTime ? `上传 ${uploadTime}` : '上传时间未知'
 }
 
 function readMinutes(payload, minuteKeys, hourKeys = []) {

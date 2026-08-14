@@ -1115,10 +1115,9 @@ function hasMealEvidence(recordFactsJson: string, signals: DomainSignal[]): bool
   const facts = recordFacts(recordFactsJson);
   const recordType = str(facts.record_type)?.toLocaleLowerCase();
   const domainKey = str(facts.domain_key)?.toLocaleLowerCase();
-  const category = str(facts.category)?.toLocaleLowerCase();
   const imageType = str(facts.image_type)?.toLocaleLowerCase();
+  if (facts.meal_claim_allowed === true) return true;
   if (recordType === "food" || domainKey === "food") return true;
-  if (category && ["food", "餐饮", "美食", "餐厅"].includes(category)) return true;
   if (imageType === "food_photo") return true;
   if (hasStructuredMealObject(facts) || hasStructuredMealObject(facts.payload)) return true;
   return signals.some((signal) =>

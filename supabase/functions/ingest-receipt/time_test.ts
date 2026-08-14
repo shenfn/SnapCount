@@ -91,6 +91,34 @@ Deno.test("missing event evidence keeps its source unknown", () => {
   assertEquals(context.event_time_source, "unknown", "null values must not compare as an AI source");
 });
 
+Deno.test("TIME-REF-001 uses upload time as the expression reference when event time is missing", () => {
+  const context = buildTimeContext({
+    occurredAt: null,
+    orderFinishedAt: null,
+    clientCapturedAt: "2026-08-14T08:24:00+08:00",
+    requestReceivedAt: "2026-08-14T08:24:03+08:00",
+  });
+  assertEquals(context.reference_time, "2026-08-14T08:24:00+08:00", "upload time should become the reference instant");
+  assertEquals(context.reference_time_source, "client_captured_at", "reference source should identify upload time");
+  assertEquals(context.reference_local_date, "2026-08-14", "reference date should be available to the prompt");
+  assertEquals(context.reference_local_time, "08:24:00", "reference clock should be available to the prompt");
+  assertEquals(context.reference_daypart, "morning", "reference daypart should use upload time when event time is absent");
+});
+
+Deno.test("TIME-REF-001 keeps event time as the expression reference when both times exist", () => {
+  const context = buildTimeContext({
+    occurredAt: "2026-08-14T17:12:00+08:00",
+    orderFinishedAt: null,
+    clientCapturedAt: "2026-08-14T17:31:00+08:00",
+    requestReceivedAt: "2026-08-14T17:31:03+08:00",
+  });
+  assertEquals(context.reference_time, "2026-08-14T17:12:00+08:00", "event time should remain the primary reference");
+  assertEquals(context.reference_time_source, "event_time", "reference source should identify event time");
+  assertEquals(context.reference_local_time, "17:12:00", "event clock should drive ordinary time wording");
+  assertEquals(context.delta_minutes, 19, "capture delta should remain available separately");
+  assertEquals(context.time_relation, "realtime", "event and upload relation should remain realtime");
+});
+
 Deno.test("time relation compares Shanghai local calendar dates", () => {
   const sameDay = classifyTimeRelation(
     "2026-08-07T22:00:00Z",

@@ -2101,10 +2101,12 @@ function sanitizeAIFeedbackForTime(
   timeContext: TimeContext | null,
 ): AIFeedback | null {
   if (!feedback || !timeContext) return feedback;
+  const emotionLine = sanitizeTextForTimeContext(feedback.emotion_line, timeContext);
+  if (!emotionLine) return null;
   return {
     ...feedback,
-    badge: sanitizeTextForTimeContext(feedback.badge, timeContext) ?? feedback.badge,
-    emotion_line: sanitizeTextForTimeContext(feedback.emotion_line, timeContext) ?? feedback.emotion_line,
+    badge: sanitizeTextForTimeContext(feedback.badge, timeContext) ?? "即时反馈",
+    emotion_line: emotionLine,
     utility_line: sanitizeTextForTimeContext(feedback.utility_line, timeContext),
     detail_reason: sanitizeTextForTimeContext(feedback.detail_reason, timeContext),
   };
@@ -3867,6 +3869,7 @@ function voiceRecordFacts(
   normalizedAmount: number | null,
 ): Record<string, unknown> {
   if (domainKey === "expense" || domainKey === "income") {
+    const payload = builtPayload ?? ai.payload_jsonb ?? null;
     return {
       record_type: domainKey,
       domain_key: ai.domain_key ?? null,
@@ -3876,7 +3879,8 @@ function voiceRecordFacts(
       source_name: ai.source_name ?? null,
       category: ai.category ?? null,
       platform: ai.platform ?? null,
-      payload: builtPayload ?? ai.payload_jsonb ?? null,
+      payload,
+      meal_claim_allowed: hasStructuredMealObjectForVoice(payload),
       occurred_at: ai.occurred_at ?? null,
     };
   }
@@ -3889,6 +3893,19 @@ function voiceRecordFacts(
     payload: builtPayload ?? null,
     occurred_at: ai.occurred_at ?? null,
   };
+}
+
+function hasStructuredMealObjectForVoice(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const payload = value as Record<string, unknown>;
+  if (typeof payload.meal_type === "string" && payload.meal_type.trim()) return true;
+  for (const key of ["dishes", "food_items"]) {
+    const items = payload[key];
+    if (Array.isArray(items) && items.length > 0) return true;
+  }
+  return ["dish_name", "food_name", "meal_name"].some((key) =>
+    typeof payload[key] === "string" && (payload[key] as string).trim().length > 0
+  );
 }
 
 interface VoiceCallResult extends FeedbackCallResult {

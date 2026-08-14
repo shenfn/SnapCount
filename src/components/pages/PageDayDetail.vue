@@ -43,7 +43,7 @@
             <div class="day-record-value">{{ item.value }}</div>
           </div>
           <div class="day-record-sub">{{ item.subtitle }}</div>
-          <div class="day-record-time">{{ item.time || '全天' }}</div>
+          <div class="day-record-time">{{ item.time || '上传时间未知' }}</div>
         </div>
       </div>
     </div>

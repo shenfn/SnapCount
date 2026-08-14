@@ -82,6 +82,9 @@ jobs:
       - name: Validate finance occurrence contract
         run: npm run test:finance-occurred-at
 
+      - name: Validate day record time labels
+        run: npm run test:day-time-display
+
       - name: Validate expression presentation contract
         run: npm run test:expression-presentation
 

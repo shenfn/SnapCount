@@ -18,6 +18,7 @@
     "test:expression-presentation": "node scripts/test-expression-presentation.mjs",
     "test:wallet-snapshot-amount": "node --experimental-specifier-resolution=node scripts/test-wallet-snapshot-amount.mjs",
     "test:finance-occurred-at": "node scripts/test-finance-occurred-at-contract.mjs",
+    "test:day-time-display": "node --test scripts/test-day-time-display.mjs",
     "test:pending-queue": "node scripts/test-pending-queue.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",

@@ -18,6 +18,26 @@ Deno.test("recognition prompt does not receive raw companion memory", () => {
   assert(prompt.includes("识别阶段上下文边界"), "recognition prompt must declare its context boundary");
   assert(!prompt.includes("陪伴文案 companion_message"), "recognition prompt must not own the final companion copy");
   assert(prompt.includes("上传时刻只写入 client_captured_at"), "recognition prompt must not promote capture time to event time");
+  assert(prompt.includes("页面广告、推荐横幅和营销卡片不属于当前交易对象"), "recognition must ignore unrelated payment-page advertising");
+});
+
+Deno.test("voice prompt does not promote a provisional food category into a meal fact", () => {
+  const prompt = buildVoicePrompt({
+    clientLocalTime: "2026-08-14 11:36",
+    domainKey: "expense",
+    recordFacts: {
+      record_type: "expense",
+      image_type: "payment_confirm",
+      merchant_name: "星之柠网络科技工作室",
+      category: "food",
+      meal_claim_allowed: false,
+      amount: 6.8,
+    },
+    signals: [],
+  });
+
+  assert(prompt.includes('"meal_claim_allowed":false'), "voice must receive the computed meal evidence boundary");
+  assert(prompt.includes("category=food 或时间是中午，也不得写成早餐、午餐、晚餐"), "voice must not treat model category or daypart as meal proof");
 });
 
 Deno.test("feedback and voice prompts consume a frozen packet", () => {
@@ -104,7 +124,8 @@ Deno.test("voice prompt receives complete time context and prioritizes event tim
   assert(prompt.includes('"event_time":"2026-08-08T06:41:00+08:00"'), "voice prompt must include canonical event time");
   assert(prompt.includes('"event_daypart":"morning"'), "voice prompt must include the event daypart");
   assert(prompt.includes("发生时间是描述记录何时发生的唯一优先依据"), "voice prompt must prioritize event time");
-  assert(prompt.includes("上传时间只用于判断实时记录或补录关系"), "voice prompt must limit capture-time semantics");
+  assert(prompt.includes("发生时间缺失时，上传时间作为本条表达的参考时间"), "voice prompt must define upload-time fallback");
+  assert(prompt.includes("两者都有时，默认围绕发生时间表达"), "voice prompt must define dual-time priority");
   assert(prompt.includes("禁止写成“凌晨”“深夜”或“夜里”"), "voice prompt must prohibit morning/night contradictions");
 });
 
@@ -128,4 +149,5 @@ Deno.test("feedback prompt keeps time context when a frozen packet exists", () =
   assert(prompt.includes("【代码计算的时间上下文】"), "feedback prompt must not hide time context behind the packet");
   assert(prompt.includes('"event_daypart":"morning"'), "feedback prompt must receive the same time contract");
   assert(prompt.includes("发生时间是描述记录何时发生的唯一优先依据"), "feedback prompt must share event-time priority rules");
+  assert(prompt.includes("发生时间缺失时，上传时间作为本条表达的参考时间"), "feedback prompt must share upload-time fallback");
 });

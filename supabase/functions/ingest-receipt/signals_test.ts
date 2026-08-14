@@ -432,16 +432,17 @@ Deno.test("EXP-003 noon alone cannot authorize meal or eating claims", () => {
   assert(result.badIndexes.includes(2), "unsupported meal and serving advice must be rejected by field");
 });
 
-Deno.test("EXP-003 independent food evidence allows natural meal language", () => {
-  const categorizedExpense = validateModelTone(
+Deno.test("EXP-003 independent food object evidence allows natural meal language", () => {
+  const structuredExpense = validateModelTone(
     ["午餐稳稳记下了，记得趁热吃。"],
     JSON.stringify({
       record_type: "expense",
-      image_type: "order_list",
+      image_type: "other",
       amount: 18.5,
       merchant_name: "示例饺子馆",
       category: "food",
       platform: "美团",
+      payload: { food_items: [{ name: "饺子" }] },
       time_context: { event_daypart: "noon", event_local_time: "12:10:00" },
     }),
   );
@@ -458,8 +459,28 @@ Deno.test("EXP-003 independent food evidence allows natural meal language", () =
     }),
   );
 
-  assert(categorizedExpense.ok, "an explicit food category may support meal wording");
+  assert(structuredExpense.ok, "a structured food object may support meal wording");
   assert(foodPhoto.ok, "structured dishes and meal type may support meal wording");
+});
+
+Deno.test("EXP-003 model-only food category on a payment screen does not authorize meal language", () => {
+  const result = validateModelTone(
+    ["简单的午餐也值得被记录。"],
+    JSON.stringify({
+      record_type: "expense",
+      domain_key: "expense",
+      image_type: "payment_confirm",
+      amount: 6.8,
+      merchant_name: "星之柠网络科技工作室",
+      category: "food",
+      platform: "淘宝",
+      payload: null,
+      time_context: { client_daypart: "noon", client_local_time: "11:36:44" },
+    }),
+  );
+
+  assert(!result.ok, "a model-only category must not be treated as independent meal evidence");
+  assert(result.badIndexes.includes(0), "meal wording must be rejected without an object or domain fact");
 });
 
 Deno.test("EXP-004 colloquial yuan-jiao forms normalize to the current amount", () => {

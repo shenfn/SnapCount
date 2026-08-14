@@ -208,7 +208,7 @@ struct RecordsView: View {
             title: item.title,
             subtitle: item.subtitle,
             value: item.value,
-            timeLabel: item.timeLabel ?? "全天",
+            timeLabel: item.timeLabel ?? "上传时间未知",
             valueTint: valueColor(for: item.kind),
             showDivider: showDivider
         )

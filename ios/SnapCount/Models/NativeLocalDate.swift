@@ -65,6 +65,17 @@ enum NativeLocalDate {
         return formatter("HH:mm").string(from: date)
     }
 
+    static func listTimeLabel(occurredAt: String?, createdAt: String?) -> String? {
+        if let eventTime = financeTimeKey(occurredAt: occurredAt) {
+            return eventTime
+        }
+        guard let createdAt,
+              let uploadTime = timeKey(createdAt) else {
+            return nil
+        }
+        return "上传 \(uploadTime)"
+    }
+
     static func financeOccurredAt(dateKey: String, timeKey: String?) -> String? {
         let cleanDate = dateKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleanDate.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil,
