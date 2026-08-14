@@ -38,6 +38,7 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
 - 禁止把不相干的历史写成连续剧情，例如"刚吃完 X，又来一份 Y""这周吃过 X，今天换成 Y""看来今晚要熬夜了"
 - 饮食记录优先观察餐次节奏、食物结构、热量大致轻重、连续外卖/正餐/夜宵等模式；单纯"第 N 顿美食"不够好
 - 饮食照片（food_photo）只围绕画面里的食物、份量、餐次和营养估算写；除非图片本身就是订单/商家页，否则不要提商家名、外卖店名或最近消费店铺
+- 财务记录的 category 是识别模型给出的暂定分类，不是独立商品证据；只有明确菜品、餐品对象、饮食图片或结构化 meal_type/dishes/food_items 时，才能把支出写成早餐、午餐、晚餐、吃饭或“这一餐”
 - 运动记录优先观察运动类型、时长、距离、心率、热量和连续性；不要劝用户休息，不要说"继续努力"
 - 如果 Context Packet 没有对应证据，绝不编造"第 N 次""比昨天""最近总是"等对比
 - 【已授权语义上下文】只允许用于 companion_message，严禁用它推断 amount、merchant_name、category、record_type、occurred_at 等识别字段
@@ -169,7 +170,8 @@ category（消费类别）：
   * 医疗/健康/药品 → health
   * 教育/学习 → education
   * 其余 → other
-- 无分类图标时，根据商家名和平台推断
+- 页面广告、推荐横幅和营销卡片不属于当前交易对象，不得用于推断 category
+- 无分类图标时，只能根据明确的收款方或当前交易商品描述推断；只有模糊商户名、平台名或无关广告时返回 other
 
 payment_method（支付方式）：
 从 [微信支付,支付宝,花呗,京东白条,美团月付,拼多多先用后付,银行卡,其他] 中选一个
@@ -379,12 +381,13 @@ function buildTimeContextPrompt(timeContext: TimeContext | Record<string, unknow
 ${JSON.stringify(timeContext)}
 
 【时间口径】
-- 发生时间是描述记录何时发生的唯一优先依据；使用 event_time、event_local_date、event_local_time 和 event_daypart，不得自行从图片角落、历史记录或上传时间另猜一个时刻
-- 上传时间只用于判断实时记录或补录关系；client_captured_at、client_local_time 和 client_daypart 不得替代发生时间
+- 发生时间是描述记录何时发生的唯一优先依据；event_time 存在时，reference_time_source=event_time，普通时间表达使用 event_local_date、event_local_time 和 event_daypart
+- 发生时间缺失时，上传时间作为本条表达的参考时间；reference_time_source=client_captured_at 时，可以使用 reference_local_date、reference_local_time 和 reference_daypart 自然描述这次记录，不要虚构一个另外的发生时刻
+- 两者都有时，默认围绕发生时间表达；只有明确写出“上传、补录、现在才记录”等关系时，才使用 client_captured_at、client_local_time 和 client_daypart 描述上传动作
 - time_relation 和 delta_minutes 只描述发生时间到上传时间的关系；只有字段明确存在时才可以轻轻提及补录，不能把补录时间说成事件发生时间
-- event_time 为空或 event_daypart=unknown 时，不要猜测早晨、凌晨、中午、下午、晚上等时段
-- event_daypart=morning 时，只能写“早晨”或“早上”，禁止写成“凌晨”“深夜”或“夜里”
-- event_daypart=noon 时只能写中午；afternoon 只能写下午；evening 只能写傍晚或晚上；night 只能写夜间或深夜；late_night 只能写凌晨或深夜
+- reference_time_source=request_received_at 仅作为上传时间无效时的最后参考，不得声称图片证明了这个时刻
+- reference_daypart=morning 时，只能写“早晨”或“早上”，禁止写成“凌晨”“深夜”或“夜里”
+- reference_daypart=noon 时只能写中午；afternoon 只能写下午；evening 只能写傍晚或晚上；night 只能写夜间或深夜；late_night 只能写凌晨或深夜
 `;
 }
 
@@ -403,7 +406,7 @@ export function buildVoicePrompt(ctx: VoicePromptContext): string {
     ? `\n避免与最近文案句式重复：\n${ctx.recentCompanionLines.slice(0, 3).map((l) => `- ${l}`).join("\n")}`
     : "";
   const timeLine = ctx.clientLocalTime
-    ? `上传/截图时间（仅用于补录关系）：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}\n`
+    ? `上传/截图时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}\n`
     : "";
   const timeContextBlock = buildTimeContextPrompt(ctx.timeContext);
   const contextBlock = ctx.contextPacket
@@ -420,6 +423,7 @@ ${timeLine}${timeContextBlock}${contextBlock}
 - 没有 selected_candidates 支撑的历史统计、次数、周期、平均值和趋势不得出现
 - 可以结合已提供的商户、类别、金额、时间和场景作非精确的定性推理；必须用“像是”“可能”“看起来”“也许”等措辞表明这只是理解，不得冒充记录事实
 - 定性推理可以说“这个价格看起来像碰上优惠”；如需带金额，只能原样使用 record_facts 中的当前金额。不得把未提供的内容写成精确事实，例如擅自补商品名、规格、金额、次数、优惠金额或历史统计
+- 对财务记录，meal_claim_allowed=false 表示没有独立餐品对象证据；即使 category=food 或时间是中午，也不得写成早餐、午餐、晚餐、吃饭、趁热吃或“这一餐”
 - “优惠了 20 元”“本周第 3 次”这类精确说法，只有在记录或同一条已核实信号明确提供相同数字和口径时才能出现
 - 没有已选候选时只围绕本条记录本身写，或返回空字符串 ""
 - companion_message 和 emotion_line 不主动给建议；utility_line 可以在记录事实、个人基线和当前时段共同支撑时给一句低风险、可选择的建议（如“下午补个觉吧”）。禁止诊断、用药、强制要求以及"加油/注意身体/记得/超标/放纵"
@@ -457,7 +461,7 @@ export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
     ? `\n\n【最近陪伴文案（请避免句式重复）】\n${ctx.recentCompanionLines.slice(0, 5).map((l) => `- ${l}`).join("\n")}`
     : "";
   const timeBlock = ctx.clientLocalTime
-    ? `上传/截图时间（仅用于补录关系）：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}`
+    ? `上传/截图时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}`
     : "";
   const recognizedBlock = hasPacket ? "" : JSON.stringify(ctx.recognizedFields ?? {}, null, 2);
   const builtBlock = !hasPacket && ctx.builtPayload ? `\n\n【内置数据域 payload】\n${JSON.stringify(ctx.builtPayload, null, 2)}` : "";

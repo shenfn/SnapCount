@@ -1065,23 +1065,23 @@ final class NativeDataService {
         var records: [NativeDayRecord] = []
         transactions.filter { financeDateKey($0)?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let dateKey = financeDateKey(row) else { return }
-            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "expense/\(row.id)", dateKey: dateKey, kind: .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: NativeLocalDate.financeTimeKey(occurredAt: row.occurredAt), systemImage: row.status == "pending" ? "clock" : "creditcard", transactionType: row.type, status: row.status))
+            records.append(NativeDayRecord(id: "expense-\(row.id)", reference: "expense/\(row.id)", dateKey: dateKey, kind: .expense, domainKey: "expense", title: row.merchantName ?? row.category ?? "消费记录", subtitle: [row.platform, row.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), value: currency(row.amount), timeLabel: NativeLocalDate.listTimeLabel(occurredAt: row.occurredAt, createdAt: row.createdAt), systemImage: row.status == "pending" ? "clock" : "creditcard", transactionType: row.type, status: row.status))
         }
         incomes.filter { financeDateKey($0)?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let dateKey = financeDateKey(row) else { return }
-            records.append(NativeDayRecord(id: "income-\(row.id)", reference: "income/\(row.id)", dateKey: dateKey, kind: .income, domainKey: "income", title: row.sourceName ?? "收入记录", subtitle: row.category ?? "收入", value: "+\(currency(row.amount))", timeLabel: NativeLocalDate.financeTimeKey(occurredAt: row.occurredAt), systemImage: "arrow.down.circle"))
+            records.append(NativeDayRecord(id: "income-\(row.id)", reference: "income/\(row.id)", dateKey: dateKey, kind: .income, domainKey: "income", title: row.sourceName ?? "收入记录", subtitle: row.category ?? "收入", value: "+\(currency(row.amount))", timeLabel: NativeLocalDate.listTimeLabel(occurredAt: row.occurredAt, createdAt: row.createdAt), systemImage: "arrow.down.circle"))
         }
         universal.filter { ($0.occurredAt ?? $0.createdAt).map(dateOnly)?.hasPrefix(monthPrefix) == true }.forEach { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
             let kind = NativeDayRecordKind(rawValue: row.domainKey ?? "") ?? .all
-            records.append(NativeDayRecord(id: "data-\(row.id)", reference: "data/\(row.id)", dateKey: dateOnly(sourceDate), kind: kind, domainKey: row.domainKey, title: row.title ?? row.summary ?? domainName(row.domainKey), subtitle: row.summary ?? domainName(row.domainKey), value: "", timeLabel: timeOnly(sourceDate), systemImage: kind == .all ? "sparkles" : kind.systemImage))
+            records.append(NativeDayRecord(id: "data-\(row.id)", reference: "data/\(row.id)", dateKey: dateOnly(sourceDate), kind: kind, domainKey: row.domainKey, title: row.title ?? row.summary ?? domainName(row.domainKey), subtitle: row.summary ?? domainName(row.domainKey), value: "", timeLabel: NativeLocalDate.listTimeLabel(occurredAt: row.occurredAt, createdAt: row.createdAt), systemImage: kind == .all ? "sparkles" : kind.systemImage))
         }
         staging.filter {
             Self.isOpenStagingStatus($0.status)
                 && ($0.occurredAt ?? $0.createdAt).map(dateOnly)?.hasPrefix(monthPrefix) == true
         }.forEach { row in
             guard let sourceDate = row.occurredAt ?? row.createdAt else { return }
-            records.append(NativeDayRecord(id: "staging-\(row.id)", reference: "staging-\(row.id)", dateKey: dateOnly(sourceDate), kind: .staging, domainKey: row.detectedDomainKey, title: row.detectedDomainName ?? domainName(row.detectedDomainKey), subtitle: row.aiSummary ?? row.lastErrorMessage ?? "待处理截图", value: row.recordType == "income" ? "+ 待确认" : row.recordType == "expense" ? "- 待确认" : "待分类", timeLabel: timeOnly(sourceDate), systemImage: stagingSystemImage(row.status ?? "unassigned")))
+            records.append(NativeDayRecord(id: "staging-\(row.id)", reference: "staging-\(row.id)", dateKey: dateOnly(sourceDate), kind: .staging, domainKey: row.detectedDomainKey, title: row.detectedDomainName ?? domainName(row.detectedDomainKey), subtitle: row.aiSummary ?? row.lastErrorMessage ?? "待处理截图", value: row.recordType == "income" ? "+ 待确认" : row.recordType == "expense" ? "- 待确认" : "待分类", timeLabel: NativeLocalDate.listTimeLabel(occurredAt: row.occurredAt, createdAt: row.createdAt), systemImage: stagingSystemImage(row.status ?? "unassigned")))
         }
         let groups = Dictionary(grouping: records) { $0.dateKey }
         return groups.keys.sorted(by: >).map { dateKey in NativeDayRecordGroup(dateKey: dateKey, records: (groups[dateKey] ?? []).sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }) }

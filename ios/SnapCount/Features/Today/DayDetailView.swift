@@ -130,7 +130,7 @@ struct DayDetailView: View {
             title: record.title,
             subtitle: record.subtitle,
             value: record.value,
-            timeLabel: record.timeLabel ?? "全天",
+            timeLabel: record.timeLabel ?? "上传时间未知",
             valueTint: valueColor(for: record.kind),
             showDivider: showDivider
         )

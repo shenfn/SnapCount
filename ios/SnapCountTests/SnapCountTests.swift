@@ -10,6 +10,17 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(NativeLocalDate.timeKey("2026-07-17T16:30:00Z"), "00:30")
     }
 
+    func testListTimeLabelFallsBackToMarkedUploadTime() {
+        XCTAssertEqual(
+            NativeLocalDate.listTimeLabel(occurredAt: nil, createdAt: "2026-08-14T03:36:44Z"),
+            "上传 11:36"
+        )
+        XCTAssertEqual(
+            NativeLocalDate.listTimeLabel(occurredAt: "2026-08-14T03:30:00Z", createdAt: "2026-08-14T03:36:44Z"),
+            "11:30"
+        )
+    }
+
     func testAppTabsHaveTitles() {
         XCTAssertEqual(AppTab.allCases.count, 5)
         XCTAssertTrue(AppTab.allCases.allSatisfy { !$0.title.isEmpty })

@@ -45,7 +45,13 @@ export interface TimeContext {
     | null;
   request_received_at: string;
   reference_time: string;
-  reference_time_source: "client_captured_at" | "request_received_at";
+  reference_time_source:
+    | "event_time"
+    | "client_captured_at"
+    | "request_received_at";
+  reference_local_date: string | null;
+  reference_local_time: string | null;
+  reference_daypart: TimeDaypart;
   delta_minutes: number | null;
   time_relation: TimeRelation;
   is_backfill: boolean;
@@ -327,9 +333,20 @@ export function buildTimeContext(input: {
     event = fallbackEventTime;
     eventSource = "fallback";
   }
-  const referenceTime = clientIso ?? requestReceivedIso;
+  const captureReferenceTime = clientIso ?? requestReceivedIso;
   const eventTime = event?.hasExactTime ? event.iso : null;
-  const relation = classifyTimeRelation(eventTime, referenceTime);
+  const relation = classifyTimeRelation(eventTime, captureReferenceTime);
+  const reference = eventTime
+    ? event
+    : clientIso
+    ? clientCaptured
+    : requestReceived;
+  const referenceTime = reference?.iso ?? captureReferenceTime;
+  const referenceSource: TimeContext["reference_time_source"] = eventTime
+    ? "event_time"
+    : clientIso
+    ? "client_captured_at"
+    : "request_received_at";
   return {
     event_time: eventTime,
     event_time_source: eventSource,
@@ -344,9 +361,10 @@ export function buildTimeContext(input: {
     client_captured_at_invalid_reason: invalidReason,
     request_received_at: requestReceivedIso,
     reference_time: referenceTime,
-    reference_time_source: clientIso
-      ? "client_captured_at"
-      : "request_received_at",
+    reference_time_source: referenceSource,
+    reference_local_date: reference?.date ?? null,
+    reference_local_time: reference?.hasExactTime ? reference.time : null,
+    reference_daypart: classifyDaypart(referenceTime),
     ...relation,
   };
 }

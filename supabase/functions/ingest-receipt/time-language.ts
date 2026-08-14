@@ -1,14 +1,5 @@
 import type { TimeContext, TimeDaypart } from "./time.ts";
 
-const DAYPART_LABELS: Record<Exclude<TimeDaypart, "unknown">, string> = {
-  late_night: "凌晨",
-  morning: "早上",
-  noon: "中午",
-  afternoon: "下午",
-  evening: "晚上",
-  night: "深夜",
-};
-
 const DAYPART_COMPATIBILITY: Record<Exclude<TimeDaypart, "unknown">, Set<string>> = {
   late_night: new Set(["凌晨", "深夜", "夜里", "夜间"]),
   morning: new Set(["早上", "早晨", "清晨", "上午"]),
@@ -19,7 +10,6 @@ const DAYPART_COMPATIBILITY: Record<Exclude<TimeDaypart, "unknown">, Set<string>
 };
 
 const DAYPART_TOKEN = /(?:凌晨|深夜|夜里|夜间|早上|早晨|清晨|上午|中午|下午|午后|傍晚|晚上)/g;
-const DAYPART_WITH_CLOCK = /(凌晨|深夜|夜里|夜间|早上|早晨|清晨|上午|中午|下午|午后|傍晚|晚上)\s*(?:[0-2]?\d|[零〇一二两三四五六七八九十]{1,3})\s*(?:点|时)(?:\s*(?:半|[零〇一二两三四五六七八九十\d]{1,3}\s*分))?/g;
 const CLOCK_NUMBER_PATTERN = "(?:[0-2]?\\d|[零〇一二两三四五六七八九十]{1,3})";
 const NATURAL_CLOCK_PHRASE = new RegExp(
   `(?:(凌晨|深夜|夜里|夜间|早上|早晨|清晨|上午|中午|下午|午后|傍晚|晚上)\\s*)?`
@@ -127,66 +117,69 @@ function nearbyCaptureCue(text: string, index: number, length: number): boolean 
   return CAPTURE_RELATION_CUE.test(text.slice(start, end));
 }
 
-function sanitizeNaturalClockPhrases(text: string, timeContext: TimeContext): string {
-  return text.replace(
-    NATURAL_CLOCK_PHRASE,
-    (
-      match: string,
-      daypart: string | undefined,
-      modifier: string | undefined,
-      hourText: string,
-      half: string | undefined,
-      more: string | undefined,
-      minuteText: string | undefined,
-      around: string | undefined,
-      particle: string | undefined,
-      offset: number,
-    ) => {
-      const hour = parseClockNumber(hourText);
-      if (hour === null) return match;
-      const hasExplicitClockCue = Boolean(daypart || modifier || half || more || minuteText || around || particle);
-      if (!hasExplicitClockCue) return match;
-
-      const describesCapture = timeContext.is_backfill
-        && nearbyCaptureCue(text, offset, match.length)
-        && (!daypart || isCompatible(timeContext.client_daypart, daypart));
-      const actualMinute = describesCapture
-        ? localMinuteOfDay(timeContext.client_local_time)
-        : localMinuteOfDay(timeContext.event_local_time);
-      const valid = actualMinute !== null && candidateClockHours(hour).some(targetHour =>
-        clockPhraseContainsMinute({ actualMinute, targetHour, modifier, half, more, minuteText, around })
-      );
-      if (valid) return match;
-
-      const referenceDaypart = describesCapture ? timeContext.client_daypart : timeContext.event_daypart;
-      return referenceDaypart === "unknown" ? "" : DAYPART_LABELS[referenceDaypart];
-    },
-  );
-}
-
 function isCompatible(daypart: TimeDaypart, token: string): boolean {
-  if (daypart === "unknown") return true;
+  if (daypart === "unknown") return false;
   return DAYPART_COMPATIBILITY[daypart].has(token);
 }
 
-function mayDescribeCaptureTime(
+function referenceForClaim(
   text: string,
   index: number,
-  tokenLength: number,
+  length: number,
+  timeContext: TimeContext,
+): { localTime: string | null; daypart: TimeDaypart } {
+  if (timeContext.client_local_time && nearbyCaptureCue(text, index, length)) {
+    return {
+      localTime: timeContext.client_local_time,
+      daypart: timeContext.client_daypart,
+    };
+  }
+  return {
+    localTime: timeContext.reference_local_time,
+    daypart: timeContext.reference_daypart,
+  };
+}
+
+function clockClaimIsSupported(
+  match: RegExpMatchArray,
+  text: string,
   timeContext: TimeContext,
 ): boolean {
-  if (!timeContext.is_backfill || timeContext.client_daypart === "unknown") return false;
-  const start = Math.max(0, index - 8);
-  const end = Math.min(text.length, index + tokenLength + 10);
-  const nearby = text.slice(start, end);
-  return CAPTURE_RELATION_CUE.test(nearby)
-    && isCompatible(timeContext.client_daypart, text.slice(index, index + tokenLength));
+  const [full, daypart, modifier, hourText, half, more, minuteText, around, particle] = match;
+  const hasExplicitClockCue = Boolean(daypart || modifier || half || more || minuteText || around || particle);
+  if (!hasExplicitClockCue) return true;
+  const hour = parseClockNumber(hourText);
+  if (hour === null) return false;
+  const reference = referenceForClaim(text, match.index ?? 0, full.length, timeContext);
+  if (daypart && !isCompatible(reference.daypart, daypart)) return false;
+  const actualMinute = localMinuteOfDay(reference.localTime);
+  return actualMinute !== null && candidateClockHours(hour).some((targetHour) =>
+    clockPhraseContainsMinute({
+      actualMinute,
+      targetHour,
+      modifier,
+      half,
+      more,
+      minuteText,
+      around,
+    })
+  );
+}
+
+function daypartClaimIsSupported(
+  match: RegExpMatchArray,
+  text: string,
+  timeContext: TimeContext,
+): boolean {
+  const token = match[0];
+  const reference = referenceForClaim(text, match.index ?? 0, token.length, timeContext);
+  return isCompatible(reference.daypart, token);
 }
 
 /**
- * Keep model tone while making code-owned event-time semantics authoritative.
- * Capture-time wording remains allowed only when it is explicitly tied to a
- * backfill/upload action.
+ * Keep model prose intact. A time claim is either supported by the selected
+ * reference or the whole field is rejected; this function never edits words
+ * out of generated language.
  */
 export function sanitizeTextForTimeContext(
   value: string | null | undefined,
@@ -195,36 +188,11 @@ export function sanitizeTextForTimeContext(
   if (!value) return null;
   const text = value.trim();
   if (!text || !timeContext) return text || null;
-  const clockSanitizedText = sanitizeNaturalClockPhrases(text, timeContext);
-  if (timeContext.event_daypart === "unknown") {
-    const withoutUnsupportedClock = clockSanitizedText
-      .replace(DAYPART_WITH_CLOCK, "")
-      .replace(DAYPART_TOKEN, "")
-      .replace(/\s{2,}/g, " ")
-      .replace(/([，。！？、])\1+/g, "$1")
-      .replace(/^[，。！？、\s]+|[，、\s]+$/g, "")
-      .trim();
-    return withoutUnsupportedClock || null;
+  for (const match of text.matchAll(NATURAL_CLOCK_PHRASE)) {
+    if (!clockClaimIsSupported(match, text, timeContext)) return null;
   }
-
-  const expected = DAYPART_LABELS[timeContext.event_daypart];
-  let result = clockSanitizedText.replace(
-    DAYPART_WITH_CLOCK,
-    (match: string, token: string, offset: number) => {
-      if (isCompatible(timeContext.event_daypart, token)) return match;
-      if (mayDescribeCaptureTime(clockSanitizedText, offset, token.length, timeContext)) return match;
-      return expected;
-    },
-  );
-
-  result = result.replace(
-    DAYPART_TOKEN,
-    (token: string, offset: number) => {
-      if (isCompatible(timeContext.event_daypart, token)) return token;
-      if (mayDescribeCaptureTime(result, offset, token.length, timeContext)) return token;
-      return expected;
-    },
-  );
-
-  return result.replace(new RegExp(`${expected}(?:\\s*${expected})+`, "g"), expected).trim() || null;
+  for (const match of text.matchAll(DAYPART_TOKEN)) {
+    if (!daypartClaimIsSupported(match, text, timeContext)) return null;
+  }
+  return text;
 }
