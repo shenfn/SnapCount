@@ -8,12 +8,12 @@ import {
 import merchantAliasConfig from "../../../tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json" with { type: "json" };
 // @ts-ignore Production-owned pure functions are shared with the offline lab.
 import { buildExpenseFactContract, parseFiniteNumber } from "../_shared/expression-core/index.mjs";
-// @ts-ignore See note above.
+// @ts-ignore Production-owned fact candidate rules are shared with the offline lab.
 import {
   generateCurrentExpenseRecordCandidate,
   generateFactCandidates,
   generateMerchantFirstOccurrenceCandidate,
-} from "../../../tools/ai-validation/expression-planner/lib/fact-candidates.mjs";
+} from "../_shared/expression-core/fact-candidates.mjs";
 // @ts-ignore See note above.
 import { generateRecordNameRecurrenceCandidates } from "../../../tools/ai-validation/expression-planner/lib/recurrence-candidates.mjs";
 // @ts-ignore See note above.

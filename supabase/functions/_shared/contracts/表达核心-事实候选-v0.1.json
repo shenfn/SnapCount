@@ -1,0 +1,64 @@
+{
+  "version": "expression-core-fact-candidates-v0.1",
+  "cases": [
+    {
+      "name": "daily facts filter local date and preserve zero",
+      "operation": "generateFactCandidates",
+      "args": [[
+        { "event_id": "event-1", "source_type": "transaction", "ledger_status": "confirmed_transaction", "count_in_facts": true, "amount": 10, "event_at": "2026-07-12T12:46:00+08:00", "known_at": "2026-07-12T12:46:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } },
+        { "event_id": "event-2", "source_type": "transaction", "ledger_status": "confirmed_transaction", "count_in_facts": true, "amount": 0, "event_at": "2026-07-12T17:36:00+08:00", "known_at": "2026-07-12T17:36:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } },
+        { "event_id": "event-pending", "source_type": "transaction", "ledger_status": "pending_review", "count_in_facts": false, "amount": 99, "event_at": "2026-07-12T18:00:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } },
+        { "event_id": "event-next-day", "source_type": "transaction", "ledger_status": "confirmed_transaction", "count_in_facts": true, "amount": 30, "event_at": "2026-07-13T01:00:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } }
+      ], { "entityId": "merchant_fixture", "localDate": "2026-07-12", "timeZone": "Asia/Shanghai" }],
+      "expected": { "length": 2, "first_value": { "entity_id": "merchant_fixture", "date": "2026-07-12", "count": 2, "total_amount": 10 }, "second_max_amount": 10 }
+    },
+    {
+      "name": "UTC event belongs to Shanghai local date",
+      "operation": "generateFactCandidates",
+      "args": [[{ "event_id": "utc-cross-day", "source_type": "transaction", "ledger_status": "confirmed_transaction", "count_in_facts": true, "amount": 10, "event_at": "2026-07-11T16:30:00Z", "known_at": "2026-07-11T16:30:00Z", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } }], { "entityId": "merchant_fixture", "localDate": "2026-07-12", "timeZone": "Asia/Shanghai" }],
+      "expected": { "length": 2, "first_count": 1 }
+    },
+    {
+      "name": "invalid amounts are ignored",
+      "operation": "generateFactCandidates",
+      "args": [[
+        { "event_id": "null", "count_in_facts": true, "amount": null, "event_at": "2026-07-12T12:00:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } },
+        { "event_id": "blank", "count_in_facts": true, "amount": "  ", "event_at": "2026-07-12T12:00:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } },
+        { "event_id": "invalid", "count_in_facts": true, "amount": "not-a-number", "event_at": "2026-07-12T12:00:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } },
+        { "event_id": "zero", "count_in_facts": true, "amount": 0, "event_at": "2026-07-12T12:00:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } },
+        { "event_id": "ten", "count_in_facts": true, "amount": "10", "event_at": "2026-07-12T12:00:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例商户" } }
+      ], { "entityId": "merchant_fixture", "localDate": "2026-07-12", "timeZone": "Asia/Shanghai" }],
+      "expected": { "length": 2, "first_value": { "entity_id": "merchant_fixture", "date": "2026-07-12", "count": 2, "total_amount": 10 } }
+    },
+    {
+      "name": "pending current record remains provisional",
+      "operation": "generateCurrentExpenseRecordCandidate",
+      "args": [{ "event_id": "transaction-pending", "target_id": "pending", "count_in_facts": false, "amount": 32, "event_at": "2026-07-25T20:16:00+08:00", "event_time_precision": "second", "category": null, "merchant": { "canonical_name": "示例记录" }, "fact_contract": { "fact_status": "pending_review", "comparison_scope": "pending_review" } }],
+      "expected": { "length": 1, "semantic_key": "expense_current_record_context", "fact_status": "pending_review", "category_needs_review": true, "allowed_surfaces": ["pwa_pending_ai_card", "record_detail"], "text_contains": ["32 元支出", "分类仍待确认"] }
+    },
+    {
+      "name": "confirmed category is not marked for review",
+      "operation": "generateCurrentExpenseRecordCandidate",
+      "args": [{ "event_id": "transaction-confirmed", "target_id": "confirmed", "count_in_facts": true, "amount": 32, "event_at": "2026-07-25T20:16:00+08:00", "event_time_precision": "second", "category": "life", "merchant": { "canonical_name": "示例记录" }, "fact_contract": { "fact_status": "confirmed", "comparison_scope": "include" } }],
+      "expected": { "length": 1, "category_needs_review": false, "text_not_contains": "分类仍待确认" }
+    },
+    {
+      "name": "entity first occurrence emits stable candidate",
+      "operation": "generateMerchantFirstOccurrenceCandidate",
+      "args": [{ "event_id": "transaction-first", "target_id": "first", "amount": 6.28, "event_at": "2026-08-05T10:20:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例茶饮", "raw_name": "示例茶饮", "normalized_key": "示例茶饮" } }, { "entity_id": "merchant_fixture", "canonical_name": "示例茶饮", "raw_name": "示例茶饮", "normalized_key": "示例茶饮", "entity_first_seen": true, "alias_first_seen": true }],
+      "expected": { "length": 1, "semantic_key": "expense_merchant_first_occurrence", "first_seen_kind": "entity", "exposure_key": "expense:merchant:entity:merchant_fixture:first-occurrence", "text_contains": ["第一次记录"] }
+    },
+    {
+      "name": "alias first seen does not create entity event",
+      "operation": "generateMerchantFirstOccurrenceCandidate",
+      "args": [{ "event_id": "transaction-alias", "target_id": "alias", "amount": 12, "event_at": "2026-08-05T10:20:00+08:00", "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例茶饮", "raw_name": "示例茶饮（外卖）", "normalized_key": "示例茶饮外卖" } }, { "entity_id": "merchant_fixture", "canonical_name": "示例茶饮", "raw_name": "示例茶饮（外卖）", "normalized_key": "示例茶饮外卖", "entity_first_seen": false, "alias_first_seen": true }],
+      "expected": { "length": 0 }
+    },
+    {
+      "name": "missing first seen observation returns no candidate",
+      "operation": "generateMerchantFirstOccurrenceCandidate",
+      "args": [{ "event_id": "transaction-known", "amount": 12, "merchant": { "entity_id": "merchant_fixture", "canonical_name": "示例茶饮" } }, { "entity_id": "merchant_fixture", "canonical_name": "示例茶饮", "entity_first_seen": false }],
+      "expected": { "length": 0 }
+    }
+  ]
+}

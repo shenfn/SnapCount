@@ -6,6 +6,8 @@
 >
 > 分支：`feature/表达核心确定性评分`
 >
+> 对应提交：`170fe77`；合并提交：`b4da010`（PR #48）
+>
 > 规格：`docs/spec/模块/表达核心/确定性评分规格说明.md`
 
 ## 范围
@@ -49,9 +51,9 @@ npm run test:expression-scoring
 
 - Windows 本地没有 `deno`，CORE-004 Deno runner 未执行。
 - Windows 本地缺少 `esbuild`，完整 Planner 回归未执行；已运行不依赖该包的评分、资格和选择回归。
-- 尚未创建 PR，因此 GitHub CI 的 Deno、Edge 类型检查、完整 Planner 回归、PWA 构建和迁移门禁均待验证。
+- PR #48 已通过 GitHub CI：Deno、Edge 类型检查、完整 Planner 回归、PWA 构建和迁移门禁均通过。
 - 未执行生产部署、迁移或端侧改动。
 
 ## 下一步
 
-创建 PR 后，以 GitHub CI 完成 CORE-004 双运行时与 Edge 验证。CI 全绿后，A2 才能只读评估候选生成或其他下一独立切片。
+CORE-004 已通过 PR #48 并合并。A2 下一切片为 CORE-005 事实候选，必须重新建立独立 Spec、fixture 和红灯。

@@ -9,7 +9,6 @@
       "known": [
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/entity-normalizer.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json",
-        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/fact-candidates.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/recurrence-candidates.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/cross-record-relationships.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/comparison-candidates.mjs",
