@@ -6,6 +6,8 @@ import {
   summarizeMerchantObservation,
 } from "../../../tools/ai-validation/expression-planner/lib/entity-normalizer.mjs";
 import merchantAliasConfig from "../../../tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json" with { type: "json" };
+// @ts-ignore Production-owned pure functions are shared with the offline lab.
+import { buildExpenseFactContract, parseFiniteNumber } from "../_shared/expression-core/index.mjs";
 // @ts-ignore See note above.
 import {
   generateCurrentExpenseRecordCandidate,
@@ -19,12 +21,9 @@ import { generateCrossRecordRelationshipCandidates } from "../../../tools/ai-val
 // @ts-ignore See note above.
 import { generateCategoryComparisonCandidates, generateComparisonCandidates } from "../../../tools/ai-validation/expression-planner/lib/comparison-candidates.mjs";
 // @ts-ignore See note above.
-import { buildExpenseFactContract } from "../../../tools/ai-validation/expression-planner/lib/expense-fact-contract.mjs";
-// @ts-ignore See note above.
 import {
   generateIncomeCandidates,
   generateBuiltinDomainCandidates,
-  parseFiniteNumber,
   prepareDomainRecords,
 } from "../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs";
 // @ts-ignore See note above.

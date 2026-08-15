@@ -1,0 +1,57 @@
+{
+  "version": "A2-2026-08-15",
+  "captured_at": "2026-08-15",
+  "source_commit": "41eca19",
+  "rules": {
+    "production_tools_imports": {
+      "mode": "ratchet",
+      "scope": "supabase/functions/**/*.{ts,js,mjs}",
+      "known": [
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/entity-normalizer.mjs",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/fact-candidates.mjs",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/recurrence-candidates.mjs",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/cross-record-relationships.mjs",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/comparison-candidates.mjs",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/eligibility-gates.mjs",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/deterministic-scoring.mjs",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/expression-plan.mjs",
+        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/render-contract.mjs"
+      ],
+      "target": "A2: production-owned supabase/functions/_shared/expression-core"
+    },
+    "page_supabase_access": {
+      "mode": "ratchet",
+      "scope": "src/components/**/*.{vue,js,ts}",
+      "known": [
+        "src/components/ModalWelcome.vue:../lib/supabase",
+        "src/components/pages/AuthPage.vue:../../lib/supabase",
+        "src/components/pages/PageAiVisionSettings.vue:../../lib/supabase",
+        "src/components/pages/PageSettings.vue:../../lib/supabase",
+        "src/components/pages/PageSettings.vue:fetch("
+      ],
+      "target": "A3: page actions call Use Case/Store boundary instead of Supabase"
+    },
+    "domain_forbidden_imports": {
+      "mode": "ratchet",
+      "scope": "src/domains/**/*.{js,ts}",
+      "known": [],
+      "target": "A3: domain modules remain framework- and transport-free"
+    },
+    "rpc_contracts": {
+      "mode": "manual",
+      "known": [],
+      "target": "A3/A5: add a shared RPC contract registry and contract tests"
+    },
+    "duplicated_business_rules": {
+      "mode": "manual",
+      "known": [
+        "time: edge time.ts / PWA time-core / iOS models / planner lab",
+        "amount: PWA finance adapters / iOS record models / planner lab",
+        "status: Edge lifecycle / PWA pending queue / iOS presentation models"
+      ],
+      "target": "A2-A4: classify adapters versus duplicate authority and migrate one rule at a time"
+    }
+  }
+}

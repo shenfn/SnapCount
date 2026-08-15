@@ -62,6 +62,22 @@ jobs:
         with:
           deno-version: v2.9.3
 
+      - name: Check expression core boundary
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/index.mjs') != '' }}
+        run: npm run check:expression-core-boundary
+
+      - name: Test expression core in Node
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/node.test.mjs') != '' }}
+        run: npm run test:expression-core
+
+      - name: Compare expression core and fallback with legacy behavior
+        if: ${{ hashFiles('supabase/functions/_shared/contracts/表达核心-旧行为对比-v0.1.json') != '' }}
+        run: npm run test:expression-core-compat
+
+      - name: Test expression core in Deno
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/deno_test.mjs') != '' }}
+        run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/deno_test.mjs
+
       - name: Check Edge Functions
         run: |
           deno check --no-lock --node-modules-dir=auto supabase/functions/generate-insights/index.ts

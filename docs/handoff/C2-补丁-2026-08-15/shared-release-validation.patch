@@ -1,0 +1,19 @@
+diff --git a/.github/workflows/release-validation.yml b/.github/workflows/release-validation.yml
+index 66e6bd1..c447235 100644
+--- a/.github/workflows/release-validation.yml
++++ b/.github/workflows/release-validation.yml
+@@ -68,7 +68,7 @@ jobs:
+           deno check --no-lock --node-modules-dir=auto supabase/functions/ingest-receipt/index.ts
+ 
+       - name: Test receipt safeguards
+-        run: deno test --no-lock supabase/functions/ingest-receipt/duplicate-review_test.ts supabase/functions/ingest-receipt/signals_test.ts supabase/functions/ingest-receipt/expression-shadow_test.ts supabase/functions/ingest-receipt/notification-text_test.ts
++        run: deno test --no-lock supabase/functions/ingest-receipt/duplicate-review_test.ts supabase/functions/ingest-receipt/signals_test.ts supabase/functions/ingest-receipt/context-packet_test.ts supabase/functions/ingest-receipt/prompts_test.ts supabase/functions/ingest-receipt/expression-shadow_test.ts supabase/functions/ingest-receipt/notification-text_test.ts
+ 
+       - name: Run Shadow Planner tests
+         run: node --test tools/ai-validation/expression-planner/tests/*.test.mjs
+@@ -113,4 +113,5 @@ jobs:
+           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-expression-feedback-signal-key-hotfix-fixture.sql
+           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260726121000_fix_expression_feedback_signal_key_precedence.sql
+           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260726121000_fix_expression_feedback_signal_key_precedence.sql
++          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260806100000_personal_context_memory_contract.sql
+           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-security-migration.sql

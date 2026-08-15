@@ -1,0 +1,138 @@
+{
+  "version": "expression-core-legacy-compat-v0.1",
+  "description": "第一切片迁移前的结构化行为快照；不包含模型文案或用户数据。",
+  "core_cases": [
+    {
+      "name": "legacy_number_from_decimal_string",
+      "operation": "parseFiniteNumber",
+      "args": [" 12.50 "],
+      "expected": 12.5
+    },
+    {
+      "name": "legacy_invalid_number_is_null",
+      "operation": "parseFiniteNumber",
+      "args": ["NaN"],
+      "expected": null
+    },
+    {
+      "name": "legacy_money_rounding",
+      "operation": "roundMoney",
+      "args": [12.345, 2],
+      "expected": 12.35
+    },
+    {
+      "name": "legacy_entity_normalization",
+      "operation": "normalizeEntityText",
+      "args": [" 星巴克（西湖店） "],
+      "expected": "星巴克西湖店"
+    },
+    {
+      "name": "legacy_pending_fact_scope",
+      "operation": "buildExpenseFactContract",
+      "args": [{ "status": "pending_review", "category": "food" }],
+      "expected": {
+        "contract_version": "expense-fact-contract-v0.1",
+        "fact_status": "pending_review",
+        "cashflow_scope": "exclude_pending_review",
+        "expense_total_scope": "exclude_pending_review",
+        "comparison_scope": "pending_review",
+        "comparison_cohort": "expense.category.food"
+      }
+    },
+    {
+      "name": "legacy_housing_rent_scope",
+      "operation": "buildExpenseFactContract",
+      "args": [{ "status": "done", "business_kind": "housing_rent" }],
+      "expected": {
+        "contract_version": "expense-fact-contract-v0.1",
+        "fact_status": "confirmed",
+        "cashflow_scope": "include",
+        "expense_total_scope": "include",
+        "fixed_expense_scope": "include",
+        "comparison_cohort": "expense.fixed.housing"
+      }
+    }
+  ],
+  "fallback_cases": [
+    {
+      "name": "exact_fact_fallback_preserves_visible_fact",
+      "surface": "pwa_pending_ai_card",
+      "candidates": [
+        {
+          "candidate_id": "low-fact",
+          "dimension": "merchant_daily_amount_structure",
+          "claim_type": "fact",
+          "fact_subtype": "aggregated",
+          "claim": {
+            "semantic_key": "merchant_daily_amount_structure",
+            "canonical_text": "当天金额结构"
+          },
+          "scoring": {
+            "exposure": { "count": 0 },
+            "surfaces": {
+              "pwa_pending_ai_card": {
+                "eligible": true,
+                "score": 60,
+                "passes_threshold": false
+              }
+            }
+          },
+          "selection_hints": {}
+        }
+      ],
+      "expected": {
+        "selected": [
+          {
+            "candidate_id": "low-fact",
+            "semantic_key": "merchant_daily_amount_structure",
+            "claim_type": "fact",
+            "selection_mode": "exact_fact_fallback"
+          }
+        ],
+        "fallback_used": true,
+        "silent": false
+      }
+    },
+    {
+      "name": "surface_fallback_remains_distinct_from_exact_fact",
+      "surface": "record_detail",
+      "candidates": [
+        {
+          "candidate_id": "record-context",
+          "dimension": "expense_current_record_context",
+          "claim_type": "fact",
+          "fact_subtype": "observed",
+          "claim": {
+            "semantic_key": "expense_current_record_context",
+            "canonical_text": "当前记录事实"
+          },
+          "selection_hints": {
+            "fallback_only_surfaces": ["record_detail"]
+          },
+          "scoring": {
+            "exposure": { "count": 0 },
+            "surfaces": {
+              "record_detail": {
+                "eligible": true,
+                "score": 69,
+                "passes_threshold": true
+              }
+            }
+          }
+        }
+      ],
+      "expected": {
+        "selected": [
+          {
+            "candidate_id": "record-context",
+            "semantic_key": "expense_current_record_context",
+            "claim_type": "fact",
+            "selection_mode": "surface_fallback"
+          }
+        ],
+        "fallback_used": false,
+        "silent": false
+      }
+    }
+  ]
+}

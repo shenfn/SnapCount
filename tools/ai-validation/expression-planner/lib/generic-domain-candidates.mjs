@@ -1,11 +1,7 @@
-export function parseFiniteNumber(value) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null
-  if (typeof value !== "string") return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const number = Number(trimmed)
-  return Number.isFinite(number) ? number : null
-}
+import { parseFiniteNumber } from './expression-core-adapter.mjs'
+
+// 保留 Planner Lab 原有的测试/实验公开入口，规则实现仍归生产核心。
+export { parseFiniteNumber }
 
 function num(value) {
   return parseFiniteNumber(value)

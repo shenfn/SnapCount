@@ -1,0 +1,63 @@
+{
+  "version": "expression-core-v0.1",
+  "number_cases": [
+    { "name": "finite_number", "input": 12, "expected": 12 },
+    { "name": "trimmed_decimal_string", "input": " 12.50 ", "expected": 12.5 },
+    { "name": "empty_string", "input": "", "expected": null },
+    { "name": "invalid_string", "input": "NaN", "expected": null },
+    { "name": "infinity", "input": "Infinity", "expected": null }
+  ],
+  "money_cases": [
+    { "name": "round_two_digits", "input": 12.345, "digits": 2, "expected": 12.35 },
+    { "name": "round_one_digit", "input": 12.34, "digits": 1, "expected": 12.3 },
+    { "name": "invalid_money_is_null", "input": "not-a-number", "digits": 2, "expected": null }
+  ],
+  "entity_cases": [
+    { "name": "normalize_nfkc_and_punctuation", "input": " 星巴克（西湖店） ", "expected": "星巴克西湖店" },
+    { "name": "normalize_ascii_case", "input": " Cafe A-1 ", "expected": "cafea1" },
+    { "name": "null_is_empty", "input": null, "expected": "" }
+  ],
+  "fact_contract_cases": [
+    {
+      "name": "pending_review_excluded",
+      "record": { "status": "pending_review", "category": "food" },
+      "expected": {
+        "fact_status": "pending_review",
+        "cashflow_scope": "exclude_pending_review",
+        "expense_total_scope": "exclude_pending_review",
+        "comparison_scope": "pending_review"
+      }
+    },
+    {
+      "name": "liability_repayment_is_cashflow_not_expense",
+      "record": { "status": "done", "business_kind": "liability_repayment" },
+      "expected": {
+        "fact_status": "confirmed",
+        "cashflow_scope": "include",
+        "expense_total_scope": "exclude_non_expense_cashflow",
+        "discretionary_scope": "exclude"
+      }
+    },
+    {
+      "name": "housing_rent_is_fixed_expense",
+      "record": { "status": "done", "business_kind": "housing_rent" },
+      "expected": {
+        "fact_status": "confirmed",
+        "cashflow_scope": "include",
+        "expense_total_scope": "include",
+        "fixed_expense_scope": "include"
+      }
+    },
+    {
+      "name": "confirmed_category_is_comparable",
+      "record": { "status": "done", "category": "food" },
+      "expected": {
+        "fact_status": "confirmed",
+        "cashflow_scope": "include",
+        "expense_total_scope": "include",
+        "comparison_scope": "include",
+        "comparison_cohort": "expense.category.food"
+      }
+    }
+  ]
+}
