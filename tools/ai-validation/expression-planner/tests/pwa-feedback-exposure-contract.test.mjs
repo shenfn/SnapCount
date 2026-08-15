@@ -12,10 +12,11 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '../../../..')
 
 test('PWA binds feedback to the rendered exposure when its id is available', async () => {
-  const [card, detail, store] = await Promise.all([
+  const [card, detail, store, feature] = await Promise.all([
     readFile(path.join(root, 'src/components/AiFeedbackCard.vue'), 'utf8'),
     readFile(path.join(root, 'src/components/pages/PageRecordDetail.vue'), 'utf8'),
     readFile(path.join(root, 'src/composables/useStore.js'), 'utf8'),
+    readFile(path.join(root, 'src/features/expression/createExpressionPlanState.js'), 'utf8'),
   ])
 
   assert.match(card, /exposureEventId:\s*\{\s*type:\s*String/)
@@ -23,8 +24,9 @@ test('PWA binds feedback to the rendered exposure when its id is available', asy
   assert.match(detail, /:exposure-event-id="aiFeedbackExposureEventId"/)
   assert.match(detail, /reviewFeedback\.value\?\.exposure_event_id/)
   assert.match(detail, /submitExpressionFeedback\(\{\s*recordId,\s*choice,\s*freeText,\s*exposureEventId\s*\}\)/)
-  assert.match(store, /submitExpressionFeedback\(\{\s*recordId,\s*choice,\s*freeText\s*=\s*"",\s*exposureEventId\s*=\s*""\s*\}\)/)
-  assert.match(store, /\.\.\.\(exposureEventId\s*\?\s*\{\s*exposure_event_id:\s*exposureEventId\s*\}\s*:\s*\{\}\)/)
+  assert.match(store, /submitExpressionFeedback,[\s\S]*\}\s*=\s*expressionPlanState/)
+  assert.match(feature, /submitExpressionFeedback\(\{\s*recordId,\s*choice,\s*freeText\s*=\s*'',\s*exposureEventId\s*=\s*''\s*\}\)/)
+  assert.match(feature, /\.\.\.\(exposureEventId\s*\?\s*\{\s*exposure_event_id:\s*exposureEventId\s*\}\s*:\s*\{\}\)/)
 })
 
 test('PWA success copy describes future selection without claiming immediate effect', async () => {
@@ -63,20 +65,23 @@ test('PWA can edit a submitted review without changing its exposure binding', as
 })
 
 test('PWA renders owner planner feedback before acknowledging its exposure', async () => {
-  const [card, detail, store, delivery] = await Promise.all([
+  const [card, detail, store, feature, delivery] = await Promise.all([
     readFile(path.join(root, 'src/components/AiFeedbackCard.vue'), 'utf8'),
     readFile(path.join(root, 'src/components/pages/PageRecordDetail.vue'), 'utf8'),
     readFile(path.join(root, 'src/composables/useStore.js'), 'utf8'),
+    readFile(path.join(root, 'src/features/expression/createExpressionPlanState.js'), 'utf8'),
     readFile(path.join(root, 'src/utils/expressionDelivery.js'), 'utf8'),
   ])
 
-  assert.match(store, /recordExpressionPlanCache\s*=\s*ref\(\{\}\)/)
-  assert.match(store, /get_record_expression_plan/)
-  assert.match(store, /ack_record_expression_plan/)
-  assert.match(store, /plan_token:\s*planToken/)
-  assert.match(store, /candidate_id:\s*candidateId/)
-  assert.match(store, /recordExpressionPlanCache\.value\s*=\s*\{\}/)
-  assert.match(store, /cached\.reason\s*===\s*'plan_not_ready'/)
+  assert.match(store, /createExpressionPlanState\(\{/)
+  assert.match(store, /cache:\s*ref\(\{\}\)/)
+  assert.match(store, /recordExpressionPlanCache,[\s\S]*loadRecordExpressionPlan,[\s\S]*ackRecordExpressionPlan/)
+  assert.match(feature, /get_record_expression_plan/)
+  assert.match(feature, /ack_record_expression_plan/)
+  assert.match(feature, /plan_token:\s*planToken/)
+  assert.match(feature, /candidate_id:\s*candidateId/)
+  assert.match(feature, /recordExpressionPlanCache\.value\s*=\s*\{\}/)
+  assert.match(feature, /cached\.reason\s*===\s*'plan_not_ready'/)
   assert.match(detail, /recordExpressionPlanForDetail\(store\.recordExpressionPlanCache\.value,\s*recordId\)/)
   assert.doesNotMatch(detail, /plan\?\.recordKind\s*===\s*expectedExpressionRecordKind\.value/)
   assert.match(detail, /plannerLookupSettled\s*=\s*computed/)
@@ -103,9 +108,9 @@ test('PWA renders owner planner feedback before acknowledging its exposure', asy
   assert.match(delivery, /documentRef\.visibilityState\s*===\s*'visible'/)
   assert.match(card, /暂时无法点评/)
   assert.match(card, /emit\('retry-review'\)/)
-  assert.match(store, /isPlannerDeliveryEnvelopeValid\(data\)/)
-  assert.match(store, /plannerDeliveryIdentityMatches\(current, acknowledgedDelivery\)/)
-  assert.match(store, /if \(force\) \{[\s\S]*?invalidateRecordExpressionPlan\(normalizedRecordId\)/)
+  assert.match(feature, /isDeliveryValid\(data\)/)
+  assert.match(feature, /deliveryIdentityMatches\(current, acknowledgedDelivery\)/)
+  assert.match(feature, /if \(force\) \{[\s\S]*?invalidateRecordExpressionPlan\(normalizedRecordId\)/)
 
   const loadIndex = detail.indexOf('store.loadRecordExpressionPlan(recordId')
   const nextTickIndex = detail.indexOf('await nextTick()', loadIndex)

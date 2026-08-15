@@ -42,42 +42,52 @@ function assertInvalidatesAfterFailureGuard(section, mutationMarker, failureMark
 }
 
 test('PWA invalidates one record plan without weakening the user-switch reset', async () => {
-  const store = await readFile(path.join(root, 'src/composables/useStore.js'), 'utf8')
+  const [store, feature] = await Promise.all([
+    readFile(path.join(root, 'src/composables/useStore.js'), 'utf8'),
+    readFile(path.join(root, 'src/features/expression/createExpressionPlanState.js'), 'utf8'),
+  ])
   const reset = between(store, 'function resetUserData()', 'function isActionPending')
   const invalidation = between(
-    store,
+    feature,
     'function invalidateRecordExpressionPlan(recordId)',
-    'async function loadRecordExpressionPlan',
+    'function loadRecordExpressionPlan',
   )
 
-  assert.match(store, /const recordExpressionPlanCacheRevisions\s*=\s*new Map\(\)/)
-  assert.match(reset, /recordExpressionPlanCache\.value\s*=\s*\{\}/)
-  assert.match(reset, /recordExpressionPlanLoadRequests\.clear\(\)/)
-  assert.match(reset, /recordExpressionPlanAckRequests\.clear\(\)/)
-  assert.match(reset, /recordExpressionPlanCacheRevisions\.clear\(\)/)
-  assert.match(reset, /recordExpressionPlanCacheVersion\s*\+=\s*1/)
+  assert.match(store, /createExpressionPlanState\(\{/)
+  assert.match(store, /recordExpressionPlanCache,[\s\S]*loadRecordExpressionPlan,[\s\S]*ackRecordExpressionPlan,[\s\S]*submitExpressionFeedback/)
+  assert.match(reset, /expressionPlanState\.reset\(\)/)
+  assert.doesNotMatch(feature, /\b(?:fetch|SUPABASE_URL|SUPABASE_ANON_KEY)\b|from ['"][^'"]*supabase/i)
+  assert.match(feature, /const cacheRevisions\s*=\s*new Map\(\)/)
+  assert.match(feature, /recordExpressionPlanCache\.value\s*=\s*\{\}/)
+  assert.match(feature, /loadRequests\.clear\(\)/)
+  assert.match(feature, /ackRequests\.clear\(\)/)
+  assert.match(feature, /cacheRevisions\.clear\(\)/)
+  assert.match(feature, /cacheVersion\s*\+=\s*1/)
 
   assert.match(invalidation, /delete nextCache\[normalizedRecordId\]/)
   assert.match(invalidation, /recordExpressionPlanCache\.value\s*=\s*nextCache/)
   assert.match(invalidation, /for \(const recordKind of \['expense', 'income', 'data'\]\)/)
-  assert.match(invalidation, /recordExpressionPlanLoadRequests\.delete\(`\$\{recordKind\}:\$\{normalizedRecordId\}`\)/)
-  assert.match(invalidation, /recordExpressionPlanAckRequests\.delete\(normalizedRecordId\)/)
-  assert.match(invalidation, /recordExpressionPlanCacheRevisions\.set\(/)
+  assert.match(invalidation, /loadRequests\.delete\(`\$\{recordKind\}:\$\{normalizedRecordId\}`\)/)
+  assert.match(invalidation, /ackRequests\.delete\(normalizedRecordId\)/)
+  assert.match(invalidation, /cacheRevisions\.set\(/)
 })
 
 test('invalidated records reject stale in-flight plan and acknowledgement writes', async () => {
-  const store = await readFile(path.join(root, 'src/composables/useStore.js'), 'utf8')
-  const load = between(store, 'async function loadRecordExpressionPlan', 'async function ackRecordExpressionPlan')
-  const acknowledge = between(store, 'async function ackRecordExpressionPlan', 'async function submitExpressionFeedback')
+  const feature = await readFile(
+    path.join(root, 'src/features/expression/createExpressionPlanState.js'),
+    'utf8',
+  )
+  const load = between(feature, 'function loadRecordExpressionPlan', 'function ackRecordExpressionPlan')
+  const acknowledge = between(feature, 'function ackRecordExpressionPlan', 'function submitExpressionFeedback')
 
-  assert.match(load, /const cacheRevision\s*=\s*getRecordExpressionPlanCacheRevision\(normalizedRecordId\)/)
+  assert.match(load, /const revision\s*=\s*getRecordExpressionPlanCacheRevision\(normalizedRecordId\)/)
   assert.ok(
-    occurrenceIndexes(load, 'isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)').length >= 2,
+    occurrenceIndexes(load, 'isCacheCurrent(normalizedRecordId, version, revision)').length >= 2,
     'plan loads must guard both successful and failed responses against stale record revisions',
   )
-  assert.match(acknowledge, /const cacheRevision\s*=\s*getRecordExpressionPlanCacheRevision\(normalizedRecordId\)/)
+  assert.match(acknowledge, /const revision\s*=\s*getRecordExpressionPlanCacheRevision\(normalizedRecordId\)/)
   assert.ok(
-    occurrenceIndexes(acknowledge, 'isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)').length >= 2,
+    occurrenceIndexes(acknowledge, 'isCacheCurrent(normalizedRecordId, version, revision)').length >= 2,
     'acknowledgements must guard both successful and failed responses against stale record revisions',
   )
 })

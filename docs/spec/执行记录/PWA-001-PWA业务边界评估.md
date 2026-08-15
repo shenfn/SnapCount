@@ -1,8 +1,12 @@
-# PWA-001 业务边界评估执行记录
+# PWA-001 业务边界首切片执行记录
 
 > 日期：2026-08-16
 >
-> 基线：`2dd9cba`
+> 评估基线：`2dd9cba`
+>
+> 实现基线：`60f40ef`（PR #65 合并提交）
+>
+> 实现分支：`feature/PWA表达计划边界`
 
 ## 目标与范围
 
@@ -30,8 +34,45 @@
 - 当前页面直连和宽 Store API 都是历史基线，本评估没有降低计数。
 - Windows 不影响本 PWA 文档评估；后续若改 iOS 仍必须走 macOS CI。
 
+## 实现与 TDD 证据
+
+### 红灯
+
+先新增 Repository 与 Feature 行为测试，目标模块尚不存在时运行：
+
+```text
+node --test src/repositories/__tests__/expressionRepository.test.mjs src/features/expression/__tests__/expressionPlanState.test.mjs
+```
+
+结果为 2 个 `ERR_MODULE_NOT_FOUND`，失败原因只来自目标模块缺失，作为有效红灯。
+
+### 最小实现
+
+- 新增 `expressionRepository.js`，只负责 session token、Edge action HTTP、DTO 解包和传输错误元数据。
+- 新增纯工厂 `createExpressionPlanState.js`，承载 cache、去重、revision/version、ACK 和反馈绑定，不依赖 Vue、Supabase 或 `fetch`。
+- `useStore` 保留原公开 ref/action，只组合 Repository/Feature，并在 `resetUserData` 调用 Feature reset。
+- 既有记录 mutation 的成功后失效调用保持原位，页面与组件零改动。
+
+### 绿灯与回归
+
+| 命令 | 结果 |
+|---|---|
+| 新 Feature/Repository + 既有 PWA 表达契约联合测试 | 22/22 通过 |
+| `npm run test:expression-presentation` | 22/22 通过 |
+| `npm run test:finance-occurred-at` | 通过 |
+| `npm run governance:check` | 通过 |
+| `npm run governance:arch` | 通过；计数保持 tools 0、页面直连 5、Domain 禁止依赖 0 |
+| `npm run build` | 通过；153 modules transformed |
+
+## 未验证与剩余风险
+
+- GitHub PR 门禁尚未运行，本地通过不替代 PR 结论。
+- `npm ci` 报告 5 个既有依赖漏洞（1 moderate、4 high）；本切片没有升级依赖或运行自动修复。
+- Vite 仍报告 vconsole `eval` 与大 chunk 警告；均非本切片引入，未借机扩展范围。
+- 页面 Supabase 直连仍为 5 项，等待后续“设置与隐私”和“认证会话”切片逐步 ratchet。
+
 ## 下一步
 
-1. 提交本评估文档 PR并等待治理、综合和 iOS Gate。
-2. 合并后从最新 main 建立 `feature/PWA表达计划边界`。
-3. 按 PWA-001 至 PWA-007 写红灯测试，再做最小迁移。
+1. 提交实现分支 PR，等待治理、综合和适用门禁。
+2. PR 通过并合并后，把 PWA-001 标记为完成。
+3. 从最新 main 建立下一独立 worktree，只读评估“设置与隐私”边界，不直接继续拆 Store。

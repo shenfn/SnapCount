@@ -32,6 +32,8 @@ import {
   isPlannerDeliveryEnvelopeValid,
   plannerDeliveryIdentityMatches,
 } from '../utils/expressionPresentation'
+import { createExpressionRepository } from '../repositories/expressionRepository'
+import { createExpressionPlanState } from '../features/expression/createExpressionPlanState'
 import {
   buildShanghaiOccurredAt,
   resolveFinanceOccurrence,
@@ -125,11 +127,23 @@ export function useStore() {
 
   const imgOverlay = reactive({ open: false, src: '' })
   const detailRecord = ref(null)
-  const recordExpressionPlanCache = ref({})
-  const recordExpressionPlanLoadRequests = new Map()
-  const recordExpressionPlanAckRequests = new Map()
-  const recordExpressionPlanCacheRevisions = new Map()
-  let recordExpressionPlanCacheVersion = 0
+  const expressionPlanState = createExpressionPlanState({
+    repository: createExpressionRepository({
+      client: sb,
+      baseUrl: SUPABASE_URL,
+      anonKey: SUPABASE_ANON_KEY,
+    }),
+    cache: ref({}),
+    isDeliveryValid: isPlannerDeliveryEnvelopeValid,
+    deliveryIdentityMatches: plannerDeliveryIdentityMatches,
+  })
+  const {
+    recordExpressionPlanCache,
+    invalidateRecordExpressionPlan,
+    loadRecordExpressionPlan,
+    ackRecordExpressionPlan,
+    submitExpressionFeedback,
+  } = expressionPlanState
   const activeDomainId = ref(null)
   const activeDateKey = ref('')
   const activeDayKind = ref('all')
@@ -465,11 +479,7 @@ export function useStore() {
     selectedStagingIds.value = new Set()
     batchMode.value = false
     detailRecord.value = null
-    recordExpressionPlanCache.value = {}
-    recordExpressionPlanLoadRequests.clear()
-    recordExpressionPlanAckRequests.clear()
-    recordExpressionPlanCacheRevisions.clear()
-    recordExpressionPlanCacheVersion += 1
+    expressionPlanState.reset()
     activeDomainId.value = null
     pageHistory.value = []
     settingsState.aiLogsEnabled = false
@@ -4430,255 +4440,6 @@ export function useStore() {
     }
   }
 
-  async function postExpressionAction(action, input, { keepalive = false, signal } = {}) {
-    const { data: sessionData, error: sessionError } = await sb.auth.getSession()
-    if (sessionError) throw sessionError
-    const token = sessionData?.session?.access_token
-    if (!token) throw new Error('登录状态已失效，请重新登录')
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/ingest-receipt`, {
-      method: 'POST',
-      keepalive,
-      signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'apikey': SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({
-        action,
-        ...input,
-      }),
-    })
-    const payload = await response.json().catch(() => ({}))
-    if (!response.ok || !payload?.ok) {
-      const error = new Error(payload?.error || '表达服务请求失败')
-      error.status = response.status
-      error.retryable = [408, 425, 429].includes(response.status) || response.status >= 500
-      throw error
-    }
-    return payload.data || null
-  }
-
-  function setRecordExpressionPlan(recordId, value) {
-    recordExpressionPlanCache.value = {
-      ...recordExpressionPlanCache.value,
-      [recordId]: value,
-    }
-    return value
-  }
-
-  function updateRecordExpressionPlan(recordId, patch) {
-    return setRecordExpressionPlan(recordId, {
-      ...(recordExpressionPlanCache.value[recordId] || {}),
-      ...patch,
-    })
-  }
-
-  function getRecordExpressionPlanCacheRevision(recordId) {
-    return recordExpressionPlanCacheRevisions.get(recordId) || 0
-  }
-
-  function isRecordExpressionPlanCacheCurrent(recordId, cacheVersion, cacheRevision) {
-    return cacheVersion === recordExpressionPlanCacheVersion
-      && cacheRevision === getRecordExpressionPlanCacheRevision(recordId)
-  }
-
-  function invalidateRecordExpressionPlan(recordId) {
-    const normalizedRecordId = String(recordId || '').trim()
-    if (!normalizedRecordId) return false
-
-    const hadCachedPlan = Object.prototype.hasOwnProperty.call(recordExpressionPlanCache.value, normalizedRecordId)
-    if (hadCachedPlan) {
-      const nextCache = { ...recordExpressionPlanCache.value }
-      delete nextCache[normalizedRecordId]
-      recordExpressionPlanCache.value = nextCache
-    }
-    for (const recordKind of ['expense', 'income', 'data']) {
-      recordExpressionPlanLoadRequests.delete(`${recordKind}:${normalizedRecordId}`)
-    }
-    recordExpressionPlanAckRequests.delete(normalizedRecordId)
-    recordExpressionPlanCacheRevisions.set(
-      normalizedRecordId,
-      getRecordExpressionPlanCacheRevision(normalizedRecordId) + 1,
-    )
-    return hadCachedPlan
-  }
-
-  async function loadRecordExpressionPlan(recordId, { recordKind, force = false, signal } = {}) {
-    const normalizedRecordId = String(recordId || '').trim()
-    const normalizedRecordKind = recordKind === 'universal' ? 'data' : String(recordKind || '').trim()
-    if (!normalizedRecordId) throw new Error('缺少记录编号')
-    if (!['expense', 'income', 'data'].includes(normalizedRecordKind)) throw new Error('缺少有效的记录类型')
-    const requestKey = `${normalizedRecordKind}:${normalizedRecordId}`
-    if (force) {
-      // A visible record may receive its persisted companion copy after the
-      // first detail payload. Invalidate both the cache and any in-flight GET
-      // so its stale presentation snapshot cannot win the race.
-      invalidateRecordExpressionPlan(normalizedRecordId)
-    } else if (recordExpressionPlanLoadRequests.has(requestKey)) {
-      return recordExpressionPlanLoadRequests.get(requestKey)
-    }
-    const cached = recordExpressionPlanCache.value[normalizedRecordId]
-    const retryableUnavailable = cached?.status === 'unavailable' && cached.reason === 'plan_not_ready'
-    if (!force && cached?.recordKind === normalizedRecordKind && !['loading', 'error'].includes(cached.status) && !retryableUnavailable) return cached
-
-    const cacheVersion = recordExpressionPlanCacheVersion
-    const cacheRevision = getRecordExpressionPlanCacheRevision(normalizedRecordId)
-    setRecordExpressionPlan(normalizedRecordId, {
-      status: 'loading',
-      available: false,
-      acknowledged: false,
-      feedback: null,
-      recordId: normalizedRecordId,
-      recordKind: normalizedRecordKind,
-      error: '',
-    })
-    const request = (async () => {
-      try {
-        const data = await postExpressionAction('get_record_expression_plan', {
-          record_id: normalizedRecordId,
-          record_kind: normalizedRecordKind,
-        }, { signal })
-        if (!isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)) return null
-        if (!data?.available) {
-          return setRecordExpressionPlan(normalizedRecordId, {
-            status: 'unavailable',
-            available: false,
-            acknowledged: false,
-            feedback: null,
-            recordId: normalizedRecordId,
-            recordKind: normalizedRecordKind,
-            reason: data?.reason || 'not_available',
-            error: '',
-          })
-        }
-        const planToken = String(data.plan_token || '').trim()
-        const candidateId = String(data.candidate_id || '').trim()
-        if (!planToken || !candidateId || !isPlannerDeliveryEnvelopeValid(data)) {
-          throw new Error('表达计划响应不完整')
-        }
-        return setRecordExpressionPlan(normalizedRecordId, {
-          status: 'ready',
-          available: true,
-          acknowledged: false,
-          recordId: normalizedRecordId,
-          recordKind: normalizedRecordKind,
-          planToken,
-          candidateId,
-          feedback: data.feedback,
-          presentationTarget: data.presentation_target || data.presentationTarget || '',
-          renderedPayload: data.rendered_payload || data.renderedPayload || null,
-          visibleFieldPaths: data.visible_field_paths || data.visibleFieldPaths || [],
-          renderedTextFingerprint: data.rendered_text_fingerprint || data.renderedTextFingerprint || '',
-          claimFingerprint: data.claim_fingerprint || data.claimFingerprint || data.feedback?.claim_fingerprint || '',
-          error: '',
-        })
-      } catch (error) {
-        if (isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)) {
-          setRecordExpressionPlan(normalizedRecordId, {
-            status: 'error',
-            available: false,
-            acknowledged: false,
-            feedback: null,
-            recordId: normalizedRecordId,
-            recordKind: normalizedRecordKind,
-            error: error?.message || String(error),
-          })
-        }
-        throw error
-      }
-    })()
-    recordExpressionPlanLoadRequests.set(requestKey, request)
-    try {
-      return await request
-    } finally {
-      if (recordExpressionPlanLoadRequests.get(requestKey) === request) {
-        recordExpressionPlanLoadRequests.delete(requestKey)
-      }
-    }
-  }
-
-  async function ackRecordExpressionPlan(recordId, { signal } = {}) {
-    const normalizedRecordId = String(recordId || '').trim()
-    if (!normalizedRecordId) throw new Error('缺少记录编号')
-    if (recordExpressionPlanAckRequests.has(normalizedRecordId)) {
-      return recordExpressionPlanAckRequests.get(normalizedRecordId)
-    }
-    const cached = recordExpressionPlanCache.value[normalizedRecordId]
-    if (!cached?.available) return cached || null
-    if (cached.acknowledged && cached.feedback?.exposure_event_id) return cached
-
-    const cacheVersion = recordExpressionPlanCacheVersion
-    const cacheRevision = getRecordExpressionPlanCacheRevision(normalizedRecordId)
-    const planToken = cached.planToken
-    const candidateId = cached.candidateId
-    updateRecordExpressionPlan(normalizedRecordId, { status: 'acknowledging', ackError: '' })
-    const request = (async () => {
-      try {
-        const data = await postExpressionAction('ack_record_expression_plan', {
-          record_id: normalizedRecordId,
-          plan_token: planToken,
-          candidate_id: candidateId,
-        }, { signal })
-        if (!isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)) return null
-        const current = recordExpressionPlanCache.value[normalizedRecordId]
-        if (current?.planToken !== planToken || current?.candidateId !== candidateId) return current || null
-        const exposureEventId = String(data?.feedback?.exposure_event_id || data?.exposure_event_id || '').trim()
-        const acknowledgedDelivery = {
-          candidateId: String(data?.candidate_id || '').trim(),
-          feedback: data?.feedback,
-          presentationTarget: data?.presentation_target || data?.presentationTarget || '',
-          renderedPayload: data?.rendered_payload || data?.renderedPayload || null,
-          visibleFieldPaths: data?.visible_field_paths || data?.visibleFieldPaths || [],
-          renderedTextFingerprint: data?.rendered_text_fingerprint || data?.renderedTextFingerprint || '',
-          claimFingerprint: data?.claim_fingerprint || data?.claimFingerprint || data?.feedback?.claim_fingerprint || '',
-        }
-        if (!exposureEventId || !plannerDeliveryIdentityMatches(current, acknowledgedDelivery)) {
-          throw new Error('表达曝光确认响应不完整')
-        }
-        return updateRecordExpressionPlan(normalizedRecordId, {
-          status: 'acknowledged',
-          acknowledged: true,
-          feedback: {
-            ...(current.feedback || {}),
-            ...(data?.feedback || {}),
-            exposure_event_id: exposureEventId,
-          },
-          ackError: '',
-        })
-      } catch (error) {
-        if (isRecordExpressionPlanCacheCurrent(normalizedRecordId, cacheVersion, cacheRevision)) {
-          const current = recordExpressionPlanCache.value[normalizedRecordId]
-          if (current?.planToken === planToken && current?.candidateId === candidateId) {
-            updateRecordExpressionPlan(normalizedRecordId, {
-              status: 'ack_error',
-              acknowledged: false,
-              ackError: error?.message || String(error),
-            })
-          }
-        }
-        throw error
-      }
-    })()
-    recordExpressionPlanAckRequests.set(normalizedRecordId, request)
-    try {
-      return await request
-    } finally {
-      if (recordExpressionPlanAckRequests.get(normalizedRecordId) === request) {
-        recordExpressionPlanAckRequests.delete(normalizedRecordId)
-      }
-    }
-  }
-
-  async function submitExpressionFeedback({ recordId, choice, freeText = "", exposureEventId = "" }) {
-    if (!recordId || !choice) throw new Error("缺少点评信息")
-    return postExpressionAction('submit_expression_feedback', {
-      record_id: recordId,
-      primary_choice: choice,
-      free_text: freeText,
-      ...(exposureEventId ? { exposure_event_id: exposureEventId } : {}),
-    }, { keepalive: true })
-  }
   return {
     currentYear, currentMonth, currentPage, monthLabel,
     pageHistory, pageScrollPositions, currentUserId, currentUserEmail, isLoggedIn,

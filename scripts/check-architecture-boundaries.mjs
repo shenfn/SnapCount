@@ -101,7 +101,7 @@ if (baseline.rules?.rpc_contracts?.mode === 'manual') {
   warnings.push('rpc_contracts 当前仍为人工清单；A3/A5 建立契约注册表后再启用自动检查')
 }
 if (baseline.rules?.duplicated_business_rules?.mode === 'manual') {
-  warnings.push('duplicated_business_rules 当前仍为人工基线；A2 先确定 expression-core 权威边界')
+  warnings.push('duplicated_business_rules 当前仍为人工基线；A3 通过模块 Spec 和行为测试防止端侧复制业务规则')
 }
 
 if (errors.length) {
