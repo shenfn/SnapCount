@@ -1,0 +1,76 @@
+{
+  "version": "expression-core-recurrence-v0.1",
+  "cases": [
+    {
+      "name": "nearest earlier same normalized name",
+      "operation": "generateRecordNameRecurrenceCandidates",
+      "args": [[
+        {"event_id":"transaction:current","target_id":"current","count_in_facts":true,"amount":25,"event_at":"2026-07-12T18:42:00+08:00","known_at":"2026-07-12T18:43:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"示例商户","normalized_key":"example"}},
+        {"event_id":"transaction:old","target_id":"old","count_in_facts":true,"amount":18,"event_at":"2026-07-01T09:00:00+08:00","known_at":"2026-07-01T09:01:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"示例商户","normalized_key":"example"}},
+        {"event_id":"transaction:nearest","target_id":"nearest","count_in_facts":true,"amount":18,"event_at":"2026-07-12T09:05:00+08:00","known_at":"2026-07-12T09:06:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"示例商户","normalized_key":"example"}}
+      ], {"currentEventId":"transaction:current"}],
+      "expected":{"length":1,"previous_record_id":"nearest","elapsed_minutes":577,"candidate_id":"fact:record-name:previous-gap:transaction:current","text_contains":"9 小时 37 分钟"}
+    },
+    {
+      "name": "later known record is not causal previous",
+      "operation": "generateRecordNameRecurrenceCandidates",
+      "args": [[
+        {"event_id":"transaction:current","target_id":"current","count_in_facts":true,"amount":10,"event_at":"2026-07-12T12:00:00+08:00","known_at":"2026-07-12T12:01:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"咖啡","normalized_key":"coffee"}},
+        {"event_id":"transaction:late","target_id":"late","count_in_facts":true,"amount":10,"event_at":"2026-07-12T10:00:00+08:00","known_at":"2026-07-12T13:00:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"咖啡","normalized_key":"coffee"}}
+      ], {"currentEventId":"transaction:current"}],
+      "expected":{"length":0}
+    },
+    {
+      "name": "date only falls back to calendar days",
+      "operation": "generateRecordNameRecurrenceCandidates",
+      "args": [[
+        {"event_id":"transaction:current","target_id":"current","count_in_facts":true,"amount":10,"event_at":"2026-07-02T12:00:00+08:00","known_at":"2026-07-02T13:00:00+08:00","event_time_precision":"date_only","event_time_confidence":0.35,"merchant":{"canonical_name":"月费","normalized_key":"monthly"}},
+        {"event_id":"transaction:previous","target_id":"previous","count_in_facts":true,"amount":10,"event_at":"2026-06-20T12:00:00+08:00","known_at":"2026-06-20T13:00:00+08:00","event_time_precision":"date_only","event_time_confidence":0.35,"merchant":{"canonical_name":"月费","normalized_key":"monthly"}}
+      ], {"currentEventId":"transaction:current"}],
+      "expected":{"length":1,"previous_record_id":"previous","elapsed_calendar_days":12,"elapsed_minutes":null,"time_precision":"calendar_day","text_contains":"约 12 天"}
+    },
+    {
+      "name": "same day date only has no positive interval",
+      "operation": "generateRecordNameRecurrenceCandidates",
+      "args": [[
+        {"event_id":"transaction:previous","target_id":"previous","count_in_facts":true,"amount":10,"event_at":"2026-07-02T12:00:00+08:00","known_at":"2026-07-02T08:00:00+08:00","event_time_precision":"date_only","event_time_confidence":0.35,"merchant":{"canonical_name":"日记","normalized_key":"daily"}},
+        {"event_id":"transaction:current","target_id":"current","count_in_facts":true,"amount":10,"event_at":"2026-07-02T12:00:00+08:00","known_at":"2026-07-02T09:00:00+08:00","event_time_precision":"date_only","event_time_confidence":0.35,"merchant":{"canonical_name":"日记","normalized_key":"daily"}}
+      ], {"currentEventId":"transaction:current"}],
+      "expected":{"length":0}
+    },
+    {
+      "name": "same batch skips to older independent record",
+      "operation": "generateRecordNameRecurrenceCandidates",
+      "args": [[
+        {"event_id":"transaction:older","target_id":"older","count_in_facts":true,"amount":10,"event_at":"2026-07-10T09:00:00+08:00","known_at":"2026-07-10T09:01:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"同名","normalized_key":"same"}},
+        {"event_id":"transaction:batch","target_id":"batch","count_in_facts":true,"amount":10,"event_at":"2026-07-12T09:00:00+08:00","known_at":"2026-07-12T09:01:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"observation_group":"capture-2","merchant":{"canonical_name":"同名","normalized_key":"same"}},
+        {"event_id":"transaction:current","target_id":"current","count_in_facts":true,"amount":10,"event_at":"2026-07-12T09:05:00+08:00","known_at":"2026-07-12T09:06:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"observation_group":"capture-2","merchant":{"canonical_name":"同名","normalized_key":"same"}}
+      ], {"currentEventId":"transaction:current"}],
+      "expected":{"length":1,"previous_record_id":"older","elapsed_minutes":2885}
+    },
+    {
+      "name": "ineligible previous is ignored",
+      "operation": "generateRecordNameRecurrenceCandidates",
+      "args": [[
+        {"event_id":"transaction:previous","target_id":"previous","count_in_facts":false,"amount":10,"event_at":"2026-07-11T12:00:00+08:00","known_at":"2026-07-11T12:01:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"待确认","normalized_key":"pending"}},
+        {"event_id":"transaction:current","target_id":"current","count_in_facts":true,"amount":10,"event_at":"2026-07-12T12:00:00+08:00","known_at":"2026-07-12T12:01:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"待确认","normalized_key":"pending"}}
+      ], {"currentEventId":"transaction:current"}],
+      "expected":{"length":0}
+    },
+    {
+      "name": "different normalized name is ignored",
+      "operation": "generateRecordNameRecurrenceCandidates",
+      "args": [[
+        {"event_id":"transaction:other","target_id":"other","count_in_facts":true,"amount":10,"event_at":"2026-07-11T12:00:00+08:00","known_at":"2026-07-11T12:01:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"另一家","normalized_key":"other"}},
+        {"event_id":"transaction:current","target_id":"current","count_in_facts":true,"amount":10,"event_at":"2026-07-12T12:00:00+08:00","known_at":"2026-07-12T12:01:00+08:00","event_time_precision":"second","event_time_confidence":0.95,"merchant":{"canonical_name":"当前商户","normalized_key":"current"}}
+      ], {"currentEventId":"transaction:current"}],
+      "expected":{"length":0}
+    },
+    {
+      "name": "missing current identity returns empty",
+      "operation": "generateRecordNameRecurrenceCandidates",
+      "args": [[], {}],
+      "expected":{"length":0}
+    }
+  ]
+}
