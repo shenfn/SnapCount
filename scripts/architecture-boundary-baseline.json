@@ -7,10 +7,6 @@
       "mode": "ratchet",
       "scope": "supabase/functions/**/*.{ts,js,mjs}",
       "known": [
-        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/entity-normalizer.mjs",
-        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json",
-        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/cross-record-relationships.mjs",
-        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/render-contract.mjs"
       ],
       "target": "A2: production-owned supabase/functions/_shared/expression-core"

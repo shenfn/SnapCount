@@ -43,3 +43,22 @@
 2. 建立 `feature/表达核心通用域` 实现 worktree，先写共享 fixture 红灯。
 3. 迁移后运行 Node、Deno、Planner、Edge 静态和治理门禁。
 4. CI 收口 CORE-010 后再评估 CORE-011；A2 完成前保持 PWA/iOS 和生产部署冻结。
+
+## 实现阶段追加
+
+- 文档基线：PR #60 已通过全部门禁并合并，合并提交为 `e19e792`。
+- 红灯：共享 Node runner 在生产 `generic-domain-candidates.mjs` 缺失时按预期以 `ERR_MODULE_NOT_FOUND` 失败。
+- 最小实现：新增稳定生产门面、共享 helper、income/food/sleep/wallet 四个领域模块；Lab 原路径改为 wrapper；Edge 改为直接引用生产门面。
+- 钱包规则单独归属 `wallet-candidates.mjs`，金额冲突、账户身份、asset/liability 和严格快照时间门禁未放宽。
+- 新增 CORE-063 至 CORE-074 共享 JSON fixture、Node/Deno runner、CORE-075 wrapper 与 Edge 静态契约；CORE-076 由双运行时和边界检查证明。
+- 本地绿灯：CORE-010 fixture 1/1、wrapper 1/1、Edge 静态契约 1/1、旧通用域 27/27、全部表达核心 Node 9/9、完整 Planner 185/185。
+- 构建与门禁：`npm run build`、`check:expression-core-boundary`、`governance:arch`、`governance:check`、`git diff --check` 均通过；构建仅有既有 `vconsole eval` 和 chunk 大小警告。
+- 依赖 ratchet：生产 `tools` 反向依赖从 2 条降至 1 条，旧例外已从基线删除，剩余仅 `render-contract.mjs`。
+- 本地环境：执行 `npm ci` 后可运行完整 Planner；审计报告 1 个 moderate、4 个 high 的存量依赖风险，本切片未改依赖版本。
+- 未验证：Windows 未安装 Deno；Deno fixture、Edge `deno check` 和双运行时结果等待 PR CI。
+
+## 实现阶段下一步
+
+1. 提交并推送 `feature/表达核心通用域`，创建实现 PR。
+2. 等待 Node/Deno、Edge、Planner、构建和治理门禁全部通过后合并。
+3. CI 收口 CORE-010 后建立 CORE-011 `render-contract` 只读边界评估；A2 完成前不进入端侧业务实现。
