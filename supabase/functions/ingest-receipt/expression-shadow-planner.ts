@@ -36,7 +36,7 @@ import {
   buildSurfacePlan,
   summarizePlans,
   SURFACE_CAPACITY,
-} from "../../../tools/ai-validation/expression-planner/lib/expression-plan.mjs";
+} from "../_shared/expression-core/plan-selection.mjs";
 // @ts-ignore See note above.
 import { buildRenderPlans } from "../../../tools/ai-validation/expression-planner/lib/render-contract.mjs";
 // @ts-ignore Pure shared data contract is bundled with the Edge Function.
