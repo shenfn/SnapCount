@@ -1,0 +1,56 @@
+{
+  "version": "expression-core-entity-normalizer-v0.1",
+  "cases": [
+    {
+      "name": "normalizes merchant text",
+      "operation": "normalizeEntityText",
+      "args": {"value": " 星巴克（西湖店） "},
+      "expected": {"value": "星巴克西湖店"}
+    },
+    {
+      "name": "configured canonical and alias resolve to one entity",
+      "operation": "resolveMerchant",
+      "args": {
+        "value": "Example API Hub",
+        "config": {"version": "entity-aliases-public-v0.1", "merchants": [{"entity_id": "merchant_example", "canonical_name": "Example API Hub", "aliases": ["ExampleAPIHub"]}]}
+      },
+      "expected": {"checks": {"entity_id": "merchant_example", "canonical_name": "Example API Hub", "resolution": "configured_alias", "confidence": 1}}
+    },
+    {
+      "name": "unconfigured name uses a normalized fallback",
+      "operation": "resolveMerchant",
+      "args": {"value": "第一次出现的商店", "config": {"merchants": []}},
+      "expected": {"checks": {"entity_id": "merchant_unmapped_第一次出现的商店", "canonical_name": "第一次出现的商店", "resolution": "normalized_fallback", "confidence": 0.6}}
+    },
+    {
+      "name": "unique administrative legal variant joins historical entity",
+      "operation": "summarizeMerchantObservation",
+      "args": {
+        "current": {"raw_name": "示例区晨光网络科技工作室（个体工商户）", "normalized_key": "示例区晨光网络科技工作室个体工商户", "entity_id": "merchant_unmapped_示例区晨光网络科技工作室个体工商户", "canonical_name": "示例区晨光网络科技工作室（个体工商户）", "resolution": "normalized_fallback", "confidence": 0.6},
+        "prior": [{"raw_name": "晨光网络科技工作室", "normalized_key": "晨光网络科技工作室", "entity_id": "merchant_history", "canonical_name": "晨光网络科技工作室", "resolution": "normalized_fallback", "confidence": 0.6}]
+      },
+      "expected": {"checks": {"entity_id": "merchant_history", "resolution": "historical_legal_variant", "confidence": 0.92, "match_basis": "administrative_prefix_and_legal_suffix", "entity_first_seen": false, "alias_first_seen": true, "historical_record_count": 1, "total_record_count": 2}}
+    },
+    {
+      "name": "ambiguous historical variants do not merge",
+      "operation": "summarizeMerchantObservation",
+      "args": {
+        "current": {"raw_name": "示例区晨光网络科技工作室（个体工商户）", "normalized_key": "示例区晨光网络科技工作室个体工商户", "entity_id": "merchant_unmapped_示例区晨光网络科技工作室个体工商户", "canonical_name": "示例区晨光网络科技工作室（个体工商户）", "resolution": "normalized_fallback", "confidence": 0.6},
+        "prior": [
+          {"raw_name": "晨光网络科技工作室", "normalized_key": "晨光网络科技工作室", "entity_id": "merchant_history_a", "canonical_name": "晨光网络科技工作室"},
+          {"raw_name": "晨光网络科技工作室", "normalized_key": "晨光网络科技工作室", "entity_id": "merchant_history_b", "canonical_name": "晨光网络科技工作室"}
+        ]
+      },
+      "expected": {"checks": {"entity_id": "merchant_unmapped_示例区晨光网络科技工作室个体工商户", "resolution": "historical_variant_ambiguous", "confidence": 0.4, "match_basis": "multiple_historical_entities", "entity_first_seen": null, "alias_first_seen": null, "historical_record_count": 0, "total_record_count": 1}}
+    },
+    {
+      "name": "non-administrative marketing prefix does not merge",
+      "operation": "summarizeMerchantObservation",
+      "args": {
+        "current": {"raw_name": "超级晨光网络科技工作室", "normalized_key": "超级晨光网络科技工作室", "entity_id": "merchant_unmapped_超级晨光网络科技工作室", "canonical_name": "超级晨光网络科技工作室", "resolution": "normalized_fallback", "confidence": 0.6},
+        "prior": [{"raw_name": "晨光网络科技工作室", "normalized_key": "晨光网络科技工作室", "entity_id": "merchant_history", "canonical_name": "晨光网络科技工作室"}]
+      },
+      "expected": {"checks": {"entity_id": "merchant_unmapped_超级晨光网络科技工作室", "resolution": "normalized_fallback", "entity_first_seen": true, "historical_record_count": 0, "total_record_count": 1}}
+    }
+  ]
+}
