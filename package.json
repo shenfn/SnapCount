@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "governance:check": "node scripts/check-project-governance.mjs",
     "logs:ai": "node --env-file=.env.local scripts/show-ai-logs.mjs",
     "test:receipt": "node --env-file=.env.local scripts/test-ingest-receipt.mjs",
     "test:upload-lifecycle": "node --env-file=.env.local scripts/test-upload-lifecycle.mjs",
