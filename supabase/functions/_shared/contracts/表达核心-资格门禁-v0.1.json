@@ -1,0 +1,231 @@
+{
+  "version": "expression-core-eligibility-v0.1",
+  "eligibility_cases": [
+    {
+      "name": "missing claim prerequisites remain auditable",
+      "candidate": {
+        "candidate_id": "candidate-missing-prerequisites",
+        "claim_type": "fact",
+        "claim": { "structured_value": null },
+        "evidence": [],
+        "numbers": [],
+        "quality": {}
+      },
+      "expected": {
+        "claim_eligible": false,
+        "claim_blocked_reasons": [
+          "missing_semantic_key",
+          "missing_structured_value",
+          "missing_evidence",
+          "missing_numeric_derivation",
+          "missing_confidence",
+          "missing_data_coverage"
+        ],
+        "surfaces": {
+          "shortcut_notification": { "eligible": false, "blocked_reasons": ["missing_semantic_key", "missing_structured_value", "missing_evidence", "missing_numeric_derivation", "missing_confidence", "missing_data_coverage"] },
+          "pwa_pending_ai_card": { "eligible": false, "blocked_reasons": ["missing_semantic_key", "missing_structured_value", "missing_evidence", "missing_numeric_derivation", "missing_confidence", "missing_data_coverage"] },
+          "record_detail": { "eligible": false, "blocked_reasons": ["missing_semantic_key", "missing_structured_value", "missing_evidence", "missing_numeric_derivation", "missing_confidence", "missing_data_coverage"] },
+          "weekly_report": { "eligible": false, "blocked_reasons": ["missing_semantic_key", "missing_structured_value", "missing_evidence", "missing_numeric_derivation", "missing_confidence", "missing_data_coverage"] }
+        }
+      }
+    },
+    {
+      "name": "missing evidence blocks claim and surfaces",
+      "candidate": {
+        "candidate_id": "candidate-missing-evidence",
+        "claim_type": "fact",
+        "claim": { "semantic_key": "merchant_daily_count_total", "structured_value": { "count": 2, "total": 20 } },
+        "evidence": [],
+        "numbers": [{ "value": 20 }],
+        "quality": { "confidence": 0.95, "data_coverage": 1 }
+      },
+      "expected": {
+        "claim_eligible": false,
+        "claim_blocked_reasons": ["missing_evidence"],
+        "surfaces": {
+          "shortcut_notification": { "eligible": false, "blocked_reasons": ["missing_evidence"] },
+          "pwa_pending_ai_card": { "eligible": false, "blocked_reasons": ["missing_evidence"] },
+          "record_detail": { "eligible": false, "blocked_reasons": ["missing_evidence"] },
+          "weekly_report": { "eligible": false, "blocked_reasons": ["missing_evidence"] }
+        }
+      }
+    },
+    {
+      "name": "near identical merchant baseline is telemetry only",
+      "candidate": {
+        "candidate_id": "candidate-near-baseline",
+        "claim_type": "comparison",
+        "claim": {
+          "semantic_key": "merchant_daily_vs_active_day_median",
+          "structured_value": {
+            "current": { "count": 1, "total": 10.33 },
+            "baseline": { "sample_days": 5, "count": 1, "total": 10 },
+            "delta": { "count": 99, "total": 999, "total_percent": 9999 }
+          }
+        },
+        "evidence": [{ "source_id": "event-current" }, { "source_id": "event-baseline" }],
+        "numbers": [{ "value": 10.33 }, { "value": 10 }],
+        "quality": { "confidence": 0.9, "data_coverage": 1 }
+      },
+      "expected": {
+        "claim_eligible": true,
+        "claim_blocked_reasons": [],
+        "materiality": {
+          "evaluated": true,
+          "passes": false,
+          "policy_version": "merchant-active-day-materiality-v0.1",
+          "reason": "difference_below_materiality_threshold"
+        },
+        "surfaces": {
+          "shortcut_notification": { "eligible": false, "blocked_reasons": ["difference_below_materiality_threshold"] },
+          "pwa_pending_ai_card": { "eligible": false, "blocked_reasons": ["difference_below_materiality_threshold"] },
+          "record_detail": { "eligible": false, "blocked_reasons": ["difference_below_materiality_threshold"] },
+          "weekly_report": { "eligible": false, "blocked_reasons": ["difference_below_materiality_threshold"] }
+        }
+      }
+    },
+    {
+      "name": "strong amount boundary passes materiality",
+      "candidate": {
+        "candidate_id": "candidate-strong-boundary",
+        "claim_type": "comparison",
+        "claim": {
+          "semantic_key": "merchant_daily_vs_active_day_median",
+          "structured_value": {
+            "current": { "count": 1, "total": 20 },
+            "baseline": { "sample_days": 5, "count": 1, "total": 0 }
+          }
+        },
+        "evidence": [{ "source_id": "event-current" }, { "source_id": "event-baseline" }],
+        "numbers": [{ "value": 20 }, { "value": 0 }],
+        "quality": { "confidence": 0.9, "data_coverage": 1 }
+      },
+      "expected": {
+        "claim_eligible": true,
+        "claim_blocked_reasons": [],
+        "materiality": {
+          "evaluated": true,
+          "passes": true,
+          "policy_version": "merchant-active-day-materiality-v0.1",
+          "reason": null
+        },
+        "surfaces": {
+          "shortcut_notification": { "eligible": false, "blocked_reasons": ["period_comparison_not_interruptive"] },
+          "pwa_pending_ai_card": { "eligible": true, "blocked_reasons": [] },
+          "record_detail": { "eligible": true, "blocked_reasons": [] },
+          "weekly_report": { "eligible": true, "blocked_reasons": [] }
+        }
+      }
+    },
+    {
+      "name": "period comparison routes only to weekly report",
+      "candidate": {
+        "candidate_id": "candidate-period",
+        "claim_type": "comparison",
+        "claim": {
+          "semantic_key": "expense_category_week_to_date_vs_previous_week_same_period",
+          "structured_value": { "current_period": { "count": 8 }, "baseline_period": { "count": 7 } }
+        },
+        "evidence": [{ "source_id": "event-current" }, { "source_id": "event-baseline" }],
+        "numbers": [{ "value": 8 }, { "value": 7 }],
+        "quality": { "confidence": 0.95, "data_coverage": 1 },
+        "selection_hints": { "delivery_scope": "period_summary", "allowed_surfaces": ["weekly_report"], "period_owner": true }
+      },
+      "expected": {
+        "claim_eligible": true,
+        "claim_blocked_reasons": [],
+        "surfaces": {
+          "shortcut_notification": { "eligible": false, "blocked_reasons": ["surface_outside_candidate_delivery_scope", "period_comparison_not_interruptive"] },
+          "pwa_pending_ai_card": { "eligible": false, "blocked_reasons": ["surface_outside_candidate_delivery_scope"] },
+          "record_detail": { "eligible": false, "blocked_reasons": ["surface_outside_candidate_delivery_scope"] },
+          "weekly_report": { "eligible": true, "blocked_reasons": [] }
+        }
+      }
+    },
+    {
+      "name": "record event cannot open weekly report",
+      "options": { "planningContext": "record_event" },
+      "candidate": {
+        "candidate_id": "candidate-record-event",
+        "claim_type": "fact",
+        "claim": { "semantic_key": "merchant_daily_count_total", "structured_value": { "count": 2, "total": 20 } },
+        "evidence": [{ "source_id": "event-current" }],
+        "numbers": [{ "value": 2 }, { "value": 20 }],
+        "quality": { "confidence": 0.95, "data_coverage": 1 }
+      },
+      "expected": {
+        "claim_eligible": true,
+        "claim_blocked_reasons": [],
+        "surfaces": {
+          "shortcut_notification": { "eligible": true, "blocked_reasons": [] },
+          "pwa_pending_ai_card": { "eligible": true, "blocked_reasons": [] },
+          "record_detail": { "eligible": true, "blocked_reasons": [] },
+          "weekly_report": { "eligible": false, "blocked_reasons": ["period_report_requires_report_context"] }
+        }
+      }
+    },
+    {
+      "name": "non owner cannot occupy weekly report",
+      "candidate": {
+        "candidate_id": "candidate-non-owner",
+        "claim_type": "comparison",
+        "claim": {
+          "semantic_key": "merchant_week_to_date_vs_previous_week_same_period",
+          "structured_value": {
+            "current_period": { "start": "2026-08-10", "end": "2026-08-11", "count": 2 },
+            "baseline_period": { "start": "2026-08-03", "end": "2026-08-04", "count": 2 }
+          }
+        },
+        "evidence": [{ "source_id": "event-current" }, { "source_id": "event-baseline" }],
+        "numbers": [{ "value": 2 }, { "value": 2 }],
+        "quality": { "confidence": 0.95, "data_coverage": 1 },
+        "selection_hints": { "delivery_scope": "period_summary", "allowed_surfaces": ["weekly_report"], "period_owner": false }
+      },
+      "expected": {
+        "claim_eligible": true,
+        "claim_blocked_reasons": [],
+        "surfaces": {
+          "shortcut_notification": { "eligible": false, "blocked_reasons": ["surface_outside_candidate_delivery_scope", "period_comparison_not_interruptive"] },
+          "pwa_pending_ai_card": { "eligible": false, "blocked_reasons": ["surface_outside_candidate_delivery_scope"] },
+          "record_detail": { "eligible": false, "blocked_reasons": ["surface_outside_candidate_delivery_scope"] },
+          "weekly_report": { "eligible": false, "blocked_reasons": ["period_surface_requires_latest_record"] }
+        }
+      }
+    },
+    {
+      "name": "diagnostic activity span stays off all surfaces",
+      "candidate": {
+        "candidate_id": "candidate-diagnostic",
+        "claim_type": "fact",
+        "claim": { "semantic_key": "merchant_daily_activity_span", "structured_value": { "span_minutes": 630 } },
+        "evidence": [{ "source_id": "event-current" }],
+        "numbers": [{ "value": 630 }],
+        "quality": { "confidence": 0.95, "data_coverage": 1 }
+      },
+      "expected": {
+        "claim_eligible": true,
+        "claim_blocked_reasons": [],
+        "surfaces": {
+          "shortcut_notification": { "eligible": false, "blocked_reasons": ["diagnostic_temporal_window_not_user_facing"] },
+          "pwa_pending_ai_card": { "eligible": false, "blocked_reasons": ["diagnostic_temporal_window_not_user_facing"] },
+          "record_detail": { "eligible": false, "blocked_reasons": ["diagnostic_temporal_window_not_user_facing"] },
+          "weekly_report": { "eligible": false, "blocked_reasons": ["diagnostic_temporal_window_not_user_facing"] }
+        }
+      }
+    }
+  ],
+  "summary_case": {
+    "candidate_names": ["diagnostic activity span stays off all surfaces", "record event cannot open weekly report"],
+    "expected": {
+      "total_candidates": 2,
+      "claim_eligible": 2,
+      "claim_blocked": 0,
+      "surface_eligible_counts": {
+        "shortcut_notification": 1,
+        "pwa_pending_ai_card": 1,
+        "record_detail": 1,
+        "weekly_report": 0
+      }
+    }
+  }
+}

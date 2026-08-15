@@ -26,8 +26,8 @@ import {
   generateBuiltinDomainCandidates,
   prepareDomainRecords,
 } from "../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs";
-// @ts-ignore See note above.
-import { evaluateCandidates, summarizeEligibility } from "../../../tools/ai-validation/expression-planner/lib/eligibility-gates.mjs";
+// @ts-ignore Production-owned pure eligibility rules are shared with the offline lab.
+import { evaluateCandidates, summarizeEligibility } from "../_shared/expression-core/eligibility-gates.mjs";
 // @ts-ignore See note above.
 import { scoreCandidates, summarizeScores } from "../../../tools/ai-validation/expression-planner/lib/deterministic-scoring.mjs";
 // @ts-ignore See note above.
