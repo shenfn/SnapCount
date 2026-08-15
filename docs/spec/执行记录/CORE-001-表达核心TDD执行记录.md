@@ -53,16 +53,16 @@ npm run test:expression-core-compat
 
 结果：8/8 通过。该测试固定候选 ID、语义键、选择模式和静默状态，不固定模型自然语言。
 
-PR CI 首轮 Planner 回归发现 `generic-domain-shadow-planner.test.mjs` 仍依赖 `generic-domain-candidates.mjs` 的公开 `parseFiniteNumber` 导出。迁移只替换了内部实现但漏保留导出，已恢复为 adapter 的 re-export；这不新增规则，只保留 Planner Lab 原有兼容入口。当前本地缺少 `esbuild`，该测试无法启动，记为环境未验证；CI 将重新验证完整 157 项 Planner 回归。
+PR CI 首轮 Planner 回归发现 `generic-domain-shadow-planner.test.mjs` 仍依赖 `generic-domain-candidates.mjs` 的公开 `parseFiniteNumber` 导出。迁移只替换了内部实现但漏保留导出，已恢复为 adapter 的 re-export；这不新增规则，只保留 Planner Lab 原有兼容入口。当前本地缺少 `esbuild`，该测试无法启动，记为环境未验证；修复后 PR CI 的完整 Planner 回归为 157/157 通过。
 
 ## 未验证
 
-- 本地没有 `deno` 命令，Deno runner 未执行，属于环境未验证。
-- GitHub Actions 的 Deno 双运行时 job 尚未取得 CI 结果。
+- 本地没有 `deno` 命令，Deno runner 未在 Windows 本地执行；GitHub Actions 已完成 Deno 双运行时验证。
+- 本地缺少 `esbuild`，无法启动完整 Planner 测试；GitHub Actions 完整 Planner 回归 157/157 通过。
 - 完整 Planner 候选链尚未全部迁移，生产仍保留 11 条 `tools/` 基线导入。
 
 ## 下一步
 
-1. 在可用 Deno 环境运行同一 fixture 的 `deno_test.mjs`。
-2. 在 CI 取得 Node/Deno 双运行时结果，确认兼容对比测试保持通过。
-3. 在双运行时验证后再迁移下一组候选规则；不在本切片继续扩大生产导入范围。
+1. 评估下一组候选规则是否满足纯函数边界和旧行为快照条件。
+2. 为下一组规则单独建立 Spec、fixture 和红灯测试，再决定是否迁移。
+3. 不在本切片继续扩大生产导入范围，不进入 PWA/iOS 业务实现。
