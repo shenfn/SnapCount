@@ -21,9 +21,17 @@
 - 实现迁移：待文档 PR 合并后建立 `feature/表达核心实体归一化`。
 - Deno：本 Windows 环境是否安装尚未检查，双运行时需由实现 PR CI 验证。
 
+## 实现阶段追加
+
+- 红灯：共享 Node runner 在生产核心文件缺失时按预期以 `ERR_MODULE_NOT_FOUND` 失败。
+- 最小实现：新增生产 `entity-normalizer.mjs`，复用 `index.mjs` 的 `normalizeEntityText`；新增生产共享公开配置；Lab 原路径改为 wrapper；Edge 改为直接引用生产核心和配置。
+- 删除旧 `tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json`，避免保留第二份配置权威。
+- 本地绿灯：CORE-056 至 CORE-061 fixture 1/1、wrapper 1/1、旧实体测试 7/7、Edge 静态契约 1/1；核心边界、治理检查和 `git diff --check` 通过。
+- 环境限制：Windows 未安装 Deno，双运行时需由 PR CI 验证；完整 Planner 中与 `esbuild` 相关的既有环境缺口沿用前片记录。
+- 生产 `tools/` 的 entity-normalizer 规则和 alias 配置反向依赖已清零，最终依赖计数由 CI 确认。
+
 ## 下一步
 
-1. 合并本评估文档 PR。
-2. 从最新 `origin/main` 建 CORE-009 实现 worktree。
-3. 新增共享 Node/Deno fixture，先验证生产目标文件缺失时的红灯。
-4. 迁移规则、共享配置和 Edge import，再跑旧回归及完整 Planner。
+1. 等待实现 PR 的 Node/Deno、Edge、Planner 和治理门禁。
+2. CI 通过后合并实现 PR，并将 A2 推进到下一片纯函数边界评估。
+3. 保持根工作区、其他 worktree、PWA/iOS 和生产部署冻结。

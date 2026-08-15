@@ -126,6 +126,14 @@ jobs:
         if: ${{ hashFiles('scripts/test-cross-record-wrapper-compat.mjs') != '' }}
         run: npm run test:expression-cross-record-wrapper-compat
 
+      - name: Test expression entity normalizer in Node
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/entity-normalizer.node.test.mjs') != '' }}
+        run: npm run test:expression-entity-normalizer
+
+      - name: Test expression entity normalizer wrapper compatibility
+        if: ${{ hashFiles('scripts/test-entity-normalizer-wrapper-compat.mjs') != '' }}
+        run: npm run test:expression-entity-normalizer-wrapper-compat
+
       - name: Compare expression core and fallback with legacy behavior
         if: ${{ hashFiles('supabase/functions/_shared/contracts/表达核心-旧行为对比-v0.1.json') != '' }}
         run: npm run test:expression-core-compat
@@ -161,6 +169,10 @@ jobs:
       - name: Test expression cross-record in Deno
         if: ${{ hashFiles('supabase/functions/_shared/expression-core/cross-record.deno_test.mjs') != '' }}
         run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/cross-record.deno_test.mjs
+
+      - name: Test expression entity normalizer in Deno
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/entity-normalizer.deno_test.mjs') != '' }}
+        run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/entity-normalizer.deno_test.mjs
 
       - name: Check Edge Functions
         run: |

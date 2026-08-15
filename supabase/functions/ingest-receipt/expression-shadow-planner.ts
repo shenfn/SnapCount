@@ -4,8 +4,8 @@ import {
   compileMerchantAliases,
   resolveMerchant,
   summarizeMerchantObservation,
-} from "../../../tools/ai-validation/expression-planner/lib/entity-normalizer.mjs";
-import merchantAliasConfig from "../../../tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json" with { type: "json" };
+} from "../_shared/expression-core/entity-normalizer.mjs";
+import merchantAliasConfig from "../_shared/expression-config/entity-aliases.public.v0.1.json" with { type: "json" };
 // @ts-ignore Production-owned pure functions are shared with the offline lab.
 import { buildExpenseFactContract, parseFiniteNumber } from "../_shared/expression-core/index.mjs";
 // @ts-ignore Production-owned fact candidate rules are shared with the offline lab.
