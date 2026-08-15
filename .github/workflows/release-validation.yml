@@ -86,6 +86,14 @@ jobs:
         if: ${{ hashFiles('scripts/test-eligibility-wrapper-compat.mjs') != '' }}
         run: npm run test:expression-eligibility-wrapper-compat
 
+      - name: Test expression scoring in Node
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/scoring.node.test.mjs') != '' }}
+        run: npm run test:expression-scoring
+
+      - name: Test expression scoring wrapper compatibility
+        if: ${{ hashFiles('scripts/test-scoring-wrapper-compat.mjs') != '' }}
+        run: npm run test:expression-scoring-wrapper-compat
+
       - name: Compare expression core and fallback with legacy behavior
         if: ${{ hashFiles('supabase/functions/_shared/contracts/表达核心-旧行为对比-v0.1.json') != '' }}
         run: npm run test:expression-core-compat
@@ -101,6 +109,10 @@ jobs:
       - name: Test expression eligibility in Deno
         if: ${{ hashFiles('supabase/functions/_shared/expression-core/eligibility.deno_test.mjs') != '' }}
         run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/eligibility.deno_test.mjs
+
+      - name: Test expression scoring in Deno
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/scoring.deno_test.mjs') != '' }}
+        run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/scoring.deno_test.mjs
 
       - name: Check Edge Functions
         run: |
