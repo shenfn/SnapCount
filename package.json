@@ -12,6 +12,7 @@
     "test:expression-core": "node --test supabase/functions/_shared/expression-core/node.test.mjs",
     "test:expression-core-compat": "node --test scripts/test-expression-core-legacy-compat.mjs",
     "test:expression-plan-selection": "node --test supabase/functions/_shared/expression-core/plan-selection.node.test.mjs",
+    "test:expression-plan-wrapper-compat": "node --test scripts/test-expression-plan-wrapper-compat.mjs",
     "check:expression-core-boundary": "node scripts/check-expression-core-boundary.mjs",
     "c2:wip:check": "node scripts/check-c2-root-wip-snapshot.mjs",
     "c2:wip:export": "node scripts/export-c2-wip-patches.mjs",
