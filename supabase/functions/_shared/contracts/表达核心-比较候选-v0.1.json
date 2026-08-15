@@ -1,0 +1,84 @@
+{
+  "version": "expression-core-comparison-v0.1",
+  "cases": [
+    {
+      "name": "merchant active-day median",
+      "operation": "generateComparisonCandidates",
+      "args": {
+        "records": [
+          {"id":"a","transaction_date":"2026-06-22","occurred_at":"2026-06-22T12:00:00+08:00","amount":10,"merchant":{"entity_id":"merchant_fixture"}},
+          {"id":"b","transaction_date":"2026-06-23","occurred_at":"2026-06-23T12:00:00+08:00","amount":20,"merchant":{"entity_id":"merchant_fixture"}},
+          {"id":"c","transaction_date":"2026-06-23","occurred_at":"2026-06-23T13:00:00+08:00","amount":10,"merchant":{"entity_id":"merchant_fixture"}},
+          {"id":"d","transaction_date":"2026-06-24","occurred_at":"2026-06-24T12:00:00+08:00","amount":30,"merchant":{"entity_id":"merchant_fixture"}}
+        ],
+        "currentDayEvents": [
+          {"event_id":"event-1","source_type":"transaction","ledger_status":"confirmed","count_in_facts":true,"amount":10,"event_at":"2026-07-12T12:00:00+08:00","known_at":"2026-07-12T12:01:00+08:00","merchant":{"entity_id":"merchant_fixture","canonical_name":"示例商户"}},
+          {"event_id":"event-2","source_type":"transaction","ledger_status":"confirmed","count_in_facts":true,"amount":15,"event_at":"2026-07-12T13:00:00+08:00","known_at":"2026-07-12T13:01:00+08:00","merchant":{"entity_id":"merchant_fixture","canonical_name":"示例商户"}}
+        ],
+        "entityId":"merchant_fixture","localDate":"2026-07-12","currentRecordId":"record-2"
+      },
+      "expected":{"length":1,"candidate_index":0,"checks":{"claim.structured_value.baseline.sample_days":3,"claim.structured_value.baseline.count":1,"claim.structured_value.baseline.total":30,"claim.structured_value.current.total":25,"selection_hints.exposure_key":"expense:merchant:merchant_fixture:daily_active_median:2026-07-12"}}
+    },
+    {
+      "name": "merchant week-to-date uses same elapsed period",
+      "operation": "generateComparisonCandidates",
+      "args": {
+        "records": [
+          {"id":"previous-mon","transaction_date":"2026-06-29","occurred_at":"2026-06-29T12:00:00+08:00","amount":10,"merchant":{"entity_id":"merchant_fixture"}},
+          {"id":"previous-wed","transaction_date":"2026-07-01","occurred_at":"2026-07-01T12:00:00+08:00","amount":20,"merchant":{"entity_id":"merchant_fixture"}},
+          {"id":"outside","transaction_date":"2026-07-05","occurred_at":"2026-07-05T12:00:00+08:00","amount":100,"merchant":{"entity_id":"merchant_fixture"}},
+          {"id":"current-mon","transaction_date":"2026-07-06","occurred_at":"2026-07-06T12:00:00+08:00","amount":15,"merchant":{"entity_id":"merchant_fixture"}}
+        ],
+        "currentDayEvents":[{"event_id":"today","source_type":"transaction","ledger_status":"confirmed","count_in_facts":true,"amount":10,"event_at":"2026-07-08T12:00:00+08:00","known_at":"2026-07-08T12:01:00+08:00","merchant":{"entity_id":"merchant_fixture","canonical_name":"示例商户"}}],
+        "entityId":"merchant_fixture","localDate":"2026-07-08"
+      },
+      "expected":{"length":2,"candidate_index":1,"checks":{"claim.semantic_key":"merchant_week_to_date_vs_previous_week_same_period","claim.structured_value.current_period.start":"2026-07-06","claim.structured_value.current_period.end":"2026-07-08","claim.structured_value.baseline_period.start":"2026-06-29","claim.structured_value.baseline_period.end":"2026-07-01","selection_hints.allowed_surfaces":["weekly_report"],"selection_hints.max_exposure_count.weekly_report":1}}
+    },
+    {
+      "name": "fewer than three active days yields no merchant comparison",
+      "operation": "generateComparisonCandidates",
+      "args": {"records":[{"id":"a","transaction_date":"2026-07-01","occurred_at":"2026-07-01T12:00:00+08:00","amount":10,"merchant":{"entity_id":"merchant_fixture"}},{"id":"b","transaction_date":"2026-07-02","occurred_at":"2026-07-02T12:00:00+08:00","amount":20,"merchant":{"entity_id":"merchant_fixture"}}],"currentDayEvents":[{"event_id":"today","count_in_facts":true,"amount":10,"event_at":"2026-07-12T12:00:00+08:00","merchant":{"entity_id":"merchant_fixture"}}],"entityId":"merchant_fixture","localDate":"2026-07-12"},
+      "expected":{"length":1,"candidate_index":0,"checks":{"claim.semantic_key":"merchant_week_to_date_vs_previous_week_same_period"}}
+    },
+    {
+      "name": "category comparison filters cohort and reports coverage",
+      "operation": "generateCategoryComparisonCandidates",
+      "args": {"records":[
+        {"id":"current-a","transaction_date":"2026-07-13","occurred_at":"2026-07-13T12:00:00+08:00","amount":10,"category":"food","fact_contract":{"fact_status":"confirmed","comparison_cohort":"expense.category.food","comparison_scope":"include"}},
+        {"id":"current-b","transaction_date":"2026-07-18","occurred_at":"2026-07-18T18:00:00+08:00","amount":10,"category":"food","fact_contract":{"fact_status":"confirmed","comparison_cohort":"expense.category.food","comparison_scope":"include"}},
+        {"id":"current","transaction_date":"2026-07-19","occurred_at":"2026-07-19T11:24:00+08:00","amount":15,"category":"food","fact_contract":{"fact_status":"confirmed","comparison_cohort":"expense.category.food","comparison_scope":"include"}},
+        {"id":"rent","transaction_date":"2026-07-15","occurred_at":"2026-07-15T19:42:00+08:00","amount":1300,"category":"life","fact_contract":{"fact_status":"confirmed","comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"previous-a","transaction_date":"2026-07-06","occurred_at":"2026-07-06T12:00:00+08:00","amount":15,"category":"food","fact_contract":{"fact_status":"confirmed","comparison_cohort":"expense.category.food","comparison_scope":"include"}},
+        {"id":"previous-b","transaction_date":"2026-07-12","occurred_at":"2026-07-12T10:00:00+08:00","amount":15,"category":"food","fact_contract":{"fact_status":"confirmed","comparison_cohort":"expense.category.food","comparison_scope":"include"}},
+        {"id":"after-cutoff","transaction_date":"2026-07-12","occurred_at":"2026-07-12T18:00:00+08:00","amount":100,"category":"food","fact_contract":{"fact_status":"confirmed","comparison_cohort":"expense.category.food","comparison_scope":"include"}},
+        {"id":"pending-current","transaction_date":"2026-07-17","occurred_at":"2026-07-17T12:00:00+08:00","amount":20,"category":"food","fact_contract":{"fact_status":"pending","comparison_cohort":"expense.category.food","comparison_scope":"pending_review"}},
+        {"id":"pending-previous","transaction_date":"2026-07-10","occurred_at":"2026-07-10T12:00:00+08:00","amount":20,"category":"food","fact_contract":{"fact_status":"pending","comparison_cohort":"expense.category.food","comparison_scope":"pending_review"}}
+      ],"currentRecord":{"id":"current","transaction_date":"2026-07-19","occurred_at":"2026-07-19T11:24:00+08:00","amount":15,"category":"food","fact_contract":{"fact_status":"confirmed","comparison_cohort":"expense.category.food","comparison_scope":"include"}}},
+      "expected":{"length":1,"candidate_index":0,"checks":{"claim.semantic_key":"expense_category_week_to_date_vs_previous_week_same_period","claim.structured_value.current_period.count":3,"claim.structured_value.current_period.total":35,"claim.structured_value.baseline_period.count":2,"claim.structured_value.baseline_period.total":30,"claim.structured_value.pending_review_count":2,"quality.data_coverage":0.71,"selection_hints.allowed_surfaces":["weekly_report"]}}
+    },
+    {
+      "name": "category metric directions and decomposition remain consistent",
+      "operation": "generateCategoryComparisonCandidates",
+      "args": {"records":[
+        {"id":"current-0","transaction_date":"2026-07-23","occurred_at":"2026-07-23T08:00:00+08:00","amount":10,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"current-1","transaction_date":"2026-07-23","occurred_at":"2026-07-23T09:00:00+08:00","amount":10,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"current-2","transaction_date":"2026-07-23","occurred_at":"2026-07-23T10:00:00+08:00","amount":10,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"current","transaction_date":"2026-07-23","occurred_at":"2026-07-23T12:34:00+08:00","amount":10,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"baseline-0","transaction_date":"2026-07-16","occurred_at":"2026-07-16T08:00:00+08:00","amount":15,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"baseline-1","transaction_date":"2026-07-16","occurred_at":"2026-07-16T09:00:00+08:00","amount":15,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"baseline-2","transaction_date":"2026-07-16","occurred_at":"2026-07-16T10:00:00+08:00","amount":15,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"baseline-3","transaction_date":"2026-07-16","occurred_at":"2026-07-16T11:00:00+08:00","amount":15,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"baseline-4","transaction_date":"2026-07-16","occurred_at":"2026-07-16T12:00:00+08:00","amount":15,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"baseline-5","transaction_date":"2026-07-16","occurred_at":"2026-07-16T13:00:00+08:00","amount":15,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
+        {"id":"baseline-6","transaction_date":"2026-07-16","occurred_at":"2026-07-16T14:00:00+08:00","amount":15,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}}
+      ],"currentRecord":{"id":"current","transaction_date":"2026-07-23","occurred_at":"2026-07-23T12:34:00+08:00","amount":10,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}}},
+      "expected":{"length":1,"candidate_index":0,"checks":{"claim.structured_value.directions.total":"decrease","claim.structured_value.directions.count":"decrease","claim.structured_value.directions.average":"decrease","claim.structured_value.driver":"average_amount","claim.structured_value.decomposition.dominant_effect":"average_amount","claim.structured_value.decomposition.offsetting":false}}
+    },
+    {
+      "name": "missing comparison inputs return empty",
+      "operation": "generateCategoryComparisonCandidates",
+      "args": {"records":[],"currentRecord":null},
+      "expected":{"length":0}
+    }
+  ]
+}
