@@ -14,8 +14,8 @@ import {
   generateFactCandidates,
   generateMerchantFirstOccurrenceCandidate,
 } from "../_shared/expression-core/fact-candidates.mjs";
-// @ts-ignore See note above.
-import { generateRecordNameRecurrenceCandidates } from "../../../tools/ai-validation/expression-planner/lib/recurrence-candidates.mjs";
+// @ts-ignore Production-owned recurrence rules are shared with the offline lab.
+import { generateRecordNameRecurrenceCandidates } from "../_shared/expression-core/recurrence-candidates.mjs";
 // @ts-ignore See note above.
 import { generateCrossRecordRelationshipCandidates } from "../../../tools/ai-validation/expression-planner/lib/cross-record-relationships.mjs";
 // @ts-ignore See note above.
