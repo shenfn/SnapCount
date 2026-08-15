@@ -11,6 +11,8 @@ const delivery = await readFile(path.join(root, 'supabase/functions/ingest-recei
 
 test('EXP-007 planner and both Edge paths receive cross-domain source records', () => {
   assert.match(planner, /generateCrossRecordRelationshipCandidates/)
+  assert.match(planner, /from ["']\.\.\/_shared\/expression-core\/cross-record-relationships\.mjs["']/)
+  assert.doesNotMatch(planner, /tools\/ai-validation\/expression-planner\/lib\/cross-record-relationships\.mjs/)
   assert.match(planner, /relatedRecords: input\.relatedRecords \?\? \[\]/)
   assert.match(planner, /source_table: "transactions" \| "income_records" \| "data_records"/)
   assert.match(shadow, /loadCrossDomainRecords/)

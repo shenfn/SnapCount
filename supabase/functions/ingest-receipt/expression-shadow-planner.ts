@@ -16,8 +16,8 @@ import {
 } from "../_shared/expression-core/fact-candidates.mjs";
 // @ts-ignore Production-owned recurrence rules are shared with the offline lab.
 import { generateRecordNameRecurrenceCandidates } from "../_shared/expression-core/recurrence-candidates.mjs";
-// @ts-ignore See note above.
-import { generateCrossRecordRelationshipCandidates } from "../../../tools/ai-validation/expression-planner/lib/cross-record-relationships.mjs";
+// @ts-ignore Production-owned cross-record rules are shared with the offline lab.
+import { generateCrossRecordRelationshipCandidates } from "../_shared/expression-core/cross-record-relationships.mjs";
 // @ts-ignore Production-owned comparison rules are shared with the offline lab.
 import { generateCategoryComparisonCandidates, generateComparisonCandidates } from "../_shared/expression-core/comparison-candidates.mjs";
 // @ts-ignore See note above.

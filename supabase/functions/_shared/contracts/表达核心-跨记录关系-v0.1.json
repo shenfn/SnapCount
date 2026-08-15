@@ -1,0 +1,95 @@
+{
+  "version": "expression-core-cross-record-v0.1",
+  "cases": [
+    {
+      "name": "object and event order produce a hypothesis",
+      "operation": "generateCrossRecordRelationshipCandidates",
+      "args": {
+        "currentRecord": {
+          "id": "food-1",
+          "domain_key": "food",
+          "occurred_at": "2026-08-09T18:20:00+08:00",
+          "created_at": "2026-08-09T18:20:00+08:00",
+          "title": "饺子",
+          "payload": {"dishes": [{"name": "饺子"}]},
+          "source_type": "data_record"
+        },
+        "relatedRecords": [{
+          "id": "order-1",
+          "domain_key": "expense",
+          "occurred_at": "2026-08-09T17:42:00+08:00",
+          "created_at": "2026-08-09T17:42:00+08:00",
+          "merchant_name": "外卖平台",
+          "title": "外卖 饺子",
+          "payload": {"items": [{"name": "饺子"}]},
+          "source_type": "transaction"
+        }]
+      },
+      "expected": {
+        "length": 1,
+        "checks": {
+          "candidate_id": "hypothesis:cross-record:life-chain:food-1:order-1",
+          "claim.semantic_key": "cross_record_possible_life_chain",
+          "claim.structured_value.relation_status": "hypothesis",
+          "claim.structured_value.elapsed_minutes": 38,
+          "claim.structured_value.beneficiary": null,
+          "quality.confidence": 0.89,
+          "evidence.0.source_id": "order-1",
+          "evidence.1.source_id": "food-1"
+        }
+      }
+    },
+    {
+      "name": "time proximity without object overlap is ignored",
+      "operation": "generateCrossRecordRelationshipCandidates",
+      "args": {
+        "currentRecord": {"id": "food-2", "domain_key": "food", "occurred_at": "2026-08-09T18:20:00+08:00", "title": "米饭"},
+        "relatedRecords": [{"id": "order-2", "domain_key": "expense", "occurred_at": "2026-08-09T17:42:00+08:00", "title": "外卖订单", "merchant_name": "外卖平台"}]
+      },
+      "expected": {"length": 0}
+    },
+    {
+      "name": "missing event time is not evidence",
+      "operation": "generateCrossRecordRelationshipCandidates",
+      "args": {
+        "currentRecord": {"id": "food-3", "domain_key": "food", "occurred_at": "2026-08-09T18:20:00+08:00", "title": "饺子"},
+        "relatedRecords": [{"id": "order-3", "domain_key": "expense", "occurred_at": null, "created_at": "2026-08-09T17:42:00+08:00", "title": "外卖 饺子", "merchant_name": "外卖平台"}]
+      },
+      "expected": {"length": 0}
+    },
+    {
+      "name": "a record learned later cannot be evidence",
+      "operation": "generateCrossRecordRelationshipCandidates",
+      "args": {
+        "currentRecord": {"id": "food-4", "domain_key": "food", "occurred_at": "2026-08-09T18:20:00+08:00", "created_at": "2026-08-09T18:20:00+08:00", "title": "饺子"},
+        "relatedRecords": [{"id": "order-4", "domain_key": "expense", "occurred_at": "2026-08-09T17:42:00+08:00", "created_at": "2026-08-09T19:00:00+08:00", "title": "外卖 饺子", "merchant_name": "外卖平台"}]
+      },
+      "expected": {"length": 0}
+    },
+    {
+      "name": "invalid related status is excluded",
+      "operation": "generateCrossRecordRelationshipCandidates",
+      "args": {
+        "currentRecord": {"id": "food-5", "domain_key": "food", "occurred_at": "2026-08-09T18:20:00+08:00", "title": "饺子"},
+        "relatedRecords": [{"id": "order-5", "domain_key": "expense", "occurred_at": "2026-08-09T17:42:00+08:00", "title": "外卖 饺子", "merchant_name": "外卖平台", "status": "failed"}]
+      },
+      "expected": {"length": 0}
+    },
+    {
+      "name": "same-domain behavior remains compatible",
+      "operation": "generateCrossRecordRelationshipCandidates",
+      "args": {
+        "currentRecord": {"id": "food-6", "domain_key": "food", "occurred_at": "2026-08-09T18:20:00+08:00", "title": "饺子"},
+        "relatedRecords": [{"id": "food-older", "domain_key": "food", "occurred_at": "2026-08-09T17:42:00+08:00", "title": "饺子"}]
+      },
+      "expected": {
+        "length": 1,
+        "checks": {
+          "claim.structured_value.related_domain_key": "food",
+          "claim.structured_value.relation_status": "hypothesis",
+          "claim.structured_value.beneficiary": null
+        }
+      }
+    }
+  ]
+}
