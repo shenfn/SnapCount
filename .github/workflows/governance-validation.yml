@@ -36,4 +36,7 @@ jobs:
           node-version: 22
 
       - name: Check governance chain
-        run: npm run governance:check
+        run: npm run --if-present governance:check
+
+      - name: Check architecture dependency ratchet
+        run: npm run --if-present governance:arch

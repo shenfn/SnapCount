@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "governance:check": "node scripts/check-project-governance.mjs",
+    "governance:arch": "node scripts/check-architecture-boundaries.mjs",
     "c2:wip:check": "node scripts/check-c2-root-wip-snapshot.mjs",
     "c2:wip:export": "node scripts/export-c2-wip-patches.mjs",
     "logs:ai": "node --env-file=.env.local scripts/show-ai-logs.mjs",
