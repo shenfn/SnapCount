@@ -35,6 +35,8 @@ npm run check:expression-core-boundary
 
 Planner Lab 的实体归一、金额/数值解析、周期/比较计算和事实契约模块已通过 adapter 复用生产核心；Edge Planner 的数值解析和事实契约导入已切换到 `_shared`。
 
+Planner Lab Node 回归：排除 5 个依赖 `esbuild` 的环境测试文件后，103/103 通过；全量启动结果为 103 个通过、5 个因当前环境缺少 `esbuild` 无法加载的测试。该 5 项记录为环境失败，不判定为业务回归。
+
 ## 未验证
 
 - 本地没有 `deno` 命令，Deno runner 未执行，属于环境未验证。
