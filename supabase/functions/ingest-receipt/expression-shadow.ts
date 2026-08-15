@@ -8,6 +8,8 @@ import {
   plannerSourceFingerprint,
 } from "./expression-shadow-planner.ts";
 import { rebuildExpressionPreferenceSnapshot } from "./expression-feedback.ts";
+// @ts-ignore Production-owned render version is shared with the offline lab.
+import { SURFACE_RENDER_CONTRACT_VERSION } from "../_shared/expression-core/render-contract.mjs";
 
 type ExpressionShadowMode = "off" | "shadow" | "enforced_owner_only" | "canary";
 type ShortcutResponseMode = "json" | "text";
@@ -409,7 +411,7 @@ export async function persistPlannerExposureEvents(
       expression_plan_version: normalizeString(renderPlan.expression_plan_version)
         ?? normalizeString(params.plan.planner_version)
         ?? EXPRESSION_PLANNER_VERSION,
-      render_contract_version: normalizeString(renderPlan.render_contract_version) ?? "surface-render-contract-v0.1",
+      render_contract_version: normalizeString(renderPlan.render_contract_version) ?? SURFACE_RENDER_CONTRACT_VERSION,
       scoring_version: normalizeString(objectValue(candidate.scoring)?.scoring_version),
       visible_field_paths: Array.isArray(deliveryEvidence?.visible_field_paths)
         ? deliveryEvidence.visible_field_paths

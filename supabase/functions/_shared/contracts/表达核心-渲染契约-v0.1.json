@@ -1,0 +1,236 @@
+{
+  "version": "表达核心-渲染契约-v0.1",
+  "cases": [
+    {
+      "id": "CORE-077",
+      "name": "四个表面保留固定渲染契约",
+      "operation": "surfaceContracts",
+      "expected": {
+        "checks": [
+          {
+            "path": "shortcut_notification",
+            "value": {
+              "surface_kind": "external_notification",
+              "fixed_slots": ["archive_status", "current_record_summary", "daily_summary"],
+              "visible_feedback_fields": ["icon", "badge", "band", "confidence", "emotion_line", "utility_line"],
+              "expandable_feedback_fields": [],
+              "persisted_only_feedback_fields": ["detail_reason", "timing_signal", "source"],
+              "delivery_state_when_sent": "returned_to_shortcut"
+            }
+          },
+          {
+            "path": "pwa_pending_ai_card",
+            "value": {
+              "surface_kind": "in_app_compact_card",
+              "fixed_slots": ["amount_editor", "image_preview", "correction_fields", "archive_action"],
+              "visible_feedback_fields": ["icon", "badge", "band", "emotion_line", "utility_line", "timing_signal"],
+              "expandable_feedback_fields": ["detail_reason"],
+              "persisted_only_feedback_fields": ["confidence", "source"],
+              "delivery_state_when_sent": "client_rendered"
+            }
+          },
+          {
+            "path": "record_detail",
+            "value": {
+              "surface_kind": "in_app_detail",
+              "fixed_slots": ["record_fields", "domain_destination", "account_binding", "record_actions"],
+              "visible_feedback_fields": ["icon", "badge", "band", "emotion_line", "utility_line", "detail_reason", "timing_signal"],
+              "expandable_feedback_fields": ["evidence", "numbers"],
+              "persisted_only_feedback_fields": ["source"],
+              "delivery_state_when_sent": "client_rendered"
+            }
+          },
+          {
+            "path": "weekly_report",
+            "value": {
+              "surface_kind": "periodic_report",
+              "fixed_slots": ["period_header", "weekly_totals"],
+              "visible_feedback_fields": ["headline", "summary", "supporting_facts"],
+              "expandable_feedback_fields": ["evidence", "numbers", "derivation"],
+              "persisted_only_feedback_fields": ["source"],
+              "delivery_state_when_sent": "client_rendered"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CORE-077",
+      "name": "候选按表面契约投影字段与事实",
+      "operation": "buildRenderPlans",
+      "args": {
+        "expressionPlans": {
+          "shortcut_notification": {
+            "plan_version": "expression-plan-v0.2",
+            "selected": [
+              {
+                "candidate_id": "weekly",
+                "semantic_key": "merchant_week_to_date_vs_previous_week_same_period",
+                "claim_type": "comparison",
+                "dimension": "period_comparison",
+                "score": 75.4,
+                "selection_mode": "threshold"
+              }
+            ]
+          }
+        },
+        "candidates": [
+          {
+            "candidate_id": "weekly",
+            "claim": {
+              "semantic_key": "merchant_week_to_date_vs_previous_week_same_period",
+              "structured_value": { "total": 251 },
+              "canonical_text": "本周高于上周同期"
+            },
+            "selection_hints": {
+              "exposure_key": "expense:merchant:merchant-1:week_to_date:2026-08-10",
+              "dedupe_key": "expense:merchant:merchant-1:week_to_date"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "checks": [
+          { "path": "shortcut_notification.render_contract_version", "value": "surface-render-contract-v0.1" },
+          { "path": "shortcut_notification.expression_plan_version", "value": "expression-plan-v0.2" },
+          { "path": "shortcut_notification.surface_kind", "value": "external_notification" },
+          { "path": "shortcut_notification.selected.0.structured_value", "value": { "total": 251 } },
+          { "path": "shortcut_notification.selected.0.canonical_text", "value": "本周高于上周同期" },
+          { "path": "shortcut_notification.selected.0.exposure_key", "value": "expense:merchant:merchant-1:week_to_date:2026-08-10" },
+          { "path": "shortcut_notification.selected.0.dedupe_key", "value": "expense:merchant:merchant-1:week_to_date" },
+          { "path": "shortcut_notification.selected.0.visible_field_paths", "value": ["rendered_feedback.icon", "rendered_feedback.badge", "rendered_feedback.band", "rendered_feedback.confidence", "rendered_feedback.emotion_line", "rendered_feedback.utility_line"] },
+          { "path": "shortcut_notification.selected.0.expandable_field_paths", "value": [] },
+          { "path": "shortcut_notification.selected.0.persisted_only_field_paths", "value": ["rendered_feedback.detail_reason", "rendered_feedback.timing_signal", "rendered_feedback.source"] }
+        ]
+      }
+    },
+    {
+      "id": "CORE-078",
+      "name": "未知表面明确失败",
+      "operation": "buildRenderPlans",
+      "args": {
+        "expressionPlans": { "unknown_surface": { "selected": [] } },
+        "candidates": []
+      },
+      "expected_error": "Missing render contract for surface: unknown_surface"
+    },
+    {
+      "id": "CORE-079",
+      "name": "模拟曝光不计入新颖度",
+      "operation": "buildExposureEvents",
+      "args": {
+        "renderPlans": {
+          "shortcut_notification": {
+            "delivery_state_when_sent": "returned_to_shortcut",
+            "expression_plan_version": "expression-plan-v0.1",
+            "render_contract_version": "surface-render-contract-v0.1",
+            "selected": [{
+              "candidate_id": "weekly",
+              "semantic_key": "weekly-key",
+              "claim_type": "comparison",
+              "dimension": "period_comparison",
+              "score": 75.4,
+              "selection_mode": "threshold",
+              "exposure_key": "exposure-key",
+              "dedupe_key": "dedupe-key",
+              "visible_field_paths": ["rendered_feedback.badge"],
+              "expandable_field_paths": [],
+              "persisted_only_field_paths": ["rendered_feedback.source"]
+            }]
+          }
+        },
+        "options": {
+          "traceId": "trace-preview",
+          "occurredAt": "2026-08-15T12:00:00+08:00"
+        }
+      },
+      "expected": {
+        "checks": [
+          { "path": "0.event_id", "value": "trace-preview:shortcut_notification:weekly" },
+          { "path": "0.lifecycle_state", "value": "rendered_preview" },
+          { "path": "0.simulation_only", "value": true },
+          { "path": "0.counts_for_novelty", "value": false },
+          { "path": "0.occurred_at", "value": "2026-08-15T12:00:00+08:00" },
+          { "path": "0.render_contract_version", "value": "surface-render-contract-v0.1" }
+        ]
+      }
+    },
+    {
+      "id": "CORE-080",
+      "name": "真实曝光使用表面交付状态并计入新颖度",
+      "operation": "buildExposureEvents",
+      "args": {
+        "renderPlans": {
+          "record_detail": {
+            "delivery_state_when_sent": "client_rendered",
+            "expression_plan_version": "expression-plan-v0.1",
+            "render_contract_version": "surface-render-contract-v0.1",
+            "selected": [{
+              "candidate_id": "record",
+              "semantic_key": "record-key",
+              "claim_type": "fact",
+              "dimension": "current_record",
+              "score": 80,
+              "selection_mode": "threshold",
+              "exposure_key": "record-exposure",
+              "dedupe_key": "record-dedupe",
+              "visible_field_paths": [],
+              "expandable_field_paths": [],
+              "persisted_only_field_paths": []
+            }]
+          }
+        },
+        "options": {
+          "traceId": "trace-real",
+          "occurredAt": "2026-08-15T13:00:00+08:00",
+          "simulationOnly": false
+        }
+      },
+      "expected": {
+        "checks": [
+          { "path": "0.lifecycle_state", "value": "client_rendered" },
+          { "path": "0.simulation_only", "value": false },
+          { "path": "0.counts_for_novelty", "value": true },
+          { "path": "0.exposure_key", "value": "record-exposure" },
+          { "path": "0.dedupe_key", "value": "record-dedupe" }
+        ]
+      }
+    },
+    {
+      "id": "CORE-081",
+      "name": "曝光历史排除模拟非计数与非白名单状态",
+      "operation": "compileExposureHistory",
+      "args": {
+        "events": [
+          { "semantic_key": "preview", "surface": "record_detail", "lifecycle_state": "rendered_preview", "simulation_only": true, "counts_for_novelty": false, "occurred_at": "2026-08-15T10:00:00+08:00" },
+          { "semantic_key": "non-counting", "surface": "record_detail", "lifecycle_state": "client_rendered", "simulation_only": false, "counts_for_novelty": false, "occurred_at": "2026-08-15T10:00:00+08:00" },
+          { "semantic_key": "unsupported", "surface": "record_detail", "lifecycle_state": "persisted", "simulation_only": false, "counts_for_novelty": true, "occurred_at": "2026-08-15T10:00:00+08:00" }
+        ]
+      },
+      "expected": { "value": {} }
+    },
+    {
+      "id": "CORE-082",
+      "name": "曝光与去重键分别累计且保留最新时间",
+      "operation": "compileExposureHistory",
+      "args": {
+        "events": [
+          { "semantic_key": "record-key", "exposure_key": "exposure-key", "dedupe_key": "dedupe-key", "surface": "record_detail", "lifecycle_state": "client_rendered", "simulation_only": false, "counts_for_novelty": true, "occurred_at": "2026-08-15T13:00:00+08:00" },
+          { "semantic_key": "record-key", "exposure_key": "exposure-key", "dedupe_key": "dedupe-key", "surface": "record_detail", "lifecycle_state": "user_reviewed", "simulation_only": false, "counts_for_novelty": true, "occurred_at": "2026-08-15T12:00:00+08:00" }
+        ]
+      },
+      "expected": {
+        "value": {
+          "record_detail:exposure-key": { "count": 2, "last_shown_at": "2026-08-15T13:00:00+08:00", "exposure_key": "exposure-key", "scoped_exposure_key": "record_detail:exposure-key" },
+          "record_detail:dedupe-key": { "count": 2, "last_shown_at": "2026-08-15T13:00:00+08:00", "exposure_key": "dedupe-key", "scoped_exposure_key": "record_detail:dedupe-key" }
+        }
+      }
+    },
+    {
+      "id": "CORE-083",
+      "name": "渲染契约版本由共享常量提供",
+      "operation": "version",
+      "expected": { "value": "surface-render-contract-v0.1" }
+    }
+  ]
+}

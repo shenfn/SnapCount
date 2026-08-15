@@ -6,9 +6,7 @@
     "production_tools_imports": {
       "mode": "ratchet",
       "scope": "supabase/functions/**/*.{ts,js,mjs}",
-      "known": [
-        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/render-contract.mjs"
-      ],
+      "known": [],
       "target": "A2: production-owned supabase/functions/_shared/expression-core"
     },
     "page_supabase_access": {
