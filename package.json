@@ -15,6 +15,8 @@
     "test:expression-plan-wrapper-compat": "node --test scripts/test-expression-plan-wrapper-compat.mjs",
     "test:expression-eligibility": "node --test supabase/functions/_shared/expression-core/eligibility.node.test.mjs",
     "test:expression-eligibility-wrapper-compat": "node --test scripts/test-eligibility-wrapper-compat.mjs",
+    "test:expression-scoring": "node --test supabase/functions/_shared/expression-core/scoring.node.test.mjs",
+    "test:expression-scoring-wrapper-compat": "node --test scripts/test-scoring-wrapper-compat.mjs",
     "check:expression-core-boundary": "node scripts/check-expression-core-boundary.mjs",
     "c2:wip:check": "node scripts/check-c2-root-wip-snapshot.mjs",
     "c2:wip:export": "node scripts/export-c2-wip-patches.mjs",

@@ -6,6 +6,8 @@
 >
 > 分支：`feature/表达核心资格门禁`
 >
+> 对应提交：`2a4a6c1`；合并提交：`b7738a5`（PR #47）
+>
 > 规格：`docs/spec/模块/表达核心/资格门禁规格说明.md`
 
 ## 范围
@@ -48,9 +50,9 @@ npm run test:expression-eligibility
 
 - Windows 本地没有 `deno`，CORE-003 Deno runner 未执行。
 - Windows 本地缺少 `esbuild`，完整 Planner 回归未执行；已运行不依赖该包的资格门和计划选择回归。
-- 尚未创建 PR，因此 GitHub CI 的 Deno、Edge 类型检查、PWA 构建、迁移门禁和完整 Planner 回归均待验证。
+- PR #47 已通过 GitHub CI：Deno、Edge 类型检查、PWA 构建、迁移门禁和完整 Planner 回归均通过。
 - 未执行生产部署、迁移或端侧改动。
 
 ## 下一步
 
-创建 PR 后，以 GitHub CI 完成 CORE-003 双运行时与 Edge 验证。CI 全绿后，A2 才能只读评估确定性评分的下一独立切片。
+CORE-003 已通过 PR #47 并合并。A2 下一切片为 CORE-004 确定性评分，必须重新建立独立 Spec、fixture 和红灯。

@@ -14,7 +14,6 @@
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/cross-record-relationships.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/comparison-candidates.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs",
-        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/deterministic-scoring.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/render-contract.mjs"
       ],
       "target": "A2: production-owned supabase/functions/_shared/expression-core"
