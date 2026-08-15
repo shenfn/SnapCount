@@ -3,7 +3,7 @@
 - 目标：确认边界后将 render contract 迁入生产共享核心，统一版本事实并消除最后一条生产 `tools` 反向依赖。
 - 实现基线：`b43d0a7`（CORE-011 文档 PR #62 合并提交）。
 - 工作树：`D:\Business\count\.worktrees\表达核心渲染契约`。
-- 分支：`feature/表达核心渲染契约`。
+- 分支：`feature/表达核心渲染契约`；实现 PR #63 合并提交为 `3390f9e`。
 - 本轮范围：CORE-077 至 CORE-084 fixture、生产共享模块、Lab wrapper、Edge import/版本常量、架构基线、CI 和交接文档。
 - 非范围：客户端 UI、数据库迁移、生产部署、曝光持久化编排和历史数据改写。
 
@@ -41,14 +41,20 @@
 - 架构门禁实测 `production_tools_imports: 0`；JavaScript 运行时版本字面量仅剩共享常量一处。
 - 完整 Planner 首次运行的 5 个失败是 worktree 缺少 `esbuild` 的环境失败；执行 `npm ci` 后重跑 185/185，通过且未修改锁文件。
 
+## PR CI 结果
+
+- PR #63 的 Governance、PWA/Edge/migrations/Shadow、iOS Build Gate、Cloudflare Pages 和 Vercel 全部通过；Build SwiftUI 按变更检测跳过。
+- Deno fixture、Edge `deno check` 和完整 Release Validation 已由 GitHub CI 验证通过。
+- 生产 `tools` 反向依赖为 0，CORE-011 实现状态：已完成并合并。
+
 ## 未验证与剩余风险
 
-- Windows 本机没有 Deno，Deno fixture、Edge `deno check` 和完整 Release Validation 仍需由 GitHub CI 验证。
+- Windows 本机没有 Deno；已由 PR CI 验证，属于本地工具限制而非未解决业务风险。
 - `buildExposureEvents` 的默认当前时钟兼容分支被保留；共享 fixture 显式传入 `occurredAt`，没有测试非确定时间文本。
-- A2 尚未完成：仍需实现 PR 全绿、合并提交、阶段完成证据和严格 fresh-agent 接续结果。
+- A2 尚未关闭：还需完成严格 fresh-agent 接续演练，并写入阶段收口记录。
 
 ## 下一步
 
-1. 提交并推送 `feature/表达核心渲染契约`，创建实现 PR。
-2. 等待 Node/Deno、Edge、Planner、构建和治理门禁全部通过后合并。
-3. 单独补 A2 完成证据与严格 fresh-agent 接续结果，再裁定下一阶段；不在本实现 PR 扩展端侧范围。
+1. 在干净的 A2 收口 worktree 运行严格 fresh-agent 接续演练。
+2. 记录演练结果并将 A2 标为已完成。
+3. 从最新 `main` 建立 A3 PWA 业务边界评估，不在收口切片开始端侧实现。

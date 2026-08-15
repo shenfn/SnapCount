@@ -18,8 +18,8 @@
 
 - 评估：已完成。
 - Spec/ADR：已建立。
-- 实现迁移：待文档 PR 合并后建立 `feature/表达核心实体归一化`。
-- Deno：本 Windows 环境是否安装尚未检查，双运行时需由实现 PR CI 验证。
+- 实现迁移：已完成并由 PR #59 合并，合并提交 `f7b24cd`。
+- Deno：本 Windows 环境未安装；PR #59 Release Validation 已补齐双运行时验证。
 
 ## 实现阶段追加
 
@@ -27,11 +27,10 @@
 - 最小实现：新增生产 `entity-normalizer.mjs`，复用 `index.mjs` 的 `normalizeEntityText`；新增生产共享公开配置；Lab 原路径改为 wrapper；Edge 改为直接引用生产核心和配置。
 - 删除旧 `tools/ai-validation/expression-planner/configs/entity-aliases.public.v0.1.json`，避免保留第二份配置权威。
 - 本地绿灯：CORE-056 至 CORE-061 fixture 1/1、wrapper 1/1、旧实体测试 7/7、Edge 静态契约 1/1；核心边界、治理检查和 `git diff --check` 通过。
-- 环境限制：Windows 未安装 Deno，双运行时需由 PR CI 验证；完整 Planner 中与 `esbuild` 相关的既有环境缺口沿用前片记录。
-- 生产 `tools/` 的 entity-normalizer 规则和 alias 配置反向依赖已清零，最终依赖计数由 CI 确认。
+- 环境限制：Windows 未安装 Deno，且本地完整 Planner 受既有 `esbuild` 环境缺口影响；PR #59 CI 后续已验证双运行时、完整 Planner 和 Edge 检查通过。
+- 生产 `tools/` 的 entity-normalizer 规则和 alias 配置反向依赖已清零，并由 PR #59 架构检查确认。
 
 ## 下一步
 
-1. 等待实现 PR 的 Node/Deno、Edge、Planner 和治理门禁。
-2. CI 通过后合并实现 PR，并将 A2 推进到下一片纯函数边界评估。
-3. 保持根工作区、其他 worktree、PWA/iOS 和生产部署冻结。
+1. CORE-009 已收口；由 CORE-010 通用域切片接续。
+2. 保持根工作区、其他 worktree、PWA/iOS 和生产部署冻结。

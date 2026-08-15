@@ -17,11 +17,11 @@
 - `domainProfile` 只提供 meal baseline 与 chronotype 等纯数据，未发现核心读取或生成 profile 的路径。
 - Edge 仍从 `tools` 导入该文件；完整 Planner 测试入口依赖 `esbuild`，Windows 未安装 Deno 的状态沿用 A2 既有环境限制。
 
-## 当前状态
+## 边界评估时状态（历史）
 
 - 评估：已完成。
 - Spec/ADR：已建立。
-- 实现迁移：待文档 PR 合并后建立 `feature/表达核心通用域`。
+- 实现迁移：在该时点尚未开始；后续已由 PR #61 完成并合并为 `082f0db`。
 - 测试：现有通用域 Planner 特征测试已存在；共享 Node/Deno fixture 尚未建立。
 
 ## 处置决策
@@ -30,14 +30,14 @@
 - wallet 单独实现、单独契约组、单独回归；income/food/sleep 分域迁移；sport/reading 保留通用指标路径。
 - 先迁共享基础和门面，再按 income/food/sleep/wallet 顺序迁移；不在本切片修改 Edge 查询或 Planner 编排。
 
-## 未验证与风险
+## 边界评估时未验证与风险（历史）
 
 - Windows 未安装 Deno，双运行时结果需由实现 PR CI 验证。
 - 完整 Planner 测试因本地缺少 `esbuild` 可能无法启动，不能将环境失败写成业务失败。
 - 现有测试尚未拆成 CORE-063 至 CORE-076 的共享 fixture 映射。
 - `render-contract.mjs` 仍是另一条 `tools` 反向依赖，另立 CORE-011，不纳入本轮。
 
-## 下一步
+## 边界评估时下一步（已完成）
 
 1. 合并本边界评估文档 PR。
 2. 建立 `feature/表达核心通用域` 实现 worktree，先写共享 fixture 红灯。
@@ -55,9 +55,9 @@
 - 构建与门禁：`npm run build`、`check:expression-core-boundary`、`governance:arch`、`governance:check`、`git diff --check` 均通过；构建仅有既有 `vconsole eval` 和 chunk 大小警告。
 - 依赖 ratchet：生产 `tools` 反向依赖从 2 条降至 1 条，旧例外已从基线删除，剩余仅 `render-contract.mjs`。
 - 本地环境：执行 `npm ci` 后可运行完整 Planner；审计报告 1 个 moderate、4 个 high 的存量依赖风险，本切片未改依赖版本。
-- 未验证：Windows 未安装 Deno；Deno fixture、Edge `deno check` 和双运行时结果等待 PR CI。
+- 本地未验证：Windows 未安装 Deno，因此未在本机执行 Deno fixture 和 Edge `deno check`；PR #61 CI 后续已验证通过。
 
-## 实现阶段下一步
+## 实现阶段下一步（已完成）
 
 1. 提交并推送 `feature/表达核心通用域`，创建实现 PR。
 2. 等待 Node/Deno、Edge、Planner、构建和治理门禁全部通过后合并。

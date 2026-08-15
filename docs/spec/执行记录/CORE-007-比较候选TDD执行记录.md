@@ -40,10 +40,10 @@ npm run test:expression-comparison
 6. `npm run test:expression-core`、`npm run test:expression-eligibility`、`npm run test:expression-scoring`、`npm run test:expression-plan-selection`：通过，已有切片未回归。
 7. `npm run check:expression-core-boundary`、`npm run governance:arch`、`npm run governance:check`：通过；生产 `tools/` 依赖由 6 降至 5。
 
-## 未验证
+## 本地未验证与 CI 补齐
 
-- Windows 本地没有 `deno`，CORE-007 Deno runner 待 PR CI 验证。
-- Windows 本地缺少 `esbuild`，完整 Planner 回归待 PR CI 验证。
+- Windows 本地没有 `deno`，因此未在本机执行 CORE-007 Deno runner；PR #54 Release Validation 后续已验证通过。
+- Windows 本地缺少 `esbuild`，因此未在本机完成完整 Planner 回归；PR #54 Release Validation 后续已验证通过。
 - 未执行生产部署、迁移或端侧改动。
 
 ## PR 验证与合并
