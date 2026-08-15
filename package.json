@@ -21,6 +21,7 @@
     "test:expression-fact-candidates-wrapper-compat": "node --test scripts/test-fact-candidates-wrapper-compat.mjs",
     "test:expression-recurrence": "node --test supabase/functions/_shared/expression-core/recurrence.node.test.mjs",
     "test:expression-recurrence-wrapper-compat": "node --test scripts/test-recurrence-wrapper-compat.mjs",
+    "test:expression-comparison": "node --test supabase/functions/_shared/expression-core/comparison.node.test.mjs",
     "check:expression-core-boundary": "node scripts/check-expression-core-boundary.mjs",
     "c2:wip:check": "node scripts/check-c2-root-wip-snapshot.mjs",
     "c2:wip:export": "node scripts/export-c2-wip-patches.mjs",
