@@ -34,6 +34,9 @@ import {
 } from '../utils/expressionPresentation'
 import { createExpressionRepository } from '../repositories/expressionRepository'
 import { createExpressionPlanState } from '../features/expression/createExpressionPlanState'
+import { createSettingsRepository } from '../repositories/settingsRepository'
+import { createSettingsState } from '../features/settings/createSettingsState'
+import { createDefaultSettingsState } from '../features/settings/settingsConfig'
 import {
   buildShanghaiOccurredAt,
   resolveFinanceOccurrence,
@@ -64,16 +67,6 @@ function humanizeDbError(err) {
 }
 
 export function useStore() {
-  const USER_SETTING_FIELDS = {
-    aiLogsEnabled: 'ai_logs_enabled',
-    keepSourceImages: 'keep_source_images',
-    promptOptimizationEnabled: 'prompt_optimization_enabled',
-    expressionImprovementEnabled: 'expression_improvement_enabled',
-    imageRetentionDays: 'image_retention_days',
-    companionEnabled: 'companion_enabled',
-    companionMemoryEnabled: 'companion_memory_enabled',
-  }
-
   const currentYear = ref(new Date().getFullYear())
   const currentMonth = ref(new Date().getMonth() + 1)
   const currentPage = ref('home')
@@ -246,15 +239,11 @@ export function useStore() {
     isArchived: false,
   })
 
-  const settingsState = reactive({
-    aiLogsEnabled: false,
-    keepSourceImages: true,
-    promptOptimizationEnabled: false,
-    expressionImprovementEnabled: false,
-    imageRetentionDays: -1,
-    companionEnabled: true,
-    companionMemoryEnabled: true,
+  const settingsFeature = createSettingsState({
+    repository: createSettingsRepository({ client: sb }),
+    state: reactive(createDefaultSettingsState()),
   })
+  const { settingsState } = settingsFeature
   const actionState = reactive({
     pendingEntry: false,
     income: false,
@@ -482,13 +471,7 @@ export function useStore() {
     expressionPlanState.reset()
     activeDomainId.value = null
     pageHistory.value = []
-    settingsState.aiLogsEnabled = false
-    settingsState.keepSourceImages = true
-    settingsState.promptOptimizationEnabled = false
-    settingsState.expressionImprovementEnabled = false
-    settingsState.imageRetentionDays = -1
-    settingsState.companionEnabled = true
-    settingsState.companionMemoryEnabled = true
+    settingsFeature.reset()
     Object.keys(actionState).forEach((key) => {
       actionState[key] = false
     })
@@ -510,32 +493,12 @@ export function useStore() {
     }
   }
 
-  async function loadUserSettings() {
-    if (!currentUserId.value) {
-      settingsState.aiLogsEnabled = false
-      settingsState.keepSourceImages = true
-      settingsState.promptOptimizationEnabled = false
-      settingsState.expressionImprovementEnabled = false
-      settingsState.imageRetentionDays = -1
-      settingsState.companionEnabled = true
-      settingsState.companionMemoryEnabled = true
-      return
+  async function loadUserSettings(options) {
+    const result = await settingsFeature.load(currentUserId.value, options)
+    if (!result.ok && !result.stale) {
+      console.warn('加载用户设置失败:', result.error?.message || result.error)
     }
-    const { data, error } = await sb.from('user_configs')
-      .select('ai_logs_enabled, keep_source_images, prompt_optimization_enabled, expression_improvement_enabled, image_retention_days, companion_enabled, companion_memory_enabled')
-      .eq('user_id', currentUserId.value)
-      .maybeSingle()
-    if (error) {
-      console.warn('加载用户设置失败:', error.message)
-      return
-    }
-    settingsState.aiLogsEnabled = data?.ai_logs_enabled ?? false
-    settingsState.keepSourceImages = data?.keep_source_images ?? true
-    settingsState.promptOptimizationEnabled = data?.prompt_optimization_enabled ?? false
-    settingsState.expressionImprovementEnabled = data?.expression_improvement_enabled ?? false
-    settingsState.imageRetentionDays = data?.image_retention_days ?? -1
-    settingsState.companionEnabled = data?.companion_enabled ?? true
-    settingsState.companionMemoryEnabled = data?.companion_memory_enabled ?? true
+    return result
   }
 
   let financeVocabularyAvailable = true
@@ -4293,88 +4256,57 @@ export function useStore() {
   }
 
   async function toggleSetting(key) {
-    if (!(key in settingsState)) return
+    if (!(key in settingsState)) return { ok: false, error: new Error(`未知设置项：${key}`) }
     if (!currentUserId.value) {
       showFlash('请先登录')
-      return
+      return { ok: false, error: new Error('请先登录') }
     }
-    if (isActionPending('settings')) return
-    const field = USER_SETTING_FIELDS[key]
-    if (!field) return
-    const prev = settingsState[key]
-    const next = !prev
-    settingsState[key] = next
-    try {
-      await runLockedAction('settings', async () => {
-        const { error } = await sb.from('user_configs').upsert({
-          user_id: currentUserId.value,
-          [field]: next,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' })
-        if (error) throw error
-      })
+    const next = !settingsState[key]
+    const result = await settingsFeature.update(currentUserId.value, key, next)
+    if (result.ok) {
       showFlash(next ? '✓ 已开启' : '✓ 已关闭')
-    } catch (e) {
-      settingsState[key] = prev
-      showFlash('⚠️ 设置保存失败：' + humanizeDbError(e))
+    } else if (!result.stale) {
+      showFlash('⚠️ 设置保存失败：' + humanizeDbError(result.error))
     }
+    return result
   }
 
   // 用于非布尔设置项（如 imageRetentionDays）
-  async function setSetting(key, value) {
-    if (!(key in settingsState)) return
+  async function setSetting(key, value, { successMessage = '✓ 已保存', errorPrefix = '⚠️ 设置保存失败：' } = {}) {
+    if (!(key in settingsState)) return { ok: false, error: new Error(`未知设置项：${key}`) }
     if (!currentUserId.value) {
       showFlash('请先登录')
-      return
+      return { ok: false, error: new Error('请先登录') }
     }
-    if (isActionPending('settings')) return
-    const field = USER_SETTING_FIELDS[key]
-    if (!field) return
-    const prev = settingsState[key]
-    settingsState[key] = value
-    try {
-      await runLockedAction('settings', async () => {
-        const { error } = await sb.from('user_configs').upsert({
-          user_id: currentUserId.value,
-          [field]: value,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' })
-        if (error) throw error
-      })
-      showFlash('✓ 已保存')
-    } catch (e) {
-      settingsState[key] = prev
-      showFlash('⚠️ 设置保存失败：' + humanizeDbError(e))
+    const result = await settingsFeature.update(currentUserId.value, key, value)
+    if (result.ok) {
+      if (successMessage) showFlash(successMessage)
+    } else if (!result.stale) {
+      showFlash(errorPrefix + humanizeDbError(result.error))
     }
+    return result
+  }
+
+  async function setSettings(patch, { successMessage = '✓ 已保存', errorPrefix = '⚠️ 设置保存失败：' } = {}) {
+    if (!currentUserId.value) {
+      showFlash('请先登录')
+      return { ok: false, error: new Error('请先登录') }
+    }
+    const result = await settingsFeature.updateMany(currentUserId.value, patch)
+    if (result.ok) {
+      if (successMessage) showFlash(successMessage)
+    } else if (!result.stale) {
+      showFlash(errorPrefix + humanizeDbError(result.error))
+    }
+    return result
   }
 
   // 同时更新 keep_source_images 和 image_retention_days 两个字段
   async function setRetention(keepSource, retentionDays) {
-    if (!currentUserId.value) {
-      showFlash('请先登录')
-      return
-    }
-    if (isActionPending('settings')) return
-    const prevKeep = settingsState.keepSourceImages
-    const prevDays = settingsState.imageRetentionDays
-    settingsState.keepSourceImages = keepSource
-    settingsState.imageRetentionDays = retentionDays
-    try {
-      await runLockedAction('settings', async () => {
-        const { error } = await sb.from('user_configs').upsert({
-          user_id: currentUserId.value,
-          keep_source_images: keepSource,
-          image_retention_days: retentionDays,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' })
-        if (error) throw error
-      })
-      showFlash('✓ 留存策略已更新')
-    } catch (e) {
-      settingsState.keepSourceImages = prevKeep
-      settingsState.imageRetentionDays = prevDays
-      showFlash('⚠️ 设置保存失败：' + humanizeDbError(e))
-    }
+    return setSettings({
+      keepSourceImages: keepSource,
+      imageRetentionDays: retentionDays,
+    }, { successMessage: '✓ 留存策略已更新' })
   }
 
   async function deleteRecordThroughBackend(recordKind, recordId) {
@@ -4493,7 +4425,7 @@ export function useStore() {
     discardStagingRecord, retryStagingRecord, archiveStagingRecord, openProcessedStagingRecord,
     openDomainPage, openDayDetail, showMoreDailyCards, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
     navigateTo, goBack,
-    settingsState, toggleSetting, setSetting, setRetention, loadUserSettings, loadFinanceVocabulary,
+    settingsState, toggleSetting, setSetting, setSettings, setRetention, loadUserSettings, loadFinanceVocabulary,
     actionState, isActionPending, isPendingEntrySaving,
     refreshIfStale, loadRecordExpressionPlan, ackRecordExpressionPlan, submitExpressionFeedback,
   }
