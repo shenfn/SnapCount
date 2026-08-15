@@ -62,3 +62,9 @@
 1. 提交并推送 `feature/表达核心通用域`，创建实现 PR。
 2. 等待 Node/Deno、Edge、Planner、构建和治理门禁全部通过后合并。
 3. CI 收口 CORE-010 后建立 CORE-011 `render-contract` 只读边界评估；A2 完成前不进入端侧业务实现。
+
+## CI 收口
+
+- PR #61 的治理、PWA build、Node/Deno expression-core、Edge `deno check`、完整 Planner、迁移和安全门禁全部通过。
+- 2026-08-15 已合并，合并提交为 `082f0db`。
+- CORE-010 状态：已完成；生产 `tools` 反向依赖剩余 1 条 `render-contract.mjs`，由 CORE-011 接续。
