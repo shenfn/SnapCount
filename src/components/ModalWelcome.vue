@@ -105,7 +105,6 @@
 
 <script setup>
 import { ref, inject, onMounted } from 'vue'
-import { sb } from '../lib/supabase'
 
 const STORAGE_KEY = 'snapcount_onboarded'
 const TOTAL_STEPS = 3
@@ -121,11 +120,8 @@ onMounted(async () => {
   visible.value = true
 
   if (store.currentUserId.value) {
-    const { data: cfg } = await sb.from('user_configs')
-      .select('upload_token')
-      .eq('user_id', store.currentUserId.value)
-      .maybeSingle()
-    if (cfg) uploadToken.value = cfg.upload_token || ''
+    await store.loadUserSettings()
+    uploadToken.value = store.settingsState.uploadToken || ''
   }
 })
 

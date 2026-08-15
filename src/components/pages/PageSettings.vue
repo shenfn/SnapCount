@@ -493,8 +493,9 @@ async function confirmRetentionModal() {
 
   retentionModal.show = false
 
-  // 保存到数据库
-  await store.setRetention(keepSource, retentionDays)
+  // 配置保存失败时，不得继续执行不可逆的原图清理。
+  const retentionResult = await store.setRetention(keepSource, retentionDays)
+  if (!retentionResult?.ok) return
 
   // 选择型弹窗 + 用户选了"立即清理" → 调用清理接口
   if (retentionModal.type === 'choice' && choice === 'now') {
@@ -879,11 +880,6 @@ function providerLabel(value) {
   return visionOptions.find(o => o.value === value)?.label.replace('（推荐）', '') || value || '自动'
 }
 
-function isMissingConfigColumn(error) {
-  const msg = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`
-  return /screenshot_vision_primary|photo_vision_primary|qwen_screenshot|qwen_photo|schema cache|column/i.test(msg)
-}
-
 function routeSummary(route) {
   const provider = route === 'photo' ? photoVisionPrimary.value : screenshotVisionPrimary.value
   const model = route === 'photo' ? qwenPhotoModel.value : qwenScreenshotModel.value
@@ -891,29 +887,25 @@ function routeSummary(route) {
   return providerLabel(provider)
 }
 
-function applyVisionConfig(cfg) {
-  if (!cfg) return
-  screenshotVisionPrimary.value = normalizeVisionProvider(cfg.screenshot_vision_primary || cfg.vision_primary)
-  photoVisionPrimary.value = normalizeVisionProvider(cfg.photo_vision_primary, 'qwen')
-  qwenScreenshotModel.value = normalizeQwenModel(cfg.qwen_screenshot_model)
-  qwenPhotoModel.value = normalizeQwenModel(cfg.qwen_photo_model)
+function syncSettingsFromStore() {
+  const settings = store.settingsState
+  uploadToken.value = settings.uploadToken || ''
+  screenshotVisionPrimary.value = normalizeVisionProvider(settings.screenshotVisionPrimary || settings.visionPrimary)
+  photoVisionPrimary.value = normalizeVisionProvider(settings.photoVisionPrimary, 'qwen')
+  qwenScreenshotModel.value = normalizeQwenModel(settings.qwenScreenshotModel)
+  qwenPhotoModel.value = normalizeQwenModel(settings.qwenPhotoModel)
+  aiInsightProvider.value = normalizeInsightProvider(settings.aiInsightProvider)
+  companionPersona.value = settings.companionPersona || 'observer'
+  companionMemoryStrength.value = settings.companionMemoryStrength || 'balanced'
+  companionExpressionStyle.value = settings.companionExpressionStyle || 'plain'
+  companionCustomNote.value = settings.companionCustomNote || ''
+  companionCustomNoteSaved.value = companionCustomNote.value
 }
 
 async function refreshVisionSummary() {
   if (!store.currentUserId.value) return
-  const { data, error } = await sb.from('user_configs')
-    .select('vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model')
-    .eq('user_id', store.currentUserId.value)
-    .maybeSingle()
-  if (error && isMissingConfigColumn(error)) {
-    const { data: legacy } = await sb.from('user_configs')
-      .select('vision_primary')
-      .eq('user_id', store.currentUserId.value)
-      .maybeSingle()
-    applyVisionConfig(legacy)
-    return
-  }
-  applyVisionConfig(data)
+  await store.loadUserSettings({ force: true })
+  syncSettingsFromStore()
 }
 
 const insightModelOptions = [
@@ -1013,28 +1005,7 @@ const companionExpressionOptions = [
 onMounted(async () => {
   if (store.currentUserId.value) {
     await store.loadUserSettings()
-    let { data: cfg, error } = await sb.from('user_configs')
-      .select('upload_token, plan, vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, ai_insight_provider, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note')
-      .eq('user_id', store.currentUserId.value)
-      .maybeSingle()
-    if (error && isMissingConfigColumn(error)) {
-      const legacy = await sb.from('user_configs')
-        .select('upload_token, plan, vision_primary, ai_insight_provider, companion_persona, companion_memory_strength, companion_expression_style, companion_custom_note')
-        .eq('user_id', store.currentUserId.value)
-        .maybeSingle()
-      cfg = legacy.data
-      error = legacy.error
-    }
-    if (cfg) {
-      uploadToken.value = cfg.upload_token || ''
-      applyVisionConfig(cfg)
-      aiInsightProvider.value = normalizeInsightProvider(cfg.ai_insight_provider)
-      companionPersona.value = cfg.companion_persona || 'observer'
-      companionMemoryStrength.value = cfg.companion_memory_strength || 'balanced'
-      companionExpressionStyle.value = cfg.companion_expression_style || 'plain'
-      companionCustomNote.value = cfg.companion_custom_note || ''
-      companionCustomNoteSaved.value = companionCustomNote.value
-    }
+    syncSettingsFromStore()
   }
 })
 
@@ -1048,104 +1019,56 @@ onUnmounted(() => {
 
 async function updateAiInsightProvider(value) {
   if (aiInsightProvider.value === value) return
-  if (!store.currentUserId.value) {
-    store.showFlash('请先登录')
-    return
-  }
-  const prev = aiInsightProvider.value
-  aiInsightProvider.value = value
-  const { error } = await sb.from('user_configs')
-    .update({ ai_insight_provider: value, updated_at: new Date().toISOString() })
-    .eq('user_id', store.currentUserId.value)
-  if (error) {
-    aiInsightProvider.value = prev
-    store.showFlash('⚠️ 切换失败：' + error.message)
-    return
-  }
   const opt = insightModelOptions.find(o => o.value === value)
-  store.showFlash(`✓ AI 分析已切换到「${opt?.label || value}」`)
+  const result = await store.setSetting('aiInsightProvider', value, {
+    successMessage: `✓ AI 分析已切换到「${opt?.label || value}」`,
+    errorPrefix: '⚠️ 切换失败：',
+  })
+  if (result?.ok) aiInsightProvider.value = store.settingsState.aiInsightProvider
 }
 
 async function updateCompanionPersona(value) {
   if (companionPersona.value === value) return
-  if (!store.currentUserId.value) {
-    store.showFlash('请先登录')
-    return
-  }
-  const prev = companionPersona.value
-  companionPersona.value = value
-  const { error } = await sb.from('user_configs')
-    .update({ companion_persona: value, updated_at: new Date().toISOString() })
-    .eq('user_id', store.currentUserId.value)
-  if (error) {
-    companionPersona.value = prev
-    store.showFlash('⚠️ 切换失败：' + error.message)
-    return
-  }
   const opt = companionPersonaOptions.find(o => o.value === value)
-  store.showFlash(`✓ 陪伴语气已切换到「${opt?.label || value}」`)
+  const result = await store.setSetting('companionPersona', value, {
+    successMessage: `✓ 陪伴语气已切换到「${opt?.label || value}」`,
+    errorPrefix: '⚠️ 切换失败：',
+  })
+  if (result?.ok) companionPersona.value = store.settingsState.companionPersona
 }
 
 async function updateCompanionMemoryStrength(value) {
   if (companionMemoryStrength.value === value) return
-  if (!store.currentUserId.value) {
-    store.showFlash('请先登录')
-    return
-  }
-  const prev = companionMemoryStrength.value
-  companionMemoryStrength.value = value
-  const { error } = await sb.from('user_configs')
-    .update({ companion_memory_strength: value, updated_at: new Date().toISOString() })
-    .eq('user_id', store.currentUserId.value)
-  if (error) {
-    companionMemoryStrength.value = prev
-    store.showFlash('⚠️ 切换失败：' + error.message)
-    return
-  }
   const opt = companionMemoryStrengthOptions.find(o => o.value === value)
-  store.showFlash(`✓ 记忆强度已切换到「${opt?.label || value}」`)
+  const result = await store.setSetting('companionMemoryStrength', value, {
+    successMessage: `✓ 记忆强度已切换到「${opt?.label || value}」`,
+    errorPrefix: '⚠️ 切换失败：',
+  })
+  if (result?.ok) companionMemoryStrength.value = store.settingsState.companionMemoryStrength
 }
 
 async function updateCompanionExpressionStyle(value) {
   if (companionExpressionStyle.value === value) return
-  if (!store.currentUserId.value) {
-    store.showFlash('请先登录')
-    return
-  }
-  const prev = companionExpressionStyle.value
-  companionExpressionStyle.value = value
-  const { error } = await sb.from('user_configs')
-    .update({ companion_expression_style: value, updated_at: new Date().toISOString() })
-    .eq('user_id', store.currentUserId.value)
-  if (error) {
-    companionExpressionStyle.value = prev
-    store.showFlash('⚠️ 切换失败：' + error.message)
-    return
-  }
   const opt = companionExpressionOptions.find(o => o.value === value)
-  store.showFlash(`✓ 表达方式已切换到「${opt?.label || value}」`)
+  const result = await store.setSetting('companionExpressionStyle', value, {
+    successMessage: `✓ 表达方式已切换到「${opt?.label || value}」`,
+    errorPrefix: '⚠️ 切换失败：',
+  })
+  if (result?.ok) companionExpressionStyle.value = store.settingsState.companionExpressionStyle
 }
 
 async function saveCompanionCustomNote() {
-  if (!store.currentUserId.value) {
-    store.showFlash('请先登录')
-    return
-  }
   const note = companionCustomNote.value.trim().slice(0, 80)
   companionCustomNote.value = note
   if (note === companionCustomNoteSaved.value) return
-  const { error } = await sb.from('user_configs')
-    .update({
-      companion_custom_note: note || null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('user_id', store.currentUserId.value)
-  if (error) {
-    store.showFlash('⚠️ 保存失败：' + error.message)
-    return
+  const result = await store.setSetting('companionCustomNote', note, {
+    successMessage: note ? '✓ 专属指令已保存' : '✓ 已清空专属指令',
+    errorPrefix: '⚠️ 保存失败：',
+  })
+  if (result?.ok) {
+    companionCustomNote.value = store.settingsState.companionCustomNote
+    companionCustomNoteSaved.value = companionCustomNote.value
   }
-  companionCustomNoteSaved.value = note
-  store.showFlash(note ? '✓ 专属指令已保存' : '✓ 已清空专属指令')
 }
 
 const userEmail = ref(store.currentUserEmail.value || '内测用户')

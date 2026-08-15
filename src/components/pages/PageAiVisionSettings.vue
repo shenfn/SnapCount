@@ -134,7 +134,6 @@
 
 <script setup>
 import { inject, onMounted, ref } from 'vue'
-import { sb } from '../../lib/supabase'
 
 const store = inject('store')
 
@@ -170,18 +169,6 @@ const qwenModelPresets = [
   { value: 'qwen3.7-plus', label: '3.7 Plus', desc: '质量优先' },
 ]
 
-function isMissingConfigColumn(error) {
-  const msg = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`
-  return /screenshot_vision_primary|photo_vision_primary|qwen_screenshot|qwen_photo|schema cache|column/i.test(msg)
-}
-
-function configErrorMessage(error) {
-  if (isMissingConfigColumn(error)) {
-    return '数据库还没执行 060_split_vision_capture_settings.sql，暂时不能保存分链路模型配置'
-  }
-  return error?.message || '未知错误'
-}
-
 function providerLabel(value) {
   return providerOptions.find(item => item.value === value)?.label || value || '自动'
 }
@@ -216,11 +203,8 @@ async function updateUserConfig(patch, successMessage) {
     store.showFlash('请先登录')
     return false
   }
-  const { error } = await sb.from('user_configs')
-    .update({ ...patch, updated_at: new Date().toISOString() })
-    .eq('user_id', store.currentUserId.value)
-  if (error) {
-    store.showFlash('⚠ 切换失败：' + configErrorMessage(error))
+  const result = await store.setSettings(patch, { successMessage: '' })
+  if (!result?.ok) {
     return false
   }
   if (successMessage) store.showFlash(successMessage)
@@ -232,8 +216,8 @@ async function updateRouteProvider(route, value) {
   const prev = routeProvider(route)
   setRouteProvider(route, value)
   const patch = route === 'photo'
-    ? { photo_vision_primary: value }
-    : { screenshot_vision_primary: value, vision_primary: value }
+    ? { photoVisionPrimary: value }
+    : { screenshotVisionPrimary: value, visionPrimary: value }
   const ok = await updateUserConfig(patch, `✓ ${route === 'photo' ? '拍照' : '截图'}链路已切换到「${providerLabel(value)}」`)
   if (!ok) setRouteProvider(route, prev)
 }
@@ -245,8 +229,8 @@ async function setQwenModel(route, model) {
   if (isPhoto) qwenPhotoModel.value = model
   else qwenScreenshotModel.value = model
   const patch = isPhoto
-    ? { qwen_photo_model: model }
-    : { qwen_screenshot_model: model }
+    ? { qwenPhotoModel: model }
+    : { qwenScreenshotModel: model }
   const ok = await updateUserConfig(patch, `✓ ${isPhoto ? '拍照' : '截图'}模型已切换到「${model}」`)
   if (!ok) {
     if (isPhoto) qwenPhotoModel.value = prev
@@ -261,8 +245,8 @@ async function updateQwenThinking(route, value) {
   else qwenScreenshotThinking.value = value
 
   const patch = isPhoto
-    ? { qwen_photo_enable_thinking: value }
-    : { qwen_screenshot_enable_thinking: value }
+    ? { qwenPhotoThinking: value }
+    : { qwenScreenshotThinking: value }
   const ok = await updateUserConfig(patch, `✓ ${isPhoto ? '拍照' : '截图'}思考模式已${value ? '开启' : '关闭'}`)
   if (!ok) {
     if (isPhoto) qwenPhotoThinking.value = prev
@@ -272,29 +256,15 @@ async function updateQwenThinking(route, value) {
 
 onMounted(async () => {
   if (!store.currentUserId.value) return
-  const { data, error } = await sb.from('user_configs')
-    .select('vision_primary, screenshot_vision_primary, photo_vision_primary, qwen_screenshot_model, qwen_photo_model, qwen_screenshot_enable_thinking, qwen_photo_enable_thinking')
-    .eq('user_id', store.currentUserId.value)
-    .maybeSingle()
-  if (error) {
-    if (isMissingConfigColumn(error)) {
-      const { data: legacy } = await sb.from('user_configs')
-        .select('vision_primary')
-        .eq('user_id', store.currentUserId.value)
-        .maybeSingle()
-      screenshotVisionPrimary.value = normalizeProvider(legacy?.vision_primary)
-      photoVisionPrimary.value = 'qwen'
-      store.showFlash('⚠ 需要先执行数据库迁移 060，才能保存分链路配置')
-      return
-    }
-    store.showFlash('⚠ 配置加载失败：' + configErrorMessage(error))
-    return
-  }
-  screenshotVisionPrimary.value = normalizeProvider(data?.screenshot_vision_primary || data?.vision_primary)
-  photoVisionPrimary.value = normalizeProvider(data?.photo_vision_primary, 'qwen')
-  qwenScreenshotModel.value = normalizeQwenModel(data?.qwen_screenshot_model)
-  qwenPhotoModel.value = normalizeQwenModel(data?.qwen_photo_model)
-  qwenScreenshotThinking.value = data?.qwen_screenshot_enable_thinking ?? false
-  qwenPhotoThinking.value = data?.qwen_photo_enable_thinking ?? false
+  const result = await store.loadUserSettings()
+  const settings = store.settingsState
+  screenshotVisionPrimary.value = normalizeProvider(settings.screenshotVisionPrimary || settings.visionPrimary)
+  photoVisionPrimary.value = normalizeProvider(settings.photoVisionPrimary, 'qwen')
+  qwenScreenshotModel.value = normalizeQwenModel(settings.qwenScreenshotModel)
+  qwenPhotoModel.value = normalizeQwenModel(settings.qwenPhotoModel)
+  qwenScreenshotThinking.value = settings.qwenScreenshotThinking
+  qwenPhotoThinking.value = settings.qwenPhotoThinking
+  if (!result?.ok && !result?.stale) store.showFlash('⚠ 配置加载失败：' + (result.error?.message || '未知错误'))
+  if (result?.legacy) store.showFlash('⚠ 当前数据库使用兼容配置，分链路设置将在迁移后生效')
 })
 </script>
