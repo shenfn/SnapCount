@@ -1,0 +1,137 @@
+{
+  "version": "expression-plan-selection-v0.1",
+  "scenarios": ["CORE-008", "CORE-009", "CORE-010", "CORE-011", "CORE-012"],
+  "surface_cases": [
+    {
+      "name": "covered_fact_uses_exact_fact_fallback",
+      "surface": "shortcut_notification",
+      "candidates": [
+        {
+          "candidate_id": "daily",
+          "dimension": "merchant_daily_count_total",
+          "claim_type": "fact",
+          "fact_subtype": "aggregated",
+          "claim": { "semantic_key": "merchant_daily_count_total", "canonical_text": "当日次数" },
+          "selection_hints": {},
+          "scoring": { "exposure": { "count": 0 }, "surfaces": { "shortcut_notification": { "eligible": true, "score": 78, "passes_threshold": true } } }
+        },
+        {
+          "candidate_id": "amounts",
+          "dimension": "merchant_daily_amount_structure",
+          "claim_type": "fact",
+          "fact_subtype": "aggregated",
+          "claim": { "semantic_key": "merchant_daily_amount_structure", "canonical_text": "当日金额结构" },
+          "selection_hints": {},
+          "scoring": { "exposure": { "count": 0 }, "surfaces": { "shortcut_notification": { "eligible": true, "score": 56, "passes_threshold": false } } }
+        }
+      ],
+      "expected": {
+        "selected": [{ "candidate_id": "amounts", "semantic_key": "merchant_daily_amount_structure", "selection_mode": "exact_fact_fallback" }],
+        "fallback_used": true,
+        "silent": false,
+        "excluded_reasons": { "daily": "covered_by_fixed_content", "amounts": "selected_as_exact_fact_fallback" }
+      }
+    },
+    {
+      "name": "record_context_uses_surface_fallback",
+      "surface": "record_detail",
+      "candidates": [
+        {
+          "candidate_id": "record-context",
+          "dimension": "expense_current_record_context",
+          "claim_type": "fact",
+          "fact_subtype": "observed",
+          "claim": { "semantic_key": "expense_current_record_context", "canonical_text": "当前记录事实" },
+          "selection_hints": { "fallback_only_surfaces": ["record_detail"] },
+          "scoring": { "exposure": { "count": 0 }, "surfaces": { "record_detail": { "eligible": true, "score": 69, "passes_threshold": true } } }
+        }
+      ],
+      "expected": {
+        "selected": [{ "candidate_id": "record-context", "semantic_key": "expense_current_record_context", "selection_mode": "surface_fallback" }],
+        "fallback_used": false,
+        "silent": false,
+        "excluded_reasons": { "record-context": "selected_as_surface_fallback" }
+      }
+    },
+    {
+      "name": "weekly_diversity_keeps_one_candidate",
+      "surface": "weekly_report",
+      "candidates": [
+        {
+          "candidate_id": "category-weekly",
+          "dimension": "expense_category_week_to_date_vs_previous_week_same_period",
+          "claim_type": "comparison",
+          "fact_subtype": null,
+          "claim": { "semantic_key": "expense_category_week_to_date_vs_previous_week_same_period", "canonical_text": "分类周比较" },
+          "selection_hints": { "diversity_groups": { "weekly_report": "expense_week_to_date_comparison" } },
+          "scoring": { "exposure": { "count": 0 }, "surfaces": { "weekly_report": { "eligible": true, "score": 87, "passes_threshold": true } } }
+        },
+        {
+          "candidate_id": "merchant-weekly",
+          "dimension": "merchant_week_to_date_vs_previous_week_same_period",
+          "claim_type": "comparison",
+          "fact_subtype": null,
+          "claim": { "semantic_key": "merchant_week_to_date_vs_previous_week_same_period", "canonical_text": "商户周比较" },
+          "selection_hints": { "diversity_groups": { "weekly_report": "expense_week_to_date_comparison" } },
+          "scoring": { "exposure": { "count": 0 }, "surfaces": { "weekly_report": { "eligible": true, "score": 86, "passes_threshold": true } } }
+        }
+      ],
+      "expected": {
+        "selected": [{ "candidate_id": "category-weekly", "semantic_key": "expense_category_week_to_date_vs_previous_week_same_period", "selection_mode": "threshold" }],
+        "fallback_used": false,
+        "silent": false,
+        "excluded_reasons": { "merchant-weekly": "duplicate_diversity_group" }
+      }
+    },
+    {
+      "name": "period_cooldown_blocks_repeat",
+      "surface": "weekly_report",
+      "candidates": [
+        {
+          "candidate_id": "weekly",
+          "dimension": "merchant_week_to_date_vs_previous_week_same_period",
+          "claim_type": "comparison",
+          "fact_subtype": null,
+          "claim": { "semantic_key": "merchant_week_to_date_vs_previous_week_same_period", "canonical_text": "商户周比较" },
+          "selection_hints": { "max_exposure_count": { "weekly_report": 1 } },
+          "scoring": {
+            "exposure": { "count": 1 },
+            "dedupe_exposure_by_surface": { "weekly_report": { "count": 1 } },
+            "surfaces": { "weekly_report": { "eligible": true, "score": 86, "passes_threshold": true } }
+          }
+        }
+      ],
+      "expected": {
+        "selected": [],
+        "fallback_used": false,
+        "silent": true,
+        "excluded_reasons": { "weekly": "period_cooldown" }
+      }
+    }
+  ],
+  "expression_case": {
+    "candidates": [
+      {
+        "candidate_id": "first-occurrence",
+        "dimension": "expense_merchant_first_occurrence",
+        "claim_type": "fact",
+        "fact_subtype": "observed",
+        "claim": { "semantic_key": "expense_merchant_first_occurrence", "canonical_text": "首次记录" },
+        "selection_hints": {},
+        "scoring": {
+          "exposure": { "count": 0 },
+          "surfaces": {
+            "shortcut_notification": { "eligible": true, "score": 80, "passes_threshold": true },
+            "pwa_pending_ai_card": { "eligible": true, "score": 80, "passes_threshold": true },
+            "record_detail": { "eligible": true, "score": 80, "passes_threshold": true },
+            "weekly_report": { "eligible": true, "score": 80, "passes_threshold": true }
+          }
+        }
+      }
+    ],
+    "expected_surfaces": ["shortcut_notification", "pwa_pending_ai_card", "record_detail", "weekly_report"],
+    "expected_selected_count": 1,
+    "expected_selection_mode": "threshold"
+  },
+  "unknown_surface": "unsupported_surface"
+}
