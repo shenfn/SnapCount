@@ -64,15 +64,13 @@ node --test src/repositories/__tests__/expressionRepository.test.mjs src/feature
 | `npm run governance:arch` | 通过；计数保持 tools 0、页面直连 5、Domain 禁止依赖 0 |
 | `npm run build` | 通过；153 modules transformed |
 
-## 未验证与剩余风险
+## PR 结果与剩余风险
 
-- GitHub PR 门禁尚未运行，本地通过不替代 PR 结论。
+- GitHub PR #66 综合、治理、iOS 变更检测和预览门禁已通过，并以 `52aa92a` 合并到 main。
 - `npm ci` 报告 5 个既有依赖漏洞（1 moderate、4 high）；本切片没有升级依赖或运行自动修复。
 - Vite 仍报告 vconsole `eval` 与大 chunk 警告；均非本切片引入，未借机扩展范围。
 - 页面 Supabase 直连仍为 5 项，等待后续“设置与隐私”和“认证会话”切片逐步 ratchet。
 
 ## 下一步
 
-1. 提交实现分支 PR，等待治理、综合和适用门禁。
-2. PR 通过并合并后，把 PWA-001 标记为完成。
-3. 从最新 main 建立下一独立 worktree，只读评估“设置与隐私”边界，不直接继续拆 Store。
+PWA-001 已完成；当前任务转入 PWA-008 设置与隐私边界评估，见 `docs/handoff/A3-PWA设置隐私边界评估-2026-08-16.md`。
