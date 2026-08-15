@@ -132,7 +132,16 @@ create table public.user_routing_feedback (id uuid primary key default gen_rando
 create table public.ai_insights (id uuid primary key default gen_random_uuid(), user_id uuid);
 create table public.user_companion_memories (
   id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   user_id uuid,
+  memory_key text,
+  memory_type text,
+  evidence_jsonb jsonb not null default '{}'::jsonb,
+  confidence numeric not null default 0.6,
+  weight numeric not null default 1.0,
+  last_seen_at timestamptz not null default now(),
+  expires_at timestamptz,
   source_table text,
   source_id uuid,
   content text
@@ -182,6 +191,7 @@ alter table public.transactions enable row level security;
 alter table public.income_records enable row level security;
 alter table public.data_records enable row level security;
 alter table public.staging_records enable row level security;
+alter table public.user_companion_memories enable row level security;
 alter table storage.objects enable row level security;
 
 create policy tx_user_access on public.transactions
@@ -203,6 +213,7 @@ create policy allow_auth_delete_receipt_images on storage.objects
   for delete to authenticated using (bucket_id = 'receipt-images');
 
 grant select, insert, update, delete on public.transactions, public.income_records, public.data_records, public.staging_records to authenticated;
+grant select, delete on public.user_companion_memories to authenticated;
 grant select, delete on storage.objects to anon, authenticated;
 grant all on all tables in schema public, storage, auth to service_role;
 

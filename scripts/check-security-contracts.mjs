@@ -31,6 +31,10 @@ const ingestSource = await readFile(
   path.join(repoRoot, "supabase", "functions", "ingest-receipt", "index.ts"),
   "utf8",
 );
+const ingestSignalsSource = await readFile(
+  path.join(repoRoot, "supabase", "functions", "ingest-receipt", "signals.ts"),
+  "utf8",
+);
 const expressionShadowSource = await readFile(
   path.join(repoRoot, "supabase", "functions", "ingest-receipt", "expression-shadow.ts"),
   "utf8",
@@ -77,6 +81,10 @@ const expressionFeedbackSignalKeyHotfixSql = await readFile(
 );
 const expressionFeedbackSignalKeyHotfixFixtureSql = await readFile(
   path.join(repoRoot, "scripts", "test-expression-feedback-signal-key-hotfix-fixture.sql"),
+  "utf8",
+);
+const personalContextMigrationSql = await readFile(
+  path.join(repoRoot, "supabase", "migrations", "20260806100000_personal_context_memory_contract.sql"),
   "utf8",
 );
 
@@ -200,7 +208,14 @@ assert.match(ingestSource, /improvementConsent: privacyConfig\.expressionImprove
 assert.match(ingestSource, /ai_feedback: payload\.aiFeedback \?\? null/);
 assert.doesNotMatch(ingestSource, /payload\.ai[\s\S]{0,80}\.ai_feedback[\s\S]{0,80}\?\? null/);
 assert.match(ingestSource, /validateModelTone/);
-assert.match(ingestSource, /hasModelOwnedStatisticalClaim/);
+assert.match(ingestSignalsSource, /export function hasModelOwnedStatisticalClaim/);
+assert.match(ingestSignalsSource, /signalSupportsStatisticalClaim/);
+assert.match(personalContextMigrationSql, /create or replace function public\.get_companion_semantic_memories\(p_user_id uuid\)/i);
+assert.match(personalContextMigrationSql, /revoke execute on function public\.get_companion_semantic_memories\(uuid\)[\s\S]*from public, anon, authenticated/i);
+assert.match(personalContextMigrationSql, /grant execute on function public\.get_companion_semantic_memories\(uuid\)\s+to service_role/i);
+assert.match(personalContextMigrationSql, /revoke insert, update on table public\.user_companion_memories from authenticated/i);
+assert.match(personalContextMigrationSql, /create policy user_companion_memories_select/i);
+assert.match(personalContextMigrationSql, /create policy user_companion_memories_delete/i);
 
 assert.match(financeVocabularySql, /create table if not exists public\.user_finance_vocabulary/i);
 assert.match(financeVocabularySql, /user_id uuid not null references auth\.users\(id\) on delete cascade/i);

@@ -67,6 +67,18 @@ select public.security_test_assert(
     and has_function_privilege('service_role', 'public.cleanup_expression_delivery_snapshots()', 'execute'),
   'delivery snapshot retention cleanup must remain service-only'
 );
+select public.security_test_assert(
+  not has_function_privilege('authenticated', 'public.get_companion_semantic_memories(uuid)', 'execute')
+    and has_function_privilege('service_role', 'public.get_companion_semantic_memories(uuid)', 'execute'),
+  'semantic companion memory RPC must remain service-only'
+);
+select public.security_test_assert(
+  has_table_privilege('authenticated', 'public.user_companion_memories', 'select')
+    and has_table_privilege('authenticated', 'public.user_companion_memories', 'delete')
+    and not has_table_privilege('authenticated', 'public.user_companion_memories', 'insert')
+    and not has_table_privilege('authenticated', 'public.user_companion_memories', 'update'),
+  'authenticated users may view/delete memories but not insert/update them'
+);
 
 select set_config('request.jwt.claim.role', 'service_role', false);
 select public.replace_expression_feedback_bundle(
