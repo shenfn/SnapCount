@@ -76,7 +76,7 @@ jobs:
 
       - name: Test expression core in Deno
         if: ${{ hashFiles('supabase/functions/_shared/expression-core/deno_test.mjs') != '' }}
-        run: deno test --no-lock supabase/functions/_shared/expression-core/deno_test.mjs
+        run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/deno_test.mjs
 
       - name: Check Edge Functions
         run: |
