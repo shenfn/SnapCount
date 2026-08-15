@@ -19,8 +19,8 @@
 
 - 评估：已完成。
 - Spec/ADR：已建立。
-- 实现迁移：待建立 `feature/表达核心跨记录关系` 分支。
-- Deno：本 Windows 环境未安装，需由 PR CI 验证。
+- 实现迁移：已完成并由 PR #57 合并，合并提交 `58c11ad`。
+- Deno：本 Windows 环境未安装；PR #57 Release Validation 已补齐双运行时验证。
 
 ## 实现阶段追加
 
@@ -28,11 +28,10 @@
 - 最小实现：新增生产 `cross-record-relationships.mjs`，Lab 原路径改为 wrapper，Edge Planner 改为直接引用生产核心；查询字段和 Planner 装配未改动。
 - 新增 CORE-049 至 CORE-055 共享 JSON fixture、Node/Deno runner 和 wrapper 兼容测试。
 - 本地绿灯：CORE-008 fixture 1/1、wrapper 1/1、旧 cross-record 5/5、表达核心/比较/周期/事实候选回归均通过；边界检查、治理检查和 `git diff --check` 通过。
-- 环境失败：完整 Planner 逐文件回归中 5 个旧测试因缺少 `esbuild` 无法启动；Windows 未安装 Deno，不能将其写成业务失败或 Deno 通过。
-- 生产 `tools/` 反向依赖预计由 5 项降至 4 项，需由 CI/静态检查最终确认。
+- 环境失败：本地完整 Planner 逐文件回归中 5 个旧测试因缺少 `esbuild` 无法启动，且 Windows 未安装 Deno；PR #57 CI 后续已验证完整 Planner、Deno 和 Edge 检查通过。
+- 生产 `tools/` 反向依赖由 5 项降至 4 项，已由 PR #57 架构检查确认。
 
 ## 下一步
 
-1. 等待实现 PR 的 Node/Deno、Edge、Planner 和治理门禁。
-2. CI 通过后合并实现 PR，并将 A2 当前任务收口到下一片纯函数评估。
-3. 保持根工作区、其他 worktree、PWA/iOS 和生产部署冻结。
+1. CORE-008 已收口；由 CORE-009 实体归一化切片接续。
+2. 保持根工作区、其他 worktree、PWA/iOS 和生产部署冻结。
