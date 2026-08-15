@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "governance:check": "node scripts/check-project-governance.mjs",
     "governance:arch": "node scripts/check-architecture-boundaries.mjs",
+    "test:expression-core": "node --test supabase/functions/_shared/expression-core/node.test.mjs",
+    "check:expression-core-boundary": "node scripts/check-expression-core-boundary.mjs",
     "c2:wip:check": "node scripts/check-c2-root-wip-snapshot.mjs",
     "c2:wip:export": "node scripts/export-c2-wip-patches.mjs",
     "logs:ai": "node --env-file=.env.local scripts/show-ai-logs.mjs",
