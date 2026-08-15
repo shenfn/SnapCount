@@ -22,9 +22,17 @@
 - 实现迁移：待建立 `feature/表达核心跨记录关系` 分支。
 - Deno：本 Windows 环境未安装，需由 PR CI 验证。
 
+## 实现阶段追加
+
+- 红灯：共享 Node runner 在生产核心文件缺失时按预期以 `ERR_MODULE_NOT_FOUND` 失败。
+- 最小实现：新增生产 `cross-record-relationships.mjs`，Lab 原路径改为 wrapper，Edge Planner 改为直接引用生产核心；查询字段和 Planner 装配未改动。
+- 新增 CORE-049 至 CORE-055 共享 JSON fixture、Node/Deno runner 和 wrapper 兼容测试。
+- 本地绿灯：CORE-008 fixture 1/1、wrapper 1/1、旧 cross-record 5/5、表达核心/比较/周期/事实候选回归均通过；边界检查、治理检查和 `git diff --check` 通过。
+- 环境失败：完整 Planner 逐文件回归中 5 个旧测试因缺少 `esbuild` 无法启动；Windows 未安装 Deno，不能将其写成业务失败或 Deno 通过。
+- 生产 `tools/` 反向依赖预计由 5 项降至 4 项，需由 CI/静态检查最终确认。
+
 ## 下一步
 
-1. 合并本评估文档 PR。
-2. 从最新 `origin/main` 建 CORE-008 实现 worktree。
-3. 新增共享 Node/Deno fixture，先验证目标文件缺失时的有效红灯。
-4. 机械迁移、替换 Lab wrapper、切 Edge 导入，并跑旧回归及完整 Planner。
+1. 等待实现 PR 的 Node/Deno、Edge、Planner 和治理门禁。
+2. CI 通过后合并实现 PR，并将 A2 当前任务收口到下一片纯函数评估。
+3. 保持根工作区、其他 worktree、PWA/iOS 和生产部署冻结。

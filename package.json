@@ -23,6 +23,8 @@
     "test:expression-recurrence-wrapper-compat": "node --test scripts/test-recurrence-wrapper-compat.mjs",
     "test:expression-comparison": "node --test supabase/functions/_shared/expression-core/comparison.node.test.mjs",
     "test:expression-comparison-wrapper-compat": "node --test scripts/test-comparison-wrapper-compat.mjs",
+    "test:expression-cross-record": "node --test supabase/functions/_shared/expression-core/cross-record.node.test.mjs",
+    "test:expression-cross-record-wrapper-compat": "node --test scripts/test-cross-record-wrapper-compat.mjs",
     "check:expression-core-boundary": "node scripts/check-expression-core-boundary.mjs",
     "c2:wip:check": "node scripts/check-c2-root-wip-snapshot.mjs",
     "c2:wip:export": "node scripts/export-c2-wip-patches.mjs",
