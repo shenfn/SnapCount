@@ -1,0 +1,2359 @@
+diff --git a/supabase/functions/ingest-receipt/index.ts b/supabase/functions/ingest-receipt/index.ts
+index a54935f..f6b5292 100644
+--- a/supabase/functions/ingest-receipt/index.ts
++++ b/supabase/functions/ingest-receipt/index.ts
+@@ -5,6 +5,8 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.4
+ import jpeg from "npm:jpeg-js@0.4.4";
+ import { decode as decodePng } from "npm:fast-png@6.2.0";
+ import { PROMPT, buildPrompt, buildFeedbackPrompt, buildVoicePrompt } from "./prompts.ts";
++import { buildContextPacket, normalizeSemanticMemories } from "./context-packet.ts";
++import type { ContextPacket } from "./context-packet.ts";
+ import { submitExpressionFeedback } from "./expression-feedback.ts";
+ import {
+   acknowledgeRecordExpressionPlan,
+@@ -17,7 +19,6 @@ import {
+   selectSignals,
+   validateModelTone,
+   hasUnsupportedFinanceCompanionClaim,
+-  hasModelOwnedStatisticalClaim,
+   parsePaceMinutes,
+ } from "./signals.ts";
+ import type { CurrentFacts, DomainProfilesMap, DomainSignal } from "./signals.ts";
+@@ -1962,12 +1963,22 @@ async function loadCompanionContext(
+   fallbackSettings: CompanionSettings = DEFAULT_COMPANION_SETTINGS,
+ ): Promise<CompanionContext> {
+   if (!userId) return { settings: fallbackSettings, memory: null };
+-  const { data, error } = await supabase.rpc("get_companion_context", { p_user_id: userId });
++  const [{ data, error }, semanticResult] = await Promise.all([
++    supabase.rpc("get_companion_context", { p_user_id: userId }),
++    supabase.rpc("get_companion_semantic_memories", { p_user_id: userId }),
++  ]);
+   if (error) {
+     console.warn("Companion context fetch failed:", error.message);
+     return { settings: fallbackSettings, memory: null };
+   }
+-  const raw = (data || {}) as Record<string, unknown>;
++  const raw = { ...((data || {}) as Record<string, unknown>) };
++  if (!semanticResult.error && Array.isArray(semanticResult.data)) {
++    raw.long_term = semanticResult.data;
++  } else if (semanticResult.error) {
++    // Before the migration is applied, fall back to the legacy rows. Their
++    // missing provenance is intentionally treated as non-expressible by the packet.
++    console.warn("Semantic memory provenance RPC unavailable; using conservative legacy memory", semanticResult.error.message);
++  }
+   const settingsRaw = (raw.settings || {}) as Record<string, unknown>;
+   const settings: CompanionSettings = {
+     enabled: settingsRaw.enabled !== false,
+@@ -1980,6 +1991,20 @@ async function loadCompanionContext(
+   return { settings, memory: settings.memoryEnabled ? raw : null };
+ }
+ 
++function isRecordValue(value: unknown): value is Record<string, unknown> {
++  return !!value && typeof value === "object" && !Array.isArray(value);
++}
++
++function recentCompanionLinesFromContext(memory: Record<string, unknown> | null): string[] {
++  if (!memory || !isRecordValue(memory.short_term)) return [];
++  const recent = memory.short_term.recent_companions;
++  if (!Array.isArray(recent)) return [];
++  return recent
++    .map((item) => isRecordValue(item) ? item.t : null)
++    .filter((item): item is string => typeof item === "string" && item.trim() !== "")
++    .slice(0, 5);
++}
++
+ function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
+   for (const value of values) {
+     const normalized = normalizeString(value);
+@@ -2018,6 +2043,16 @@ function sanitizeCompanionMessageForTime(
+     .slice(0, 60);
+ }
+ 
++function sanitizeGeneratedCompanion(
++  message: string | null,
++  ai: AIResult,
++  timeContext: TimeContext | null,
++): string | null {
++  let safe = sanitizeCompanionMessageForContent(message, ai);
++  if (safe && timeContext) safe = sanitizeCompanionMessageForTime(safe, ai, timeContext);
++  return safe;
++}
++
+ const COMPANION_FORBIDDEN_PATTERNS = [
+   /刚吃完.+又来/,
+   /这周.*吃过.*今天换成/,
+@@ -2273,6 +2308,29 @@ function buildSignalFallbackAIFeedback(
+   };
+ }
+ 
++function mergeSignalFeedback(
++  modelFeedback: Partial<AIFeedback> | null,
++  ruleFeedback: AIFeedback,
++): AIFeedback {
++  if (!modelFeedback) return ruleFeedback;
++  return {
++    ...ruleFeedback,
++    ...modelFeedback,
++    version: "feedback-v1",
++    domain_key: modelFeedback.domain_key ?? ruleFeedback.domain_key,
++    badge: modelFeedback.badge ?? ruleFeedback.badge,
++    icon: modelFeedback.icon ?? ruleFeedback.icon,
++    band: modelFeedback.band ?? ruleFeedback.band,
++    tone: modelFeedback.tone ?? ruleFeedback.tone,
++    emotion_line: modelFeedback.emotion_line ?? ruleFeedback.emotion_line,
++    confidence: modelFeedback.confidence ?? ruleFeedback.confidence,
++    // 规则层保留已核实候选作为最后依据；模型有自己的合规判断依据时优先保留。
++    utility_line: modelFeedback.utility_line ?? ruleFeedback.utility_line,
++    detail_reason: modelFeedback.detail_reason ?? ruleFeedback.detail_reason,
++    source: "hybrid",
++  };
++}
++
+ function buildBuiltinAIFeedback(
+   domainKey: BuiltinDomainKey,
+   built: { payload: Record<string, unknown>; title: string; summary: string },
+@@ -2702,12 +2760,22 @@ async function upsertCompanionMemory(
+   },
+ ): Promise<void> {
+   if (!payload.userId) return;
++  const evidence = {
++    ...payload.evidence,
++    ...(payload.sourceTable ? {
++      source: payload.evidence.source ?? "record_derived",
++      source_table: payload.sourceTable,
++    } : {}),
++    ...(payload.sourceId ? {
++      source_record_id: payload.sourceId,
++    } : {}),
++  };
+   const { error } = await supabase.from("user_companion_memories").upsert({
+     user_id: payload.userId,
+     memory_key: payload.memoryKey,
+     memory_type: payload.memoryType,
+     content: memoryText(payload.content),
+-    evidence_jsonb: payload.evidence,
++    evidence_jsonb: evidence,
+     confidence: payload.confidence ?? 0.65,
+     weight: payload.weight ?? 1,
+     last_seen_at: new Date().toISOString(),
+@@ -2732,6 +2800,11 @@ async function rememberCompanionSignals(
+   },
+ ): Promise<void> {
+   if (!params.userId || !params.recordId || !params.recordTable) return;
++  // Domain profiles and Signals are the authority for recomputable facts. Do
++  // not grow the semantic-memory table with one-record summaries by default.
++  // The flag remains as a temporary rollback switch; provenance is stamped as
++  // record_derived so even an explicitly enabled legacy path cannot express it.
++  if (!getEnvBoolean("COMPANION_DERIVED_MEMORY_WRITES_ENABLED", false)) return;
+   const expiresSoon = new Date(Date.now() + 21 * 24 * 3600 * 1000).toISOString();
+   const expiresLater = new Date(Date.now() + 60 * 24 * 3600 * 1000).toISOString();
+   const writes: Promise<void>[] = [];
+@@ -3307,6 +3380,8 @@ async function regenerateFeedbackWithSecondCall(opts: {
+   ai: AIResult;
+   domainKey: string;
+   builtPayload?: Record<string, unknown> | null;
++  domainProfiles: DomainProfilesMap;
++  memory?: Record<string, unknown> | null;
+   timeContext: TimeContext | null;
+   timingSignal: AIFeedback["timing_signal"] | null;
+   promptCtx: PromptContextLike;
+@@ -3323,6 +3398,36 @@ async function regenerateFeedbackWithSecondCall(opts: {
+     };
+   }
+   try {
++    const recordFacts = voiceRecordFacts(
++      opts.domainKey,
++      opts.ai,
++      opts.builtPayload ?? null,
++      normalizeAmount(opts.ai.amount),
++    );
++    const signals = selectSignals(
++      opts.domainKey,
++      opts.domainProfiles,
++      buildCurrentFactsFor(
++        opts.domainKey,
++        opts.ai,
++        opts.builtPayload ?? null,
++        normalizeAmount(opts.ai.amount),
++        opts.promptCtx.clientLocalTime ?? null,
++      ),
++    );
++    const contextPacket = buildContextPacket({
++      domainKey: opts.domainKey,
++      recordFacts: { ...recordFacts, time_context: opts.timeContext },
++      signals,
++      memory: opts.memory ?? null,
++      expressionPreferences: {
++        persona: opts.promptCtx.persona ?? null,
++        memory_strength: opts.promptCtx.memoryStrength ?? null,
++        expression_style: opts.promptCtx.expressionStyle ?? null,
++        custom_note: opts.promptCtx.customNote ?? null,
++      },
++      recentExpressionContext: opts.promptCtx.recentCompanionLines ?? [],
++    });
+     const promptText = buildFeedbackPrompt({
+       clientLocalTime: opts.promptCtx.clientLocalTime ?? null,
+       weekday: opts.promptCtx.weekday ?? null,
+@@ -3344,8 +3449,7 @@ async function regenerateFeedbackWithSecondCall(opts: {
+       },
+       builtPayload: opts.builtPayload ?? null,
+       timeContext: opts.timeContext ? (opts.timeContext as unknown as Record<string, unknown>) : null,
+-      memory: opts.promptCtx.memory ?? null,
+-      memoryEnabled: opts.promptCtx.memoryEnabled,
++      contextPacket,
+       persona: opts.promptCtx.persona ?? null,
+       memoryStrength: opts.promptCtx.memoryStrength ?? null,
+       expressionStyle: opts.promptCtx.expressionStyle ?? null,
+@@ -3354,22 +3458,20 @@ async function regenerateFeedbackWithSecondCall(opts: {
+     });
+     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.85);
+     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
+-    const recordFacts = voiceRecordFacts(
+-      opts.domainKey,
+-      opts.ai,
+-      opts.builtPayload ?? null,
+-      normalizeAmount(opts.ai.amount),
+-    );
+     const check = validateModelTone([
+       normalized.companion_message,
+       normalized.ai_feedback?.emotion_line ?? null,
+       normalized.ai_feedback?.utility_line ?? null,
+       normalized.ai_feedback?.detail_reason ?? null,
+       normalized.ai_feedback?.badge ?? null,
+-    ], JSON.stringify(recordFacts));
++    ], JSON.stringify(recordFacts), signals);
+     if (!check.ok) {
+       const bad = new Set(check.badIndexes);
+-      const companion = bad.has(0) ? null : normalized.companion_message;
++      const companion = sanitizeGeneratedCompanion(
++        bad.has(0) ? null : normalized.companion_message,
++        opts.ai,
++        opts.timeContext,
++      );
+       let aiFeedback = normalized.ai_feedback;
+       if (aiFeedback) {
+         if (bad.has(1)) {
+@@ -3392,7 +3494,7 @@ async function regenerateFeedbackWithSecondCall(opts: {
+       };
+     }
+     return {
+-      companion_message: normalized.companion_message,
++      companion_message: sanitizeGeneratedCompanion(normalized.companion_message, opts.ai, opts.timeContext),
+       ai_feedback: normalized.ai_feedback,
+       raw_text: rawText,
+       duration_ms: Date.now() - startedAt,
+@@ -3411,8 +3513,6 @@ async function regenerateFeedbackWithSecondCall(opts: {
+ interface PromptContextLike {
+   clientLocalTime?: string | null;
+   weekday?: string | null;
+-  memory?: Record<string, unknown> | null;
+-  memoryEnabled?: boolean | null;
+   persona?: string | null;
+   memoryStrength?: string | null;
+   expressionStyle?: string | null;
+@@ -3538,12 +3638,15 @@ async function generateVoiceFeedback(opts: {
+   normalizedAmount?: number | null;
+   domainProfiles: DomainProfilesMap;
+   timingSignal: AIFeedback["timing_signal"] | null;
++  timeContext: TimeContext | null;
+   clientLocalTime: string | null;
+   weekday: string | null;
+   persona?: string | null;
++  memoryStrength?: string | null;
+   expressionStyle?: string | null;
+   customNote?: string | null;
+   recentCompanionLines?: string[];
++  memory?: Record<string, unknown> | null;
+   textProvider: ProviderConfig | null;
+ }): Promise<VoiceCallResult> {
+   const startedAt = Date.now();
+@@ -3556,6 +3659,19 @@ async function generateVoiceFeedback(opts: {
+     return { companion_message: null, ai_feedback: null, raw_text: null, duration_ms: 0, error: "no_text_provider", signals };
+   }
+   const recordFacts = voiceRecordFacts(opts.domainKey, opts.ai, opts.builtPayload ?? null, opts.normalizedAmount ?? null);
++  const contextPacket = buildContextPacket({
++    domainKey: opts.domainKey,
++    recordFacts,
++    signals,
++    memory: opts.memory ?? null,
++      expressionPreferences: {
++        persona: opts.persona ?? null,
++        memory_strength: opts.memoryStrength ?? null,
++      expression_style: opts.expressionStyle ?? null,
++      custom_note: opts.customNote ?? null,
++    },
++    recentExpressionContext: opts.recentCompanionLines ?? [],
++  });
+   try {
+     const promptText = buildVoicePrompt({
+       clientLocalTime: opts.clientLocalTime,
+@@ -3563,6 +3679,7 @@ async function generateVoiceFeedback(opts: {
+       domainKey: opts.domainKey,
+       recordFacts,
+       signals: signals.map((s) => ({ kind: s.kind, fact: s.fact })),
++      contextPacket,
+       persona: opts.persona ?? null,
+       expressionStyle: opts.expressionStyle ?? null,
+       customNote: opts.customNote ?? null,
+@@ -3570,7 +3687,7 @@ async function generateVoiceFeedback(opts: {
+     });
+     const { rawText, parsed } = await callTextOnlyJsonGeneration(opts.textProvider, promptText, 0.8);
+     const normalized = normalizeFeedbackPayload(parsed, opts.domainKey, opts.timingSignal);
+-    // 模型只拥有语气：画像统计数字与时间口径由规则层直接呈现。
++    // Voice 层可以忠实转述已核实信号；数字和统计口径仍由信号白名单闭环约束。
+     const check = validateModelTone(
+       [
+         normalized.companion_message,
+@@ -3580,9 +3697,11 @@ async function generateVoiceFeedback(opts: {
+         normalized.ai_feedback?.badge ?? null,
+       ],
+       JSON.stringify(recordFacts),
++      signals,
+     );
+     const bad = new Set(check.badIndexes);
+-    const companion = bad.has(0) ? null : normalized.companion_message;
++    let companion = bad.has(0) ? null : normalized.companion_message;
++    companion = sanitizeGeneratedCompanion(companion, opts.ai, opts.timeContext);
+     let modelFeedback = normalized.ai_feedback;
+     if (modelFeedback) {
+       if (bad.has(1)) {
+@@ -3601,14 +3720,12 @@ async function generateVoiceFeedback(opts: {
+     if (verifiedSignals.length > 0) {
+       const ruleFeedback = buildSignalFallbackAIFeedback(opts.domainKey, verifiedSignals, opts.timingSignal);
+       if (ruleFeedback) {
+-        const tone = companion ?? modelFeedback?.emotion_line ?? null;
++        const mergedFeedback = mergeSignalFeedback(modelFeedback, ruleFeedback);
++        const fallbackTone = sanitizeGeneratedCompanion(mergedFeedback.emotion_line ?? null, opts.ai, opts.timeContext);
++        const tone = companion ?? fallbackTone;
+         return {
+           companion_message: tone ?? ruleFeedback.emotion_line,
+-          ai_feedback: {
+-            ...ruleFeedback,
+-            emotion_line: tone ?? ruleFeedback.emotion_line,
+-            source: tone ? "hybrid" : "rule",
+-          },
++          ai_feedback: mergedFeedback,
+           raw_text: rawText,
+           duration_ms: Date.now() - startedAt,
+           signals,
+@@ -4988,6 +5105,81 @@ Deno.serve(async (req) => {
+       const jsonBody = await req.json().catch(() => ({}));
+       const action = jsonBody?.action;
+ 
++      if (action === "list_companion_memories" || action === "delete_companion_memory") {
++        const actionUserId = await authenticatedUserId(req);
++        const userClient = authenticatedSupabaseClient(req);
++        if (!actionUserId || !userClient) {
++          return new Response(JSON.stringify({ error: "未授权" }), {
++            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
++          });
++        }
++
++        if (action === "list_companion_memories") {
++          const { data, error: memoryError } = await userClient.from("user_companion_memories")
++            .select("id,memory_key,memory_type,content,evidence_jsonb,confidence,weight,last_seen_at,expires_at,source_table,source_id")
++            .eq("user_id", actionUserId)
++            .order("weight", { ascending: false })
++            .order("last_seen_at", { ascending: false });
++          if (memoryError) {
++            return new Response(JSON.stringify({ ok: false, error: memoryError.message }), {
++              status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
++            });
++          }
++          const memories = normalizeSemanticMemories({ long_term: data ?? [] })
++            .filter((memory) => memory.claimability === "expressible")
++            .map((memory) => ({
++              id: memory.memoryId,
++              key: memory.key,
++              type: memory.type,
++              content: memory.content,
++              domain_key: memory.domainKey,
++              entity_key: memory.entityKey,
++              confidence: memory.confidence,
++              last_seen_at: memory.lastSeenAt,
++            }));
++          return new Response(JSON.stringify({ ok: true, data: { memories, count: memories.length } }), {
++            headers: { "Content-Type": "application/json", ...corsHeaders },
++          });
++        }
++
++        const memoryId = typeof jsonBody?.memory_id === "string" ? jsonBody.memory_id.trim() : "";
++        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(memoryId)) {
++          return new Response(JSON.stringify({ ok: false, error: "理解 ID 无效" }), {
++            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
++          });
++        }
++        const { data: existing, error: existingError } = await userClient.from("user_companion_memories")
++          .select("id,memory_key,memory_type,content,evidence_jsonb,confidence,weight,last_seen_at,expires_at,source_table,source_id")
++          .eq("id", memoryId)
++          .eq("user_id", actionUserId)
++          .maybeSingle();
++        if (existingError) {
++          return new Response(JSON.stringify({ ok: false, error: existingError.message }), {
++            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
++          });
++        }
++        const normalizedExisting = existing
++          ? normalizeSemanticMemories({ long_term: [existing] })[0]
++          : null;
++        if (!normalizedExisting || normalizedExisting.claimability !== "expressible") {
++          return new Response(JSON.stringify({ ok: false, error: "理解不存在或不可删除" }), {
++            status: 404, headers: { "Content-Type": "application/json", ...corsHeaders },
++          });
++        }
++        const { error: deleteError } = await userClient.from("user_companion_memories")
++          .delete()
++          .eq("id", memoryId)
++          .eq("user_id", actionUserId);
++        if (deleteError) {
++          return new Response(JSON.stringify({ ok: false, error: deleteError.message }), {
++            status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
++          });
++        }
++        return new Response(JSON.stringify({ ok: true, data: { deleted: true, memory_id: memoryId } }), {
++          headers: { "Content-Type": "application/json", ...corsHeaders },
++        });
++      }
++
+       if (action === "get_record_expression_plan" || action === "ack_record_expression_plan") {
+         const actionUserId = await authenticatedUserId(req);
+         if (!actionUserId) {
+@@ -5653,7 +5845,6 @@ Deno.serve(async (req) => {
+       expressionStyle: companionSettings.expressionStyle,
+       persona: companionSettings.persona,
+       customNote: companionSettings.customNote,
+-      memory: companionContext.memory,
+     });
+     const visionPromptHash = await sha256Short(visionPrompt);
+ 
+@@ -5850,14 +6041,10 @@ Deno.serve(async (req) => {
+       companion: companionDebug(),
+       notification: options.notification,
+     });
+-    // 归一化陪伴文案：去前后空白和引号、压缩换行、截断到 60 字符（约 30 个汉字裕量）
+-    if (typeof ai.companion_message === "string") {
+-      const trimmed = ai.companion_message.replace(/[\r\n]+/g, " ").trim().replace(/^["'""''「『]+|["'""''」』]+$/g, "");
+-      ai.companion_message = trimmed ? trimmed.slice(0, 60) : null;
+-    } else {
+-      ai.companion_message = null;
+-    }
+-    normalizedCompanion = ai.companion_message;
++    // 识别模型不再拥有最终陪伴文案权限。保留 raw 值仅供调试，用户可见内容
++    // 统一由后续 Signals/Voice 或规则兜底生成，避免先展示一版又被二次调用覆盖。
++    ai.companion_message = null;
++    normalizedCompanion = null;
+     if (!companionSettings.enabled) ai.companion_message = null;
+     const recordType: RecordType = ai.record_type ?? "expense";
+     const builtinKey: BuiltinDomainKey | null = isBuiltinDomain(ai.domain_key)
+@@ -5869,9 +6056,6 @@ Deno.serve(async (req) => {
+       ai.record_type = builtinKey;
+       ai.domain_key = builtinKey;
+     }
+-    if (ai.companion_message && hasModelOwnedStatisticalClaim(ai.companion_message)) {
+-      ai.companion_message = null;
+-    }
+     ai.companion_message = sanitizeCompanionMessageForContent(ai.companion_message, ai);
+     contentGuardedCompanion = ai.companion_message;
+     if (ai.companion_message) {
+@@ -6230,12 +6414,15 @@ Deno.serve(async (req) => {
+             normalizedAmount: null,
+             domainProfiles,
+             timingSignal: timingSignalFor(builtinKey, timeContext),
++            timeContext,
+             clientLocalTime,
+             weekday: _weekdayCN,
+             persona: companionSettings.persona,
++            memoryStrength: companionSettings.memoryStrength,
+             expressionStyle: companionSettings.expressionStyle,
+             customNote: companionSettings.customNote,
+-            recentCompanionLines: [],
++            recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
++            memory: companionContext.memory,
+             textProvider,
+           });
+           if (_voiceCall.duration_ms > 0) {
+@@ -6578,30 +6765,33 @@ Deno.serve(async (req) => {
+             normalizedAmount,
+             domainProfiles,
+             timingSignal: timingSignalFor("income", timeContext),
++            timeContext,
+             clientLocalTime,
+             weekday: _weekdayCN,
+             persona: companionSettings.persona,
++            memoryStrength: companionSettings.memoryStrength,
+             expressionStyle: companionSettings.expressionStyle,
+             customNote: companionSettings.customNote,
+-            recentCompanionLines: [],
++            recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
++            memory: companionContext.memory,
+             textProvider,
+           })
+           : await regenerateFeedbackWithSecondCall({
+             ai,
+             domainKey: "income",
+             builtPayload: null,
++            domainProfiles,
++            memory: companionContext.memory,
+             timeContext,
+             timingSignal: timingSignalFor("income", timeContext),
+             promptCtx: {
+               clientLocalTime,
+               weekday: _weekdayCN,
+-              memoryEnabled: companionSettings.memoryEnabled,
+               memoryStrength: companionSettings.memoryStrength,
+               expressionStyle: companionSettings.expressionStyle,
+               persona: companionSettings.persona,
+               customNote: companionSettings.customNote,
+-              memory: companionContext.memory,
+-              recentCompanionLines: [],
++              recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
+             },
+             textProvider,
+           });
+@@ -6828,30 +7018,33 @@ Deno.serve(async (req) => {
+           normalizedAmount,
+           domainProfiles,
+           timingSignal: timingSignalFor("expense", timeContext),
++          timeContext,
+           clientLocalTime,
+           weekday: _weekdayCN,
+           persona: companionSettings.persona,
++          memoryStrength: companionSettings.memoryStrength,
+           expressionStyle: companionSettings.expressionStyle,
+           customNote: companionSettings.customNote,
+-          recentCompanionLines: [],
++          recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
++          memory: companionContext.memory,
+           textProvider,
+         })
+         : await regenerateFeedbackWithSecondCall({
+           ai,
+           domainKey: "expense",
+           builtPayload: null,
++          domainProfiles,
++          memory: companionContext.memory,
+           timeContext,
+           timingSignal: timingSignalFor("expense", timeContext),
+           promptCtx: {
+             clientLocalTime,
+             weekday: _weekdayCN,
+-            memoryEnabled: companionSettings.memoryEnabled,
+             memoryStrength: companionSettings.memoryStrength,
+             expressionStyle: companionSettings.expressionStyle,
+             persona: companionSettings.persona,
+             customNote: companionSettings.customNote,
+-            memory: companionContext.memory,
+-            recentCompanionLines: [],
++            recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
+           },
+           textProvider,
+         });
+diff --git a/supabase/functions/ingest-receipt/prompts.ts b/supabase/functions/ingest-receipt/prompts.ts
+index 567b502..318d876 100644
+--- a/supabase/functions/ingest-receipt/prompts.ts
++++ b/supabase/functions/ingest-receipt/prompts.ts
+@@ -1,3 +1,5 @@
++import type { ContextPacket } from "./context-packet.ts";
++
+ export interface PromptContext {
+   clientLocalTime?: string | null;
+   weekday?: string | null;
+@@ -7,49 +9,48 @@ export interface PromptContext {
+   expressionStyle?: string | null;
+   persona?: string | null;
+   customNote?: string | null;
+-  memory?: Record<string, unknown> | null;
+ }
+ 
+ const PERSONAS: Record<string, string> = {
+   observer: `你是用户的"日常旁观者"：观察细致、情绪稳定、从不评判。
+-- 主要做事实观察，优先引用用户记忆中的具体数字和模式。
++- 主要做事实观察，优先引用 Context Packet 中已授权的具体事实和语义。
+ - 语气像看见了生活的细节，而不是在做分析报告。`,
+   warm: `你是用户温柔的老朋友：关心但不啰嗦。
+ - 优先注意辛苦信号，例如睡得少、深夜消费、连续外卖、很久没运动。
+ - 可以说"我注意到了"，但不要劝、不要教育、不要安排用户。`,
+   sharp: `你是用户毒舌但精准的损友：一针见血，轻轻扎心。
+-- 必须基于记忆或本条记录的事实开损，只损行为模式，不攻击人。
++- 必须基于 Context Packet 或本条记录的事实开损，只损行为模式，不攻击人。
+ - 没有足够数据时就平静陈述，不硬损。`,
+   minimal: `你惜字如金。
+-- 只有记忆显示出明确模式时才写一句极短文案（不超过 15 个汉字）。
++- 只有 Context Packet 显示出明确模式时才写一句极短文案（不超过 15 个汉字）。
+ - 没有强信号时返回空字符串 ""。`,
+ };
+ 
+ const COMPANION_RULES = `【陪伴文案 companion_message】
+-基于本条记录和【用户记忆】写 1 句话作为 companion_message，要求：
++基于本条记录和【已授权语义上下文】写 1 句话作为 companion_message，要求：
+ - 不超过 30 个汉字，最多 1 句，句末标点 1 个
+-- 优先级：长期记忆中的稳定模式 > 短期快照中的具体数字 > 本条记录细节 > 空字符串
++- 优先级：已确认语义 > 已核实候选事实 > 本条记录细节 > 空字符串
+ - 但"本条记录主体"永远是主角：先写当前截图里真实可见/可读的内容，再决定是否轻轻带历史；历史不能抢走当前记录
+-- 周/月/近 N 天、次数、连续天数、平均值、趋势和历史比较全部由代码生成并单独展示；你不得复述、换算或改写这些统计口径
+-- 你可以根据已核实模式调整语气，但不要在 companion_message、emotion_line、utility_line 或 detail_reason 中输出任何历史统计结论
++- 周/月/近 N 天、次数、连续天数、平均值、趋势和历史比较只能来自 Context Packet 的 selected_candidates；可以忠实转述其中一个候选，但不得复述、换算或改写时间范围、对象和数字
++- companion_message、emotion_line、utility_line、detail_reason 都可以引用已选候选，但必须同时贴着当前记录写；没有候选时不得自行补历史结论
+ - 不要把最近一条消费商家当作通用记忆套到下一条记录上；例如当前是蛋糕/吐司/自制饭菜照片，就不要提"外婆家""某某外卖""刚吃完 X 又来 Y"
+ - 禁止把不相干的历史写成连续剧情，例如"刚吃完 X，又来一份 Y""这周吃过 X，今天换成 Y""看来今晚要熬夜了"
+ - 饮食记录优先观察餐次节奏、食物结构、热量大致轻重、连续外卖/正餐/夜宵等模式；单纯"第 N 顿美食"不够好
+ - 饮食照片（food_photo）只围绕画面里的食物、份量、餐次和营养估算写；除非图片本身就是订单/商家页，否则不要提商家名、外卖店名或最近消费店铺
+ - 运动记录优先观察运动类型、时长、距离、心率、热量和连续性；不要劝用户休息，不要说"继续努力"
+-- 如果记忆没有证据，绝不编造"第 N 次""比昨天""最近总是"等对比
+-- 【用户记忆】只允许用于 companion_message，严禁用它推断 amount、merchant_name、category、record_type、occurred_at 等识别字段
+-- 【用户记忆】只是弱上下文，不是本条记录的事实证据；不得把记忆中的商家身份、用途、因果或标签写成确定主谓（如"这是给开发中转站的充值"），当前记录没有独立证据时直接省略该判断
++- 如果 Context Packet 没有对应证据，绝不编造"第 N 次""比昨天""最近总是"等对比
++- 【已授权语义上下文】只允许用于 companion_message，严禁用它推断 amount、merchant_name、category、record_type、occurred_at 等识别字段
++- 【已授权语义上下文】不是本条记录的事实证据；不得把未经当前实体匹配的商家身份、用途、因果或标签写成确定主谓，匹配不到时直接省略该判断
+ - 如果截图记录日期早于【截图所在用户本地时间】的日期，companion_message 禁止使用"昨天""昨晚""刚才""今天"等相对时间；睡眠补录请写具体日期（如"6月10日这晚"）或直接省略时间称呼
+ - 避免和【最近陪伴文案】重复句式
+ 
+ 【表达反例 → 改写正例（对比组，从生产数据中抽取，严禁产出反例左侧形态）】
+ 反例 1（财务）："这周第 11 笔消费，又是熟悉的支付记录"
+-  问题：以"这周第 X 笔"开头 + "又是熟悉的"兜底套话 + 没有任何具体信息
+-  改写为："这次 38 元下午茶，临走前刷的常去那家"
++   问题：只数数，没有当前记录内容
++   改写为："这周第 4 次，还是这家下午茶"
+ 反例 2（饮食）："这周第 12 次记录饮食，又是熟悉的杨国福"
+-  问题：数数 + 套话；正确做法是聚焦具体食物或情绪节奏
+-  改写为："还是麻辣烫，这周已经第三家不同的店了"
++   问题：没有说明统计口径来自哪里；正确做法是把代码候选和当前食物放在一起
++   改写为："这顿麻辣烫，是本周第 3 次加餐"
+   或："今天的麻辣烫看起来荤多了点，喝口汤暖一下"
+ 反例 3（财务）："签约开通处理中，这周第 11 笔消费"
+   问题：把无关字段（签约开通）当作 companion_message 主体
+@@ -69,7 +70,7 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
+ - 不要使用感叹号超过一次
+ - 必须基于这条记录的具体内容，不能是通用句
+ - 支出/收入页面如果同时出现红包、广告、抽免单、优惠活动，只能围绕真实交易主体写，不要说"收到红包""获得奖励"
+-- 禁止以"这周第 X 笔/次"开头，禁止使用"又是熟悉的 XX"句式
++- 不要只用"这周第 X 笔/次"或"又是熟悉的 XX"凑全文；有候选时必须结合当前记录主体
+ - 如果信息太少写不出有意义的话，返回空字符串 ""，不要硬凑
+ 
+ 【ai_feedback 字段产出规范】
+@@ -77,16 +78,11 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
+ - badge：4-8 个汉字，描述本条记录的主题标签，如"夜宵记录""周末长跑""疑似重复"
+ - band：严格从 [positive, neutral, watch, recover, ritual] 五选一
+ - emotion_line：≤ 28 个汉字，共情/陪伴向，不带建议；可以与 companion_message 相同或互补
+-- utility_line：≤ 30 个汉字，提供 1 个具体观察或轻微建议；与 emotion_line 不重复
+-- detail_reason：≤ 60 个汉字，说明判断依据；仅当 confidence ≥ 0.7 时输出，否则为 null
++- utility_line：≤ 30 个汉字，提供 1 个具体观察或轻微建议；可引用一个已选候选，与 emotion_line 不重复
++- detail_reason：≤ 60 个汉字，说明当前记录或已选候选的判断依据；仅当 confidence ≥ 0.7 时输出，否则为 null
+ - confidence：0-1 之间小数，自评打分；低于 0.6 整个 ai_feedback 可返回 null
+ - 若没有足够强信号产出有意义的 ai_feedback，整个对象返回 null，不要硬凑套话`;
+ 
+-function buildMemoryBlock(memory: Record<string, unknown> | null | undefined, memoryEnabled: boolean): string {
+-  if (!memoryEnabled || !memory) return "";
+-  return `\n\n【用户记忆（只供 companion_message 使用，不影响识别字段）】\n${JSON.stringify(memory)}`;
+-}
+-
+ export function buildPrompt(ctx: PromptContext = {}): string {
+   const contextLines: string[] = [];
+   if (ctx.clientLocalTime) {
+@@ -96,24 +92,11 @@ export function buildPrompt(ctx: PromptContext = {}): string {
+     ? `【运行时上下文】\n${contextLines.join("\n")}\n\n`
+     : "";
+   const companionEnabled = ctx.companionEnabled !== false;
+-  const memoryEnabled = companionEnabled && ctx.memoryEnabled !== false;
+   if (!companionEnabled) {
+-    return contextBlock + BASE_PROMPT + "\n\n【陪伴文案 companion_message】\n用户已关闭 AI 陪伴文案，companion_message 必须返回空字符串 \"\"。";
++    return contextBlock + BASE_PROMPT + "\n\n【识别阶段上下文边界】\n用户已关闭 AI 陪伴文案。本次调用只负责识别图片和当前记录字段，不生成 companion_message。";
+   }
+-  const personaText = PERSONAS[ctx.persona ?? "observer"] ?? PERSONAS.observer;
+-  const customLine = ctx.customNote ? `\n- 用户附加偏好：${ctx.customNote.slice(0, 80)}` : "";
+-  const strengthLine = `\n- 记忆引用强度：${ctx.memoryStrength ?? "balanced"}（light=偶尔引用，balanced=自然引用，bold=有证据时优先引用）`;
+-  const expressionStyle = ctx.expressionStyle ?? "plain";
+-  const expressionLine = expressionStyle === "emoji"
+-    ? "\n- 表达方式：可在句尾使用 1 个贴切 emoji，但不要每次都用，不要影响识别字段"
+-    : expressionStyle === "kaomoji"
+-      ? "\n- 表达方式：可偶尔使用 1 个轻量颜文字，如 (´･_･`) / (￣▽￣)，但不要卖萌过度"
+-      : "\n- 表达方式：纯文字，不使用 emoji 或颜文字";
+-
+   return contextBlock + BASE_PROMPT
+-    + "\n\n" + COMPANION_RULES
+-    + "\n\n【你的人格】\n" + personaText + strengthLine + expressionLine + customLine
+-    + buildMemoryBlock(ctx.memory, memoryEnabled);
++    + "\n\n【识别阶段上下文边界】\n本次调用只负责识别图片和当前记录字段。不得读取、猜测或引用历史统计、商户频率、个人基线或未经当前记录确认的语义。不要生成 companion_message；陪伴表达将在代码计算信号后单独生成。";
+ }
+ 
+ const BASE_PROMPT = `你是个人数据平台的截图识别与路由助手。图片可能来自财务、运动、睡眠、阅读等生活数据域。请先判断图片类型和 record_type，再按对应数据域提取结构化字段。
+@@ -339,7 +322,7 @@ order_finished_at（订单完成时间）：
+ - 看不清或不可见的字段返回 null，不要编造。
+ 
+ 只返回如下结构的纯 JSON（不要 markdown 包裹）：
+-{"image_type":"other","record_type":"uncertain","domain_key":null,"title":null,"summary":null,"amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"funding_source":null,"receiving_account":null,"income_category":null,"source_name":null,"occurred_at":null,"order_finished_at":null,"payload_jsonb":null,"confidence":0,"companion_message":""}`;
++{"image_type":"other","record_type":"uncertain","domain_key":null,"title":null,"summary":null,"amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"funding_source":null,"receiving_account":null,"income_category":null,"source_name":null,"occurred_at":null,"order_finished_at":null,"payload_jsonb":null,"confidence":0}`;
+ 
+ export const PROMPT = buildPrompt();
+ 
+@@ -354,12 +337,11 @@ export interface FeedbackPromptContext {
+   recognizedFields?: Record<string, unknown>; // 第一阶段识别出的字段
+   timeContext?: Record<string, unknown> | null;
+   builtPayload?: Record<string, unknown> | null;
+-  memory?: Record<string, unknown> | null;
++  contextPacket?: ContextPacket | null;
+   persona?: string | null;
+   memoryStrength?: string | null;
+   expressionStyle?: string | null;
+   customNote?: string | null;
+-  memoryEnabled?: boolean | null;
+   recentCompanionLines?: string[];
+ }
+ 
+@@ -375,6 +357,7 @@ export interface VoicePromptContext {
+   domainKey: string;
+   recordFacts: Record<string, unknown>;   // 本条记录的关键字段(白名单后)
+   signals: Array<{ kind: string; fact: string }>;  // 信号层已算好的事实句
++  contextPacket?: ContextPacket | null;
+   persona?: string | null;
+   expressionStyle?: string | null;
+   customNote?: string | null;
+@@ -405,22 +388,22 @@ export function buildVoicePrompt(ctx: VoicePromptContext): string {
+   const timeLine = ctx.clientLocalTime
+     ? `当前时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}\n`
+     : "";
++  const contextBlock = ctx.contextPacket
++    ? `【冻结的 Context Packet】\n${JSON.stringify(ctx.contextPacket)}`
++    : `【本条记录】\n${JSON.stringify(ctx.recordFacts)}\n\n【已核实的信号（可自然转述，但不得新增、计算或改变数字、周期和趋势）】\n${signalBlock}`;
+ 
+-  return `你为用户刚归档的一条${ctx.domainKey}记录写陪伴语气。统计事实由代码单独展示，你不得改写。
+-
+-${timeLine}【本条记录】
+-${JSON.stringify(ctx.recordFacts)}
++  return `你为用户刚归档的一条${ctx.domainKey}记录写陪伴语气。统计事实已经由代码核实，你只能自然转述下方信号明确提供的事实，不能自行计算或改变口径。
+ 
+-【已核实的信号（仅用于理解语境，不得复述其中的数字、周期或趋势）】
+-${signalBlock}
++${timeLine}${contextBlock}
+ 
+ 【铁律】
+-- 画像信号中的数字、次数、周期、对比和趋势会由代码原样展示；输出中一律不要复述
+-- 只能引用【本条记录】本身明确存在的数字，禁止自己计算、推测或回忆任何历史统计
++- 只能引用【本条记录】或【已核实的信号】中明确存在的数字、次数、周期、对比和趋势；禁止自己计算、推测、回忆或混用不同口径
++- 如果引用信号中的统计事实，必须保持它的时间范围、对象和方向；例如信号说“本自然周第 4 次”，不能改成“近 30 天第 4 次”
++- 没有信号支撑的历史统计、次数、周期、平均值和趋势不得出现
+ - 无信号时只围绕本条记录本身写，或返回空字符串 ""
+ - 不建议、不评判、不教育；禁止"加油/注意身体/记得/超标/放纵"
+ - 禁止质问式反问（如"心里没点数吗"）；反问只允许出现在明显角色扮演的语气里，且不得带指责感
+-- 禁止"这周第X笔"开头、禁止"又是熟悉的XX"句式
++- 不要只用"这周第X笔/次"或"又是熟悉的XX"凑成全文；有信号支撑时可以把准确统计和当前实体自然结合
+ - companion_message ≤30 字，必须是完整句子自然收尾，宁短勿长
+ - ${personaHint}
+ - ${styleHint}
+@@ -441,8 +424,9 @@ export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
+       ? "表达方式：可偶尔使用 1 个轻量颜文字"
+       : "表达方式：纯文字，不使用 emoji 或颜文字";
+   const customLine = ctx.customNote ? `用户附加偏好：${ctx.customNote.slice(0, 80)}` : "";
+-  const memoryBlock = (ctx.memoryEnabled !== false && ctx.memory)
+-    ? `\n\n【用户记忆】\n${JSON.stringify(ctx.memory)}`
++  const hasPacket = Boolean(ctx.contextPacket);
++  const packetBlock = hasPacket
++    ? `\n\n【冻结的 Context Packet（唯一上下文来源）】\n${JSON.stringify(ctx.contextPacket)}`
+     : "";
+   const recentLines = (ctx.recentCompanionLines && ctx.recentCompanionLines.length > 0)
+     ? `\n\n【最近陪伴文案（请避免句式重复）】\n${ctx.recentCompanionLines.slice(0, 5).map((l) => `- ${l}`).join("\n")}`
+@@ -450,22 +434,22 @@ export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
+   const timeBlock = ctx.clientLocalTime
+     ? `截图时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}`
+     : "";
+-  const recognizedBlock = JSON.stringify(ctx.recognizedFields ?? {}, null, 2);
+-  const builtBlock = ctx.builtPayload ? `\n\n【内置数据域 payload】\n${JSON.stringify(ctx.builtPayload, null, 2)}` : "";
+-  const timeContextBlock = ctx.timeContext ? `\n\n【时间上下文】\n${JSON.stringify(ctx.timeContext, null, 2)}` : "";
++  const recognizedBlock = hasPacket ? "" : JSON.stringify(ctx.recognizedFields ?? {}, null, 2);
++  const builtBlock = !hasPacket && ctx.builtPayload ? `\n\n【内置数据域 payload】\n${JSON.stringify(ctx.builtPayload, null, 2)}` : "";
++  const timeContextBlock = !hasPacket && ctx.timeContext ? `\n\n【时间上下文】\n${JSON.stringify(ctx.timeContext, null, 2)}` : "";
+ 
+   return `你是个人 AI 记忆助手，正在为用户的本条记录生成「陪伴文案」和「AI 即时反馈」。
+ 
+ 【任务】
+-基于下方已识别的字段、用户记忆、时间上下文，输出符合规范的 JSON：
++基于下方已识别的字段、冻结的 Context Packet 和时间上下文，输出符合规范的 JSON：
+ {
+   "companion_message": "1 句话，≤ 30 汉字，可以为空字符串",
+   "ai_feedback": {
+     "badge": "4-8 字标签",
+     "band": "positive | neutral | watch | recover | ritual",
+     "emotion_line": "≤ 28 汉字，共情向",
+-    "utility_line": "≤ 30 汉字，不含历史统计；与 emotion_line 不重复",
+-    "detail_reason": "仅说明本条记录依据，不得写历史统计；不确定时为 null",
++    "utility_line": "≤ 30 汉字，可引用一个已选候选；与 emotion_line 不重复",
++    "detail_reason": "说明本条记录或一个已选候选的依据；不确定时为 null",
+     "confidence": 0.0
+   }
+ }
+@@ -482,7 +466,7 @@ ${COMPANION_RULES}
+ ${timeBlock}
+ 
+ 【本条记录已识别字段】
+-${recognizedBlock}${builtBlock}${timeContextBlock}${memoryBlock}${recentLines}
++${hasPacket ? "" : `${recognizedBlock}${builtBlock}${timeContextBlock}`}\n${packetBlock}${recentLines}
+ 
+ 仅输出上述 JSON 结构，不要任何 markdown 包裹或额外解释。`;
+ }
+diff --git a/supabase/functions/ingest-receipt/signals.ts b/supabase/functions/ingest-receipt/signals.ts
+index 5cb40f5..e7a54d6 100644
+--- a/supabase/functions/ingest-receipt/signals.ts
++++ b/supabase/functions/ingest-receipt/signals.ts
+@@ -665,19 +665,6 @@ export function selectSignals(
+ // 违规 → 调用方丢弃 AI 文案,退回规则渲染
+ // ============================================================
+ 
+-const CN_NUM: Record<string, number> = {
+-  "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+-  "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+-};
+-
+-function cnToNumber(s: string): number | null {
+-  if (/^\d+$/.test(s)) return Number(s);
+-  if (s in CN_NUM) return CN_NUM[s];
+-  if (s.length === 2 && s[0] === "十" && s[1] in CN_NUM) return 10 + CN_NUM[s[1]]; // 十一..十九
+-  if (s.length === 2 && s[0] in CN_NUM && s[1] === "十") return CN_NUM[s[0]] * 10;  // 二十/三十...
+-  return null;
+-}
+-
+ export function extractDigitNumbers(text: string): number[] {
+   const out: number[] = [];
+   for (const m of text.matchAll(/\d+(?:\.\d+)?/g)) {
+@@ -695,13 +682,13 @@ export interface NumberValidationResult {
+ }
+ 
+ export function hasUnsupportedFinanceCompanionClaim(text: string): boolean {
+-  return /(?:第|连续|连着)\s*[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)
+-    || /(?:这周|本周|本月|近\s*\d+\s*天|30\s*天).{0,16}[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)
+-    || /(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text);
++  // 统计次数不在这里拦截：是否有来源、数字和时间口径由 validateModelTone
++  // 按 Context Packet/Signals 校验。这里仅保留与事实来源无关的空泛或判决式套话。
++  return /(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text);
+ }
+ 
+-// 画像统计的次数、周期、趋势和比较必须由代码直接呈现。模型只能据此调整语气，
+-// 不能重新表述统计事实，否则即使数字正确也可能把“近30天”改写成“本周”。
++// 画像统计的次数、周期、趋势和比较必须由代码提供来源。模型可以忠实转述，
++// 但 validateModelTone 会拒绝没有候选支撑或改写了时间窗口的表述。
+ export function hasModelOwnedStatisticalClaim(text: string): boolean {
+   const compact = text.replace(/\s+/g, "");
+   return /(?:本|这|上)(?:自然)?周|(?:本|这|上)个月|本月|上月|近(?:两|三|四|[一二两三四五六七八九十\d]+)(?:天|周|月|晚)|过去(?:两|三|四|[一二两三四五六七八九十\d]+)(?:天|周|月)/.test(compact)
+@@ -713,7 +700,76 @@ export function hasModelOwnedStatisticalClaim(text: string): boolean {
+     || /(?:最近|近来).{0,12}(?:总是|一直|经常|频繁|反复|又)/.test(compact);
+ }
+ 
+-// allowedSources:信号 fact 文本 + 本条记录字段 JSON。数字宽松匹配(整数/一位小数视为同数)。
++type StatisticalScope = string;
++
++function parseChineseCardinal(s: string): number | null {
++  if (/^\d+$/.test(s)) return Number(s);
++  const digits: Record<string, number> = {
++    "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
++    "六": 6, "七": 7, "八": 8, "九": 9, "零": 0,
++  };
++  const units: Record<string, number> = { "十": 10, "百": 100, "千": 1000 };
++  if (!s || [...s].some((char) => !(char in digits) && !(char in units))) return null;
++  let total = 0;
++  let section = 0;
++  for (const char of s) {
++    if (char in digits) {
++      section += digits[char];
++      continue;
++    }
++    const unit = units[char];
++    total += (section || 1) * unit;
++    section = 0;
++  }
++  const result = total + section;
++  return result > 0 ? result : null;
++}
++
++function rollingWindowKey(value: string, unit: string): string | null {
++  const parsed = parseChineseCardinal(value);
++  if (parsed === null) return null;
++  if (unit === "天" || unit === "晚") return `rolling:${parsed}d`;
++  if (unit === "周") return `rolling:${parsed * 7}d`;
++  if (unit === "月") return `rolling:${parsed}m`;
++  return null;
++}
++
++function statisticalScopes(text: string): Set<StatisticalScope> {
++  const compact = text.replace(/\s+/g, "");
++  const scopes = new Set<StatisticalScope>();
++  if (/(?:本|这)(?:自然)?周/.test(compact)) scopes.add("week:current");
++  if (/上(?:自然)?周/.test(compact)) scopes.add("week:previous");
++  if (/(?:本|这)个?月|本月/.test(compact)) scopes.add("month:current");
++  if (/(?:上)个?月|上月/.test(compact)) scopes.add("month:previous");
++  for (const match of compact.matchAll(/(?:近|过去)([一二两三四五六七八九十百\d]+)(天|周|月|晚)/g)) {
++    const key = rollingWindowKey(match[1], match[2]);
++    if (key) scopes.add(key);
++  }
++  if (/(?:第|连续|连着|已有|累计)[一二两三四五六七八九十百\d]+(?:次|笔|顿|天|晚|家|周|月)|[一二两三四五六七八九十百\d]+(?:次|笔|顿|天|晚|家|周|月|回)/.test(compact)) scopes.add("count");
++  if (/(?:平均|均值)/.test(compact)) scopes.add("baseline:average");
++  if (/(?:中位数?|中位)/.test(compact)) scopes.add("baseline:median");
++  if (/(?:四分位|百分位|p\d{1,3})/i.test(compact)) scopes.add("baseline:percentile");
++  if (/(?:历史最好|历史最高|历史最低|最好|最高|最低)/.test(compact)) scopes.add("baseline:extreme");
++  if (/(?:比|较)(?:昨天|之前|过去|上次|上周|上月|平时|常态|平均|中位|历史)/.test(compact)) scopes.add("comparison:reference");
++  if (/(?:高于|低于|涨了|降了|增加|减少|相差|多了|少了)/.test(compact)) scopes.add("comparison:direction");
++  if (/(?:今天|今晚|今早).{0,12}(?:已有|累计|第[一二两三四五六七八九十百\d]+|连续)/.test(compact)) scopes.add("day:today");
++  if (/(?:最近|近来).{0,12}(?:总是|一直|经常|频繁|反复|又)|(?:反复出现|高频|常点)/.test(compact)) scopes.add("frequency");
++  return scopes;
++}
++
++function signalSupportsStatisticalClaim(text: string, signals: DomainSignal[]): boolean {
++  const requested = statisticalScopes(text);
++  if (requested.size === 0) return true;
++  // 必须由同一个候选提供完整口径，避免把一个候选的周次数和另一个候选的
++  // 月度比较拼成模型从未得到过的组合。
++  return signals.some((signal) => {
++    const available = statisticalScopes(signal.fact);
++    return [...requested].every((scope) => available.has(scope));
++  });
++}
++
++// allowedSources:信号 fact 文本 + 本条记录字段 JSON。数字必须与代码事实一致；
++// 不再把金额/均值自动取整，避免模型把 9.54 元改写成 10 元后仍被放行。
+ // 计数表达("第X次/连续X天")单独用严格白名单 countNumbers:
+ // 只有计数类信号显式声明的数才能进计数表达,防止金额/时长取整后泄漏放行幻觉计数。
+ // 逐句校验:只标记违规的那条文本,调用方可保留其余合规字段(不整体丢弃)。
+@@ -726,10 +782,6 @@ export function validateVoiceNumbers(
+   const countAllowed = new Set<string>();
+   const addNum = (n: number) => {
+     allowed.add(String(n));
+-    allowed.add(String(Math.round(n)));
+-    allowed.add(String(Math.floor(n)));
+-    allowed.add(String(Math.ceil(n)));
+-    allowed.add(String(Math.round(n * 10) / 10));
+   };
+   for (const s of signals) {
+     for (const n of s.numbers) addNum(n);
+@@ -746,19 +798,18 @@ export function validateVoiceNumbers(
+     let bad = false;
+     // 1) 裸数字必须在允许集内
+     for (const n of extractDigitNumbers(text)) {
+-      const keys = [String(n), String(Math.round(n)), String(Math.round(n * 10) / 10)];
+-      if (!keys.some((k) => allowed.has(k))) {
++      if (!allowed.has(String(n))) {
+         violations.push(`数字 ${n} 不在信号/记录允许集内: "${text.slice(0, 40)}"`);
+         bad = true;
+       }
+     }
+     // 2) "第X次/笔/顿/天/晚" 计数表达:数值必须来自计数信号显式声明
+-    for (const m of text.matchAll(/(?:第|连续|连着)\s*([一二两三四五六七八九十\d]{1,3})\s*(?:次|笔|顿|天|晚|家)/g)) {
+-      const n = cnToNumber(m[1]);
++    for (const m of text.matchAll(/(?:第|连续|连着)\s*([一二两三四五六七八九十百千\d]{1,4})\s*(?:次|笔|顿|天|晚|家)/g)) {
++      const n = parseChineseCardinal(m[1]);
+       if (countAllowed.size === 0) {
+         violations.push(`计数表达 "${m[0]}" 无计数信号支撑`);
+         bad = true;
+-      } else if (n !== null && !countAllowed.has(String(n))) {
++      } else if (n === null || !countAllowed.has(String(n))) {
+         violations.push(`计数 "${m[0]}" 数值不可追溯到计数信号`);
+         bad = true;
+       }
+@@ -771,14 +822,16 @@ export function validateVoiceNumbers(
+ export function validateModelTone(
+   generatedTexts: Array<string | null | undefined>,
+   recordFactsJson: string,
++  signals: DomainSignal[] = [],
+ ): NumberValidationResult {
+-  // 不把画像信号交给数字白名单：模型只能引用本条记录数字，画像数字由规则层原样输出。
+-  const numericCheck = validateVoiceNumbers(generatedTexts, [], recordFactsJson);
++  // 旧链路不传 signals 时仍保持严格模式；信号 Voice 层传入已核实信号后，允许忠实转述其数字和口径。
++  const numericCheck = validateVoiceNumbers(generatedTexts, signals, recordFactsJson);
+   const violations = [...numericCheck.violations];
+   const badIndexes = new Set(numericCheck.badIndexes);
+ 
+   generatedTexts.forEach((text, index) => {
+     if (!text || !hasModelOwnedStatisticalClaim(text)) return;
++    if (signals.length > 0 && signalSupportsStatisticalClaim(text, signals)) return;
+     violations.push(`模型试图改写代码统计口径: "${text.slice(0, 40)}"`);
+     badIndexes.add(index);
+   });
+diff --git a/supabase/functions/ingest-receipt/signals_test.ts b/supabase/functions/ingest-receipt/signals_test.ts
+index d7b3ada..298c6f4 100644
+--- a/supabase/functions/ingest-receipt/signals_test.ts
++++ b/supabase/functions/ingest-receipt/signals_test.ts
+@@ -71,6 +71,111 @@ Deno.test("verified merchant frequency accepts the declared count", () => {
+   );
+ });
+ 
++Deno.test("signal-backed tone may repeat the verified weekly count", () => {
++  const signals: DomainSignal[] = [{
++    kind: "merchant_repeat",
++    priority: 1,
++    fact: "本自然周在示例餐厅已是第 4 次消费，含本笔",
++    numbers: [4],
++    countNumbers: [4],
++  }];
++  const result = validateModelTone(
++    ["这周第4次来示例餐厅，熟悉的味道又出现了。"],
++    JSON.stringify({
++      record_type: "expense",
++      amount: 14.8,
++      merchant_name: "示例餐厅",
++    }),
++    signals,
++  );
++
++  assert(result.ok, "the model may faithfully repeat a signal-backed weekly count");
++});
++
++Deno.test("signal-backed tone cannot change the verified time window", () => {
++  const signals: DomainSignal[] = [{
++    kind: "merchant_repeat",
++    priority: 1,
++    fact: "本自然周在示例餐厅已是第 4 次消费，含本笔",
++    numbers: [4],
++    countNumbers: [4],
++  }];
++  const result = validateModelTone(
++    ["近30天第4次来示例餐厅。"],
++    JSON.stringify({
++      record_type: "expense",
++      amount: 14.8,
++      merchant_name: "示例餐厅",
++    }),
++    signals,
++  );
++
++  assert(!result.ok, "a correct number with a wrong time window must be rejected");
++});
++
++Deno.test("signal-backed tone cannot swap one rolling window for another", () => {
++  const signals: DomainSignal[] = [{
++    kind: "merchant_repeat",
++    priority: 1,
++    fact: "本自然周在示例餐厅已是第 4 次消费；该店近90天平均单笔 9.54 元",
++    numbers: [4, 9.54],
++    countNumbers: [4],
++  }];
++  const result = validateModelTone(
++    ["近30天第4次来示例餐厅，平均单笔9.54元。"],
++    JSON.stringify({ record_type: "expense", merchant_name: "示例餐厅" }),
++    signals,
++  );
++
++  assert(!result.ok, "near-90-day evidence must not authorize a near-30-day claim");
++});
++
++Deno.test("one candidate must support the whole statistical claim", () => {
++  const signals: DomainSignal[] = [{
++    kind: "merchant_repeat",
++    priority: 1,
++    fact: "本自然周在示例餐厅已是第 4 次消费",
++    numbers: [4],
++    countNumbers: [4],
++  }, {
++    kind: "unusual_amount",
++    priority: 2,
++    fact: "本笔14.8元高于近30天该类p90=12元",
++    numbers: [14.8, 12, 30, 90],
++  }];
++  const result = validateModelTone(
++    ["本周第4次来这里，平均单笔14.8元。"],
++    JSON.stringify({ record_type: "expense", amount: 14.8, merchant_name: "示例餐厅" }),
++    signals,
++  );
++
++  assert(!result.ok, "scopes from different candidates must not be merged into one claim");
++});
++
++Deno.test("unparseable Chinese counts never bypass the count whitelist", () => {
++  const signals: DomainSignal[] = [{
++    kind: "merchant_repeat",
++    priority: 1,
++    fact: "本自然周在示例餐厅已是第 4 次消费",
++    numbers: [4],
++    countNumbers: [4],
++  }];
++  const result = validateVoiceNumbers(
++    ["这已经是第二十一次了。"],
++    signals,
++    JSON.stringify({ record_type: "expense", merchant_name: "示例餐厅" }),
++  );
++
++  assert(!result.ok, "a different multi-character Chinese count must be rejected");
++});
++
++Deno.test("content guard leaves verified statistics to the evidence validator", () => {
++  assert(
++    !hasUnsupportedFinanceCompanionClaim("这周第4次来示例餐厅。"),
++    "content style guard must not preempt a signal-backed statistical claim",
++  );
++});
++
+ Deno.test("model tone cannot relabel a rolling count as a weekly count", () => {
+   const result = validateModelTone(
+     ["这已经是本周第50次给数字中心充值了。"],
+
+diff --git a/supabase/functions/ingest-receipt/context-packet.ts b/supabase/functions/ingest-receipt/context-packet.ts
+new file mode 100644
+index 0000000..44e497b
+--- /dev/null
++++ b/supabase/functions/ingest-receipt/context-packet.ts
+@@ -0,0 +1,294 @@
++import type { DomainSignal } from "./signals.ts";
++
++export type MemoryOrigin = "user_explicit" | "record_derived" | "model_inferred" | "unknown";
++export type MemoryAuthority = "confirmed" | "supported" | "hypothesis";
++export type MemoryState = "hypothesis" | "confirmed" | "denied" | "superseded" | "expired" | "deleted";
++export type MemoryClaimability = "expressible" | "context_only" | "ranking_only";
++
++export interface NormalizedSemanticMemory {
++  memoryId: string | null;
++  key: string;
++  type: string;
++  content: string;
++  origin: MemoryOrigin;
++  authority: MemoryAuthority;
++  state: MemoryState;
++  claimability: MemoryClaimability;
++  domainKey: string | null;
++  entityKey: string | null;
++  aliases: string[];
++  confidence: number | null;
++  weight: number;
++  lastSeenAt: string | null;
++  sourceTable: string | null;
++  sourceId: string | null;
++  evidence: Record<string, unknown>;
++}
++
++export interface ContextPacket {
++  packet_version: "context-packet-v1";
++  record_facts: Record<string, unknown>;
++  selected_candidates: Array<{
++    kind: string;
++    fact: string;
++    numbers: number[];
++    count_numbers: number[];
++    source: "domain_profile_signal";
++  }>;
++  semantic_context: Array<{
++    key: string;
++    type: string;
++    content: string;
++    claimability: MemoryClaimability;
++    domain_key: string | null;
++    entity_key: string | null;
++  }>;
++  expression_preferences: Record<string, unknown>;
++  recent_expression_context: string[];
++  trace: {
++    domain_key: string;
++    source: string;
++    packet_created_at: string;
++    content_fingerprint: string;
++    memory_count: number;
++    memory_loaded_count: number;
++    memory_filtered_count: number;
++    selected_memory_ids: string[];
++    candidate_count: number;
++    candidate_kinds: string[];
++  };
++}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return !!value && typeof value === "object" && !Array.isArray(value);
++}
++
++function stableJson(value: unknown): string {
++  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
++  if (isRecord(value)) {
++    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
++  }
++  return JSON.stringify(value) ?? "null";
++}
++
++// This is an audit fingerprint, not a security hash. It stays synchronous so
++// packet assembly remains a pure, single-pass operation before the model call.
++function contentFingerprint(value: unknown): string {
++  let hash = 2166136261;
++  for (const char of stableJson(value)) {
++    hash ^= char.codePointAt(0) ?? 0;
++    hash = Math.imul(hash, 16777619);
++  }
++  return (hash >>> 0).toString(16).padStart(8, "0");
++}
++
++function stringValue(value: unknown): string | null {
++  return typeof value === "string" && value.trim() ? value.trim() : null;
++}
++
++function numberValue(value: unknown): number | null {
++  if (typeof value === "number" && Number.isFinite(value)) return value;
++  if (typeof value === "string" && value.trim()) {
++    const parsed = Number(value);
++    return Number.isFinite(parsed) ? parsed : null;
++  }
++  return null;
++}
++
++function canonical(value: string): string {
++  return value.toLocaleLowerCase().replace(/[\s\-_（）()「」『』]/g, "");
++}
++
++function domainForMemory(type: string, key: string): string | null {
++  if (/^(merchant|merchant_context|expense_category):/.test(key) || type === "spending_pattern" || type === "merchant_pattern") return "expense";
++  if (/^income_source:/.test(key) || type === "income_pattern") return "wallet";
++  if (type === "sleep_pattern") return "sleep";
++  if (type === "sport_pattern") return "sport";
++  if (type === "food_pattern") return "food";
++  if (type === "reading_pattern") return "reading";
++  return null;
++}
++
++function entityForMemory(key: string, evidence: Record<string, unknown>): { entityKey: string | null; aliases: string[] } {
++  const separator = key.indexOf(":");
++  const keyEntity = separator >= 0 ? key.slice(separator + 1).trim() : null;
++  const evidenceEntity = stringValue(evidence.merchant)
++    ?? stringValue(evidence.source_name)
++    ?? stringValue(evidence.account_name)
++    ?? stringValue(evidence.book_name)
++    ?? stringValue(evidence.sport_type)
++    ?? stringValue(evidence.entity);
++  const aliases = Array.isArray(evidence.merchant_aliases)
++    ? evidence.merchant_aliases.filter((item): item is string => typeof item === "string" && item.trim() !== "")
++    : [];
++  const entityKey = keyEntity && !["pattern", "context"].includes(keyEntity) ? keyEntity : evidenceEntity;
++  return { entityKey, aliases };
++}
++
++function deriveOrigin(row: Record<string, unknown>, evidence: Record<string, unknown>): MemoryOrigin {
++  const explicitOrigin = stringValue(row.origin) ?? stringValue(row.memory_origin);
++  if (explicitOrigin === "user_explicit" || explicitOrigin === "record_derived" || explicitOrigin === "model_inferred") {
++    return explicitOrigin;
++  }
++  const source = stringValue(evidence.source) ?? stringValue(evidence.source_kind);
++  if (source === "user_explicit_feedback" || source === "user_explicit" || source === "user_confirmed") return "user_explicit";
++  if (
++    stringValue(row.source_table)
++    || stringValue(row.source_id)
++    || stringValue(evidence.source_table)
++    || stringValue(evidence.source_record_id)
++    || stringValue(evidence.record_id)
++  ) return "record_derived";
++  if (source === "model_inferred" || source === "model") return "model_inferred";
++  return "unknown";
++}
++
++function normalizeRow(row: Record<string, unknown>): NormalizedSemanticMemory | null {
++  const key = stringValue(row.key) ?? stringValue(row.memory_key);
++  const content = stringValue(row.content);
++  if (!key || !content) return null;
++  const type = stringValue(row.type) ?? stringValue(row.memory_type) ?? "unknown";
++  const evidence = isRecord(row.evidence) ? row.evidence : isRecord(row.evidence_jsonb) ? row.evidence_jsonb : {};
++  const origin = deriveOrigin(row, evidence);
++  const expiresAt = stringValue(row.expires_at);
++  const expired = !!expiresAt && Date.parse(expiresAt) <= Date.now();
++  const stateValue = stringValue(row.state) ?? stringValue(row.status);
++  const state: MemoryState = stateValue === "deleted" || stateValue === "denied" || stateValue === "superseded"
++    ? stateValue
++    : expired
++      ? "expired"
++      : origin === "user_explicit"
++        ? "confirmed"
++        : "hypothesis";
++  const authority: MemoryAuthority = origin === "user_explicit" ? "confirmed" : "hypothesis";
++  const claimability: MemoryClaimability = state === "confirmed" && origin === "user_explicit"
++    ? "expressible"
++    : origin === "record_derived"
++      ? "ranking_only"
++      : "context_only";
++  const entity = entityForMemory(key, evidence);
++  return {
++    memoryId: stringValue(row.id),
++    key,
++    type,
++    content,
++    origin,
++    authority,
++    state,
++    claimability,
++    domainKey: domainForMemory(type, key),
++    entityKey: entity.entityKey,
++    aliases: entity.aliases,
++    confidence: numberValue(row.confidence),
++    weight: numberValue(row.weight) ?? 0,
++    lastSeenAt: stringValue(row.last_seen_at),
++    sourceTable: stringValue(row.source_table) ?? stringValue(evidence.source_table),
++    sourceId: stringValue(row.source_id) ?? stringValue(evidence.source_record_id) ?? stringValue(evidence.record_id),
++    evidence,
++  };
++}
++
++export function normalizeSemanticMemories(memory: Record<string, unknown> | null | undefined): NormalizedSemanticMemory[] {
++  if (!memory) return [];
++  const rawItems = Array.isArray(memory.long_term)
++    ? memory.long_term
++    : Array.isArray(memory.items)
++      ? memory.items
++      : [];
++  return rawItems
++    .filter(isRecord)
++    .map(normalizeRow)
++    .filter((item): item is NormalizedSemanticMemory => !!item)
++    .sort((left, right) => right.weight - left.weight || (right.lastSeenAt ?? "").localeCompare(left.lastSeenAt ?? ""));
++}
++
++function recordEntityValues(recordFacts: Record<string, unknown>): string[] {
++  const payload = isRecord(recordFacts.payload) ? recordFacts.payload : {};
++  const payloadDishes = Array.isArray(payload.dishes)
++    ? payload.dishes.flatMap((dish) => isRecord(dish) ? [dish.name] : [])
++    : [];
++  return [
++    recordFacts.merchant_name,
++    recordFacts.source_name,
++    recordFacts.account_name,
++    recordFacts.book_name,
++    recordFacts.title,
++    recordFacts.sport_type,
++    payload.merchant_name,
++    payload.source_name,
++    payload.account_name,
++    payload.book_name,
++    payload.title,
++    payload.sport_type,
++    payload.meal_type,
++    ...payloadDishes,
++  ].filter((value): value is string => typeof value === "string" && value.trim() !== "");
++}
++
++function isRelevant(memory: NormalizedSemanticMemory, domainKey: string, recordFacts: Record<string, unknown>): boolean {
++  if (memory.state !== "confirmed" || memory.claimability !== "expressible") return false;
++  const comparableDomain = domainKey === "income" ? "wallet" : domainKey;
++  if (memory.domainKey && memory.domainKey !== comparableDomain) return false;
++  if (!memory.entityKey) return true;
++  const entities = recordEntityValues(recordFacts).map(canonical);
++  const candidates = [memory.entityKey, ...memory.aliases].map(canonical).filter(Boolean);
++  return candidates.some((candidate) => entities.some((entity) => entity === candidate || entity.includes(candidate) || candidate.includes(entity)));
++}
++
++export function selectSemanticContext(
++  memory: Record<string, unknown> | null | undefined,
++  domainKey: string,
++  recordFacts: Record<string, unknown>,
++  limit = 3,
++): NormalizedSemanticMemory[] {
++  return normalizeSemanticMemories(memory).filter((item) => isRelevant(item, domainKey, recordFacts)).slice(0, limit);
++}
++
++export function buildContextPacket(input: {
++  domainKey: string;
++  recordFacts: Record<string, unknown>;
++  signals: DomainSignal[];
++  memory?: Record<string, unknown> | null;
++  expressionPreferences?: Record<string, unknown>;
++  recentExpressionContext?: string[];
++}): ContextPacket {
++  const normalizedMemories = normalizeSemanticMemories(input.memory);
++  const semantic = normalizedMemories.filter((item) => isRelevant(item, input.domainKey, input.recordFacts)).slice(0, 3);
++  const packetCreatedAt = new Date().toISOString();
++  const packetCore = {
++    packet_version: "context-packet-v1" as const,
++    record_facts: input.recordFacts,
++    selected_candidates: input.signals.map((signal) => ({
++      kind: signal.kind,
++      fact: signal.fact,
++      numbers: signal.numbers,
++      count_numbers: signal.countNumbers ?? [],
++      source: "domain_profile_signal" as const,
++    })),
++    semantic_context: semantic.map((item) => ({
++      key: item.key,
++      type: item.type,
++      content: item.content,
++      claimability: item.claimability,
++      domain_key: item.domainKey,
++      entity_key: item.entityKey,
++    })),
++    expression_preferences: input.expressionPreferences ?? {},
++    recent_expression_context: (input.recentExpressionContext ?? []).slice(0, 5),
++  };
++  return {
++    ...packetCore,
++    trace: {
++      domain_key: input.domainKey,
++      source: "domain_profiles+signals+semantic_memory",
++      packet_created_at: packetCreatedAt,
++      content_fingerprint: contentFingerprint(packetCore),
++      memory_count: semantic.length,
++      memory_loaded_count: normalizedMemories.length,
++      memory_filtered_count: Math.max(0, normalizedMemories.length - semantic.length),
++      selected_memory_ids: semantic.map((item) => item.memoryId).filter((id): id is string => !!id),
++      candidate_count: input.signals.length,
++      candidate_kinds: input.signals.map((signal) => signal.kind),
++    },
++  };
++}
+
+diff --git a/supabase/functions/ingest-receipt/context-packet_test.ts b/supabase/functions/ingest-receipt/context-packet_test.ts
+new file mode 100644
+index 0000000..0a584c6
+--- /dev/null
++++ b/supabase/functions/ingest-receipt/context-packet_test.ts
+@@ -0,0 +1,111 @@
++import {
++  buildContextPacket,
++  normalizeSemanticMemories,
++  selectSemanticContext,
++} from "./context-packet.ts";
++
++const assert = (condition: boolean, message: string) => {
++  if (!condition) throw new Error(message);
++};
++
++Deno.test("semantic memory normalization keeps explicit meaning expressible", () => {
++  const memories = normalizeSemanticMemories({
++    long_term: [{
++      id: "memory-1",
++      key: "merchant_context:QLHazyCoder 数字中心",
++      type: "merchant_pattern",
++      content: "这是模型 API 中转站。",
++      confidence: 1,
++      weight: 5,
++      evidence: {
++        source: "user_explicit_feedback",
++        merchant_aliases: ["QLHazyCoder数字中心"],
++      },
++    }],
++  });
++
++  assert(memories.length === 1, "one semantic memory should be normalized");
++  assert(memories[0].origin === "user_explicit", "explicit source should be preserved");
++  assert(memories[0].state === "confirmed", "explicit source should be confirmed");
++  assert(memories[0].claimability === "expressible", "confirmed meaning should be expressible");
++});
++
++Deno.test("record-derived memory cannot enter expressible context", () => {
++  const selected = selectSemanticContext({
++    long_term: [{
++      key: "merchant:示例餐厅",
++      type: "merchant_pattern",
++      content: "用户会在示例餐厅消费。",
++      confidence: 0.75,
++      weight: 1.2,
++      evidence: { source_table: "transactions", source_record_id: "tx-1", merchant: "示例餐厅" },
++    }],
++  }, "expense", { merchant_name: "示例餐厅" });
++
++  assert(selected.length === 0, "derived merchant pattern must not be expressible");
++});
++
++Deno.test("top-level source provenance marks legacy rows as derived", () => {
++  const memories = normalizeSemanticMemories({
++    long_term: [{
++      id: "memory-derived",
++      key: "reading:示例书",
++      type: "reading_pattern",
++      content: "用户最近在读示例书。",
++      source_table: "data_records",
++      source_id: "record-1",
++      evidence: { book_name: "示例书" },
++    }],
++  });
++
++  assert(memories[0].origin === "record_derived", "RPC source columns must be honored");
++  assert(memories[0].sourceTable === "data_records", "source table must remain traceable");
++  assert(memories[0].sourceId === "record-1", "source id must remain traceable");
++});
++
++Deno.test("nested domain entities can match an explicit memory", () => {
++  const selected = selectSemanticContext({
++    long_term: [{
++      key: "reading:示例书",
++      type: "reading_pattern",
++      content: "这本书让用户想继续读。",
++      evidence: { source: "user_explicit_feedback", book_name: "示例书" },
++    }],
++  }, "reading", { record_type: "reading", payload: { book_name: "示例书" } });
++
++  assert(selected.length === 1, "reading memories must match payload entities");
++  assert(selected[0].claimability === "expressible", "explicit memory must be expressible");
++});
++
++Deno.test("context packet contains selected candidates and bounded semantic context", () => {
++  const packet = buildContextPacket({
++    domainKey: "expense",
++    recordFacts: { record_type: "expense", merchant_name: "示例餐厅", amount: 14.8 },
++    signals: [{
++      kind: "merchant_repeat",
++      priority: 1,
++      fact: "本自然周在示例餐厅已是第 4 次消费，含本笔",
++      numbers: [4],
++      countNumbers: [4],
++    }],
++    memory: {
++      long_term: Array.from({ length: 5 }, (_, index) => ({
++        key: `merchant_context:${index}`,
++        type: "merchant_pattern",
++        content: `语义 ${index}`,
++        evidence: { source: "user_explicit_feedback", merchant: "示例餐厅" },
++        weight: 5 - index,
++      })),
++    },
++  });
++
++  assert(packet.packet_version === "context-packet-v1", "packet version must be explicit");
++  assert(packet.selected_candidates.length === 1, "packet must carry selected candidates");
++  assert(packet.semantic_context.length <= 3, "semantic context must be bounded");
++  assert(packet.trace.candidate_count === 1, "packet trace must include candidate count");
++  assert(packet.trace.packet_created_at.length > 0, "packet trace must include creation time");
++  assert(/^[0-9a-f]{8}$/.test(packet.trace.content_fingerprint), "packet trace must include a deterministic fingerprint");
++  assert(packet.trace.memory_loaded_count === 5, "packet trace must include loaded memory count");
++  assert(packet.trace.memory_filtered_count === 5, "nonmatching memories must be counted as filtered");
++  assert(packet.selected_candidates[0].source === "domain_profile_signal", "candidate source must be explicit");
++});
+
+diff --git a/supabase/functions/ingest-receipt/prompts_test.ts b/supabase/functions/ingest-receipt/prompts_test.ts
+new file mode 100644
+index 0000000..eb55bf4
+--- /dev/null
++++ b/supabase/functions/ingest-receipt/prompts_test.ts
+@@ -0,0 +1,49 @@
++import { buildFeedbackPrompt, buildPrompt, buildVoicePrompt } from "./prompts.ts";
++import { buildContextPacket } from "./context-packet.ts";
++
++const assert = (condition: boolean, message: string) => {
++  if (!condition) throw new Error(message);
++};
++
++Deno.test("recognition prompt does not receive raw companion memory", () => {
++  const prompt = buildPrompt({
++    clientLocalTime: "2026-08-06 12:00",
++    companionEnabled: true,
++    memoryEnabled: true,
++    persona: "observer",
++  });
++
++  assert(!prompt.includes("frequent_merchants_30d"), "recognition prompt must not receive short-term statistics");
++  assert(prompt.includes("识别阶段上下文边界"), "recognition prompt must declare its context boundary");
++  assert(!prompt.includes("陪伴文案 companion_message"), "recognition prompt must not own the final companion copy");
++});
++
++Deno.test("feedback and voice prompts consume a frozen packet", () => {
++  const packet = buildContextPacket({
++    domainKey: "expense",
++    recordFacts: { record_type: "expense", merchant_name: "示例餐厅", amount: 14.8 },
++    signals: [{
++      kind: "merchant_repeat",
++      priority: 1,
++      fact: "本自然周在示例餐厅已是第 4 次消费，含本笔",
++      numbers: [4],
++      countNumbers: [4],
++    }],
++  });
++  const voice = buildVoicePrompt({
++    domainKey: "expense",
++    recordFacts: packet.record_facts,
++    signals: packet.selected_candidates.map((candidate) => ({ kind: candidate.kind, fact: candidate.fact })),
++    contextPacket: packet,
++  });
++  const feedback = buildFeedbackPrompt({
++    recognizedFields: packet.record_facts,
++    contextPacket: packet,
++  });
++
++  assert(voice.includes("context-packet-v1"), "voice prompt must include packet version");
++  assert(feedback.includes("context-packet-v1"), "feedback prompt must include packet version");
++  assert(!feedback.includes("【用户记忆】"), "feedback prompt must not dump raw memory");
++  assert(!feedback.includes("不含历史统计；与 emotion_line 不重复"), "feedback rules must allow verified candidate facts");
++  assert(feedback.includes("唯一上下文来源"), "feedback prompt must mark packet as the sole context source");
++});
+
+diff --git a/docs/personal-context-architecture-v0.1.md b/docs/personal-context-architecture-v0.1.md
+new file mode 100644
+index 0000000..b48ee9b
+--- /dev/null
++++ b/docs/personal-context-architecture-v0.1.md
+@@ -0,0 +1,542 @@
++# Personal Context Architecture v0.1
++
++> 状态：Phase 0-1 实施中  
++> 范围：个人上下文、域画像、Planner、陪伴表达之间的职责与数据契约  
++> 本文是实现约束与评审基线；生产部署、迁移执行和 TestFlight 仍需单独授权
++
++截至 2026-08-07，`context-packet-v1`、Signals 数字闭环、识别/表达分离、语义 Memory 读取与删除契约已经落到 Edge Function 和迁移草案中。本文中标记为“目标/待接入”的 Planner Surface、六域完整候选和生产 Canary 仍未视为完成。
++
++## 1. 目标
++
++芥子的价值不是把记录重新复述一遍，而是让用户逐渐感受到：系统既能准确理解当前记录，也能理解这条记录对这个用户的特殊含义。
++
++因此，系统需要同时满足两件事：
++
++1. **事实可靠**：金额、时间、商户、域、历史统计和比较口径只能来自代码可追溯的数据。
++2. **理解有连续性**：用户纠正过的商户含义、人物关系、表达偏好和长期目标可以被保留，并在相关场景发挥作用。
++
++核心原则仍然是：**代码负责算，大模型负责说。**
++
++## 1.1 已确认的产品方向
++
++- Personal Context 是覆盖所有域的基础框架，不按消费域做一次性特例；
++- 用户可以查看芥子当前已经确认的理解，但不能直接编辑记忆内容；
++- 用户可以删除某条理解，删除只针对芥子的理解，不删除原始记录；
++- 用户明确确认或纠正的语义可以在匹配当前实体时进入陪伴表达；
++- 未确认的系统推断只能影响候选排序、观察优先级或后续取证，不能直接对用户陈述；
++- 各域可以分批补齐画像字段和候选规则，但必须消费同一套上下文、权威和生命周期契约。
++
++## 1.2 范围与非目标
++
++### 本架构覆盖
++
++- 六个域（expense、sleep、food、sport、reading、wallet）的上下文组装；收入记录作为财务事实进入 expense/wallet 相关上下文，但不额外制造第七套 Memory 规则；
++- 事实、候选、语义记忆、偏好和近期表达历史的边界；
++- 记忆查看、删除、失效、冲突和回滚规则；
++- 模型输入最小化、数字来源约束和全域契约测试。
++
++### 本架构暂不覆盖
++
++- 重新设计各域的原始识别字段；
++- 让模型负责计算统计、时间窗口、金额或因果；
++- 立即建立知识图谱或一张巨型个人画像 JSON；
++- 通过用户手工编辑记忆来修正系统，修正入口采用删除和新的明确反馈；
++- 本轮生产迁移、部署和 TestFlight 发布。
++
++## 2. 当前系统盘点
++
++当前仓库已经具备大部分骨架，不应重新建设同名系统：
++
++| 现有模块 | 职责 | 当前边界 |
++| --- | --- | --- |
++| `transactions` / `income_records` / `data_records` | 原始记录真相 | 最终事实来源 |
++| `user_domain_profiles` | 各域可重算的统计投影 | 由 rebuild 函数计算，不应被模型反向修改 |
++| `signals.ts` | 当前记录 + 域画像 → 可验证信号 | 生成带口径、数字和来源的事实 |
++| Expression Planner | 候选生成、Gate、评分、Surface 组合 | 当前主要处于 Shadow/owner-only 路径，不能假设已全面接管用户可见内容 |
++| `user_configs` | 人格、语气、表达样式和自定义设置 | 属于偏好/设置，不是生活事实 |
++| `user_companion_memories` | 语义记忆与自动模式混合存储 | 需要收敛读取和写入边界 |
++| `get_companion_context` | 聚合设置、短期统计、近期文案和长期记忆 | 旧的混合上下文入口，必须逐步退役 |
++
++`user_domain_profiles` 的 schema 约定已经明确：画像是投影，不是数据源；增量刷新和夜间回填共用 rebuild 逻辑。Personal Context 不替代这套设计，而是在它之上提供有类型的上下文协调。
++
++### 2.1 权威来源矩阵
++
++| 信息类型 | 唯一权威来源 | 允许谁改变 | 模型是否可自行推导 |
++| --- | --- | --- | --- |
++| 当前记录字段 | 对应源记录/识别结果 | 识别与用户补全流程 | 否 |
++| 历史次数、金额、基线、趋势 | 域画像和候选事实 | rebuild、候选代码 | 否 |
++| 候选是否值得展示 | Planner Gate、评分和 Surface 规则 | 规则与学习策略 | 否 |
++| 商户/人物/目标的用户语义 | 已确认语义记忆 | 用户明确反馈或新版本替代 | 否，只有匹配后可转述 |
++| 语气、人格、长度、禁用表达 | `user_configs` 与偏好画像 | 用户设置、结构化点评学习 | 否 |
++| 最近说过的句式和候选 | 近期表达上下文 | 展示事件流水 | 否 |
++
++若同一信息同时出现在多个来源，Context Assembler 必须按此矩阵选择权威来源，不允许“最后加载的值覆盖前面的值”。
++
++## 3. 目标架构
++
++```mermaid
++flowchart LR
++    A[源记录] --> B[记录事实]
++    B --> C[域画像<br/>可重算统计]
++    B --> D[语义记忆<br/>用户确认的含义]
++    E[点评与纠错] --> D
++    E --> F[偏好画像<br/>想看什么/怎么说]
++    C --> G[Signals]
++    D --> H[Context Assembler]
++    F --> H
++    G --> I[Planner<br/>候选/Gate/排序]
++    I --> H
++    J[近期上下文<br/>去重/会话] --> H
++    H --> K[Context Packet]
++    K --> L[表达模型]
++    L --> M[用户可见反馈]
++```
++
++Personal Context 是一个**协调层**，不是一张新的巨型画像表。它由以下四类信息组成：
++
++### 3.1 域画像 Domain Profile
++
++回答“客观上发生了什么”。例如：本自然周商户次数、近 90 天中位数、睡眠基线、阅读连续天数。
++
++要求：
++
++- 可由源记录重建；
++- 明确时区、窗口和是否包含当前记录；
++- 每个字段必须有消费它的信号或候选规则；
++- 不直接作为自由文本 Memory 注入模型。
++
++### 3.2 语义记忆 Semantic Memory
++
++回答“这件事对这个用户意味着什么”。例如：
++
++- 用户确认某商户是模型 API 中转站；
++- 用户说明某个名字对应家人或朋友；
++- 用户纠正系统对某条记录的解释；
++- 用户明确表达某个长期目标或场景。
++
++它不能承载可从交易或数据记录重算的统计数字。
++
++用户可以在“芥子对我的理解”页面查看已生效的语义记忆，但不能直接编辑内容。用户可以删除某条理解；删除只移除这条语义记忆及其检索索引，不删除原始交易、截图或数据记录。删除后的记忆不得再次进入 Context Packet；如果未来从源记录或用户明确说明重新形成新的理解，应建立新的记忆版本，而不是恢复旧内容。
++
++### 3.3 偏好画像 Preference Profile
++
++回答“用户想看什么、希望怎么说”。例如：
++
++- 更关注当前记录本身；
++- 不喜欢说教或泛泛鼓励；
++- 对周期比较、商户重复、消费节奏的偏好；
++- 某个域适合详情展示，不适合快捷通知。
++
++人格是表达策略，不能改变事实、候选资格或统计口径。
++
++### 3.4 近期上下文 Recent Context
++
++回答“最近已经说过什么”。它只用于句式去重、连续表达和会话体验，不能升级为长期事实，也不能替代语义记忆。
++
++### 3.5 用户理解面
++
++“芥子对我的理解”是透明度和控制入口，不是编辑器：
++
++- 展示理解内容、适用对象/域、来源类型和最近验证时间；
++- 不提供直接改写入口，避免用户修改后破坏证据链；
++- 提供删除操作，并明确删除的是“芥子的理解”，不是原始记录；
++- 删除后立即从所有域和所有 Surface 的检索结果中消失；
++- 空状态、删除中、删除成功和删除失败都必须有明确反馈。
++
++## 4. Memory 分类与迁移规则
++
++旧 `get_companion_context` 中的内容按以下规则处理：
++
++| 旧内容 | 目标归属 | 处理 |
++| --- | --- | --- |
++| `today_spend`、`week_spend`、`frequent_merchants_30d` | 域画像/事实注册表 | 移出 Memory 上下文 |
++| `sport_this_week`、`last_sleep`、`food_this_week` | 对应域画像 | 由域规则统一计算 |
++| `recent_companions` | 近期上下文 | 只用于去重，设置短生命周期 |
++| 用户确认的商户含义、人物关系、纠错 | 语义记忆 | 保留，优先级最高 |
++| `tone_preference`、`avoidance` | 偏好画像 | 与生活事实分开读取 |
++| 自动生成“用户会在 X 消费” | 派生模式 | 停止续写，逐步归档，不批量删除 |
++
++迁移原则：**保留用户确认过的语义资产，停止把可重算统计写成 Memory。** 未确认的模型推断只能作为候选假设，不能直接进入用户可见断言。
++
++## 5. 语义记忆的最小契约
++
++当前表已有 `memory_key`、`memory_type`、`evidence_jsonb`、`confidence`、`weight`、`expires_at`、`source_table` 和 `source_id`。这些字段可以作为过渡数据源，但不能继续依赖隐含约定。
++
++Context Assembler 读取时应把旧行标准化成以下逻辑字段：
++
++```text
++origin: user_explicit | record_derived | model_inferred
++authority: confirmed | supported | hypothesis
++scope: domain + entity key
++state: hypothesis | confirmed | denied | superseded | expired | deleted
++claimability: expressible | context_only | ranking_only
++evidence: source records, feedback, or user statement
++```
++
++第一阶段可以在代码层完成标准化，不立即新增完整表结构。标准化结果必须保留原始 `memory_id`，并把无法确认的字段标记为 `unknown`，不能通过空值猜测为用户确认。
++
++现有字段到逻辑字段的过渡映射：
++
++| 逻辑字段 | 首选来源 | 缺失时的处理 |
++| --- | --- | --- |
++| `origin` | `evidence_jsonb.source`、`source_table` | 标记 `unknown`，不得升级为 `user_explicit` |
++| `scope` | `memory_key`、`memory_type`、证据中的实体别名 | 无法解析实体时只能 `ranking_only` |
++| `authority` | 用户明确反馈标记、可追溯证据和当前状态 | 默认最高只能 `hypothesis` |
++| `state` | 未来的状态字段或删除/过期记录 | 旧行默认 `confirmed` 仅限明确用户来源，其余为 `hypothesis` |
++| `claimability` | 显式策略映射 | 不允许仅由 `weight` 或 `confidence` 推断 |
++| `evidence` | `source_table`、`source_id`、`evidence_jsonb` | 证据为空时不得直接表达 |
++
++只有当用户纠错、冲突和版本替换真实发生后，再决定是否增加 `status`、记忆版本链和多证据表。这里的“暂不新增表结构”不等于“暂不定义契约”。
++
++特别约束：
++
++- `weight` 只用于排序，不能代表事实正确性；
++- `confidence` 不能替代用户确认状态；
++- `memory_type` 不能单独决定是否允许模型表达；
++- 语义记忆与当前记录实体不匹配时，不得注入表达上下文。
++
++### 5.1 用户可见记忆契约
++
++用户理解页面只读取 `state=confirmed` 且未删除的语义记忆。每条可见项至少显示：
++
++- 理解内容（使用用户能读懂的短句）；
++- 对象或域（例如某商户、某本书、睡眠域）；
++- 来源概括（用户确认、用户纠正或系统观察）；
++- 最近验证时间；
++- 删除入口。
++
++页面不显示候选分数、内部置信度、原始 JSON、Prompt 或模型内部标签。删除操作需要确认，成功后必须使活跃检索、短期缓存、待发送 Packet 和未来 Surface 读取全部失效。删除语义记忆不会删除源记录，也不会自动删除已经生成并持久化的历史文案；历史文案只在重新生成时遵守删除结果。
++
++## 6. Context Packet 契约
++
++模型每次只接收一个经过筛选的 Context Packet，不接收原始 `get_companion_context` JSON：
++
++```text
++record_facts:
++  当前记录字段、记录时间、域、识别置信度
++
++selected_candidates:
++  Planner 选中的候选事实、数字、时间口径、证据来源、Surface
++
++semantic_context:
++  与当前实体直接相关的少量语义记忆及其 claimability
++
++expression_preferences:
++  人格、长度、语气、禁用表达、用户偏好的分析角度
++
++recent_expression_context:
++  最近已展示的候选/句式指纹，仅用于避免重复
++```
++
++模型不得从 `semantic_context` 重新计算次数、金额、趋势或因果；统计表达必须来自 `selected_candidates`。如果没有合格候选，模型只能围绕当前记录事实表达，不能用旧 Memory 凑内容。
++
++### 6.1 Context Packet 的字段约束
++
++| 字段 | 必填 | 内容边界 | 最大规模 |
++| --- | --- | --- | --- |
++| `packet_version` | 是 | 契约版本，例如 `context-packet-v1` | 1 个 |
++| `record_facts` | 是 | 当前记录已确认字段、事件时间、域、识别状态 | 当前记录 1 条 |
++| `selected_candidates` | 否 | Planner 已选事实、数字、口径、证据和 Surface | 每个域最多 2 条，总计最多 4 条 |
++| `semantic_context` | 否 | 当前实体匹配且有权使用的语义记忆 | 最多 3 条 |
++| `expression_preferences` | 是 | 人格、风格、长度、禁区和当前 Surface | 只传当前 Surface 所需字段 |
++| `recent_expression_context` | 否 | 最近展示的候选指纹和短句指纹 | 最近 5 条或 7 天内，以较小者为准 |
++| `trace` | 是 | 来源域、候选类型、Memory ID、计算时间和内容指纹 | 不向用户展示 |
++
++Packet 生成失败时必须返回可审计的 `fallback_reason`，并退回规则表达；不能把原始 Memory JSON 作为备用输入。当前 v1 已生成同步内容指纹，用于追踪 Packet 是否被重复或覆盖；时间戳只放在 trace，不参与指纹。后续接入画像/候选版本后，版本字段必须加入指纹输入。
++
++### 6.2 候选与语义记忆的组合规则
++
++1. `record_facts` 是当前记录的唯一主体；
++2. `selected_candidates` 决定可以说哪些统计事实；
++3. `semantic_context` 只补充用户语义，不新增统计事实；
++4. `expression_preferences` 只改变说法，不改变事实和候选选择；
++5. `recent_expression_context` 只用于去重，不得形成新的事实；
++6. 候选和记忆冲突时，候选事实和源记录优先，冲突进入质量日志；
++7. 任何缺少来源、范围或有效状态的信息都不得进入 `expressible`。
++
++### 6.3 一次表达调用的边界
++
++所有上下文筛选、事实计算、候选选择和记忆匹配在模型调用前完成。表达模型只接收一个冻结的 Context Packet；调用中途不得追加另一份 Memory 或重新查询统计。需要换角度时，代码生成新的 Packet 和新的候选曝光，而不是让模型自行扩大上下文范围。
++
++### 6.4 三个模型入口的替换矩阵
++
++当前代码存在三个不同入口，不能用“表达模型”四个字笼统替代：
++
++| 入口 | 当前职责 | Packet 改造后的职责 |
++| --- | --- | --- |
++| `buildPrompt` | 首轮视觉识别，同时可能返回临时 companion_message | 只接收图片、识别规则和运行时设置；不得接收历史统计或未经当前实体匹配的语义；其 companion_message 不是最终表达事实 |
++| `buildVoicePrompt` | Signals 之后的二次表达 | 接收唯一冻结 Context Packet，允许自然转述 `selected_candidates` 和已授权 `semantic_context` |
++| `buildFeedbackPrompt` | `VOICE_SIGNALS_ENABLED=false` 时的兼容 fallback | 只接收由代码构造的同一 Packet；旧开关关闭后逐步下线，不能恢复原始 Memory JSON 注入 |
++
++识别调用和表达调用可以是同一次请求中的两次模型调用，但职责必须分开：第一次识别出当前事实，代码随后计算画像、信号、候选和语义匹配，第二次才表达。不存在“先把完整 Memory 交给视觉模型，让它自己判断”的兜底路径。
++
++## 7. 写入与生命周期
++
++语义记忆不能由每条记录自动升级。建议采用以下状态流转：
++
++```text
++候选假设 → 用户确认 → 生效
++候选假设 → 用户否定 → 禁用
++生效记忆 → 新纠正 → 被替代/建立新版本
++生效记忆 → 超过有效期 → 过期
++```
++
++写入来源按可信度排序：
++
++1. 用户明确说明或纠正；
++2. 用户点评中明确确认的语义；
++3. 有稳定证据支持的系统推断；
++4. 单次模型猜测。
++
++用户明确纠正或确认的语义记忆，在当前记录实体和作用范围匹配时，可以进入 `expressible`，由模型自然表达；但它仍不能改变当前记录字段，也不能生成统计数字或因果结论。
++
++未确认的系统推断只能进入 `ranking_only`，最多影响候选排序和是否值得继续观察，不得出现在用户可见文案中。具有稳定记录证据但未获用户确认的内容，默认进入 `context_only`。单次模型猜测只能留在待验证区域。
++
++语义记忆状态流转必须完整：
++
++| 当前状态 | 可流转至 | 触发条件 | 终态 |
++| --- | --- | --- | --- |
++| `hypothesis` | `confirmed` / `denied` / `expired` | 用户确认、用户否定、超过有效期 | 否 |
++| `confirmed` | `superseded` / `expired` / `deleted` | 新纠正、有效期结束、用户删除 | 否 |
++| `denied` | `hypothesis` | 后续出现新的独立证据，重新等待确认 | 否 |
++| `superseded` | `deleted` | 新版本已接替，用户删除旧版本 | 否 |
++| `expired` | `hypothesis` / `deleted` | 新证据重新验证、用户删除 | 否 |
++| `deleted` | 无 | 用户删除理解 | 是 |
++
++用户不直接修改内容，但可以删除任何可见理解；删除不能把关联原始记录误删或回写。
++
++### 7.1 记忆产生规则
++
++| 触发来源 | 初始状态 | 默认权限 | 是否可直接表达 |
++| --- | --- | --- | --- |
++| 用户明确说明或纠正 | `confirmed` | `expressible`（需实体匹配） | 是 |
++| 用户对语义候选明确确认 | `confirmed` | `expressible`（需实体匹配） | 是 |
++| 多条记录支持的系统观察 | `hypothesis` | `context_only` 或 `ranking_only` | 否 |
++| 单次模型猜测 | `hypothesis` | `ranking_only` | 否 |
++| 统计聚合结果 | 不写入语义记忆 | 仅由域画像/候选使用 | 否 |
++
++自动观察不能因为重复出现就自动升级为 `confirmed`。升级必须来自用户明确确认，或来自后续专门设计的反馈事件；普通的“没有点评”不算确认。
++
++### 7.2 冲突处理
++
++- 同一实体出现两条互相矛盾的 `confirmed` 记忆时，暂停两条记忆的直接表达，进入冲突队列；
++- 新的用户纠正创建新版本，并将旧版本标记为 `superseded`，保留来源关系；
++- 用户删除只删除被选中的理解，不自动删除冲突的原始记录；
++- Planner 在冲突未解决时只能使用无争议的当前记录事实。
++
++## 8. 实施阶段
++
++### 阶段零：已知断裂点止血
++
++在 Context Packet 完整接入之前，先完成两个不依赖数据库迁移的安全修复：
++
++- Voice Prompt 与 Signals 铁律统一：允许引用信号事实，禁止自行计算和改变时间口径；
++- 数字校验和统计词校验按信号来源区分；有明确信号且数字/周期匹配时放行，无信号或口径不匹配时阻断。
++
++阶段零必须与阶段一并验证，不能先切断旧 Memory 再把正确信号继续锁死，否则会产生“旧数据不见了、文案仍然变空”的中间坏状态。
++
++### 阶段一：全域契约和观测
++
++- 写 Context Packet 和 Memory 标准化读取器的测试样例；
++- 统计线上 Memory 各类型、来源和实际消费情况；
++- 确认哪些路径仍在读取 `short_term` 或原始 `long_term`。
++- 为 expense、sleep、food、sport、reading、wallet 统一定义同一套输入、来源和表达权限；域特有字段由各域画像和候选规则补充。
++
++产出：契约文档、分类清单、回归样本。
++
++### 阶段二：全域切断混合上下文
++
++- 停止把短期统计原样注入模型；
++- 只注入与当前实体匹配的语义记忆和表达偏好；
++- 保留旧字段读取作为兼容层，但不再把整个 JSON 传入 Prompt。
++- 所有域统一通过 Context Packet 进入表达层；不能为消费域单独保留一条旧 Memory 通道。
++
++产出：上下文来源单一、统计口径可追溯。
++
++### 阶段三：全域语义记忆收敛
++
++- 停止自动写入冗余商户/分类 Memory；
++- 保留用户确认的语义资产；
++- 增加否定、替代和过期的可审计状态；
++- 在真实纠错数据增加后再决定是否拆分证据表。
++- 消费、睡眠、饮食、运动、阅读和钱包共用来源、权限、删除和失效规则；各域只负责提供自己的语义实体和证据。
++
++### 阶段三的迁移分类
++
++旧 Memory 不直接全部转换为已确认画像，按以下分类处理：
++
++| 分类 | 判断 | 迁移动作 |
++| --- | --- | --- |
++| 用户明确语义 | 有用户原文、纠正点评或人工确认来源 | 转为 `confirmed + expressible` |
++| 可重算统计 | 金额、次数、排行、均值、中位数、窗口趋势 | 不迁移，删除读取路径，由域画像提供 |
++| 自动记录模式 | 由单条记录生成“用户会在 X 消费”等句子 | 停止续写，保留兼容数据但标记 `record_derived` |
++| 来源不明 | 无法判断来自用户还是系统 | 暂不表达，进入人工/规则核验队列 |
++| 用户否定或已删除 | 明确表示错误或主动删除 | 标记 `denied/deleted`，阻断未来召回 |
++
++### 阶段四：全域表达和学习接入
++
++- Planner 选择候选，偏好画像影响排序，不得改写事实；
++- 继续保留规则兜底和 Shadow 对照，直到线上闭环稳定。
++- 所有域都必须验证“代码事实可追溯、模型只表达已选事实、反馈能回到候选/表达偏好”这条闭环。
++
++## 9. 暂不做的事情
++
++- 不新建一张巨型 `personal_profile` JSON 表；
++- 不把所有自动推断升级为长期记忆；
++- 不让 Memory 产生金额、次数、周期或因果结论；
++- 不在没有回归样本和线上观测的情况下批量删除旧记忆；
++- 不把 Planner 的 Shadow 结果直接当作已经完成的表达闭环。
++
++## 10. 已确认的产品决策
++
++1. 用户明确纠正或确认的语义记忆，在实体和作用范围匹配时允许直接进入陪伴文案；仍不得改变记录字段或生成统计结论。
++2. 未确认的系统推断只能影响候选排序、观察优先级或是否继续收集证据，不得直接出现在用户可见文案中。
++3. 用户可以查看“芥子对我的理解”，但不能直接编辑；可以删除。删除理解不删除原始记录，并立即阻断后续检索。
++4. 这是全域基础框架，不是消费域试点。六个域共用 Context Packet、来源权威、状态生命周期和删除规则；各域画像与候选能力可以分批完善，但不能有不同的 Memory 读取原则。
++
++## 11. 复审验收标准
++
++架构进入代码阶段前，至少满足以下条件：
++
++- 同一条统计事实只有一个代码权威来源，Memory 不再提供统计数字；
++- 用户确认的语义记忆可追溯到来源，并能按实体/域匹配；
++- 未确认推断在所有域、所有 Surface 均不能进入用户可见表达；
++- 用户删除理解后，记录详情、通知、AI 卡片和周报均不再读取该记忆；
++- `hypothesis`、`confirmed`、`denied`、`superseded`、`expired`、`deleted` 每个状态都有合法出口；
++- 无候选、候选失效、记忆冲突、删除失败和模型表达违规都有规则兜底；
++- expense、sleep、food、sport、reading、wallet 至少各有一条契约测试，验证同一套 Context Packet 边界。
++
++## 12. 多角色复审结论
++
++### 总体判定
++
++**有条件通过，允许进入契约设计和测试准备，不允许直接改线上读取链路。**
++
++核心架构方向成立，但必须先完成 Context Packet、记忆删除和全域验收契约，再进入实现。
++
++### 产品视角
++
++- 用户价值清晰：从“记录是什么”扩展到“这条记录对我意味着什么”；
++- “可查看、可删除、不可编辑”形成了可信的个人理解边界；
++- 需要在后续产品稿中补充成功指标：当前记录相关性、语义记忆删除后的不再召回率、重复表达率和用户纠错率。
++
++### 研发视角
++
++- 可复用现有域画像、Signals、Planner 和 `user_configs`，不新建平行事实系统；
++- Context Packet 仍需在实现前确定必填字段、最大条数、来源标识和无候选时的空值行为；
++- 删除语义记忆必须同时清理检索索引、缓存和各 Surface 的上下文快照，但不能删除源记录；
++- 旧 `get_companion_context` 保留兼容读取期间，必须有明确的下线开关和回滚路径。
++
++### 测试视角
++
++- 状态机已覆盖 `hypothesis → confirmed/denied/expired`、`confirmed → superseded/expired/deleted` 和删除终态；
++- 还必须覆盖实体不匹配、记忆冲突、删除后缓存命中、模型表达违规、候选失效和六域空画像；
++- 每个域至少一条正例和一条拒绝例，证明未确认推断不会进入用户可见表达。
++
++### UI/UX 视角
++
++- “芥子对我的理解”应是浏览和删除页面，不做编辑表单；
++- 每条理解显示对象、来源概括、最近验证时间和删除入口；
++- 删除需要明确确认，并提供成功/失败反馈；空状态要说明“当前没有已确认的理解”，不能伪造画像内容。
++
++### 运营视角
++
++- 首次切换 Context Packet 后需要保留旧链路 Shadow 对照；
++- 记录 Packet 版本、记忆命中数、候选命中数、表达兜底率、数字校验失败率和删除后的再召回率；
++- 必须具备按用户和按域关闭语义记忆注入的开关，便于回滚。
++
++### 隐私与合规视角
++
++- 语义记忆属于个人画像数据，应沿用用户隔离、最小化传输和删除权原则；
++- 发给模型的只能是当前场景所需的最小语义片段，不得传完整历史 Memory；
++- 用户删除理解后，活跃存储、检索缓存和待发送上下文都必须失效；原始记录是否保留与“删除理解”是两个独立操作。
++
++### 进入代码阶段的必要条件
++
++1. Context Packet 的字段、来源和空值规则确定；
++2. 记忆删除的存储、缓存和 Surface 失效规则确定；
++3. 六域统一契约测试样例确定；
++4. 旧链路 Shadow、回滚开关和观测指标确定。
++
++## 13. 全域适配约定
++
++框架层一次建设，域层按适配器接入。每个域适配器必须提供以下四类输出：
++
++| 输出 | 说明 |
++| --- | --- |
++| `record_facts` | 当前域已经识别并通过字段校验的字段 |
++| `profile_facts` | 当前域画像中的可追溯统计，包含窗口和样本数 |
++| `candidate_facts` | 当前域可供 Planner 选择的候选事实 |
++| `semantic_entities` | 当前记录可匹配的商户、人物、书籍、运动类型等实体 |
++
++域适配器不得自行把统计写入语义记忆，也不得绕过 Context Assembler 直接拼接 Prompt。不同域的差异只体现在字段、候选和实体匹配规则，不体现在权威、删除和表达权限上。
++
++最低接入要求：
++
++- expense：商户、分类、时间、金额和账户语义；
++- wallet：收入来源、账户、快照和负债语义；收入记录的来源字段由财务事实适配器提供；
++- sleep：睡眠事件日期、时长、评分和睡眠习惯语义；
++- food：餐次、食物实体、营养字段和饮食偏好语义；
++- sport：运动类型、时长、距离、配速和目标语义；
++- reading：书籍、章节/页码、摘录内容和阅读目标语义。
++
++缺少某个域的画像字段时，仍必须生成只依赖当前记录的 `record_facts`，不能因为没有历史画像就调用旧 Memory 兜底。
++
++## 14. 观测、灰度与回滚
++
++### 14.1 必须记录的内部指标
++
++- `context_packet_version` 与 `memory_schema_version`；
++- 当前记录域、候选 ID、候选来源和候选口径；
++- 语义记忆命中数、被过滤数及过滤原因；
++- 模型表达成功率、规则兜底率、数字校验失败率；
++- 用户纠错率、候选价值正负反馈和表达风格反馈；
++- 删除后再次命中的次数；该指标必须为 0；
++- 旧链路与新 Packet 的内容差异摘要，不记录完整敏感 Prompt。
++
++### 14.2 灰度顺序
++
++1. 离线契约样本：六域正例、拒绝例、冲突例和删除例；
++2. Shadow：新旧上下文并行计算，但只展示旧链路，比较事实和候选差异；
++3. 单用户 canary：只对当前用户启用新 Packet，保留回滚开关；
++4. 稳定后扩大 Surface，最后才下线旧 `get_companion_context` 的统计注入。
++
++### 14.3 回滚条件
++
++出现以下任一情况，立即关闭语义记忆注入并退回规则/事实表达：
++
++- 统计数字来源无法追溯；
++- 用户已删除的记忆再次进入 Packet；
++- 未确认推断进入用户可见文案；
++- 任一域的事实字段被语义记忆覆盖；
++- 兜底率或数字校验失败率显著高于旧链路。
++
++## 15. 契约测试矩阵
++
++每个域至少覆盖下列用例，测试实现可以复用同一个 Packet 验证器：
++
++| 场景 | 预期 |
++| --- | --- |
++| 当前记录有完整事实和候选 | Packet 包含当前事实和已选候选，模型不得新增统计 |
++| 只有当前事实、无历史画像 | 只允许事实表达，不读取旧统计 Memory |
++| 命中已确认语义记忆 | 允许表达语义，但不改变识别字段 |
++| 命中未确认推断 | 只能影响排序，不进入表达 Packet 的 `expressible` |
++| 实体不匹配 | 语义记忆不注入 |
++| 两条语义互相冲突 | 两条均不可直接表达，记录冲突日志 |
++| 用户删除语义 | 所有未来 Packet 均不命中，源记录保持不变 |
++| 候选失效或模型违规 | 退回规则事实表达，并保留失败原因 |
++| 重试、编辑或补全记录 | 重新计算记录指纹、候选依赖和语义匹配 |
++
++六个域都必须至少有一组上述用例；不能只用 expense 域证明框架正确。
++
++## 16. 开发前冻结清单
++
++以下事项完成后，文档才进入“可开发”状态：
++
++- [ ] 确定 Context Packet 的最终字段名、版本和空值规则；
++- [ ] 确定旧 Memory 行的标准化映射和未知来源处理；
++- [ ] 确定查看/删除页面的接口行为和删除后的缓存失效范围；
++- [ ] 确定候选、语义记忆、偏好和近期上下文的日志字段；
++- [ ] 为六个域准备契约样本和失败样本；
++- [ ] 确定 Shadow、canary、回滚开关和上线门槛；
++- [ ] 通过一次代码评审，确认任何模型调用都不能绕过 Context Assembler。
+
+diff --git a/docs/personal-context-development-log-v0.1.md b/docs/personal-context-development-log-v0.1.md
+new file mode 100644
+index 0000000..dd6bd02
+--- /dev/null
++++ b/docs/personal-context-development-log-v0.1.md
+@@ -0,0 +1,245 @@
++# Personal Context 开发计划与交接日志 v0.1
++
++> 对应设计：[personal-context-architecture-v0.1.md](./personal-context-architecture-v0.1.md)  
++> 状态：开发中  
++> 范围：Supabase Edge Function、Planner/Signals 上下文边界、语义 Memory 读取与测试  
++> 发布边界：本轮不自动 push、部署或触发 TestFlight；需通过本日志的发布门槛后单独授权
++
++## 1. 目标
++
++把现有“事实/信号/旧 Memory/模型表达”并行链路收敛为：
++
++```text
++源记录 → 域画像/当前事实 → Signals/Planner → Context Packet → 表达模型
++                         ↘ 语义 Memory（只提供已授权的用户语义）
++```
++
++代码负责计算事实、口径、候选和权限；模型只负责在冻结 Packet 内自然表达。
++
++## 2. 不在本轮做的事情
++
++- 不修改原始记录识别字段、交易状态机或账户逻辑；
++- 不建立巨型 `personal_profile` JSON 表；
++- 不把所有域的候选规则一次性重写；
++- 不批量删除现有 `user_companion_memories` 数据；
++- 不在未通过回归、Shadow 和单用户 Canary 前做全量生产发布。
++
++## 3. 开发阶段与交付物
++
++### Phase 0：表达链路止血与入口盘点
++
++目标：先消除已知的统计口径误杀和旧入口混用。
++
++任务：
++
++- 明确识别调用、Voice 调用和旧反馈调用的边界；
++- 识别调用不得接收短期统计或未经匹配的语义 Memory；
++- Voice Prompt 允许引用已选信号事实，但禁止自行计算；
++- 数字校验按来源白名单工作，保留对无来源统计的拦截；
++- 为三类调用分别增加回归样本和日志字段。
++
++产出：调用入口矩阵、Prompt/Guard 回归测试、已知“第 11 次/第 4 次”样本通过。
++
++### Phase 1：Context Packet 与 Memory 标准化
++
++目标：所有表达入口只消费一个冻结的、带来源的 Packet。
++
++任务：
++
++- 实现 Memory 标准化读取器，不改变数据库表结构；
++- 实现实体/域匹配、状态和 claimability 过滤；
++- 实现 Packet 版本、内容指纹和 trace；
++- 将 `buildPrompt`、`buildVoicePrompt`、`buildFeedbackPrompt` 接到明确的兼容适配层；
++- 禁止完整 `get_companion_context` JSON 继续进入模型。
++
++产出：Packet 构造器、旧链路兼容适配、三入口一致性测试。
++
++### Phase 2：语义 Memory 收敛与删除契约
++
++目标：保留用户确认的语义资产，停止统计型 Memory 增长。
++
++任务：
++
++- 停止 `rememberCompanionSignals` 写入可重算的商户/分类统计模式；
++- 旧数据按 `user_explicit`、`record_derived`、来源不明分类；
++- 加入删除语义的存储、缓存、Packet 和 Surface 失效；
++- 提供“芥子对我的理解”只读列表和删除入口；
++- 删除不影响原始记录，不恢复旧记忆。
++
++产出：Memory 迁移报告、删除回归测试、最小用户理解页面契约。
++
++### Phase 3：六域契约与学习接入
++
++目标：框架一次性覆盖所有域，生产切换按风险分批进行。
++
++任务：
++
++- 为 expense、sleep、food、sport、reading、wallet 准备正例/拒绝例；
++- 统一候选、语义 Memory 和偏好的来源优先级；
++- 保留 Planner Shadow，比较旧链路、新 Packet 和规则兜底；
++- 记录候选、Memory 命中、表达违规、反馈和删除后再召回指标。
++
++产出：六域契约测试、Shadow 报告、单用户 Canary 清单。
++
++### Phase 4：发布候选与上线
++
++目标：在可回滚的前提下完成闭环。
++
++任务：
++
++- 本地测试、Edge bundle 检查和 GitHub CI；
++- 单用户 Canary，至少覆盖 20-30 条真实跨域记录；
++- 确认删除理解后所有 Surface 不再命中；
++- 确认旧 Memory 统计不会进入任一 Prompt；
++- 通过发布评审后再部署生产。
++
++## 4. 每轮交接格式
++
++每轮完成后更新本文件：
++
++```text
++日期：YYYY-MM-DD
++完成：
++修改文件：
++测试：
++真实样本/回放：
++已知风险：
++下一轮：
++是否允许进入下一阶段：是/否
++```
++
++每轮不得把用户素材、凭据、生产导出或无关 WIP 纳入提交。
++
++## 5. 开发前门槛
++
++- [ ] 三类模型入口和 fallback 条件已在代码中定位并有测试；
++- [ ] Context Packet 字段、空值、最大规模和来源 trace 已冻结；
++- [ ] Memory 删除不会级联删除原始记录；
++- [ ] 未确认推断没有 `expressible` 权限；
++- [ ] 六域至少各有一条 Packet 契约样本；
++- [ ] Shadow、Canary、回滚开关和指标已定义；
++- [ ] 未通过以上门槛前不做生产部署。
++
++## 6. 进度
++
++| 阶段 | 状态 | 备注 |
++| --- | --- | --- |
++| Phase 0 | 进行中 | 已修正 Voice 指令和信号数字校验，待 Edge CI 验证 |
++| Phase 1 | 进行中 | 已新增 Context Packet 和 Memory 标准化读取器，待接入旧 fallback 并跑 CI |
++| Phase 2 | 未开始 | 不批量删除旧数据 |
++| Phase 3 | 未开始 | 全域契约、分批 Canary |
++| Phase 4 | 未开始 | 需要明确发布授权 |
++
++## 7. 2026-08-06 开发记录
++
++完成：
++
++- 新增 `context-packet.ts`：标准化语义 Memory、实体匹配、claimability 过滤和 Packet trace；
++- 识别阶段 `buildPrompt` 不再序列化原始 Memory，并明确识别/表达边界；
++- Voice Prompt 改为允许忠实转述已核实信号，同时禁止改写时间范围和统计口径；
++- Voice 层校验改为传入 signals，允许信号白名单数字，拒绝错误时间窗口；
++- 新增 Signals、Context Packet、Prompt 入口契约测试样本。
++
++修改文件：
++
++- `supabase/functions/ingest-receipt/context-packet.ts`
++- `supabase/functions/ingest-receipt/context-packet_test.ts`
++- `supabase/functions/ingest-receipt/prompts.ts`
++- `supabase/functions/ingest-receipt/prompts_test.ts`
++- `supabase/functions/ingest-receipt/signals.ts`
++- `supabase/functions/ingest-receipt/signals_test.ts`
++- `supabase/functions/ingest-receipt/index.ts`
++
++测试：
++
++- `git diff --check` 通过；
++- Windows 本机未安装 Deno，Edge `deno test` 未能运行；
++- GitHub Actions 的 `deno check` 与 Edge 测试仍是下一验证门槛。
++
++已知风险：
++
++- 旧反馈 fallback 已停止原始 Memory JSON 注入，但尚未在 fallback 分支构造完整 Context Packet；
++- `rememberCompanionSignals` 仍会写入派生统计型 Memory，Phase 2 处理；
++- 识别阶段目前只切断了 Memory 注入，首轮返回的 companion_message 仍需在后续统一收敛。
++
++下一轮：
++
++- 将 fallback 分支接入 Context Packet；
++- 补全三入口的静态契约检查；
++- 在 CI 上运行 Deno 类型检查和 Edge 单测。
++
++是否允许进入下一阶段：否，等待 Edge CI 验证和 fallback 接入。
++
++## 8. 2026-08-07 收口记录
++
++完成：
++
++- 修正安全契约门禁：`hasModelOwnedStatisticalClaim` 由 `signals.ts` 负责，门禁不再要求它错误地出现在 `index.ts`；仍检查所有表达入口使用 `validateModelTone`。
++- 用 `npx deno` 本机执行与 CI 同口径的 Edge `check` 和 23 项 Signals/Packet/Prompt 测试；识别、Voice、兼容 Feedback 三个入口均通过。
++- 将 `get_companion_semantic_memories` 迁移加入 release validation，并扩充安全夹具字段；明确 authenticated 只能 SELECT/DELETE，不能 INSERT/UPDATE，RPC 仅 service role 可执行。
++- Context Packet 增加同步内容指纹，trace 保留 Packet 创建时间、候选类型、Memory 加载/过滤数量和选中 Memory ID。
++- 保持识别模型的 companion 只进入 debug，不进入用户可见或归档字段；最终文案统一由 Voice/规则链路生成。
++- 将内容 Guard 和补录时间 Guard 放到 Voice/兼容表达的最终出口，避免二次调用绕过“禁用套话”和睡眠补录相对日期校正。
++
++修改文件：
++
++- `scripts/check-security-contracts.mjs`
++- `scripts/security-migration-fixture.sql`
++- `scripts/test-security-migration.sql`
++- `.github/workflows/release-validation.yml`
++- `supabase/migrations/20260806100000_personal_context_memory_contract.sql`
++- `supabase/functions/ingest-receipt/context-packet.ts`
++- `supabase/functions/ingest-receipt/context-packet_test.ts`
++- `docs/personal-context-architecture-v0.1.md`
++- `docs/personal-context-development-log-v0.1.md`
++
++测试：
++
++- `npx deno check --no-lock --node-modules-dir=auto supabase/functions/ingest-receipt/index.ts` 通过；
++- `npx deno test --no-lock .../signals_test.ts .../context-packet_test.ts .../prompts_test.ts`：23 passed；
++- CI 完整 Edge 测试集合（重复识别、Signals、Packet、Prompt、Shadow、通知）：35 passed；
++- `npm run check:security-contracts` 通过；
++- `git diff --check` 通过；
++- `npm run build`、`npm run test:pending-queue`、`npm run check:receipt-dedup`、迁移版本检查均通过；
++- 迁移版本检查、PWA 待处理队列和重复记录契约仍待本轮最终复跑；Windows 尚未直接执行 PostgreSQL 迁移演练，GitHub Actions 仍是数据库门禁权威。
++
++已知风险：
++
++- 新迁移已加入 CI，但当前工作区没有本地 `psql`；需在 GitHub Actions 的 PostgreSQL service 中确认夹具和 RLS 权限行为。
++- Planner 仍有部分候选停留在 Shadow/owner-only，Context Packet 已提供统一入口，但未宣称六域候选已全部补齐。
++- 本轮未提交、未 push、未部署；根工作区中的用户素材和其他 WIP 未纳入本任务范围。
++
++下一轮：
++
++- 运行完整 release-validation；通过后再做单用户真实回放，重点观察“当前记录主体 + 一个准确候选 + 人格语气”是否同时保留。
++- 对删除后的语义 Memory 做线上回放，确认所有 Surface 不再命中，且历史已持久化文案不被误删。
++
++是否允许进入下一阶段：否，等待 GitHub Edge/Postgres CI 和单用户 Canary 结果。
++
++## 9. 2026-08-07 本轮复核
++
++完成：
++
++- 复跑 Edge `deno check` 与完整收件箱/信号/Packet/Prompt/Shadow/通知测试：35 passed；
++- 复跑 PWA 构建、安全契约、待处理队列、重复记录契约、财务审核选项、迁移版本和注册同意元数据检查：全部通过；
++- 只读复审识别、Voice、兼容 Feedback 三个入口：识别模型的 companion 只保留调试值，表达入口均通过 Context Packet 组装；
++- 只读复审语义 Memory RPC 和 RLS：service role 才能读取聚合语义 Memory，authenticated 只能查看/删除，不能 INSERT/UPDATE。
++
++未完成/环境差异：
++
++- Windows 本机没有可被 Planner 测试直接解析的 `esbuild` 包，PowerShell 运行 Planner 测试时有 4 个测试加载失败；其余 84 个 Planner 测试通过。该依赖以 GitHub Actions 的 Linux 安装结果为准，本轮没有修改依赖或绕过测试；
++- Windows 没有 `psql`，Docker daemon 未运行，PostgreSQL 迁移与 RLS 演练仍需 CI service；
++- 尚未提交、push、部署或执行生产迁移。
++
++Git 阻塞：
++
++- 根工作区仍包含本任务改动和用户无关素材；4 个旧共享 worktree 的 HEAD 指向已消失的分支引用，`git worktree list --porcelain` 显示全零；
++- `fsck` 进程已结束，但按 AGENTS.md 规则，在 Git owner 恢复这些异常 worktree 前不执行 `add`、`commit`、`push`、`worktree repair` 或引用清理。
++
++下一轮：
++
++- Git owner 从干净 `origin/main` 建立中文独立 worktree，逐文件转移本轮源码、迁移、测试和文档；
++- 在新 worktree 复跑完整 release-validation，重点确认 PostgreSQL 迁移和 RLS；
++- CI 通过后再做单用户 20–30 条真实记录 Canary，并决定是否进入生产发布。
++
++是否允许进入下一阶段：否，等待 Git owner 修复 worktree 并通过 CI/Postgres 门槛。
