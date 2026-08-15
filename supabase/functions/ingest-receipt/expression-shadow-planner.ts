@@ -25,7 +25,7 @@ import {
   generateIncomeCandidates,
   generateBuiltinDomainCandidates,
   prepareDomainRecords,
-} from "../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs";
+} from "../_shared/expression-core/generic-domain-candidates.mjs";
 // @ts-ignore Production-owned pure eligibility rules are shared with the offline lab.
 import { evaluateCandidates, summarizeEligibility } from "../_shared/expression-core/eligibility-gates.mjs";
 // @ts-ignore Production-owned pure scoring rules are shared with the offline lab.

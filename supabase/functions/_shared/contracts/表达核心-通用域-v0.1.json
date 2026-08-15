@@ -1,0 +1,257 @@
+{
+  "version": "0.1",
+  "cases": [
+    {
+      "id": "CORE-063",
+      "name": "only records known before the current record remain available",
+      "operation": "prepareDomainRecords",
+      "args": {
+        "domainKey": "reading",
+        "currentRecordId": "current",
+        "records": [
+          { "id": "past", "created_at": "2026-07-01T09:00:00+08:00", "occurred_at": "2026-07-01T08:00:00+08:00" },
+          { "id": "current", "created_at": "2026-07-03T09:00:00+08:00", "occurred_at": "2026-07-03T08:00:00+08:00" },
+          { "id": "future", "created_at": "2026-07-04T09:00:00+08:00", "occurred_at": "2026-07-04T08:00:00+08:00" }
+        ]
+      },
+      "expected": { "record_ids": ["past", "current"] }
+    },
+    {
+      "id": "CORE-064",
+      "name": "duplicate sleep events collapse to the most recently known row",
+      "operation": "prepareDomainRecords",
+      "args": {
+        "domainKey": "sleep",
+        "currentRecordId": "current-sleep",
+        "records": [
+          {
+            "id": "duplicate-older",
+            "created_at": "2026-07-01T08:05:00+08:00",
+            "occurred_at": "2026-07-01T08:00:00+08:00",
+            "payload": { "sleep_start_at": "2026-07-01T01:00:00+08:00", "wake_at": "2026-07-01T08:00:00+08:00", "sleep_hours": 7 }
+          },
+          {
+            "id": "duplicate-newer",
+            "created_at": "2026-07-01T08:06:00+08:00",
+            "occurred_at": "2026-07-01T08:00:00+08:00",
+            "payload": { "sleep_start_at": "2026-07-01T01:00:00+08:00", "wake_at": "2026-07-01T08:00:00+08:00", "sleep_hours": 7 }
+          },
+          {
+            "id": "current-sleep",
+            "created_at": "2026-07-05T08:05:00+08:00",
+            "occurred_at": "2026-07-05T08:00:00+08:00",
+            "payload": { "sleep_start_at": "2026-07-05T02:00:00+08:00", "wake_at": "2026-07-05T08:00:00+08:00", "sleep_hours": 6 }
+          }
+        ]
+      },
+      "expected": { "record_ids": ["current-sleep", "duplicate-newer"] }
+    },
+    {
+      "id": "CORE-065",
+      "name": "income preserves current, month aggregation, and repeated source facts",
+      "operation": "generateIncomeCandidates",
+      "args": {
+        "currentRecordId": "income-current",
+        "records": [
+          { "id": "income-prior", "occurred_at": "2026-07-01T12:00:00+08:00", "amount": 1000, "source_name": "项目款" },
+          { "id": "income-current", "occurred_at": "2026-07-13T12:00:00+08:00", "amount": 500, "source_name": "项目款" }
+        ]
+      },
+      "expected": {
+        "candidate_keys_include": ["income_current_amount", "income_month_total_count", "income_source_month_pattern"],
+        "checks": [
+          { "semantic_key": "income_month_total_count", "path": "claim.structured_value.count", "value": 2 },
+          { "semantic_key": "income_month_total_count", "path": "claim.structured_value.total_amount", "value": 1500 },
+          { "semantic_key": "income_source_month_pattern", "path": "claim.structured_value.count", "value": 2 }
+        ]
+      }
+    },
+    {
+      "id": "CORE-066",
+      "name": "sport accepts duration and reading does not turn blanks into zero",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "sport",
+        "currentRecordId": "sport-current",
+        "records": [{ "id": "sport-current", "occurred_at": "2026-07-13T12:00:00+08:00", "payload": { "duration_minutes": 45 } }]
+      },
+      "expected": {
+        "candidate_keys_include": ["sport_current_metric"],
+        "checks": [{ "semantic_key": "sport_current_metric", "path": "claim.structured_value.value", "value": 45 }]
+      }
+    },
+    {
+      "id": "CORE-066-B",
+      "name": "reading blank duration produces no candidate",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "reading",
+        "currentRecordId": "reading-current",
+        "records": [{ "id": "reading-current", "occurred_at": "2026-07-13T12:00:00+08:00", "payload": { "reading_minutes": " " } }]
+      },
+      "expected": { "candidate_keys": [] }
+    },
+    {
+      "id": "CORE-067",
+      "name": "food keeps meal and dish composition when calories are missing",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "food",
+        "currentRecordId": "food-current",
+        "records": [{
+          "id": "food-current",
+          "occurred_at": "2026-07-14T08:31:00+08:00",
+          "payload": { "meal_type": "breakfast", "dishes": [{ "name": "全麦面包", "protein_g": 8, "carb_g": 32, "fat_g": 4 }] }
+        }]
+      },
+      "expected": {
+        "candidate_keys_include": ["food_record_context", "food_composition"],
+        "candidate_keys_exclude": ["food_current_metric"],
+        "checks": [
+          { "semantic_key": "food_record_context", "path": "claim.structured_value.dish_names", "value": ["全麦面包"] },
+          { "semantic_key": "food_composition", "path": "claim.structured_value.macros.protein_g", "value": 8 }
+        ]
+      }
+    },
+    {
+      "id": "CORE-068",
+      "name": "food does not compare an under-supported meal baseline",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "food",
+        "currentRecordId": "food-current",
+        "records": [
+          { "id": "food-prior-1", "occurred_at": "2026-07-10T19:00:00+08:00", "payload": { "meal_type": "dinner", "total_calorie_kcal": 700 } },
+          { "id": "food-prior-2", "occurred_at": "2026-07-11T19:00:00+08:00", "payload": { "meal_type": "dinner", "total_calorie_kcal": 720 } },
+          { "id": "food-current", "occurred_at": "2026-07-14T19:00:00+08:00", "payload": { "meal_type": "dinner", "total_calorie_kcal": 638 } }
+        ],
+        "domainProfile": { "meal_baseline": { "dinner": { "n": 4, "median_kcal": 750 } } }
+      },
+      "expected": { "candidate_keys_exclude": ["food_meal_vs_personal_median"] }
+    },
+    {
+      "id": "CORE-068-B",
+      "name": "blank meal type keeps the generic food median path",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "food",
+        "currentRecordId": "food-current",
+        "records": [
+          { "id": "food-prior-1", "occurred_at": "2026-07-10T19:00:00+08:00", "payload": { "total_calorie_kcal": 600 } },
+          { "id": "food-prior-2", "occurred_at": "2026-07-11T19:00:00+08:00", "payload": { "total_calorie_kcal": 700 } },
+          { "id": "food-prior-3", "occurred_at": "2026-07-12T19:00:00+08:00", "payload": { "total_calorie_kcal": 800 } },
+          { "id": "food-current", "occurred_at": "2026-07-14T19:00:00+08:00", "payload": { "meal_type": "   ", "total_calorie_kcal": 650 } }
+        ]
+      },
+      "expected": { "candidate_keys_include": ["food_vs_personal_median"] }
+    },
+    {
+      "id": "CORE-069",
+      "name": "sleep preserves partial timing and stage coverage without filling REM",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "sleep",
+        "currentRecordId": "sleep-current",
+        "records": [{
+          "id": "sleep-current",
+          "occurred_at": "2026-07-14T08:20:00+08:00",
+          "payload": { "sleep_hours": 7.18, "quality_score": 82, "sleep_start_at": "2026-07-14T01:10:00+08:00", "deep_sleep_minutes": 90, "light_sleep_minutes": 240, "rem_minutes": null }
+        }]
+      },
+      "expected": {
+        "candidate_keys_include": ["sleep_current_metric", "sleep_timing", "sleep_quality_current", "sleep_stage_composition"],
+        "checks": [
+          { "semantic_key": "sleep_timing", "path": "numbers.length", "value": 1 },
+          { "semantic_key": "sleep_stage_composition", "path": "claim.structured_value.rem_minutes", "value": null },
+          { "semantic_key": "sleep_stage_composition", "path": "quality.data_coverage", "value": 0.6666666666666666 }
+        ]
+      }
+    },
+    {
+      "id": "CORE-070",
+      "name": "chronotype comparison keeps current behavior without an n threshold",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "sleep",
+        "currentRecordId": "sleep-current",
+        "records": [{
+          "id": "sleep-current",
+          "occurred_at": "2026-07-14T08:00:00+08:00",
+          "payload": { "sleep_hours": 7, "sleep_start_at": "2026-07-14T02:00:00+08:00", "wake_at": "2026-07-14T08:00:00+08:00" }
+        }],
+        "domainProfile": { "chronotype": { "typical_sleep_start": "00:40", "typical_wake": "07:30" } }
+      },
+      "expected": {
+        "candidate_keys_include": ["sleep_timing_vs_typical"],
+        "checks": [
+          { "semantic_key": "sleep_timing_vs_typical", "path": "claim.structured_value.sleep_start_delta_minutes", "value": 80 },
+          { "semantic_key": "sleep_timing_vs_typical", "path": "claim.structured_value.wake_delta_minutes", "value": 30 }
+        ]
+      }
+    },
+    {
+      "id": "CORE-071",
+      "name": "wallet amount conflicts preserve current fact and block change",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "wallet",
+        "currentRecordId": "wallet-current",
+        "records": [
+          { "id": "wallet-prior", "user_id": "user-1", "occurred_at": "2026-07-13T08:00:00+08:00", "snapshot_balance": 80, "account_snapshot_kind": "asset", "linked_account_id": "account-1", "account_name": "微信余额" },
+          { "id": "wallet-current", "user_id": "user-1", "occurred_at": "2026-07-14T08:00:00+08:00", "snapshot_balance": 100, "account_snapshot_kind": "asset", "linked_account_id": "account-1", "account_name": "微信余额", "payload": { "amount": 99 } }
+        ]
+      },
+      "expected": {
+        "candidate_keys_include": ["wallet_current_metric"],
+        "candidate_keys_exclude": ["wallet_change_previous"],
+        "checks": [{ "semantic_key": "wallet_current_metric", "path": "claim.structured_value.amount_conflict", "value": true }]
+      }
+    },
+    {
+      "id": "CORE-072",
+      "name": "wallet comparison does not cross linked accounts",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "wallet",
+        "currentRecordId": "wallet-current",
+        "records": [
+          { "id": "wallet-prior", "user_id": "user-1", "occurred_at": "2026-07-13T08:00:00+08:00", "snapshot_balance": 80, "account_snapshot_kind": "asset", "linked_account_id": "account-2", "account_name": "微信余额" },
+          { "id": "wallet-current", "user_id": "user-1", "occurred_at": "2026-07-14T08:00:00+08:00", "snapshot_balance": 100, "account_snapshot_kind": "asset", "linked_account_id": "account-1", "account_name": "微信余额" }
+        ]
+      },
+      "expected": { "candidate_keys_exclude": ["wallet_change_previous"] }
+    },
+    {
+      "id": "CORE-073",
+      "name": "wallet comparison rejects equal snapshot timestamps",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "wallet",
+        "currentRecordId": "wallet-current",
+        "records": [
+          { "id": "wallet-prior", "user_id": "user-1", "occurred_at": "2026-07-14T08:00:00+08:00", "snapshot_balance": 80, "account_snapshot_kind": "asset", "linked_account_id": "account-1", "account_name": "微信余额" },
+          { "id": "wallet-current", "user_id": "user-1", "occurred_at": "2026-07-14T08:00:00+08:00", "snapshot_balance": 100, "account_snapshot_kind": "asset", "linked_account_id": "account-1", "account_name": "微信余额" }
+        ]
+      },
+      "expected": { "candidate_keys_exclude": ["wallet_change_previous"] }
+    },
+    {
+      "id": "CORE-074",
+      "name": "liability wording reports amount change without repayment inference",
+      "operation": "generateBuiltinDomainCandidates",
+      "args": {
+        "domainKey": "wallet",
+        "currentRecordId": "wallet-current",
+        "records": [
+          { "id": "wallet-prior", "user_id": "user-1", "occurred_at": "2026-07-13T08:00:00+08:00", "snapshot_balance": 120, "account_snapshot_kind": "liability", "linked_account_id": "account-1", "account_name": "花呗待还" },
+          { "id": "wallet-current", "user_id": "user-1", "occurred_at": "2026-07-14T08:00:00+08:00", "snapshot_balance": 100, "account_snapshot_kind": "liability", "linked_account_id": "account-1", "account_name": "花呗待还" }
+        ]
+      },
+      "expected": {
+        "candidate_keys_include": ["wallet_change_previous"],
+        "text_matches": [{ "semantic_key": "wallet_change_previous", "pattern": "待还金额" }],
+        "text_excludes": [{ "semantic_key": "wallet_change_previous", "pattern": "还款|偿还|还清|消费|支出" }]
+      }
+    }
+  ]
+}
