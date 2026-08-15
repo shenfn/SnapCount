@@ -45,13 +45,20 @@ npm run test:expression-fact-candidates
 - `npm run check:expression-core-boundary`、`npm run governance:arch`、`npm run governance:check`：通过；生产 `tools/` 依赖由 8 降至 7。
 - 迁移前后事实候选函数体逐行一致，唯一差异是生产核心从 `_shared/index.mjs` 导入已有数值/金额函数。
 
+## PR 验证与合并
+
+- PR #49：`https://github.com/shenfn/SnapCount/pull/49`
+- GitHub Release Validation：通过，包含 Node/Deno 事实候选测试、Edge 检查、完整 Planner、PWA、迁移和 Shadow 门禁。
+- GitHub Governance Validation：通过。
+- GitHub iOS Build：检测到无 iOS 变更，SwiftUI 构建按条件跳过；iOS Build Gate 通过。
+- PR 已于 2026-08-15 合并，合并提交：`c79ed56`。
+
 ## 未验证
 
 - Windows 本地没有 `deno`，CORE-005 Deno runner 未执行。
 - Windows 本地缺少 `esbuild`，完整 Planner 回归未执行；已运行不依赖该包的事实候选和核心回归。
-- 尚未创建 PR，因此 GitHub CI 的 Deno、Edge 类型检查、完整 Planner 回归、PWA 构建和迁移门禁均待验证。
 - 未执行生产部署、迁移或端侧改动。
 
 ## 下一步
 
-创建 PR 后，以 GitHub CI 完成 CORE-005 双运行时与 Edge 验证。CI 全绿后，A2 才能只读评估 recurrence 或 comparison 的下一独立切片。
+只读评估 recurrence；若边界、调用点和既有测试适合独立迁移，再新建 CORE-006 Spec、共享 fixture 和红灯，不能直接迁移实现。
