@@ -49,9 +49,9 @@ npm run test:expression-plan-selection
 
 - Windows 本地没有 `deno`，Deno runner 未执行。
 - Windows 本地缺少 `esbuild`，完整 Planner 回归未执行；已运行不依赖该包的 expression-plan 回归。
-- GitHub CI 尚未运行。
+- PR #46 的 GitHub CI 已通过：Node/Deno 选择 fixture、Edge 检查、完整 Planner 回归、治理、PWA 构建和迁移门禁均为绿色。
 - 未执行部署、迁移或端侧改动。
 
 ## 下一步
 
-实现最小选择核心后重新运行 CORE-002 fixture、原有 expression-plan 回归和边界检查。
+CORE-002 已完成。A2 下一步只读评估下一组候选规则，不在未写新 Spec、fixture 和红灯前继续迁移。
