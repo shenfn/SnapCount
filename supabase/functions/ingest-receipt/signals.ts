@@ -665,19 +665,6 @@ export function selectSignals(
 // 违规 → 调用方丢弃 AI 文案,退回规则渲染
 // ============================================================
 
-const CN_NUM: Record<string, number> = {
-  "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
-  "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
-};
-
-function cnToNumber(s: string): number | null {
-  if (/^\d+$/.test(s)) return Number(s);
-  if (s in CN_NUM) return CN_NUM[s];
-  if (s.length === 2 && s[0] === "十" && s[1] in CN_NUM) return 10 + CN_NUM[s[1]]; // 十一..十九
-  if (s.length === 2 && s[0] in CN_NUM && s[1] === "十") return CN_NUM[s[0]] * 10;  // 二十/三十...
-  return null;
-}
-
 export function extractDigitNumbers(text: string): number[] {
   const out: number[] = [];
   for (const m of text.matchAll(/\d+(?:\.\d+)?/g)) {
@@ -695,13 +682,13 @@ export interface NumberValidationResult {
 }
 
 export function hasUnsupportedFinanceCompanionClaim(text: string): boolean {
-  return /(?:第|连续|连着)\s*[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)
-    || /(?:这周|本周|本月|近\s*\d+\s*天|30\s*天).{0,16}[一二两三四五六七八九十\d]{1,3}\s*(?:次|笔|顿|天|晚|家)/.test(text)
-    || /(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text);
+  // 统计次数不在这里拦截：是否有来源、数字和时间口径由 validateModelTone
+  // 按 Context Packet/Signals 校验。这里仅保留与事实来源无关的空泛或判决式套话。
+  return /(第几笔|凑个单|小确幸|给生活充个值|看来是|应该不错|确实地道)/.test(text);
 }
 
-// 画像统计的次数、周期、趋势和比较必须由代码直接呈现。模型只能据此调整语气，
-// 不能重新表述统计事实，否则即使数字正确也可能把“近30天”改写成“本周”。
+// 画像统计的次数、周期、趋势和比较必须由代码提供来源。模型可以忠实转述，
+// 但 validateModelTone 会拒绝没有候选支撑或改写了时间窗口的表述。
 export function hasModelOwnedStatisticalClaim(text: string): boolean {
   const compact = text.replace(/\s+/g, "");
   return /(?:本|这|上)(?:自然)?周|(?:本|这|上)个月|本月|上月|近(?:两|三|四|[一二两三四五六七八九十\d]+)(?:天|周|月|晚)|过去(?:两|三|四|[一二两三四五六七八九十\d]+)(?:天|周|月)/.test(compact)
@@ -713,7 +700,76 @@ export function hasModelOwnedStatisticalClaim(text: string): boolean {
     || /(?:最近|近来).{0,12}(?:总是|一直|经常|频繁|反复|又)/.test(compact);
 }
 
-// allowedSources:信号 fact 文本 + 本条记录字段 JSON。数字宽松匹配(整数/一位小数视为同数)。
+type StatisticalScope = string;
+
+function parseChineseCardinal(s: string): number | null {
+  if (/^\d+$/.test(s)) return Number(s);
+  const digits: Record<string, number> = {
+    "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+    "六": 6, "七": 7, "八": 8, "九": 9, "零": 0,
+  };
+  const units: Record<string, number> = { "十": 10, "百": 100, "千": 1000 };
+  if (!s || [...s].some((char) => !(char in digits) && !(char in units))) return null;
+  let total = 0;
+  let section = 0;
+  for (const char of s) {
+    if (char in digits) {
+      section += digits[char];
+      continue;
+    }
+    const unit = units[char];
+    total += (section || 1) * unit;
+    section = 0;
+  }
+  const result = total + section;
+  return result > 0 ? result : null;
+}
+
+function rollingWindowKey(value: string, unit: string): string | null {
+  const parsed = parseChineseCardinal(value);
+  if (parsed === null) return null;
+  if (unit === "天" || unit === "晚") return `rolling:${parsed}d`;
+  if (unit === "周") return `rolling:${parsed * 7}d`;
+  if (unit === "月") return `rolling:${parsed}m`;
+  return null;
+}
+
+function statisticalScopes(text: string): Set<StatisticalScope> {
+  const compact = text.replace(/\s+/g, "");
+  const scopes = new Set<StatisticalScope>();
+  if (/(?:本|这)(?:自然)?周/.test(compact)) scopes.add("week:current");
+  if (/上(?:自然)?周/.test(compact)) scopes.add("week:previous");
+  if (/(?:本|这)个?月|本月/.test(compact)) scopes.add("month:current");
+  if (/(?:上)个?月|上月/.test(compact)) scopes.add("month:previous");
+  for (const match of compact.matchAll(/(?:近|过去)([一二两三四五六七八九十百\d]+)(天|周|月|晚)/g)) {
+    const key = rollingWindowKey(match[1], match[2]);
+    if (key) scopes.add(key);
+  }
+  if (/(?:第|连续|连着|已有|累计)[一二两三四五六七八九十百\d]+(?:次|笔|顿|天|晚|家|周|月)|[一二两三四五六七八九十百\d]+(?:次|笔|顿|天|晚|家|周|月|回)/.test(compact)) scopes.add("count");
+  if (/(?:平均|均值)/.test(compact)) scopes.add("baseline:average");
+  if (/(?:中位数?|中位)/.test(compact)) scopes.add("baseline:median");
+  if (/(?:四分位|百分位|p\d{1,3})/i.test(compact)) scopes.add("baseline:percentile");
+  if (/(?:历史最好|历史最高|历史最低|最好|最高|最低)/.test(compact)) scopes.add("baseline:extreme");
+  if (/(?:比|较)(?:昨天|之前|过去|上次|上周|上月|平时|常态|平均|中位|历史)/.test(compact)) scopes.add("comparison:reference");
+  if (/(?:高于|低于|涨了|降了|增加|减少|相差|多了|少了)/.test(compact)) scopes.add("comparison:direction");
+  if (/(?:今天|今晚|今早).{0,12}(?:已有|累计|第[一二两三四五六七八九十百\d]+|连续)/.test(compact)) scopes.add("day:today");
+  if (/(?:最近|近来).{0,12}(?:总是|一直|经常|频繁|反复|又)|(?:反复出现|高频|常点)/.test(compact)) scopes.add("frequency");
+  return scopes;
+}
+
+function signalSupportsStatisticalClaim(text: string, signals: DomainSignal[]): boolean {
+  const requested = statisticalScopes(text);
+  if (requested.size === 0) return true;
+  // 必须由同一个候选提供完整口径，避免把一个候选的周次数和另一个候选的
+  // 月度比较拼成模型从未得到过的组合。
+  return signals.some((signal) => {
+    const available = statisticalScopes(signal.fact);
+    return [...requested].every((scope) => available.has(scope));
+  });
+}
+
+// allowedSources:信号 fact 文本 + 本条记录字段 JSON。数字必须与代码事实一致；
+// 不再把金额/均值自动取整，避免模型把 9.54 元改写成 10 元后仍被放行。
 // 计数表达("第X次/连续X天")单独用严格白名单 countNumbers:
 // 只有计数类信号显式声明的数才能进计数表达,防止金额/时长取整后泄漏放行幻觉计数。
 // 逐句校验:只标记违规的那条文本,调用方可保留其余合规字段(不整体丢弃)。
@@ -726,10 +782,6 @@ export function validateVoiceNumbers(
   const countAllowed = new Set<string>();
   const addNum = (n: number) => {
     allowed.add(String(n));
-    allowed.add(String(Math.round(n)));
-    allowed.add(String(Math.floor(n)));
-    allowed.add(String(Math.ceil(n)));
-    allowed.add(String(Math.round(n * 10) / 10));
   };
   for (const s of signals) {
     for (const n of s.numbers) addNum(n);
@@ -746,19 +798,18 @@ export function validateVoiceNumbers(
     let bad = false;
     // 1) 裸数字必须在允许集内
     for (const n of extractDigitNumbers(text)) {
-      const keys = [String(n), String(Math.round(n)), String(Math.round(n * 10) / 10)];
-      if (!keys.some((k) => allowed.has(k))) {
+      if (!allowed.has(String(n))) {
         violations.push(`数字 ${n} 不在信号/记录允许集内: "${text.slice(0, 40)}"`);
         bad = true;
       }
     }
     // 2) "第X次/笔/顿/天/晚" 计数表达:数值必须来自计数信号显式声明
-    for (const m of text.matchAll(/(?:第|连续|连着)\s*([一二两三四五六七八九十\d]{1,3})\s*(?:次|笔|顿|天|晚|家)/g)) {
-      const n = cnToNumber(m[1]);
+    for (const m of text.matchAll(/(?:第|连续|连着)\s*([一二两三四五六七八九十百千\d]{1,4})\s*(?:次|笔|顿|天|晚|家)/g)) {
+      const n = parseChineseCardinal(m[1]);
       if (countAllowed.size === 0) {
         violations.push(`计数表达 "${m[0]}" 无计数信号支撑`);
         bad = true;
-      } else if (n !== null && !countAllowed.has(String(n))) {
+      } else if (n === null || !countAllowed.has(String(n))) {
         violations.push(`计数 "${m[0]}" 数值不可追溯到计数信号`);
         bad = true;
       }
@@ -771,14 +822,16 @@ export function validateVoiceNumbers(
 export function validateModelTone(
   generatedTexts: Array<string | null | undefined>,
   recordFactsJson: string,
+  signals: DomainSignal[] = [],
 ): NumberValidationResult {
-  // 不把画像信号交给数字白名单：模型只能引用本条记录数字，画像数字由规则层原样输出。
-  const numericCheck = validateVoiceNumbers(generatedTexts, [], recordFactsJson);
+  // 旧链路不传 signals 时仍保持严格模式；信号 Voice 层传入已核实信号后，允许忠实转述其数字和口径。
+  const numericCheck = validateVoiceNumbers(generatedTexts, signals, recordFactsJson);
   const violations = [...numericCheck.violations];
   const badIndexes = new Set(numericCheck.badIndexes);
 
   generatedTexts.forEach((text, index) => {
     if (!text || !hasModelOwnedStatisticalClaim(text)) return;
+    if (signals.length > 0 && signalSupportsStatisticalClaim(text, signals)) return;
     violations.push(`模型试图改写代码统计口径: "${text.slice(0, 40)}"`);
     badIndexes.add(index);
   });

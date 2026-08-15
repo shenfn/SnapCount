@@ -1,3 +1,5 @@
+import type { ContextPacket } from "./context-packet.ts";
+
 export interface PromptContext {
   clientLocalTime?: string | null;
   weekday?: string | null;
@@ -7,49 +9,48 @@ export interface PromptContext {
   expressionStyle?: string | null;
   persona?: string | null;
   customNote?: string | null;
-  memory?: Record<string, unknown> | null;
 }
 
 const PERSONAS: Record<string, string> = {
   observer: `你是用户的"日常旁观者"：观察细致、情绪稳定、从不评判。
-- 主要做事实观察，优先引用用户记忆中的具体数字和模式。
+- 主要做事实观察，优先引用 Context Packet 中已授权的具体事实和语义。
 - 语气像看见了生活的细节，而不是在做分析报告。`,
   warm: `你是用户温柔的老朋友：关心但不啰嗦。
 - 优先注意辛苦信号，例如睡得少、深夜消费、连续外卖、很久没运动。
 - 可以说"我注意到了"，但不要劝、不要教育、不要安排用户。`,
   sharp: `你是用户毒舌但精准的损友：一针见血，轻轻扎心。
-- 必须基于记忆或本条记录的事实开损，只损行为模式，不攻击人。
+- 必须基于 Context Packet 或本条记录的事实开损，只损行为模式，不攻击人。
 - 没有足够数据时就平静陈述，不硬损。`,
   minimal: `你惜字如金。
-- 只有记忆显示出明确模式时才写一句极短文案（不超过 15 个汉字）。
+- 只有 Context Packet 显示出明确模式时才写一句极短文案（不超过 15 个汉字）。
 - 没有强信号时返回空字符串 ""。`,
 };
 
 const COMPANION_RULES = `【陪伴文案 companion_message】
-基于本条记录和【用户记忆】写 1 句话作为 companion_message，要求：
+基于本条记录和【已授权语义上下文】写 1 句话作为 companion_message，要求：
 - 不超过 30 个汉字，最多 1 句，句末标点 1 个
-- 优先级：长期记忆中的稳定模式 > 短期快照中的具体数字 > 本条记录细节 > 空字符串
+- 优先级：已确认语义 > 已核实候选事实 > 本条记录细节 > 空字符串
 - 但"本条记录主体"永远是主角：先写当前截图里真实可见/可读的内容，再决定是否轻轻带历史；历史不能抢走当前记录
-- 周/月/近 N 天、次数、连续天数、平均值、趋势和历史比较全部由代码生成并单独展示；你不得复述、换算或改写这些统计口径
-- 你可以根据已核实模式调整语气，但不要在 companion_message、emotion_line、utility_line 或 detail_reason 中输出任何历史统计结论
+- 周/月/近 N 天、次数、连续天数、平均值、趋势和历史比较只能来自 Context Packet 的 selected_candidates；可以忠实转述其中一个候选，但不得复述、换算或改写时间范围、对象和数字
+- companion_message、emotion_line、utility_line、detail_reason 都可以引用已选候选，但必须同时贴着当前记录写；没有候选时不得自行补历史结论
 - 不要把最近一条消费商家当作通用记忆套到下一条记录上；例如当前是蛋糕/吐司/自制饭菜照片，就不要提"外婆家""某某外卖""刚吃完 X 又来 Y"
 - 禁止把不相干的历史写成连续剧情，例如"刚吃完 X，又来一份 Y""这周吃过 X，今天换成 Y""看来今晚要熬夜了"
 - 饮食记录优先观察餐次节奏、食物结构、热量大致轻重、连续外卖/正餐/夜宵等模式；单纯"第 N 顿美食"不够好
 - 饮食照片（food_photo）只围绕画面里的食物、份量、餐次和营养估算写；除非图片本身就是订单/商家页，否则不要提商家名、外卖店名或最近消费店铺
 - 运动记录优先观察运动类型、时长、距离、心率、热量和连续性；不要劝用户休息，不要说"继续努力"
-- 如果记忆没有证据，绝不编造"第 N 次""比昨天""最近总是"等对比
-- 【用户记忆】只允许用于 companion_message，严禁用它推断 amount、merchant_name、category、record_type、occurred_at 等识别字段
-- 【用户记忆】只是弱上下文，不是本条记录的事实证据；不得把记忆中的商家身份、用途、因果或标签写成确定主谓（如"这是给开发中转站的充值"），当前记录没有独立证据时直接省略该判断
+- 如果 Context Packet 没有对应证据，绝不编造"第 N 次""比昨天""最近总是"等对比
+- 【已授权语义上下文】只允许用于 companion_message，严禁用它推断 amount、merchant_name、category、record_type、occurred_at 等识别字段
+- 【已授权语义上下文】不是本条记录的事实证据；不得把未经当前实体匹配的商家身份、用途、因果或标签写成确定主谓，匹配不到时直接省略该判断
 - 如果截图记录日期早于【截图所在用户本地时间】的日期，companion_message 禁止使用"昨天""昨晚""刚才""今天"等相对时间；睡眠补录请写具体日期（如"6月10日这晚"）或直接省略时间称呼
 - 避免和【最近陪伴文案】重复句式
 
 【表达反例 → 改写正例（对比组，从生产数据中抽取，严禁产出反例左侧形态）】
 反例 1（财务）："这周第 11 笔消费，又是熟悉的支付记录"
-  问题：以"这周第 X 笔"开头 + "又是熟悉的"兜底套话 + 没有任何具体信息
-  改写为："这次 38 元下午茶，临走前刷的常去那家"
+   问题：只数数，没有当前记录内容
+   改写为："这周第 4 次，还是这家下午茶"
 反例 2（饮食）："这周第 12 次记录饮食，又是熟悉的杨国福"
-  问题：数数 + 套话；正确做法是聚焦具体食物或情绪节奏
-  改写为："还是麻辣烫，这周已经第三家不同的店了"
+   问题：没有说明统计口径来自哪里；正确做法是把代码候选和当前食物放在一起
+   改写为："这顿麻辣烫，是本周第 3 次加餐"
   或："今天的麻辣烫看起来荤多了点，喝口汤暖一下"
 反例 3（财务）："签约开通处理中，这周第 11 笔消费"
   问题：把无关字段（签约开通）当作 companion_message 主体
@@ -69,7 +70,7 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
 - 不要使用感叹号超过一次
 - 必须基于这条记录的具体内容，不能是通用句
 - 支出/收入页面如果同时出现红包、广告、抽免单、优惠活动，只能围绕真实交易主体写，不要说"收到红包""获得奖励"
-- 禁止以"这周第 X 笔/次"开头，禁止使用"又是熟悉的 XX"句式
+- 不要只用"这周第 X 笔/次"或"又是熟悉的 XX"凑全文；有候选时必须结合当前记录主体
 - 如果信息太少写不出有意义的话，返回空字符串 ""，不要硬凑
 
 【ai_feedback 字段产出规范】
@@ -77,15 +78,10 @@ const COMPANION_RULES = `【陪伴文案 companion_message】
 - badge：4-8 个汉字，描述本条记录的主题标签，如"夜宵记录""周末长跑""疑似重复"
 - band：严格从 [positive, neutral, watch, recover, ritual] 五选一
 - emotion_line：≤ 28 个汉字，共情/陪伴向，不带建议；可以与 companion_message 相同或互补
-- utility_line：≤ 30 个汉字，提供 1 个具体观察或轻微建议；与 emotion_line 不重复
-- detail_reason：≤ 60 个汉字，说明判断依据；仅当 confidence ≥ 0.7 时输出，否则为 null
+- utility_line：≤ 30 个汉字，提供 1 个具体观察或轻微建议；可引用一个已选候选，与 emotion_line 不重复
+- detail_reason：≤ 60 个汉字，说明当前记录或已选候选的判断依据；仅当 confidence ≥ 0.7 时输出，否则为 null
 - confidence：0-1 之间小数，自评打分；低于 0.6 整个 ai_feedback 可返回 null
 - 若没有足够强信号产出有意义的 ai_feedback，整个对象返回 null，不要硬凑套话`;
-
-function buildMemoryBlock(memory: Record<string, unknown> | null | undefined, memoryEnabled: boolean): string {
-  if (!memoryEnabled || !memory) return "";
-  return `\n\n【用户记忆（只供 companion_message 使用，不影响识别字段）】\n${JSON.stringify(memory)}`;
-}
 
 export function buildPrompt(ctx: PromptContext = {}): string {
   const contextLines: string[] = [];
@@ -96,24 +92,11 @@ export function buildPrompt(ctx: PromptContext = {}): string {
     ? `【运行时上下文】\n${contextLines.join("\n")}\n\n`
     : "";
   const companionEnabled = ctx.companionEnabled !== false;
-  const memoryEnabled = companionEnabled && ctx.memoryEnabled !== false;
   if (!companionEnabled) {
-    return contextBlock + BASE_PROMPT + "\n\n【陪伴文案 companion_message】\n用户已关闭 AI 陪伴文案，companion_message 必须返回空字符串 \"\"。";
+    return contextBlock + BASE_PROMPT + "\n\n【识别阶段上下文边界】\n用户已关闭 AI 陪伴文案。本次调用只负责识别图片和当前记录字段，不生成 companion_message。";
   }
-  const personaText = PERSONAS[ctx.persona ?? "observer"] ?? PERSONAS.observer;
-  const customLine = ctx.customNote ? `\n- 用户附加偏好：${ctx.customNote.slice(0, 80)}` : "";
-  const strengthLine = `\n- 记忆引用强度：${ctx.memoryStrength ?? "balanced"}（light=偶尔引用，balanced=自然引用，bold=有证据时优先引用）`;
-  const expressionStyle = ctx.expressionStyle ?? "plain";
-  const expressionLine = expressionStyle === "emoji"
-    ? "\n- 表达方式：可在句尾使用 1 个贴切 emoji，但不要每次都用，不要影响识别字段"
-    : expressionStyle === "kaomoji"
-      ? "\n- 表达方式：可偶尔使用 1 个轻量颜文字，如 (´･_･`) / (￣▽￣)，但不要卖萌过度"
-      : "\n- 表达方式：纯文字，不使用 emoji 或颜文字";
-
   return contextBlock + BASE_PROMPT
-    + "\n\n" + COMPANION_RULES
-    + "\n\n【你的人格】\n" + personaText + strengthLine + expressionLine + customLine
-    + buildMemoryBlock(ctx.memory, memoryEnabled);
+    + "\n\n【识别阶段上下文边界】\n本次调用只负责识别图片和当前记录字段。不得读取、猜测或引用历史统计、商户频率、个人基线或未经当前记录确认的语义。不要生成 companion_message；陪伴表达将在代码计算信号后单独生成。";
 }
 
 const BASE_PROMPT = `你是个人数据平台的截图识别与路由助手。图片可能来自财务、运动、睡眠、阅读等生活数据域。请先判断图片类型和 record_type，再按对应数据域提取结构化字段。
@@ -339,7 +322,7 @@ order_finished_at（订单完成时间）：
 - 看不清或不可见的字段返回 null，不要编造。
 
 只返回如下结构的纯 JSON（不要 markdown 包裹）：
-{"image_type":"other","record_type":"uncertain","domain_key":null,"title":null,"summary":null,"amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"funding_source":null,"receiving_account":null,"income_category":null,"source_name":null,"occurred_at":null,"order_finished_at":null,"payload_jsonb":null,"confidence":0,"companion_message":""}`;
+{"image_type":"other","record_type":"uncertain","domain_key":null,"title":null,"summary":null,"amount":null,"merchant_name":null,"platform":null,"category":null,"payment_method":null,"funding_source":null,"receiving_account":null,"income_category":null,"source_name":null,"occurred_at":null,"order_finished_at":null,"payload_jsonb":null,"confidence":0}`;
 
 export const PROMPT = buildPrompt();
 
@@ -354,12 +337,11 @@ export interface FeedbackPromptContext {
   recognizedFields?: Record<string, unknown>; // 第一阶段识别出的字段
   timeContext?: Record<string, unknown> | null;
   builtPayload?: Record<string, unknown> | null;
-  memory?: Record<string, unknown> | null;
+  contextPacket?: ContextPacket | null;
   persona?: string | null;
   memoryStrength?: string | null;
   expressionStyle?: string | null;
   customNote?: string | null;
-  memoryEnabled?: boolean | null;
   recentCompanionLines?: string[];
 }
 
@@ -375,6 +357,7 @@ export interface VoicePromptContext {
   domainKey: string;
   recordFacts: Record<string, unknown>;   // 本条记录的关键字段(白名单后)
   signals: Array<{ kind: string; fact: string }>;  // 信号层已算好的事实句
+  contextPacket?: ContextPacket | null;
   persona?: string | null;
   expressionStyle?: string | null;
   customNote?: string | null;
@@ -405,22 +388,22 @@ export function buildVoicePrompt(ctx: VoicePromptContext): string {
   const timeLine = ctx.clientLocalTime
     ? `当前时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}\n`
     : "";
+  const contextBlock = ctx.contextPacket
+    ? `【冻结的 Context Packet】\n${JSON.stringify(ctx.contextPacket)}`
+    : `【本条记录】\n${JSON.stringify(ctx.recordFacts)}\n\n【已核实的信号（可自然转述，但不得新增、计算或改变数字、周期和趋势）】\n${signalBlock}`;
 
-  return `你为用户刚归档的一条${ctx.domainKey}记录写陪伴语气。统计事实由代码单独展示，你不得改写。
+  return `你为用户刚归档的一条${ctx.domainKey}记录写陪伴语气。统计事实已经由代码核实，你只能自然转述下方信号明确提供的事实，不能自行计算或改变口径。
 
-${timeLine}【本条记录】
-${JSON.stringify(ctx.recordFacts)}
-
-【已核实的信号（仅用于理解语境，不得复述其中的数字、周期或趋势）】
-${signalBlock}
+${timeLine}${contextBlock}
 
 【铁律】
-- 画像信号中的数字、次数、周期、对比和趋势会由代码原样展示；输出中一律不要复述
-- 只能引用【本条记录】本身明确存在的数字，禁止自己计算、推测或回忆任何历史统计
+- 只能引用【本条记录】或【已核实的信号】中明确存在的数字、次数、周期、对比和趋势；禁止自己计算、推测、回忆或混用不同口径
+- 如果引用信号中的统计事实，必须保持它的时间范围、对象和方向；例如信号说“本自然周第 4 次”，不能改成“近 30 天第 4 次”
+- 没有信号支撑的历史统计、次数、周期、平均值和趋势不得出现
 - 无信号时只围绕本条记录本身写，或返回空字符串 ""
 - 不建议、不评判、不教育；禁止"加油/注意身体/记得/超标/放纵"
 - 禁止质问式反问（如"心里没点数吗"）；反问只允许出现在明显角色扮演的语气里，且不得带指责感
-- 禁止"这周第X笔"开头、禁止"又是熟悉的XX"句式
+- 不要只用"这周第X笔/次"或"又是熟悉的XX"凑成全文；有信号支撑时可以把准确统计和当前实体自然结合
 - companion_message ≤30 字，必须是完整句子自然收尾，宁短勿长
 - ${personaHint}
 - ${styleHint}
@@ -441,8 +424,9 @@ export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
       ? "表达方式：可偶尔使用 1 个轻量颜文字"
       : "表达方式：纯文字，不使用 emoji 或颜文字";
   const customLine = ctx.customNote ? `用户附加偏好：${ctx.customNote.slice(0, 80)}` : "";
-  const memoryBlock = (ctx.memoryEnabled !== false && ctx.memory)
-    ? `\n\n【用户记忆】\n${JSON.stringify(ctx.memory)}`
+  const hasPacket = Boolean(ctx.contextPacket);
+  const packetBlock = hasPacket
+    ? `\n\n【冻结的 Context Packet（唯一上下文来源）】\n${JSON.stringify(ctx.contextPacket)}`
     : "";
   const recentLines = (ctx.recentCompanionLines && ctx.recentCompanionLines.length > 0)
     ? `\n\n【最近陪伴文案（请避免句式重复）】\n${ctx.recentCompanionLines.slice(0, 5).map((l) => `- ${l}`).join("\n")}`
@@ -450,22 +434,22 @@ export function buildFeedbackPrompt(ctx: FeedbackPromptContext): string {
   const timeBlock = ctx.clientLocalTime
     ? `截图时间：${ctx.clientLocalTime}${ctx.weekday ? `（${ctx.weekday}）` : ""}`
     : "";
-  const recognizedBlock = JSON.stringify(ctx.recognizedFields ?? {}, null, 2);
-  const builtBlock = ctx.builtPayload ? `\n\n【内置数据域 payload】\n${JSON.stringify(ctx.builtPayload, null, 2)}` : "";
-  const timeContextBlock = ctx.timeContext ? `\n\n【时间上下文】\n${JSON.stringify(ctx.timeContext, null, 2)}` : "";
+  const recognizedBlock = hasPacket ? "" : JSON.stringify(ctx.recognizedFields ?? {}, null, 2);
+  const builtBlock = !hasPacket && ctx.builtPayload ? `\n\n【内置数据域 payload】\n${JSON.stringify(ctx.builtPayload, null, 2)}` : "";
+  const timeContextBlock = !hasPacket && ctx.timeContext ? `\n\n【时间上下文】\n${JSON.stringify(ctx.timeContext, null, 2)}` : "";
 
   return `你是个人 AI 记忆助手，正在为用户的本条记录生成「陪伴文案」和「AI 即时反馈」。
 
 【任务】
-基于下方已识别的字段、用户记忆、时间上下文，输出符合规范的 JSON：
+基于下方已识别的字段、冻结的 Context Packet 和时间上下文，输出符合规范的 JSON：
 {
   "companion_message": "1 句话，≤ 30 汉字，可以为空字符串",
   "ai_feedback": {
     "badge": "4-8 字标签",
     "band": "positive | neutral | watch | recover | ritual",
     "emotion_line": "≤ 28 汉字，共情向",
-    "utility_line": "≤ 30 汉字，不含历史统计；与 emotion_line 不重复",
-    "detail_reason": "仅说明本条记录依据，不得写历史统计；不确定时为 null",
+    "utility_line": "≤ 30 汉字，可引用一个已选候选；与 emotion_line 不重复",
+    "detail_reason": "说明本条记录或一个已选候选的依据；不确定时为 null",
     "confidence": 0.0
   }
 }
@@ -482,7 +466,7 @@ ${COMPANION_RULES}
 ${timeBlock}
 
 【本条记录已识别字段】
-${recognizedBlock}${builtBlock}${timeContextBlock}${memoryBlock}${recentLines}
+${hasPacket ? "" : `${recognizedBlock}${builtBlock}${timeContextBlock}`}\n${packetBlock}${recentLines}
 
 仅输出上述 JSON 结构，不要任何 markdown 包裹或额外解释。`;
 }
