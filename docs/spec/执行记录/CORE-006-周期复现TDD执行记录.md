@@ -30,6 +30,23 @@ npm run test:expression-recurrence
 
 ## 下一步
 
+## 最小实现与绿灯证据
+
 1. 将现有纯函数迁入生产核心，Lab 原路径改为兼容 wrapper，Edge 切换导入。
 2. 加入 wrapper 兼容测试、PR workflow 双运行时步骤和架构 ratchet 更新。
-3. 运行 CORE-006、旧 recurrence 回归、前五片核心回归、Planner、Edge 和治理检查。
+3. `npm run test:expression-recurrence`：通过，CORE-031 至 CORE-039 共享 fixture 转绿。
+4. `npm run test:expression-recurrence-wrapper-compat`：通过，确认 Lab API 与生产核心为同一绑定。
+5. `node --test tools/ai-validation/expression-planner/tests/recurrence-candidates.test.mjs`：通过，8/8。
+6. `npm run test:expression-core`、`npm run test:expression-eligibility`、`npm run test:expression-scoring`、`npm run test:expression-plan-selection`：通过，已有切片未回归。
+7. `npm run check:expression-core-boundary`、`npm run governance:arch`、`npm run governance:check`：通过；生产 `tools/` 依赖由 7 降至 6。
+
+## 未验证
+
+- Windows 本地没有 `deno`，CORE-006 Deno runner 待 PR CI 验证。
+- Windows 本地缺少 `esbuild`，完整 Planner 回归待 PR CI 验证。
+- 尚未创建 PR，Edge 类型检查、PWA、迁移和发布门禁待 CI 验证。
+- 未执行生产部署、迁移或端侧改动。
+
+## 下一步
+
+创建 PR，以 GitHub CI 完成 CORE-006 双运行时、Edge、完整 Planner、治理、PWA 和迁移验证；CI 全绿后再回写阶段索引并评估 comparison。
