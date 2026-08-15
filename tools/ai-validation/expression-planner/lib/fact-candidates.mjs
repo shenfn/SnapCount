@@ -1,13 +1,4 @@
-function roundMoney(value) {
-  return Math.round(value * 100) / 100
-}
-
-function parseFiniteNumber(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null
-  if (typeof value !== 'string' || !value.trim()) return null
-  const parsed = Number(value.trim())
-  return Number.isFinite(parsed) ? parsed : null
-}
+import { parseFiniteNumber, roundMoney } from './expression-core-adapter.mjs'
 
 function localDateOf(value, timeZone) {
   const date = new Date(value)

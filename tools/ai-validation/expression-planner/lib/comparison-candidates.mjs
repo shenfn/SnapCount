@@ -1,17 +1,7 @@
 const COMPARISON_TIME_ZONE = 'Asia/Shanghai'
 const COMPARISON_TIME_ZONE_OFFSET = '+08:00'
 
-function roundMoney(value) {
-  const rounded = Math.round(value * 100) / 100
-  return Object.is(rounded, -0) ? 0 : rounded
-}
-
-function parseFiniteNumber(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null
-  if (typeof value !== 'string' || !value.trim()) return null
-  const parsed = Number(value.trim())
-  return Number.isFinite(parsed) ? parsed : null
-}
+import { parseFiniteNumber, roundMoney } from './expression-core-adapter.mjs'
 
 function dateAtUtc(localDate) {
   return new Date(`${localDate}T00:00:00Z`)

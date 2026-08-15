@@ -1,11 +1,8 @@
 ﻿export function normalizeEntityText(value) {
-  return String(value ?? '')
-    .normalize('NFKC')
-    .trim()
-    .toLowerCase()
-    .replace(/[\s·•・_—–-]+/g, '')
-    .replace(/[（）()【】\[\]]/g, '')
+  return normalizeEntityTextCore(value)
 }
+
+import { normalizeEntityText as normalizeEntityTextCore } from './expression-core-adapter.mjs'
 
 const LEGAL_NAME_SUFFIXES = [
   '股份有限责任公司',

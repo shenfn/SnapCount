@@ -13,7 +13,8 @@ export function roundMoney(value, digits = 2) {
   const number = parseFiniteNumber(value)
   if (number === null || !Number.isInteger(digits) || digits < 0 || digits > 8) return null
   const factor = 10 ** digits
-  return Math.round(number * factor) / factor
+  const rounded = Math.round(number * factor) / factor
+  return Object.is(rounded, -0) ? 0 : rounded
 }
 
 export function normalizeEntityText(value) {

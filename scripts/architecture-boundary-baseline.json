@@ -1,7 +1,7 @@
 {
-  "version": "A1-2026-08-15",
+  "version": "A2-2026-08-15",
   "captured_at": "2026-08-15",
-  "source_commit": "3371a821e2df5d15967f2891a5a0d6e60ff35042",
+  "source_commit": "41eca19",
   "rules": {
     "production_tools_imports": {
       "mode": "ratchet",
@@ -13,7 +13,6 @@
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/recurrence-candidates.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/cross-record-relationships.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/comparison-candidates.mjs",
-        "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/expense-fact-contract.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/generic-domain-candidates.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/eligibility-gates.mjs",
         "supabase/functions/ingest-receipt/expression-shadow-planner.ts:../../../tools/ai-validation/expression-planner/lib/deterministic-scoring.mjs",

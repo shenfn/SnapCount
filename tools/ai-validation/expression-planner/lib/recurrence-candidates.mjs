@@ -1,9 +1,4 @@
-function parseFiniteNumber(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null
-  if (typeof value !== 'string' || !value.trim()) return null
-  const parsed = Number(value.trim())
-  return Number.isFinite(parsed) ? parsed : null
-}
+import { parseFiniteNumber } from './expression-core-adapter.mjs'
 
 function timestamp(value) {
   const parsed = new Date(value).getTime()

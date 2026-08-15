@@ -33,14 +33,16 @@ npm run check:expression-core-boundary
 
 结果：Node 特征测试通过；核心边界检查通过。测试只断言结构化结果和事实范围，不断言模型自然语言。
 
+Planner Lab 的实体归一、金额/数值解析、周期/比较计算和事实契约模块已通过 adapter 复用生产核心；Edge Planner 的数值解析和事实契约导入已切换到 `_shared`。
+
 ## 未验证
 
 - 本地没有 `deno` 命令，Deno runner 未执行，属于环境未验证。
 - GitHub Actions 的 Deno 双运行时 job 尚未取得 CI 结果。
-- Planner Lab adapter 和 Edge 入口尚未切换到 `_shared`，生产反向依赖仍按 A1 基线保留。
+- 完整 Planner 候选链尚未全部迁移，生产仍保留 11 条 `tools/` 基线导入。
 
 ## 下一步
 
 1. 在可用 Deno 环境运行同一 fixture 的 `deno_test.mjs`。
-2. 评估 Planner Lab adapter 是否只复用四个核心函数，不复制规则。
-3. 为 Edge 第一切片替换导入前增加对比 fixture，确认 fallback 行为不变。
+2. 为 Edge 第一切片增加对比 fixture，确认 fallback 行为不变。
+3. 在完整 Deno 验证后再迁移下一组候选规则。

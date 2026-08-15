@@ -1,11 +1,4 @@
-export function parseFiniteNumber(value) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null
-  if (typeof value !== "string") return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const number = Number(trimmed)
-  return Number.isFinite(number) ? number : null
-}
+import { parseFiniteNumber } from './expression-core-adapter.mjs'
 
 function num(value) {
   return parseFiniteNumber(value)
