@@ -142,6 +142,14 @@ jobs:
         if: ${{ hashFiles('scripts/test-generic-domain-wrapper-compat.mjs') != '' }}
         run: npm run test:expression-generic-domain-wrapper-compat
 
+      - name: Test expression render contract in Node
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/render-contract.node.test.mjs') != '' }}
+        run: npm run test:expression-render-contract
+
+      - name: Test expression render contract wrapper compatibility
+        if: ${{ hashFiles('scripts/test-render-contract-wrapper-compat.mjs') != '' }}
+        run: npm run test:expression-render-contract-wrapper-compat
+
       - name: Compare expression core and fallback with legacy behavior
         if: ${{ hashFiles('supabase/functions/_shared/contracts/表达核心-旧行为对比-v0.1.json') != '' }}
         run: npm run test:expression-core-compat
@@ -185,6 +193,10 @@ jobs:
       - name: Test expression generic domain in Deno
         if: ${{ hashFiles('supabase/functions/_shared/expression-core/generic-domain.deno_test.mjs') != '' }}
         run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/generic-domain.deno_test.mjs
+
+      - name: Test expression render contract in Deno
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/render-contract.deno_test.mjs') != '' }}
+        run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/render-contract.deno_test.mjs
 
       - name: Check Edge Functions
         run: |

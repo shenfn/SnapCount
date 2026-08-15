@@ -29,6 +29,8 @@
     "test:expression-entity-normalizer-wrapper-compat": "node --test scripts/test-entity-normalizer-wrapper-compat.mjs",
     "test:expression-generic-domain": "node --test supabase/functions/_shared/expression-core/generic-domain.node.test.mjs",
     "test:expression-generic-domain-wrapper-compat": "node --test scripts/test-generic-domain-wrapper-compat.mjs",
+    "test:expression-render-contract": "node --test supabase/functions/_shared/expression-core/render-contract.node.test.mjs",
+    "test:expression-render-contract-wrapper-compat": "node --test scripts/test-render-contract-wrapper-compat.mjs",
     "check:expression-core-boundary": "node scripts/check-expression-core-boundary.mjs",
     "c2:wip:check": "node scripts/check-c2-root-wip-snapshot.mjs",
     "c2:wip:export": "node scripts/export-c2-wip-patches.mjs",

@@ -37,8 +37,8 @@ import {
   summarizePlans,
   SURFACE_CAPACITY,
 } from "../_shared/expression-core/plan-selection.mjs";
-// @ts-ignore See note above.
-import { buildRenderPlans } from "../../../tools/ai-validation/expression-planner/lib/render-contract.mjs";
+// @ts-ignore Production-owned render rules are shared with the offline lab.
+import { buildRenderPlans } from "../_shared/expression-core/render-contract.mjs";
 // @ts-ignore Pure shared data contract is bundled with the Edge Function.
 import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories.js";
 

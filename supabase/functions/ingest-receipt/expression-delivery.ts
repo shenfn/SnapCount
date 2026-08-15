@@ -16,8 +16,10 @@ import {
 import type { ShadowExpenseTransaction } from "./expression-shadow-planner.ts";
 import { resolveExpressedSemanticKey } from "./context-packet.ts";
 import type { ContextPacketCandidate } from "./context-packet.ts";
+// @ts-ignore Production-owned render version is shared with the offline lab.
+import { SURFACE_RENDER_CONTRACT_VERSION } from "../_shared/expression-core/render-contract.mjs";
 
-const RECORD_DETAIL_RENDER_VERSION = "surface-render-contract-v0.1";
+const RECORD_DETAIL_RENDER_VERSION = SURFACE_RENDER_CONTRACT_VERSION;
 const RECORD_DETAIL_DECISION_VERSION = "record-detail-decision-v0.1";
 const RECORD_DETAIL_POLICY_NAME = "deterministic_rule";
 const RECORD_DETAIL_POLICY_VERSION = "deterministic-record-detail-v0.1";
