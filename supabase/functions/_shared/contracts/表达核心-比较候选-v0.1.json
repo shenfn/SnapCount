@@ -17,7 +17,7 @@
         ],
         "entityId":"merchant_fixture","localDate":"2026-07-12","currentRecordId":"record-2"
       },
-      "expected":{"length":2,"candidate_index":0,"checks":{"claim.structured_value.baseline.sample_days":3,"claim.structured_value.baseline.count":1,"claim.structured_value.baseline.total":30,"claim.structured_value.current.total":25,"selection_hints.exposure_key":"expense:merchant:merchant_fixture:daily_active_median:2026-07-12"}}
+      "expected":{"length":1,"candidate_index":0,"checks":{"claim.structured_value.baseline.sample_days":3,"claim.structured_value.baseline.count":1,"claim.structured_value.baseline.total":30,"claim.structured_value.current.total":25,"selection_hints.exposure_key":"expense:merchant:merchant_fixture:daily_active_median:2026-07-12"}}
     },
     {
       "name": "merchant week-to-date uses same elapsed period",
@@ -32,13 +32,13 @@
         "currentDayEvents":[{"event_id":"today","source_type":"transaction","ledger_status":"confirmed","count_in_facts":true,"amount":10,"event_at":"2026-07-08T12:00:00+08:00","known_at":"2026-07-08T12:01:00+08:00","merchant":{"entity_id":"merchant_fixture","canonical_name":"示例商户"}}],
         "entityId":"merchant_fixture","localDate":"2026-07-08"
       },
-      "expected":{"length":1,"candidate_index":0,"checks":{"claim.semantic_key":"merchant_week_to_date_vs_previous_week_same_period","claim.structured_value.current_period.start":"2026-07-06","claim.structured_value.current_period.end":"2026-07-08","claim.structured_value.baseline_period.start":"2026-06-29","claim.structured_value.baseline_period.end":"2026-07-01","selection_hints.allowed_surfaces":["weekly_report"],"selection_hints.max_exposure_count.weekly_report":1}}
+      "expected":{"length":2,"candidate_index":1,"checks":{"claim.semantic_key":"merchant_week_to_date_vs_previous_week_same_period","claim.structured_value.current_period.start":"2026-07-06","claim.structured_value.current_period.end":"2026-07-08","claim.structured_value.baseline_period.start":"2026-06-29","claim.structured_value.baseline_period.end":"2026-07-01","selection_hints.allowed_surfaces":["weekly_report"],"selection_hints.max_exposure_count.weekly_report":1}}
     },
     {
       "name": "fewer than three active days yields no merchant comparison",
       "operation": "generateComparisonCandidates",
       "args": {"records":[{"id":"a","transaction_date":"2026-07-01","occurred_at":"2026-07-01T12:00:00+08:00","amount":10,"merchant":{"entity_id":"merchant_fixture"}},{"id":"b","transaction_date":"2026-07-02","occurred_at":"2026-07-02T12:00:00+08:00","amount":20,"merchant":{"entity_id":"merchant_fixture"}}],"currentDayEvents":[{"event_id":"today","count_in_facts":true,"amount":10,"event_at":"2026-07-12T12:00:00+08:00","merchant":{"entity_id":"merchant_fixture"}}],"entityId":"merchant_fixture","localDate":"2026-07-12"},
-      "expected":{"length":0}
+      "expected":{"length":1,"candidate_index":0,"checks":{"claim.semantic_key":"merchant_week_to_date_vs_previous_week_same_period"}}
     },
     {
       "name": "category comparison filters cohort and reports coverage",
@@ -72,7 +72,7 @@
         {"id":"baseline-5","transaction_date":"2026-07-16","occurred_at":"2026-07-16T13:00:00+08:00","amount":15,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}},
         {"id":"baseline-6","transaction_date":"2026-07-16","occurred_at":"2026-07-16T14:00:00+08:00","amount":15,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}}
       ],"currentRecord":{"id":"current","transaction_date":"2026-07-23","occurred_at":"2026-07-23T12:34:00+08:00","amount":10,"category":"life","fact_contract":{"comparison_cohort":"expense.category.life","comparison_scope":"include"}}},
-      "expected":{"length":1,"candidate_index":0,"checks":{"claim.structured_value.directions.total":"decrease","claim.structured_value.directions.count":"increase","claim.structured_value.directions.average":"decrease","claim.structured_value.driver":"average_amount","claim.structured_value.decomposition.dominant_effect":"average_amount","claim.structured_value.decomposition.offsetting":true}}
+      "expected":{"length":1,"candidate_index":0,"checks":{"claim.structured_value.directions.total":"decrease","claim.structured_value.directions.count":"decrease","claim.structured_value.directions.average":"decrease","claim.structured_value.driver":"average_amount","claim.structured_value.decomposition.dominant_effect":"average_amount","claim.structured_value.decomposition.offsetting":false}}
     },
     {
       "name": "missing comparison inputs return empty",

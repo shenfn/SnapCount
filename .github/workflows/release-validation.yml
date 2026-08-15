@@ -110,6 +110,14 @@ jobs:
         if: ${{ hashFiles('scripts/test-recurrence-wrapper-compat.mjs') != '' }}
         run: npm run test:expression-recurrence-wrapper-compat
 
+      - name: Test expression comparison in Node
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/comparison.node.test.mjs') != '' }}
+        run: npm run test:expression-comparison
+
+      - name: Test expression comparison wrapper compatibility
+        if: ${{ hashFiles('scripts/test-comparison-wrapper-compat.mjs') != '' }}
+        run: npm run test:expression-comparison-wrapper-compat
+
       - name: Compare expression core and fallback with legacy behavior
         if: ${{ hashFiles('supabase/functions/_shared/contracts/表达核心-旧行为对比-v0.1.json') != '' }}
         run: npm run test:expression-core-compat
@@ -137,6 +145,10 @@ jobs:
       - name: Test expression recurrence in Deno
         if: ${{ hashFiles('supabase/functions/_shared/expression-core/recurrence.deno_test.mjs') != '' }}
         run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/recurrence.deno_test.mjs
+
+      - name: Test expression comparison in Deno
+        if: ${{ hashFiles('supabase/functions/_shared/expression-core/comparison.deno_test.mjs') != '' }}
+        run: deno test --no-lock --allow-read=supabase/functions/_shared/contracts supabase/functions/_shared/expression-core/comparison.deno_test.mjs
 
       - name: Check Edge Functions
         run: |

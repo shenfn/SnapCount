@@ -18,8 +18,8 @@ import {
 import { generateRecordNameRecurrenceCandidates } from "../_shared/expression-core/recurrence-candidates.mjs";
 // @ts-ignore See note above.
 import { generateCrossRecordRelationshipCandidates } from "../../../tools/ai-validation/expression-planner/lib/cross-record-relationships.mjs";
-// @ts-ignore See note above.
-import { generateCategoryComparisonCandidates, generateComparisonCandidates } from "../../../tools/ai-validation/expression-planner/lib/comparison-candidates.mjs";
+// @ts-ignore Production-owned comparison rules are shared with the offline lab.
+import { generateCategoryComparisonCandidates, generateComparisonCandidates } from "../_shared/expression-core/comparison-candidates.mjs";
 // @ts-ignore See note above.
 import {
   generateIncomeCandidates,
