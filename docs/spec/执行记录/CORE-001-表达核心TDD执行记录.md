@@ -53,6 +53,8 @@ npm run test:expression-core-compat
 
 结果：8/8 通过。该测试固定候选 ID、语义键、选择模式和静默状态，不固定模型自然语言。
 
+PR CI 首轮 Planner 回归发现 `generic-domain-shadow-planner.test.mjs` 仍依赖 `generic-domain-candidates.mjs` 的公开 `parseFiniteNumber` 导出。迁移只替换了内部实现但漏保留导出，已恢复为 adapter 的 re-export；这不新增规则，只保留 Planner Lab 原有兼容入口。当前本地缺少 `esbuild`，该测试无法启动，记为环境未验证；CI 将重新验证完整 157 项 Planner 回归。
+
 ## 未验证
 
 - 本地没有 `deno` 命令，Deno runner 未执行，属于环境未验证。

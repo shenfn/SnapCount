@@ -1,5 +1,8 @@
 import { parseFiniteNumber } from './expression-core-adapter.mjs'
 
+// 保留 Planner Lab 原有的测试/实验公开入口，规则实现仍归生产核心。
+export { parseFiniteNumber }
+
 function num(value) {
   return parseFiniteNumber(value)
 }
