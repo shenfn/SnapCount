@@ -37,6 +37,22 @@ Planner Lab 的实体归一、金额/数值解析、周期/比较计算和事实
 
 Planner Lab Node 回归：排除 5 个依赖 `esbuild` 的环境测试文件后，103/103 通过；全量启动结果为 103 个通过、5 个因当前环境缺少 `esbuild` 无法加载的测试。该 5 项记录为环境失败，不判定为业务回归。
 
+## 旧行为与 fallback 对比证据
+
+结构化快照位于 `supabase/functions/_shared/contracts/表达核心-旧行为对比-v0.1.json`，不保存模型文案、图片或用户数据。Node 契约测试覆盖：
+
+- 第一切片四类核心函数的迁移前输出；
+- `exact_fact_fallback` 在候选低于阈值时仍保留可见事实；
+- `surface_fallback` 与 `exact_fact_fallback` 仍是两个不同的降级出口。
+
+运行：
+
+```text
+npm run test:expression-core-compat
+```
+
+结果：8/8 通过。该测试固定候选 ID、语义键、选择模式和静默状态，不固定模型自然语言。
+
 ## 未验证
 
 - 本地没有 `deno` 命令，Deno runner 未执行，属于环境未验证。
@@ -46,5 +62,5 @@ Planner Lab Node 回归：排除 5 个依赖 `esbuild` 的环境测试文件后�
 ## 下一步
 
 1. 在可用 Deno 环境运行同一 fixture 的 `deno_test.mjs`。
-2. 为 Edge 第一切片增加对比 fixture，确认 fallback 行为不变。
-3. 在完整 Deno 验证后再迁移下一组候选规则。
+2. 在 CI 取得 Node/Deno 双运行时结果，确认兼容对比测试保持通过。
+3. 在双运行时验证后再迁移下一组候选规则；不在本切片继续扩大生产导入范围。

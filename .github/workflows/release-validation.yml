@@ -70,6 +70,10 @@ jobs:
         if: ${{ hashFiles('supabase/functions/_shared/expression-core/node.test.mjs') != '' }}
         run: npm run test:expression-core
 
+      - name: Compare expression core and fallback with legacy behavior
+        if: ${{ hashFiles('supabase/functions/_shared/contracts/表达核心-旧行为对比-v0.1.json') != '' }}
+        run: npm run test:expression-core-compat
+
       - name: Test expression core in Deno
         if: ${{ hashFiles('supabase/functions/_shared/expression-core/deno_test.mjs') != '' }}
         run: deno test --no-lock supabase/functions/_shared/expression-core/deno_test.mjs
