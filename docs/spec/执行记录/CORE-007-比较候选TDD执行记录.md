@@ -44,9 +44,16 @@ npm run test:expression-comparison
 
 - Windows 本地没有 `deno`，CORE-007 Deno runner 待 PR CI 验证。
 - Windows 本地缺少 `esbuild`，完整 Planner 回归待 PR CI 验证。
-- 尚未创建 PR，Edge 类型检查、PWA、迁移和发布门禁待 CI 验证。
 - 未执行生产部署、迁移或端侧改动。
+
+## PR 验证与合并
+
+- PR #54：`https://github.com/shenfn/SnapCount/pull/54`
+- GitHub Release Validation：通过，包含 Node/Deno comparison、Edge、完整 Planner、PWA、迁移和 Shadow 门禁。
+- GitHub Governance Validation：通过。
+- GitHub iOS Build：检测到无 iOS 变更，SwiftUI 构建按条件跳过；iOS Build Gate 通过。
+- PR 已于 2026-08-15 合并，合并提交：`68434cb`。
 
 ## 下一步
 
-创建 PR，以 GitHub CI 完成 CORE-007 双运行时、Edge、完整 Planner、治理、PWA 和迁移验证；CI 全绿后再回写阶段索引并评估 cross-record。
+只读评估 cross-record 的输入契约、纯函数边界和是否能独立迁移；先建评估文档和 Spec，再决定是否实现。
