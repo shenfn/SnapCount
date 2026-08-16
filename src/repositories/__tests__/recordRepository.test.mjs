@@ -55,6 +55,29 @@ function createReadClient(responseQueues = {}) {
   }
 }
 
+function createWriteClient(responseQueues = {}) {
+  const calls = []
+  const queues = Object.fromEntries(
+    Object.entries(responseQueues).map(([rpc, responses]) => [
+      rpc,
+      Array.isArray(responses) ? [...responses] : [responses],
+    ]),
+  )
+
+  return {
+    calls,
+    client: {
+      from() {
+        throw new Error('write test must not query a table')
+      },
+      async rpc(name, params) {
+        calls.push({ name, params })
+        return queues[name]?.shift() || { data: null, error: { message: `missing response for ${name}` } }
+      },
+    },
+  }
+}
+
 test('PWA-052 repository owns monthly and pending expense queries without user_id', async () => {
   const { client, calls } = createReadClient({
     transactions: [
@@ -249,4 +272,141 @@ test('PWA-056E single-target reads preserve not-found and service failures', asy
     { table: 'data_records', method: 'maybeSingle' },
     { table: 'income_records', method: 'maybeSingle' },
   ])
+})
+
+test('PWA-058 expense saves use the canonical RPC and map its returned row', async () => {
+  const { client, calls } = createWriteClient({
+    save_transaction_with_account: {
+      data: {
+        id: 'expense-save-1',
+        amount: '28.5',
+        merchant_name: '晚餐',
+        platform: '微信',
+        category: '餐饮',
+        payment_method: '微信支付',
+        transaction_date: '2026-08-16',
+        transaction_time: '19:30:00',
+        occurred_at: '2026-08-16T11:30:00Z',
+        status: 'done',
+        type: 'expense',
+        account_id: 'account-1',
+      },
+      error: null,
+    },
+  })
+  const repository = createRecordRepository({ client })
+
+  const result = await repository.saveExpense({
+    id: null,
+    amount: 28.5,
+    merchantName: '晚餐',
+    platform: '微信',
+    category: '餐饮',
+    paymentMethod: '微信支付',
+    transactionDate: '2026-08-16',
+    transactionTime: '19:30:00',
+    occurredAt: '2026-08-16T11:30:00Z',
+    note: null,
+    isLargeTransport: false,
+    transportType: null,
+    source: 'manual',
+    imageUrl: null,
+    imageHash: null,
+    companionMessage: null,
+    accountId: 'account-1',
+  })
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.reason, 'saved')
+  assert.equal(result.kind, 'expense')
+  assert.equal(result.record.id, 'expense-save-1')
+  assert.equal(result.record.accountId, 'account-1')
+  assert.equal(result.record.occurredAt, '2026-08-16T11:30:00Z')
+  assert.deepEqual(calls, [{
+    name: 'save_transaction_with_account',
+    params: {
+      p_id: null,
+      p_amount: 28.5,
+      p_merchant_name: '晚餐',
+      p_platform: '微信',
+      p_category: '餐饮',
+      p_payment_method: '微信支付',
+      p_transaction_date: '2026-08-16',
+      p_transaction_time: '19:30:00',
+      p_occurred_at: '2026-08-16T11:30:00Z',
+      p_note: null,
+      p_is_large_transport: false,
+      p_transport_type: null,
+      p_source: 'manual',
+      p_image_url: null,
+      p_image_hash: null,
+      p_companion_message: null,
+      p_account_id: 'account-1',
+    },
+  }])
+  assert.equal(Object.hasOwn(calls[0].params, 'user_id'), false)
+})
+
+test('PWA-058 income saves map canonical rows and preserve service failures', async () => {
+  const { client, calls } = createWriteClient({
+    save_income_with_account: [
+      {
+        data: {
+          id: 'income-save-1',
+          category: 'salary',
+          source_name: '工资',
+          amount: '4620',
+          income_date: '2026-08-16',
+          occurred_at: '2026-08-15T16:00:00Z',
+          account_id: 'account-2',
+        },
+        error: null,
+      },
+      { data: null, error: { message: 'income save failed' } },
+    ],
+  })
+  const repository = createRecordRepository({ client })
+  const input = {
+    id: 'income-existing',
+    category: 'salary',
+    sourceName: '工资',
+    amount: 4620,
+    incomeDate: '2026-08-16',
+    occurredAt: '2026-08-15T16:00:00Z',
+    note: null,
+    source: null,
+    imageUrl: null,
+    imageHash: null,
+    companionMessage: null,
+    accountId: 'account-2',
+  }
+
+  const accepted = await repository.saveIncome(input)
+  const failed = await repository.saveIncome(input)
+
+  assert.equal(accepted.status, 'accepted')
+  assert.equal(accepted.kind, 'income')
+  assert.equal(accepted.record.id, 'income-save-1')
+  assert.equal(accepted.record.accountId, 'account-2')
+  assert.equal(failed.status, 'failed')
+  assert.equal(failed.reason, 'service_error')
+  assert.equal(failed.error, 'income save failed')
+  assert.equal(failed.record, null)
+  assert.deepEqual(calls[0], {
+    name: 'save_income_with_account',
+    params: {
+      p_id: 'income-existing',
+      p_category: 'salary',
+      p_source_name: '工资',
+      p_amount: 4620,
+      p_income_date: '2026-08-16',
+      p_occurred_at: '2026-08-15T16:00:00Z',
+      p_note: null,
+      p_source: null,
+      p_image_url: null,
+      p_image_hash: null,
+      p_companion_message: null,
+      p_account_id: 'account-2',
+    },
+  })
 })

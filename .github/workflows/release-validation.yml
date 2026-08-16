@@ -61,6 +61,9 @@ jobs:
       - name: Validate formal record read boundary
         run: npm run test:record-read
 
+      - name: Validate finance save boundary
+        run: npm run test:finance-save
+
       - name: Install trace console dependencies
         working-directory: tools/ai-validation/ui/trace-console
         run: npm ci

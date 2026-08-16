@@ -17,7 +17,7 @@ import {
   validateUniversalModal,
 } from '../domains/universalFormAdapter'
 import {
-  formatDate, formatMonthLabel, mapTransaction,
+  formatMonthLabel, mapTransaction,
   incomeCatMap, payAliasMap,
   getLocalDateKey, localDateKeyOf,
 } from '../utils/helpers'
@@ -44,6 +44,7 @@ import { createRecordRepository, mapDataRecordRow, mapIncomeRow } from '../repos
 import { createStagingRetryFeature } from '../features/staging/createStagingRetryFeature'
 import { createStagingArchiveFeature } from '../features/staging/createStagingArchiveFeature'
 import { createStagingDiscardFeature } from '../features/staging/createStagingDiscardFeature'
+import { createFinanceSaveFeature } from '../features/finance/createFinanceSaveFeature'
 import {
   resolveFinanceOccurrence,
 } from '../utils/financeOccurrence'
@@ -100,6 +101,7 @@ export function useStore() {
   let stagingRetryFeature = null
   let stagingArchiveFeature = null
   let stagingDiscardFeature = null
+  let financeSaveFeature = null
 
   const currentFilter = ref('all')
   const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
@@ -254,6 +256,10 @@ export function useStore() {
     anonKey: SUPABASE_ANON_KEY,
   })
   const recordRepository = createRecordRepository({ client: sb })
+  financeSaveFeature = createFinanceSaveFeature({
+    repository: recordRepository,
+    getCurrentUserId: () => currentUserId.value,
+  })
   stagingRetryFeature = createStagingRetryFeature({
     repository: stagingRepository,
     getCurrentUserId: () => currentUserId.value,
@@ -492,6 +498,7 @@ export function useStore() {
     stagingRetryFeature?.reset()
     stagingArchiveFeature?.reset()
     stagingDiscardFeature?.reset()
+    financeSaveFeature.reset()
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -1822,6 +1829,12 @@ export function useStore() {
     incomeModalInitial = null
   }
 
+  function upsertFinanceRecord(records, record) {
+    const index = records.findIndex(item => item.id === record.id)
+    if (index >= 0) records[index] = record
+    else records.unshift(record)
+  }
+
   async function confirmIncome() {
     return runLockedAction('income', async () => {
       const amt = parseFloat(incomeModal.amount)
@@ -1854,94 +1867,46 @@ export function useStore() {
         closeIncomeModal()
         return result
       }
-      if (incomeModal.mode === 'edit' && incomeModal.id) {
-        const incomeOccurrence = resolveFinanceOccurrence({ date: incomeModal.date })
-        const incomeAccountId = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
-        const { error } = await sb.rpc('save_income_with_account', {
-          p_id: incomeModal.id,
-          p_category: incomeModal.cat,
-          p_source_name: source,
-          p_amount: amt,
-          p_income_date: incomeModal.date,
-          p_occurred_at: incomeOccurrence.occurredAt,
-          p_note: incomeModal.note.trim() || null,
-          p_source: null,
-          p_image_url: incomeModal.imagePath || null,
-          p_image_hash: null,
-          p_companion_message: null,
-          p_account_id: incomeAccountId,
-        })
-        if (error) { showError('保存失败：' + humanizeDbError(error)); return }
-        invalidateRecordExpressionPlan(incomeModal.id)
-        await refreshAccountsFromDB()
-        if (currentPage.value === 'unbound-records') await loadUnboundRecords()
-        closeIncomeModal()
-        const applyEdit = (arr) => {
-          const idx = arr.findIndex(item => item.id === incomeModal.id)
-          if (idx >= 0) {
-            arr[idx] = {
-              ...arr[idx],
-              cat: incomeModal.cat,
-              source,
-              amount: amt,
-              date: formatDate(incomeModal.date),
-              dateRaw: incomeModal.date,
-              note: incomeModal.note.trim() || null,
-              icon: incomeCatMap[incomeModal.cat]?.icon || '💰',
-            }
-          }
-        }
-        applyEdit(incomeRecords.value)
-        applyEdit(recentIncomeRecords.value)
-        showFlash('✓ 收入已更新')
-        if (detailRecord.value?.id === incomeModal.id) {
-          const updated = incomeRecords.value.find(item => item.id === incomeModal.id)
-            || recentIncomeRecords.value.find(item => item.id === incomeModal.id)
-          if (updated) {
-            await openRecordDetail('income', updated)
-          }
-        }
-        return
-      }
-      const incomeAccountIdNew = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
+      const isEdit = incomeModal.mode === 'edit' && Boolean(incomeModal.id)
+      const recordId = isEdit ? incomeModal.id : null
+      const incomeAccountId = incomeModal.accountUnbound ? null : (incomeModal.accountId || null)
       const incomeOccurrence = resolveFinanceOccurrence({ date: incomeModal.date })
-      const { data: newRow, error } = await sb.rpc('save_income_with_account', {
-        p_id: null,
-        p_category: incomeModal.cat,
-        p_source_name: source,
-        p_amount: amt,
-        p_income_date: incomeModal.date,
-        p_occurred_at: incomeOccurrence.occurredAt,
-        p_note: incomeModal.note.trim() || null,
-        p_source: 'manual',
-        p_image_url: incomeModal.imagePath || null,
-        p_image_hash: null,
-        p_companion_message: null,
-        p_account_id: incomeAccountIdNew,
+      const result = await financeSaveFeature.saveIncome({
+        id: recordId,
+        category: incomeModal.cat,
+        sourceName: source,
+        amount: amt,
+        incomeDate: incomeModal.date,
+        occurredAt: incomeOccurrence.occurredAt,
+        note: incomeModal.note.trim() || null,
+        source: isEdit ? null : 'manual',
+        imageUrl: incomeModal.imagePath || null,
+        imageHash: null,
+        companionMessage: null,
+        accountId: incomeAccountId,
+      }, {
+        onAccepted: ({ record }) => {
+          invalidateRecordExpressionPlan(record.id)
+          upsertFinanceRecord(incomeRecords.value, record)
+          upsertFinanceRecord(recentIncomeRecords.value, record)
+          closeIncomeModal()
+        },
+        refresh: async (_accepted, { userId }) => {
+          await refreshAccountsFromDB({ expectedUserId: userId, throwOnError: true })
+          if (currentPage.value === 'unbound-records') {
+            await loadUnboundRecords({ expectedUserId: userId, throwOnError: true })
+          }
+        },
       })
-      if (error) { showError('保存失败：' + humanizeDbError(error)); return }
-      invalidateRecordExpressionPlan(newRow?.id)
-      await refreshAccountsFromDB()
-      if (currentPage.value === 'unbound-records') await loadUnboundRecords()
-      closeIncomeModal()
-      const mapped = {
-        id: newRow.id,
-        cat: newRow.category,
-        source: newRow.source_name,
-        amount: Number(newRow.amount),
-        date: formatDate(newRow.income_date),
-        dateRaw: newRow.income_date,
-        createdAt: newRow.created_at,
-        occurredAt: newRow.occurred_at || null,
-        time: '',
-        icon: incomeCatMap[newRow.category]?.icon || '💰',
-        note: newRow.note,
-        image_url: newRow.image_url,
-        image_path: newRow.image_url,
-        sourceType: newRow.source || 'manual',
+      if (result.status === 'stale') return result
+      if (result.status !== 'accepted') {
+        showError('保存失败：' + humanizeDbError(result.error || '请重新登录后再试'))
+        return result
       }
-      incomeRecords.value.unshift(mapped)
-      showFlash('✓ 收入已记录')
+      if (detailRecord.value?.id === result.record.id) await openRecordDetail('income', result.record)
+      if (result.refreshStatus === 'failed') showFlash('✓ 收入已保存，账户或列表刷新失败，请稍后刷新页面')
+      else showFlash(isEdit ? '✓ 收入已更新' : '✓ 收入已记录')
+      return result
     })
   }
 
@@ -2136,110 +2101,65 @@ export function useStore() {
         return result
       }
 
-      if (expenseModal.mode === 'edit' && expenseModal.id) {
-        const expenseOccurrence = resolveFinanceOccurrence({
-          date: expenseModal.date,
-          time: resolvedTime,
-        })
-        const expenseAccountId = expenseModal.accountUnbound
-          ? null
-          : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
-        const { error } = await sb.rpc('save_transaction_with_account', {
-          p_id: expenseModal.id,
-          p_amount: amt,
-          p_merchant_name: merchantName,
-          p_platform: expenseModal.platform,
-          p_category: expenseModal.category,
-          p_payment_method: expenseModal.payment,
-          p_transaction_date: expenseModal.date,
-          p_transaction_time: resolvedTime,
-          p_occurred_at: expenseOccurrence.occurredAt,
-          p_note: expenseModal.note.trim() || null,
-          p_is_large_transport: isLargeTransport,
-          p_transport_type: isLargeTransport ? '交通' : null,
-          p_source: null,
-          p_image_url: expenseModal.imagePath || null,
-          p_image_hash: null,
-          p_companion_message: null,
-          p_account_id: expenseAccountId,
-        })
-        if (error) { showError('保存失败：' + humanizeDbError(error)); return }
-        invalidateRecordExpressionPlan(expenseModal.id)
-        learnConfirmedExpenseVocabulary({
-          platform: expenseModal.platform,
-          category: expenseModal.category,
-          payment: expenseModal.payment,
-          accountId: expenseAccountId,
-        })
-        await refreshAccountsFromDB()
-        if (currentPage.value === 'unbound-records') await loadUnboundRecords()
-        closeExpenseModal()
-        const editIdx = bills.value.findIndex(item => item.id === expenseModal.id)
-        if (editIdx >= 0) {
-          bills.value[editIdx] = {
-            ...bills.value[editIdx],
-            name: merchantName,
-            platform: expenseModal.platform,
-            payment: expenseModal.payment,
-            cat: expenseModal.category,
-            amount: amt,
-            date: formatDate(expenseModal.date),
-            dateRaw: expenseModal.date,
-            time: resolvedTime ? resolvedTime.slice(0, 5) : '',
-            transport_type: isLargeTransport ? '交通' : null,
-            note: expenseModal.note.trim() || null,
-          }
-        }
-        showFlash('✓ 支出已更新')
-        if (detailRecord.value?.id === expenseModal.id) {
-          const updated = bills.value.find(item => item.id === expenseModal.id)
-          if (updated) {
-            await openRecordDetail('expense', updated)
-          }
-        }
-        return
-      }
-
-      const expenseAccountIdNew = expenseModal.accountUnbound
+      const isEdit = expenseModal.mode === 'edit' && Boolean(expenseModal.id)
+      const recordId = isEdit ? expenseModal.id : null
+      const expenseAccountId = expenseModal.accountUnbound
         ? null
         : (expenseModal.accountId || autoAccountIdForPayment(expenseModal.payment, 'expense') || null)
-      const createdTime = resolvedTime || (new Date().toTimeString().slice(0, 8))
+      const transactionTime = isEdit ? resolvedTime : (resolvedTime || new Date().toTimeString().slice(0, 8))
       const expenseOccurrence = resolveFinanceOccurrence({
         date: expenseModal.date,
-        time: createdTime,
+        time: transactionTime,
       })
-      const { data: newRow, error } = await sb.rpc('save_transaction_with_account', {
-        p_id: null,
-        p_amount: amt,
-        p_merchant_name: merchantName,
-        p_platform: expenseModal.platform,
-        p_category: expenseModal.category,
-        p_payment_method: expenseModal.payment,
-        p_transaction_date: expenseModal.date,
-        p_transaction_time: createdTime,
-        p_occurred_at: expenseOccurrence.occurredAt,
-        p_note: expenseModal.note.trim() || null,
-        p_is_large_transport: isLargeTransport,
-        p_transport_type: isLargeTransport ? '交通' : null,
-        p_source: 'manual',
-        p_image_url: expenseModal.imagePath || null,
-        p_image_hash: null,
-        p_companion_message: null,
-        p_account_id: expenseAccountIdNew,
+      const expensePlatform = expenseModal.platform
+      const expenseCategory = expenseModal.category
+      const expensePayment = expenseModal.payment
+      const result = await financeSaveFeature.saveExpense({
+        id: recordId,
+        amount: amt,
+        merchantName,
+        platform: expensePlatform,
+        category: expenseCategory,
+        paymentMethod: expensePayment,
+        transactionDate: expenseModal.date,
+        transactionTime,
+        occurredAt: expenseOccurrence.occurredAt,
+        note: expenseModal.note.trim() || null,
+        isLargeTransport,
+        transportType: isLargeTransport ? '交通' : null,
+        source: isEdit ? null : 'manual',
+        imageUrl: expenseModal.imagePath || null,
+        imageHash: null,
+        companionMessage: null,
+        accountId: expenseAccountId,
+      }, {
+        onAccepted: ({ record }) => {
+          invalidateRecordExpressionPlan(record.id)
+          learnConfirmedExpenseVocabulary({
+            platform: expensePlatform,
+            category: expenseCategory,
+            payment: expensePayment,
+            accountId: expenseAccountId,
+          })
+          upsertFinanceRecord(bills.value, record)
+          closeExpenseModal()
+        },
+        refresh: async (_accepted, { userId }) => {
+          await refreshAccountsFromDB({ expectedUserId: userId, throwOnError: true })
+          if (currentPage.value === 'unbound-records') {
+            await loadUnboundRecords({ expectedUserId: userId, throwOnError: true })
+          }
+        },
       })
-      if (error) { showError('保存失败：' + humanizeDbError(error)); return }
-      invalidateRecordExpressionPlan(newRow?.id)
-      learnConfirmedExpenseVocabulary({
-        platform: expenseModal.platform,
-        category: expenseModal.category,
-        payment: expenseModal.payment,
-        accountId: expenseAccountIdNew,
-      })
-      await refreshAccountsFromDB()
-      if (currentPage.value === 'unbound-records') await loadUnboundRecords()
-      closeExpenseModal()
-      bills.value.unshift(mapTransaction(newRow))
-      showFlash('✓ 支出已记录')
+      if (result.status === 'stale') return result
+      if (result.status !== 'accepted') {
+        showError('保存失败：' + humanizeDbError(result.error || '请重新登录后再试'))
+        return result
+      }
+      if (detailRecord.value?.id === result.record.id) await openRecordDetail('expense', result.record)
+      if (result.refreshStatus === 'failed') showFlash('✓ 支出已保存，账户或列表刷新失败，请稍后刷新页面')
+      else showFlash(isEdit ? '✓ 支出已更新' : '✓ 支出已记录')
+      return result
     })
   }
 
@@ -3290,14 +3210,21 @@ export function useStore() {
     }
   }
 
-  async function refreshAccountsFromDB() {
+  async function refreshAccountsFromDB({ expectedUserId = currentUserId.value, throwOnError = false } = {}) {
     const { data, error } = await sb.from('accounts')
       .select('*')
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
-    if (error) { console.warn('刷新账户失败:', error.message); return }
+    if (error) {
+      console.warn('刷新账户失败:', error.message)
+      if (throwOnError) throw error
+      return { status: 'failed', error: error.message }
+    }
+    if (expectedUserId && currentUserId.value !== expectedUserId) return { status: 'stale' }
     accounts.value = (data || []).map(mapAccountRow)
     await repairEmptyAccountSnapshotBalances(accounts.value)
+    if (expectedUserId && currentUserId.value !== expectedUserId) return { status: 'stale' }
+    return { status: 'accepted' }
   }
 
   function defaultAccountIdForKind(kind) {
@@ -3916,7 +3843,7 @@ export function useStore() {
     showFlash('✓ 已关联账户')
   }
 
-  async function loadUnboundRecords() {
+  async function loadUnboundRecords({ expectedUserId = currentUserId.value, throwOnError = false } = {}) {
     unboundRecordsLoading.value = true
     const padM = String(currentMonth.value).padStart(2, '0')
     const start = `${currentYear.value}-${padM}-01`
@@ -3924,18 +3851,21 @@ export function useStore() {
     const end = `${currentYear.value}-${padM}-${String(lastDay).padStart(2, '0')}`
 
     const result = await recordRepository.listUnboundRecords({ start, end, limit: 100 })
+    if (expectedUserId && currentUserId.value !== expectedUserId) return { status: 'stale' }
     unboundRecordsLoading.value = false
 
     if (result.status !== 'accepted') {
       console.warn('加载未绑定记录失败:', result.error)
+      if (throwOnError) throw new Error(result.error || '未绑定记录加载失败')
       showFlash('未绑定记录加载失败')
-      return
+      return result
     }
 
     unboundRecords.value = {
       expenses: result.expenses,
       incomes: result.incomes,
     }
+    return result
   }
 
   async function openUnboundRecordsPage(filter = 'all') {

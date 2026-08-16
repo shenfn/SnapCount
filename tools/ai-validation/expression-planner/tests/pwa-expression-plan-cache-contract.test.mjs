@@ -93,7 +93,10 @@ test('invalidated records reject stale in-flight plan and acknowledgement writes
 })
 
 test('successful PWA record mutations invalidate the affected planner cache', async () => {
-  const store = await readFile(path.join(root, 'src/composables/useStore.js'), 'utf8')
+  const [store, financeSaveFeature] = await Promise.all([
+    readFile(path.join(root, 'src/composables/useStore.js'), 'utf8'),
+    readFile(path.join(root, 'src/features/finance/createFinanceSaveFeature.js'), 'utf8'),
+  ])
   const confirmEntry = between(store, 'async function confirmEntry()', 'async function confirmStagingRepayment')
   const confirmIncome = between(store, 'async function confirmIncome()', 'function markIncomeImageUnavailable')
   const confirmExpense = between(store, 'async function confirmExpense()', 'function markExpenseImageUnavailable')
@@ -123,38 +126,21 @@ test('successful PWA record mutations invalidate the affected planner cache', as
   assert.match(confirmEntry, /invalidateRecordExpressionPlan\(confirmedIncomeId\)/)
   assert.match(confirmEntry, /invalidateRecordExpressionPlan\(confirmedExpenseId\)/)
 
-  assertInvalidatesAfterFailureGuard(
+  assert.match(
+    financeSaveFeature,
+    /if \(result\.status !== 'accepted'\) return result[\s\S]*await options\.onAccepted\(result, \{ userId \}\)/,
+    'finance save failures must exit before the accepted convergence callback',
+  )
+  assert.match(
     confirmIncome,
-    'p_id: incomeModal.id',
-    'if (error)',
-    'invalidateRecordExpressionPlan(incomeModal.id)',
-    'income edit',
+    /financeSaveFeature\.saveIncome\([\s\S]*onAccepted: \(\{ record \}\) => \{[\s\S]*invalidateRecordExpressionPlan\(record\.id\)/,
+    'income create and edit must invalidate the canonical returned record after acceptance',
   )
-  assertInvalidatesAfterFailureGuard(
-    confirmIncome,
-    'p_id: null',
-    'if (error)',
-    'invalidateRecordExpressionPlan(newRow?.id)',
-    'income create',
-  )
-  assert.match(confirmIncome, /invalidateRecordExpressionPlan\(incomeModal\.id\)/)
-  assert.match(confirmIncome, /invalidateRecordExpressionPlan\(newRow\?\.id\)/)
-  assertInvalidatesAfterFailureGuard(
+  assert.match(
     confirmExpense,
-    'p_id: expenseModal.id',
-    'if (error)',
-    'invalidateRecordExpressionPlan(expenseModal.id)',
-    'expense edit',
+    /financeSaveFeature\.saveExpense\([\s\S]*onAccepted: \(\{ record \}\) => \{[\s\S]*invalidateRecordExpressionPlan\(record\.id\)/,
+    'expense create and edit must invalidate the canonical returned record after acceptance',
   )
-  assertInvalidatesAfterFailureGuard(
-    confirmExpense,
-    'p_id: null',
-    'if (error)',
-    'invalidateRecordExpressionPlan(newRow?.id)',
-    'expense create',
-  )
-  assert.match(confirmExpense, /invalidateRecordExpressionPlan\(expenseModal\.id\)/)
-  assert.match(confirmExpense, /invalidateRecordExpressionPlan\(newRow\?\.id\)/)
 
   assertInvalidatesAfterFailureGuard(
     confirmUniversal,
