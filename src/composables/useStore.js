@@ -45,6 +45,7 @@ import { createStagingRetryFeature } from '../features/staging/createStagingRetr
 import { createStagingArchiveFeature } from '../features/staging/createStagingArchiveFeature'
 import { createStagingDiscardFeature } from '../features/staging/createStagingDiscardFeature'
 import { createFinanceSaveFeature } from '../features/finance/createFinanceSaveFeature'
+import { createAccountBindingFeature } from '../features/finance/createAccountBindingFeature'
 import {
   resolveFinanceOccurrence,
 } from '../utils/financeOccurrence'
@@ -102,6 +103,7 @@ export function useStore() {
   let stagingArchiveFeature = null
   let stagingDiscardFeature = null
   let financeSaveFeature = null
+  let accountBindingFeature = null
 
   const currentFilter = ref('all')
   const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
@@ -257,6 +259,10 @@ export function useStore() {
   })
   const recordRepository = createRecordRepository({ client: sb })
   financeSaveFeature = createFinanceSaveFeature({
+    repository: recordRepository,
+    getCurrentUserId: () => currentUserId.value,
+  })
+  accountBindingFeature = createAccountBindingFeature({
     repository: recordRepository,
     getCurrentUserId: () => currentUserId.value,
   })
@@ -499,6 +505,7 @@ export function useStore() {
     stagingArchiveFeature?.reset()
     stagingDiscardFeature?.reset()
     financeSaveFeature.reset()
+    accountBindingFeature.reset()
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -3450,60 +3457,45 @@ export function useStore() {
     return bindRecordToAccount(kind, record, recommendation.accountId)
   }
 
-  async function bindRecordToAccount(kind, record, accountId, options = {}) {
-    if (!record?.id || !accountId) return false
-    if (kind === 'income') {
-      const { error } = await sb.rpc('save_income_with_account', {
-        p_id: record.id,
-        p_category: record.cat || 'other',
-        p_source_name: record.source || '收入',
-        p_amount: Number(record.amount || 0),
-        p_income_date: record.dateRaw || getLocalDateKey(),
-        p_note: record.note || null,
-        p_source: record.sourceType || null,
-        p_image_url: record.image_path || record.image_url || null,
-        p_image_hash: null,
-        p_companion_message: record.companionMessage || null,
-        p_account_id: accountId,
-        p_occurred_at: record.occurredAt || null,
-        p_occurred_at: record.occurredAt || null,
-      })
-      if (error) { showFlash('补绑失败：' + humanizeDbError(error)); return false }
-    } else {
-      const time = record.time ? `${record.time.length === 5 ? `${record.time}:00` : record.time}` : null
-      const { error } = await sb.rpc('save_transaction_with_account', {
-        p_id: record.id,
-        p_amount: Number(record.amount || 0),
-        p_merchant_name: record.name || '支出',
-        p_platform: record.platform && record.platform !== '?' ? record.platform : null,
-        p_category: record.cat && record.cat !== '?' ? record.cat : null,
-        p_payment_method: record.payment && record.payment !== '?' ? record.payment : null,
-        p_transaction_date: record.dateRaw || getLocalDateKey(),
-        p_transaction_time: time,
-        p_note: record.note || null,
-        p_is_large_transport: record.cat === 'transport' && Number(record.amount || 0) >= 200,
-        p_transport_type: record.transport_type || null,
-        p_source: record.source || null,
-        p_image_url: record.image_path || record.image_url || null,
-        p_image_hash: record.image_hash || null,
-        p_companion_message: record.companionMessage || null,
-        p_account_id: accountId,
-        p_occurred_at: record.occurredAt || null,
-        p_occurred_at: record.occurredAt || null,
-      })
-      if (error) { showFlash('补绑失败：' + humanizeDbError(error)); return false }
-    }
+  function convergeAccountBinding(kind, record) {
     invalidateRecordExpressionPlan(record.id)
+    if (kind === 'income') {
+      upsertFinanceRecord(incomeRecords.value, record)
+      upsertFinanceRecord(recentIncomeRecords.value, record)
+      unboundRecords.value = {
+        ...unboundRecords.value,
+        incomes: (unboundRecords.value.incomes || []).filter(item => item.id !== record.id),
+      }
+      return
+    }
+    upsertFinanceRecord(bills.value, record)
+    unboundRecords.value = {
+      ...unboundRecords.value,
+      expenses: (unboundRecords.value.expenses || []).filter(item => item.id !== record.id),
+    }
+  }
 
-    if (!options.silent) {
-      await refreshAccountsFromDB()
-      await loadUnboundRecords()
+  async function refreshAccountBindingViews(userId) {
+    await refreshAccountsFromDB({ expectedUserId: userId, throwOnError: true })
+    await loadUnboundRecords({ expectedUserId: userId, throwOnError: true })
+  }
+
+  async function bindRecordToAccount(kind, record, accountId) {
+    const result = await accountBindingFeature.bind(kind, record, accountId, {
+      onAccepted: ({ record: canonicalRecord }) => convergeAccountBinding(kind, canonicalRecord),
+      refresh: async (_accepted, { userId }) => refreshAccountBindingViews(userId),
+    })
+    if (result.status === 'stale') return false
+    if (result.status !== 'accepted') {
+      const message = result.reason === 'binding_conflict'
+        ? '这条记录正在绑定其他账户，请稍后再试'
+        : humanizeDbError(result.error || '请重新登录后再试')
+      showFlash('补绑失败：' + message)
+      return false
     }
-    if (!options.silent && detailRecord.value?.id === record.id) {
-      await loadData(0, true)
-      await refreshDetailRecord()
-    }
-    if (!options.silent) showFlash('✓ 已补绑账户并生成流水')
+    if (detailRecord.value?.id === result.record.id) await openRecordDetail(kind, result.record)
+    if (result.refreshStatus === 'failed') showFlash('✓ 已补绑账户并生成流水，账户或列表刷新失败，请稍后刷新页面')
+    else showFlash('✓ 已补绑账户并生成流水')
     return true
   }
 
@@ -3539,17 +3531,23 @@ export function useStore() {
       if (!ok) return false
     }
     return runLockedAction('batchBindUnbound', async () => {
-      let success = 0
-      let failed = 0
-      for (const item of candidates) {
-        const done = await bindRecordToAccount(item.kind, item.record, item.recommendation.accountId, { silent: true })
-        if (done) success++
-        else failed++
+      const result = await accountBindingFeature.bindBatch(candidates.map(item => ({
+        kind: item.kind,
+        record: item.record,
+        accountId: item.recommendation.accountId,
+      })), {
+        onAccepted: ({ record: canonicalRecord }, item) => convergeAccountBinding(item.kind, canonicalRecord),
+        refresh: async (_summary, { userId }) => refreshAccountBindingViews(userId),
+      })
+      if (result.status === 'stale') return false
+      if (result.successCount === 0) {
+        showFlash(`补绑失败：${result.failedCount || candidates.length} 条记录均未完成`)
+        return false
       }
-      await refreshAccountsFromDB()
-      await loadUnboundRecords()
-      showFlash(failed ? `✓ 已补绑 ${success} 条，${failed} 条失败` : `✓ 已批量补绑 ${success} 条`)
-      return success > 0
+      const refreshSuffix = result.refreshStatus === 'failed' ? '；账户或列表刷新失败，请刷新页面后再继续' : ''
+      if (result.failedCount > 0) showFlash(`已补绑 ${result.successCount} 条，${result.failedCount} 条失败${refreshSuffix}`)
+      else showFlash(`✓ 已批量补绑 ${result.successCount} 条${refreshSuffix}`)
+      return true
     })
   }
 

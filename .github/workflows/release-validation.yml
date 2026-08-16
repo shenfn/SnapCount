@@ -64,6 +64,9 @@ jobs:
       - name: Validate finance save boundary
         run: npm run test:finance-save
 
+      - name: Validate account binding boundary
+        run: npm run test:account-binding
+
       - name: Install trace console dependencies
         working-directory: tools/ai-validation/ui/trace-console
         run: npm ci
