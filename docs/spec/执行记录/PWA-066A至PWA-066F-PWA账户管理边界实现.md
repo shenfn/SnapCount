@@ -6,7 +6,7 @@
 >
 > 分支：`feature/PWA账户管理边界实现`
 >
-> 状态：本地实现与回归已完成，待远程 PostgreSQL 17 行为验证
+> 状态：实现完成，PostgreSQL 17 行为验证通过，PR #102 待合并
 
 ## 当前范围
 
@@ -37,13 +37,12 @@
 
 ## 下一步
 
-1. 提交并推送当前分支，创建 PR。
-2. 由 GitHub PostgreSQL 17 job 连续执行 migration 两次并运行行为 assertions。
-3. 全部门禁通过后合并，再建立独立收口任务；不在本分支进入 iOS A4。
+1. 推送远程验证证据并等待 PR #102 第二轮门禁。
+2. 全部门禁通过后合并，再建立独立收口任务；不在本分支进入 iOS A4。
 
 ## 未验证与风险
 
-- 本机没有可用 PostgreSQL/Docker 行为环境；当前只有静态 migration 契约通过，SQL 真实执行必须以 GitHub PostgreSQL 17 job 为准。
+- 本机没有可用 PostgreSQL/Docker 行为环境；SQL 真实执行已由 PR #102 的 GitHub PostgreSQL 17 job 验证通过。
 - 生产数据现状未知，未执行生产查询或写入。
 
 ## 本地验证
@@ -57,3 +56,4 @@
 - `npm run build`：通过；仅既有 `vconsole eval` 与 bundle size 警告。
 - `npm run governance:check`、`npm run governance:arch`：通过；架构检查仅既有人工清单警告。
 - `git diff --check`：通过；仅工作区行尾转换提示。
+- PR #102 首轮全部适用门禁通过；综合 job 在 PostgreSQL 17 中连续执行 migration 两次并通过完整行为 assertions（GitHub Actions run `31941675852`）。
