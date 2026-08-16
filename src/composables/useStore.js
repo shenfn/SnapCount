@@ -41,6 +41,7 @@ import { createAuthRepository } from '../repositories/authRepository'
 import { createSessionState } from '../features/auth/createSessionState'
 import { createStagingRepository } from '../repositories/stagingRepository'
 import { createStagingRetryFeature } from '../features/staging/createStagingRetryFeature'
+import { createStagingArchiveFeature } from '../features/staging/createStagingArchiveFeature'
 import {
   buildShanghaiOccurredAt,
   resolveFinanceOccurrence,
@@ -102,6 +103,7 @@ export function useStore() {
   const unboundRecordFilter = ref('all')
   const walletAccountCreatingSourceIds = new Set()
   let stagingRetryFeature = null
+  let stagingArchiveFeature = null
 
   const currentFilter = ref('all')
   const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
@@ -250,12 +252,17 @@ export function useStore() {
   })
   const { settingsState } = settingsFeature
   const authRepository = createAuthRepository({ client: sb })
+  const stagingRepository = createStagingRepository({
+    client: sb,
+    baseUrl: SUPABASE_URL,
+    anonKey: SUPABASE_ANON_KEY,
+  })
   stagingRetryFeature = createStagingRetryFeature({
-    repository: createStagingRepository({
-      client: sb,
-      baseUrl: SUPABASE_URL,
-      anonKey: SUPABASE_ANON_KEY,
-    }),
+    repository: stagingRepository,
+    getCurrentUserId: () => currentUserId.value,
+  })
+  stagingArchiveFeature = createStagingArchiveFeature({
+    repository: stagingRepository,
     getCurrentUserId: () => currentUserId.value,
   })
   const sessionFeature = createSessionState({
@@ -482,6 +489,7 @@ export function useStore() {
   function resetUserData() {
     loadDataRunId += 1
     stagingRetryFeature?.reset()
+    stagingArchiveFeature?.reset()
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -2732,12 +2740,12 @@ export function useStore() {
     if (!domain) return null
 
     if (options.confirm !== false) {
-      const ok = confirm(`确认把这条待处理截图归档到「${domain.name}」？`)
+      const ok = confirm('确认把这条待处理截图归档到「' + domain.name + '」？')
       if (!ok) return null
     }
 
     const payload = {
-      ...(record.extracted || {}),
+      ...stagingArchivePayload(record),
       ...(options.payloadOverrides || {}),
       image_type: record.imageType || null,
       record_type: record.recordType || null,
@@ -2745,213 +2753,77 @@ export function useStore() {
       ai_summary: record.summary || null,
       failure_reason: record.failureReason || null,
     }
-
     const financeOccurrence = options.financeOccurrence || stagingFinanceOccurrence(record, payload)
-    const occurredAt = payload.occurred_at || payload.order_finished_at || record.occurredAt || null
+    const amount = Number.parseFloat(
+      payload.amount
+      ?? record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1]
+      ?? '0',
+    )
     const title = buildUniversalRecordTitle(domainKey, payload, record)
-    const summary = options.summaryOverride || record.summary || `${domain.name}截图归档`
-    const companionMessage = record.companionMessage || payload.companion_message || payload.payload_jsonb?.companion_message || null
-    const aiFeedback = payload.ai_feedback || payload.payload_jsonb?.ai_feedback || null
+    const summary = options.summaryOverride || record.summary || domain.name + '截图归档'
+    const accountId = options.explicitAccount
+      ? payload.account_id || null
+      : domainKey === 'expense'
+        ? autoAccountIdForPayment(payload.payment_method || null, 'expense')
+        : domainKey === 'income'
+          ? defaultAccountIdForKind('income')
+          : null
 
-    if (domainKey === 'expense') {
-      const expenseOccurrence = financeOccurrence
-      const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
-      const paymentMethod = payload.payment_method || null
-      const { data: inserted, error: insertErr } = await sb.rpc('save_transaction_with_account', {
-        p_id: null,
-        p_amount: amount > 0 ? amount : 0.01,
-        p_merchant_name: payload.merchant_name || payload.source_name || title || '待补充支出',
-        p_platform: payload.platform || '微信',
-        p_category: payload.category || null,
-        p_payment_method: paymentMethod,
-        p_transaction_date: expenseOccurrence.date || normalizeDateOnly(record.createdAt),
-        p_transaction_time: expenseOccurrence.time,
-        p_occurred_at: expenseOccurrence.occurredAt,
-        p_note: summary,
-        p_is_large_transport: payload.category === 'transport' && amount >= 200,
-        p_transport_type: payload.category === 'transport' && amount >= 200 ? '交通' : null,
-        p_source: 'ai_scan',
-        p_image_url: record.imagePath || null,
-        p_image_hash: record.imageHash || null,
-        p_companion_message: companionMessage,
-        p_account_id: options.explicitAccount
-          ? payload.account_id || null
-          : autoAccountIdForPayment(paymentMethod, 'expense'),
-      })
-      if (insertErr) {
-        showFlash('❌ 转入支出失败：' + humanizeDbError(insertErr))
-        return null
-      }
-      const done = await finishStagingArchive(record, inserted.id, null, 'expense', payload)
-      if (!done) return null
-      const sIdx = stagingRecords.value.findIndex(r => r.id === record.id)
-      if (sIdx >= 0) stagingRecords.value.splice(sIdx, 1)
-      const bill = { ...mapTransaction(inserted), aiFeedback, companionMessage: companionMessage || '' }
-      const billIndex = bills.value.findIndex(item => item.id === bill.id)
-      if (isInSelectedMonth(bill.dateRaw)) {
-        if (billIndex >= 0) bills.value[billIndex] = bill
-        else bills.value.unshift(bill)
-      } else if (billIndex >= 0) {
-        bills.value.splice(billIndex, 1)
-      }
-      rememberProcessedStaging(record, {
-        status: 'archived',
-        domainKey: 'expense',
-        targetRecordId: inserted.id,
-        resolvedAction: 'archived',
-        resolvedAt: new Date().toISOString(),
-      })
-      showFlash('✓ 已转入支出，可在已处理中查看并编辑')
-      return { kind: 'expense', record: bill, targetRecordId: inserted.id }
-    }
-
-    if (domainKey === 'income') {
-      const incomeOccurrence = financeOccurrence
-      const amount = parseFloat(payload.amount || record.summary?.match(/金额\s*(\d+(\.\d+)?)/)?.[1] || '0')
-      const { data: inserted, error: insertErr } = await sb.rpc('save_income_with_account', {
-        p_id: null,
-        p_category: payload.income_category || 'other',
-        p_source_name: payload.source_name || title || '截图识别收入',
-        p_amount: amount > 0 ? amount : 0.01,
-        p_income_date: incomeOccurrence.date || normalizeDateOnly(record.createdAt),
-        p_occurred_at: incomeOccurrence.occurredAt,
-        p_note: summary,
-        p_source: 'ai_scan',
-        p_image_url: record.imagePath || null,
-        p_image_hash: record.imageHash || null,
-        p_companion_message: companionMessage,
-        p_account_id: options.explicitAccount
-          ? payload.account_id || null
-          : defaultAccountIdForKind('income'),
-      })
-      if (insertErr) {
-        showFlash('❌ 转入收入失败：' + humanizeDbError(insertErr))
-        return null
-      }
-      const done = await finishStagingArchive(record, inserted.id, null, 'income', payload)
-      if (!done) return null
-      const sIdx2 = stagingRecords.value.findIndex(r => r.id === record.id)
-      if (sIdx2 >= 0) stagingRecords.value.splice(sIdx2, 1)
-      const income = { ...mapIncomeRow(inserted), aiFeedback, companionMessage: companionMessage || '' }
-      const incomeIndex = incomeRecords.value.findIndex(item => item.id === income.id)
-      if (isInSelectedMonth(income.dateRaw)) {
-        if (incomeIndex >= 0) incomeRecords.value[incomeIndex] = income
-        else incomeRecords.value.unshift(income)
-      } else if (incomeIndex >= 0) {
-        incomeRecords.value.splice(incomeIndex, 1)
-      }
-      const recentIndex = recentIncomeRecords.value.findIndex(item => item.id === income.id)
-      if (recentIndex >= 0) recentIncomeRecords.value[recentIndex] = income
-      else recentIncomeRecords.value.unshift(income)
-      recentIncomeRecords.value = recentIncomeRecords.value.slice(0, 10)
-      rememberProcessedStaging(record, {
-        status: 'archived',
-        domainKey: 'income',
-        targetRecordId: inserted.id,
-        resolvedAction: 'archived',
-        resolvedAt: new Date().toISOString(),
-      })
-      showFlash('✓ 已转入收入，可在已处理中查看并编辑')
-      return { kind: 'income', record: income, targetRecordId: inserted.id }
-    }
-
-    const { data: domainRows, error: domainErr } = await sb.from('data_domains')
-      .select('id,key,version')
-      .eq('key', domainKey)
-      .eq('status', 'active')
-      .limit(1)
-    if (domainErr || !domainRows?.length) {
-      showFlash('❌ 数据域未就绪，请先执行 007 迁移')
-      return null
-    }
-
-    const domainRow = domainRows[0]
-    const { data: inserted, error: insertErr } = await sb.from('data_records').insert({
-      domain_id: domainRow.id,
-      domain_key: domainKey,
-      domain_version: domainRow.version || '1.0',
-      occurred_at: occurredAt,
-      title,
+    const result = await stagingArchiveFeature.archive(record, domainKey, {
+      amount: Number.isFinite(amount) ? amount : null,
+      title: domainKey === 'expense'
+        ? payload.merchant_name || payload.source_name || title || null
+        : domainKey === 'income'
+          ? payload.source_name || title || null
+          : title,
+      platform: payload.platform || null,
+      category: payload.category || null,
+      paymentMethod: payload.payment_method || null,
+      incomeCategory: payload.income_category || null,
+      recordDate: financeOccurrence.date || null,
+      recordTime: financeOccurrence.time || null,
+      occurredAt: financeOccurrence.occurredAt || null,
       summary,
-      payload_jsonb: payload,
-      source: 'staging',
-      source_image_path: record.imagePath || null,
-      source_image_hash: record.imageHash || null,
-      staging_record_id: record.id,
-      user_id: currentUserId.value,
-    }).select('id').single()
-    if (insertErr) {
-      showFlash('❌ 归档失败：' + humanizeDbError(insertErr))
-      return null
-    }
-
-    const done = await finishStagingArchive(record, inserted.id, domainRow.id, domainKey, payload)
-    if (!done) return null
-
-    const sIdx3 = stagingRecords.value.findIndex(r => r.id === record.id)
-    if (sIdx3 >= 0) stagingRecords.value.splice(sIdx3, 1)
-    const targetRecord = mapDataRecordRow({
-      ...inserted,
-      domain_id: domainRow.id,
-      domain_key: domainKey,
-      domain_version: domainRow.version || '1.0',
-      occurred_at: occurredAt,
-      created_at: new Date().toISOString(),
-      title,
-      summary,
-      payload_jsonb: payload,
-      source: 'staging',
-      source_image_path: record.imagePath || null,
-      source_image_hash: record.imageHash || null,
-      staging_record_id: record.id,
+      payload,
+      accountId,
+      afterAccepted: async () => {
+        const refresh = await loadData(0, true)
+        if (!refresh?.ok) throw new Error('归档成功，但列表刷新失败')
+      },
     })
-    const dataIndex = dataRecords.value.findIndex(item => item.id === targetRecord.id)
-    if (isInSelectedMonth(targetRecord.occurredAt)) {
-      if (dataIndex >= 0) dataRecords.value[dataIndex] = targetRecord
-      else dataRecords.value.unshift(targetRecord)
-    } else if (dataIndex >= 0) {
-      dataRecords.value.splice(dataIndex, 1)
+
+    if (result.status === 'rejected') {
+      if (result.reason === 'missing_amount') {
+        showFlash('⚠ 缺少有效金额，请补全后再归档')
+      } else if (result.reason === 'unauthenticated') {
+        showFlash('⚠ 登录状态已失效，请重新登录')
+      }
+      return null
     }
+
+    if (result.status !== 'accepted') {
+      if (result.status !== 'stale') {
+        showFlash('❌ 归档失败：' + (result.error || '请求未完成'))
+      }
+      return null
+    }
+
+    const stagingIndex = stagingRecords.value.findIndex(item => item.id === record.id)
+    if (stagingIndex >= 0) stagingRecords.value.splice(stagingIndex, 1)
     rememberProcessedStaging(record, {
       status: 'archived',
       domainKey,
-      targetDomainId: domainRow.id,
-      targetRecordId: inserted.id,
+      targetRecordId: result.targetRecordId,
       resolvedAction: 'archived',
       resolvedAt: new Date().toISOString(),
     })
-    showFlash(`✓ 已归档到${domain.name}，可在已处理中查看并编辑`)
-    return { kind: 'universal', record: targetRecord, targetRecordId: inserted.id }
-  }
-
-  async function finishStagingArchive(record, targetRecordId, targetDomainId, domainKey, payload) {
-    const { error: stagingErr } = await sb.from('staging_records').update({
-      status: 'archived',
-      target_domain_id: targetDomainId || record.targetDomainId || null,
-      target_record_id: targetRecordId,
-      resolved_action: 'archived',
-      resolved_at: new Date().toISOString(),
-    }).eq('id', record.id)
-    if (stagingErr) {
-      showFlash('❌ 中转站状态更新失败：' + stagingErr.message)
-      return false
-    }
-
-    const { error: feedbackErr } = await sb.from('user_routing_feedback').insert({
-      staging_record_id: record.id,
-      image_hash: record.imageHash || null,
-      original_domain_key: record.domainKey || null,
-      corrected_domain_key: domainKey,
-      action: 'archive',
-      confidence: record.confidence || null,
-      payload_jsonb: payload,
-    })
-    if (feedbackErr) console.warn('写入路由反馈失败:', feedbackErr.message)
     invalidateRecordExpressionPlan(record.id)
-    invalidateRecordExpressionPlan(targetRecordId)
-    return true
+    invalidateRecordExpressionPlan(result.targetRecordId)
+    showFlash(result.refreshStatus === 'failed'
+      ? '✓ 已归档；列表刷新失败，请稍后刷新查看'
+      : '✓ 已归档到' + domain.name)
+    return { ...result, kind: domainKey }
   }
-
   function buildUniversalRecordTitle(domainKey, payload, record) {
     return buildUniversalRecordTitleFromAdapter(domainKey, payload, record)
   }

@@ -98,7 +98,7 @@ test('successful PWA record mutations invalidate the affected planner cache', as
   const confirmIncome = between(store, 'async function confirmIncome()', 'function markIncomeImageUnavailable')
   const confirmExpense = between(store, 'async function confirmExpense()', 'function markExpenseImageUnavailable')
   const confirmUniversal = between(store, 'async function confirmUniversalRecord()', 'function markUniversalImageUnavailable')
-  const finishArchive = between(store, 'async function finishStagingArchive', 'function buildUniversalRecordTitle')
+  const archiveStaging = between(store, 'async function archiveStagingRecord', 'function buildUniversalRecordTitle')
   const bindRecord = between(store, 'async function bindRecordToAccount', 'function recommendedUnboundRecords')
   const createWalletAccount = between(store, 'async function createAccountFromWalletSnapshot', 'async function linkWalletSnapshotToAccount')
   const linkWalletAccount = between(store, 'async function linkWalletSnapshotToAccount', 'function mapIncomeRow')
@@ -181,7 +181,14 @@ test('successful PWA record mutations invalidate the affected planner cache', as
   assert.match(confirmUniversal, /invalidateRecordExpressionPlan\(data\?\.target_record_id\)/)
   assert.match(confirmUniversal, /invalidateRecordExpressionPlan\(universalModal\.id\)/)
   assert.match(confirmUniversal, /invalidateRecordExpressionPlan\(newRow\?\.id\)/)
-  assert.match(finishArchive, /invalidateRecordExpressionPlan\(targetRecordId\)/)
+  assertInvalidatesAfterFailureGuard(
+    archiveStaging,
+    'stagingArchiveFeature.archive(record, domainKey',
+    "if (result.status !== 'accepted')",
+    'invalidateRecordExpressionPlan(record.id)',
+    'atomic staging archive',
+  )
+  assert.match(archiveStaging, /invalidateRecordExpressionPlan\(result\.targetRecordId\)/)
 
   assert.match(bindRecord, /invalidateRecordExpressionPlan\(record\.id\)/)
   assert.match(createWalletAccount, /invalidateRecordExpressionPlan\(record\.id\)/)

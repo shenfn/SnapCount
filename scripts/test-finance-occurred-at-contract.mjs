@@ -28,6 +28,11 @@ const canonicalExpenseEnd = migration.indexOf(
 )
 const accountEntryFunction = migration.slice(accountEntryStart, canonicalExpenseStart)
 const storeSource = await readFile('src/composables/useStore.js', 'utf8')
+const stagingArchiveFeatureSource = await readFile(
+  'src/features/staging/createStagingArchiveFeature.js',
+  'utf8',
+)
+const stagingRepositorySource = await readFile('src/repositories/stagingRepository.js', 'utf8')
 const helpersSource = await readFile('src/utils/helpers.js', 'utf8')
 const ingestSource = await readFile(
   'supabase/functions/ingest-receipt/index.ts',
@@ -226,18 +231,23 @@ assert.equal(canonicalAiTransaction.time, '06:41')
 
 assert.match(
   storeSource,
-  /p_transaction_time:\s*expenseOccurrence\.time/,
-  'staging expense archive must pass the recognized wall time',
+  /recordTime:\s*financeOccurrence\.time/,
+  'staging archive facade must pass the recognized wall time to the feature',
 )
 assert.match(
   storeSource,
-  /p_occurred_at:\s*expenseOccurrence\.occurredAt/,
-  'staging expense archive must pass the exact occurrence timestamp',
+  /occurredAt:\s*financeOccurrence\.occurredAt/,
+  'staging archive facade must pass the exact occurrence timestamp to the feature',
 )
 assert.match(
-  storeSource,
-  /p_occurred_at:\s*incomeOccurrence\.occurredAt/,
-  'staging income archive must pass the exact occurrence timestamp',
+  stagingArchiveFeatureSource,
+  /recordTime:\s*options\.recordTime[\s\S]{0,400}occurredAt:\s*options\.occurredAt/,
+  'staging archive feature must preserve explicit occurrence fields',
+)
+assert.match(
+  stagingRepositorySource,
+  /p_record_time:\s*input\.recordTime[\s\S]{0,200}p_occurred_at:\s*input\.occurredAt/,
+  'staging repository must map occurrence fields to the atomic RPC',
 )
 assert.match(helpersSource, /occurredAt:\s*t\.occurred_at\s*\|\|\s*null/)
 assert.match(storeSource, /occurredAt:\s*row\.occurred_at\s*\|\|\s*null/)

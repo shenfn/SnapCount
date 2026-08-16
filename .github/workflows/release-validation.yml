@@ -49,6 +49,9 @@ jobs:
       - name: Validate unified pending queue
         run: npm run test:pending-queue
 
+      - name: Validate staging archive boundary
+        run: npm run test:staging-archive
+
       - name: Install trace console dependencies
         working-directory: tools/ai-validation/ui/trace-console
         run: npm ci
