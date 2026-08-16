@@ -6,6 +6,8 @@
 >
 > 分支：`feature/PWA设置配置边界`
 
+> 状态：已完成（PR #68，merge commit `21e011b`）
+
 ## 目标与范围
 
 - 将 `user_configs` 的读取、字段映射、白名单更新和共享状态集中到 Settings Repository/Feature。
@@ -39,7 +41,7 @@
 
 ## 未验证与剩余风险
 
-- GitHub PR 综合门禁尚未运行，需推送并创建 PR 后确认。
+- GitHub PR 综合、治理、架构和预览门禁已通过并合并，merge commit 为 `21e011b`。
 - Windows 本地不能编译 iOS，本切片没有 iOS 变更；不触发 iOS Build Gate。
 - `PageSettings` 的数据导出查询错误处理和隐私清理 transport 仍是后续独立切片。
 - Repository 对 modern vision 列缺失时可以 legacy read；legacy 模式下修改新增分链路字段会返回数据库错误，页面由 Store 显式提示失败。
@@ -47,6 +49,5 @@
 
 ## 下一步
 
-1. 逐文件检查并暂存本切片文件，提交 `feature/PWA设置配置边界`。
-2. 推送并创建 PR，等待综合、治理、架构和 PWA build 门禁。
-3. PR 合并后回写索引与交接状态，再评估下一个 PWA 业务边界切片。
+1. 保留当前 worktree 和分支，不删除历史对象。
+2. 当前任务转入 PWA-026 中转生命周期边界评估。
