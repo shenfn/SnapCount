@@ -6,7 +6,7 @@
 >
 > 分支：`feature/PWA截图还款边界实现`
 >
-> 状态：本地实现完成，待 PostgreSQL 17 远程事务验证
+> 状态：实现与 PostgreSQL 17 远程事务验证通过，待 PR #105 合并
 
 ## 当前范围
 
@@ -54,19 +54,19 @@
 - `npm run test:account-read`：20 项通过。
 - `npm run test:account-management`：19 项通过。
 - `npm run test:finance-save`：16 项通过。
-- `npm run check:security-contracts`、`npm run governance:check`、`npm run governance:arch`、`npm run build` 与 `git diff --check` 待最终提交前复跑并登记。
+- `npm run check:security-contracts`、`npm run governance:check`、`npm run governance:arch`、`npm run build` 与 `git diff --check` 均通过；构建只有既有 `vconsole eval` 和 bundle size 警告。
 
 ## 未验证与剩余风险
 
-- PostgreSQL fixture 尚未在真实 PostgreSQL 17 执行；migration 语法、权限、触发器余额和双次执行必须由远程 job 证明。
-- GitHub PR 门禁尚未运行，当前不能把 PWA-067 标记为完成。
+- PR #105 首轮 8 项成功、1 项按路径跳过、0 失败；Release Validation run `31943619573` 对应提交 `7d99247`。
+- run 第 68 步 `Execute screenshot repayment transaction contract` 已在 PostgreSQL 17 实际成功，migration 语法、权限、触发器余额、幂等和双次执行均有远程证据。
+- 当前补证提交仍需第二轮 PR 门禁；在 PR 合并前不把 PWA-067 标记为已完成。
 - 未执行生产 migration、生产查询、部署、真实数据写入或 TestFlight。
 
 ## 下一步
 
-1. 完成最终本地回归、构建、治理与 diff 检查。
-2. 逐文件提交并推送 PR，等待 PostgreSQL 17 与全部门禁。
-3. 门禁全绿后补远程证据并建立纯文档收口；在此之前不开始 PWA-068。
+1. 推送远程证据提交并等待 PR #105 第二轮全部门禁。
+2. PR 合并后建立纯文档收口；在此之前不开始 PWA-068。
 
 ## 发布边界
 
