@@ -6,7 +6,7 @@
 >
 > 分支：`feature/PWA账户管理边界实现`
 >
-> 状态：实现完成，PostgreSQL 17 行为验证通过，PR #102 待合并
+> 状态：已完成，PR #102 已合并
 
 ## 当前范围
 
@@ -37,8 +37,9 @@
 
 ## 下一步
 
-1. 推送远程验证证据并等待 PR #102 第二轮门禁。
-2. 全部门禁通过后合并，再建立独立收口任务；不在本分支进入 iOS A4。
+1. 从最新 `origin/main@34af7da` 建立 `docs/PWA截图还款边界评估`。
+2. 只读评估 PWA-067 截图还款候选、`confirm_staging_repayment`、staging/accounts 协作事件和失败出口。
+3. PWA-068 wallet 快照创建、关联、cycle 与余额校准继续冻结；不在 PWA-067 中顺手实现。
 
 ## 未验证与风险
 
@@ -57,3 +58,5 @@
 - `npm run governance:check`、`npm run governance:arch`：通过；架构检查仅既有人工清单警告。
 - `git diff --check`：通过；仅工作区行尾转换提示。
 - PR #102 首轮全部适用门禁通过；综合 job 在 PostgreSQL 17 中连续执行 migration 两次并通过完整行为 assertions（GitHub Actions run `31941675852`）。
+- PR #102 第二轮全部适用门禁通过；Release Validation run `31941768740` 的综合 job 再次通过 PostgreSQL 17 行为验证。
+- PR #102 已合并，merge commit `34af7da27a5f8e50d97f1247074de9d2c281ffbe`。
