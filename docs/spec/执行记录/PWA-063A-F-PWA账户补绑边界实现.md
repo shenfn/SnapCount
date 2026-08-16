@@ -75,3 +75,11 @@
 ## 发布边界
 
 - 不执行生产查询、迁移、部署、真实数据写入或 TestFlight。
+
+## 首轮远程门禁修复
+
+- PR #91 首轮 PWA build、账户补绑专项、财务保存、正式记录、Edge 和双运行时核心检查均通过。
+- Shadow Planner 为 184/185 项通过；唯一失败是旧缓存静态契约仍要求 `bindRecordToAccount` 函数体直接出现失效调用，未识别 accepted 回调委托给 `convergeAccountBinding`。
+- 契约已收窄为验证：Account Binding Feature 的失败结果在 accepted 回调前退出；Store 的 accepted 回调使用 canonical record 调用收敛函数；收敛函数以 `record.id` 失效缓存。
+- 定向缓存契约 3 项通过。
+- Windows 全量 Shadow 中 105 项通过，5 个依赖 `esbuild` 的测试在加载阶段失败；这是环境失败，最终完整结果等待 GitHub `npm ci` 环境复核。
