@@ -42,3 +42,14 @@ test('PWA-052 to PWA-055 record repository stays outside accounts, staging, sign
   assert.doesNotMatch(source, /\.insert\(|\.update\(|\.delete\(|\.rpc\(/)
   assert.doesNotMatch(source, /getSignedImageUrl|ensure_liability_repayment_cycles|buildRepaymentCandidate|accountCandidate/i)
 })
+
+test('PWA-056E processed staging navigation uses explicit kind and the record repository', async () => {
+  const source = await readFile('src/composables/useStore.js', 'utf8')
+  const openProcessed = functionSource(source, 'async function openProcessedStagingRecord(', '  // 账户 CRUD')
+
+  assert.match(openProcessed, /record\.targetKind/)
+  assert.match(openProcessed, /recordRepository\.getRecordByTarget\(/)
+  assert.doesNotMatch(openProcessed, /Promise\.all\(/)
+  assert.doesNotMatch(openProcessed, /sb\.from\(['"](?:transactions|income_records|data_records)['"]\)/)
+  assert.match(openProcessed, /targetKind === ['"]expense['"]|targetKind === ['"]income['"]|targetKind === ['"]data['"]/)
+})

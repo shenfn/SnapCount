@@ -41,6 +41,10 @@ function createReadClient(responseQueues = {}) {
             calls.push({ table, method: 'limit', value })
             return query
           },
+          maybeSingle() {
+            calls.push({ table, method: 'maybeSingle' })
+            return Promise.resolve(response)
+          },
           then(resolve, reject) {
             return Promise.resolve(response).then(resolve, reject)
           },
@@ -162,4 +166,87 @@ test('PWA-052 repository returns structured failure instead of accepted empty ro
   assert.equal(result.reason, 'service_error')
   assert.equal(result.error, 'expense read failed')
   assert.deepEqual(result.rows, [])
+})
+
+test('PWA-056E getRecordByTarget reads only the table selected by target kind', async () => {
+  const { client, calls } = createReadClient({
+    transactions: {
+      data: {
+        id: 'expense-1',
+        amount: 12.5,
+        merchant_name: '午餐',
+        transaction_date: '2026-08-16',
+        status: 'done',
+        type: 'expense',
+      },
+      error: null,
+    },
+  })
+  const repository = createRecordRepository({ client })
+
+  const result = await repository.getRecordByTarget({
+    targetKind: 'expense',
+    targetRecordId: 'expense-1',
+  })
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.reason, 'loaded')
+  assert.equal(result.kind, 'expense')
+  assert.equal(result.record.id, 'expense-1')
+  assert.deepEqual(calls.filter(call => call.method === 'maybeSingle'), [
+    { table: 'transactions', method: 'maybeSingle' },
+  ])
+  assert.equal(calls.some(call => ['income_records', 'data_records'].includes(call.table)), false)
+})
+
+test('PWA-056E unknown or invalid target cannot trigger a formal record request', async () => {
+  const { client, calls } = createReadClient()
+  const repository = createRecordRepository({ client })
+
+  for (const targetKind of [null, '', 'wallet', 'unknown']) {
+    const result = await repository.getRecordByTarget({
+      targetKind,
+      targetRecordId: 'target-1',
+    })
+    assert.equal(result.status, 'rejected')
+    assert.equal(result.reason, 'invalid_target')
+  }
+  const missingId = await repository.getRecordByTarget({
+    targetKind: 'income',
+    targetRecordId: '',
+  })
+  assert.equal(missingId.status, 'rejected')
+  assert.equal(missingId.reason, 'invalid_target')
+  assert.equal(calls.length, 0)
+})
+
+test('PWA-056E single-target reads preserve not-found and service failures', async () => {
+  const { client, calls } = createReadClient({
+    data_records: { data: null, error: null },
+    income_records: { data: null, error: { message: 'income read failed' } },
+  })
+  const repository = createRecordRepository({ client })
+
+  const missing = await repository.getRecordByTarget({
+    targetKind: 'data',
+    targetRecordId: 'data-missing',
+  })
+  const failed = await repository.getRecordByTarget({
+    targetKind: 'income',
+    targetRecordId: 'income-1',
+  })
+
+  assert.deepEqual(missing, {
+    status: 'accepted',
+    reason: 'not_found',
+    kind: 'data',
+    record: null,
+  })
+  assert.equal(failed.status, 'failed')
+  assert.equal(failed.reason, 'service_error')
+  assert.equal(failed.error, 'income read failed')
+  assert.deepEqual(calls.filter(call => call.method === 'maybeSingle'), [
+    { table: 'data_records', method: 'maybeSingle' },
+    { table: 'income_records', method: 'maybeSingle' },
+  ])
 })

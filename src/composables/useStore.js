@@ -2735,7 +2735,11 @@ export function useStore() {
     rememberProcessedStaging(record, {
       status: 'archived',
       domainKey,
+      detectedDomainKey: record.detectedDomainKey || record.domainKey || null,
+      resolvedDomainKey: result.resolvedDomainKey || domainKey,
+      targetKind: result.targetKind || (['expense', 'income'].includes(domainKey) ? domainKey : 'data'),
       targetRecordId: result.targetRecordId,
+      targetReference: result.targetReference || null,
       resolvedAction: 'archived',
       resolvedAt: new Date().toISOString(),
     })
@@ -2753,42 +2757,36 @@ export function useStore() {
   async function openProcessedStagingRecord(record) {
     if (!record?.targetRecordId || record.status !== 'archived') return false
     const targetId = record.targetRecordId
-    const localExpense = bills.value.find(item => item.id === targetId)
-    if (localExpense) {
-      await openRecordDetail('expense', localExpense)
-      return true
+    const targetKind = ['expense', 'income', 'data'].includes(record.targetKind)
+      ? record.targetKind
+      : null
+    if (!targetKind) {
+      showFlash('归档目标类型未知，请从中转站重新确认')
+      return false
     }
-    const localIncome = incomeRecords.value.find(item => item.id === targetId)
-      || recentIncomeRecords.value.find(item => item.id === targetId)
-    if (localIncome) {
-      await openRecordDetail('income', localIncome)
-      return true
-    }
-    const localUniversal = dataRecords.value.find(item => item.id === targetId)
-    if (localUniversal) {
-      await openRecordDetail('universal', localUniversal)
+
+    const localRecord = targetKind === 'expense'
+      ? bills.value.find(item => item.id === targetId)
+      : targetKind === 'income'
+        ? incomeRecords.value.find(item => item.id === targetId)
+          || recentIncomeRecords.value.find(item => item.id === targetId)
+        : dataRecords.value.find(item => item.id === targetId)
+    if (localRecord) {
+      await openRecordDetail(targetKind === 'data' ? 'universal' : targetKind, localRecord)
       return true
     }
 
-    const [expenseResult, incomeResult, dataResult] = await Promise.all([
-      sb.from('transactions').select('*').eq('id', targetId).maybeSingle(),
-      sb.from('income_records').select('*').eq('id', targetId).maybeSingle(),
-      sb.from('data_records').select('*').eq('id', targetId).maybeSingle(),
-    ])
-    if (expenseResult.data) {
-      await openRecordDetail('expense', mapTransaction(expenseResult.data))
+    const result = await recordRepository.getRecordByTarget({
+      targetKind,
+      targetRecordId: targetId,
+    })
+    if (result.status === 'accepted' && result.record) {
+      await openRecordDetail(targetKind === 'data' ? 'universal' : targetKind, result.record)
       return true
     }
-    if (incomeResult.data) {
-      await openRecordDetail('income', mapIncomeRow(incomeResult.data))
-      return true
-    }
-    if (dataResult.data) {
-      await openRecordDetail('universal', mapDataRecordRow(dataResult.data))
-      return true
-    }
-    const error = expenseResult.error || incomeResult.error || dataResult.error
-    showFlash(error ? `记录读取失败：${humanizeDbError(error)}` : '归档后的记录已不存在')
+    showFlash(result.status === 'failed'
+      ? `记录读取失败：${humanizeDbError(result.error)}`
+      : '归档后的记录已不存在')
     return false
   }
 

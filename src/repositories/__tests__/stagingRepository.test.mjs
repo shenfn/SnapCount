@@ -107,6 +107,8 @@ test('PWA-040 repository archives through the atomic RPC without user_id', async
         return {
           data: {
             target_record_id: 'target-1',
+            target_kind: 'expense',
+            resolved_domain_key: 'expense',
             target_reference: 'expense/target-1',
             idempotent_retry: false,
           },
@@ -130,6 +132,8 @@ test('PWA-040 repository archives through the atomic RPC without user_id', async
 
   assert.equal(result.status, 'accepted')
   assert.equal(result.targetRecordId, 'target-1')
+  assert.equal(result.targetKind, 'expense')
+  assert.equal(result.resolvedDomainKey, 'expense')
   assert.equal(rpcCall.name, 'archive_staging_record')
   assert.equal(rpcCall.payload.p_staging_id, 'staging-1')
   assert.equal(rpcCall.payload.p_domain_key, 'expense')
@@ -236,6 +240,10 @@ test('PWA-048 repository lists processed staging records with archived/discarded
       record_type: 'uncertain',
       confidence: 0,
       extracted_json: {},
+      detected_domain_key: 'sport',
+      resolved_domain_key: 'sport',
+      target_kind: 'data',
+      target_record_id: 'data-1',
     }],
   })
   const repository = createStagingRepository({
@@ -249,12 +257,42 @@ test('PWA-048 repository lists processed staging records with archived/discarded
   assert.equal(result.status, 'accepted')
   assert.equal(result.rows[0].status, 'discarded')
   assert.equal(result.rows[0].resolvedAt, '2026-08-15T03:00:00Z')
+  assert.equal(result.rows[0].detectedDomainKey, 'sport')
+  assert.equal(result.rows[0].resolvedDomainKey, 'sport')
+  assert.equal(result.rows[0].targetKind, 'data')
+  assert.equal(result.rows[0].targetRecordId, 'data-1')
+  assert.equal(result.rows[0].domainKey, 'sport')
+  assert.equal(result.rows[0].targetReference, 'data/data-1')
   assert.deepEqual(calls.filter(call => call.method === 'in'), [{
     method: 'in',
     column: 'status',
     values: ['archived', 'discarded'],
   }])
   assert.deepEqual(calls.filter(call => call.method === 'limit'), [{ method: 'limit', value: 2 }])
+})
+
+test('PWA-056D invalid target kind never creates a navigation reference', async () => {
+  const { client } = createReadClient({
+    rows: [{
+      id: 'staging-invalid-kind',
+      status: 'archived',
+      target_kind: 'wallet',
+      target_record_id: 'target-1',
+      detected_domain_key: 'wallet',
+      resolved_domain_key: 'wallet',
+    }],
+  })
+  const repository = createStagingRepository({
+    client,
+    baseUrl: 'https://api.example.test',
+    fetchImpl: async () => new Response('{}'),
+  })
+
+  const result = await repository.listProcessed()
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.rows[0].targetKind, null)
+  assert.equal(result.rows[0].targetReference, null)
 })
 
 test('PWA-047 repository preserves a read failure as a structured empty result', async () => {

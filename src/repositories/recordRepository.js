@@ -51,6 +51,17 @@ async function readRows(query, mapper) {
   }
 }
 
+async function readSingle(query, mapper, kind) {
+  try {
+    const { data, error } = await query
+    if (error) return { status: 'failed', reason: 'service_error', kind, record: null, error: errorMessage(error) }
+    if (!data) return { status: 'accepted', reason: 'not_found', kind, record: null }
+    return { status: 'accepted', reason: 'loaded', kind, record: mapper(data) }
+  } catch (error) {
+    return { status: 'failed', reason: 'service_error', kind, record: null, error: errorMessage(error) }
+  }
+}
+
 export function mapIncomeRow(row = {}) {
   const occurrence = resolveFinanceOccurrence({ occurredAt: row.occurred_at, date: row.income_date })
   return {
@@ -207,6 +218,36 @@ export function createRecordRepository({ client }) {
     }
   }
 
+  async function getRecordByTarget({ targetKind, targetRecordId } = {}) {
+    const normalizedKind = String(targetKind || '').trim()
+    const normalizedId = String(targetRecordId || '').trim()
+    const targetReaders = {
+      expense: ['transactions', mapTransaction],
+      income: ['income_records', mapIncomeRow],
+      data: ['data_records', mapDataRecordRow],
+    }
+    const targetReader = targetReaders[normalizedKind]
+    if (!targetReader || !normalizedId) {
+      return {
+        status: 'rejected',
+        reason: 'invalid_target',
+        kind: targetReader ? normalizedKind : null,
+        record: null,
+        error: '归档目标类型未知或目标编号缺失',
+      }
+    }
+
+    const [table, mapper] = targetReader
+    return readSingle(
+      client.from(table)
+        .select('*')
+        .eq('id', normalizedId)
+        .maybeSingle(),
+      mapper,
+      normalizedKind,
+    )
+  }
+
   return {
     listExpenses,
     listPendingExpenses,
@@ -214,5 +255,6 @@ export function createRecordRepository({ client }) {
     listRecentIncomes,
     listUniversalRecords,
     listUnboundRecords,
+    getRecordByTarget,
   }
 }

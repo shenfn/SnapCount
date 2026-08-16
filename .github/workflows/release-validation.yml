@@ -273,6 +273,10 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260808120000_finance_occurred_at_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816100000_archive_idempotency_domain_guard.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816100000_archive_idempotency_domain_guard.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-staging-target-type-migration-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816120000_staging_target_type_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816120000_staging_target_type_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-staging-target-type-migration.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-staging-archive-migration.sql
 
       - name: Execute security migrations
