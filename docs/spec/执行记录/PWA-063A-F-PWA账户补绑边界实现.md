@@ -83,3 +83,14 @@
 - 契约已收窄为验证：Account Binding Feature 的失败结果在 accepted 回调前退出；Store 的 accepted 回调使用 canonical record 调用收敛函数；收敛函数以 `record.id` 失效缓存。
 - 定向缓存契约 3 项通过。
 - Windows 全量 Shadow 中 105 项通过，5 个依赖 `esbuild` 的测试在加载阶段失败；这是环境失败，最终完整结果等待 GitHub `npm ci` 环境复核。
+
+## 远程门禁与合并结果
+
+- 修复提交 `0e51204` 推送后，PR #91 第二轮治理、PWA/Edge/迁移/Shadow、iOS 检测与预览门禁通过。
+- GitHub 状态汇总为 8 项成功；SwiftUI 构建因无 iOS 文件变更按条件跳过，不属于失败或未验证。
+- 规格提交：`db63e80`。
+- 实现提交：`a783149`。
+- 静态契约修复提交：`0e51204`。
+- PR：#91。
+- 合并提交：`35dae06`。
+- 合并时间：2026-08-16。
