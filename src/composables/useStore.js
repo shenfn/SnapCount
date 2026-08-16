@@ -42,6 +42,7 @@ import { createSessionState } from '../features/auth/createSessionState'
 import { createStagingRepository } from '../repositories/stagingRepository'
 import { createStagingRetryFeature } from '../features/staging/createStagingRetryFeature'
 import { createStagingArchiveFeature } from '../features/staging/createStagingArchiveFeature'
+import { createStagingDiscardFeature } from '../features/staging/createStagingDiscardFeature'
 import {
   buildShanghaiOccurredAt,
   resolveFinanceOccurrence,
@@ -104,6 +105,7 @@ export function useStore() {
   const walletAccountCreatingSourceIds = new Set()
   let stagingRetryFeature = null
   let stagingArchiveFeature = null
+  let stagingDiscardFeature = null
 
   const currentFilter = ref('all')
   const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
@@ -262,6 +264,10 @@ export function useStore() {
     getCurrentUserId: () => currentUserId.value,
   })
   stagingArchiveFeature = createStagingArchiveFeature({
+    repository: stagingRepository,
+    getCurrentUserId: () => currentUserId.value,
+  })
+  stagingDiscardFeature = createStagingDiscardFeature({
     repository: stagingRepository,
     getCurrentUserId: () => currentUserId.value,
   })
@@ -490,6 +496,7 @@ export function useStore() {
     loadDataRunId += 1
     stagingRetryFeature?.reset()
     stagingArchiveFeature?.reset()
+    stagingDiscardFeature?.reset()
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -2612,26 +2619,29 @@ export function useStore() {
       const ok = confirm('确认销毁这条待处理截图？原图也会在后台安全清理。')
       if (!ok) return null
     }
-    const { data, error } = await sb.rpc('discard_staging_record', {
-      p_staging_id: record.id,
-      p_reason: reason,
+    const result = await stagingDiscardFeature.discard(record, reason, {
+      afterAccepted: async () => {
+        const idx = stagingRecords.value.findIndex(r => r.id === record.id)
+        if (idx >= 0) stagingRecords.value.splice(idx, 1)
+        rememberProcessedStaging(record, {
+          status: 'discarded',
+          resolvedAction: 'discarded',
+          resolvedAt: new Date().toISOString(),
+          discardReason: reason,
+        })
+      },
     })
-    if (error) {
-      showFlash('❌ 销毁失败：' + error.message)
-      return null
+
+    if (result.status !== 'accepted') {
+      if (result.status !== 'stale') showFlash('❌ 销毁失败：' + (result.error || '请求未完成'))
+      return result
     }
-    const idx = stagingRecords.value.findIndex(r => r.id === record.id)
-    if (idx >= 0) stagingRecords.value.splice(idx, 1)
-    rememberProcessedStaging(record, {
-      status: 'discarded',
-      resolvedAction: 'discarded',
-      resolvedAt: new Date().toISOString(),
-      discardReason: reason,
-    })
-    if (data?.cleanup_queued) showFlash('✓ 已销毁，原图已加入后台清理')
-    else if (data?.cleanup_status === 'skipped_external') showFlash('✓ 已销毁；外部图片链接不由芥子删除')
+
+    if (result.convergenceStatus === 'failed') showFlash('✓ 已销毁；列表更新失败，请稍后刷新')
+    else if (result.cleanupQueued) showFlash('✓ 已销毁，原图已加入后台清理')
+    else if (result.cleanupStatus === 'skipped_external') showFlash('✓ 已销毁；外部图片链接不由芥子删除')
     else showFlash('✓ 已销毁')
-    return data || { status: 'discarded' }
+    return result
   }
 
   function toggleBatchMode() {
@@ -2664,7 +2674,9 @@ export function useStore() {
     const results = await Promise.allSettled(records.map(record => (
       discardStagingRecord(record, 'batch_discard', { confirm: false })
     )))
-    const successCount = results.filter(result => result.status === 'fulfilled' && result.value).length
+    const successCount = results.filter(result => (
+      result.status === 'fulfilled' && result.value?.status === 'accepted'
+    )).length
     selectedStagingIds.value = new Set()
     batchMode.value = false
     showFlash(successCount === ids.length

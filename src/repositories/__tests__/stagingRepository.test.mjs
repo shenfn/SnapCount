@@ -104,3 +104,44 @@ test('PWA-040 repository archives through the atomic RPC without user_id', async
   assert.equal(rpcCall.payload.p_account_id, 'account-1')
   assert.equal(Object.hasOwn(rpcCall.payload, 'user_id'), false)
 })
+
+test('PWA-042 repository discards through the authoritative RPC and maps cleanup facts', async () => {
+  let rpcCall
+  const repository = createStagingRepository({
+    client: {
+      ...createClient(),
+      async rpc(name, payload) {
+        rpcCall = { name, payload }
+        return {
+          data: {
+            staging_id: 'staging-discard-1',
+            status: 'discarded',
+            cleanup_status: 'pending',
+            cleanup_queued: true,
+            bucket_path: 'user-1/receipt.png',
+          },
+          error: null,
+        }
+      },
+    },
+    baseUrl: 'https://api.example.test',
+    fetchImpl: async () => new Response('{}'),
+  })
+
+  const result = await repository.discard({
+    stagingId: 'staging-discard-1',
+    reason: 'user_discarded',
+  })
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.reason, 'discarded')
+  assert.equal(result.cleanupStatus, 'pending')
+  assert.equal(result.cleanupQueued, true)
+  assert.equal(result.recordStillVisible, false)
+  assert.equal(rpcCall.name, 'discard_staging_record')
+  assert.deepEqual(rpcCall.payload, {
+    p_staging_id: 'staging-discard-1',
+    p_reason: 'user_discarded',
+  })
+  assert.equal(Object.hasOwn(rpcCall.payload, 'user_id'), false)
+})

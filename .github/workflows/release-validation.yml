@@ -52,6 +52,9 @@ jobs:
       - name: Validate staging archive boundary
         run: npm run test:staging-archive
 
+      - name: Validate staging discard boundary
+        run: npm run test:staging-discard
+
       - name: Install trace console dependencies
         working-directory: tools/ai-validation/ui/trace-console
         run: npm ci
