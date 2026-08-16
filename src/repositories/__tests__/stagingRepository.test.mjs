@@ -12,6 +12,39 @@ function createClient() {
   }
 }
 
+function createReadClient({ rows = [], error = null } = {}) {
+  const calls = []
+  const client = {
+    ...createClient(),
+    from(table) {
+      const query = {
+        select(fields) {
+          calls.push({ method: 'select', table, fields })
+          return query
+        },
+        or(filter) {
+          calls.push({ method: 'or', filter })
+          return query
+        },
+        in(column, values) {
+          calls.push({ method: 'in', column, values })
+          return query
+        },
+        order(column, options) {
+          calls.push({ method: 'order', column, options })
+          return query
+        },
+        limit(value) {
+          calls.push({ method: 'limit', value })
+          return Promise.resolve({ data: rows, error })
+        },
+      }
+      return query
+    },
+  }
+  return { client, calls }
+}
+
 test('PWA-028 repository sends only staging id and maps server retry limit', async () => {
   let request
   const repository = createStagingRepository({
@@ -144,4 +177,97 @@ test('PWA-042 repository discards through the authoritative RPC and maps cleanup
     p_reason: 'user_discarded',
   })
   assert.equal(Object.hasOwn(rpcCall.payload, 'user_id'), false)
+})
+
+test('PWA-047 repository lists open staging records with stable queue contract and DTO mapping', async () => {
+  const { client, calls } = createReadClient({
+    rows: [{
+      id: 'staging-open-1',
+      status: 'pending_review',
+      occurred_at: '2026-08-16T02:00:00Z',
+      created_at: '2026-08-16T02:01:00Z',
+      image_path: 'user-1/open.png',
+      image_hash: 'hash-1',
+      image_type: 'receipt',
+      record_type: 'expense',
+      detected_domain_key: 'expense',
+      detected_domain_name: '支出',
+      target_domain_id: 'domain-1',
+      confidence: 0.92,
+      ai_summary: '午餐',
+      extracted_json: { amount: 12.5 },
+      retry_count: 1,
+      target_record_id: null,
+      resolved_action: null,
+      resolved_at: null,
+      discard_reason: null,
+    }],
+  })
+  const repository = createStagingRepository({
+    client,
+    baseUrl: 'https://api.example.test',
+    fetchImpl: async () => new Response('{}'),
+  })
+
+  const result = await repository.listOpen()
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.rows[0].id, 'staging-open-1')
+  assert.equal(result.rows[0].imagePath, 'user-1/open.png')
+  assert.equal(result.rows[0].domainKey, 'expense')
+  assert.equal(result.rows[0].confidence, 0.92)
+  assert.deepEqual(calls.filter(call => call.method === 'or'), [{
+    method: 'or',
+    filter: 'status.is.null,status.not.in.(confirmed,discarded,archived,assigned)',
+  }])
+  assert.deepEqual(calls.filter(call => call.method === 'limit'), [{ method: 'limit', value: 1000 }])
+  assert.equal(calls.some(call => JSON.stringify(call).includes('user_id')), false)
+})
+
+test('PWA-048 repository lists processed staging records with archived/discarded filter', async () => {
+  const { client, calls } = createReadClient({
+    rows: [{
+      id: 'staging-processed-1',
+      status: 'discarded',
+      occurred_at: '2026-08-15T02:00:00Z',
+      created_at: '2026-08-15T02:01:00Z',
+      resolved_at: '2026-08-15T03:00:00Z',
+      image_path: null,
+      record_type: 'uncertain',
+      confidence: 0,
+      extracted_json: {},
+    }],
+  })
+  const repository = createStagingRepository({
+    client,
+    baseUrl: 'https://api.example.test',
+    fetchImpl: async () => new Response('{}'),
+  })
+
+  const result = await repository.listProcessed({ limit: 2 })
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.rows[0].status, 'discarded')
+  assert.equal(result.rows[0].resolvedAt, '2026-08-15T03:00:00Z')
+  assert.deepEqual(calls.filter(call => call.method === 'in'), [{
+    method: 'in',
+    column: 'status',
+    values: ['archived', 'discarded'],
+  }])
+  assert.deepEqual(calls.filter(call => call.method === 'limit'), [{ method: 'limit', value: 2 }])
+})
+
+test('PWA-047 repository preserves a read failure as a structured empty result', async () => {
+  const { client } = createReadClient({ error: { message: 'read failed' } })
+  const repository = createStagingRepository({
+    client,
+    baseUrl: 'https://api.example.test',
+    fetchImpl: async () => new Response('{}'),
+  })
+
+  const result = await repository.listOpen()
+
+  assert.equal(result.status, 'failed')
+  assert.equal(result.reason, 'service_error')
+  assert.deepEqual(result.rows, [])
 })

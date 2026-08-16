@@ -1020,12 +1020,7 @@ export function useStore() {
           .select('*')
           .order('sort_order', { ascending: true })
           .order('created_at', { ascending: true }),
-        sb.from('staging_records')
-          .select('*')
-          .or('status.is.null,status.not.in.(confirmed,discarded,archived,assigned)')
-          .order('occurred_at', { ascending: false, nullsFirst: false })
-          .order('created_at', { ascending: false })
-          .limit(PENDING_QUEUE_QUERY_LIMIT),
+        stagingRepository.listOpen({ limit: PENDING_QUEUE_QUERY_LIMIT }),
       ])
 
       if (!isCurrentDataLoad()) return { ok: false, stale: true }
@@ -1070,44 +1065,15 @@ export function useStore() {
         await repairEmptyAccountSnapshotBalances(accounts.value)
       }
 
-      const { data: staging, error: stagingErr } = stagingResult
-      if (stagingErr) console.warn('加载中转站失败:', stagingErr.message)
+      const stagingErr = stagingResult?.status === 'accepted' ? null : stagingResult
+      if (stagingErr) console.warn('加载中转站失败:', stagingErr.error || '请求未完成')
 
-      const stagingRows = stagingErr ? [] : (staging || [])
+      const stagingRows = stagingErr ? [] : (stagingResult.rows || [])
 
-      stagingRecords.value = stagingRows.map(r => {
-        const record = {
-          id: r.id,
-          status: r.status,
-          occurredAt: r.occurred_at,
-          createdAt: r.created_at,
-          imagePath: r.image_path,
-          imageUrl: null,
-          imageLoadError: false,
-          imageHash: r.image_hash,
-          imageType: r.image_type,
-          recordType: r.record_type || 'uncertain',
-          domainKey: r.detected_domain_key,
-          domainName: r.detected_domain_name,
-          targetDomainId: r.target_domain_id,
-          confidence: Number(r.confidence || 0),
-          summary: r.ai_summary || r.failure_reason || '等待处理的截图',
-          failureReason: r.failure_reason,
-          lastErrorType: r.last_error_type,
-          lastErrorMessage: r.last_error_message,
-          extracted: r.extracted_json || {},
-          companionMessage: r.companion_message || r.extracted_json?.companion_message || '',
-          retryCount: r.retry_count || 0,
-          targetRecordId: r.target_record_id,
-          resolvedAction: r.resolved_action,
-          resolvedAt: r.resolved_at,
-          discardReason: r.discard_reason,
-        }
-        return {
-          ...record,
-          repaymentCandidate: null,
-        }
-      })
+      stagingRecords.value = stagingRows.map(record => ({
+        ...record,
+        repaymentCandidate: null,
+      }))
 
       if (!silent) {
         repaymentCycles.value = []
@@ -1137,7 +1103,7 @@ export function useStore() {
         ))
       }
       const hydrateStagingImages = async () => {
-        const imageUrlMap = await getSignedImageUrlMap(stagingRows.map(r => r.image_path))
+        const imageUrlMap = await getSignedImageUrlMap(stagingRows.map(r => r.imagePath))
         if (!isCurrentDataLoad()) return
         stagingRecords.value = stagingRecords.value.map(record => {
           const imageUrl = imageUrlMap[record.imagePath] || null
@@ -1172,42 +1138,20 @@ export function useStore() {
         }
       }
       const loadProcessedStaging = async () => {
-        const { data: processed, error: procErr } = await sb.from('staging_records')
-          .select('*')
-          .in('status', ['archived', 'discarded'])
-          .order('resolved_at', { ascending: false, nullsFirst: false })
-          .limit(30)
-        if (procErr) {
-          console.warn('加载已处理记录失败:', procErr.message)
+        const processedResult = await stagingRepository.listProcessed({ limit: 30 })
+        if (processedResult.status !== 'accepted') {
+          console.warn('加载已处理记录失败:', processedResult.error || '请求未完成')
           return
         }
-        const processedRows = processed || []
-        const processedImageUrlMap = await getSignedImageUrlMap(processedRows.map(r => r.image_path))
+        const processedRows = processedResult.rows || []
+        const processedImageUrlMap = await getSignedImageUrlMap(processedRows.map(r => r.imagePath))
         if (!isCurrentDataLoad()) return
         processedStagingRecords.value = processedRows.map(r => {
-          const imageUrl = processedImageUrlMap[r.image_path] || null
+          const imageUrl = processedImageUrlMap[r.imagePath] || null
           return ({
-            id: r.id,
-            status: r.status,
-            occurredAt: r.occurred_at,
-            createdAt: r.created_at,
-            resolvedAt: r.resolved_at,
-            imagePath: r.image_path,
+            ...r,
             imageUrl,
-            imageLoadError: !!r.image_path && !imageUrl,
-            imageHash: r.image_hash,
-            imageType: r.image_type,
-            recordType: r.record_type || 'uncertain',
-            domainKey: r.detected_domain_key,
-            domainName: r.detected_domain_name,
-            targetDomainId: r.target_domain_id,
-            targetRecordId: r.target_record_id,
-            confidence: Number(r.confidence || 0),
-            summary: r.ai_summary || r.failure_reason || '',
-            companionMessage: r.companion_message || r.extracted_json?.companion_message || '',
-            failureReason: r.failure_reason,
-            resolvedAction: r.resolved_action,
-            discardReason: r.discard_reason,
+            imageLoadError: !!r.imagePath && !imageUrl,
           })
         })
       }
