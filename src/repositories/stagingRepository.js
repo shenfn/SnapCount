@@ -15,6 +15,54 @@ function isRetryLimitError(payload) {
   return /retry limit exceeded|max 3|重试上限/i.test(String(payload?.error || payload?.message || ''))
 }
 
+const OPEN_STAGING_LIMIT = 1000
+const PROCESSED_STAGING_LIMIT = 30
+
+function normalizeListLimit(value, fallback) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback
+  return Math.min(parsed, 1000)
+}
+
+function mapStagingRow(row = {}, { processed = false } = {}) {
+  return {
+    id: row.id,
+    status: row.status,
+    occurredAt: row.occurred_at,
+    createdAt: row.created_at,
+    imagePath: row.image_path,
+    imageUrl: null,
+    imageLoadError: false,
+    imageHash: row.image_hash,
+    imageType: row.image_type,
+    recordType: row.record_type || 'uncertain',
+    domainKey: row.detected_domain_key,
+    domainName: row.detected_domain_name,
+    targetDomainId: row.target_domain_id,
+    confidence: Number(row.confidence || 0),
+    summary: row.ai_summary || row.failure_reason || (processed ? '' : '等待处理的截图'),
+    failureReason: row.failure_reason,
+    lastErrorType: row.last_error_type,
+    lastErrorMessage: row.last_error_message,
+    extracted: row.extracted_json && typeof row.extracted_json === 'object' ? row.extracted_json : {},
+    companionMessage: row.companion_message || row.extracted_json?.companion_message || '',
+    retryCount: row.retry_count || 0,
+    targetRecordId: row.target_record_id,
+    resolvedAction: row.resolved_action,
+    resolvedAt: row.resolved_at,
+    discardReason: row.discard_reason,
+  }
+}
+
+function readFailure(error) {
+  return {
+    status: 'failed',
+    reason: 'service_error',
+    rows: [],
+    error: errorMessage(error),
+  }
+}
+
 export function createStagingRepository({
   client,
   baseUrl,
@@ -227,5 +275,43 @@ export function createStagingRepository({
     }
   }
 
-  return { retry, archive, discard }
+  async function listOpen({ limit = OPEN_STAGING_LIMIT } = {}) {
+    try {
+      const { data, error } = await client.from('staging_records')
+        .select('*')
+        .or('status.is.null,status.not.in.(confirmed,discarded,archived,assigned)')
+        .order('occurred_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(normalizeListLimit(limit, OPEN_STAGING_LIMIT))
+      if (error) return readFailure(error)
+      return {
+        status: 'accepted',
+        reason: 'loaded',
+        rows: (data || []).map(row => mapStagingRow(row)),
+      }
+    } catch (error) {
+      return readFailure(error)
+    }
+  }
+
+  async function listProcessed({ limit = PROCESSED_STAGING_LIMIT } = {}) {
+    try {
+      const { data, error } = await client.from('staging_records')
+        .select('*')
+        .in('status', ['archived', 'discarded'])
+        .order('resolved_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(normalizeListLimit(limit, PROCESSED_STAGING_LIMIT))
+      if (error) return readFailure(error)
+      return {
+        status: 'accepted',
+        reason: 'loaded',
+        rows: (data || []).map(row => mapStagingRow(row, { processed: true })),
+      }
+    } catch (error) {
+      return readFailure(error)
+    }
+  }
+
+  return { retry, archive, discard, listOpen, listProcessed }
 }
