@@ -53,7 +53,7 @@
 - `npm run test:repayment`：11 项通过。
 - Repository/Feature/Store/Page 新增文件均通过 `node --check`，`package.json` 可解析，`git diff --check` 通过。
 - 相关 PWA 回归、构建、治理和架构结果见“基线验证”。
-- PostgreSQL 事务契约：PR #94 的 `Release Validation` 已通过（1 分 10 秒）；PR 共 8 项检查成功、1 项按路径跳过、0 失败。
+- PostgreSQL 事务契约：PR #94 两轮 `Release Validation` 均通过，最终一轮耗时 1 分 14 秒；PR 共 8 项检查成功、1 项按路径跳过、0 失败。
 
 ## 未解决风险
 
@@ -65,5 +65,5 @@
 ## 发布边界
 
 - 不执行生产查询、迁移、部署、真实数据写入或 TestFlight。
-- 对应提交：`d4dcb5b`（规格）、`73a0e3b`（实现、测试、CI 与本地证据）。
-- 下一步：提交 PR #94 的远程验证证据，门禁复跑通过后合并。
+- 对应提交：`d4dcb5b`（规格）、`73a0e3b`（实现、测试、CI 与本地证据）、`64661eb`（远程验证证据）；PR #94 merge commit `09d9ff8`。
+- 下一步：PWA-064A 至 PWA-064F 已完成；按 ADR-025 对 PWA-065 账户列表/详情读取边界做只读评估，不直接开始实现。
