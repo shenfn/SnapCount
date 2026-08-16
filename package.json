@@ -55,6 +55,8 @@
     "test:finance-save": "node --test src/repositories/__tests__/recordRepository.test.mjs src/features/finance/__tests__/financeSaveFeature.test.mjs src/features/finance/__tests__/financeSaveBoundary.test.mjs",
     "test:account-binding": "node --test src/features/finance/__tests__/accountBindingFeature.test.mjs src/features/finance/__tests__/accountBindingBoundary.test.mjs",
     "test:repayment": "node --test src/repositories/__tests__/accountRepository.test.mjs src/features/accounts/__tests__/repaymentFeature.test.mjs src/features/accounts/__tests__/repaymentBoundary.test.mjs",
+    "test:screenshot-repayment-contract": "node scripts/test-screenshot-repayment-migration-contract.mjs",
+    "test:screenshot-repayment": "node --test src/repositories/__tests__/accountRepository.test.mjs src/repositories/__tests__/stagingRepository.test.mjs src/features/accounts/__tests__/screenshotRepaymentCandidate.test.mjs src/features/accounts/__tests__/screenshotRepaymentFeature.test.mjs src/features/accounts/__tests__/screenshotRepaymentBoundary.test.mjs",
     "test:account-read": "node --test src/repositories/__tests__/accountRepository.test.mjs src/features/accounts/__tests__/accountDetailFeature.test.mjs src/features/accounts/__tests__/accountReadBoundary.test.mjs",
     "test:account-management-contract": "node scripts/test-account-management-migration-contract.mjs",
     "test:account-management": "node --test src/repositories/__tests__/accountRepository.test.mjs src/features/accounts/__tests__/accountManagementFeature.test.mjs src/features/accounts/__tests__/accountManagementBoundary.test.mjs",

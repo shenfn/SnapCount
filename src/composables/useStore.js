@@ -48,6 +48,8 @@ import { createStagingDiscardFeature } from '../features/staging/createStagingDi
 import { createFinanceSaveFeature } from '../features/finance/createFinanceSaveFeature'
 import { createAccountBindingFeature } from '../features/finance/createAccountBindingFeature'
 import { createRepaymentFeature } from '../features/accounts/createRepaymentFeature'
+import { createScreenshotRepaymentFeature } from '../features/accounts/createScreenshotRepaymentFeature'
+import { buildScreenshotRepaymentCandidate } from '../features/accounts/buildScreenshotRepaymentCandidate'
 import { createAccountDetailFeature } from '../features/accounts/createAccountDetailFeature'
 import { createAccountManagementFeature } from '../features/accounts/createAccountManagementFeature'
 import {
@@ -110,6 +112,7 @@ export function useStore() {
   let financeSaveFeature = null
   let accountBindingFeature = null
   let repaymentFeature = null
+  let screenshotRepaymentFeature = null
   let accountDetailFeature = null
   let accountManagementFeature = null
   let accountCommandSequence = 0
@@ -270,6 +273,10 @@ export function useStore() {
   const recordRepository = createRecordRepository({ client: sb })
   const accountRepository = createAccountRepository({ client: sb })
   accountManagementFeature = createAccountManagementFeature({
+    repository: accountRepository,
+    getCurrentUserId: () => currentUserId.value,
+  })
+  screenshotRepaymentFeature = createScreenshotRepaymentFeature({
     repository: accountRepository,
     getCurrentUserId: () => currentUserId.value,
   })
@@ -535,6 +542,7 @@ export function useStore() {
     financeSaveFeature.reset()
     accountBindingFeature.reset()
     repaymentFeature.reset()
+    screenshotRepaymentFeature.reset()
     accountDetailFeature.reset()
     accountManagementFeature.reset()
     bills.value = []
@@ -1370,74 +1378,7 @@ export function useStore() {
   }
 
   function buildRepaymentCandidateForStaging(record) {
-    const extracted = record?.extracted || {}
-    const payload = extracted.payload_jsonb || {}
-    const isLiabilityPaid = (record?.domainKey === 'wallet' || extracted.domain_key === 'wallet')
-      && (payload.record_kind === 'liability_snapshot' || payload.account_snapshot_kind === 'liability')
-      && payload.status === 'paid'
-    if (!isLiabilityPaid) return null
-
-    const amount = Number(extracted.amount ?? payload.amount ?? payload.snapshot_balance)
-    const accountText = normalizeAccountMatchText([
-      payload.account_name,
-      payload.institution,
-      extracted.title,
-      extracted.summary,
-      record.summary,
-    ].filter(Boolean).join(' '))
-    const openStatuses = new Set(['pending', 'due_today', 'overdue_unconfirmed', 'partial_paid', 'minimum_paid', 'carried_over'])
-    const candidates = repaymentCycles.value
-      .filter(cycle => openStatuses.has(cycle.status))
-      .map(cycle => {
-        const account = accounts.value.find(item => item.id === cycle.accountId)
-        if (!account) return null
-        const accountName = normalizeAccountMatchText(`${account.name || ''} ${account.institution || ''}`)
-        const remaining = Number(cycle.remainingAmount || cycle.statementAmount || 0)
-        const amountDiff = Number.isFinite(amount) ? Math.abs(amount - remaining) : 0
-        let score = 0.35
-        const reasons = []
-        if (accountText && accountName && (accountText.includes(accountName) || accountName.includes(accountText))) {
-          score += 0.28
-          reasons.push(`账户匹配「${account.name}」`)
-        } else if (accountText && accountName && accountText.split('').some(char => char && accountName.includes(char))) {
-          score += 0.1
-          reasons.push('账户名称部分匹配')
-        }
-        if (Number.isFinite(amount) && amount > 0) {
-          if (amountDiff < 0.01) {
-            score += 0.32
-            reasons.push('金额与剩余待还一致')
-          } else if (amountDiff <= 5) {
-            score += 0.18
-            reasons.push(`金额相差 ${formatYuan(amountDiff)}`)
-          }
-        }
-        if (cycle.dueDate && record.occurredAt) {
-          const days = Math.abs(daysBetweenDateKeys(localDateKeyOf(record.occurredAt), cycle.dueDate))
-          if (days <= 3) {
-            score += 0.15
-            reasons.push('还款时间接近还款日')
-          }
-        }
-        return {
-          cycle,
-          account,
-          amount: Number.isFinite(amount) && amount > 0 ? amount : remaining,
-          score: Math.min(score, 0.99),
-          reason: reasons.length ? reasons.join('；') : '识别为已还款截图，需人工确认',
-        }
-      })
-      .filter(Boolean)
-      .filter(item => item.amount > 0 && item.score >= 0.55)
-      .sort((a, b) => b.score - a.score)
-    return candidates[0] || null
-  }
-
-  function daysBetweenDateKeys(a, b) {
-    if (!a || !b) return 999
-    const left = new Date(`${a}T00:00:00`)
-    const right = new Date(`${b}T00:00:00`)
-    return Math.round((left - right) / 86400000)
+    return buildScreenshotRepaymentCandidate(record, accounts.value, repaymentCycles.value)
   }
 
   function formatYuan(value) {
@@ -1722,26 +1663,43 @@ export function useStore() {
     if (!record?.id || !candidate?.cycle) return false
     const ok = confirm(`确认把这张截图作为还款证据？\n账单：${candidate.account.name} ${candidate.cycle.cycleMonth}\n金额：¥${Number(candidate.amount || 0).toFixed(2)}`)
     if (!ok) return false
-    return runLockedAction(`staging-repayment:${record.id}`, async () => {
-      const { error } = await sb.rpc('confirm_staging_repayment', {
-        p_staging_id: record.id,
-        p_cycle_id: candidate.cycle.id,
-        p_paid_amount: Number(candidate.amount || 0),
-        p_paid_at: new Date().toISOString(),
-        p_debit_account_id: candidate.cycle.autoDebitAccountId || candidate.account.autoDebitAccountId || null,
-        p_status: 'paid',
-        p_note: '根据还款截图确认已还清',
-      })
-      if (error) {
-        showFlash('还款截图确认失败：' + humanizeDbError(error))
-        return false
-      }
-      const idx = stagingRecords.value.findIndex(item => item.id === record.id)
-      if (idx >= 0) stagingRecords.value.splice(idx, 1)
-      await refreshAccountsFromDB()
-      showFlash('✓ 已根据截图确认还款')
-      return true
+    const result = await screenshotRepaymentFeature.confirm({
+      stagingId: record.id,
+      cycleId: candidate.cycle.id,
+      paidAmount: Number(candidate.amount || 0),
+      debitAccountId: candidate.cycle.autoDebitAccountId || candidate.account.autoDebitAccountId || null,
+      note: '根据还款截图确认',
+    }, {
+      onAccepted: ({ cycle }) => {
+        convergeRepaymentCycle(cycle)
+        const idx = stagingRecords.value.findIndex(item => item.id === record.id)
+        if (idx >= 0) stagingRecords.value.splice(idx, 1)
+        rememberProcessedStaging(record, {
+          status: 'archived',
+          domainKey: 'wallet',
+          resolvedDomainKey: 'wallet',
+          targetKind: 'repayment_cycle',
+          targetRecordId: cycle.id,
+          targetReference: `repayment_cycle/${cycle.id}`,
+          resolvedAction: 'liability_repayment_confirmed',
+          resolvedAt: new Date().toISOString(),
+        })
+      },
+      refresh: async () => {
+        const refresh = await loadData(0, true)
+        if (!refresh?.ok) throw new Error('账户与中转列表刷新失败')
+      },
     })
+    if (result.status === 'accepted') {
+      showFlash(result.refreshStatus === 'failed'
+        ? '✓ 已根据截图确认还款；列表刷新失败，请稍后刷新'
+        : '✓ 已根据截图确认还款')
+    } else if (result.status === 'rejected' && result.reason === 'screenshot_repayment_conflict') {
+      showFlash('还款截图正在以另一种方式处理，请稍后重试')
+    } else if (result.status === 'failed') {
+      showFlash('还款截图确认失败：' + humanizeDbError(result.error))
+    }
+    return result
   }
 
   function stagingArchivePayload(record) {
@@ -2675,6 +2633,16 @@ export function useStore() {
   async function openProcessedStagingRecord(record) {
     if (!record?.targetRecordId || record.status !== 'archived') return false
     const targetId = record.targetRecordId
+    if (record.targetKind === 'repayment_cycle') {
+      const cycle = repaymentCycles.value.find(item => item.id === targetId)
+      const account = cycle && accounts.value.find(item => item.id === cycle.accountId)
+      if (!cycle || !account) {
+        showFlash('还款账期暂时无法读取，请刷新后重试')
+        return false
+      }
+      await openAccountDetail(account)
+      return true
+    }
     const targetKind = ['expense', 'income', 'data'].includes(record.targetKind)
       ? record.targetKind
       : null
