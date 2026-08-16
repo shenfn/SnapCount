@@ -72,15 +72,23 @@
 - `npm run governance:arch`：通过，仅既有人工清单警告。
 - `npm run build`：通过，仅既有 `eval` 与 bundle size 警告。
 - `git diff --check` 与相关 JavaScript `node --check`：通过。
-- PostgreSQL fixture：待 GitHub Release Validation 验证，当前不得标记通过。
+- PostgreSQL fixture：本机未执行；已由 GitHub Release Validation 的真实 PostgreSQL job 验证通过。
+
+## GitHub CI 结果
+
+- PR #85 首轮门禁全部通过。
+- Release Validation `PWA, Edge, migrations, and Shadow`：通过（1 分 15 秒）。
+- PostgreSQL job 已连续执行新迁移两次，并通过历史唯一/零/多命中、跨用户、字段约束、首次归档和幂等自愈 fixture。
+- Governance Validation、iOS change detection/gate、Cloudflare Pages 与 Vercel：通过；本轮无 iOS 代码，SwiftUI build 按规则跳过。
 
 ## 未解决风险
 
 - 生产 archived 行回填率未知；本轮不查询生产。
 - unknown 记录必须保留人工恢复出口，不能以识别域代替最终类型。
 - 新迁移尚未在本机 PostgreSQL 或生产执行；生产迁移不在本轮授权范围。
-- GitHub PostgreSQL fixture 与全量远程门禁待 PR 验证。
+- 生产迁移和真实历史回填率仍未验证；PR 门禁只证明脱敏 fixture 与代码契约。
 
 ## 对应提交
 
-待实际提交后填写。
+- 实现提交：`f31ad16`。
+- PR：#85。
