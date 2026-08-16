@@ -27,7 +27,7 @@ test('PWA-052 to PWA-054 loadData delegates formal record reads and keeps the ru
 
 test('PWA-055 unbound records delegate transport while Store keeps loading and page state', async () => {
   const source = await readFile('src/composables/useStore.js', 'utf8')
-  const loadUnbound = functionSource(source, 'async function loadUnboundRecords()', 'async function openUnboundRecordsPage(')
+  const loadUnbound = functionSource(source, 'async function loadUnboundRecords(', 'async function openUnboundRecordsPage(')
 
   assert.match(loadUnbound, /unboundRecordsLoading\.value = true/)
   assert.match(loadUnbound, /recordRepository\.listUnboundRecords\(/)
@@ -35,11 +35,13 @@ test('PWA-055 unbound records delegate transport while Store keeps loading and p
   assert.doesNotMatch(loadUnbound, /sb\.from\(['"](?:transactions|income_records)['"]\)/)
 })
 
-test('PWA-052 to PWA-055 record repository stays outside accounts, staging, signing, and writes', async () => {
+test('PWA-052 to PWA-055 record repository stays outside account, staging, signing, and direct table writes', async () => {
   const source = await readFile('src/repositories/recordRepository.js', 'utf8')
 
   assert.doesNotMatch(source, /from\(['"](?:accounts|account_entries|staging_records)['"]\)/)
-  assert.doesNotMatch(source, /\.insert\(|\.update\(|\.delete\(|\.rpc\(/)
+  assert.doesNotMatch(source, /\.insert\(|\.update\(|\.delete\(/)
+  assert.match(source, /saveRecord\(client, 'save_transaction_with_account'/)
+  assert.match(source, /saveRecord\(client, 'save_income_with_account'/)
   assert.doesNotMatch(source, /getSignedImageUrl|ensure_liability_repayment_cycles|buildRepaymentCandidate|accountCandidate/i)
 })
 

@@ -62,6 +62,46 @@ async function readSingle(query, mapper, kind) {
   }
 }
 
+async function saveRecord(client, rpcName, params, mapper, kind) {
+  try {
+    if (typeof client.rpc !== 'function') throw new Error('正式记录服务缺少保存能力')
+    const { data, error } = await client.rpc(rpcName, params)
+    if (error) {
+      return {
+        status: 'failed',
+        reason: 'service_error',
+        kind,
+        record: null,
+        error: errorMessage(error),
+      }
+    }
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row) {
+      return {
+        status: 'failed',
+        reason: 'invalid_response',
+        kind,
+        record: null,
+        error: '保存成功但未返回正式记录',
+      }
+    }
+    return {
+      status: 'accepted',
+      reason: 'saved',
+      kind,
+      record: mapper(row),
+    }
+  } catch (error) {
+    return {
+      status: 'failed',
+      reason: 'service_error',
+      kind,
+      record: null,
+      error: errorMessage(error),
+    }
+  }
+}
+
 export function mapIncomeRow(row = {}) {
   const occurrence = resolveFinanceOccurrence({ occurredAt: row.occurred_at, date: row.income_date })
   return {
@@ -248,6 +288,45 @@ export function createRecordRepository({ client }) {
     )
   }
 
+  function saveExpense(input = {}) {
+    return saveRecord(client, 'save_transaction_with_account', {
+      p_id: input.id ?? null,
+      p_amount: input.amount,
+      p_merchant_name: input.merchantName,
+      p_platform: input.platform,
+      p_category: input.category,
+      p_payment_method: input.paymentMethod,
+      p_transaction_date: input.transactionDate,
+      p_transaction_time: input.transactionTime ?? null,
+      p_occurred_at: input.occurredAt ?? null,
+      p_note: input.note ?? null,
+      p_is_large_transport: Boolean(input.isLargeTransport),
+      p_transport_type: input.transportType ?? null,
+      p_source: input.source ?? null,
+      p_image_url: input.imageUrl ?? null,
+      p_image_hash: input.imageHash ?? null,
+      p_companion_message: input.companionMessage ?? null,
+      p_account_id: input.accountId ?? null,
+    }, mapTransaction, 'expense')
+  }
+
+  function saveIncome(input = {}) {
+    return saveRecord(client, 'save_income_with_account', {
+      p_id: input.id ?? null,
+      p_category: input.category,
+      p_source_name: input.sourceName,
+      p_amount: input.amount,
+      p_income_date: input.incomeDate,
+      p_occurred_at: input.occurredAt ?? null,
+      p_note: input.note ?? null,
+      p_source: input.source ?? null,
+      p_image_url: input.imageUrl ?? null,
+      p_image_hash: input.imageHash ?? null,
+      p_companion_message: input.companionMessage ?? null,
+      p_account_id: input.accountId ?? null,
+    }, mapIncomeRow, 'income')
+  }
+
   return {
     listExpenses,
     listPendingExpenses,
@@ -256,5 +335,7 @@ export function createRecordRepository({ client }) {
     listUniversalRecords,
     listUnboundRecords,
     getRecordByTarget,
+    saveExpense,
+    saveIncome,
   }
 }
