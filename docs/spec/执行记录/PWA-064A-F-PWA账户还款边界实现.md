@@ -36,7 +36,7 @@
 ## 特征测试与红灯证据
 
 - PWA-064A 新增隔离 PostgreSQL fixture 与断言脚本，覆盖部分还款、重新确认、撤销、重复撤销、负债/扣款余额和跨用户拒绝，并接入 Release Validation 的 PostgreSQL 17 service。
-- 本机无 `psql`，Docker CLI 存在但 Docker Desktop daemon 未运行，因此数据库契约当前是“未验证”，最终结果必须以 PR 远程门禁为准。
+- 本机无 `psql`，Docker CLI 存在但 Docker Desktop daemon 未运行，因此数据库契约未在本地执行；PR #94 的 PostgreSQL 17 `Release Validation` 已通过，成为本片数据库事务的最终验证证据。
 - `npm run test:repayment` 首次运行失败：`accountRepository.js` 与 `createRepaymentFeature.js` 不存在，Store 边界断言同时证明两个 RPC 仍由 `useStore.js` 直接组装。
 - 页面特征项在同次红灯运行中通过，证明金额模式、最低还款、溢缴、扣款账户预览与撤销确认没有被本片误删。
 
@@ -53,7 +53,7 @@
 - `npm run test:repayment`：11 项通过。
 - Repository/Feature/Store/Page 新增文件均通过 `node --check`，`package.json` 可解析，`git diff --check` 通过。
 - 相关 PWA 回归、构建、治理和架构结果见“基线验证”。
-- PostgreSQL 事务契约：本机环境未验证，已登记为 PR 必须通过的远程门禁。
+- PostgreSQL 事务契约：PR #94 的 `Release Validation` 已通过（1 分 10 秒）；PR 共 8 项检查成功、1 项按路径跳过、0 失败。
 
 ## 未解决风险
 
@@ -65,4 +65,5 @@
 ## 发布边界
 
 - 不执行生产查询、迁移、部署、真实数据写入或 TestFlight。
-- 下一步：逐文件提交并创建 PR，以远程 PostgreSQL 17 契约和完整 Release Validation 作为最终验收。
+- 对应提交：`d4dcb5b`（规格）、`73a0e3b`（实现、测试、CI 与本地证据）。
+- 下一步：提交 PR #94 的远程验证证据，门禁复跑通过后合并。
