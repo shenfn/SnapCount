@@ -25,6 +25,12 @@ function normalizeListLimit(value, fallback) {
 }
 
 function mapStagingRow(row = {}, { processed = false } = {}) {
+  const allowedTargetKinds = new Set(['expense', 'income', 'data'])
+  const targetKind = allowedTargetKinds.has(row.target_kind) ? row.target_kind : null
+  const resolvedDomainKey = typeof row.resolved_domain_key === 'string' && row.resolved_domain_key.trim()
+    ? row.resolved_domain_key.trim()
+    : null
+  const targetRecordId = row.target_record_id || null
   return {
     id: row.id,
     status: row.status,
@@ -36,7 +42,9 @@ function mapStagingRow(row = {}, { processed = false } = {}) {
     imageHash: row.image_hash,
     imageType: row.image_type,
     recordType: row.record_type || 'uncertain',
-    domainKey: row.detected_domain_key,
+    domainKey: resolvedDomainKey || row.detected_domain_key,
+    detectedDomainKey: row.detected_domain_key || null,
+    resolvedDomainKey,
     domainName: row.detected_domain_name,
     targetDomainId: row.target_domain_id,
     confidence: Number(row.confidence || 0),
@@ -47,7 +55,9 @@ function mapStagingRow(row = {}, { processed = false } = {}) {
     extracted: row.extracted_json && typeof row.extracted_json === 'object' ? row.extracted_json : {},
     companionMessage: row.companion_message || row.extracted_json?.companion_message || '',
     retryCount: row.retry_count || 0,
-    targetRecordId: row.target_record_id,
+    targetKind,
+    targetRecordId,
+    targetReference: targetKind && targetRecordId ? `${targetKind}/${targetRecordId}` : null,
     resolvedAction: row.resolved_action,
     resolvedAt: row.resolved_at,
     discardReason: row.discard_reason,
@@ -213,6 +223,8 @@ export function createStagingRepository({
       reason: 'archived',
       recordId: stagingId,
       targetRecordId,
+      targetKind: ['expense', 'income', 'data'].includes(data?.target_kind) ? data.target_kind : null,
+      resolvedDomainKey: data?.resolved_domain_key || null,
       targetReference: data.target_reference || null,
       idempotentRetry: data.idempotent_retry === true,
       recordStillVisible: false,

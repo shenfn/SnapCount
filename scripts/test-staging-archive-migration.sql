@@ -98,6 +98,12 @@ select public.staging_archive_test_assert(
   'expense staging must become archived with a target'
 );
 select public.staging_archive_test_assert(
+  (select target_kind = 'expense' and resolved_domain_key = 'expense'
+   from public.staging_records
+   where id = '61000000-0000-4000-8000-000000000001'),
+  'expense archive must persist its physical and final target type'
+);
+select public.staging_archive_test_assert(
   (select count(*) = 1
    from public.transactions
    where staging_record_id = '61000000-0000-4000-8000-000000000001'
@@ -121,6 +127,10 @@ select public.staging_archive_test_assert(
 );
 
 -- Same-domain retry must return the original target and create no duplicates.
+update public.staging_records
+   set target_kind = null,
+       resolved_domain_key = null
+ where id = '61000000-0000-4000-8000-000000000001';
 select public.staging_archive_test_assert(
   (public.archive_staging_record(
     '61000000-0000-4000-8000-000000000001',
@@ -139,6 +149,12 @@ select public.staging_archive_test_assert(
     null
   )->>'idempotent_retry') = 'true',
   'same-domain retry must be idempotent'
+);
+select public.staging_archive_test_assert(
+  (select target_kind = 'expense' and resolved_domain_key = 'expense'
+   from public.staging_records
+   where id = '61000000-0000-4000-8000-000000000001'),
+  'same-domain retry must self-heal missing target type metadata'
 );
 select public.staging_archive_test_assert(
   (select count(*) = 1 from public.transactions
@@ -193,6 +209,12 @@ select public.staging_archive_test_assert(
      and user_id = '11111111-1111-4111-8111-111111111111'
      and amount = 500.00),
   'income archive must create exactly one target record'
+);
+select public.staging_archive_test_assert(
+  (select target_kind = 'income' and resolved_domain_key = 'income'
+   from public.staging_records
+   where id = '61000000-0000-4000-8000-000000000005'),
+  'income archive must persist its target type'
 );
 select public.staging_archive_test_assert(
   (select count(*) = 1
@@ -278,6 +300,12 @@ select public.staging_archive_test_assert(
       and domain_key = 'sport'
   ),
   'generic archive must create the requested domain record'
+);
+select public.staging_archive_test_assert(
+  (select target_kind = 'data' and resolved_domain_key = 'sport'
+   from public.staging_records
+   where id = '61000000-0000-4000-8000-000000000003'),
+  'generic archive must persist data kind and final domain'
 );
 
 -- An injected downstream failure must roll back target, staging state and
