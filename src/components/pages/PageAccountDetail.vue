@@ -42,6 +42,11 @@
           <img :src="sourceSnapshot.imageUrl" alt="来源快照截图" />
         </button>
       </section>
+      <div v-if="accountDetailSectionLoading.sourceSnapshot" class="wallet-account-empty">正在加载来源快照...</div>
+      <div v-if="accountDetailSectionErrors.sourceSnapshot" class="wallet-account-empty account-detail-section-error">
+        <span>来源快照加载失败：{{ accountDetailSectionErrors.sourceSnapshot }}</span>
+        <button class="wallet-snapshot-action-btn secondary" @click="store.refreshAccountDetail()">重试</button>
+      </div>
 
       <section class="account-detail-grid">
         <div class="account-stat-card">
@@ -64,6 +69,11 @@
 
       <section v-if="isLiability" class="account-repayment-panel">
         <div class="wallet-account-section-title">还款计划</div>
+        <div v-if="accountDetailSectionLoading.repaymentCycles" class="wallet-account-empty">正在加载账单周期...</div>
+        <div v-if="accountDetailSectionErrors.repaymentCycles" class="wallet-account-empty account-detail-section-error">
+          <span>账单周期加载失败：{{ accountDetailSectionErrors.repaymentCycles }}</span>
+          <button class="wallet-snapshot-action-btn secondary" @click="store.refreshAccountDetail()">重试</button>
+        </div>
         <div class="account-repayment-status" :class="repaymentStatus.tone">
           <strong>{{ repaymentStatus.label }}</strong>
           <span>{{ repaymentStatus.desc }}</span>
@@ -208,6 +218,12 @@
         </div>
       </section>
 
+      <div v-if="isLiability && accountDetailSectionLoading.payments" class="wallet-account-empty">正在加载还款记录...</div>
+      <div v-if="isLiability && accountDetailSectionErrors.payments" class="wallet-account-empty account-detail-section-error">
+        <span>还款记录加载失败：{{ accountDetailSectionErrors.payments }}</span>
+        <button class="wallet-snapshot-action-btn secondary" @click="store.refreshAccountDetail()">重试</button>
+      </div>
+
       <section v-if="isLiability && activePayments.length" class="account-payment-panel">
         <div class="wallet-account-section-title">最近还款记录</div>
         <div class="account-payment-list">
@@ -288,6 +304,10 @@
           <button class="wallet-snapshot-action-btn secondary" @click="store.refreshAccountDetail()">刷新</button>
         </div>
 
+        <div v-if="accountDetailSectionErrors.entries" class="wallet-account-empty account-detail-section-error">
+          <span>账户流水加载失败：{{ accountDetailSectionErrors.entries }}</span>
+          <button class="wallet-snapshot-action-btn secondary" @click="store.refreshAccountDetail()">重试</button>
+        </div>
         <div v-if="store.accountEntriesLoading.value" class="wallet-account-empty">正在加载流水...</div>
         <div v-else-if="!activeEntries.length && !voidedEntries.length" class="wallet-account-empty">还没有账户流水</div>
         <button
@@ -356,6 +376,24 @@ const account = computed(() => store.selectedAccount.value)
 const entries = computed(() => store.selectedAccountEntries.value || [])
 const payments = computed(() => store.selectedAccountPayments?.value || [])
 const sourceSnapshot = computed(() => store.selectedAccountSourceSnapshot?.value || null)
+const accountDetailSections = computed(() => store.accountDetailState?.value?.sections || {})
+const accountDetailSectionLoading = computed(() => ({
+  entries: accountDetailSections.value.entries?.status === 'loading',
+  payments: accountDetailSections.value.payments?.status === 'loading',
+  repaymentCycles: accountDetailSections.value.repaymentCycles?.status === 'loading',
+  sourceSnapshot: accountDetailSections.value.sourceSnapshot?.status === 'loading',
+}))
+const accountDetailSectionErrors = computed(() => {
+  const errorOf = (section, fallback) => ['failed', 'unavailable'].includes(section?.status)
+    ? (section.error || fallback)
+    : ''
+  return {
+    entries: errorOf(accountDetailSections.value.entries, '账户流水暂时不可用'),
+    payments: errorOf(accountDetailSections.value.payments, '还款记录暂时不可用'),
+    repaymentCycles: errorOf(accountDetailSections.value.repaymentCycles, '账单周期暂时不可用'),
+    sourceSnapshot: errorOf(accountDetailSections.value.sourceSnapshot, '来源快照暂时不可用'),
+  }
+})
 const showVoided = ref(false)
 const showVoidedPayments = ref(false)
 const repaymentMode = ref('full')

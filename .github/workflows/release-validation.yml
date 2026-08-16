@@ -70,6 +70,9 @@ jobs:
       - name: Validate repayment boundary
         run: npm run test:repayment
 
+      - name: Validate account read boundary
+        run: npm run test:account-read
+
       - name: Install trace console dependencies
         working-directory: tools/ai-validation/ui/trace-console
         run: npm ci

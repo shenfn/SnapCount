@@ -1,5 +1,42 @@
+import { mapAccountRow } from '../adapters/domain/accountAdapter.js'
+
 function errorMessage(error) {
-  return error?.message || String(error || '账户还款服务请求失败')
+  return error?.message || String(error || '账户服务请求失败')
+}
+
+export function mapAccountEntryRow(row = {}) {
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    direction: row.direction,
+    amount: Number(row.amount || 0),
+    entryType: row.entry_type,
+    sourceTable: row.source_table || '',
+    sourceId: row.source_id || '',
+    occurredAt: row.occurred_at,
+    note: row.note || '',
+    isVoided: !!row.is_voided,
+    voidedReason: row.voided_reason || '',
+    createdAt: row.created_at,
+  }
+}
+
+export function mapLiabilityPaymentRow(row = {}) {
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    statementId: row.statement_id || null,
+    debitAccountId: row.debit_account_id || null,
+    amount: Number(row.amount || 0),
+    overpaymentAmount: Number(row.overpayment_amount || 0),
+    paidAt: row.paid_at,
+    source: row.source || 'manual',
+    evidenceRecordId: row.evidence_record_id || null,
+    status: row.status || 'confirmed',
+    note: row.note || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
 }
 
 function firstRow(data) {
@@ -40,8 +77,100 @@ function failed(reason, error) {
   return { status: 'failed', reason, cycle: null, error: errorMessage(error) }
 }
 
+function readFailed(error) {
+  return { status: 'failed', reason: 'service_error', rows: [], error: errorMessage(error) }
+}
+
+function readAccepted(rows, mapper) {
+  return { status: 'accepted', reason: 'loaded', rows: (rows || []).map(mapper) }
+}
+
+function missingPaymentTable(error) {
+  return error?.code === 'PGRST205'
+    || /liability_payments|schema cache|Could not find the table/i.test(error?.message || '')
+}
+
 export function createAccountRepository({ client }) {
   if (typeof client?.rpc !== 'function') throw new Error('账户服务缺少 RPC 客户端')
+  let paymentsAvailable = true
+
+  async function listAccounts() {
+    try {
+      const { data, error } = await client.from('accounts')
+        .select('*')
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true })
+      if (error) return readFailed(error)
+      return readAccepted(data, mapAccountRow)
+    } catch (error) {
+      return readFailed(error)
+    }
+  }
+
+  async function listAccountEntries({ accountId, limit = 50 } = {}) {
+    try {
+      const { data, error } = await client.from('account_entries')
+        .select('*')
+        .eq('account_id', accountId)
+        .order('occurred_at', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (error) return readFailed(error)
+      return readAccepted(data, mapAccountEntryRow)
+    } catch (error) {
+      return readFailed(error)
+    }
+  }
+
+  async function listAccountPayments({ accountId, limit = 30 } = {}) {
+    if (!paymentsAvailable) {
+      return { status: 'unavailable', reason: 'not_available', rows: [], error: '还款记录表尚不可用' }
+    }
+    try {
+      const { data, error } = await client.from('liability_payments')
+        .select('*')
+        .eq('account_id', accountId)
+        .order('paid_at', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (error && missingPaymentTable(error)) {
+        paymentsAvailable = false
+        return { status: 'unavailable', reason: 'not_available', rows: [], error: errorMessage(error) }
+      }
+      if (error) return readFailed(error)
+      return readAccepted(data, mapLiabilityPaymentRow)
+    } catch (error) {
+      return readFailed(error)
+    }
+  }
+
+  async function listRepaymentCycles({ accountId, limit = 80 } = {}) {
+    try {
+      let query = client.from('account_repayment_cycles')
+        .select('*')
+      if (accountId) query = query.eq('account_id', accountId)
+      const { data, error } = await query
+        .order('due_date', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (error) return readFailed(error)
+      return readAccepted(data, mapRepaymentCycleRow)
+    } catch (error) {
+      return readFailed(error)
+    }
+  }
+
+  async function ensureRepaymentCycles({ cycleMonth } = {}) {
+    try {
+      const { error } = await client.rpc('ensure_liability_repayment_cycles', {
+        p_cycle_month: cycleMonth,
+      })
+      if (error) return { status: 'failed', reason: 'service_error', error: errorMessage(error) }
+      return { status: 'accepted', reason: 'ensured' }
+    } catch (error) {
+      return { status: 'failed', reason: 'service_error', error: errorMessage(error) }
+    }
+  }
 
   async function confirmRepayment(command = {}) {
     try {
@@ -76,5 +205,13 @@ export function createAccountRepository({ client }) {
     }
   }
 
-  return { confirmRepayment, revokePayment }
+  return {
+    listAccounts,
+    listAccountEntries,
+    listAccountPayments,
+    listRepaymentCycles,
+    ensureRepaymentCycles,
+    confirmRepayment,
+    revokePayment,
+  }
 }
