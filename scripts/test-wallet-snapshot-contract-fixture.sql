@@ -51,7 +51,6 @@ create table public.data_records (
 
 alter table public.account_repayment_cycles
   add column original_statement_amount numeric(14,2),
-  add column min_payment_amount numeric(14,2),
   add column refund_applied_amount numeric(14,2) not null default 0,
   add column evidence_record_id uuid references public.data_records(id),
   add column confidence numeric(5,4),
