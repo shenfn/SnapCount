@@ -49,6 +49,7 @@ import { createFinanceSaveFeature } from '../features/finance/createFinanceSaveF
 import { createAccountBindingFeature } from '../features/finance/createAccountBindingFeature'
 import { createRepaymentFeature } from '../features/accounts/createRepaymentFeature'
 import { createAccountDetailFeature } from '../features/accounts/createAccountDetailFeature'
+import { createAccountManagementFeature } from '../features/accounts/createAccountManagementFeature'
 import {
   resolveFinanceOccurrence,
 } from '../utils/financeOccurrence'
@@ -110,6 +111,8 @@ export function useStore() {
   let accountBindingFeature = null
   let repaymentFeature = null
   let accountDetailFeature = null
+  let accountManagementFeature = null
+  let accountCommandSequence = 0
 
   const currentFilter = ref('all')
   const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
@@ -250,6 +253,7 @@ export function useStore() {
     isDefaultExpense: false,
     isDefaultIncome: false,
     isArchived: false,
+    commandKey: null,
   })
 
   const settingsFeature = createSettingsState({
@@ -265,6 +269,10 @@ export function useStore() {
   })
   const recordRepository = createRecordRepository({ client: sb })
   const accountRepository = createAccountRepository({ client: sb })
+  accountManagementFeature = createAccountManagementFeature({
+    repository: accountRepository,
+    getCurrentUserId: () => currentUserId.value,
+  })
   financeSaveFeature = createFinanceSaveFeature({
     repository: recordRepository,
     getCurrentUserId: () => currentUserId.value,
@@ -528,6 +536,7 @@ export function useStore() {
     accountBindingFeature.reset()
     repaymentFeature.reset()
     accountDetailFeature.reset()
+    accountManagementFeature.reset()
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -2719,6 +2728,7 @@ export function useStore() {
     accountModal.isDefaultExpense = false
     accountModal.isDefaultIncome = false
     accountModal.isArchived = false
+    accountModal.commandKey = `create-account-${Date.now()}-${++accountCommandSequence}`
   }
 
   function openAccountModalForEdit(account) {
@@ -2738,6 +2748,7 @@ export function useStore() {
     accountModal.isDefaultExpense = !!account.isDefaultExpense
     accountModal.isDefaultIncome = !!account.isDefaultIncome
     accountModal.isArchived = !!account.isArchived
+    accountModal.commandKey = null
   }
 
   function closeAccountModal() {
@@ -2751,6 +2762,7 @@ export function useStore() {
     if (accountModal.last4 && !/^\d{4}$/.test(String(accountModal.last4).trim())) return '尾号必须是 4 位数字'
     const init = parseFloat(accountModal.initialBalance || '0')
     if (Number.isNaN(init)) return '初始余额必须是数字'
+    if (init < 0) return '初始余额不能小于 0'
     const billDay = accountModal.billDay === '' ? null : Number(accountModal.billDay)
     if (billDay != null && (!Number.isInteger(billDay) || billDay < 1 || billDay > 31)) return '账单日必须是 1-31 之间的整数'
     const dueDay = accountModal.paymentDueDay === '' ? null : Number(accountModal.paymentDueDay)
@@ -2758,99 +2770,98 @@ export function useStore() {
     return ''
   }
 
+  function convergeCanonicalAccount(account) {
+    if (!account?.id) return
+    accounts.value = accounts.value.map((item) => {
+      if (item.id === account.id) return account
+      const next = { ...item }
+      if (account.isDefaultExpense) next.isDefaultExpense = false
+      if (account.isDefaultIncome) next.isDefaultIncome = false
+      if (account.isArchived && next.autoDebitAccountId === account.id) next.autoDebitAccountId = null
+      return next
+    })
+    const index = accounts.value.findIndex(item => item.id === account.id)
+    if (index < 0) accounts.value.unshift(account)
+    if (selectedAccount.value?.id) {
+      const selectedCanonical = accounts.value.find(item => item.id === selectedAccount.value.id)
+      if (selectedCanonical) selectedAccount.value = selectedCanonical
+    }
+  }
+
+  function accountWriteError(result) {
+    if (result?.reason === 'account_type_transition_blocked') return '该账户已有流水、账单或引用，不能直接切换资产/负债类型'
+    if (result?.reason === 'invalid_auto_debit_account') return '自动扣款账户必须是本人未归档的资产账户'
+    if (result?.reason === 'account_not_found') return '账户不存在或当前登录状态无权操作'
+    if (result?.reason === 'account_command_conflict') return '该账户正在执行另一项操作，请稍后重试'
+    return humanizeDbError(result?.error || result?.reason || '账户操作失败')
+  }
+
   async function saveAccount() {
     return runLockedAction('account', async () => {
       if (!currentUserId.value) { showWarn('请先登录'); return null }
       const err = validateAccountForm()
       if (err) { showWarn(err); return null }
-      const name = accountModal.name.trim()
-      const initial = parseFloat(accountModal.initialBalance || '0') || 0
-      const last4 = accountModal.last4 && /^\d{4}$/.test(String(accountModal.last4).trim()) ? String(accountModal.last4).trim() : null
-      const institution = accountModal.institution.trim() || null
       const accountType = normalizeAccountType(accountModal.type)
       const liability = ['credit_card', 'credit_line'].includes(accountType)
-      const billDay = liability && accountModal.billDay !== '' ? Number(accountModal.billDay) : null
-      const dueDay = liability && accountModal.paymentDueDay !== '' ? Number(accountModal.paymentDueDay) : null
-      const autoDebitAccountId = liability ? (accountModal.autoDebitAccountId || null) : null
-
-      if (accountModal.mode === 'edit' && accountModal.id) {
-        const body = {
-          name,
-          type: accountType,
-          institution,
-          last4,
-          bill_day: billDay,
-          payment_due_day: dueDay,
-          auto_debit_account_id: autoDebitAccountId,
-          auto_confirm_repayment: liability ? !!accountModal.autoConfirmRepayment : false,
-          is_default_expense: !!accountModal.isDefaultExpense,
-          is_default_income: !!accountModal.isDefaultIncome,
-          is_archived: !!accountModal.isArchived,
-          updated_at: new Date().toISOString(),
-        }
-        const { data, error } = await sb.from('accounts').update(body).eq('id', accountModal.id).select('*').single()
-        if (error) { showError('保存失败：' + humanizeDbError(error)); return null }
-        // 默认账户互斥
-        if (body.is_default_expense) await unsetOtherDefaults('expense', data.id)
-        if (body.is_default_income) await unsetOtherDefaults('income', data.id)
-        const idx = accounts.value.findIndex(a => a.id === data.id)
-        if (idx >= 0) accounts.value[idx] = mapAccountRow(data)
-        closeAccountModal()
-        showFlash('✓ 账户已更新')
-        return data
-      }
-
-      const body = {
-        user_id: currentUserId.value,
-        name,
+      const isEdit = accountModal.mode === 'edit' && !!accountModal.id
+      const command = {
+        accountId: isEdit ? accountModal.id : null,
+        commandKey: isEdit ? null : accountModal.commandKey,
+        name: accountModal.name.trim(),
         type: accountType,
-        institution,
-        last4,
-        currency: 'CNY',
-        initial_balance: initial,
-        current_balance: initial,
-        bill_day: billDay,
-        payment_due_day: dueDay,
-        auto_debit_account_id: autoDebitAccountId,
-        auto_confirm_repayment: liability ? !!accountModal.autoConfirmRepayment : false,
-        is_default_expense: !!accountModal.isDefaultExpense,
-        is_default_income: !!accountModal.isDefaultIncome,
+        institution: accountModal.institution.trim() || null,
+        last4: accountModal.last4 ? String(accountModal.last4).trim() : null,
+        initialBalance: parseFloat(accountModal.initialBalance || '0') || 0,
+        billDay: liability && accountModal.billDay !== '' ? Number(accountModal.billDay) : null,
+        paymentDueDay: liability && accountModal.paymentDueDay !== '' ? Number(accountModal.paymentDueDay) : null,
+        autoDebitAccountId: liability ? (accountModal.autoDebitAccountId || null) : null,
+        autoConfirmRepayment: liability ? !!accountModal.autoConfirmRepayment : false,
+        isDefaultExpense: !!accountModal.isDefaultExpense,
+        isDefaultIncome: !!accountModal.isDefaultIncome,
       }
-      const { data, error } = await sb.from('accounts').insert(body).select('*').single()
-      if (error) { showError('创建失败：' + humanizeDbError(error)); return null }
-      if (body.is_default_expense) await unsetOtherDefaults('expense', data.id)
-      if (body.is_default_income) await unsetOtherDefaults('income', data.id)
-      accounts.value.unshift(mapAccountRow(data))
-      closeAccountModal()
-      showFlash('✓ 账户已创建')
-      return data
+      const result = await accountManagementFeature.save(command, {
+        onAccepted: (account) => {
+          convergeCanonicalAccount(account)
+          closeAccountModal()
+        },
+        refresh: async (_account, { userId }) => {
+          await refreshAccountsFromDB({ expectedUserId: userId, throwOnError: true })
+        },
+      })
+      if (result.status === 'stale') return result
+      if (result.status !== 'accepted') {
+        showError(`${isEdit ? '保存' : '创建'}失败：${accountWriteError(result)}`)
+        return result
+      }
+      if (result.refreshStatus === 'failed') showFlash(`✓ 账户已${isEdit ? '更新' : '创建'}，列表刷新失败，请稍后刷新页面`)
+      else showFlash(isEdit ? '✓ 账户已更新' : '✓ 账户已创建')
+      return result
     })
   }
 
-  async function unsetOtherDefaults(kind, keepId) {
-    const column = kind === 'expense' ? 'is_default_expense' : 'is_default_income'
-    const { error } = await sb.from('accounts')
-      .update({ [column]: false })
-      .eq('user_id', currentUserId.value)
-      .eq(column, true)
-      .neq('id', keepId)
-    if (error) console.warn(`重置默认 ${kind} 账户失败:`, error.message)
-    accounts.value = accounts.value.map(a => a.id === keepId ? a : { ...a, [kind === 'expense' ? 'isDefaultExpense' : 'isDefaultIncome']: false })
-  }
-
   async function archiveAccount(account, archived = true) {
-    if (!account?.id) return
-    const ok = confirm(archived ? `确认归档账户「${account.name}」？归档后不再作为默认候选。` : `确认恢复账户「${account.name}」？`)
-    if (!ok) return
-    const { data, error } = await sb.from('accounts')
-      .update({ is_archived: archived, updated_at: new Date().toISOString() })
-      .eq('id', account.id)
-      .select('*')
-      .single()
-    if (error) { showError('操作失败：' + humanizeDbError(error)); return }
-    const idx = accounts.value.findIndex(a => a.id === account.id)
-    if (idx >= 0) accounts.value[idx] = mapAccountRow(data)
-    showFlash(archived ? '✓ 账户已归档' : '✓ 账户已恢复')
+    if (!account?.id) return null
+    const effect = archived
+      ? '归档会清除默认项和未来自动扣款引用，但保留余额、流水和还款历史。'
+      : '恢复后不会自动恢复默认项或自动扣款关系。'
+    const ok = confirm(`确认${archived ? '归档' : '恢复'}账户「${account.name}」？${effect}`)
+    if (!ok) return null
+    return runLockedAction('account', async () => {
+      const result = await accountManagementFeature.setArchived({ accountId: account.id, archived }, {
+        onAccepted: canonicalAccount => convergeCanonicalAccount(canonicalAccount),
+        refresh: async (_canonicalAccount, { userId }) => {
+          await refreshAccountsFromDB({ expectedUserId: userId, throwOnError: true })
+        },
+      })
+      if (result.status === 'stale') return result
+      if (result.status !== 'accepted') {
+        showError('操作失败：' + accountWriteError(result))
+        return result
+      }
+      if (result.refreshStatus === 'failed') showFlash(`✓ 账户已${archived ? '归档' : '恢复'}，列表刷新失败，请稍后刷新页面`)
+      else showFlash(archived ? '✓ 账户已归档' : '✓ 账户已恢复')
+      return result
+    })
   }
 
   async function loadAccountSourceSnapshot(account) {

@@ -279,3 +279,56 @@ test('PWA-065B missing payment table stays distinguishable from an empty result'
   assert.equal(result.reason, 'not_available')
   assert.deepEqual(result.rows, [])
 })
+
+test('PWA-066C account writes use canonical RPC params without user or archive fields', async () => {
+  const accountRow = {
+    id: 'account-1', user_id: 'user-1', name: '微信钱包', type: 'wallet_balance',
+    current_balance: '120.50', initial_balance: '100.00', is_archived: false,
+  }
+  const { client, calls } = createRpcClient({
+    save_account: { data: accountRow, error: null },
+    set_account_archived: { data: accountRow, error: null },
+  })
+  const repository = createAccountRepository({ client })
+
+  const saved = await repository.saveAccount({
+    name: '微信钱包', type: 'wallet_balance', accountId: 'account-1', initialBalance: 999,
+    institution: '微信', last4: '1234', billDay: null, paymentDueDay: null,
+    autoDebitAccountId: null, autoConfirmRepayment: false,
+    isDefaultExpense: true, isDefaultIncome: false, isArchived: true, userId: 'must-not-cross',
+  })
+  const archived = await repository.setAccountArchived({ accountId: 'account-1', archived: true, userId: 'must-not-cross' })
+
+  assert.equal(saved.status, 'accepted')
+  assert.equal(saved.account.id, 'account-1')
+  assert.equal(archived.status, 'accepted')
+  assert.deepEqual(calls, [
+    {
+      name: 'save_account',
+      params: {
+        p_name: '微信钱包', p_type: 'wallet_balance', p_account_id: 'account-1',
+        p_institution: '微信', p_last4: '1234', p_initial_balance: 999,
+        p_bill_day: null, p_payment_due_day: null, p_auto_debit_account_id: null,
+        p_auto_confirm_repayment: false, p_is_default_expense: true, p_is_default_income: false,
+      },
+    },
+    { name: 'set_account_archived', params: { p_account_id: 'account-1', p_archived: true } },
+  ])
+})
+
+test('PWA-066C account writes map stable database reasons and reject empty canonical responses', async () => {
+  const { client } = createRpcClient({
+    save_account: [
+      { data: null, error: { message: 'account_type_transition_blocked' } },
+      { data: null, error: null },
+      { data: null, error: { message: 'network down' } },
+    ],
+    set_account_archived: { data: null, error: { message: 'invalid_auto_debit_account' } },
+  })
+  const repository = createAccountRepository({ client })
+
+  assert.equal((await repository.saveAccount({ name: 'a', type: 'cash' })).reason, 'account_type_transition_blocked')
+  assert.equal((await repository.saveAccount({ name: 'a', type: 'cash' })).reason, 'invalid_response')
+  assert.equal((await repository.saveAccount({ name: 'a', type: 'cash' })).reason, 'service_error')
+  assert.equal((await repository.setAccountArchived({ accountId: 'a', archived: true })).reason, 'invalid_auto_debit_account')
+})

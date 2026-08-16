@@ -4,6 +4,14 @@ function errorMessage(error) {
   return error?.message || String(error || '账户服务请求失败')
 }
 
+function accountWriteReason(error) {
+  const message = errorMessage(error)
+  if (/account_type_transition_blocked/i.test(message)) return 'account_type_transition_blocked'
+  if (/invalid_auto_debit_account/i.test(message)) return 'invalid_auto_debit_account'
+  if (/account_not_found|account not found|permission denied/i.test(message)) return 'account_not_found'
+  return 'service_error'
+}
+
 export function mapAccountEntryRow(row = {}) {
   return {
     id: row.id,
@@ -205,6 +213,46 @@ export function createAccountRepository({ client }) {
     }
   }
 
+  async function saveAccount(command = {}) {
+    try {
+      const { data, error } = await client.rpc('save_account', {
+        p_name: command.name,
+        p_type: command.type,
+        p_account_id: command.accountId || null,
+        p_institution: command.institution || null,
+        p_last4: command.last4 || null,
+        p_initial_balance: command.initialBalance == null ? 0 : command.initialBalance,
+        p_bill_day: command.billDay == null ? null : command.billDay,
+        p_payment_due_day: command.paymentDueDay == null ? null : command.paymentDueDay,
+        p_auto_debit_account_id: command.autoDebitAccountId || null,
+        p_auto_confirm_repayment: !!command.autoConfirmRepayment,
+        p_is_default_expense: !!command.isDefaultExpense,
+        p_is_default_income: !!command.isDefaultIncome,
+      })
+      if (error) return { status: 'failed', reason: accountWriteReason(error), account: null, error: errorMessage(error) }
+      const row = firstRow(data)
+      if (!row?.id) return { status: 'failed', reason: 'invalid_response', account: null, error: '账户保存成功但未返回账户' }
+      return { status: 'accepted', reason: 'saved', account: mapAccountRow(row) }
+    } catch (error) {
+      return { status: 'failed', reason: accountWriteReason(error), account: null, error: errorMessage(error) }
+    }
+  }
+
+  async function setAccountArchived(command = {}) {
+    try {
+      const { data, error } = await client.rpc('set_account_archived', {
+        p_account_id: command.accountId,
+        p_archived: !!command.archived,
+      })
+      if (error) return { status: 'failed', reason: accountWriteReason(error), account: null, error: errorMessage(error) }
+      const row = firstRow(data)
+      if (!row?.id) return { status: 'failed', reason: 'invalid_response', account: null, error: '账户归档成功但未返回账户' }
+      return { status: 'accepted', reason: command.archived ? 'archived' : 'restored', account: mapAccountRow(row) }
+    } catch (error) {
+      return { status: 'failed', reason: accountWriteReason(error), account: null, error: errorMessage(error) }
+    }
+  }
+
   return {
     listAccounts,
     listAccountEntries,
@@ -213,5 +261,7 @@ export function createAccountRepository({ client }) {
     ensureRepaymentCycles,
     confirmRepayment,
     revokePayment,
+    saveAccount,
+    setAccountArchived,
   }
 }
