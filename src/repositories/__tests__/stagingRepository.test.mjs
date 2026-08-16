@@ -63,3 +63,44 @@ test('PWA-030 repository preserves a retry failure as a visible structured resul
     },
   )
 })
+
+test('PWA-040 repository archives through the atomic RPC without user_id', async () => {
+  let rpcCall
+  const repository = createStagingRepository({
+    client: {
+      ...createClient(),
+      async rpc(name, payload) {
+        rpcCall = { name, payload }
+        return {
+          data: {
+            target_record_id: 'target-1',
+            target_reference: 'expense/target-1',
+            idempotent_retry: false,
+          },
+          error: null,
+        }
+      },
+    },
+    baseUrl: 'https://api.example.test',
+    anonKey: 'anon-1',
+    fetchImpl: async () => new Response('{}'),
+  })
+
+  const result = await repository.archive({
+    stagingId: 'staging-1',
+    domainKey: 'expense',
+    amount: 12.5,
+    title: '午餐',
+    accountId: 'account-1',
+    payload: { source: 'contract-test' },
+  })
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.targetRecordId, 'target-1')
+  assert.equal(rpcCall.name, 'archive_staging_record')
+  assert.equal(rpcCall.payload.p_staging_id, 'staging-1')
+  assert.equal(rpcCall.payload.p_domain_key, 'expense')
+  assert.equal(rpcCall.payload.p_amount, 12.5)
+  assert.equal(rpcCall.payload.p_account_id, 'account-1')
+  assert.equal(Object.hasOwn(rpcCall.payload, 'user_id'), false)
+})

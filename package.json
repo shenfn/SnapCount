@@ -48,6 +48,7 @@
     "test:day-time-display": "node --test scripts/test-day-time-display.mjs",
     "test:pending-queue": "node scripts/test-pending-queue.mjs",
     "test:staging-retry": "node --test src/repositories/__tests__/stagingRepository.test.mjs src/features/staging/__tests__/stagingRetryFeature.test.mjs",
+    "test:staging-archive": "node --test src/repositories/__tests__/stagingRepository.test.mjs src/features/staging/__tests__/stagingArchiveFeature.test.mjs src/features/staging/__tests__/stagingArchiveBoundary.test.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",
     "audit:storage-orphans": "node scripts/audit-storage-orphans.mjs",

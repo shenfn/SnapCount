@@ -103,5 +103,74 @@ export function createStagingRepository({
     }
   }
 
-  return { retry }
+  async function archive(input = {}) {
+    const stagingId = String(input.stagingId || '').trim()
+    const domainKey = String(input.domainKey || '').trim()
+    if (!stagingId) throw new Error('缺少中转记录编号')
+    if (!domainKey) throw new Error('缺少归档数据域')
+
+    let data
+    let error
+    try {
+      ({ data, error } = await client.rpc('archive_staging_record', {
+        p_staging_id: stagingId,
+        p_domain_key: domainKey,
+        p_amount: input.amount ?? null,
+        p_title: input.title ?? null,
+        p_platform: input.platform ?? null,
+        p_category: input.category ?? null,
+        p_payment_method: input.paymentMethod ?? null,
+        p_income_category: input.incomeCategory ?? null,
+        p_record_date: input.recordDate ?? null,
+        p_record_time: input.recordTime ?? null,
+        p_occurred_at: input.occurredAt ?? null,
+        p_summary: input.summary ?? null,
+        p_payload: input.payload && typeof input.payload === 'object' ? input.payload : {},
+        p_account_id: input.accountId ?? null,
+      }))
+    } catch (caught) {
+      return {
+        status: 'failed',
+        reason: 'network',
+        recordId: stagingId,
+        recordStillVisible: true,
+        error: errorMessage(caught),
+      }
+    }
+
+    if (error) {
+      return {
+        status: 'failed',
+        reason: 'service_error',
+        recordId: stagingId,
+        recordStillVisible: true,
+        error: errorMessage(error),
+      }
+    }
+
+    const targetRecordId = data?.target_record_id || null
+    if (!targetRecordId) {
+      return {
+        status: 'failed',
+        reason: 'unexpected_response',
+        recordId: stagingId,
+        recordStillVisible: true,
+        error: '归档服务未返回目标记录',
+        payload: data,
+      }
+    }
+
+    return {
+      status: 'accepted',
+      reason: 'archived',
+      recordId: stagingId,
+      targetRecordId,
+      targetReference: data.target_reference || null,
+      idempotentRetry: data.idempotent_retry === true,
+      recordStillVisible: false,
+      payload: data,
+    }
+  }
+
+  return { retry, archive }
 }
