@@ -44,6 +44,8 @@
     "test:finance-options": "node scripts/test-finance-review-options.mjs",
     "test:expression-presentation": "node scripts/test-expression-presentation.mjs",
     "test:wallet-snapshot-amount": "node --experimental-specifier-resolution=node scripts/test-wallet-snapshot-amount.mjs",
+    "test:wallet-snapshot-contract": "node scripts/test-wallet-snapshot-migration-contract.mjs",
+    "test:wallet-snapshot": "node --test src/features/accounts/__tests__/walletSnapshotRepository.test.mjs src/features/accounts/__tests__/walletSnapshotFeature.test.mjs src/features/accounts/__tests__/walletSnapshotBoundary.test.mjs",
     "test:finance-occurred-at": "node scripts/test-finance-occurred-at-contract.mjs",
     "test:day-time-display": "node --test scripts/test-day-time-display.mjs",
     "test:pending-queue": "node scripts/test-pending-queue.mjs",

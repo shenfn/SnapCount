@@ -110,18 +110,19 @@
             <div class="wallet-account-subtitle">截图金额 ¥{{ Number(record.payload?.snapshot_balance ?? record.payload?.amount ?? 0).toFixed(2) }}</div>
           </div>
           <div class="wallet-snapshot-action-buttons">
-            <button class="wallet-snapshot-action-btn" @click="store.createAccountFromWalletSnapshot(record)">创建账户</button>
-            <button class="wallet-snapshot-action-btn secondary" @click="toggleSnapshotAccountPicker(record.id)">
+            <button class="wallet-snapshot-action-btn" :disabled="isWalletSnapshotBusy(record.id)" @click="createAccountFromWalletSnapshot(record)">创建账户</button>
+            <button class="wallet-snapshot-action-btn secondary" :disabled="isWalletSnapshotBusy(record.id)" @click="toggleSnapshotAccountPicker(record.id)">
               {{ expandedSnapshotId === record.id ? '收起' : '关联已有' }}
             </button>
           </div>
         </div>
         <div v-if="expandedSnapshotId === record.id" class="wallet-snapshot-account-picker">
-          <div v-if="!availableAccounts.length" class="wallet-snapshot-account-empty">还没有可关联账户，请先创建账户</div>
+          <div v-if="!compatibleWalletSnapshotAccounts.length" class="wallet-snapshot-account-empty">没有与这条快照类型兼容的可用账户</div>
           <button
-            v-for="account in availableAccounts"
+            v-for="account in compatibleWalletSnapshotAccounts"
             :key="account.id"
             class="wallet-snapshot-account-option"
+            :disabled="isWalletSnapshotBusy(record.id)"
             @click="linkSnapshotToExistingAccount(record, account.id)"
           >
             <span>
@@ -163,10 +164,11 @@ import DomainTrendPanel from '../domain/DomainTrendPanel.vue'
 import DomainDistributionPanel from '../domain/DomainDistributionPanel.vue'
 import DomainRecentRecordList from '../domain/DomainRecentRecordList.vue'
 import { getAccountSections } from '../../adapters/domain/walletAdapter'
-import { accountTitle, formatAccountCurrency } from '../../adapters/domain/accountAdapter'
+import { accountTitle, formatAccountCurrency, normalizeAccountType } from '../../adapters/domain/accountAdapter'
 
 const store = inject('store')
 const expandedSnapshotId = ref(null)
+const walletSnapshotBusyIds = ref(new Set())
 
 const today = new Date()
 const todayIndex = today.getDay() === 0 ? 6 : today.getDay() - 1
@@ -207,6 +209,19 @@ const walletAccountSections = computed(() => domain.value.id === 'wallet' ? getA
 const availableAccounts = computed(() => {
   return (store.accounts?.value || []).filter(account => !account.isArchived)
 })
+const expandedWalletSnapshot = computed(() => {
+  return store.dataRecords.value.find(record => record.id === expandedSnapshotId.value) || null
+})
+const compatibleWalletSnapshotAccounts = computed(() => {
+  const payload = expandedWalletSnapshot.value?.payload || {}
+  const kind = payload.account_snapshot_kind
+    || (payload.record_kind === 'liability_snapshot' ? 'liability' : 'asset')
+  return availableAccounts.value.filter(account => {
+    const type = normalizeAccountType(account.type)
+    const liability = type === 'credit_card' || type === 'credit_line'
+    return kind === 'liability' ? liability : !liability
+  })
+})
 const unboundExpenses = computed(() => {
   return (store.bills?.value || [])
     .filter(b => b.status === 'done' && !b.accountId)
@@ -235,9 +250,36 @@ function toggleSnapshotAccountPicker(recordId) {
   expandedSnapshotId.value = expandedSnapshotId.value === recordId ? null : recordId
 }
 
+function isWalletSnapshotBusy(recordId) {
+  return walletSnapshotBusyIds.value.has(recordId)
+}
+
+function setWalletSnapshotBusy(recordId, busy) {
+  const next = new Set(walletSnapshotBusyIds.value)
+  if (busy) next.add(recordId)
+  else next.delete(recordId)
+  walletSnapshotBusyIds.value = next
+}
+
+async function createAccountFromWalletSnapshot(record) {
+  if (isWalletSnapshotBusy(record.id)) return
+  setWalletSnapshotBusy(record.id, true)
+  try {
+    await store.createAccountFromWalletSnapshot(record)
+  } finally {
+    setWalletSnapshotBusy(record.id, false)
+  }
+}
+
 async function linkSnapshotToExistingAccount(record, accountId) {
-  await store.linkWalletSnapshotToAccount(record, accountId)
-  expandedSnapshotId.value = null
+  if (isWalletSnapshotBusy(record.id)) return
+  setWalletSnapshotBusy(record.id, true)
+  try {
+    const result = await store.linkWalletSnapshotToAccount(record, accountId)
+    if (result?.status === 'accepted') expandedSnapshotId.value = null
+  } finally {
+    setWalletSnapshotBusy(record.id, false)
+  }
 }
 </script>
 
