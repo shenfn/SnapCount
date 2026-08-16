@@ -6,7 +6,7 @@
 >
 > 分支：`feature/PWA账户读取边界实现`
 >
-> 状态：本地实现与回归完成，待 PR 验证
+> 状态：已完成，PR #98 已合并（`6dec17d`）
 
 ## 当前范围
 
@@ -25,6 +25,7 @@
 - 已让 `loadData`、`refreshAccountsFromDB`、`openAccountDetail` 和 `refreshAccountDetail` 经新边界委托，并移除账户读取后的隐藏 repair 调用。
 - 已在详情页增加来源快照、周期、还款记录和流水的分区 loading/error/重试状态。
 - 已新增 `test:account-read` 并接入 Release Validation。
+- PR #98 已通过综合 Release Validation、治理、iOS 变更检测与门禁、Cloudflare Pages 和 Vercel 预览检查，并于 2026-08-16 合并，merge commit `6dec17d`。
 
 ## TDD 证据
 
@@ -59,11 +60,17 @@
 - `npm run governance:check`：通过。
 - `npm run governance:arch`：通过，仅既有人工清单警告。
 - `git diff --check`：通过，仅 Git 行尾转换提示。
+- PR #98 远程门禁：综合 Release Validation、治理、iOS gate、Cloudflare Pages 和 Vercel 全部通过；iOS SwiftUI 构建因本 PR 无 iOS 改动按预期跳过。
 - 未执行生产查询、迁移、部署、真实数据写入或 TestFlight。
 
 ## 未验证与风险
 
-- 远程 Release Validation 与预览门禁尚未运行。
 - 未在已登录真实页面执行账户快速切换和分区错误视觉验收；本轮由 Feature/源边界测试与 Vite 构建覆盖。
 - 来源快照读取协作者仍复用 Store 的 `data_records` 与图片签名能力；它未进入 Account Repository，后续可在 Record/Wallet Snapshot 读取切片继续收窄。
 - wallet repair 仅移出隐式读取调用，最终替代入口不在本片实现；这会停止读取触发的自动余额回填，符合 ADR-026，但后续显式 repair 入口尚未建立。
+
+## 收口与下一步
+
+- PWA-065A 至 PWA-065E 已完成，不再扩展账户读取范围。
+- 下一任务是 PWA-066 账户创建、编辑、默认项和归档的原子边界只读评估；在评估 Spec、场景编号和测试映射完成前不修改业务代码。
+- wallet repair 继续作为独立后续切片，不并入 PWA-066。
