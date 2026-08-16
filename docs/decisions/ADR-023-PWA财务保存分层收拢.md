@@ -24,4 +24,3 @@
 - 不用 `detected_domain_key`、页面数组或按钮状态推断数据库写入结果。
 - 不把 staging、待补全、补绑和 manual/edit 合成一个万能 save 方法。
 - 不把 concurrent dedupe 宣称为端到端幂等。
-
