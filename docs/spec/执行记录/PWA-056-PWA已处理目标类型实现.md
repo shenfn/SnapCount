@@ -80,6 +80,8 @@
 - Release Validation `PWA, Edge, migrations, and Shadow`：通过（1 分 15 秒）。
 - PostgreSQL job 已连续执行新迁移两次，并通过历史唯一/零/多命中、跨用户、字段约束、首次归档和幂等自愈 fixture。
 - Governance Validation、iOS change detection/gate、Cloudflare Pages 与 Vercel：通过；本轮无 iOS 代码，SwiftUI build 按规则跳过。
+- CI 证据提交 `f424010` 后第二轮全门禁再次通过；Release Validation 为 1 分 13 秒。
+- PR #85 已合并，merge commit `24b4761`。
 
 ## 未解决风险
 
@@ -91,4 +93,5 @@
 ## 对应提交
 
 - 实现提交：`f31ad16`。
-- PR：#85。
+- CI 证据提交：`f424010`。
+- PR：#85，已合并为 `24b4761`。
