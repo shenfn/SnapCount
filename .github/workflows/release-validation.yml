@@ -250,6 +250,19 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260808120000_finance_occurred_at_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-finance-occurred-at-migration.sql
 
+      - name: Execute staging archive migration contract
+        env:
+          PGROOT: postgresql://postgres:security-test@localhost:5432/postgres
+          PGURL: postgresql://postgres:security-test@localhost:5432/staging_archive_contract
+        run: |
+          psql "$PGROOT" -v ON_ERROR_STOP=1 -c "create database staging_archive_contract"
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-finance-occurred-at-migration-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260808120000_finance_occurred_at_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260808120000_finance_occurred_at_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816100000_archive_idempotency_domain_guard.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816100000_archive_idempotency_domain_guard.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-staging-archive-migration.sql
+
       - name: Execute security migrations
         env:
           PGURL: postgresql://postgres:security-test@localhost:5432/postgres
