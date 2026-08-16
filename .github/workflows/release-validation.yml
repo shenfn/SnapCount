@@ -67,6 +67,9 @@ jobs:
       - name: Validate account binding boundary
         run: npm run test:account-binding
 
+      - name: Validate repayment boundary
+        run: npm run test:repayment
+
       - name: Install trace console dependencies
         working-directory: tools/ai-validation/ui/trace-console
         run: npm ci
@@ -267,6 +270,17 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260808120000_finance_occurred_at_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260808120000_finance_occurred_at_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-finance-occurred-at-migration.sql
+
+      - name: Execute repayment transaction contract
+        env:
+          PGROOT: postgresql://postgres:security-test@localhost:5432/postgres
+          PGURL: postgresql://postgres:security-test@localhost:5432/repayment_contract
+        run: |
+          psql "$PGROOT" -v ON_ERROR_STOP=1 -c "create database repayment_contract"
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-repayment-contract-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/048_revoke_liability_payment.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/049_fix_liability_repayment_reconfirm_order.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-repayment-contract.sql
 
       - name: Execute staging archive migration contract
         env:
