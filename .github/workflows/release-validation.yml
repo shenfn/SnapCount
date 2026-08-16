@@ -285,6 +285,17 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/049_fix_liability_repayment_reconfirm_order.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-repayment-contract.sql
 
+      - name: Execute account management transaction contract
+        env:
+          PGROOT: postgresql://postgres:security-test@localhost:5432/postgres
+          PGURL: postgresql://postgres:security-test@localhost:5432/account_management_contract
+        run: |
+          psql "$PGROOT" -v ON_ERROR_STOP=1 -c "create database account_management_contract"
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-account-management-contract-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816160000_account_management_atomic_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816160000_account_management_atomic_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-account-management-contract.sql
+
       - name: Execute staging archive migration contract
         env:
           PGROOT: postgresql://postgres:security-test@localhost:5432/postgres

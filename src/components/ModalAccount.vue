@@ -83,12 +83,6 @@
           </label>
         </div>
 
-        <div v-if="store.accountModal.mode === 'edit'" class="sel-section default-row" style="margin-top:14px">
-          <label class="default-row-item">
-            <input type="checkbox" v-model="store.accountModal.isArchived">
-            <span>归档（隐藏于候选列表）</span>
-          </label>
-        </div>
       </div>
 
       <div class="sheet-footer">

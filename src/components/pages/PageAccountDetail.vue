@@ -23,6 +23,21 @@
         <div class="account-hero-mark">{{ isLiability ? '还' : '钱' }}</div>
       </section>
 
+      <section class="account-source-card account-management-panel">
+        <div class="account-source-main">
+          <div class="account-source-title">{{ account.isArchived ? '该账户已归档' : '账户使用状态' }}</div>
+          <div v-if="account.isArchived" class="account-source-summary">恢复不会自动还原默认项或自动扣款关系。</div>
+          <div v-else class="account-source-summary">归档会保留余额、流水和还款历史，并清除默认项与未来自动扣款引用。</div>
+        </div>
+        <button
+          class="wallet-snapshot-action-btn secondary"
+          :disabled="store.isActionPending('account')"
+          @click="store.archiveAccount(account, !account.isArchived)"
+        >
+          {{ store.isActionPending('account') ? '处理中...' : (account.isArchived ? '恢复账户' : '归档账户') }}
+        </button>
+      </section>
+
       <section v-if="sourceSnapshot" class="account-source-card">
         <div class="account-source-main">
           <div class="wallet-account-section-title">来源快照</div>

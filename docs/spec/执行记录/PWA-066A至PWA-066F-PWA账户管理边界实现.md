@@ -6,7 +6,7 @@
 >
 > 分支：`feature/PWA账户管理边界实现`
 >
-> 状态：正式 Spec 已建立，待 PostgreSQL 红灯
+> 状态：本地实现与回归已完成，待远程 PostgreSQL 17 行为验证
 
 ## 当前范围
 
@@ -21,7 +21,12 @@
 
 - 已读取 TDD 规范、账户管理边界评估、ADR-027 和收口交接。
 - 已建立正式 Spec、文件范围、非目标、数据库契约、测试层与完成定义。
-- 业务代码、migration 和测试尚未修改。
+- 已新增 PostgreSQL fixture/assertion、静态 migration 契约和 Release Validation PostgreSQL 17 job 接线。
+- `npm run test:account-management-contract` 已确认有效红灯：仅因目标文件 `supabase/migrations/20260816160000_account_management_atomic_contract.sql` 不存在而以 `ENOENT` 失败。
+- 已实现存量默认规范化、旧客户端兼容 trigger、partial unique/check、`save_account`、`set_account_archived`、权限和迁移幂等脚本。
+- Account Repository 已独占两个 RPC transport；Account Management Feature 已实现同命令 Promise 复用、冲突、reset/用户切换 stale 和 accepted/refresh 分层。
+- Store 已移除账户管理直写与 `unsetOtherDefaults`，canonical account 同步列表和当前详情；modal 不再混合归档，wallet/详情新增已归档列表和恢复出口。
+- PWA-066F 源边界测试曾因 modal 仍含归档复选框而有效红灯，最小页面接线后转绿。
 
 ## 基线
 
@@ -32,12 +37,23 @@
 
 ## 下一步
 
-1. 新增 PostgreSQL fixture/assertion 与 Release Validation job。
-2. 在目标 migration 缺失时确认 PWA-066A/PWA-066B 有效红灯。
-3. 红灯成立后实现最小 migration，不提前修改 Repository 或页面。
+1. 提交并推送当前分支，创建 PR。
+2. 由 GitHub PostgreSQL 17 job 连续执行 migration 两次并运行行为 assertions。
+3. 全部门禁通过后合并，再建立独立收口任务；不在本分支进入 iOS A4。
 
 ## 未验证与风险
 
-- canonical RPC、trigger、约束和 PWA 接线均未实现。
-- 本机是否具备 PostgreSQL/Docker 运行环境尚未确认；环境失败不得冒充业务红灯。
+- 本机没有可用 PostgreSQL/Docker 行为环境；当前只有静态 migration 契约通过，SQL 真实执行必须以 GitHub PostgreSQL 17 job 为准。
 - 生产数据现状未知，未执行生产查询或写入。
+
+## 本地验证
+
+- `npm run test:account-management-contract`：通过。
+- `npm run test:account-management`：18 项通过。
+- `npm run test:account-read`：19 项通过。
+- `npm run test:repayment`：17 项通过。
+- `npm run test:account-binding`：11 项通过。
+- `npm run test:finance-save`：16 项通过。
+- `npm run build`：通过；仅既有 `vconsole eval` 与 bundle size 警告。
+- `npm run governance:check`、`npm run governance:arch`：通过；架构检查仅既有人工清单警告。
+- `git diff --check`：通过；仅工作区行尾转换提示。

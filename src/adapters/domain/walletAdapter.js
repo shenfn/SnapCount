@@ -179,8 +179,10 @@ export function getRecentRecords(store, domain, limit = 8) {
 }
 
 export function getAccountSections(store) {
-  const { assets, liabilities } = splitAccounts(store.accounts?.value || [])
-  return [
+  const accounts = store.accounts?.value || []
+  const { assets, liabilities } = splitAccounts(accounts)
+  const archived = accounts.filter(account => account.isArchived)
+  const sections = [
     {
       key: 'assets',
       title: '资产账户',
@@ -208,6 +210,22 @@ export function getAccountSections(store) {
       })),
     },
   ]
+  if (archived.length) {
+    sections.push({
+      key: 'archived',
+      title: '已归档账户',
+      empty: '',
+      items: archived.map(account => ({
+        id: account.id,
+        title: accountTitle(account),
+        subtitle: `${account.institution || account.type} · 可进入详情恢复`,
+        value: formatAccountCurrency(account.currentBalance),
+        snapshot: accountSnapshotLabel(account),
+        raw: account,
+      })),
+    })
+  }
+  return sections
 }
 
 export default {
