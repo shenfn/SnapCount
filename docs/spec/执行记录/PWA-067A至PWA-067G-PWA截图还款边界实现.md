@@ -6,7 +6,7 @@
 >
 > 分支：`feature/PWA截图还款边界实现`
 >
-> 状态：实现与 PostgreSQL 17 远程事务验证通过，待 PR #105 合并
+> 状态：已完成
 
 ## 当前范围
 
@@ -60,13 +60,15 @@
 
 - PR #105 首轮 8 项成功、1 项按路径跳过、0 失败；Release Validation run `31943619573` 对应提交 `7d99247`。
 - run 第 68 步 `Execute screenshot repayment transaction contract` 已在 PostgreSQL 17 实际成功，migration 语法、权限、触发器余额、幂等和双次执行均有远程证据。
-- 当前补证提交仍需第二轮 PR 门禁；在 PR 合并前不把 PWA-067 标记为已完成。
+- 补证提交 `1e6d69f` 的第二轮 Release Validation run `31943782706` 再次通过 PostgreSQL 17 transaction step，全部适用门禁通过。
+- PR #105 已合并，merge commit `8fc67d2e0b5b2c5d0ccb4ccf7c20ed327db6e49b`。
 - 未执行生产 migration、生产查询、部署、真实数据写入或 TestFlight。
 
 ## 下一步
 
-1. 推送远程证据提交并等待 PR #105 第二轮全部门禁。
-2. PR 合并后建立纯文档收口；在此之前不开始 PWA-068。
+1. 从合并后的最新 `origin/main@8fc67d2` 建立 `docs/PWA钱包快照边界评估`。
+2. 只读评估 PWA-068 的 wallet 快照创建、账户关联、cycle、余额校准、repair 和 `evidence_record_id` 原子边界。
+3. 评估结论合并前不建立实现 Spec、不修改业务代码；PWA-069 流水 helper 与 iOS 继续冻结。
 
 ## 发布边界
 
