@@ -13,7 +13,6 @@
       "mode": "ratchet",
       "scope": "src/components/**/*.{vue,js,ts}",
       "known": [
-        "src/components/pages/AuthPage.vue:../../lib/supabase",
         "src/components/pages/PageSettings.vue:../../lib/supabase",
         "src/components/pages/PageSettings.vue:fetch("
       ],
