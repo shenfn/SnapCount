@@ -41,7 +41,7 @@ import { createAuthRepository } from '../repositories/authRepository'
 import { createSessionState } from '../features/auth/createSessionState'
 import { createStagingRepository } from '../repositories/stagingRepository'
 import { createRecordRepository, mapDataRecordRow, mapIncomeRow } from '../repositories/recordRepository'
-import { createAccountRepository, mapRepaymentCycleRow } from '../repositories/accountRepository'
+import { createAccountRepository } from '../repositories/accountRepository'
 import { createStagingRetryFeature } from '../features/staging/createStagingRetryFeature'
 import { createStagingArchiveFeature } from '../features/staging/createStagingArchiveFeature'
 import { createStagingDiscardFeature } from '../features/staging/createStagingDiscardFeature'
@@ -49,6 +49,7 @@ import { createFinanceSaveFeature } from '../features/finance/createFinanceSaveF
 import { createAccountBindingFeature } from '../features/finance/createAccountBindingFeature'
 import { createRepaymentFeature } from '../features/accounts/createRepaymentFeature'
 import { createScreenshotRepaymentFeature } from '../features/accounts/createScreenshotRepaymentFeature'
+import { createWalletSnapshotFeature } from '../features/accounts/createWalletSnapshotFeature'
 import { buildScreenshotRepaymentCandidate } from '../features/accounts/buildScreenshotRepaymentCandidate'
 import { createAccountDetailFeature } from '../features/accounts/createAccountDetailFeature'
 import { createAccountManagementFeature } from '../features/accounts/createAccountManagementFeature'
@@ -105,7 +106,6 @@ export function useStore() {
   const unboundRecords = ref({ expenses: [], incomes: [] })
   const unboundRecordsLoading = ref(false)
   const unboundRecordFilter = ref('all')
-  const walletAccountCreatingSourceIds = new Set()
   let stagingRetryFeature = null
   let stagingArchiveFeature = null
   let stagingDiscardFeature = null
@@ -113,6 +113,7 @@ export function useStore() {
   let accountBindingFeature = null
   let repaymentFeature = null
   let screenshotRepaymentFeature = null
+  let walletSnapshotFeature = null
   let accountDetailFeature = null
   let accountManagementFeature = null
   let accountCommandSequence = 0
@@ -277,6 +278,10 @@ export function useStore() {
     getCurrentUserId: () => currentUserId.value,
   })
   screenshotRepaymentFeature = createScreenshotRepaymentFeature({
+    repository: accountRepository,
+    getCurrentUserId: () => currentUserId.value,
+  })
+  walletSnapshotFeature = createWalletSnapshotFeature({
     repository: accountRepository,
     getCurrentUserId: () => currentUserId.value,
   })
@@ -543,6 +548,7 @@ export function useStore() {
     accountBindingFeature.reset()
     repaymentFeature.reset()
     screenshotRepaymentFeature.reset()
+    walletSnapshotFeature.reset()
     accountDetailFeature.reset()
     accountManagementFeature.reset()
     bills.value = []
@@ -566,7 +572,6 @@ export function useStore() {
     accountDetailState.value = { status: 'idle', identity: null, sections: {}, error: null }
     unboundRecords.value = { expenses: [], incomes: [] }
     unboundRecordsLoading.value = false
-    walletAccountCreatingSourceIds.clear()
     dailySummary.value = []
     dailySummaryLoading.value = false
     dailySummaryError.value = ''
@@ -743,98 +748,6 @@ export function useStore() {
       }))
     }
     Promise.allSettled(updates).catch(error => console.warn('更新个人财务词表失败:', error?.message || error))
-  }
-
-  function normalizeMonthKey(value) {
-    const text = String(value || '').trim()
-    const match = text.match(/^(\d{4})[-/年](\d{1,2})/)
-    if (!match) return null
-    const month = Number(match[2])
-    if (!Number.isFinite(month) || month < 1 || month > 12) return null
-    return `${match[1]}-${String(month).padStart(2, '0')}`
-  }
-
-  function dateDay(value) {
-    const text = String(value || '').trim()
-    const match = text.match(/^\d{4}-\d{2}-(\d{2})$/)
-    if (!match) return null
-    const day = Number(match[1])
-    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : null
-  }
-
-  function walletSnapshotCycleMonth(record) {
-    const payload = record?.payload || {}
-    return normalizeMonthKey(payload.cycle_month)
-      || normalizeMonthKey(payload.statement_month)
-      || normalizeMonthKey(payload.bill_month)
-      || normalizeMonthKey(payload.due_date)
-      || normalizeMonthKey(record?.occurredAt)
-      || normalizeMonthKey(record?.createdAt)
-  }
-
-  function walletSnapshotPaymentDueDay(record) {
-    const payload = record?.payload || {}
-    const dueDateDay = dateDay(payload.due_date)
-    if (dueDateDay) return dueDateDay
-    const raw = payload.payment_due_day ?? payload.due_day ?? payload.repayment_day
-    const day = Number(raw)
-    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : null
-  }
-
-  function walletSnapshotBillDay(record) {
-    const payload = record?.payload || {}
-    const day = Number(payload.bill_day)
-    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : null
-  }
-
-  function walletSnapshotStatementDate(record, key) {
-    const payload = record?.payload || {}
-    const value = String(payload?.[key] || '').trim()
-    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null
-  }
-
-  function walletSnapshotDueDate(record) {
-    const payload = record?.payload || {}
-    const dueDate = String(payload.due_date || '').trim()
-    return /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? dueDate : null
-  }
-
-  function dueDateFromMonthAndDay(monthKey, day) {
-    if (!monthKey || !day) return null
-    const [yearText, monthText] = monthKey.split('-')
-    const year = Number(yearText)
-    const month = Number(monthText)
-    const dueDay = Number(day)
-    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(dueDay)) return null
-    const lastDay = new Date(year, month, 0).getDate()
-    return `${monthKey}-${String(Math.min(Math.max(dueDay, 1), lastDay)).padStart(2, '0')}`
-  }
-
-  function accountPaymentDueDay(accountId) {
-    const account = accounts.value.find(item => item.id === accountId)
-    const day = Number(account?.paymentDueDay ?? account?.payment_due_day)
-    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : null
-  }
-
-  function walletSnapshotConfidence(record) {
-    const candidates = [
-      record?.confidence,
-      record?.accountConfidence,
-      record?.payload?.confidence,
-      record?.payload?.time_context?.confidence,
-    ]
-    for (const candidate of candidates) {
-      const value = Number(candidate)
-      if (Number.isFinite(value) && value >= 0) return Math.min(value, 1)
-    }
-    return null
-  }
-
-  function repaymentStatusFromWalletSnapshot(record) {
-    const status = String(record?.payload?.status || '').trim()
-    if (status === 'paid') return 'paid'
-    if (status === 'ignored') return 'ignored'
-    return 'pending'
   }
 
   let lastRefreshTs = 0
@@ -3505,294 +3418,97 @@ export function useStore() {
     })
   }
 
-  function walletSnapshotKindOf(record) {
-    const payload = record?.payload || {}
-    if (payload.account_snapshot_kind === 'asset' || payload.account_snapshot_kind === 'liability') return payload.account_snapshot_kind
-    return payload.record_kind === 'liability_snapshot' ? 'liability' : 'asset'
+  function convergeWalletSnapshot(result) {
+    const accountIndex = accounts.value.findIndex(item => item.id === result.account.id)
+    if (accountIndex >= 0) accounts.value[accountIndex] = result.account
+    else accounts.value.unshift(result.account)
+
+    if (result.cycle?.id) {
+      const cycleIndex = repaymentCycles.value.findIndex(item => item.id === result.cycle.id)
+      if (cycleIndex >= 0) repaymentCycles.value[cycleIndex] = result.cycle
+      else repaymentCycles.value.unshift(result.cycle)
+    }
+    if (selectedAccount.value?.id === result.account.id) {
+      selectedAccount.value = result.account
+      if (result.payment?.id && !selectedAccountPayments.value.some(item => item.id === result.payment.id)) {
+        selectedAccountPayments.value.unshift(result.payment)
+      }
+    }
+
+    const recordIndex = dataRecords.value.findIndex(item => item.id === result.recordId)
+    if (recordIndex >= 0) {
+      const current = dataRecords.value[recordIndex]
+      dataRecords.value[recordIndex] = {
+        ...current,
+        payload: {
+          ...(current.payload || {}),
+          linked_account_id: result.linkedAccountId,
+        },
+      }
+    }
+    invalidateRecordExpressionPlan(result.recordId)
   }
 
-  function accountTypeFromWalletSnapshot(record) {
-    const payload = record?.payload || {}
-    const normalized = normalizeAccountType(payload.account_type)
-    if (normalized !== 'other') return normalized
-    return walletSnapshotKindOf(record) === 'liability' ? 'credit_line' : 'wallet_balance'
+  async function refreshWalletSnapshotViews(userId) {
+    const result = await loadData(0, true)
+    if (currentUserId.value !== userId) return { status: 'stale' }
+    if (!result?.ok) throw new Error(result?.error?.message || '账户或记录刷新失败')
+    return { status: 'accepted' }
   }
 
-  function amountFromWalletSnapshot(record) {
-    const payload = record?.payload || {}
-    const value = payload.snapshot_balance ?? payload.amount
-    const amount = Number(value)
-    return Number.isFinite(amount) && amount >= 0 ? amount : 0
-  }
-
-  async function upsertRepaymentCycleFromWalletSnapshot(record, accountId) {
-    if (!record || !accountId || walletSnapshotKindOf(record) !== 'liability') return
-    const cycleMonth = walletSnapshotCycleMonth(record)
-    if (!cycleMonth) return
-    const amount = amountFromWalletSnapshot(record)
-    if (amount <= 0) return
-    const status = repaymentStatusFromWalletSnapshot(record)
-    const dueDate = walletSnapshotDueDate(record)
-      || dueDateFromMonthAndDay(cycleMonth, walletSnapshotPaymentDueDay(record))
-      || dueDateFromMonthAndDay(cycleMonth, accountPaymentDueDay(accountId))
-    const statementStartDate = walletSnapshotStatementDate(record, 'statement_start_date')
-    const statementEndDate = walletSnapshotStatementDate(record, 'statement_end_date')
-    const paidAmount = status === 'paid' ? amount : 0
-    const remainingAmount = status === 'paid' ? 0 : amount
-    const confidence = walletSnapshotConfidence(record)
-    const { data, error } = await sb.from('account_repayment_cycles')
-      .upsert({
-        user_id: currentUserId.value,
-        account_id: accountId,
-        cycle_month: cycleMonth,
-        statement_start_date: statementStartDate,
-        statement_end_date: statementEndDate,
-        due_date: dueDate,
-        statement_amount: amount,
-        paid_amount: paidAmount,
-        remaining_amount: remainingAmount,
-        carried_over_amount: 0,
-        status,
-        source: 'screenshot',
-        evidence_record_id: record.id,
-        confidence,
-        statement_source_priority: 90,
-        original_statement_amount: amount,
-        note: status === 'paid' ? '来源快照显示已还款' : '来源快照生成待还周期',
-      }, { onConflict: 'account_id,cycle_month' })
-      .select('*')
-      .single()
-    if (error) {
-      console.warn('写入快照还款周期失败:', error.message)
+  function reportWalletSnapshotResult(result, successMessage) {
+    if (result.status === 'stale') return
+    if (result.status !== 'accepted') {
+      const messages = {
+        wallet_snapshot_conflict: '这条快照正在执行另一项关联，请稍后再试',
+        snapshot_link_conflict: '这条快照已经关联到其他账户',
+        account_kind_mismatch: '快照类型与目标账户不兼容',
+        account_archived: '已归档账户不能接收快照',
+      }
+      showFlash('快照处理失败：' + (messages[result.reason] || humanizeDbError(result.error || result.reason)))
       return
     }
-    const mapped = mapRepaymentCycleRow(data)
-    const idx = repaymentCycles.value.findIndex(item => item.id === mapped.id)
-    if (idx >= 0) repaymentCycles.value[idx] = mapped
-    else repaymentCycles.value.unshift(mapped)
-  }
-
-  async function reconcileLiabilityAccountFromWalletSnapshot(record, accountId) {
-    if (!record || !accountId || walletSnapshotKindOf(record) !== 'liability') return false
-    const amount = amountFromWalletSnapshot(record)
-    const account = accounts.value.find(item => item.id === accountId)
-    const current = Number(account?.currentBalance ?? account?.current_balance ?? 0)
-    if (!Number.isFinite(amount) || !Number.isFinite(current)) return false
-    const delta = Math.round((amount - current) * 100) / 100
-    if (Math.abs(delta) < 0.01) return false
-    const direction = delta > 0 ? 'in' : 'out'
-    await upsertAccountEntry({
-      accountId,
-      direction,
-      amount: Math.abs(delta),
-      entryType: 'adjustment',
-      sourceTable: 'data_records',
-      sourceId: record.id,
-      occurredAt: record.occurredAt || record.createdAt || new Date().toISOString(),
-      note: `由负债快照校准当前总欠款至 ¥${amount.toFixed(2)}`,
-    })
-    await sb.from('accounts')
-      .update({ last_reconciled_at: record.occurredAt || record.createdAt || new Date().toISOString() })
-      .eq('id', accountId)
-    return true
+    if (result.reason === 'needs_confirmation') {
+      showFlash('账户已关联，账期或还款需要确认')
+    } else if (result.refreshStatus === 'failed') {
+      showFlash('账户已关联，但列表刷新失败，请稍后刷新页面')
+    } else {
+      showFlash(successMessage)
+    }
   }
 
   async function createAccountFromWalletSnapshot(record) {
     if (!record || record.domainKey !== 'wallet') {
-      showFlash('只能从钱包快照创建账户')
-      return
+      const result = { status: 'rejected', reason: 'invalid_input' }
+      reportWalletSnapshotResult(result, '')
+      return result
     }
-    if (!currentUserId.value) {
-      showFlash('请先登录后再创建账户')
-      return
-    }
-    const payload = record.payload || {}
-    if (payload.linked_account_id) {
-      showFlash('这条快照已经关联账户')
-      return
-    }
-    if (walletAccountCreatingSourceIds.has(record.id)) {
-      showFlash('账户正在创建中，请勿重复点击')
-      return
-    }
-    const localExisting = accounts.value.find(account => account.sourceRecordTable === 'data_records' && account.sourceRecordId === record.id)
-    if (localExisting) {
-      await linkWalletSnapshotToAccount(record, localExisting.id)
-      return
-    }
-    const amount = amountFromWalletSnapshot(record)
-    const now = new Date().toISOString()
-    const snapshotAt = record.occurredAt || record.createdAt || now
-    const isLiabilitySnapshot = walletSnapshotKindOf(record) === 'liability'
-    const billDay = isLiabilitySnapshot ? walletSnapshotBillDay(record) : null
-    const paymentDueDay = isLiabilitySnapshot ? walletSnapshotPaymentDueDay(record) : null
-    const body = {
-      user_id: currentUserId.value,
-      name: payload.account_name || record.title || '未命名账户',
-      type: accountTypeFromWalletSnapshot(record),
-      institution: payload.institution || payload.account_name || null,
-      last4: payload.last4 && /^\d{4}$/.test(String(payload.last4)) ? String(payload.last4) : null,
-      currency: 'CNY',
-      initial_balance: amount,
-      current_balance: amount,
-      snapshot_balance: amount,
-      snapshot_at: snapshotAt,
-      source_record_table: 'data_records',
-      source_record_id: record.id,
-    }
-    if (isLiabilitySnapshot) {
-      if (billDay) body.bill_day = billDay
-      if (paymentDueDay) body.payment_due_day = paymentDueDay
-    }
-
-    walletAccountCreatingSourceIds.add(record.id)
-    try {
-      const { data: existingRows, error: existingErr } = await sb.from('accounts')
-        .select('*')
-        .eq('source_record_table', 'data_records')
-        .eq('source_record_id', record.id)
-        .eq('user_id', currentUserId.value)
-        .order('created_at', { ascending: true })
-        .limit(1)
-      if (existingErr) {
-        showError('检查账户是否已存在失败：' + humanizeDbError(existingErr))
-        return
-      }
-      if (existingRows?.length) {
-        const existingAccount = mapAccountRow(existingRows[0])
-        if (!accounts.value.some(account => account.id === existingAccount.id)) accounts.value.unshift(existingAccount)
-        await linkWalletSnapshotToAccount(record, existingAccount.id)
-        return
-      }
-
-      const { data: accountRow, error: accountErr } = await sb.from('accounts')
-        .insert(body)
-        .select('*')
-        .single()
-      if (accountErr) {
-        showError('创建账户失败：' + humanizeDbError(accountErr))
-        return
-      }
-
-      const linkedPayload = {
-        ...payload,
-        linked_account_id: accountRow.id,
-        account_snapshot_kind: walletSnapshotKindOf(record),
-        snapshot_balance: amount,
-      }
-      const { error: linkErr } = await sb.from('data_records')
-        .update({
-          linked_account_id: accountRow.id,
-          account_snapshot_kind: walletSnapshotKindOf(record),
-          snapshot_balance: amount,
-          snapshot_at: snapshotAt,
-          payload_jsonb: linkedPayload,
-        })
-        .eq('id', record.id)
-      if (linkErr) {
-        showError('账户已创建，但关联快照失败：' + humanizeDbError(linkErr))
-        await loadData(0, true)
-        return
-      }
-      invalidateRecordExpressionPlan(record.id)
-
-      accounts.value.unshift(mapAccountRow(accountRow))
-      await upsertRepaymentCycleFromWalletSnapshot(record, accountRow.id)
-      const idx = dataRecords.value.findIndex(item => item.id === record.id)
-      if (idx >= 0) {
-        dataRecords.value[idx] = {
-          ...dataRecords.value[idx],
-          payload: linkedPayload,
-        }
-      }
-      showFlash('✓ 已从快照创建账户')
-    } finally {
-      walletAccountCreatingSourceIds.delete(record.id)
-    }
+    const result = await walletSnapshotFeature.apply(
+      { operation: 'create', recordId: record.id },
+      {
+        onAccepted: convergeWalletSnapshot,
+        refresh: (_accepted, { userId }) => refreshWalletSnapshotViews(userId),
+      },
+    )
+    reportWalletSnapshotResult(result, '✓ 已从快照创建账户')
+    return result
   }
 
   async function linkWalletSnapshotToAccount(record, accountId) {
-    if (!record || record.domainKey !== 'wallet' || !accountId) return
-    const payload = record.payload || {}
-    const amount = amountFromWalletSnapshot(record)
-    const snapshotAt = record.occurredAt || record.createdAt || new Date().toISOString()
-    const isLiabilitySnapshot = walletSnapshotKindOf(record) === 'liability'
-    const billDay = isLiabilitySnapshot ? walletSnapshotBillDay(record) : null
-    const paymentDueDay = isLiabilitySnapshot ? walletSnapshotPaymentDueDay(record) : null
-    const { data: accountRow, error: accountReadError } = await sb.from('accounts')
-      .select('id,initial_balance,current_balance')
-      .eq('id', accountId)
-      .maybeSingle()
-    if (accountReadError || !accountRow) {
-      showError('读取账户余额失败：' + humanizeDbError(accountReadError || new Error('账户不存在')))
-      return
+    if (!record || record.domainKey !== 'wallet' || !accountId) {
+      const result = { status: 'rejected', reason: 'invalid_input' }
+      reportWalletSnapshotResult(result, '')
+      return result
     }
-    const { count: activeEntryCount, error: entryCountError } = await sb.from('account_entries')
-      .select('id', { count: 'exact', head: true })
-      .eq('account_id', accountId)
-      .eq('is_voided', false)
-      .neq('entry_type', 'snapshot_initialization')
-    if (entryCountError) console.warn('读取账户流水数量失败，将保留当前余额:', entryCountError.message)
-    const adoptAsOpeningBalance = shouldAdoptSnapshotAsOpeningBalance(
-      accountRow,
-      entryCountError ? 1 : (activeEntryCount || 0),
-      amount,
+    const result = await walletSnapshotFeature.apply(
+      { operation: 'link', recordId: record.id, accountId },
+      {
+        onAccepted: convergeWalletSnapshot,
+        refresh: (_accepted, { userId }) => refreshWalletSnapshotViews(userId),
+      },
     )
-    const accountPatch = {
-      snapshot_balance: amount,
-      snapshot_at: snapshotAt,
-      source_record_table: 'data_records',
-      source_record_id: record.id,
-      updated_at: new Date().toISOString(),
-    }
-    if (adoptAsOpeningBalance) {
-      accountPatch.initial_balance = amount
-      accountPatch.current_balance = amount
-    }
-    if (isLiabilitySnapshot) {
-      if (billDay) accountPatch.bill_day = billDay
-      if (paymentDueDay) accountPatch.payment_due_day = paymentDueDay
-    }
-
-    const { data: updatedAccount, error: accountErr } = await sb.from('accounts')
-      .update(accountPatch)
-      .eq('id', accountId)
-      .select('*')
-      .single()
-    if (accountErr) {
-      showError('更新账户快照失败：' + humanizeDbError(accountErr))
-      return
-    }
-    const accountIndex = accounts.value.findIndex(item => item.id === accountId)
-    if (accountIndex >= 0) accounts.value[accountIndex] = mapAccountRow(updatedAccount)
-
-    const linkedPayload = {
-      ...payload,
-      linked_account_id: accountId,
-      account_snapshot_kind: walletSnapshotKindOf(record),
-      snapshot_balance: amount,
-    }
-    const { error: recordErr } = await sb.from('data_records')
-      .update({
-        linked_account_id: accountId,
-        account_snapshot_kind: walletSnapshotKindOf(record),
-        snapshot_balance: amount,
-        snapshot_at: snapshotAt,
-        payload_jsonb: linkedPayload,
-      })
-      .eq('id', record.id)
-    if (recordErr) {
-      showError('账户快照已更新，但记录关联失败：' + humanizeDbError(recordErr))
-      await loadData(0, true)
-      return
-    }
-    invalidateRecordExpressionPlan(record.id)
-
-    await upsertRepaymentCycleFromWalletSnapshot(record, accountId)
-    await reconcileLiabilityAccountFromWalletSnapshot(record, accountId)
-    await refreshAccountsFromDB()
-    await loadData(0, true)
-    showFlash('✓ 已关联账户')
+    reportWalletSnapshotResult(result, '✓ 已关联账户')
+    return result
   }
 
   async function loadUnboundRecords({ expectedUserId = currentUserId.value, throwOnError = false } = {}) {

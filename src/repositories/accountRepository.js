@@ -12,6 +12,21 @@ function accountWriteReason(error) {
   return 'service_error'
 }
 
+function walletSnapshotReason(error) {
+  const message = errorMessage(error)
+  const stableReasons = [
+    'not_authenticated',
+    'wallet_snapshot_not_found',
+    'invalid_wallet_snapshot',
+    'account_not_found',
+    'account_archived',
+    'account_kind_mismatch',
+    'snapshot_link_conflict',
+    'repayment_evidence_conflict',
+  ]
+  return stableReasons.find(reason => message.includes(reason)) || 'service_error'
+}
+
 export function mapAccountEntryRow(row = {}) {
   return {
     id: row.id,
@@ -273,6 +288,39 @@ export function createAccountRepository({ client }) {
     }
   }
 
+  async function applyWalletSnapshot(command = {}) {
+    try {
+      const recordId = String(command.recordId || '').trim()
+      const accountId = String(command.accountId || '').trim() || null
+      const { data, error } = await client.rpc('apply_wallet_snapshot', {
+        p_record_id: recordId,
+        p_account_id: accountId,
+      })
+      if (error) {
+        return { status: 'failed', reason: walletSnapshotReason(error), account: null, cycle: null, payment: null, error: errorMessage(error) }
+      }
+      const row = firstRow(data)
+      const allowedOutcomes = new Set(['created', 'linked', 'replayed', 'needs_confirmation'])
+      if (!row || !allowedOutcomes.has(row.outcome) || row.record_id !== recordId
+          || !row.linked_account_id || !row.account?.id || row.account.id !== row.linked_account_id) {
+        return { status: 'failed', reason: 'invalid_response', account: null, cycle: null, payment: null, error: '钱包快照命令返回无效结果' }
+      }
+      return {
+        status: 'accepted',
+        reason: row.outcome,
+        recordId: row.record_id,
+        linkedAccountId: row.linked_account_id,
+        account: mapAccountRow(row.account),
+        cycle: row.cycle?.id ? mapRepaymentCycleRow(row.cycle) : null,
+        payment: row.payment?.id ? mapLiabilityPaymentRow(row.payment) : null,
+        balanceChanged: !!row.balance_changed,
+        reviewRequired: !!row.review_required,
+      }
+    } catch (error) {
+      return { status: 'failed', reason: walletSnapshotReason(error), account: null, cycle: null, payment: null, error: errorMessage(error) }
+    }
+  }
+
   return {
     listAccounts,
     listAccountEntries,
@@ -284,5 +332,6 @@ export function createAccountRepository({ client }) {
     revokePayment,
     saveAccount,
     setAccountArchived,
+    applyWalletSnapshot,
   }
 }

@@ -24,7 +24,7 @@ test('PWA-063A Store binding delegates to Account Binding Feature without direct
 
 test('PWA-063E batch delegates once and does not loop over single Store bindings', async () => {
   const source = await readFile('src/composables/useStore.js', 'utf8')
-  const batch = functionSlice(source, 'async function batchBindRecommendedUnboundRecords(', 'function walletSnapshotKindOf(')
+  const batch = functionSlice(source, 'async function batchBindRecommendedUnboundRecords(', 'function convergeWalletSnapshot(')
 
   assert.match(batch, /accountBindingFeature\.bindBatch\(/)
   assert.doesNotMatch(batch, /for \(const item of candidates\)/)

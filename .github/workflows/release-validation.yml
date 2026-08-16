@@ -73,6 +73,12 @@ jobs:
       - name: Validate account read boundary
         run: npm run test:account-read
 
+      - name: Validate wallet snapshot migration contract
+        run: npm run test:wallet-snapshot-contract
+
+      - name: Validate wallet snapshot boundary
+        run: npm run test:wallet-snapshot
+
       - name: Install trace console dependencies
         working-directory: tools/ai-validation/ui/trace-console
         run: npm ci
@@ -309,6 +315,18 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816190000_screenshot_repayment_atomic_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816190000_screenshot_repayment_atomic_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-screenshot-repayment-contract.sql
+
+      - name: Execute wallet snapshot transaction contract
+        env:
+          PGROOT: postgresql://postgres:security-test@localhost:5432/postgres
+          PGURL: postgresql://postgres:security-test@localhost:5432/wallet_snapshot_contract
+        run: |
+          psql "$PGROOT" -v ON_ERROR_STOP=1 -c "create database wallet_snapshot_contract"
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-wallet-snapshot-contract-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/049_fix_liability_repayment_reconfirm_order.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816210000_wallet_snapshot_atomic_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816210000_wallet_snapshot_atomic_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-wallet-snapshot-contract.sql
 
       - name: Execute staging archive migration contract
         env:
