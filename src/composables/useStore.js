@@ -48,6 +48,7 @@ import { createStagingDiscardFeature } from '../features/staging/createStagingDi
 import { createFinanceSaveFeature } from '../features/finance/createFinanceSaveFeature'
 import { createAccountBindingFeature } from '../features/finance/createAccountBindingFeature'
 import { createRepaymentFeature } from '../features/accounts/createRepaymentFeature'
+import { createAccountDetailFeature } from '../features/accounts/createAccountDetailFeature'
 import {
   resolveFinanceOccurrence,
 } from '../utils/financeOccurrence'
@@ -96,7 +97,8 @@ export function useStore() {
   const selectedAccountPayments = ref([])
   const selectedAccountSourceSnapshot = ref(null)
   const accountEntriesLoading = ref(false)
-  const liabilityPaymentsAvailable = ref(true)
+  const accountListState = ref({ status: 'idle', error: null })
+  const accountDetailState = ref({ status: 'idle', identity: null, sections: {}, error: null })
   const unboundRecords = ref({ expenses: [], incomes: [] })
   const unboundRecordsLoading = ref(false)
   const unboundRecordFilter = ref('all')
@@ -107,6 +109,7 @@ export function useStore() {
   let financeSaveFeature = null
   let accountBindingFeature = null
   let repaymentFeature = null
+  let accountDetailFeature = null
 
   const currentFilter = ref('all')
   const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
@@ -273,6 +276,15 @@ export function useStore() {
   repaymentFeature = createRepaymentFeature({
     repository: accountRepository,
     getCurrentUserId: () => currentUserId.value,
+  })
+  accountDetailFeature = createAccountDetailFeature({
+    accountRepository,
+    loadSourceSnapshot: account => loadAccountSourceSnapshot(account),
+    getCurrentUserId: () => currentUserId.value,
+    onStateChange: nextState => {
+      accountDetailState.value = nextState
+      accountEntriesLoading.value = nextState.sections?.entries?.status === 'loading'
+    },
   })
   stagingRetryFeature = createStagingRetryFeature({
     repository: stagingRepository,
@@ -515,6 +527,7 @@ export function useStore() {
     financeSaveFeature.reset()
     accountBindingFeature.reset()
     repaymentFeature.reset()
+    accountDetailFeature.reset()
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -532,6 +545,8 @@ export function useStore() {
     selectedAccountPayments.value = []
     selectedAccountSourceSnapshot.value = null
     accountEntriesLoading.value = false
+    accountListState.value = { status: 'idle', error: null }
+    accountDetailState.value = { status: 'idle', identity: null, sections: {}, error: null }
     unboundRecords.value = { expenses: [], incomes: [] }
     unboundRecordsLoading.value = false
     walletAccountCreatingSourceIds.clear()
@@ -980,10 +995,7 @@ export function useStore() {
         recordRepository.listIncomes({ start, end }),
         recordRepository.listRecentIncomes({ limit: 10 }),
         recordRepository.listUniversalRecords({ start, end, limit: 120 }),
-        sb.from('accounts')
-          .select('*')
-          .order('sort_order', { ascending: true })
-          .order('created_at', { ascending: true }),
+        accountRepository.listAccounts(),
         stagingRepository.listOpen({ limit: PENDING_QUEUE_QUERY_LIMIT }),
       ])
 
@@ -1015,13 +1027,12 @@ export function useStore() {
         dataRecords.value = universalResult.rows
       }
 
-      const { data: accountRows, error: accountErr } = accountResult
-      if (accountErr) {
-        console.warn('加载账户失败:', accountErr.message)
-        accounts.value = []
+      if (accountResult.status !== 'accepted') {
+        console.warn('加载账户失败:', accountResult.error)
+        accountListState.value = { status: 'failed', error: accountResult.error || '账户列表读取失败' }
       } else {
-        accounts.value = (accountRows || []).map(mapAccountRow)
-        await repairEmptyAccountSnapshotBalances(accounts.value)
+        accounts.value = accountResult.rows
+        accountListState.value = { status: 'accepted', error: null }
       }
 
       const stagingErr = stagingResult?.status === 'accepted' ? null : stagingResult
@@ -1074,22 +1085,14 @@ export function useStore() {
         })
       }
       const loadRepaymentCycles = async () => {
-        const { error: ensureCycleErr } = await sb.rpc('ensure_liability_repayment_cycles', {
-          p_cycle_month: cycleMonth,
-        })
-        if (ensureCycleErr) console.warn('生成还款周期失败:', ensureCycleErr.message)
-
-        const { data: cycleRows, error: cycleErr } = await sb.from('account_repayment_cycles')
-          .select('*')
-          .order('due_date', { ascending: true, nullsFirst: false })
-          .order('created_at', { ascending: false })
-          .limit(80)
+        const ensureResult = await accountRepository.ensureRepaymentCycles({ cycleMonth })
+        if (ensureResult.status !== 'accepted') console.warn('生成还款周期失败:', ensureResult.error)
+        const cycleResult = await accountRepository.listRepaymentCycles({ limit: 80 })
         if (!isCurrentDataLoad()) return
-        if (cycleErr) {
-          console.warn('加载还款周期失败:', cycleErr.message)
-          repaymentCycles.value = []
+        if (cycleResult.status !== 'accepted') {
+          console.warn('加载还款周期失败:', cycleResult.error)
         } else {
-          repaymentCycles.value = (cycleRows || []).map(mapRepaymentCycleRow)
+          repaymentCycles.value = cycleResult.rows
           stagingRecords.value = stagingRecords.value.map(record => ({
             ...record,
             repaymentCandidate: buildRepaymentCandidateForStaging(record),
@@ -2850,138 +2853,92 @@ export function useStore() {
     showFlash(archived ? '✓ 账户已归档' : '✓ 账户已恢复')
   }
 
-  function mapAccountEntryRow(row) {
-    return {
-      id: row.id,
-      accountId: row.account_id,
-      direction: row.direction,
-      amount: Number(row.amount || 0),
-      entryType: row.entry_type,
-      sourceTable: row.source_table || '',
-      sourceId: row.source_id || '',
-      occurredAt: row.occurred_at,
-      note: row.note || '',
-      isVoided: !!row.is_voided,
-      voidedReason: row.voided_reason || '',
-      createdAt: row.created_at,
-    }
-  }
-
-  function mapLiabilityPaymentRow(row) {
-    return {
-      id: row.id,
-      accountId: row.account_id,
-      statementId: row.statement_id || null,
-      debitAccountId: row.debit_account_id || null,
-      amount: Number(row.amount || 0),
-      overpaymentAmount: Number(row.overpayment_amount || 0),
-      paidAt: row.paid_at,
-      source: row.source || 'manual',
-      evidenceRecordId: row.evidence_record_id || null,
-      status: row.status || 'confirmed',
-      note: row.note || '',
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }
-  }
-
-  async function loadAccountEntries(accountId) {
-    if (!accountId) {
-      selectedAccountEntries.value = []
-      return
-    }
-    accountEntriesLoading.value = true
-    const { data, error } = await sb.from('account_entries')
-      .select('*')
-      .eq('account_id', accountId)
-      .order('occurred_at', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(50)
-    accountEntriesLoading.value = false
-    if (error) {
-      console.warn('加载账户流水失败:', error.message)
-      selectedAccountEntries.value = []
-      return
-    }
-    selectedAccountEntries.value = (data || []).map(mapAccountEntryRow)
-  }
-
-  async function loadAccountPayments(accountId) {
-    if (!accountId) {
-      selectedAccountPayments.value = []
-      return
-    }
-    if (!liabilityPaymentsAvailable.value) {
-      selectedAccountPayments.value = []
-      return
-    }
-    const { data, error } = await sb.from('liability_payments')
-      .select('*')
-      .eq('account_id', accountId)
-      .order('paid_at', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(30)
-    if (error) {
-      const missingTable = error.code === 'PGRST205' || /liability_payments|schema cache|Could not find the table/i.test(error.message || '')
-      if (missingTable) {
-        liabilityPaymentsAvailable.value = false
-        console.warn('还款记录表尚未迁移，已临时跳过读取 liability_payments')
-      } else {
-        console.warn('加载还款记录失败:', error.message)
-      }
-      selectedAccountPayments.value = []
-      return
-    }
-    selectedAccountPayments.value = (data || []).map(mapLiabilityPaymentRow)
-  }
-
   async function loadAccountSourceSnapshot(account) {
-    selectedAccountSourceSnapshot.value = null
-    if (!account?.sourceRecordId || account.sourceRecordTable !== 'data_records') return
+    if (!account?.sourceRecordId || account.sourceRecordTable !== 'data_records') {
+      return { status: 'accepted', reason: 'not_applicable', data: null, applicable: false }
+    }
     const { data, error } = await sb.from('data_records')
       .select('id,title,summary,occurred_at,source_image_path,source_image_hash,payload_jsonb,snapshot_balance,snapshot_at,account_snapshot_kind')
       .eq('id', account.sourceRecordId)
       .maybeSingle()
-    if (error || !data) {
-      if (error) console.warn('加载账户来源快照失败:', error.message)
-      return
+    if (error) {
+      console.warn('加载账户来源快照失败:', error.message)
+      return { status: 'failed', reason: 'service_error', data: null, error: error.message }
     }
+    if (!data) return { status: 'accepted', reason: 'not_found', data: null }
     const payload = data.payload_jsonb || {}
-    selectedAccountSourceSnapshot.value = {
+    const imageUrl = await getSignedImageUrl(data.source_image_path)
+    const snapshot = {
       id: data.id,
       title: data.title || '来源快照',
       summary: data.summary || '',
       occurredAt: data.occurred_at,
       imagePath: data.source_image_path || '',
-      imageUrl: await getSignedImageUrl(data.source_image_path),
+      imageUrl,
+      imageLoadError: Boolean(data.source_image_path && !imageUrl),
       imageHash: data.source_image_hash || '',
       snapshotBalance: data.snapshot_balance ?? payload.snapshot_balance ?? null,
       snapshotAt: data.snapshot_at || data.occurred_at || null,
       accountSnapshotKind: data.account_snapshot_kind || payload.account_snapshot_kind || null,
       payload,
     }
+    if (snapshot.imageLoadError) {
+      return { status: 'failed', reason: 'image_signing_failed', data: snapshot, error: '来源快照图片加载失败' }
+    }
+    return { status: 'accepted', reason: 'loaded', data: snapshot }
+  }
+
+  function applyAccountDetailResult(result) {
+    if (!result || result.status === 'stale' || !result.sections) return result
+    if (selectedAccount.value?.id !== result.accountId) return { status: 'stale', reason: 'account_changed' }
+    const { entries, payments, repaymentCycles: cycles, sourceSnapshot } = result.sections
+    if (entries.status === 'accepted' || entries.data.length) selectedAccountEntries.value = entries.data
+    if (payments.status === 'accepted' || payments.data.length) selectedAccountPayments.value = payments.data
+    if (cycles.status === 'accepted' || cycles.data.length) {
+      repaymentCycles.value = [
+        ...repaymentCycles.value.filter(cycle => cycle.accountId !== result.accountId),
+        ...cycles.data,
+      ]
+    }
+    if (sourceSnapshot.status === 'accepted' || sourceSnapshot.data) {
+      selectedAccountSourceSnapshot.value = sourceSnapshot.data
+    }
+    return result
+  }
+
+  async function loadAccountEntries(accountId) {
+    const account = accounts.value.find(item => item.id === accountId)
+      || (selectedAccount.value?.id === accountId ? selectedAccount.value : null)
+    if (!account) return { status: 'failed', reason: 'account_not_found' }
+    const cycleMonth = `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`
+    const result = await accountDetailFeature.load(account, {
+      ensureCycles: isLiabilityAccount(account),
+      cycleMonth,
+    })
+    if (result.status === 'stale') return result
+    return applyAccountDetailResult(result)
   }
 
   async function openAccountDetail(account) {
-    if (!account?.id) return
+    if (!account?.id) return { status: 'failed', reason: 'account_not_found' }
+    const accountChanged = selectedAccount.value?.id !== account.id
     selectedAccount.value = account
-    await Promise.all([
-      loadAccountEntries(account.id),
-      loadAccountPayments(account.id),
-      loadAccountSourceSnapshot(account),
-    ])
-    navigateTo('account-detail')
+    if (accountChanged) {
+      selectedAccountEntries.value = []
+      selectedAccountPayments.value = []
+      selectedAccountSourceSnapshot.value = null
+    }
+    const result = await loadAccountEntries(account.id)
+    if (result.status !== 'stale') navigateTo('account-detail')
+    return result
   }
 
   async function refreshAccountDetail() {
-    if (!selectedAccount.value?.id) return
+    if (!selectedAccount.value?.id) return { status: 'failed', reason: 'account_not_found' }
     const latest = accounts.value.find(account => account.id === selectedAccount.value.id)
     if (latest) selectedAccount.value = latest
-    await Promise.all([
-      loadAccountEntries(selectedAccount.value.id),
-      loadAccountPayments(selectedAccount.value.id),
-      loadAccountSourceSnapshot(selectedAccount.value),
-    ])
+    const result = await loadAccountEntries(selectedAccount.value.id)
+    return result
   }
 
   function convergeRepaymentCycle(cycle, { selectCycleMonth = false } = {}) {
@@ -2998,8 +2955,14 @@ export function useStore() {
   }
 
   async function refreshRepaymentAccounts(expectedUserId) {
-    await refreshAccountsFromDB({ expectedUserId, throwOnError: true })
-    if (selectedAccount.value?.id) await refreshAccountDetail()
+    const listResult = await refreshAccountsFromDB({ expectedUserId, throwOnError: true })
+    if (listResult.status === 'stale') throw new Error('账户列表刷新已过期')
+    if (selectedAccount.value?.id) {
+      const detailResult = await refreshAccountDetail()
+      if (detailResult.status !== 'accepted') {
+        throw new Error(detailResult.status === 'partial' ? '账户详情仅部分刷新成功' : '账户详情刷新失败')
+      }
+    }
   }
 
   async function confirmRepaymentCyclePaid(cycle, options = {}) {
@@ -3232,18 +3195,16 @@ export function useStore() {
   }
 
   async function refreshAccountsFromDB({ expectedUserId = currentUserId.value, throwOnError = false } = {}) {
-    const { data, error } = await sb.from('accounts')
-      .select('*')
-      .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true })
-    if (error) {
-      console.warn('刷新账户失败:', error.message)
-      if (throwOnError) throw error
-      return { status: 'failed', error: error.message }
+    const result = await accountRepository.listAccounts()
+    if (result.status !== 'accepted') {
+      console.warn('刷新账户失败:', result.error)
+      accountListState.value = { status: 'failed', error: result.error || '账户列表读取失败' }
+      if (throwOnError) throw new Error(result.error || '账户列表读取失败')
+      return { status: 'failed', error: result.error || '账户列表读取失败' }
     }
     if (expectedUserId && currentUserId.value !== expectedUserId) return { status: 'stale' }
-    accounts.value = (data || []).map(mapAccountRow)
-    await repairEmptyAccountSnapshotBalances(accounts.value)
+    accounts.value = result.rows
+    accountListState.value = { status: 'accepted', error: null }
     if (expectedUserId && currentUserId.value !== expectedUserId) return { status: 'stale' }
     return { status: 'accepted' }
   }
@@ -4142,6 +4103,7 @@ export function useStore() {
     loading, loadError, loadErrorDetail,
     bills, incomeRecords, recentIncomeRecords, transportRecords, stagingRecords, processedStagingRecords, dataRecords, accounts, financeVocabulary, repaymentCycles,
     selectedAccount, selectedAccountEntries, selectedAccountPayments, selectedAccountSourceSnapshot, accountEntriesLoading,
+    accountListState, accountDetailState,
     unboundRecords, unboundRecordsLoading, unboundRecordFilter,
     doneBills, pendingBills, filteredBills,
     recentEntries,
