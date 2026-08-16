@@ -118,6 +118,10 @@ const pwaStoreSource = await readFile(
   path.join(repoRoot, "src", "composables", "useStore.js"),
   "utf8",
 );
+const pwaStagingRepositorySource = await readFile(
+  path.join(repoRoot, "src", "repositories", "stagingRepository.js"),
+  "utf8",
+);
 const nativeDataSource = await readFile(
   path.join(repoRoot, "ios", "SnapCount", "Services", "NativeDataService.swift"),
   "utf8",
@@ -273,7 +277,8 @@ assert.doesNotMatch(receiptCleanupSource, /DEFAULT_UPLOAD_TOKEN|uploadToken\s*=\
 assert.match(receiptTestSource, /TEST_RECEIPT_ACCESS_TOKEN[\s\S]*TEST_RECEIPT_UPLOAD_TOKEN/);
 assert.match(receiptTestSource, /缺少测试身份/);
 const pwaDiscardSource = pwaStoreSource.match(/async function discardStagingRecord[\s\S]*?function toggleBatchMode/)?.[0] ?? "";
-assert.match(pwaDiscardSource, /sb\.rpc\('discard_staging_record'/);
+assert.match(pwaStagingRepositorySource, /client\.rpc\('discard_staging_record'/);
+assert.doesNotMatch(pwaDiscardSource, /sb\.rpc\('discard_staging_record'/);
 assert.doesNotMatch(pwaDiscardSource, /from\('staging_records'\)\.update/);
 assert.match(nativeDataSource, /func discardStagingRecord[\s\S]*name: "discard_staging_record"/);
 

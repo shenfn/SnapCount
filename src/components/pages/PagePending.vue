@@ -875,8 +875,8 @@ async function discardFromVerdict(record) {
   const previousIndex = activeVerdictIndex.value
   verdictBusy.value = true
   try {
-    await store.discardStagingRecord(record)
-    settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
+    const result = await store.discardStagingRecord(record)
+    if (result?.status === 'accepted') settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
   } finally {
     verdictBusy.value = false
   }

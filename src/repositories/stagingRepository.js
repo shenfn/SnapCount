@@ -172,5 +172,60 @@ export function createStagingRepository({
     }
   }
 
-  return { retry, archive }
+  async function discard(input = {}) {
+    const stagingId = String(input.stagingId || '').trim()
+    const reason = String(input.reason || 'user_discarded').trim() || 'user_discarded'
+    if (!stagingId) throw new Error('缺少中转记录编号')
+
+    let data
+    let error
+    try {
+      ({ data, error } = await client.rpc('discard_staging_record', {
+        p_staging_id: stagingId,
+        p_reason: reason,
+      }))
+    } catch (caught) {
+      return {
+        status: 'failed',
+        reason: 'network',
+        recordId: stagingId,
+        recordStillVisible: true,
+        error: errorMessage(caught),
+      }
+    }
+
+    if (error) {
+      return {
+        status: 'failed',
+        reason: 'service_error',
+        recordId: stagingId,
+        recordStillVisible: true,
+        error: errorMessage(error),
+      }
+    }
+
+    if (data?.status !== 'discarded') {
+      return {
+        status: 'failed',
+        reason: 'unexpected_response',
+        recordId: stagingId,
+        recordStillVisible: true,
+        error: '丢弃服务未返回完成状态',
+        payload: data,
+      }
+    }
+
+    return {
+      status: 'accepted',
+      reason: 'discarded',
+      recordId: data.staging_id || stagingId,
+      cleanupStatus: data.cleanup_status || null,
+      cleanupQueued: data.cleanup_queued === true,
+      bucketPath: data.bucket_path || null,
+      recordStillVisible: false,
+      payload: data,
+    }
+  }
+
+  return { retry, archive, discard }
 }
