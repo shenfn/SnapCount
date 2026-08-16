@@ -171,7 +171,6 @@
 
 <script setup>
 import { ref, provide, onMounted, onBeforeUnmount, computed } from 'vue'
-import { sb } from './lib/supabase'
 import { useStore } from './composables/useStore'
 import { usePullToRefresh } from './composables/usePullToRefresh'
 import AuthPage   from './components/pages/AuthPage.vue'
@@ -198,33 +197,8 @@ const store = useStore()
 provide('store', store)
 
 const fabOpen = ref(false)
-
-// 登录态：以 supabase 的 auth 事件为唯一真相源，避免冷启动时
-// getSession() 还未完成本地恢复就进入未登录态，或 AuthPage / App
-// 同时各调一次 loadData() 产生竞态。
-async function applySession(session) {
-  if (!session?.user) return
-  const switchingUser = Boolean(
-    store.currentUserId.value && store.currentUserId.value !== session.user.id,
-  )
-  if (switchingUser) store.resetUserData()
-  const sameUser = store.isLoggedIn.value && store.currentUserId.value === session.user.id
-  store.currentUserId.value = session.user.id
-  store.currentUserEmail.value = session.user.email || ''
-  store.isLoggedIn.value = true
-  if (!sameUser) {
-    store.navigateTo('home')
-    await store.loadData()
-  }
-}
-
-function handleSignedOut() {
-  store.resetUserData()
-  store.currentUserId.value = null
-  store.currentUserEmail.value = ''
-  store.isLoggedIn.value = false
-  store.navigateTo('home')
-}
+let authUnsubscribe = null
+let appUnmounted = false
 
 // 下拉刷新（全局生效，仅在页面滚到顶才会触发）
 const { pullDistance, refreshing, ptrActive } = usePullToRefresh({
@@ -261,25 +235,23 @@ function handleWindowFocus() {
 }
 
 onMounted(async () => {
-  // 先同步读一次作为快速路径（热启动 / session 已恢复的场景）
-  const { data } = await sb.auth.getSession()
-  await applySession(data?.session)
-
-  // 订阅后续变化：INITIAL_SESSION（冷启动恢复）/ SIGNED_IN /
-  // TOKEN_REFRESHED / SIGNED_OUT 都会走这里
-  sb.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT') {
-      handleSignedOut()
-    } else if (session) {
-      applySession(session)
-    }
-  })
+  try {
+    const unsubscribe = await store.initializeAuth()
+    if (appUnmounted) unsubscribe?.()
+    else authUnsubscribe = unsubscribe
+  } catch (error) {
+    console.error('认证初始化失败:', error)
+    store.showFlash('⚠️ 登录状态恢复失败，请刷新重试')
+  }
 
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('focus', handleWindowFocus)
 })
 
 onBeforeUnmount(() => {
+  appUnmounted = true
+  authUnsubscribe?.()
+  authUnsubscribe = null
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('focus', handleWindowFocus)
 })

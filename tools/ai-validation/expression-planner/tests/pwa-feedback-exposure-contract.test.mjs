@@ -299,12 +299,17 @@ test('visibility gate requires both viewport intersection and a visible document
 })
 
 test('direct SIGNED_IN user switches clear cached state before assigning the new user', async () => {
-  const app = await readFile(path.join(root, 'src/App.vue'), 'utf8')
-  const sessionStart = app.indexOf('async function applySession(session)')
-  const resetIndex = app.indexOf('store.resetUserData()', sessionStart)
-  const assignIndex = app.indexOf('store.currentUserId.value = session.user.id', sessionStart)
+  const [app, session] = await Promise.all([
+    readFile(path.join(root, 'src/App.vue'), 'utf8'),
+    readFile(path.join(root, 'src/features/auth/createSessionState.js'), 'utf8'),
+  ])
 
-  assert.match(app, /store\.currentUserId\.value\s*&&\s*store\.currentUserId\.value\s*!==\s*session\.user\.id/)
+  assert.match(app, /store\.initializeAuth\(\)/, 'App must initialize the single auth event entry')
+  const sessionStart = session.indexOf('async function applySession(session)')
+  const resetIndex = session.indexOf('resetUserData()', sessionStart)
+  const assignIndex = session.indexOf('setIdentity(user)', resetIndex)
+
+  assert.match(session, /activeUserId\s*&&\s*activeUserId\s*!==\s*userId/)
   assert.ok(sessionStart >= 0)
   assert.ok(resetIndex > sessionStart, 'user switching must clear the previous account cache')
   assert.ok(assignIndex > resetIndex, 'the cache must be cleared before assigning the new user id')

@@ -37,6 +37,8 @@ import { createExpressionPlanState } from '../features/expression/createExpressi
 import { createSettingsRepository } from '../repositories/settingsRepository'
 import { createSettingsState } from '../features/settings/createSettingsState'
 import { createDefaultSettingsState } from '../features/settings/settingsConfig'
+import { createAuthRepository } from '../repositories/authRepository'
+import { createSessionState } from '../features/auth/createSessionState'
 import {
   buildShanghaiOccurredAt,
   resolveFinanceOccurrence,
@@ -244,6 +246,23 @@ export function useStore() {
     state: reactive(createDefaultSettingsState()),
   })
   const { settingsState } = settingsFeature
+  const authRepository = createAuthRepository({ client: sb })
+  const sessionFeature = createSessionState({
+    getCurrentUserId: () => currentUserId.value,
+    setIdentity(user) {
+      currentUserId.value = user.id
+      currentUserEmail.value = user.email || ''
+      isLoggedIn.value = true
+    },
+    clearIdentity() {
+      currentUserId.value = null
+      currentUserEmail.value = ''
+      isLoggedIn.value = false
+    },
+    resetUserData,
+    navigateHome: () => navigateTo('home'),
+    loadData,
+  })
   const actionState = reactive({
     pendingEntry: false,
     income: false,
@@ -450,6 +469,7 @@ export function useStore() {
   })
 
   function resetUserData() {
+    loadDataRunId += 1
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -458,19 +478,50 @@ export function useStore() {
     stagingRecords.value = []
     processedStagingRecords.value = []
     dataRecords.value = []
+    accounts.value = []
     financeVocabulary.value = []
     financeVocabularyAvailable = true
     repaymentCycles.value = []
+    selectedAccount.value = null
+    selectedAccountEntries.value = []
+    selectedAccountPayments.value = []
     selectedAccountSourceSnapshot.value = null
+    accountEntriesLoading.value = false
+    unboundRecords.value = { expenses: [], incomes: [] }
+    unboundRecordsLoading.value = false
+    walletAccountCreatingSourceIds.clear()
+    dailySummary.value = []
+    dailySummaryLoading.value = false
+    dailySummaryError.value = ''
+    dailySummaryLoadedAt = 0
+    aiInsight.value = null
+    aiInsightLoading.value = false
+    aiInsightError.value = ''
+    aiInsightCached.value = false
+    signedImageUrlCache.clear()
+    signedImageUrlRequests.clear()
     loadError.value = ''
     loadErrorDetail.value = null
     loading.value = false
+    lastRefreshTs = 0
     selectedStagingIds.value = new Set()
     batchMode.value = false
     detailRecord.value = null
+    imgOverlay.open = false
+    imgOverlay.src = ''
     expressionPlanState.reset()
     activeDomainId.value = null
+    activeDateKey.value = ''
+    activeDayKind.value = 'all'
+    dailyCardVisibleCount.value = 8
     pageHistory.value = []
+    Object.keys(pageScrollPositions).forEach(key => delete pageScrollPositions[key])
+    pendingModal.open = false
+    incomeModal.open = false
+    expenseModal.open = false
+    universalModal.open = false
+    accountModal.open = false
+    deleteConfirm.open = false
     settingsFeature.reset()
     Object.keys(actionState).forEach((key) => {
       actionState[key] = false
@@ -499,6 +550,35 @@ export function useStore() {
       console.warn('加载用户设置失败:', result.error?.message || result.error)
     }
     return result
+  }
+
+  async function initializeAuth() {
+    const unsubscribe = authRepository.subscribe((event, nextSession) => {
+      void sessionFeature.handleAuthEvent(event, nextSession).catch(error => {
+        console.error('认证会话处理失败:', error)
+        showFlash('⚠️ 登录状态更新失败，请重试')
+      })
+    })
+    try {
+      const session = await authRepository.getSession()
+      await sessionFeature.applySession(session)
+      return unsubscribe
+    } catch (error) {
+      unsubscribe()
+      throw error
+    }
+  }
+
+  function signIn(email, password) {
+    return authRepository.signIn({ email, password })
+  }
+
+  function signUp(email, password, consent) {
+    return authRepository.signUp({ email, password, ...consent })
+  }
+
+  function signOut() {
+    return authRepository.signOut()
   }
 
   let financeVocabularyAvailable = true
@@ -849,6 +929,10 @@ export function useStore() {
 
   async function loadData(attempt = 0, silent = false, runId = null) {
     if (attempt === 0 || !runId) runId = ++loadDataRunId
+    const expectedUserId = currentUserId.value
+    const isCurrentDataLoad = () => (
+      runId === loadDataRunId && currentUserId.value === expectedUserId
+    )
     if (attempt === 0 && !silent) loading.value = true
     if (attempt === 0 && !silent) {
       loadError.value = ''
@@ -916,6 +1000,8 @@ export function useStore() {
           .order('created_at', { ascending: false })
           .limit(PENDING_QUEUE_QUERY_LIMIT),
       ])
+
+      if (!isCurrentDataLoad()) return { ok: false, stale: true }
 
       const { data: txs, error: txErr } = txResult
       if (txErr) throw new Error('账单查询失败: ' + txErr.message)
@@ -1001,14 +1087,13 @@ export function useStore() {
         processedStagingRecords.value = []
       }
 
-      const isCurrentRun = () => runId === loadDataRunId
       const cycleMonth = `${currentYear.value}-${String(currentMonth.value).padStart(2, '0')}`
       const hydratePendingBillImages = async () => {
         const pendingPaths = pendingBills.value
           .map(bill => bill.image_path || bill.image_url)
           .filter(Boolean)
         const imageUrlMap = await getSignedImageUrlMap(pendingPaths)
-        if (!isCurrentRun()) return
+        if (!isCurrentDataLoad()) return
         const hydratePendingBill = bill => {
           const imagePath = bill.image_path || bill.image_url || null
           const imageUrl = imagePath ? imageUrlMap[imagePath] || null : null
@@ -1026,7 +1111,7 @@ export function useStore() {
       }
       const hydrateStagingImages = async () => {
         const imageUrlMap = await getSignedImageUrlMap(stagingRows.map(r => r.image_path))
-        if (!isCurrentRun()) return
+        if (!isCurrentDataLoad()) return
         stagingRecords.value = stagingRecords.value.map(record => {
           const imageUrl = imageUrlMap[record.imagePath] || null
           return {
@@ -1047,7 +1132,7 @@ export function useStore() {
           .order('due_date', { ascending: true, nullsFirst: false })
           .order('created_at', { ascending: false })
           .limit(80)
-        if (!isCurrentRun()) return
+        if (!isCurrentDataLoad()) return
         if (cycleErr) {
           console.warn('加载还款周期失败:', cycleErr.message)
           repaymentCycles.value = []
@@ -1071,7 +1156,7 @@ export function useStore() {
         }
         const processedRows = processed || []
         const processedImageUrlMap = await getSignedImageUrlMap(processedRows.map(r => r.image_path))
-        if (!isCurrentRun()) return
+        if (!isCurrentDataLoad()) return
         processedStagingRecords.value = processedRows.map(r => {
           const imageUrl = processedImageUrlMap[r.image_path] || null
           return ({
@@ -1111,7 +1196,9 @@ export function useStore() {
         })
       })
       if (silent) await supplementalLoad
+      return { ok: true }
     } catch (e) {
+      if (!isCurrentDataLoad()) return { ok: false, stale: true, error: e }
       console.error('[loadData 异常]', e)
       // 优先使用 supabase.js 抛出的 FriendlyNetworkError 上的结构化信息：
       //   - friendly: { title, message, userAction[], code, retryable }
@@ -1136,7 +1223,7 @@ export function useStore() {
         await new Promise(r => setTimeout(r, delay))
         return loadData(attempt + 1, silent, runId)
       }
-      if (silent) return
+      if (silent) return { ok: false, error: e, silent: true }
       if (friendly) {
         // 有友好结构：同时填充 detail（供 UI 渲染指导步骤）和 string（向后兼容）
         loadErrorDetail.value = friendly
@@ -1148,8 +1235,9 @@ export function useStore() {
         loadErrorDetail.value = null
         loadError.value = `加载失败: ${tip}`
       }
+      return { ok: false, error: e }
     } finally {
-      if (attempt === 0 && !silent) loading.value = false
+      if (attempt === 0 && !silent && isCurrentDataLoad()) loading.value = false
     }
   }
 
@@ -4401,6 +4489,7 @@ export function useStore() {
     aiInsight, aiInsightLoading, aiInsightError, aiInsightCached,
     generateAiInsight, loadLatestAiInsight,
     loadData, resetUserData, changeMonth, showFlash,
+    initializeAuth, signIn, signUp, signOut,
     openPendingModal, closePendingModal, confirmEntry, confirmStagingRepayment,
     hasPendingChanges, resetPendingChanges,
     markPendingImageUnavailable,

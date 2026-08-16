@@ -29,7 +29,7 @@ test('PWA-009 settings consumers no longer query user_configs directly', async (
   assert.doesNotMatch(settings, /\.from\(['"]user_configs['"]\)/)
   assert.doesNotMatch(vision, /lib\/supabase|\.from\(['"]user_configs['"]\)/)
   assert.doesNotMatch(welcome, /lib\/supabase|\.from\(['"]user_configs['"]\)/)
-  assert.match(auth, /\.from\(['"]user_configs['"]\)/, 'registration config remains in the auth boundary')
+  assert.doesNotMatch(auth, /lib\/supabase|\.from\(['"]user_configs['"]\)/)
 })
 
 test('PWA-013 immediate image cleanup is gated by a successful retention save', async () => {

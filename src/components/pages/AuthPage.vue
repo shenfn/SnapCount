@@ -52,7 +52,6 @@
 
 <script setup>
 import { ref, inject } from 'vue'
-import { sb } from '../../lib/supabase'
 
 const store = inject('store')
 const mode = ref('login')
@@ -64,10 +63,7 @@ const acceptedTerms = ref(false)
 const acceptedSensitiveData = ref(false)
 const isWechatBrowser = /MicroMessenger/i.test(typeof navigator === 'undefined' ? '' : navigator.userAgent || '')
 
-// 登录态/会话恢复统一由 App.vue 的 onAuthStateChange 监听处理，
-// 这里不再自行调用 loadData()，避免与 App.vue 产生竞态。
-
-async function submit(attempt = 0) {
+async function submit() {
   loading.value = true
   errorMsg.value = ''
 
@@ -77,57 +73,23 @@ async function submit(attempt = 0) {
         errorMsg.value = '请先完成服务协议、隐私政策和敏感数据处理确认'
         return
       }
-      const acceptedAt = new Date().toISOString()
-      const { data, error } = await sb.auth.signUp({
-        email: email.value.trim(),
-        password: password.value,
-        options: {
-          data: {
-            legal_consent_at: acceptedAt,
-            sensitive_data_consent_at: acceptedAt,
-            terms_version: '2026-07-19',
-            privacy_version: '2026-07-22',
-          },
-        },
+      const result = await store.signUp(email.value, password.value, {
+        acceptedTerms: acceptedTerms.value,
+        acceptedSensitiveData: acceptedSensitiveData.value,
       })
-      if (error) throw error
-
-      if (data?.user) {
-        await sb.from('user_configs').upsert({
-          user_id: data.user.id,
-          plan: 'seed',
-          created_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' })
-        store.currentUserId.value = data.user.id
-        store.currentUserEmail.value = data.user.email || ''
-        store.isLoggedIn.value = true
-        store.showFlash('✓ 注册成功，已自动登录')
-        await store.loadData()
+      if (result?.user) {
+        store.showFlash(result.session ? '✓ 注册成功，已自动登录' : '✓ 注册成功，请检查邮箱完成登录')
       }
     } else {
-      const { data, error } = await sb.auth.signInWithPassword({
-        email: email.value.trim(),
-        password: password.value,
-      })
-      if (error) throw error
-
-      if (data?.user) {
-        store.currentUserId.value = data.user.id
-        store.currentUserEmail.value = data.user.email || ''
-        store.isLoggedIn.value = true
+      const result = await store.signIn(email.value, password.value)
+      if (result?.user) {
         store.showFlash('✓ 登录成功')
-        await store.loadData()
       }
     }
   } catch (e) {
-    if (e.message === 'Load failed' && attempt < 1) {
-      errorMsg.value = '网络波动，正在重试...'
-      await new Promise(r => setTimeout(r, 1500))
-      return submit(attempt + 1)
-    }
     errorMsg.value = e.message || '操作失败，请重试'
   } finally {
-    if (!errorMsg.value || !errorMsg.value.startsWith('网络波动')) loading.value = false
+    loading.value = false
   }
 }
 </script>
