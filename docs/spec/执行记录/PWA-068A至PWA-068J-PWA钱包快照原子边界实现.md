@@ -6,7 +6,7 @@
 >
 > 分支：`feature/PWA钱包快照原子边界`
 >
-> 状态：实现完成，PR #108 第四轮全部门禁通过
+> 状态：已完成并合并
 
 ## 当前范围
 
@@ -42,6 +42,8 @@
 - GitHub Actions run `31952369584`：`PWA, Edge, migrations, and Shadow` 通过，用时 1m21s。
 - PostgreSQL 17 已连续执行 `20260816210000_wallet_snapshot_atomic_contract.sql` 两次并通过完整 wallet snapshot 行为断言。
 - iOS 变更检测与 Build Gate、治理分支门禁、Vercel 和 Cloudflare Preview 均通过；本切片未修改 Swift，iOS app build 按规则跳过。
+- 最终证据提交 `0f9dee3` 的 GitHub Actions run `31952491558` 再次全部通过，用时 1m15s。
+- PR #108 已合并，merge commit 为 `b20d89b7b5a47d48a0493deeb3c81244234dfb35`。
 
 ## 未验证
 
@@ -50,5 +52,5 @@
 
 ## 下一步
 
-1. 提交本轮远程 CI 证据并确认最终检查仍为绿色。
-2. 合并 PR #108 后记录 merge commit，进入 PWA-068 收口与下一边界评估。
+1. 合并 PWA-068 收口文档。
+2. 从最新 main 建立 PWA-069 流水 helper 只读边界评估；评估结论合并前不修改业务代码。
