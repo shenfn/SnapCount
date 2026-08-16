@@ -93,15 +93,17 @@ test('invalidated records reject stale in-flight plan and acknowledgement writes
 })
 
 test('successful PWA record mutations invalidate the affected planner cache', async () => {
-  const [store, financeSaveFeature] = await Promise.all([
+  const [store, financeSaveFeature, accountBindingFeature] = await Promise.all([
     readFile(path.join(root, 'src/composables/useStore.js'), 'utf8'),
     readFile(path.join(root, 'src/features/finance/createFinanceSaveFeature.js'), 'utf8'),
+    readFile(path.join(root, 'src/features/finance/createAccountBindingFeature.js'), 'utf8'),
   ])
   const confirmEntry = between(store, 'async function confirmEntry()', 'async function confirmStagingRepayment')
   const confirmIncome = between(store, 'async function confirmIncome()', 'function markIncomeImageUnavailable')
   const confirmExpense = between(store, 'async function confirmExpense()', 'function markExpenseImageUnavailable')
   const confirmUniversal = between(store, 'async function confirmUniversalRecord()', 'function markUniversalImageUnavailable')
   const archiveStaging = between(store, 'async function archiveStagingRecord', 'function buildUniversalRecordTitle')
+  const convergeBinding = between(store, 'function convergeAccountBinding', 'async function refreshAccountBindingViews')
   const bindRecord = between(store, 'async function bindRecordToAccount', 'function recommendedUnboundRecords')
   const createWalletAccount = between(store, 'async function createAccountFromWalletSnapshot', 'async function linkWalletSnapshotToAccount')
   const linkWalletAccount = between(store, 'async function linkWalletSnapshotToAccount', 'async function loadUnboundRecords')
@@ -176,7 +178,13 @@ test('successful PWA record mutations invalidate the affected planner cache', as
   )
   assert.match(archiveStaging, /invalidateRecordExpressionPlan\(result\.targetRecordId\)/)
 
-  assert.match(bindRecord, /invalidateRecordExpressionPlan\(record\.id\)/)
+  assert.match(
+    accountBindingFeature,
+    /if \(result\.status !== 'accepted'\) return result[\s\S]*await options\.onAccepted\(result,/,
+    'account binding failures must exit before the accepted convergence callback',
+  )
+  assert.match(bindRecord, /onAccepted: \(\{ record: canonicalRecord \}\) => convergeAccountBinding\(kind, canonicalRecord\)/)
+  assert.match(convergeBinding, /invalidateRecordExpressionPlan\(record\.id\)/)
   assert.match(createWalletAccount, /invalidateRecordExpressionPlan\(record\.id\)/)
   assert.match(linkWalletAccount, /invalidateRecordExpressionPlan\(record\.id\)/)
   assert.match(deleteRecord, /if \(!response\.ok\) throw[\s\S]*invalidateRecordExpressionPlan\(recordId\)/)

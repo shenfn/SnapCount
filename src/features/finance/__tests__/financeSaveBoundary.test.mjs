@@ -26,10 +26,10 @@ test('PWA-062 manual and edit finance saves delegate to the Finance Save Feature
   assert.match(expense, /result\.record/)
 })
 
-test('PWA-062 account rebinding remains outside this slice', async () => {
+test('PWA-062 account rebinding remains outside the modal Finance Save Feature', async () => {
   const source = await readFile('src/composables/useStore.js', 'utf8')
   const binding = functionSlice(source, 'async function bindRecordToAccount(', 'async function batchBindRecommendedUnboundRecords(')
 
-  assert.match(binding, /sb\.rpc\('save_income_with_account'/)
-  assert.match(binding, /sb\.rpc\('save_transaction_with_account'/)
+  assert.match(binding, /accountBindingFeature\.bind\(/)
+  assert.doesNotMatch(binding, /financeSaveFeature\./)
 })
