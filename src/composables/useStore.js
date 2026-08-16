@@ -39,6 +39,8 @@ import { createSettingsState } from '../features/settings/createSettingsState'
 import { createDefaultSettingsState } from '../features/settings/settingsConfig'
 import { createAuthRepository } from '../repositories/authRepository'
 import { createSessionState } from '../features/auth/createSessionState'
+import { createStagingRepository } from '../repositories/stagingRepository'
+import { createStagingRetryFeature } from '../features/staging/createStagingRetryFeature'
 import {
   buildShanghaiOccurredAt,
   resolveFinanceOccurrence,
@@ -99,6 +101,7 @@ export function useStore() {
   const unboundRecordsLoading = ref(false)
   const unboundRecordFilter = ref('all')
   const walletAccountCreatingSourceIds = new Set()
+  let stagingRetryFeature = null
 
   const currentFilter = ref('all')
   const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
@@ -247,6 +250,14 @@ export function useStore() {
   })
   const { settingsState } = settingsFeature
   const authRepository = createAuthRepository({ client: sb })
+  stagingRetryFeature = createStagingRetryFeature({
+    repository: createStagingRepository({
+      client: sb,
+      baseUrl: SUPABASE_URL,
+      anonKey: SUPABASE_ANON_KEY,
+    }),
+    getCurrentUserId: () => currentUserId.value,
+  })
   const sessionFeature = createSessionState({
     getCurrentUserId: () => currentUserId.value,
     setIdentity(user) {
@@ -470,6 +481,7 @@ export function useStore() {
 
   function resetUserData() {
     loadDataRunId += 1
+    stagingRetryFeature?.reset()
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -2683,36 +2695,33 @@ export function useStore() {
     return runLockedAction('retryStaging', async () => {
       showFlash('⏳ 正在重新识别...')
       try {
-        const { data: { session } } = await sb.auth.getSession()
-        const token = session?.access_token
-        if (!token) throw new Error('登录状态已失效，请重新登录')
-
-        const fnUrl = `${SUPABASE_URL}/functions/v1/ingest-receipt`
-        const formData = new FormData()
-        formData.append('staging_record_id', record.id)
-        if (currentUserId.value) formData.append('user_id', currentUserId.value)
-        const resp = await fetch(fnUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'apikey': SUPABASE_ANON_KEY,
-          },
-          body: formData,
-        })
-        if (!resp.ok) {
-          const errText = await resp.text()
-          throw new Error(`${resp.status}: ${errText}`)
-        }
-        const result = await resp.json()
-        if (result.status === 'done') {
-          showFlash(`✓ 重试成功 → 已归档到「${getSystemDomainLabel(result.record_type, result.record_type)}」`)
+        const result = await stagingRetryFeature.retry(record)
+        if (result.status === 'accepted') {
+          showFlash(`✓ 重试成功 → 已归档到「${getSystemDomainLabel(result.payload?.record_type, result.payload?.record_type)}」`)
           const idx = stagingRecords.value.findIndex(r => r.id === record.id)
           if (idx >= 0) stagingRecords.value.splice(idx, 1)
-        } else {
-          showFlash('⚠ 重试未确定，请手动选择数据域归档（下方按钮）')
+          return result
         }
+        if (result.nextRetryCount != null) {
+          const idx = stagingRecords.value.findIndex(r => r.id === record.id)
+          if (idx >= 0) stagingRecords.value[idx] = {
+            ...stagingRecords.value[idx],
+            retryCount: result.nextRetryCount,
+          }
+        }
+        if (result.reason === 'retry_limit_exceeded') {
+          showFlash('⚠ 已达到重试上限，请手动调整、归档或销毁')
+        } else if (result.reason === 'retry_failed') {
+          showFlash('⚠ 重试仍未确定，记录已保留，请手动选择数据域归档')
+        } else if (result.status === 'stale') {
+          return result
+        } else {
+          showFlash('❌ 重试失败：' + (result.error || '未知错误'))
+        }
+        return result
       } catch (e) {
         showFlash('❌ 重试失败：' + (e.message || '未知错误'))
+        return { status: 'failed', reason: 'client_error', recordId: record.id, recordStillVisible: true, error: e.message || '未知错误' }
       }
     })
   }
@@ -4511,7 +4520,7 @@ export function useStore() {
     getDomainRegistryStatus,
     openImgFull, closeImgFull, openDataRecordImage,
     deleteConfirm, openDeleteConfirm, closeDeleteConfirm, confirmDelete,
-    discardStagingRecord, retryStagingRecord, archiveStagingRecord, openProcessedStagingRecord,
+    discardStagingRecord, retryStagingRecord, canRetryStagingRecord: stagingRetryFeature.canRetry, archiveStagingRecord, openProcessedStagingRecord,
     openDomainPage, openDayDetail, showMoreDailyCards, openRecordDetail, closeRecordDetail, openDetailEditor, refreshDetailRecord,
     navigateTo, goBack,
     settingsState, toggleSetting, setSetting, setSettings, setRetention, loadUserSettings, loadFinanceVocabulary,

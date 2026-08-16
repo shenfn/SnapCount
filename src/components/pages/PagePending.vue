@@ -298,7 +298,7 @@
             </button>
             <div class="verdict-minor-actions">
               <button v-if="suggestedDomain(activeVerdict.record)" type="button" :disabled="verdictBusy" @click="adjustFromVerdict(activeVerdict.record)"><span>☷</span>调整</button>
-              <button type="button" :disabled="verdictBusy" @click="retryFromVerdict(activeVerdict.record)"><span>↻</span>重试</button>
+              <button v-if="store.canRetryStagingRecord(activeVerdict.record)" type="button" :disabled="verdictBusy" @click="retryFromVerdict(activeVerdict.record)"><span>↻</span>重试</button>
               <button type="button" class="danger" :disabled="verdictBusy" @click="discardFromVerdict(activeVerdict.record)"><span>×</span>销毁</button>
             </div>
           </div>
@@ -863,8 +863,8 @@ async function retryFromVerdict(record) {
   const previousIndex = activeVerdictIndex.value
   verdictBusy.value = true
   try {
-    await store.retryStagingRecord(record)
-    settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
+    const result = await store.retryStagingRecord(record)
+    if (result?.status === 'accepted') settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
   } finally {
     verdictBusy.value = false
   }
