@@ -49,13 +49,15 @@
 | `npm run governance:check` | 通过 |
 | `npm run governance:arch` | 通过；既有 ratchet 警告 |
 | `git diff --check` | 通过 |
+| GitHub PR #72 | 已合并；治理、iOS 检测、PWA/Edge/migrations/Shadow 和预览门禁通过 |
 
 ## 未验证项与剩余风险
 
 - 未执行真实 Edge 重试、归档、丢弃或生产数据审计。
 - 服务端重试成功后的跨表归档原子性仍未解决，必须由独立数据库/生命周期任务处理。
-- GitHub PR 门禁尚未运行；对应提交和 CI 结果待 PR 阶段填写。
+- PWA-033 归档跨表原子性仍未建立服务端事实测试和恢复策略。
 
 ## 对应提交
 
-- 待用户授权提交和推送后填写。
+- 实现提交：`9427455`
+- 合并提交：`ba90b4b`
