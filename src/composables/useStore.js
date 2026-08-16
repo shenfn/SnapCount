@@ -40,22 +40,16 @@ import { createDefaultSettingsState } from '../features/settings/settingsConfig'
 import { createAuthRepository } from '../repositories/authRepository'
 import { createSessionState } from '../features/auth/createSessionState'
 import { createStagingRepository } from '../repositories/stagingRepository'
+import { createRecordRepository, mapDataRecordRow, mapIncomeRow } from '../repositories/recordRepository'
 import { createStagingRetryFeature } from '../features/staging/createStagingRetryFeature'
 import { createStagingArchiveFeature } from '../features/staging/createStagingArchiveFeature'
 import { createStagingDiscardFeature } from '../features/staging/createStagingDiscardFeature'
 import {
-  buildShanghaiOccurredAt,
   resolveFinanceOccurrence,
 } from '../utils/financeOccurrence'
 
 const PRIMARY_EXPENSE_CATEGORIES = new Set(['餐饮', '购物', '出行', '娱乐', '生活', '健康', '教育', '其他'])
 const PENDING_QUEUE_QUERY_LIMIT = 1000
-
-function financeMonthFilter(legacyDateColumn, start, end) {
-  const startTimestamp = buildShanghaiOccurredAt(start, '00:00:00')
-  const endTimestamp = buildShanghaiOccurredAt(end, '23:59:59')
-  return `and(occurred_at.gte.${startTimestamp},occurred_at.lte.${endTimestamp}),and(occurred_at.is.null,${legacyDateColumn}.gte.${start},${legacyDateColumn}.lte.${end})`
-}
 
 // 把 Supabase/Postgres 常见错误信息翻译为中文
 function humanizeDbError(err) {
@@ -259,6 +253,7 @@ export function useStore() {
     baseUrl: SUPABASE_URL,
     anonKey: SUPABASE_ANON_KEY,
   })
+  const recordRepository = createRecordRepository({ client: sb })
   stagingRetryFeature = createStagingRetryFeature({
     repository: stagingRepository,
     getCurrentUserId: () => currentUserId.value,
@@ -987,35 +982,11 @@ export function useStore() {
         accountResult,
         stagingResult,
       ] = await Promise.all([
-        sb.from('transactions')
-          .select('*')
-          .or(financeMonthFilter('transaction_date', start, end))
-          .order('occurred_at', { ascending: false, nullsFirst: false })
-          .order('transaction_date', { ascending: false })
-          .order('created_at', { ascending: false }),
-        sb.from('transactions')
-          .select('*')
-          .eq('status', 'pending')
-          .order('occurred_at', { ascending: false, nullsFirst: false })
-          .order('transaction_date', { ascending: false })
-          .order('created_at', { ascending: false })
-          .limit(PENDING_QUEUE_QUERY_LIMIT),
-        sb.from('income_records')
-          .select('*')
-          .or(financeMonthFilter('income_date', start, end))
-          .order('occurred_at', { ascending: false, nullsFirst: false })
-          .order('income_date', { ascending: false })
-          .order('created_at', { ascending: false }),
-        sb.from('income_records')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(10),
-        sb.from('data_records')
-          .select('*')
-          .or(`and(occurred_at.gte.${buildShanghaiOccurredAt(start, '00:00:00')},occurred_at.lte.${buildShanghaiOccurredAt(end, '23:59:59')}),and(occurred_at.is.null,created_at.gte.${buildShanghaiOccurredAt(start, '00:00:00')},created_at.lte.${buildShanghaiOccurredAt(end, '23:59:59')})`)
-          .order('occurred_at', { ascending: false, nullsFirst: false })
-          .order('created_at', { ascending: false })
-          .limit(120),
+        recordRepository.listExpenses({ start, end }),
+        recordRepository.listPendingExpenses({ limit: PENDING_QUEUE_QUERY_LIMIT }),
+        recordRepository.listIncomes({ start, end }),
+        recordRepository.listRecentIncomes({ limit: 10 }),
+        recordRepository.listUniversalRecords({ start, end, limit: 120 }),
         sb.from('accounts')
           .select('*')
           .order('sort_order', { ascending: true })
@@ -1025,35 +996,30 @@ export function useStore() {
 
       if (!isCurrentDataLoad()) return { ok: false, stale: true }
 
-      const { data: txs, error: txErr } = txResult
-      if (txErr) throw new Error('账单查询失败: ' + txErr.message)
-      const { data: pendingTxs, error: pendingTxErr } = pendingTxResult
-      if (pendingTxErr) throw new Error('待补全账单查询失败: ' + pendingTxErr.message)
-      bills.value = (txs || []).map(mapTransaction)
-      pendingBills.value = (pendingTxs || []).map(mapTransaction)
+      if (txResult.status !== 'accepted') throw new Error('账单查询失败: ' + txResult.error)
+      if (pendingTxResult.status !== 'accepted') throw new Error('待补全账单查询失败: ' + pendingTxResult.error)
+      bills.value = txResult.rows
+      pendingBills.value = pendingTxResult.rows
       transportRecords.value = bills.value
         .filter(b => b.cat === 'transport' && b.amount >= 200)
         .map(b => ({ id: b.id, type: b.transport_type || '交通', desc: b.name, amount: b.amount, date: b.date }))
 
-      const { data: incs, error: incErr } = incResult
-      if (incErr) console.warn('加载收入失败:', incErr.message)
-      incomeRecords.value = (incs || []).map(mapIncomeRow)
+      if (incResult.status !== 'accepted') console.warn('加载收入失败:', incResult.error)
+      incomeRecords.value = incResult.status === 'accepted' ? incResult.rows : []
 
       unboundRecords.value = {
         expenses: bills.value.filter(b => b.status === 'done' && !b.accountId),
         incomes: incomeRecords.value.filter(r => !r.accountId),
       }
 
-      const { data: recentIncs, error: recentIncErr } = recentIncResult
-      if (recentIncErr) console.warn('加载最近收入失败:', recentIncErr.message)
-      recentIncomeRecords.value = (recentIncs || []).map(mapIncomeRow)
+      if (recentIncResult.status !== 'accepted') console.warn('加载最近收入失败:', recentIncResult.error)
+      recentIncomeRecords.value = recentIncResult.status === 'accepted' ? recentIncResult.rows : []
 
-      const { data: universalRows, error: universalErr } = universalResult
-      if (universalErr) {
-        console.warn('加载通用记录失败:', universalErr.message)
+      if (universalResult.status !== 'accepted') {
+        console.warn('加载通用记录失败:', universalResult.error)
         dataRecords.value = []
       } else {
-        dataRecords.value = (universalRows || []).map(mapDataRecordRow)
+        dataRecords.value = universalResult.rows
       }
 
       const { data: accountRows, error: accountErr } = accountResult
@@ -3952,57 +3918,6 @@ export function useStore() {
     showFlash('✓ 已关联账户')
   }
 
-  function mapIncomeRow(row) {
-    const occurrence = resolveFinanceOccurrence({ occurredAt: row.occurred_at, date: row.income_date })
-    return {
-      id: row.id,
-      cat: row.category,
-      source: row.source_name,
-      amount: Number(row.amount),
-      date: occurrence.date ? formatDate(occurrence.date) : '',
-      dateRaw: occurrence.date || row.income_date,
-      createdAt: row.created_at,
-      occurredAt: row.occurred_at || null,
-      time: occurrence.time?.slice(0, 5) || '',
-      icon: incomeCatMap[row.category]?.icon || '💰',
-      note: row.note,
-      image_url: row.image_url,
-      image_path: row.image_url,
-      sourceType: row.source || 'manual',
-      companionMessage: row.companion_message || '',
-      aiFeedback: row.ai_feedback || null,
-      accountId: row.account_id || null,
-      accountConfidence: row.account_confidence ?? null,
-      accountInference: row.account_inference || null,
-    }
-  }
-
-  function mapDataRecordRow(row) {
-    const payload = row.payload_jsonb || {}
-    return {
-      id: row.id,
-      domainId: row.domain_id,
-      domainKey: row.domain_key,
-      domainVersion: row.domain_version || '1.0',
-      occurredAt: row.occurred_at,
-      createdAt: row.created_at,
-      title: row.title,
-      summary: row.summary,
-      payload: {
-        ...payload,
-        linked_account_id: row.linked_account_id || payload.linked_account_id || null,
-        account_snapshot_kind: row.account_snapshot_kind || payload.account_snapshot_kind || null,
-        snapshot_balance: row.snapshot_balance ?? payload.snapshot_balance ?? null,
-      },
-      companionMessage: payload?.companion_message || '',
-      aiFeedback: payload?.ai_feedback || null,
-      imagePath: row.source_image_path,
-      imageHash: row.source_image_hash,
-      stagingRecordId: row.staging_record_id,
-      source: row.source || 'staging',
-    }
-  }
-
   async function loadUnboundRecords() {
     unboundRecordsLoading.value = true
     const padM = String(currentMonth.value).padStart(2, '0')
@@ -4010,34 +3925,18 @@ export function useStore() {
     const lastDay = new Date(currentYear.value, currentMonth.value, 0).getDate()
     const end = `${currentYear.value}-${padM}-${String(lastDay).padStart(2, '0')}`
 
-    const [txResult, incResult] = await Promise.all([
-      sb.from('transactions')
-        .select('*')
-        .eq('status', 'done')
-        .is('account_id', null)
-        .or(financeMonthFilter('transaction_date', start, end))
-        .order('occurred_at', { ascending: false, nullsFirst: false })
-        .order('transaction_date', { ascending: false })
-        .limit(100),
-      sb.from('income_records')
-        .select('*')
-        .is('account_id', null)
-        .or(financeMonthFilter('income_date', start, end))
-        .order('occurred_at', { ascending: false, nullsFirst: false })
-        .order('income_date', { ascending: false })
-        .limit(100),
-    ])
+    const result = await recordRepository.listUnboundRecords({ start, end, limit: 100 })
     unboundRecordsLoading.value = false
 
-    if (txResult.error || incResult.error) {
-      console.warn('加载未绑定记录失败:', txResult.error?.message || incResult.error?.message)
+    if (result.status !== 'accepted') {
+      console.warn('加载未绑定记录失败:', result.error)
       showFlash('未绑定记录加载失败')
       return
     }
 
     unboundRecords.value = {
-      expenses: (txResult.data || []).map(mapTransaction),
-      incomes: (incResult.data || []).map(mapIncomeRow),
+      expenses: result.expenses,
+      incomes: result.incomes,
     }
   }
 

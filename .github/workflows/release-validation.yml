@@ -58,6 +58,9 @@ jobs:
       - name: Validate staging read boundary
         run: npm run test:staging-read
 
+      - name: Validate formal record read boundary
+        run: npm run test:record-read
+
       - name: Install trace console dependencies
         working-directory: tools/ai-validation/ui/trace-console
         run: npm ci
