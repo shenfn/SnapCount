@@ -6,7 +6,7 @@
 >
 > 分支：`feature/PWA钱包快照原子边界`
 >
-> 状态：本地最小实现与客户端回归已绿，待 PostgreSQL 17 远程验证
+> 状态：实现完成，PR #108 第四轮全部门禁通过
 
 ## 当前范围
 
@@ -36,14 +36,19 @@
 - `npm run governance:check`、`npm run governance:arch`：通过。
 - `git diff --check`：通过；工作区换行符提示不属于业务失败。
 
+## 远程验证
+
+- PR：[#108](https://github.com/shenfn/SnapCount/pull/108)。
+- GitHub Actions run `31952369584`：`PWA, Edge, migrations, and Shadow` 通过，用时 1m21s。
+- PostgreSQL 17 已连续执行 `20260816210000_wallet_snapshot_atomic_contract.sql` 两次并通过完整 wallet snapshot 行为断言。
+- iOS 变更检测与 Build Gate、治理分支门禁、Vercel 和 Cloudflare Preview 均通过；本切片未修改 Swift，iOS app build 按规则跳过。
+
 ## 未验证
 
-- 本机没有 `psql`，Docker Desktop daemon 不可用；PostgreSQL fixture、真实函数编译、事务回滚和 migration 双次执行尚待 GitHub PostgreSQL 17 job。
-- 尚未运行远程 Release Validation，不能把 SQL 行为写成已验证。
+- 没有执行浏览器端手工点击验收；核心页面出口由源边界测试与 PWA build 覆盖。
 - 未执行任何生产或发布操作。
 
 ## 下一步
 
-1. 逐文件暂存并提交本地实现与证据。
-2. 推送 PR，运行 Release Validation 的 PostgreSQL 17 wallet snapshot job。
-3. 根据真实 SQL 日志修复后更新最终 CI 证据；全绿前不合并。
+1. 提交本轮远程 CI 证据并确认最终检查仍为绿色。
+2. 合并 PR #108 后记录 merge commit，进入 PWA-068 收口与下一边界评估。
