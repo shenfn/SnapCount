@@ -79,6 +79,9 @@ jobs:
       - name: Validate wallet snapshot boundary
         run: npm run test:wallet-snapshot
 
+      - name: Validate account entry helper boundary
+        run: npm run test:account-entry-helper
+
       - name: Install trace console dependencies
         working-directory: tools/ai-validation/ui/trace-console
         run: npm ci
