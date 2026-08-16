@@ -6,7 +6,7 @@
 >
 > 分支：`docs/PWA账户管理边界评估`
 >
-> 结果：只读评估完成，待文档 PR 验证
+> 结果：PR #100 全门禁通过并合并，merge commit `e0ef559`
 
 ## 本轮范围
 
@@ -42,6 +42,8 @@
 | `npm run test:account-binding` | 11 项通过 |
 | `npm run governance:arch` | 通过，仅既有人工清单警告 |
 | `npm run build` | 通过，仅既有 `eval` 与 bundle size 警告 |
+
+- PR #100 远程综合 Release Validation、治理、iOS gate、Cloudflare Pages 和 Vercel 全部通过；无 iOS 改动，SwiftUI 构建按预期跳过。
 
 ## 未验证与剩余风险
 
