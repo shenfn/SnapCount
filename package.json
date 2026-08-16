@@ -54,6 +54,7 @@
     "test:record-read": "node --test src/repositories/__tests__/recordRepository.test.mjs src/features/records/__tests__/recordReadBoundary.test.mjs",
     "test:finance-save": "node --test src/repositories/__tests__/recordRepository.test.mjs src/features/finance/__tests__/financeSaveFeature.test.mjs src/features/finance/__tests__/financeSaveBoundary.test.mjs",
     "test:account-binding": "node --test src/features/finance/__tests__/accountBindingFeature.test.mjs src/features/finance/__tests__/accountBindingBoundary.test.mjs",
+    "test:repayment": "node --test src/repositories/__tests__/accountRepository.test.mjs src/features/accounts/__tests__/repaymentFeature.test.mjs src/features/accounts/__tests__/repaymentBoundary.test.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",
     "audit:storage-orphans": "node scripts/audit-storage-orphans.mjs",

@@ -41,11 +41,13 @@ import { createAuthRepository } from '../repositories/authRepository'
 import { createSessionState } from '../features/auth/createSessionState'
 import { createStagingRepository } from '../repositories/stagingRepository'
 import { createRecordRepository, mapDataRecordRow, mapIncomeRow } from '../repositories/recordRepository'
+import { createAccountRepository, mapRepaymentCycleRow } from '../repositories/accountRepository'
 import { createStagingRetryFeature } from '../features/staging/createStagingRetryFeature'
 import { createStagingArchiveFeature } from '../features/staging/createStagingArchiveFeature'
 import { createStagingDiscardFeature } from '../features/staging/createStagingDiscardFeature'
 import { createFinanceSaveFeature } from '../features/finance/createFinanceSaveFeature'
 import { createAccountBindingFeature } from '../features/finance/createAccountBindingFeature'
+import { createRepaymentFeature } from '../features/accounts/createRepaymentFeature'
 import {
   resolveFinanceOccurrence,
 } from '../utils/financeOccurrence'
@@ -104,6 +106,7 @@ export function useStore() {
   let stagingDiscardFeature = null
   let financeSaveFeature = null
   let accountBindingFeature = null
+  let repaymentFeature = null
 
   const currentFilter = ref('all')
   const pendingFilter = ref('all') // all | routing_failed | pending_review | ai_error | bill_pending
@@ -258,12 +261,17 @@ export function useStore() {
     anonKey: SUPABASE_ANON_KEY,
   })
   const recordRepository = createRecordRepository({ client: sb })
+  const accountRepository = createAccountRepository({ client: sb })
   financeSaveFeature = createFinanceSaveFeature({
     repository: recordRepository,
     getCurrentUserId: () => currentUserId.value,
   })
   accountBindingFeature = createAccountBindingFeature({
     repository: recordRepository,
+    getCurrentUserId: () => currentUserId.value,
+  })
+  repaymentFeature = createRepaymentFeature({
+    repository: accountRepository,
     getCurrentUserId: () => currentUserId.value,
   })
   stagingRetryFeature = createStagingRetryFeature({
@@ -506,6 +514,7 @@ export function useStore() {
     stagingDiscardFeature?.reset()
     financeSaveFeature.reset()
     accountBindingFeature.reset()
+    repaymentFeature.reset()
     bills.value = []
     pendingBills.value = []
     incomeRecords.value = []
@@ -702,36 +711,6 @@ export function useStore() {
       }))
     }
     Promise.allSettled(updates).catch(error => console.warn('更新个人财务词表失败:', error?.message || error))
-  }
-
-  function mapRepaymentCycleRow(row) {
-    return {
-      id: row.id,
-      userId: row.user_id,
-      accountId: row.account_id,
-      cycleMonth: row.cycle_month,
-      statementStartDate: row.statement_start_date || null,
-      statementEndDate: row.statement_end_date || null,
-      dueDate: row.due_date || null,
-      statementAmount: Number(row.statement_amount || 0),
-      paidAmount: Number(row.paid_amount || 0),
-      remainingAmount: Number(row.remaining_amount || 0),
-      carriedOverAmount: Number(row.carried_over_amount || 0),
-      originalStatementAmount: row.original_statement_amount == null ? null : Number(row.original_statement_amount),
-      minPaymentAmount: row.min_payment_amount == null ? null : Number(row.min_payment_amount),
-      refundAppliedAmount: Number(row.refund_applied_amount || 0),
-      status: row.status || 'pending',
-      autoDebitAccountId: row.auto_debit_account_id || null,
-      autoConfirmRepayment: !!row.auto_confirm_repayment,
-      source: row.source || 'system',
-      evidenceRecordId: row.evidence_record_id || null,
-      confidence: row.confidence == null ? null : Number(row.confidence),
-      statementSourcePriority: Number(row.statement_source_priority || 0),
-      note: row.note || '',
-      confirmedAt: row.confirmed_at || null,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }
   }
 
   function normalizeMonthKey(value) {
@@ -3005,39 +2984,67 @@ export function useStore() {
     ])
   }
 
+  function convergeRepaymentCycle(cycle, { selectCycleMonth = false } = {}) {
+    if (!cycle?.id) return
+    const idx = repaymentCycles.value.findIndex(item => item.id === cycle.id)
+    if (idx >= 0) repaymentCycles.value[idx] = cycle
+    else repaymentCycles.value.unshift(cycle)
+    if (!selectCycleMonth || !/^\d{4}-\d{2}$/.test(cycle.cycleMonth || '')) return
+    const [year, month] = cycle.cycleMonth.split('-').map(Number)
+    if (Number.isInteger(year) && Number.isInteger(month)) {
+      currentYear.value = year
+      currentMonth.value = month
+    }
+  }
+
+  async function refreshRepaymentAccounts(expectedUserId) {
+    await refreshAccountsFromDB({ expectedUserId, throwOnError: true })
+    if (selectedAccount.value?.id) await refreshAccountDetail()
+  }
+
   async function confirmRepaymentCyclePaid(cycle, options = {}) {
     if (!cycle?.id) return false
     const lockKey = `repayment-cycle:${cycle.id}`
-    return runLockedAction(lockKey, async () => {
-      const paidAmount = Number(options.paidAmount ?? cycle.statementAmount ?? 0)
-      if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
-        showFlash('待还金额异常，暂时不能确认')
-        return false
-      }
-      const debitAccountId = options.debitAccountId || cycle.autoDebitAccountId || null
-      const { data, error } = await sb.rpc('set_repayment_cycle_paid_amount', {
-        p_cycle_id: cycle.id,
-        p_paid_amount: paidAmount,
-        p_paid_at: new Date().toISOString(),
-        p_debit_account_id: debitAccountId,
-        p_status: options.status ?? 'paid',
-        p_note: options.note || '手动确认已还清',
+    const wasPending = !!actionState[lockKey]
+    if (!wasPending) actionState[lockKey] = true
+    const paidAmount = Number(options.paidAmount ?? cycle.statementAmount ?? 0)
+    const debitAccountId = options.debitAccountId || cycle.autoDebitAccountId || null
+    const expectedUserId = currentUserId.value
+    try {
+      const result = await repaymentFeature.confirm({
+        cycleId: cycle.id,
+        accountId: cycle.accountId,
+        paidAmount,
+        debitAccountId,
+        status: options.status ?? 'paid',
+        note: options.note || '手动确认已还清',
+      }, {
+        onAccepted: accepted => convergeRepaymentCycle(accepted.cycle),
+        refresh: () => refreshRepaymentAccounts(expectedUserId),
       })
-      if (error) {
-        showFlash('确认还款失败：' + humanizeDbError(error))
+      if (result.status === 'stale') return false
+      if (result.status === 'rejected') {
+        const message = result.reason === 'unauthenticated'
+          ? '登录状态已失效，请重新登录'
+          : result.reason === 'repayment_conflict'
+            ? '当前账单已有还款操作进行中'
+            : '待还金额异常，暂时不能确认'
+        showFlash(message)
         return false
       }
-
-      const mapped = mapRepaymentCycleRow(data)
-      const idx = repaymentCycles.value.findIndex(item => item.id === mapped.id)
-      if (idx >= 0) repaymentCycles.value[idx] = mapped
-      else repaymentCycles.value.unshift(mapped)
-
-      await refreshAccountsFromDB()
-      if (selectedAccount.value?.id) await refreshAccountDetail()
+      if (result.status !== 'accepted') {
+        showFlash('确认还款失败：' + humanizeDbError(result.error))
+        return false
+      }
+      if (result.refreshStatus === 'failed') {
+        showFlash('✓ 已确认还款；账户列表刷新失败，请稍后刷新页面')
+        return true
+      }
       showFlash(debitAccountId ? '✓ 已确认还款并记录扣款' : '✓ 已确认还款')
       return true
-    })
+    } finally {
+      if (!wasPending) actionState[lockKey] = false
+    }
   }
 
   async function revokeLiabilityPayment(payment) {
@@ -3045,35 +3052,42 @@ export function useStore() {
     const ok = confirm(`确认撤销这笔还款记录？\n金额：¥${Number(payment.amount || 0).toFixed(2)}\n撤销后会作废关联账户流水，并恢复账单待还金额。`)
     if (!ok) return false
     const lockKey = `liability-payment:${payment.id}`
-    return runLockedAction(lockKey, async () => {
-      const { data, error } = await sb.rpc('revoke_liability_payment', {
-        p_payment_id: payment.id,
-        p_reason: '用户撤销还款',
+    const wasPending = !!actionState[lockKey]
+    if (!wasPending) actionState[lockKey] = true
+    const expectedUserId = currentUserId.value
+    try {
+      const result = await repaymentFeature.revoke({
+        paymentId: payment.id,
+        cycleId: payment.statementId,
+        accountId: payment.accountId,
+        reason: '用户撤销还款',
+      }, {
+        onAccepted: accepted => convergeRepaymentCycle(accepted.cycle, { selectCycleMonth: true }),
+        refresh: () => refreshRepaymentAccounts(expectedUserId),
       })
-      if (error) {
-        showFlash('撤销还款失败：' + humanizeDbError(error))
+      if (result.status === 'stale') return false
+      if (result.status === 'rejected') {
+        const message = result.reason === 'unauthenticated'
+          ? '登录状态已失效，请重新登录'
+          : result.reason === 'repayment_conflict'
+            ? '当前账单已有还款操作进行中'
+            : '还款记录不完整，暂时不能撤销'
+        showFlash(message)
         return false
       }
-
-      if (data?.id) {
-        const mapped = mapRepaymentCycleRow(data)
-        const idx = repaymentCycles.value.findIndex(item => item.id === mapped.id)
-        if (idx >= 0) repaymentCycles.value[idx] = mapped
-        else repaymentCycles.value.unshift(mapped)
-        if (mapped.cycleMonth && /^\d{4}-\d{2}$/.test(mapped.cycleMonth)) {
-          const [year, month] = mapped.cycleMonth.split('-').map(Number)
-          if (Number.isInteger(year) && Number.isInteger(month)) {
-            currentYear.value = year
-            currentMonth.value = month
-          }
-        }
+      if (result.status !== 'accepted') {
+        showFlash('撤销还款失败：' + humanizeDbError(result.error))
+        return false
       }
-
-      await refreshAccountsFromDB()
-      if (selectedAccount.value?.id) await refreshAccountDetail()
+      if (result.refreshStatus === 'failed') {
+        showFlash('✓ 已撤销还款；账户列表刷新失败，请稍后刷新页面')
+        return true
+      }
       showFlash('✓ 已撤销还款')
       return true
-    })
+    } finally {
+      if (!wasPending) actionState[lockKey] = false
+    }
   }
 
   function openAccountEntrySource(entry) {
