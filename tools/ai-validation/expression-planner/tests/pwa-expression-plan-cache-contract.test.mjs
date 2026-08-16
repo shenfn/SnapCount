@@ -101,7 +101,7 @@ test('successful PWA record mutations invalidate the affected planner cache', as
   const archiveStaging = between(store, 'async function archiveStagingRecord', 'function buildUniversalRecordTitle')
   const bindRecord = between(store, 'async function bindRecordToAccount', 'function recommendedUnboundRecords')
   const createWalletAccount = between(store, 'async function createAccountFromWalletSnapshot', 'async function linkWalletSnapshotToAccount')
-  const linkWalletAccount = between(store, 'async function linkWalletSnapshotToAccount', 'function mapIncomeRow')
+  const linkWalletAccount = between(store, 'async function linkWalletSnapshotToAccount', 'async function loadUnboundRecords')
   const deleteRecord = between(store, 'async function deleteRecordThroughBackend', 'async function confirmDelete')
 
   const pendingInvalidations = occurrenceIndexes(confirmEntry, 'invalidateRecordExpressionPlan(pendingId)')

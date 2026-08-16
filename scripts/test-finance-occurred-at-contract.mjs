@@ -33,6 +33,7 @@ const stagingArchiveFeatureSource = await readFile(
   'utf8',
 )
 const stagingRepositorySource = await readFile('src/repositories/stagingRepository.js', 'utf8')
+const recordRepositorySource = await readFile('src/repositories/recordRepository.js', 'utf8')
 const helpersSource = await readFile('src/utils/helpers.js', 'utf8')
 const ingestSource = await readFile(
   'supabase/functions/ingest-receipt/index.ts',
@@ -250,7 +251,7 @@ assert.match(
   'staging repository must map occurrence fields to the atomic RPC',
 )
 assert.match(helpersSource, /occurredAt:\s*t\.occurred_at\s*\|\|\s*null/)
-assert.match(storeSource, /occurredAt:\s*row\.occurred_at\s*\|\|\s*null/)
+assert.match(recordRepositorySource, /occurredAt:\s*row\.occurred_at\s*\|\|\s*null/)
 assert.match(
   storeSource,
   /async function bindRecordToAccount[\s\S]*p_occurred_at:\s*record\.occurredAt\s*\|\|\s*null/,
