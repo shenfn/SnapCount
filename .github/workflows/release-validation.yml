@@ -296,6 +296,20 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816160000_account_management_atomic_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-account-management-contract.sql
 
+      - name: Execute screenshot repayment transaction contract
+        env:
+          PGROOT: postgresql://postgres:security-test@localhost:5432/postgres
+          PGURL: postgresql://postgres:security-test@localhost:5432/screenshot_repayment_contract
+        run: |
+          psql "$PGROOT" -v ON_ERROR_STOP=1 -c "create database screenshot_repayment_contract"
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-repayment-contract-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/048_revoke_liability_payment.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/049_fix_liability_repayment_reconfirm_order.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-screenshot-repayment-contract-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816190000_screenshot_repayment_atomic_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816190000_screenshot_repayment_atomic_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-screenshot-repayment-contract.sql
+
       - name: Execute staging archive migration contract
         env:
           PGROOT: postgresql://postgres:security-test@localhost:5432/postgres

@@ -199,6 +199,26 @@ export function createAccountRepository({ client }) {
     }
   }
 
+  async function confirmStagingRepayment(command = {}) {
+    try {
+      const { data, error } = await client.rpc('confirm_staging_repayment', {
+        p_staging_id: command.stagingId,
+        p_cycle_id: command.cycleId,
+        p_paid_amount: command.paidAmount,
+        p_paid_at: command.paidAt || null,
+        p_debit_account_id: command.debitAccountId || null,
+        p_status: null,
+        p_note: command.note || null,
+      })
+      if (error) return failed('service_error', error)
+      const row = firstRow(data)
+      if (!row?.id) return failed('invalid_response', '截图还款成功但未返回账单周期')
+      return { status: 'accepted', reason: 'confirmed_from_screenshot', cycle: mapRepaymentCycleRow(row) }
+    } catch (error) {
+      return failed('service_error', error)
+    }
+  }
+
   async function revokePayment(command = {}) {
     try {
       const { data, error } = await client.rpc('revoke_liability_payment', {
@@ -260,6 +280,7 @@ export function createAccountRepository({ client }) {
     listRepaymentCycles,
     ensureRepaymentCycles,
     confirmRepayment,
+    confirmStagingRepayment,
     revokePayment,
     saveAccount,
     setAccountArchived,

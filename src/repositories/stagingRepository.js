@@ -25,7 +25,7 @@ function normalizeListLimit(value, fallback) {
 }
 
 function mapStagingRow(row = {}, { processed = false } = {}) {
-  const allowedTargetKinds = new Set(['expense', 'income', 'data'])
+  const allowedTargetKinds = new Set(['expense', 'income', 'data', 'repayment_cycle'])
   const targetKind = allowedTargetKinds.has(row.target_kind) ? row.target_kind : null
   const resolvedDomainKey = typeof row.resolved_domain_key === 'string' && row.resolved_domain_key.trim()
     ? row.resolved_domain_key.trim()

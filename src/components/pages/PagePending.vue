@@ -887,8 +887,8 @@ async function confirmRepaymentFromVerdict(record) {
   const previousIndex = activeVerdictIndex.value
   verdictBusy.value = true
   try {
-    await store.confirmStagingRepayment(record)
-    settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
+    const result = await store.confirmStagingRepayment(record)
+    if (result?.status === 'accepted') settleVerdictAfterAction(`staging:${record.id}`, previousIndex)
   } finally {
     verdictBusy.value = false
   }

@@ -173,6 +173,29 @@ test('PWA-064B invalid canonical responses are not reported as accepted', async 
   assert.equal(result.cycle, null)
 })
 
+test('PWA-067C screenshot confirmation owns RPC params and returns canonical cycle', async () => {
+  const { client, calls } = createRpcClient({
+    confirm_staging_repayment: { data: cycleRow, error: null },
+  })
+  const repository = createAccountRepository({ client })
+  const result = await repository.confirmStagingRepayment({
+    stagingId: 'staging-1', cycleId: 'cycle-1', paidAmount: 40,
+    paidAt: '2026-08-16T08:00:00Z', debitAccountId: 'debit-1', note: '截图确认',
+    userId: 'must-not-cross', status: 'paid',
+  })
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.cycle.id, 'cycle-1')
+  assert.deepEqual(calls[0], {
+    name: 'confirm_staging_repayment',
+    params: {
+      p_staging_id: 'staging-1', p_cycle_id: 'cycle-1', p_paid_amount: 40,
+      p_paid_at: '2026-08-16T08:00:00Z', p_debit_account_id: 'debit-1',
+      p_status: null, p_note: '截图确认',
+    },
+  })
+  assert.equal(Object.hasOwn(calls[0].params, 'user_id'), false)
+})
+
 test('PWA-065A account list transport maps rows without a user filter', async () => {
   const { client, calls } = createReadClient({
     accounts: {

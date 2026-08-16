@@ -295,6 +295,17 @@ test('PWA-056D invalid target kind never creates a navigation reference', async 
   assert.equal(result.rows[0].targetReference, null)
 })
 
+test('PWA-067F repayment cycle is a valid processed target kind', async () => {
+  const { client } = createReadClient({ rows: [{
+    id: 'staging-repayment', status: 'archived', target_kind: 'repayment_cycle',
+    target_record_id: 'cycle-1', resolved_domain_key: 'wallet',
+  }] })
+  const repository = createStagingRepository({ client, fetchImpl: async () => null })
+  const result = await repository.listProcessed()
+  assert.equal(result.rows[0].targetKind, 'repayment_cycle')
+  assert.equal(result.rows[0].targetReference, 'repayment_cycle/cycle-1')
+})
+
 test('PWA-047 repository preserves a read failure as a structured empty result', async () => {
   const { client } = createReadClient({ error: { message: 'read failed' } })
   const repository = createStagingRepository({
