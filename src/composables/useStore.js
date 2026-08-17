@@ -2967,39 +2967,11 @@ export function useStore() {
     }
   }
 
-  // 统一流水入口：保证幂等（先作废旧的同源同类流水再插入新的）
-  async function upsertAccountEntry({ accountId, direction, amount, entryType, sourceTable, sourceId, occurredAt, note }) {
-    if (!accountId) return
-    const amt = Number(amount)
-    if (!Number.isFinite(amt) || amt <= 0) return
-    const { error } = await sb.rpc('create_account_entry_for_record', {
-      p_account_id: accountId,
-      p_direction: direction,
-      p_amount: amt,
-      p_entry_type: entryType,
-      p_source_table: sourceTable || null,
-      p_source_id: sourceId || null,
-      p_occurred_at: occurredAt || new Date().toISOString(),
-      p_note: note || null,
-    })
-    if (error) console.warn('写入账户流水失败:', error.message)
-  }
-
   function resolveAccountEntryDirection({ accountId, entryType, fallbackDirection }) {
     const account = accounts.value.find(item => item.id === accountId)
     if (!account) return fallbackDirection
     if (entryType === 'expense' && isLiabilityAccount(account)) return 'in'
     return fallbackDirection
-  }
-
-  async function voidAccountEntries(sourceTable, sourceId, reason = 'source_deleted') {
-    if (!sourceTable || !sourceId) return
-    const { error } = await sb.rpc('void_account_entries_for_record', {
-      p_source_table: sourceTable,
-      p_source_id: sourceId,
-      p_reason: reason,
-    })
-    if (error) console.warn('作废账户流水失败:', error.message)
   }
 
   async function repairEmptyAccountSnapshotBalances(accountRows = accounts.value) {
@@ -3836,7 +3808,7 @@ export function useStore() {
     openAccountDetail, refreshAccountDetail, loadAccountEntries, openAccountEntrySource,
     confirmRepaymentCyclePaid, revokeLiabilityPayment,
     openUnboundRecordsPage, loadUnboundRecords,
-    upsertAccountEntry, voidAccountEntries, refreshAccountsFromDB, defaultAccountIdForKind,
+    refreshAccountsFromDB, defaultAccountIdForKind,
     pendingAccountReview, balanceImpactPreview,
     recommendAccountForRecord, accountBindingExplanation, bindRecordToRecommendedAccount, bindRecordToAccount,
     recommendedUnboundRecords, batchBindRecommendedUnboundRecords,
