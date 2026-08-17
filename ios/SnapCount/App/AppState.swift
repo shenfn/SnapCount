@@ -1087,7 +1087,7 @@ final class AppState: ObservableObject {
             )
             await refreshAfterWalletSnapshotLink()
             walletSnapshotMessage = result.warnings.isEmpty
-                ? "已从快照创建账户"
+                ? result.successMessage
                 : result.warnings.joined(separator: "；")
             return true
         } catch {
@@ -1115,7 +1115,7 @@ final class AppState: ObservableObject {
             )
             await refreshAfterWalletSnapshotLink()
             walletSnapshotMessage = result.warnings.isEmpty
-                ? "已关联账户"
+                ? result.successMessage
                 : result.warnings.joined(separator: "；")
             return true
         } catch {

@@ -58,60 +58,7 @@ final class WalletSnapshotRepository: WalletSnapshotRepositoryProtocol {
         userId: String,
         accessToken: String
     ) async throws -> NativeWalletSnapshotLinkResult {
-        guard snapshot.linkedAccountId == nil else {
-            throw SupabaseRemoteError.requestFailed("这条快照已经关联账户")
-        }
-
-        let existing = try await sourceAccount(snapshotId: snapshot.id, accessToken: accessToken)
-        if let existing {
-            return try await link(snapshot, to: existing.native, userId: userId, accessToken: accessToken)
-        }
-
-        var body: [String: AnyCodable] = [
-            "user_id": AnyCodable(userId),
-            "name": AnyCodable(snapshot.accountName),
-            "type": AnyCodable(snapshot.accountType.rawValue),
-            "institution": AnyCodable(nullable(snapshot.institution)),
-            "last4": AnyCodable(nullable(snapshot.last4)),
-            "currency": AnyCodable("CNY"),
-            "initial_balance": AnyCodable(snapshot.balance),
-            "current_balance": AnyCodable(snapshot.balance),
-            "snapshot_balance": AnyCodable(snapshot.balance),
-            "snapshot_at": AnyCodable(snapshot.snapshotAt),
-            "source_record_table": AnyCodable("data_records"),
-            "source_record_id": AnyCodable(snapshot.id)
-        ]
-        if snapshot.kind == .liability {
-            body["bill_day"] = AnyCodable(nullable(snapshot.billDay))
-            body["payment_due_day"] = AnyCodable(nullable(snapshot.paymentDueDay))
-        }
-
-        let rows = try await remoteClient.post(
-            [WalletAccountRow].self,
-            path: "rest/v1/accounts",
-            queryItems: [],
-            body: body,
-            accessToken: accessToken
-        )
-        guard let account = rows.first else {
-            throw SupabaseRemoteError.requestFailed("账户创建成功，但没有返回账户编号")
-        }
-
-        try await linkRecord(snapshot, accountId: account.id, accessToken: accessToken)
-        var warnings: [String] = []
-        if snapshot.kind == .liability {
-            do {
-                try await upsertRepaymentCycle(
-                    snapshot,
-                    accountId: account.id,
-                    userId: userId,
-                    accessToken: accessToken
-                )
-            } catch {
-                warnings.append("账户已创建，但还款账期暂未同步")
-            }
-        }
-        return NativeWalletSnapshotLinkResult(accountId: account.id, warnings: warnings)
+        try await applyWalletSnapshot(snapshot, accountId: nil, accessToken: accessToken)
     }
 
     func link(
@@ -120,168 +67,46 @@ final class WalletSnapshotRepository: WalletSnapshotRepositoryProtocol {
         userId: String,
         accessToken: String
     ) async throws -> NativeWalletSnapshotLinkResult {
-        var accountPatch: [String: AnyCodable] = [
-            "snapshot_balance": AnyCodable(snapshot.balance),
-            "snapshot_at": AnyCodable(snapshot.snapshotAt),
-            "source_record_table": AnyCodable("data_records"),
-            "source_record_id": AnyCodable(snapshot.id),
-            "updated_at": AnyCodable(ISO8601DateFormatter().string(from: Date()))
-        ]
-        if snapshot.kind == .liability {
-            if let billDay = snapshot.billDay { accountPatch["bill_day"] = AnyCodable(billDay) }
-            if let paymentDueDay = snapshot.paymentDueDay { accountPatch["payment_due_day"] = AnyCodable(paymentDueDay) }
-        }
-
-        try await remoteClient.patch(
-            path: "rest/v1/accounts",
-            queryItems: [URLQueryItem(name: "id", value: "eq.\(account.id)")],
-            body: accountPatch,
-            accessToken: accessToken
-        )
-        try await linkRecord(snapshot, accountId: account.id, accessToken: accessToken)
-
-        var warnings: [String] = []
-        if snapshot.kind == .liability {
-            do {
-                try await upsertRepaymentCycle(
-                    snapshot,
-                    accountId: account.id,
-                    userId: userId,
-                    accessToken: accessToken
-                )
-            } catch {
-                warnings.append("快照已关联，但还款账期暂未同步")
-            }
-            do {
-                try await reconcileLiability(snapshot, account: account, accessToken: accessToken)
-            } catch {
-                warnings.append("快照已关联，但当前欠款校准失败")
-            }
-        }
-        return NativeWalletSnapshotLinkResult(accountId: account.id, warnings: warnings)
+        try await applyWalletSnapshot(snapshot, accountId: account.id, accessToken: accessToken)
     }
 
-    private func sourceAccount(snapshotId: String, accessToken: String) async throws -> WalletAccountRow? {
-        let rows = try await remoteClient.get(
-            [WalletAccountRow].self,
-            path: "rest/v1/accounts",
-            queryItems: [
-                URLQueryItem(name: "select", value: "*"),
-                URLQueryItem(name: "source_record_table", value: "eq.data_records"),
-                URLQueryItem(name: "source_record_id", value: "eq.\(snapshotId)"),
-                URLQueryItem(name: "order", value: "created_at.asc"),
-                URLQueryItem(name: "limit", value: "1")
-            ],
-            accessToken: accessToken
-        )
-        return rows.first
-    }
-
-    private func linkRecord(
+    private func applyWalletSnapshot(
         _ snapshot: NativeWalletSnapshot,
-        accountId: String,
+        accountId: String?,
         accessToken: String
-    ) async throws {
-        var payload = snapshot.payload
-        payload["linked_account_id"] = AnyCodable(accountId)
-        payload["account_snapshot_kind"] = AnyCodable(snapshot.kind.rawValue)
-        payload["snapshot_balance"] = AnyCodable(snapshot.balance)
-        try await remoteClient.patch(
-            path: "rest/v1/data_records",
-            queryItems: [URLQueryItem(name: "id", value: "eq.\(snapshot.id)")],
-            body: [
-                "linked_account_id": AnyCodable(accountId),
-                "account_snapshot_kind": AnyCodable(snapshot.kind.rawValue),
-                "snapshot_balance": AnyCodable(snapshot.balance),
-                "snapshot_at": AnyCodable(snapshot.snapshotAt),
-                "payload_jsonb": AnyCodable(payload.mapValues(\.value))
-            ],
-            accessToken: accessToken
-        )
-    }
-
-    private func upsertRepaymentCycle(
-        _ snapshot: NativeWalletSnapshot,
-        accountId: String,
-        userId: String,
-        accessToken: String
-    ) async throws {
-        guard let cycleMonth = snapshot.cycleMonth, snapshot.balance > 0 else { return }
-        let dueDate = snapshot.dueDate ?? dueDate(monthKey: cycleMonth, day: snapshot.paymentDueDay)
-        let paidAmount = snapshot.status == .paid ? snapshot.balance : 0
-        let remainingAmount = snapshot.status == .paid ? 0 : snapshot.balance
-        _ = try await remoteClient.upsert(
-            [WalletRepaymentCycleIDRow].self,
-            path: "rest/v1/account_repayment_cycles",
-            queryItems: [URLQueryItem(name: "on_conflict", value: "account_id,cycle_month")],
-            body: [
-                "user_id": AnyCodable(userId),
-                "account_id": AnyCodable(accountId),
-                "cycle_month": AnyCodable(cycleMonth),
-                "statement_start_date": AnyCodable(nullable(snapshot.statementStartDate)),
-                "statement_end_date": AnyCodable(nullable(snapshot.statementEndDate)),
-                "due_date": AnyCodable(nullable(dueDate)),
-                "statement_amount": AnyCodable(snapshot.balance),
-                "paid_amount": AnyCodable(paidAmount),
-                "remaining_amount": AnyCodable(remainingAmount),
-                "carried_over_amount": AnyCodable(0),
-                "status": AnyCodable(snapshot.status.rawValue),
-                "source": AnyCodable("screenshot"),
-                "evidence_record_id": AnyCodable(snapshot.id),
-                "confidence": AnyCodable(nullable(snapshot.confidence)),
-                "statement_source_priority": AnyCodable(90),
-                "original_statement_amount": AnyCodable(snapshot.balance),
-                "note": AnyCodable(snapshot.status == .paid ? "来源快照显示已还款" : "来源快照生成待还周期")
-            ],
-            accessToken: accessToken
-        )
-    }
-
-    private func reconcileLiability(
-        _ snapshot: NativeWalletSnapshot,
-        account: NativeAccount,
-        accessToken: String
-    ) async throws {
-        let delta = ((snapshot.balance - account.currentBalance) * 100).rounded() / 100
-        guard abs(delta) >= 0.01 else { return }
-        _ = try await remoteClient.rpc(
-            WalletAccountEntryIDRow.self,
-            name: "create_account_entry_for_record",
-            body: [
-                "p_account_id": AnyCodable(account.id),
-                "p_direction": AnyCodable(delta > 0 ? "in" : "out"),
-                "p_amount": AnyCodable(abs(delta)),
-                "p_entry_type": AnyCodable("adjustment"),
-                "p_source_table": AnyCodable("data_records"),
-                "p_source_id": AnyCodable(snapshot.id),
-                "p_occurred_at": AnyCodable(snapshot.snapshotAt),
-                "p_note": AnyCodable("由负债快照校准当前总欠款至 ¥\(String(format: "%.2f", snapshot.balance))")
-            ],
-            accessToken: accessToken
-        )
-        try await remoteClient.patch(
-            path: "rest/v1/accounts",
-            queryItems: [URLQueryItem(name: "id", value: "eq.\(account.id)")],
-            body: ["last_reconciled_at": AnyCodable(snapshot.snapshotAt)],
-            accessToken: accessToken
-        )
-    }
-
-    private func dueDate(monthKey: String, day: Int?) -> String? {
-        guard let day else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        guard let start = formatter.date(from: monthKey + "-01"),
-              let range = Calendar(identifier: .gregorian).range(of: .day, in: .month, for: start) else {
-            return nil
+    ) async throws -> NativeWalletSnapshotLinkResult {
+        do {
+            let response = try await remoteClient.rpc(
+                WalletSnapshotApplyResponse.self,
+                name: "apply_wallet_snapshot",
+                body: [
+                    "p_record_id": AnyCodable(snapshot.id),
+                    "p_account_id": AnyCodable(nullable(accountId))
+                ],
+                accessToken: accessToken
+            )
+            return try response.row.nativeResult()
+        } catch let error as SupabaseRemoteError {
+            throw normalizedWalletSnapshotError(error)
+        } catch is DecodingError {
+            throw SupabaseRemoteError.requestFailed("invalid_response")
         }
-        return "\(monthKey)-\(String(format: "%02d", min(max(day, 1), range.count)))"
     }
 
     private func nullable<T>(_ value: T?) -> Any {
         guard let value else { return NSNull() }
         return value
+    }
+
+    private func normalizedWalletSnapshotError(_ error: SupabaseRemoteError) -> SupabaseRemoteError {
+        guard case .requestFailed(let message) = error else { return error }
+        let reasons = [
+            "not_authenticated", "wallet_snapshot_not_found", "invalid_wallet_snapshot",
+            "account_not_found", "account_archived", "account_kind_mismatch",
+            "snapshot_link_conflict", "repayment_evidence_conflict"
+        ]
+        guard let reason = reasons.first(where: { message.contains($0) }) else { return error }
+        return .requestFailed(reason)
     }
 }
 
@@ -400,5 +225,168 @@ private struct WalletAccountRow: Decodable {
     }
 }
 
-private struct WalletRepaymentCycleIDRow: Decodable { let id: String }
-private struct WalletAccountEntryIDRow: Decodable { let id: String }
+private struct WalletSnapshotApplyResponse: Decodable {
+    let row: WalletSnapshotApplyRow
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let object = try? container.decode(WalletSnapshotApplyRow.self) {
+            row = object
+            return
+        }
+        let rows = try container.decode([WalletSnapshotApplyRow].self)
+        guard let first = rows.first else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "钱包快照命令返回空结果")
+        }
+        row = first
+    }
+}
+
+private struct WalletSnapshotApplyRow: Decodable {
+    let outcome: String
+    let recordId: String?
+    let linkedAccountId: String?
+    let account: WalletAccountRow?
+    let cycle: WalletRepaymentCycleRow?
+    let payment: WalletPaymentRow?
+    let balanceChanged: Bool?
+    let reviewRequired: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case outcome, account, cycle, payment
+        case recordId = "record_id"
+        case linkedAccountId = "linked_account_id"
+        case balanceChanged = "balance_changed"
+        case reviewRequired = "review_required"
+    }
+
+    func nativeResult() throws -> NativeWalletSnapshotLinkResult {
+        guard let outcome = NativeWalletSnapshotOutcome(rawValue: outcome),
+              let recordId,
+              let linkedAccountId,
+              let account,
+              account.id == linkedAccountId else {
+            throw SupabaseRemoteError.requestFailed("invalid_response")
+        }
+        return NativeWalletSnapshotLinkResult(
+            accountId: linkedAccountId,
+            outcome: outcome,
+            recordId: recordId,
+            cycle: cycle?.native,
+            payment: payment?.native,
+            balanceChanged: balanceChanged ?? false,
+            reviewRequired: reviewRequired ?? false
+        )
+    }
+}
+
+private struct WalletRepaymentCycleRow: Decodable {
+    let id: String
+    let accountId: String
+    let cycleMonth: String
+    let statementStartDate: String?
+    let statementEndDate: String?
+    let dueDate: String?
+    let status: String
+    let autoDebitAccountId: String?
+    let autoConfirmRepayment: Bool?
+    let source: String?
+    let evidenceRecordId: String?
+    let confidence: Double?
+    let note: String?
+    let confirmedAt: String?
+    let statementAmount: Double?
+    let paidAmount: Double?
+    let remainingAmount: Double?
+    let carriedOverAmount: Double?
+    let originalStatementAmount: Double?
+    let minPaymentAmount: Double?
+    let refundAppliedAmount: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, source, confidence, note
+        case accountId = "account_id"
+        case cycleMonth = "cycle_month"
+        case statementStartDate = "statement_start_date"
+        case statementEndDate = "statement_end_date"
+        case dueDate = "due_date"
+        case autoDebitAccountId = "auto_debit_account_id"
+        case autoConfirmRepayment = "auto_confirm_repayment"
+        case evidenceRecordId = "evidence_record_id"
+        case confirmedAt = "confirmed_at"
+        case statementAmount = "statement_amount"
+        case paidAmount = "paid_amount"
+        case remainingAmount = "remaining_amount"
+        case carriedOverAmount = "carried_over_amount"
+        case originalStatementAmount = "original_statement_amount"
+        case minPaymentAmount = "min_payment_amount"
+        case refundAppliedAmount = "refund_applied_amount"
+    }
+
+    var native: NativeRepaymentCycle? {
+        guard let status = NativeRepaymentStatus(rawValue: status) else { return nil }
+        return NativeRepaymentCycle(
+            id: id,
+            accountId: accountId,
+            cycleMonth: cycleMonth,
+            statementStartDate: statementStartDate,
+            statementEndDate: statementEndDate,
+            dueDate: dueDate,
+            statementAmount: statementAmount ?? 0,
+            paidAmount: paidAmount ?? 0,
+            remainingAmount: remainingAmount ?? 0,
+            carriedOverAmount: carriedOverAmount ?? 0,
+            originalStatementAmount: originalStatementAmount,
+            minPaymentAmount: minPaymentAmount,
+            refundAppliedAmount: refundAppliedAmount ?? 0,
+            status: status,
+            autoDebitAccountId: autoDebitAccountId,
+            autoConfirmRepayment: autoConfirmRepayment ?? false,
+            source: source ?? "system",
+            evidenceRecordId: evidenceRecordId,
+            confidence: confidence,
+            note: note ?? "",
+            confirmedAt: confirmedAt
+        )
+    }
+}
+
+private struct WalletPaymentRow: Decodable {
+    let id: String
+    let accountId: String
+    let statementId: String?
+    let debitAccountId: String?
+    let amount: Double?
+    let overpaymentAmount: Double?
+    let paidAt: String
+    let source: String?
+    let evidenceRecordId: String?
+    let status: String?
+    let note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, amount, source, status, note
+        case accountId = "account_id"
+        case statementId = "statement_id"
+        case debitAccountId = "debit_account_id"
+        case overpaymentAmount = "overpayment_amount"
+        case paidAt = "paid_at"
+        case evidenceRecordId = "evidence_record_id"
+    }
+
+    var native: NativeLiabilityPayment {
+        NativeLiabilityPayment(
+            id: id,
+            accountId: accountId,
+            statementId: statementId,
+            debitAccountId: debitAccountId,
+            amount: amount ?? 0,
+            overpaymentAmount: overpaymentAmount ?? 0,
+            paidAt: paidAt,
+            source: source ?? "manual",
+            evidenceRecordId: evidenceRecordId,
+            status: status ?? "confirmed",
+            note: note ?? ""
+        )
+    }
+}

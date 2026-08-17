@@ -63,6 +63,7 @@
     "test:account-management-contract": "node scripts/test-account-management-migration-contract.mjs",
     "test:account-management": "node --test src/repositories/__tests__/accountRepository.test.mjs src/features/accounts/__tests__/accountManagementFeature.test.mjs src/features/accounts/__tests__/accountManagementBoundary.test.mjs",
     "test:account-entry-helper": "node --test src/features/accounts/__tests__/accountEntryHelperBoundary.test.mjs",
+    "test:ios-wallet-snapshot-boundary": "node --test scripts/test-ios-wallet-snapshot-boundary.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",
     "audit:storage-orphans": "node scripts/audit-storage-orphans.mjs",

@@ -123,7 +123,49 @@ struct NativeWalletSnapshot: Identifiable {
     }
 }
 
+enum NativeWalletSnapshotOutcome: String, Codable, Equatable {
+    case created
+    case linked
+    case replayed
+    case needsConfirmation = "needs_confirmation"
+}
+
 struct NativeWalletSnapshotLinkResult {
     let accountId: String
     let warnings: [String]
+    let outcome: NativeWalletSnapshotOutcome
+    let recordId: String?
+    let cycle: NativeRepaymentCycle?
+    let payment: NativeLiabilityPayment?
+    let balanceChanged: Bool
+    let reviewRequired: Bool
+
+    var successMessage: String {
+        switch outcome {
+        case .created: return "已从快照创建账户"
+        case .linked: return "已关联账户"
+        case .replayed: return "快照关联已存在"
+        case .needsConfirmation: return "账户已关联，账期/还款需要确认"
+        }
+    }
+
+    init(
+        accountId: String,
+        warnings: [String] = [],
+        outcome: NativeWalletSnapshotOutcome = .linked,
+        recordId: String? = nil,
+        cycle: NativeRepaymentCycle? = nil,
+        payment: NativeLiabilityPayment? = nil,
+        balanceChanged: Bool = false,
+        reviewRequired: Bool = false
+    ) {
+        self.accountId = accountId
+        self.warnings = warnings
+        self.outcome = outcome
+        self.recordId = recordId
+        self.cycle = cycle
+        self.payment = payment
+        self.balanceChanged = balanceChanged
+        self.reviewRequired = reviewRequired
+    }
 }
