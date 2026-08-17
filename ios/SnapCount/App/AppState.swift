@@ -3,6 +3,12 @@ import SwiftUI
 typealias NativeSessionProvider = (_ forceRefresh: Bool) async throws -> SupabaseAuthSession
 typealias NativeSleepProvider = (_ nanoseconds: UInt64) async throws -> Void
 
+private struct WalletSnapshotReadModelRefreshError: LocalizedError {
+    let message: String
+
+    var errorDescription: String? { message }
+}
+
 private struct PendingRecordExpressionPlanDelivery {
     let id: UUID
     let recordId: String
@@ -98,6 +104,7 @@ final class AppState: ObservableObject {
     private let accountRepository: AccountRepositoryProtocol
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
+    private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
     private let insightsRepository: InsightsRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
     private let financeVocabularyRepository: FinanceVocabularyRepositoryProtocol
@@ -130,6 +137,7 @@ final class AppState: ObservableObject {
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
+        walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
         insightsRepository: InsightsRepositoryProtocol = InsightsRepository(),
         settingsRepository: SettingsRepositoryProtocol = SettingsRepository(),
         financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository(),
@@ -147,6 +155,7 @@ final class AppState: ObservableObject {
         self.accountRepository = accountRepository
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
+        self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
         self.insightsRepository = insightsRepository
         self.settingsRepository = settingsRepository
         self.financeVocabularyRepository = financeVocabularyRepository
@@ -1073,61 +1082,131 @@ final class AppState: ObservableObject {
     }
 
     func createAccountFromWalletSnapshot(_ snapshot: NativeWalletSnapshot) async -> Bool {
-        guard walletSnapshotActionId == nil else { return false }
-        walletSnapshotActionId = snapshot.id
-        walletSnapshotMessage = nil
-        defer { walletSnapshotActionId = nil }
-
-        do {
-            let session = try await validSession()
-            let result = try await walletSnapshotRepository.createAccount(
-                from: snapshot,
-                userId: session.user.id,
-                accessToken: session.accessToken
-            )
-            await refreshAfterWalletSnapshotLink()
-            walletSnapshotMessage = result.warnings.isEmpty
-                ? result.successMessage
-                : result.warnings.joined(separator: "；")
-            return true
-        } catch {
-            walletSnapshotMessage = error.localizedDescription
-            return false
-        }
+        await performWalletSnapshotAction(
+            .create(recordId: snapshot.id),
+            snapshot: snapshot
+        )
     }
 
     func linkWalletSnapshot(
         _ snapshot: NativeWalletSnapshot,
         to account: NativeAccount
     ) async -> Bool {
-        guard walletSnapshotActionId == nil else { return false }
-        walletSnapshotActionId = snapshot.id
-        walletSnapshotMessage = nil
-        defer { walletSnapshotActionId = nil }
+        await performWalletSnapshotAction(
+            .link(recordId: snapshot.id, accountId: account.id),
+            snapshot: snapshot,
+            account: account
+        )
+    }
 
-        do {
-            let session = try await validSession()
-            let result = try await walletSnapshotRepository.link(
-                snapshot,
-                to: account,
-                userId: session.user.id,
-                accessToken: session.accessToken
-            )
-            await refreshAfterWalletSnapshotLink()
-            walletSnapshotMessage = result.warnings.isEmpty
-                ? result.successMessage
-                : result.warnings.joined(separator: "；")
+    private func performWalletSnapshotAction(
+        _ command: WalletSnapshotActionCommand,
+        snapshot: NativeWalletSnapshot,
+        account: NativeAccount? = nil
+    ) async -> Bool {
+        let ownsBusyState = walletSnapshotActionId == nil
+        if ownsBusyState {
+            walletSnapshotActionId = snapshot.id
+            walletSnapshotMessage = nil
+        }
+        defer {
+            if ownsBusyState, walletSnapshotActionId == snapshot.id {
+                walletSnapshotActionId = nil
+            }
+        }
+
+        let result = await resolvedWalletSnapshotActionUseCase().perform(
+            command,
+            snapshot: snapshot,
+            account: account
+        )
+        return projectWalletSnapshotActionResult(result)
+    }
+
+    private func resolvedWalletSnapshotActionUseCase() -> WalletSnapshotActionUseCase {
+        if let walletSnapshotActionUseCase { return walletSnapshotActionUseCase }
+        let useCase = WalletSnapshotActionUseCase(
+            repository: walletSnapshotRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return WalletSnapshotActionUserContext(
+                        userId: "",
+                        generation: -1,
+                        isSignedIn: false
+                    )
+                }
+                return WalletSnapshotActionUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            refresh: { [weak self] in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                try await self.refreshAfterWalletSnapshotLink()
+            }
+        )
+        walletSnapshotActionUseCase = useCase
+        return useCase
+    }
+
+    private func projectWalletSnapshotActionResult(_ result: WalletSnapshotActionResult) -> Bool {
+        switch result.transaction {
+        case .accepted(let outcome):
+            let successMessage = walletSnapshotSuccessMessage(outcome)
+            switch result.refresh {
+            case .failed(let message):
+                walletSnapshotMessage = "\(successMessage)，但刷新失败：\(message)"
+            case .notStarted, .succeeded:
+                walletSnapshotMessage = successMessage
+            }
             return true
-        } catch {
-            walletSnapshotMessage = error.localizedDescription
+        case .rejected(.unauthenticated):
+            walletSnapshotMessage = "登录状态已失效，请重新登录。"
+        case .rejected(.invalidInput):
+            walletSnapshotMessage = "钱包快照参数无效"
+        case .conflict(.walletSnapshotBusy):
+            walletSnapshotMessage = "钱包快照正在处理中"
+        case .conflict(.walletSnapshotConflict):
+            walletSnapshotMessage = "该快照正在执行另一项关联操作"
+        case .failed(let message):
+            walletSnapshotMessage = message
+        case .stale:
             return false
+        }
+        return false
+    }
+
+    private func walletSnapshotSuccessMessage(_ outcome: NativeWalletSnapshotOutcome) -> String {
+        switch outcome {
+        case .created: return "已从快照创建账户"
+        case .linked: return "已关联账户"
+        case .replayed: return "快照关联已存在"
+        case .needsConfirmation: return "账户已关联，账期/还款需要确认"
         }
     }
 
-    private func refreshAfterWalletSnapshotLink() async {
+    private func refreshAfterWalletSnapshotLink() async throws {
         await loadAccounts()
+        if let accountMessage, !accountMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: accountMessage)
+        }
         await loadWalletSnapshots()
+        if let walletSnapshotMessage, !walletSnapshotMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: walletSnapshotMessage)
+        }
         await refreshDashboard()
+        if let dashboardMessage, !dashboardMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: dashboardMessage)
+        }
     }
 
     func openUnboundRecord(_ record: NativeUnboundRecord) {
@@ -2360,6 +2439,7 @@ final class AppState: ObservableObject {
     func resetUserScopedState() {
         dashboardRefreshGeneration += 1
         userStateGeneration += 1
+        walletSnapshotActionUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false
