@@ -11,6 +11,6 @@
 - 最小实现：create/link 共用 `apply_wallet_snapshot`；新增 outcome、account/cycle/payment DTO 和稳定错误/畸形响应映射。
 - 绿灯结果：`npm run test:ios-wallet-snapshot-boundary` 4/4 通过。
 - PWA/iOS 差异：共享数据库事务和结果语义；iOS 保留 Swift Repository/AppState 入口，PWA Feature 不迁移到 iOS。
-- GitHub CI 结果：实现 PR 尚未创建；Swift Build/XCTest 未验证。
-- 未解决风险：Windows 无法编译 Swift；需要 macOS 验证 DTO 解码和现有 AppState 构建；完整 AppState stale/use-case 拆分留待后续切片。
-- 对应提交：待提交。
+- GitHub CI 结果：PR #115 的 GitHub macOS Build/XCTest、PWA/Edge、治理和 iOS Build Gate 全部通过。
+- 未解决风险：完整 AppState stale/use-case 拆分留待 A4-IOS-002；本片未改数据库/PWA/Edge/Planner。
+- 对应提交：`58dc167`；合并提交 `61874ba`。
