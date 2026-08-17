@@ -131,7 +131,7 @@ final class WalletSnapshotActionUseCase {
         let token = UUID()
         let expectedResetGeneration = resetGeneration
         let task = Task { [weak self] in
-            guard let self else { return .stale }
+            guard let self else { return WalletSnapshotActionResult.stale }
             return await self.execute(
                 command,
                 snapshot: snapshot,
