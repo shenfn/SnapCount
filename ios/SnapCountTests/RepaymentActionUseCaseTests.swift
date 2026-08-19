@@ -42,9 +42,8 @@ final class RepaymentActionUseCaseTests: XCTestCase {
         async let first = harness.useCase.perform(confirm)
         await gate.waitUntilEntered()
         async let duplicate = harness.useCase.perform(confirm)
-        let conflict = await harness.useCase.perform(.confirm(
-            cycleId: "cycle-1", accountId: "account-1", paidAmount: 240,
-            debitAccountId: "cash-1", status: .paid, note: "另一笔确认"
+        let conflict = await harness.useCase.perform(.revoke(
+            paymentId: "payment-1", cycleId: "cycle-1", accountId: "account-1"
         ))
 
         XCTAssertEqual(conflict.conflict, .repaymentConflict)
@@ -111,6 +110,26 @@ final class RepaymentActionUseCaseTests: XCTestCase {
         XCTAssertEqual(result.refresh, .succeeded)
     }
 
+    func testA4IOS003FAppStateKeepsPublicEntryAndProjectsAcceptedResult() async {
+        let repository = RepaymentActionRepositoryStub()
+        let harness = makeHarness(repository: repository)
+        let state = AppState(repaymentActionUseCase: harness.useCase)
+
+        let accepted = await state.confirmRepayment(
+            cycle: repaymentCycle(),
+            paidAmount: 120,
+            debitAccountId: "cash-1",
+            status: .partialPaid,
+            note: "手动还款"
+        )
+
+        XCTAssertTrue(accepted)
+        XCTAssertFalse(state.isSubmittingRepayment)
+        XCTAssertEqual(state.repaymentMessage, "已确认还款并记录扣款")
+        XCTAssertEqual(repository.confirmCallCount, 1)
+        XCTAssertEqual(harness.refreshCallCount(), 1)
+    }
+
     private func makeHarness(
         repository: RepaymentActionRepositoryStub,
         context: RepaymentActionUserContext = .init(userId: "user-1", generation: 1, isSignedIn: true),
@@ -126,7 +145,7 @@ final class RepaymentActionUseCaseTests: XCTestCase {
                 return Self.session
             },
             contextProvider: { contextProvider?() ?? context },
-            refresh: {
+            refresh: { _ in
                 refreshCalls += 1
                 try await refresh()
             }
@@ -146,6 +165,32 @@ final class RepaymentActionUseCaseTests: XCTestCase {
         tokenType: "bearer",
         user: SupabaseUser(id: "user-1", email: "test@example.com")
     )
+
+    private func repaymentCycle() -> NativeRepaymentCycle {
+        NativeRepaymentCycle(
+            id: "cycle-1",
+            accountId: "account-1",
+            cycleMonth: "2026-08",
+            statementStartDate: "2026-08-01",
+            statementEndDate: "2026-08-31",
+            dueDate: "2026-08-20",
+            statementAmount: 500,
+            paidAmount: 0,
+            remainingAmount: 500,
+            carriedOverAmount: 0,
+            originalStatementAmount: nil,
+            minPaymentAmount: 50,
+            refundAppliedAmount: 0,
+            status: .pending,
+            autoDebitAccountId: nil,
+            autoConfirmRepayment: false,
+            source: "manual",
+            evidenceRecordId: nil,
+            confidence: nil,
+            note: "",
+            confirmedAt: nil
+        )
+    }
 }
 
 private struct RepaymentActionHarness {
@@ -272,4 +317,3 @@ private extension RepaymentActionResult {
         return false
     }
 }
-

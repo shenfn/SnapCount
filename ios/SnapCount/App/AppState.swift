@@ -102,6 +102,7 @@ final class AppState: ObservableObject {
     private let domainRepository: DomainRepositoryProtocol
     private let snapshotStore: DashboardSnapshotStoreProtocol
     private let accountRepository: AccountRepositoryProtocol
+    private var repaymentActionUseCase: RepaymentActionUseCase?
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
@@ -135,6 +136,7 @@ final class AppState: ObservableObject {
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
         snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
+        repaymentActionUseCase: RepaymentActionUseCase? = nil,
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
@@ -153,6 +155,7 @@ final class AppState: ObservableObject {
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore
         self.accountRepository = accountRepository
+        self.repaymentActionUseCase = repaymentActionUseCase
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
         self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
@@ -699,54 +702,120 @@ final class AppState: ObservableObject {
         status: NativeRepaymentStatus,
         note: String
     ) async -> Bool {
-        guard !isSubmittingRepayment else { return false }
-        isSubmittingRepayment = true
-        repaymentMessage = nil
-        defer { isSubmittingRepayment = false }
-
-        do {
-            let session = try await validSession()
-            _ = try await accountRepository.confirmRepayment(
-                cycleId: cycle.id,
-                paidAmount: paidAmount,
-                debitAccountId: debitAccountId,
-                status: status,
-                note: note,
-                accessToken: session.accessToken
-            )
-            await refreshAfterRepayment(accountId: cycle.accountId, session: session)
-            repaymentMessage = debitAccountId == nil
-                ? "已确认还款"
-                : "已确认还款并记录扣款"
-            return true
-        } catch {
-            repaymentMessage = error.localizedDescription
-            return false
-        }
+        await performRepaymentAction(.confirm(
+            cycleId: cycle.id,
+            accountId: cycle.accountId,
+            paidAmount: paidAmount,
+            debitAccountId: debitAccountId,
+            status: status,
+            note: note
+        ))
     }
 
     func revokeLiabilityPayment(
         payment: NativeLiabilityPayment,
         accountId: String
     ) async -> Bool {
-        guard !isSubmittingRepayment else { return false }
-        isSubmittingRepayment = true
-        repaymentMessage = nil
-        defer { isSubmittingRepayment = false }
+        await performRepaymentAction(.revoke(
+            paymentId: payment.id,
+            cycleId: payment.statementId ?? "",
+            accountId: accountId
+        ))
+    }
 
-        do {
-            let session = try await validSession()
-            _ = try await accountRepository.revokePayment(
-                paymentId: payment.id,
-                accessToken: session.accessToken
-            )
-            await refreshAfterRepayment(accountId: accountId, session: session)
-            repaymentMessage = "已撤销还款"
+    private func performRepaymentAction(_ command: RepaymentActionCommand) async -> Bool {
+        let ownsBusyState = !isSubmittingRepayment
+        if ownsBusyState {
+            isSubmittingRepayment = true
+            repaymentMessage = nil
+        }
+        defer {
+            if ownsBusyState { isSubmittingRepayment = false }
+        }
+
+        let result = await resolvedRepaymentActionUseCase().perform(command)
+        return projectRepaymentActionResult(result)
+    }
+
+    private func resolvedRepaymentActionUseCase() -> RepaymentActionUseCase {
+        if let repaymentActionUseCase { return repaymentActionUseCase }
+        let useCase = RepaymentActionUseCase(
+            repository: accountRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return RepaymentActionUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return RepaymentActionUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] cycle in
+                self?.applyCanonicalRepaymentCycle(cycle)
+            },
+            refresh: { [weak self] accountId in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                try await self.refreshAfterRepayment(accountId: accountId)
+            }
+        )
+        repaymentActionUseCase = useCase
+        return useCase
+    }
+
+    private func projectRepaymentActionResult(_ result: RepaymentActionResult) -> Bool {
+        switch result.transaction {
+        case .accepted(let accepted):
+            let successMessage: String
+            switch accepted.operation {
+            case .confirm:
+                successMessage = accepted.recordedDebit ? "已确认还款并记录扣款" : "已确认还款"
+            case .revoke:
+                successMessage = "已撤销还款"
+            }
+            if case .failed(let message) = result.refresh {
+                repaymentMessage = "\(successMessage)，但刷新失败：\(message)"
+            } else {
+                repaymentMessage = successMessage
+            }
             return true
-        } catch {
-            repaymentMessage = error.localizedDescription
+        case .rejected(.unauthenticated):
+            repaymentMessage = "登录状态已失效，请重新登录。"
+        case .rejected(.invalidInput):
+            repaymentMessage = "还款参数无效"
+        case .conflict(.repaymentConflict):
+            repaymentMessage = "当前账单正在执行另一项还款操作"
+        case .failed(let message):
+            repaymentMessage = message
+        case .stale:
             return false
         }
+        return false
+    }
+
+    private func applyCanonicalRepaymentCycle(_ cycle: NativeRepaymentCycle) {
+        guard let detail = selectedAccountDetail, detail.account.id == cycle.accountId else { return }
+        var cycles = detail.repaymentCycles
+        if let index = cycles.firstIndex(where: { $0.id == cycle.id }) {
+            cycles[index] = cycle
+        } else {
+            cycles.insert(cycle, at: 0)
+        }
+        selectedAccountDetail = NativeAccountDetail(
+            account: detail.account,
+            entries: detail.entries,
+            repaymentCycles: cycles,
+            payments: detail.payments,
+            loadErrors: detail.loadErrors
+        )
     }
 
     func loadInboxRepaymentCandidates() async {
@@ -816,15 +885,43 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func refreshAfterRepayment(accountId: String, session: SupabaseAuthSession) async {
+    private func refreshAfterRepayment(accountId: String) async throws {
         await loadAccounts()
+        if let accountMessage, !accountMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: accountMessage)
+        }
         if let account = accounts.first(where: { $0.id == accountId }) {
-            selectedAccountDetail = await accountRepository.fetchDetail(
+            let generation = userStateGeneration
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let refreshedDetail = await accountRepository.fetchDetail(
                 account: account,
                 accessToken: session.accessToken
             )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+
+            let canonicalCycles = selectedAccountDetail?.account.id == accountId
+                ? selectedAccountDetail?.repaymentCycles ?? []
+                : []
+            if refreshedDetail.loadError(for: .repaymentCycles) != nil, !canonicalCycles.isEmpty {
+                selectedAccountDetail = NativeAccountDetail(
+                    account: refreshedDetail.account,
+                    entries: refreshedDetail.entries,
+                    repaymentCycles: canonicalCycles,
+                    payments: refreshedDetail.payments,
+                    loadErrors: refreshedDetail.loadErrors
+                )
+            } else {
+                selectedAccountDetail = refreshedDetail
+            }
+            if let message = refreshedDetail.loadErrors.values.first {
+                throw WalletSnapshotReadModelRefreshError(message: message)
+            }
         }
         await refreshDashboard()
+        if let dashboardMessage, !dashboardMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: dashboardMessage)
+        }
     }
 
     func saveAccount(_ draft: NativeAccountDraft) async -> Bool {
@@ -2440,6 +2537,7 @@ final class AppState: ObservableObject {
         dashboardRefreshGeneration += 1
         userStateGeneration += 1
         walletSnapshotActionUseCase?.reset()
+        repaymentActionUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false
