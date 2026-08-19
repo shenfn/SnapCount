@@ -1,6 +1,6 @@
 # ADR-030：iOS 账户还款动作编排边界
 
-> 状态：提议
+> 状态：已接受
 >
 > 日期：2026-08-19
 >
@@ -37,3 +37,4 @@ iOS 手动账户还款确认与撤销作为一个独立动作编排切片，新�
 - 当前只读证据：`ios/SnapCount/App/AppState.swift`、`ios/SnapCount/Repositories/AccountRepository.swift`。
 - 跨端行为基线：`docs/spec/模块/PWA业务边界/账户还款规格说明.md`。
 - 实现阶段必须补充专项 XCTest、完整 macOS iOS Build、治理和架构门禁结果。
+- PR #121 已合并（`df4265c`）；红灯 run `32264644828` 和转绿 run `32266597152`、`32267345129` 记录了从类型缺失到完整 Build/XCTest 通过的证据。
