@@ -85,7 +85,7 @@ final class AccountReadPreparationUseCase {
         let token = UUID()
         let expectedResetGeneration = resetGeneration
         let task = Task { [weak self] in
-            guard let self else { return .stale }
+            guard let self else { return AccountReadPreparationResult.stale }
             return await self.execute(
                 monthKey: normalizedMonthKey,
                 context: context,
