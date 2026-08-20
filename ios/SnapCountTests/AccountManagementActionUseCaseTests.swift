@@ -256,7 +256,7 @@ private final class AccountManagementRepositoryStub: AccountManagementRepository
         return account()
     }
 
-    func setArchived(
+    func setAccountArchived(
         accountId: String,
         archived: Bool,
         accessToken: String

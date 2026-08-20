@@ -7,7 +7,7 @@
 - 基线：`d5dc62f`，A4-IOS-004 评估 PR #123 合并提交。
 - 当前 worktree：`D:\Business\count\.worktrees\A4-IOS-004账户管理红灯`。
 - 当前分支：`test/A4-IOS-004账户管理红灯`。
-- 当前阶段：正式 Spec 已建立，准备提交 XCTest 红灯。
+- 当前阶段：红灯已确认，最小实现已在同一分支完成，等待 macOS CI 转绿。
 
 ## 权威来源
 
@@ -33,8 +33,14 @@
 
 同时 A4-IOS-004A-H 场景追踪检查通过，`node --check`、`npm run governance:check` 和 `git diff --check` 通过。Windows 无 Swift/Xcode，XCTest 编译红灯需由 GitHub macOS runner 复核，不能把本地工具缺失写成业务结论。
 
+## 最小实现进展
+
+已新增纯 Swift `AccountManagementActionUseCase`，实现同命令复用、跨命令冲突、reset/user stale 和 accepted/refresh 分层；`AccountRepository` 已实现 `AccountManagementRepositoryProtocol`，保存/归档分别调用 `save_account` / `set_account_archived`；AppState 保留公开入口并通过 Use Case 投影 canonical account。
+
+本地 `npm run test:ios-account-management-action-boundary` 已 5/5 通过；新增 Repository XCTest 固定 RPC 名称、参数、无 `user_id` 旁路和 malformed response 失败。
+
 ## 未验证与下一步
 
-- 尚未运行 Swift XCTest；当前红灯提交包含测试代码但缺少预期的业务类型/实现。
-- 下一步：推送红灯提交并取得 macOS Build/XCTest 失败证据；随后在同一任务下按最小实现顺序补 Repository、Use Case 和 AppState。
+- 尚未运行 Swift XCTest；实现提交等待 GitHub macOS Build/XCTest 验证。
+- 下一步：若 macOS 编译通过，运行完整 PWA/Edge、治理和架构回归；若失败，只修当前账户管理切片，不扩大到账户读取或截图还款。
 - 红灯合并后，从同一分支开始最小实现；不新增数据库迁移或生产部署。
