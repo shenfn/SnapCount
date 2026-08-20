@@ -22,10 +22,19 @@
 
 ## 红灯证据
 
-待添加并运行 A4-IOS-004A-H 测试后填写。Windows 无 Swift/Xcode 时，需区分“测试代码已建立但本地环境无法编译”和“业务断言失败”，最终以 GitHub macOS Build/XCTest 为准。
+2026-08-20 已添加 `AccountManagementActionUseCaseTests.swift` 的 A4-IOS-004A-H 场景和 `test:ios-account-management-action-boundary` 源边界检查。
+
+本地 Node 红灯结果：5 个子测试中 1 个通过、4 个按预期失败：
+
+- `save_account` 尚未出现在 iOS `AccountRepository`；
+- `set_account_archived` 尚未出现在 iOS `AccountRepository`；
+- `AccountManagementActionUseCase.swift` 尚不存在；
+- AppState 尚未委托账户管理 Use Case。
+
+同时 A4-IOS-004A-H 场景追踪检查通过，`node --check`、`npm run governance:check` 和 `git diff --check` 通过。Windows 无 Swift/Xcode，XCTest 编译红灯需由 GitHub macOS runner 复核，不能把本地工具缺失写成业务结论。
 
 ## 未验证与下一步
 
-- 尚未运行 Swift XCTest；当前只完成规格文件建立。
-- 下一步：添加专项 XCTest 和 Repository 源边界检查，提交可复现红灯。
+- 尚未运行 Swift XCTest；当前红灯提交包含测试代码但缺少预期的业务类型/实现。
+- 下一步：推送红灯提交并取得 macOS Build/XCTest 失败证据；随后在同一任务下按最小实现顺序补 Repository、Use Case 和 AppState。
 - 红灯合并后，从同一分支开始最小实现；不新增数据库迁移或生产部署。
