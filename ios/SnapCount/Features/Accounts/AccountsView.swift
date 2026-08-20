@@ -654,12 +654,6 @@ struct AccountEditSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if !draft.isCreating {
-                    Section("状态") {
-                        Toggle("已归档", isOn: $draft.isArchived)
-                    }
-                }
-
                 if let message {
                     Section { Text(message).foregroundStyle(JieziTheme.coral) }
                 }
