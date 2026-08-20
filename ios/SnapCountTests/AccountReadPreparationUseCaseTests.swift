@@ -110,8 +110,10 @@ final class AccountReadPreparationUseCaseTests: XCTestCase {
     private static let session = SupabaseAuthSession(
         accessToken: "test-token",
         refreshToken: nil,
+        expiresIn: nil,
         expiresAt: nil,
-        user: SupabaseAuthUser(id: "user-1", email: "test@example.com")
+        tokenType: "bearer",
+        user: SupabaseUser(id: "user-1", email: "test@example.com")
     )
 }
 
