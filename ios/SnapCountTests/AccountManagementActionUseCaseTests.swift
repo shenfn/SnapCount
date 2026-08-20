@@ -246,7 +246,7 @@ private final class AccountManagementRepositoryStub: AccountManagementRepository
         self.failure = error
     }
 
-    func save(
+    func saveAccount(
         _ command: AccountManagementSaveCommand,
         accessToken: String
     ) async throws -> NativeAccount {
