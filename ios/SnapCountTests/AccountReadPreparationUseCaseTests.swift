@@ -15,6 +15,11 @@ final class AccountReadPreparationUseCaseTests: XCTestCase {
         XCTAssertEqual(repository.ensureCallCount, 0)
         XCTAssertEqual(harness.sessionCallCount(), 0)
         context = AccountReadPreparationUserContext(userId: "user-1", generation: 1, isSignedIn: true)
+
+        let invalidMonth = await harness.useCase.prepare(monthKey: "2026-13")
+        XCTAssertEqual(invalidMonth.transaction, .rejected(.invalidInput))
+        XCTAssertEqual(repository.ensureCallCount, 0)
+        XCTAssertEqual(harness.sessionCallCount(), 0)
     }
 
     func testA4IOS005BReusesSamePreparationTask() async {
@@ -55,6 +60,22 @@ final class AccountReadPreparationUseCaseTests: XCTestCase {
         async let pending = harness.useCase.prepare(monthKey: "2026-08")
         await gate.waitUntilEntered()
         harness.useCase.reset()
+        await gate.release()
+
+        let result = await pending
+        XCTAssertEqual(result.transaction, .stale)
+        XCTAssertEqual(repository.ensureCallCount, 1)
+    }
+
+    func testA4IOS005EUserSwitchMakesPreparationStale() async {
+        let gate = AccountReadPreparationGate()
+        let repository = AccountReadPreparationRepositoryStub(gate: gate)
+        var context = AccountReadPreparationUserContext(userId: "user-1", generation: 1, isSignedIn: true)
+        let harness = makeHarness(repository: repository, contextProvider: { context })
+
+        async let pending = harness.useCase.prepare(monthKey: "2026-08")
+        await gate.waitUntilEntered()
+        context = AccountReadPreparationUserContext(userId: "user-2", generation: 2, isSignedIn: true)
         await gate.release()
 
         let result = await pending
@@ -120,7 +141,7 @@ private final class AccountReadPreparationRepositoryStub: AccountReadPreparation
     }
 }
 
-private final class AccountReadPreparationGate {
+private actor AccountReadPreparationGate {
     private var entered = false
     private var enteredContinuations: [CheckedContinuation<Void, Never>] = []
     private var releaseContinuation: CheckedContinuation<Void, Never>?

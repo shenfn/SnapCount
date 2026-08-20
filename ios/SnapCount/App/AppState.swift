@@ -103,8 +103,10 @@ final class AppState: ObservableObject {
     private let snapshotStore: DashboardSnapshotStoreProtocol
     private let accountRepository: AccountRepositoryProtocol
     private let accountManagementRepository: AccountManagementRepositoryProtocol
+    private let accountReadPreparationRepository: AccountReadPreparationRepositoryProtocol
     private var repaymentActionUseCase: RepaymentActionUseCase?
     private var accountManagementActionUseCase: AccountManagementActionUseCase?
+    private var accountReadPreparationUseCase: AccountReadPreparationUseCase?
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
@@ -139,8 +141,10 @@ final class AppState: ObservableObject {
         snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
         accountManagementRepository: AccountManagementRepositoryProtocol? = nil,
+        accountReadPreparationRepository: AccountReadPreparationRepositoryProtocol? = nil,
         repaymentActionUseCase: RepaymentActionUseCase? = nil,
         accountManagementActionUseCase: AccountManagementActionUseCase? = nil,
+        accountReadPreparationUseCase: AccountReadPreparationUseCase? = nil,
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
@@ -162,8 +166,12 @@ final class AppState: ObservableObject {
         self.accountManagementRepository = accountManagementRepository
             ?? (accountRepository as? AccountManagementRepositoryProtocol)
             ?? AccountRepository()
+        self.accountReadPreparationRepository = accountReadPreparationRepository
+            ?? (accountRepository as? AccountReadPreparationRepositoryProtocol)
+            ?? AccountRepository()
         self.accountManagementActionUseCase = accountManagementActionUseCase
         self.repaymentActionUseCase = repaymentActionUseCase
+        self.accountReadPreparationUseCase = accountReadPreparationUseCase
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
         self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
@@ -673,10 +681,10 @@ final class AppState: ObservableObject {
         guard let session else { accountMessage = "登录状态已失效，请重新登录。"; return }
         guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
         if account.type.isLiability {
-            try? await accountRepository.ensureRepaymentCycles(
-                monthKey: Self.currentMonthKey,
-                accessToken: session.accessToken
-            )
+            let preparation = await resolvedAccountReadPreparationUseCase().prepare(monthKey: Self.currentMonthKey)
+            guard projectAccountReadPreparationResult(preparation, onFailure: { [weak self] message in
+                self?.accountMessage = message
+            }) else { return }
         }
         let loadedDetail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
         guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
@@ -779,6 +787,52 @@ final class AppState: ObservableObject {
         return useCase
     }
 
+    private func resolvedAccountReadPreparationUseCase() -> AccountReadPreparationUseCase {
+        if let accountReadPreparationUseCase { return accountReadPreparationUseCase }
+        let useCase = AccountReadPreparationUseCase(
+            repository: accountReadPreparationRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return AccountReadPreparationUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return AccountReadPreparationUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            }
+        )
+        accountReadPreparationUseCase = useCase
+        return useCase
+    }
+
+    private func projectAccountReadPreparationResult(
+        _ result: AccountReadPreparationResult,
+        onFailure: (String) -> Void
+    ) -> Bool {
+        switch result.transaction {
+        case .accepted:
+            return true
+        case .failed(let message):
+            onFailure("还款计划准备失败：\(message)")
+            return true
+        case .rejected(.unauthenticated):
+            onFailure("登录状态已失效，请重新登录。")
+            return false
+        case .rejected(.invalidInput):
+            onFailure("还款计划月份无效")
+            return false
+        case .stale:
+            return false
+        }
+    }
+
     private func projectRepaymentActionResult(_ result: RepaymentActionResult) -> Bool {
         switch result.transaction {
         case .accepted(let accepted):
@@ -836,10 +890,10 @@ final class AppState: ObservableObject {
 
         do {
             let session = try await validSession()
-            try? await accountRepository.ensureRepaymentCycles(
-                monthKey: Self.currentMonthKey,
-                accessToken: session.accessToken
-            )
+            let preparation = await resolvedAccountReadPreparationUseCase().prepare(monthKey: Self.currentMonthKey)
+            guard projectAccountReadPreparationResult(preparation, onFailure: { [weak self] message in
+                self?.inboxFinanceMessage = message
+            }) else { return }
             async let accountRows = accountRepository.fetchAccounts(accessToken: session.accessToken)
             async let cycleRows = accountRepository.fetchOpenRepaymentCycles(accessToken: session.accessToken)
             let (loadedAccounts, cycles) = try await (accountRows, cycleRows)
@@ -2628,6 +2682,7 @@ final class AppState: ObservableObject {
         walletSnapshotActionUseCase?.reset()
         repaymentActionUseCase?.reset()
         accountManagementActionUseCase?.reset()
+        accountReadPreparationUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false

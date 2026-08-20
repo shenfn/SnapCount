@@ -30,7 +30,7 @@ protocol AccountManagementRepositoryProtocol {
     ) async throws -> NativeAccount
 }
 
-final class AccountRepository: AccountRepositoryProtocol, AccountManagementRepositoryProtocol {
+final class AccountRepository: AccountRepositoryProtocol, AccountManagementRepositoryProtocol, AccountReadPreparationRepositoryProtocol {
     private let remoteClient:SupabaseRemoteClientProtocol
     init(remoteClient:SupabaseRemoteClientProtocol=SupabaseRemoteClient()){self.remoteClient=remoteClient}
 
