@@ -67,6 +67,7 @@
     "test:ios-wallet-snapshot-action-boundary": "node --test scripts/test-ios-wallet-snapshot-action-boundary.mjs",
     "test:ios-repayment-action-boundary": "node --test scripts/test-ios-repayment-action-boundary.mjs",
     "test:ios-account-management-action-boundary": "node --test scripts/test-ios-account-management-action-boundary.mjs",
+    "test:ios-account-read-boundary": "node --test scripts/test-ios-account-read-boundary.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",
     "audit:storage-orphans": "node scripts/audit-storage-orphans.mjs",
