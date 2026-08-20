@@ -39,6 +39,8 @@
 
 本地 `npm run test:ios-account-management-action-boundary` 已 5/5 通过；新增 Repository XCTest 固定 RPC 名称、参数、无 `user_id` 旁路和 malformed response 失败。
 
+第三轮 macOS workflow `32381458280` 在 runner 长时间无终态日志后由本任务主动取消，属于环境级未验证；不计入业务通过或失败。取消前未出现新的编译错误输出。
+
 ## 未验证与下一步
 
 - 尚未运行 Swift XCTest；实现提交等待 GitHub macOS Build/XCTest 验证。
