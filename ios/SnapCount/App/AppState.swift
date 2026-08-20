@@ -989,6 +989,7 @@ final class AppState: ObservableObject {
         case .stale:
             return false
         }
+        return false
     }
 
     private func resolvedAccountManagementActionUseCase() -> AccountManagementActionUseCase {
