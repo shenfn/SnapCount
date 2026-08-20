@@ -41,8 +41,18 @@
 
 第三轮 macOS workflow `32381458280` 在 runner 长时间无终态日志后由本任务主动取消，属于环境级未验证；不计入业务通过或失败。取消前未出现新的编译错误输出。
 
+## CI 转绿证据
+
+- macOS workflow `32382431565`：Build SwiftUI app 通过（含完整 XCTest），iOS Build Gate 通过。
+- Release Validation：PWA/Edge/migrations/shadow 通过；Governance、Cloudflare Pages、Vercel 通过。
+- 本地 `npm run test:account-management`：19 项通过。
+- 本地 `npm run test:account-read`：20 项通过。
+- 本地 `npm run test:repayment`：18 项通过。
+- 本地 `npm run governance:arch`：通过；仅保留既有人工清单警告。
+- 本地 `npm run build`：通过；仅有既有 `eval` 与 bundle size 警告。
+
 ## 未验证与下一步
 
-- 尚未运行 Swift XCTest；实现提交等待 GitHub macOS Build/XCTest 验证。
-- 下一步：若 macOS 编译通过，运行完整 PWA/Edge、治理和架构回归；若失败，只修当前账户管理切片，不扩大到账户读取或截图还款。
+- Swift 权威验证已由 GitHub macOS runner 完成；Windows 本地仍无法运行 Swift/Xcode。
+- 下一步：合并 PR #124 后建立收口文档 worktree，更新阶段索引和最终交接；账户读取副作用与截图还款继续保持独立后续切片。
 - 红灯合并后，从同一分支开始最小实现；不新增数据库迁移或生产部署。
