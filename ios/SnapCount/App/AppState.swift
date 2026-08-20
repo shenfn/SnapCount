@@ -102,7 +102,9 @@ final class AppState: ObservableObject {
     private let domainRepository: DomainRepositoryProtocol
     private let snapshotStore: DashboardSnapshotStoreProtocol
     private let accountRepository: AccountRepositoryProtocol
+    private let accountManagementRepository: AccountManagementRepositoryProtocol
     private var repaymentActionUseCase: RepaymentActionUseCase?
+    private var accountManagementActionUseCase: AccountManagementActionUseCase?
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
@@ -136,7 +138,9 @@ final class AppState: ObservableObject {
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
         snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
+        accountManagementRepository: AccountManagementRepositoryProtocol? = nil,
         repaymentActionUseCase: RepaymentActionUseCase? = nil,
+        accountManagementActionUseCase: AccountManagementActionUseCase? = nil,
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
@@ -155,6 +159,10 @@ final class AppState: ObservableObject {
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore
         self.accountRepository = accountRepository
+        self.accountManagementRepository = accountManagementRepository
+            ?? (accountRepository as? AccountManagementRepositoryProtocol)
+            ?? AccountRepository()
+        self.accountManagementActionUseCase = accountManagementActionUseCase
         self.repaymentActionUseCase = repaymentActionUseCase
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
@@ -925,55 +933,136 @@ final class AppState: ObservableObject {
     }
 
     func saveAccount(_ draft: NativeAccountDraft) async -> Bool {
-        guard !isSavingAccount else { return false }
-        isSavingAccount = true
-        accountMessage = nil
-        defer { isSavingAccount = false }
-
-        do {
-            let session = try await validSession()
-            accounts = try await accountRepository.save(
-                draft,
-                userId: session.user.id,
-                accessToken: session.accessToken
-            )
-            if let accountId = draft.accountId,
-               let account = accounts.first(where: { $0.id == accountId }) {
-                selectedAccountDetail = await accountRepository.fetchDetail(
-                    account: account,
-                    accessToken: session.accessToken
-                )
-            }
-            return true
-        } catch {
-            accountMessage = error.localizedDescription
+        guard let initialBalance = Double(draft.initialBalanceText.isEmpty ? "0" : draft.initialBalanceText) else {
+            accountMessage = "初始余额必须是数字"
             return false
         }
+        let command = AccountManagementActionCommand.save(
+            AccountManagementSaveCommand(
+                accountId: draft.accountId,
+                name: draft.name,
+                type: draft.type,
+                institution: draft.institution,
+                last4: draft.last4,
+                initialBalance: initialBalance,
+                billDay: Int(draft.billDayText),
+                paymentDueDay: Int(draft.paymentDueDayText),
+                autoDebitAccountId: draft.autoDebitAccountId,
+                autoConfirmRepayment: draft.autoConfirmRepayment,
+                isDefaultExpense: draft.isDefaultExpense,
+                isDefaultIncome: draft.isDefaultIncome
+            )
+        )
+        return await performAccountManagementAction(command)
     }
 
     func setAccountArchived(_ account: NativeAccount, archived: Bool) async -> Bool {
+        return await performAccountManagementAction(
+            .setArchived(accountId: account.id, archived: archived)
+        )
+    }
+
+    private func performAccountManagementAction(_ command: AccountManagementActionCommand) async -> Bool {
         guard !isSavingAccount else { return false }
         isSavingAccount = true
         accountMessage = nil
         defer { isSavingAccount = false }
 
-        do {
-            let session = try await validSession()
-            accounts = try await accountRepository.setArchived(
-                accountId: account.id,
-                archived: archived,
-                accessToken: session.accessToken
-            )
-            if let updated = accounts.first(where: { $0.id == account.id }) {
-                selectedAccountDetail = await accountRepository.fetchDetail(
-                    account: updated,
-                    accessToken: session.accessToken
-                )
+        let result = await resolvedAccountManagementActionUseCase().perform(command)
+        switch result.transaction {
+        case .accepted:
+            switch result.refresh {
+            case .notStarted, .succeeded:
+                accountMessage = "账户已保存"
+            case .failed(let message):
+                accountMessage = "账户已保存，但刷新失败：\(message)"
             }
             return true
-        } catch {
-            accountMessage = error.localizedDescription
+        case .rejected(.unauthenticated):
+            accountMessage = "登录状态已失效，请重新登录。"
+        case .rejected(.invalidInput):
+            accountMessage = "账户信息不完整，请检查后重试。"
+        case .conflict:
+            accountMessage = "账户正在保存，请稍后重试。"
+        case .failed(let message):
+            accountMessage = message
+        case .stale:
             return false
+        }
+        return false
+    }
+
+    private func resolvedAccountManagementActionUseCase() -> AccountManagementActionUseCase {
+        if let accountManagementActionUseCase { return accountManagementActionUseCase }
+        let useCase = AccountManagementActionUseCase(
+            repository: accountManagementRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return AccountManagementUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return AccountManagementUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] account in
+                self?.applyCanonicalAccount(account)
+            },
+            refresh: { [weak self] accountId in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                try await self.refreshAfterAccountManagement(accountId: accountId)
+            }
+        )
+        accountManagementActionUseCase = useCase
+        return useCase
+    }
+
+    private func applyCanonicalAccount(_ account: NativeAccount) {
+        if let index = accounts.firstIndex(where: { $0.id == account.id }) {
+            accounts[index] = account
+        } else {
+            accounts.append(account)
+        }
+        guard selectedAccountDetail?.account.id == account.id,
+              let detail = selectedAccountDetail else { return }
+        selectedAccountDetail = NativeAccountDetail(
+            account: account,
+            entries: detail.entries,
+            repaymentCycles: detail.repaymentCycles,
+            payments: detail.payments,
+            loadErrors: detail.loadErrors
+        )
+    }
+
+    private func refreshAfterAccountManagement(accountId: String) async throws {
+        await loadAccounts()
+        if let accountMessage, !accountMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: accountMessage)
+        }
+        guard let account = accounts.first(where: { $0.id == accountId }) else {
+            throw WalletSnapshotReadModelRefreshError(message: "账户刷新后未找到")
+        }
+        let generation = userStateGeneration
+        let session = try await validSession()
+        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+        let detail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
+        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+        selectedAccountDetail = detail
+        if let message = detail.loadErrors.values.first {
+            throw WalletSnapshotReadModelRefreshError(message: message)
+        }
+        await refreshDashboard()
+        if let dashboardMessage, !dashboardMessage.isEmpty {
+            throw WalletSnapshotReadModelRefreshError(message: dashboardMessage)
         }
     }
 
@@ -2538,6 +2627,7 @@ final class AppState: ObservableObject {
         userStateGeneration += 1
         walletSnapshotActionUseCase?.reset()
         repaymentActionUseCase?.reset()
+        accountManagementActionUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false

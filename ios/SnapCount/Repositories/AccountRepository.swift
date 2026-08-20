@@ -18,7 +18,19 @@ protocol AccountRepositoryProtocol {
     func revokePayment(paymentId: String, accessToken: String) async throws -> NativeRepaymentCycle?
 }
 
-final class AccountRepository: AccountRepositoryProtocol {
+protocol AccountManagementRepositoryProtocol {
+    func saveAccount(
+        _ command: AccountManagementSaveCommand,
+        accessToken: String
+    ) async throws -> NativeAccount
+    func setAccountArchived(
+        accountId: String,
+        archived: Bool,
+        accessToken: String
+    ) async throws -> NativeAccount
+}
+
+final class AccountRepository: AccountRepositoryProtocol, AccountManagementRepositoryProtocol {
     private let remoteClient:SupabaseRemoteClientProtocol
     init(remoteClient:SupabaseRemoteClientProtocol=SupabaseRemoteClient()){self.remoteClient=remoteClient}
 
@@ -68,74 +80,94 @@ final class AccountRepository: AccountRepositoryProtocol {
     }
 
     func save(_ draft: NativeAccountDraft, userId: String, accessToken: String) async throws -> [NativeAccount] {
-        if let message = draft.validationMessage {
-            throw SupabaseRemoteError.requestFailed(message)
+        guard let initialBalance = Double(draft.initialBalanceText.isEmpty ? "0" : draft.initialBalanceText) else {
+            throw SupabaseRemoteError.requestFailed("初始余额必须是数字")
         }
-
-        let liability = draft.type.isLiability
-        var body: [String: AnyCodable] = [
-            "name": AnyCodable(draft.name.trimmingCharacters(in: .whitespacesAndNewlines)),
-            "type": AnyCodable(draft.type.rawValue),
-            "institution": AnyCodable(nullableString(draft.institution)),
-            "last4": AnyCodable(nullableString(draft.last4)),
-            "bill_day": AnyCodable(nullableInt(liability ? draft.billDayText : "")),
-            "payment_due_day": AnyCodable(nullableInt(liability ? draft.paymentDueDayText : "")),
-            "auto_debit_account_id": AnyCodable(nullableString(liability ? draft.autoDebitAccountId : nil)),
-            "auto_confirm_repayment": AnyCodable(liability && draft.autoConfirmRepayment),
-            "is_default_expense": AnyCodable(draft.isDefaultExpense),
-            "is_default_income": AnyCodable(draft.isDefaultIncome),
-            "is_archived": AnyCodable(draft.isArchived),
-            "updated_at": AnyCodable(ISO8601DateFormatter().string(from: Date()))
-        ]
-
-        let savedId: String
-        if let accountId = draft.accountId {
-            try await remoteClient.patch(
-                path: "rest/v1/accounts",
-                queryItems: [URLQueryItem(name: "id", value: "eq.\(accountId)")],
-                body: body,
-                accessToken: accessToken
-            )
-            savedId = accountId
-        } else {
-            let initialBalance = Double(draft.initialBalanceText) ?? 0
-            body["user_id"] = AnyCodable(userId)
-            body["currency"] = AnyCodable("CNY")
-            body["initial_balance"] = AnyCodable(initialBalance)
-            body["current_balance"] = AnyCodable(initialBalance)
-            let rows = try await remoteClient.post(
-                [AccountRow].self,
-                path: "rest/v1/accounts",
-                queryItems: [],
-                body: body,
-                accessToken: accessToken
-            )
-            guard let insertedId = rows.first?.id else {
-                throw SupabaseRemoteError.requestFailed("账户创建成功，但没有返回账户编号")
-            }
-            savedId = insertedId
-        }
-
-        if draft.isDefaultExpense {
-            try await unsetOtherDefaults(column: "is_default_expense", userId: userId, keepId: savedId, accessToken: accessToken)
-        }
-        if draft.isDefaultIncome {
-            try await unsetOtherDefaults(column: "is_default_income", userId: userId, keepId: savedId, accessToken: accessToken)
-        }
+        let command = AccountManagementSaveCommand(
+            accountId: draft.accountId,
+            name: draft.name,
+            type: draft.type,
+            institution: draft.institution,
+            last4: draft.last4,
+            initialBalance: initialBalance,
+            billDay: Int(draft.billDayText),
+            paymentDueDay: Int(draft.paymentDueDayText),
+            autoDebitAccountId: draft.autoDebitAccountId,
+            autoConfirmRepayment: draft.autoConfirmRepayment,
+            isDefaultExpense: draft.isDefaultExpense,
+            isDefaultIncome: draft.isDefaultIncome
+        )
+        _ = try await saveAccount(command, accessToken: accessToken)
         return try await fetchAccounts(accessToken: accessToken)
     }
 
     func setArchived(accountId: String, archived: Bool, accessToken: String) async throws -> [NativeAccount] {
-        try await remoteClient.patch(
-            path: "rest/v1/accounts",
-            queryItems: [URLQueryItem(name: "id", value: "eq.\(accountId)")],
-            body: [
-                "is_archived": AnyCodable(archived),
-                "updated_at": AnyCodable(ISO8601DateFormatter().string(from: Date()))
-            ],
+        _ = try await setAccountArchived(
+            accountId: accountId,
+            archived: archived,
             accessToken: accessToken
         )
         return try await fetchAccounts(accessToken: accessToken)
+    }
+
+    func saveAccount(
+        _ command: AccountManagementSaveCommand,
+        accessToken: String
+    ) async throws -> NativeAccount {
+        guard command.validationMessage == nil else {
+            throw SupabaseRemoteError.requestFailed(command.validationMessage ?? "invalid_account_data")
+        }
+        do {
+            let row = try await remoteClient.rpc(
+                AccountRow.self,
+                name: "save_account",
+                body: [
+                    "p_name": AnyCodable(command.name.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    "p_type": AnyCodable(command.type.rawValue),
+                    "p_account_id": AnyCodable(nullableString(command.accountId)),
+                    "p_institution": AnyCodable(nullableString(command.institution)),
+                    "p_last4": AnyCodable(nullableString(command.last4)),
+                    "p_initial_balance": AnyCodable(command.initialBalance),
+                    "p_bill_day": AnyCodable(nullableInt(command.billDay)),
+                    "p_payment_due_day": AnyCodable(nullableInt(command.paymentDueDay)),
+                    "p_auto_debit_account_id": AnyCodable(nullableString(command.autoDebitAccountId)),
+                    "p_auto_confirm_repayment": AnyCodable(command.type.isLiability && command.autoConfirmRepayment),
+                    "p_is_default_expense": AnyCodable(command.isDefaultExpense),
+                    "p_is_default_income": AnyCodable(command.isDefaultIncome)
+                ],
+                accessToken: accessToken
+            )
+            guard let account = row.native else {
+                throw SupabaseRemoteError.requestFailed("invalid_response")
+            }
+            return account
+        } catch is DecodingError {
+            throw SupabaseRemoteError.requestFailed("invalid_response")
+        }
+    }
+
+    func setAccountArchived(
+        accountId: String,
+        archived: Bool,
+        accessToken: String
+    ) async throws -> NativeAccount {
+        do {
+            let row = try await remoteClient.rpc(
+                AccountRow.self,
+                name: "set_account_archived",
+                body: [
+                    "p_account_id": AnyCodable(accountId),
+                    "p_archived": AnyCodable(archived)
+                ],
+                accessToken: accessToken
+            )
+            guard let account = row.native else {
+                throw SupabaseRemoteError.requestFailed("invalid_response")
+            }
+            return account
+        } catch is DecodingError {
+            throw SupabaseRemoteError.requestFailed("invalid_response")
+        }
     }
 
     func ensureRepaymentCycles(monthKey: String, accessToken: String) async throws {
@@ -190,19 +222,6 @@ final class AccountRepository: AccountRepositoryProtocol {
         return row?.native
     }
 
-    private func unsetOtherDefaults(column: String, userId: String, keepId: String, accessToken: String) async throws {
-        try await remoteClient.patch(
-            path: "rest/v1/accounts",
-            queryItems: [
-                URLQueryItem(name: "user_id", value: "eq.\(userId)"),
-                URLQueryItem(name: column, value: "eq.true"),
-                URLQueryItem(name: "id", value: "neq.\(keepId)")
-            ],
-            body: [column: AnyCodable(false)],
-            accessToken: accessToken
-        )
-    }
-
     private func nullableString(_ value: String?) -> Any {
         guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return NSNull() }
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -211,6 +230,10 @@ final class AccountRepository: AccountRepositoryProtocol {
     private func nullableInt(_ value: String) -> Any {
         guard let value = Int(value) else { return NSNull() }
         return value
+    }
+
+    private func nullableInt(_ value: Int?) -> Any {
+        value ?? NSNull()
     }
 
     private func fetchEntries(_ accountId:String,accessToken:String) async throws -> [NativeAccountEntry] {
