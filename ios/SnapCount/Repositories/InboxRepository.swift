@@ -12,7 +12,7 @@ enum InboxArchiveDomains {
     ]
 }
 
-protocol InboxRepositoryProtocol {
+protocol InboxRepositoryProtocol: ScreenshotRepaymentRepositoryProtocol {
     func discard(id: String, accessToken: String) async throws
     func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String
@@ -21,8 +21,9 @@ protocol InboxRepositoryProtocol {
         cycleId: String,
         paidAmount: Double,
         debitAccountId: String?,
+        note: String,
         accessToken: String
-    ) async throws
+    ) async throws -> NativeRepaymentCycle
     func resolveImageURL(path: String, accessToken: String) async throws -> URL
     func confirmPending(_ draft: NativePendingResolutionDraft, accessToken: String) async throws
 }
@@ -60,13 +61,14 @@ final class InboxRepository: InboxRepositoryProtocol {
         cycleId: String,
         paidAmount: Double,
         debitAccountId: String?,
+        note: String,
         accessToken: String
-    ) async throws {
+    ) async throws -> NativeRepaymentCycle {
         guard paidAmount > 0 else {
             throw SupabaseRemoteError.requestFailed("请输入有效的还款金额")
         }
-        _ = try await remoteClient.rpc(
-            AnyCodable.self,
+        let row = try await remoteClient.rpc(
+            RepaymentCycleRow.self,
             name: "confirm_staging_repayment",
             body: [
                 "p_staging_id": AnyCodable(id),
@@ -74,11 +76,15 @@ final class InboxRepository: InboxRepositoryProtocol {
                 "p_paid_amount": AnyCodable(paidAmount),
                 "p_paid_at": AnyCodable(ISO8601DateFormatter().string(from: Date())),
                 "p_debit_account_id": AnyCodable(nullableString(debitAccountId)),
-                "p_status": AnyCodable("paid"),
-                "p_note": AnyCodable("根据还款截图确认已还清")
+                "p_status": AnyCodable(NSNull()),
+                "p_note": AnyCodable(note)
             ],
             accessToken: accessToken
         )
+        guard let cycle = row.native else {
+            throw SupabaseRemoteError.requestFailed("服务端返回了无法识别的还款状态")
+        }
+        return cycle
     }
 
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {
