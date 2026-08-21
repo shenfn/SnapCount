@@ -1,6 +1,6 @@
 # A4-IOS-006 iOS 截图还款候选与确认红灯执行记录
 
-> 状态：实现完成，macOS Swift/XCTest 与全部适用门禁通过
+> 状态：已合并；macOS Swift/XCTest 与全部适用门禁通过
 >
 > 日期：2026-08-21
 >
@@ -58,7 +58,7 @@ Windows 静态与跨模块回归已通过：
 macOS GitHub Actions 已通过：
 
 - Run `32501880601`：模拟器构建、全部 `SnapCountTests` XCTest 和 iOS Build Gate 通过；
-- Release Validation、两组 Governance Validation 和部署预览检查通过。
+- Release Validation、两组 Governance Validation 和部署预览检查通过；PR #130 已以 merge commit `024aee2` 合并。
 
 架构检查仅保留既有人工基线警告；Windows 无法运行 Swift/XCTest，需以 GitHub macOS iOS Build/XCTest 为最终依据。
 
