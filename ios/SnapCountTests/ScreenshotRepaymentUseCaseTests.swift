@@ -36,12 +36,11 @@ final class ScreenshotRepaymentUseCaseTests: XCTestCase {
         let harness = makeHarness(repository: repository, contextProvider: { context })
         let valid = ScreenshotRepaymentCommand(stagingId: "staging-1", cycleId: "cycle-1", paidAmount: 100)
 
-        XCTAssertEqual((await harness.useCase.confirm(valid)).transaction, .rejected(.unauthenticated))
+        let unauthenticatedResult = await harness.useCase.confirm(valid)
+        XCTAssertEqual(unauthenticatedResult.transaction, .rejected(.unauthenticated))
         context = ScreenshotRepaymentUserContext(userId: "user-1", generation: 1, isSignedIn: true)
-        XCTAssertEqual(
-            (await harness.useCase.confirm(valid.with(stagingId: ""))).transaction,
-            .rejected(.invalidInput)
-        )
+        let invalidInputResult = await harness.useCase.confirm(valid.with(stagingId: ""))
+        XCTAssertEqual(invalidInputResult.transaction, .rejected(.invalidInput))
         XCTAssertEqual(repository.callCount, 0)
     }
 
@@ -111,7 +110,7 @@ final class ScreenshotRepaymentUseCaseTests: XCTestCase {
         repository: ScreenshotRepaymentRepositoryStub,
         contextProvider: (() -> ScreenshotRepaymentUserContext)? = nil
     ) -> ScreenshotRepaymentHarness {
-        var context = ScreenshotRepaymentUserContext(userId: "user-1", generation: 1, isSignedIn: true)
+        let context = ScreenshotRepaymentUserContext(userId: "user-1", generation: 1, isSignedIn: true)
         let useCase = ScreenshotRepaymentUseCase(
             repository: repository,
             sessionProvider: { _ in Self.session },
