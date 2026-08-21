@@ -154,8 +154,7 @@ private final class ScreenshotRepaymentRepositoryStub: ScreenshotRepaymentReposi
         accessToken: String
     ) async throws -> NativeRepaymentCycle {
         callCount += 1
-        await gate?.entered()
-        await gate?.waitForRelease()
+        await gate?.enterAndWait()
         return NativeRepaymentCycle(
             id: cycleId,
             accountId: "account-1",
@@ -184,31 +183,27 @@ private final class ScreenshotRepaymentRepositoryStub: ScreenshotRepaymentReposi
 
 private actor ScreenshotRepaymentGate {
     private var entered = false
-    private var enteredContinuations: [CheckedContinuation<Void, Never>] = []
-    private var releaseContinuation: CheckedContinuation<Void, Never>?
     private var released = false
+    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
 
-    func entered() async {
+    func enterAndWait() async {
         entered = true
-        let continuations = enteredContinuations
-        enteredContinuations.removeAll()
-        continuations.forEach { $0.resume() }
+        enteredWaiters.forEach { $0.resume() }
+        enteredWaiters.removeAll()
+        guard !released else { return }
+        await withCheckedContinuation { releaseWaiters.append($0) }
     }
 
     func waitUntilEntered() async {
-        if entered { return }
-        await withCheckedContinuation { enteredContinuations.append($0) }
+        guard !entered else { return }
+        await withCheckedContinuation { enteredWaiters.append($0) }
     }
 
-    func waitForRelease() async {
-        if released { return }
-        await withCheckedContinuation { releaseContinuation = $0 }
-    }
-
-    func release() async {
+    func release() {
         released = true
-        releaseContinuation?.resume()
-        releaseContinuation = nil
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
     }
 }
 
