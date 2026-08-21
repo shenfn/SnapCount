@@ -1,6 +1,6 @@
 # A4-IOS-006 iOS 截图还款候选与确认红灯执行记录
 
-> 状态：最小实现完成，等待 macOS Swift/XCTest 验证
+> 状态：实现完成，macOS Swift/XCTest 与全部适用门禁通过
 >
 > 日期：2026-08-21
 >
@@ -55,9 +55,14 @@ Windows 静态与跨模块回归已通过：
 - `npm run build`
 - `git diff --check`
 
+macOS GitHub Actions 已通过：
+
+- Run `32501880601`：模拟器构建、全部 `SnapCountTests` XCTest 和 iOS Build Gate 通过；
+- Release Validation、两组 Governance Validation 和部署预览检查通过。
+
 架构检查仅保留既有人工基线警告；Windows 无法运行 Swift/XCTest，需以 GitHub macOS iOS Build/XCTest 为最终依据。
 
 ## 验证限制
 
-- Windows 无 Swift/Xcode，尚未运行 XCTest；以 GitHub macOS Build 为权威。
+- Windows 无 Swift/Xcode；XCTest 已由 GitHub macOS Build 权威验证。
 - 尚未执行生产查询、migration、部署、真实账户写入或 TestFlight。
