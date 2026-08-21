@@ -21,8 +21,8 @@ protocol InboxRepositoryProtocol: ScreenshotRepaymentRepositoryProtocol {
         cycleId: String,
         paidAmount: Double,
         debitAccountId: String?,
-        accessToken: String,
-        note: String
+        note: String,
+        accessToken: String
     ) async throws -> NativeRepaymentCycle
     func resolveImageURL(path: String, accessToken: String) async throws -> URL
     func confirmPending(_ draft: NativePendingResolutionDraft, accessToken: String) async throws
@@ -61,8 +61,8 @@ final class InboxRepository: InboxRepositoryProtocol {
         cycleId: String,
         paidAmount: Double,
         debitAccountId: String?,
-        accessToken: String,
-        note: String
+        note: String,
+        accessToken: String
     ) async throws -> NativeRepaymentCycle {
         guard paidAmount > 0 else {
             throw SupabaseRemoteError.requestFailed("请输入有效的还款金额")

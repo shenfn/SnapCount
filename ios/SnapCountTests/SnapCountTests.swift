@@ -3455,8 +3455,8 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
         cycleId: String,
         paidAmount: Double,
         debitAccountId: String?,
-        accessToken: String,
-        note: String
+        note: String,
+        accessToken: String
     ) async throws -> NativeRepaymentCycle {
         NativeRepaymentCycle(
             id: cycleId, accountId: "account-1", cycleMonth: "2026-08",
