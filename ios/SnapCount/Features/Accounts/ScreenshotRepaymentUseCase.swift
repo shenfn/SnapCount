@@ -121,7 +121,7 @@ final class ScreenshotRepaymentUseCase {
         let token = UUID()
         let expectedResetGeneration = resetGeneration
         let task = Task { [weak self] in
-            guard let self else { return .stale }
+            guard let self else { return ScreenshotRepaymentResult.stale }
             return await self.execute(
                 command,
                 context: context,
