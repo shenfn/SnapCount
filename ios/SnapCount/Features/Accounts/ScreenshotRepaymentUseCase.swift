@@ -17,6 +17,20 @@ struct ScreenshotRepaymentCommand: Hashable {
     let paidAmount: Double
     let debitAccountId: String?
     let note: String
+
+    init(
+        stagingId: String,
+        cycleId: String,
+        paidAmount: Double,
+        debitAccountId: String? = nil,
+        note: String = "根据还款截图确认"
+    ) {
+        self.stagingId = stagingId
+        self.cycleId = cycleId
+        self.paidAmount = paidAmount
+        self.debitAccountId = debitAccountId
+        self.note = note
+    }
 }
 
 struct ScreenshotRepaymentUserContext: Equatable {
