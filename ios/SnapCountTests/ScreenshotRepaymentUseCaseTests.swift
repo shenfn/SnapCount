@@ -186,6 +186,7 @@ private actor ScreenshotRepaymentGate {
     private var entered = false
     private var enteredContinuations: [CheckedContinuation<Void, Never>] = []
     private var releaseContinuation: CheckedContinuation<Void, Never>?
+    private var released = false
 
     func entered() async {
         entered = true
@@ -200,10 +201,12 @@ private actor ScreenshotRepaymentGate {
     }
 
     func waitForRelease() async {
+        if released { return }
         await withCheckedContinuation { releaseContinuation = $0 }
     }
 
     func release() async {
+        released = true
         releaseContinuation?.resume()
         releaseContinuation = nil
     }
