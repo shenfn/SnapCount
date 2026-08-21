@@ -1,10 +1,10 @@
 # A4-IOS-007 iOS 账户补绑边界评估执行记录
 
-> 状态：只读评估完成，等待评估 PR 合并
+> 状态：只读评估已合并；红灯工作区已建立，等待 A4-IOS-007A-G 红灯证据
 >
 > 日期：2026-08-22
 >
-> 基线：`ebd1ad8`（A4-IOS-006 收口合并提交）
+> 基线：`dc6b512`（A4-IOS-007 边界评估合并提交）
 
 ## 本次结论
 
@@ -24,6 +24,22 @@
 2. 先添加 A4-IOS-007A-G XCTest/源边界检查，再做 Repository 结构化结果和 Use Case 最小实现。
 3. Windows 验证静态/脚本门禁；GitHub macOS 验证 Swift/XCTest。
 4. 实现收口时更新阶段索引、交接快照和本执行记录；未通过全部门禁不进入下一片。
+
+## 红灯工作区进展
+
+- 分支：`test/A4-IOS-007账户补绑红灯`。
+- 新增 `ios/SnapCountTests/AccountBindingUseCaseTests.swift`，覆盖 A4-IOS-007A-G 的输入拒绝、并发复用/冲突、accepted 与刷新失败分层、批量部分成功、stale 停止、identity 保留和纯推荐边界。
+- 新增 `scripts/test-ios-account-binding-boundary.mjs`，固定 Use Case、Repository、AppState 和推荐算法的依赖方向。
+- 新增 npm 命令 `npm run test:ios-account-binding-boundary`。
+- 预期红灯：`AccountBindingUseCase.swift` 尚不存在；Repository 仍返回 `Void`；AppState 仍直接调用 Repository 并循环批量动作。
+
+## 红灯验证
+
+- `npm run test:ios-account-binding-boundary`：1 项场景登记通过，4 项边界断言按预期失败；失败均属于本片尚未实现的业务边界，不是环境错误。
+- `npm run governance:check`：通过。
+- `npm run governance:arch`：通过；仅保留既有人工清单警告。
+- `git diff --check`：通过（仅有 Windows 换行提示）。
+- Windows 未运行 Swift/XCTest；后续以 GitHub macOS iOS Build 为编译和 XCTest 权威。
 
 ## 未验证项
 
