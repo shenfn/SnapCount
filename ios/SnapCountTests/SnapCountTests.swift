@@ -3455,8 +3455,19 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
         cycleId: String,
         paidAmount: Double,
         debitAccountId: String?,
-        accessToken: String
-    ) async throws {}
+        accessToken: String,
+        note: String
+    ) async throws -> NativeRepaymentCycle {
+        NativeRepaymentCycle(
+            id: cycleId, accountId: "account-1", cycleMonth: "2026-08",
+            statementStartDate: nil, statementEndDate: nil, dueDate: nil,
+            statementAmount: paidAmount, paidAmount: paidAmount, remainingAmount: 0,
+            carriedOverAmount: 0, originalStatementAmount: paidAmount, minPaymentAmount: nil,
+            refundAppliedAmount: 0, status: .paid, autoDebitAccountId: debitAccountId,
+            autoConfirmRepayment: false, source: "screenshot", evidenceRecordId: nil,
+            confidence: nil, note: note, confirmedAt: nil
+        )
+    }
 
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {
         URL(string: "https://example.com/receipt.jpg")!

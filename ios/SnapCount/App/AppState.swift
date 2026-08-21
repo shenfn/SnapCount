@@ -105,6 +105,7 @@ final class AppState: ObservableObject {
     private let accountManagementRepository: AccountManagementRepositoryProtocol
     private let accountReadPreparationRepository: AccountReadPreparationRepositoryProtocol
     private var repaymentActionUseCase: RepaymentActionUseCase?
+    private var screenshotRepaymentUseCase: ScreenshotRepaymentUseCase?
     private var accountManagementActionUseCase: AccountManagementActionUseCase?
     private var accountReadPreparationUseCase: AccountReadPreparationUseCase?
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
@@ -143,6 +144,7 @@ final class AppState: ObservableObject {
         accountManagementRepository: AccountManagementRepositoryProtocol? = nil,
         accountReadPreparationRepository: AccountReadPreparationRepositoryProtocol? = nil,
         repaymentActionUseCase: RepaymentActionUseCase? = nil,
+        screenshotRepaymentUseCase: ScreenshotRepaymentUseCase? = nil,
         accountManagementActionUseCase: AccountManagementActionUseCase? = nil,
         accountReadPreparationUseCase: AccountReadPreparationUseCase? = nil,
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
@@ -171,6 +173,7 @@ final class AppState: ObservableObject {
             ?? AccountRepository()
         self.accountManagementActionUseCase = accountManagementActionUseCase
         self.repaymentActionUseCase = repaymentActionUseCase
+        self.screenshotRepaymentUseCase = screenshotRepaymentUseCase
         self.accountReadPreparationUseCase = accountReadPreparationUseCase
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
@@ -833,6 +836,54 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func resolvedScreenshotRepaymentUseCase() -> ScreenshotRepaymentUseCase {
+        if let screenshotRepaymentUseCase { return screenshotRepaymentUseCase }
+        let useCase = ScreenshotRepaymentUseCase(
+            repository: inboxRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return ScreenshotRepaymentUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return ScreenshotRepaymentUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            }
+        )
+        screenshotRepaymentUseCase = useCase
+        return useCase
+    }
+
+    private func projectScreenshotRepaymentResult(_ result: ScreenshotRepaymentResult) -> Bool {
+        switch result.transaction {
+        case .accepted:
+            if case .failed(let message) = result.refresh {
+                inboxFinanceMessage = "已根据截图确认还款，但刷新失败：\(message)"
+            } else {
+                inboxFinanceMessage = "已根据截图确认还款"
+            }
+            return true
+        case .rejected(.unauthenticated):
+            inboxFinanceMessage = "登录状态已失效，请重新登录。"
+        case .rejected(.invalidInput):
+            inboxFinanceMessage = "还款参数无效"
+        case .conflict(.screenshotRepaymentConflict):
+            inboxFinanceMessage = "还款截图正在以另一种方式处理，请稍后重试"
+        case .failed(let message):
+            inboxFinanceMessage = message
+        case .stale:
+            return false
+        }
+        return false
+    }
+
     private func projectRepaymentActionResult(_ result: RepaymentActionResult) -> Bool {
         switch result.transaction {
         case .accepted(let accepted):
@@ -925,26 +976,35 @@ final class AppState: ObservableObject {
         inboxFinanceMessage = nil
         defer { stagingRepaymentId = nil }
 
-        do {
-            let session = try await validSession()
-            try await inboxRepository.confirmStagingRepayment(
-                id: record.id,
+        let result = await resolvedScreenshotRepaymentUseCase().confirm(
+            ScreenshotRepaymentCommand(
+                stagingId: record.id,
                 cycleId: candidate.cycle.id,
                 paidAmount: candidate.amount,
                 debitAccountId: candidate.cycle.autoDebitAccountId ?? candidate.account.autoDebitAccountId,
-                accessToken: session.accessToken
-            )
-
-            repaymentCandidates.removeValue(forKey: record.id)
-            inboxPath = NavigationPath()
-            await loadAccounts()
-            await refreshDashboard()
-            inboxFinanceMessage = "已根据截图确认还款"
-            return true
-        } catch {
-            inboxFinanceMessage = error.localizedDescription
-            return false
-        }
+                note: "根据还款截图确认"
+            ),
+            onAccepted: { [weak self] cycle in
+                guard let self else { return }
+                self.applyCanonicalRepaymentCycle(cycle)
+                self.repaymentCandidates.removeValue(forKey: record.id)
+                self.inboxPath = NavigationPath()
+            },
+            refresh: { [weak self] _ in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                await self.loadAccounts()
+                if let message = self.accountMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+                await self.refreshDashboard()
+                if let message = self.dashboardMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+            }
+        )
+        return projectScreenshotRepaymentResult(result)
     }
 
     private func refreshAfterRepayment(accountId: String) async throws {
@@ -2683,6 +2743,7 @@ final class AppState: ObservableObject {
         repaymentActionUseCase?.reset()
         accountManagementActionUseCase?.reset()
         accountReadPreparationUseCase?.reset()
+        screenshotRepaymentUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false

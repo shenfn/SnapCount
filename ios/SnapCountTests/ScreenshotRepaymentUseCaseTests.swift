@@ -147,7 +147,7 @@ private final class ScreenshotRepaymentRepositoryStub: ScreenshotRepaymentReposi
     }
 
     func confirmStagingRepayment(
-        stagingId: String,
+        id: String,
         cycleId: String,
         paidAmount: Double,
         debitAccountId: String?,

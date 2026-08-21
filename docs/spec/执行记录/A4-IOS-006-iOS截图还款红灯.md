@@ -1,6 +1,6 @@
 # A4-IOS-006 iOS 截图还款候选与确认红灯执行记录
 
-> 状态：红灯已建立
+> 状态：最小实现完成，等待 macOS Swift/XCTest 验证
 >
 > 日期：2026-08-21
 >
@@ -24,15 +24,38 @@
   - Inbox Repository 必须返回 canonical `NativeRepaymentCycle`；
   - XCTest 场景必须存在。
 
+## 红灯转绿与最小实现
+
+已完成窄 Use Case、Repository canonical cycle transport 和 AppState 兼容投影：
+
+- `ScreenshotRepaymentUseCase` 负责同命令复用、冲突、用户/generation stale、accepted 与 refresh 分层；
+- `InboxRepository` 只负责 RPC transport，并返回服务端 canonical `NativeRepaymentCycle`；
+- `AppState` 只保留兼容入口、状态投影和账户/dashboard 刷新协调；
+- 服务端 `p_status` 传 `null`，状态继续由数据库规则计算，不由客户端写死 `paid`。
+
 ## 当前失败证据
 
-`npm run test:ios-screenshot-repayment-boundary`：
+初始 `npm run test:ios-screenshot-repayment-boundary`：
 
 - 失败：`ScreenshotRepaymentUseCase.swift` 尚不存在；
 - 失败：AppState 尚未接入 `ScreenshotRepaymentUseCase`，仍直接调用 `inboxRepository.confirmStagingRepayment`；
 - 通过：场景 XCTest 文件已包含 006B 至 006F。
 
-这些失败是预期的 TDD 红灯，下一步只实现窄 Use Case、Repository canonical cycle transport 和 AppState 兼容投影。
+这些失败是预期的 TDD 红灯，已由最小实现转绿。
+
+## 当前验证证据
+
+Windows 静态与跨模块回归已通过：
+
+- `npm run test:ios-screenshot-repayment-boundary`
+- `npm run test:ios-repayment-action-boundary`
+- `npm run test:ios-account-read-boundary`
+- `npm run governance:check`
+- `npm run governance:arch`
+- `npm run build`
+- `git diff --check`
+
+架构检查仅保留既有人工基线警告；Windows 无法运行 Swift/XCTest，需以 GitHub macOS iOS Build/XCTest 为最终依据。
 
 ## 验证限制
 
