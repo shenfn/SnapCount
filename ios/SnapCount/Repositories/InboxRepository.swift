@@ -12,10 +12,34 @@ enum InboxArchiveDomains {
     ]
 }
 
-protocol InboxRepositoryProtocol: ScreenshotRepaymentRepositoryProtocol {
-    func discard(id: String, accessToken: String) async throws
-    func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult
-    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String
+struct NativeStagingDiscardResult: Equatable {
+    let recordId: String
+    let status: String
+    let cleanupStatus: String
+    let cleanupQueued: Bool
+}
+
+struct NativeStagingRetryResult: Equatable {
+    let recordId: String
+    let route: String
+    let displayText: String
+    let notificationText: String
+}
+
+struct NativeStagingArchiveResult: Equatable {
+    let recordId: String
+    let targetRecordId: String
+    let targetReference: String
+    let idempotentRetry: Bool
+}
+
+protocol StagingLifecycleRepositoryProtocol {
+    func discard(id: String, accessToken: String) async throws -> NativeStagingDiscardResult
+    func retry(id: String, accessToken: String) async throws -> NativeStagingRetryResult
+    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> NativeStagingArchiveResult
+}
+
+protocol InboxRepositoryProtocol: ScreenshotRepaymentRepositoryProtocol, StagingLifecycleRepositoryProtocol {
     func confirmStagingRepayment(
         id: String,
         cycleId: String,
@@ -40,15 +64,15 @@ final class InboxRepository: InboxRepositoryProtocol {
         self.remoteClient = remoteClient
     }
 
-    func discard(id: String, accessToken: String) async throws {
+    func discard(id: String, accessToken: String) async throws -> NativeStagingDiscardResult {
         try await remoteService.discardStagingRecord(id: id, accessToken: accessToken)
     }
 
-    func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult {
+    func retry(id: String, accessToken: String) async throws -> NativeStagingRetryResult {
         try await remoteService.retryStagingRecord(id: id, accessToken: accessToken)
     }
 
-    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
+    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> NativeStagingArchiveResult {
         try await remoteService.archiveStagingRecord(
             record,
             domainKey: domainKey,
