@@ -1,10 +1,12 @@
 # A4-IOS-007 iOS 账户补绑边界评估执行记录
 
-> 状态：A4-IOS-007A-G 实现完成，等待 PR 合并收口
+> 状态：已完成，PR #133 已合并
 >
 > 日期：2026-08-22
 >
-> 基线：`dc6b512`（A4-IOS-007 边界评估合并提交）
+> 基线：`11f79ad6`（PR #133 合并提交）
+
+> 最终门禁：A4-IOS-007A-G XCTest、macOS iOS Build、Release Validation、Governance Validation 和源边界检查全部通过。
 
 ## 本次结论
 
