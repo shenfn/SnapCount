@@ -70,6 +70,7 @@
     "test:ios-account-read-boundary": "node --test scripts/test-ios-account-read-boundary.mjs",
     "test:ios-account-binding-boundary": "node --test scripts/test-ios-account-binding-boundary.mjs",
     "test:ios-staging-lifecycle-boundary": "node --test scripts/test-ios-staging-lifecycle-boundary.mjs",
+    "test:ios-pending-confirmation-boundary": "node --test scripts/test-ios-pending-confirmation-boundary.mjs",
     "test:ios-screenshot-repayment-boundary": "node --test scripts/test-ios-screenshot-repayment-boundary.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",

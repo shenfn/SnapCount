@@ -111,6 +111,7 @@ final class AppState: ObservableObject {
     private var accountBindingUseCase: AccountBindingUseCase?
     private var accountBindingUseCaseMonthKey: String?
     private var stagingLifecycleUseCase: StagingLifecycleUseCase?
+    private var pendingConfirmationUseCase: PendingConfirmationUseCase?
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
@@ -152,6 +153,7 @@ final class AppState: ObservableObject {
         accountReadPreparationUseCase: AccountReadPreparationUseCase? = nil,
         accountBindingUseCase: AccountBindingUseCase? = nil,
         stagingLifecycleUseCase: StagingLifecycleUseCase? = nil,
+        pendingConfirmationUseCase: PendingConfirmationUseCase? = nil,
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
@@ -182,6 +184,7 @@ final class AppState: ObservableObject {
         self.accountReadPreparationUseCase = accountReadPreparationUseCase
         self.accountBindingUseCase = accountBindingUseCase
         self.stagingLifecycleUseCase = stagingLifecycleUseCase
+        self.pendingConfirmationUseCase = pendingConfirmationUseCase
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
         self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
@@ -1849,6 +1852,45 @@ final class AppState: ObservableObject {
         return useCase
     }
 
+    private func resolvedPendingConfirmationUseCase() -> PendingConfirmationUseCase {
+        if let pendingConfirmationUseCase { return pendingConfirmationUseCase }
+        let useCase = PendingConfirmationUseCase(
+            repository: inboxRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else { throw SupabaseRemoteError.requestFailed("会话已失效") }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return PendingConfirmationUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return PendingConfirmationUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] accepted in
+                self?.invalidateRecordExpressionPlanState(
+                    afterChanging: ["expense/\(accepted.pendingId)", accepted.recordReference]
+                )
+            },
+            refresh: { [weak self] in
+                guard let self else { return }
+                await self.loadAccounts()
+                if let message = self.accountMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+                await self.refreshDashboard()
+                if let message = self.dashboardMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+            }
+        )
+        pendingConfirmationUseCase = useCase
+        return useCase
+    }
+
     func resolveStagingImageURL(for record: NativeStagingRecord) async throws -> URL {
         guard let imagePath = record.imagePath, !imagePath.isEmpty else {
             throw SupabaseRemoteError.requestFailed("这条记录没有可查看的截图")
@@ -2439,31 +2481,47 @@ final class AppState: ObservableObject {
         isConfirmingPendingRecord = true
         pendingResolutionMessage = "正在保存…"
         defer { isConfirmingPendingRecord = false }
-        do {
-            let session = try await validSession()
-            try await inboxRepository.confirmPending(draft, accessToken: session.accessToken)
-            if draft.kind == .expense {
-                scheduleConfirmedExpenseVocabulary(
-                    platform: draft.platform,
-                    category: draft.category,
-                    paymentMethod: draft.paymentMethod,
-                    accountId: draft.accountId,
-                    userId: session.user.id,
-                    accessToken: session.accessToken
-                )
+        let result = await resolvedPendingConfirmationUseCase().perform(
+            draft
+        )
+        switch result.transaction {
+        case .accepted(let accepted):
+            if accepted.recordType == "expense" {
+                await scheduleConfirmedExpenseVocabularyIfCurrent(draft)
             }
-            invalidateRecordExpressionPlanState(
-                afterChanging: ["expense/\(draft.pendingId)"]
-            )
-            await loadAccounts()
-            await refreshDashboard()
             if !preserveInboxNavigation { inboxPath = NavigationPath() }
-            pendingResolutionMessage = draft.kind == .income ? "收入已记录" : "支出已补全"
+            let message = draft.kind == .income ? "收入已记录" : "支出已补全"
+            pendingResolutionMessage = result.refresh.failureMessage.map {
+                "\(message)，刷新失败：\($0)"
+            } ?? message
             return true
-        } catch {
-            pendingResolutionMessage = "保存失败：\(error.localizedDescription)"
+        case .rejected(.unauthenticated):
+            pendingResolutionMessage = "登录状态已失效，请重新登录"
+        case .rejected(.invalidInput):
+            pendingResolutionMessage = draft.validationMessage ?? "待补全账单无效"
+        case .conflict:
+            pendingResolutionMessage = "这条待补全账单正在保存"
+        case .failed(let message):
+            pendingResolutionMessage = "保存失败：\(message)"
+        case .stale:
             return false
         }
+        return false
+    }
+
+    private func scheduleConfirmedExpenseVocabularyIfCurrent(
+        _ draft: NativePendingResolutionDraft
+    ) async {
+        guard let session = try? await validSession(),
+              isCurrentUserLoad(userStateGeneration, userId: session.user.id) else { return }
+        scheduleConfirmedExpenseVocabulary(
+            platform: draft.platform,
+            category: draft.category,
+            paymentMethod: draft.paymentMethod,
+            accountId: draft.accountId,
+            userId: session.user.id,
+            accessToken: session.accessToken
+        )
     }
 
     func submitRecordFeedback(
@@ -2841,6 +2899,7 @@ final class AppState: ObservableObject {
         screenshotRepaymentUseCase?.reset()
         accountBindingUseCase?.reset()
         stagingLifecycleUseCase?.reset()
+        pendingConfirmationUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false
