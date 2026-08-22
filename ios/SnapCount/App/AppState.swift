@@ -1736,7 +1736,7 @@ final class AppState: ObservableObject {
                 ? "重新识别完成，仍需确认或选择归档域"
                 : actionMessage
             if case .failed(let message) = result.refresh {
-                inboxActionMessage += "；刷新失败：\(message)"
+                inboxActionMessage = "\(inboxActionMessage ?? actionMessage)；刷新失败：\(message)"
             }
             return true
         case .rejected(.unauthenticated):
