@@ -1,6 +1,6 @@
 # A4-IOS-007 iOS 账户补绑边界评估执行记录
 
-> 状态：只读评估已合并；红灯工作区已建立，等待 A4-IOS-007A-G 红灯证据
+> 状态：A4-IOS-007A-G 实现完成，等待 PR 合并收口
 >
 > 日期：2026-08-22
 >
@@ -40,6 +40,14 @@
 - `npm run governance:arch`：通过；仅保留既有人工清单警告。
 - `git diff --check`：通过（仅有 Windows 换行提示）。
 - Windows 未运行 Swift/XCTest；后续以 GitHub macOS iOS Build 为编译和 XCTest 权威。
+
+## 实现收口
+
+- `AccountBindingUseCase` 已接管单笔/批量补绑编排：相同命令复用、不同账户冲突、逐项结果、stale、批量停止和一次刷新。
+- `UnboundRecordRepository` 返回 `NativeAccountBindingResult`，保留服务端 accepted 的记录 kind/id/账户 identity；expense/income RPC 参数未改写。
+- `AppState` 保留原公开入口，只做结果投影、同记录移除和消息转换；用户作用域 reset 会使旧补绑 stale。
+- A4-IOS-007A-G XCTest 全部通过；PR #133 的 macOS Build、iOS Build Gate、Release Validation、治理门禁和源边界检查全部通过。
+- 未执行生产查询、迁移、部署、真实账户写入或 TestFlight。
 
 ## 未验证项
 
