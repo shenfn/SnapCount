@@ -27,6 +27,7 @@ final class AccountBindingUseCaseTests: XCTestCase {
         async let first = harness.useCase.bind(source, accountId: "account-1")
         await gate.waitUntilEntered()
         async let duplicate = harness.useCase.bind(source, accountId: "account-1")
+        try? await Task.sleep(nanoseconds: 10_000_000)
         let conflict = await harness.useCase.bind(source, accountId: "account-2")
 
         XCTAssertEqual(conflict.transaction, .conflict(.bindingConflict))
