@@ -2,7 +2,7 @@ import Foundation
 
 protocol UnboundRecordRepositoryProtocol {
     func fetch(monthKey: String, accessToken: String) async throws -> [NativeUnboundRecord]
-    func bind(_ record: NativeUnboundRecord, accountId: String, accessToken: String) async throws
+    func bind(_ record: NativeUnboundRecord, accountId: String, accessToken: String) async throws -> NativeAccountBindingResult
 }
 
 final class UnboundRecordRepository: UnboundRecordRepositoryProtocol {
@@ -51,10 +51,11 @@ final class UnboundRecordRepository: UnboundRecordRepositoryProtocol {
         }
     }
 
-    func bind(_ record: NativeUnboundRecord, accountId: String, accessToken: String) async throws {
+    func bind(_ record: NativeUnboundRecord, accountId: String, accessToken: String) async throws -> NativeAccountBindingResult {
+        let response: BoundRecordResponse
         switch record.kind {
         case .expense:
-            _ = try await remoteClient.rpc(
+            response = try await remoteClient.rpc(
                 BoundRecordResponse.self,
                 name: "save_transaction_with_account",
                 body: [
@@ -79,7 +80,7 @@ final class UnboundRecordRepository: UnboundRecordRepositoryProtocol {
                 accessToken: accessToken
             )
         case .income:
-            _ = try await remoteClient.rpc(
+            response = try await remoteClient.rpc(
                 BoundRecordResponse.self,
                 name: "save_income_with_account",
                 body: [
@@ -99,6 +100,7 @@ final class UnboundRecordRepository: UnboundRecordRepositoryProtocol {
                 accessToken: accessToken
             )
         }
+        return NativeAccountBindingResult(recordId: response.id, kind: record.kind, accountId: accountId)
     }
 
     private func monthRange(_ monthKey: String) throws -> (start: String, end: String) {

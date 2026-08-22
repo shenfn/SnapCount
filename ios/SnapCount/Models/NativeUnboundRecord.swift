@@ -1,6 +1,6 @@
 import Foundation
 
-enum NativeUnboundRecordKind: String, CaseIterable, Identifiable {
+enum NativeUnboundRecordKind: String, CaseIterable, Identifiable, Hashable {
     case expense
     case income
 
