@@ -1,10 +1,12 @@
 # A4-IOS-008 iOS 中转生命周期动作编排执行记录
 
-> 状态：最小实现已接入，等待 macOS XCTest/门禁验证
+> 状态：最小实现已验证，等待 PR #136 合并
 >
 > 日期：2026-08-22
 >
 > 基线：`590deca8`（A4-IOS-008 边界评估合并提交）
+>
+> 验证提交：`fece8e3`（修正中转重试刷新提示投影）
 
 ## 本次范围
 
@@ -31,14 +33,15 @@
 - `npm run governance:check`：通过。
 - `npm run governance:arch`：通过；仅保留既有人工清单警告。
 - `git diff --check`：通过。
-- Windows 未运行 Swift/XCTest；后续以 GitHub macOS iOS Build/XCTest 为编译和业务测试权威。
+- GitHub Actions Run `32543967223`：Build SwiftUI app、iOS Build Gate 全部通过；A4-IOS-008A-H macOS XCTest 通过。
+- PR #136 的 Release、Governance、PWA/Edge、Vercel、Cloudflare 和源边界门禁全部通过。
+- Windows 未运行 Swift/XCTest；以 GitHub macOS iOS Build/XCTest 为编译和业务测试权威。
 
 ## 后续验证顺序
 
-1. 以 GitHub macOS XCTest 验证 A4-IOS-008A-H 的运行时行为和编译。
-2. 若出现失败，按业务失败、环境失败和测试契约错误分层处理，不把门禁红灯直接视为实现完成。
-3. macOS、Release、治理、源边界全部通过后，更新阶段索引和交接快照并进入下一片只读评估。
-4. 验证完成前不执行生产迁移、部署、真实数据写入或 TestFlight。
+1. 合并 PR #136；合并前不执行生产迁移、部署、真实数据写入或 TestFlight。
+2. 合并后从最新 `origin/main` 对下一片 iOS 业务边界做只读评估，不预先假设任务编号或范围。
+3. 若后续发现回归，按业务失败、环境失败和测试契约错误分层处理，不把门禁红灯直接视为实现完成。
 
 ## 冻结范围
 
