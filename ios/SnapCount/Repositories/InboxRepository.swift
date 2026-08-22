@@ -33,13 +33,27 @@ struct NativeStagingArchiveResult: Equatable {
     let idempotentRetry: Bool
 }
 
+struct NativePendingConfirmationResult: Equatable {
+    let recordType: String
+    let recordId: String
+    let recordReference: String
+    let idempotentRetry: Bool
+}
+
 protocol StagingLifecycleRepositoryProtocol {
     func discard(id: String, accessToken: String) async throws -> NativeStagingDiscardResult
     func retry(id: String, accessToken: String) async throws -> NativeStagingRetryResult
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> NativeStagingArchiveResult
 }
 
-protocol InboxRepositoryProtocol: ScreenshotRepaymentRepositoryProtocol, StagingLifecycleRepositoryProtocol {
+protocol PendingConfirmationRepositoryProtocol {
+    func confirmPending(
+        _ draft: NativePendingResolutionDraft,
+        accessToken: String
+    ) async throws -> NativePendingConfirmationResult
+}
+
+protocol InboxRepositoryProtocol: ScreenshotRepaymentRepositoryProtocol, StagingLifecycleRepositoryProtocol, PendingConfirmationRepositoryProtocol {
     func confirmStagingRepayment(
         id: String,
         cycleId: String,
@@ -49,7 +63,6 @@ protocol InboxRepositoryProtocol: ScreenshotRepaymentRepositoryProtocol, Staging
         accessToken: String
     ) async throws -> NativeRepaymentCycle
     func resolveImageURL(path: String, accessToken: String) async throws -> URL
-    func confirmPending(_ draft: NativePendingResolutionDraft, accessToken: String) async throws
 }
 
 final class InboxRepository: InboxRepositoryProtocol {
@@ -115,7 +128,10 @@ final class InboxRepository: InboxRepositoryProtocol {
         try await remoteService.resolveImageURL(path: path, accessToken: accessToken)
     }
 
-    func confirmPending(_ draft: NativePendingResolutionDraft, accessToken: String) async throws {
+    func confirmPending(
+        _ draft: NativePendingResolutionDraft,
+        accessToken: String
+    ) async throws -> NativePendingConfirmationResult {
         guard let amount = draft.amount else {
             throw SupabaseRemoteError.requestFailed("金额格式不正确")
         }
@@ -123,8 +139,8 @@ final class InboxRepository: InboxRepositoryProtocol {
             guard let value, !value.isEmpty else { return NSNull() }
             return value
         }
-        _ = try await remoteClient.rpc(
-            AnyCodable.self,
+        let response = try await remoteClient.rpc(
+            PendingConfirmationRPCResponse.self,
             name: "confirm_pending_transaction_with_account",
             body: [
                 "p_pending_id": AnyCodable(draft.pendingId),
@@ -139,10 +155,42 @@ final class InboxRepository: InboxRepositoryProtocol {
             ],
             accessToken: accessToken
         )
+        guard let result = response.native else {
+            throw SupabaseRemoteError.requestFailed("服务端返回了无法识别的待补全确认结果")
+        }
+        return result
     }
 
     private func nullableString(_ value: String?) -> Any {
         guard let value, !value.isEmpty else { return NSNull() }
         return value
+    }
+}
+
+private struct PendingConfirmationRPCResponse: Decodable {
+    let recordType: String?
+    let transaction: [String: AnyCodable]?
+    let incomeRecord: [String: AnyCodable]?
+    let idempotentRetry: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case recordType = "record_type"
+        case transaction
+        case incomeRecord = "income_record"
+        case idempotentRetry = "idempotent_retry"
+    }
+
+    var native: NativePendingConfirmationResult? {
+        guard let recordType = recordType?.trimmingCharacters(in: .whitespacesAndNewlines),
+              recordType == "expense" || recordType == "income" else { return nil }
+        let payload = recordType == "income" ? incomeRecord : transaction
+        guard let recordId = payload?["id"]?.stringValue,
+              !recordId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return NativePendingConfirmationResult(
+            recordType: recordType,
+            recordId: recordId,
+            recordReference: "\(recordType)/\(recordId)",
+            idempotentRetry: idempotentRetry ?? false
+        )
     }
 }

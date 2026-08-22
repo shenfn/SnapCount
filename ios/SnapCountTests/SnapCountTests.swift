@@ -3480,7 +3480,17 @@ private struct InboxRepositoryStub: InboxRepositoryProtocol {
         URL(string: "https://example.com/receipt.jpg")!
     }
 
-    func confirmPending(_ draft: NativePendingResolutionDraft, accessToken: String) async throws {}
+    func confirmPending(
+        _ draft: NativePendingResolutionDraft,
+        accessToken: String
+    ) async throws -> NativePendingConfirmationResult {
+        NativePendingConfirmationResult(
+            recordType: draft.kind.rawValue,
+            recordId: draft.pendingId,
+            recordReference: "\(draft.kind.rawValue)/\(draft.pendingId)",
+            idempotentRetry: false
+        )
+    }
 }
 
 
