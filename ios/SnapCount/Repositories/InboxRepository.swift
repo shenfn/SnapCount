@@ -33,10 +33,13 @@ struct NativeStagingArchiveResult: Equatable {
     let idempotentRetry: Bool
 }
 
-protocol InboxRepositoryProtocol: ScreenshotRepaymentRepositoryProtocol {
+protocol StagingLifecycleRepositoryProtocol {
     func discard(id: String, accessToken: String) async throws -> NativeStagingDiscardResult
     func retry(id: String, accessToken: String) async throws -> NativeStagingRetryResult
     func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> NativeStagingArchiveResult
+}
+
+protocol InboxRepositoryProtocol: ScreenshotRepaymentRepositoryProtocol, StagingLifecycleRepositoryProtocol {
     func confirmStagingRepayment(
         id: String,
         cycleId: String,
