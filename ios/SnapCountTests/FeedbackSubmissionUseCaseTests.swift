@@ -14,7 +14,8 @@ final class FeedbackSubmissionUseCaseTests: XCTestCase {
         XCTAssertEqual(invalid.transaction, .rejected(.invalidInput))
         let signedOut = await unauthenticated.perform(input())
         XCTAssertEqual(signedOut.transaction, .rejected(.unauthenticated))
-        XCTAssertEqual(await repository.callCount, 0)
+        let callCount = await repository.callCount
+        XCTAssertEqual(callCount, 0)
     }
 
     func testA4IOS010BReusesSameCommandAndAllowsDifferentIdentity() async {
@@ -32,7 +33,8 @@ final class FeedbackSubmissionUseCaseTests: XCTestCase {
         XCTAssertEqual(firstResult.transaction, .accepted)
         XCTAssertEqual(duplicateResult.transaction, .accepted)
         XCTAssertEqual(differentResult.transaction, .accepted)
-        XCTAssertEqual(await repository.callCount, 2)
+        let callCount = await repository.callCount
+        XCTAssertEqual(callCount, 2)
     }
 
     func testA4IOS010CForwardsFeedbackFactsWithoutUserId() async {

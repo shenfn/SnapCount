@@ -112,6 +112,7 @@ final class AppState: ObservableObject {
     private var accountBindingUseCaseMonthKey: String?
     private var stagingLifecycleUseCase: StagingLifecycleUseCase?
     private var pendingConfirmationUseCase: PendingConfirmationUseCase?
+    private var feedbackSubmissionUseCase: FeedbackSubmissionUseCase?
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
@@ -154,6 +155,7 @@ final class AppState: ObservableObject {
         accountBindingUseCase: AccountBindingUseCase? = nil,
         stagingLifecycleUseCase: StagingLifecycleUseCase? = nil,
         pendingConfirmationUseCase: PendingConfirmationUseCase? = nil,
+        feedbackSubmissionUseCase: FeedbackSubmissionUseCase? = nil,
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
@@ -185,6 +187,7 @@ final class AppState: ObservableObject {
         self.accountBindingUseCase = accountBindingUseCase
         self.stagingLifecycleUseCase = stagingLifecycleUseCase
         self.pendingConfirmationUseCase = pendingConfirmationUseCase
+        self.feedbackSubmissionUseCase = feedbackSubmissionUseCase
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
         self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
@@ -2538,19 +2541,52 @@ final class AppState: ObservableObject {
                   renderIdentity: feedbackIdentity
               ) else { return }
         recordFeedbackState = .submitting
-        do {
-            let session = try await validSession()
-            try await recordRepository.submitFeedback(
+        let result = await resolvedFeedbackSubmissionUseCase().perform(
+            FeedbackSubmissionInput(
                 recordId: detail.rawId,
+                feedbackIdentity: feedback.renderIdentity,
                 choice: choice,
                 freeText: freeText,
-                exposureEventId: feedback.exposureEventId,
-                accessToken: session.accessToken
+                exposureEventId: feedback.exposureEventId
             )
+        )
+        switch result.transaction {
+        case .accepted:
             recordFeedbackState = .submitted
-        } catch {
-            recordFeedbackState = .failed(error.localizedDescription)
+        case .rejected(.unauthenticated):
+            recordFeedbackState = .failed("登录状态已失效，请重新登录")
+        case .rejected(.invalidInput):
+            recordFeedbackState = .failed("反馈参数无效")
+        case .failed(let message):
+            recordFeedbackState = .failed(message)
+        case .stale:
+            return
         }
+    }
+
+    private func resolvedFeedbackSubmissionUseCase() -> FeedbackSubmissionUseCase {
+        if let feedbackSubmissionUseCase { return feedbackSubmissionUseCase }
+        let useCase = FeedbackSubmissionUseCase(
+            repository: recordRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return FeedbackSubmissionUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return FeedbackSubmissionUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            }
+        )
+        feedbackSubmissionUseCase = useCase
+        return useCase
     }
 
     func loadUserSettings() async {
@@ -2900,6 +2936,7 @@ final class AppState: ObservableObject {
         accountBindingUseCase?.reset()
         stagingLifecycleUseCase?.reset()
         pendingConfirmationUseCase?.reset()
+        feedbackSubmissionUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false

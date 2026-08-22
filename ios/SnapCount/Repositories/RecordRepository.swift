@@ -1,6 +1,16 @@
 import Foundation
 
-protocol RecordRepositoryProtocol {
+protocol NativeRecordFeedbackRepositoryProtocol {
+    func submitFeedback(
+        recordId: String,
+        choice: NativeAIFeedbackReviewChoice,
+        freeText: String,
+        exposureEventId: String?,
+        accessToken: String
+    ) async throws
+}
+
+protocol RecordRepositoryProtocol: NativeRecordFeedbackRepositoryProtocol {
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail
     func hydrateDetailImage(_ detail: NativeRecordDetail, accessToken: String) async throws -> NativeRecordDetail
@@ -14,13 +24,6 @@ protocol RecordRepositoryProtocol {
     func create(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?, userId: String, accessToken: String) async throws -> String
     func saveDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String
     func delete(reference: String, accessToken: String) async throws
-    func submitFeedback(
-        recordId: String,
-        choice: NativeAIFeedbackReviewChoice,
-        freeText: String,
-        exposureEventId: String?,
-        accessToken: String
-    ) async throws
 }
 
 struct NativeRecordExpressionPlan: Equatable {
