@@ -146,7 +146,7 @@ final class AccountBindingUseCase {
         let token = UUID()
         let expectedResetGeneration = resetGeneration
         let task = Task { [weak self] in
-            guard let self else { return .stale }
+            guard let self else { return AccountBindingActionResult.stale }
             return await self.execute(
                 record: record,
                 accountId: accountId,
