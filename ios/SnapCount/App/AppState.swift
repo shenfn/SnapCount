@@ -108,6 +108,8 @@ final class AppState: ObservableObject {
     private var screenshotRepaymentUseCase: ScreenshotRepaymentUseCase?
     private var accountManagementActionUseCase: AccountManagementActionUseCase?
     private var accountReadPreparationUseCase: AccountReadPreparationUseCase?
+    private var accountBindingUseCase: AccountBindingUseCase?
+    private var accountBindingUseCaseMonthKey: String?
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
@@ -147,6 +149,7 @@ final class AppState: ObservableObject {
         screenshotRepaymentUseCase: ScreenshotRepaymentUseCase? = nil,
         accountManagementActionUseCase: AccountManagementActionUseCase? = nil,
         accountReadPreparationUseCase: AccountReadPreparationUseCase? = nil,
+        accountBindingUseCase: AccountBindingUseCase? = nil,
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
@@ -175,6 +178,7 @@ final class AppState: ObservableObject {
         self.repaymentActionUseCase = repaymentActionUseCase
         self.screenshotRepaymentUseCase = screenshotRepaymentUseCase
         self.accountReadPreparationUseCase = accountReadPreparationUseCase
+        self.accountBindingUseCase = accountBindingUseCase
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
         self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
@@ -1202,6 +1206,40 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func resolvedAccountBindingUseCase(monthKey: String) -> AccountBindingUseCase {
+        if let accountBindingUseCase,
+           accountBindingUseCaseMonthKey == monthKey {
+            return accountBindingUseCase
+        }
+        let useCase = AccountBindingUseCase(
+            repository: unboundRecordRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else { throw SupabaseRemoteError.requestFailed("会话已失效") }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return AccountBindingUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return AccountBindingUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] accepted in
+                self?.unboundRecords.removeAll { $0.id == accepted.recordId && $0.kind == accepted.kind }
+            },
+            refresh: { [weak self] in
+                guard let self else { return }
+                try await self.refreshAfterAccountBinding(monthKey: monthKey)
+            }
+        )
+        accountBindingUseCase = useCase
+        accountBindingUseCaseMonthKey = monthKey
+        return useCase
+    }
+
     func bindUnboundRecord(
         _ record: NativeUnboundRecord,
         accountId: String,
@@ -1211,22 +1249,25 @@ final class AppState: ObservableObject {
         isBindingUnboundRecords = true
         unboundBindingMessage = nil
         defer { isBindingUnboundRecords = false }
-
-        do {
-            let session = try await validSession()
-            try await unboundRecordRepository.bind(
-                record,
-                accountId: accountId,
-                accessToken: session.accessToken
-            )
-            unboundRecords.removeAll { $0.id == record.id && $0.kind == record.kind }
-            await refreshAfterAccountBinding(monthKey: monthKey)
-            unboundBindingMessage = "已补绑账户并生成流水"
+        let result = await resolvedAccountBindingUseCase(monthKey: monthKey).bind(record, accountId: accountId)
+        switch result.transaction {
+        case .accepted(let accepted):
+            unboundRecords.removeAll { $0.id == accepted.recordId && $0.kind == accepted.kind }
+            unboundBindingMessage = result.refresh.failureMessage.map { "已补绑账户并生成流水；刷新失败：\($0)" }
+                ?? "已补绑账户并生成流水"
             return true
-        } catch {
-            unboundBindingMessage = error.localizedDescription
+        case .rejected(.unauthenticated):
+            unboundBindingMessage = "登录状态已失效，请重新登录"
+        case .rejected(.invalidInput):
+            unboundBindingMessage = "补绑记录或账户无效"
+        case .conflict:
+            unboundBindingMessage = "该记录正在使用其他账户补绑"
+        case .failed(let message):
+            unboundBindingMessage = message
+        case .stale:
             return false
         }
+        return false
     }
 
     func batchBindUnboundRecords(
@@ -1237,32 +1278,26 @@ final class AppState: ObservableObject {
         isBindingUnboundRecords = true
         unboundBindingMessage = nil
         defer { isBindingUnboundRecords = false }
-
-        do {
-            let session = try await validSession()
-            var successCount = 0
-            var failureCount = 0
-            for candidate in candidates {
-                do {
-                    try await unboundRecordRepository.bind(
-                        candidate.record,
-                        accountId: candidate.recommendation.account.id,
-                        accessToken: session.accessToken
-                    )
-                    successCount += 1
-                } catch {
-                    failureCount += 1
-                }
+        let result = await resolvedAccountBindingUseCase(monthKey: monthKey).bindBatch(candidates)
+        for item in result.items {
+            if case .accepted = item.transaction {
+                unboundRecords.removeAll { $0.id == item.recordId && $0.kind == item.kind }
             }
-            await refreshAfterAccountBinding(monthKey: monthKey)
-            unboundBindingMessage = failureCount == 0
-                ? "已批量补绑 \(successCount) 条记录"
-                : "已补绑 \(successCount) 条，\(failureCount) 条失败"
-            return successCount > 0
-        } catch {
-            unboundBindingMessage = error.localizedDescription
+        }
+        switch result.status {
+        case .allSucceeded:
+            unboundBindingMessage = "已批量补绑 \(result.successCount) 条记录"
+        case .partial:
+            unboundBindingMessage = "已补绑 \(result.successCount) 条，\(result.failedCount) 条失败"
+        case .failed:
+            unboundBindingMessage = "批量补绑失败"
+        case .stale:
             return false
         }
+        if let message = result.refresh.failureMessage {
+            unboundBindingMessage = "\(unboundBindingMessage ?? "已补绑")；刷新失败：\(message)"
+        }
+        return result.successCount > 0
     }
 
     func loadWalletSnapshots() async {
@@ -1520,10 +1555,13 @@ final class AppState: ObservableObject {
         recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
     }
 
-    private func refreshAfterAccountBinding(monthKey: String) async {
+    private func refreshAfterAccountBinding(monthKey: String) async throws {
         await loadAccounts()
         await loadUnboundRecords(monthKey: monthKey)
         await refreshDashboard()
+        if let message = accountMessage, !message.isEmpty { throw WalletSnapshotReadModelRefreshError(message: message) }
+        if let message = unboundRecordsMessage, !message.isEmpty { throw WalletSnapshotReadModelRefreshError(message: message) }
+        if let message = dashboardMessage, !message.isEmpty { throw WalletSnapshotReadModelRefreshError(message: message) }
     }
 
     func prefetchRecordDetails(_ references: [String]) {
@@ -2744,6 +2782,7 @@ final class AppState: ObservableObject {
         accountManagementActionUseCase?.reset()
         accountReadPreparationUseCase?.reset()
         screenshotRepaymentUseCase?.reset()
+        accountBindingUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false
