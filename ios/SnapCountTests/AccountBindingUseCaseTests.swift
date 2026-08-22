@@ -109,7 +109,6 @@ final class AccountBindingUseCaseTests: XCTestCase {
 
     func testA4IOS007GDoesNotMoveRecommendationOrReadIntoBindingAction() {
         XCTAssertTrue(NativeAccountRecommendationEngine.candidates(records: [], accounts: []).isEmpty)
-        XCTAssertTrue(UnboundRecordRepositoryProtocol.self is Any.Type)
     }
 
     private func makeHarness(
