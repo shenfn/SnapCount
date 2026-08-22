@@ -113,6 +113,7 @@ final class AppState: ObservableObject {
     private var stagingLifecycleUseCase: StagingLifecycleUseCase?
     private var pendingConfirmationUseCase: PendingConfirmationUseCase?
     private var feedbackSubmissionUseCase: FeedbackSubmissionUseCase?
+    private var recordDetailImageUseCase: RecordDetailImageUseCase?
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
@@ -156,6 +157,7 @@ final class AppState: ObservableObject {
         stagingLifecycleUseCase: StagingLifecycleUseCase? = nil,
         pendingConfirmationUseCase: PendingConfirmationUseCase? = nil,
         feedbackSubmissionUseCase: FeedbackSubmissionUseCase? = nil,
+        recordDetailImageUseCase: RecordDetailImageUseCase? = nil,
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
@@ -188,6 +190,7 @@ final class AppState: ObservableObject {
         self.stagingLifecycleUseCase = stagingLifecycleUseCase
         self.pendingConfirmationUseCase = pendingConfirmationUseCase
         self.feedbackSubmissionUseCase = feedbackSubmissionUseCase
+        self.recordDetailImageUseCase = recordDetailImageUseCase
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
         self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
@@ -1964,17 +1967,58 @@ final class AppState: ObservableObject {
         guard detail.imagePath != nil, detail.imageURL == nil, let session else { return }
         Task { [weak self] in
             guard let self else { return }
-            guard let hydrated = try? await self.recordRepository.hydrateDetailImage(detail, accessToken: session.accessToken) else { return }
-            guard self.userStateGeneration == generation,
-                  self.activeRecordReference == reference,
-                  self.isSignedIn,
-                  self.currentUserId == session.user.id else { return }
-            let mergedDetail = self.detailPreservingExpressionFeedback(hydrated)
-            self.recordDetailCache[reference] = mergedDetail
-            if self.selectedRecordDetail?.id == hydrated.id {
-                self.selectedRecordDetail = mergedDetail
+            let useCase = self.resolvedRecordDetailImageUseCase()
+            let result = await useCase.perform(detail, reference: reference)
+            switch result.transaction {
+            case .hydrated:
+                guard let hydrated = result.detail else { return }
+                let mergedDetail = self.detailPreservingExpressionFeedback(hydrated)
+                self.recordDetailCache[reference] = mergedDetail
+                if self.selectedRecordDetail?.id == hydrated.id {
+                    self.selectedRecordDetail = mergedDetail
+                }
+            case .failed:
+                var failedDetail = detail
+                failedDetail.imageLoadError = true
+                let mergedDetail = self.detailPreservingExpressionFeedback(failedDetail)
+                guard self.userStateGeneration == generation,
+                      self.activeRecordReference == reference,
+                      self.isSignedIn,
+                      self.currentUserId == session.user.id else { return }
+                self.recordDetailCache[reference] = mergedDetail
+                if self.selectedRecordDetail?.id == detail.id {
+                    self.selectedRecordDetail = mergedDetail
+                }
+            case .notNeeded, .stale:
+                return
             }
         }
+    }
+
+    private func resolvedRecordDetailImageUseCase() -> RecordDetailImageUseCase {
+        if let recordDetailImageUseCase { return recordDetailImageUseCase }
+        let useCase = RecordDetailImageUseCase(
+            repository: recordRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else {
+                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
+                }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return RecordDetailImageUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return RecordDetailImageUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn,
+                    activeRecordReference: self.activeRecordReference
+                )
+            }
+        )
+        recordDetailImageUseCase = useCase
+        return useCase
     }
 
     private func prepareRecordExpressionPlan(
@@ -2937,6 +2981,7 @@ final class AppState: ObservableObject {
         stagingLifecycleUseCase?.reset()
         pendingConfirmationUseCase?.reset()
         feedbackSubmissionUseCase?.reset()
+        recordDetailImageUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false

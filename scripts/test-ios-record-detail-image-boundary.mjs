@@ -38,8 +38,9 @@ test('A4-IOS-011 repository remains the signed-image transport boundary', async 
 test('A4-IOS-011 AppState is only a compatibility projection', async () => {
   const source = await readFile(appStatePath, 'utf8')
   assert.ok(source.includes('hydrateRecordDetailImageIfNeeded'))
-  assert.equal(source.includes('recordDetailImageUseCase'), false, 'red baseline unexpectedly has use case wiring')
-  assert.match(source, /recordRepository\.hydrateDetailImage\(/u)
+  assert.ok(source.includes('resolvedRecordDetailImageUseCase'))
+  assert.ok(source.includes('recordDetailImageUseCase?.reset()'))
+  assert.equal(/recordRepository\.hydrateDetailImage\(/u.test(source), false, 'AppState still owns image transport')
 })
 
 test('A4-IOS-011 use case does not absorb detail reads or expression feedback', async () => {

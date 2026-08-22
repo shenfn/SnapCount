@@ -11,7 +11,8 @@ final class RecordDetailImageUseCaseTests: XCTestCase {
         let result = await useCase.perform(detail(imagePath: nil), reference: "expense/record-1")
 
         XCTAssertEqual(result.transaction, .notNeeded)
-        XCTAssertEqual(repository.callCount, 0)
+        let callCount = await repository.callCount
+        XCTAssertEqual(callCount, 0)
     }
 
     func testA4IOS011BReusesSameIdentityAndSkipsExistingURL() async {
@@ -27,11 +28,13 @@ final class RecordDetailImageUseCaseTests: XCTestCase {
         let (firstResult, duplicateResult) = await (first, duplicate)
         XCTAssertEqual(firstResult.transaction, .hydrated)
         XCTAssertEqual(duplicateResult.transaction, .hydrated)
-        XCTAssertEqual(repository.callCount, 1)
+        let callCount = await repository.callCount
+        XCTAssertEqual(callCount, 1)
 
         let cached = await useCase.perform(detail(imageURL: URL(string: "https://signed.example/1")), reference: "expense/record-1")
         XCTAssertEqual(cached.transaction, .notNeeded)
-        XCTAssertEqual(repository.callCount, 1)
+        let callCountAfterCache = await repository.callCount
+        XCTAssertEqual(callCountAfterCache, 1)
     }
 
     func testA4IOS011CForwardsImageFactsToNarrowRepository() async {
@@ -40,8 +43,9 @@ final class RecordDetailImageUseCaseTests: XCTestCase {
 
         _ = await useCase.perform(detail(imagePath: "user-1/receipt.jpg"), reference: "expense/record-1")
 
-        XCTAssertEqual(repository.calls.first?.imagePath, "user-1/receipt.jpg")
-        XCTAssertEqual(repository.calls.first?.accessToken, "test-token")
+        let call = await repository.calls.first
+        XCTAssertEqual(call?.imagePath, "user-1/receipt.jpg")
+        XCTAssertEqual(call?.accessToken, "test-token")
     }
 
     func testA4IOS011DFailureIsImageFailureOnly() async {
