@@ -1207,9 +1207,10 @@ final class AppState: ObservableObject {
     }
 
     private func resolvedAccountBindingUseCase(monthKey: String) -> AccountBindingUseCase {
-        if let accountBindingUseCase,
-           accountBindingUseCaseMonthKey == monthKey {
-            return accountBindingUseCase
+        if let accountBindingUseCase {
+            if accountBindingUseCaseMonthKey == nil || accountBindingUseCaseMonthKey == monthKey {
+                return accountBindingUseCase
+            }
         }
         let useCase = AccountBindingUseCase(
             repository: unboundRecordRepository,
