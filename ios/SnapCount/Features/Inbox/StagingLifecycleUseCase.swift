@@ -30,7 +30,7 @@ enum StagingLifecycleCommand {
         switch self {
         case .discard(let recordId): return "discard|\(recordId)"
         case .retry(let recordId): return "retry|\(recordId)"
-        case .archive(let record, let domainKey): return "archive|\(record.id)|\(domainKey)|\(record.archivePayload)"
+        case .archive(let record, let domainKey): return "archive|\(record.id)|\(domainKey)"
         }
     }
 }
