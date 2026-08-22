@@ -566,8 +566,8 @@ final class NativeDataService {
         )
     }
 
-    func discardStagingRecord(id: String, accessToken: String) async throws {
-        _ = try await rpc(
+    func discardStagingRecord(id: String, accessToken: String) async throws -> NativeStagingDiscardResult {
+        let response = try await rpc(
             DiscardStagingRPCResponse.self,
             name: "discard_staging_record",
             body: [
@@ -576,26 +576,44 @@ final class NativeDataService {
             ],
             accessToken: accessToken
         )
+        return NativeStagingDiscardResult(
+            recordId: id,
+            status: response.status,
+            cleanupStatus: response.cleanupStatus,
+            cleanupQueued: response.cleanupQueued
+        )
     }
 
-    func retryStagingRecord(id: String, accessToken: String) async throws -> ShortcutUploadResult {
+    func retryStagingRecord(id: String, accessToken: String) async throws -> NativeStagingRetryResult {
         let responseData = try await postMultipart(
             path: "functions/v1/ingest-receipt",
             fields: ["staging_record_id": id, "response_mode": "json"],
             accessToken: accessToken
         )
         if let payload = try? decoder.decode(ShortcutUploadPayload.self, from: responseData) {
-            return ShortcutUploadResult(payload: payload)
+            let result = ShortcutUploadResult(payload: payload)
+            return NativeStagingRetryResult(
+                recordId: id,
+                route: result.route,
+                displayText: result.displayText,
+                notificationText: result.notificationText
+            )
         }
         let text = String(data: responseData, encoding: .utf8) ?? ""
-        return ShortcutUploadResult(displayText: text.isEmpty ? "已重新识别，打开芥子查看结果。" : text)
+        let result = ShortcutUploadResult(displayText: text.isEmpty ? "已重新识别，打开芥子查看结果。" : text)
+        return NativeStagingRetryResult(
+            recordId: id,
+            route: result.route,
+            displayText: result.displayText,
+            notificationText: result.notificationText
+        )
     }
 
     func archiveStagingRecord(
         _ record: NativeStagingRecord,
         domainKey: String,
         accessToken: String
-    ) async throws -> String {
+    ) async throws -> NativeStagingArchiveResult {
         let payload = record.archivePayload
         let occurredAt = payload.string("occurred_at")
             ?? payload.string("order_finished_at")
@@ -614,7 +632,12 @@ final class NativeDataService {
             ),
             accessToken: accessToken
         )
-        return response.targetReference
+        return NativeStagingArchiveResult(
+            recordId: record.id,
+            targetRecordId: response.targetRecordId,
+            targetReference: response.targetReference,
+            idempotentRetry: response.idempotentRetry
+        )
     }
 
     func resolveImageURL(path: String, accessToken: String) async throws -> URL {

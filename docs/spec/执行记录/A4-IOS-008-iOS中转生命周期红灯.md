@@ -1,6 +1,6 @@
 # A4-IOS-008 iOS 中转生命周期动作编排执行记录
 
-> 状态：A4-IOS-008A-H 红灯已建立，尚未进入最小实现
+> 状态：最小实现已接入，等待 macOS XCTest/门禁验证
 >
 > 日期：2026-08-22
 >
@@ -17,20 +17,28 @@
 - 新增 `npm run test:ios-staging-lifecycle-boundary`。
 - 阶段索引切换到 A4-IOS-008A-H 红灯，当前工作分支为 `test/A4-IOS-008中转生命周期红灯`。
 
+## 最小实现进展
+
+- `InboxRepository` 和 `NativeDataService` 现在返回丢弃清理状态、重试 route/提示和归档 target/idempotent 的结构化结果；RPC、Edge endpoint 和归档 payload 参数未改变。
+- 新增纯编排 `StagingLifecycleUseCase`，统一认证、同记录命令复用/冲突、reset stale、accepted/refresh 分层和一次写后刷新。
+- `AppState` 保留三个中转公开入口，只负责 busy、导航、消息和本地读模型兼容投影；用户 reset 会重置 Use Case。
+- 更新既有 `InboxRepositoryProtocol` 测试 stub，避免结构化返回变更污染其他测试。
+
 ## 红灯验证
 
 - `npm run test:ios-staging-lifecycle-boundary`：A4-IOS-008A-H 场景登记通过；Use Case 文件缺失、Repository 仍返回旧 `Void`/`ShortcutUploadResult`/`String`、AppState 仍直调 transport 等 4 项边界断言按预期失败。
+- 最小实现接入后再次运行 `npm run test:ios-staging-lifecycle-boundary`：5 项源边界检查全部通过。
 - `npm run governance:check`：通过。
 - `npm run governance:arch`：通过；仅保留既有人工清单警告。
 - `git diff --check`：通过。
 - Windows 未运行 Swift/XCTest；后续以 GitHub macOS iOS Build/XCTest 为编译和业务测试权威。
 
-## 进入最小实现的顺序
+## 后续验证顺序
 
-1. 先让 `InboxRepository` 返回丢弃、重试、归档的结构化事实，不改变 RPC/Edge 参数。
-2. 建立不依赖 SwiftUI、Supabase 或 HTTP 的 `StagingLifecycleUseCase`，实现认证、并发、reset/generation stale 和 accepted/refresh 分层。
-3. 最后把 `AppState` 三个公开入口改成兼容投影，保留页面导航和已有消息出口。
-4. macOS 门禁通过前不进入下一片，不执行生产迁移、部署、真实数据写入或 TestFlight。
+1. 以 GitHub macOS XCTest 验证 A4-IOS-008A-H 的运行时行为和编译。
+2. 若出现失败，按业务失败、环境失败和测试契约错误分层处理，不把门禁红灯直接视为实现完成。
+3. macOS、Release、治理、源边界全部通过后，更新阶段索引和交接快照并进入下一片只读评估。
+4. 验证完成前不执行生产迁移、部署、真实数据写入或 TestFlight。
 
 ## 冻结范围
 

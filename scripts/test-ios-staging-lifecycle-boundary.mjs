@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 
 const useCasePath = 'ios/SnapCount/Features/Inbox/StagingLifecycleUseCase.swift'
 const repositoryPath = 'ios/SnapCount/Repositories/InboxRepository.swift'
+const transportPath = 'ios/SnapCount/Services/NativeDataService.swift'
 const appStatePath = 'ios/SnapCount/App/AppState.swift'
 const testsPath = 'ios/SnapCountTests/StagingLifecycleUseCaseTests.swift'
 
@@ -25,12 +26,16 @@ test('A4-IOS-008 use case owns lifecycle orchestration without transport depende
 })
 
 test('A4-IOS-008 repository returns structured discard/retry/archive facts', async () => {
-  const source = await readFile(repositoryPath, 'utf8')
+  const [source, transport] = await Promise.all([
+    readFile(repositoryPath, 'utf8'),
+    readFile(transportPath, 'utf8')
+  ])
   assert.match(source, /func\s+discard\([\s\S]*\)\s+async\s+throws\s*->\s*NativeStagingDiscardResult/u)
   assert.match(source, /func\s+retry\([\s\S]*\)\s+async\s+throws\s*->\s*NativeStagingRetryResult/u)
   assert.match(source, /func\s+archive\([\s\S]*\)\s+async\s+throws\s*->\s*NativeStagingArchiveResult/u)
+  const combined = `${source}\n${transport}`
   for (const marker of ['discard_staging_record', 'archive_staging_record', 'ingest-receipt', 'idempotent_retry', 'cleanup_queued']) {
-    assert.ok(source.includes(marker), `missing transport fact marker: ${marker}`)
+    assert.ok(combined.includes(marker), `missing transport fact marker: ${marker}`)
   }
 })
 

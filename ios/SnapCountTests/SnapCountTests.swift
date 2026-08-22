@@ -3440,14 +3440,21 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
 }
 
 private struct InboxRepositoryStub: InboxRepositoryProtocol {
-    func discard(id: String, accessToken: String) async throws {}
-
-    func retry(id: String, accessToken: String) async throws -> ShortcutUploadResult {
-        ShortcutUploadResult(displayText: "已重新识别")
+    func discard(id: String, accessToken: String) async throws -> NativeStagingDiscardResult {
+        NativeStagingDiscardResult(recordId: id, status: "discarded", cleanupStatus: "queued", cleanupQueued: true)
     }
 
-    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> String {
-        "expense:record-1"
+    func retry(id: String, accessToken: String) async throws -> NativeStagingRetryResult {
+        NativeStagingRetryResult(recordId: id, route: "today", displayText: "已重新识别", notificationText: "已重新识别")
+    }
+
+    func archive(_ record: NativeStagingRecord, domainKey: String, accessToken: String) async throws -> NativeStagingArchiveResult {
+        NativeStagingArchiveResult(
+            recordId: record.id,
+            targetRecordId: "record-1",
+            targetReference: "expense/record-1",
+            idempotentRetry: false
+        )
     }
 
     func confirmStagingRepayment(

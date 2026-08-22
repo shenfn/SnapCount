@@ -110,6 +110,7 @@ final class AppState: ObservableObject {
     private var accountReadPreparationUseCase: AccountReadPreparationUseCase?
     private var accountBindingUseCase: AccountBindingUseCase?
     private var accountBindingUseCaseMonthKey: String?
+    private var stagingLifecycleUseCase: StagingLifecycleUseCase?
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
@@ -150,6 +151,7 @@ final class AppState: ObservableObject {
         accountManagementActionUseCase: AccountManagementActionUseCase? = nil,
         accountReadPreparationUseCase: AccountReadPreparationUseCase? = nil,
         accountBindingUseCase: AccountBindingUseCase? = nil,
+        stagingLifecycleUseCase: StagingLifecycleUseCase? = nil,
         unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
         walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
         walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
@@ -179,6 +181,7 @@ final class AppState: ObservableObject {
         self.screenshotRepaymentUseCase = screenshotRepaymentUseCase
         self.accountReadPreparationUseCase = accountReadPreparationUseCase
         self.accountBindingUseCase = accountBindingUseCase
+        self.stagingLifecycleUseCase = stagingLifecycleUseCase
         self.unboundRecordRepository = unboundRecordRepository
         self.walletSnapshotRepository = walletSnapshotRepository
         self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
@@ -1686,19 +1689,27 @@ final class AppState: ObservableObject {
         inboxActionMessage = "正在销毁截图…"
         inboxActionMessageIsError = false
         defer { inboxActionRecordId = nil }
-        do {
-            let session = try await validSession()
-            try await inboxRepository.discard(id: record.id, accessToken: session.accessToken)
+        let result = await resolvedStagingLifecycleUseCase().perform(.discard(recordId: record.id))
+        switch result.transaction {
+        case .accepted:
             if !preserveInboxNavigation { inboxPath = NavigationPath() }
-            removeStagingRecordLocally(record.id)
-            refreshDashboardAfterInboxMutation()
-            inboxActionMessage = "已销毁这条待处理截图，原图将在后台安全清理"
+            inboxActionMessage = result.refresh.failureMessage.map {
+                "已销毁这条待处理截图，原图将在后台安全清理；刷新失败：\($0)"
+            } ?? "已销毁这条待处理截图，原图将在后台安全清理"
             return true
-        } catch {
-            inboxActionMessage = "销毁失败：\(error.localizedDescription)"
-            inboxActionMessageIsError = true
+        case .rejected(.unauthenticated):
+            inboxActionMessage = "登录状态已失效，请重新登录"
+        case .rejected(.invalidInput):
+            inboxActionMessage = "待处理截图无效"
+        case .conflict:
+            inboxActionMessage = "这条待处理截图正在执行其他操作"
+        case .failed(let message):
+            inboxActionMessage = "销毁失败：\(message)"
+        case .stale:
             return false
         }
+        inboxActionMessageIsError = true
+        return false
     }
 
     @discardableResult
@@ -1711,26 +1722,36 @@ final class AppState: ObservableObject {
         inboxActionMessage = "正在重新识别…"
         inboxActionMessageIsError = false
         defer { inboxActionRecordId = nil }
-        do {
-            let session = try await validSession()
-            let result = try await inboxRepository.retry(id: record.id, accessToken: session.accessToken)
-            await refreshDashboard()
+        let result = await resolvedStagingLifecycleUseCase().perform(.retry(recordId: record.id))
+        switch result.transaction {
+        case .accepted(let accepted):
             let remainsInInbox = dashboard.stagingRecords.contains { $0.id == record.id }
             if !remainsInInbox, !preserveInboxNavigation {
                 inboxPath = NavigationPath()
             }
-            inboxActionMessage = remainsInInbox
+            let actionMessage = remainsInInbox
                 ? "重新识别完成，仍需确认或选择归档域"
                 : "重新识别成功，记录已自动归档"
-            if result.route.hasPrefix("inbox") {
-                inboxActionMessage = "重新识别完成，仍需确认或选择归档域"
+            inboxActionMessage = accepted.route?.hasPrefix("inbox") == true
+                ? "重新识别完成，仍需确认或选择归档域"
+                : actionMessage
+            if case .failed(let message) = result.refresh {
+                inboxActionMessage += "；刷新失败：\(message)"
             }
             return true
-        } catch {
-            inboxActionMessage = "重新识别失败：\(error.localizedDescription)"
-            inboxActionMessageIsError = true
+        case .rejected(.unauthenticated):
+            inboxActionMessage = "登录状态已失效，请重新登录"
+        case .rejected(.invalidInput):
+            inboxActionMessage = "待处理截图无效"
+        case .conflict:
+            inboxActionMessage = "这条待处理截图正在执行其他操作"
+        case .failed(let message):
+            inboxActionMessage = "重新识别失败：\(message)"
+        case .stale:
             return false
         }
+        inboxActionMessageIsError = true
+        return false
     }
 
     @discardableResult
@@ -1747,23 +1768,29 @@ final class AppState: ObservableObject {
         inboxActionMessage = "正在归档到\(domainTitle)…"
         inboxActionMessageIsError = false
         defer { inboxActionRecordId = nil }
-        do {
-            let session = try await validSession()
-            let targetReference = try await inboxRepository.archive(
-                record,
-                domainKey: domainKey,
-                accessToken: session.accessToken
-            )
+        let result = await resolvedStagingLifecycleUseCase().perform(
+            .archive(record: record, domainKey: domainKey)
+        )
+        switch result.transaction {
+        case .accepted(let accepted):
             if !preserveInboxNavigation { inboxPath = NavigationPath() }
-            removeStagingRecordLocally(record.id)
-            refreshDashboardAfterInboxMutation()
-            inboxActionMessage = "已归档到\(domainTitle)"
-            return targetReference
-        } catch {
-            inboxActionMessage = "归档失败：\(error.localizedDescription)"
-            inboxActionMessageIsError = true
+            inboxActionMessage = result.refresh.failureMessage.map {
+                "已归档到\(domainTitle)；刷新失败：\($0)"
+            } ?? "已归档到\(domainTitle)"
+            return accepted.targetReference
+        case .rejected(.unauthenticated):
+            inboxActionMessage = "登录状态已失效，请重新登录"
+        case .rejected(.invalidInput):
+            inboxActionMessage = "待处理截图或归档域无效"
+        case .conflict:
+            inboxActionMessage = "这条待处理截图正在执行其他操作"
+        case .failed(let message):
+            inboxActionMessage = "归档失败：\(message)"
+        case .stale:
             return nil
         }
+        inboxActionMessageIsError = true
+        return nil
     }
 
     @discardableResult
@@ -1786,11 +1813,40 @@ final class AppState: ObservableObject {
         dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
     }
 
-    private func refreshDashboardAfterInboxMutation() {
-        Task { [weak self] in
-            await Task.yield()
-            await self?.refreshDashboard()
-        }
+    private func resolvedStagingLifecycleUseCase() -> StagingLifecycleUseCase {
+        if let stagingLifecycleUseCase { return stagingLifecycleUseCase }
+        let useCase = StagingLifecycleUseCase(
+            repository: inboxRepository,
+            sessionProvider: { [weak self] forceRefresh in
+                guard let self else { throw SupabaseRemoteError.requestFailed("会话已失效") }
+                return try await self.validSession(forceRefresh: forceRefresh)
+            },
+            contextProvider: { [weak self] in
+                guard let self else {
+                    return StagingLifecycleUserContext(userId: "", generation: -1, isSignedIn: false)
+                }
+                return StagingLifecycleUserContext(
+                    userId: self.currentUserId,
+                    generation: self.userStateGeneration,
+                    isSignedIn: self.isSignedIn
+                )
+            },
+            applyAccepted: { [weak self] accepted in
+                guard let self else { return }
+                if accepted.action == .discard || accepted.action == .archive {
+                    self.removeStagingRecordLocally(accepted.recordId)
+                }
+            },
+            refresh: { [weak self] in
+                guard let self else { return }
+                await self.refreshDashboard()
+                if let message = self.dashboardMessage, !message.isEmpty {
+                    throw WalletSnapshotReadModelRefreshError(message: message)
+                }
+            }
+        )
+        stagingLifecycleUseCase = useCase
+        return useCase
     }
 
     func resolveStagingImageURL(for record: NativeStagingRecord) async throws -> URL {
@@ -2784,6 +2840,7 @@ final class AppState: ObservableObject {
         accountReadPreparationUseCase?.reset()
         screenshotRepaymentUseCase?.reset()
         accountBindingUseCase?.reset()
+        stagingLifecycleUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
         isLoadingDashboard = false
