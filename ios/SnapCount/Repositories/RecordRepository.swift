@@ -10,7 +10,7 @@ protocol NativeRecordFeedbackRepositoryProtocol {
     ) async throws
 }
 
-protocol RecordRepositoryProtocol: NativeRecordFeedbackRepositoryProtocol {
+protocol RecordRepositoryProtocol: NativeRecordFeedbackRepositoryProtocol, NativeRecordDetailImageRepositoryProtocol {
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail
     func hydrateDetailImage(_ detail: NativeRecordDetail, accessToken: String) async throws -> NativeRecordDetail
