@@ -1,0 +1,25 @@
+# LOCAL-002-UIA 本地安全壳执行记录
+
+- 目标行为：无 Supabase session 时跳过登录墙，只显示 Records 与本地 Settings，并从当前本地 profile 读取消费月份。
+- 当前行为：UIA 已完成本地安全壳、消费月份读取与远端详情/设置闸门；UIB 账户准备与新增消费尚未开始。
+- 权威来源：`免登录入口与本地账户准备规格说明.md` 的 `LOCAL-002UIA1` 至 `LOCAL-002UIA7`，以及 ADR-038。
+- 本轮范围：Root、Records、本地 Settings、AppState 本地月份路由、Node 源边界和 iOS XCTest。
+- 非范围：账户创建、手工消费表单、本地详情、同步、AI Provider、其他数据域、生产迁移、部署和 TestFlight。
+- 基线测试结果：`test:ios-local-expense-app-boundary`、治理检查和架构检查通过。
+- 红灯测试及失败原因：
+  - `npm run test:ios-local-shell-boundary` 首次 4/4 失败：本地 Settings 文件缺失，Root 仍显示 LoginView，Records 仍导航和预取远端详情，未登录仍暴露新增按钮。
+  - GitHub Actions run `32625777973` 可编译，244 项 XCTest 中仅新用例失败；断言证明未登录月份没有调用 Local Use Case、查询了 session、未投影本地记录并产生登录失效错误。
+- 最小实现：
+  - Root 显式拆分本地两 Tab 与旧云端五 Tab。
+  - AppState 未登录月份复用 `LocalExpenseUseCase.month()`，不直接访问 GRDB 或远端 Repository。
+  - Records 本地模式仅展示 expense，禁用远端详情导航和预取，并隐藏 UIB 前不可完成的新增入口。
+  - Local Settings 只展示本机存储、同步未开启、主题、法律文档和版本，不加载云端设置或登录入口。
+- 绿灯结果：
+  - `npm run test:ios-local-shell-boundary`：4/4 通过。
+  - `npm run test:ios-local-expense-app-boundary`：2/2 通过。
+  - `npm run governance:check`：通过。
+  - `npm run governance:arch`：通过，未增加架构违规。
+  - GitHub Actions run `32626367969`：SwiftUI Simulator Build、完整 XCTest 和 iOS Build Gate 通过。
+- GitHub CI 结果：PR #158 当前适用门禁全绿，仍为 Draft，待收尾提交再次验证后转为 Ready。
+- 未解决风险：Windows 无法执行 SwiftUI 编译；UIB 完成前本地用户只能读取已有本地消费，不能从 UI 新建账户或消费。
+- 对应提交：红灯 `3069796`；最小实现 `ba146f2`。

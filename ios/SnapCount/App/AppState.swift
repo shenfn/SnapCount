@@ -213,6 +213,10 @@ final class AppState: ObservableObject {
                 manualRecordMessage = "本地数据初始化失败：\(error.localizedDescription)"
             }
             await restoreAuthentication()
+            if !isSignedIn {
+                selectedTab = .records
+                await loadRecordMonth(Self.currentMonthKey, force: true)
+            }
             isBootstrapping = false
             await refreshNotificationPermissionStatus()
             presentOnboardingIfNeeded()
@@ -553,6 +557,10 @@ final class AppState: ObservableObject {
     }
 
     func loadRecordMonth(_ monthKey: String, force: Bool = false) async {
+        guard isSignedIn else {
+            await loadLocalExpenseMonth(monthKey, force: force)
+            return
+        }
         guard monthKey != Self.currentMonthKey else {
             if force { await refreshDashboard() }
             return
@@ -583,6 +591,61 @@ final class AppState: ObservableObject {
             guard generation == userStateGeneration else { return }
             recordMonthMessages[monthKey] = error.localizedDescription
         }
+    }
+
+    private func loadLocalExpenseMonth(_ monthKey: String, force: Bool) async {
+        guard force || recordMonthGroups[monthKey] == nil else { return }
+        guard loadingRecordMonthKey != monthKey else { return }
+        let generation = userStateGeneration
+        loadingRecordMonthKey = monthKey
+        recordMonthMessages.removeValue(forKey: monthKey)
+        defer {
+            if loadingRecordMonthKey == monthKey { loadingRecordMonthKey = nil }
+        }
+        do {
+            guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+            let month = try await localExpenseUseCase.month(monthKey)
+            guard generation == userStateGeneration, !isSignedIn else { return }
+            let groups = LocalExpenseReadModel.groups(from: month)
+            recordMonthDetails[monthKey] = [:]
+            recordMonthGroups[monthKey] = groups
+            if monthKey == Self.currentMonthKey {
+                applyLocalExpenseMonth(month, groups: groups)
+            }
+        } catch {
+            guard generation == userStateGeneration, !isSignedIn else { return }
+            recordMonthMessages[monthKey] = error.localizedDescription
+        }
+    }
+
+    private func applyLocalExpenseMonth(_ month: LocalExpenseMonth, groups: [NativeDayRecordGroup]) {
+        let todayKey = NativeLocalDate.dateKey(Date())
+        let todayExpenses = month.expenses.filter { $0.transactionDate == todayKey }
+        dashboard.dayRecordGroups = groups
+        dashboard.dailySummaries = groups.map { group in
+            let expense = group.records.reduce(0.0) { total, record in
+                guard let local = month.expenses.first(where: { $0.id.uuidString == record.id }) else { return total }
+                return total + Double(local.amountMinor) / 100
+            }
+            return NativeDailySummary(
+                dateKey: group.dateKey,
+                expense: expense,
+                income: 0,
+                pendingCount: 0,
+                recordCount: group.records.count
+            )
+        }
+        dashboard.todayCount = todayExpenses.count
+        dashboard.monthCount = month.expenses.count
+        dashboard.todayExpense = todayExpenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
+        dashboard.monthExpense = month.expenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
+        dashboard.todayIncome = 0
+        dashboard.monthIncome = 0
+        dashboard.pendingCount = 0
+        dashboard.recordDetails = [:]
+        dashboard.recentRecords = []
+        dashboard.stagingRecords = []
+        dashboard.pendingExpenses = []
     }
 
     func reportSnapshot(monthKey: String) -> DashboardSnapshot {
@@ -2972,6 +3035,7 @@ final class AppState: ObservableObject {
         hasUploadToken = false
         shortcutCredentialMessage = nil
         resetUserScopedState()
+        selectedTab = .records
         Task { await RemoteImageRepository.shared.clear() }
         authMessage = message
         authMessageIsError = !message.isEmpty

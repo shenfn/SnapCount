@@ -7,10 +7,13 @@ struct RecordsView: View {
     @State private var selectedMonthKey: String
     @State private var showManualRecordSheet = false
 
-    private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: selectedKind) }
+    private var effectiveKind: NativeDayRecordKind { appState.isSignedIn ? selectedKind : .expense }
+    private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: effectiveKind) }
     private var monthGroups: [NativeDayRecordGroup] { appState.recordGroups(monthKey: selectedMonthKey) }
     private var groups: [NativeDayRecordGroup] { query.groups(from: monthGroups) }
-    private var availableKinds: [NativeDayRecordKind] { query.availableKinds(from: monthGroups) }
+    private var availableKinds: [NativeDayRecordKind] {
+        appState.isSignedIn ? query.availableKinds(from: monthGroups) : [.expense]
+    }
     private var isLoadingMonth: Bool { appState.loadingRecordMonthKey == selectedMonthKey }
     private var palette: JieziGeneratedPalette { themeManager.palette }
 
@@ -43,7 +46,7 @@ struct RecordsView: View {
                                     JieziChip(
                                         palette: palette,
                                         title: kind.title,
-                                        isSelected: selectedKind == kind,
+                                        isSelected: effectiveKind == kind,
                                         tint: kind == .all ? palette.brand : domainColor(for: kind.rawValue)
                                     ) {
                                         selectedKind = kind
@@ -85,10 +88,14 @@ struct RecordsView: View {
 
                                 VStack(spacing: 0) {
                                     ForEach(Array(group.records.enumerated()), id: \.element.id) { index, item in
-                                        NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
+                                        if appState.isSignedIn {
+                                            NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
+                                                recordRow(item, showDivider: index < group.records.count - 1)
+                                            }
+                                            .buttonStyle(.plain)
+                                        } else {
                                             recordRow(item, showDivider: index < group.records.count - 1)
                                         }
-                                        .buttonStyle(.plain)
                                     }
                                 }
                                 .background(
@@ -114,11 +121,13 @@ struct RecordsView: View {
         .navigationTitle("记录")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showManualRecordSheet = true
-                } label: {
-                    Label("新增记录", systemImage: "plus")
+            if appState.isSignedIn {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showManualRecordSheet = true
+                    } label: {
+                        Label("新增记录", systemImage: "plus")
+                    }
                 }
             }
         }
@@ -127,9 +136,11 @@ struct RecordsView: View {
         }
         .onChange(of: availableKinds) { kinds in if !kinds.contains(selectedKind) { selectedKind = .all } }
         .task(id: prefetchKey) {
+            guard appState.isSignedIn else { return }
             appState.prefetchRecordDetails(groups.flatMap(\.records).map(\.reference))
         }
         .task(id: selectedMonthKey) {
+            if !appState.isSignedIn { selectedKind = .expense }
             await appState.loadRecordMonth(selectedMonthKey)
         }
         .sheet(isPresented: $showManualRecordSheet) {
@@ -143,27 +154,30 @@ struct RecordsView: View {
         NativeMonthKey.title(selectedMonthKey)
     }
 
+    @ViewBuilder
     private var contextNavigation: some View {
-        HStack(spacing: JieziSpacing.sm) {
-            NavigationLink {
-                AccountsView()
-            } label: {
-                Label("账户", systemImage: "wallet.pass")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(palette.brand)
+        if appState.isSignedIn {
+            HStack(spacing: JieziSpacing.sm) {
+                NavigationLink {
+                    AccountsView()
+                } label: {
+                    Label("账户", systemImage: "wallet.pass")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(palette.brand)
 
-            NavigationLink {
-                DomainsView()
-            } label: {
-                Label("数据域", systemImage: "square.stack.3d.up")
-                    .frame(maxWidth: .infinity)
+                NavigationLink {
+                    DomainsView()
+                } label: {
+                    Label("数据域", systemImage: "square.stack.3d.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(palette.brand)
             }
-            .buttonStyle(.bordered)
-            .tint(palette.brand)
+            .font(.subheadline.weight(.semibold))
         }
-        .font(.subheadline.weight(.semibold))
     }
 
     private func dayHeader(_ group: NativeDayRecordGroup) -> some View {
@@ -225,7 +239,7 @@ struct RecordsView: View {
     }
 
     private func daySummaryText(_ group: NativeDayRecordGroup) -> String {
-        guard selectedKind == .all,
+        guard effectiveKind == .all,
               let summary = appState.dashboard.dailySummaries.first(where: { $0.dateKey == group.dateKey }) else {
             return "\(group.records.count) 条"
         }
