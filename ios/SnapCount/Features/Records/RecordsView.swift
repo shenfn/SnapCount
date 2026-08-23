@@ -135,7 +135,7 @@ struct RecordsView: View {
             await appState.loadRecordMonth(selectedMonthKey)
         }
         .sheet(isPresented: $showManualRecordSheet) {
-            ManualRecordSheet()
+            UnifiedManualRecordEntry()
         }
     }
 

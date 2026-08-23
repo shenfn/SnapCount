@@ -13,6 +13,7 @@
 - `SettingsView` 合并本机存储、云端身份、同步状态和登录入口；删除临时 `LocalSettingsView`。
 - `AppState.loadRecordMonth` 通过统一门面先读本地 GRDB，再在需要时调用远端兼容读路径。
 - `AppState.createManualRecord` 通过统一门面让消费记录始终先写本地；非消费域保留远端兼容路径。
+- 新增记录使用单一入口容器；未登录时继续走本地账户准备与本地消费表单，避免统一壳改造造成本地保存回归。
 
 ## 验证
 
