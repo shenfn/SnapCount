@@ -20,10 +20,18 @@ final class LocalDatabase {
         )[0].appendingPathComponent("JieziLocalData", isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+            withIntermediateDirectories: true
         )
-        try self.init(databaseURL: directory.appendingPathComponent("jiezi.sqlite"))
+        try FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: directory.path
+        )
+        let databaseURL = directory.appendingPathComponent("jiezi.sqlite")
+        try self.init(databaseURL: databaseURL)
+        try FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: databaseURL.path
+        )
     }
 
     private static var migrator: DatabaseMigrator {

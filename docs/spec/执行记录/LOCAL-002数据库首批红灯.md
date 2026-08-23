@@ -1,6 +1,6 @@
 # LOCAL-002 数据库首批红灯执行记录
 
-> 状态：有效红灯已取得，最小实现进行中
+> 状态：红灯与绿灯完成，等待 PR 合并
 >
 > 日期：2026-08-23
 >
@@ -45,8 +45,26 @@ GitHub Actions Run `32617323551`：
 - 不做编辑、删除、导出导入和云端用户迁移。
 - 不执行生产迁移、部署或 TestFlight。
 
+## 绿灯证据
+
+GitHub Actions Run `32617626804`：
+
+- `Build for simulator` 成功；
+- `LocalExpenseRepositoryTests` 执行 5 个测试，0 failures；
+- 完整 `SnapCountTests` 执行 223 个测试，0 failures；
+- `TEST SUCCEEDED`，iOS Build Gate 通过；
+- Governance、Release Validation、Cloudflare 和 Vercel 适用检查通过。
+
+最小实现范围：
+
+- `LocalDatabase`：GRDB migration 与默认受保护文件路径；
+- `LocalModels`：UUID、整数金额和本地版本模型；
+- `LocalExpenseRepository`：profile、账户、消费、流水、Outbox 同事务写入与余额派生；
+- `ios/project.yml`：生产 App target 增加精确版本 GRDB 依赖；
+- 未接 AppState、页面、Supabase 或网络发送。
+
 ## 下一步
 
-1. 推送红灯提交并取得 macOS 编译失败证据。
-2. 只增加 GRDB package、Local Domain、migration 和 Repository 最小实现。
-3. 让本文件中的五组不变量转绿，再进入 DB2。
+1. PR #152 最终门禁通过后合并。
+2. 从最新主线建立 LOCAL-002-DB2 worktree。
+3. 先为编辑、删除、冲销流水、tombstone 和版本递增建立红灯，不接页面。
