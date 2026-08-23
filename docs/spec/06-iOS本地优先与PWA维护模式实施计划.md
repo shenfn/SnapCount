@@ -74,8 +74,8 @@ LOCAL-002 只处理消费记录和支持它所必需的最小本地账户，不�
 
 | 决策 | 当前状态 | 解决阶段 |
 |---|---|---|
-| GRDB/SQLite 或 SwiftData | 未决定；长期倾向 GRDB，但必须 Spike | LOCAL-SPIKE-001 |
-| 本地数据库是否额外加密 | 未决定；先完成威胁模型和系统文件保护评估 | LOCAL-SPIKE-001 |
+| GRDB/SQLite 或 SwiftData | 已选择 GRDB/SQLite，见 ADR-037 | LOCAL-SPIKE-001 已裁决 |
+| 本地数据库是否额外加密 | L1 先落实 iOS Data Protection；SQLCipher 由独立威胁模型和 ADR 决定 | L1/安全评估 |
 | 本地匿名 profile 的生成与登录绑定 | 原则已定，字段和迁移未定 | L1 |
 | 同步冲突策略 | 未决定；账户禁止最后写入覆盖 | L3 |
 | BYOK 首批供应商和直连能力 | 未决定；需验证 SDK、CORS、审核和隐私条款 | L4 |

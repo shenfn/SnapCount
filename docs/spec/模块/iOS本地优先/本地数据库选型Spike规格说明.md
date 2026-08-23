@@ -2,7 +2,7 @@
 
 > 规格编号：LOCAL-SPIKE-001
 >
-> 状态：执行中，等待 macOS/iOS Simulator 证据
+> 状态：证据完成，选型见 ADR-037
 >
 > 基线：`origin/main@b864030`
 
@@ -63,11 +63,11 @@ LocalDatabaseSpikeHarness
 
 裁决优先级：数据正确性与可审计性 > 迁移和测试能力 > 同步适配性 > 接入代码量。少写几行代码不能抵消事务、唯一约束或迁移证据不足。
 
-## 6. 当前假设
+## 6. 选型结论
 
-- GRDB 长期更符合显式事务、唯一约束、Outbox 和可审计迁移需求，但在 CI 证据完成前不标记为已选定。
+- 选择 GRDB/SQLite 作为 iOS 生产本地业务事实库，详见 `ADR-037`。
 - SwiftData 与 SwiftUI 集成更直接，但本项目的本地数据库位于 Repository 之后，View 自动观察不是首要选型指标。
-- `@Attribute(.unique)` 若表现为 upsert，需要额外的应用层冲突检测；这对导入和同步稳定 ID 是实质成本，不是命名差异。
+- `@Attribute(.unique)` 已在 iOS Simulator 证实为 upsert：重复稳定 UUID 保留一条记录并覆盖金额。导入和同步必须显式处理冲突，不能把这个默认语义当作权威行为。
 - iOS Data Protection 是默认最低保护。是否引入 SQLCipher 必须由威胁模型、备份恢复、性能和密钥生命周期共同决定，不能只因“隐私优先”直接引入。
 
 ## 7. 完成定义
