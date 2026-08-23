@@ -26,7 +26,8 @@ final class LocalExpenseAccountPreparationTests: XCTestCase {
 
         XCTAssertEqual(account.openingBalanceMinor, 0)
         XCTAssertEqual(try fixture.repository.accountBalanceMinor(accountID: account.id), 0)
-        XCTAssertEqual(try await fixture.useCase.prepareWorkspace().accounts.map(\.id), [account.id])
+        let workspace = try await fixture.useCase.prepareWorkspace()
+        XCTAssertEqual(workspace.accounts.map(\.id), [account.id])
     }
 
     func testCreateAccountRejectsInvalidAmountAndUnsupportedKind() async throws {

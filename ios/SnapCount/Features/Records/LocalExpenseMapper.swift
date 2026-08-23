@@ -1,6 +1,8 @@
 import Foundation
 
 enum LocalExpenseMapper {
+    static let allowedAccountKinds: Set<String> = ["cash", "wallet_balance", "debit_card"]
+
     static func createDraft(
         _ command: LocalExpenseCommand,
         profileID: UUID
@@ -51,6 +53,23 @@ enum LocalExpenseMapper {
         var rounded = Decimal()
         NSDecimalRound(&rounded, &scaled, 0, .bankers)
         guard rounded > 0,
+              rounded <= Decimal(Int64.max) else {
+            throw LocalDataError.invalidAmount
+        }
+        return NSDecimalNumber(decimal: rounded).int64Value
+    }
+
+    static func openingBalanceMinor(_ text: String) throws -> Int64 {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+              let decimal = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
+              decimal >= 0 else {
+            throw LocalDataError.invalidAmount
+        }
+        var scaled = decimal * Decimal(100)
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .bankers)
+        guard rounded >= 0,
               rounded <= Decimal(Int64.max) else {
             throw LocalDataError.invalidAmount
         }

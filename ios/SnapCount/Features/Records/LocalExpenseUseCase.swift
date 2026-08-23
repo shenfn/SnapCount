@@ -48,12 +48,46 @@ struct LocalExpenseMonth: Equatable {
     let expenses: [LocalExpense]
 }
 
+struct LocalExpenseWorkspace: Equatable {
+    let profile: LocalProfile
+    let accounts: [LocalAccount]
+    let defaultAccountID: UUID?
+}
+
+struct LocalAccountSetupCommand: Equatable {
+    let id: UUID
+    let name: String
+    let kind: String
+    let openingBalanceText: String
+    let createdAt: Date
+}
+
 protocol LocalExpenseUseCaseProtocol {
     func prepareProfile() async throws -> LocalProfile
+    func prepareWorkspace() async throws -> LocalExpenseWorkspace
+    func accounts() async throws -> [LocalAccount]
+    func accountBalanceMinor(_ accountID: UUID) async throws -> Int64
+    func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome
     func update(_ command: LocalExpenseUpdateCommand) async throws -> LocalExpenseOutcome
     func delete(_ command: LocalExpenseDeleteCommand) async throws -> LocalExpenseOutcome
     func month(_ monthKey: String) async throws -> LocalExpenseMonth
+}
+
+extension LocalExpenseUseCaseProtocol {
+    func prepareWorkspace() async throws -> LocalExpenseWorkspace {
+        LocalExpenseWorkspace(profile: try await prepareProfile(), accounts: [], defaultAccountID: nil)
+    }
+
+    func accounts() async throws -> [LocalAccount] { try await prepareWorkspace().accounts }
+
+    func accountBalanceMinor(_ accountID: UUID) async throws -> Int64 {
+        throw LocalDataError.invalidRecord
+    }
+
+    func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount {
+        throw LocalDataError.invalidRecord
+    }
 }
 
 final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
@@ -75,8 +109,50 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         try profileStore.activeProfile()
     }
 
+    func prepareWorkspace() async throws -> LocalExpenseWorkspace {
+        let profile = try profileStore.activeProfile()
+        return LocalExpenseWorkspace(
+            profile: profile,
+            accounts: try repository.accounts(profileID: profile.id),
+            defaultAccountID: nil
+        )
+    }
+
+    func accounts() async throws -> [LocalAccount] {
+        try await prepareWorkspace().accounts
+    }
+
+    func accountBalanceMinor(_ accountID: UUID) async throws -> Int64 {
+        let profile = try profileStore.activeProfile()
+        guard try repository.accounts(profileID: profile.id).contains(where: { $0.id == accountID }) else {
+            throw LocalDataError.invalidIdentifier
+        }
+        return try repository.accountBalanceMinor(accountID: accountID)
+    }
+
+    func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount {
+        let profile = try profileStore.activeProfile()
+        let draft = LocalAccountDraft(
+            id: command.id,
+            profileID: profile.id,
+            name: command.name.trimmingCharacters(in: .whitespacesAndNewlines),
+            kind: command.kind,
+            currency: "CNY",
+            openingBalanceMinor: try LocalExpenseMapper.openingBalanceMinor(command.openingBalanceText),
+            createdAt: command.createdAt
+        )
+        guard !draft.name.isEmpty else { throw LocalDataError.invalidRecord }
+        guard LocalExpenseMapper.allowedAccountKinds.contains(draft.kind) else {
+            throw LocalDataError.invalidAccountKind
+        }
+        return try repository.createAccount(draft)
+    }
+
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome {
         let profile = try profileStore.activeProfile()
+        guard try repository.accounts(profileID: profile.id).contains(where: { $0.id == command.accountID }) else {
+            throw LocalDataError.accountRequired
+        }
         let draft = try LocalExpenseMapper.createDraft(command, profileID: profile.id)
         let expense = try repository.createExpense(draft, operationID: operationIDProvider())
         return LocalExpenseOutcome(expense: expense, tombstone: nil, profileID: profile.id)

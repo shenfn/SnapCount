@@ -15,6 +15,7 @@ test('LOCAL-002UIB application contract exposes workspace and account creation',
   assert.match(source, /func prepareWorkspace\(\)/u)
   assert.match(source, /func createAccount\(_ command: LocalAccountSetupCommand\)/u)
   assert.match(source, /func accounts\b/u)
+  assert.match(source, /func accountBalanceMinor\(_ accountID: UUID\)/u)
 })
 
 test('LOCAL-002UIB amount contract uses Decimal minor units and allows zero opening balance', async () => {

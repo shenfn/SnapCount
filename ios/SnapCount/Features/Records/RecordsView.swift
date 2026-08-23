@@ -6,6 +6,9 @@ struct RecordsView: View {
     @State private var selectedKind: NativeDayRecordKind = .all
     @State private var selectedMonthKey: String
     @State private var showManualRecordSheet = false
+    @State private var showLocalAccountPreparation = false
+    @State private var showLocalExpenseEntry = false
+    @State private var localDraftAccountID: UUID?
 
     private var effectiveKind: NativeDayRecordKind { appState.isSignedIn ? selectedKind : .expense }
     private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: effectiveKind) }
@@ -129,6 +132,14 @@ struct RecordsView: View {
                         Label("新增记录", systemImage: "plus")
                     }
                 }
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await openLocalExpenseEntry() }
+                    } label: {
+                        Label("新增消费", systemImage: "plus")
+                    }
+                }
             }
         }
         .navigationDestination(for: NativeRecordRoute.self) { route in
@@ -146,9 +157,36 @@ struct RecordsView: View {
         .sheet(isPresented: $showManualRecordSheet) {
             ManualRecordSheet()
         }
+        .sheet(isPresented: $showLocalAccountPreparation) {
+            LocalAccountPreparationView { account in
+                localDraftAccountID = account.id
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(150))
+                    showLocalExpenseEntry = true
+                }
+            }
+        }
+        .sheet(isPresented: $showLocalExpenseEntry) {
+            LocalExpenseEntryView(
+                accounts: appState.localAccounts,
+                initialAccountID: localDraftAccountID
+            )
+        }
     }
 
     private var prefetchKey: String { "\(selectedMonthKey):\(selectedKind.rawValue):\(groups.count)" }
+
+    @MainActor
+    private func openLocalExpenseEntry() async {
+        guard !appState.isSignedIn else { return }
+        guard let workspace = await appState.prepareLocalWorkspace() else { return }
+        localDraftAccountID = nil
+        if workspace.accounts.isEmpty {
+            showLocalAccountPreparation = true
+        } else {
+            showLocalExpenseEntry = true
+        }
+    }
 
     private var monthTitle: String {
         NativeMonthKey.title(selectedMonthKey)
@@ -176,6 +214,16 @@ struct RecordsView: View {
                 .buttonStyle(.bordered)
                 .tint(palette.brand)
             }
+            .font(.subheadline.weight(.semibold))
+        } else {
+            NavigationLink {
+                LocalAccountsView()
+            } label: {
+                Label("本地账户", systemImage: "wallet.pass")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(palette.brand)
             .font(.subheadline.weight(.semibold))
         }
     }

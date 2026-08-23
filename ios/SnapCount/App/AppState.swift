@@ -55,6 +55,9 @@ final class AppState: ObservableObject {
     @Published var recordMonthMessages: [String: String] = [:]
     @Published var loadingRecordMonthKey: String?
     @Published var accounts: [NativeAccount] = []
+    @Published var localAccounts: [LocalAccount] = []
+    @Published var localAccountBalances: [UUID: Int64] = [:]
+    @Published var localAccountMessage: String?
     @Published var financeVocabulary: [NativeFinanceVocabularyEntry] = []
     @Published var selectedAccountDetail: NativeAccountDetail?
     @Published var selectedAccountSourceSnapshot: NativeWalletSnapshot?
@@ -3150,6 +3153,61 @@ final class AppState: ObservableObject {
         }
     }
 
+    func prepareLocalWorkspace() async -> LocalExpenseWorkspace? {
+        guard !isSignedIn, let localExpenseUseCase else { return nil }
+        do {
+            let workspace = try await localExpenseUseCase.prepareWorkspace()
+            localAccounts = workspace.accounts
+            var balances: [UUID: Int64] = [:]
+            for account in workspace.accounts {
+                balances[account.id] = try await localExpenseUseCase.accountBalanceMinor(account.id)
+            }
+            localAccountBalances = balances
+            localAccountMessage = nil
+            return workspace
+        } catch {
+            localAccountMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func createLocalAccount(_ command: LocalAccountSetupCommand) async -> LocalAccount? {
+        guard !isSignedIn, let localExpenseUseCase else { return nil }
+        do {
+            let account = try await localExpenseUseCase.createAccount(command)
+            _ = await prepareLocalWorkspace()
+            localAccountMessage = nil
+            return account
+        } catch {
+            localAccountMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func createLocalExpense(
+        amountText: String,
+        accountID: UUID,
+        merchantName: String,
+        platform: String,
+        category: String,
+        paymentMethod: String,
+        date: Date,
+        note: String
+    ) async -> Bool {
+        let draft = NativeManualRecordDraft(
+            kind: .expense,
+            accountID: accountID,
+            amountText: amountText,
+            title: merchantName,
+            platform: platform,
+            category: category,
+            paymentMethod: paymentMethod,
+            date: date,
+            note: note
+        )
+        return await createManualRecord(draft, domain: nil)
+    }
+
     private func createLocalExpense(_ draft: NativeManualRecordDraft) async throws -> Bool {
         guard draft.existingRawId == nil else { throw LocalDataError.invalidRecord }
         guard let accountText = draft.accountId,
@@ -3172,6 +3230,7 @@ final class AppState: ObservableObject {
             createdAt: Date()
         )
         let outcome = try await localExpenseUseCase.create(command)
+        _ = await prepareLocalWorkspace()
         let monthKey = String(command.transactionDate.prefix(7))
         let month = try await localExpenseUseCase.month(monthKey)
         let groups = LocalExpenseReadModel.groups(from: month)

@@ -133,6 +133,28 @@ struct NativeManualRecordDraft {
     var imagePath: String?
     var imageHash: String?
 
+    init(
+        kind: NativeManualRecordKind = .expense,
+        accountID: UUID,
+        amountText: String,
+        title: String,
+        platform: String,
+        category: String,
+        paymentMethod: String,
+        date: Date,
+        note: String
+    ) {
+        self.init(kind: kind)
+        self.accountId = accountID.uuidString
+        self.amountText = amountText
+        self.title = title
+        self.platform = platform
+        self.category = category
+        self.paymentMethod = paymentMethod
+        self.date = date
+        self.note = note
+    }
+
     init(kind: NativeManualRecordKind = .expense, domainKey: String = "sport") {
         self.kind = kind
         self.domainKey = domainKey

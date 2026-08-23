@@ -2,7 +2,7 @@
 
 ## 状态
 
-红灯建立中。基线为 `origin/main@57e1f39`，对应 UIA 已合并后的主线。
+红灯已确认，最小实现已落地，等待 macOS iOS Build/XCTest 绿灯。基线为 `origin/main@57e1f39`，对应 UIA 已合并后的主线。
 
 ## 本片范围
 
@@ -18,12 +18,19 @@
 
 ## 红灯证据
 
-- `npm run test:ios-local-account-boundary` 已运行，5 个断言全部按预期失败：Use Case 契约、金额映射、账户准备 View 和本地 expense View 尚未存在；
+- `npm run test:ios-local-account-boundary` 已运行，5 个断言现已通过：Use Case 契约、金额映射、账户准备 View 和本地 expense View 已落地；
 - `npm run test:ios-local-shell-boundary` 通过；
 - `npm run test:ios-local-expense-app-boundary` 通过；
 - `npm run governance:check` 和 `npm run governance:arch` 通过；
-- `LocalExpenseAccountPreparationTests.swift` 尚未在 macOS 上编译，预期会因 `LocalExpenseWorkspace`、账户命令和错误出口尚未实现而失败。
+- 首轮 macOS CI 已确认红灯：App 编译通过，但 UIB XCTest 因上述契约缺失失败；最小实现后需重新运行。
+
+## 最小实现
+
+- LocalExpense Use Case 负责 profile、账户读取、余额投影、账户创建和账户归属门禁；
+- Records 本地模式新增入口先读取账户 workspace，无账户先进入账户准备；
+- 本地账户准备和本地支出表单为独立 View，不读取云端账户或财务词表；
+- 账户创建只注入当前消费草稿，不建立默认账户。
 
 ## 下一步
 
-红灯确认后，仅实现最小本地账户准备与本地 expense 表单闭环，再运行专项边界、完整 XCTest、macOS Build、治理和架构门禁。
+最小实现已完成，下一步运行专项边界、完整 XCTest、macOS Build、治理和架构门禁。
