@@ -133,3 +133,13 @@ private extension XCTestCase {
         }
     }
 }
+
+private func temporaryDatabaseURL() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("SnapCountUIBTests-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("jiezi.sqlite")
+}
+
+private func removeDatabase(at url: URL) {
+    try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+}
