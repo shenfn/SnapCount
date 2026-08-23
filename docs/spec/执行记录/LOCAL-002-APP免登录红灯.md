@@ -33,9 +33,16 @@
 
 ## 当前绿灯证据
 
-- Run `32622637600`：模拟器 Build、完整 iOS XCTest `240/240`、iOS Build Gate 通过；PWA/Edge、治理、Cloudflare/Vercel 门禁全绿。
+- Run `32623778871`：模拟器 Build、完整 iOS XCTest `242/242`、iOS Build Gate 通过；PWA/Edge、治理、Cloudflare/Vercel 门禁全绿。
 - `npm run test:ios-local-expense-app-boundary`：2/2 通过。
+- `npm run governance:check`：通过。
 - `npm run governance:arch`：未增加架构基线违规。
+
+## CI 失败分类与修复
+
+- Run `32623184158` 的业务实现和模拟器 Build 通过，但 `testLocalProfilePersistsAcrossDatabaseReopen` 用整个 `LocalProfile` 严格比较 `Date`，被 SQLite 毫秒级时间持久化精度触发误报。
+- 提交 `1917281` 将恢复不变量拆为 profile ID、云端绑定和同步状态严格相等，创建时间使用 1 毫秒容差；未修改生产语义。
+- 后续 Run `32623778871` 全绿，确认该失败属于测试精度问题，不是本地 profile 重复创建或数据丢失。
 
 ## 未完成的产品出口
 

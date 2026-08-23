@@ -2,7 +2,7 @@
 
 > 规格编号：LOCAL-002-APP
 >
-> 状态：提议，待红灯
+> 状态：部分实施；应用层与 AppState 兼容接线绿灯，产品入口待后续切片
 >
 > 上游：`LOCAL-002-APP-EVAL`、`LOCAL-DATA-001`、`LOCAL-002`
 
@@ -92,3 +92,10 @@ AppState 不负责解析金额、组装 Local 模型、创建/冲销流水、写
 4. DoD：所有场景绿灯；本地模式 network spy 为 0；无 session 可新增/读取/编辑/删除；登录退出不串 profile；文档与交接快照更新。
 
 本片完成后仍不得宣称同步、老用户迁移、其他域或 AI Provider 已完成。
+
+## 9. 当前实施边界
+
+- 已完成：本地 profile 创建/恢复、消费 Use Case、Decimal/minor mapper、月度读模型，以及 AppState 未登录消费兼容入口。
+- 已验证：Run `32623778871` 的模拟器 Build、242 项 XCTest 和 iOS Build Gate 通过；本地边界、治理与架构检查通过。
+- 未完成：`RootView` 仍以登录状态决定是否进入主界面；首次本地账户准备/选择尚无产品出口。
+- 因此当前成果是可复用的本地应用层基础，不是可直接发布的完整免登录体验。
