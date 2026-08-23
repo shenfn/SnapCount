@@ -1,0 +1,52 @@
+name: LocalDatabaseSpikeHarness
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: 6.29.3
+
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "17.0"
+
+settings:
+  base:
+    SWIFT_VERSION: 5.9
+
+targets:
+  LocalDatabaseSpike:
+    type: framework
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources/LocalDatabaseSpike
+    dependencies:
+      - package: GRDB
+        product: GRDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiezi.local-database-spike
+        CODE_SIGNING_ALLOWED: NO
+
+  LocalDatabaseSpikeTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Tests/LocalDatabaseSpikeTests
+    dependencies:
+      - target: LocalDatabaseSpike
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiezi.local-database-spike.tests
+        CODE_SIGNING_ALLOWED: NO
+
+schemes:
+  LocalDatabaseSpikeHarness:
+    build:
+      targets:
+        LocalDatabaseSpike: all
+    test:
+      targets:
+        - LocalDatabaseSpikeTests
