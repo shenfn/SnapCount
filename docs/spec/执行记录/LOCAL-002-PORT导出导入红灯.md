@@ -1,6 +1,6 @@
 # LOCAL-002-PORT 导出导入红灯执行记录
 
-> 状态：有效红灯已取得，最小实现验证中
+> 状态：红灯与绿灯完成，等待 PR 合并
 >
 > 日期：2026-08-23
 >
@@ -67,7 +67,19 @@ GitHub Actions Run `32619675938`：
 
 ## 绿灯结果
 
-未开始。
+GitHub Actions Run `32620209372`：
+
+- `Build for simulator` 成功；
+- `LocalExpensePortabilityTests` 执行 7 个测试，0 failures；
+- 完整 `SnapCountTests` 执行 237 个测试，0 failures；
+- `TEST SUCCEEDED`，iOS Build Gate 通过；
+- Governance、Release Validation、Cloudflare 和 Vercel 适用检查通过。
+
+最小实现范围：
+
+- `LocalExpenseArchive`：固定格式、schema v1、profile/账户/消费/tombstone/流水 archive 模型；
+- `LocalExpensePortability`：JSON ISO8601 codec、关系预校验、稳定 ID 比较、单一 GRDB 导入事务和 fresh pending Outbox；
+- 不复用 Dashboard 展示快照或云端报表导出，不导出 cloud 绑定、凭据、缓存、诊断和源 Outbox。
 
 ## 未解决风险
 
@@ -77,4 +89,7 @@ GitHub Actions Run `32619675938`：
 
 ## 对应提交
 
-待用户授权提交后填写。
+- 红灯提交：`10c37e0`
+- 最小实现提交：`47834f7`
+- 编译修复提交：`bb1aaf7`
+- PR：[#154](https://github.com/shenfn/SnapCount/pull/154)
