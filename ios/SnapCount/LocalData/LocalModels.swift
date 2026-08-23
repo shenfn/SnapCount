@@ -17,7 +17,7 @@ struct LocalAccountDraft: Equatable {
     let createdAt: Date
 }
 
-struct LocalAccount: Equatable {
+struct LocalAccount: Equatable, Identifiable {
     let id: UUID
     let profileID: UUID
     let name: String
@@ -113,6 +113,8 @@ struct LocalOutboxOperation: Equatable {
 
 enum LocalDataError: Error, Equatable {
     case invalidAmount
+    case invalidAccountKind
+    case accountRequired
     case invalidIdentifier
     case invalidRecord
     case recordNotFound
