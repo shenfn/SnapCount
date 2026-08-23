@@ -6,17 +6,12 @@ struct RecordsView: View {
     @State private var selectedKind: NativeDayRecordKind = .all
     @State private var selectedMonthKey: String
     @State private var showManualRecordSheet = false
-    @State private var showLocalAccountPreparation = false
-    @State private var showLocalExpenseEntry = false
-    @State private var localDraftAccountID: UUID?
 
-    private var effectiveKind: NativeDayRecordKind { appState.isSignedIn ? selectedKind : .expense }
-    private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: effectiveKind) }
+    private var effectiveKind: NativeDayRecordKind { selectedKind }
+    private var query: NativeRecordQuery { NativeRecordQuery(monthKey: selectedMonthKey, kind: selectedKind) }
     private var monthGroups: [NativeDayRecordGroup] { appState.recordGroups(monthKey: selectedMonthKey) }
     private var groups: [NativeDayRecordGroup] { query.groups(from: monthGroups) }
-    private var availableKinds: [NativeDayRecordKind] {
-        appState.isSignedIn ? query.availableKinds(from: monthGroups) : [.expense]
-    }
+    private var availableKinds: [NativeDayRecordKind] { query.availableKinds(from: monthGroups) }
     private var isLoadingMonth: Bool { appState.loadingRecordMonthKey == selectedMonthKey }
     private var palette: JieziGeneratedPalette { themeManager.palette }
 
@@ -30,6 +25,7 @@ struct RecordsView: View {
 
     var body: some View {
         ZStack {
+            // 统一页面只依赖 recordGroups(monthKey:) 的本地读模型，登录态不改变业务树。
             JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: JieziSpacing.xl2) {
@@ -91,14 +87,10 @@ struct RecordsView: View {
 
                                 VStack(spacing: 0) {
                                     ForEach(Array(group.records.enumerated()), id: \.element.id) { index, item in
-                                        if appState.isSignedIn {
-                                            NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
-                                                recordRow(item, showDivider: index < group.records.count - 1)
-                                            }
-                                            .buttonStyle(.plain)
-                                        } else {
+                                        NavigationLink(value: NativeRecordRoute(reference: item.reference)) {
                                             recordRow(item, showDivider: index < group.records.count - 1)
                                         }
+                                        .buttonStyle(.plain)
                                     }
                                 }
                                 .background(
@@ -124,21 +116,11 @@ struct RecordsView: View {
         .navigationTitle("记录")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
-            if appState.isSignedIn {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showManualRecordSheet = true
-                    } label: {
-                        Label("新增记录", systemImage: "plus")
-                    }
-                }
-            } else {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await openLocalExpenseEntry() }
-                    } label: {
-                        Label("新增消费", systemImage: "plus")
-                    }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showManualRecordSheet = true
+                } label: {
+                    Label("新增记录", systemImage: "plus")
                 }
             }
         }
@@ -147,46 +129,17 @@ struct RecordsView: View {
         }
         .onChange(of: availableKinds) { kinds in if !kinds.contains(selectedKind) { selectedKind = .all } }
         .task(id: prefetchKey) {
-            guard appState.isSignedIn else { return }
             appState.prefetchRecordDetails(groups.flatMap(\.records).map(\.reference))
         }
         .task(id: selectedMonthKey) {
-            if !appState.isSignedIn { selectedKind = .expense }
             await appState.loadRecordMonth(selectedMonthKey)
         }
         .sheet(isPresented: $showManualRecordSheet) {
             ManualRecordSheet()
         }
-        .sheet(isPresented: $showLocalAccountPreparation) {
-            LocalAccountPreparationView { account in
-                localDraftAccountID = account.id
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(150))
-                    showLocalExpenseEntry = true
-                }
-            }
-        }
-        .sheet(isPresented: $showLocalExpenseEntry) {
-            LocalExpenseEntryView(
-                accounts: appState.localAccounts,
-                initialAccountID: localDraftAccountID
-            )
-        }
     }
 
     private var prefetchKey: String { "\(selectedMonthKey):\(selectedKind.rawValue):\(groups.count)" }
-
-    @MainActor
-    private func openLocalExpenseEntry() async {
-        guard !appState.isSignedIn else { return }
-        guard let workspace = await appState.prepareLocalWorkspace() else { return }
-        localDraftAccountID = nil
-        if workspace.accounts.isEmpty {
-            showLocalAccountPreparation = true
-        } else {
-            showLocalExpenseEntry = true
-        }
-    }
 
     private var monthTitle: String {
         NativeMonthKey.title(selectedMonthKey)
@@ -194,38 +147,26 @@ struct RecordsView: View {
 
     @ViewBuilder
     private var contextNavigation: some View {
-        if appState.isSignedIn {
-            HStack(spacing: JieziSpacing.sm) {
-                NavigationLink {
-                    AccountsView()
-                } label: {
-                    Label("账户", systemImage: "wallet.pass")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(palette.brand)
-
-                NavigationLink {
-                    DomainsView()
-                } label: {
-                    Label("数据域", systemImage: "square.stack.3d.up")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(palette.brand)
-            }
-            .font(.subheadline.weight(.semibold))
-        } else {
+        HStack(spacing: JieziSpacing.sm) {
             NavigationLink {
-                LocalAccountsView()
+                AccountsView()
             } label: {
-                Label("本地账户", systemImage: "wallet.pass")
+                Label("账户", systemImage: "wallet.pass")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .tint(palette.brand)
-            .font(.subheadline.weight(.semibold))
+
+            NavigationLink {
+                DomainsView()
+            } label: {
+                Label("数据域", systemImage: "square.stack.3d.up")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(palette.brand)
         }
+        .font(.subheadline.weight(.semibold))
     }
 
     private func dayHeader(_ group: NativeDayRecordGroup) -> some View {

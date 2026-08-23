@@ -4,6 +4,7 @@ import UIKit
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var themeManager: JieziThemeManager
+    @State private var showLogin = false
     @State private var showDeleteAccountConfirmation = false
 
     var body: some View {
@@ -12,6 +13,28 @@ struct SettingsView: View {
             List {
                 Section {
                     profileHeader
+                }
+
+                Section("数据与同步") {
+                    LabeledContent("本机数据") {
+                        Text("保存在此 iPhone")
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("云端身份") {
+                        Text(appState.isSignedIn ? "已登录" : "未登录")
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("云同步") {
+                        Text(appState.isSignedIn ? "可手动开启" : "尚未开启")
+                            .foregroundStyle(.secondary)
+                    }
+                    if !appState.isSignedIn {
+                        Button {
+                            showLogin = true
+                        } label: {
+                            Label("登录并管理云同步", systemImage: "person.crop.circle.badge.plus")
+                        }
+                    }
                 }
 
                 Section("使用帮助") {
@@ -118,7 +141,7 @@ struct SettingsView: View {
                         Text(versionLabel).foregroundStyle(.secondary)
                     }
                     LabeledContent("数据存储") {
-                        Text("Supabase 新加坡节点").foregroundStyle(.secondary)
+                        Text("本机优先 · 云端可选").foregroundStyle(.secondary)
                     }
                 }
 
@@ -162,7 +185,9 @@ struct SettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .listStyle(.insetGrouped)
-            .refreshable { await appState.loadUserSettings() }
+            .refreshable {
+                if appState.isSignedIn { await appState.loadUserSettings() }
+            }
         }
         .navigationTitle("设置")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
@@ -174,7 +199,13 @@ struct SettingsView: View {
         } message: {
             Text("这会删除云端记录、账户流水、AI 识别数据和原图，且无法恢复。")
         }
-        .task { await appState.loadUserSettings() }
+        .sheet(isPresented: $showLogin) {
+            NavigationStack { LoginView() }
+                .environmentObject(appState)
+        }
+        .task {
+            if appState.isSignedIn { await appState.loadUserSettings() }
+        }
     }
 
     private var profileHeader: some View {
@@ -183,9 +214,11 @@ struct SettingsView: View {
                 .font(.system(size: 38))
                 .foregroundStyle(JieziTheme.brand)
             VStack(alignment: .leading, spacing: 3) {
-                Text(appState.currentUserEmail.isEmpty ? "已登录用户" : appState.currentUserEmail)
+                Text(appState.isSignedIn
+                     ? (appState.currentUserEmail.isEmpty ? "已登录用户" : appState.currentUserEmail)
+                     : "本机用户")
                     .font(.headline)
-                Text("\(appState.userSettings.planTitle) · \(appState.currentUserId)")
+                Text(appState.isSignedIn ? "云端身份可用" : "数据仅保存在此 iPhone")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
