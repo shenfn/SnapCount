@@ -1,0 +1,44 @@
+name: iOS Local Database Spike
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ios/Spikes/LocalDatabaseSpike/**
+      - .github/workflows/ios-local-database-spike.yml
+
+jobs:
+  spike-tests:
+    name: GRDB and SwiftData iOS Simulator Tests
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate isolated spike project
+        working-directory: ios/Spikes/LocalDatabaseSpike
+        run: xcodegen generate --spec project.yml
+
+      - name: Run isolated iOS simulator tests
+        working-directory: ios/Spikes/LocalDatabaseSpike
+        shell: bash
+        run: |
+          set -o pipefail
+          SIMULATOR_UDID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+          test -n "$SIMULATOR_UDID"
+          xcodebuild \
+            -project LocalDatabaseSpikeHarness.xcodeproj \
+            -scheme LocalDatabaseSpikeHarness \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            CODE_SIGNING_ALLOWED=NO \
+            test

@@ -2,7 +2,7 @@
 
 > 计划编号：LOCAL-PLAN-001
 >
-> 状态：已批准，处于 L0 规格阶段
+> 状态：已批准，L0 已完成，处于 LOCAL-SPIKE-001
 >
 > 基线：`origin/main@dc482ac`（2026-08-22）
 >
@@ -45,8 +45,8 @@ Use Case -> VisionProvider / ExpressionProvider
 
 | 阶段 | 目标 | 状态 | 主要产物 | 进入下一阶段门禁 |
 |---|---|---|---|---|
-| L0 | 固化产品边界、数据权威、隐私承诺和首片范围 | 进行中 | 总计划、ADR、生命周期 Spec、消费切片 Spec、AI 安全契约 | 文档索引完整、治理检查通过、核心待裁决项明确 |
-| LOCAL-SPIKE-001 | 比较 GRDB/SQLite 与 SwiftData | 待开始 | 可丢弃技术 Spike、迁移/事务/测试报告 | 不修改生产业务流；形成明确选型 ADR |
+| L0 | 固化产品边界、数据权威、隐私承诺和首片范围 | 已完成 | 总计划、ADR、生命周期 Spec、消费切片 Spec、AI 安全契约 | PR #149、#150 已合并 |
+| LOCAL-SPIKE-001 | 比较 GRDB/SQLite 与 SwiftData | 进行中 | 可丢弃技术 Spike、迁移/事务/测试报告 | 不修改生产业务流；形成明确选型 ADR |
 | L1 / LOCAL-002 | 消费记录本地优先垂直切片 | 待开始 | 本地存储、Repository、免登录身份、导出导入、专项测试 | 断网、重启、删除、导出恢复和网络闸门通过 |
 | L2 | 现有云端用户首次本地化迁移 | 待开始 | 拉取、去重、断点续传、回滚和迁移状态 | 脱敏 fixture 与双次迁移通过，无重复和余额漂移 |
 | L3 | 可选同步引擎 | 待开始 | Outbox/Inbox、幂等、版本、tombstone、冲突出口 | 双设备离线并发场景和账户不变量通过 |
@@ -74,8 +74,8 @@ LOCAL-002 只处理消费记录和支持它所必需的最小本地账户，不�
 
 | 决策 | 当前状态 | 解决阶段 |
 |---|---|---|
-| GRDB/SQLite 或 SwiftData | 未决定；长期倾向 GRDB，但必须 Spike | LOCAL-SPIKE-001 |
-| 本地数据库是否额外加密 | 未决定；先完成威胁模型和系统文件保护评估 | LOCAL-SPIKE-001 |
+| GRDB/SQLite 或 SwiftData | 已选择 GRDB/SQLite，见 ADR-037 | LOCAL-SPIKE-001 已裁决 |
+| 本地数据库是否额外加密 | L1 先落实 iOS Data Protection；SQLCipher 由独立威胁模型和 ADR 决定 | L1/安全评估 |
 | 本地匿名 profile 的生成与登录绑定 | 原则已定，字段和迁移未定 | L1 |
 | 同步冲突策略 | 未决定；账户禁止最后写入覆盖 | L3 |
 | BYOK 首批供应商和直连能力 | 未决定；需验证 SDK、CORS、审核和隐私条款 | L4 |
