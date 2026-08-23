@@ -1,6 +1,6 @@
 # LOCAL-002-DB2 编辑删除红灯执行记录
 
-> 状态：有效红灯已取得，最小实现验证中
+> 状态：红灯与绿灯完成，等待 PR 合并
 >
 > 日期：2026-08-23
 >
@@ -69,7 +69,15 @@ GitHub Actions Run `32618481883`：
 
 ## 绿灯结果
 
-未开始。
+GitHub Actions Run `32618764122`：
+
+- `Build for simulator` 成功；
+- `LocalExpenseRepositoryTests` 执行 12 个测试，0 failures；
+- 完整 `SnapCountTests` 执行 230 个测试，0 failures；
+- `TEST SUCCEEDED`，iOS Build Gate 通过；
+- Governance、Release Validation、Cloudflare 和 Vercel 适用检查通过。
+
+新增 7 个 DB2 场景验证了普通字段编辑、金额替换流水、账户迁移、陈旧版本拒绝、软删除 tombstone、Outbox 冲突回滚和文件重启恢复。DB1 原有 5 个场景保持通过。
 
 ## 未解决风险
 
@@ -79,4 +87,6 @@ GitHub Actions Run `32618481883`：
 
 ## 对应提交
 
-待用户授权提交后填写。
+- 红灯提交：`efc12b7`
+- 最小实现提交：`570b917`
+- PR：[#153](https://github.com/shenfn/SnapCount/pull/153)
