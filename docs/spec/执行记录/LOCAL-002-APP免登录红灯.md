@@ -30,3 +30,15 @@
 2. 建立不复制 local/cloud 事务语义的 AppState 兼容门面；
 3. 接入本地记录查询投影和无 session 网络闸门；
 4. 完整 XCTest、macOS Build、治理和源边界回归。
+
+## 当前绿灯证据
+
+- Run `32622637600`：模拟器 Build、完整 iOS XCTest `240/240`、iOS Build Gate 通过；PWA/Edge、治理、Cloudflare/Vercel 门禁全绿。
+- `npm run test:ios-local-expense-app-boundary`：2/2 通过。
+- `npm run governance:arch`：未增加架构基线违规。
+
+## 未完成的产品出口
+
+- `RootView` 未登录时仍只展示 `LoginView`，用户尚不能进入主 Tab；
+- 本地消费要求当前 profile 下存在账户，首次使用尚无账户准备/选择出口；
+- 因此本批只证明应用层基础和 AppState 兼容接线，不能标记“免登录可发布”。
