@@ -1,6 +1,6 @@
 # LOCAL-002-PORT 导出导入红灯执行记录
 
-> 状态：准备红灯
+> 状态：有效红灯已取得，最小实现验证中
 >
 > 日期：2026-08-23
 >
@@ -52,7 +52,14 @@ DB2 最终 GitHub Actions Run `32619112015`：完整 230 个 XCTest、iOS Build 
 
 ## 红灯测试及失败原因
 
-待 GitHub macOS CI 验证。
+GitHub Actions Run `32619675938`：
+
+- `Build for simulator` 成功，证明 DB2 production adapter 和主 App target 仍可构建；
+- `Run unit tests` 编译测试 target 时失败；
+- 明确错误包括 `cannot find 'LocalExpenseArchive' in scope`、`cannot find 'LocalExpensePortability' in scope`、`cannot find 'LocalExpenseImportResult' in scope`；
+- Governance、Release Validation、Cloudflare 和 Vercel 适用检查通过。
+
+因此该失败来自 PORT 目标生产类型缺失，是有效业务红灯，不是依赖、Xcode 或 runner 环境失败。
 
 ## 最小实现
 
