@@ -144,7 +144,7 @@ final class AppState: ObservableObject {
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
         recordRepository: RecordRepositoryProtocol = RecordRepository(),
-        localExpenseUseCase: LocalExpenseUseCaseProtocol? = AppState.defaultLocalExpenseUseCase(),
+        localExpenseUseCase: LocalExpenseUseCaseProtocol? = nil,
         inboxRepository: InboxRepositoryProtocol = InboxRepository(),
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
         snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
@@ -174,7 +174,7 @@ final class AppState: ObservableObject {
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
-        self.localExpenseUseCase = localExpenseUseCase
+        self.localExpenseUseCase = localExpenseUseCase ?? Self.defaultLocalExpenseUseCase()
         self.inboxRepository = inboxRepository
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore
