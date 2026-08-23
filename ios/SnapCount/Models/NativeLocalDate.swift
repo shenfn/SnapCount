@@ -27,6 +27,10 @@ enum NativeLocalDate {
         return formatter("HH:mm").string(from: date)
     }
 
+    static func timeKey(_ date: Date) -> String {
+        formatter("HH:mm").string(from: date)
+    }
+
     static func dateTimeLabel(_ value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
             return nil
