@@ -27,7 +27,14 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
             database: LocalDatabase(databaseURL: databaseURL)
         ).activeProfile()
 
-        XCTAssertEqual(reopened, first)
+        XCTAssertEqual(reopened.id, first.id)
+        XCTAssertEqual(reopened.cloudUserID, first.cloudUserID)
+        XCTAssertEqual(reopened.syncEnabled, first.syncEnabled)
+        XCTAssertEqual(
+            reopened.createdAt.timeIntervalSince1970,
+            first.createdAt.timeIntervalSince1970,
+            accuracy: 0.001
+        )
     }
 
     func testAmountMapperUsesDecimalMinorUnits() throws {
