@@ -2,7 +2,7 @@
 
 ## 状态
 
-红灯已确认，最小实现已落地，等待 macOS iOS Build/XCTest 绿灯。基线为 `origin/main@57e1f39`，对应 UIA 已合并后的主线。
+红灯已确认，最小实现已落地并通过 macOS iOS Build/XCTest。PR #159 已转 Ready，等待合并。基线为 `origin/main@57e1f39`，对应 UIA 已合并后的主线。
 
 ## 本片范围
 
@@ -24,6 +24,13 @@
 - `npm run governance:check` 和 `npm run governance:arch` 通过；
 - 首轮 macOS CI 已确认红灯：App 编译通过，但 UIB XCTest 因上述契约缺失失败；最小实现后需重新运行。
 
+## 绿灯证据
+
+- PR #159 第二轮 Build SwiftUI app 通过（Run `32630303321`）；
+- iOS Build Gate 通过；
+- Governance、PWA/Edge、Cloudflare Pages 和 Vercel 相关门禁通过；
+- 本地专项 Node、UIA 回归、应用边界、治理和架构检查通过。
+
 ## 最小实现
 
 - LocalExpense Use Case 负责 profile、账户读取、余额投影、账户创建和账户归属门禁；
@@ -33,4 +40,4 @@
 
 ## 下一步
 
-最小实现已完成，下一步运行专项边界、完整 XCTest、macOS Build、治理和架构门禁。
+最小实现已完成，当前等待 PR #159 合并；合并后进入 LOCAL-002-UIB 收口复盘，再评估下一片本地详情或 DB2。
