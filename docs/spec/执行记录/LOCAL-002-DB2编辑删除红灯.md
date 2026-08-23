@@ -1,6 +1,6 @@
 # LOCAL-002-DB2 编辑删除红灯执行记录
 
-> 状态：准备红灯
+> 状态：有效红灯已取得，最小实现验证中
 >
 > 日期：2026-08-23
 >
@@ -49,11 +49,23 @@ DB1 最终 GitHub Actions Run `32617953115` 全部门禁通过；此前 Run `326
 
 ## 红灯测试及失败原因
 
-待 GitHub macOS CI 验证。
+GitHub Actions Run `32618481883`：
+
+- `Build for simulator` 成功，证明 DB1 App target 和 GRDB production adapter 仍可构建；
+- `Run unit tests` 编译测试 target 时失败；
+- 明确错误为 `cannot find type 'LocalExpenseUpdate' in scope`；
+- Governance、Release Validation、Cloudflare 和 Vercel 适用检查通过。
+
+因此该失败来自 DB2 目标生产 API 缺失，是有效业务红灯，不是依赖、Xcode 或 runner 环境失败。
 
 ## 最小实现
 
-待红灯成立后实现。
+实现范围保持在：
+
+- `LocalModels`：编辑命令、tombstone、账户流水审计模型和显式版本冲突；
+- `LocalExpenseRepository`：乐观版本编辑、软删除、旧流水冲销、替代流水、Outbox 同事务写入和审计读取；
+- 复用 DB1 已有 `deleted_at`、`voided_at`、`local_version`，不新增无必要 migration；
+- AppState、页面和同步发送继续冻结。
 
 ## 绿灯结果
 
