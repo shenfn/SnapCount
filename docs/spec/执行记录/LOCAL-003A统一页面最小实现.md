@@ -18,6 +18,7 @@
 ## 验证
 
 - `LOCAL-003A` 统一页面边界测试：5/5 通过。
+- 既有 `LocalExpenseAppUseCaseTests` 已按 LOCAL-003 本地优先语义更新：已登录且本地月份为空时验证远端兼容回退。
 - 旧 `LOCAL-002` 本地壳测试：不作为本片通过条件；其中断言已淘汰的两 Tab 壳和 `LocalSettingsView`，与 LOCAL-003 决策冲突。
 - Windows 无法验证 Swift 编译；必须以 GitHub macOS iOS Build/XCTest 为准。
 
