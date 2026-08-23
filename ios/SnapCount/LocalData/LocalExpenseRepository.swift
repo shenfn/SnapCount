@@ -4,6 +4,7 @@ import GRDB
 protocol LocalExpenseRepositoryProtocol {
     func createProfile(id: UUID, createdAt: Date) throws -> LocalProfile
     func createAccount(_ draft: LocalAccountDraft) throws -> LocalAccount
+    func accounts(profileID: UUID) throws -> [LocalAccount]
     func createExpense(_ draft: LocalExpenseDraft, operationID: UUID) throws -> LocalExpense
     func updateExpense(_ update: LocalExpenseUpdate, operationID: UUID) throws -> LocalExpense
     func deleteExpense(
@@ -13,6 +14,7 @@ protocol LocalExpenseRepositoryProtocol {
         operationID: UUID
     ) throws -> LocalExpenseTombstone
     func expense(id: UUID) throws -> LocalExpense?
+    func expenses(profileID: UUID, monthKey: String) throws -> [LocalExpense]
     func expenseTombstone(id: UUID) throws -> LocalExpenseTombstone?
     func expenseCount() throws -> Int
     func accountEntryCount() throws -> Int
@@ -69,6 +71,36 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             openingBalanceMinor: draft.openingBalanceMinor,
             createdAt: draft.createdAt
         )
+    }
+
+    func accounts(profileID: UUID) throws -> [LocalAccount] {
+        try database.writer.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, profile_id, name, kind, currency, opening_balance_minor, created_at
+                    FROM local_accounts
+                    WHERE profile_id = ?
+                    ORDER BY created_at ASC, id ASC
+                    """,
+                arguments: [profileID.uuidString]
+            ).map { row in
+                guard let id = UUID(uuidString: row["id"]),
+                      let storedProfileID = UUID(uuidString: row["profile_id"]),
+                      let createdAt: Date = row["created_at"] else {
+                    throw LocalDataError.invalidRecord
+                }
+                return LocalAccount(
+                    id: id,
+                    profileID: storedProfileID,
+                    name: row["name"],
+                    kind: row["kind"],
+                    currency: row["currency"],
+                    openingBalanceMinor: row["opening_balance_minor"],
+                    createdAt: createdAt
+                )
+            }
+        }
     }
 
     func createExpense(_ draft: LocalExpenseDraft, operationID: UUID) throws -> LocalExpense {
@@ -315,6 +347,22 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 return nil
             }
             return try Self.expense(from: row)
+        }
+    }
+
+    func expenses(profileID: UUID, monthKey: String) throws -> [LocalExpense] {
+        try database.writer.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM local_expenses
+                    WHERE profile_id = ?
+                      AND transaction_date LIKE ?
+                      AND deleted_at IS NULL
+                    ORDER BY transaction_date DESC, transaction_time DESC, created_at DESC, id DESC
+                    """,
+                arguments: [profileID.uuidString, "\(monthKey)-%"]
+            ).map { try Self.expense(from: $0) }
         }
     }
 
