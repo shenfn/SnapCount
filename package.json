@@ -73,6 +73,7 @@
     "test:ios-pending-confirmation-boundary": "node --test scripts/test-ios-pending-confirmation-boundary.mjs",
     "test:ios-feedback-submission-boundary": "node --test scripts/test-ios-feedback-submission-boundary.mjs",
     "test:ios-record-detail-image-boundary": "node --test scripts/test-ios-record-detail-image-boundary.mjs",
+    "test:ios-local-expense-app-boundary": "node --test scripts/test-ios-local-expense-app-boundary.mjs",
     "test:ios-screenshot-repayment-boundary": "node --test scripts/test-ios-screenshot-repayment-boundary.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",
