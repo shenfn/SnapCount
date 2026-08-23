@@ -2,7 +2,7 @@
 
 > 计划编号：LOCAL-PLAN-001
 >
-> 状态：已批准，L0 已完成，处于 LOCAL-SPIKE-001
+> 状态：已批准，L0 与 LOCAL-SPIKE-001 已完成，L1/LOCAL-002 收口中，LOCAL-003 进入规格评审
 >
 > 基线：`origin/main@dc482ac`（2026-08-22）
 >
@@ -47,7 +47,8 @@ Use Case -> VisionProvider / ExpressionProvider
 |---|---|---|---|---|
 | L0 | 固化产品边界、数据权威、隐私承诺和首片范围 | 已完成 | 总计划、ADR、生命周期 Spec、消费切片 Spec、AI 安全契约 | PR #149、#150 已合并 |
 | LOCAL-SPIKE-001 | 比较 GRDB/SQLite 与 SwiftData | 进行中 | 可丢弃技术 Spike、迁移/事务/测试报告 | 不修改生产业务流；形成明确选型 ADR |
-| L1 / LOCAL-002 | 消费记录本地优先垂直切片 | 待开始 | 本地存储、Repository、免登录身份、导出导入、专项测试 | 断网、重启、删除、导出恢复和网络闸门通过 |
+| L1 / LOCAL-002 | 消费记录本地优先垂直切片 | 进行中 | 本地存储、Repository、免登录身份、导出导入、专项测试 | DB2、PORT、断网、重启、删除、导出恢复和网络闸门通过 |
+| LOCAL-003 | 统一页面与云端同步架构 | 规格评审中 | 统一 App Shell、本地权威、登录绑定、同步状态和冲突出口 | Spec/ADR 合并，LOCAL-003A 红灯建立 |
 | L2 | 现有云端用户首次本地化迁移 | 待开始 | 拉取、去重、断点续传、回滚和迁移状态 | 脱敏 fixture 与双次迁移通过，无重复和余额漂移 |
 | L3 | 可选同步引擎 | 待开始 | Outbox/Inbox、幂等、版本、tombstone、冲突出口 | 双设备离线并发场景和账户不变量通过 |
 | L4 | AI Provider 与 BYOK | 待开始 | Vision/Expression Provider、Keychain、数据预览和网络策略 | Key 不离开设备；Hosted/BYOK/Disabled 失败隔离通过 |
