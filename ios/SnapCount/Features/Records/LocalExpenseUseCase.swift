@@ -49,6 +49,7 @@ struct LocalExpenseMonth: Equatable {
 }
 
 protocol LocalExpenseUseCaseProtocol {
+    func prepareProfile() async throws -> LocalProfile
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome
     func update(_ command: LocalExpenseUpdateCommand) async throws -> LocalExpenseOutcome
     func delete(_ command: LocalExpenseDeleteCommand) async throws -> LocalExpenseOutcome
@@ -68,6 +69,10 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         self.profileStore = profileStore
         self.repository = repository
         self.operationIDProvider = operationIDProvider
+    }
+
+    func prepareProfile() async throws -> LocalProfile {
+        try profileStore.activeProfile()
     }
 
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome {

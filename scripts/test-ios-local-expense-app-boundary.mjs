@@ -18,9 +18,13 @@ test('LOCAL-002-APP application boundary files exist', async () => {
 
 test('AppState does not own the local transaction implementation', async () => {
   const source = await readFile('ios/SnapCount/App/AppState.swift', 'utf8')
+  const start = source.indexOf('func createManualRecord(')
+  const end = source.indexOf('private func createLocalExpense(', start)
+  assert.ok(start >= 0 && end > start, 'missing local expense compatibility boundary')
+  const createBlock = source.slice(start, end)
   assert.doesNotMatch(
-    source,
-    /func createManualRecord\([\s\S]*?validSession\(\)[\s\S]*?recordRepository\.create/u,
+    createBlock,
+    /validSession\(\)|recordRepository\.create/u,
     'AppState still directly gates local expense creation on a remote session'
   )
 })

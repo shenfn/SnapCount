@@ -98,6 +98,7 @@ final class AppState: ObservableObject {
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
     private let recordRepository: RecordRepositoryProtocol
+    private let localExpenseUseCase: LocalExpenseUseCaseProtocol?
     private let inboxRepository: InboxRepositoryProtocol
     private let domainRepository: DomainRepositoryProtocol
     private let snapshotStore: DashboardSnapshotStoreProtocol
@@ -143,6 +144,7 @@ final class AppState: ObservableObject {
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
         recordRepository: RecordRepositoryProtocol = RecordRepository(),
+        localExpenseUseCase: LocalExpenseUseCaseProtocol? = AppState.defaultLocalExpenseUseCase(),
         inboxRepository: InboxRepositoryProtocol = InboxRepository(),
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
         snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
@@ -172,6 +174,7 @@ final class AppState: ObservableObject {
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
+        self.localExpenseUseCase = localExpenseUseCase
         self.inboxRepository = inboxRepository
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore
@@ -204,6 +207,11 @@ final class AppState: ObservableObject {
 
     func bootstrap() {
         Task {
+            do {
+                _ = try await localExpenseUseCase?.prepareProfile()
+            } catch {
+                manualRecordMessage = "本地数据初始化失败：\(error.localizedDescription)"
+            }
             await restoreAuthentication()
             isBootstrapping = false
             await refreshNotificationPermissionStatus()
@@ -3068,47 +3076,93 @@ final class AppState: ObservableObject {
         defer { isCreatingManualRecord = false }
 
         do {
-            let session = try await validSession()
-            let reference = try await recordRepository.create(
-                draft,
-                domain: domain,
-                userId: session.user.id,
-                accessToken: session.accessToken
-            )
-            let savedReference = NativeRecordReference(reference).canonicalValue
-            if let existingRawId = draft.existingRawId {
-                let originalReference = NativeRecordReference(
-                    kind: "data",
-                    rawId: existingRawId
-                ).canonicalValue
-                invalidateRecordExpressionPlanState(
-                    afterChanging: [originalReference, savedReference]
-                )
+            if draft.kind == .expense, !isSignedIn, localExpenseUseCase != nil {
+                return try await createLocalExpense(draft)
             }
-            if draft.kind == .expense {
-                scheduleConfirmedExpenseVocabulary(
-                    platform: draft.platform,
-                    category: draft.category,
-                    paymentMethod: draft.paymentMethod,
-                    accountId: draft.accountId,
-                    userId: session.user.id,
-                    accessToken: session.accessToken
-                )
-            }
-            await refreshDashboard()
-            if draft.kind != .universal || draft.domainKey == "wallet" {
-                await loadAccounts()
-            }
-            if draft.existingRawId != nil {
-                recordDetailCache.removeValue(forKey: savedReference)
-                await loadRecordDetail(reference: savedReference, force: true)
-            }
-            manualRecordMessage = draft.existingRawId == nil ? "记录已保存" : "记录已更新"
-            return true
+            return try await createRemoteManualRecord(draft, domain: domain)
         } catch {
             manualRecordMessage = error.localizedDescription
             return false
         }
+    }
+
+    private func createLocalExpense(_ draft: NativeManualRecordDraft) async throws -> Bool {
+        guard draft.existingRawId == nil else { throw LocalDataError.invalidRecord }
+        guard let accountText = draft.accountId,
+              let accountID = UUID(uuidString: accountText),
+              let localExpenseUseCase else {
+            throw LocalDataError.invalidIdentifier
+        }
+        let command = LocalExpenseCommand(
+            id: UUID(),
+            accountID: accountID,
+            amountText: draft.amountText,
+            currency: "CNY",
+            merchantName: draft.title,
+            platform: draft.platform,
+            category: draft.category,
+            paymentMethod: draft.paymentMethod,
+            transactionDate: NativeLocalDate.dateKey(draft.date),
+            transactionTime: draft.includesTime ? NativeLocalDate.timeKey(draft.time) : nil,
+            note: draft.note.isEmpty ? nil : draft.note,
+            createdAt: Date()
+        )
+        let outcome = try await localExpenseUseCase.create(command)
+        let monthKey = String(command.transactionDate.prefix(7))
+        let month = try await localExpenseUseCase.month(monthKey)
+        let groups = LocalExpenseReadModel.groups(from: month)
+        recordMonthGroups[monthKey] = groups
+        if monthKey == Self.currentMonthKey {
+            dashboard.dayRecordGroups = groups
+            dashboard.monthCount = month.expenses.count
+            dashboard.monthExpense = month.expenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
+        }
+        manualRecordMessage = outcome.expense == nil ? "本地记录未保存" : "记录已保存（本机）"
+        return outcome.expense != nil
+    }
+
+    private func createRemoteManualRecord(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?) async throws -> Bool {
+        let session = try await validSession()
+        let reference = try await recordRepository.create(
+            draft,
+            domain: domain,
+            userId: session.user.id,
+            accessToken: session.accessToken
+        )
+        let savedReference = NativeRecordReference(reference).canonicalValue
+        if let existingRawId = draft.existingRawId {
+            let originalReference = NativeRecordReference(
+                kind: "data",
+                rawId: existingRawId
+            ).canonicalValue
+            invalidateRecordExpressionPlanState(afterChanging: [originalReference, savedReference])
+        }
+        if draft.kind == .expense {
+            scheduleConfirmedExpenseVocabulary(
+                platform: draft.platform,
+                category: draft.category,
+                paymentMethod: draft.paymentMethod,
+                accountId: draft.accountId,
+                userId: session.user.id,
+                accessToken: session.accessToken
+            )
+        }
+        await refreshDashboard()
+        if draft.kind != .universal || draft.domainKey == "wallet" {
+            await loadAccounts()
+        }
+        if draft.existingRawId != nil {
+            recordDetailCache.removeValue(forKey: savedReference)
+            await loadRecordDetail(reference: savedReference, force: true)
+        }
+        manualRecordMessage = draft.existingRawId == nil ? "记录已保存" : "记录已更新"
+        return true
+    }
+
+    private static func defaultLocalExpenseUseCase() -> LocalExpenseUseCaseProtocol? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalExpenseRepository(database: database) else { return nil }
+        return LocalExpenseUseCase(profileStore: LocalProfileStore(database: database), repository: repository)
     }
 
     private static let monthKeyFormatter: DateFormatter = {
