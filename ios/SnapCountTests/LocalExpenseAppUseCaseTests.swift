@@ -155,6 +155,34 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(state.recordGroups(monthKey: "2026-07").first?.records.first?.title, "云端记录")
     }
 
+    @MainActor
+    func testSignedOutStateCanRestoreLocalMonthAfterCloudStateReset() async throws {
+        let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let localUseCase = LocalShellExpenseUseCaseStub(
+            profile: LocalProfile(
+                id: profileID,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                cloudUserID: nil,
+                syncEnabled: false
+            ),
+            month: LocalExpenseMonth(profileID: profileID, expenses: [localExpense(profileID: profileID)])
+        )
+        let state = AppState(localExpenseUseCase: localUseCase)
+        state.isSignedIn = true
+        state.currentUserId = "cloud-user"
+        state.selectedTab = .settings
+
+        state.isSignedIn = false
+        state.currentUserId = ""
+        state.resetUserScopedState()
+        state.selectedTab = .records
+        await state.loadRecordMonth("2026-07", force: true)
+
+        XCTAssertEqual(state.selectedTab, .records)
+        XCTAssertEqual(localUseCase.monthKeys, ["2026-07"])
+        XCTAssertEqual(state.recordGroups(monthKey: "2026-07").first?.records.first?.reference, "local-expense/22222222-2222-2222-2222-222222222222")
+    }
+
     private func localExpense(profileID: UUID) -> LocalExpense {
         LocalExpense(
             id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
