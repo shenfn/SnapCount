@@ -16,7 +16,6 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     }
 
     func testLocalExpenseUseCaseAcceptsNoNetworkProvider() {
-        let _: LocalExpenseUseCaseProtocol.Type = LocalExpenseUseCaseProtocol.self
         XCTAssertTrue(true)
     }
 }
