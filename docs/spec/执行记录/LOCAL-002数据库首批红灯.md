@@ -1,6 +1,6 @@
 # LOCAL-002 数据库首批红灯执行记录
 
-> 状态：红灯待远程验证
+> 状态：有效红灯已取得，最小实现进行中
 >
 > 日期：2026-08-23
 >
@@ -26,6 +26,17 @@
 - `LocalOutboxOperation`
 
 macOS iOS Build 应在编译 `SnapCountTests` 时因这些类型缺失失败。该失败证明生产本地数据库边界尚未实现，不是 Windows 环境失败。
+
+## 红灯证据
+
+GitHub Actions Run `32617323551`：
+
+- App target 的 `Build for simulator` 先通过；
+- `Run unit tests` 编译 `LocalExpenseRepositoryTests.swift` 时失败；
+- 明确错误为 `cannot find type 'LocalProfile'`、`LocalAccount`、`LocalExpenseRepository`、`LocalExpenseDraft`；
+- Governance、Release Validation、Cloudflare 和 Vercel 适用检查通过。
+
+因此该失败是目标生产类型缺失造成的有效业务红灯，不是 Xcode、依赖下载或 runner 环境故障。
 
 ## 冻结范围
 
