@@ -439,13 +439,17 @@ final class LocalExpensePortability {
     }
 
     private static func accountMatches(_ row: Row, _ value: LocalExpenseArchive.Account) -> Bool {
+        guard let id = UUID(uuidString: row["id"]),
+              let profileID = UUID(uuidString: row["profile_id"]) else {
+            return false
+        }
         let createdAt: Date = row["created_at"]
         let name: String = row["name"]
         let kind: String = row["kind"]
         let currency: String = row["currency"]
         let openingBalanceMinor: Int64 = row["opening_balance_minor"]
-        UUID(uuidString: row["id"]) == value.id
-            && UUID(uuidString: row["profile_id"]) == value.profileID
+        return id == value.id
+            && profileID == value.profileID
             && name == value.name
             && kind == value.kind
             && currency == value.currency
