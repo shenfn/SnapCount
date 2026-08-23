@@ -43,6 +43,22 @@ struct LocalExpenseDraft: Equatable {
     let createdAt: Date
 }
 
+struct LocalExpenseUpdate: Equatable {
+    let id: UUID
+    let expectedVersion: Int64
+    let accountID: UUID
+    let amountMinor: Int64
+    let currency: String
+    let merchantName: String
+    let platform: String
+    let category: String
+    let paymentMethod: String
+    let transactionDate: String
+    let transactionTime: String?
+    let note: String?
+    let updatedAt: Date
+}
+
 struct LocalExpense: Equatable {
     let id: UUID
     let profileID: UUID
@@ -59,6 +75,26 @@ struct LocalExpense: Equatable {
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
+}
+
+struct LocalExpenseTombstone: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let localVersion: Int64
+    let deletedAt: Date
+}
+
+struct LocalAccountEntry: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID
+    let direction: String
+    let amountMinor: Int64
+    let entryKind: String
+    let sourceKind: String
+    let sourceID: UUID
+    let occurredAt: Date
+    let voidedAt: Date?
 }
 
 struct LocalOutboxOperation: Equatable {
@@ -79,4 +115,6 @@ enum LocalDataError: Error, Equatable {
     case invalidAmount
     case invalidIdentifier
     case invalidRecord
+    case recordNotFound
+    case versionConflict(expected: Int64, actual: Int64)
 }
