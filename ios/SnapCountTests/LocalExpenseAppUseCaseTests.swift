@@ -180,8 +180,10 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         draft.amountText = "20.00"
         draft.title = "瑞幸咖啡"
 
-        XCTAssertTrue(await state.saveRecordDetail(draft))
-        XCTAssertTrue(await state.deleteRecord(reference: draft.reference))
+        let saveSucceeded = await state.saveRecordDetail(draft)
+        let deleteSucceeded = await state.deleteRecord(reference: draft.reference)
+        XCTAssertTrue(saveSucceeded)
+        XCTAssertTrue(deleteSucceeded)
         XCTAssertEqual(sessionLookupCount, 0)
         XCTAssertEqual(localUseCase.updateCommands.count, 1)
         XCTAssertEqual(localUseCase.deleteCommands.count, 1)
