@@ -1,31 +1,47 @@
 # LOCAL-003B 统一记录详情、编辑、删除执行记录
 
-> 状态：规格草案，待评审
+> 状态：实现完成，待 macOS CI 验证
 >
-> 分支：`docs/LOCAL-003B统一记录详情编辑删除规格`
+> 分支：`feature/LOCAL-003B统一记录详情编辑删除实现`
 >
-> 基线：`origin/main@7a4e366`
+> 基线：`origin/main@6e291cd`
 
 ## 本轮完成
 
 - 核对 LOCAL-003A 已合并，macOS Build 和 250 个 XCTest 通过。
 - 核对本地 Repository 已具备 expense/account 的 update、delete、流水和 tombstone/outbox 基础。
 - 新增 LOCAL-003B 规格，锁定本地详情、编辑、删除、余额投影和云端兼容回归边界。
+- 新增本地消费详情映射：使用 `local-expense/<UUID>` 稳定引用，不构造云端图片或 AI 字段。
+- `AppState` 的详情、编辑、删除按引用事实来源分流；本地引用不查会话、不调用远端 Repository。
+- 本地编辑通过 `LocalExpenseUseCase.update`，删除通过 `LocalExpenseUseCase.delete`，成功后刷新本地月份、详情缓存和账户余额投影。
+- 新增 Swift 特征测试：本地详情映射、本地详情加载无会话/远端依赖。
 
 ## 基线和未验证项
 
-- 尚未修改 Swift 业务代码。
-- 尚未建立 LOCAL-003B 红灯测试。
-- 尚未验证本地引用进入 `RecordDetailView` 后不会调用远端详情。
-- Windows 无法运行 Swift XCTest；红灯和绿灯需由 GitHub macOS Build 证明。
+- Windows 无法运行 Swift XCTest，Swift 编译与 XCTest 结果仍需 GitHub macOS Build 证明。
+- 尚未在真实 iOS Simulator 上验证编辑/删除后的页面刷新和错误提示。
+- 尚未验证首次同步、冲突合并和 outbox 上传；这些明确不属于本轮范围。
+
+## 本地验证
+
+- `npm run test:ios-local-record-detail-boundary`：通过（3/3）。
+- `npm run governance:check`：通过。
+- `git diff --check`：通过。
+- 主测试集中的 `LocalExpenseRepositoryTests` 已覆盖更新、删除、余额流水、tombstone 和版本冲突；本轮未在 Windows 重跑 Swift 测试。
 
 ## 冻结范围
 
 - 不实现登录绑定、首次同步、Outbox 上传、冲突合并或其他数据域。
 - 不修改 PWA、Edge、Supabase schema、生产配置、TestFlight 或根工作区 WIP。
 
+## 流程收敛决定
+
+- 本片复用现有本地 Repository、账户流水事务测试和统一页面规范，不新增通用本地域框架。
+- 不为后续收入、运动、睡眠、饮食、阅读域预先复制本片的完整详情/编辑/删除流程。
+- 本片通过 macOS CI 和一次真机验证后先暂停，依据实际体验决定下一个域；只有出现第二个域的真实重复代码时才提取公共抽象。
+
 ## 下一步
 
-1. 评审并合并本规格。
-2. 从最新 main 建立 `test/LOCAL-003B统一记录详情编辑删除红灯`，先固定 B1-B8 的关键失败。
-3. 红灯确认后建立 `feature/LOCAL-003B统一记录详情编辑删除实现`，做最小本地详情和事务接线。
+1. 推送实现分支并通过 GitHub macOS iOS Build 与 XCTest。
+2. CI 绿灯后由用户决定是否创建/合并 PR。
+3. 通过后再进入 LOCAL-003C 或回查统一页面的真实 iOS 交互，不扩展到同步和其他数据域。

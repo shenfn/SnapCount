@@ -89,6 +89,104 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(groups.first?.records.first?.value, "¥12.30")
     }
 
+    func testLocalExpenseDetailUsesStableReferenceAndLocalOnlyFields() {
+        let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let detail = LocalExpenseReadModel.detail(from: localExpense(profileID: profileID))
+
+        XCTAssertEqual(detail.id, "local-expense/22222222-2222-2222-2222-222222222222")
+        XCTAssertEqual(detail.kind, "expense")
+        XCTAssertEqual(detail.status, "local")
+        XCTAssertEqual(detail.value, "¥12.30")
+        XCTAssertNil(detail.imagePath)
+        XCTAssertNil(detail.companionMessage)
+    }
+
+    @MainActor
+    func testAppStateLoadsLocalDetailWithoutSessionOrRemoteRepository() async {
+        let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let expense = localExpense(profileID: profileID)
+        let localUseCase = LocalShellExpenseUseCaseStub(
+            profile: LocalProfile(id: profileID, createdAt: Date(), cloudUserID: nil, syncEnabled: false),
+            month: LocalExpenseMonth(profileID: profileID, expenses: [expense]),
+            expenseResult: expense
+        )
+        let repository = LocalShellRecordRepositorySpy(
+            monthSnapshot: NativeRecordMonthSnapshot(groups: [], details: [:])
+        )
+        var sessionLookupCount = 0
+        let state = AppState(
+            recordRepository: repository,
+            localExpenseUseCase: localUseCase,
+            sessionProvider: { _ in
+                sessionLookupCount += 1
+                throw SupabaseRemoteError.missingSession
+            }
+        )
+
+        await state.loadRecordDetail(reference: "local-expense/22222222-2222-2222-2222-222222222222")
+
+        XCTAssertEqual(sessionLookupCount, 0)
+        XCTAssertTrue(repository.fetchDetailReferences.isEmpty)
+        XCTAssertEqual(state.selectedRecordDetail?.title, "全家便利店")
+    }
+
+    @MainActor
+    func testSignedInLocalEditAndDeleteStayLocal() async {
+        let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let expense = localExpense(profileID: profileID)
+        var updated = expense
+        updated = LocalExpense(
+            id: expense.id,
+            profileID: expense.profileID,
+            accountID: expense.accountID,
+            amountMinor: 2_000,
+            currency: expense.currency,
+            merchantName: "瑞幸咖啡",
+            platform: expense.platform,
+            category: expense.category,
+            paymentMethod: expense.paymentMethod,
+            transactionDate: expense.transactionDate,
+            transactionTime: expense.transactionTime,
+            note: expense.note,
+            localVersion: 2,
+            createdAt: expense.createdAt,
+            updatedAt: Date()
+        )
+        let tombstone = LocalExpenseTombstone(
+            id: expense.id,
+            profileID: profileID,
+            localVersion: 3,
+            deletedAt: Date()
+        )
+        let localUseCase = LocalShellExpenseUseCaseStub(
+            profile: LocalProfile(id: profileID, createdAt: Date(), cloudUserID: nil, syncEnabled: false),
+            month: LocalExpenseMonth(profileID: profileID, expenses: [updated]),
+            expenseResult: expense,
+            updateResult: LocalExpenseOutcome(expense: updated, tombstone: nil, profileID: profileID),
+            deleteResult: LocalExpenseOutcome(expense: nil, tombstone: tombstone, profileID: profileID)
+        )
+        var sessionLookupCount = 0
+        let state = AppState(
+            localExpenseUseCase: localUseCase,
+            sessionProvider: { _ in
+                sessionLookupCount += 1
+                throw SupabaseRemoteError.missingSession
+            }
+        )
+        state.isSignedIn = true
+        state.currentUserId = "cloud-user"
+
+        var draft = NativeRecordEditDraft(detail: LocalExpenseReadModel.detail(from: expense))
+        draft.amountText = "20.00"
+        draft.title = "瑞幸咖啡"
+
+        XCTAssertTrue(await state.saveRecordDetail(draft))
+        XCTAssertTrue(await state.deleteRecord(reference: draft.reference))
+        XCTAssertEqual(sessionLookupCount, 0)
+        XCTAssertEqual(localUseCase.updateCommands.count, 1)
+        XCTAssertEqual(localUseCase.deleteCommands.count, 1)
+    }
+
     @MainActor
     func testAppStateLoadsSignedOutMonthFromLocalUseCaseWithoutSessionLookup() async throws {
         let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
@@ -215,17 +313,40 @@ private final class LocalShellExpenseUseCaseStub: LocalExpenseUseCaseProtocol {
 
     let profile: LocalProfile
     let monthResult: LocalExpenseMonth
+    let expenseResult: LocalExpense?
+    let updateResult: LocalExpenseOutcome?
+    let deleteResult: LocalExpenseOutcome?
     private(set) var monthKeys: [String] = []
+    private(set) var updateCommands: [LocalExpenseUpdateCommand] = []
+    private(set) var deleteCommands: [LocalExpenseDeleteCommand] = []
 
-    init(profile: LocalProfile, month: LocalExpenseMonth) {
+    init(
+        profile: LocalProfile,
+        month: LocalExpenseMonth,
+        expenseResult: LocalExpense? = nil,
+        updateResult: LocalExpenseOutcome? = nil,
+        deleteResult: LocalExpenseOutcome? = nil
+    ) {
         self.profile = profile
         self.monthResult = month
+        self.expenseResult = expenseResult
+        self.updateResult = updateResult
+        self.deleteResult = deleteResult
     }
 
     func prepareProfile() async throws -> LocalProfile { profile }
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome { throw LocalDataError.invalidRecord }
-    func update(_ command: LocalExpenseUpdateCommand) async throws -> LocalExpenseOutcome { throw LocalDataError.invalidRecord }
-    func delete(_ command: LocalExpenseDeleteCommand) async throws -> LocalExpenseOutcome { throw LocalDataError.invalidRecord }
+    func expense(id: UUID) async throws -> LocalExpense? { expenseResult?.id == id ? expenseResult : nil }
+    func update(_ command: LocalExpenseUpdateCommand) async throws -> LocalExpenseOutcome {
+        updateCommands.append(command)
+        guard let updateResult else { throw LocalDataError.invalidRecord }
+        return updateResult
+    }
+    func delete(_ command: LocalExpenseDeleteCommand) async throws -> LocalExpenseOutcome {
+        deleteCommands.append(command)
+        guard let deleteResult else { throw LocalDataError.invalidRecord }
+        return deleteResult
+    }
 
     func month(_ monthKey: String) async throws -> LocalExpenseMonth {
         monthKeys.append(monthKey)
@@ -245,6 +366,7 @@ private final class LocalShellRecordRepositorySpy: RecordRepositoryProtocol {
 
     let monthSnapshot: NativeRecordMonthSnapshot
     private(set) var fetchMonthKeys: [String] = []
+    private(set) var fetchDetailReferences: [String] = []
 
     init(monthSnapshot: NativeRecordMonthSnapshot) {
         self.monthSnapshot = monthSnapshot
@@ -256,6 +378,7 @@ private final class LocalShellRecordRepositorySpy: RecordRepositoryProtocol {
     }
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
+        fetchDetailReferences.append(reference)
         throw SupabaseRemoteError.requestFailed("unused")
     }
 

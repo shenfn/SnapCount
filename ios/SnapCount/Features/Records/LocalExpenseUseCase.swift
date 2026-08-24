@@ -67,6 +67,7 @@ protocol LocalExpenseUseCaseProtocol {
     func prepareWorkspace() async throws -> LocalExpenseWorkspace
     func accounts() async throws -> [LocalAccount]
     func accountBalanceMinor(_ accountID: UUID) async throws -> Int64
+    func expense(id: UUID) async throws -> LocalExpense?
     func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome
     func update(_ command: LocalExpenseUpdateCommand) async throws -> LocalExpenseOutcome
@@ -84,6 +85,8 @@ extension LocalExpenseUseCaseProtocol {
     func accountBalanceMinor(_ accountID: UUID) async throws -> Int64 {
         throw LocalDataError.invalidRecord
     }
+
+    func expense(id: UUID) async throws -> LocalExpense? { nil }
 
     func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount {
         throw LocalDataError.invalidRecord
@@ -128,6 +131,13 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
             throw LocalDataError.invalidIdentifier
         }
         return try repository.accountBalanceMinor(accountID: accountID)
+    }
+
+    func expense(id: UUID) async throws -> LocalExpense? {
+        let profile = try profileStore.activeProfile()
+        guard let expense = try repository.expense(id: id) else { return nil }
+        guard expense.profileID == profile.id else { throw LocalDataError.invalidIdentifier }
+        return expense
     }
 
     func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount {

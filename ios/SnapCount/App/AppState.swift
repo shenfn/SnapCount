@@ -1995,19 +1995,11 @@ final class AppState: ObservableObject {
         return try await inboxRepository.resolveImageURL(path: imagePath, accessToken: session.accessToken)
     }
 
-    func loadRecordDetail(reference: String, force: Bool = false) async {
-        let canonicalReference = NativeRecordReference(reference).canonicalValue
-        let generation = userStateGeneration
-        if let previousReference = activeRecordReference,
-           previousReference != canonicalReference {
-            deactivateRecordDetail(reference: previousReference)
-        }
-        activeRecordReference = canonicalReference
-        recordDetailMessage = nil
-        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
-            recordFeedbackState = .idle
-            recordExpressionPlanExposureState = .idle
-        }
+    private func loadRemoteRecordDetail(
+        reference canonicalReference: String,
+        force: Bool,
+        generation: Int
+    ) async {
         if !force, let cached = recordDetailCache[canonicalReference] {
             selectedRecordDetail = cached
             if let session = try? await validSession() {
@@ -2043,6 +2035,67 @@ final class AppState: ObservableObject {
             )
         } catch {
             if activeRecordReference == canonicalReference {
+                recordDetailMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func loadRecordDetail(reference: String, force: Bool = false) async {
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        let generation = userStateGeneration
+        if let previousReference = activeRecordReference,
+           previousReference != canonicalReference {
+            deactivateRecordDetail(reference: previousReference)
+        }
+        activeRecordReference = canonicalReference
+        recordDetailMessage = nil
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
+            recordFeedbackState = .idle
+            recordExpressionPlanExposureState = .idle
+        }
+        if isLocalExpenseReference(canonicalReference) {
+            await loadLocalExpenseDetail(reference: canonicalReference, force: force, generation: generation)
+            return
+        }
+        await loadRemoteRecordDetail(reference: canonicalReference, force: force, generation: generation)
+    }
+
+    private func isLocalExpenseReference(_ reference: String) -> Bool {
+        NativeRecordReference(reference).kind == "local-expense"
+    }
+
+    private func loadLocalExpenseDetail(
+        reference: String,
+        force: Bool,
+        generation: Int
+    ) async {
+        guard let localExpenseUseCase else {
+            recordDetailMessage = "本地数据不可用"
+            return
+        }
+        let resolved = NativeRecordReference(reference)
+        guard let id = UUID(uuidString: resolved.rawId) else {
+            recordDetailMessage = "本地记录标识无效"
+            return
+        }
+        if !force, let cached = recordDetailCache[reference] {
+            selectedRecordDetail = cached
+            return
+        }
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(reference) }) ?? true {
+            selectedRecordDetail = nil
+        }
+        do {
+            guard let expense = try await localExpenseUseCase.expense(id: id) else {
+                throw LocalDataError.recordNotFound
+            }
+            guard generation == userStateGeneration,
+                  activeRecordReference == reference else { return }
+            let detail = LocalExpenseReadModel.detail(from: expense)
+            recordDetailCache[reference] = detail
+            selectedRecordDetail = detail
+        } catch {
+            if activeRecordReference == reference {
                 recordDetailMessage = error.localizedDescription
             }
         }
@@ -2561,6 +2614,96 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func localExpenseForReference(_ reference: String) async throws -> LocalExpense {
+        guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+        let resolved = NativeRecordReference(reference)
+        guard resolved.kind == "local-expense",
+              let id = UUID(uuidString: resolved.rawId) else {
+            throw LocalDataError.invalidIdentifier
+        }
+        guard let expense = try await localExpenseUseCase.expense(id: id) else {
+            throw LocalDataError.recordNotFound
+        }
+        return expense
+    }
+
+    private func saveLocalRecordDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
+        guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+        let current = try await localExpenseForReference(draft.reference)
+        guard let accountID = UUID(uuidString: draft.accountId ?? current.accountID.uuidString) else {
+            throw LocalDataError.invalidIdentifier
+        }
+        let command = LocalExpenseUpdateCommand(
+            id: current.id,
+            expectedVersion: current.localVersion,
+            accountID: accountID,
+            amountText: draft.amountText,
+            currency: current.currency,
+            merchantName: draft.title,
+            platform: draft.platform,
+            category: draft.category,
+            paymentMethod: draft.paymentMethod,
+            transactionDate: draft.recordDate,
+            transactionTime: draft.transactionTime,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            updatedAt: Date()
+        )
+        let outcome = try await localExpenseUseCase.update(command)
+        guard let saved = outcome.expense else { throw LocalDataError.invalidRecord }
+        let oldMonth = String(current.transactionDate.prefix(7))
+        let newMonth = String(saved.transactionDate.prefix(7))
+        invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
+        _ = await prepareLocalWorkspace()
+        await readDeviceExpenseMonth(oldMonth, force: true)
+        if newMonth != oldMonth {
+            await readDeviceExpenseMonth(newMonth, force: true)
+        }
+        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
+        await loadRecordDetail(reference: "local-expense/\(saved.id.uuidString)", force: true)
+        return true
+    }
+
+    private func deleteLocalRecord(reference: String) async throws -> Bool {
+        guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+        let current = try await localExpenseForReference(reference)
+        _ = try await localExpenseUseCase.delete(LocalExpenseDeleteCommand(
+            id: current.id,
+            expectedVersion: current.localVersion,
+            deletedAt: Date()
+        ))
+        let monthKey = String(current.transactionDate.prefix(7))
+        invalidateRecordExpressionPlanState(afterChanging: [reference])
+        recordsPath = NavigationPath()
+        _ = await prepareLocalWorkspace()
+        await readDeviceExpenseMonth(monthKey, force: true)
+        return true
+    }
+
+    private func saveRemoteRecordDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
+        let session = try await validSession()
+        let reference = try await recordRepository.saveDetail(draft, accessToken: session.accessToken)
+        let oldReference = NativeRecordReference(draft.reference).canonicalValue
+        let savedReference = NativeRecordReference(reference).canonicalValue
+        invalidateRecordExpressionPlanState(
+            afterChanging: [oldReference, savedReference]
+        )
+        await refreshDashboard()
+        await loadAccounts()
+        recordDetailCache.removeValue(forKey: savedReference)
+        await loadRecordDetail(reference: savedReference, force: true)
+        return true
+    }
+
+    private func deleteRemoteRecord(reference: String) async throws -> Bool {
+        let session = try await validSession()
+        try await recordRepository.delete(reference: reference, accessToken: session.accessToken)
+        invalidateRecordExpressionPlanState(afterChanging: [reference])
+        recordsPath = NavigationPath()
+        await loadAccounts()
+        await refreshDashboard()
+        return true
+    }
+
     func saveRecordDetail(_ draft: NativeRecordEditDraft) async -> Bool {
         guard !isSavingRecordDetail else { return false }
         isSavingRecordDetail = true
@@ -2568,18 +2711,10 @@ final class AppState: ObservableObject {
         defer { isSavingRecordDetail = false }
 
         do {
-            let session = try await validSession()
-            let reference = try await recordRepository.saveDetail(draft, accessToken: session.accessToken)
-            let oldReference = NativeRecordReference(draft.reference).canonicalValue
-            let savedReference = NativeRecordReference(reference).canonicalValue
-            invalidateRecordExpressionPlanState(
-                afterChanging: [oldReference, savedReference]
-            )
-            await refreshDashboard()
-            await loadAccounts()
-            recordDetailCache.removeValue(forKey: savedReference)
-            await loadRecordDetail(reference: savedReference, force: true)
-            return true
+            if isLocalExpenseReference(draft.reference) {
+                return try await saveLocalRecordDetail(draft)
+            }
+            return try await saveRemoteRecordDetail(draft)
         } catch {
             recordDetailMessage = error.localizedDescription
             return false
@@ -2593,13 +2728,10 @@ final class AppState: ObservableObject {
         defer { isDeletingRecordDetail = false }
 
         do {
-            let session = try await validSession()
-            try await recordRepository.delete(reference: reference, accessToken: session.accessToken)
-            invalidateRecordExpressionPlanState(afterChanging: [reference])
-            recordsPath = NavigationPath()
-            await loadAccounts()
-            await refreshDashboard()
-            return true
+            if isLocalExpenseReference(reference) {
+                return try await deleteLocalRecord(reference: reference)
+            }
+            return try await deleteRemoteRecord(reference: reference)
         } catch {
             recordDetailMessage = error.localizedDescription
             return false
