@@ -76,6 +76,7 @@
     "test:ios-local-expense-app-boundary": "node --test scripts/test-ios-local-expense-app-boundary.mjs",
     "test:ios-local-account-boundary": "node --test scripts/test-ios-local-account-boundary.mjs",
     "test:ios-local-shell-boundary": "node --test scripts/test-ios-local-shell-boundary.mjs",
+    "test:ios-local-record-detail-boundary": "node --test scripts/test-ios-local-record-detail-boundary.mjs",
     "test:ios-screenshot-repayment-boundary": "node --test scripts/test-ios-screenshot-repayment-boundary.mjs",
     "check:receipt-dedup": "node scripts/check-receipt-dedup-contracts.mjs",
     "check:security-contracts": "node scripts/check-security-contracts.mjs",
