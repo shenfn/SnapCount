@@ -9,10 +9,8 @@ struct RootView: View {
             if appState.isBootstrapping {
                 ProgressView()
                     .tint(JieziTheme.mint)
-            } else if appState.isSignedIn {
-                cloudTabRoot
             } else {
-                localTabRoot
+                unifiedTabRoot
             }
         }
         .fullScreenCover(isPresented: $appState.isOnboardingPresented) {
@@ -21,28 +19,7 @@ struct RootView: View {
         }
     }
 
-    private var localTabRoot: some View {
-        TabView(selection: $appState.selectedTab) {
-            NavigationStack(path: $appState.recordsPath) {
-                RecordsView()
-            }
-            .tabItem { Label(AppTab.records.title, systemImage: AppTab.records.systemImage) }
-            .tag(AppTab.records)
-
-            NavigationStack {
-                LocalSettingsView()
-            }
-            .tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage) }
-            .tag(AppTab.settings)
-        }
-        .tint(themeManager.palette.brand)
-        .toolbarBackground(themeManager.palette.paper.opacity(0.94), for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
-        .onAppear { normalizeLocalSelection() }
-        .onChange(of: appState.selectedTab) { _ in normalizeLocalSelection() }
-    }
-
-    private var cloudTabRoot: some View {
+    private var unifiedTabRoot: some View {
         TabView(selection: $appState.selectedTab) {
             NavigationStack(path: $appState.todayPath) {
                 TodayView()
@@ -89,10 +66,5 @@ struct RootView: View {
                 await appState.refreshDashboardIfStale()
             }
         }
-    }
-
-    private func normalizeLocalSelection() {
-        guard ![AppTab.records, .settings].contains(appState.selectedTab) else { return }
-        appState.selectedTab = .records
     }
 }

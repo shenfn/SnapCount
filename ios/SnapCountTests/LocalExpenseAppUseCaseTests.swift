@@ -120,7 +120,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     }
 
     @MainActor
-    func testAppStateKeepsSignedInMonthOnRemoteRepository() async throws {
+    func testAppStateFallsBackToRemoteWhenSignedInLocalMonthIsEmpty() async throws {
         let localUseCase = LocalShellExpenseUseCaseStub.empty
         let remoteGroup = NativeDayRecordGroup(
             dateKey: "2026-07-20",
@@ -151,7 +151,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         await state.loadRecordMonth("2026-07", force: true)
 
         XCTAssertEqual(repository.fetchMonthKeys, ["2026-07"])
-        XCTAssertTrue(localUseCase.monthKeys.isEmpty)
+        XCTAssertEqual(localUseCase.monthKeys, ["2026-07"])
         XCTAssertEqual(state.recordGroups(monthKey: "2026-07").first?.records.first?.title, "云端记录")
     }
 

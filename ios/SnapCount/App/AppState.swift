@@ -560,43 +560,26 @@ final class AppState: ObservableObject {
     }
 
     func loadRecordMonth(_ monthKey: String, force: Bool = false) async {
-        guard isSignedIn else {
-            await loadLocalExpenseMonth(monthKey, force: force)
-            return
-        }
-        guard monthKey != Self.currentMonthKey else {
-            if force { await refreshDashboard() }
-            return
-        }
-        guard force || recordMonthGroups[monthKey] == nil else { return }
-        guard loadingRecordMonthKey != monthKey else { return }
-        let generation = userStateGeneration
-        loadingRecordMonthKey = monthKey
-        recordMonthMessages.removeValue(forKey: monthKey)
-        defer {
-            if loadingRecordMonthKey == monthKey { loadingRecordMonthKey = nil }
-        }
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            let month = try await recordRepository.fetchMonth(
-                monthKey: monthKey,
-                accessToken: session.accessToken
-            )
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            recordMonthDetails[monthKey] = month.details
-            for (reference, detail) in month.details {
-                let canonicalReference = NativeRecordReference(reference).canonicalValue
-                recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
-            }
-            recordMonthGroups[monthKey] = month.groups
-        } catch {
-            guard generation == userStateGeneration else { return }
-            recordMonthMessages[monthKey] = error.localizedDescription
-        }
+        await loadUnifiedRecordMonth(monthKey, force: force)
     }
 
+    private func loadUnifiedRecordMonth(_ monthKey: String, force: Bool = false) async {
+        if localExpenseUseCase != nil {
+            await readDeviceExpenseMonth(monthKey, force: force)
+            let localHasRecords = !(recordMonthGroups[monthKey] ?? []).isEmpty
+            if localHasRecords || !isSignedIn { return }
+            await loadRemoteRecordMonth(monthKey, force: true)
+            return
+        }
+        await loadRemoteRecordMonth(monthKey, force: force)
+    }
+
+    // Compatibility name retained for older feature tests; new callers use the unified facade above.
     private func loadLocalExpenseMonth(_ monthKey: String, force: Bool) async {
+        await readDeviceExpenseMonth(monthKey, force: force)
+    }
+
+    private func readDeviceExpenseMonth(_ monthKey: String, force: Bool) async {
         guard force || recordMonthGroups[monthKey] == nil else { return }
         guard loadingRecordMonthKey != monthKey else { return }
         let generation = userStateGeneration
@@ -608,7 +591,7 @@ final class AppState: ObservableObject {
         do {
             guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
             let month = try await localExpenseUseCase.month(monthKey)
-            guard generation == userStateGeneration, !isSignedIn else { return }
+            guard generation == userStateGeneration else { return }
             let groups = LocalExpenseReadModel.groups(from: month)
             recordMonthDetails[monthKey] = [:]
             recordMonthGroups[monthKey] = groups
@@ -616,7 +599,7 @@ final class AppState: ObservableObject {
                 applyLocalExpenseMonth(month, groups: groups)
             }
         } catch {
-            guard generation == userStateGeneration, !isSignedIn else { return }
+            guard generation == userStateGeneration else { return }
             recordMonthMessages[monthKey] = error.localizedDescription
         }
     }
@@ -667,6 +650,39 @@ final class AppState: ObservableObject {
         let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
         snapshot.domains = domainsWithUpdatedCounts(definitions, snapshot: snapshot)
         return snapshot
+    }
+
+    private func loadRemoteRecordMonth(_ monthKey: String, force: Bool = false) async {
+        guard monthKey != Self.currentMonthKey else {
+            if force { await refreshDashboard() }
+            return
+        }
+        guard force || recordMonthGroups[monthKey] == nil else { return }
+        guard loadingRecordMonthKey != monthKey else { return }
+        let generation = userStateGeneration
+        loadingRecordMonthKey = monthKey
+        recordMonthMessages.removeValue(forKey: monthKey)
+        defer {
+            if loadingRecordMonthKey == monthKey { loadingRecordMonthKey = nil }
+        }
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let month = try await recordRepository.fetchMonth(
+                monthKey: monthKey,
+                accessToken: session.accessToken
+            )
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            recordMonthDetails[monthKey] = month.details
+            for (reference, detail) in month.details {
+                let canonicalReference = NativeRecordReference(reference).canonicalValue
+                recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
+            }
+            recordMonthGroups[monthKey] = month.groups
+        } catch {
+            guard generation == userStateGeneration else { return }
+            recordMonthMessages[monthKey] = error.localizedDescription
+        }
     }
 
     func loadAccounts() async {
@@ -3143,10 +3159,7 @@ final class AppState: ObservableObject {
         defer { isCreatingManualRecord = false }
 
         do {
-            if draft.kind == .expense, !isSignedIn, localExpenseUseCase != nil {
-                return try await createLocalExpense(draft)
-            }
-            return try await createRemoteManualRecord(draft, domain: domain)
+            return try await createUnifiedManualRecord(draft, domain: domain)
         } catch {
             manualRecordMessage = error.localizedDescription
             return false
@@ -3154,7 +3167,7 @@ final class AppState: ObservableObject {
     }
 
     func prepareLocalWorkspace() async -> LocalExpenseWorkspace? {
-        guard !isSignedIn, let localExpenseUseCase else { return nil }
+        guard let localExpenseUseCase else { return nil }
         do {
             let workspace = try await localExpenseUseCase.prepareWorkspace()
             localAccounts = workspace.accounts
@@ -3172,7 +3185,7 @@ final class AppState: ObservableObject {
     }
 
     func createLocalAccount(_ command: LocalAccountSetupCommand) async -> LocalAccount? {
-        guard !isSignedIn, let localExpenseUseCase else { return nil }
+        guard let localExpenseUseCase else { return nil }
         do {
             let account = try await localExpenseUseCase.createAccount(command)
             _ = await prepareLocalWorkspace()
@@ -3242,6 +3255,16 @@ final class AppState: ObservableObject {
         }
         manualRecordMessage = outcome.expense == nil ? "本地记录未保存" : "记录已保存（本机）"
         return outcome.expense != nil
+    }
+
+    private func createUnifiedManualRecord(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async throws -> Bool {
+        if draft.kind == .expense, localExpenseUseCase != nil {
+            return try await createLocalExpense(draft)
+        }
+        return try await createRemoteManualRecord(draft, domain: domain)
     }
 
     private func createRemoteManualRecord(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?) async throws -> Bool {
