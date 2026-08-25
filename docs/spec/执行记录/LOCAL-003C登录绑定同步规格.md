@@ -9,9 +9,9 @@
 - 基线测试结果：未运行 Swift XCTest；Windows 无 Swift/Xcode，不能替代 macOS iOS Build。
 - 红灯测试及失败原因：`LocalBindingPreviewUseCaseTests` 已覆盖 workspace 初始状态、预览、绑定、错绑、退出禁用、checkpoint 和 Outbox 门禁；Windows 无法运行。
 - 最小实现：新增 `local-v2-sync-state` GRDB 迁移、`LocalSyncState`/独立 `LocalConflictState`/checkpoint/binding 模型、`LocalProfileStore` 状态读写、`LocalBindingPreviewUseCase`，并把绑定预览与同步授权出口接入 `AppState`/`SettingsView`。
-- 绿灯结果：未验证；需由 GitHub macOS XCTest、iOS Build、治理门禁和源边界门禁证明。冲突状态独立轴的上传门禁已补充 XCTest。
+- 绿灯结果：GitHub macOS iOS Build 与 XCTest 通过；冲突状态独立轴、绑定预览和上传门禁已由测试覆盖。
 - PWA/iOS 差异：本片只约束 iOS；PWA 保持维护模式，不接入本地数据库或同步协议。
-- GitHub CI 结果：未触发；当前 feature 分支尚未推送。
+- GitHub CI 结果：PR #166 的 iOS Build、Release Validation、Governance Validation 全部通过；iOS Build 包含模拟器编译和 XCTest。
 - 未解决风险：现有登录成功路径仍会刷新旧云端 Dashboard；`baseVersion` 尚未持久化；本地云端互通和首次传输未实现；云端范围读取复用 `data_domains` 定义，后续同步协议仍需独立服务端契约；workspace 已绑定其他账号时仍只有退出/暂不开启出口。
-- 对应提交：待本片验证后提交。
-- 下一步：在 macOS CI 验证迁移、AppState/Settings 接线与 XCTest；首次导入与 Outbox 上传进入 `LOCAL-003D`。
+- 对应提交：`999d543`、`2902fa3`；PR #166。
+- 下一步：合并 PR #166 后进入 `LOCAL-003D`，实现首次导入与 Outbox 上传；本地优先页面仍需后续逐域接管旧 Dashboard 数据。
