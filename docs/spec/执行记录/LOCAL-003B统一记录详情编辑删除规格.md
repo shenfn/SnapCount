@@ -1,6 +1,6 @@
 # LOCAL-003B 统一记录详情、编辑、删除执行记录
 
-> 状态：实现完成，待 macOS CI 验证
+> 状态：实现完成，TestFlight 已上传，待真机验证
 >
 > 分支：`feature/LOCAL-003B统一记录详情编辑删除实现`
 >
@@ -28,6 +28,8 @@
 - `npm run governance:check`：通过。
 - `git diff --check`：通过。
 - 主测试集中的 `LocalExpenseRepositoryTests` 已覆盖更新、删除、余额流水、tombstone 和版本冲突；本轮未在 Windows 重跑 Swift 测试。
+- PR #165 的 macOS iOS Build：通过（Build for simulator + XCTest）。
+- TestFlight workflow：通过，run `32794323603`，上传提交 `f1e9af6`；Archive、Export IPA、Upload to TestFlight 和 IPA artifact 均成功。
 
 ## 冻结范围
 
@@ -42,6 +44,6 @@
 
 ## 下一步
 
-1. 推送实现分支并通过 GitHub macOS iOS Build 与 XCTest。
-2. CI 绿灯后由用户决定是否创建/合并 PR。
-3. 通过后再进入 LOCAL-003C 或回查统一页面的真实 iOS 交互，不扩展到同步和其他数据域。
+1. 等待 App Store Connect 完成处理并在 TestFlight 安装构建。
+2. 按本轮验证清单检查本地消费详情、编辑、删除、余额和离线行为。
+3. 真机验证通过后再由用户决定是否合并 PR；不扩展到同步和其他数据域。
