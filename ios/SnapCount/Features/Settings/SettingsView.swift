@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var themeManager: JieziThemeManager
     @State private var showLogin = false
+    @State private var showBindingPreview = false
     @State private var showDeleteAccountConfirmation = false
 
     var body: some View {
@@ -25,8 +26,31 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     LabeledContent("云同步") {
-                        Text(appState.isSignedIn ? "可手动开启" : "尚未开启")
+                        Text(syncStatusTitle)
                             .foregroundStyle(.secondary)
+                    }
+                    if canPreviewLocalBinding {
+                        Button {
+                            Task {
+                                await appState.prepareLocalBindingPreview()
+                                if appState.localBindingPreview != nil {
+                                    showBindingPreview = true
+                                }
+                            }
+                        } label: {
+                            Label(
+                                appState.isLoadingLocalBindingPreview ? "正在读取同步范围" : "查看同步预览",
+                                systemImage: "arrow.triangle.2.circlepath"
+                            )
+                        }
+                        .disabled(appState.isLoadingLocalBindingPreview)
+                    }
+                    if canDisableLocalSync {
+                        Button(role: .destructive) {
+                            appState.disableLocalSync()
+                        } label: {
+                            Label("关闭云同步", systemImage: "icloud.slash")
+                        }
                     }
                     if !appState.isSignedIn {
                         Button {
@@ -182,6 +206,13 @@ struct SettingsView: View {
                             .foregroundStyle(message.contains("失败") ? JieziTheme.coral : .secondary)
                     }
                 }
+                if let message = appState.localSyncMessage {
+                    Section {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(message.contains("失败") || message.contains("无法") ? JieziTheme.coral : .secondary)
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .listStyle(.insetGrouped)
@@ -203,7 +234,18 @@ struct SettingsView: View {
             NavigationStack { LoginView() }
                 .environmentObject(appState)
         }
+        .sheet(isPresented: $showBindingPreview) {
+            NavigationStack {
+                if let preview = appState.localBindingPreview {
+                    LocalBindingPreviewView(preview: preview)
+                } else {
+                    ContentUnavailableView("同步预览已结束", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            .environmentObject(appState)
+        }
         .task {
+            appState.refreshLocalSyncState()
             if appState.isSignedIn { await appState.loadUserSettings() }
         }
     }
@@ -225,6 +267,37 @@ struct SettingsView: View {
             }
         }
         .padding(.vertical, 5)
+    }
+
+    private var syncStatusTitle: String {
+        guard let state = appState.localSyncState else { return "状态未知" }
+        if state.conflictState == .unresolved { return "有待处理冲突" }
+        switch state.status {
+        case .disabled: return appState.isSignedIn ? "已登录，尚未开启" : "尚未开启"
+        case .ready: return "已授权，等待同步"
+        case .syncing: return "同步中"
+        case .synced: return "已同步"
+        case .failed: return "同步失败，可重试"
+        }
+    }
+
+    private var canPreviewLocalBinding: Bool {
+        guard appState.isSignedIn,
+              let state = appState.localSyncState else { return false }
+        switch state.binding {
+        case .unbound, .mismatch:
+            return true
+        case .bound(let userID):
+            return userID == appState.currentUserId && state.status == .disabled
+        }
+    }
+
+    private var canDisableLocalSync: Bool {
+        guard appState.isSignedIn,
+              let state = appState.localSyncState,
+              state.status != .disabled else { return false }
+        guard case .bound(let userID) = state.binding else { return false }
+        return userID == appState.currentUserId
     }
 
     private func settingsRow(_ title: String, detail: String, systemImage: String) -> some View {

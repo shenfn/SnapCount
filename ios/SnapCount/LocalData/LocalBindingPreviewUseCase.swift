@@ -5,6 +5,17 @@ protocol LocalBindingScopeProvider {
     func fetchScopes(cloudUserID: String) async throws -> [String]
 }
 
+struct DomainRepositoryBindingScopeProvider: LocalBindingScopeProvider {
+    let repository: DomainRepositoryProtocol
+    let accessTokenProvider: () async throws -> String
+
+    func fetchScopes(cloudUserID: String) async throws -> [String] {
+        let accessToken = try await accessTokenProvider()
+        let definitions = try await repository.fetchDefinitions(accessToken: accessToken)
+        return definitions.map(\.id)
+    }
+}
+
 protocol LocalBindingRepository: AnyObject {
     func activeProfile() throws -> LocalProfile
     func workspaceSummary(profileID: UUID) throws -> LocalWorkspaceSummary
