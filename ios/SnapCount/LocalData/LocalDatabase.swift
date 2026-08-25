@@ -122,6 +122,24 @@ final class LocalDatabase {
                     ON local_outbox_operations(status, sequence);
                 """)
         }
+        migrator.registerMigration("local-v2-sync-state") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_sync_state (
+                    profile_id TEXT PRIMARY KEY NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    sync_generation INTEGER NOT NULL DEFAULT 0 CHECK (sync_generation >= 0),
+                    pull_cursor TEXT,
+                    last_successful_sync_at DATETIME,
+                    active_attempt_id TEXT,
+                    sync_status TEXT NOT NULL DEFAULT 'disabled'
+                        CHECK (sync_status IN ('disabled', 'ready', 'syncing', 'synced', 'failed')),
+                    conflict_status TEXT NOT NULL DEFAULT 'none'
+                        CHECK (conflict_status IN ('none', 'unresolved'))
+                );
+
+                INSERT OR IGNORE INTO local_sync_state (profile_id)
+                    SELECT id FROM local_profiles;
+                """)
+        }
         return migrator
     }
 }

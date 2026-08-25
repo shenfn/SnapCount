@@ -58,6 +58,10 @@ final class AppState: ObservableObject {
     @Published var localAccounts: [LocalAccount] = []
     @Published var localAccountBalances: [UUID: Int64] = [:]
     @Published var localAccountMessage: String?
+    @Published var localSyncState: LocalSyncState?
+    @Published var localBindingPreview: LocalBindingPreview?
+    @Published var isLoadingLocalBindingPreview = false
+    @Published var localSyncMessage: String?
     @Published var financeVocabulary: [NativeFinanceVocabularyEntry] = []
     @Published var selectedAccountDetail: NativeAccountDetail?
     @Published var selectedAccountSourceSnapshot: NativeWalletSnapshot?
@@ -124,6 +128,7 @@ final class AppState: ObservableObject {
     private let insightsRepository: InsightsRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
     private let financeVocabularyRepository: FinanceVocabularyRepositoryProtocol
+    private let localBindingRepository: LocalBindingRepository?
     private let onboardingProgressStore: OnboardingProgressStore
     private let sessionProvider: NativeSessionProvider?
     private let expressionPlanAcknowledgementSleep: NativeSleepProvider
@@ -169,6 +174,7 @@ final class AppState: ObservableObject {
         insightsRepository: InsightsRepositoryProtocol = InsightsRepository(),
         settingsRepository: SettingsRepositoryProtocol = SettingsRepository(),
         financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository(),
+        localBindingRepository: LocalBindingRepository? = nil,
         onboardingProgressStore: OnboardingProgressStore = OnboardingProgressStore(),
         sessionProvider: NativeSessionProvider? = nil,
         expressionPlanAcknowledgementSleep: @escaping NativeSleepProvider = {
@@ -203,6 +209,7 @@ final class AppState: ObservableObject {
         self.insightsRepository = insightsRepository
         self.settingsRepository = settingsRepository
         self.financeVocabularyRepository = financeVocabularyRepository
+        self.localBindingRepository = localBindingRepository ?? Self.defaultLocalBindingRepository()
         self.onboardingProgressStore = onboardingProgressStore
         self.sessionProvider = sessionProvider
         self.expressionPlanAcknowledgementSleep = expressionPlanAcknowledgementSleep
@@ -212,6 +219,7 @@ final class AppState: ObservableObject {
         Task {
             do {
                 _ = try await localExpenseUseCase?.prepareProfile()
+                refreshLocalSyncState()
             } catch {
                 manualRecordMessage = "本地数据初始化失败：\(error.localizedDescription)"
             }
@@ -367,6 +375,90 @@ final class AppState: ObservableObject {
             updateShortcutCredentialMessage()
         } catch {
             shortcutCredentialMessage = error.localizedDescription
+        }
+    }
+
+    func refreshLocalSyncState() {
+        guard let localBindingRepository else {
+            localSyncState = nil
+            return
+        }
+        do {
+            let profile = try localBindingRepository.activeProfile()
+            localSyncState = try localBindingRepository.syncState(profileID: profile.id)
+            localSyncMessage = nil
+        } catch {
+            localSyncState = nil
+            localSyncMessage = "本地同步状态读取失败：\(error.localizedDescription)"
+        }
+    }
+
+    func prepareLocalBindingPreview() async {
+        guard isSignedIn, !currentUserId.isEmpty else { return }
+        guard let localBindingRepository else {
+            localSyncMessage = "本地同步服务不可用。"
+            return
+        }
+        guard !isLoadingLocalBindingPreview else { return }
+        isLoadingLocalBindingPreview = true
+        localSyncMessage = nil
+        defer { isLoadingLocalBindingPreview = false }
+
+        do {
+            let session = try await validSession()
+            let userID = session.user.id
+            guard userID == currentUserId else { return }
+            let useCase = LocalBindingPreviewUseCase(
+                repository: localBindingRepository,
+                scopeProvider: DomainRepositoryBindingScopeProvider(
+                    repository: domainRepository,
+                    accessTokenProvider: { [weak self] in
+                        guard let self else { throw SupabaseRemoteError.missingSession }
+                        let session = try await self.validSession()
+                        return session.accessToken
+                    }
+                )
+            )
+            localBindingPreview = try await useCase.makePreview(
+                cloudUserID: userID,
+                email: session.user.email
+            )
+        } catch {
+            localBindingPreview = nil
+            localSyncMessage = "无法读取云端同步范围：\(error.localizedDescription)"
+        }
+    }
+
+    func deferLocalSync() {
+        localBindingPreview = nil
+        refreshLocalSyncState()
+        localSyncMessage = "已保留本地数据，同步尚未开启。"
+    }
+
+    func disableLocalSync() {
+        guard let localBindingRepository else { return }
+        do {
+            let profile = try localBindingRepository.activeProfile()
+            localSyncState = try localBindingRepository.disableSync(profileID: profile.id)
+            localBindingPreview = nil
+            localSyncMessage = "云同步已关闭，本地数据仍保留在此 iPhone。"
+        } catch {
+            localSyncMessage = "关闭云同步失败：\(error.localizedDescription)"
+        }
+    }
+
+    func confirmLocalBinding() {
+        guard let preview = localBindingPreview,
+              let localBindingRepository else { return }
+        do {
+            localSyncState = try localBindingRepository.confirmBinding(
+                profileID: preview.workspaceID,
+                cloudUserID: preview.candidateCloudUserID
+            )
+            localBindingPreview = nil
+            localSyncMessage = "已绑定本地 workspace。首次同步将在后续版本中执行。"
+        } catch {
+            localSyncMessage = error.localizedDescription
         }
     }
 
@@ -3120,6 +3212,7 @@ final class AppState: ObservableObject {
         isSignedIn = true
         currentUserId = session.user.id
         currentUserEmail = session.user.email ?? ""
+        refreshLocalSyncState()
     }
 
     private func updateShortcutCredentialMessage() {
@@ -3178,6 +3271,7 @@ final class AppState: ObservableObject {
     }
 
     private func invalidateSession(message: String) {
+        disableLocalSync()
         try? keychain.remove(KeychainKeys.authSession)
         try? keychain.remove(KeychainKeys.uploadToken)
         isSignedIn = false
@@ -3186,6 +3280,7 @@ final class AppState: ObservableObject {
         hasUploadToken = false
         shortcutCredentialMessage = nil
         resetUserScopedState()
+        refreshLocalSyncState()
         selectedTab = .records
         Task { await RemoteImageRepository.shared.clear() }
         authMessage = message
@@ -3236,6 +3331,10 @@ final class AppState: ObservableObject {
         selectedAccountDetail = nil
         selectedAccountSourceSnapshot = nil
         accountMessage = nil
+        localSyncState = nil
+        localBindingPreview = nil
+        isLoadingLocalBindingPreview = false
+        localSyncMessage = nil
         isLoadingAccounts = false
         isSavingAccount = false
         isSubmittingRepayment = false
@@ -3441,6 +3540,11 @@ final class AppState: ObservableObject {
         guard let database = try? LocalDatabase(),
               let repository = try? LocalExpenseRepository(database: database) else { return nil }
         return LocalExpenseUseCase(profileStore: LocalProfileStore(database: database), repository: repository)
+    }
+
+    private static func defaultLocalBindingRepository() -> LocalBindingRepository? {
+        guard let database = try? LocalDatabase() else { return nil }
+        return LocalProfileStore(database: database)
     }
 
     private static let monthKeyFormatter: DateFormatter = {
