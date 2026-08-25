@@ -20,6 +20,9 @@ protocol LocalExpenseRepositoryProtocol {
     func accountEntryCount() throws -> Int
     func accountEntries(sourceID: UUID) throws -> [LocalAccountEntry]
     func pendingOutboxOperations() throws -> [LocalOutboxOperation]
+    func pendingOutboxUploads(profileID: UUID) throws -> [LocalOutboxUpload]
+    func markOutboxSent(operationIDs: [UUID]) throws
+    func markOutboxFailed(operationIDs: [UUID], error: String) throws
     func accountBalanceMinor(accountID: UUID) throws -> Int64
 }
 
@@ -430,6 +433,74 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     ORDER BY sequence ASC
                     """
             ).map { try Self.outboxOperation(from: $0) }
+        }
+    }
+
+    func pendingOutboxUploads(profileID: UUID) throws -> [LocalOutboxUpload] {
+        try database.writer.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT sequence, operation_id, profile_id, aggregate_kind, aggregate_id,
+                           operation_kind, aggregate_version, idempotency_key, payload_json,
+                           attempt_count, created_at
+                    FROM local_outbox_operations
+                    WHERE profile_id = ? AND status IN ('pending', 'failed')
+                    ORDER BY sequence ASC
+                    """,
+                arguments: [profileID.uuidString]
+            ).map { row in
+                guard let operationID = UUID(uuidString: row["operation_id"]),
+                      let profileID = UUID(uuidString: row["profile_id"]),
+                      let aggregateID = UUID(uuidString: row["aggregate_id"]) else {
+                    throw LocalDataError.invalidRecord
+                }
+                return LocalOutboxUpload(
+                    sequence: row["sequence"],
+                    operationID: operationID,
+                    profileID: profileID,
+                    aggregateKind: row["aggregate_kind"],
+                    aggregateID: aggregateID,
+                    operationKind: row["operation_kind"],
+                    aggregateVersion: row["aggregate_version"],
+                    idempotencyKey: row["idempotency_key"],
+                    payloadJSON: row["payload_json"],
+                    attemptCount: row["attempt_count"],
+                    createdAt: row["created_at"]
+                )
+            }
+        }
+    }
+
+    func markOutboxSent(operationIDs: [UUID]) throws {
+        guard !operationIDs.isEmpty else { return }
+        try database.writer.write { db in
+            for operationID in operationIDs {
+                try db.execute(
+                    sql: """
+                        UPDATE local_outbox_operations
+                        SET status = 'sent', last_error = NULL, next_attempt_at = NULL
+                        WHERE operation_id = ? AND status IN ('pending', 'failed', 'processing')
+                        """,
+                    arguments: [operationID.uuidString]
+                )
+            }
+        }
+    }
+
+    func markOutboxFailed(operationIDs: [UUID], error: String) throws {
+        guard !operationIDs.isEmpty else { return }
+        try database.writer.write { db in
+            for operationID in operationIDs {
+                try db.execute(
+                    sql: """
+                        UPDATE local_outbox_operations
+                        SET status = 'failed', attempt_count = attempt_count + 1, last_error = ?
+                        WHERE operation_id = ? AND status IN ('pending', 'failed', 'processing')
+                        """,
+                    arguments: [error, operationID.uuidString]
+                )
+            }
         }
     }
 
