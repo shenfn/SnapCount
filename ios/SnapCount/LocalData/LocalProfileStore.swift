@@ -6,7 +6,7 @@ protocol LocalProfileStoreProtocol {
 }
 
 final class LocalProfileStore: LocalProfileStoreProtocol {
-    private let database: LocalDatabase
+    let database: LocalDatabase
 
     init(database: LocalDatabase) {
         self.database = database
