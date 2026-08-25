@@ -156,11 +156,19 @@ final class LocalExpensePortability {
         }
     }
 
-    func importArchive(_ data: Data, importedAt: Date = Date()) throws -> LocalExpenseImportResult {
+    func importArchive(
+        _ data: Data,
+        importedAt: Date = Date(),
+        enqueueOutbox: Bool = true,
+        expectedProfileID: UUID? = nil
+    ) throws -> LocalExpenseImportResult {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let archive = try decoder.decode(LocalExpenseArchive.self, from: data)
         try validate(archive)
+        if let expectedProfileID, archive.profile.id != expectedProfileID {
+            throw LocalExpenseArchiveError.invalidRelationship
+        }
 
         return try database.writer.write { db in
             let existingProfile = try Row.fetchOne(
@@ -319,7 +327,7 @@ final class LocalExpensePortability {
             }
 
             var insertedOutbox = 0
-            for expense in archive.expenses where insertedExpenseIDs.contains(expense.id) {
+            for expense in archive.expenses where enqueueOutbox && insertedExpenseIDs.contains(expense.id) {
                 try db.execute(
                     sql: """
                         INSERT INTO local_outbox_operations (

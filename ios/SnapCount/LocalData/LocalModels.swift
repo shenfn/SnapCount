@@ -111,6 +111,20 @@ struct LocalOutboxOperation: Equatable {
     let createdAt: Date
 }
 
+struct LocalOutboxUpload: Equatable {
+    let sequence: Int64
+    let operationID: UUID
+    let profileID: UUID
+    let aggregateKind: String
+    let aggregateID: UUID
+    let operationKind: String
+    let aggregateVersion: Int64
+    let idempotencyKey: String
+    let payloadJSON: String
+    let attemptCount: Int
+    let createdAt: Date
+}
+
 enum LocalDataError: Error, Equatable {
     case invalidAmount
     case invalidAccountKind
@@ -189,4 +203,6 @@ struct LocalBindingPreview: Equatable {
 enum LocalSyncError: Error, Equatable {
     case bindingMismatch(boundUserID: String, candidateUserID: String)
     case invalidWorkspace
+    case syncNotAuthorized
+    case staleAttempt
 }

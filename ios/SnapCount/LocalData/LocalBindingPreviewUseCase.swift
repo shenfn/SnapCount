@@ -88,6 +88,41 @@ struct LocalBindingPreviewUseCase {
 }
 
 extension LocalProfileStore: LocalBindingRepository {
+    func isCurrentSyncAttempt(profileID: UUID, cloudUserID: String, attemptID: UUID) throws -> Bool {
+        try database.writer.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT p.cloud_user_id, p.sync_enabled, s.active_attempt_id, s.conflict_status
+                    FROM local_profiles AS p
+                    JOIN local_sync_state AS s ON s.profile_id = p.id
+                    WHERE p.id = ?
+                    """,
+                arguments: [profileID.uuidString]
+            ) else { throw LocalSyncError.invalidWorkspace }
+            let boundUserID: String? = row["cloud_user_id"]
+            let syncEnabled: Bool = row["sync_enabled"] ?? false
+            let activeAttempt: String? = row["active_attempt_id"]
+            let conflictStatus: String = row["conflict_status"] ?? "none"
+            return boundUserID == cloudUserID
+                && syncEnabled
+                && activeAttempt == attemptID.uuidString
+                && conflictStatus == "none"
+        }
+    }
+
+    func syncCheckpoint(profileID: UUID) throws -> LocalSyncCheckpoint {
+        let state = try syncState(profileID: profileID)
+        return LocalSyncCheckpoint(
+            workspaceID: profileID,
+            syncGeneration: state.syncGeneration,
+            pullCursor: state.pullCursor,
+            lastSuccessfulSyncAt: state.lastSuccessfulSyncAt,
+            activeAttemptID: state.activeAttemptID,
+            pendingMutationCount: state.pendingMutationCount
+        )
+    }
+
     func workspaceSummary(profileID: UUID) throws -> LocalWorkspaceSummary {
         try database.writer.read { db in
             guard try String.fetchOne(
@@ -266,6 +301,123 @@ extension LocalProfileStore: LocalBindingRepository {
             return false
         }
         return true
+    }
+
+    func beginSync(profileID: UUID, cloudUserID: String, attemptID: UUID = UUID()) throws -> LocalSyncState {
+        try database.writer.write { db in
+            guard let profileRow = try Row.fetchOne(
+                db,
+                sql: "SELECT cloud_user_id, sync_enabled FROM local_profiles WHERE id = ?",
+                arguments: [profileID.uuidString]
+            ) else {
+                throw LocalSyncError.invalidWorkspace
+            }
+            let boundUserID: String? = profileRow["cloud_user_id"]
+            let syncEnabled: Bool = profileRow["sync_enabled"] ?? false
+            guard boundUserID == cloudUserID, syncEnabled else {
+                throw LocalSyncError.syncNotAuthorized
+            }
+            try ensureSyncState(db: db, profileID: profileID)
+            let state = try syncState(db: db, profileID: profileID, boundUserID: boundUserID)
+            guard state.conflictState == .none else { throw LocalSyncError.syncNotAuthorized }
+            try db.execute(
+                sql: """
+                    UPDATE local_sync_state
+                    SET sync_status = 'syncing', active_attempt_id = ?
+                    WHERE profile_id = ? AND sync_generation = ?
+                    """,
+                arguments: [attemptID.uuidString, profileID.uuidString, state.syncGeneration]
+            )
+            return try syncState(db: db, profileID: profileID, boundUserID: boundUserID)
+        }
+    }
+
+    func completeSync(
+        profileID: UUID,
+        attemptID: UUID,
+        pullCursor: String?,
+        completedAt: Date
+    ) throws -> LocalSyncState {
+        try database.writer.write { db in
+            guard let profileRow = try Row.fetchOne(
+                db,
+                sql: "SELECT cloud_user_id FROM local_profiles WHERE id = ?",
+                arguments: [profileID.uuidString]
+            ),
+            let boundUserID: String = profileRow["cloud_user_id"],
+            let activeAttempt: String = try String.fetchOne(
+                db,
+                sql: "SELECT active_attempt_id FROM local_sync_state WHERE profile_id = ?",
+                arguments: [profileID.uuidString]
+            ) else {
+                throw LocalSyncError.invalidWorkspace
+            }
+            guard activeAttempt == attemptID.uuidString else { throw LocalSyncError.staleAttempt }
+            try db.execute(
+                sql: """
+                    UPDATE local_sync_state
+                    SET pull_cursor = ?, last_successful_sync_at = ?,
+                        active_attempt_id = NULL, sync_status = 'synced'
+                    WHERE profile_id = ? AND active_attempt_id = ?
+                    """,
+                arguments: [pullCursor, completedAt, profileID.uuidString, attemptID.uuidString]
+            )
+            return try syncState(db: db, profileID: profileID, boundUserID: boundUserID)
+        }
+    }
+
+    func failSync(profileID: UUID, attemptID: UUID) throws -> LocalSyncState {
+        try database.writer.write { db in
+            guard let profileRow = try Row.fetchOne(
+                db,
+                sql: "SELECT cloud_user_id FROM local_profiles WHERE id = ?",
+                arguments: [profileID.uuidString]
+            ),
+            let boundUserID: String = profileRow["cloud_user_id"] else {
+                throw LocalSyncError.invalidWorkspace
+            }
+            guard try String.fetchOne(
+                db,
+                sql: "SELECT active_attempt_id FROM local_sync_state WHERE profile_id = ?",
+                arguments: [profileID.uuidString]
+            ) == attemptID.uuidString else { throw LocalSyncError.staleAttempt }
+            try db.execute(
+                sql: """
+                    UPDATE local_sync_state
+                    SET active_attempt_id = NULL, sync_status = 'failed'
+                    WHERE profile_id = ? AND active_attempt_id = ?
+                    """,
+                arguments: [profileID.uuidString, attemptID.uuidString]
+            )
+            return try syncState(db: db, profileID: profileID, boundUserID: boundUserID)
+        }
+    }
+
+    func markSyncConflict(profileID: UUID, attemptID: UUID) throws -> LocalSyncState {
+        try database.writer.write { db in
+            guard let profileRow = try Row.fetchOne(
+                db,
+                sql: "SELECT cloud_user_id FROM local_profiles WHERE id = ?",
+                arguments: [profileID.uuidString]
+            ),
+            let boundUserID: String = profileRow["cloud_user_id"] else {
+                throw LocalSyncError.invalidWorkspace
+            }
+            guard try String.fetchOne(
+                db,
+                sql: "SELECT active_attempt_id FROM local_sync_state WHERE profile_id = ?",
+                arguments: [profileID.uuidString]
+            ) == attemptID.uuidString else { throw LocalSyncError.staleAttempt }
+            try db.execute(
+                sql: """
+                    UPDATE local_sync_state
+                    SET active_attempt_id = NULL, conflict_status = 'unresolved', sync_status = 'failed'
+                    WHERE profile_id = ? AND active_attempt_id = ?
+                    """,
+                arguments: [profileID.uuidString, attemptID.uuidString]
+            )
+            return try syncState(db: db, profileID: profileID, boundUserID: boundUserID)
+        }
     }
 
     private func ensureSyncState(db: Database, profileID: UUID) throws {
