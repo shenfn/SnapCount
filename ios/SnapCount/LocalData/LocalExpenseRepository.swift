@@ -24,6 +24,7 @@ protocol LocalExpenseRepositoryProtocol {
     func markOutboxSent(operationIDs: [UUID]) throws
     func markOutboxFailed(operationIDs: [UUID], error: String) throws
     func accountBalanceMinor(accountID: UUID) throws -> Int64
+    func applyRemoteSnapshot(_ snapshot: LocalRemoteSnapshot, profileID: UUID, excludingExpenseIDs: Set<UUID>) throws -> Int
 }
 
 final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
@@ -530,6 +531,69 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             let openingBalance: Int64 = row["opening_balance_minor"]
             let ledgerDelta: Int64 = row["ledger_delta_minor"]
             return openingBalance + ledgerDelta
+        }
+    }
+
+    func applyRemoteSnapshot(_ snapshot: LocalRemoteSnapshot, profileID: UUID, excludingExpenseIDs: Set<UUID> = []) throws -> Int {
+        try database.writer.write { db in
+            var imported = 0
+            for account in snapshot.accounts {
+                if account.deletedAt != nil {
+                    continue
+                }
+                let existing = try Row.fetchOne(db, sql: "SELECT id FROM local_accounts WHERE id = ? AND profile_id = ?", arguments: [account.id.uuidString, profileID.uuidString])
+                if existing == nil {
+                    try db.execute(sql: """
+                        INSERT INTO local_accounts (id, profile_id, name, kind, currency, opening_balance_minor, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, arguments: [account.id.uuidString, profileID.uuidString, account.name, account.kind, account.currency, account.openingBalanceMinor, Date()])
+                    imported += 1
+                } else {
+                    try db.execute(sql: "UPDATE local_accounts SET name = ?, kind = ?, currency = ? WHERE id = ? AND profile_id = ?", arguments: [account.name, account.kind, account.currency, account.id.uuidString, profileID.uuidString])
+                }
+            }
+            for expense in snapshot.expenses {
+                if excludingExpenseIDs.contains(expense.id) { continue }
+                let row = try Row.fetchOne(db, sql: "SELECT local_version FROM local_expenses WHERE id = ? AND profile_id = ?", arguments: [expense.id.uuidString, profileID.uuidString])
+                let localVersion: Int64 = row?["local_version"] ?? 0
+                guard expense.version >= localVersion else { continue }
+                if expense.deletedAt != nil {
+                    try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL", arguments: [expense.deletedAt, expense.id.uuidString])
+                    try db.execute(sql: "UPDATE local_expenses SET local_version = ?, deleted_at = ?, updated_at = ? WHERE id = ? AND profile_id = ?", arguments: [expense.version, expense.deletedAt, Date(), expense.id.uuidString, profileID.uuidString])
+                } else if row == nil {
+                    try db.execute(sql: """
+                        INSERT INTO local_expenses (id, profile_id, account_id, amount_minor, currency, merchant_name, platform, category, payment_method, transaction_date, transaction_time, note, local_version, created_at, updated_at, deleted_at)
+                        VALUES (?, ?, ?, ?, ?, ?, 'remote', ?, ?, ?, ?, NULL, ?, ?, ?, NULL)
+                        """, arguments: [expense.id.uuidString, profileID.uuidString, expense.accountID.uuidString, expense.amountMinor, expense.currency, expense.merchantName, expense.category, expense.paymentMethod, expense.transactionDate, expense.transactionTime, expense.version, Date(), Date()])
+                    try db.execute(sql: """
+                        INSERT INTO local_account_entries (id, profile_id, account_id, direction, amount_minor, entry_kind, source_kind, source_id, occurred_at, voided_at)
+                        VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
+                        """, arguments: [UUID().uuidString, profileID.uuidString, expense.accountID.uuidString, expense.amountMinor, expense.id.uuidString, Date()])
+                    imported += 1
+                } else {
+                    try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL", arguments: [Date(), expense.id.uuidString])
+                    try db.execute(sql: """
+                        UPDATE local_expenses SET account_id = ?, amount_minor = ?, currency = ?, merchant_name = ?, category = ?, payment_method = ?, transaction_date = ?, transaction_time = ?, local_version = ?, updated_at = ?
+                        WHERE id = ? AND profile_id = ?
+                        """, arguments: [expense.accountID.uuidString, expense.amountMinor, expense.currency, expense.merchantName, expense.category, expense.paymentMethod, expense.transactionDate, expense.transactionTime, expense.version, Date(), expense.id.uuidString, profileID.uuidString])
+                    try db.execute(sql: """
+                        INSERT INTO local_account_entries (id, profile_id, account_id, direction, amount_minor, entry_kind, source_kind, source_id, occurred_at, voided_at)
+                        VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
+                        """, arguments: [UUID().uuidString, profileID.uuidString, expense.accountID.uuidString, expense.amountMinor, expense.id.uuidString, Date()])
+                }
+            }
+            for entry in snapshot.accountEntries {
+                let exists = try Row.fetchOne(db, sql: "SELECT id FROM local_account_entries WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL", arguments: [entry.sourceID.uuidString]) != nil
+                if !exists {
+                    try db.execute(sql: """
+                        INSERT INTO local_account_entries (id, profile_id, account_id, direction, amount_minor, entry_kind, source_kind, source_id, occurred_at, voided_at)
+                        VALUES (?, ?, ?, ?, ?, ?, 'expense', ?, ?, ?)
+                        """, arguments: [UUID().uuidString, profileID.uuidString, entry.accountID.uuidString, entry.direction, entry.amountMinor, entry.entryKind, entry.sourceID.uuidString, Date(), entry.voided ? Date() : nil])
+                } else if entry.voided {
+                    try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND profile_id = ?", arguments: [Date(), entry.sourceID.uuidString, profileID.uuidString])
+                }
+            }
+            return imported
         }
     }
 

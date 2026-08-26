@@ -3,6 +3,17 @@ import Foundation
 struct LocalSyncTransportResult: Equatable {
     let remoteArchive: Data?
     let nextPullCursor: String?
+    let remoteSnapshot: LocalRemoteSnapshot?
+    let acceptedOperationIDs: [UUID]?
+    let conflictedExpenseIDs: Set<UUID>
+
+    init(remoteArchive: Data? = nil, nextPullCursor: String? = nil, remoteSnapshot: LocalRemoteSnapshot? = nil, acceptedOperationIDs: [UUID]? = nil, conflictedExpenseIDs: Set<UUID> = []) {
+        self.remoteArchive = remoteArchive
+        self.nextPullCursor = nextPullCursor
+        self.remoteSnapshot = remoteSnapshot
+        self.acceptedOperationIDs = acceptedOperationIDs
+        self.conflictedExpenseIDs = conflictedExpenseIDs
+    }
 }
 
 protocol LocalSyncTransport {
@@ -80,7 +91,9 @@ struct LocalSyncCoordinator {
                 throw LocalSyncError.staleAttempt
             }
             var importedRecordCount = 0
-            if let archive = result.remoteArchive {
+            if let snapshot = result.remoteSnapshot {
+                importedRecordCount = try repository.applyRemoteSnapshot(snapshot, profileID: profileID, excludingExpenseIDs: result.conflictedExpenseIDs)
+            } else if let archive = result.remoteArchive {
                 do {
                     let imported = try portability.importArchive(
                         archive,
@@ -94,7 +107,14 @@ struct LocalSyncCoordinator {
                     throw error
                 }
             }
-            try repository.markOutboxSent(operationIDs: uploads.map(\.operationID))
+            let acceptedIDs = result.acceptedOperationIDs ?? uploads.map(\.operationID)
+            if !acceptedIDs.isEmpty {
+                try repository.markOutboxSent(operationIDs: acceptedIDs)
+            }
+            if !result.conflictedExpenseIDs.isEmpty {
+                _ = try stateStore.markSyncConflict(profileID: profileID, attemptID: currentAttemptID)
+                throw LocalSyncError.remoteConflict
+            }
             let state = try stateStore.completeSync(
                 profileID: profileID,
                 attemptID: currentAttemptID,
