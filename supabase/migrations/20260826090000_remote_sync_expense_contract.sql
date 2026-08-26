@@ -105,6 +105,9 @@ declare
   v_cursor bigint;
   v_next_cursor bigint;
   v_pull_cursor bigint;
+  v_remote_accounts jsonb := '[]'::jsonb;
+  v_remote_expenses jsonb := '[]'::jsonb;
+  v_remote_entries jsonb := '[]'::jsonb;
   v_accepted jsonb := '[]'::jsonb;
   v_conflicts jsonb := '[]'::jsonb;
   v_rejected jsonb := '[]'::jsonb;
@@ -292,9 +295,59 @@ begin
   end loop;
 
   select coalesce(max(cursor), 0) into v_next_cursor from public.sync_change_log where user_id = v_user_id;
+  select coalesce(jsonb_agg(to_jsonb(account_row) order by account_row.cursor), '[]'::jsonb)
+    into v_remote_accounts
+    from (
+      select distinct on (c.aggregate_id)
+        c.cursor, c.aggregate_id, c.version, c.change_kind,
+        a.name, a.type, a.currency, a.initial_balance, a.current_balance,
+        e.deleted_at
+        from public.sync_change_log c
+        left join public.accounts a
+          on a.id = c.aggregate_id and a.user_id = v_user_id
+        left join public.sync_entity_versions e
+          on e.user_id = v_user_id and e.aggregate_kind = 'account'
+         and e.aggregate_id = c.aggregate_id
+       where c.user_id = v_user_id and c.aggregate_kind = 'account'
+         and (v_pull_cursor is null or c.cursor > v_pull_cursor)
+       order by c.aggregate_id, c.cursor desc
+    ) account_row;
+  select coalesce(jsonb_agg(to_jsonb(expense_row) order by expense_row.cursor), '[]'::jsonb)
+    into v_remote_expenses
+    from (
+      select distinct on (c.aggregate_id)
+        c.cursor, c.aggregate_id, c.version, c.change_kind,
+        t.amount, t.merchant_name, t.category, t.payment_method,
+        t.transaction_date, t.transaction_time, t.account_id,
+        e.deleted_at
+        from public.sync_change_log c
+        left join public.transactions t
+          on t.id = c.aggregate_id and t.user_id = v_user_id
+        left join public.sync_entity_versions e
+          on e.user_id = v_user_id and e.aggregate_kind = 'expense'
+         and e.aggregate_id = c.aggregate_id
+       where c.user_id = v_user_id and c.aggregate_kind = 'expense'
+         and (v_pull_cursor is null or c.cursor > v_pull_cursor)
+       order by c.aggregate_id, c.cursor desc
+    ) expense_row;
+  select coalesce(jsonb_agg(to_jsonb(entry_row) order by entry_row.cursor), '[]'::jsonb)
+    into v_remote_entries
+    from (
+      select distinct on (c.aggregate_id)
+        c.cursor, c.aggregate_id, c.version, c.change_kind,
+        ae.account_id, ae.direction, ae.amount, ae.entry_type,
+        ae.source_table, ae.source_id, ae.is_voided, ae.voided_reason
+        from public.sync_change_log c
+        join public.account_entries ae
+          on ae.source_id = c.aggregate_id and ae.user_id = v_user_id
+         and ae.source_table = 'transactions'
+       where c.user_id = v_user_id and c.aggregate_kind = 'expense'
+         and (v_pull_cursor is null or c.cursor > v_pull_cursor)
+       order by c.aggregate_id, c.cursor desc
+    ) entry_row;
   return jsonb_build_object('accepted_operation_ids', v_accepted, 'conflicts', v_conflicts,
-    'rejected', v_rejected, 'remote_accounts', '[]'::jsonb, 'remote_expenses', '[]'::jsonb,
-    'remote_account_entries', '[]'::jsonb, 'next_pull_cursor', 'c:' || v_next_cursor::text,
+    'rejected', v_rejected, 'remote_accounts', v_remote_accounts, 'remote_expenses', v_remote_expenses,
+    'remote_account_entries', v_remote_entries, 'next_pull_cursor', 'c:' || v_next_cursor::text,
     'operation_count', v_operation_count);
 end;
 $$;
