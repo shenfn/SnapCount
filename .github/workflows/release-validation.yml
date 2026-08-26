@@ -331,6 +331,17 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260816210000_wallet_snapshot_atomic_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-wallet-snapshot-contract.sql
 
+      - name: Execute remote sync transaction contract
+        env:
+          PGROOT: postgresql://postgres:security-test@localhost:5432/postgres
+          PGURL: postgresql://postgres:security-test@localhost:5432/remote_sync_contract
+        run: |
+          psql "$PGROOT" -v ON_ERROR_STOP=1 -c "create database remote_sync_contract"
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-remote-sync-contract-fixture.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260826090000_remote_sync_expense_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260826090000_remote_sync_expense_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-remote-sync-contract.sql
+
       - name: Execute staging archive migration contract
         env:
           PGROOT: postgresql://postgres:security-test@localhost:5432/postgres
