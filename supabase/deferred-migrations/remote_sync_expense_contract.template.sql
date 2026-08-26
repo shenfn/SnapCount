@@ -1,0 +1,16 @@
+-- D-REMOTE-002 implementation placeholder.
+--
+-- This file is intentionally deferred: it documents the production migration
+-- slot without allowing an unfinished sync RPC into the active migration set.
+-- The implementation slice must replace this template with a timestamped
+-- migration only after scripts/test-remote-sync-contract.sql is green.
+
+-- Required objects:
+--   public.sync_entity_versions
+--   public.sync_change_log
+--   public.sync_operations
+--   public.sync_expense_batch(uuid, integer, text, jsonb)
+--
+-- Required properties:
+--   user-scoped uniqueness, server-owned cursor, tombstones, transaction-wide
+--   rollback, immutable idempotency result, and auth.uid() isolation.
