@@ -122,6 +122,90 @@ begin
 end;
 $$;
 
--- DREMOTE-004 entry replacement, DREMOTE-005 tombstones, DREMOTE-006 whole
--- batch rollback, and DREMOTE-008 cursor retention remain explicit red work
--- for the next migration slice.
+do $$
+declare
+  v_replace jsonb;
+  v_delete jsonb;
+  v_before_transactions integer;
+  v_before_operations integer;
+  v_rollback boolean := false;
+  v_expense_id uuid := '77000000-0000-4000-8000-000000000002';
+  v_account_id uuid := '66000000-0000-4000-8000-000000000001';
+begin
+  v_replace := public.sync_expense_batch(
+    'aa000000-0000-4000-8000-000000000001', 1, null,
+    jsonb_build_array(jsonb_build_object(
+      'operation_id', '99000000-0000-4000-8000-000000000005',
+      'idempotency_key', 'replace-key-001', 'aggregate_kind', 'expense',
+      'aggregate_id', v_expense_id, 'aggregate_version', 2, 'base_version', 1,
+      'payload', jsonb_build_object('amount', 10, 'account_id', v_account_id)
+    ))
+  );
+  perform public.remote_sync_test_assert(
+    jsonb_array_length(v_replace->'accepted_operation_ids') = 1
+      and (select count(*) from public.account_entries where source_id = v_expense_id and not is_voided) = 1
+      and (select count(*) from public.account_entries where source_id = v_expense_id and is_voided) = 1
+      and (select amount = 10 from public.transactions where id = v_expense_id),
+    'DREMOTE-004 replacement must void the old entry and create one new entry'
+  );
+
+  v_delete := public.sync_expense_batch(
+    'aa000000-0000-4000-8000-000000000001', 1, null,
+    jsonb_build_array(jsonb_build_object(
+      'operation_id', '99000000-0000-4000-8000-000000000006',
+      'idempotency_key', 'delete-key-001', 'aggregate_kind', 'expense',
+      'aggregate_id', v_expense_id, 'operation_kind', 'delete',
+      'aggregate_version', 3, 'base_version', 2, 'payload', '{}'::jsonb
+    ))
+  );
+  perform public.remote_sync_test_assert(
+    jsonb_array_length(v_delete->'accepted_operation_ids') = 1
+      and (select status = 'deleted' from public.transactions where id = v_expense_id)
+      and (select count(*) from public.account_entries where source_id = v_expense_id and not is_voided) = 0
+      and (select change_kind = 'delete' from public.sync_change_log
+            where aggregate_id = v_expense_id order by cursor desc limit 1),
+    'DREMOTE-005 delete must retain a tombstone and void the entry'
+  );
+
+  select count(*) into v_before_transactions from public.transactions;
+  select count(*) into v_before_operations from public.sync_operations;
+  begin
+    perform public.sync_expense_batch(
+      'aa000000-0000-4000-8000-000000000001', 1, null,
+      jsonb_build_array(
+        jsonb_build_object(
+          'operation_id', '99000000-0000-4000-8000-000000000007',
+          'idempotency_key', 'rollback-key-001', 'aggregate_kind', 'expense',
+          'aggregate_id', '77000000-0000-4000-8000-000000000004',
+          'aggregate_version', 1, 'base_version', 0,
+          'payload', jsonb_build_object('amount', 11, 'account_id', v_account_id)
+        ),
+        jsonb_build_object(
+          'operation_id', '99000000-0000-4000-8000-000000000008',
+          'idempotency_key', 'rollback-key-002', 'aggregate_kind', 'expense',
+          'aggregate_id', '77000000-0000-4000-8000-000000000005',
+          'aggregate_version', 1, 'base_version', 0,
+          'payload', jsonb_build_object('force_failure', true, 'amount', 12, 'account_id', v_account_id)
+        )
+      )
+    );
+  exception when others then
+    v_rollback := position('sync_batch_forced_failure' in sqlerrm) > 0;
+  end;
+  perform public.remote_sync_test_assert(
+    v_rollback
+      and (select count(*) from public.transactions) = v_before_transactions
+      and (select count(*) from public.sync_operations) = v_before_operations,
+    'DREMOTE-006 mid-batch failure must roll back all facts and metadata'
+  );
+
+  update public.sync_cursor_state set minimum_cursor = 100
+   where user_id = '11111111-1111-4111-8111-111111111111';
+  perform public.remote_sync_test_assert(
+    public.sync_expense_batch(
+      'aa000000-0000-4000-8000-000000000001', 1, 'c:0', '[]'::jsonb
+    )->>'error' = 'cursor_expired',
+    'DREMOTE-008 expired cursor must return cursor_expired'
+  );
+end;
+$$;
