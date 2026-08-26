@@ -102,7 +102,7 @@ begin
       'aggregate_id', '66000000-0000-4000-8000-000000000002',
       'aggregate_version', 1, 'base_version', 0,
       'payload', jsonb_build_object('name', '不应读取')
-    )) into v_cross_user;
+    ))) into v_cross_user;
   perform public.remote_sync_test_assert(
     v_cross_user->'rejected' @> jsonb_build_array(jsonb_build_object(
       'operation_id', '99000000-0000-4000-8000-000000000004', 'reason', 'permission_denied'
