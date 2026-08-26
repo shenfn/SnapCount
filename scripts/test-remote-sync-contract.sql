@@ -116,8 +116,16 @@ begin
   );
   perform public.remote_sync_test_assert(
     v_pull->>'next_pull_cursor' is not null
+      and jsonb_array_length(v_pull->'remote_expenses') >= 1
       and (select count(*) from public.sync_operations) = v_before_count,
-    'DREMOTE-009 empty batch must only pull'
+    'DREMOTE-009 empty batch must only pull the current remote snapshot'
+  );
+  perform public.remote_sync_test_assert(
+    jsonb_array_length(public.sync_expense_batch(
+      'aa000000-0000-4000-8000-000000000001', 1,
+      v_pull->>'next_pull_cursor', '[]'::jsonb
+    )->'remote_expenses') = 0,
+    'a consumed cursor must not return the same expense again'
   );
 end;
 $$;
