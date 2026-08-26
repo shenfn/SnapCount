@@ -125,6 +125,47 @@ struct LocalOutboxUpload: Equatable {
     let createdAt: Date
 }
 
+struct LocalRemoteAccount: Equatable {
+    let id: UUID
+    let name: String
+    let kind: String
+    let currency: String
+    let openingBalanceMinor: Int64
+    let version: Int64
+    let deletedAt: Date?
+}
+
+struct LocalRemoteExpense: Equatable {
+    let id: UUID
+    let accountID: UUID
+    let amountMinor: Int64
+    let currency: String
+    let merchantName: String
+    let category: String
+    let paymentMethod: String
+    let transactionDate: String
+    let transactionTime: String?
+    let version: Int64
+    let deletedAt: Date?
+}
+
+struct LocalRemoteAccountEntry: Equatable {
+    let id: UUID
+    let accountID: UUID
+    let direction: String
+    let amountMinor: Int64
+    let entryKind: String
+    let sourceID: UUID
+    let voided: Bool
+    let voidedReason: String?
+}
+
+struct LocalRemoteSnapshot: Equatable {
+    let accounts: [LocalRemoteAccount]
+    let expenses: [LocalRemoteExpense]
+    let accountEntries: [LocalRemoteAccountEntry]
+}
+
 enum LocalDataError: Error, Equatable {
     case invalidAmount
     case invalidAccountKind
@@ -205,4 +246,5 @@ enum LocalSyncError: Error, Equatable {
     case invalidWorkspace
     case syncNotAuthorized
     case staleAttempt
+    case remoteConflict
 }
