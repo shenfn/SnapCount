@@ -171,7 +171,7 @@ final class SupabaseSyncTransport: LocalSyncTransport {
                 )
             }
         )
-        let conflictedExpenseIDs = Set(response.conflicts.compactMap { value in
+        let conflictedExpenseIDs: Set<UUID> = Set(response.conflicts.compactMap { value -> UUID? in
             guard let raw = (value.value as? [String: Any])?["aggregate_id"] as? String else { return nil }
             return UUID(uuidString: raw)
         })
