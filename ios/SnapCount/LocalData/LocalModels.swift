@@ -247,4 +247,30 @@ enum LocalSyncError: Error, Equatable {
     case syncNotAuthorized
     case staleAttempt
     case remoteConflict
+    case partialFailure(rejectedOperationIDs: Set<UUID>)
+    case cursorExpired
+    case invalidResponse
+}
+
+extension LocalSyncError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .bindingMismatch:
+            return "本地 workspace 与当前账号不匹配。"
+        case .invalidWorkspace:
+            return "本地 workspace 不存在。"
+        case .syncNotAuthorized:
+            return "当前账号未授权此 workspace 同步。"
+        case .staleAttempt:
+            return "同步任务已过期，请重试。"
+        case .remoteConflict:
+            return "同步发现冲突，请处理后重试。"
+        case .partialFailure:
+            return "部分同步操作被云端拒绝，请检查后重试。"
+        case .cursorExpired:
+            return "同步记录已过期，下一次同步将重新获取完整数据。"
+        case .invalidResponse:
+            return "同步响应无效，请稍后重试。"
+        }
+    }
 }

@@ -116,6 +116,9 @@ final class SupabaseSyncTransport: LocalSyncTransport {
             accessToken: try await accessToken()
         )
         if let error = response.error {
+            if error == "cursor_expired" {
+                throw LocalSyncError.cursorExpired
+            }
             throw SupabaseRemoteError.requestFailed(error)
         }
         let snapshot = LocalRemoteSnapshot(
@@ -171,11 +174,33 @@ final class SupabaseSyncTransport: LocalSyncTransport {
                 )
             }
         )
-        let conflictedExpenseIDs: Set<UUID> = Set(response.conflicts.compactMap { value -> UUID? in
-            guard let raw = (value.value as? [String: Any])?["aggregate_id"] as? String else { return nil }
+        let conflictDictionaries = response.conflicts.compactMap { $0.value as? [String: Any] }
+        let conflictedAggregateIDs = Set(conflictDictionaries.compactMap { dictionary -> UUID? in
+            guard let raw = dictionary["aggregate_id"] as? String else { return nil }
             return UUID(uuidString: raw)
         })
-        return LocalSyncTransportResult(nextPullCursor: response.nextPullCursor, remoteSnapshot: snapshot, acceptedOperationIDs: response.acceptedOperationIDs, conflictedExpenseIDs: conflictedExpenseIDs)
+        let conflictedExpenseIDs = Set(conflictDictionaries.compactMap { dictionary -> UUID? in
+            guard dictionary["aggregate_kind"] as? String == "expense",
+                  let raw = dictionary["aggregate_id"] as? String else { return nil }
+            return UUID(uuidString: raw)
+        })
+        let rejectedOperations = try response.rejected.map { value -> LocalSyncRejectedOperation in
+            guard let dictionary = value.value as? [String: Any],
+                  let operationID = dictionary["operation_id"] as? String,
+                  let id = UUID(uuidString: operationID),
+                  let reason = dictionary["reason"] as? String else {
+                throw LocalSyncError.invalidResponse
+            }
+            return LocalSyncRejectedOperation(operationID: id, reason: reason)
+        }
+        return LocalSyncTransportResult(
+            nextPullCursor: response.nextPullCursor,
+            remoteSnapshot: snapshot,
+            acceptedOperationIDs: response.acceptedOperationIDs,
+            rejectedOperations: rejectedOperations,
+            conflictedAggregateIDs: conflictedAggregateIDs,
+            conflictedExpenseIDs: conflictedExpenseIDs
+        )
     }
 
     private func operationBody(_ upload: LocalOutboxUpload) throws -> [String: AnyCodable] {

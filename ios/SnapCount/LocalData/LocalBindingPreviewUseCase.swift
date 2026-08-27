@@ -393,6 +393,33 @@ extension LocalProfileStore: LocalBindingRepository {
         }
     }
 
+    func recoverCursorExpired(profileID: UUID, attemptID: UUID) throws -> LocalSyncState {
+        try database.writer.write { db in
+            guard let profileRow = try Row.fetchOne(
+                db,
+                sql: "SELECT cloud_user_id FROM local_profiles WHERE id = ?",
+                arguments: [profileID.uuidString]
+            ),
+            let boundUserID: String = profileRow["cloud_user_id"] else {
+                throw LocalSyncError.invalidWorkspace
+            }
+            guard try String.fetchOne(
+                db,
+                sql: "SELECT active_attempt_id FROM local_sync_state WHERE profile_id = ?",
+                arguments: [profileID.uuidString]
+            ) == attemptID.uuidString else { throw LocalSyncError.staleAttempt }
+            try db.execute(
+                sql: """
+                    UPDATE local_sync_state
+                    SET pull_cursor = NULL, active_attempt_id = NULL, sync_status = 'failed'
+                    WHERE profile_id = ? AND active_attempt_id = ?
+                    """,
+                arguments: [profileID.uuidString, attemptID.uuidString]
+            )
+            return try syncState(db: db, profileID: profileID, boundUserID: boundUserID)
+        }
+    }
+
     func markSyncConflict(profileID: UUID, attemptID: UUID) throws -> LocalSyncState {
         try database.writer.write { db in
             guard let profileRow = try Row.fetchOne(

@@ -24,6 +24,58 @@ final class SupabaseSyncTransportTests: XCTestCase {
         XCTAssertEqual(result.remoteSnapshot?.expenses.first?.amountMinor, 1230)
         XCTAssertEqual(result.remoteSnapshot?.accountEntries.count, 1)
     }
+
+    func testDREMOTE014MapsRejectedOperationsWithoutTreatingThemAsAccepted() async throws {
+        let client = SyncRemoteClientStub()
+        let operationID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        client.response = Data("""
+        {
+          "accepted_operation_ids": [],
+          "conflicts": [],
+          "rejected": [{"operation_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","reason":"permission_denied"}],
+          "remote_accounts": [], "remote_expenses": [], "remote_account_entries": [],
+          "next_pull_cursor":"c:8"
+        }
+        """.utf8)
+
+        let result = try await SupabaseSyncTransport(
+            remoteClient: client,
+            accessToken: { "token" }
+        ).synchronize(
+            cloudUserID: "cloud",
+            profileID: UUID(),
+            pullCursor: "c:7",
+            uploads: []
+        )
+
+        XCTAssertEqual(result.acceptedOperationIDs, [])
+        XCTAssertEqual(result.rejectedOperations, [
+            LocalSyncRejectedOperation(operationID: operationID, reason: "permission_denied")
+        ])
+    }
+
+    func testDREMOTE015MapsCursorExpiredToRecoverableSyncError() async {
+        let client = SyncRemoteClientStub()
+        client.response = Data("""
+        {
+          "accepted_operation_ids": [], "conflicts": [], "rejected": [],
+          "remote_accounts": [], "remote_expenses": [], "remote_account_entries": [],
+          "error":"cursor_expired"
+        }
+        """.utf8)
+
+        do {
+            _ = try await SupabaseSyncTransport(
+                remoteClient: client,
+                accessToken: { "token" }
+            ).synchronize(cloudUserID: "cloud", profileID: UUID(), pullCursor: "c:1", uploads: [])
+            XCTFail("Expected cursor_expired")
+        } catch let error as LocalSyncError {
+            XCTAssertEqual(error, .cursorExpired)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
 }
 
 private final class SyncRemoteClientStub: SupabaseRemoteClientProtocol {
