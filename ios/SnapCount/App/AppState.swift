@@ -134,6 +134,8 @@ final class AppState: ObservableObject {
     private let expressionPlanAcknowledgementSleep: NativeSleepProvider
     private let keychain = KeychainStore.shared
     private var lastDashboardRefreshAt: Date?
+    /// 最近一次成功发布 dashboard（或恢复本地缓存）的时间，供首页刊头展示同步状态
+    var lastDashboardSyncedAt: Date? { lastDashboardRefreshAt }
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
     private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
     private var activeRecordReference: String?
@@ -469,7 +471,6 @@ final class AppState: ObservableObject {
         dashboardSupplementTask?.cancel()
         isLoadingDashboard = true
         dashboardMessage = nil
-        lastDashboardRefreshAt = Date()
         defer {
             if generation == dashboardRefreshGeneration {
                 isLoadingDashboard = false
@@ -534,6 +535,7 @@ final class AppState: ObservableObject {
     private func publishDashboard(_ snapshot: DashboardSnapshot, userId: String) {
         dashboard = snapshot
         isShowingCachedDashboard = false
+        lastDashboardRefreshAt = Date()
         try? snapshotStore.save(snapshot, userId: userId)
         for detail in snapshot.recordDetails.values {
             let canonicalReference = NativeRecordReference(detail.id).canonicalValue
