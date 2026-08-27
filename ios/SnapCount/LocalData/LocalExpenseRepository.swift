@@ -24,7 +24,12 @@ protocol LocalExpenseRepositoryProtocol {
     func markOutboxSent(operationIDs: [UUID]) throws
     func markOutboxFailed(operationIDs: [UUID], error: String) throws
     func accountBalanceMinor(accountID: UUID) throws -> Int64
-    func applyRemoteSnapshot(_ snapshot: LocalRemoteSnapshot, profileID: UUID, excludingExpenseIDs: Set<UUID>) throws -> Int
+    func applyRemoteSnapshot(
+        _ snapshot: LocalRemoteSnapshot,
+        profileID: UUID,
+        excludingExpenseIDs: Set<UUID>,
+        excludingAccountIDs: Set<UUID>
+    ) throws -> Int
 }
 
 final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
@@ -534,10 +539,16 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         }
     }
 
-    func applyRemoteSnapshot(_ snapshot: LocalRemoteSnapshot, profileID: UUID, excludingExpenseIDs: Set<UUID> = []) throws -> Int {
+    func applyRemoteSnapshot(
+        _ snapshot: LocalRemoteSnapshot,
+        profileID: UUID,
+        excludingExpenseIDs: Set<UUID> = [],
+        excludingAccountIDs: Set<UUID> = []
+    ) throws -> Int {
         try database.writer.write { db in
             var imported = 0
             for account in snapshot.accounts {
+                if excludingAccountIDs.contains(account.id) { continue }
                 if account.deletedAt != nil {
                     continue
                 }

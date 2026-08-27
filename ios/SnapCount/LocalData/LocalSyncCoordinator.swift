@@ -4,16 +4,33 @@ struct LocalSyncTransportResult: Equatable {
     let remoteArchive: Data?
     let nextPullCursor: String?
     let remoteSnapshot: LocalRemoteSnapshot?
-    let acceptedOperationIDs: [UUID]?
+    let acceptedOperationIDs: [UUID]
+    let rejectedOperations: [LocalSyncRejectedOperation]
+    let conflictedAggregateIDs: Set<UUID>
     let conflictedExpenseIDs: Set<UUID>
 
-    init(remoteArchive: Data? = nil, nextPullCursor: String? = nil, remoteSnapshot: LocalRemoteSnapshot? = nil, acceptedOperationIDs: [UUID]? = nil, conflictedExpenseIDs: Set<UUID> = []) {
+    init(
+        remoteArchive: Data? = nil,
+        nextPullCursor: String? = nil,
+        remoteSnapshot: LocalRemoteSnapshot? = nil,
+        acceptedOperationIDs: [UUID] = [],
+        rejectedOperations: [LocalSyncRejectedOperation] = [],
+        conflictedAggregateIDs: Set<UUID> = [],
+        conflictedExpenseIDs: Set<UUID> = []
+    ) {
         self.remoteArchive = remoteArchive
         self.nextPullCursor = nextPullCursor
         self.remoteSnapshot = remoteSnapshot
         self.acceptedOperationIDs = acceptedOperationIDs
+        self.rejectedOperations = rejectedOperations
+        self.conflictedAggregateIDs = conflictedAggregateIDs
         self.conflictedExpenseIDs = conflictedExpenseIDs
     }
+}
+
+struct LocalSyncRejectedOperation: Equatable {
+    let operationID: UUID
+    let reason: String
 }
 
 protocol LocalSyncTransport {
@@ -31,7 +48,14 @@ protocol LocalSyncStateStore: AnyObject {
     func beginSync(profileID: UUID, cloudUserID: String, attemptID: UUID) throws -> LocalSyncState
     func completeSync(profileID: UUID, attemptID: UUID, pullCursor: String?, completedAt: Date) throws -> LocalSyncState
     func failSync(profileID: UUID, attemptID: UUID) throws -> LocalSyncState
+    func recoverCursorExpired(profileID: UUID, attemptID: UUID) throws -> LocalSyncState
     func markSyncConflict(profileID: UUID, attemptID: UUID) throws -> LocalSyncState
+}
+
+extension LocalSyncStateStore {
+    func recoverCursorExpired(profileID: UUID, attemptID: UUID) throws -> LocalSyncState {
+        try failSync(profileID: profileID, attemptID: attemptID)
+    }
 }
 
 extension LocalProfileStore: LocalSyncStateStore {}
@@ -94,9 +118,32 @@ struct LocalSyncCoordinator {
             ) else {
                 throw LocalSyncError.staleAttempt
             }
+            if !result.acceptedOperationIDs.isEmpty {
+                try repository.markOutboxSent(operationIDs: result.acceptedOperationIDs)
+            }
+            if !result.rejectedOperations.isEmpty {
+                try repository.markOutboxFailed(
+                    operationIDs: result.rejectedOperations.map(\.operationID),
+                    error: result.rejectedOperations.map { "\($0.operationID.uuidString): \($0.reason)" }.joined(separator: ", ")
+                )
+            }
+            if !result.conflictedAggregateIDs.isEmpty || !result.conflictedExpenseIDs.isEmpty {
+                _ = try stateStore.markSyncConflict(profileID: profileID, attemptID: currentAttemptID)
+                throw LocalSyncError.remoteConflict
+            }
+            if !result.rejectedOperations.isEmpty {
+                throw LocalSyncError.partialFailure(
+                    rejectedOperationIDs: Set(result.rejectedOperations.map(\.operationID))
+                )
+            }
             var importedRecordCount = 0
             if let snapshot = result.remoteSnapshot {
-                importedRecordCount = try repository.applyRemoteSnapshot(snapshot, profileID: profileID, excludingExpenseIDs: result.conflictedExpenseIDs)
+                importedRecordCount = try repository.applyRemoteSnapshot(
+                    snapshot,
+                    profileID: profileID,
+                    excludingExpenseIDs: result.conflictedExpenseIDs,
+                    excludingAccountIDs: result.conflictedAggregateIDs.subtracting(result.conflictedExpenseIDs)
+                )
             } else if let archive = result.remoteArchive {
                 do {
                     let imported = try portability.importArchive(
@@ -111,14 +158,6 @@ struct LocalSyncCoordinator {
                     throw error
                 }
             }
-            let acceptedIDs = result.acceptedOperationIDs ?? uploads.map(\.operationID)
-            if !acceptedIDs.isEmpty {
-                try repository.markOutboxSent(operationIDs: acceptedIDs)
-            }
-            if !result.conflictedExpenseIDs.isEmpty {
-                _ = try stateStore.markSyncConflict(profileID: profileID, attemptID: currentAttemptID)
-                throw LocalSyncError.remoteConflict
-            }
             let state = try stateStore.completeSync(
                 profileID: profileID,
                 attemptID: currentAttemptID,
@@ -131,7 +170,22 @@ struct LocalSyncCoordinator {
                 importedRecordCount: importedRecordCount
             )
         } catch {
-            if !(error is LocalSyncError) {
+            if let syncError = error as? LocalSyncError {
+                switch syncError {
+                case .cursorExpired:
+                    try? repository.markOutboxFailed(
+                        operationIDs: uploads.map(\.operationID),
+                        error: syncError.localizedDescription
+                    )
+                    _ = try? stateStore.recoverCursorExpired(profileID: profileID, attemptID: currentAttemptID)
+                case .partialFailure:
+                    _ = try? stateStore.failSync(profileID: profileID, attemptID: currentAttemptID)
+                case .remoteConflict, .staleAttempt:
+                    break
+                default:
+                    _ = try? stateStore.failSync(profileID: profileID, attemptID: currentAttemptID)
+                }
+            } else {
                 try? repository.markOutboxFailed(
                     operationIDs: uploads.map(\.operationID),
                     error: String(describing: error)
