@@ -130,14 +130,14 @@ final class LocalSyncAppStateTests: XCTestCase {
 
     private static let currentMonthKey = localSyncCurrentMonthKey()
 
-    private static func syncState(profileID: UUID, status: LocalSyncStatus) -> LocalSyncState {
+    private static func syncState(profileID: UUID, status: LocalSyncStatus, pullCursor: String? = nil) -> LocalSyncState {
         LocalSyncState(
             workspaceID: profileID,
             binding: .bound(Self.session.user.id),
             status: status,
             conflictState: .none,
             syncGeneration: 1,
-            pullCursor: nil,
+            pullCursor: pullCursor,
             lastSuccessfulSyncAt: nil,
             activeAttemptID: nil,
             pendingMutationCount: 0
@@ -146,7 +146,7 @@ final class LocalSyncAppStateTests: XCTestCase {
 
     private static func syncResult(profileID: UUID, importedRecordCount: Int = 0) -> LocalSyncRunResult {
         LocalSyncRunResult(
-            state: syncState(profileID: profileID, status: .synced),
+            state: syncState(profileID: profileID, status: .synced, pullCursor: "cursor-1"),
             uploadedOperationCount: 0,
             importedRecordCount: importedRecordCount
         )
