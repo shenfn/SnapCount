@@ -80,13 +80,13 @@ private struct RemoteEntryDTO: Decodable {
 
 final class SupabaseSyncTransport: LocalSyncTransport {
     private let remoteClient: SupabaseRemoteClientProtocol
-    private let accessToken: () throws -> String
+    private let accessToken: () async throws -> String
     private let workspaceID: (UUID) -> UUID
     private let clientGeneration: () -> Int
 
     init(
         remoteClient: SupabaseRemoteClientProtocol,
-        accessToken: @escaping () throws -> String,
+        accessToken: @escaping () async throws -> String,
         workspaceID: @escaping (UUID) -> UUID = { $0 },
         clientGeneration: @escaping () -> Int = { 1 }
     ) {
@@ -113,7 +113,7 @@ final class SupabaseSyncTransport: LocalSyncTransport {
             SyncBatchResponse.self,
             name: "sync_expense_batch",
             body: body,
-            accessToken: try accessToken()
+            accessToken: try await accessToken()
         )
         if let error = response.error {
             throw SupabaseRemoteError.requestFailed(error)
