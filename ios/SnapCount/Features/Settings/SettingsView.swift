@@ -45,6 +45,17 @@ struct SettingsView: View {
                         }
                         .disabled(appState.isLoadingLocalBindingPreview)
                     }
+                    if canManuallySynchronizeLocalData {
+                        Button {
+                            Task { await appState.synchronizeLocalData() }
+                        } label: {
+                            Label(
+                                appState.isSynchronizingLocalData ? "正在同步" : syncActionTitle,
+                                systemImage: "arrow.triangle.2.circlepath"
+                            )
+                        }
+                        .disabled(appState.isSynchronizingLocalData)
+                    }
                     if canDisableLocalSync {
                         Button(role: .destructive) {
                             appState.disableLocalSync()
@@ -298,6 +309,19 @@ struct SettingsView: View {
               state.status != .disabled else { return false }
         guard case .bound(let userID) = state.binding else { return false }
         return userID == appState.currentUserId
+    }
+
+    private var canManuallySynchronizeLocalData: Bool {
+        guard appState.isSignedIn,
+              let state = appState.localSyncState,
+              state.conflictState == .none,
+              case .bound(let userID) = state.binding,
+              userID == appState.currentUserId else { return false }
+        return [.ready, .failed, .synced].contains(state.status)
+    }
+
+    private var syncActionTitle: String {
+        appState.localSyncState?.status == .failed ? "重试同步" : "立即同步"
     }
 
     private func settingsRow(_ title: String, detail: String, systemImage: String) -> some View {

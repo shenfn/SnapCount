@@ -42,6 +42,10 @@ struct LocalSyncRunResult: Equatable {
     let importedRecordCount: Int
 }
 
+protocol LocalSyncRunner {
+    func synchronize(profileID: UUID, cloudUserID: String) async throws -> LocalSyncRunResult
+}
+
 struct LocalSyncCoordinator {
     private let stateStore: LocalSyncStateStore
     private let repository: LocalExpenseRepositoryProtocol
@@ -139,3 +143,5 @@ struct LocalSyncCoordinator {
     }
 
 }
+
+extension LocalSyncCoordinator: LocalSyncRunner {}

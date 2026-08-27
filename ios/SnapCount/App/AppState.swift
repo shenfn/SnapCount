@@ -61,6 +61,7 @@ final class AppState: ObservableObject {
     @Published var localSyncState: LocalSyncState?
     @Published var localBindingPreview: LocalBindingPreview?
     @Published var isLoadingLocalBindingPreview = false
+    @Published var isSynchronizingLocalData = false
     @Published var localSyncMessage: String?
     @Published var financeVocabulary: [NativeFinanceVocabularyEntry] = []
     @Published var selectedAccountDetail: NativeAccountDetail?
@@ -129,6 +130,7 @@ final class AppState: ObservableObject {
     private let settingsRepository: SettingsRepositoryProtocol
     private let financeVocabularyRepository: FinanceVocabularyRepositoryProtocol
     private let localBindingRepository: LocalBindingRepository?
+    private let localSyncRunner: LocalSyncRunner?
     private let onboardingProgressStore: OnboardingProgressStore
     private let sessionProvider: NativeSessionProvider?
     private let expressionPlanAcknowledgementSleep: NativeSleepProvider
@@ -175,6 +177,7 @@ final class AppState: ObservableObject {
         settingsRepository: SettingsRepositoryProtocol = SettingsRepository(),
         financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository(),
         localBindingRepository: LocalBindingRepository? = nil,
+        localSyncRunner: LocalSyncRunner? = nil,
         onboardingProgressStore: OnboardingProgressStore = OnboardingProgressStore(),
         sessionProvider: NativeSessionProvider? = nil,
         expressionPlanAcknowledgementSleep: @escaping NativeSleepProvider = {
@@ -210,6 +213,7 @@ final class AppState: ObservableObject {
         self.settingsRepository = settingsRepository
         self.financeVocabularyRepository = financeVocabularyRepository
         self.localBindingRepository = localBindingRepository ?? Self.defaultLocalBindingRepository()
+        self.localSyncRunner = localSyncRunner ?? Self.defaultLocalSyncRunner()
         self.onboardingProgressStore = onboardingProgressStore
         self.sessionProvider = sessionProvider
         self.expressionPlanAcknowledgementSleep = expressionPlanAcknowledgementSleep
@@ -456,9 +460,51 @@ final class AppState: ObservableObject {
                 cloudUserID: preview.candidateCloudUserID
             )
             localBindingPreview = nil
-            localSyncMessage = "已绑定本地 workspace。首次同步将在后续版本中执行。"
+            localSyncMessage = "已绑定本地 workspace，正在进行首次同步。"
+            Task { await synchronizeLocalData() }
         } catch {
             localSyncMessage = error.localizedDescription
+        }
+    }
+
+    func synchronizeLocalData() async {
+        guard !isSynchronizingLocalData else { return }
+        guard isSignedIn, !currentUserId.isEmpty else {
+            localSyncMessage = "请先登录后再同步。"
+            return
+        }
+        guard let localBindingRepository else {
+            localSyncMessage = "本地同步服务不可用。"
+            return
+        }
+        guard let localSyncRunner else {
+            localSyncMessage = "本地同步服务不可用。"
+            return
+        }
+
+        isSynchronizingLocalData = true
+        localSyncMessage = nil
+        defer { isSynchronizingLocalData = false }
+
+        do {
+            let profile = try localBindingRepository.activeProfile()
+            let session = try await validSession()
+            guard session.user.id == currentUserId else {
+                throw LocalSyncError.syncNotAuthorized
+            }
+            let result = try await localSyncRunner.synchronize(
+                profileID: profile.id,
+                cloudUserID: session.user.id
+            )
+            localSyncState = result.state
+            _ = await prepareLocalWorkspace()
+            await loadRecordMonth(Self.currentMonthKey, force: true)
+            localSyncMessage = result.importedRecordCount > 0
+                ? "同步完成，已合并 \(result.importedRecordCount) 条本地记录。"
+                : "同步完成。"
+        } catch {
+            refreshLocalSyncState()
+            localSyncMessage = "同步失败，可重试：\(error.localizedDescription)"
         }
     }
 
@@ -3334,6 +3380,7 @@ final class AppState: ObservableObject {
         localSyncState = nil
         localBindingPreview = nil
         isLoadingLocalBindingPreview = false
+        isSynchronizingLocalData = false
         localSyncMessage = nil
         isLoadingAccounts = false
         isSavingAccount = false
@@ -3545,6 +3592,24 @@ final class AppState: ObservableObject {
     private static func defaultLocalBindingRepository() -> LocalBindingRepository? {
         guard let database = try? LocalDatabase() else { return nil }
         return LocalProfileStore(database: database)
+    }
+
+    private static func defaultLocalSyncRunner() -> LocalSyncRunner? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalExpenseRepository(database: database) else { return nil }
+        let profileStore = LocalProfileStore(database: database)
+        let transport = SupabaseSyncTransport(
+            remoteClient: SupabaseRemoteClient(),
+            accessToken: {
+                try await SupabaseAuthService().currentSession().accessToken
+            }
+        )
+        return LocalSyncCoordinator(
+            stateStore: profileStore,
+            repository: repository,
+            portability: LocalExpensePortability(database: database),
+            transport: transport
+        )
     }
 
     private static let monthKeyFormatter: DateFormatter = {
