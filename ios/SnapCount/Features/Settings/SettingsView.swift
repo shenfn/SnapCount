@@ -224,6 +224,14 @@ struct SettingsView: View {
                             .foregroundStyle(message.contains("失败") || message.contains("无法") ? JieziTheme.coral : .secondary)
                     }
                 }
+                if let diagnostic = appState.localSyncDiagnostic {
+                    Section("同步诊断") {
+                        Text(diagnostic.summary)
+                            .font(.footnote)
+                            .foregroundStyle(diagnostic.phase == .failed ? JieziTheme.coral : .secondary)
+                            .textSelection(.enabled)
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .listStyle(.insetGrouped)
