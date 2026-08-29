@@ -63,6 +63,7 @@ final class AppState: ObservableObject {
     @Published var isLoadingLocalBindingPreview = false
     @Published var isSynchronizingLocalData = false
     @Published var localSyncMessage: String?
+    @Published var localSyncDiagnostic: LocalSyncDiagnostic?
     @Published var financeVocabulary: [NativeFinanceVocabularyEntry] = []
     @Published var selectedAccountDetail: NativeAccountDetail?
     @Published var selectedAccountSourceSnapshot: NativeWalletSnapshot?
@@ -486,17 +487,48 @@ final class AppState: ObservableObject {
         localSyncMessage = nil
         defer { isSynchronizingLocalData = false }
 
+        var diagnosticProfileID: UUID?
+        var pendingOperationCount = 0
         do {
             let profile = try localBindingRepository.activeProfile()
+            diagnosticProfileID = profile.id
+            pendingOperationCount = try localBindingRepository.workspaceSummary(profileID: profile.id).pendingOutboxCount
+            localSyncDiagnostic = LocalSyncDiagnostic(
+                phase: .preflight,
+                profileID: profile.id,
+                pendingOperationCount: pendingOperationCount,
+                uploadedOperationCount: 0,
+                importedRecordCount: 0,
+                failure: nil,
+                syncStatus: localSyncState?.status
+            )
             let session = try await validSession()
             guard session.user.id == currentUserId else {
                 throw LocalSyncError.syncNotAuthorized
             }
+            localSyncDiagnostic = LocalSyncDiagnostic(
+                phase: .transport,
+                profileID: profile.id,
+                pendingOperationCount: pendingOperationCount,
+                uploadedOperationCount: 0,
+                importedRecordCount: 0,
+                failure: nil,
+                syncStatus: .syncing
+            )
             let result = try await localSyncRunner.synchronize(
                 profileID: profile.id,
                 cloudUserID: session.user.id
             )
             localSyncState = result.state
+            localSyncDiagnostic = LocalSyncDiagnostic(
+                phase: .completed,
+                profileID: profile.id,
+                pendingOperationCount: pendingOperationCount,
+                uploadedOperationCount: result.uploadedOperationCount,
+                importedRecordCount: result.importedRecordCount,
+                failure: nil,
+                syncStatus: result.state.status
+            )
             _ = await prepareLocalWorkspace()
             await loadRecordMonth(Self.currentMonthKey, force: true)
             localSyncMessage = result.importedRecordCount > 0
@@ -504,8 +536,36 @@ final class AppState: ObservableObject {
                 : "同步完成。"
         } catch {
             refreshLocalSyncState()
+            if let diagnosticProfileID {
+                localSyncDiagnostic = LocalSyncDiagnostic(
+                    phase: .failed,
+                    profileID: diagnosticProfileID,
+                    pendingOperationCount: pendingOperationCount,
+                    uploadedOperationCount: 0,
+                    importedRecordCount: 0,
+                    failure: Self.syncDiagnosticFailure(for: error),
+                    syncStatus: localSyncState?.status
+                )
+            }
             localSyncMessage = "同步失败，可重试：\(error.localizedDescription)"
         }
+    }
+
+    private static func syncDiagnosticFailure(for error: Error) -> LocalSyncDiagnosticFailure {
+        if let syncError = error as? LocalSyncError {
+            switch syncError {
+            case .syncNotAuthorized, .bindingMismatch: return .notAuthorized
+            case .partialFailure: return .partialFailure
+            case .cursorExpired: return .cursorExpired
+            case .remoteConflict: return .conflict
+            case .invalidResponse: return .invalidResponse
+            case .invalidWorkspace, .staleAttempt: return .unknown
+            }
+        }
+        if error is SupabaseRemoteError {
+            return .transport
+        }
+        return .transport
     }
 
     func refreshDashboard() async {

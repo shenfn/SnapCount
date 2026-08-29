@@ -64,6 +64,9 @@ final class LocalSyncAppStateTests: XCTestCase {
         XCTAssertEqual(state.localSyncState?.status, .synced)
         XCTAssertEqual(state.localSyncState?.pullCursor, "cursor-1")
         XCTAssertTrue(state.localSyncMessage?.contains("2") == true)
+        XCTAssertEqual(state.localSyncDiagnostic?.phase, .completed)
+        XCTAssertEqual(state.localSyncDiagnostic?.uploadedOperationCount, 0)
+        XCTAssertEqual(state.localSyncDiagnostic?.importedRecordCount, 2)
         XCTAssertFalse(state.isSynchronizingLocalData)
         XCTAssertTrue(useCase.workspaceCallCount > 0)
         XCTAssertTrue(useCase.monthKeys.contains(Self.currentMonthKey))
@@ -92,6 +95,8 @@ final class LocalSyncAppStateTests: XCTestCase {
         XCTAssertEqual(runner.callCount, 1)
         XCTAssertEqual(state.localSyncState?.status, .failed)
         XCTAssertTrue(state.localSyncMessage?.contains("同步失败") == true)
+        XCTAssertEqual(state.localSyncDiagnostic?.phase, .failed)
+        XCTAssertEqual(state.localSyncDiagnostic?.failure, .transport)
         XCTAssertFalse(state.isSynchronizingLocalData)
         XCTAssertEqual(useCase.monthKeys.count, 0)
     }

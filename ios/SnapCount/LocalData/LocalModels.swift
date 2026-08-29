@@ -216,6 +216,90 @@ struct LocalSyncState: Equatable {
     let pendingMutationCount: Int
 }
 
+enum LocalSyncDiagnosticPhase: String, Equatable {
+    case preflight
+    case transport
+    case completed
+    case failed
+}
+
+enum LocalSyncDiagnosticFailure: String, Equatable {
+    case transport
+    case notAuthorized
+    case partialFailure
+    case cursorExpired
+    case conflict
+    case invalidResponse
+    case unknown
+}
+
+struct LocalSyncDiagnostic: Equatable {
+    let phase: LocalSyncDiagnosticPhase
+    let profileID: UUID
+    let pendingOperationCount: Int
+    let uploadedOperationCount: Int
+    let importedRecordCount: Int
+    let failure: LocalSyncDiagnosticFailure?
+    let syncStatus: LocalSyncStatus?
+
+    var summary: String {
+        var parts = [
+            "阶段：\(phase.title)",
+            "待处理：\(pendingOperationCount)"
+        ]
+        if uploadedOperationCount > 0 {
+            parts.append("上传：\(uploadedOperationCount)")
+        }
+        if importedRecordCount > 0 {
+            parts.append("拉取：\(importedRecordCount)")
+        }
+        if let failure {
+            parts.append("错误：\(failure.title)")
+        }
+        if let syncStatus {
+            parts.append("状态：\(syncStatus.title)")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+private extension LocalSyncDiagnosticPhase {
+    var title: String {
+        switch self {
+        case .preflight: return "准备"
+        case .transport: return "请求云端"
+        case .completed: return "完成"
+        case .failed: return "失败"
+        }
+    }
+}
+
+private extension LocalSyncDiagnosticFailure {
+    var title: String {
+        switch self {
+        case .transport: return "云端请求失败"
+        case .notAuthorized: return "未授权或绑定不匹配"
+        case .partialFailure: return "部分操作被拒绝"
+        case .cursorExpired: return "同步游标过期"
+        case .conflict: return "存在数据冲突"
+        case .invalidResponse: return "云端响应无效"
+        case .unknown: return "未知错误"
+        }
+    }
+}
+
+private extension LocalSyncStatus {
+    var title: String {
+        switch self {
+        case .disabled: return "未开启"
+        case .ready: return "待同步"
+        case .syncing: return "同步中"
+        case .synced: return "已同步"
+        case .failed: return "失败"
+        }
+    }
+}
+
 struct LocalWorkspaceSummary: Equatable {
     let workspaceID: UUID
     let expenseCount: Int
