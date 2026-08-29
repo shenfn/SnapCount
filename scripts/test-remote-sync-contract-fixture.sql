@@ -81,9 +81,7 @@ create table if not exists public.transactions (
   status text not null default 'pending' check (status in ('pending', 'done')),
   source text not null default 'ai_scan' check (source in ('ai_scan', 'manual')),
   note text,
-  deleted_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  created_at timestamptz not null default now()
 );
 
 create table if not exists public.account_entries (

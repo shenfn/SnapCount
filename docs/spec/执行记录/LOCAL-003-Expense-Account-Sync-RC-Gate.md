@@ -112,3 +112,12 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 
 下一步：等待构建 104 在 TestFlight 可安装后，用 `test2` 重试 RC-005/012/015。先确认原 4 条待处理消费全部接受并出现于云端，再连续同步两次确认不重复落库，最后核对本地与云端账户余额无漂移；出现失败时保存新的脱敏诊断摘要，不继续猜测字段缺口。
 
+## 9. 生产 schema 对账与修复（2026-08-29）
+
+- 真正的生产 schema 对账发现：`public.transactions` 缺少同步 RPC 已使用的 `deleted_at` 与 `updated_at`；迁移历史为 applied 不能替代列级 schema 检查。
+- 修复分支新增 `20260829150000_remote_sync_transaction_timestamps.sql`：仅添加两列，按既有 `created_at` 回填 `updated_at`，再设置默认值、非空约束和用户/删除时间索引；不删除或重写交易事实。
+- 远端同步 fixture 已调整为先模拟生产缺列状态；迁移按 CI 顺序执行两次后，完整 D-REMOTE 契约测试通过，验证新增迁移可重复执行且同步 RPC 的删除/更新字段真实可用。
+- 生产应用授权已获得，但在 PR 门禁和 macOS iOS Build 通过前不执行；应用后需重新执行列级 schema 查询、RPC smoke 和 `test2` 真机重试。
+
+下一步：合并修复 PR 后，将新迁移应用到生产并记录 `migration list` 与 schema 查询结果；生产 smoke 通过后从固定主线提交触发新的 TestFlight，重新验证 RC-005/012/015。
+
