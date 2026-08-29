@@ -44,17 +44,19 @@ private struct RemoteExpenseDTO: Decodable {
     let changeKind: String
     let amount: Double?
     let merchantName: String?
+    let platform: String?
     let category: String?
     let paymentMethod: String?
     let transactionDate: String?
     let transactionTime: String?
+    let note: String?
     let accountID: UUID?
     let deletedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case aggregateID = "aggregate_id"
         case version, changeKind = "change_kind", amount
-        case merchantName = "merchant_name", category
+        case merchantName = "merchant_name", platform, category, note
         case paymentMethod = "payment_method"
         case transactionDate = "transaction_date"
         case transactionTime = "transaction_time"
@@ -139,7 +141,7 @@ final class SupabaseSyncTransport: LocalSyncTransport {
             },
             expenses: response.remoteExpenses.compactMap { expense in
                 if expense.changeKind == "delete" {
-                    return LocalRemoteExpense(id: expense.aggregateID, accountID: expense.accountID ?? UUID(), amountMinor: 0, currency: "CNY", merchantName: "", category: "", paymentMethod: "", transactionDate: "1970-01-01", transactionTime: nil, version: expense.version, deletedAt: parseDate(expense.deletedAt) ?? Date())
+                    return LocalRemoteExpense(id: expense.aggregateID, accountID: expense.accountID ?? UUID(), amountMinor: 0, currency: "CNY", merchantName: "", platform: "", category: "", paymentMethod: "", transactionDate: "1970-01-01", transactionTime: nil, note: nil, version: expense.version, deletedAt: parseDate(expense.deletedAt) ?? Date())
                 }
                 guard let accountID = expense.accountID,
                       let amount = expense.amount,
@@ -153,10 +155,12 @@ final class SupabaseSyncTransport: LocalSyncTransport {
                     amountMinor: Int64((amount * 100).rounded()),
                     currency: "CNY",
                     merchantName: merchantName,
+                    platform: expense.platform ?? "",
                     category: category,
                     paymentMethod: paymentMethod,
                     transactionDate: transactionDate,
                     transactionTime: expense.transactionTime,
+                    note: expense.note,
                     version: expense.version,
                     deletedAt: parseDate(expense.deletedAt)
                 )

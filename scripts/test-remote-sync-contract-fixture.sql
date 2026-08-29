@@ -69,14 +69,19 @@ create table if not exists public.accounts (
 create table if not exists public.transactions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
+  type text not null check (type in ('expense', 'income')),
   amount numeric(14,2) not null check (amount > 0),
   merchant_name text,
+  platform text,
   category text,
   payment_method text,
   transaction_date date not null default current_date,
   transaction_time time,
   account_id uuid references public.accounts(id) on delete set null,
-  status text not null default 'done',
+  status text not null default 'pending' check (status in ('pending', 'done')),
+  source text not null default 'ai_scan' check (source in ('ai_scan', 'manual')),
+  note text,
+  deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -125,12 +130,12 @@ values
 on conflict (id) do nothing;
 
 insert into public.transactions (
-  id, user_id, amount, merchant_name, category, transaction_date, account_id
+  id, user_id, type, amount, merchant_name, category, transaction_date, account_id
 )
 values (
   '77000000-0000-4000-8000-000000000001',
   '11111111-1111-4111-8111-111111111111',
-  12.50, 'fixture 早餐', 'food', '2026-08-25',
+  'expense', 12.50, 'fixture 早餐', 'food', '2026-08-25',
   '66000000-0000-4000-8000-000000000001'
 )
 on conflict (id) do nothing;

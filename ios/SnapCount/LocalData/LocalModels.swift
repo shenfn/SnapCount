@@ -141,10 +141,12 @@ struct LocalRemoteExpense: Equatable {
     let amountMinor: Int64
     let currency: String
     let merchantName: String
+    let platform: String
     let category: String
     let paymentMethod: String
     let transactionDate: String
     let transactionTime: String?
+    let note: String?
     let version: Int64
     let deletedAt: Date?
 }

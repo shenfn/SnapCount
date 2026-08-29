@@ -340,6 +340,8 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-remote-sync-contract-fixture.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260826090000_remote_sync_expense_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260826090000_remote_sync_expense_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260829100000_remote_sync_expense_field_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260829100000_remote_sync_expense_field_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-remote-sync-contract.sql
 
       - name: Execute staging archive migration contract

@@ -499,12 +499,57 @@ final class LocalExpensePortability {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
-        return String(decoding: try encoder.encode(expense), as: UTF8.self)
+        return String(
+            decoding: try encoder.encode(ImportedExpenseOutboxPayload(expense: expense)),
+            as: UTF8.self
+        )
     }
 
     private static func outboxPayload(for account: LocalExpenseArchive.Account) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return String(decoding: try encoder.encode(account), as: UTF8.self)
+    }
+}
+
+private struct ImportedExpenseOutboxPayload: Encodable {
+    let id: UUID
+    let profileID: UUID
+    let type: String
+    let source: String
+    let accountID: UUID
+    let amountMinor: Int64
+    let currency: String
+    let merchantName: String
+    let platform: String
+    let category: String
+    let paymentMethod: String
+    let transactionDate: String
+    let transactionTime: String?
+    let note: String?
+    let localVersion: Int64
+    let createdAt: Date
+    let updatedAt: Date
+    let deletedAt: Date?
+
+    init(expense: LocalExpenseArchive.Expense) {
+        id = expense.id
+        profileID = expense.profileID
+        type = "expense"
+        source = "manual"
+        accountID = expense.accountID
+        amountMinor = expense.amountMinor
+        currency = expense.currency
+        merchantName = expense.merchantName
+        platform = expense.platform
+        category = expense.category
+        paymentMethod = expense.paymentMethod
+        transactionDate = expense.transactionDate
+        transactionTime = expense.transactionTime
+        note = expense.note
+        localVersion = expense.localVersion
+        createdAt = expense.createdAt
+        updatedAt = expense.updatedAt
+        deletedAt = expense.deletedAt
     }
 }

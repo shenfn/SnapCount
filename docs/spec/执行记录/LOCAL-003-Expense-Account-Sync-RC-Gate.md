@@ -96,3 +96,17 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 
 完成账户 Outbox 窄修复后，以 macOS iOS Build/XCTest 和治理门禁为准合并，再从固定提交触发新的 TestFlight。安装后使用 `test2` 重试，确认账户先上传、4 条消费全部接受、重复同步不重复落库且余额无漂移。修复前不把 RC 标记为通过，也不进入其他数据域。
 
+## 8. 第二轮真实验证与字段契约修复（2026-08-29）
+
+- 账户 Outbox 修复已合并到 `main@c90d4a8`，新 TestFlight 中原 `account not found` 已不再是当前错误。
+- 新失败：`null value in column "type" of relation "transactions" violates not-null constraint`。本地事实和待重试 Outbox 仍保留。
+- 根因：同步 RPC 插入消费时未写生产必填字段 `transactions.type`；测试 fixture 缺少该非空约束，因此旧门禁误绿。集中审计同时发现 RPC 未明确写 `status/source`、编辑未覆盖全部字段、Pull 丢失 `platform/note`，以及删除错误写入约束不允许的 `status=deleted`。
+- 当前范围：仅修复 Expense + Account 同步字段契约。新客户端 payload 明确发送 `type=expense/source=manual`；服务端兼容已有旧 Outbox；RPC 写入正式消费 `type=expense/status=done`，完整更新可编辑字段；Pull 往返 `platform/note`；删除沿用统一删除模型 `transactions.deleted_at`。
+- 数据库落地：新增迁移 `20260829100000_remote_sync_expense_field_contract.sql` 替换已部署 RPC，不修改已登记的 `20260826090000` 历史迁移。
+- 测试：生产关键非空/枚举/删除约束写入 PostgreSQL fixture，新增 DREMOTE-018/019；iOS 测试固定 Repository/导入 Outbox 和 Pull 字段映射。
+- 已验证：治理检查、架构依赖检查、LOCAL-002-APP 与 LOCAL-003B 边界脚本通过；`git diff --check` 通过。临时 PostgreSQL 17 容器已按 CI 顺序重复执行旧同步迁移和新字段迁移，DREMOTE 数据库契约全绿。
+- 未验证：Windows 无法执行 Xcode/XCTest，Swift 编译与 XCTest 交给 PR 的 macOS iOS Build。
+- 已知基线：`test:ios-local-account-boundary` 的旧 `showLocalAccountPreparation` 静态断言在当前 main 已失效，与本次字段契约无关，不在本 PR 修改页面。
+
+下一步：提交并创建窄 PR，等待 PostgreSQL、治理与 macOS 门禁全部通过。合并后仍需单独授权应用 `20260829100000` 生产迁移，再从固定 main 触发 TestFlight，并以 `test2` 重试 RC-005/012/015；不得在迁移未应用时用新 App 重试并误判客户端修复。
+

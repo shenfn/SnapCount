@@ -653,8 +653,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 } else if row == nil {
                     try db.execute(sql: """
                         INSERT INTO local_expenses (id, profile_id, account_id, amount_minor, currency, merchant_name, platform, category, payment_method, transaction_date, transaction_time, note, local_version, created_at, updated_at, deleted_at)
-                        VALUES (?, ?, ?, ?, ?, ?, 'remote', ?, ?, ?, ?, NULL, ?, ?, ?, NULL)
-                        """, arguments: [expense.id.uuidString, profileID.uuidString, expense.accountID.uuidString, expense.amountMinor, expense.currency, expense.merchantName, expense.category, expense.paymentMethod, expense.transactionDate, expense.transactionTime, expense.version, Date(), Date()])
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                        """, arguments: [expense.id.uuidString, profileID.uuidString, expense.accountID.uuidString, expense.amountMinor, expense.currency, expense.merchantName, expense.platform, expense.category, expense.paymentMethod, expense.transactionDate, expense.transactionTime, expense.note, expense.version, Date(), Date()])
                     try db.execute(sql: """
                         INSERT INTO local_account_entries (id, profile_id, account_id, direction, amount_minor, entry_kind, source_kind, source_id, occurred_at, voided_at)
                         VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
@@ -663,9 +663,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 } else {
                     try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL", arguments: [Date(), expense.id.uuidString])
                     try db.execute(sql: """
-                        UPDATE local_expenses SET account_id = ?, amount_minor = ?, currency = ?, merchant_name = ?, category = ?, payment_method = ?, transaction_date = ?, transaction_time = ?, local_version = ?, updated_at = ?
+                        UPDATE local_expenses SET account_id = ?, amount_minor = ?, currency = ?, merchant_name = ?, platform = ?, category = ?, payment_method = ?, transaction_date = ?, transaction_time = ?, note = ?, local_version = ?, updated_at = ?
                         WHERE id = ? AND profile_id = ?
-                        """, arguments: [expense.accountID.uuidString, expense.amountMinor, expense.currency, expense.merchantName, expense.category, expense.paymentMethod, expense.transactionDate, expense.transactionTime, expense.version, Date(), expense.id.uuidString, profileID.uuidString])
+                        """, arguments: [expense.accountID.uuidString, expense.amountMinor, expense.currency, expense.merchantName, expense.platform, expense.category, expense.paymentMethod, expense.transactionDate, expense.transactionTime, expense.note, expense.version, Date(), expense.id.uuidString, profileID.uuidString])
                     try db.execute(sql: """
                         INSERT INTO local_account_entries (id, profile_id, account_id, direction, amount_minor, entry_kind, source_kind, source_id, occurred_at, voided_at)
                         VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
@@ -888,6 +888,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         let payload = ExpenseOutboxPayload(
             id: expense.id,
             profileID: expense.profileID,
+            type: "expense",
+            source: "manual",
             accountID: expense.accountID,
             amountMinor: expense.amountMinor,
             currency: expense.currency,
@@ -925,6 +927,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
 private struct ExpenseOutboxPayload: Encodable {
     let id: UUID
     let profileID: UUID
+    let type: String
+    let source: String
     let accountID: UUID
     let amountMinor: Int64
     let currency: String
