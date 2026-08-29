@@ -2,7 +2,7 @@
 
 > 状态：进行中
 >
-> 基线：`a28e57b`（RC 基线修正已合并）
+> 基线：`7bcb87a`（PR #186 合并提交）
 >
 > 范围：iOS `expense/accounts` 本地优先、可选云同步闭环
 
@@ -18,10 +18,10 @@
 |---|---|---|
 | D-REMOTE-007 入口接线 | 已完成 | PR #176，已合并 |
 | D-REMOTE-008 失败出口 | 已完成 | PR #177，已合并；门禁全绿 |
-| 主线固定提交 | 已确认 | `origin/main@a28e57b` |
-| 同步数据库迁移 | 已应用并登记 | 生产已应用 `20260826090000`、`20260828090000`；`supabase migration list --linked` 显示 Local/Remote 完全一致 |
+| 主线固定提交 | 已确认 | `origin/main@7bcb87a` |
+| 同步数据库迁移 | 已应用并登记 | 生产已应用 `20260826090000`、`20260828090000`、`20260829100000`；`supabase migration list --linked` 显示 Local/Remote 完全一致 |
 | 真实 Supabase/账号 | 已具备 | 项目 `igbghrhsdaolxljgiisf` 已完成 schema、RPC、RLS 与权限复核；真机业务验收待执行 |
-| macOS Build/XCTest | 已通过 | PR #177 门禁记录 |
+| macOS Build/XCTest | 已通过 | PR #186 的 `Build SwiftUI app` 和 `iOS Build Gate` 全绿 |
 
 ## 3. 验收矩阵
 
@@ -65,7 +65,7 @@
 |---|---|---|---|
 | RC-015 | 重复同步、编辑、删除后核对余额 | `current_balance` 与有效流水重算一致，无漂移 | 待真实环境 |
 | RC-016 | 迁移应用后完整回归 | 迁移可重复执行；RPC、RLS 和现有财务契约不回归 | 待生产/验收环境 |
-| RC-017 | TestFlight 候选构建 | 从固定且门禁通过的主线提交触发；安装后完成 RC-001 至 RC-015 | 已上传待处理（Run `33183324255`，主线 `c1443093`） |
+| RC-017 | TestFlight 候选构建 | 从固定且门禁通过的主线提交触发；安装后完成 RC-001 至 RC-015 | 构建 104 上传成功（Run `33237295903`，主线 `7bcb87a`）；等待 App Store Connect 处理和真机复验 |
 
 ## 4. 放行规则
 
@@ -108,5 +108,7 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 - 未验证：Windows 无法执行 Xcode/XCTest，Swift 编译与 XCTest 交给 PR 的 macOS iOS Build。
 - 已知基线：`test:ios-local-account-boundary` 的旧 `showLocalAccountPreparation` 静态断言在当前 main 已失效，与本次字段契约无关，不在本 PR 修改页面。
 
-下一步：提交并创建窄 PR，等待 PostgreSQL、治理与 macOS 门禁全部通过。合并后仍需单独授权应用 `20260829100000` 生产迁移，再从固定 main 触发 TestFlight，并以 `test2` 重试 RC-005/012/015；不得在迁移未应用时用新 App 重试并误判客户端修复。
+发布执行结果：PR #186 全部门禁通过并合并为 `7bcb87a`。生产 dry-run 只包含 `20260829100000_remote_sync_expense_field_contract.sql`，迁移应用成功；远端 `public` schema 导出确认 `sync_expense_batch` 已包含 `type=expense`、`status=done`、`deleted_at` tombstone 和 `platform/note` Pull 字段。TestFlight Run `33237295903` 从固定 `main@7bcb87a` 上传成功，实际构建号 104，Delivery UUID `73b36822-cbdf-49d6-af60-b2bf04349049`。
+
+下一步：等待构建 104 在 TestFlight 可安装后，用 `test2` 重试 RC-005/012/015。先确认原 4 条待处理消费全部接受并出现于云端，再连续同步两次确认不重复落库，最后核对本地与云端账户余额无漂移；出现失败时保存新的脱敏诊断摘要，不继续猜测字段缺口。
 
