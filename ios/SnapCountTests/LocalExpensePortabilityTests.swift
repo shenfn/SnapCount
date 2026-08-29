@@ -53,7 +53,7 @@ final class LocalExpensePortabilityTests: XCTestCase {
                 insertedAccounts: 1,
                 insertedExpenses: 2,
                 insertedAccountEntries: 3,
-                insertedOutboxOperations: 2,
+                insertedOutboxOperations: 3,
                 skippedProfiles: 0,
                 skippedAccounts: 0,
                 skippedExpenses: 0,
@@ -67,6 +67,7 @@ final class LocalExpensePortabilityTests: XCTestCase {
         XCTAssertEqual(try repository.accountEntries(sourceID: fixture.activeExpenseID).count, 2)
         XCTAssertEqual(try repository.accountEntries(sourceID: fixture.deletedExpenseID).count, 1)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.accountID), 6_820)
+        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateKind), ["account", "expense", "expense"])
         XCTAssertEqual(Set(try repository.pendingOutboxOperations().map(\.operationKind)), ["upsert", "delete"])
     }
 
@@ -93,7 +94,7 @@ final class LocalExpensePortabilityTests: XCTestCase {
         XCTAssertEqual(repeated.skippedAccounts, 1)
         XCTAssertEqual(repeated.skippedExpenses, 2)
         XCTAssertEqual(repeated.skippedAccountEntries, 3)
-        XCTAssertEqual(try repository.pendingOutboxOperations().count, 2)
+        XCTAssertEqual(try repository.pendingOutboxOperations().count, 3)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.accountID), 6_820)
     }
 
@@ -138,7 +139,7 @@ final class LocalExpensePortabilityTests: XCTestCase {
         XCTAssertNil(try repository.expenseTombstone(id: fixture.deletedExpenseID))
         XCTAssertEqual(try repository.expenseCount(), 1)
         XCTAssertEqual(try repository.accountEntryCount(), 1)
-        XCTAssertEqual(try repository.pendingOutboxOperations().count, 1)
+        XCTAssertEqual(try repository.pendingOutboxOperations().count, 2)
     }
 
     func testLOCAL002F4RejectsUnknownVersionAndInvalidRelationshipsBeforeWriting() throws {

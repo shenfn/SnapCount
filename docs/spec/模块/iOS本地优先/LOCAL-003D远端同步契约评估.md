@@ -36,7 +36,7 @@
 
 ### 3. 本地账户写入没有 Outbox
 
-`LocalExpenseRepository.createAccount` 只写 `local_accounts`，不会追加账户 Outbox。即使消费 Outbox 可以上传，首次同步也无法知道新建账户或账户初始余额，消费的 `account_id` 可能在云端不存在。
+历史版本的 `LocalExpenseRepository.createAccount` 只写 `local_accounts`，不会追加账户 Outbox。即使消费 Outbox 可以上传，首次同步也无法知道新建账户或账户初始余额，消费的 `account_id` 可能在云端不存在。修复后账户与账户 Outbox 必须在同一数据库事务中提交；对于历史本地账户，如果仍有待上传消费引用且不存在任何账户操作，协调器必须以幂等方式补偿一条 `account/upsert`。
 
 ### 4. REST 多步写不满足原子性
 
@@ -77,6 +77,7 @@ sync_expense_batch(
 - pull cursor 必须是服务端同步流的 opaque cursor，不能复用某个数据域的 `updated_at`。
 - 删除以 tombstone 或等价 change event 进入同步流，不能物理删除后让另一台设备“猜不到”。
 - 返回结果必须按 `accepted / conflict / rejected` 分层，客户端可以安全重试未确认操作。
+- 当前 iOS adapter 对含账户依赖的批次按账户 `upsert`、消费 `upsert` 的顺序发送；服务端批次处理仍按数组顺序执行。其他客户端接入前，必须将“服务端不依赖调用方排序”单独提升为协议增强，不能把当前 iOS 排序误认为跨客户端保证。
 
 ## 推荐实施顺序
 

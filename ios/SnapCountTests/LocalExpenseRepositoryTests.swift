@@ -21,7 +21,7 @@ final class LocalExpenseRepositoryTests: XCTestCase {
 
         XCTAssertEqual(expense.amountMinor, 2_680)
         XCTAssertEqual(expense.accountID, fixture.account.id)
-        XCTAssertEqual(try repository.pendingOutboxOperations().count, 1)
+        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateKind), ["account", "expense"])
     }
 
     func testLOCALDATA004AOutboxConflictRollsBackExpenseAndEntry() throws {
@@ -56,7 +56,7 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertNil(try repository.expense(id: rejectedExpenseID))
         XCTAssertEqual(try repository.expenseCount(), 1)
         XCTAssertEqual(try repository.accountEntryCount(), 1)
-        XCTAssertEqual(try repository.pendingOutboxOperations().count, 1)
+        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateKind), ["account", "expense"])
     }
 
     func testLOCAL002B1ReopensExpenseAndPendingOutboxFromFile() throws {
@@ -83,7 +83,10 @@ final class LocalExpenseRepositoryTests: XCTestCase {
 
         let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
         XCTAssertEqual(try reopened.expense(id: expenseID)?.accountID, accountID)
-        XCTAssertEqual(try reopened.pendingOutboxOperations().map(\.operationID), [operationID])
+        let reopenedOutbox = try reopened.pendingOutboxOperations()
+        XCTAssertEqual(reopenedOutbox.count, 2)
+        XCTAssertEqual(reopenedOutbox.last?.operationID, operationID)
+        XCTAssertEqual(reopenedOutbox.map(\.aggregateKind), ["account", "expense"])
     }
 
     func testLOCAL002J1DerivesBalanceFromOpeningBalanceAndLedger() throws {
@@ -170,8 +173,9 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertEqual(try repository.accountEntries(sourceID: expenseID).count, 1)
         XCTAssertNil(try repository.accountEntries(sourceID: expenseID).first?.voidedAt)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.account.id), 7_320)
-        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateVersion), [1, 2])
-        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.operationKind), ["upsert", "upsert"])
+        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateVersion), [1, 1, 2])
+        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateKind), ["account", "expense", "expense"])
+        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.operationKind), ["upsert", "upsert", "upsert"])
     }
 
     func testLOCAL002C2AmountEditVoidsOldEntryAndCreatesReplacement() throws {
@@ -296,7 +300,7 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertEqual(try repository.expense(id: expenseID)?.merchantName, "盒马鲜生")
         XCTAssertEqual(try repository.expense(id: expenseID)?.amountMinor, 2_680)
         XCTAssertEqual(try repository.accountEntries(sourceID: expenseID).count, 1)
-        XCTAssertEqual(try repository.pendingOutboxOperations().count, 2)
+        XCTAssertEqual(try repository.pendingOutboxOperations().count, 3)
     }
 
     func testLOCAL002D1DeleteCreatesTombstoneVoidsLedgerAndRestoresBalance() throws {
@@ -332,8 +336,9 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertEqual(try repository.accountEntryCount(), 0)
         XCTAssertNotNil(try repository.accountEntries(sourceID: expenseID).first?.voidedAt)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.account.id), 10_000)
-        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.operationKind), ["upsert", "delete"])
-        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateVersion), [1, 2])
+        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateKind), ["account", "expense", "expense"])
+        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.operationKind), ["upsert", "upsert", "delete"])
+        XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateVersion), [1, 1, 2])
     }
 
     func testLOCAL002D2OutboxConflictRollsBackEditAndDelete() throws {
@@ -381,7 +386,7 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertNotNil(try repository.expense(id: expenseID))
         XCTAssertNil(try repository.expenseTombstone(id: expenseID))
         XCTAssertNil(try repository.accountEntries(sourceID: expenseID).first?.voidedAt)
-        XCTAssertEqual(try repository.pendingOutboxOperations().count, 1)
+        XCTAssertEqual(try repository.pendingOutboxOperations().count, 2)
     }
 
     func testLOCAL002B2ReopensEditedExpenseAndDeletedTombstone() throws {

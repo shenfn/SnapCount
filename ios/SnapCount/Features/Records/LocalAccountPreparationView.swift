@@ -31,7 +31,7 @@ struct LocalAccountPreparationView: View {
                 } header: {
                     Text("先准备一个本地账户")
                 } footer: {
-                    Text("账户只保存在此 iPhone，不会成为云端账户，也不会自动替你选择。")
+                    Text("账户默认保存在此 iPhone；开启云端同步后，账户信息会同步到你的云端账号。")
                 }
 
                 if let message = appState.localAccountMessage {

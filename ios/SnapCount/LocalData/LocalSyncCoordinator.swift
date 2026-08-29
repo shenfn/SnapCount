@@ -96,6 +96,7 @@ struct LocalSyncCoordinator {
 
     func synchronize(profileID: UUID, cloudUserID: String) async throws -> LocalSyncRunResult {
         let currentAttemptID = attemptID()
+        _ = try repository.ensureAccountOutboxForPendingExpenses(profileID: profileID)
         _ = try stateStore.beginSync(
             profileID: profileID,
             cloudUserID: cloudUserID,

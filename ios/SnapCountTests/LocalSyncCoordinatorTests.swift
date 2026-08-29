@@ -19,15 +19,16 @@ final class LocalSyncCoordinatorTests: XCTestCase {
         ), operationID: UUID())
         _ = try fixture.store.confirmBinding(profileID: profile.id, cloudUserID: "cloud-a")
 
-        let upload = try fixture.repository.pendingOutboxUploads(profileID: profile.id).first!
+        let uploads = try fixture.repository.pendingOutboxUploads(profileID: profile.id)
+        XCTAssertEqual(uploads.map(\.aggregateKind), ["account", "expense"])
         let coordinator = fixture.coordinator(transport: StubSyncTransport(result: .init(
             remoteArchive: nil,
             nextPullCursor: "cursor-1",
-            acceptedOperationIDs: [upload.operationID]
+            acceptedOperationIDs: uploads.map(\.operationID)
         )))
         let result = try await coordinator.synchronize(profileID: profile.id, cloudUserID: "cloud-a")
 
-        XCTAssertEqual(result.uploadedOperationCount, 1)
+        XCTAssertEqual(result.uploadedOperationCount, 2)
         XCTAssertEqual(result.state.status, .synced)
         XCTAssertEqual(result.state.pullCursor, "cursor-1")
         XCTAssertTrue(try fixture.repository.pendingOutboxOperations().isEmpty)
@@ -57,8 +58,8 @@ final class LocalSyncCoordinatorTests: XCTestCase {
 
         XCTAssertNotNil(try fixture.repository.expense(id: expenseID))
         XCTAssertEqual(try fixture.store.syncState(profileID: profile.id).status, .failed)
-        XCTAssertEqual(try fixture.repository.pendingOutboxUploads(profileID: profile.id).count, 1)
-        XCTAssertEqual(try fixture.repository.pendingOutboxUploads(profileID: profile.id).first?.attemptCount ?? -1, 1)
+        XCTAssertEqual(try fixture.repository.pendingOutboxUploads(profileID: profile.id).count, 2)
+        XCTAssertTrue(try fixture.repository.pendingOutboxUploads(profileID: profile.id).allSatisfy { $0.attemptCount == 1 })
     }
 
     func testLOCAL003D3MismatchedOrUnboundWorkspaceCannotStartSync() async throws {
@@ -77,6 +78,43 @@ final class LocalSyncCoordinatorTests: XCTestCase {
             _ = try await coordinator.synchronize(profileID: profile.id, cloudUserID: "cloud-b")
         }
         XCTAssertEqual(try fixture.store.syncState(profileID: profile.id).status, .ready)
+    }
+
+    func testDREMOTE017BackfillsMissingAccountOutboxBeforePendingExpensesIdempotently() async throws {
+        let fixture = try LocalSyncCoordinatorFixture()
+        defer { fixture.cleanup() }
+        let profile = try fixture.store.activeProfile()
+        let account = try fixture.repository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: fixture.fixedDate
+        ))
+        try await fixture.database.writer.write { db in
+            try db.execute(
+                sql: "DELETE FROM local_outbox_operations WHERE aggregate_kind = 'account' AND aggregate_id = ?",
+                arguments: [account.id.uuidString]
+            )
+        }
+        _ = try fixture.repository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: account.id, amountMinor: 123,
+            currency: "CNY", merchantName: "早餐", platform: "manual", category: "food",
+            paymentMethod: "现金", transactionDate: "2026-08-25", transactionTime: nil,
+            note: nil, createdAt: fixture.fixedDate
+        ), operationID: UUID())
+        _ = try fixture.store.confirmBinding(profileID: profile.id, cloudUserID: "cloud-a")
+
+        XCTAssertEqual(try fixture.repository.ensureAccountOutboxForPendingExpenses(profileID: profile.id), 1)
+        XCTAssertEqual(try fixture.repository.ensureAccountOutboxForPendingExpenses(profileID: profile.id), 0)
+
+        let uploads = try fixture.repository.pendingOutboxUploads(profileID: profile.id)
+        let transport = StubSyncTransport(result: .init(
+            nextPullCursor: "cursor-1",
+            acceptedOperationIDs: uploads.map(\.operationID)
+        ))
+        let coordinator = fixture.coordinator(transport: transport)
+        _ = try await coordinator.synchronize(profileID: profile.id, cloudUserID: "cloud-a")
+
+        XCTAssertEqual(transport.uploads.map(\.aggregateKind), ["account", "expense"])
+        XCTAssertTrue(try fixture.repository.pendingOutboxOperations().isEmpty)
     }
 
     func testLOCAL003D4RemoteArchiveMergesIntoCurrentWorkspaceWithoutCreatingOutbox() async throws {
@@ -129,7 +167,7 @@ final class LocalSyncCoordinatorTests: XCTestCase {
             note: nil, createdAt: fixture.fixedDate
         ), operationID: UUID())
         _ = try fixture.store.confirmBinding(profileID: profile.id, cloudUserID: "cloud-a")
-        let upload = try fixture.repository.pendingOutboxUploads(profileID: profile.id).first!
+        let upload = try fixture.repository.pendingOutboxUploads(profileID: profile.id).first { $0.aggregateKind == "expense" }!
         let coordinator = fixture.coordinator(transport: StubSyncTransport(result: .init(
             nextPullCursor: "cursor-new",
             rejectedOperations: [LocalSyncRejectedOperation(operationID: upload.operationID, reason: "permission_denied")]
@@ -142,7 +180,7 @@ final class LocalSyncCoordinatorTests: XCTestCase {
         let state = try fixture.store.syncState(profileID: profile.id)
         XCTAssertEqual(state.status, .failed)
         XCTAssertNil(state.pullCursor)
-        XCTAssertEqual(try fixture.repository.pendingOutboxUploads(profileID: profile.id).first?.attemptCount, 1)
+        XCTAssertEqual(try fixture.repository.pendingOutboxUploads(profileID: profile.id).first { $0.operationID == upload.operationID }?.attemptCount, 1)
         XCTAssertNotNil(try fixture.repository.expense(id: upload.aggregateID))
     }
 
@@ -173,7 +211,7 @@ final class LocalSyncCoordinatorTests: XCTestCase {
         let state = try fixture.store.syncState(profileID: profile.id)
         XCTAssertEqual(state.status, .failed)
         XCTAssertNil(state.pullCursor)
-        XCTAssertEqual(try fixture.repository.pendingOutboxUploads(profileID: profile.id).count, 1)
+        XCTAssertEqual(try fixture.repository.pendingOutboxUploads(profileID: profile.id).count, 2)
     }
 
     func testDREMOTE016AccountConflictSkipsRemoteProjectionAndMarksUnresolved() async throws {

@@ -20,6 +20,8 @@ protocol LocalExpenseRepositoryProtocol {
     func accountEntryCount() throws -> Int
     func accountEntries(sourceID: UUID) throws -> [LocalAccountEntry]
     func pendingOutboxOperations() throws -> [LocalOutboxOperation]
+    @discardableResult
+    func ensureAccountOutboxForPendingExpenses(profileID: UUID) throws -> Int
     func pendingOutboxUploads(profileID: UUID) throws -> [LocalOutboxUpload]
     func markOutboxSent(operationIDs: [UUID]) throws
     func markOutboxFailed(operationIDs: [UUID], error: String) throws
@@ -69,6 +71,17 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     draft.openingBalanceMinor,
                     draft.createdAt
                 ]
+            )
+            try Self.insertOutbox(
+                operationID: UUID(),
+                profileID: draft.profileID,
+                aggregateKind: "account",
+                aggregateID: draft.id,
+                operationKind: "upsert",
+                aggregateVersion: 1,
+                payload: try Self.outboxPayload(account: draft),
+                createdAt: draft.createdAt,
+                database: db
             )
         }
         return LocalAccount(
@@ -283,6 +296,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             try Self.insertOutbox(
                 operationID: operationID,
                 profileID: updated.profileID,
+                aggregateKind: "expense",
                 aggregateID: updated.id,
                 operationKind: "upsert",
                 aggregateVersion: updated.localVersion,
@@ -332,6 +346,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             try Self.insertOutbox(
                 operationID: operationID,
                 profileID: tombstone.profileID,
+                aggregateKind: "expense",
                 aggregateID: tombstone.id,
                 operationKind: "delete",
                 aggregateVersion: tombstone.localVersion,
@@ -436,9 +451,72 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                            attempt_count, created_at
                     FROM local_outbox_operations
                     WHERE status = 'pending'
-                    ORDER BY sequence ASC
+                    ORDER BY CASE aggregate_kind WHEN 'account' THEN 0 ELSE 1 END,
+                             sequence ASC
                     """
             ).map { try Self.outboxOperation(from: $0) }
+        }
+    }
+
+    @discardableResult
+    func ensureAccountOutboxForPendingExpenses(profileID: UUID) throws -> Int {
+        try database.writer.write { db in
+            let accounts = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT DISTINCT a.id, a.profile_id, a.name, a.kind, a.currency,
+                           a.opening_balance_minor, a.created_at
+                    FROM local_accounts AS a
+                    JOIN local_expenses AS e ON e.account_id = a.id AND e.profile_id = a.profile_id
+                    JOIN local_outbox_operations AS expense_outbox
+                      ON expense_outbox.aggregate_kind = 'expense'
+                     AND expense_outbox.aggregate_id = e.id
+                     AND expense_outbox.profile_id = e.profile_id
+                     AND expense_outbox.status IN ('pending', 'failed')
+                    WHERE a.profile_id = ?
+                      AND e.deleted_at IS NULL
+                    ORDER BY a.created_at ASC, a.id ASC
+                    """,
+                arguments: [profileID.uuidString]
+            )
+            var inserted = 0
+            for row in accounts {
+                let accountID: String = row["id"]
+                let existing = try Row.fetchOne(
+                    db,
+                    sql: """
+                        SELECT 1 FROM local_outbox_operations
+                        WHERE profile_id = ? AND aggregate_kind = 'account' AND aggregate_id = ?
+                        LIMIT 1
+                        """,
+                    arguments: [profileID.uuidString, accountID]
+                )
+                guard existing == nil,
+                      let id = UUID(uuidString: accountID),
+                      let storedProfileID = UUID(uuidString: row["profile_id"]) else { continue }
+                let draft = LocalAccountDraft(
+                    id: id,
+                    profileID: storedProfileID,
+                    name: row["name"],
+                    kind: row["kind"],
+                    currency: row["currency"],
+                    openingBalanceMinor: row["opening_balance_minor"],
+                    createdAt: row["created_at"]
+                )
+                try Self.insertOutbox(
+                    operationID: UUID(),
+                    profileID: draft.profileID,
+                    aggregateKind: "account",
+                    aggregateID: draft.id,
+                    operationKind: "upsert",
+                    aggregateVersion: 1,
+                    payload: try Self.outboxPayload(account: draft),
+                    createdAt: draft.createdAt,
+                    database: db
+                )
+                inserted += 1
+            }
+            return inserted
         }
     }
 
@@ -452,7 +530,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                            attempt_count, created_at
                     FROM local_outbox_operations
                     WHERE profile_id = ? AND status IN ('pending', 'failed')
-                    ORDER BY sequence ASC
+                    ORDER BY CASE aggregate_kind WHEN 'account' THEN 0 ELSE 1 END,
+                             sequence ASC
                     """,
                 arguments: [profileID.uuidString]
             ).map { row in
@@ -762,6 +841,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
     private static func insertOutbox(
         operationID: UUID,
         profileID: UUID,
+        aggregateKind: String,
         aggregateID: UUID,
         operationKind: String,
         aggregateVersion: Int64,
@@ -775,11 +855,12 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     operation_id, profile_id, aggregate_kind, aggregate_id, operation_kind,
                     aggregate_version, idempotency_key, payload_json, status, attempt_count,
                     next_attempt_at, last_error, created_at
-                ) VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, ?)
                 """,
             arguments: [
                 operationID.uuidString,
                 profileID.uuidString,
+                aggregateKind,
                 aggregateID.uuidString,
                 operationKind,
                 aggregateVersion,
@@ -788,6 +869,19 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 createdAt
             ]
         )
+    }
+
+    private static func outboxPayload(account: LocalAccountDraft) throws -> String {
+        try encodePayload(AccountOutboxPayload(
+            id: account.id,
+            profileID: account.profileID,
+            name: account.name,
+            kind: account.kind,
+            currency: account.currency,
+            openingBalanceMinor: account.openingBalanceMinor,
+            localVersion: 1,
+            createdAt: account.createdAt
+        ))
     }
 
     private static func outboxPayload(expense: LocalExpense) throws -> String {
@@ -851,4 +945,15 @@ private struct ExpenseDeleteOutboxPayload: Encodable {
     let profileID: UUID
     let localVersion: Int64
     let deletedAt: Date
+}
+
+private struct AccountOutboxPayload: Encodable {
+    let id: UUID
+    let profileID: UUID
+    let name: String
+    let kind: String
+    let currency: String
+    let openingBalanceMinor: Int64
+    let localVersion: Int64
+    let createdAt: Date
 }

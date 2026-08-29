@@ -26,6 +26,7 @@ final class LocalExpenseAccountPreparationTests: XCTestCase {
 
         XCTAssertEqual(account.openingBalanceMinor, 0)
         XCTAssertEqual(try fixture.repository.accountBalanceMinor(accountID: account.id), 0)
+        XCTAssertEqual(try fixture.repository.pendingOutboxOperations().map(\.aggregateKind), ["account"])
         let workspace = try await fixture.useCase.prepareWorkspace()
         XCTAssertEqual(workspace.accounts.map(\.id), [account.id])
     }
