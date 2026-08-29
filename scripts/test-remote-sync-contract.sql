@@ -19,6 +19,13 @@ select public.remote_sync_test_assert(
   to_regprocedure('public.sync_expense_batch(uuid,integer,text,jsonb)') is not null,
   'canonical batch RPC must exist'
 );
+select public.remote_sync_test_assert(
+  exists (select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = 'transactions' and column_name = 'deleted_at')
+    and exists (select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = 'transactions' and column_name = 'updated_at'),
+  'transactions must expose the sync tombstone and update-time columns'
+);
 
 select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
 
