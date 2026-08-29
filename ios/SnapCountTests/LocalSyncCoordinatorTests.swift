@@ -88,7 +88,7 @@ final class LocalSyncCoordinatorTests: XCTestCase {
             id: UUID(), profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
             openingBalanceMinor: 10_000, createdAt: fixture.fixedDate
         ))
-        try fixture.database.writer.write { db in
+        try await fixture.database.writer.write { db in
             try db.execute(
                 sql: "DELETE FROM local_outbox_operations WHERE aggregate_kind = 'account' AND aggregate_id = ?",
                 arguments: [account.id.uuidString]
