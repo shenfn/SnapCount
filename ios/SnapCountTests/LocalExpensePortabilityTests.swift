@@ -69,6 +69,16 @@ final class LocalExpensePortabilityTests: XCTestCase {
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.accountID), 6_820)
         XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateKind), ["account", "expense", "expense"])
         XCTAssertEqual(Set(try repository.pendingOutboxOperations().map(\.operationKind)), ["upsert", "delete"])
+        let activeUpload = try XCTUnwrap(
+            repository.pendingOutboxUploads(profileID: fixture.profileID)
+                .first(where: { $0.aggregateID == fixture.activeExpenseID })
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(activeUpload.payloadJSON.utf8))
+                as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "expense")
+        XCTAssertEqual(payload["source"] as? String, "manual")
     }
 
     func testLOCAL002F2RepeatedImportIsIdempotentAndDoesNotAppendOutbox() throws {

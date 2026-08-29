@@ -175,6 +175,8 @@
 | DREMOTE-007 | 用户 A 读取/写入用户 B UUID | RLS/RPC 拒绝，不泄露实体是否存在 |
 | DREMOTE-008 | 旧 cursor | 返回 `cursor_expired`，不静默返回最新集合 |
 | DREMOTE-009 | 空批次只 pull | 不写 operation，不改变实体，只返回 cursor 后的变更 |
+| DREMOTE-018 | 消费字段完整写入与旧 Outbox 兼容 | 新客户端发送 `type/source/platform/note`；服务端对旧 payload 缺少 `type/source` 时仍写入 `expense/manual`，正式记录保持 `status=done` |
+| DREMOTE-019 | 完整编辑、Pull 与删除往返 | 所有可编辑消费字段更新并返回；删除使用 `transactions.deleted_at` tombstone，不写入 status 约束之外的值 |
 
 ## 7. 进入 D-REMOTE-002 的门禁
 

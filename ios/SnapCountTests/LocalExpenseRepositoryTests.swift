@@ -22,6 +22,18 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertEqual(expense.amountMinor, 2_680)
         XCTAssertEqual(expense.accountID, fixture.account.id)
         XCTAssertEqual(try repository.pendingOutboxOperations().map(\.aggregateKind), ["account", "expense"])
+        let expenseUpload = try XCTUnwrap(
+            repository.pendingOutboxUploads(profileID: fixture.profile.id)
+                .first(where: { $0.aggregateKind == "expense" })
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(expenseUpload.payloadJSON.utf8))
+                as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "expense")
+        XCTAssertEqual(payload["source"] as? String, "manual")
+        XCTAssertNotNil(payload["platform"])
+        XCTAssertNotNil(payload["note"])
     }
 
     func testLOCALDATA004AOutboxConflictRollsBackExpenseAndEntry() throws {

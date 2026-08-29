@@ -10,7 +10,7 @@ final class SupabaseSyncTransportTests: XCTestCase {
           "accepted_operation_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
           "conflicts": [], "rejected": [],
           "remote_accounts": [{"aggregate_id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","version":1,"change_kind":"upsert","name":"现金","type":"cash","currency":"CNY","initial_balance":100,"current_balance":90,"deleted_at":null}],
-          "remote_expenses": [{"aggregate_id":"cccccccc-cccc-cccc-cccc-cccccccccccc","version":1,"change_kind":"upsert","amount":12.3,"merchant_name":"早餐","category":"food","payment_method":"现金","transaction_date":"2026-08-26","transaction_time":"08:30:00","account_id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","deleted_at":null}],
+          "remote_expenses": [{"aggregate_id":"cccccccc-cccc-cccc-cccc-cccccccccccc","version":1,"change_kind":"upsert","amount":12.3,"merchant_name":"早餐","platform":"线下消费","category":"food","payment_method":"现金","transaction_date":"2026-08-26","transaction_time":"08:30:00","note":"同步备注","account_id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","deleted_at":null}],
           "remote_account_entries": [{"source_id":"cccccccc-cccc-cccc-cccc-cccccccccccc","account_id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","direction":"out","amount":12.3,"entry_type":"expense","is_voided":false,"voided_reason":null}],
           "next_pull_cursor":"c:4"
         }
@@ -22,6 +22,8 @@ final class SupabaseSyncTransportTests: XCTestCase {
         XCTAssertTrue(client.rpcBody?["p_pull_cursor"]?.value is NSNull)
         XCTAssertEqual(result.nextPullCursor, "c:4")
         XCTAssertEqual(result.remoteSnapshot?.expenses.first?.amountMinor, 1230)
+        XCTAssertEqual(result.remoteSnapshot?.expenses.first?.platform, "线下消费")
+        XCTAssertEqual(result.remoteSnapshot?.expenses.first?.note, "同步备注")
         XCTAssertEqual(result.remoteSnapshot?.accountEntries.count, 1)
     }
 

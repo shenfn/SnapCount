@@ -42,7 +42,9 @@ begin
       'aggregate_kind', 'expense', 'aggregate_id', v_expense_id,
       'operation_kind', 'upsert', 'aggregate_version', 1, 'base_version', 0,
       'payload', jsonb_build_object('amount', 8.50, 'merchant_name', 'D-REMOTE 早餐',
-        'category', 'food', 'account_id', v_account_id, 'transaction_date', '2026-08-26')
+        'platform', '线下消费', 'category', 'food', 'payment_method', '现金',
+        'note', '初次同步备注', 'account_id', v_account_id,
+        'transaction_date', '2026-08-26', 'transaction_time', '08:30:00')
     ))
   );
   v_retry := public.sync_expense_batch(
@@ -57,8 +59,11 @@ begin
   perform public.remote_sync_test_assert(
     v_first = v_retry
       and (select count(*) from public.transactions where id = v_expense_id) = 1
+      and (select type = 'expense' and status = 'done' and source = 'manual'
+             and platform = '线下消费' and note = '初次同步备注'
+           from public.transactions where id = v_expense_id)
       and (select count(*) from public.account_entries where source_id = v_expense_id and not is_voided) = 1,
-    'DREMOTE-001 retry must return the first result and create one fact'
+    'DREMOTE-001 retry must create one complete production-compatible expense fact'
   );
 
   v_duplicate := public.sync_expense_batch(
@@ -146,15 +151,22 @@ begin
       'operation_id', '99000000-0000-4000-8000-000000000005',
       'idempotency_key', 'replace-key-001', 'aggregate_kind', 'expense',
       'aggregate_id', v_expense_id, 'aggregate_version', 2, 'base_version', 1,
-      'payload', jsonb_build_object('amount', 10, 'account_id', v_account_id)
+      'payload', jsonb_build_object('amount', 10, 'merchant_name', 'D-REMOTE 午餐',
+        'platform', '外卖', 'category', 'dining', 'payment_method', '银行卡',
+        'transaction_date', '2026-08-27', 'transaction_time', '12:15:00',
+        'note', '更新后备注', 'source', 'manual', 'account_id', v_account_id)
     ))
   );
   perform public.remote_sync_test_assert(
     jsonb_array_length(v_replace->'accepted_operation_ids') = 1
       and (select count(*) from public.account_entries where source_id = v_expense_id and not is_voided) = 1
       and (select count(*) from public.account_entries where source_id = v_expense_id and is_voided) = 1
-      and (select amount = 10 from public.transactions where id = v_expense_id),
-    'DREMOTE-004 replacement must void the old entry and create one new entry'
+      and (select amount = 10 and merchant_name = 'D-REMOTE 午餐' and platform = '外卖'
+             and category = 'dining' and payment_method = '银行卡'
+             and transaction_date = '2026-08-27' and transaction_time = '12:15:00'
+             and note = '更新后备注' and status = 'done' and deleted_at is null
+           from public.transactions where id = v_expense_id),
+    'DREMOTE-004 replacement must update every editable field and replace the ledger entry'
   );
 
   v_delete := public.sync_expense_batch(
@@ -168,11 +180,11 @@ begin
   );
   perform public.remote_sync_test_assert(
     jsonb_array_length(v_delete->'accepted_operation_ids') = 1
-      and (select status = 'deleted' from public.transactions where id = v_expense_id)
+      and (select status = 'done' and deleted_at is not null from public.transactions where id = v_expense_id)
       and (select count(*) from public.account_entries where source_id = v_expense_id and not is_voided) = 0
       and (select change_kind = 'delete' from public.sync_change_log
             where aggregate_id = v_expense_id order by cursor desc limit 1),
-    'DREMOTE-005 delete must retain a tombstone and void the entry'
+    'DREMOTE-005 delete must use deleted_at tombstone without violating status constraint'
   );
 
   select count(*) into v_before_transactions from public.transactions;
