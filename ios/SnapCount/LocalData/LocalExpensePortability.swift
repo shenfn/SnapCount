@@ -202,6 +202,7 @@ final class LocalExpensePortability {
             }
 
             var insertedAccounts = 0
+            var insertedAccountIDs = Set<UUID>()
             var skippedAccounts = 0
             for account in archive.accounts {
                 let existing = try Row.fetchOne(
@@ -237,6 +238,7 @@ final class LocalExpensePortability {
                         ]
                     )
                     insertedAccounts += 1
+                    insertedAccountIDs.insert(account.id)
                 }
             }
 
@@ -327,6 +329,26 @@ final class LocalExpensePortability {
             }
 
             var insertedOutbox = 0
+            for account in archive.accounts where enqueueOutbox && insertedAccountIDs.contains(account.id) {
+                try db.execute(
+                    sql: """
+                        INSERT INTO local_outbox_operations (
+                            operation_id, profile_id, aggregate_kind, aggregate_id, operation_kind,
+                            aggregate_version, idempotency_key, payload_json, status, attempt_count,
+                            next_attempt_at, last_error, created_at
+                        ) VALUES (?, ?, 'account', ?, 'upsert', 1, ?, ?, 'pending', 0, NULL, NULL, ?)
+                        """,
+                    arguments: [
+                        operationID().uuidString,
+                        account.profileID.uuidString,
+                        account.id.uuidString,
+                        UUID().uuidString,
+                        try Self.outboxPayload(for: account),
+                        importedAt
+                    ]
+                )
+                insertedOutbox += 1
+            }
             for expense in archive.expenses where enqueueOutbox && insertedExpenseIDs.contains(expense.id) {
                 try db.execute(
                     sql: """
@@ -478,5 +500,11 @@ final class LocalExpensePortability {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         return String(decoding: try encoder.encode(expense), as: UTF8.self)
+    }
+
+    private static func outboxPayload(for account: LocalExpenseArchive.Account) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return String(decoding: try encoder.encode(account), as: UTF8.self)
     }
 }

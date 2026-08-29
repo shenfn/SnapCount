@@ -84,7 +84,15 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 - TestFlight 已上传，等待 App Store Connect 完成处理后进行真机验收。
 - Windows 不能替代 macOS 验证 Swift；iOS 编译以 GitHub macOS 门禁为准。
 
-## 6. 下一步
+## 6. 本轮真实验证记录（2026-08-29）
 
-生产迁移、历史登记和 TestFlight 上传已完成。下一步等待构建处理完成后运行 RC-001 至 RC-016。每次真机/双设备测试把结果、设备、账号、提交和时间写回本记录；未完成前不进入其他数据域。
+- TestFlight 构建：`1.0 (33228057081)`，基于已合并的同步诊断提交；安装后使用既有主账号 `test2`。
+- 结果：本地存在 4 条待处理消费操作，同步失败并显示 `account not found`；本地消费、账户和 Outbox 保留，未发现本地事实丢失。
+- 诊断链：本地 `expense` Outbox → `sync_expense_batch` → 服务端按 payload.account_id 查找当前用户账户 → 云端账户不存在 → RPC 抛出 `account not found` → 客户端标记失败并保留待重试。
+- 根因分类：业务代码缺陷。`LocalExpenseRepository.createAccount` 原先只写 `local_accounts`，没有写 `account` Outbox；已有账户也没有补偿事件。不是账号切换、网络或迁移执行失败的证据。
+- 修复范围：账户 Outbox 与消费依赖顺序；不扩展到其他数据域、冲突 UI 或同步协议重构。
+
+## 7. 下一步
+
+完成账户 Outbox 窄修复后，以 macOS iOS Build/XCTest 和治理门禁为准合并，再从固定提交触发新的 TestFlight。安装后使用 `test2` 重试，确认账户先上传、4 条消费全部接受、重复同步不重复落库且余额无漂移。修复前不把 RC 标记为通过，也不进入其他数据域。
 
