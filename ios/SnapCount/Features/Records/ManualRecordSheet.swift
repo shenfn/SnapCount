@@ -43,8 +43,37 @@ struct ManualRecordSheet: View {
         NativeManualDomainMetadata.resolve(selectedDomain, fallbackDomainKey: draft.domainKey)
     }
 
-    private var accountCandidates: [NativeAccount] {
-        appState.accounts.filter { !$0.isArchived }
+    private struct ManualAccountCandidate: Identifiable {
+        let id: String
+        let title: String
+        let isDefaultExpense: Bool
+        let isDefaultIncome: Bool
+    }
+
+    private var accountCandidates: [ManualAccountCandidate] {
+        // Expense writes are local-first even when a cloud session exists. Use
+        // the local projection so a failed cloud account refresh cannot block
+        // offline entry.
+        if draft.kind == .expense {
+            return appState.localAccounts.map { account in
+                ManualAccountCandidate(
+                    id: account.id.uuidString,
+                    title: account.name,
+                    isDefaultExpense: false,
+                    isDefaultIncome: false
+                )
+            }
+        }
+        return appState.accounts
+            .filter { !$0.isArchived }
+            .map { account in
+                ManualAccountCandidate(
+                    id: account.id,
+                    title: account.title,
+                    isDefaultExpense: account.isDefaultExpense,
+                    isDefaultIncome: account.isDefaultIncome
+                )
+            }
     }
 
     private var isSaving: Bool {
@@ -118,6 +147,9 @@ struct ManualRecordSheet: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .task {
+            // The form must be able to resolve local accounts while offline.
+            // Cloud account/vocabulary refreshes remain best-effort below.
+            _ = await appState.prepareLocalWorkspace()
             if appState.accounts.isEmpty { await appState.loadAccounts() }
             await appState.loadFinanceVocabulary()
             normalizeDomainSelection()
@@ -501,6 +533,7 @@ struct ManualRecordSheet: View {
         switch draft.kind {
         case .expense:
             draft.accountId = accountCandidates.first(where: \.isDefaultExpense)?.id
+                ?? accountCandidates.first?.id
         case .income:
             draft.accountId = accountCandidates.first(where: \.isDefaultIncome)?.id
         case .universal:

@@ -121,3 +121,13 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 
 下一步：合并修复 PR 后，将新迁移应用到生产并记录 `migration list` 与 schema 查询结果；生产 smoke 通过后从固定主线提交触发新的 TestFlight，重新验证 RC-005/012/015。
 
+## 10. 断网手动记录修复（2026-08-30）
+
+- TestFlight 构建 105 已验证同步成功，但真机发现断网后已登录用户无法保存手动消费。
+- 根因定位：手动消费已经走本地 GRDB，但统一表单打开时只刷新云端 `accounts`；断网刷新失败后，表单没有本地账户候选，导致本地消费命令拿不到 `accountID`。
+- 修复范围：统一表单打开时先准备本地 workspace；消费类型优先读取 `localAccounts`，云端账户仅作为其他记录类型的候选来源；消费无显式默认账户时选取第一个本地账户。未修改同步协议、数据库迁移或远端保存路径。
+- 回归测试：新增已登录但云端 session 不可用时，手动消费仍调用 `LocalExpenseUseCase`、不查询远端 session、返回“记录已保存（本机）”的 AppState 测试。
+- 未验证：Windows 无法执行 Swift/XCTest；需由 PR 的 macOS iOS Build 验证，并在新 TestFlight 开启飞行模式复验。
+
+下一步：完成 macOS Build/XCTest 和门禁后合并；从固定主线触发新 TestFlight，按“飞行模式创建消费 → 重启 App → 恢复网络同步”验证 RC-008/009。
+

@@ -190,6 +190,45 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     }
 
     @MainActor
+    func testSignedInManualExpenseStaysLocalWhenCloudSessionIsUnavailable() async {
+        let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let accountID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let expense = localExpense(profileID: profileID)
+        let localUseCase = LocalShellExpenseUseCaseStub(
+            profile: LocalProfile(id: profileID, createdAt: Date(), cloudUserID: nil, syncEnabled: false),
+            month: LocalExpenseMonth(profileID: profileID, expenses: [expense]),
+            createResult: LocalExpenseOutcome(expense: expense, tombstone: nil, profileID: profileID)
+        )
+        var sessionLookupCount = 0
+        let state = AppState(
+            localExpenseUseCase: localUseCase,
+            sessionProvider: { _ in
+                sessionLookupCount += 1
+                throw SupabaseRemoteError.missingSession
+            }
+        )
+        state.isSignedIn = true
+        state.currentUserId = "cloud-user"
+
+        var draft = NativeManualRecordDraft(kind: .expense)
+        draft.accountId = accountID.uuidString
+        draft.amountText = "12.30"
+        draft.platform = "线下消费"
+        draft.category = "food"
+        draft.paymentMethod = "现金"
+        draft.title = "全家便利店"
+        draft.date = Date(timeIntervalSince1970: 1_700_000_100)
+
+        let saved = await state.createManualRecord(draft, domain: nil)
+
+        XCTAssertTrue(saved)
+        XCTAssertEqual(localUseCase.createCommands.count, 1)
+        XCTAssertEqual(localUseCase.createCommands.first?.accountID, accountID)
+        XCTAssertEqual(sessionLookupCount, 0)
+        XCTAssertEqual(state.manualRecordMessage, "记录已保存（本机）")
+    }
+
+    @MainActor
     func testAppStateLoadsSignedOutMonthFromLocalUseCaseWithoutSessionLookup() async throws {
         let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let expense = localExpense(profileID: profileID)
@@ -316,9 +355,11 @@ private final class LocalShellExpenseUseCaseStub: LocalExpenseUseCaseProtocol {
     let profile: LocalProfile
     let monthResult: LocalExpenseMonth
     let expenseResult: LocalExpense?
+    let createResult: LocalExpenseOutcome?
     let updateResult: LocalExpenseOutcome?
     let deleteResult: LocalExpenseOutcome?
     private(set) var monthKeys: [String] = []
+    private(set) var createCommands: [LocalExpenseCommand] = []
     private(set) var updateCommands: [LocalExpenseUpdateCommand] = []
     private(set) var deleteCommands: [LocalExpenseDeleteCommand] = []
 
@@ -326,18 +367,24 @@ private final class LocalShellExpenseUseCaseStub: LocalExpenseUseCaseProtocol {
         profile: LocalProfile,
         month: LocalExpenseMonth,
         expenseResult: LocalExpense? = nil,
+        createResult: LocalExpenseOutcome? = nil,
         updateResult: LocalExpenseOutcome? = nil,
         deleteResult: LocalExpenseOutcome? = nil
     ) {
         self.profile = profile
         self.monthResult = month
         self.expenseResult = expenseResult
+        self.createResult = createResult
         self.updateResult = updateResult
         self.deleteResult = deleteResult
     }
 
     func prepareProfile() async throws -> LocalProfile { profile }
-    func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome { throw LocalDataError.invalidRecord }
+    func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome {
+        createCommands.append(command)
+        guard let createResult else { throw LocalDataError.invalidRecord }
+        return createResult
+    }
     func expense(id: UUID) async throws -> LocalExpense? { expenseResult?.id == id ? expenseResult : nil }
     func update(_ command: LocalExpenseUpdateCommand) async throws -> LocalExpenseOutcome {
         updateCommands.append(command)
