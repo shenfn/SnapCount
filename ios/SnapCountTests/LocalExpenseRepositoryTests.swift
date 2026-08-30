@@ -3,6 +3,47 @@ import XCTest
 @testable import SnapCount
 
 final class LocalExpenseRepositoryTests: XCTestCase {
+    func testLOCAL003ProjectionImportsCloudFactsWithoutCreatingOutbox() throws {
+        let databaseURL = temporaryLocalDatabaseURL()
+        defer { removeLocalDatabase(at: databaseURL) }
+        let repository = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let profile = try repository.createProfile(id: UUID(), createdAt: fixedDate)
+        let accountID = UUID()
+        try repository.importRemoteAccounts([
+            LocalAccountDraft(
+                id: accountID,
+                profileID: profile.id,
+                name: "云端银行卡",
+                kind: "debit_card",
+                currency: "CNY",
+                openingBalanceMinor: 20_000,
+                createdAt: fixedDate
+            )
+        ])
+        let expenseID = UUID()
+        try repository.importRemoteExpenses([
+            expenseDraft(
+                id: expenseID,
+                profileID: profile.id,
+                accountID: accountID,
+                amountMinor: 1_280
+            )
+        ])
+        try repository.importRemoteExpenses([
+            expenseDraft(
+                id: expenseID,
+                profileID: profile.id,
+                accountID: accountID,
+                amountMinor: 9_999
+            )
+        ])
+
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).map(\.id), [accountID])
+        XCTAssertEqual(try repository.expense(id: expenseID)?.amountMinor, 1_280)
+        XCTAssertEqual(try repository.accountEntries(accountID: accountID).count, 1)
+        XCTAssertEqual(try repository.pendingOutboxOperations().count, 0)
+    }
+
     func testLOCAL002A1CreatesProfileAccountAndExpenseWithoutCloudSession() throws {
         let databaseURL = temporaryLocalDatabaseURL()
         defer { removeLocalDatabase(at: databaseURL) }

@@ -4,8 +4,10 @@ import GRDB
 protocol LocalExpenseRepositoryProtocol {
     func createProfile(id: UUID, createdAt: Date) throws -> LocalProfile
     func createAccount(_ draft: LocalAccountDraft) throws -> LocalAccount
+    func importRemoteAccounts(_ drafts: [LocalAccountDraft]) throws
     func accounts(profileID: UUID) throws -> [LocalAccount]
     func createExpense(_ draft: LocalExpenseDraft, operationID: UUID) throws -> LocalExpense
+    func importRemoteExpenses(_ drafts: [LocalExpenseDraft]) throws
     func updateExpense(_ update: LocalExpenseUpdate, operationID: UUID) throws -> LocalExpense
     func deleteExpense(
         id: UUID,
@@ -19,6 +21,7 @@ protocol LocalExpenseRepositoryProtocol {
     func expenseCount() throws -> Int
     func accountEntryCount() throws -> Int
     func accountEntries(sourceID: UUID) throws -> [LocalAccountEntry]
+    func accountEntries(accountID: UUID) throws -> [LocalAccountEntry]
     func pendingOutboxOperations() throws -> [LocalOutboxOperation]
     @discardableResult
     func ensureAccountOutboxForPendingExpenses(profileID: UUID) throws -> Int
@@ -93,6 +96,29 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             openingBalanceMinor: draft.openingBalanceMinor,
             createdAt: draft.createdAt
         )
+    }
+
+    /// Mirrors already-authoritative cloud accounts without enqueueing uploads.
+    /// The local workspace is a projection here; a user-created local account
+    /// still goes through createAccount and produces an outbox operation.
+    func importRemoteAccounts(_ drafts: [LocalAccountDraft]) throws {
+        guard !drafts.isEmpty else { return }
+        try database.writer.write { db in
+            for draft in drafts {
+                try db.execute(sql: """
+                    INSERT INTO local_accounts (id, profile_id, name, kind, currency, opening_balance_minor, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        name = excluded.name,
+                        kind = excluded.kind,
+                        currency = excluded.currency,
+                        opening_balance_minor = excluded.opening_balance_minor
+                    """, arguments: [
+                        draft.id.uuidString, draft.profileID.uuidString, draft.name,
+                        draft.kind, draft.currency, draft.openingBalanceMinor, draft.createdAt
+                    ])
+            }
+        }
     }
 
     func accounts(profileID: UUID) throws -> [LocalAccount] {
@@ -214,6 +240,43 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         }
 
         return expense
+    }
+
+    /// Imports cloud facts into the local projection. No outbox operation is
+    /// created because these rows are already authoritative remotely.
+    func importRemoteExpenses(_ drafts: [LocalExpenseDraft]) throws {
+        guard !drafts.isEmpty else { return }
+        try database.writer.write { db in
+            for draft in drafts where draft.amountMinor > 0 {
+                let exists = try Row.fetchOne(
+                    db,
+                    sql: "SELECT id FROM local_expenses WHERE id = ? AND profile_id = ?",
+                    arguments: [draft.id.uuidString, draft.profileID.uuidString]
+                ) != nil
+                if exists { continue }
+                try db.execute(sql: """
+                    INSERT INTO local_expenses (
+                        id, profile_id, account_id, amount_minor, currency, merchant_name,
+                        platform, category, payment_method, transaction_date, transaction_time,
+                        note, local_version, created_at, updated_at, deleted_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+                    """, arguments: [
+                        draft.id.uuidString, draft.profileID.uuidString, draft.accountID.uuidString,
+                        draft.amountMinor, draft.currency, draft.merchantName, draft.platform,
+                        draft.category, draft.paymentMethod, draft.transactionDate,
+                        draft.transactionTime, draft.note, draft.createdAt, draft.createdAt
+                    ])
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO local_account_entries (
+                        id, profile_id, account_id, direction, amount_minor, entry_kind,
+                        source_kind, source_id, occurred_at, voided_at
+                    ) VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
+                    """, arguments: [
+                        UUID().uuidString, draft.profileID.uuidString, draft.accountID.uuidString,
+                        draft.amountMinor, draft.id.uuidString, draft.createdAt
+                    ])
+            }
+        }
     }
 
     func updateExpense(_ update: LocalExpenseUpdate, operationID: UUID) throws -> LocalExpense {
@@ -437,6 +500,22 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     ORDER BY occurred_at ASC, id ASC
                     """,
                 arguments: [sourceID.uuidString]
+            ).map { try Self.accountEntry(from: $0) }
+        }
+    }
+
+    func accountEntries(accountID: UUID) throws -> [LocalAccountEntry] {
+        try database.writer.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, profile_id, account_id, direction, amount_minor, entry_kind,
+                           source_kind, source_id, occurred_at, voided_at
+                    FROM local_account_entries
+                    WHERE account_id = ?
+                    ORDER BY occurred_at DESC, id DESC
+                    """,
+                arguments: [accountID.uuidString]
             ).map { try Self.accountEntry(from: $0) }
         }
     }

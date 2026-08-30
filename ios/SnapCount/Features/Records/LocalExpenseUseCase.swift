@@ -69,9 +69,12 @@ protocol LocalExpenseUseCaseProtocol {
     func accountBalanceMinor(_ accountID: UUID) async throws -> Int64
     func expense(id: UUID) async throws -> LocalExpense?
     func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount
+    func importRemoteAccounts(_ accounts: [LocalAccount]) async throws
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome
+    func importRemoteExpenses(_ expenses: [LocalExpenseDraft]) async throws
     func update(_ command: LocalExpenseUpdateCommand) async throws -> LocalExpenseOutcome
     func delete(_ command: LocalExpenseDeleteCommand) async throws -> LocalExpenseOutcome
+    func accountEntries(accountID: UUID) async throws -> [LocalAccountEntry]
     func month(_ monthKey: String) async throws -> LocalExpenseMonth
 }
 
@@ -91,6 +94,10 @@ extension LocalExpenseUseCaseProtocol {
     func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount {
         throw LocalDataError.invalidRecord
     }
+
+    func importRemoteAccounts(_ accounts: [LocalAccount]) async throws {}
+    func importRemoteExpenses(_ expenses: [LocalExpenseDraft]) async throws {}
+    func accountEntries(accountID: UUID) async throws -> [LocalAccountEntry] { [] }
 }
 
 final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
@@ -158,6 +165,22 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         return try repository.createAccount(draft)
     }
 
+    func importRemoteAccounts(_ accounts: [LocalAccount]) async throws {
+        let profile = try profileStore.activeProfile()
+        let drafts = accounts.map { account in
+            LocalAccountDraft(
+                id: account.id,
+                profileID: profile.id,
+                name: account.name,
+                kind: account.kind,
+                currency: account.currency,
+                openingBalanceMinor: account.openingBalanceMinor,
+                createdAt: account.createdAt
+            )
+        }
+        try repository.importRemoteAccounts(drafts)
+    }
+
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome {
         let profile = try profileStore.activeProfile()
         guard try repository.accounts(profileID: profile.id).contains(where: { $0.id == command.accountID }) else {
@@ -166,6 +189,28 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         let draft = try LocalExpenseMapper.createDraft(command, profileID: profile.id)
         let expense = try repository.createExpense(draft, operationID: operationIDProvider())
         return LocalExpenseOutcome(expense: expense, tombstone: nil, profileID: profile.id)
+    }
+
+    func importRemoteExpenses(_ expenses: [LocalExpenseDraft]) async throws {
+        let profile = try profileStore.activeProfile()
+        let scoped = expenses.map { expense in
+            LocalExpenseDraft(
+                id: expense.id,
+                profileID: profile.id,
+                accountID: expense.accountID,
+                amountMinor: expense.amountMinor,
+                currency: expense.currency,
+                merchantName: expense.merchantName,
+                platform: expense.platform,
+                category: expense.category,
+                paymentMethod: expense.paymentMethod,
+                transactionDate: expense.transactionDate,
+                transactionTime: expense.transactionTime,
+                note: expense.note,
+                createdAt: expense.createdAt
+            )
+        }
+        try repository.importRemoteExpenses(scoped)
     }
 
     func update(_ command: LocalExpenseUpdateCommand) async throws -> LocalExpenseOutcome {
@@ -194,5 +239,10 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
             profileID: profile.id,
             expenses: try repository.expenses(profileID: profile.id, monthKey: monthKey)
         )
+    }
+
+    func accountEntries(accountID: UUID) async throws -> [LocalAccountEntry] {
+        let profile = try profileStore.activeProfile()
+        return try repository.accountEntries(accountID: accountID).filter { $0.profileID == profile.id }
     }
 }

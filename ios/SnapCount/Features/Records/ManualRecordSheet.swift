@@ -55,7 +55,7 @@ struct ManualRecordSheet: View {
         // the local projection so a failed cloud account refresh cannot block
         // offline entry.
         if draft.kind == .expense {
-            return appState.localAccounts.map { account in
+            let local = appState.localAccounts.map { account in
                 ManualAccountCandidate(
                     id: account.id.uuidString,
                     title: account.name,
@@ -63,6 +63,20 @@ struct ManualRecordSheet: View {
                     isDefaultIncome: false
                 )
             }
+            if !local.isEmpty { return local }
+            // The account refresh and local mirror may complete in either
+            // order when the sheet is opened immediately after login. The
+            // save path mirrors this cloud candidate before writing locally.
+            return appState.accounts
+                .filter { !$0.isArchived }
+                .map { account in
+                    ManualAccountCandidate(
+                        id: account.id,
+                        title: account.title,
+                        isDefaultExpense: account.isDefaultExpense,
+                        isDefaultIncome: account.isDefaultIncome
+                    )
+                }
         }
         return appState.accounts
             .filter { !$0.isArchived }
