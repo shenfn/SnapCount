@@ -139,6 +139,7 @@ final class AppState: ObservableObject {
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
     private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
+    private var localExpenseMonthGroups: [String: [NativeDayRecordGroup]] = [:]
     private var activeRecordReference: String?
     private var prefetchingRecordReferences: Set<String> = []
     private var expressionPlanDeliveryTokens: [String: UUID] = [:]
@@ -259,7 +260,9 @@ final class AppState: ObservableObject {
             hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
             updateShortcutCredentialMessage()
             Task {
+                await loadAccounts()
                 await refreshDashboard()
+                await loadRecordMonth(Self.currentMonthKey, force: true)
             }
         } catch {
             if isInvalidRefreshSessionError(error) {
@@ -289,7 +292,9 @@ final class AppState: ObservableObject {
             authMessage = "已登录，快捷指令凭据已同步。"
             updateShortcutCredentialMessage()
             presentOnboardingIfNeeded()
+            await loadAccounts()
             await refreshDashboard()
+            await loadRecordMonth(Self.currentMonthKey, force: true)
         } catch {
             authMessage = error.localizedDescription
             authMessageIsError = true
@@ -587,6 +592,7 @@ final class AppState: ObservableObject {
             guard generation == dashboardRefreshGeneration else { return }
             let snapshot = preparedCoreSnapshot(fetchedSnapshot)
             publishDashboard(snapshot, userId: session.user.id)
+            await importRemoteExpenseDetails(snapshot.recordDetails.values)
             scheduleDashboardSupplement(snapshot, session: session, generation: generation)
             Task { [weak self] in await self?.loadFinanceVocabulary() }
         } catch {
@@ -670,6 +676,7 @@ final class AppState: ObservableObject {
             var supplemented = hydrated ?? snapshot
             supplemented.domains = domains
             self.publishDashboard(supplemented, userId: session.user.id)
+            await self.importRemoteExpenseDetails(supplemented.recordDetails.values)
             if let selectedId = self.selectedRecordDetail?.id,
                let selected = self.recordDetailCache[NativeRecordReference(selectedId).canonicalValue] {
                 self.selectedRecordDetail = selected
@@ -751,10 +758,32 @@ final class AppState: ObservableObject {
     }
 
     func recordGroups(monthKey: String) -> [NativeDayRecordGroup] {
-        if monthKey == Self.currentMonthKey {
-            return dashboard.dayRecordGroups
+        let remote = monthKey == Self.currentMonthKey
+            ? dashboard.dayRecordGroups
+            : (recordMonthGroups[monthKey] ?? [])
+        guard let local = localExpenseMonthGroups[monthKey], !local.isEmpty else { return remote }
+        return Self.mergeRecordGroups(local: local, remote: remote)
+    }
+
+    private static func mergeRecordGroups(
+        local: [NativeDayRecordGroup],
+        remote: [NativeDayRecordGroup]
+    ) -> [NativeDayRecordGroup] {
+        let localIDs = Set(local.flatMap(\.records).map(\.id))
+        let merged = local + remote.map { group in
+            NativeDayRecordGroup(
+                dateKey: group.dateKey,
+                records: group.records.filter { !localIDs.contains($0.id) }
+            )
         }
-        return recordMonthGroups[monthKey] ?? []
+        return Dictionary(grouping: merged.flatMap { group in
+            group.records.map { (group.dateKey, $0) }
+        }, by: \.0).map { dateKey, entries in
+            NativeDayRecordGroup(
+                dateKey: dateKey,
+                records: entries.map(\.1).sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }
+            )
+        }.sorted { $0.dateKey > $1.dateKey }
     }
 
     func loadRecordMonth(_ monthKey: String, force: Bool = false) async {
@@ -764,7 +793,7 @@ final class AppState: ObservableObject {
     private func loadUnifiedRecordMonth(_ monthKey: String, force: Bool = false) async {
         if localExpenseUseCase != nil {
             await readDeviceExpenseMonth(monthKey, force: force)
-            let localHasRecords = !(recordMonthGroups[monthKey] ?? []).isEmpty
+            let localHasRecords = !(localExpenseMonthGroups[monthKey] ?? []).isEmpty
             if localHasRecords || !isSignedIn { return }
             await loadRemoteRecordMonth(monthKey, force: true)
             return
@@ -791,9 +820,10 @@ final class AppState: ObservableObject {
             let month = try await localExpenseUseCase.month(monthKey)
             guard generation == userStateGeneration else { return }
             let groups = LocalExpenseReadModel.groups(from: month)
+            localExpenseMonthGroups[monthKey] = groups
             recordMonthDetails[monthKey] = [:]
             recordMonthGroups[monthKey] = groups
-            if monthKey == Self.currentMonthKey {
+            if monthKey == Self.currentMonthKey && !isSignedIn {
                 applyLocalExpenseMonth(month, groups: groups)
             }
         } catch {
@@ -877,6 +907,8 @@ final class AppState: ObservableObject {
                 recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
             }
             recordMonthGroups[monthKey] = month.groups
+            await importRemoteExpenseDetails(month.details.values)
+            await readDeviceExpenseMonth(monthKey, force: true)
         } catch {
             guard generation == userStateGeneration else { return }
             recordMonthMessages[monthKey] = error.localizedDescription
@@ -895,10 +927,133 @@ final class AppState: ObservableObject {
             let loadedAccounts = try await accountRepository.fetchAccounts(accessToken: session.accessToken)
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             accounts = loadedAccounts
+            if shouldProjectRemoteData, let localExpenseUseCase {
+                let localAccounts = loadedAccounts.compactMap { account -> LocalAccount? in
+                    guard let id = UUID(uuidString: account.id) else { return nil }
+                    return LocalAccount(
+                        id: id,
+                        profileID: UUID(),
+                        name: account.name,
+                        kind: account.type.rawValue,
+                        currency: account.currency,
+                        openingBalanceMinor: Int64((account.initialBalance * 100).rounded()),
+                        createdAt: Date()
+                    )
+                }
+                try await localExpenseUseCase.importRemoteAccounts(localAccounts)
+                _ = await prepareLocalWorkspace()
+            }
         } catch {
             guard generation == userStateGeneration else { return }
-            accountMessage = error.localizedDescription
+            if !isSignedIn {
+                await loadLocalAccounts()
+                accountMessage = nil
+            } else {
+                accountMessage = error.localizedDescription
+            }
         }
+    }
+
+    private func importRemoteExpenseDetails(_ details: Dictionary<String, NativeRecordDetail>.Values) async {
+        guard shouldProjectRemoteData, let localExpenseUseCase else { return }
+        let referencedAccountIDs = Set(details.compactMap { $0.accountId })
+        let missingAccounts = accounts.compactMap { account -> LocalAccount? in
+            guard referencedAccountIDs.contains(account.id),
+                  let id = UUID(uuidString: account.id),
+                  !localAccounts.contains(where: { $0.id == id }) else { return nil }
+            return LocalAccount(
+                id: id,
+                profileID: UUID(),
+                name: account.name,
+                kind: account.type.rawValue,
+                currency: account.currency,
+                openingBalanceMinor: Int64((account.initialBalance * 100).rounded()),
+                createdAt: Date()
+            )
+        }
+        if !missingAccounts.isEmpty {
+            try? await localExpenseUseCase.importRemoteAccounts(missingAccounts)
+            _ = await prepareLocalWorkspace()
+        }
+        let drafts = details.compactMap { detail -> LocalExpenseDraft? in
+            guard detail.kind == "expense",
+                  let id = UUID(uuidString: detail.rawId),
+                  let accountID = detail.accountId.flatMap(UUID.init(uuidString:)),
+                  let amount = detail.amount, amount > 0,
+                  let date = detail.recordDate,
+                  let merchant = detail.merchantName else { return nil }
+            return LocalExpenseDraft(
+                id: id,
+                profileID: UUID(),
+                accountID: accountID,
+                amountMinor: Int64((amount * 100).rounded()),
+                currency: "CNY",
+                merchantName: merchant,
+                platform: detail.platform ?? "",
+                category: detail.category ?? "other",
+                paymentMethod: detail.paymentMethod ?? "",
+                transactionDate: date,
+                transactionTime: detail.transactionTime,
+                note: detail.note,
+                createdAt: Date()
+            )
+        }
+        guard !drafts.isEmpty else { return }
+        try? await localExpenseUseCase.importRemoteExpenses(drafts)
+        _ = await prepareLocalWorkspace()
+    }
+
+    private var shouldProjectRemoteData: Bool {
+        guard isSignedIn,
+              let state = localSyncState,
+              case .bound(let userID) = state.binding else { return false }
+        return userID == currentUserId
+    }
+
+    private func loadLocalAccounts() async {
+        guard let workspace = await prepareLocalWorkspace() else {
+            accounts = []
+            return
+        }
+        var projected: [NativeAccount] = []
+        for account in workspace.accounts {
+            let balance: Int64
+            if let useCase = localExpenseUseCase,
+               let value = try? await useCase.accountBalanceMinor(account.id) {
+                balance = value
+            } else {
+                balance = account.openingBalanceMinor
+            }
+            projected.append(Self.nativeAccount(from: account, balanceMinor: balance))
+        }
+        accounts = projected
+    }
+
+    private static func nativeAccount(from account: LocalAccount, balanceMinor: Int64) -> NativeAccount {
+        NativeAccount(
+            id: account.id.uuidString,
+            name: account.name,
+            type: NativeAccountType.normalized(account.kind),
+            institution: "",
+            last4: "",
+            currency: account.currency,
+            initialBalance: Double(account.openingBalanceMinor) / 100,
+            currentBalance: Double(balanceMinor) / 100,
+            snapshotBalance: nil,
+            snapshotAt: nil,
+            sourceRecordTable: "",
+            sourceRecordId: "",
+            billDay: nil,
+            paymentDueDay: nil,
+            autoDebitAccountId: nil,
+            autoConfirmRepayment: false,
+            gracePeriodDays: 0,
+            lastReconciledAt: nil,
+            isDefaultExpense: false,
+            isDefaultIncome: false,
+            isArchived: false,
+            sortOrder: 0
+        )
     }
 
     func loadFinanceVocabulary() async {
@@ -985,7 +1140,10 @@ final class AppState: ObservableObject {
         selectedAccountSourceSnapshot = nil
         accountMessage = nil
         let session = try? await validSession()
-        guard let session else { accountMessage = "登录状态已失效，请重新登录。"; return }
+        guard let session else {
+            await loadLocalAccountDetail(account)
+            return
+        }
         guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
         if account.type.isLiability {
             let preparation = await resolvedAccountReadPreparationUseCase().prepare(monthKey: Self.currentMonthKey)
@@ -1015,6 +1173,42 @@ final class AppState: ObservableObject {
                     Task { await RemoteImageRepository.shared.prefetch([imageURL]) }
                 }
             }
+        }
+    }
+
+    private func loadLocalAccountDetail(_ account: NativeAccount) async {
+        guard let accountID = UUID(uuidString: account.id),
+              let localExpenseUseCase else {
+            accountMessage = "本机账户标识无效。"
+            return
+        }
+        do {
+            let entries = try await localExpenseUseCase.accountEntries(accountID: accountID)
+            let nativeEntries = entries.map { entry in
+                NativeAccountEntry(
+                    id: entry.id.uuidString,
+                    accountId: entry.accountID.uuidString,
+                    direction: entry.direction,
+                    amount: Double(entry.amountMinor) / 100,
+                    entryType: entry.entryKind,
+                    sourceTable: entry.sourceKind,
+                    sourceId: entry.sourceID.uuidString,
+                    occurredAt: ISO8601DateFormatter().string(from: entry.occurredAt),
+                    note: "",
+                    isVoided: entry.voidedAt != nil,
+                    voidedReason: entry.voidedAt == nil ? "" : "本地已作废"
+                )
+            }
+            selectedAccountDetail = NativeAccountDetail(
+                account: account,
+                entries: nativeEntries,
+                repaymentCycles: [],
+                payments: [],
+                loadErrors: [:]
+            )
+            accountMessage = nil
+        } catch {
+            accountMessage = error.localizedDescription
         }
     }
 
@@ -3565,6 +3759,23 @@ final class AppState: ObservableObject {
               let accountID = UUID(uuidString: accountText),
               let localExpenseUseCase else {
             throw LocalDataError.invalidIdentifier
+        }
+        // A user can open the form while the background account refresh is
+        // still running. Ensure a cloud account selected by the unified form
+        // exists in the local projection before validating the expense.
+        if !localAccounts.contains(where: { $0.id == accountID }),
+           let cloudAccount = accounts.first(where: { $0.id == accountText }) {
+            let mirror = LocalAccount(
+                id: accountID,
+                profileID: UUID(),
+                name: cloudAccount.name,
+                kind: cloudAccount.type.rawValue,
+                currency: cloudAccount.currency,
+                openingBalanceMinor: Int64((cloudAccount.initialBalance * 100).rounded()),
+                createdAt: Date()
+            )
+            try await localExpenseUseCase.importRemoteAccounts([mirror])
+            _ = await prepareLocalWorkspace()
         }
         let command = LocalExpenseCommand(
             id: UUID(),
