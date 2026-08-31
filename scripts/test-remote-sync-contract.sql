@@ -26,6 +26,16 @@ select public.remote_sync_test_assert(
           where table_schema = 'public' and table_name = 'transactions' and column_name = 'updated_at'),
   'transactions must expose the sync tombstone and update-time columns'
 );
+select public.remote_sync_test_assert(
+  to_regprocedure('public.record_transaction_sync_delete()') is not null
+    and exists (
+      select 1 from pg_trigger
+       where tgrelid = 'public.transactions'::regclass
+         and tgname = 'transactions_sync_delete_tombstone'
+         and not tgisinternal
+    ),
+  'hard transaction deletes must publish a sync tombstone'
+);
 
 select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
 
@@ -233,6 +243,19 @@ begin
       'aa000000-0000-4000-8000-000000000001', 1, 'c:0', '[]'::jsonb
     )->>'error' = 'cursor_expired',
     'DREMOTE-008 expired cursor must return cursor_expired'
+  );
+
+  delete from public.transactions
+   where id = '77000000-0000-4000-8000-000000000001'
+     and user_id = '11111111-1111-4111-8111-111111111111';
+  perform public.remote_sync_test_assert(
+    not exists (select 1 from public.transactions where id = '77000000-0000-4000-8000-000000000001')
+      and (select change_kind = 'delete' and version > 0
+             from public.sync_change_log
+            where aggregate_kind = 'expense'
+              and aggregate_id = '77000000-0000-4000-8000-000000000001'
+            order by cursor desc limit 1),
+    'legacy hard delete must publish an expense tombstone'
   );
 end;
 $$;

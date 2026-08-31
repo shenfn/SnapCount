@@ -112,6 +112,20 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 
 下一步：等待构建 104 在 TestFlight 可安装后，用 `test2` 重试 RC-005/012/015。先确认原 4 条待处理消费全部接受并出现于云端，再连续同步两次确认不重复落库，最后核对本地与云端账户余额无漂移；出现失败时保存新的脱敏诊断摘要，不继续猜测字段缺口。
 
+## 12. 真机月份投影与云端删除问题（2026-08-31）
+
+- 真机反馈：进入日期后首页没有数据；登录/退出云端时同一日期的记录数量不一致；云端删除交易后 iOS 本地仍保留。
+- 根因一：`AppState` 用同一个月份字典同时承载本地 Expense 与远端月份，并在本地非空时提前跳过远端加载；本地读取还会覆盖远端月份，导致远端其他数据域和云端记录缺失。
+- 根因二：本地记录状态为 `local`，首页统计原先只把 `done` 视为已确认消费，因此本地事实没有计入日期金额/数量。
+- 根因三：PWA/旧删除路径物理删除 `transactions`，未写入 `sync_change_log`；iOS 的同步协议没有删除变更可应用，故本地投影不会收敛。
+- 本轮修复：分离本地/远端月份缓存与详情；登录时即使本地非空也加载远端并按稳定记录 ID 合并；`local` 计入首页消费聚合；新增 `20260831100000_remote_sync_transaction_delete_tombstone.sql`，以 `AFTER DELETE` 触发器为硬删除写入用户隔离的 Expense tombstone 和 change log；远端同步门禁迁移重复执行两次。
+- 自动化补强：新增月份本地+远端合并 XCTest、本地状态首页聚合 XCTest，以及硬删除触发器存在性和行为 SQL 断言。
+- 已验证：`npm run governance:check`、`npm run check:expression-core-boundary`、`node scripts/check-migration-versions.mjs`、`test:ios-local-expense-app-boundary`、`test:ios-record-detail-image-boundary` 通过；`git diff --check` 通过。
+- 环境未验证：Windows 无 Xcode/XCTest；本机 Docker/psql 服务未运行，SQL fixture 尚未本地执行；交由 PR macOS Build 与 Release Validation 门禁验证。
+- 已知基线失败：`test:ios-local-shell-boundary` 在当前主线即因缺失 `Features/Settings/LocalSettingsView.swift` 和旧签名断言失败，本轮未修改该既有范围。
+
+下一步：提交并推送本修复 PR；以 CI 的 Swift 编译/XCTest 与 PostgreSQL 双次迁移契约为准审查。合并后再安排一次集中 TestFlight，验证日期首页、本地/云端统一记录、云端删除下拉收敛；本轮不触发 TestFlight。
+
 ## 9. 生产 schema 对账与修复（2026-08-29）
 
 - 真正的生产 schema 对账发现：`public.transactions` 缺少同步 RPC 已使用的 `deleted_at` 与 `updated_at`；迁移历史为 applied 不能替代列级 schema 检查。

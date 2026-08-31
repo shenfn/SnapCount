@@ -140,6 +140,12 @@ final class AppState: ObservableObject {
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
     private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
     private var localExpenseMonthGroups: [String: [NativeDayRecordGroup]] = [:]
+    // Remote and local projections have different freshness and deletion
+    // semantics. Keep them separate so loading one cannot erase the other.
+    private var remoteRecordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
+    private var localRecordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
+    private var loadingLocalExpenseMonthKey: String?
+    private var loadingRemoteRecordMonthKey: String?
     private var activeRecordReference: String?
     private var prefetchingRecordReferences: Set<String> = []
     private var expressionPlanDeliveryTokens: [String: UUID] = [:]
@@ -760,7 +766,7 @@ final class AppState: ObservableObject {
     func recordGroups(monthKey: String) -> [NativeDayRecordGroup] {
         let remote = monthKey == Self.currentMonthKey
             ? dashboard.dayRecordGroups
-            : (recordMonthGroups[monthKey] ?? [])
+            : (remoteRecordMonthGroups[monthKey] ?? [])
         guard let local = localExpenseMonthGroups[monthKey], !local.isEmpty else { return remote }
         return Self.mergeRecordGroups(local: local, remote: remote)
     }
@@ -793,9 +799,12 @@ final class AppState: ObservableObject {
     private func loadUnifiedRecordMonth(_ monthKey: String, force: Bool = false) async {
         if localExpenseUseCase != nil {
             await readDeviceExpenseMonth(monthKey, force: force)
-            let localHasRecords = !(localExpenseMonthGroups[monthKey] ?? []).isEmpty
-            if localHasRecords || !isSignedIn { return }
-            await loadRemoteRecordMonth(monthKey, force: true)
+            if isSignedIn {
+                // A non-empty local projection is not evidence that the
+                // remote month is complete. Pull it as well so other domains
+                // and cloud-only records can be merged into the same page.
+                await loadRemoteRecordMonth(monthKey, force: force)
+            }
             return
         }
         await loadRemoteRecordMonth(monthKey, force: force)
@@ -807,13 +816,17 @@ final class AppState: ObservableObject {
     }
 
     private func readDeviceExpenseMonth(_ monthKey: String, force: Bool) async {
-        guard force || recordMonthGroups[monthKey] == nil else { return }
-        guard loadingRecordMonthKey != monthKey else { return }
+        guard force || localExpenseMonthGroups[monthKey] == nil else { return }
+        guard loadingLocalExpenseMonthKey != monthKey else { return }
         let generation = userStateGeneration
+        loadingLocalExpenseMonthKey = monthKey
         loadingRecordMonthKey = monthKey
         recordMonthMessages.removeValue(forKey: monthKey)
         defer {
-            if loadingRecordMonthKey == monthKey { loadingRecordMonthKey = nil }
+            if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
+            if loadingRecordMonthKey == monthKey, loadingRemoteRecordMonthKey != monthKey {
+                loadingRecordMonthKey = nil
+            }
         }
         do {
             guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
@@ -821,8 +834,12 @@ final class AppState: ObservableObject {
             guard generation == userStateGeneration else { return }
             let groups = LocalExpenseReadModel.groups(from: month)
             localExpenseMonthGroups[monthKey] = groups
-            recordMonthDetails[monthKey] = [:]
-            recordMonthGroups[monthKey] = groups
+            localRecordMonthDetails[monthKey] = Dictionary(
+                uniqueKeysWithValues: month.expenses.map {
+                    let detail = LocalExpenseReadModel.detail(from: $0)
+                    return (detail.id, detail)
+                }
+            )
             if monthKey == Self.currentMonthKey && !isSignedIn {
                 applyLocalExpenseMonth(month, groups: groups)
             }
@@ -863,11 +880,13 @@ final class AppState: ObservableObject {
     }
 
     func reportSnapshot(monthKey: String) -> DashboardSnapshot {
-        if monthKey == Self.currentMonthKey { return dashboard }
-        let groups = recordMonthGroups[monthKey] ?? []
-        let details = recordMonthDetails[monthKey] ?? [:]
+        var snapshot = monthKey == Self.currentMonthKey ? dashboard : DashboardSnapshot()
+        let groups = recordGroups(monthKey: monthKey)
+        let details = (recordMonthDetails[monthKey] ?? [:]).merging(
+            localRecordMonthDetails[monthKey] ?? [:],
+            uniquingKeysWith: { _, local in local }
+        )
         let records = groups.flatMap(\.records).filter { $0.kind != .staging }
-        var snapshot = DashboardSnapshot()
         snapshot.dayRecordGroups = groups
         snapshot.recordDetails = details
         snapshot.monthCount = records.count
@@ -882,16 +901,23 @@ final class AppState: ObservableObject {
 
     private func loadRemoteRecordMonth(_ monthKey: String, force: Bool = false) async {
         guard monthKey != Self.currentMonthKey else {
-            if force { await refreshDashboard() }
+            if force || dashboard.dayRecordGroups.isEmpty {
+                await refreshDashboard()
+                await readDeviceExpenseMonth(monthKey, force: true)
+            }
             return
         }
-        guard force || recordMonthGroups[monthKey] == nil else { return }
-        guard loadingRecordMonthKey != monthKey else { return }
+        guard force || remoteRecordMonthGroups[monthKey] == nil else { return }
+        guard loadingRemoteRecordMonthKey != monthKey else { return }
         let generation = userStateGeneration
+        loadingRemoteRecordMonthKey = monthKey
         loadingRecordMonthKey = monthKey
         recordMonthMessages.removeValue(forKey: monthKey)
         defer {
-            if loadingRecordMonthKey == monthKey { loadingRecordMonthKey = nil }
+            if loadingRemoteRecordMonthKey == monthKey { loadingRemoteRecordMonthKey = nil }
+            if loadingRecordMonthKey == monthKey, loadingLocalExpenseMonthKey != monthKey {
+                loadingRecordMonthKey = nil
+            }
         }
         do {
             let session = try await validSession()
@@ -906,7 +932,7 @@ final class AppState: ObservableObject {
                 let canonicalReference = NativeRecordReference(reference).canonicalValue
                 recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
             }
-            recordMonthGroups[monthKey] = month.groups
+            remoteRecordMonthGroups[monthKey] = month.groups
             await importRemoteExpenseDetails(month.details.values)
             await readDeviceExpenseMonth(monthKey, force: true)
         } catch {
@@ -3609,9 +3635,14 @@ final class AppState: ObservableObject {
         recordsPath = NavigationPath()
         selectedRecordDetail = nil
         recordMonthGroups = [:]
+        remoteRecordMonthGroups = [:]
+        localExpenseMonthGroups = [:]
+        localRecordMonthDetails = [:]
         recordMonthDetails = [:]
         recordMonthMessages = [:]
         loadingRecordMonthKey = nil
+        loadingLocalExpenseMonthKey = nil
+        loadingRemoteRecordMonthKey = nil
         recordDetailCache.removeAll()
         activeRecordReference = nil
         prefetchingRecordReferences.removeAll()
@@ -3796,7 +3827,13 @@ final class AppState: ObservableObject {
         let monthKey = String(command.transactionDate.prefix(7))
         let month = try await localExpenseUseCase.month(monthKey)
         let groups = LocalExpenseReadModel.groups(from: month)
-        recordMonthGroups[monthKey] = groups
+        localExpenseMonthGroups[monthKey] = groups
+        localRecordMonthDetails[monthKey] = Dictionary(
+            uniqueKeysWithValues: month.expenses.map {
+                let detail = LocalExpenseReadModel.detail(from: $0)
+                return (detail.id, detail)
+            }
+        )
         if monthKey == Self.currentMonthKey {
             dashboard.dayRecordGroups = groups
             dashboard.monthCount = month.expenses.count

@@ -544,7 +544,10 @@ enum NativeHomeInsightAnalytics {
             return false
         }
         if let status = record.status ?? detail(for: record, snapshot: snapshot)?.status {
-            return status == "done"
+            // Local GRDB facts are already committed user records. They use
+            // `local` until the cloud acknowledges their outbox operation,
+            // but must still count in the same home-day aggregates.
+            return status == "done" || status == "local"
         }
         return record.systemImage != "clock"
     }
