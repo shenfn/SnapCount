@@ -228,10 +228,15 @@ struct RecordsView: View {
     }
 
     private func daySummaryText(_ group: NativeDayRecordGroup) -> String {
-        guard effectiveKind == .all,
-              let summary = appState.dashboard.dailySummaries.first(where: { $0.dateKey == group.dateKey }) else {
+        guard effectiveKind == .all else {
             return "\(group.records.count) 条"
         }
+        // Use the same merged local/remote projection as the rows. The
+        // dashboard summary may still reflect only the last cloud refresh.
+        let summary = NativeHomeInsightAnalytics.dailySummary(
+            on: group.dateKey,
+            from: appState.reportSnapshot(monthKey: selectedMonthKey)
+        )
         var parts: [String] = []
         if summary.expense > 0 { parts.append("支出 \(money(summary.expense))") }
         if summary.income > 0 { parts.append("收入 \(money(summary.income))") }
