@@ -290,8 +290,48 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         await state.loadRecordMonth("2026-07", force: true)
 
         XCTAssertEqual(repository.fetchMonthKeys, ["2026-07"])
-        XCTAssertEqual(localUseCase.monthKeys, ["2026-07"])
+        XCTAssertEqual(localUseCase.monthKeys, ["2026-07", "2026-07"])
         XCTAssertEqual(state.recordGroups(monthKey: "2026-07").first?.records.first?.title, "云端记录")
+    }
+
+    @MainActor
+    func testAppStateMergesRemoteMonthWhenLocalMonthIsNonEmpty() async throws {
+        let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let localUseCase = LocalShellExpenseUseCaseStub(
+            profile: LocalProfile(id: profileID, createdAt: Date(), cloudUserID: nil, syncEnabled: false),
+            month: LocalExpenseMonth(profileID: profileID, expenses: [localExpense(profileID: profileID)])
+        )
+        let remoteGroup = NativeDayRecordGroup(
+            dateKey: "2026-07-20",
+            records: [NativeDayRecord(
+                id: "remote-sleep-1",
+                reference: "data/remote-sleep-1",
+                dateKey: "2026-07-20",
+                kind: .sleep,
+                domainKey: "sleep",
+                title: "云端睡眠",
+                subtitle: "",
+                value: "",
+                timeLabel: nil,
+                systemImage: "moon"
+            )]
+        )
+        let repository = LocalShellRecordRepositorySpy(
+            monthSnapshot: NativeRecordMonthSnapshot(groups: [remoteGroup], details: [:])
+        )
+        let state = AppState(
+            recordRepository: repository,
+            localExpenseUseCase: localUseCase,
+            sessionProvider: { _ in LocalShellRecordRepositorySpy.session }
+        )
+        state.isSignedIn = true
+        state.currentUserId = LocalShellRecordRepositorySpy.session.user.id
+
+        await state.loadRecordMonth("2026-07", force: true)
+
+        let records = state.recordGroups(monthKey: "2026-07").flatMap(\.records)
+        XCTAssertEqual(repository.fetchMonthKeys, ["2026-07"])
+        XCTAssertEqual(Set(records.map(\.id)), Set(["22222222-2222-2222-2222-222222222222", "remote-sleep-1"]))
     }
 
     @MainActor

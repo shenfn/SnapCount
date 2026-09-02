@@ -3118,6 +3118,22 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(NativeHomeDomainCardKey.dailyBalance.title, "当天生活")
     }
 
+    func testHomeInsightCountsCommittedLocalExpenses() {
+        let local = NativeDayRecord(
+            id: "local-expense-1", reference: "local-expense/local-expense-1", dateKey: "2026-07-23",
+            kind: .expense, domainKey: nil, title: "本地早餐", subtitle: "food", value: "¥12.30",
+            timeLabel: "08:30", systemImage: "creditcard", transactionType: "expense", status: "local"
+        )
+        let snapshot = DashboardSnapshot(dayRecordGroups: [
+            NativeDayRecordGroup(dateKey: "2026-07-23", records: [local])
+        ])
+
+        let summary = NativeHomeInsightAnalytics.dailySummary(on: "2026-07-23", from: snapshot)
+        XCTAssertEqual(summary.expense, 12.30, accuracy: 0.001)
+        XCTAssertEqual(summary.recordCount, 1)
+        XCTAssertEqual(NativeHomeInsightAnalytics.confirmedExpenseTotal(from: snapshot), 12.30, accuracy: 0.001)
+    }
+
     func testHomeInsightDomainMetricsRequireARealMetricField() {
         let sleep = NativeDayRecord(
             id: "sleep-1", reference: "data/sleep-1", dateKey: "2026-07-23", kind: .sleep,
