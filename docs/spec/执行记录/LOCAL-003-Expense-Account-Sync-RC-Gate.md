@@ -157,3 +157,12 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 
 下一步：完成 PR 门禁后集中进行一次 TestFlight 验证，覆盖“登录后云端数据落本地 → 退出登录仍可见 → 无网络手动消费 → 恢复网络同步”。在该验证通过前不扩展其他数据域，也不重复触发构建。
 
+## 13. PR 合并、生产迁移与 TestFlight（2026-09-02）
+
+- PR #191 `fix/LOCAL-003-RC月份与删除投影` 已通过全部门禁并合并到 `main@fe763a4`；macOS Swift 编译与 XCTest 全部通过。
+- 生产项目 `igbghrhsdaolxljgiisf` 已应用 `20260831100000_remote_sync_transaction_delete_tombstone.sql`；`supabase migration list --linked` 显示该版本 Local/Remote 一致。
+- 从固定提交 `fe763a4` 触发 TestFlight Run `33636788186`，Archive、Export、Upload 全部成功；构建号为 `33636788186`，Delivery UUID 为 `b9d28d3f-e6b7-4a3c-b959-6494f26521a3`。
+- 本机因未运行 Docker，无法执行 `supabase db dump` 的列级 schema 导出；迁移应用与版本登记成功，触发器行为仍以真机删除同步验收为最终证据。
+
+下一步：等待构建在 App Store Connect 处理完成后，使用 `test2` 验证 RC-005/RC-012/RC-015：日期首页、本地与云端合并、云端删除后本地投影收敛、重复同步不重复落库且余额无漂移。双设备场景仍标记为环境未验证；真机验收通过前不关闭 RC Gate。
+
