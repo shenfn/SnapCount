@@ -123,6 +123,7 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 - 已验证：`npm run governance:check`、`npm run check:expression-core-boundary`、`node scripts/check-migration-versions.mjs`、`test:ios-local-expense-app-boundary`、`test:ios-record-detail-image-boundary` 通过；`git diff --check` 通过。
 - 环境未验证：Windows 无 Xcode/XCTest；本机 Docker/psql 服务未运行，SQL fixture 尚未本地执行；交由 PR macOS Build 与 Release Validation 门禁验证。
 - 已知基线失败：`test:ios-local-shell-boundary` 在当前主线即因缺失 `Features/Settings/LocalSettingsView.swift` 和旧签名断言失败，本轮未修改该既有范围。
+- 首轮 PR 门禁反馈：Swift 编译通过，但全套 XCTest 暴露两处旧测试假设（本地非空时不加载远端、同步后状态不受当前月刷新影响）；已按新统一投影契约更新测试，并保留会话有效时的同步结果状态。
 
 下一步：提交并推送本修复 PR；以 CI 的 Swift 编译/XCTest 与 PostgreSQL 双次迁移契约为准审查。合并后再安排一次集中 TestFlight，验证日期首页、本地/云端统一记录、云端删除下拉收敛；本轮不触发 TestFlight。
 

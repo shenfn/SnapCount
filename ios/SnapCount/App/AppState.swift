@@ -542,6 +542,13 @@ final class AppState: ObservableObject {
             )
             _ = await prepareLocalWorkspace()
             await loadRecordMonth(Self.currentMonthKey, force: true)
+            // Refreshing the current dashboard may run concurrently with the
+            // sync completion projection. Keep the authoritative runner
+            // result visible unless that refresh explicitly invalidated the
+            // session (in which case the state was intentionally reset).
+            if isSignedIn {
+                localSyncState = result.state
+            }
             localSyncMessage = result.importedRecordCount > 0
                 ? "同步完成，已合并 \(result.importedRecordCount) 条本地记录。"
                 : "同步完成。"

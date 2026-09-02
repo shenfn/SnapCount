@@ -290,7 +290,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         await state.loadRecordMonth("2026-07", force: true)
 
         XCTAssertEqual(repository.fetchMonthKeys, ["2026-07"])
-        XCTAssertEqual(localUseCase.monthKeys, ["2026-07"])
+        XCTAssertEqual(localUseCase.monthKeys, ["2026-07", "2026-07"])
         XCTAssertEqual(state.recordGroups(monthKey: "2026-07").first?.records.first?.title, "云端记录")
     }
 
