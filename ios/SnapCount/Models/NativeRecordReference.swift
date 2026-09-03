@@ -29,7 +29,13 @@ struct NativeRecordReference: Hashable {
         self.rawId = rawId
     }
 
-    var canonicalValue: String { "\(kind)/\(rawId)" }
+    // Local GRDB expenses use a local-only reference prefix while remote
+    // snapshots use the canonical expense prefix. They still represent the
+    // same aggregate when their raw UUID matches.
+    var canonicalValue: String {
+        let canonicalKind = kind == "local-expense" ? "expense" : kind
+        return "\(canonicalKind)/\(rawId)"
+    }
 
     func matches(_ detail: NativeRecordDetail) -> Bool {
         canonicalValue == NativeRecordReference(kind: detail.kind, rawId: detail.rawId).canonicalValue
