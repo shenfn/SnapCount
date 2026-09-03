@@ -782,11 +782,15 @@ final class AppState: ObservableObject {
         local: [NativeDayRecordGroup],
         remote: [NativeDayRecordGroup]
     ) -> [NativeDayRecordGroup] {
-        let localIDs = Set(local.flatMap(\.records).map(\.id))
+        let localReferences = Set(
+            local.flatMap(\.records).map { NativeRecordReference($0.reference).canonicalValue }
+        )
         let merged = local + remote.map { group in
             NativeDayRecordGroup(
                 dateKey: group.dateKey,
-                records: group.records.filter { !localIDs.contains($0.id) }
+                records: group.records.filter {
+                    !localReferences.contains(NativeRecordReference($0.reference).canonicalValue)
+                }
             )
         }
         return Dictionary(grouping: merged.flatMap { group in
@@ -2466,7 +2470,8 @@ final class AppState: ObservableObject {
     }
 
     func loadRecordDetail(reference: String, force: Bool = false) async {
-        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        let parsedReference = NativeRecordReference(reference)
+        let canonicalReference = parsedReference.canonicalValue
         let generation = userStateGeneration
         if let previousReference = activeRecordReference,
            previousReference != canonicalReference {
@@ -2478,8 +2483,8 @@ final class AppState: ObservableObject {
             recordFeedbackState = .idle
             recordExpressionPlanExposureState = .idle
         }
-        if isLocalExpenseReference(canonicalReference) {
-            await loadLocalExpenseDetail(reference: canonicalReference, force: force, generation: generation)
+        if parsedReference.kind == "local-expense" {
+            await loadLocalExpenseDetail(reference: reference, force: force, generation: generation)
             return
         }
         await loadRemoteRecordDetail(reference: canonicalReference, force: force, generation: generation)
@@ -2503,11 +2508,12 @@ final class AppState: ObservableObject {
             recordDetailMessage = "本地记录标识无效"
             return
         }
-        if !force, let cached = recordDetailCache[reference] {
+        let canonicalReference = resolved.canonicalValue
+        if !force, let cached = recordDetailCache[canonicalReference] {
             selectedRecordDetail = cached
             return
         }
-        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(reference) }) ?? true {
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
             selectedRecordDetail = nil
         }
         do {
@@ -2515,12 +2521,12 @@ final class AppState: ObservableObject {
                 throw LocalDataError.recordNotFound
             }
             guard generation == userStateGeneration,
-                  activeRecordReference == reference else { return }
+                  activeRecordReference == canonicalReference else { return }
             let detail = LocalExpenseReadModel.detail(from: expense)
-            recordDetailCache[reference] = detail
+            recordDetailCache[canonicalReference] = detail
             selectedRecordDetail = detail
         } catch {
-            if activeRecordReference == reference {
+            if activeRecordReference == canonicalReference {
                 recordDetailMessage = error.localizedDescription
             }
         }

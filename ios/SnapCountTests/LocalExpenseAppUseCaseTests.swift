@@ -335,6 +335,49 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     }
 
     @MainActor
+    func testAppStateDeduplicatesLocalAndRemoteExpenseWithSameAggregateID() async throws {
+        let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let expense = localExpense(profileID: profileID)
+        let localUseCase = LocalShellExpenseUseCaseStub(
+            profile: LocalProfile(id: profileID, createdAt: Date(), cloudUserID: nil, syncEnabled: false),
+            month: LocalExpenseMonth(profileID: profileID, expenses: [expense])
+        )
+        let remoteGroup = NativeDayRecordGroup(
+            dateKey: "2026-07-20",
+            records: [NativeDayRecord(
+                id: "expense-22222222-2222-2222-2222-222222222222",
+                reference: "expense/22222222-2222-2222-2222-222222222222",
+                dateKey: "2026-07-20",
+                kind: .expense,
+                domainKey: "expense",
+                title: "全家便利店",
+                subtitle: "线下消费 · food",
+                value: "¥12.30",
+                timeLabel: "08:30",
+                systemImage: "creditcard",
+                transactionType: "expense",
+                status: "done"
+            )]
+        )
+        let repository = LocalShellRecordRepositorySpy(
+            monthSnapshot: NativeRecordMonthSnapshot(groups: [remoteGroup], details: [:])
+        )
+        let state = AppState(
+            recordRepository: repository,
+            localExpenseUseCase: localUseCase,
+            sessionProvider: { _ in LocalShellRecordRepositorySpy.session }
+        )
+        state.isSignedIn = true
+        state.currentUserId = LocalShellRecordRepositorySpy.session.user.id
+
+        await state.loadRecordMonth("2026-07", force: true)
+
+        let records = state.recordGroups(monthKey: "2026-07").flatMap(\.records)
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.reference, "local-expense/22222222-2222-2222-2222-222222222222")
+    }
+
+    @MainActor
     func testSignedOutStateCanRestoreLocalMonthAfterCloudStateReset() async throws {
         let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let localUseCase = LocalShellExpenseUseCaseStub(
