@@ -34,7 +34,8 @@ struct NativeRecordReference: Hashable {
     // same aggregate when their raw UUID matches.
     var canonicalValue: String {
         let canonicalKind = kind == "local-expense" ? "expense" : kind
-        return "\(canonicalKind)/\(rawId)"
+        let canonicalRawID = UUID(uuidString: rawId)?.uuidString.lowercased() ?? rawId
+        return "\(canonicalKind)/\(canonicalRawID)"
     }
 
     func matches(_ detail: NativeRecordDetail) -> Bool {
