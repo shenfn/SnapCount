@@ -202,3 +202,15 @@ Phase A 放行前置条件：
 - 已知基线失败：test:ios-local-account-boundary 的旧 showLocalAccountPreparation 静态断言在当前主线即失败，本轮未修改 Records 页面。
 - 当前不执行：commit、push、生产迁移、部署、TestFlight；待用户确认并取得 CI 证据后再进入收口。
 
+## 17. Phase A PR 门禁完成与 RC 入口（2026-09-05）
+
+- 修复分支为 `fix/LOCAL-003-记录投影去重`，隔离 worktree 为 `.worktrees/LOCAL-003-协议收缩与修复`；根工作区 WIP 和其他 worktree 未修改。
+- PR #195 已打开，当前提交为 `6143243`：`4ca7445` 实施 Phase A 契约，`f1d23dd` 修正 iOS 编译兼容，`3c9788c` 修正 `origin` 重复初始化，`6143243` 恢复 DREMOTE-016 测试实际调用同步入口。
+- iOS Build `33951506319`（HEAD `6143243`）通过：模拟器编译与 280 个 XCTest 全绿。
+- Release Validation `33951508600`（HEAD `6143243`）通过：PWA、Edge、迁移双次执行、PostgreSQL remote sync fixture 和既有边界检查全绿。
+- 首轮 iOS Build `33950875174` 的 3 个失败均来自 DREMOTE-016 测试遗漏 `synchronize` 调用，已以单独测试提交修复；未改变生产实现。
+- 当前未验证：真实 iPhone/TestFlight 单设备 RC 走查。范围为 RC-001…006、009…012、015；双设备并发按 ADR-040 标记“范围外”，不标记为失败。
+- 当前不执行：合并 PR、生产迁移、部署或 TestFlight，直到用户对发布步骤作当前任务的明确授权。
+
+下一步：获得发布授权后，从通过门禁的固定提交执行迁移与 TestFlight，再进行一次集中单设备 RC 走查；真机若发现问题，只修复具体红灯并重新跑门禁。
+
