@@ -215,7 +215,7 @@ Phase A 放行前置条件：
 ## 18. Phase A PR 门禁完成与 RC 入口（2026-09-05）
 
 - 修复分支为 `fix/LOCAL-003-记录投影去重`，隔离 worktree 为 `.worktrees/LOCAL-003-协议收缩与修复`；根工作区 WIP 和其他 worktree 未修改。
-- PR #195 已打开；代码修复提交为 `6143243`，最终 PR HEAD 为合并提交 `8a6d341`：`4ca7445` 实施 Phase A 契约，`f1d23dd` 修正 iOS 编译兼容，`3c9788c` 修正 `origin` 重复初始化，`6143243` 恢复 DREMOTE-016 测试实际调用同步入口，并合入 main 的 UUID 大小写归一化修复。
+- PR #195 已打开；代码修复提交为 `6143243`，随后在 `8a6d341` 合入 main 的 UUID 大小写归一化修复，后续提交仅维护本交接记录：`4ca7445` 实施 Phase A 契约，`f1d23dd` 修正 iOS 编译兼容，`3c9788c` 修正 `origin` 重复初始化，`6143243` 恢复 DREMOTE-016 测试实际调用同步入口。
 - iOS Build `33951506319`（HEAD `6143243`）通过：模拟器编译与 280 个 XCTest 全绿。
 - Release Validation `33951508600`（HEAD `6143243`）通过：PWA、Edge、迁移双次执行、PostgreSQL remote sync fixture 和既有边界检查全绿。
 - 首轮 iOS Build `33950875174` 的 3 个失败均来自 DREMOTE-016 测试遗漏 `synchronize` 调用，已以单独测试提交修复；未改变生产实现。
