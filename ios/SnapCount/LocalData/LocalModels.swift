@@ -25,7 +25,7 @@ struct LocalAccount: Equatable, Identifiable {
     let currency: String
     let openingBalanceMinor: Int64
     let createdAt: Date
-    let origin: String = "local"
+    let origin: String
 
     init(
         id: UUID,
