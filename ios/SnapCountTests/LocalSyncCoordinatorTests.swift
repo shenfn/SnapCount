@@ -238,6 +238,8 @@ final class LocalSyncCoordinatorTests: XCTestCase {
             conflictedOperationIDs: [accountOperationID]
         )))
 
+        _ = try await coordinator.synchronize(profileID: profile.id, cloudUserID: "cloud-a")
+
         XCTAssertEqual(
             try fixture.repository.accounts(profileID: profile.id).first(where: { $0.id == account.id })?.name,
             "云端现金"
