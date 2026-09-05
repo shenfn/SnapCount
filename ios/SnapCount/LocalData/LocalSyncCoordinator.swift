@@ -133,7 +133,7 @@ struct LocalSyncCoordinator {
             }
             if !result.conflictedAggregateIDs.isEmpty || !result.conflictedExpenseIDs.isEmpty {
                 try repository.discardOutboxOperations(
-                    operationIDs: result.conflictedOperationIDs,
+                    operationIDs: Array(result.conflictedOperationIDs),
                     reason: "云端已更新，请复核"
                 )
             }
