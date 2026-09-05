@@ -39,6 +39,7 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         ])
 
         XCTAssertEqual(try repository.accounts(profileID: profile.id).map(\.id), [accountID])
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).first?.origin, "remote")
         XCTAssertEqual(try repository.expense(id: expenseID)?.amountMinor, 1_280)
         XCTAssertEqual(try repository.accountEntries(accountID: accountID).count, 1)
         XCTAssertEqual(try repository.pendingOutboxOperations().count, 0)

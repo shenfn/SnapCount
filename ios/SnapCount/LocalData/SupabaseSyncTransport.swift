@@ -10,6 +10,18 @@ private struct SyncBatchResponse: Decodable {
     let nextPullCursor: String?
     let error: String?
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        acceptedOperationIDs = try container.decodeIfPresent([UUID].self, forKey: .acceptedOperationIDs) ?? []
+        conflicts = try container.decodeIfPresent([AnyCodable].self, forKey: .conflicts) ?? []
+        rejected = try container.decodeIfPresent([AnyCodable].self, forKey: .rejected) ?? []
+        remoteAccounts = try container.decodeIfPresent([RemoteAccountDTO].self, forKey: .remoteAccounts) ?? []
+        remoteExpenses = try container.decodeIfPresent([RemoteExpenseDTO].self, forKey: .remoteExpenses) ?? []
+        remoteAccountEntries = try container.decodeIfPresent([RemoteEntryDTO].self, forKey: .remoteAccountEntries) ?? []
+        nextPullCursor = try container.decodeIfPresent(String.self, forKey: .nextPullCursor)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+    }
+
     enum CodingKeys: String, CodingKey {
         case acceptedOperationIDs = "accepted_operation_ids"
         case conflicts, rejected
@@ -126,7 +138,7 @@ final class SupabaseSyncTransport: LocalSyncTransport {
         let snapshot = LocalRemoteSnapshot(
             accounts: response.remoteAccounts.compactMap { account in
                 if account.changeKind == "delete" {
-                    return LocalRemoteAccount(id: account.aggregateID, name: "", kind: "other", currency: account.currency ?? "CNY", openingBalanceMinor: 0, version: account.version, deletedAt: parseDate(account.deletedAt) ?? Date())
+                    return LocalRemoteAccount(id: account.aggregateID, name: "", kind: "other", currency: account.currency ?? "CNY", openingBalanceMinor: 0, version: account.version, deletedAt: parseDate(account.deletedAt) ?? Date(timeIntervalSince1970: 0))
                 }
                 guard let name = account.name, let kind = account.type else { return nil }
                 return LocalRemoteAccount(
@@ -134,14 +146,14 @@ final class SupabaseSyncTransport: LocalSyncTransport {
                     name: name,
                     kind: kind,
                     currency: account.currency ?? "CNY",
-                    openingBalanceMinor: Int64((account.initialBalance ?? 0) * 100),
+                    openingBalanceMinor: Int64(((account.initialBalance ?? 0) * 100).rounded()),
                     version: account.version,
                     deletedAt: parseDate(account.deletedAt)
                 )
             },
             expenses: response.remoteExpenses.compactMap { expense in
                 if expense.changeKind == "delete" {
-                    return LocalRemoteExpense(id: expense.aggregateID, accountID: expense.accountID ?? UUID(), amountMinor: 0, currency: "CNY", merchantName: "", platform: "", category: "", paymentMethod: "", transactionDate: "1970-01-01", transactionTime: nil, note: nil, version: expense.version, deletedAt: parseDate(expense.deletedAt) ?? Date())
+                    return LocalRemoteExpense(id: expense.aggregateID, accountID: expense.accountID ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!, amountMinor: 0, currency: "CNY", merchantName: "", platform: "", category: "", paymentMethod: "", transactionDate: "1970-01-01", transactionTime: nil, note: nil, version: expense.version, deletedAt: parseDate(expense.deletedAt) ?? Date(timeIntervalSince1970: 0))
                 }
                 guard let accountID = expense.accountID,
                       let amount = expense.amount,
@@ -165,22 +177,17 @@ final class SupabaseSyncTransport: LocalSyncTransport {
                     deletedAt: parseDate(expense.deletedAt)
                 )
             },
-            accountEntries: response.remoteAccountEntries.map { entry in
-                LocalRemoteAccountEntry(
-                    id: entry.sourceID,
-                    accountID: entry.accountID,
-                    direction: entry.direction,
-                    amountMinor: Int64((entry.amount * 100).rounded()),
-                    entryKind: entry.entryType,
-                    sourceID: entry.sourceID,
-                    voided: entry.isVoided,
-                    voidedReason: entry.voidedReason
-                )
-            }
+            // Account entries are derived from the expense projection locally;
+            // accepting a second remote ledger projection can drift on edits.
+            accountEntries: []
         )
         let conflictDictionaries = response.conflicts.compactMap { $0.value as? [String: Any] }
         let conflictedAggregateIDs = Set(conflictDictionaries.compactMap { dictionary -> UUID? in
             guard let raw = dictionary["aggregate_id"] as? String else { return nil }
+            return UUID(uuidString: raw)
+        })
+        let conflictedOperationIDs = Set(conflictDictionaries.compactMap { dictionary -> UUID? in
+            guard let raw = dictionary["operation_id"] as? String else { return nil }
             return UUID(uuidString: raw)
         })
         let conflictedExpenseIDs = Set(conflictDictionaries.compactMap { dictionary -> UUID? in
@@ -203,7 +210,8 @@ final class SupabaseSyncTransport: LocalSyncTransport {
             acceptedOperationIDs: response.acceptedOperationIDs,
             rejectedOperations: rejectedOperations,
             conflictedAggregateIDs: conflictedAggregateIDs,
-            conflictedExpenseIDs: conflictedExpenseIDs
+            conflictedExpenseIDs: conflictedExpenseIDs,
+            conflictedOperationIDs: conflictedOperationIDs
         )
     }
 
@@ -239,6 +247,11 @@ final class SupabaseSyncTransport: LocalSyncTransport {
 
     private func parseDate(_ value: String?) -> Date? {
         guard let value else { return nil }
-        return ISO8601DateFormatter().date(from: value)
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        return standard.date(from: value)
     }
 }

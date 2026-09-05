@@ -8,6 +8,7 @@ struct LocalSyncTransportResult: Equatable {
     let rejectedOperations: [LocalSyncRejectedOperation]
     let conflictedAggregateIDs: Set<UUID>
     let conflictedExpenseIDs: Set<UUID>
+    let conflictedOperationIDs: Set<UUID>
 
     init(
         remoteArchive: Data? = nil,
@@ -16,7 +17,8 @@ struct LocalSyncTransportResult: Equatable {
         acceptedOperationIDs: [UUID] = [],
         rejectedOperations: [LocalSyncRejectedOperation] = [],
         conflictedAggregateIDs: Set<UUID> = [],
-        conflictedExpenseIDs: Set<UUID> = []
+        conflictedExpenseIDs: Set<UUID> = [],
+        conflictedOperationIDs: Set<UUID> = []
     ) {
         self.remoteArchive = remoteArchive
         self.nextPullCursor = nextPullCursor
@@ -25,6 +27,7 @@ struct LocalSyncTransportResult: Equatable {
         self.rejectedOperations = rejectedOperations
         self.conflictedAggregateIDs = conflictedAggregateIDs
         self.conflictedExpenseIDs = conflictedExpenseIDs
+        self.conflictedOperationIDs = conflictedOperationIDs
     }
 }
 
@@ -129,8 +132,10 @@ struct LocalSyncCoordinator {
                 )
             }
             if !result.conflictedAggregateIDs.isEmpty || !result.conflictedExpenseIDs.isEmpty {
-                _ = try stateStore.markSyncConflict(profileID: profileID, attemptID: currentAttemptID)
-                throw LocalSyncError.remoteConflict
+                try repository.discardOutboxOperations(
+                    operationIDs: result.conflictedOperationIDs,
+                    reason: "云端已更新，请复核"
+                )
             }
             if !result.rejectedOperations.isEmpty {
                 throw LocalSyncError.partialFailure(
@@ -142,8 +147,8 @@ struct LocalSyncCoordinator {
                 importedRecordCount = try repository.applyRemoteSnapshot(
                     snapshot,
                     profileID: profileID,
-                    excludingExpenseIDs: result.conflictedExpenseIDs,
-                    excludingAccountIDs: result.conflictedAggregateIDs.subtracting(result.conflictedExpenseIDs)
+                    excludingExpenseIDs: [],
+                    excludingAccountIDs: []
                 )
             } else if let archive = result.remoteArchive {
                 do {

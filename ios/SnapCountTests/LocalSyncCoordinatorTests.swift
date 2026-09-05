@@ -214,7 +214,7 @@ final class LocalSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(try fixture.repository.pendingOutboxUploads(profileID: profile.id).count, 2)
     }
 
-    func testDREMOTE016AccountConflictSkipsRemoteProjectionAndMarksUnresolved() async throws {
+    func testDREMOTE016ConflictTakesRemoteAndLeavesNoRetryableOperation() async throws {
         let fixture = try LocalSyncCoordinatorFixture()
         defer { fixture.cleanup() }
         let profile = try fixture.store.activeProfile()
@@ -222,6 +222,10 @@ final class LocalSyncCoordinatorTests: XCTestCase {
             id: UUID(), profileID: profile.id, name: "本地现金", kind: "cash", currency: "CNY",
             openingBalanceMinor: 10_000, createdAt: fixture.fixedDate
         ))
+        let accountOperationID = try XCTUnwrap(
+            fixture.repository.pendingOutboxUploads(profileID: profile.id)
+                .first(where: { $0.aggregateKind == "account" })?.operationID
+        )
         _ = try fixture.store.confirmBinding(profileID: profile.id, cloudUserID: "cloud-a")
         let remote = LocalRemoteSnapshot(
             accounts: [LocalRemoteAccount(id: account.id, name: "云端现金", kind: "cash", currency: "CNY", openingBalanceMinor: 10_000, version: 2, deletedAt: nil)],
@@ -230,20 +234,18 @@ final class LocalSyncCoordinatorTests: XCTestCase {
         )
         let coordinator = fixture.coordinator(transport: StubSyncTransport(result: .init(
             remoteSnapshot: remote,
-            conflictedAggregateIDs: [account.id]
+            conflictedAggregateIDs: [account.id],
+            conflictedOperationIDs: [accountOperationID]
         )))
-
-        await XCTAssertThrowsErrorAsync {
-            _ = try await coordinator.synchronize(profileID: profile.id, cloudUserID: "cloud-a")
-        }
 
         XCTAssertEqual(
             try fixture.repository.accounts(profileID: profile.id).first(where: { $0.id == account.id })?.name,
-            "本地现金"
+            "云端现金"
         )
         let state = try fixture.store.syncState(profileID: profile.id)
-        XCTAssertEqual(state.status, .failed)
-        XCTAssertEqual(state.conflictState, .unresolved)
+        XCTAssertEqual(state.status, .synced)
+        XCTAssertEqual(state.conflictState, .none)
+        XCTAssertTrue(try fixture.repository.pendingOutboxUploads(profileID: profile.id).isEmpty)
     }
 }
 

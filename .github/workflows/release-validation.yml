@@ -346,6 +346,8 @@ jobs:
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260829150000_remote_sync_transaction_timestamps.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260831100000_remote_sync_transaction_delete_tombstone.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260831100000_remote_sync_transaction_delete_tombstone.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260905090000_local003_phase_a_sync_contract.sql
+          psql "$PGURL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260905090000_local003_phase_a_sync_contract.sql
           psql "$PGURL" -v ON_ERROR_STOP=1 -f scripts/test-remote-sync-contract.sql
 
       - name: Execute staging archive migration contract
