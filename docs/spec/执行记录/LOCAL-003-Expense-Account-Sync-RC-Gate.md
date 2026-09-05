@@ -175,7 +175,17 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 
 下一步：完成本修复 PR 的 macOS Build/XCTest 后，先用现有 TestFlight 构建确认重复行消失；若仍存在不同 UUID 的重复，导出脱敏 ID/字段清单后再决定是否提供用户确认式合并工具。本轮不自动删除用户数据。
 
-## 15. Phase A 范围收缩与新放行标准（2026-09-05）
+## 15. UUID 大小写归一化补丁（2026-09-05）
+
+- 新 TestFlight 仍出现本地与云端同一业务记录的双投影，说明仅统一 `local-expense` / `expense` 前缀仍不充分。
+- 根因收窄为 UUID 文本大小写差异：Swift `UUID.uuidString` 输出大写字母，而 Supabase 返回的 UUID 文本通常为小写；此前 `canonicalValue` 对 `rawId` 做大小写敏感比较，因此同一 UUID 仍可能被视为两个实体。
+- 本轮红灯场景固定：本地使用大写 UUID 引用、云端使用小写 UUID 引用，合并后必须只保留本地一条记录。
+- 最小修复：仅当 `rawId` 可解析为 UUID 时，将其规范化为小写 UUID；非 UUID 标识保持原始大小写，避免改变其他域可能存在的大小写敏感 ID。
+- 安全边界不变：不同 UUID 仍视为两笔独立事实，不自动删除或合并。
+
+下一步：等待 PR 的 macOS Swift Build/XCTest；通过后再从合并提交触发一次 TestFlight，验证同 UUID（含大小写差异）不再双显。
+
+## 16. Phase A 范围收缩与新放行标准（2026-09-05）
 
 只读裁决确认当前多设备双写协议不放行。依据 ADR-040，本 Gate 不再把第二台设备并发编辑作为 Phase A 承诺，改为“单设备 + 云端 AI/PWA 写入者”。
 
@@ -189,7 +199,7 @@ Phase A 放行前置条件：
 - PostgreSQL fixture 与生产约束同构，并有确定性操作序列测试；
 - 双设备并发、人工冲突 UI 和其他数据域明确标记为 Phase B，不得作为当前 RC 模板能力。
 
-## 16. Phase A 实施与当前验证（2026-09-05）
+## 17. Phase A 实施与当前验证（2026-09-05）
 
 - 已在 main@050c265 的隔离 worktree codex/LOCAL-003-phase-a 实施 B1/B2/B3/B4、F1/F3/F6；根工作区 WIP 和其他 worktree 未修改。
 - B1：local_accounts.origin 区分 local/remote，远端账户不进入消费账户补偿 Outbox。
@@ -202,7 +212,7 @@ Phase A 放行前置条件：
 - 已知基线失败：test:ios-local-account-boundary 的旧 showLocalAccountPreparation 静态断言在当前主线即失败，本轮未修改 Records 页面。
 - 当前不执行：commit、push、生产迁移、部署、TestFlight；待用户确认并取得 CI 证据后再进入收口。
 
-## 17. Phase A PR 门禁完成与 RC 入口（2026-09-05）
+## 18. Phase A PR 门禁完成与 RC 入口（2026-09-05）
 
 - 修复分支为 `fix/LOCAL-003-记录投影去重`，隔离 worktree 为 `.worktrees/LOCAL-003-协议收缩与修复`；根工作区 WIP 和其他 worktree 未修改。
 - PR #195 已打开，当前提交为 `6143243`：`4ca7445` 实施 Phase A 契约，`f1d23dd` 修正 iOS 编译兼容，`3c9788c` 修正 `origin` 重复初始化，`6143243` 恢复 DREMOTE-016 测试实际调用同步入口。
