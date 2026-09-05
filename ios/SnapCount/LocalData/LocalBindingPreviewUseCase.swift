@@ -296,8 +296,7 @@ extension LocalProfileStore: LocalBindingRepository {
         let state = try syncState(profileID: profileID)
         guard case .bound(let boundUserID) = state.binding,
               boundUserID == cloudUserID,
-              state.status != .disabled,
-              state.conflictState != .unresolved else {
+              state.status != .disabled else {
             return false
         }
         return true
@@ -319,7 +318,6 @@ extension LocalProfileStore: LocalBindingRepository {
             }
             try ensureSyncState(db: db, profileID: profileID)
             let state = try syncState(db: db, profileID: profileID, boundUserID: boundUserID)
-            guard state.conflictState == .none else { throw LocalSyncError.syncNotAuthorized }
             try db.execute(
                 sql: """
                     UPDATE local_sync_state
@@ -357,7 +355,8 @@ extension LocalProfileStore: LocalBindingRepository {
                 sql: """
                     UPDATE local_sync_state
                     SET pull_cursor = ?, last_successful_sync_at = ?,
-                        active_attempt_id = NULL, sync_status = 'synced'
+                        active_attempt_id = NULL, sync_status = 'synced',
+                        conflict_status = 'none'
                     WHERE profile_id = ? AND active_attempt_id = ?
                     """,
                 arguments: [pullCursor, completedAt, profileID.uuidString, attemptID.uuidString]

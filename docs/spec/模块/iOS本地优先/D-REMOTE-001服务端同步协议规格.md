@@ -30,7 +30,7 @@
 2. 云端账户余额不接受客户端覆盖；账户余额由账户初始余额和未作废流水在服务端派生。
 3. 同一 `operation_id` 或 `idempotency_key` 重试返回第一次结果，不重复创建消费或账户流水。
 4. `base_version` 不匹配时返回冲突，不修改云端实体，不接受客户端强制覆盖。
-5. 批次中账户、消费、流水和同步元数据必须在同一数据库事务中提交；任一业务校验失败，批次整体回滚。
+5. 每个操作的账户、消费、流水和同步元数据必须在同一数据库事务中提交；单个操作业务校验失败只回滚该操作并落库为 `rejected(reason)`，不能回滚同批其他已接受操作。
 6. pull cursor 是全局同步流的 opaque 位置，不是 `updated_at`、某张表的版本或某个域的计数。
 7. 删除通过 tombstone/change event 同步；物理删除不能从同步流中消失。
 
@@ -132,7 +132,6 @@
   "rejected": [],
   "remote_accounts": [],
   "remote_expenses": [],
-  "remote_account_entries": [],
   "next_pull_cursor": "opaque-next-cursor"
 }
 ```
@@ -149,13 +148,13 @@
 6. 固化每个 operation 的结果到 `sync_operations`；
 7. 生成响应并提交事务。
 
-任一步骤失败，除可重复识别的已存在幂等结果外，整个事务回滚。
+单个操作失败时回滚该操作并记录 `rejected(reason)`；同批其他操作继续处理。可重复识别的幂等结果仍按首次结果返回。
 
 ## 5. Pull 语义
 
 - `p_pull_cursor = null` 表示首次拉取当前用户的完整同步集合；
 - 非空 cursor 只返回 cursor 之后的 `sync_change_log`，并带实体完整快照或 tombstone；
-- 返回结果必须包含账户、消费和账户流水的关联关系；
+- 返回结果包含账户和消费事实；账户流水由客户端依据本地有效消费投影派生，不作为同步响应字段；
 - 同一实体多次变更可在响应中折叠，但不能跳过最新版本或 tombstone；
 - cursor 只在事务成功后前进；客户端收到传输错误时不得持久化新 cursor；
 - `workspace_id` 不参与数据过滤，不能用来读取其他用户的数据。
@@ -171,7 +170,7 @@
 | DREMOTE-003 | `base_version` 过期 | 返回 conflict，云端实体/流水不变 |
 | DREMOTE-004 | 消费金额/账户替换 | 旧流水作废、新流水生成，余额只由有效流水派生 |
 | DREMOTE-005 | 删除 tombstone | 删除进入 change log，另一端可恢复删除事实 |
-| DREMOTE-006 | 批次中间失败 | 账户、消费、流水、版本、change log、operation 结果全部回滚 |
+| DREMOTE-006 | 批次中间失败 | 成功操作提交；失败操作落库为 `rejected(reason)`；不形成整批毒丸 |
 | DREMOTE-007 | 用户 A 读取/写入用户 B UUID | RLS/RPC 拒绝，不泄露实体是否存在 |
 | DREMOTE-008 | 旧 cursor | 返回 `cursor_expired`，不静默返回最新集合 |
 | DREMOTE-009 | 空批次只 pull | 不写 operation，不改变实体，只返回 cursor 后的变更 |
