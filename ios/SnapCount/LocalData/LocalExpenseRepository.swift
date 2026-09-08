@@ -27,6 +27,7 @@ protocol LocalExpenseRepositoryProtocol {
     func ensureAccountOutboxForPendingExpenses(profileID: UUID) throws -> Int
     func pendingOutboxUploads(profileID: UUID) throws -> [LocalOutboxUpload]
     func markOutboxSent(operationIDs: [UUID]) throws
+    func discardOutboxOperations(operationIDs: [UUID], reason: String) throws
     func markOutboxFailed(operationIDs: [UUID], error: String) throws
     func accountBalanceMinor(accountID: UUID) throws -> Int64
     func applyRemoteSnapshot(
@@ -62,8 +63,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             try db.execute(
                 sql: """
                     INSERT INTO local_accounts (
-                        id, profile_id, name, kind, currency, opening_balance_minor, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local')
                     """,
                 arguments: [
                     draft.id.uuidString,
@@ -106,13 +107,20 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         try database.writer.write { db in
             for draft in drafts {
                 try db.execute(sql: """
-                    INSERT INTO local_accounts (id, profile_id, name, kind, currency, opening_balance_minor, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO local_accounts (id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'remote')
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         kind = excluded.kind,
                         currency = excluded.currency,
-                        opening_balance_minor = excluded.opening_balance_minor
+                        opening_balance_minor = excluded.opening_balance_minor,
+                        origin = CASE WHEN EXISTS (
+                            SELECT 1 FROM local_outbox_operations
+                            WHERE aggregate_kind = 'account'
+                              AND aggregate_id = local_accounts.id
+                              AND profile_id = local_accounts.profile_id
+                              AND status IN ('pending', 'failed')
+                        ) THEN local_accounts.origin ELSE 'remote' END
                     """, arguments: [
                         draft.id.uuidString, draft.profileID.uuidString, draft.name,
                         draft.kind, draft.currency, draft.openingBalanceMinor, draft.createdAt
@@ -126,7 +134,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT id, profile_id, name, kind, currency, opening_balance_minor, created_at
+                    SELECT id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin
                     FROM local_accounts
                     WHERE profile_id = ?
                     ORDER BY created_at ASC, id ASC
@@ -145,7 +153,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     kind: row["kind"],
                     currency: row["currency"],
                     openingBalanceMinor: row["opening_balance_minor"],
-                    createdAt: createdAt
+                    createdAt: createdAt,
+                    origin: row["origin"] ?? "local"
                 )
             }
         }
@@ -553,6 +562,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                      AND expense_outbox.profile_id = e.profile_id
                      AND expense_outbox.status IN ('pending', 'failed')
                     WHERE a.profile_id = ?
+                      AND a.origin = 'local'
                       AND e.deleted_at IS NULL
                     ORDER BY a.created_at ASC, a.id ASC
                     """,
@@ -652,6 +662,24 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         }
     }
 
+    /// Conflict operations are terminal in Phase A. Keep the row for
+    /// diagnostics while removing it from the retry queue.
+    func discardOutboxOperations(operationIDs: [UUID], reason: String) throws {
+        guard !operationIDs.isEmpty else { return }
+        try database.writer.write { db in
+            for operationID in operationIDs {
+                try db.execute(
+                    sql: """
+                        UPDATE local_outbox_operations
+                        SET status = 'sent', last_error = ?, next_attempt_at = NULL
+                        WHERE operation_id = ? AND status IN ('pending', 'failed', 'processing')
+                        """,
+                    arguments: [reason, operationID.uuidString]
+                )
+            }
+        }
+    }
+
     func markOutboxFailed(operationIDs: [UUID], error: String) throws {
         guard !operationIDs.isEmpty else { return }
         try database.writer.write { db in
@@ -713,12 +741,21 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 let existing = try Row.fetchOne(db, sql: "SELECT id FROM local_accounts WHERE id = ? AND profile_id = ?", arguments: [account.id.uuidString, profileID.uuidString])
                 if existing == nil {
                     try db.execute(sql: """
-                        INSERT INTO local_accounts (id, profile_id, name, kind, currency, opening_balance_minor, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO local_accounts (id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'remote')
                         """, arguments: [account.id.uuidString, profileID.uuidString, account.name, account.kind, account.currency, account.openingBalanceMinor, Date()])
                     imported += 1
                 } else {
-                    try db.execute(sql: "UPDATE local_accounts SET name = ?, kind = ?, currency = ? WHERE id = ? AND profile_id = ?", arguments: [account.name, account.kind, account.currency, account.id.uuidString, profileID.uuidString])
+                    try db.execute(sql: """
+                        UPDATE local_accounts
+                        SET name = ?, kind = ?, currency = ?,
+                            origin = CASE WHEN EXISTS (
+                                SELECT 1 FROM local_outbox_operations
+                                WHERE aggregate_kind = 'account' AND aggregate_id = local_accounts.id
+                                  AND profile_id = local_accounts.profile_id AND status IN ('pending', 'failed')
+                            ) THEN origin ELSE 'remote' END
+                        WHERE id = ? AND profile_id = ?
+                        """, arguments: [account.name, account.kind, account.currency, account.id.uuidString, profileID.uuidString])
                 }
             }
             for expense in snapshot.expenses {
@@ -749,17 +786,6 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         INSERT INTO local_account_entries (id, profile_id, account_id, direction, amount_minor, entry_kind, source_kind, source_id, occurred_at, voided_at)
                         VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
                         """, arguments: [UUID().uuidString, profileID.uuidString, expense.accountID.uuidString, expense.amountMinor, expense.id.uuidString, Date()])
-                }
-            }
-            for entry in snapshot.accountEntries {
-                let exists = try Row.fetchOne(db, sql: "SELECT id FROM local_account_entries WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL", arguments: [entry.sourceID.uuidString]) != nil
-                if !exists {
-                    try db.execute(sql: """
-                        INSERT INTO local_account_entries (id, profile_id, account_id, direction, amount_minor, entry_kind, source_kind, source_id, occurred_at, voided_at)
-                        VALUES (?, ?, ?, ?, ?, ?, 'expense', ?, ?, ?)
-                        """, arguments: [UUID().uuidString, profileID.uuidString, entry.accountID.uuidString, entry.direction, entry.amountMinor, entry.entryKind, entry.sourceID.uuidString, Date(), entry.voided ? Date() : nil])
-                } else if entry.voided {
-                    try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND profile_id = ?", arguments: [Date(), entry.sourceID.uuidString, profileID.uuidString])
                 }
             }
             return imported

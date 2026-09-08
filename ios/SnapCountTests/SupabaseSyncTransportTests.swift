@@ -24,7 +24,7 @@ final class SupabaseSyncTransportTests: XCTestCase {
         XCTAssertEqual(result.remoteSnapshot?.expenses.first?.amountMinor, 1230)
         XCTAssertEqual(result.remoteSnapshot?.expenses.first?.platform, "线下消费")
         XCTAssertEqual(result.remoteSnapshot?.expenses.first?.note, "同步备注")
-        XCTAssertEqual(result.remoteSnapshot?.accountEntries.count, 1)
+        XCTAssertEqual(result.remoteSnapshot?.accountEntries.count, 0)
     }
 
     func testDREMOTE014MapsRejectedOperationsWithoutTreatingThemAsAccepted() async throws {

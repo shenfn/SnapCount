@@ -131,7 +131,7 @@ final class LocalBindingPreviewUseCaseTests: XCTestCase {
         XCTAssertFalse(try fixture.store.canUploadOutbox(profileID: profile.id, cloudUserID: "cloud-b"))
     }
 
-    func testUnresolvedConflictBlocksOutboxWithoutChangingSyncStatus() throws {
+    func testLegacyUnresolvedConflictDoesNotPermanentlyBlockOutbox() throws {
         let fixture = try LocalSyncFixture()
         defer { fixture.cleanup() }
         let profile = try fixture.store.activeProfile()
@@ -147,7 +147,22 @@ final class LocalBindingPreviewUseCaseTests: XCTestCase {
         let state = try fixture.store.syncState(profileID: profile.id)
         XCTAssertEqual(state.status, .ready)
         XCTAssertEqual(state.conflictState, .unresolved)
-        XCTAssertFalse(try fixture.store.canUploadOutbox(profileID: profile.id, cloudUserID: "cloud-a"))
+        XCTAssertTrue(try fixture.store.canUploadOutbox(profileID: profile.id, cloudUserID: "cloud-a"))
+
+        let attemptID = UUID()
+        _ = try fixture.store.beginSync(
+            profileID: profile.id,
+            cloudUserID: "cloud-a",
+            attemptID: attemptID
+        )
+        let completed = try fixture.store.completeSync(
+            profileID: profile.id,
+            attemptID: attemptID,
+            pullCursor: "c:1",
+            completedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        XCTAssertEqual(completed.status, .synced)
+        XCTAssertEqual(completed.conflictState, .none)
     }
 }
 

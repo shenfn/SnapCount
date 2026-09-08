@@ -25,6 +25,27 @@ struct LocalAccount: Equatable, Identifiable {
     let currency: String
     let openingBalanceMinor: Int64
     let createdAt: Date
+    let origin: String
+
+    init(
+        id: UUID,
+        profileID: UUID,
+        name: String,
+        kind: String,
+        currency: String,
+        openingBalanceMinor: Int64,
+        createdAt: Date,
+        origin: String = "local"
+    ) {
+        self.id = id
+        self.profileID = profileID
+        self.name = name
+        self.kind = kind
+        self.currency = currency
+        self.openingBalanceMinor = openingBalanceMinor
+        self.createdAt = createdAt
+        self.origin = origin
+    }
 }
 
 struct LocalExpenseDraft: Equatable {
@@ -166,6 +187,16 @@ struct LocalRemoteSnapshot: Equatable {
     let accounts: [LocalRemoteAccount]
     let expenses: [LocalRemoteExpense]
     let accountEntries: [LocalRemoteAccountEntry]
+
+    init(
+        accounts: [LocalRemoteAccount],
+        expenses: [LocalRemoteExpense],
+        accountEntries: [LocalRemoteAccountEntry] = []
+    ) {
+        self.accounts = accounts
+        self.expenses = expenses
+        self.accountEntries = accountEntries
+    }
 }
 
 enum LocalDataError: Error, Equatable {

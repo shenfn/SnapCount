@@ -79,7 +79,8 @@ begin
       and (select type = 'expense' and status = 'done' and source = 'manual'
              and platform = '线下消费' and note = '初次同步备注'
            from public.transactions where id = v_expense_id)
-      and (select count(*) from public.account_entries where source_id = v_expense_id and not is_voided) = 1,
+       and (select count(*) from public.account_entries where source_id = v_expense_id and not is_voided) = 1
+       and not (v_first ? 'remote_account_entries'),
     'DREMOTE-001 retry must create one complete production-compatible expense fact'
   );
 
@@ -158,7 +159,7 @@ declare
   v_delete jsonb;
   v_before_transactions integer;
   v_before_operations integer;
-  v_rollback boolean := false;
+  v_partial jsonb;
   v_expense_id uuid := '77000000-0000-4000-8000-000000000002';
   v_account_id uuid := '66000000-0000-4000-8000-000000000001';
 begin
@@ -206,34 +207,33 @@ begin
 
   select count(*) into v_before_transactions from public.transactions;
   select count(*) into v_before_operations from public.sync_operations;
-  begin
-    perform public.sync_expense_batch(
-      'aa000000-0000-4000-8000-000000000001', 1, null,
-      jsonb_build_array(
-        jsonb_build_object(
-          'operation_id', '99000000-0000-4000-8000-000000000007',
-          'idempotency_key', 'rollback-key-001', 'aggregate_kind', 'expense',
-          'aggregate_id', '77000000-0000-4000-8000-000000000004',
-          'aggregate_version', 1, 'base_version', 0,
-          'payload', jsonb_build_object('amount', 11, 'account_id', v_account_id)
-        ),
-        jsonb_build_object(
-          'operation_id', '99000000-0000-4000-8000-000000000008',
-          'idempotency_key', 'rollback-key-002', 'aggregate_kind', 'expense',
-          'aggregate_id', '77000000-0000-4000-8000-000000000005',
-          'aggregate_version', 1, 'base_version', 0,
-          'payload', jsonb_build_object('force_failure', true, 'amount', 12, 'account_id', v_account_id)
-        )
+  select public.sync_expense_batch(
+    'aa000000-0000-4000-8000-000000000001', 1, null,
+    jsonb_build_array(
+      jsonb_build_object(
+        'operation_id', '99000000-0000-4000-8000-000000000007',
+        'idempotency_key', 'partial-key-001', 'aggregate_kind', 'expense',
+        'aggregate_id', '77000000-0000-4000-8000-000000000004',
+        'aggregate_version', 1, 'base_version', 0,
+        'payload', jsonb_build_object('amount', 11, 'account_id', v_account_id)
+      ),
+      jsonb_build_object(
+        'operation_id', '99000000-0000-4000-8000-000000000008',
+        'idempotency_key', 'partial-key-002', 'aggregate_kind', 'expense',
+        'aggregate_id', '77000000-0000-4000-8000-000000000005',
+        'aggregate_version', 1, 'base_version', 0,
+        'payload', jsonb_build_object('amount', 12,
+          'account_id', '66000000-0000-4000-8000-000000000099')
       )
-    );
-  exception when others then
-    v_rollback := position('sync_batch_forced_failure' in sqlerrm) > 0;
-  end;
+    )
+  ) into v_partial;
   perform public.remote_sync_test_assert(
-    v_rollback
-      and (select count(*) from public.transactions) = v_before_transactions
-      and (select count(*) from public.sync_operations) = v_before_operations,
-    'DREMOTE-006 mid-batch failure must roll back all facts and metadata'
+    jsonb_array_length(v_partial->'accepted_operation_ids') = 1
+      and jsonb_array_length(v_partial->'rejected') = 1
+      and (v_partial->'rejected'->0->>'reason') = 'account not found'
+      and (select count(*) from public.transactions) = v_before_transactions + 1
+      and (select count(*) from public.sync_operations) = v_before_operations + 2,
+    'DREMOTE-006 must isolate an operation failure without rolling back accepted operations'
   );
 
   update public.sync_cursor_state set minimum_cursor = 100

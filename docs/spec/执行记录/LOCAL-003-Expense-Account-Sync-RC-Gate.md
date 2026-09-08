@@ -173,7 +173,7 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 - 回归测试新增：同一 UUID 的本地/云端消费只生成一条列表记录，且优先保留本地引用。
 - 重要边界：如果本地和云端是不同 UUID，即表示历史上确实创建了两笔独立事实，本修复不会自动删除或合并，需另行做可审计的重复候选复核。
 
- 下一步：完成本修复 PR 的 macOS Build/XCTest 后，先用现有 TestFlight 构建确认重复行消失；若仍存在不同 UUID 的重复，导出脱敏 ID/字段清单后再决定是否提供用户确认式合并工具。本轮不自动删除用户数据。
+下一步：完成本修复 PR 的 macOS Build/XCTest 后，先用现有 TestFlight 构建确认重复行消失；若仍存在不同 UUID 的重复，导出脱敏 ID/字段清单后再决定是否提供用户确认式合并工具。本轮不自动删除用户数据。
 
 ## 15. UUID 大小写归一化补丁（2026-09-05）
 
@@ -184,4 +184,43 @@ RC Gate 只有在 RC-001 至 RC-017 全部有证据、且没有未解释的业�
 - 安全边界不变：不同 UUID 仍视为两笔独立事实，不自动删除或合并。
 
 下一步：等待 PR 的 macOS Swift Build/XCTest；通过后再从合并提交触发一次 TestFlight，验证同 UUID（含大小写差异）不再双显。
+
+## 16. Phase A 范围收缩与新放行标准（2026-09-05）
+
+只读裁决确认当前多设备双写协议不放行。依据 ADR-040，本 Gate 不再把第二台设备并发编辑作为 Phase A 承诺，改为“单设备 + 云端 AI/PWA 写入者”。
+
+Phase A 放行前置条件：
+
+- B3：批次内单操作失败落库为 `rejected(reason)`，同批其他操作可继续，客户端能定位具体 operation；
+- B2：版本冲突自动 take-remote，冲突 outbox 进入终态丢弃并保留诊断原因，`conflict_status` 不进入永久 `unresolved`；
+- B1：本地账户保存 `origin`，远端导入账户不被消费补偿逻辑重新上传；
+- B4：同步响应移除派生 `remote_account_entries`，本地余额只由有效本地 expense 投影重算；
+- 删除生产测试钩子、修复金额四舍五入和 fractional seconds 时间解析；
+- PostgreSQL fixture 与生产约束同构，并有确定性操作序列测试；
+- 双设备并发、人工冲突 UI 和其他数据域明确标记为 Phase B，不得作为当前 RC 模板能力。
+
+## 17. Phase A 实施与当前验证（2026-09-05）
+
+- 已在 main@050c265 的隔离 worktree codex/LOCAL-003-phase-a 实施 B1/B2/B3/B4、F1/F3/F6；根工作区 WIP 和其他 worktree 未修改。
+- B1：local_accounts.origin 区分 local/remote，远端账户不进入消费账户补偿 Outbox。
+- B2：冲突操作标记为终态 sent 并保留“云端已更新，请复核”，继续应用远端快照；历史 unresolved 不再阻止同步，成功同步清零冲突状态。
+- B3：公开 RPC 逐操作调用并隔离异常，失败落库 rejected(reason)，同批成功操作继续提交。
+- B4：公开响应和本地投影不再消费 remote_account_entries，账户流水由本地有效消费投影派生。
+- F1/F3/F6：金额转换使用四舍五入；时间解析支持 fractional seconds；公开 RPC 不保留 expired 特殊输入或 force_failure 行为。
+- 已通过：npm run governance:check、npm run governance:arch、node scripts/check-migration-versions.mjs、LOCAL-002-APP/LOCAL-003B/LOCAL-003D 边界脚本、git diff --check。
+- 未验证：Windows 无 Swift/XCTest；Docker daemon 未运行，PostgreSQL fixture 尚未执行。上述两项交由 GitHub macOS iOS Build/XCTest 与 PostgreSQL Release Validation 门禁验证。
+- 已知基线失败：test:ios-local-account-boundary 的旧 showLocalAccountPreparation 静态断言在当前主线即失败，本轮未修改 Records 页面。
+- 当前不执行：commit、push、生产迁移、部署、TestFlight；待用户确认并取得 CI 证据后再进入收口。
+
+## 18. Phase A PR 门禁完成与 RC 入口（2026-09-05）
+
+- 修复分支为 `fix/LOCAL-003-记录投影去重`，隔离 worktree 为 `.worktrees/LOCAL-003-协议收缩与修复`；根工作区 WIP 和其他 worktree 未修改。
+- PR #195 已打开；代码修复提交为 `6143243`，随后在 `8a6d341` 合入 main 的 UUID 大小写归一化修复，后续提交仅维护本交接记录：`4ca7445` 实施 Phase A 契约，`f1d23dd` 修正 iOS 编译兼容，`3c9788c` 修正 `origin` 重复初始化，`6143243` 恢复 DREMOTE-016 测试实际调用同步入口。
+- iOS Build `33951506319`（HEAD `6143243`）通过：模拟器编译与 280 个 XCTest 全绿。
+- Release Validation `33951508600`（HEAD `6143243`）通过：PWA、Edge、迁移双次执行、PostgreSQL remote sync fixture 和既有边界检查全绿。
+- 首轮 iOS Build `33950875174` 的 3 个失败均来自 DREMOTE-016 测试遗漏 `synchronize` 调用，已以单独测试提交修复；未改变生产实现。
+- 当前未验证：真实 iPhone/TestFlight 单设备 RC 走查。范围为 RC-001…006、009…012、015；双设备并发按 ADR-040 标记“范围外”，不标记为失败。
+- 当前不执行：合并 PR、生产迁移、部署或 TestFlight，直到用户对发布步骤作当前任务的明确授权。
+
+下一步：获得发布授权后，从通过门禁的固定提交执行迁移与 TestFlight，再进行一次集中单设备 RC 走查；真机若发现问题，只修复具体红灯并重新跑门禁。
 

@@ -140,6 +140,13 @@ final class LocalDatabase {
                     SELECT id FROM local_profiles;
                 """)
         }
+        migrator.registerMigration("local-v3-phase-a-origin") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_accounts
+                ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'
+                    CHECK (origin IN ('local', 'remote'));
+                """)
+        }
         return migrator
     }
 }
