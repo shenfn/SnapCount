@@ -224,3 +224,19 @@ Phase A 放行前置条件：
 
 下一步：获得发布授权后，从通过门禁的固定提交执行迁移与 TestFlight，再进行一次集中单设备 RC 走查；真机若发现问题，只修复具体红灯并重新跑门禁。
 
+## 19. Phase A 合并、生产迁移与 TestFlight（2026-09-08）
+
+- PR #195 的固定 HEAD `1d5fbd3` 全部门禁通过后，以 merge commit `6d54ced` 合入 `main`。
+- 生产迁移历史存在仓库旧迁移未应用、生产独有版本 `20260808054219` 的既有差异，因此未执行会扩大范围的全量 `db push`；只定向执行并登记 `20260905090000_local003_phase_a_sync_contract.sql`。
+- 生产校验确认 `sync_expense_batch(uuid, integer, text, jsonb)` 已包含逐操作 `exception when others` 隔离，且函数定义不再包含 `remote_account_entries`。
+- 从固定 `main@6d54ced` 触发 TestFlight Run `34240291445`，Archive、Export、Upload 全部成功；IPA 的实际构建号为 `34240291445`，Delivery UUID 为 `0bf90e3d-00a8-4c19-8dc0-9e5d7223af6d`。
+
+对 2026-09-08 同步阻塞复审的裁决：
+
+- “最新已安装版本不含 UUID 大小写修复”对旧构建成立，本次新构建已包含该修复；是否消除同 UUID 双显仍需真机证明。
+- 历史首次 Pull 依赖 `sync_change_log`、旧云端编辑缺少统一变更捕获、客户端未对 100 条以上 Outbox 分批，均是当前仍成立的单设备可靠性缺口；它们不阻止本次验证特定双显修复，但阻止宣称整个同步 RC 已收口。
+- “游标过期响应会先解码失败”不适用于当前 PR：响应数组已使用 `decodeIfPresent` 并有真实仅含 `error` 的测试路径。
+- “远端流水选择导致本地余额风险”对应的下发路径已由 Phase A B4 删除；当前余额风险应改由消费编辑、换账户、删除后的本地派生投影测试验证，不能沿用旧 `remote_account_entries` 结论。
+
+当前验证边界：发布成功不是业务通过。待 App Store Connect 处理完成后，只用此构建执行 RC-001…006、009…012、015；优先确认原双显记录是否为同一 UUID。若仍双显，先导出脱敏的本地/云端 raw ID，不自动合并或删除用户数据。历史首拉、云端编辑捕获和 101+ Outbox 分批作为后续独立红灯，不得复制同步能力到其他域。
+
