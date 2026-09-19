@@ -178,3 +178,9 @@ macOS iOS workflow `35431410842` 已通过：应用编译、完整 XCTest、iOS 
 `LOCAL-P1-SPORT-001-G` 已实现并通过 CI：未登录图片入口转入本地运动兜底表单，保存时图片沿用 `LocalRecordUseCase` 的本地生命周期。随后继续完成 `DM-GAP-02` 的最小模型收敛：`local_records` 与 `local_staging_records` 增加 `source_kind`、`domain_version`，高置信度自动归档、低置信度候选和用户确认分别保留 `ai_auto_archive`、`ai_candidate`、`ai_confirmed` 来源；旧数据库通过 v6 本地迁移补默认值。
 
 `8850c61` 的 G 片已由 macOS iOS workflow `35442948032` 通过 Build、完整 XCTest 和 iOS Build Gate；PWA/Edge、治理、Vercel、Cloudflare 门禁同步通过。来源元数据改动随后由 `f83c951` 加入，并在 `6e1bbc0` 修正中转站 INSERT 占位符后收口；最终 macOS iOS workflow `35444698473` 的 Build、完整 XCTest 和 iOS Build Gate 均通过，PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁也全部通过。未触发新的 TestFlight，当前提交尚未完成新的真机验证。后续仍应围绕本地候选/中转 UI 与 AI 输入适配，不把来源元数据误认为 AI 运行日志，也不扩展 Cloud Sync。
+
+## 15. H 片：本地中转站收件箱闭环
+
+`LOCAL-P1-SPORT-001-H` 将低置信度本地候选投影到既有 Inbox 收件箱：使用 `local-staging/<id>` 路由、本地图片目录 URL 和候选来源元数据；“确认”调用本地 `confirmStaging` 生成正式记录，“销毁”调用本地 `discardStaging` 并沿用图片清理生命周期。中转候选不会进入正式事实读取，且本片不接入远端重试、AI 适配、跨域分析或同步协议。
+
+实现提交为 `9587898`，macOS iOS workflow `35445897681` 已通过模拟器编译、完整 XCTest 和 iOS Build Gate；PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁也全部通过。H 片当前仅在未登录本地路径投影候选；本地候选的编辑、重试和域重判仍明确延期，当前提交未触发新的 TestFlight，尚未完成新的真机验证。

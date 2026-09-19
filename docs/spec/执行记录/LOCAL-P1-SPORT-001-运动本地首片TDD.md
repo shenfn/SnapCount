@@ -35,3 +35,11 @@
 - `LocalFactReader` 与本地导出读取并保留这两个元数据，不把 AI 原始响应、提示词或 token 写入正式事实。
 - 新增 `testLOCALP1DM002IntakePreservesCandidateAndFormalSourceKinds`，固定候选、自动归档和确认后的来源边界。
 - G 片的 macOS Build/XCTest workflow `35442948032`、iOS Build Gate、PWA/Edge、治理、Vercel 和 Cloudflare 均通过；来源元数据改动在 `f83c951` 加入，并由 `6e1bbc0` 修正中转站 INSERT 占位符后通过最终 workflow `35444698473` 的 Build、完整 XCTest、iOS Build Gate 及 PR 全部门禁。未触发新的 TestFlight，当前提交尚未完成新的真机验证。
+
+## 后续切片：LOCAL-P1-SPORT-001-H
+
+- 目标行为：将未登录本地低置信度候选投影到既有 Inbox，使用 `local-staging/<id>` 路由展示本地图片和候选元数据；确认进入本地正式记录，销毁走本地中转删除并清理图片。
+- 红灯：`testLOCALP1SPORT001HLocalStagingProjectsToInboxWithLocalImageRoute` 固定本地候选到收件箱的路由、运动域、置信度、待确认状态、本地图片 URL 和本地 ID 往返映射。
+- 最小实现：新增 `LocalStagingReadModel`；`AppState` 在离线本地加载后投影候选，并将本地 Inbox 确认/销毁路由到既有 `LocalRecordUseCase`；Inbox 隐藏本地候选不支持的远端重试、编辑和域重判入口。
+- 保护边界：不改变远端中转站、不增加 AI provider 适配、不修改 Cloud Sync、Outbox/Cursor/Conflict、AI Popup 或 Analysis 算法；候选仍排除在 `LocalFactReader` 正式事实之外。
+- 验证：macOS iOS workflow `35445897681` 已通过模拟器编译、完整 XCTest 和 iOS Build Gate；PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁全部通过。当前 H 代码未重新上传 TestFlight，真机验证仍未完成。
