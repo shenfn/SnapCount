@@ -898,6 +898,7 @@ final class AppState: ObservableObject {
             )
             if monthKey == Self.currentMonthKey && !isSignedIn {
                 applyLocalFactMonth(month)
+                await applyLocalStagingProjection()
             }
         } catch {
             guard generation == userStateGeneration else { return }
@@ -943,6 +944,31 @@ final class AppState: ObservableObject {
         dashboard.recentRecords = []
         dashboard.stagingRecords = []
         dashboard.pendingExpenses = []
+    }
+
+    private func applyLocalStagingProjection() async {
+        guard let localRecordUseCase else {
+            dashboard.stagingRecords = []
+            dashboard.pendingCount = dashboard.pendingExpenses.count
+            return
+        }
+        do {
+            let records = try await localRecordUseCase.stagingRecords()
+            let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+            dashboard.stagingRecords = records.map { record in
+                let domainName = definitions.first(where: { $0.id == record.domainKey })?.shortName
+                return LocalStagingReadModel.native(
+                    from: record,
+                    imageStore: localImageStore,
+                    domainName: domainName
+                )
+            }
+            dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
+        } catch {
+            dashboard.stagingRecords = []
+            dashboard.pendingCount = dashboard.pendingExpenses.count
+            inboxFinanceMessage = "本地中转站暂时无法读取：\(error.localizedDescription)"
+        }
     }
 
     private func readDeviceExpenseMonth(_ monthKey: String, force: Bool) async {
@@ -1015,6 +1041,9 @@ final class AppState: ObservableObject {
             )
             if monthKey == Self.currentMonthKey {
                 applyLocalRecordMonth()
+                if !isSignedIn {
+                    await applyLocalStagingProjection()
+                }
             }
         } catch {
             guard generation == userStateGeneration else { return }
@@ -1672,6 +1701,11 @@ final class AppState: ObservableObject {
     }
 
     func loadInboxRepaymentCandidates() async {
+        guard isSignedIn else {
+            repaymentCandidates = [:]
+            inboxFinanceMessage = nil
+            return
+        }
         let generation = userStateGeneration
         let stagingRecords = dashboard.stagingRecords
         guard !stagingRecords.isEmpty else {
@@ -2418,6 +2452,13 @@ final class AppState: ObservableObject {
         preserveInboxNavigation: Bool = false
     ) async -> Bool {
         guard inboxActionRecordId == nil else { return false }
+        if let localID = LocalStagingReadModel.localID(from: record.id) {
+            return await discardLocalStagingRecord(
+                localID,
+                record: record,
+                preserveInboxNavigation: preserveInboxNavigation
+            )
+        }
         inboxActionRecordId = record.id
         inboxActionMessage = "正在销毁截图…"
         inboxActionMessageIsError = false
@@ -2451,6 +2492,11 @@ final class AppState: ObservableObject {
         preserveInboxNavigation: Bool = false
     ) async -> Bool {
         guard inboxActionRecordId == nil else { return false }
+        if LocalStagingReadModel.localID(from: record.id) != nil {
+            inboxActionMessage = "本地候选需重新发起识别"
+            inboxActionMessageIsError = true
+            return false
+        }
         inboxActionRecordId = record.id
         inboxActionMessage = "正在重新识别…"
         inboxActionMessageIsError = false
@@ -2494,6 +2540,13 @@ final class AppState: ObservableObject {
         preserveInboxNavigation: Bool = false
     ) async -> String? {
         guard inboxActionRecordId == nil else { return nil }
+        if let localID = LocalStagingReadModel.localID(from: record.id) {
+            return await archiveLocalStagingRecord(
+                localID,
+                record: record,
+                preserveInboxNavigation: preserveInboxNavigation
+            )
+        }
         inboxActionRecordId = record.id
         let domainTitle = dashboard.domains.first(where: { $0.id == domainKey })?.shortName
             ?? InboxArchiveDomains.all.first(where: { $0.id == domainKey })?.title
@@ -2539,6 +2592,55 @@ final class AppState: ObservableObject {
             domainKey: draft.domainKey,
             preserveInboxNavigation: preserveInboxNavigation
         )
+    }
+
+    private func discardLocalStagingRecord(
+        _ localID: String,
+        record: NativeStagingRecord,
+        preserveInboxNavigation: Bool
+    ) async -> Bool {
+        guard let localRecordUseCase else { return false }
+        inboxActionRecordId = record.id
+        inboxActionMessage = "正在销毁本地候选…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
+        do {
+            try await localRecordUseCase.discardStaging(id: localID)
+            removeStagingRecordLocally(record.id)
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
+            inboxActionMessage = "已销毁本地候选，原图已清理"
+            return true
+        } catch {
+            inboxActionMessage = "销毁失败：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+            return false
+        }
+    }
+
+    private func archiveLocalStagingRecord(
+        _ localID: String,
+        record: NativeStagingRecord,
+        preserveInboxNavigation: Bool
+    ) async -> String? {
+        guard let localRecordUseCase else { return nil }
+        inboxActionRecordId = record.id
+        inboxActionMessage = "正在归档本地候选…"
+        inboxActionMessageIsError = false
+        defer { inboxActionRecordId = nil }
+        do {
+            let outcome = try await localRecordUseCase.confirmStaging(
+                id: localID,
+                recordID: UUID()
+            )
+            removeStagingRecordLocally(record.id)
+            if !preserveInboxNavigation { inboxPath = NavigationPath() }
+            inboxActionMessage = "已归档到\(record.domainName ?? "本地记录")"
+            return "local-data/\(outcome.record.id.uuidString)"
+        } catch {
+            inboxActionMessage = "归档失败：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+            return nil
+        }
     }
 
     private func removeStagingRecordLocally(_ recordId: String) {

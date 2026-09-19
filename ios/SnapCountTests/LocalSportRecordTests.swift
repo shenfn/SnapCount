@@ -14,6 +14,55 @@ final class LocalSportRecordTests: XCTestCase {
         XCTAssertEqual(draft.kind, .universal)
     }
 
+    func testLOCALP1SPORT001HLocalStagingProjectsToInboxWithLocalImageRoute() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        let imageDirectory = temporaryDirectoryURL()
+        defer {
+            removeDatabase(at: databaseURL)
+            removeImageDirectory(at: imageDirectory)
+        }
+
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let store = try LocalImageStore(rootDirectory: imageDirectory)
+        let useCase = LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: try LocalRecordRepository(database: database),
+            imageStore: store
+        )
+        let staged = try await useCase.stage(LocalRecordCandidate(
+            id: "candidate-local-inbox",
+            domainKey: "sport",
+            title: "待确认运动",
+            summary: "本地候选",
+            payload: [
+                "sport_type": AnyCodable("跑步"),
+                "duration_minutes": AnyCodable(30)
+            ],
+            confidence: 0.62,
+            recordDate: "2026-09-19",
+            recordTime: "18:00",
+            imageData: Data("local-staging-image".utf8),
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+
+        let inboxRecord = LocalStagingReadModel.native(
+            from: staged.record,
+            imageStore: store,
+            domainName: "运动"
+        )
+
+        XCTAssertEqual(inboxRecord.id, "local-staging/candidate-local-inbox")
+        XCTAssertEqual(
+            LocalStagingReadModel.localID(from: inboxRecord.id),
+            staged.record.id
+        )
+        XCTAssertEqual(inboxRecord.domainKey, "sport")
+        XCTAssertEqual(inboxRecord.confidencePercent, 62)
+        XCTAssertEqual(inboxRecord.status, "pending_review")
+        XCTAssertEqual(inboxRecord.domainName, "运动")
+        XCTAssertEqual(inboxRecord.imageURL, store.url(for: staged.record.imagePath!))
+    }
+
     func testLOCALP1SPORT001ARecordSurvivesDatabaseReopenAndProjectsToNativeRecord() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

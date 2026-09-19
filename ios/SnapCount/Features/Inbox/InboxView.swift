@@ -1598,14 +1598,16 @@ private struct StagingVerdictStageView: View {
             }
 
             HStack(spacing: JieziSpacing.sm) {
-                stageActionButton("slider.horizontal.3", title: "调整") {
-                    let domainId = record.domainKey ?? domains.first?.id ?? "expense"
-                    editorContext = StagingEditorContext(record: record, domainId: domainId)
-                }
-                stageActionButton("arrow.clockwise", title: "重试") {
-                    Task {
-                        await appState.retryStagingRecord(record)
-                        finishAction(for: record.id)
+                if LocalStagingReadModel.localID(from: record.id) == nil {
+                    stageActionButton("slider.horizontal.3", title: "调整") {
+                        let domainId = record.domainKey ?? domains.first?.id ?? "expense"
+                        editorContext = StagingEditorContext(record: record, domainId: domainId)
+                    }
+                    stageActionButton("arrow.clockwise", title: "重试") {
+                        Task {
+                            await appState.retryStagingRecord(record)
+                            finishAction(for: record.id)
+                        }
                     }
                 }
                 stageActionButton("trash", title: "销毁", destructive: true) {
@@ -1640,32 +1642,35 @@ private struct StagingVerdictStageView: View {
         )
     }
 
+    @ViewBuilder
     private func domainStrip(_ record: NativeStagingRecord) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: JieziSpacing.sm) {
-                Text("改判到")
-                    .font(.caption)
-                    .foregroundStyle(JieziTheme.muted)
-                ForEach(domains) { domain in
-                    Button(domain.title) {
-                        Task { await archive(record, to: domain.id) }
+        if LocalStagingReadModel.localID(from: record.id) == nil {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: JieziSpacing.sm) {
+                    Text("改判到")
+                        .font(.caption)
+                        .foregroundStyle(JieziTheme.muted)
+                    ForEach(domains) { domain in
+                        Button(domain.title) {
+                            Task { await archive(record, to: domain.id) }
+                        }
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(domain.id == record.domainKey ? JieziTheme.brand : JieziTheme.ink)
+                        .padding(.horizontal, 11)
+                        .frame(height: 32)
+                        .background(
+                            domain.id == record.domainKey ? JieziTheme.brand.opacity(0.1) : Color.white.opacity(0.48),
+                            in: Capsule()
+                        )
+                        .overlay(Capsule().stroke(JieziTheme.brand.opacity(domain.id == record.domainKey ? 0.28 : 0.1)))
+                        .disabled(appState.inboxActionRecordId != nil)
                     }
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(domain.id == record.domainKey ? JieziTheme.brand : JieziTheme.ink)
-                    .padding(.horizontal, 11)
-                    .frame(height: 32)
-                    .background(
-                        domain.id == record.domainKey ? JieziTheme.brand.opacity(0.1) : Color.white.opacity(0.48),
-                        in: Capsule()
-                    )
-                    .overlay(Capsule().stroke(JieziTheme.brand.opacity(domain.id == record.domainKey ? 0.28 : 0.1)))
-                    .disabled(appState.inboxActionRecordId != nil)
                 }
+                .padding(.horizontal, 26)
             }
-            .padding(.horizontal, 26)
+            .padding(.top, JieziSpacing.sm)
+            .padding(.bottom, 24)
         }
-        .padding(.top, JieziSpacing.sm)
-        .padding(.bottom, 24)
     }
 
     private func archive(_ record: NativeStagingRecord, to domainId: String) async {
