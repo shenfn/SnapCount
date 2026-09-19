@@ -42,11 +42,14 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         let payloadJSON = try LocalRecordCodec.encode(
             LocalRecordCodec.normalizedPayload(domainKey: command.domainKey, payload: command.payload)
         )
-        if command.imageData != nil, imageStore == nil {
+        if (command.imageData != nil || command.imageReference != nil), imageStore == nil {
             throw LocalDataError.invalidRecord
         }
         let imageReference: LocalImageReference?
-        if let imageData = command.imageData {
+        if let existingReference = command.imageReference {
+            guard let imageStore else { throw LocalDataError.invalidRecord }
+            imageReference = try imageStore.move(existingReference, to: "records")
+        } else if let imageData = command.imageData {
             imageReference = try imageStore?.save(
                 data: imageData,
                 owner: "record-\(command.id.uuidString)-\(UUID().uuidString)",
@@ -65,8 +68,8 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             recordDate: command.recordDate,
             recordTime: command.recordTime,
             note: command.note,
-            imagePath: command.imageData == nil ? nil : imageReference?.path,
-            imageHash: command.imageData == nil ? nil : imageReference?.hash,
+            imagePath: imageReference?.path,
+            imageHash: imageReference?.hash,
             createdAt: command.createdAt,
             sourceKind: command.sourceKind,
             domainVersion: 1
@@ -153,11 +156,14 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
                 requireFacts: false
             )
         )
-        if candidate.imageData != nil, imageStore == nil {
+        if (candidate.imageData != nil || candidate.imageReference != nil), imageStore == nil {
             throw LocalDataError.invalidRecord
         }
         let imageReference: LocalImageReference?
-        if let imageData = candidate.imageData {
+        if let existingReference = candidate.imageReference {
+            guard let imageStore else { throw LocalDataError.invalidRecord }
+            imageReference = try imageStore.move(existingReference, to: "staging")
+        } else if let imageData = candidate.imageData {
             imageReference = try imageStore?.save(
                 data: imageData,
                 owner: "staging-\(candidate.id)-\(UUID().uuidString)",
@@ -177,8 +183,10 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             payloadJSON: payloadJSON,
             recordDate: candidate.recordDate,
             recordTime: candidate.recordTime,
-            imagePath: candidate.imageData == nil ? nil : imageReference?.path,
-            imageHash: candidate.imageData == nil ? nil : imageReference?.hash,
+            imagePath: imageReference?.path,
+            imageHash: imageReference?.hash,
+            evidenceFields: candidate.evidenceFields,
+            missingFields: candidate.missingFields,
             createdAt: candidate.createdAt,
             sourceKind: .aiCandidate,
             domainVersion: 1
@@ -193,6 +201,22 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
     }
 
     func ingest(_ candidate: LocalRecordCandidate, recordID: UUID? = nil) async throws -> LocalRecordIntakeOutcome {
+        if let recordID, let existing = try await record(id: recordID) {
+            return .archived(LocalRecordOutcome(record: existing, profileID: existing.profileID))
+        }
+        if let existingStaging = try await staging(id: candidate.id) {
+            switch existingStaging.status {
+            case .pendingReview:
+                return .staged(LocalStagingOutcome(record: existingStaging, profileID: existingStaging.profileID))
+            case .archived:
+                if let targetRecordID = existingStaging.targetRecordID,
+                   let existing = try await record(id: targetRecordID) {
+                    return .archived(LocalRecordOutcome(record: existing, profileID: existing.profileID))
+                }
+            case .discarded, .failed:
+                break
+            }
+        }
         switch LocalRecordIntakeRouter.route(
             domainKey: candidate.domainKey,
             confidence: candidate.confidence,
@@ -209,6 +233,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
                 recordTime: candidate.recordTime,
                 note: candidate.payload.string("note"),
                 imageData: candidate.imageData,
+                imageReference: candidate.imageReference,
                 createdAt: candidate.createdAt,
                 sourceKind: .aiAutoArchive
             )

@@ -225,6 +225,15 @@ final class LocalDatabase {
                     CHECK (domain_version > 0);
                 """)
         }
+        migrator.registerMigration("local-v7-phase1-candidate-evidence") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_staging_records
+                ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '[]';
+
+                ALTER TABLE local_staging_records
+                ADD COLUMN missing_fields_json TEXT NOT NULL DEFAULT '[]';
+                """)
+        }
         return migrator
     }
 }

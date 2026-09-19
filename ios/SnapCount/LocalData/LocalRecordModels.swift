@@ -30,6 +30,7 @@ struct LocalRecordCommand {
     let recordTime: String?
     let note: String?
     let imageData: Data?
+    let imageReference: LocalImageReference?
     let createdAt: Date
 
     let sourceKind: LocalRecordSourceKind
@@ -44,6 +45,7 @@ struct LocalRecordCommand {
         recordTime: String?,
         note: String?,
         imageData: Data?,
+        imageReference: LocalImageReference? = nil,
         createdAt: Date,
         sourceKind: LocalRecordSourceKind = .manual
     ) {
@@ -56,6 +58,7 @@ struct LocalRecordCommand {
         self.recordTime = recordTime
         self.note = note
         self.imageData = imageData
+        self.imageReference = imageReference
         self.createdAt = createdAt
         self.sourceKind = sourceKind
     }
@@ -167,6 +170,8 @@ struct LocalStagingRecord: Equatable {
     let domainKey: String
     let status: LocalStagingRecordStatus
     let confidence: Double?
+    let evidenceFields: [String] = []
+    let missingFields: [String] = []
     let title: String
     let summary: String
     let payloadJSON: String
@@ -194,6 +199,9 @@ struct LocalRecordCandidate {
     let recordTime: String?
     let imageData: Data?
     let createdAt: Date
+    let imageReference: LocalImageReference? = nil
+    let evidenceFields: [String] = []
+    let missingFields: [String] = []
 }
 
 struct LocalStagingDraft: Equatable {
@@ -202,6 +210,8 @@ struct LocalStagingDraft: Equatable {
     let domainKey: String
     let status: LocalStagingRecordStatus
     let confidence: Double?
+    let evidenceFields: [String]
+    let missingFields: [String]
     let title: String
     let summary: String
     let payloadJSON: String
@@ -220,6 +230,8 @@ struct LocalStagingDraft: Equatable {
         domainKey: String,
         status: LocalStagingRecordStatus,
         confidence: Double?,
+        evidenceFields: [String] = [],
+        missingFields: [String] = [],
         title: String,
         summary: String,
         payloadJSON: String,
@@ -236,6 +248,8 @@ struct LocalStagingDraft: Equatable {
         self.domainKey = domainKey
         self.status = status
         self.confidence = confidence
+        self.evidenceFields = evidenceFields
+        self.missingFields = missingFields
         self.title = title
         self.summary = summary
         self.payloadJSON = payloadJSON

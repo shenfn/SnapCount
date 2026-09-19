@@ -111,6 +111,25 @@ final class SnapCountUploadService {
         return ShortcutUploadResult(payload: payload)
     }
 
+    func recognizeNativeImage(
+        data: Data,
+        uploadToken: String? = nil,
+        captureKind: String = "photo_library",
+        filename: String = "native-recognition.jpg",
+        mimeType: String = "image/jpeg"
+    ) async throws -> Data {
+        try await uploadImageResponse(
+            data: data,
+            uploadToken: uploadToken,
+            sourceApp: "ios_native_local_first",
+            captureKind: captureKind,
+            filename: filename,
+            mimeType: mimeType,
+            responseMode: "json",
+            operation: "recognize_only"
+        )
+    }
+
     private func uploadImage(
         data: Data,
         uploadToken: String,
@@ -134,12 +153,13 @@ final class SnapCountUploadService {
 
     private func uploadImageResponse(
         data: Data,
-        uploadToken: String,
+        uploadToken: String?,
         sourceApp: String,
         captureKind: String,
         filename: String,
         mimeType: String,
-        responseMode: String
+        responseMode: String,
+        operation: String? = nil
     ) async throws -> Data {
         guard !AppConfig.supabaseFunctionsURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
             throw SnapCountUploadServiceError.missingConfig
@@ -151,7 +171,12 @@ final class SnapCountUploadService {
         let url = baseURL.appendingPathComponent("functions/v1/ingest-receipt")
         let boundary = "Boundary-\(UUID().uuidString)"
         var multipart = MultipartFormData(boundary: boundary)
-        multipart.appendField(name: "upload_token", value: uploadToken)
+        if let uploadToken, !uploadToken.isEmpty {
+            multipart.appendField(name: "upload_token", value: uploadToken)
+        }
+        if let operation {
+            multipart.appendField(name: "operation", value: operation)
+        }
         multipart.appendField(name: "source_app", value: sourceApp)
         multipart.appendField(name: "capture_kind", value: captureKind)
         multipart.appendField(name: "response_mode", value: responseMode)

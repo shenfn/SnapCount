@@ -36,6 +36,7 @@
     "c2:wip:export": "node scripts/export-c2-wip-patches.mjs",
     "logs:ai": "node --env-file=.env.local scripts/show-ai-logs.mjs",
     "test:receipt": "node --env-file=.env.local scripts/test-ingest-receipt.mjs",
+    "test:local-recognition-boundary": "node --test scripts/test-local-recognition-boundary.mjs",
     "test:upload-lifecycle": "node --env-file=.env.local scripts/test-upload-lifecycle.mjs",
     "cleanup:test-receipts": "node --env-file=.env.local scripts/cleanup-test-receipts.mjs",
     "test:image-cleanup": "node --env-file=.env.local scripts/test-image-cleanup-lifecycle.mjs",

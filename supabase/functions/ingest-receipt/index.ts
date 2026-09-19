@@ -5872,6 +5872,11 @@ Deno.serve(async (req) => {
     // 1. 接收图片（multipart/form-data，字段名 image）
     const form = await req.formData();
     responseMode = normalizeResponseMode(form.get("response_mode")) === "text" ? "text" : responseMode;
+    const operation = normalizeString(form.get("operation")) ?? "ingest";
+    const recognizeOnly = operation === "recognize_only";
+    if (!recognizeOnly && operation !== "ingest") {
+      return respondShortcut({ error: `不支持的图片操作：${operation}` }, { mode: responseMode, status: 400 });
+    }
     const testMeta = buildTestMeta(form);
     timings.mark("form_parse");
     // ── 身份校验（三级优先级）──
@@ -5881,6 +5886,7 @@ Deno.serve(async (req) => {
     let userId: string | null = null;
     const authHeader = req.headers.get("Authorization") || "";
     const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    const formUploadToken = normalizeString(form.get("upload_token"));
 
     // 尝试 JWT 验证（仅当 Bearer token 不是 anon key 时）
     if (bearerToken) {
@@ -5911,7 +5917,7 @@ Deno.serve(async (req) => {
       }
     } else {
       // 没有 JWT，尝试 upload_token 反查
-      const uploadToken = normalizeString(form.get("upload_token"));
+      const uploadToken = formUploadToken;
       if (uploadToken) {
         const { data: rawConfig } = await supabase.from("user_configs")
           .select("user_id")
@@ -5923,7 +5929,7 @@ Deno.serve(async (req) => {
       }
 
       // 既没有有效 JWT，也没有有效 upload_token，拒绝请求
-      if (!userId) {
+      if (!userId && !recognizeOnly) {
         return respondShortcut(
           { error: "缺少有效身份信息：请通过登录或 upload_token 认证" },
           { mode: responseMode, status: 401 }
@@ -5931,19 +5937,21 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { count: deletionRequestCount, error: deletionRequestError } = await supabase
-      .from("account_deletion_requests")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .in("status", ["requested", "cleaning", "deleting", "failed"]);
-    if (deletionRequestError) {
-      throw new Error(`Failed to verify account deletion state: ${deletionRequestError.message}`);
-    }
-    if ((deletionRequestCount ?? 0) > 0) {
-      return respondShortcut(
-        { error: "账户已停用或正在删除，不能继续上传" },
-        { mode: responseMode, status: 410 },
-      );
+    if (userId) {
+      const { count: deletionRequestCount, error: deletionRequestError } = await supabase
+        .from("account_deletion_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .in("status", ["requested", "cleaning", "deleting", "failed"]);
+      if (deletionRequestError) {
+        throw new Error(`Failed to verify account deletion state: ${deletionRequestError.message}`);
+      }
+      if ((deletionRequestCount ?? 0) > 0) {
+        return respondShortcut(
+          { error: "账户已停用或正在删除，不能继续上传" },
+          { mode: responseMode, status: 410 },
+        );
+      }
     }
 
     let companionSettings: CompanionSettings = DEFAULT_COMPANION_SETTINGS;
@@ -6019,6 +6027,12 @@ Deno.serve(async (req) => {
     };
 
     const stagingRetryId = normalizeString(form.get("staging_record_id"));
+    if (recognizeOnly && stagingRetryId) {
+      return respondShortcut(
+        { error: "recognize_only 不支持云端 staging 重试" },
+        { mode: responseMode, status: 400 },
+      );
+    }
     let file = form.get("image") as File | null;
     let retryImageBytes: Uint8Array | null = null;
     let retryImageMime = "image/jpeg";
@@ -6277,13 +6291,19 @@ Deno.serve(async (req) => {
 
     // 3. 上传到 Storage（重试模式跳过，图片已存在）
     // 隐私控制：keep_source_images=false 时仅以 tmp/ 路径完成识别，并在请求结束前删除
-    const storagePath = isRetry ? (retryImagePath!) : `${userId}/${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
+    const storagePath = recognizeOnly
+      ? `recognize-only/${hash.slice(0, 12)}`
+      : isRetry
+        ? (retryImagePath!)
+        : `${userId}/${new Date().toISOString().slice(0,10)}/${hash.slice(0,12)}.${mime.includes("png") ? "png" : "jpg"}`;
     const path = (!isRetry && !privacyConfig.keepSourceImages) ? `tmp/${storagePath}` : storagePath;
-    if (!privacyConfig.keepSourceImages) {
+    if (!recognizeOnly && !privacyConfig.keepSourceImages) {
       temporaryImageCleanup = { userId, path };
     }
     let uploadedNewObject = false;
-    const storageUploadPromise = (async () => {
+    const storageUploadPromise = recognizeOnly
+      ? Promise.resolve({ uploaded: false, error: null as Error | null, durationMs: 0 })
+      : (async () => {
       const uploadStartedAt = Date.now();
       if (isRetry) {
         return { uploaded: false, error: null as Error | null, durationMs: 0 };
@@ -6393,6 +6413,62 @@ Deno.serve(async (req) => {
     timings.record("storage_upload", storageUpload.durationMs);
     if (storageUpload.error) throw storageUpload.error;
     uploadedNewObject = storageUpload.uploaded;
+
+    if (recognizeOnly) {
+      const candidateReference = normalizeAiDateTime(ai.occurred_at);
+      const candidateOrderFinished = normalizeAiDateTime(ai.order_finished_at);
+      const referenceDateTime = normalizeAiDateTime(clientCapturedAt)
+        ?? normalizeAiDateTime(requestReceivedAt);
+      const recognizedDateTime = candidateReference ?? candidateOrderFinished;
+      const recordDateTime = recognizedDateTime ?? referenceDateTime;
+      const occurredAt = exactNormalizedIso(recognizedDateTime);
+      const domainKey = isBuiltinDomain(ai.domain_key)
+        ? ai.domain_key
+        : isBuiltinDomain(ai.record_type)
+          ? ai.record_type
+          : normalizeString(ai.domain_key) ?? normalizeString(ai.record_type) ?? "uncertain";
+      const built = buildBuiltinPayload(ai, visionRawText);
+      const payload = built?.payload ?? cleanPayload(ai);
+      const evidenceFields = Object.entries(payload)
+        .filter(([, value]) => value !== null && value !== undefined && value !== "")
+        .map(([key]) => key)
+        .sort();
+      const missingFields = built?.missingFields ?? ["domain_key"];
+      const responseCandidate = {
+        id: `hosted-${hash}`,
+        domain_key: domainKey,
+        title: built?.title ?? normalizeString(ai.title) ?? "待确认记录",
+        summary: built?.summary ?? normalizeString(ai.summary) ?? "图片识别候选",
+        confidence: Number.isFinite(ai.confidence) ? ai.confidence : null,
+        payload,
+        record_date: recordDateTime?.date ?? today,
+        record_time: recognizedDateTime?.hasExactTime ? recognizedDateTime.time : null,
+        occurred_at: occurredAt,
+        missing_fields: missingFields,
+        evidence_fields: evidenceFields,
+        image_hash: hash,
+      };
+      if (!aiOk) {
+        return respondShortcut({
+          schema_version: "local-recognition-candidate-v1",
+          operation: "recognize_only",
+          status: "error",
+          error_type: "AI_PROVIDER_ERROR",
+          error_message: aiErrorMessage,
+          provider: { kind: "hosted_ai", name: aiProvider, model: aiModel },
+          image_hash: hash,
+        }, { mode: responseMode, status: 502 });
+      }
+      return new Response(JSON.stringify({
+        schema_version: "local-recognition-candidate-v1",
+        operation: "recognize_only",
+        status: "candidate",
+        candidate: responseCandidate,
+        provider: { kind: "hosted_ai", name: aiProvider, model: aiModel },
+      }), {
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
     // 慢请求采样：vision 阶段 > 5s 时打印 warn，方便从函数日志直接搜
     const _visionMs = timings.snapshot().vision_total ?? 0;
     if (_visionMs > 5000) {

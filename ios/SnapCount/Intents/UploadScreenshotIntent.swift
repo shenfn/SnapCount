@@ -19,22 +19,44 @@ struct UploadScreenshotIntent: AppIntent {
             return .result(value: message)
         }
 
-        guard let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken),
-              !uploadToken.isEmpty else {
-            let message = "请先打开芥子登录。"
-            return .result(value: message)
-        }
-
         if #available(iOS 18.0, *) {
             do {
                 let rawImageData = try await image.data(contentType: .image)
                 let imageData = try ImageUploadPreprocessor.jpegData(from: rawImageData)
-                let result = try await SnapCountUploadService().uploadShortcutImageResult(
-                    data: imageData,
-                    uploadToken: uploadToken,
-                    captureKind: "screenshot",
-                    filename: "shortcut-jpeg.jpg"
+                let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+                let recognition = try LocalImageRecognitionUseCase.makeDefault(
+                    provider: HostedAIImageRecognitionProvider()
                 )
+                let result: ShortcutUploadResult
+                do {
+                    let outcome = try await recognition.ingest(
+                        imageData: imageData,
+                        captureKind: "screenshot",
+                        filename: "shortcut-jpeg.jpg",
+                        uploadToken: uploadToken
+                    )
+                    switch outcome.result {
+                    case .archived:
+                        result = ShortcutUploadResult(
+                            displayText: "AI 识别结果已自动记录到本机。",
+                            notificationText: "AI 识别结果已自动记录到本机。",
+                            route: "records"
+                        )
+                    case .staged:
+                        result = ShortcutUploadResult(
+                            displayText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
+                            notificationText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
+                            route: "inbox"
+                        )
+                    }
+                } catch LocalImageRecognitionError.unsupportedDomain(_) where uploadToken?.isEmpty == false {
+                    result = try await SnapCountUploadService().uploadShortcutImageResult(
+                        data: imageData,
+                        uploadToken: uploadToken!,
+                        captureKind: "screenshot",
+                        filename: "shortcut-jpeg.jpg"
+                    )
+                }
                 await ShortcutNotificationService.shared.notifyUploadResult(result)
                 let value = ShortcutFeedbackPreferences.resultCardEnabled ? result.displayText : result.compactDisplayText
                 return .result(value: value)

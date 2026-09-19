@@ -862,6 +862,45 @@ final class AppState: ObservableObject {
         await readDeviceExpenseMonth(monthKey, force: force)
     }
 
+    func ingestHostedImageLocally(
+        data: Data,
+        captureKind: String,
+        filename: String,
+        uploadToken: String? = nil
+    ) async throws -> LocalImageIntakeOutcome {
+        guard let localRecordUseCase, let localImageStore else {
+            throw LocalDataError.invalidRecord
+        }
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: localRecordUseCase,
+            imageStore: localImageStore,
+            provider: HostedAIImageRecognitionProvider()
+        )
+        return try await recognition.ingest(
+            imageData: data,
+            captureKind: captureKind,
+            filename: filename,
+            uploadToken: uploadToken
+        )
+    }
+
+    func refreshLocalRecognitionProjection(monthKey: String = Self.currentMonthKey) async {
+        if localFactReader != nil {
+            await readDeviceFactMonth(monthKey, force: true)
+            if monthKey == Self.currentMonthKey, let month = localFactMonths[monthKey] {
+                applyLocalFactMonth(month)
+            }
+        } else {
+            await readDeviceRecordMonth(monthKey, force: true)
+            if monthKey == Self.currentMonthKey {
+                applyLocalRecordMonth()
+            }
+        }
+        if monthKey == Self.currentMonthKey {
+            await applyLocalStagingProjection()
+        }
+    }
+
     private func readDeviceFactMonth(_ monthKey: String, force: Bool) async {
         guard let localFactReader else { return }
         guard force || localFactMonths[monthKey] == nil else { return }

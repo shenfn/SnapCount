@@ -635,26 +635,49 @@ struct TodayView: View {
     }
 
     private func uploadImageData(_ data: Data, captureKind: String, filename: String) async {
-        guard appState.isSignedIn else {
-            pendingLocalImageData = data
-            showManualRecordSheet = true
-            return
-        }
         isUploading = true
         defer { isUploading = false }
         do {
-            guard let uploadToken = try KeychainStore.shared.string(for: KeychainKeys.uploadToken), !uploadToken.isEmpty else { throw SnapCountUploadServiceError.requestFailed("登录凭据未同步，请重新登录") }
-            let result = try await SnapCountUploadService().uploadNativeImageResult(
+            let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+            let localOutcome = try await appState.ingestHostedImageLocally(
                 data: data,
-                uploadToken: uploadToken,
                 captureKind: captureKind,
-                filename: filename
+                filename: filename,
+                uploadToken: uploadToken
             )
-            uploadMessage = result.notificationText
+            switch localOutcome.result {
+            case .archived:
+                uploadMessage = "AI 识别结果已按高置信度规则自动记录到本机。"
+            case .staged:
+                uploadMessage = "AI 识别结果已保存到本地收件箱，请确认后归档。"
+            }
             uploadMessageIsError = false
-            await appState.refreshDashboard()
+            await appState.refreshLocalRecognitionProjection()
+        } catch LocalImageRecognitionError.unsupportedDomain(_) where appState.isSignedIn {
+            do {
+                guard let uploadToken = try KeychainStore.shared.string(for: KeychainKeys.uploadToken), !uploadToken.isEmpty else {
+                    throw SnapCountUploadServiceError.requestFailed("登录凭据未同步，请重新登录")
+                }
+                let result = try await SnapCountUploadService().uploadNativeImageResult(
+                    data: data,
+                    uploadToken: uploadToken,
+                    captureKind: captureKind,
+                    filename: filename
+                )
+                uploadMessage = result.notificationText
+                uploadMessageIsError = false
+                await appState.refreshDashboard()
+            } catch {
+                uploadMessage = "上传失败：\(error.localizedDescription)"
+                uploadMessageIsError = true
+            }
         } catch {
-            uploadMessage = "上传失败：\(error.localizedDescription)"
+            if !appState.isSignedIn {
+                pendingLocalImageData = data
+                showManualRecordSheet = true
+                return
+            }
+            uploadMessage = "AI 识别失败：\(error.localizedDescription)"
             uploadMessageIsError = true
         }
         showUploadResult = true

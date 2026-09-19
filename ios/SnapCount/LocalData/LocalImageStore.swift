@@ -44,6 +44,25 @@ final class LocalImageStore {
         return LocalImageReference(path: relativePath, hash: hash)
     }
 
+    func move(_ reference: LocalImageReference, to bucket: String) throws -> LocalImageReference {
+        let source = try validatedURL(for: reference.path)
+        guard fileManager.fileExists(atPath: source.path) else {
+            throw LocalDataError.recordNotFound
+        }
+        let destination = try validatedURL(for: "\(bucket)/\(source.lastPathComponent)")
+        guard source.path != destination.path else { return reference }
+        try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if fileManager.fileExists(atPath: destination.path) {
+            try fileManager.removeItem(at: source)
+        } else {
+            try fileManager.moveItem(at: source, to: destination)
+        }
+        return LocalImageReference(path: "\(bucket)/\(source.lastPathComponent)", hash: reference.hash)
+    }
+
     func url(for relativePath: String) -> URL {
         (try? validatedURL(for: relativePath)) ?? rootDirectory.appendingPathComponent("invalid")
     }
@@ -73,7 +92,7 @@ final class LocalImageStore {
         return candidate
     }
 
-    private static func sha256(_ data: Data) -> String {
+    static func sha256(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

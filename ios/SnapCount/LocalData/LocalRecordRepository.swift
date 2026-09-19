@@ -202,8 +202,9 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     INSERT INTO local_staging_records (
                         id, profile_id, domain_key, status, confidence, title, summary,
                         payload_json, record_date, record_time, image_path, image_hash,
-                        source_kind, domain_version, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        source_kind, domain_version, evidence_json, missing_fields_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                 arguments: [
                     draft.id,
@@ -220,6 +221,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     draft.imageHash,
                     draft.sourceKind.rawValue,
                     draft.domainVersion,
+                    Self.encodeStringArray(draft.evidenceFields),
+                    Self.encodeStringArray(draft.missingFields),
                     draft.createdAt,
                     draft.createdAt
                 ]
@@ -447,6 +450,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
             domainKey: domainKey,
             status: status,
             confidence: row["confidence"],
+            evidenceFields: Self.decodeStringArray(row["evidence_json"]),
+            missingFields: Self.decodeStringArray(row["missing_fields_json"]),
             title: title,
             summary: summary,
             payloadJSON: payloadJSON,
@@ -462,5 +467,22 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
             createdAt: createdAt,
             updatedAt: updatedAt
         )
+    }
+
+    private static func encodeStringArray(_ values: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(values),
+              let json = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return json
+    }
+
+    private static func decodeStringArray(_ json: String?) -> [String] {
+        guard let json,
+              let data = json.data(using: .utf8),
+              let values = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return values
     }
 }
