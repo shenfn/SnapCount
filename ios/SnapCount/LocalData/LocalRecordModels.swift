@@ -31,7 +31,34 @@ struct LocalRecordCommand {
     let note: String?
     let imageData: Data?
     let createdAt: Date
-    let sourceKind: LocalRecordSourceKind = .manual
+
+    let sourceKind: LocalRecordSourceKind
+
+    init(
+        id: UUID,
+        domainKey: String,
+        title: String,
+        summary: String,
+        payload: [String: AnyCodable],
+        recordDate: String,
+        recordTime: String?,
+        note: String?,
+        imageData: Data?,
+        createdAt: Date,
+        sourceKind: LocalRecordSourceKind = .manual
+    ) {
+        self.id = id
+        self.domainKey = domainKey
+        self.title = title
+        self.summary = summary
+        self.payload = payload
+        self.recordDate = recordDate
+        self.recordTime = recordTime
+        self.note = note
+        self.imageData = imageData
+        self.createdAt = createdAt
+        self.sourceKind = sourceKind
+    }
 }
 
 struct LocalRecordDraft: Equatable {
@@ -47,8 +74,41 @@ struct LocalRecordDraft: Equatable {
     let imagePath: String?
     let imageHash: String?
     let createdAt: Date
-    let sourceKind: LocalRecordSourceKind = .manual
-    let domainVersion: Int = 1
+
+    let sourceKind: LocalRecordSourceKind
+    let domainVersion: Int
+
+    init(
+        id: UUID,
+        profileID: UUID,
+        domainKey: String,
+        title: String,
+        summary: String,
+        payloadJSON: String,
+        recordDate: String,
+        recordTime: String?,
+        note: String?,
+        imagePath: String?,
+        imageHash: String?,
+        createdAt: Date,
+        sourceKind: LocalRecordSourceKind = .manual,
+        domainVersion: Int = 1
+    ) {
+        self.id = id
+        self.profileID = profileID
+        self.domainKey = domainKey
+        self.title = title
+        self.summary = summary
+        self.payloadJSON = payloadJSON
+        self.recordDate = recordDate
+        self.recordTime = recordTime
+        self.note = note
+        self.imagePath = imagePath
+        self.imageHash = imageHash
+        self.createdAt = createdAt
+        self.sourceKind = sourceKind
+        self.domainVersion = domainVersion
+    }
 }
 
 struct LocalRecordUpdateCommand {
@@ -150,8 +210,43 @@ struct LocalStagingDraft: Equatable {
     let imagePath: String?
     let imageHash: String?
     let createdAt: Date
-    let sourceKind: LocalRecordSourceKind = .aiCandidate
-    let domainVersion: Int = 1
+
+    let sourceKind: LocalRecordSourceKind
+    let domainVersion: Int
+
+    init(
+        id: String,
+        profileID: UUID,
+        domainKey: String,
+        status: LocalStagingRecordStatus,
+        confidence: Double?,
+        title: String,
+        summary: String,
+        payloadJSON: String,
+        recordDate: String,
+        recordTime: String?,
+        imagePath: String?,
+        imageHash: String?,
+        createdAt: Date,
+        sourceKind: LocalRecordSourceKind = .aiCandidate,
+        domainVersion: Int = 1
+    ) {
+        self.id = id
+        self.profileID = profileID
+        self.domainKey = domainKey
+        self.status = status
+        self.confidence = confidence
+        self.title = title
+        self.summary = summary
+        self.payloadJSON = payloadJSON
+        self.recordDate = recordDate
+        self.recordTime = recordTime
+        self.imagePath = imagePath
+        self.imageHash = imageHash
+        self.createdAt = createdAt
+        self.sourceKind = sourceKind
+        self.domainVersion = domainVersion
+    }
 }
 
 struct LocalRecordOutcome: Equatable {
