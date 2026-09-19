@@ -34,4 +34,4 @@
 - 高置信度自动归档记录为 `ai_auto_archive`，低置信度候选记录为 `ai_candidate`，中转站确认后的正式记录记录为 `ai_confirmed`；手动记录默认 `manual`。
 - `LocalFactReader` 与本地导出读取并保留这两个元数据，不把 AI 原始响应、提示词或 token 写入正式事实。
 - 新增 `testLOCALP1DM002IntakePreservesCandidateAndFormalSourceKinds`，固定候选、自动归档和确认后的来源边界。
-- G 片的 macOS Build/XCTest workflow `35442948032`、iOS Build Gate、PWA/Edge、治理、Vercel 和 Cloudflare 均通过；本次来源元数据改动待新的 CI 验证。未触发新的 TestFlight，待下一轮真机相关变更再决定。
+- G 片的 macOS Build/XCTest workflow `35442948032`、iOS Build Gate、PWA/Edge、治理、Vercel 和 Cloudflare 均通过；来源元数据改动在 `f83c951` 加入，并由 `6e1bbc0` 修正中转站 INSERT 占位符后通过最终 workflow `35444698473` 的 Build、完整 XCTest、iOS Build Gate 及 PR 全部门禁。未触发新的 TestFlight，当前提交尚未完成新的真机验证。

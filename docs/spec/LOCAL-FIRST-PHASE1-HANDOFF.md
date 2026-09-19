@@ -177,4 +177,4 @@ macOS iOS workflow `35431410842` 已通过：应用编译、完整 XCTest、iOS 
 
 `LOCAL-P1-SPORT-001-G` 已实现并通过 CI：未登录图片入口转入本地运动兜底表单，保存时图片沿用 `LocalRecordUseCase` 的本地生命周期。随后继续完成 `DM-GAP-02` 的最小模型收敛：`local_records` 与 `local_staging_records` 增加 `source_kind`、`domain_version`，高置信度自动归档、低置信度候选和用户确认分别保留 `ai_auto_archive`、`ai_candidate`、`ai_confirmed` 来源；旧数据库通过 v6 本地迁移补默认值。
 
-`8850c61` 的 G 片已由 macOS iOS workflow `35442948032` 通过 Build、完整 XCTest 和 iOS Build Gate；PWA/Edge、治理、Vercel、Cloudflare 门禁同步通过。本节新增的来源元数据改动待本次提交的 CI 验证。后续仍应围绕本地候选/中转 UI 与 AI 输入适配，不把来源元数据误认为 AI 运行日志，也不扩展 Cloud Sync。
+`8850c61` 的 G 片已由 macOS iOS workflow `35442948032` 通过 Build、完整 XCTest 和 iOS Build Gate；PWA/Edge、治理、Vercel、Cloudflare 门禁同步通过。来源元数据改动随后由 `f83c951` 加入，并在 `6e1bbc0` 修正中转站 INSERT 占位符后收口；最终 macOS iOS workflow `35444698473` 的 Build、完整 XCTest 和 iOS Build Gate 均通过，PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁也全部通过。未触发新的 TestFlight，当前提交尚未完成新的真机验证。后续仍应围绕本地候选/中转 UI 与 AI 输入适配，不把来源元数据误认为 AI 运行日志，也不扩展 Cloud Sync。
