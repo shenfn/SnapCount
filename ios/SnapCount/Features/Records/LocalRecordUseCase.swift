@@ -67,7 +67,9 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             note: command.note,
             imagePath: command.imageData == nil ? nil : imageReference?.path,
             imageHash: command.imageData == nil ? nil : imageReference?.hash,
-            createdAt: command.createdAt
+            createdAt: command.createdAt,
+            sourceKind: command.sourceKind,
+            domainVersion: 1
         )
         do {
             let record = try repository.createRecord(draft)
@@ -177,7 +179,9 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             recordTime: candidate.recordTime,
             imagePath: candidate.imageData == nil ? nil : imageReference?.path,
             imageHash: candidate.imageData == nil ? nil : imageReference?.hash,
-            createdAt: candidate.createdAt
+            createdAt: candidate.createdAt,
+            sourceKind: .aiCandidate,
+            domainVersion: 1
         )
         do {
             let record = try repository.createStaging(draft)
@@ -205,7 +209,8 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
                 recordTime: candidate.recordTime,
                 note: candidate.payload.string("note"),
                 imageData: candidate.imageData,
-                createdAt: candidate.createdAt
+                createdAt: candidate.createdAt,
+                sourceKind: .aiAutoArchive
             )
             return .archived(try await create(command))
         case .staging:

@@ -27,3 +27,11 @@
 - 最小实现：`NativeManualRecordDraft` 增加图片数据承载；`TodayView` 在未登录图片入口转入 `ManualRecordSheet(initialImageData:)`；表单提供本地预览、拍照、相册选择、替换和移除；`AppState.createLocalDomainRecord` 将图片交给既有 `LocalRecordUseCase.create`。
 - 保护边界：登录态仍走既有云端图片上传；不改变 AI 识别、中转协议、同步协议、Outbox/Cursor/Conflict、AI Popup 或 Analysis。
 - 验证：Windows 只执行 `git diff --check` 和静态核对；必须由 macOS GitHub Actions 完成 Swift 编译与完整 XCTest，再安排下一次真机验收。
+
+## DM-GAP-02 最小模型收敛
+
+- 在 `local_records` 和 `local_staging_records` 增加 `source_kind` 与 `domain_version`；旧本地库由 `local-v6-phase1-fact-provenance` 补齐默认值。
+- 高置信度自动归档记录为 `ai_auto_archive`，低置信度候选记录为 `ai_candidate`，中转站确认后的正式记录记录为 `ai_confirmed`；手动记录默认 `manual`。
+- `LocalFactReader` 与本地导出读取并保留这两个元数据，不把 AI 原始响应、提示词或 token 写入正式事实。
+- 新增 `testLOCALP1DM002IntakePreservesCandidateAndFormalSourceKinds`，固定候选、自动归档和确认后的来源边界。
+- G 片的 macOS Build/XCTest workflow `35442948032`、iOS Build Gate、PWA/Edge、治理、Vercel 和 Cloudflare 均通过；本次来源元数据改动待新的 CI 验证。未触发新的 TestFlight，待下一轮真机相关变更再决定。

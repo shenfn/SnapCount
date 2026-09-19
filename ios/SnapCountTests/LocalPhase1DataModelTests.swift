@@ -3,6 +3,71 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testLOCALP1DM002IntakePreservesCandidateAndFormalSourceKinds() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let useCase = LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: try LocalRecordRepository(database: database)
+        )
+
+        let archived = try await useCase.ingest(
+            LocalRecordCandidate(
+                id: "candidate-source-auto",
+                domainKey: "sport",
+                title: "自动归档运动",
+                summary: "高置信度候选",
+                payload: [
+                    "sport_type": AnyCodable("跑步"),
+                    "duration_minutes": AnyCodable(30)
+                ],
+                confidence: 0.90,
+                recordDate: "2026-09-19",
+                recordTime: nil,
+                imageData: nil,
+                createdAt: Date()
+            ),
+            recordID: UUID()
+        )
+        guard case .archived(let archived) = archived else {
+            return XCTFail("高置信度候选应自动归档")
+        }
+        XCTAssertEqual(archived.record.sourceKind, .aiAutoArchive)
+        XCTAssertEqual(archived.record.domainVersion, 1)
+
+        let staged = try await useCase.ingest(
+            LocalRecordCandidate(
+                id: "candidate-source-review",
+                domainKey: "sport",
+                title: "待确认运动",
+                summary: "低置信度候选",
+                payload: [
+                    "sport_type": AnyCodable("游泳"),
+                    "duration_minutes": AnyCodable(25)
+                ],
+                confidence: 0.40,
+                recordDate: "2026-09-19",
+                recordTime: nil,
+                imageData: nil,
+                createdAt: Date()
+            ),
+            recordID: nil
+        )
+        guard case .staged(let staged) = staged else {
+            return XCTFail("低置信度候选应进入中转站")
+        }
+        XCTAssertEqual(staged.record.sourceKind, .aiCandidate)
+        XCTAssertEqual(staged.record.domainVersion, 1)
+
+        let confirmed = try await useCase.confirmStaging(
+            id: staged.record.id,
+            recordID: UUID()
+        )
+        XCTAssertEqual(confirmed.record.sourceKind, .aiConfirmed)
+        XCTAssertEqual(confirmed.record.domainVersion, 1)
+    }
+
     func testLOCALP1DM001GenericRepositoryRejectsExpenseDomain() throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

@@ -12,6 +12,14 @@ enum LocalStagingRecordStatus: String, Equatable {
     case failed
 }
 
+enum LocalRecordSourceKind: String, Codable, Equatable {
+    case manual
+    case aiAutoArchive = "ai_auto_archive"
+    case aiCandidate = "ai_candidate"
+    case aiConfirmed = "ai_confirmed"
+    case imported
+}
+
 struct LocalRecordCommand {
     let id: UUID
     let domainKey: String
@@ -23,6 +31,7 @@ struct LocalRecordCommand {
     let note: String?
     let imageData: Data?
     let createdAt: Date
+    let sourceKind: LocalRecordSourceKind = .manual
 }
 
 struct LocalRecordDraft: Equatable {
@@ -38,6 +47,8 @@ struct LocalRecordDraft: Equatable {
     let imagePath: String?
     let imageHash: String?
     let createdAt: Date
+    let sourceKind: LocalRecordSourceKind = .manual
+    let domainVersion: Int = 1
 }
 
 struct LocalRecordUpdateCommand {
@@ -70,6 +81,8 @@ struct LocalRecord: Equatable {
     let note: String?
     let imagePath: String?
     let imageHash: String?
+    let sourceKind: LocalRecordSourceKind
+    let domainVersion: Int
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
@@ -101,6 +114,8 @@ struct LocalStagingRecord: Equatable {
     let recordTime: String?
     let imagePath: String?
     let imageHash: String?
+    let sourceKind: LocalRecordSourceKind
+    let domainVersion: Int
     let targetRecordID: UUID?
     let resolvedAction: String?
     let resolvedAt: Date?
@@ -135,6 +150,8 @@ struct LocalStagingDraft: Equatable {
     let imagePath: String?
     let imageHash: String?
     let createdAt: Date
+    let sourceKind: LocalRecordSourceKind = .aiCandidate
+    let domainVersion: Int = 1
 }
 
 struct LocalRecordOutcome: Equatable {

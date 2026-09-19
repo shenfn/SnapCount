@@ -172,3 +172,9 @@ macOS iOS workflow `35431410842` 已通过：应用编译、完整 XCTest、iOS 
 本片只新增本地手动兜底入口和草稿图片传递，不接入云端 AI 识别、不改变登录态远端 Planner 路由、不修改 Cloud Sync、Outbox、Cursor、Conflict 或 AI Popup / Analysis 算法。行为编号为 `LOCAL-P1-SPORT-001-G`，测试层为 `NativeManualRecordDraft` 状态测试加既有本地图片保存/导出/删除 XCTest；iOS 编译和完整 XCTest 仍以 macOS CI 为准。
 
 本片完成后仍未解决：截图图片直接进入本地候选/中转站、AI source 持久化、图片编辑替换、AI Popup/Analysis 本地读取以及饮食/睡眠/阅读用户闭环。
+
+## 14. G 片与事实来源元数据收口
+
+`LOCAL-P1-SPORT-001-G` 已实现并通过 CI：未登录图片入口转入本地运动兜底表单，保存时图片沿用 `LocalRecordUseCase` 的本地生命周期。随后继续完成 `DM-GAP-02` 的最小模型收敛：`local_records` 与 `local_staging_records` 增加 `source_kind`、`domain_version`，高置信度自动归档、低置信度候选和用户确认分别保留 `ai_auto_archive`、`ai_candidate`、`ai_confirmed` 来源；旧数据库通过 v6 本地迁移补默认值。
+
+`8850c61` 的 G 片已由 macOS iOS workflow `35442948032` 通过 Build、完整 XCTest 和 iOS Build Gate；PWA/Edge、治理、Vercel、Cloudflare 门禁同步通过。本节新增的来源元数据改动待本次提交的 CI 验证。后续仍应围绕本地候选/中转 UI 与 AI 输入适配，不把来源元数据误认为 AI 运行日志，也不扩展 Cloud Sync。

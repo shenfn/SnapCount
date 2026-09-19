@@ -32,8 +32,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     INSERT INTO local_records (
                         id, profile_id, domain_key, title, summary, payload_json,
                         record_date, record_time, note, image_path, image_hash,
-                        local_version, created_at, updated_at, deleted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+                        source_kind, domain_version, local_version, created_at, updated_at, deleted_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
                     """,
                 arguments: [
                     draft.id.uuidString,
@@ -47,6 +47,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     draft.note,
                     draft.imagePath,
                     draft.imageHash,
+                    draft.sourceKind.rawValue,
+                    draft.domainVersion,
                     draft.createdAt,
                     draft.createdAt
                 ]
@@ -200,8 +202,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     INSERT INTO local_staging_records (
                         id, profile_id, domain_key, status, confidence, title, summary,
                         payload_json, record_date, record_time, image_path, image_hash,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        source_kind, domain_version, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                 arguments: [
                     draft.id,
@@ -216,6 +218,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     draft.recordTime,
                     draft.imagePath,
                     draft.imageHash,
+                    draft.sourceKind.rawValue,
+                    draft.domainVersion,
                     draft.createdAt,
                     draft.createdAt
                 ]
@@ -304,8 +308,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     INSERT INTO local_records (
                         id, profile_id, domain_key, title, summary, payload_json,
                         record_date, record_time, note, image_path, image_hash,
-                        local_version, created_at, updated_at, deleted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, ?, ?, NULL)
+                        source_kind, domain_version, local_version, created_at, updated_at, deleted_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, NULL)
                     """,
                 arguments: [
                     recordID.uuidString,
@@ -318,6 +322,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     recordTime,
                     imagePath,
                     imageHash,
+                    LocalRecordSourceKind.aiConfirmed.rawValue,
+                    stagingRow["domain_version"],
                     createdAt,
                     updatedAt
                 ]
@@ -377,6 +383,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
               let summary: String = row["summary"],
               let payloadJSON: String = row["payload_json"],
               let recordDate: String = row["record_date"],
+              let sourceKindRaw: String = row["source_kind"],
+              let sourceKind = LocalRecordSourceKind(rawValue: sourceKindRaw),
               let createdAt: Date = row["created_at"],
               let updatedAt: Date = row["updated_at"] else {
             throw LocalDataError.invalidRecord
@@ -393,6 +401,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
             note: row["note"],
             imagePath: row["image_path"],
             imageHash: row["image_hash"],
+            sourceKind: sourceKind,
+            domainVersion: row["domain_version"],
             localVersion: row["local_version"],
             createdAt: createdAt,
             updatedAt: updatedAt
@@ -424,6 +434,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
               let summary: String = row["summary"],
               let payloadJSON: String = row["payload_json"],
               let recordDate: String = row["record_date"],
+              let sourceKindRaw: String = row["source_kind"],
+              let sourceKind = LocalRecordSourceKind(rawValue: sourceKindRaw),
               let createdAt: Date = row["created_at"],
               let updatedAt: Date = row["updated_at"] else {
             throw LocalDataError.invalidRecord
@@ -442,6 +454,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
             recordTime: row["record_time"],
             imagePath: row["image_path"],
             imageHash: row["image_hash"],
+            sourceKind: sourceKind,
+            domainVersion: row["domain_version"],
             targetRecordID: targetRecordID.flatMap { UUID(uuidString: $0) },
             resolvedAction: row["resolved_action"],
             resolvedAt: row["resolved_at"],

@@ -24,6 +24,8 @@ struct LocalRecordArchive: Codable, Equatable {
         let imagePath: String?
         let imageHash: String?
         let imageDataBase64: String?
+        let sourceKind: String
+        let domainVersion: Int
         let localVersion: Int64
         let createdAt: Date
         let updatedAt: Date
@@ -57,7 +59,7 @@ final class LocalRecordPortability {
                 sql: """
                     SELECT id, profile_id, domain_key, title, summary, payload_json,
                            record_date, record_time, note, image_path, image_hash,
-                           local_version, created_at, updated_at, deleted_at
+                           source_kind, domain_version, local_version, created_at, updated_at, deleted_at
                     FROM local_records
                     WHERE profile_id = ?
                       AND domain_key IN ('food', 'sleep', 'sport', 'reading')
@@ -91,6 +93,8 @@ final class LocalRecordPortability {
                     imagePath: imagePath,
                     imageHash: row["image_hash"],
                     imageDataBase64: imageDataBase64,
+                    sourceKind: row["source_kind"],
+                    domainVersion: row["domain_version"],
                     localVersion: row["local_version"],
                     createdAt: row["created_at"],
                     updatedAt: row["updated_at"],
@@ -118,7 +122,7 @@ final class LocalRecordPortability {
             encoder.outputFormatting = [.sortedKeys]
             return try encoder.encode(archive)
         case .csv:
-            var lines = ["id,domain_key,title,summary,record_date,record_time,note,image_path,image_hash,image_data_base64,payload_json"]
+            var lines = ["id,domain_key,title,summary,record_date,record_time,note,image_path,image_hash,image_data_base64,source_kind,domain_version,payload_json"]
             for record in archive.records {
                 lines.append([
                     record.id.uuidString,
@@ -131,6 +135,8 @@ final class LocalRecordPortability {
                     record.imagePath ?? "",
                     record.imageHash ?? "",
                     record.imageDataBase64 ?? "",
+                    record.sourceKind,
+                    String(record.domainVersion),
                     record.payloadJSON
                 ].map(csvField).joined(separator: ","))
             }

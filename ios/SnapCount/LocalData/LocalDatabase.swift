@@ -206,6 +206,25 @@ final class LocalDatabase {
                     ON local_staging_records(target_record_id);
                 """)
         }
+        migrator.registerMigration("local-v6-phase1-fact-provenance") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_records
+                ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'manual'
+                    CHECK (source_kind IN ('manual', 'ai_auto_archive', 'ai_candidate', 'ai_confirmed', 'imported'));
+
+                ALTER TABLE local_records
+                ADD COLUMN domain_version INTEGER NOT NULL DEFAULT 1
+                    CHECK (domain_version > 0);
+
+                ALTER TABLE local_staging_records
+                ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'ai_candidate'
+                    CHECK (source_kind IN ('manual', 'ai_auto_archive', 'ai_candidate', 'ai_confirmed', 'imported'));
+
+                ALTER TABLE local_staging_records
+                ADD COLUMN domain_version INTEGER NOT NULL DEFAULT 1
+                    CHECK (domain_version > 0);
+                """)
+        }
         return migrator
     }
 }
