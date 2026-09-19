@@ -130,6 +130,7 @@ struct NativeDataExportRequest {
     var range: NativeExportRange = .thisMonth
     var format: NativeExportFormat = .csv
     var includeFullPayload = false
+    var includeImages = false
 }
 
 struct NativeExportedFile: Identifiable {

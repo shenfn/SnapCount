@@ -161,7 +161,7 @@ struct NativeManualRecordDraft {
     }
 
     init(detail: NativeRecordDetail) {
-        self.init(kind: .universal, domainKey: detail.category ?? "sport")
+        self.init(kind: .universal, domainKey: detail.domainKey ?? detail.category ?? "sport")
         existingRawId = detail.rawId
         originalPayload = detail.payload ?? [:]
         title = detail.title

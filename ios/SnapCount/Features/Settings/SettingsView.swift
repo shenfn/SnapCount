@@ -672,6 +672,7 @@ private struct DataExportView: View {
                 }
                 if request.content == .universal {
                     Toggle("包含完整 payload", isOn: $request.includeFullPayload)
+                    Toggle("包含本地图片", isOn: $request.includeImages)
                 }
             }
             Section {

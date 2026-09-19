@@ -33,7 +33,12 @@ struct NativeRecordReference: Hashable {
     // snapshots use the canonical expense prefix. They still represent the
     // same aggregate when their raw UUID matches.
     var canonicalValue: String {
-        let canonicalKind = kind == "local-expense" ? "expense" : kind
+        let canonicalKind: String
+        switch kind {
+        case "local-expense": canonicalKind = "expense"
+        case "local-data": canonicalKind = "data"
+        default: canonicalKind = kind
+        }
         let canonicalRawID = UUID(uuidString: rawId)?.uuidString.lowercased() ?? rawId
         return "\(canonicalKind)/\(canonicalRawID)"
     }
@@ -50,6 +55,7 @@ struct NativeRecordReference: Hashable {
         switch value {
         case "tx", "transaction", "expense": return "expense"
         case "income": return "income"
+        case "local-data": return "local-data"
         case "universal", "data": return "data"
         default: return value
         }
