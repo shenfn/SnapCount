@@ -4292,10 +4292,21 @@ final class AppState: ObservableObject {
         }
         if draft.kind == .universal,
            localRecordUseCase != nil,
-           LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey) {
+           LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey),
+           await shouldCreateLocalDomainRecord(for: draft) {
             return try await createLocalDomainRecord(draft, domain: domain)
         }
         return try await createRemoteManualRecord(draft, domain: domain)
+    }
+
+    private func shouldCreateLocalDomainRecord(for draft: NativeManualRecordDraft) async -> Bool {
+        guard let localRecordUseCase else { return false }
+        if !isSignedIn { return true }
+        guard let existingRawId = draft.existingRawId,
+              let existingID = UUID(uuidString: existingRawId) else {
+            return false
+        }
+        return (try? await localRecordUseCase.record(id: existingID)) != nil
     }
 
     private func createRemoteManualRecord(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?) async throws -> Bool {
