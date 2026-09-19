@@ -44,7 +44,8 @@ final class LocalSportRecordTests: XCTestCase {
 
         XCTAssertEqual(groups.first?.records.first?.reference, "local-data/\(recordID.uuidString)")
         XCTAssertEqual(groups.first?.records.first?.domainKey, "sport")
-        XCTAssertEqual(try await reopenedUseCase.record(id: recordID)?.localVersion, 1)
+        let reopenedRecord = try await reopenedUseCase.record(id: recordID)
+        XCTAssertEqual(reopenedRecord?.localVersion, 1)
     }
 
     func testLOCALP1SPORT001BEditAndDeleteUseExpectedVersionAndLeaveTombstone() async throws {
@@ -81,7 +82,8 @@ final class LocalSportRecordTests: XCTestCase {
             updatedAt: Date()
         ))
         XCTAssertEqual(updated.record.localVersion, 2)
-        XCTAssertEqual(try await useCase.record(id: recordID)?.title, "夜间骑行")
+        let updatedRecord = try await useCase.record(id: recordID)
+        XCTAssertEqual(updatedRecord?.title, "夜间骑行")
 
         let deleted = try await useCase.delete(LocalRecordDeleteCommand(
             id: recordID,
@@ -89,8 +91,10 @@ final class LocalSportRecordTests: XCTestCase {
             deletedAt: Date()
         ))
         XCTAssertEqual(deleted.tombstone.localVersion, 3)
-        XCTAssertNil(try await useCase.record(id: recordID))
-        XCTAssertEqual(try await useCase.tombstone(id: recordID)?.localVersion, 3)
+        let deletedRecord = try await useCase.record(id: recordID)
+        XCTAssertNil(deletedRecord)
+        let tombstone = try await useCase.tombstone(id: recordID)
+        XCTAssertEqual(tombstone?.localVersion, 3)
     }
 
     func testLOCALP1SPORT001CConfidenceRoutesHighToArchiveAndLowToStaging() {
@@ -143,7 +147,8 @@ final class LocalSportRecordTests: XCTestCase {
         }
         XCTAssertEqual(archived.record.domainKey, "sport")
         XCTAssertEqual(staged.record.status, .pendingReview)
-        XCTAssertEqual(try await useCase.records(monthKey: "2026-09").count, 1)
+        let records = try await useCase.records(monthKey: "2026-09")
+        XCTAssertEqual(records.count, 1)
     }
 
     func testLOCALP1SPORT001DStagingDoesNotBecomeFormalRecordBeforeConfirmation() async throws {
@@ -167,15 +172,18 @@ final class LocalSportRecordTests: XCTestCase {
         ))
 
         XCTAssertEqual(staging.record.status, .pendingReview)
-        XCTAssertTrue(try await useCase.records(monthKey: "2026-09").isEmpty)
+        let recordsBeforeConfirmation = try await useCase.records(monthKey: "2026-09")
+        XCTAssertTrue(recordsBeforeConfirmation.isEmpty)
 
         let archived = try await useCase.confirmStaging(
             id: staging.record.id,
             recordID: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
         )
         XCTAssertEqual(archived.record.domainKey, "sport")
-        XCTAssertEqual(try await useCase.records(monthKey: "2026-09").count, 1)
-        XCTAssertEqual(try await useCase.staging(id: staging.record.id)?.status, .archived)
+        let recordsAfterConfirmation = try await useCase.records(monthKey: "2026-09")
+        XCTAssertEqual(recordsAfterConfirmation.count, 1)
+        let confirmedStaging = try await useCase.staging(id: staging.record.id)
+        XCTAssertEqual(confirmedStaging?.status, .archived)
     }
 
     func testLOCALP1SPORT001EImageIsLocalAndRemovedWithRecord() async throws {

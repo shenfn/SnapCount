@@ -140,7 +140,8 @@ final class LocalPhase1DataModelTests: XCTestCase {
 
         XCTAssertEqual(first.record.id, recordID)
         XCTAssertEqual(retry.record.id, recordID)
-        XCTAssertEqual(try await useCase.records(monthKey: "2026-09").map(\.id), [recordID])
+        let records = try await useCase.records(monthKey: "2026-09")
+        XCTAssertEqual(records.map(\.id), [recordID])
     }
 
     func testLOCALP1DM008StaleVersionCannotOverwriteFormalFact() async throws {
@@ -192,7 +193,8 @@ final class LocalPhase1DataModelTests: XCTestCase {
         } catch let error as LocalDataError {
             XCTAssertEqual(error, .versionConflict(expected: 1, actual: 2))
         }
-        XCTAssertEqual(try await useCase.record(id: recordID)?.title, "第一次编辑")
+        let savedRecord = try await useCase.record(id: recordID)
+        XCTAssertEqual(savedRecord?.title, "第一次编辑")
     }
 
     func testLOCALP1DM011FactReaderMergesFormalDomainsAndExcludesStagingAndTombstones() async throws {
@@ -295,7 +297,8 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertEqual(month.facts.map(\.kind), [.record, .expense])
         XCTAssertEqual(month.facts.last?.payloadJSON.contains("amount_minor"), true)
         XCTAssertFalse(month.facts.contains { $0.id == deletedReadingID })
-        XCTAssertEqual(try await useCase.stagingRecords().count, 1)
+        let stagingRecords = try await useCase.stagingRecords()
+        XCTAssertEqual(stagingRecords.count, 1)
     }
 
     func testLOCALP1DM011FactReadModelProjectsSeparateTodayAndRecordsGroups() throws {
