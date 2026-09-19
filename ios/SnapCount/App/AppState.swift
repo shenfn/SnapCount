@@ -2633,6 +2633,12 @@ final class AppState: ObservableObject {
                 recordID: UUID()
             )
             removeStagingRecordLocally(record.id)
+            let monthKey = String(outcome.record.recordDate.prefix(7))
+            if localFactReader != nil {
+                await readDeviceFactMonth(monthKey, force: true)
+            } else {
+                await readDeviceRecordMonth(monthKey, force: true)
+            }
             if !preserveInboxNavigation { inboxPath = NavigationPath() }
             inboxActionMessage = "已归档到\(record.domainName ?? "本地记录")"
             return "local-data/\(outcome.record.id.uuidString)"

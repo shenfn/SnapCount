@@ -63,6 +63,68 @@ final class LocalSportRecordTests: XCTestCase {
         XCTAssertEqual(inboxRecord.imageURL, store.url(for: staged.record.imagePath!))
     }
 
+    func testLOCALP1SPORT001IConfirmedCandidateBecomesFormalFactWithImageAndSource() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        let imageDirectory = temporaryDirectoryURL()
+        defer {
+            removeDatabase(at: databaseURL)
+            removeImageDirectory(at: imageDirectory)
+        }
+
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let store = try LocalImageStore(rootDirectory: imageDirectory)
+        let useCase = LocalRecordUseCase(
+            profileStore: profileStore,
+            repository: try LocalRecordRepository(database: database),
+            imageStore: store
+        )
+        let recordID = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+        let staged = try await useCase.stage(LocalRecordCandidate(
+            id: "candidate-formal-fact",
+            domainKey: "sport",
+            title: "已确认运动",
+            summary: "确认后成为正式事实",
+            payload: [
+                "sport_type": AnyCodable("跑步"),
+                "duration_minutes": AnyCodable(45)
+            ],
+            confidence: 0.62,
+            recordDate: "2026-09-19",
+            recordTime: "18:00",
+            imageData: Data("confirmed-local-image".utf8),
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+
+        let stagedImagePath = try XCTUnwrap(staged.record.imagePath)
+        let archived = try await useCase.confirmStaging(
+            id: staged.record.id,
+            recordID: recordID
+        )
+
+        XCTAssertEqual(archived.record.id, recordID)
+        XCTAssertEqual(archived.record.sourceKind, .aiConfirmed)
+        XCTAssertEqual(archived.record.imagePath, stagedImagePath)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.url(for: stagedImagePath).path))
+
+        let resolvedStaging = try await useCase.staging(id: staged.record.id)
+        XCTAssertEqual(resolvedStaging?.status, .archived)
+        XCTAssertNil(resolvedStaging?.imagePath)
+
+        let reader = try LocalFactReader(database: database)
+        let profile = try profileStore.activeProfile()
+        let month = try reader.month(profileID: profile.id, monthKey: "2026-09")
+        let fact = try XCTUnwrap(month.facts.first { $0.id == recordID })
+        XCTAssertEqual(fact.reference, "data/\(recordID.uuidString)")
+        XCTAssertEqual(fact.sourceKind, LocalRecordSourceKind.aiConfirmed.rawValue)
+        XCTAssertEqual(fact.imagePath, stagedImagePath)
+
+        let detail = LocalRecordReadModel.detail(from: archived.record, imageStore: store)
+        XCTAssertEqual(detail.source, LocalRecordSourceKind.aiConfirmed.rawValue)
+        XCTAssertEqual(detail.domainVersion, "local-v1")
+        XCTAssertEqual(detail.imageURL, store.url(for: stagedImagePath))
+    }
+
     func testLOCALP1SPORT001ARecordSurvivesDatabaseReopenAndProjectsToNativeRecord() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

@@ -36,9 +36,9 @@ enum LocalRecordReadModel {
             ),
             transactionTime: record.recordTime,
             domainKey: record.domainKey,
-            source: "manual",
+            source: record.sourceKind.rawValue,
             status: "local",
-            domainVersion: "local-v1"
+            domainVersion: "local-v\(record.domainVersion)"
         )
         return NativeRecordDetail(
             id: base.id,
