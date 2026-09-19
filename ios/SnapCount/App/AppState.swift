@@ -4262,7 +4262,7 @@ final class AppState: ObservableObject {
                 recordDate: draft.dateKey,
                 recordTime: draft.timeKey,
                 note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
-                imageData: nil,
+                imageData: draft.imageData,
                 createdAt: Date()
             ))
             record = created.record

@@ -132,6 +132,7 @@ struct NativeManualRecordDraft {
     var originalPayload: [String: AnyCodable] = [:]
     var imagePath: String?
     var imageHash: String?
+    var imageData: Data?
 
     init(
         kind: NativeManualRecordKind = .expense,

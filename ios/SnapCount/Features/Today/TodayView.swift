@@ -6,6 +6,7 @@ struct TodayView: View {
     @State private var showCameraPicker = false
     @State private var showPhotoLibraryPicker = false
     @State private var showManualRecordSheet = false
+    @State private var pendingLocalImageData: Data?
     @State private var isUploading = false
     @State private var uploadMessage: String?
     @State private var uploadMessageIsError = false
@@ -134,8 +135,14 @@ struct TodayView: View {
                 Task { await uploadImageData(data, captureKind: "screenshot", filename: "photo-library-upload.jpg") }
             } onCancel: { showPhotoLibraryPicker = false }
         }
-        .sheet(isPresented: $showManualRecordSheet) {
-            ManualRecordSheet()
+        .sheet(isPresented: $showManualRecordSheet, onDismiss: {
+            pendingLocalImageData = nil
+        }) {
+            if let pendingLocalImageData {
+                ManualRecordSheet(initialImageData: pendingLocalImageData)
+            } else {
+                ManualRecordSheet()
+            }
         }
         .sheet(isPresented: $showWidgetManager) {
             HomeWidgetManagerSheet(
@@ -628,6 +635,11 @@ struct TodayView: View {
     }
 
     private func uploadImageData(_ data: Data, captureKind: String, filename: String) async {
+        guard appState.isSignedIn else {
+            pendingLocalImageData = data
+            showManualRecordSheet = true
+            return
+        }
         isUploading = true
         defer { isUploading = false }
         do {

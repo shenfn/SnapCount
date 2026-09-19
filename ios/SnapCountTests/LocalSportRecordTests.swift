@@ -3,6 +3,17 @@ import XCTest
 @testable import SnapCount
 
 final class LocalSportRecordTests: XCTestCase {
+    func testLOCALP1SPORT001GLocalCaptureDraftRetainsImageForLocalSave() {
+        let imageData = Data("captured-image".utf8)
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
+
+        draft.imageData = imageData
+
+        XCTAssertEqual(draft.imageData, imageData)
+        XCTAssertEqual(draft.domainKey, "sport")
+        XCTAssertEqual(draft.kind, .universal)
+    }
+
     func testLOCALP1SPORT001ARecordSurvivesDatabaseReopenAndProjectsToNativeRecord() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

@@ -18,3 +18,12 @@
 - 本轮可执行验证：`git diff --check` 通过；已确认 `project.yml` 以目录方式收录 App/Test 源码；Windows 环境无 `xcodebuild`、`xcodegen` 和 Swift toolchain；macOS workflow `.github/workflows/ios-build.yml` 已远端验证编译与 XCTest，真机链路仍未验证。
 - 保护边界：未修改同步协议、Outbox、Cursor、Conflict、`LocalSyncCoordinator`、AI Popup / Expression Planner 算法或生产配置；现有工作区其他 WIP 未清理、未归类、未提交。
 - 对应分支：`codex/local-first-phase1-fact-reader`；PR：`https://github.com/shenfn/SnapCount/pull/199`；最终代码提交：`11a5518`。
+
+## 后续切片：LOCAL-P1-SPORT-001-G
+
+- 进入条件：PR #199 的 TestFlight 构建 `35432794401` 上传成功，用户已完成真机验收并确认无阻断问题。
+- 目标行为：未登录时从 Today 的相机/相册入口取得图片，进入本地运动记录兜底表单；保存后图片与运动正式记录一起落入本地生命周期。
+- 红灯：`testLOCALP1SPORT001GLocalCaptureDraftRetainsImageForLocalSave` 固定草稿必须保留图片数据、运动域和通用记录类型。
+- 最小实现：`NativeManualRecordDraft` 增加图片数据承载；`TodayView` 在未登录图片入口转入 `ManualRecordSheet(initialImageData:)`；表单提供本地预览、拍照、相册选择、替换和移除；`AppState.createLocalDomainRecord` 将图片交给既有 `LocalRecordUseCase.create`。
+- 保护边界：登录态仍走既有云端图片上传；不改变 AI 识别、中转协议、同步协议、Outbox/Cursor/Conflict、AI Popup 或 Analysis。
+- 验证：Windows 只执行 `git diff --check` 和静态核对；必须由 macOS GitHub Actions 完成 Swift 编译与完整 XCTest，再安排下一次真机验收。

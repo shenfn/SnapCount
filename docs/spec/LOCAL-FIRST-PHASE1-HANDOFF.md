@@ -164,3 +164,11 @@ Phase 1 的目标是尽快完成一个可发布 App Store 的 Local-First Person
 macOS iOS workflow `35431410842` 已通过：应用编译、完整 XCTest、iOS Build Gate 均为成功；同一 PR 的 PWA/迁移、治理、预览和部署检查也已通过。Windows 本地仍无法执行 Swift/Xcode 或真机测试，因此真机链路保持未验证。
 
 本轮保留的剩余风险不变：AI Popup/Analysis 本地读取、真实图片输入、AI source 持久化、图片与数据库删除的原子性，以及最终真机验收。未提交的根工作区素材、视觉改动、规格原文和其他 WIP 未进入本分支提交。
+
+## 13. 真机验收后的下一切片：LOCAL-P1-SPORT-001-G
+
+2026-09-19，PR #199 对应的 TestFlight 构建已上传成功，用户已完成真机验收并确认无阻断问题。下一片固定为运动首片的离线真实图片入口：未登录时从 Today 的相机/相册入口取得图片，打开本地运动记录兜底表单；用户补齐运动事实并保存后，图片通过既有 `LocalRecordUseCase` 写入本地记录目录，沿用本地 hash、导出和删除生命周期。
+
+本片只新增本地手动兜底入口和草稿图片传递，不接入云端 AI 识别、不改变登录态远端 Planner 路由、不修改 Cloud Sync、Outbox、Cursor、Conflict 或 AI Popup / Analysis 算法。行为编号为 `LOCAL-P1-SPORT-001-G`，测试层为 `NativeManualRecordDraft` 状态测试加既有本地图片保存/导出/删除 XCTest；iOS 编译和完整 XCTest 仍以 macOS CI 为准。
+
+本片完成后仍未解决：截图图片直接进入本地候选/中转站、AI source 持久化、图片编辑替换、AI Popup/Analysis 本地读取以及饮食/睡眠/阅读用户闭环。
