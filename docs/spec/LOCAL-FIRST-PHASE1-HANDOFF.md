@@ -156,3 +156,11 @@ Phase 1 的目标是尽快完成一个可发布 App Store 的 Local-First Person
 2026-09-19 已在当前根工作区开始实现，保护既有用户 WIP，未新建隔离 worktree。已完成并待 macOS 验证的最小模型收敛包括：通用记录禁止写入 `expense`、域阈值与事实完整性路由、睡眠分钟归一化、时间格式边界、中转确认幂等、版本保护、只读 `LocalFactReader`，以及到 Today/Records 和离线通用导出的接线。`LocalFactReader` 以 `expense/<uuid>` 和 `data/<uuid>` 输出正式事实，排除中转记录与删除墓碑。
 
 当前仍未完成：AI Popup/Analysis 本地读取适配、真实图片输入、AI source 持久化和真机验收。Windows 无 Swift/Xcode 工具链，本轮仅完成静态检查；iOS 编译与 XCTest 以 macOS CI 为准。同步协议、Outbox、Cursor、冲突机制和 Cloud Sync 主线保持冻结。
+
+## 12. 本轮分支与 CI 收口
+
+2026-09-19 已将本轮实现整理到分支 `codex/local-first-phase1-fact-reader`，通过 PR [#199](https://github.com/shenfn/SnapCount/pull/199) 提交。实现提交为 `196a6f1`，随后补充了数据库写入返回、异步 XCTest 断言和登录态 Planner 路由兼容修复，最终提交为 `11a5518`。
+
+macOS iOS workflow `35431410842` 已通过：应用编译、完整 XCTest、iOS Build Gate 均为成功；同一 PR 的 PWA/迁移、治理、预览和部署检查也已通过。Windows 本地仍无法执行 Swift/Xcode 或真机测试，因此真机链路保持未验证。
+
+本轮保留的剩余风险不变：AI Popup/Analysis 本地读取、真实图片输入、AI source 持久化、图片与数据库删除的原子性，以及最终真机验收。未提交的根工作区素材、视觉改动、规格原文和其他 WIP 未进入本分支提交。

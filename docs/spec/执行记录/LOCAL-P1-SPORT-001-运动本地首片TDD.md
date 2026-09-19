@@ -10,11 +10,11 @@
 - 基线测试结果：Windows 无 `xcodebuild`、`xcodegen` 和 Swift toolchain；未运行 XCTest。macOS CI 是 iOS 编译与测试权威。
 - 红灯测试及失败原因：专项测试先固定本地运动记录、候选路由、中转确认、版本删除、图片生命周期和导出图片；本轮新增模型红灯覆盖消费与通用表隔离、域阈值与事实完整性、睡眠分钟归一化、时间格式、中转确认幂等和过期版本。Windows 无 Swift toolchain，未能取得本地红灯输出。
 - 最小实现：在既有 v4 基础上补充 `local_staging_records` v5 归档目标/解析字段；Repository 拒绝通用消费、确认中转站幂等；Use Case/Codec 采用域阈值、最小事实校验、睡眠分钟归一化和时间格式校验；新增 `LocalFactReader`、`LocalFactReadModel` 和 `LocalFactPortability`，把消费与四个非财务域合并为正式事实读取，接入本地 Today/Records 和离线通用导出，并排除中转与墓碑；未修改 Outbox、Cursor、Conflict 或同步协调器。
-- 绿灯结果：待 macOS CI 验证，不能据此声称已通过。
+- 绿灯结果：macOS CI 已通过；新增 `LOCAL-P1-DM-*` 与 `LOCAL-P1-SPORT-001` 专项测试，以及完整既有 XCTest 均通过。
 - PWA/iOS 差异：本轮只实现 iOS 本地事实；PWA 继续读取云端副本，不改 PWA。
-- GitHub CI 结果：待验证。
+- GitHub CI 结果：PR #199 的 iOS workflow `35431410842` 已通过应用编译、完整 XCTest 和 iOS Build Gate；PWA/迁移、治理、预览和部署检查同步通过。
 - 未解决风险：本地文件删除与数据库 tombstone 不是同一物理事务；现有截图 AI / Hosted AI 结果尚未接入 `LocalRecordUseCase.ingest`；登录态仍会保留远端刷新并和本地事实合并展示，这是当前兼容策略而非 Cloud Sync；通用记录的 AI source 持久化、AI Popup/Analysis 本地读取、真实图片输入和完整真机链路仍需逐步实现。
 - 本轮修改文件：上一轮列出的本地数据与 App 接线文件，以及本轮的 `AppState.swift`、`LocalFactReader.swift`、`LocalFactReadModel.swift`、`LocalFactPortability.swift`、`LocalPhase1DataModelTests.swift`。
-- 本轮可执行验证：`git diff --check` 通过；已确认 `project.yml` 以目录方式收录 App/Test 源码；已确认 Windows 环境无 `xcodebuild`、`xcodegen` 和 Swift toolchain，因此 XCTest、iOS 编译和真机链路未验证；对应 macOS 工作流为 `.github/workflows/ios-build.yml`，当前未对未提交工作区触发远端运行。
+- 本轮可执行验证：`git diff --check` 通过；已确认 `project.yml` 以目录方式收录 App/Test 源码；Windows 环境无 `xcodebuild`、`xcodegen` 和 Swift toolchain；macOS workflow `.github/workflows/ios-build.yml` 已远端验证编译与 XCTest，真机链路仍未验证。
 - 保护边界：未修改同步协议、Outbox、Cursor、Conflict、`LocalSyncCoordinator`、AI Popup / Expression Planner 算法或生产配置；现有工作区其他 WIP 未清理、未归类、未提交。
-- 对应提交：未提交。
+- 对应分支：`codex/local-first-phase1-fact-reader`；PR：`https://github.com/shenfn/SnapCount/pull/199`；最终代码提交：`11a5518`。
