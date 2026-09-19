@@ -26,7 +26,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
         guard LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey) else {
             throw LocalDataError.invalidRecord
         }
-        try database.writer.write { db in
+        return try database.writer.write { db in
             try db.execute(
                 sql: """
                     INSERT INTO local_records (
@@ -63,7 +63,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
     }
 
     func updateRecord(_ update: LocalRecordUpdateCommand, profileID: UUID) throws -> LocalRecord {
-        try database.writer.write { db in
+        return try database.writer.write { db in
             guard let current = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_records WHERE id = ?",
@@ -115,7 +115,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
         _ command: LocalRecordDeleteCommand,
         profileID: UUID
     ) throws -> LocalRecordTombstone {
-        try database.writer.write { db in
+        return try database.writer.write { db in
             guard let current = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_records WHERE id = ?",
@@ -194,7 +194,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
         guard LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey) else {
             throw LocalDataError.invalidRecord
         }
-        try database.writer.write { db in
+        return try database.writer.write { db in
             try db.execute(
                 sql: """
                     INSERT INTO local_staging_records (
