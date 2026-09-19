@@ -189,4 +189,4 @@ macOS iOS workflow `35431410842` 已通过：应用编译、完整 XCTest、iOS 
 
 `LOCAL-P1-SPORT-001-I` 补齐 H 片确认后的正式事实可见性：确认候选后，正式记录保留原本地图片引用，中转记录清空图片引用并保留 `archived` 关系；统一事实读取器可读取 `data/<uuid>`，详情读模型保留 `ai_confirmed` 和域版本元数据。`AppState` 在本地确认后刷新对应月份投影，确保 Today/Records 不需要重启即可看到新事实。
 
-实现提交为 `80ff1a4`，macOS iOS workflow `35450693810` 已通过模拟器编译、完整 XCTest 和 iOS Build Gate；截至本记录，PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁也全部通过。该提交尚未触发 TestFlight；TestFlight 应从本阶段代码和文档均已固定、CI 通过的提交触发，之后再进行真机验收。
+实现提交为 `80ff1a4`，macOS iOS workflow `35450693810` 已通过模拟器编译、完整 XCTest 和 iOS Build Gate；截至本记录，PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁也全部通过。随后从文档已固定的提交 `cf6b2e9` 触发 TestFlight workflow `35451820461`，实际 IPA build number 为 `35451820461`，App Store Connect 上传成功，IPA artifact `SnapCount-ipa` 已生成。当前仍需等待 Apple 处理完成后在 TestFlight 中出现，再进行真机验收。

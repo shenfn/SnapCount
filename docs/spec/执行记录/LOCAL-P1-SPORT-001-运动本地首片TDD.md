@@ -50,4 +50,4 @@
 - 红灯：`testLOCALP1SPORT001IConfirmedCandidateBecomesFormalFactWithImageAndSource` 固定正式记录 ID、来源、图片路径、图片文件存在、中转归档状态、统一事实引用和详情来源元数据。
 - 最小实现：本地确认后刷新对应月份的本地事实投影；`LocalRecordReadModel` 不再把所有通用本地记录伪装成 `manual`/`local-v1`，而是读取持久化来源与域版本。
 - 保护边界：不改变远端中转站、不扩展 AI provider、不修改 Cloud Sync、Outbox/Cursor/Conflict、AI Popup 或 Analysis 算法。
-- 验证：macOS iOS workflow `35450693810` 的模拟器编译、完整 XCTest 和 iOS Build Gate 已通过；PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁全部通过。TestFlight 与真机验证安排在本阶段固定后统一触发。
+- 验证：macOS iOS workflow `35450693810` 的模拟器编译、完整 XCTest 和 iOS Build Gate 已通过；PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁全部通过。随后从固定提交 `cf6b2e9` 触发 TestFlight workflow `35451820461`，IPA build number 为 `35451820461`，App Store Connect 上传成功，IPA artifact `SnapCount-ipa` 已生成；Apple 处理完成和真机验证待进行。
