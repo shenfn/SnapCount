@@ -184,3 +184,9 @@ macOS iOS workflow `35431410842` 已通过：应用编译、完整 XCTest、iOS 
 `LOCAL-P1-SPORT-001-H` 将低置信度本地候选投影到既有 Inbox 收件箱：使用 `local-staging/<id>` 路由、本地图片目录 URL 和候选来源元数据；“确认”调用本地 `confirmStaging` 生成正式记录，“销毁”调用本地 `discardStaging` 并沿用图片清理生命周期。中转候选不会进入正式事实读取，且本片不接入远端重试、AI 适配、跨域分析或同步协议。
 
 实现提交为 `9587898`，macOS iOS workflow `35445897681` 已通过模拟器编译、完整 XCTest 和 iOS Build Gate；PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁也全部通过。H 片当前仅在未登录本地路径投影候选；本地候选的编辑、重试和域重判仍明确延期，当前提交未触发新的 TestFlight，尚未完成新的真机验证。
+
+## 16. I 片：确认后正式事实投影
+
+`LOCAL-P1-SPORT-001-I` 补齐 H 片确认后的正式事实可见性：确认候选后，正式记录保留原本地图片引用，中转记录清空图片引用并保留 `archived` 关系；统一事实读取器可读取 `data/<uuid>`，详情读模型保留 `ai_confirmed` 和域版本元数据。`AppState` 在本地确认后刷新对应月份投影，确保 Today/Records 不需要重启即可看到新事实。
+
+实现提交为 `80ff1a4`，macOS iOS workflow `35450693810` 已通过模拟器编译、完整 XCTest 和 iOS Build Gate；截至本记录，PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁也全部通过。该提交尚未触发 TestFlight；TestFlight 应从本阶段代码和文档均已固定、CI 通过的提交触发，之后再进行真机验收。

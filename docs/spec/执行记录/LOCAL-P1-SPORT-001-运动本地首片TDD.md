@@ -43,3 +43,11 @@
 - 最小实现：新增 `LocalStagingReadModel`；`AppState` 在离线本地加载后投影候选，并将本地 Inbox 确认/销毁路由到既有 `LocalRecordUseCase`；Inbox 隐藏本地候选不支持的远端重试、编辑和域重判入口。
 - 保护边界：不改变远端中转站、不增加 AI provider 适配、不修改 Cloud Sync、Outbox/Cursor/Conflict、AI Popup 或 Analysis 算法；候选仍排除在 `LocalFactReader` 正式事实之外。
 - 验证：macOS iOS workflow `35445897681` 已通过模拟器编译、完整 XCTest 和 iOS Build Gate；PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁全部通过。当前 H 代码未重新上传 TestFlight，真机验证仍未完成。
+
+## 后续切片：LOCAL-P1-SPORT-001-I
+
+- 目标行为：确认本地运动候选后，正式记录立即进入统一事实读取，保留原本地图片引用；中转行变为 `archived`、清空图片引用；详情继续显示 `ai_confirmed` 来源和域版本。
+- 红灯：`testLOCALP1SPORT001IConfirmedCandidateBecomesFormalFactWithImageAndSource` 固定正式记录 ID、来源、图片路径、图片文件存在、中转归档状态、统一事实引用和详情来源元数据。
+- 最小实现：本地确认后刷新对应月份的本地事实投影；`LocalRecordReadModel` 不再把所有通用本地记录伪装成 `manual`/`local-v1`，而是读取持久化来源与域版本。
+- 保护边界：不改变远端中转站、不扩展 AI provider、不修改 Cloud Sync、Outbox/Cursor/Conflict、AI Popup 或 Analysis 算法。
+- 验证：macOS iOS workflow `35450693810` 的模拟器编译、完整 XCTest 和 iOS Build Gate 已通过；PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁全部通过。TestFlight 与真机验证安排在本阶段固定后统一触发。
