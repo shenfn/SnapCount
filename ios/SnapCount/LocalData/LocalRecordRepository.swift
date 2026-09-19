@@ -203,7 +203,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         id, profile_id, domain_key, status, confidence, title, summary,
                         payload_json, record_date, record_time, image_path, image_hash,
                         source_kind, domain_version, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                 arguments: [
                     draft.id,
