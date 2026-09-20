@@ -88,5 +88,5 @@
 - 红灯：新增 `testLOCALP1SPORT001LLoggedOutInboxAndDetailReloadFromLocalData` 与 `testLOCALP1SPORT001LLocalExpenseDetailReloadsAfterLogoutWithoutSession`，固定本地 staging 投影、运动详情、本地消费详情和零远端 session 查询。
 - 最小实现：新增 `AppState.refreshInboxProjection()`；Inbox 主页面和分类页面的 task/refreshable 统一调用该入口；`AppState.loadRecordDetail()` 在远端回退前异步查询本地通用记录和消费。
 - 保护边界：不修改 Hosted AI、认证策略、置信度阈值、图片生命周期、Cloud Sync、Outbox/Cursor/Conflict、数据库迁移、Edge Function、AI Popup、Expression Planner 或跨域 Analysis。
-- 当前验证：`git diff --check` 通过；Windows 无 `xcodebuild` 和 Swift toolchain，尚未运行 XCTest。必须由 macOS GitHub Actions 验证编译与完整 XCTest，并重新触发新的 TestFlight 后再做真机回归。
+- 当前验证：`git diff --check` 通过；Windows 无 `xcodebuild` 和 Swift toolchain。macOS iOS workflow `35510609001` 的 simulator build、完整 XCTest 和 iOS Build Gate 已通过，Release Validation `35510608995` 也已通过。重新触发新的 TestFlight 后再做真机回归。
 - 尚未验证：退出登录后 Inbox 真实页面显示、staging 确认/销毁、运动/消费详情图片展示、App 重启、断网以及登录切换；旧 TestFlight build `35487465615` 不包含本片修复。

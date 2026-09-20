@@ -228,4 +228,4 @@ K 片完成了 J 片 `recognize_only` 的生产上线和生产 AI smoke，但把
 - `loadRecordDetail()` 在远端回退前查询本地通用记录和本地消费，避免退出登录后因内存缓存已清空而把本地事实误判为远端记录；
 - 未修改登录认证、AI 置信度阈值、图片生命周期、Cloud Sync、Outbox、数据库迁移、Edge Function 或 Planner/Analysis。
 
-新增 `LocalFirstLogoutProjectionTests`，场景覆盖 `LOCAL-P1-SPORT-001-L`：退出登录后本地 staging 重新出现在 Inbox；本地运动详情和本地消费详情在没有 session 的情况下直接从本地读取，且不触发远端 session 查询。当前 Windows 仅完成静态检查；`xcodebuild`/Swift 工具链不可用，macOS CI 和真机验证待进行。修复完成后需要从新的 CI 固定提交重新生成 TestFlight，不能继续把旧 build `35487465615` 当作包含本修复的版本。
+新增 `LocalFirstLogoutProjectionTests`，场景覆盖 `LOCAL-P1-SPORT-001-L`：退出登录后本地 staging 重新出现在 Inbox；本地运动详情和本地消费详情在没有 session 的情况下直接从本地读取，且不触发远端 session 查询。Windows 仍无 `xcodebuild`/Swift 工具链；macOS iOS workflow `35510609001` 的 simulator build、完整 XCTest 和 iOS Build Gate 已通过，Release Validation `35510608995` 也已通过。真机验证待进行；修复完成后需要从固定提交 `27ab2c4` 重新生成 TestFlight，不能继续把旧 build `35487465615` 当作包含本修复的版本。
