@@ -884,7 +884,8 @@ final class AppState: ObservableObject {
         )
     }
 
-    func refreshLocalRecognitionProjection(monthKey: String = Self.currentMonthKey) async {
+    func refreshLocalRecognitionProjection(monthKey requestedMonthKey: String? = nil) async {
+        let monthKey = requestedMonthKey ?? Self.currentMonthKey
         if localFactReader != nil {
             await readDeviceFactMonth(monthKey, force: true)
             if monthKey == Self.currentMonthKey, let month = localFactMonths[monthKey] {
