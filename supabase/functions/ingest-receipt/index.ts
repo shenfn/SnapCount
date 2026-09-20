@@ -5929,7 +5929,7 @@ Deno.serve(async (req) => {
       }
 
       // 既没有有效 JWT，也没有有效 upload_token，拒绝请求
-      if (!userId && !recognizeOnly) {
+      if (!userId) {
         return respondShortcut(
           { error: "缺少有效身份信息：请通过登录或 upload_token 认证" },
           { mode: responseMode, status: 401 }

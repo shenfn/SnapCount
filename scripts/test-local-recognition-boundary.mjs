@@ -21,6 +21,16 @@ test("LOCAL-P1-SPORT-001 J: recognize_only returns the provider-neutral candidat
   assert.match(recognizeOnlyBranch, /provider: \{ kind: "hosted_ai", name: aiProvider, model: aiModel \}/);
 });
 
+test("LOCAL-P1-SPORT-001 K-001: Hosted AI recognize_only keeps the existing authenticated boundary", () => {
+  const authStart = source.indexOf("// 既没有有效 JWT，也没有有效 upload_token，拒绝请求");
+  const authEnd = source.indexOf("if (userId) {", authStart);
+  assert.notEqual(authStart, -1);
+  assert.notEqual(authEnd, -1);
+  const authBlock = source.slice(authStart, authEnd);
+  assert.match(authBlock, /if \(!userId\) \{/);
+  assert.doesNotMatch(authBlock, /!recognizeOnly/);
+});
+
 test("LOCAL-P1-SPORT-001 J: recognize_only has no cloud business fact or source-image write", () => {
   assert.doesNotMatch(recognizeOnlyBranch, /\.storage\.from\([^)]*\)\s*\.upload/);
   assert.doesNotMatch(recognizeOnlyBranch, /\.from\("(?:transactions|income_records|data_records|staging_records)"\)/);
