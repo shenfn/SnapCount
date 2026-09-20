@@ -178,6 +178,8 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             domainKey: candidate.domainKey,
             status: .pendingReview,
             confidence: candidate.confidence,
+            evidenceFields: candidate.evidenceFields,
+            missingFields: candidate.missingFields,
             title: candidate.title.trimmingCharacters(in: .whitespacesAndNewlines),
             summary: candidate.summary,
             payloadJSON: payloadJSON,
@@ -185,8 +187,6 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             recordTime: candidate.recordTime,
             imagePath: imageReference?.path,
             imageHash: imageReference?.hash,
-            evidenceFields: candidate.evidenceFields,
-            missingFields: candidate.missingFields,
             createdAt: candidate.createdAt,
             sourceKind: .aiCandidate,
             domainVersion: 1

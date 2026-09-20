@@ -186,6 +186,52 @@ struct LocalStagingRecord: Equatable {
     let resolvedAt: Date?
     let createdAt: Date
     let updatedAt: Date
+
+    init(
+        id: String,
+        profileID: UUID,
+        domainKey: String,
+        status: LocalStagingRecordStatus,
+        confidence: Double?,
+        evidenceFields: [String] = [],
+        missingFields: [String] = [],
+        title: String,
+        summary: String,
+        payloadJSON: String,
+        recordDate: String,
+        recordTime: String?,
+        imagePath: String?,
+        imageHash: String?,
+        sourceKind: LocalRecordSourceKind,
+        domainVersion: Int,
+        targetRecordID: UUID?,
+        resolvedAction: String?,
+        resolvedAt: Date?,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.profileID = profileID
+        self.domainKey = domainKey
+        self.status = status
+        self.confidence = confidence
+        self.evidenceFields = evidenceFields
+        self.missingFields = missingFields
+        self.title = title
+        self.summary = summary
+        self.payloadJSON = payloadJSON
+        self.recordDate = recordDate
+        self.recordTime = recordTime
+        self.imagePath = imagePath
+        self.imageHash = imageHash
+        self.sourceKind = sourceKind
+        self.domainVersion = domainVersion
+        self.targetRecordID = targetRecordID
+        self.resolvedAction = resolvedAction
+        self.resolvedAt = resolvedAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 }
 
 struct LocalRecordCandidate {
@@ -202,6 +248,36 @@ struct LocalRecordCandidate {
     let imageReference: LocalImageReference? = nil
     let evidenceFields: [String] = []
     let missingFields: [String] = []
+
+    init(
+        id: String,
+        domainKey: String,
+        title: String,
+        summary: String,
+        payload: [String: AnyCodable],
+        confidence: Double?,
+        recordDate: String,
+        recordTime: String?,
+        imageData: Data?,
+        createdAt: Date,
+        imageReference: LocalImageReference? = nil,
+        evidenceFields: [String] = [],
+        missingFields: [String] = []
+    ) {
+        self.id = id
+        self.domainKey = domainKey
+        self.title = title
+        self.summary = summary
+        self.payload = payload
+        self.confidence = confidence
+        self.recordDate = recordDate
+        self.recordTime = recordTime
+        self.imageData = imageData
+        self.createdAt = createdAt
+        self.imageReference = imageReference
+        self.evidenceFields = evidenceFields
+        self.missingFields = missingFields
+    }
 }
 
 struct LocalStagingDraft: Equatable {
