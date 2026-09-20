@@ -202,3 +202,17 @@ macOS iOS workflow `35431410842` 已通过：应用编译、完整 XCTest、iOS 
 J 片提交为 `3c78b1e`、`37d010a`、`2db3640`、`77758ca`、`3731121`，分支为 `codex/local-first-phase1-fact-reader`，PR 为 [#199](https://github.com/shenfn/SnapCount/pull/199)。本地 `npm run test:local-recognition-boundary` 4/4、`npm run build`、`git diff --check` 均通过；macOS iOS workflow `35480060158` 的 simulator build、完整 XCTest（306 tests，0 failures）和 iOS Build Gate 全部通过。未执行生产迁移、Edge Function 部署或 TestFlight 上传。
 
 J 片尚未验证真实 Hosted AI 网络样本、真机相机/相册/快捷指令权限与后台生命周期、重启后的图片展示、登录/未登录实际操作及旧域回退行为。下一次 TestFlight 需要固定验证：支持域在登录和未登录两态都只在本地生成正式事实；低置信度和字段缺失只进本地 Inbox；重试不重复；App 重启后 Today/Records/Inbox 与图片仍在；并通过 Supabase 侧核对 recognize-only 请求没有新增业务记录。
+
+## 18. K 片：recognize_only 上线与真实 AI 链路验收
+
+K 片完成了 J 片 `recognize_only` 的生产上线和生产 AI smoke，但把“生产候选边界已证明”和“真机本地事实链路已证明”明确区分。
+
+- 生产部署前 version `198` 的 `ingest-receipt` 源码与 `ab6ed3f` 完全一致，尚未包含 `recognize_only`；其余 `generate-insights` version `26` 未变。
+- J 片曾让无 JWT / `upload_token` 的 `recognize_only` 请求绕过认证。K 片先以 `LOCAL-P1-SPORT-001-K-001` 固定红灯，再在 `21644b5` 恢复既有 Hosted AI 认证边界：函数内部必须有 JWT 或 `upload_token`，没有开放匿名 Hosted AI；`verify_jwt=false` 配置保持原样。BYOK 本片未实现或验证。
+- 生产仅部署 `ingest-receipt` version `199`（`2026-09-20T03:38:04Z`，`ezbr_sha256=c813a222797d61b0e380e17bf923b3afd6cfffcfe3bc748799acceb501151af4`），未执行数据库迁移、未修改 Cloud Sync、未部署其他 Edge Function。回滚点是 version `198` / `ab6ed3f`，从该提交重新部署同一函数即可回滚。
+- 生产无认证 smoke 返回 `401`。使用 `docs/cases/cycling.jpg` 的认证 smoke 返回 `200` Provider-neutral candidate：`domain_key=sport`、`confidence=1`、`missing_fields=[]`，证据字段和 payload 完整。
+- 该认证 smoke 前后针对测试账号的云端计数保持不变：`transactions 72→72`、`data_records 17→17`、`staging_records 31→31`、`ai_recognition_logs 70→70`；`receipt-images/recognize-only/910e13cf2c96` 对象数 `0→0`。1×1 PNG 的 AI 失败请求返回 `502 AI_PROVIDER_ERROR`，同样没有业务写入。
+- PR #199 Release Validation `35486659827`、macOS iOS workflow `35486659801` 均通过；完整 XCTest 为 306 tests、0 failures。TestFlight workflow `35487465615` 从固定提交 `21644b595c264d9daff7eb6d008350cc6de0e9ad` 触发，IPA build number 为 `35487465615`，上传成功并生成 `SnapCount-ipa` artifact。
+- 代码审计和 smoke 均支持：Hosted AI 只返回候选、域、置信度、证据、hash 和 provider metadata，不进入云端业务事实存储；旧 `ingest` 默认路径和认证策略未被改写。
+- K 片当前停点：生产 Edge 的真实 AI 候选和零云端业务写入已经证明；TestFlight 真机相机/相册/快捷指令、置信度高低路由、Inbox 确认、重启、断网、登录/退出登录与本地图片展示仍待用户在 iPhone 上验证。未完成真机清单前，不将完整“真实 AI → 本地自动归档/staging → 本地正式事实”宣称为已闭环，也不开始饮食、睡眠、阅读扩展。
+- 真机验收应使用 build `35487465615`：登录后分别测试相册、相机、快捷指令；高置信度完整运动候选检查 Today/Records，低置信度或缺字段检查 Inbox；再测同图重试、Inbox 确认、重启、断网编辑删除、登录/退出登录切换，并用同一生产测试时间窗口复核三张业务表和 Storage 无对应新增。

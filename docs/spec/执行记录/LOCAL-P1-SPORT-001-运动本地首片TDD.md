@@ -64,3 +64,19 @@
 - 实现提交：`3c78b1e`（J 片主体）、`37d010a`、`2db3640`、`77758ca`、`3731121`（编译与测试修复）；分支 `codex/local-first-phase1-fact-reader`。
 - 验证结果：`npm run test:local-recognition-boundary` 通过 4/4；`npm run build` 通过；`git diff --check` 通过；macOS iOS workflow `35480060158` 的 simulator build、完整 XCTest（306 tests，0 failures）和 iOS Build Gate 全部通过。Windows 无 Swift/Xcode toolchain；未执行生产迁移、Edge Function 部署或 TestFlight 上传。
 - 未验证：真实 Hosted AI 网络请求的线上返回样本、相机/相册/快捷指令在真机上的权限与后台生命周期、重启后的实机图片展示、登录/未登录两态实际操作、旧域兼容回退是否符合产品预期；下一次 TestFlight 应专门验证这些链路，并确认支持域不出现云端业务写入。
+
+## K 片：recognize_only 上线与真实 AI 链路验收
+
+- 目标行为：将 J 片的 `recognize_only` Edge Function 部署到生产，并从同一固定提交触发 TestFlight；Hosted AI 只返回 Provider-neutral 候选，正式事实和 staging 继续由 iOS 本地生命周期保存。
+- 继承口径：沿用现有置信度阈值和“高置信度且字段完整直接视为确认/自动归档”的语义；不修改 Planner、Cloud Sync、数据库迁移、同步协议或认证策略。
+- 发布前核查：生产 `ingest-receipt` version `198` 的源码与提交 `ab6ed3f` 完全一致；该版本没有 `recognize_only`。生产函数 `verify_jwt=false` 配置保持不变，函数内部继续要求有效 JWT 或 `upload_token`。发现 J 片曾对无身份 `recognize_only` 放行后，先新增 `LOCAL-P1-SPORT-001-K-001` 红灯契约，再以 `21644b5` 恢复既有认证边界；没有开放匿名 Hosted AI。BYOK 未在本片实现或验证。
+- 最小修正：`supabase/functions/ingest-receipt/index.ts` 仅把无有效身份的拒绝条件恢复为所有图片操作一致的 `401`；`scripts/test-local-recognition-boundary.mjs` 新增认证边界断言。旧 `ingest` 默认行为未改变。
+- CI：PR #199 的 Release Validation `35486659827` 通过；macOS iOS workflow `35486659801` 通过模拟器编译、完整 XCTest（306 tests，0 failures）和 iOS Build Gate。
+- 生产部署：仅部署 `ingest-receipt`，未部署 `generate-insights`，未执行数据库迁移，未启用或修改 Cloud Sync。生产 version 从 `198` 升为 `199`，部署时间为 `2026-09-20T03:38:04Z`，`ezbr_sha256=c813a222797d61b0e380e17bf923b3afd6cfffcfe3bc748799acceb501151af4`；`generate-insights` 仍为 version `26`。回滚点为生产 version `198` / 提交 `ab6ed3f`，回滚方式是从该提交重新部署同一个 `ingest-receipt` 函数。
+- 生产 smoke：无 JWT / `upload_token` 的 `recognize_only` 返回 `401`；使用本地非用户素材 `docs/cases/cycling.jpg` 和活跃 `upload_token` 请求返回 `200`、`schema_version=local-recognition-candidate-v1`、`domain_key=sport`、`confidence=1`、`missing_fields=[]`，并返回结构化 payload、evidence 和 Hosted provider metadata。
+- 零业务写入：请求前后针对测试账号的 `transactions`、`data_records`、`staging_records`、`ai_recognition_logs` 计数分别保持 `72→72`、`17→17`、`31→31`、`70→70`；`receipt-images/recognize-only/910e13cf2c96` 前缀对象数保持 `0→0`。1×1 PNG 的失败 smoke 返回 `502 AI_PROVIDER_ERROR`，没有云端业务写入。
+- 日志核查：`recognize_only` 分支在旧 Storage、业务表插入和 `writeTraceAiLog` 之前返回；该分支只返回候选、域、置信度、证据、图片 hash 和 provider metadata。生产 smoke 未发现 API key、完整图片内容或不必要个人业务数据落入响应/计数表。
+- TestFlight：workflow `35487465615` 从分支 `codex/local-first-phase1-fact-reader` 的固定提交 `21644b595c264d9daff7eb6d008350cc6de0e9ad` 触发；IPA build number 为 `35487465615`，App Store Connect 日志为 `UPLOAD SUCCEEDED with no errors`，`SnapCount-ipa` artifact 已生成。
+- 已证明：生产 Hosted AI 的“认证 → 真实图片识别 → Provider-neutral 候选 → 不创建云端业务事实”链路成立；J 片本地 use case 的自动归档/staging、图片保存、重试幂等和 Today/Records/Inbox 投影由 XCTest 覆盖。
+- 尚未证明：本轮没有可自动控制的真实 iPhone，因此 TestFlight 上相机、相册、快捷指令、置信度路由、Inbox 确认、重启、断网、登录/退出登录和本地图片展示尚未取得真机证据。生产 smoke 证明的是 Edge/AI 边界，不等同于完整“真实 AI → iOS 本地正式事实/staging”真机验收。
+- 下一步真机验收：安装 build `35487465615`，登录后分别从相册、相机、快捷指令识别运动图片；确认高置信度完整候选只出现在本地 Today/Records，低置信度或缺字段只进本地 Inbox；重复提交同图、Inbox 确认、App 重启、断网查看编辑删除、登录/退出登录切换后再次检查本地事实和图片，并用生产账号时间窗口复核四张云端表及 Storage 无对应新增。在该清单完成前，不扩展饮食、睡眠、阅读。
