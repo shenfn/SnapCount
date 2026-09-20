@@ -170,8 +170,8 @@ struct LocalStagingRecord: Equatable {
     let domainKey: String
     let status: LocalStagingRecordStatus
     let confidence: Double?
-    let evidenceFields: [String] = []
-    let missingFields: [String] = []
+    let evidenceFields: [String]
+    let missingFields: [String]
     let title: String
     let summary: String
     let payloadJSON: String
@@ -245,9 +245,9 @@ struct LocalRecordCandidate {
     let recordTime: String?
     let imageData: Data?
     let createdAt: Date
-    let imageReference: LocalImageReference? = nil
-    let evidenceFields: [String] = []
-    let missingFields: [String] = []
+    let imageReference: LocalImageReference?
+    let evidenceFields: [String]
+    let missingFields: [String]
 
     init(
         id: String,
