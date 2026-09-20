@@ -51,3 +51,16 @@
 - 最小实现：本地确认后刷新对应月份的本地事实投影；`LocalRecordReadModel` 不再把所有通用本地记录伪装成 `manual`/`local-v1`，而是读取持久化来源与域版本。
 - 保护边界：不改变远端中转站、不扩展 AI provider、不修改 Cloud Sync、Outbox/Cursor/Conflict、AI Popup 或 Analysis 算法。
 - 验证：macOS iOS workflow `35450693810` 的模拟器编译、完整 XCTest 和 iOS Build Gate 已通过；PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁全部通过。随后从固定提交 `cf6b2e9` 触发 TestFlight workflow `35451820461`，IPA build number 为 `35451820461`，App Store Connect 上传成功，IPA artifact `SnapCount-ipa` 已生成；Apple 处理完成和真机验证待进行。
+
+## 当前切片：LOCAL-P1-SPORT-001-J
+
+- 目标行为：把 Today 的选择图片/拍照、相册入口和快捷输入接入本地图片生命周期；图片先保存到本地 `intake/`，再调用 Hosted AI 的 `operation=recognize_only`；结构化候选使用 Provider-neutral envelope 返回 iOS，由既有 `LocalRecordUseCase.ingest()` 沿用现有阈值与事实完整性口径路由。高置信度且字段完整直接作为已确认的本地正式事实，低置信度或关键字段缺失进入本地 staging；Today、Records、Inbox 在完成后刷新，重启后由本地数据库和图片目录恢复。
+- 产品口径：沿用既有规则，不改变“高置信度且完整即直接确认/自动归档”的语义；AI Provider 不拥有存储决策，Hosted AI 返回值不是云端业务事实，用户确认后的本地修改仍优先于 AI 原始候选。Phase 1 不扩展 Cloud Sync、Outbox、冲突协议、AI Popup、Expression Planner 或跨域 Analysis。
+- 风险核查结论：旧 `ingest-receipt` 默认 `ingest` 分支会写 Storage，并插入 `transactions`、`income_records`、`data_records`、`staging_records`，还可能写 `ai_recognition_logs`，不能直接作为本地识别接口。J 片新增显式 `operation=recognize_only` 分支：只读取必要的域/Provider 配置并调用既有 Prompt、字段映射和置信度语义，不上传源图到云端 Storage，不创建云端正式记录或云端 staging，不写 AI trace；旧调用未带 operation 时仍保持 legacy ingest 行为。
+- 真实入口：Today 的相册/拍照上传路径和 `UploadScreenshotIntent` 均先走本地 Hosted AI 识别；支持本地通用记录域的候选由本地 use case 保存。对当前 LocalRecordValidation 不支持的旧域，登录态保留旧 Hosted ingest 兼容回退，因此这些旧域仍可能产生云端业务记录；这不是 J 片本地运动/通用记录路径的保存方式，后续应按域收敛而不是扩大 J 片范围。
+- 图片生命周期：AI 请求前先写入本地 `intake/`；成功后由 `LocalRecordUseCase` 移动到 `records/` 或 `staging/`，失败时清理 intake，图片保存失败时不会创建数据库候选。正式记录保存本地图片引用，staging 保存本地图片引用；重试使用图片 hash 派生的候选/记录 ID 幂等，避免重复正式事实。
+- Provider 边界：新增 `LocalImageRecognitionProvider` 与 `LocalRecognitionCandidate`；Hosted AI 仅负责把 `local-recognition-candidate-v1` 解码为中立候选，后续 BYOK 可复用同一候选结构，不把 Hosted AI 响应字段直接固化为唯一业务模型。
+- 红灯/测试覆盖：新增 `LocalImageRecognitionTests` 覆盖高置信度完整运动直接正式归档、低置信度 staging、高置信度缺关键字段 staging、图片保存失败无半成品、AI 请求失败清理 intake、相同图片重试幂等；新增 `test:local-recognition-boundary` 静态契约测试覆盖显式 recognize-only、Provider-neutral envelope、无云端业务/源图写入和 legacy ingest 默认行为。H/I 片既有 XCTest 继续覆盖本地 Inbox/Today/Records 投影、确认/删除和重启恢复；完整回归共 306 tests。
+- 实现提交：`3c78b1e`（J 片主体）、`37d010a`、`2db3640`、`77758ca`、`3731121`（编译与测试修复）；分支 `codex/local-first-phase1-fact-reader`。
+- 验证结果：`npm run test:local-recognition-boundary` 通过 4/4；`npm run build` 通过；`git diff --check` 通过；macOS iOS workflow `35480060158` 的 simulator build、完整 XCTest（306 tests，0 failures）和 iOS Build Gate 全部通过。Windows 无 Swift/Xcode toolchain；未执行生产迁移、Edge Function 部署或 TestFlight 上传。
+- 未验证：真实 Hosted AI 网络请求的线上返回样本、相机/相册/快捷指令在真机上的权限与后台生命周期、重启后的实机图片展示、登录/未登录两态实际操作、旧域兼容回退是否符合产品预期；下一次 TestFlight 应专门验证这些链路，并确认支持域不出现云端业务写入。

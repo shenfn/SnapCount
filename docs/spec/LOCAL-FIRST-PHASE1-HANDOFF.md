@@ -190,3 +190,15 @@ macOS iOS workflow `35431410842` 已通过：应用编译、完整 XCTest、iOS 
 `LOCAL-P1-SPORT-001-I` 补齐 H 片确认后的正式事实可见性：确认候选后，正式记录保留原本地图片引用，中转记录清空图片引用并保留 `archived` 关系；统一事实读取器可读取 `data/<uuid>`，详情读模型保留 `ai_confirmed` 和域版本元数据。`AppState` 在本地确认后刷新对应月份投影，确保 Today/Records 不需要重启即可看到新事实。
 
 实现提交为 `80ff1a4`，macOS iOS workflow `35450693810` 已通过模拟器编译、完整 XCTest 和 iOS Build Gate；截至本记录，PR #199 的 PWA/Edge、治理、Vercel、Cloudflare 门禁也全部通过。随后从文档已固定的提交 `cf6b2e9` 触发 TestFlight workflow `35451820461`，实际 IPA build number 为 `35451820461`，App Store Connect 上传成功，IPA artifact `SnapCount-ipa` 已生成。当前仍需等待 Apple 处理完成后在 TestFlight 中出现，再进行真机验收。
+
+## 17. J 片：真实图片输入与 Hosted AI 识别接入本地生命周期
+
+`LOCAL-P1-SPORT-001-J` 已完成代码实现。Today 的相册/拍照入口和 `UploadScreenshotIntent` 现在先把图片交给本地 `LocalImageRecognitionUseCase`：先写入本地 `intake/`，再调用 Hosted AI 的显式 `operation=recognize_only`，返回 Provider-neutral 的 `local-recognition-candidate-v1` 候选。候选不直接成为云端业务事实，而是交由既有 `LocalRecordUseCase.ingest()` 沿用原阈值与字段完整性规则：高置信度且完整直接视为确认并写入本地正式记录，低置信度或缺关键字段写入本地 staging；完成后刷新 Today/Records/Inbox，数据库和图片目录可在 App 重启后恢复。
+
+本片首先核实了旧 `ingest-receipt` 的边界：默认 `ingest` 会写 Storage，并写入 `transactions`、`income_records`、`data_records`、`staging_records`，还可能写 `ai_recognition_logs`，因此没有把它直接当成本地识别接口。新增的 `recognize_only` 分支只做必要的配置/域读取和 AI 识别，不上传源图到云端 Storage，不创建云端正式记录或云端 staging，不写 AI trace；未显式传 operation 的旧调用仍保持原有 ingest 行为。对 LocalRecordValidation 当前不支持的旧域，登录态仍保留旧 Hosted ingest 兼容回退，故 J 片完成不等于所有历史域都已本地化。
+
+图片保存失败不会留下只有数据库的候选；AI 请求失败按既有本地图片生命周期清理 intake；成功候选按结果移动到 `records/` 或 `staging/`。候选和正式记录 ID 由图片 hash 派生，重试不会生成重复正式事实。新增 `LocalImageRecognitionProvider` / `LocalRecognitionCandidate` 保留 BYOK 复用边界，Hosted AI 返回结构不成为唯一 Provider 模型。J 片不修改 Cloud Sync、Outbox、Cursor、冲突协议、AI Popup、Expression Planner 或跨域 Analysis。
+
+J 片提交为 `3c78b1e`、`37d010a`、`2db3640`、`77758ca`、`3731121`，分支为 `codex/local-first-phase1-fact-reader`，PR 为 [#199](https://github.com/shenfn/SnapCount/pull/199)。本地 `npm run test:local-recognition-boundary` 4/4、`npm run build`、`git diff --check` 均通过；macOS iOS workflow `35480060158` 的 simulator build、完整 XCTest（306 tests，0 failures）和 iOS Build Gate 全部通过。未执行生产迁移、Edge Function 部署或 TestFlight 上传。
+
+J 片尚未验证真实 Hosted AI 网络样本、真机相机/相册/快捷指令权限与后台生命周期、重启后的图片展示、登录/未登录实际操作及旧域回退行为。下一次 TestFlight 需要固定验证：支持域在登录和未登录两态都只在本地生成正式事实；低置信度和字段缺失只进本地 Inbox；重试不重复；App 重启后 Today/Records/Inbox 与图片仍在；并通过 Supabase 侧核对 recognize-only 请求没有新增业务记录。
