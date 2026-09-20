@@ -216,3 +216,16 @@ K 片完成了 J 片 `recognize_only` 的生产上线和生产 AI smoke，但把
 - 代码审计和 smoke 均支持：Hosted AI 只返回候选、域、置信度、证据、hash 和 provider metadata，不进入云端业务事实存储；旧 `ingest` 默认路径和认证策略未被改写。
 - K 片当前停点：生产 Edge 的真实 AI 候选和零云端业务写入已经证明；TestFlight 真机相机/相册/快捷指令、置信度高低路由、Inbox 确认、重启、断网、登录/退出登录与本地图片展示仍待用户在 iPhone 上验证。未完成真机清单前，不将完整“真实 AI → 本地自动归档/staging → 本地正式事实”宣称为已闭环，也不开始饮食、睡眠、阅读扩展。
 - 真机验收应使用 build `35487465615`：登录后分别测试相册、相机、快捷指令；高置信度完整运动候选检查 Today/Records，低置信度或缺字段检查 Inbox；再测同图重试、Inbox 确认、重启、断网编辑删除、登录/退出登录切换，并用同一生产测试时间窗口复核三张业务表和 Storage 无对应新增。
+
+## 19. L 片：退出登录后的本地 Inbox 与详情投影恢复
+
+用户真机验收发现：退出登录后选择相册会正确回到本地手动录入，但本地中转站显示为空，部分记录详情疑似回退到需要登录的远端路径。只读核查确认本地 staging 没有被删除；`resetUserScopedState()` 清空了内存 dashboard，而 Inbox 的 `.task` 只加载远端 repayment 候选，没有重新调用本地 staging 投影。这是本地读取缺口，不是产品规则，也不改变 Hosted AI 认证边界。
+
+`LOCAL-P1-SPORT-001-L` 的最小修复为：
+
+- `AppState.refreshInboxProjection()` 在未登录时重建本地正式事实与 staging 投影，登录时继续只加载既有远端 repayment 候选；
+- Inbox 主页面、分类页面和下拉刷新统一使用该入口，未登录刷新不再请求远端 dashboard；
+- `loadRecordDetail()` 在远端回退前查询本地通用记录和本地消费，避免退出登录后因内存缓存已清空而把本地事实误判为远端记录；
+- 未修改登录认证、AI 置信度阈值、图片生命周期、Cloud Sync、Outbox、数据库迁移、Edge Function 或 Planner/Analysis。
+
+新增 `LocalFirstLogoutProjectionTests`，场景覆盖 `LOCAL-P1-SPORT-001-L`：退出登录后本地 staging 重新出现在 Inbox；本地运动详情和本地消费详情在没有 session 的情况下直接从本地读取，且不触发远端 session 查询。当前 Windows 仅完成静态检查；`xcodebuild`/Swift 工具链不可用，macOS CI 和真机验证待进行。修复完成后需要从新的 CI 固定提交重新生成 TestFlight，不能继续把旧 build `35487465615` 当作包含本修复的版本。

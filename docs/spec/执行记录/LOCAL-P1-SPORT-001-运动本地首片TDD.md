@@ -80,3 +80,13 @@
 - 已证明：生产 Hosted AI 的“认证 → 真实图片识别 → Provider-neutral 候选 → 不创建云端业务事实”链路成立；J 片本地 use case 的自动归档/staging、图片保存、重试幂等和 Today/Records/Inbox 投影由 XCTest 覆盖。
 - 尚未证明：本轮没有可自动控制的真实 iPhone，因此 TestFlight 上相机、相册、快捷指令、置信度路由、Inbox 确认、重启、断网、登录/退出登录和本地图片展示尚未取得真机证据。生产 smoke 证明的是 Edge/AI 边界，不等同于完整“真实 AI → iOS 本地正式事实/staging”真机验收。
 - 下一步真机验收：安装 build `35487465615`，登录后分别从相册、相机、快捷指令识别运动图片；确认高置信度完整候选只出现在本地 Today/Records，低置信度或缺字段只进本地 Inbox；重复提交同图、Inbox 确认、App 重启、断网查看编辑删除、登录/退出登录切换后再次检查本地事实和图片，并用生产账号时间窗口复核四张云端表及 Storage 无对应新增。在该清单完成前，不扩展饮食、睡眠、阅读。
+
+## L 片：退出登录后的本地 Inbox 与详情投影恢复
+
+- 问题证据：退出登录会通过 `resetUserScopedState()` 清空内存 dashboard；本地 staging 数据仍保存在设备数据库，但 Inbox 页面原先只调用 `loadInboxRepaymentCandidates()`，未重新加载本地 staging 投影，因此退出登录后显示空中转站。详情路由在本地缓存被清空时也可能把 `data/<uuid>` 或 `expense/<uuid>` 误判为远端记录。
+- 目标行为：未登录时 Inbox 仍展示和操作本地 staging；本地正式运动/消费详情优先从本地数据库读取，不因缺少 session 隐藏本地事实；登录时保持现有远端 repayment 和远端记录兼容行为。
+- 红灯：新增 `testLOCALP1SPORT001LLoggedOutInboxAndDetailReloadFromLocalData` 与 `testLOCALP1SPORT001LLocalExpenseDetailReloadsAfterLogoutWithoutSession`，固定本地 staging 投影、运动详情、本地消费详情和零远端 session 查询。
+- 最小实现：新增 `AppState.refreshInboxProjection()`；Inbox 主页面和分类页面的 task/refreshable 统一调用该入口；`AppState.loadRecordDetail()` 在远端回退前异步查询本地通用记录和消费。
+- 保护边界：不修改 Hosted AI、认证策略、置信度阈值、图片生命周期、Cloud Sync、Outbox/Cursor/Conflict、数据库迁移、Edge Function、AI Popup、Expression Planner 或跨域 Analysis。
+- 当前验证：`git diff --check` 通过；Windows 无 `xcodebuild` 和 Swift toolchain，尚未运行 XCTest。必须由 macOS GitHub Actions 验证编译与完整 XCTest，并重新触发新的 TestFlight 后再做真机回归。
+- 尚未验证：退出登录后 Inbox 真实页面显示、staging 确认/销毁、运动/消费详情图片展示、App 重启、断网以及登录切换；旧 TestFlight build `35487465615` 不包含本片修复。

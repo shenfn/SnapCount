@@ -902,6 +902,16 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Rebuilds the Inbox from the authoritative local projection when no
+    /// cloud session is available. Remote repayment candidates remain
+    /// session-scoped and are intentionally loaded only when signed in.
+    func refreshInboxProjection() async {
+        if !isSignedIn {
+            await refreshLocalRecognitionProjection()
+        }
+        await loadInboxRepaymentCandidates()
+    }
+
     private func readDeviceFactMonth(_ monthKey: String, force: Bool) async {
         guard let localFactReader else { return }
         guard force || localFactMonths[monthKey] == nil else { return }
@@ -2846,7 +2856,39 @@ final class AppState: ObservableObject {
             await loadLocalDomainDetail(reference: reference, force: force, generation: generation)
             return
         }
+        if parsedReference.kind == "data", await hasLocalDomainRecord(reference: reference) {
+            await loadLocalDomainDetail(reference: reference, force: force, generation: generation)
+            return
+        }
+        if parsedReference.kind == "expense", await hasLocalExpense(reference: reference) {
+            await loadLocalExpenseDetail(reference: reference, force: force, generation: generation)
+            return
+        }
         await loadRemoteRecordDetail(reference: canonicalReference, force: force, generation: generation)
+    }
+
+    private func hasLocalDomainRecord(reference: String) async -> Bool {
+        guard let localRecordUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
+            return false
+        }
+        do {
+            return try await localRecordUseCase.record(id: id) != nil
+        } catch {
+            return false
+        }
+    }
+
+    private func hasLocalExpense(reference: String) async -> Bool {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
+            return false
+        }
+        do {
+            return try await localExpenseUseCase.expense(id: id) != nil
+        } catch {
+            return false
+        }
     }
 
     private func isLocalExpenseReference(_ reference: String) -> Bool {

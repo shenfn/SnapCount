@@ -94,8 +94,10 @@ struct InboxView: View {
                 .padding(.bottom, 84)
             }
             .refreshable {
-                await appState.refreshDashboard()
-                await appState.loadInboxRepaymentCandidates()
+                if appState.isSignedIn {
+                    await appState.refreshDashboard()
+                }
+                await appState.refreshInboxProjection()
             }
         }
         .navigationTitle("收件箱")
@@ -144,7 +146,7 @@ struct InboxView: View {
         .onChange(of: scope) { _, _ in
             if (filterCounts[filter] ?? 0) == 0 { filter = .all }
         }
-        .task { await appState.loadInboxRepaymentCandidates() }
+        .task { await appState.refreshInboxProjection() }
     }
 
     private var pendingSummary: some View {
@@ -525,8 +527,10 @@ private struct InboxCategoryView: View {
                 .padding(.bottom, 84)
             }
             .refreshable {
-                await appState.refreshDashboard()
-                await appState.loadInboxRepaymentCandidates()
+                if appState.isSignedIn {
+                    await appState.refreshDashboard()
+                }
+                await appState.refreshInboxProjection()
             }
         }
         .navigationTitle(filter.galleryTitle)
@@ -576,7 +580,7 @@ private struct InboxCategoryView: View {
                 .environmentObject(appState)
             }
         }
-        .task { await appState.loadInboxRepaymentCandidates() }
+        .task { await appState.refreshInboxProjection() }
     }
 
     private var categoryHeader: some View {
