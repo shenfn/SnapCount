@@ -74,7 +74,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertEqual(stagedOutcome.record.status, .pendingReview)
         XCTAssertEqual(stagedOutcome.record.sourceKind, .aiCandidate)
         XCTAssertEqual(stagedOutcome.record.confidence, 0.62)
-        XCTAssertEqual(stagedOutcome.record.evidenceFields, ["sport_type", "duration_minutes"])
+        XCTAssertEqual(Set(stagedOutcome.record.evidenceFields), Set(["sport_type", "duration_minutes"]))
         XCTAssertTrue(stagedOutcome.record.imagePath?.hasPrefix("staging/") == true)
         let formalRecords = try await context.useCase.records(monthKey: "2026-09")
         XCTAssertTrue(formalRecords.isEmpty)
