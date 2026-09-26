@@ -189,7 +189,6 @@ const RECORD_FIXTURES = {
   'exp-lunch': {
     kind: 'expense',
     domainLabel: '消费',
-    domainBadge: 'badge',
     amount: '-¥28.00',
     amountClass: 'is-expense',
     title: '午餐 · 巷口食堂',
@@ -442,9 +441,11 @@ function renderRecordDetail(id) {
   const basic = rec.basic
     .map(([label, value, badge]) => {
       if (badge) {
+        const tone =
+          badge === 'badge-warning' ? 'jz-badge--gold' : badge === 'badge-success' ? '' : '';
         return `<div class="record-detail-field">
           <span class="field-label">${label}</span>
-          <span class="field-value"><span class="badge ${badge === 'badge' ? '' : badge}">${value}</span></span>
+          <span class="field-value"><span class="jz-badge ${tone}">${value}</span></span>
         </div>`;
       }
       return fieldRow(label, value);
@@ -472,7 +473,7 @@ function renderRecordDetail(id) {
   let dishes = '';
   if (rec.dishes?.length) {
     dishes = `<div class="record-detail-section">
-      <div class="record-detail-section-title">菜品明细 <span class="badge badge-warning">估算值</span></div>
+      <div class="record-detail-section-title">菜品明细 <span class="jz-badge jz-badge--gold">估算值</span></div>
       ${rec.dishes
         .map(
           (d) => `<div class="record-detail-field stacked food-dish-field">

@@ -38,7 +38,6 @@ prototype/
   shared/css/tokens.css           # 从 dist 拷贝的自包含 token（预览不依赖上级路径）
   shared/css/ios-shell.css        # 设备框、页面背景、TabBar、字体角色 + 变量兜底
   shared/css/ios-components.css   # DesignSystem 组件 class
-  shared/css/prototype.css        # 工作台补充
   shared/js/app.js                # 路由、九主题切换、日期、首页交互
 ```
 

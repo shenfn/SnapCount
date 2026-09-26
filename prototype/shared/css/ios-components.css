@@ -557,20 +557,7 @@
   background: color-mix(in srgb, var(--jiezi-color-coral) 10%, transparent);
 }
 
-/* ========== 财务 Hero 卡（示意） ========== */
-
-.finance-hero {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.finance-hero-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
+/* ========== 财务 Hero 字型（分析页数值展示） ========== */
 
 .finance-hero-value {
   font: var(--ios-type-money-hero);
@@ -1529,27 +1516,6 @@
 .record-detail-btn.danger {
   color: var(--jiezi-color-coral);
   background: color-mix(in srgb, var(--jiezi-color-coral) 10%, transparent);
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 8px;
-  border-radius: var(--jiezi-radius-pill);
-  font: 600 12px/1 var(--jiezi-font-family-sans);
-  color: var(--jiezi-color-brand);
-  background: var(--jiezi-color-brand-alpha-8);
-}
-
-.badge-warning {
-  color: color-mix(in srgb, var(--jiezi-color-light) 40%, var(--jiezi-color-ink));
-  background: color-mix(in srgb, var(--jiezi-color-light) 16%, transparent);
-}
-
-.badge-success {
-  color: var(--jiezi-color-brand);
-  background: var(--jiezi-color-brand-alpha-8);
 }
 
 .jz-row-value.is-income { color: var(--jiezi-color-brand); }
