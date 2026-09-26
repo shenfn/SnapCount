@@ -374,11 +374,6 @@ enum LocalRecordIntakeRouter {
         "reading": 0.75
     ]
 
-    static func route(confidence: Double?) -> LocalRecordIntakeRoute {
-        guard let confidence, confidence >= fallbackAutoArchiveConfidence else { return .staging }
-        return .autoArchive
-    }
-
     static func route(
         domainKey: String,
         confidence: Double?,
