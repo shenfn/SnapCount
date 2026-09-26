@@ -1,9 +1,9 @@
 # 芥子 Local-First 全景 BDD 场景梳理
 
 > 规格编号：LOCAL-FIRST-BDD-001
-> 状态：只读梳理稿，待评审（本文档不授权任何实现）
+> 状态：已评审基线；SL-02 已完成，SL-A/SL-B 仍待切片级 Grooming 与用户确认（本文档不授权任何实现）
 > 日期：2026-09-25
-> 基线：主工作区分支 `codex/local-first-phase1-fact-reader`（HEAD `7005e81`，PR #199 系列）；根工作区存在用户 WIP，本轮未触碰
+> 基线：`origin/main`（HEAD `7c64bae`，SL-02 已合入）；本次 Grooming 使用独立分支 `feature/local-first-sl-a-sl-b-grooming`，根工作区存在用户 WIP，未触碰
 > 编号纪律：沿用既有场景编号（REC/EXP/CORE/PWA/A4-IOS/D-REMOTE/LOCAL-002/LOCAL-003/LOCAL-P1-DM/LOCAL-P1-SPORT/LOCAL-DATA）；仅对**尚无编号的真实缺口**分配新前缀 `LF-001` 起的编号。同一不变量不另造平行编号。
 
 ## 1. 目的与事实来源
@@ -118,6 +118,14 @@
 | 17 | 钱包快照 | ⏳ 范围已拍板，待 SL-B（最小形态） | F14 | Q-01、LF-033 |
 | 18 | 异常恢复（重启/断网/低存储/迁移失败） | ⚠️ 重启/断网已测；低存储/迁移失败未测 | F9 | LOCAL-002B/G、DM-013、LF-023~025 |
 | 19 | 登录绑定/退出登录/账号轮换 | ✅ 基础闭环；轮换归属未定义 | F10 | LOCAL-003C、DREMOTE-010~017、SPORT-001-L、LF-026~028 |
+
+### 3.1 切片执行状态（2026-09-26）
+
+| Slice | 覆盖场景/能力 | 状态 | 证据/下一步 |
+|---|---|---|---|
+| SL-02 | LF-001、LF-002、DM-004/005/011/014、三套引用前缀路由、C4 投影刷新收敛 | ✅ 已完成并合入 main | PR #200 / merge `7c64bae`；交接回填 `docs/handoff/LOCAL-FIRST-SL-02-投影刷新收敛-2026-09-25.md` |
+| SL-A | LF-032 收入本地域 | ⏳ Grooming 中 | 先确认表结构、校验、FactReader/导出/聚合扩展与迁移 v8，再进入 TDD |
+| SL-B | LF-033 钱包快照本地域（最小形态） | ⏳ 待 SL-A 完成 | SL-A 完成后连续 Grooming/TDD；不做还款周期/账务推演 |
 
 ## 4. BDD 场景
 
