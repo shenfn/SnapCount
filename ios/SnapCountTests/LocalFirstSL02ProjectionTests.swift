@@ -247,7 +247,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         )
     }
 
-    private static func syncState(binding: LocalSyncBinding) -> LocalSyncState {
+    private static func syncState(binding: LocalWorkspaceBinding) -> LocalSyncState {
         LocalSyncState(
             workspaceID: UUID(),
             binding: binding,
