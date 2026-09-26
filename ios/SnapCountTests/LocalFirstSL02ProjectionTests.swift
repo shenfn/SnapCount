@@ -27,7 +27,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         XCTAssertEqual(Set(recordFacts.map(\.domainKey)), Set(["food", "sleep", "reading"]))
         XCTAssertTrue(recordFacts.allSatisfy { $0.reference.hasPrefix("data/") })
 
-        let references = Set(state.recordGroups(monthKey).flatMap(\.records).map(\.reference))
+        let references = Set(state.recordGroups(monthKey: monthKey).flatMap(\.records).map(\.reference))
         XCTAssertEqual(references, Set(recordFacts.map(\.reference)))
         XCTAssertEqual(harness.sessionCounter.current, 0, "未登录手动创建不应触发任何会话查询")
     }
@@ -54,7 +54,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         let monthKey = NativeMonthKey.current()
         let facts = try harness.factReader.month(profileID: harness.profile.id, monthKey: monthKey)
         XCTAssertTrue(facts.facts.isEmpty, "登录态新建不应写入本地事实层")
-        XCTAssertTrue(state.recordGroups(monthKey).flatMap(\.records).isEmpty)
+        XCTAssertTrue(state.recordGroups(monthKey: monthKey).flatMap(\.records).isEmpty)
         XCTAssertGreaterThanOrEqual(harness.sessionCounter.current, 1, "登录态新建应走云端链路")
     }
 
@@ -102,7 +102,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 1_000)
         ))
         let expenseOutcome = try await harness.expenseUseCase.create(LocalExpenseCommand(
-            profileID: harness.profile.id,
+            id: UUID(),
             accountID: account.id,
             amountText: "19.80",
             currency: "CNY",
@@ -113,7 +113,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             transactionDate: "2026-01-19",
             transactionTime: nil,
             note: nil,
-            updatedAt: Date(timeIntervalSince1970: 1_100)
+            createdAt: Date(timeIntervalSince1970: 1_100)
         ))
         guard let expense = expenseOutcome.expense else {
             throw SL02TestError.unexpectedFailure("本地消费创建失败")
@@ -138,14 +138,14 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             ("data/\(recordOutcome.record.id.uuidString)", recordOutcome.record.id.uuidString, "晨跑")
         ]
         for item in cases {
-            await state.loadRecordDetail(item.reference)
+            await state.loadRecordDetail(reference: item.reference)
             XCTAssertEqual(state.selectedRecordDetail?.rawId, item.rawId, "\(item.reference) 应路由到本地详情")
             XCTAssertEqual(state.selectedRecordDetail?.title, item.title)
             XCTAssertNil(state.recordDetailMessage, "\(item.reference) 不应产生会话查询报错")
         }
         XCTAssertEqual(harness.sessionCounter.current, 0, "本地前缀路由不应查询会话")
 
-        await state.loadRecordDetail("local-staging/stage-001")
+        await state.loadRecordDetail(reference: "local-staging/stage-001")
         XCTAssertNil(state.selectedRecordDetail, "local-staging 引用不应进入正式详情路由")
         XCTAssertNotNil(state.recordDetailMessage, "local-staging 引用只应触发会话查询失败")
         XCTAssertEqual(harness.sessionCounter.current, 1)
@@ -170,7 +170,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 1_000)
         ))
         let expenseOutcome = try await harness.expenseUseCase.create(LocalExpenseCommand(
-            profileID: harness.profile.id,
+            id: UUID(),
             accountID: account.id,
             amountText: "12.30",
             currency: "CNY",
@@ -181,7 +181,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             transactionDate: "2026-01-19",
             transactionTime: nil,
             note: nil,
-            updatedAt: Date(timeIntervalSince1970: 1_100)
+            createdAt: Date(timeIntervalSince1970: 1_100)
         ))
         guard let expense = expenseOutcome.expense else {
             throw SL02TestError.unexpectedFailure("本地消费创建失败")
@@ -214,7 +214,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         let recordSaved = await state.saveRecordDetail(recordDraft)
         XCTAssertTrue(recordSaved)
 
-        let references = Set(state.recordGroups(monthKey).flatMap(\.records).map(\.reference))
+        let references = Set(state.recordGroups(monthKey: monthKey).flatMap(\.records).map(\.reference))
         XCTAssertEqual(references, Set([
             "expense/\(expense.id.uuidString)",
             "data/\(recordOutcome.record.id.uuidString)"
@@ -241,7 +241,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             accessToken: "test-token",
             refreshToken: "refresh-token",
             expiresIn: 3_600,
-            expiresAt: Date().addingTimeInterval(3_600),
+            expiresAt: Int(Date().addingTimeInterval(3_600).timeIntervalSince1970),
             tokenType: "bearer",
             user: SupabaseUser(id: "cloud-user", email: "user@example.com")
         )
@@ -261,7 +261,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         )
     }
 
-    private static func remoteExpenseDetail() -> NativeRecordDetail {
+    fileprivate static func remoteExpenseDetail() -> NativeRecordDetail {
         NativeRecordDetail(
             id: "expense/11111111-1111-1111-1111-111111111111",
             rawId: "11111111-1111-1111-1111-111111111111",
@@ -300,7 +300,7 @@ private struct SL02Harness {
     let databaseURL: URL
     let factReader: LocalFactReader
     let recordSpy: SL02RecordRepositorySpy
-    let expenseStub: SL02ExpenseUseCaseStub?
+    let expenseStub: SL02ExpenseUseCaseStub
     let expenseRepository: LocalExpenseRepository
     let expenseUseCase: LocalExpenseUseCaseProtocol
     let recordUseCase: LocalRecordUseCase
@@ -330,9 +330,13 @@ extension LocalFirstSL02ProjectionTests {
         let expenseRepository = try LocalExpenseRepository(database: database)
         let recordRepository = try LocalRecordRepository(database: database)
 
-        let resolvedExpenseUseCase: LocalExpenseUseCaseProtocol = expenseStub
-            ? SL02ExpenseUseCaseStub()
-            : LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository)
+        let resolvedExpenseUseCase: LocalExpenseUseCaseProtocol
+        let stub = SL02ExpenseUseCaseStub()
+        if expenseStub {
+            resolvedExpenseUseCase = stub
+        } else {
+            resolvedExpenseUseCase = LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository)
+        }
         let recordUseCase = LocalRecordUseCase(profileStore: profileStore, repository: recordRepository)
         let factReader = try LocalFactReader(database: database)
 
@@ -368,7 +372,7 @@ extension LocalFirstSL02ProjectionTests {
             databaseURL: databaseURL,
             factReader: factReader,
             recordSpy: recordSpy,
-            expenseStub: expenseStub ? (resolvedExpenseUseCase as? SL02ExpenseUseCaseStub) : nil,
+            expenseStub: stub,
             expenseRepository: expenseRepository,
             expenseUseCase: resolvedExpenseUseCase,
             recordUseCase: recordUseCase,
