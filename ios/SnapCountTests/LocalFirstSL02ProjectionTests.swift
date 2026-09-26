@@ -67,7 +67,12 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         state.isSignedIn = true
         state.currentUserId = "cloud-user"
         let monthKey = "2000-01"
-        state.localSyncState = Self.syncState(binding: .unbound)
+        // 绑定状态走真实链路：localBindingRepository → refreshLocalSyncState
+        // （validSession→apply 每次会重读绑定状态，手工塞 localSyncState 会被覆盖）
+        state.refreshLocalSyncState()
+        guard case .unbound = state.localSyncState?.binding else {
+            throw SL02TestError.unexpectedFailure("新工作区默认应为未绑定")
+        }
 
         await state.loadRecordMonth(monthKey, force: true)
 
@@ -75,7 +80,14 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         XCTAssertTrue(harness.expenseStub.importRemoteExpenseCalls.isEmpty, "未绑定时不得把云端消费写入本地")
         XCTAssertTrue(harness.expenseStub.importRemoteAccountCalls.isEmpty)
 
-        state.localSyncState = Self.syncState(binding: .bound("cloud-user"))
+        _ = try harness.bindingRepository.confirmBinding(
+            profileID: harness.profile.id,
+            cloudUserID: "cloud-user"
+        )
+        state.refreshLocalSyncState()
+        guard case .bound = state.localSyncState?.binding else {
+            throw SL02TestError.unexpectedFailure("确认绑定后 syncState 应为 bound")
+        }
         await state.loadRecordMonth(monthKey, force: true)
 
         XCTAssertEqual(harness.recordSpy.fetchMonthKeys.count, 2)
@@ -246,20 +258,6 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             user: SupabaseUser(id: "cloud-user", email: "user@example.com")
         )
     }
-
-    private static func syncState(binding: LocalWorkspaceBinding) -> LocalSyncState {
-        LocalSyncState(
-            workspaceID: UUID(),
-            binding: binding,
-            status: .disabled,
-            conflictState: .none,
-            syncGeneration: 0,
-            pullCursor: nil,
-            lastSuccessfulSyncAt: nil,
-            activeAttemptID: nil,
-            pendingMutationCount: 0
-        )
-    }
 }
 
 /// 文件级 fixture：从非隔离的测试替身中构造 NativeRecordDetail，
@@ -309,6 +307,7 @@ private struct SL02Harness {
     let expenseUseCase: LocalExpenseUseCaseProtocol
     let recordUseCase: LocalRecordUseCase
     let profile: LocalProfile
+    let bindingRepository: LocalBindingRepository
     let sessionCounter: SL02Counter
 
     func cleanup() {
@@ -368,6 +367,7 @@ extension LocalFirstSL02ProjectionTests {
             domainRepository: SL02DomainRepositoryStub(),
             snapshotStore: SL02SnapshotStoreStub(),
             financeVocabularyRepository: SL02FinanceVocabularyRepositoryStub(),
+            localBindingRepository: profileStore,
             sessionProvider: sessionProvider
         )
 
@@ -381,6 +381,7 @@ extension LocalFirstSL02ProjectionTests {
             expenseUseCase: resolvedExpenseUseCase,
             recordUseCase: recordUseCase,
             profile: profile,
+            bindingRepository: profileStore,
             sessionCounter: sessionCounter
         )
     }
