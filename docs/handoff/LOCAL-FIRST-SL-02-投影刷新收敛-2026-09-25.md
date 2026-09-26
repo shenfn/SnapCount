@@ -4,7 +4,7 @@
 - 分支：`feature/SL-02-投影刷新收敛`（自 `feature/SL-01-文档口径收口` @ `1e768e4` 拉出）
 - 上游交接：`docs/handoff/LOCAL-FIRST-SL-01-文档口径收口-2026-09-25.md`
 - 依据 Spec：`docs/spec/LOCAL-FIRST-DOMAIN-CONVERGENCE.md` §7 SL-02、§5 F-5/D3/D6、§9
-- 状态：**代码与测试已完成，未提交、未推送、未跑 CI**（等待提交授权；Windows 侧无法编译 Swift，验证依赖 macOS CI）
+- 状态：**已完成并合入 main**（PR #200，merge commit `7c64bae`，2026-09-26 全绿合并）
 
 ## 1. 本轮范围（已完成）
 
@@ -54,8 +54,10 @@
 2. **CI 基线未知**：`feature/SL-01-文档口径收口`（1e768e4）未跑过 iOS Build；若基线已红，需先区分基线失败与本次失败。
 3. **降级模式双域刷新**新增一次幂等读，极端数据量下有轻微额外开销（当月门禁限制实际影响）。
 
-## 7. 下一步
+## 7. CI 回归与修复记录（2026-09-26）
 
-1. 用户确认提交规划 → 按"测试 / 重构 / 死 API / 交接文档"分 commit 提交。
-2. 推送授权后由 GitHub macOS CI 跑 iOS Build + XCTest，确认 C4 红灯转绿与全部特征测试通过。
-3. CI 通过后回填本文件的执行记录，并更新 `docs/spec/03-阶段与任务索引.md` 与 BDD 覆盖表状态。
+- 首轮（b34381b）：17 处编译错误——测试夹具签名与真实 API 偏差（LocalExpenseCommand 应为 id/createdAt、recordGroups/loadRecordDetail 参数标签、SupabaseAuthSession.expiresAt 为 Int epoch、expenseStub 可选解包），逐一对源码修正（4520e1f）。
+- 次轮（99f0804）：1 处编译错误——@MainActor 测试类静态 fixture 被非隔离 spy 调用导致隐式异步，移出为文件级 SL02RemoteExpenseFixture。
+- 三轮（860b808）：运行时断言失败（仅 DM-014）——根因是 validSession→apply 每次调 refreshLocalSyncState() 从 localBindingRepository 重读绑定状态，手工塞 localSyncState 被覆盖；修复为 harness 注入真实 LocalProfileStore 并走 confirmBinding 真实链路。
+- 终轮（860b808）：iOS Build + XCTest 全绿（7m11s），PR #200 全绿合入 main（7c64bae）。
+- 经验：Windows 侧写 Swift 测试必须逐一对照真实 init/参数标签/访问级别/actor 隔离，不能凭同构记忆；AppState.validSession 链路会覆盖手工注入的 localSyncState，绑定状态测试必须走真实仓库。
