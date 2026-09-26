@@ -638,7 +638,7 @@
 
 .lab-label {
   margin: 8px 0 0;
-  font: 600 11px/1 var(--jiezi-font-family-sans);
+  font: 600 12px/1 var(--jiezi-font-family-sans);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--jiezi-color-muted);
@@ -693,7 +693,7 @@
 }
 
 .home-layout-kicker {
-  font: 600 10px/1.2 var(--jiezi-font-family-sans);
+  font: 600 12px/1.2 var(--jiezi-font-family-sans);
   letter-spacing: 0.12em;
   color: var(--jiezi-color-muted);
 }
@@ -796,7 +796,10 @@
   text-align: left;
   background: color-mix(in srgb, var(--jiezi-color-light) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-light) 16%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.finance-due-row:active { transform: var(--ios-press); }
 
 .finance-due-label {
   font: var(--ios-type-caption);
@@ -861,10 +864,13 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
 
+.finance-bar-col:active { transform: var(--ios-press); }
+
 .finance-bar-amount {
-  font: 500 10px/1 var(--jiezi-font-family-sans);
+  font: 500 12px/1 var(--jiezi-font-family-sans);
   color: var(--jiezi-color-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -969,7 +975,10 @@
   text-align: left;
   background: color-mix(in srgb, var(--jiezi-color-coral) 8%, var(--jiezi-color-paper));
   border: 1px solid color-mix(in srgb, var(--jiezi-color-coral) 18%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.home-pending-alert:active { transform: var(--ios-press); }
 
 .pending-alert-icon {
   position: relative;
@@ -1029,7 +1038,10 @@
   background: color-mix(in srgb, var(--jiezi-color-paper) 86%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
   box-shadow: 0 4px 10px color-mix(in srgb, var(--jiezi-color-space) 4%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.domain-quick-card:active { transform: var(--ios-press); }
 
 .domain-quick-icon {
   display: grid;
@@ -1067,7 +1079,10 @@
   text-align: left;
   background: color-mix(in srgb, var(--jiezi-color-paper) 88%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.home-daily-card:active { transform: var(--ios-press); }
 
 .home-daily-card.is-empty {
   opacity: 0.72;
@@ -1627,7 +1642,10 @@
   background: color-mix(in srgb, var(--jiezi-color-paper) 90%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--jiezi-color-space) 5%, transparent);
+  transition: transform var(--jiezi-duration-fast) var(--jiezi-easing-standard);
 }
+
+.pending-film-card:active { transform: var(--ios-press); }
 
 .pending-film-visual {
   position: relative;
@@ -1690,7 +1708,7 @@
   min-height: 22px;
   padding: 0 8px;
   border-radius: var(--jiezi-radius-pill);
-  font: 600 11px/1 var(--jiezi-font-family-sans);
+  font: 600 12px/1 var(--jiezi-font-family-sans);
   color: #fff;
   background: color-mix(in srgb, var(--jiezi-color-brand) 88%, transparent);
 }
@@ -1724,7 +1742,7 @@
 }
 
 .pending-film-scrim small {
-  font: 400 11px/1.3 var(--jiezi-font-family-sans);
+  font: 400 12px/1.3 var(--jiezi-font-family-sans);
   opacity: 0.9;
 }
 
@@ -1749,7 +1767,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font: 400 11px/1.35 var(--jiezi-font-family-sans);
+  font: 400 12px/1.35 var(--jiezi-font-family-sans);
   color: var(--jiezi-color-muted);
 }
 
@@ -2166,7 +2184,7 @@ button.home-layout-switch input {
 }
 
 .account-hero-kicker {
-  font: 600 10px/1.2 var(--jiezi-font-family-sans);
+  font: 600 12px/1.2 var(--jiezi-font-family-sans);
   letter-spacing: 0.12em;
   color: var(--jiezi-color-muted);
 }
