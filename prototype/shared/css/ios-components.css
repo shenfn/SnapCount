@@ -1590,6 +1590,8 @@
   background: color-mix(in srgb, var(--jiezi-color-coral) 10%, transparent);
 }
 
+.record-detail-btn--block { width: 100%; margin-top: 10px; }
+
 .jz-row-value.is-income { color: var(--jiezi-color-brand); }
 
 /* ========== 中转站 · 对齐 PagePending / InboxView ========== */
@@ -1735,6 +1737,11 @@
 .pending-film-fact small {
   font: var(--ios-type-caption);
   color: var(--jiezi-color-muted);
+}
+
+.pending-film-visual-wrap {
+  position: relative;
+  display: block;
 }
 
 .pending-film-state {

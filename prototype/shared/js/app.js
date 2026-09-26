@@ -695,7 +695,7 @@ function renderInboxList() {
                      </span>
                    </span>`;
               return `<button class="pending-film-card" type="button" data-open-verdict="${item.id}">
-                <span class="pending-film-visual-wrap" style="position:relative;display:block">
+                <span class="pending-film-visual-wrap">
                   ${visual}
                   <span class="pending-film-state ${st.tone}"><i></i>${st.label}</span>
                 </span>
@@ -1080,8 +1080,8 @@ function openAccountDetail(id) {
 
   const manage = `<section class="account-source-card">
     <div class="wallet-account-section-title">账户使用状态</div>
-    <p class="jz-status-line" style="margin:0">${rec.archived ? '恢复不会自动还原默认项或自动扣款关系。' : '归档会保留余额、流水和还款历史，并清除默认项。'}</p>
-    <button class="record-detail-btn secondary" type="button" style="margin-top:10px;width:100%" data-toast="${rec.archived ? '恢复账户' : '归档账户'} · 后续接线">${rec.archived ? '恢复账户' : '归档账户'}</button>
+    <p class="jz-status-line is-flush">${rec.archived ? '恢复不会自动还原默认项或自动扣款关系。' : '归档会保留余额、流水和还款历史，并清除默认项。'}</p>
+    <button class="record-detail-btn secondary record-detail-btn--block" type="button" data-toast="${rec.archived ? '恢复账户' : '归档账户'} · 后续接线">${rec.archived ? '恢复账户' : '归档账户'}</button>
   </section>`;
 
   const stats = `<section class="account-detail-grid">${rec.stats
