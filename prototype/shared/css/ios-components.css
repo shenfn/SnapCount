@@ -791,8 +791,8 @@
   padding: 12px 14px;
   border-radius: 14px;
   text-align: left;
-  background: color-mix(in srgb, var(--jiezi-color-gold) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--jiezi-color-gold) 16%, transparent);
+  background: color-mix(in srgb, var(--jiezi-color-light) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--jiezi-color-light) 16%, transparent);
 }
 
 .finance-due-label {
@@ -943,7 +943,7 @@
 }
 
 .today-overview-row.is-pending .today-overview-label {
-  color: color-mix(in srgb, var(--jiezi-color-gold) 70%, var(--jiezi-color-ink));
+  color: color-mix(in srgb, var(--jiezi-color-light) 70%, var(--jiezi-color-ink));
 }
 
 .today-overview-footer {
@@ -987,7 +987,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--jiezi-color-gold);
+  background: var(--jiezi-color-light);
   box-shadow: 0 0 0 2px var(--jiezi-color-paper);
 }
 
@@ -1426,7 +1426,7 @@
 }
 
 .record-account-card.recommended .record-account-mark {
-  background: var(--jiezi-color-gold, #DCBF74);
+  background: var(--jiezi-color-light);
   color: var(--jiezi-color-space);
 }
 
@@ -2277,7 +2277,7 @@ button.home-layout-switch input {
   padding: 10px 12px;
   border-radius: 12px;
   margin-bottom: 10px;
-  background: color-mix(in srgb, var(--jiezi-color-gold, #DCBF74) 12%, transparent);
+  background: color-mix(in srgb, var(--jiezi-color-light) 12%, transparent);
 }
 
 .account-repayment-status strong {
