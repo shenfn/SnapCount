@@ -764,7 +764,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 12px;
-  border-radius: 14px;
+  border-radius: var(--jiezi-radius-md);
   text-align: left;
   background: color-mix(in srgb, var(--jiezi-color-paper) 88%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-brand) 8%, transparent);
@@ -789,7 +789,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--jiezi-radius-md);
   text-align: left;
   background: color-mix(in srgb, var(--jiezi-color-light) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-light) 16%, transparent);
@@ -872,14 +872,14 @@
   justify-content: center;
   width: 100%;
   height: 72px;
-  border-radius: 10px 10px 6px 6px;
+  border-radius: var(--jiezi-radius-sm) var(--jiezi-radius-sm) 6px 6px;
   background: color-mix(in srgb, var(--jiezi-color-brand) 5%, transparent);
 }
 
 .finance-bar {
   width: 58%;
   min-height: 4px;
-  border-radius: 999px 999px 4px 4px;
+  border-radius: var(--jiezi-radius-pill) var(--jiezi-radius-pill) 4px 4px;
   background: color-mix(in srgb, var(--jiezi-color-brand) 55%, transparent);
   transition: height 0.2s ease, background 0.15s ease;
 }
@@ -925,7 +925,7 @@
   place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: 12px;
+  border-radius: var(--jiezi-radius-md);
   font-size: 16px;
   background: color-mix(in srgb, var(--jiezi-color-brand) 8%, transparent);
 }
@@ -974,7 +974,7 @@
   place-items: center;
   width: 40px;
   height: 40px;
-  border-radius: 14px;
+  border-radius: var(--jiezi-radius-md);
   font: 700 15px/1 var(--jiezi-font-family-sans);
   color: #fff;
   background: var(--jiezi-color-coral);
@@ -1033,7 +1033,7 @@
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: 12px;
+  border-radius: var(--jiezi-radius-md);
   font-size: 16px;
   background: color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
 }
@@ -1150,7 +1150,7 @@
   max-height: 78%;
   overflow: auto;
   padding: 18px 16px calc(18px + var(--ios-tab-h));
-  border-radius: 22px 22px 0 0;
+  border-radius: var(--jiezi-radius-sheet) var(--jiezi-radius-sheet) 0 0;
   background: var(--jiezi-color-paper);
   box-shadow: 0 -12px 40px color-mix(in srgb, var(--jiezi-color-space) 18%, transparent);
 }
@@ -1217,7 +1217,7 @@
 .home-layout-switch span {
   width: 100%;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--jiezi-radius-pill);
   background: color-mix(in srgb, var(--jiezi-color-muted) 28%, transparent);
   transition: background 0.15s ease;
 }
@@ -1419,7 +1419,7 @@
   place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: 12px;
+  border-radius: var(--jiezi-radius-md);
   font: 700 14px/1 var(--jiezi-font-family-sans);
   color: #fff;
   background: var(--jiezi-color-brand);
@@ -1486,7 +1486,7 @@
   place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: 12px;
+  border-radius: var(--jiezi-radius-md);
   background: color-mix(in srgb, var(--jiezi-color-light) 18%, transparent);
 }
 
@@ -1877,7 +1877,7 @@
   min-height: 220px;
   flex: 1;
   max-height: 340px;
-  border-radius: 18px;
+  border-radius: var(--jiezi-radius-xl);
   overflow: hidden;
   background: rgba(0, 0, 0, 0.22);
 }
@@ -1886,7 +1886,7 @@
   width: min(100%, 280px);
   aspect-ratio: 9 / 16;
   max-height: 300px;
-  border-radius: 12px;
+  border-radius: var(--jiezi-radius-md);
   background:
     linear-gradient(165deg, rgba(220, 191, 116, 0.18), transparent 40%),
     linear-gradient(#2a3d38, #1a2a27);
@@ -1971,7 +1971,7 @@
 .verdict-stage-error {
   margin-top: 8px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--jiezi-radius-sm);
   font: var(--ios-type-caption);
   color: #ffd7d0;
   background: rgba(183, 101, 85, 0.22);
@@ -2003,7 +2003,7 @@
 
 .verdict-minor-actions button {
   min-height: 40px;
-  border-radius: 12px;
+  border-radius: var(--jiezi-radius-md);
   font: 600 13px/1 var(--jiezi-font-family-sans);
   color: #f5f1e7;
   background: rgba(245, 241, 231, 0.08);
@@ -2063,7 +2063,7 @@
   place-items: center;
   width: 48px;
   height: 48px;
-  border-radius: 16px;
+  border-radius: var(--jiezi-radius-lg);
   font: 700 18px/1 var(--jiezi-font-family-sans);
   color: #fff;
   background: var(--jiezi-color-brand);
@@ -2106,7 +2106,7 @@
 .export-preview {
   margin-top: 14px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--jiezi-radius-md);
   font: var(--ios-type-footnote);
   color: var(--jiezi-color-ink);
   background: var(--jiezi-color-brand-alpha-8);
@@ -2131,7 +2131,7 @@ button.home-layout-switch {
 button.home-layout-switch span {
   width: 100%;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--jiezi-radius-pill);
   background: color-mix(in srgb, var(--jiezi-color-muted) 28%, transparent);
   transition: background 0.15s ease;
   position: relative;
@@ -2215,7 +2215,7 @@ button.home-layout-switch input {
   place-items: center;
   width: 44px;
   height: 44px;
-  border-radius: 14px;
+  border-radius: var(--jiezi-radius-md);
   font: 700 16px/1 var(--jiezi-font-family-sans);
   color: #fff;
   background: var(--jiezi-color-brand);
@@ -2237,7 +2237,7 @@ button.home-layout-switch input {
   flex-direction: column;
   gap: 6px;
   padding: 12px;
-  border-radius: 14px;
+  border-radius: var(--jiezi-radius-md);
   background: color-mix(in srgb, var(--jiezi-color-paper) 88%, transparent);
   border: 1px solid color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
 }
@@ -2275,7 +2275,7 @@ button.home-layout-switch input {
   flex-direction: column;
   gap: 4px;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--jiezi-radius-md);
   margin-bottom: 10px;
   background: color-mix(in srgb, var(--jiezi-color-light) 12%, transparent);
 }
@@ -2326,7 +2326,7 @@ button.home-layout-switch input {
 
 .account-repayment-mode-btn {
   min-height: 40px;
-  border-radius: 12px;
+  border-radius: var(--jiezi-radius-md);
   font: 600 13px/1 var(--jiezi-font-family-sans);
   color: var(--jiezi-color-muted);
   background: color-mix(in srgb, var(--jiezi-color-brand) 6%, transparent);

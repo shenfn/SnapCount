@@ -1,9 +1,7 @@
 /* iOS 壳层：页面背景、设备框、TabBar —— 对齐 JieziPageBackground / RootView */
 
 :root {
-  /* 几何/字体兜底；颜色只来自 tokens.css，避免覆盖主题 */
-  --jiezi-radius-card: 18px;
-  --jiezi-radius-button: 14px;
+  /* 几何/字体兜底；颜色与圆角 token 只来自 tokens.css（SSOT），避免覆盖主题 */
   --jiezi-radius-pill: 999px;
   --jiezi-spacing-page_padding: 16px;
   --jiezi-font-family-sans: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
