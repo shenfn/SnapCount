@@ -260,8 +260,12 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             pendingMutationCount: 0
         )
     }
+}
 
-    fileprivate static func remoteExpenseDetail() -> NativeRecordDetail {
+/// 文件级 fixture：从非隔离的测试替身中构造 NativeRecordDetail，
+/// 避免调用 @MainActor 测试类静态方法导致隐式异步。
+private enum SL02RemoteExpenseFixture {
+    static func detail() -> NativeRecordDetail {
         NativeRecordDetail(
             id: "expense/11111111-1111-1111-1111-111111111111",
             rawId: "11111111-1111-1111-1111-111111111111",
@@ -399,7 +403,7 @@ private final class SL02RecordRepositorySpy: RecordRepositoryProtocol {
         fetchMonthKeys.append(monthKey)
         return NativeRecordMonthSnapshot(
             groups: [],
-            details: [LocalFirstSL02ProjectionTests.remoteExpenseDetail().id: LocalFirstSL02ProjectionTests.remoteExpenseDetail()]
+            details: [SL02RemoteExpenseFixture.detail().id: SL02RemoteExpenseFixture.detail()]
         )
     }
 
