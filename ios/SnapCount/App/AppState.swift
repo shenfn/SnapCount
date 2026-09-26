@@ -857,6 +857,22 @@ final class AppState: ObservableObject {
         await loadRemoteRecordMonth(monthKey, force: force)
     }
 
+    /// SL-02（C4）：所有写路径的"写后当月投影刷新"统一走这里。
+    /// FactReader 权威模式刷新统一事实月；降级双 UseCase 模式刷新其拥有的两个本地月缓存。
+    /// 读取路径（loadUnifiedRecordMonth、识别投影）不使用本方法。
+    private func refreshLocalMonthProjection(monthKey: String) async {
+        if localFactReader != nil {
+            await readDeviceFactMonth(monthKey, force: true)
+            return
+        }
+        if localExpenseUseCase != nil {
+            await readDeviceExpenseMonth(monthKey, force: true)
+        }
+        if localRecordUseCase != nil {
+            await readDeviceRecordMonth(monthKey, force: true)
+        }
+    }
+
     // Compatibility name retained for older feature tests; new callers use the unified facade above.
     private func loadLocalExpenseMonth(_ monthKey: String, force: Bool) async {
         await readDeviceExpenseMonth(monthKey, force: force)
@@ -1180,16 +1196,7 @@ final class AppState: ObservableObject {
         guard monthKey != Self.currentMonthKey else {
             if force || dashboard.dayRecordGroups.isEmpty {
                 await refreshDashboard()
-                if localFactReader != nil {
-                    await readDeviceFactMonth(monthKey, force: true)
-                } else {
-                    if localExpenseUseCase != nil {
-                        await readDeviceExpenseMonth(monthKey, force: true)
-                    }
-                    if localRecordUseCase != nil {
-                        await readDeviceRecordMonth(monthKey, force: true)
-                    }
-                }
+                await refreshLocalMonthProjection(monthKey: monthKey)
             }
             return
         }
@@ -1220,16 +1227,7 @@ final class AppState: ObservableObject {
             }
             remoteRecordMonthGroups[monthKey] = month.groups
             await importRemoteExpenseDetails(month.details.values)
-            if localFactReader != nil {
-                await readDeviceFactMonth(monthKey, force: true)
-            } else {
-                if localExpenseUseCase != nil {
-                    await readDeviceExpenseMonth(monthKey, force: true)
-                }
-                if localRecordUseCase != nil {
-                    await readDeviceRecordMonth(monthKey, force: true)
-                }
-            }
+            await refreshLocalMonthProjection(monthKey: monthKey)
         } catch {
             guard generation == userStateGeneration else { return }
             recordMonthMessages[monthKey] = error.localizedDescription
@@ -2684,11 +2682,7 @@ final class AppState: ObservableObject {
             )
             removeStagingRecordLocally(record.id)
             let monthKey = String(outcome.record.recordDate.prefix(7))
-            if localFactReader != nil {
-                await readDeviceFactMonth(monthKey, force: true)
-            } else {
-                await readDeviceRecordMonth(monthKey, force: true)
-            }
+            await refreshLocalMonthProjection(monthKey: monthKey)
             if !preserveInboxNavigation { inboxPath = NavigationPath() }
             inboxActionMessage = "已归档到\(record.domainName ?? "本地记录")"
             return "local-data/\(outcome.record.id.uuidString)"
@@ -3544,9 +3538,9 @@ final class AppState: ObservableObject {
         let newMonth = String(saved.transactionDate.prefix(7))
         invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
         _ = await prepareLocalWorkspace()
-        await readDeviceExpenseMonth(oldMonth, force: true)
+        await refreshLocalMonthProjection(monthKey: oldMonth)
         if newMonth != oldMonth {
-            await readDeviceExpenseMonth(newMonth, force: true)
+            await refreshLocalMonthProjection(monthKey: newMonth)
         }
         recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
         await loadRecordDetail(reference: "local-expense/\(saved.id.uuidString)", force: true)
@@ -3565,11 +3559,7 @@ final class AppState: ObservableObject {
         invalidateRecordExpressionPlanState(afterChanging: [reference])
         recordsPath = NavigationPath()
         _ = await prepareLocalWorkspace()
-        if localFactReader != nil {
-            await readDeviceFactMonth(monthKey, force: true)
-        } else {
-            await readDeviceExpenseMonth(monthKey, force: true)
-        }
+        await refreshLocalMonthProjection(monthKey: monthKey)
         return true
     }
 
@@ -3613,9 +3603,9 @@ final class AppState: ObservableObject {
         let oldMonth = String(current.recordDate.prefix(7))
         let newMonth = String(outcome.record.recordDate.prefix(7))
         invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
-        await readDeviceRecordMonth(oldMonth, force: true)
+        await refreshLocalMonthProjection(monthKey: oldMonth)
         if newMonth != oldMonth {
-            await readDeviceRecordMonth(newMonth, force: true)
+            await refreshLocalMonthProjection(monthKey: newMonth)
         }
         recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
         await loadRecordDetail(reference: "local-data/\(outcome.record.id.uuidString)", force: true)
@@ -3632,7 +3622,7 @@ final class AppState: ObservableObject {
         ))
         invalidateRecordExpressionPlanState(afterChanging: [reference])
         recordsPath = NavigationPath()
-        await readDeviceRecordMonth(String(current.recordDate.prefix(7)), force: true)
+        await refreshLocalMonthProjection(monthKey: String(current.recordDate.prefix(7)))
         return true
     }
 
@@ -4458,11 +4448,7 @@ final class AppState: ObservableObject {
             record = created.record
         }
         let monthKey = String(record.recordDate.prefix(7))
-        if localFactReader != nil {
-            await readDeviceFactMonth(monthKey, force: true)
-        } else {
-            await readDeviceRecordMonth(monthKey, force: true)
-        }
+        await refreshLocalMonthProjection(monthKey: monthKey)
         if let existingRawId = draft.existingRawId {
             let oldReference = "local-data/\(existingRawId)"
             invalidateRecordExpressionPlanState(afterChanging: [oldReference])
