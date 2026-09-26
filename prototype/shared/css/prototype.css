@@ -1,0 +1,5 @@
+/* 工作台外框补充：与 ios-shell 分工，不承载 App 内组件样式 */
+
+.prototype-workbench-note-extra {
+  margin-top: 8px;
+}

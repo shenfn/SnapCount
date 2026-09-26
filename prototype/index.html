@@ -1,0 +1,1231 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="cyan">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#F5F1E7" />
+    <title>芥子 · iOS 样式原型</title>
+    <!-- 内联 cyan 兜底，避免 tokens 加载失败时设备框塌掉 -->
+    <style>
+      :root {
+        --jiezi-color-paper: #F5F1E7;
+        --jiezi-color-brand: #426E63;
+        --jiezi-color-light: #DCBF74;
+        --jiezi-color-space: #17312D;
+        --jiezi-color-ink: #202A27;
+        --jiezi-color-muted: #6E7773;
+        --jiezi-color-coral: #B76555;
+        --jiezi-color-brand-alpha-8: rgba(66, 110, 99, 0.08);
+        --jiezi-color-light-alpha-12: rgba(220, 191, 116, 0.12);
+        --jiezi-color-paper-alpha-72: rgba(245, 241, 231, 0.72);
+        --jiezi-color-space-alpha-8: rgba(23, 49, 45, 0.08);
+      }
+    </style>
+    <link rel="stylesheet" href="shared/css/tokens.css" />
+    <link rel="stylesheet" href="shared/css/ios-shell.css" />
+    <link rel="stylesheet" href="shared/css/ios-components.css" />
+    <link rel="stylesheet" href="shared/css/prototype.css" />
+  </head>
+  <body>
+    <div class="workbench">
+      <header class="workbench-head">
+        <div>
+          <p class="workbench-kicker">Jiezi / iOS Design System</p>
+          <h1>本地优先原型 · 样式基线</h1>
+        </div>
+        <div class="workbench-tools">
+          <button class="workbench-btn" type="button" data-action="cycle-theme">切换主题</button>
+          <button class="workbench-btn" type="button" data-action="toggle-lab">组件陈列</button>
+        </div>
+      </header>
+
+      <div class="device" aria-label="芥子 iOS 原型">
+        <div class="device-status" aria-hidden="true">
+          <span>9:41</span>
+          <span class="device-status-icons">
+            <i class="sig"></i><i class="wifi"></i><i class="bat"></i>
+          </span>
+        </div>
+
+        <div class="app">
+          <div class="app-bg" aria-hidden="true"></div>
+
+          <div class="app-viewport">
+            <!-- 今日 · 对齐 PWA PageHome 五组件 -->
+            <section class="screen" data-page="today" aria-label="今日">
+              <div class="screen-stack">
+                <header class="page-header">
+                  <div>
+                    <h1>个人数据平台</h1>
+                    <p class="page-date" data-bind="full-date">2026年9月12日 星期五</p>
+                  </div>
+                  <button class="date-pill" type="button" aria-label="选择首页日期">
+                    <span data-bind="month-label">2026年9月</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+                  </button>
+                </header>
+
+                <p class="jz-status-line">
+                  <span class="jz-status-dot" aria-hidden="true"></span>
+                  <span>本地模式 · 数据仅保存在本机</span>
+                </p>
+
+                <div class="home-guide-strip" role="navigation" aria-label="首页速览">
+                  <button class="home-guide-pill" type="button" data-scroll-to="finance">
+                    <span>净额</span><strong>¥12,481</strong>
+                  </button>
+                  <button class="home-guide-pill" type="button" data-scroll-to="finance">
+                    <span>待还</span><strong>¥1,120</strong>
+                  </button>
+                  <button class="home-guide-pill" type="button" data-scroll-to="today">
+                    <span>今日</span><strong>-¥61.40</strong>
+                  </button>
+                  <button class="home-guide-pill" type="button" data-scroll-to="pending">
+                    <span>待处理</span><strong>3条</strong>
+                  </button>
+                </div>
+
+                <button class="capture-cta" type="button" data-route="capture-hint">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                  <span>留下此刻</span>
+                </button>
+
+                <div class="home-layout-band">
+                  <div class="home-layout-summary">
+                    <div>
+                      <div class="home-layout-kicker">DASHBOARD LAYOUT</div>
+                      <div class="home-layout-title">5 个首页组件已启用</div>
+                    </div>
+                    <button class="home-layout-btn" type="button" data-action="open-layout">管理组件</button>
+                  </div>
+                </div>
+
+                <!-- 财务状态 -->
+                <section class="jz-section" data-widget="finance" id="home-finance">
+                  <div class="jz-section-header">
+                    <div>
+                      <h2>财务状态</h2>
+                      <p>净额估算 · 待还 · 近 7 日支出</p>
+                    </div>
+                    <button class="jz-section-link" type="button" data-toast="报告 · 后续接线">
+                      报告
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </div>
+
+                  <article class="jz-card finance-card">
+                    <div class="finance-card-top">
+                      <div>
+                        <p class="finance-kicker">状态良好 · 现金覆盖 2.9 个月</p>
+                        <p class="finance-main-label">净额估算</p>
+                        <div class="finance-main-value">¥12,480.50</div>
+                      </div>
+                      <button class="finance-badge" type="button" data-route="accounts">钱包快照</button>
+                    </div>
+
+                    <div class="finance-split-grid">
+                      <button type="button" data-route="accounts">
+                        <span>可用现金</span>
+                        <strong>¥3,260.00</strong>
+                      </button>
+                      <button type="button" data-route="accounts">
+                        <span>当前总欠款估算</span>
+                        <strong class="is-coral">¥1,120.00</strong>
+                      </button>
+                      <button type="button" data-toast="今日收入 · 日详情">
+                        <span>今日收入</span>
+                        <strong>¥0.00</strong>
+                      </button>
+                      <button type="button" data-toast="今日支出 · 日详情">
+                        <span>今日支出</span>
+                        <strong>¥61.40</strong>
+                      </button>
+                    </div>
+
+                    <button class="finance-due-row" type="button" data-open-account="acc-cmb">
+                      <div class="finance-due-main">
+                        <div class="finance-due-label">最近待还</div>
+                        <div class="finance-due-name">招商信用卡</div>
+                        <div class="finance-due-sub">2026-09 账单</div>
+                      </div>
+                      <div class="finance-due-value">
+                        <strong>¥860</strong>
+                        <span>09-18</span>
+                      </div>
+                    </button>
+
+                    <div class="finance-trend">
+                      <div class="finance-trend-head">
+                        <span>近 7 日支出</span>
+                        <strong data-bind="trend-summary">今日占比 38%</strong>
+                      </div>
+                      <div class="finance-bars" role="list">
+                        <button class="finance-bar-col" type="button" data-trend="06-06" data-amount="42" aria-label="9月6日 ¥42">
+                          <span class="finance-bar-amount">¥42</span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:35%"></span></span>
+                          <span class="finance-bar-label">6</span>
+                        </button>
+                        <button class="finance-bar-col" type="button" data-trend="06-07" data-amount="128" aria-label="9月7日 ¥128">
+                          <span class="finance-bar-amount">¥128</span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:78%"></span></span>
+                          <span class="finance-bar-label">7</span>
+                        </button>
+                        <button class="finance-bar-col" type="button" data-trend="06-08" data-amount="56" aria-label="9月8日 ¥56">
+                          <span class="finance-bar-amount">¥56</span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:42%"></span></span>
+                          <span class="finance-bar-label">8</span>
+                        </button>
+                        <button class="finance-bar-col" type="button" data-trend="06-09" data-amount="0" aria-label="9月9日 ¥0">
+                          <span class="finance-bar-amount">¥0</span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:4%"></span></span>
+                          <span class="finance-bar-label">9</span>
+                        </button>
+                        <button class="finance-bar-col" type="button" data-trend="06-10" data-amount="95" aria-label="9月10日 ¥95">
+                          <span class="finance-bar-amount">¥95</span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:58%"></span></span>
+                          <span class="finance-bar-label">10</span>
+                        </button>
+                        <button class="finance-bar-col" type="button" data-trend="06-11" data-amount="37" aria-label="9月11日 ¥37">
+                          <span class="finance-bar-amount">¥37</span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:28%"></span></span>
+                          <span class="finance-bar-label">11</span>
+                        </button>
+                        <button class="finance-bar-col is-selected" type="button" data-trend="today" data-amount="61" aria-label="今天 ¥61">
+                          <span class="finance-bar-amount">¥61</span>
+                          <span class="finance-bar-wrap"><span class="finance-bar is-today is-selected" style="height:48%"></span></span>
+                          <span class="finance-bar-label">今</span>
+                        </button>
+                      </div>
+                      <p class="finance-trend-hint">点柱子查看当天占比，再点进入明细</p>
+                    </div>
+                  </article>
+                </section>
+
+                <!-- 今日概览 -->
+                <section class="jz-section" data-widget="today" id="home-today">
+                  <div class="jz-section-header">
+                    <div>
+                      <h2>今日概览</h2>
+                      <p data-bind="today-overview-date">9月12日 周五</p>
+                    </div>
+                  </div>
+                  <article class="jz-card jz-card--solid today-overview">
+                    <button class="today-overview-row" type="button" data-toast="支出日详情">
+                      <span class="today-overview-icon expense">💸</span>
+                      <span class="today-overview-content">
+                        <span class="today-overview-label">支出 ¥61.40</span>
+                        <span class="today-overview-detail">支付宝×2 · 现金×1 · 交通卡×1</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="today-overview-row is-pending" type="button" data-route="inbox">
+                      <span class="today-overview-icon pending">⚠️</span>
+                      <span class="today-overview-content">
+                        <span class="today-overview-label">待补全 ¥25.00</span>
+                        <span class="today-overview-detail">1 笔已识别金额，待补全分类 ›</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="today-overview-row" type="button" data-open-record="sport-run">
+                      <span class="today-overview-icon sport">🏃</span>
+                      <span class="today-overview-content">
+                        <span class="today-overview-label">晨跑 · 公园</span>
+                        <span class="today-overview-detail">32分钟 · 4.2km</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="today-overview-row" type="button" data-open-record="food-breakfast">
+                      <span class="today-overview-icon food">🍱</span>
+                      <span class="today-overview-content">
+                        <span class="today-overview-label">今日饮食</span>
+                        <span class="today-overview-detail">2 餐 · 约 980 千卡（估算）</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="today-overview-footer" type="button" data-route="inbox">
+                      ⏳ 2 条截图待确认 ›
+                    </button>
+                  </article>
+                </section>
+
+                <!-- 待处理提醒 -->
+                <button class="home-pending-alert" type="button" data-widget="pending" id="home-pending" data-route="inbox">
+                  <span class="pending-alert-icon">待<span class="pending-alert-dot"></span></span>
+                  <span class="pending-alert-content">
+                    <span class="pending-alert-title">3 条待处理记录</span>
+                    <span class="pending-alert-desc">1 条待分类 · 1 条待确认 · 1 条识别失败</span>
+                  </span>
+                  <span class="pending-alert-arrow">›</span>
+                </button>
+
+                <!-- 数据域 -->
+                <section class="jz-section" data-widget="domains" id="home-domains">
+                  <div class="jz-section-header">
+                    <div>
+                      <h2>已安装数据域</h2>
+                      <p>快速进入常用域</p>
+                    </div>
+                    <button class="jz-section-link" type="button" data-toast="全部数据域 · 后续接线">
+                      全部
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </div>
+                  <div class="home-domains-grid">
+                    <button class="domain-quick-card" type="button" data-toast="钱包域">
+                      <span class="domain-quick-icon" data-domain="expense">💳</span>
+                      <span class="domain-quick-name">钱包</span>
+                      <span class="domain-quick-count">12 条</span>
+                    </button>
+                    <button class="domain-quick-card" type="button" data-toast="运动域">
+                      <span class="domain-quick-icon" data-domain="sport">🏃</span>
+                      <span class="domain-quick-name">运动</span>
+                      <span class="domain-quick-count">5 条</span>
+                    </button>
+                    <button class="domain-quick-card" type="button" data-toast="睡眠域">
+                      <span class="domain-quick-icon" data-domain="sleep">🌙</span>
+                      <span class="domain-quick-name">睡眠</span>
+                      <span class="domain-quick-count">8 条</span>
+                    </button>
+                    <button class="domain-quick-card" type="button" data-toast="饮食域">
+                      <span class="domain-quick-icon" data-domain="food">🍱</span>
+                      <span class="domain-quick-name">饮食</span>
+                      <span class="domain-quick-count">21 条</span>
+                    </button>
+                    <button class="domain-quick-card" type="button" data-toast="阅读域">
+                      <span class="domain-quick-icon">📖</span>
+                      <span class="domain-quick-name">阅读</span>
+                      <span class="domain-quick-count">3 条</span>
+                    </button>
+                    <button class="domain-quick-card" type="button" data-toast="通用域">
+                      <span class="domain-quick-icon">✦</span>
+                      <span class="domain-quick-name">通用</span>
+                      <span class="domain-quick-count">9 条</span>
+                    </button>
+                  </div>
+                </section>
+
+                <!-- 每日明细 -->
+                <section class="jz-section" data-widget="daily" id="home-daily">
+                  <div class="jz-section-header">
+                    <div>
+                      <h2>每日明细</h2>
+                      <p>按日期汇总本月所有数据</p>
+                    </div>
+                    <button class="jz-section-link" type="button" data-toast="报告 · 后续接线">
+                      报告
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </div>
+                  <div class="home-daily-grid">
+                    <button class="home-daily-card" type="button" data-toast="9月12日 明细">
+                      <span class="home-daily-card-head">
+                        <span class="home-daily-date">9/12</span>
+                        <span class="home-daily-week">周五</span>
+                      </span>
+                      <span class="home-daily-divider"></span>
+                      <span class="home-daily-lines">
+                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-coral)"></i><span>支出</span><strong>¥61</strong></span>
+                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-brand)"></i><span>运动</span><strong>32分</strong></span>
+                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-light)"></i><span>饮食</span><strong>2餐</strong></span>
+                      </span>
+                    </button>
+                    <button class="home-daily-card" type="button" data-toast="9月11日 明细">
+                      <span class="home-daily-card-head">
+                        <span class="home-daily-date">9/11</span>
+                        <span class="home-daily-week">周四</span>
+                      </span>
+                      <span class="home-daily-divider"></span>
+                      <span class="home-daily-lines">
+                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-coral)"></i><span>支出</span><strong>¥37</strong></span>
+                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-brand)"></i><span>睡眠</span><strong>7.2h</strong></span>
+                      </span>
+                    </button>
+                    <button class="home-daily-card is-empty" type="button" data-toast="9月10日 空态">
+                      <span class="home-daily-card-head">
+                        <span class="home-daily-date">9/10</span>
+                        <span class="home-daily-week">周三</span>
+                      </span>
+                      <span class="home-daily-divider"></span>
+                      <span class="home-daily-lines">
+                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-coral)"></i><span>支出</span><strong>¥95</strong></span>
+                      </span>
+                    </button>
+                    <button class="home-daily-card is-empty" type="button" data-toast="9月9日 空态">
+                      <span class="home-daily-card-head">
+                        <span class="home-daily-date">9/9</span>
+                        <span class="home-daily-week">周二</span>
+                      </span>
+                      <span class="home-daily-divider"></span>
+                      <span class="home-daily-empty">这天还没有记录</span>
+                    </button>
+                  </div>
+                  <button class="home-daily-more" type="button" data-toast="展开更多日期">查看更多日期</button>
+                </section>
+              </div>
+            </section>
+
+            <!-- 收件箱 · 对齐 PWA PagePending / iOS InboxView -->
+            <section class="screen" data-page="inbox" aria-label="收件箱" hidden>
+              <div class="screen-stack">
+                <header class="pending-hero">
+                  <div>
+                    <div class="nav-title">收件箱</div>
+                    <p class="nav-subtitle" data-bind="inbox-subtitle">今天还有 3 条需要你决定</p>
+                  </div>
+                  <div class="pending-hero-actions">
+                    <div class="pending-scope-switch" role="group" aria-label="范围">
+                      <button type="button" class="is-active" data-inbox-scope="all">全部</button>
+                      <button type="button" data-inbox-scope="today">今天</button>
+                    </div>
+                  </div>
+                </header>
+
+                <div class="pending-filter-row" data-inbox-filters aria-label="状态筛选">
+                  <button type="button" class="pending-filter-chip is-active" data-inbox-filter="all">全部 <span data-count="all">3</span></button>
+                  <button type="button" class="pending-filter-chip" data-inbox-filter="routing_failed">待分类 <span data-count="routing_failed">1</span></button>
+                  <button type="button" class="pending-filter-chip" data-inbox-filter="pending_review">待确认 <span data-count="pending_review">1</span></button>
+                  <button type="button" class="pending-filter-chip" data-inbox-filter="ai_error">需重试 <span data-count="ai_error">1</span></button>
+                </div>
+
+                <div data-inbox-list>
+                  <!-- 由 app.js 渲染胶片卡片 -->
+                </div>
+
+                <div class="pending-empty-state" data-inbox-empty hidden>
+                  <div class="pending-empty-orbit" aria-hidden="true"><span></span></div>
+                  <div class="empty-title">微尘皆已落定</div>
+                  <div class="empty-desc">新的截图会在这里稍作停留</div>
+                </div>
+
+                <section class="jz-section" data-inbox-processed-section>
+                  <div class="jz-section-header">
+                    <div>
+                      <h2>已处理</h2>
+                      <p>最近归档与销毁</p>
+                    </div>
+                    <button class="jz-section-link" type="button" data-action="toggle-processed">
+                      展开
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </div>
+                  <div data-inbox-processed hidden>
+                    <article class="jz-card jz-card--solid jz-list">
+                      <div class="jz-row">
+                        <span class="jz-row-icon" data-domain="expense">支</span>
+                        <span class="jz-row-main">
+                          <span class="jz-row-title">已归档 · 消费</span>
+                          <span class="jz-row-sub">流向「消费」 · 今天 09:18</span>
+                        </span>
+                        <span class="jz-badge">已归档</span>
+                      </div>
+                      <div class="jz-row jz-row--divider">
+                        <span class="jz-row-icon">弃</span>
+                        <span class="jz-row-main">
+                          <span class="jz-row-title">已销毁 · 广告截图</span>
+                          <span class="jz-row-sub">原因：非消费记录 · 昨天 21:04</span>
+                        </span>
+                        <span class="jz-badge jz-badge--coral">已销毁</span>
+                      </div>
+                    </article>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <!-- 记录 -->
+            <section class="screen" data-page="records" aria-label="记录" hidden>
+              <div class="screen-stack">
+                <h1 class="nav-title">记录</h1>
+                <p class="nav-subtitle">本地已确认的消费与账户流水</p>
+
+                <div class="jz-chip-row" role="tablist" aria-label="记录筛选">
+                  <button class="jz-chip is-selected" type="button">全部</button>
+                  <button class="jz-chip" type="button">支出</button>
+                  <button class="jz-chip" type="button">收入</button>
+                  <button class="jz-chip" type="button">转账</button>
+                </div>
+
+                <section class="jz-section">
+                  <div class="jz-section-header">
+                    <div>
+                      <h2>9月12日</h2>
+                      <p>多类型示例 · 点击进入详情</p>
+                    </div>
+                  </div>
+                  <article class="jz-card jz-card--solid jz-list">
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-record="exp-lunch">
+                      <span class="jz-row-icon" data-domain="expense">
+                        <svg viewBox="0 0 24 24"><path d="M4 7h16v12H4zM8 7V5a4 4 0 0 1 8 0v2"/></svg>
+                      </span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">午餐 · 巷口食堂</span>
+                        <span class="jz-row-sub">现金</span>
+                      </span>
+                      <span class="jz-row-trail">
+                        <span class="jz-row-value">-¥28.00</span>
+                        <span class="jz-row-time">12:18</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-record="exp-coffee">
+                      <span class="jz-row-icon" data-domain="expense">
+                        <svg viewBox="0 0 24 24"><path d="M4 7h16v12H4zM8 7V5a4 4 0 0 1 8 0v2"/></svg>
+                      </span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">便利店咖啡</span>
+                        <span class="jz-row-sub">支付宝</span>
+                      </span>
+                      <span class="jz-row-trail">
+                        <span class="jz-row-value">-¥15.40</span>
+                        <span class="jz-row-time">09:20</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-record="exp-metro">
+                      <span class="jz-row-icon" data-domain="expense">
+                        <svg viewBox="0 0 24 24"><path d="M4 7h16v12H4zM8 7V5a4 4 0 0 1 8 0v2"/></svg>
+                      </span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">地铁通勤</span>
+                        <span class="jz-row-sub">交通卡</span>
+                      </span>
+                      <span class="jz-row-trail">
+                        <span class="jz-row-value">-¥6.00</span>
+                        <span class="jz-row-time">08:42</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-record="food-breakfast">
+                      <span class="jz-row-icon" data-domain="food">
+                        <svg viewBox="0 0 24 24"><path d="M4 11h16M6 11a6 6 0 0 1 12 0M8 19h8"/></svg>
+                      </span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">早餐 · 豆浆油条</span>
+                        <span class="jz-row-sub">饮食域</span>
+                      </span>
+                      <span class="jz-row-trail">
+                        <span class="jz-row-value">2餐</span>
+                        <span class="jz-row-time">07:55</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-record="inc-salary">
+                      <span class="jz-row-icon" data-domain="income">
+                        <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>
+                      </span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">项目奖金</span>
+                        <span class="jz-row-sub">工资收入</span>
+                      </span>
+                      <span class="jz-row-trail">
+                        <span class="jz-row-value is-income">+¥2,000.00</span>
+                        <span class="jz-row-time">09-10</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-record="sleep-last">
+                      <span class="jz-row-icon" data-domain="sleep">
+                        <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+                      </span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">昨夜睡眠</span>
+                        <span class="jz-row-sub">睡眠域 · 良好</span>
+                      </span>
+                      <span class="jz-row-trail">
+                        <span class="jz-row-value">7.2h</span>
+                        <span class="jz-row-time">09-11</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-record="sport-run">
+                      <span class="jz-row-icon" data-domain="sport">
+                        <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><path d="M8 21l3-6 3 2 2-5M7 12l3-3 4 1"/></svg>
+                      </span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">晨跑 · 公园</span>
+                        <span class="jz-row-sub">运动域</span>
+                      </span>
+                      <span class="jz-row-trail">
+                        <span class="jz-row-value">4.2km</span>
+                        <span class="jz-row-time">06:40</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </article>
+                </section>
+              </div>
+            </section>
+
+            <!-- 记录详情 · 对齐 PWA PageRecordDetail / iOS RecordDetailView -->
+            <section class="screen detail-screen" data-page="record-detail" aria-label="记录详情" hidden>
+              <div class="screen-stack">
+                <header class="detail-header">
+                  <button class="detail-back" type="button" data-action="close-detail" aria-label="返回">‹</button>
+                  <div class="detail-header-info">
+                    <div class="detail-header-title">记录详情</div>
+                  </div>
+                  <button class="detail-more" type="button" data-toast="删除确认 · 后续接线">删</button>
+                </header>
+
+                <div class="record-detail-content" data-bind="record-detail-body">
+                  <!-- 由 app.js 按类型渲染 -->
+                </div>
+              </div>
+            </section>
+
+            <!-- 分析 -->
+            <section class="screen" data-page="insights" aria-label="分析" hidden>
+              <div class="screen-stack">
+                <h1 class="nav-title">分析</h1>
+                <p class="nav-subtitle">基于已确认本地记录的趋势</p>
+                <article class="jz-card">
+                  <p class="finance-hero-label">近 7 日支出</p>
+                  <div class="finance-hero-value">¥486.20</div>
+                  <p class="jz-status-line" style="margin: 14px 0 0">较上周下降 12% · 餐饮占比最高</p>
+                </article>
+                <div class="jz-empty">
+                  <div class="jz-empty-ring" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6"/></svg>
+                  </div>
+                  <h3>更多洞察稍后开放</h3>
+                  <p>原型阶段先对齐样式与信息层级，深度分析页按同一设计系统继续展开。</p>
+                </div>
+              </div>
+            </section>
+
+            <!-- 账户与钱包 -->
+            <section class="screen detail-screen" data-page="accounts" aria-label="账户与钱包" hidden>
+              <div class="screen-stack">
+                <header class="detail-header">
+                  <button class="detail-back" type="button" data-action="close-accounts" aria-label="返回">‹</button>
+                  <div class="detail-header-info">
+                    <div class="detail-header-title">账户与钱包</div>
+                  </div>
+                  <button class="detail-more" type="button" data-toast="新建账户 · 后续接线">＋</button>
+                </header>
+
+                <section class="jz-section">
+                  <div class="jz-section-header">
+                    <div>
+                      <h2>资产账户</h2>
+                      <p>现金、储蓄与可支付余额</p>
+                    </div>
+                  </div>
+                  <article class="jz-card jz-card--solid jz-list">
+                    <button class="jz-row jz-press" type="button" data-open-account="acc-cash">
+                      <span class="jz-row-icon" data-domain="expense">钱</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">现金 <span class="jz-badge">默认支出</span></span>
+                        <span class="jz-row-sub">现金 · 本地账户</span>
+                      </span>
+                      <span class="jz-row-trail"><span class="jz-row-value">¥860.00</span></span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-account="acc-alipay">
+                      <span class="jz-row-icon">支</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">支付宝</span>
+                        <span class="jz-row-sub">电子钱包</span>
+                      </span>
+                      <span class="jz-row-trail"><span class="jz-row-value">¥1,240.50</span></span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-account="acc-bank">
+                      <span class="jz-row-icon">卡</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">银行卡 <span class="jz-badge">默认收入</span></span>
+                        <span class="jz-row-sub">储蓄卡 · 招商银行</span>
+                      </span>
+                      <span class="jz-row-trail"><span class="jz-row-value">¥1,159.50</span></span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </article>
+                </section>
+
+                <section class="jz-section">
+                  <div class="jz-section-header">
+                    <div>
+                      <h2>负债与待还</h2>
+                      <p>信用卡与信用支付</p>
+                    </div>
+                  </div>
+                  <article class="jz-card jz-card--solid jz-list">
+                    <button class="jz-row jz-press" type="button" data-open-account="acc-cmb">
+                      <span class="jz-row-icon" data-domain="income">还</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">招商信用卡</span>
+                        <span class="jz-row-sub">信用卡 · 每月 18 日还款</span>
+                      </span>
+                      <span class="jz-row-trail">
+                        <span class="jz-row-value jz-metric-value--coral">-¥860.00</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-open-account="acc-huabei">
+                      <span class="jz-row-icon">花</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">花呗</span>
+                        <span class="jz-row-sub">信用支付 · 每月 10 日还款</span>
+                      </span>
+                      <span class="jz-row-trail">
+                        <span class="jz-row-value jz-metric-value--coral">-¥260.00</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </article>
+                </section>
+
+                <section class="jz-section">
+                  <div class="jz-section-header">
+                    <div>
+                      <h2>已归档</h2>
+                      <p>保留余额与历史，不参与合计</p>
+                    </div>
+                  </div>
+                  <article class="jz-card jz-card--solid jz-list">
+                    <button class="jz-row jz-press" type="button" data-open-account="acc-archived">
+                      <span class="jz-row-icon">旧</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">旧校园卡</span>
+                        <span class="jz-row-sub">已归档</span>
+                      </span>
+                      <span class="jz-row-trail"><span class="jz-row-value">¥12.00</span></span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </article>
+                </section>
+              </div>
+            </section>
+
+            <!-- 账户详情 -->
+            <section class="screen detail-screen" data-page="account-detail" aria-label="账户详情" hidden>
+              <div class="screen-stack">
+                <header class="detail-header">
+                  <button class="detail-back" type="button" data-action="close-account-detail" aria-label="返回">‹</button>
+                  <div class="detail-header-info">
+                    <div class="detail-header-title" data-bind="account-title">账户</div>
+                    <div class="domain-detail-header-sub" data-bind="account-subtitle">类型</div>
+                  </div>
+                  <button class="detail-more" type="button" data-toast="编辑账户 · 后续接线">编</button>
+                </header>
+                <div data-bind="account-detail-body"></div>
+              </div>
+            </section>
+
+            <!-- 设置 · 对齐 iOS SettingsView + PWA PageSettings -->
+            <section class="screen" data-page="settings" aria-label="设置" hidden>
+              <div class="screen-stack">
+                <h1 class="nav-title">设置</h1>
+
+                <div class="settings-profile">
+                  <div class="settings-avatar">芥</div>
+                  <div class="settings-profile-info">
+                    <div class="settings-profile-name">local@jiezi.app</div>
+                    <div class="settings-profile-plan">本地优先 · 云端可选</div>
+                  </div>
+                  <button class="jz-chip" type="button" data-toast="登录 · 后续接线">登录</button>
+                </div>
+
+                <section class="jz-form-section">
+                  <div class="jz-section-header"><div><h2>数据与同步</h2></div></div>
+                  <div class="jz-form-body">
+                    <div class="jz-row">
+                      <span class="jz-row-icon">本</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">本机数据</span>
+                        <span class="jz-row-sub">保存在此设备</span>
+                      </span>
+                      <span class="settings-detail">已就绪</span>
+                    </div>
+                    <div class="jz-row jz-row--divider">
+                      <span class="jz-row-icon">云</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">云端身份</span>
+                        <span class="jz-row-sub">登录后可绑定多端</span>
+                      </span>
+                      <span class="settings-detail">未登录</span>
+                    </div>
+                    <div class="jz-row jz-row--divider">
+                      <span class="jz-row-icon">同</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">云同步</span>
+                        <span class="jz-row-sub">本地优先，同步可选</span>
+                      </span>
+                      <span class="settings-detail">关闭</span>
+                    </div>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-toast="同步预览 · 后续接线">
+                      <span class="jz-row-icon">览</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">查看同步预览</span>
+                        <span class="jz-row-sub">确认将上传的范围</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="jz-form-section">
+                  <div class="jz-section-header"><div><h2>使用帮助</h2></div></div>
+                  <div class="jz-form-body">
+                    <button class="jz-row jz-press" type="button" data-toast="使用引导 · 后续接线">
+                      <span class="jz-row-icon">引</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">使用引导</span>
+                        <span class="jz-row-sub">已完成 · 可重新播放</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="jz-form-section">
+                  <div class="jz-section-header"><div><h2>外观</h2></div></div>
+                  <div class="jz-form-body">
+                    <div class="jz-form-row">
+                      <div class="jz-form-label">界面主题</div>
+                      <input class="jz-input" data-bind="theme-name" value="芥青微光" readonly />
+                      <p class="jz-status-line" style="margin: 0">可用工作台「切换主题」循环九套 Token 主题。</p>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="jz-form-section">
+                  <div class="jz-section-header"><div><h2>数据管理</h2></div></div>
+                  <div class="jz-form-body">
+                    <button class="jz-row jz-press" type="button" data-action="open-export">
+                      <span class="jz-row-icon">出</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">数据导出</span>
+                        <span class="jz-row-sub">支出、收入和通用记录 · CSV / JSON</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-toast="导入能力后续版本接入">
+                      <span class="jz-row-icon">入</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">数据导入</span>
+                        <span class="jz-row-sub">CSV 与历史数据</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="jz-form-section">
+                  <div class="jz-section-header"><div><h2>AI 能力</h2></div></div>
+                  <div class="jz-form-body">
+                    <button class="jz-row jz-press" type="button" data-toast="截图/拍照识别路由 · 后续接线">
+                      <span class="jz-row-icon">识</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">截图 / 拍照识别</span>
+                        <span class="jz-row-sub">截图：视觉模型 · 拍照：视觉模型</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <div class="jz-row jz-row--divider">
+                      <span class="jz-row-icon">伴</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">陪伴文案</span>
+                        <span class="jz-row-sub">通知与详情第一句话</span>
+                      </span>
+                      <button class="home-layout-switch" type="button" role="switch" aria-checked="true" data-toggle-setting="companionEnabled">
+                        <input type="checkbox" checked tabindex="-1" /><span></span>
+                      </button>
+                    </div>
+                    <div class="jz-row jz-row--divider">
+                      <span class="jz-row-icon">忆</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">长期记忆</span>
+                        <span class="jz-row-sub">引用历史模式</span>
+                      </span>
+                      <button class="home-layout-switch" type="button" role="switch" aria-checked="true" data-toggle-setting="companionMemoryEnabled">
+                        <input type="checkbox" checked tabindex="-1" /><span></span>
+                      </button>
+                    </div>
+                    <div class="settings-chip-block">
+                      <div class="jz-form-label">陪伴语气</div>
+                      <div class="jz-chip-row" data-chip-group="persona">
+                        <button class="jz-chip is-selected" type="button">温柔</button>
+                        <button class="jz-chip" type="button">克制</button>
+                        <button class="jz-chip" type="button">活泼</button>
+                        <button class="jz-chip" type="button">吐槽</button>
+                      </div>
+                    </div>
+                    <button class="jz-row jz-press" type="button" data-toast="联动分析模型 · 后续接线">
+                      <span class="jz-row-icon">析</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">AI 联动分析</span>
+                        <span class="jz-row-sub">深度思考 · 不影响截图识别</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="jz-form-section">
+                  <div class="jz-section-header"><div><h2>隐私与留存</h2></div></div>
+                  <div class="jz-form-body">
+                    <div class="jz-row">
+                      <span class="jz-row-icon">志</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">AI 日志记录</span>
+                        <span class="jz-row-sub">保留识别摘要，便于排查</span>
+                      </span>
+                      <button class="home-layout-switch" type="button" role="switch" aria-checked="true" data-toggle-setting="aiLogsEnabled">
+                        <input type="checkbox" checked tabindex="-1" /><span></span>
+                      </button>
+                    </div>
+                    <div class="jz-row jz-row--divider">
+                      <span class="jz-row-icon">优</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">Prompt 优化参与</span>
+                        <span class="jz-row-sub">分享原始输出帮助优化（默认关）</span>
+                      </span>
+                      <button class="home-layout-switch" type="button" role="switch" aria-checked="false" data-toggle-setting="promptOptimizationEnabled">
+                        <input type="checkbox" tabindex="-1" /><span></span>
+                      </button>
+                    </div>
+                    <div class="jz-row jz-row--divider">
+                      <span class="jz-row-icon">研</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">参与 AI 改进</span>
+                        <span class="jz-row-sub">脱敏语义 30 天，不含原图与金额</span>
+                      </span>
+                      <button class="home-layout-switch" type="button" role="switch" aria-checked="false" data-toggle-setting="expressionImprovementEnabled">
+                        <input type="checkbox" tabindex="-1" /><span></span>
+                      </button>
+                    </div>
+                    <div class="settings-chip-block">
+                      <div class="jz-form-label">截图原图留存 · <span data-bind="retention-label">90 天</span></div>
+                      <div class="jz-chip-row" data-chip-group="retention">
+                        <button class="jz-chip" type="button" data-retention="7">7 天</button>
+                        <button class="jz-chip" type="button" data-retention="30">30 天</button>
+                        <button class="jz-chip is-selected" type="button" data-retention="90">90 天</button>
+                        <button class="jz-chip" type="button" data-retention="forever">永久</button>
+                      </div>
+                    </div>
+                    <div class="jz-row jz-row--divider">
+                      <span class="jz-row-icon">存</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">数据存储</span>
+                        <span class="jz-row-sub">本机优先 · 云端可选</span>
+                      </span>
+                      <span class="settings-detail">本地</span>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="jz-form-section">
+                  <div class="jz-section-header"><div><h2>快捷指令</h2></div></div>
+                  <div class="jz-form-body">
+                    <button class="jz-row jz-press" type="button" data-toast="快捷指令设置 · 后续接线">
+                      <span class="jz-row-icon">捷</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">快捷指令设置</span>
+                        <span class="jz-row-sub">凭据未同步 · 需登录后同步</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <div class="jz-row jz-row--divider">
+                      <span class="jz-row-icon">铃</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">上传完成通知</span>
+                        <span class="jz-row-sub">截图处理完提醒</span>
+                      </span>
+                      <button class="home-layout-switch" type="button" role="switch" aria-checked="true" data-toggle-setting="shortcutNotificationsEnabled">
+                        <input type="checkbox" checked tabindex="-1" /><span></span>
+                      </button>
+                    </div>
+                    <div class="jz-row jz-row--divider">
+                      <span class="jz-row-icon">卡</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">快捷指令结果卡片</span>
+                        <span class="jz-row-sub">识别结果摘要卡片</span>
+                      </span>
+                      <button class="home-layout-switch" type="button" role="switch" aria-checked="true" data-toggle-setting="shortcutResultCardEnabled">
+                        <input type="checkbox" checked tabindex="-1" /><span></span>
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="jz-form-section">
+                  <div class="jz-section-header"><div><h2>关于</h2></div></div>
+                  <div class="jz-form-body">
+                    <div class="jz-row">
+                      <span class="jz-row-icon">版</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">当前版本</span>
+                        <span class="jz-row-sub">Prototype v0.2 · 样式基线</span>
+                      </span>
+                    </div>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-toast="用户协议 · 后续接线">
+                      <span class="jz-row-icon">协</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">用户协议</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-toast="隐私政策 · 后续接线">
+                      <span class="jz-row-icon">隐</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">隐私政策</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                    <button class="jz-row jz-row--divider jz-press" type="button" data-toast="删除账号需二次确认 · 后续接线">
+                      <span class="jz-row-icon warn">删</span>
+                      <span class="jz-row-main">
+                        <span class="jz-row-title">删除账号</span>
+                        <span class="jz-row-sub">不可恢复 · 需二次确认</span>
+                      </span>
+                      <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              <!-- 导出面板 -->
+              <div class="home-layout-overlay" data-export-panel hidden>
+                <div class="home-layout-panel" role="dialog" aria-label="数据导出">
+                  <div class="home-layout-panel-head">
+                    <div>
+                      <div class="home-layout-kicker">DATA EXPORT</div>
+                      <div class="home-layout-panel-title">数据导出</div>
+                    </div>
+                    <button class="home-layout-close" type="button" data-action="close-export">完成</button>
+                  </div>
+                  <p class="jz-status-line" style="margin:0 0 12px">选择导出范围与格式（原型演示）</p>
+                  <div class="settings-chip-block">
+                    <div class="jz-form-label">导出内容</div>
+                    <div class="jz-chip-row" data-chip-group="export-content">
+                      <button class="jz-chip is-selected" type="button">全部</button>
+                      <button class="jz-chip" type="button">支出</button>
+                      <button class="jz-chip" type="button">收入</button>
+                      <button class="jz-chip" type="button">通用记录</button>
+                    </div>
+                  </div>
+                  <div class="settings-chip-block">
+                    <div class="jz-form-label">时间范围</div>
+                    <div class="jz-chip-row" data-chip-group="export-range">
+                      <button class="jz-chip" type="button">近 7 天</button>
+                      <button class="jz-chip" type="button">本月</button>
+                      <button class="jz-chip is-selected" type="button">全部</button>
+                    </div>
+                  </div>
+                  <div class="settings-chip-block">
+                    <div class="jz-form-label">导出格式</div>
+                    <div class="jz-chip-row" data-chip-group="export-format">
+                      <button class="jz-chip is-selected" type="button">JSON</button>
+                      <button class="jz-chip" type="button">CSV</button>
+                    </div>
+                  </div>
+                  <div class="export-preview">预计导出 <strong>42</strong> 条记录</div>
+                  <button class="jz-btn jz-btn--primary" type="button" style="width:100%;margin-top:12px" data-action="do-export">开始导出</button>
+                </div>
+              </div>
+            </section>
+
+            <!-- 组件陈列（开发辅助） -->
+            <section class="screen" data-page="lab" aria-label="组件陈列" hidden>
+              <div class="screen-stack">
+                <h1 class="nav-title">组件陈列</h1>
+                <p class="nav-subtitle">DesignSystem 一比一对照，非产品页面</p>
+
+                <p class="lab-label">按钮</p>
+                <div class="lab-grid">
+                  <button class="jz-btn jz-btn--primary" type="button">主按钮</button>
+                  <button class="jz-btn jz-btn--secondary" type="button">次按钮</button>
+                  <button class="jz-btn jz-btn--danger" type="button">危险操作</button>
+                  <button class="jz-btn jz-btn--ghost" type="button">幽灵按钮</button>
+                </div>
+
+                <p class="lab-label">Chip</p>
+                <div class="lab-row">
+                  <button class="jz-chip is-selected" type="button">已选</button>
+                  <button class="jz-chip" type="button">未选</button>
+                  <button class="jz-chip" type="button">筛选</button>
+                </div>
+
+                <p class="lab-label">指标</p>
+                <article class="jz-card jz-metric-grid">
+                  <div class="jz-metric">
+                    <span class="jz-metric-label">可用现金</span>
+                    <span class="jz-metric-value">¥3,260</span>
+                  </div>
+                  <div class="jz-metric">
+                    <span class="jz-metric-label">净额</span>
+                    <span class="jz-metric-value jz-metric-value--hero" style="font-size: 28px">¥12,480</span>
+                  </div>
+                </article>
+
+                <p class="lab-label">空态</p>
+                <article class="jz-card">
+                  <div class="jz-empty">
+                    <div class="jz-empty-ring" aria-hidden="true">
+                      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2 2"/></svg>
+                    </div>
+                    <h3>今天还没有记录</h3>
+                    <p>手动记一笔，或从相册选择截图。</p>
+                    <button class="jz-btn jz-btn--primary" type="button">留下此刻</button>
+                  </div>
+                </article>
+
+                <p class="lab-label">消息</p>
+                <div class="jz-message jz-message--error">金额必须大于 0</div>
+                <div class="jz-message jz-message--ok">已保存到本地</div>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tab-bar" aria-label="主导航">
+            <button class="tab-item is-active" type="button" data-route="today" aria-current="page">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3zM18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14zM6 15l.6 1.6L8 17l-1.4.6L6 19l-.6-1.4L4 17l1.4-.6L6 15z"/></svg>
+              <span>今日</span>
+            </button>
+            <button class="tab-item" type="button" data-route="inbox">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM4 13h4l2 3h4l2-3h4"/></svg>
+              <span>收件箱</span>
+            </button>
+            <button class="tab-item" type="button" data-route="records">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+              <span>记录</span>
+            </button>
+            <button class="tab-item" type="button" data-route="insights">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M7 15l3-4 3 2 4-6"/></svg>
+              <span>分析</span>
+            </button>
+            <button class="tab-item" type="button" data-route="settings">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></svg>
+              <span>设置</span>
+            </button>
+          </nav>
+
+          <!-- 中转站裁决台 -->
+          <div class="verdict-stage" data-verdict-stage hidden>
+            <div class="verdict-stage-shell" role="dialog" aria-label="截图裁决台">
+              <header class="verdict-stage-topbar">
+                <button class="verdict-icon-button" type="button" data-action="close-verdict" aria-label="关闭">×</button>
+                <div class="verdict-stage-state" data-bind="verdict-state"><i></i>待确认 · 消费</div>
+                <div class="verdict-stage-counter" data-bind="verdict-counter">1 / 3</div>
+              </header>
+
+              <div class="verdict-photo-stage">
+                <button class="verdict-page-button previous" type="button" data-action="verdict-prev" aria-label="上一张">‹</button>
+                <div class="verdict-photo" data-bind="verdict-photo" role="img" aria-label="来源截图"></div>
+                <button class="verdict-page-button next" type="button" data-action="verdict-next" aria-label="下一张">›</button>
+              </div>
+
+              <div class="verdict-stage-info">
+                <strong data-bind="verdict-title">支付成功截图</strong>
+                <p class="verdict-stage-guidance" data-bind="verdict-desc">识别为消费，金额 25.00，待确认分类</p>
+                <div class="verdict-stage-meta">
+                  <span class="verdict-assurance" data-bind="verdict-assurance"><i class="on"></i><i class="on"></i><i></i>较高把握</span>
+                </div>
+                <div class="verdict-time-stack">
+                  <span><i>记录时间</i><span data-bind="verdict-occurred">今天 10:02</span></span>
+                  <span><i>上传时间</i><span data-bind="verdict-uploaded">今天 10:03</span></span>
+                </div>
+                <div class="verdict-stage-error" data-bind="verdict-error" hidden></div>
+              </div>
+
+              <div class="verdict-stage-actions">
+                <button class="verdict-accept-button" type="button" data-action="verdict-archive">
+                  <span>↓</span> <span data-bind="verdict-primary">收下到消费</span>
+                </button>
+                <div class="verdict-minor-actions">
+                  <button type="button" data-action="verdict-adjust"><span>☷</span>调整</button>
+                  <button type="button" data-action="verdict-retry"><span>↻</span>重试</button>
+                  <button type="button" class="danger" data-action="verdict-discard"><span>×</span>销毁</button>
+                </div>
+              </div>
+
+              <div class="verdict-domain-strip">
+                <span>改判到</span>
+                <button type="button" class="is-current" data-verdict-domain="expense">消费</button>
+                <button type="button" data-verdict-domain="income">收入</button>
+                <button type="button" data-verdict-domain="food">饮食</button>
+                <button type="button" data-verdict-domain="sport">运动</button>
+                <button type="button" data-verdict-domain="sleep">睡眠</button>
+                <button type="button" data-verdict-domain="wallet">钱包</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 首页组件管理（盖住 TabBar） -->
+          <div class="home-layout-overlay" data-layout-panel hidden>
+            <div class="home-layout-panel" role="dialog" aria-label="首页组件">
+              <div class="home-layout-panel-head">
+                <div>
+                  <div class="home-layout-kicker">DASHBOARD LAYOUT</div>
+                  <div class="home-layout-panel-title">首页组件</div>
+                </div>
+                <button class="home-layout-close" type="button" data-action="close-layout">完成</button>
+              </div>
+              <div class="home-layout-panel-list">
+                <div class="home-layout-item">
+                  <div class="home-layout-item-main">
+                    <div class="home-layout-item-title">财务状态</div>
+                    <div class="home-layout-item-desc">净额估算、待还与近 7 日支出趋势</div>
+                  </div>
+                  <div class="home-layout-item-actions">
+                    <label class="home-layout-switch"><input type="checkbox" checked data-widget-toggle="finance"><span></span></label>
+                  </div>
+                </div>
+                <div class="home-layout-item">
+                  <div class="home-layout-item-main">
+                    <div class="home-layout-item-title">今日概览</div>
+                    <div class="home-layout-item-desc">当天消费、收入、运动、饮食与待处理摘要</div>
+                  </div>
+                  <div class="home-layout-item-actions">
+                    <label class="home-layout-switch"><input type="checkbox" checked data-widget-toggle="today"><span></span></label>
+                  </div>
+                </div>
+                <div class="home-layout-item">
+                  <div class="home-layout-item-main">
+                    <div class="home-layout-item-title">待处理提醒</div>
+                    <div class="home-layout-item-desc">待分类、待确认、识别失败的截图提醒</div>
+                  </div>
+                  <div class="home-layout-item-actions">
+                    <label class="home-layout-switch"><input type="checkbox" checked data-widget-toggle="pending"><span></span></label>
+                  </div>
+                </div>
+                <div class="home-layout-item">
+                  <div class="home-layout-item-main">
+                    <div class="home-layout-item-title">数据域快捷入口</div>
+                    <div class="home-layout-item-desc">快速进入已安装数据域</div>
+                  </div>
+                  <div class="home-layout-item-actions">
+                    <label class="home-layout-switch"><input type="checkbox" checked data-widget-toggle="domains"><span></span></label>
+                  </div>
+                </div>
+                <div class="home-layout-item">
+                  <div class="home-layout-item-main">
+                    <div class="home-layout-item-title">每日明细</div>
+                    <div class="home-layout-item-desc">按日期查看本月全部沉淀记录</div>
+                  </div>
+                  <div class="home-layout-item-actions">
+                    <label class="home-layout-switch"><input type="checkbox" checked data-widget-toggle="daily"><span></span></label>
+                  </div>
+                </div>
+              </div>
+              <div class="home-layout-panel-foot">
+                <button class="home-layout-reset-btn" type="button" data-action="reset-layout">恢复默认</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="device-home-indicator" aria-hidden="true"></div>
+      </div>
+
+      <p class="workbench-note">
+        样式对齐 iOS DesignSystem（Token + Card / Button / ListRow / Metric / Chip / EmptyState / TabBar）。
+        默认主题 cyan；业务数据为合成占位，不连后端。
+      </p>
+    </div>
+
+    <div class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <script type="module" src="shared/js/app.js"></script>
+  </body>
+</html>

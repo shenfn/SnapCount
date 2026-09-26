@@ -120,7 +120,15 @@ struct CachedRemoteImage<Content: View, Placeholder: View, Failure: View>: View 
             uiImage = nil
             didFail = false
             do {
-                uiImage = try await RemoteImageRepository.shared.image(for: url)
+                if url.isFileURL {
+                    guard let data = try? Data(contentsOf: url),
+                          let image = UIImage(data: data) else {
+                        throw URLError(.cannotDecodeContentData)
+                    }
+                    uiImage = image
+                } else {
+                    uiImage = try await RemoteImageRepository.shared.image(for: url)
+                }
             } catch {
                 didFail = true
             }

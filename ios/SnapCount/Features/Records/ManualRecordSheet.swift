@@ -1,10 +1,14 @@
 import SwiftUI
+import UIKit
 
 struct ManualRecordSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var draft: NativeManualRecordDraft
     @State private var localMessage: String?
+    @State private var showLocalCameraPicker = false
+    @State private var showLocalPhotoLibraryPicker = false
+    @State private var showLocalPhotoOptions = false
     private let stagingRecord: NativeStagingRecord?
     private let preserveInboxNavigation: Bool
     private let onResolved: (() -> Void)?
@@ -17,6 +21,15 @@ struct ManualRecordSheet: View {
             initialValue: detail.map { NativeManualRecordDraft(detail: $0) }
                 ?? NativeManualRecordDraft(kind: kind, domainKey: domainKey)
         )
+    }
+
+    init(initialImageData: Data?) {
+        stagingRecord = nil
+        preserveInboxNavigation = false
+        onResolved = nil
+        var initialDraft = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
+        initialDraft.imageData = initialImageData
+        _draft = State(initialValue: initialDraft)
     }
 
     init(
@@ -144,6 +157,10 @@ struct ManualRecordSheet: View {
                                 universalFields
                             }
 
+                            if canAttachLocalImage {
+                                localImageSection
+                            }
+
                             dateFields
                             noteSection
 
@@ -186,6 +203,71 @@ struct ManualRecordSheet: View {
                 fallbackDomainKey: draft.domainKey
             ).defaultDimension
             if draft.dimension.isEmpty { draft.dimension = fallback }
+        }
+    }
+
+    private var canAttachLocalImage: Bool {
+        !appState.isSignedIn && draft.kind == .universal && draft.existingRawId == nil
+    }
+
+    private var localImageSection: some View {
+        JieziFormSection(
+            title: "本地图片",
+            subtitle: "图片只保存在本机，并随这条记录一起导出或删除。"
+        ) {
+            if let imageData = draft.imageData,
+               let image = UIImage(data: imageData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
+
+                HStack(spacing: JieziSpacing.md) {
+                    Button("重新选择") { showLocalPhotoOptions = true }
+                        .buttonStyle(.bordered)
+                    Button("移除图片", role: .destructive) { draft.imageData = nil }
+                        .buttonStyle(.bordered)
+                }
+            } else {
+                HStack(spacing: JieziSpacing.md) {
+                    Button {
+                        showLocalCameraPicker = true
+                    } label: {
+                        Label("拍照", systemImage: "camera")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        showLocalPhotoLibraryPicker = true
+                    } label: {
+                        Label("选择图片", systemImage: "photo")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .confirmationDialog("添加本地图片", isPresented: $showLocalPhotoOptions, titleVisibility: .visible) {
+            Button("拍照") { showLocalCameraPicker = true }
+            Button("从相册选择") { showLocalPhotoLibraryPicker = true }
+            Button("取消", role: .cancel) {}
+        }
+        .fullScreenCover(isPresented: $showLocalCameraPicker) {
+            CameraPicker { data in
+                showLocalCameraPicker = false
+                draft.imageData = data
+            } onCancel: {
+                showLocalCameraPicker = false
+            }
+            .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showLocalPhotoLibraryPicker) {
+            PhotoLibraryPicker { data in
+                showLocalPhotoLibraryPicker = false
+                draft.imageData = data
+            } onCancel: {
+                showLocalPhotoLibraryPicker = false
+            }
         }
     }
 
