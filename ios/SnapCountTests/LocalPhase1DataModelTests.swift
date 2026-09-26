@@ -262,6 +262,35 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertEqual(savedRecord?.title, "第一次编辑")
     }
 
+    func testLOCALP1DM004DM005SleepAndReadingConfidenceBoundariesFollowDomainThresholds() {
+        let sleepPayload: [String: AnyCodable] = [
+            "sleep_hours": AnyCodable(6.5),
+            "quality_level": AnyCodable("良好")
+        ]
+        XCTAssertEqual(
+            LocalRecordIntakeRouter.route(domainKey: "sleep", confidence: 0.75, payload: sleepPayload),
+            .autoArchive,
+            "DM-004：sleep 达到分域阈值 0.75 应自动归档"
+        )
+        XCTAssertEqual(
+            LocalRecordIntakeRouter.route(domainKey: "sleep", confidence: 0.74, payload: sleepPayload),
+            .staging,
+            "DM-005：sleep 低于分域阈值应进本地 Inbox"
+        )
+        let readingPayload: [String: AnyCodable] = [
+            "book_name": AnyCodable("原则"),
+            "reading_minutes": AnyCodable(25)
+        ]
+        XCTAssertEqual(
+            LocalRecordIntakeRouter.route(domainKey: "reading", confidence: 0.75, payload: readingPayload),
+            .autoArchive
+        )
+        XCTAssertEqual(
+            LocalRecordIntakeRouter.route(domainKey: "reading", confidence: 0.74, payload: readingPayload),
+            .staging
+        )
+    }
+
     func testLOCALP1DM011FactReaderMergesFormalDomainsAndExcludesStagingAndTombstones() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

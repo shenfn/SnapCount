@@ -219,10 +219,25 @@ final class LocalSportRecordTests: XCTestCase {
         XCTAssertEqual(tombstone?.localVersion, 3)
     }
 
-    func testLOCALP1SPORT001CConfidenceRoutesHighToArchiveAndLowToStaging() {
-        XCTAssertEqual(LocalRecordIntakeRouter.route(confidence: 0.80), .autoArchive)
-        XCTAssertEqual(LocalRecordIntakeRouter.route(confidence: 0.79), .staging)
-        XCTAssertEqual(LocalRecordIntakeRouter.route(confidence: nil), .staging)
+    func testLOCALP1SPORT001CConfidenceBoundaryRoutesPerSportDomainThreshold() {
+        let payload: [String: AnyCodable] = [
+            "sport_type": AnyCodable("跑步"),
+            "duration_minutes": AnyCodable(20)
+        ]
+        XCTAssertEqual(
+            LocalRecordIntakeRouter.route(domainKey: "sport", confidence: 0.75, payload: payload),
+            .autoArchive,
+            "sport 分域阈值 0.75：达到边界应自动归档"
+        )
+        XCTAssertEqual(
+            LocalRecordIntakeRouter.route(domainKey: "sport", confidence: 0.74, payload: payload),
+            .staging
+        )
+        XCTAssertEqual(
+            LocalRecordIntakeRouter.route(domainKey: "sport", confidence: nil, payload: payload),
+            .staging,
+            "无置信度应保留在本地 Inbox"
+        )
     }
 
     func testLOCALP1SPORT001CUseCasePersistsAutoArchiveAndStagingRoute() async throws {
