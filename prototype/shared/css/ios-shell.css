@@ -390,6 +390,20 @@ button:focus-visible {
   color: var(--jiezi-color-muted);
 }
 
+/* 全局 toast（原 app.js 内联样式收编） */
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: var(--jiezi-z-toast);
+  padding: 10px 14px;
+  border-radius: var(--jiezi-radius-button);
+  color: var(--jiezi-color-ink);
+  background: var(--jiezi-color-paper);
+  box-shadow: 0 12px 22px color-mix(in srgb, var(--jiezi-color-space) 12%, transparent);
+  font: 400 13px/1.4 var(--jiezi-font-family-sans);
+}
+
 @media (max-width: 480px) {
   .workbench { padding: 12px 0 18px; }
   .workbench-head { padding: 0 14px; align-items: flex-start; flex-direction: column; }

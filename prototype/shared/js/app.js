@@ -19,18 +19,6 @@ function showToast(message) {
   const toast = document.createElement('div');
   toast.className = 'toast';
   toast.textContent = message;
-  Object.assign(toast.style, {
-    position: 'fixed',
-    right: '20px',
-    bottom: '20px',
-    zIndex: '100000',
-    padding: '10px 14px',
-    borderRadius: '18px',
-    color: 'var(--jiezi-color-ink)',
-    background: 'var(--jiezi-color-paper)',
-    boxShadow: '0 12px 22px color-mix(in srgb, var(--jiezi-color-space) 12%, transparent)',
-    font: '400 13px/1.4 system-ui, sans-serif',
-  });
   toastRegion.append(toast);
   window.setTimeout(() => toast.remove(), 2000);
 }
@@ -134,6 +122,9 @@ document.querySelectorAll('[data-toast]').forEach((el) => {
 });
 
 const trendSummary = document.querySelector('[data-bind="trend-summary"]');
+document.querySelectorAll('.finance-bar[data-height]').forEach((bar) => {
+  bar.style.setProperty('--bar-h', bar.dataset.height);
+});
 document.querySelectorAll('.finance-bar-col').forEach((col) => {
   col.addEventListener('click', () => {
     const selected = col.classList.contains('is-selected');

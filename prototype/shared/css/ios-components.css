@@ -534,6 +534,17 @@
   background: var(--jiezi-color-brand-alpha-8);
 }
 
+/* 状态行间距变体（收编自 index.html 内联 margin） */
+.jz-status-line.is-trailing { margin: 14px 0 0; }
+.jz-status-line.is-flush { margin: 0; }
+.jz-status-line.is-panel-intro { margin: 0 0 12px; }
+
+/* 面板内全宽主按钮（收编自内联样式） */
+.export-submit { margin-top: 12px; }
+
+/* 陈列页紧凑 hero 字号 */
+.jz-metric-value--hero.is-compact { font-size: 28px; }
+
 /* ========== 状态条 / 同步 ========== */
 
 .jz-status-line {
@@ -888,6 +899,7 @@
 .finance-bar {
   width: 58%;
   min-height: 4px;
+  height: calc(var(--bar-h, 50) * 1%);
   border-radius: var(--jiezi-radius-pill) var(--jiezi-radius-pill) 4px 4px;
   background: color-mix(in srgb, var(--jiezi-color-brand) 55%, transparent);
   transition: height 0.2s ease, background 0.15s ease;
@@ -935,9 +947,24 @@
   width: 36px;
   height: 36px;
   border-radius: var(--jiezi-radius-md);
-  font-size: 16px;
-  background: color-mix(in srgb, var(--jiezi-color-brand) 8%, transparent);
+  background: color-mix(in srgb, var(--domain, var(--jiezi-color-brand)) 10%, transparent);
+  color: var(--domain, var(--jiezi-color-brand));
 }
+
+.today-overview-icon svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.today-overview-icon[data-domain="expense"] { --domain: var(--jiezi-domain-expense); }
+.today-overview-icon[data-domain="food"] { --domain: var(--jiezi-domain-food); }
+.today-overview-icon[data-domain="sport"] { --domain: var(--jiezi-domain-sport); }
+.today-overview-icon[data-domain="pending"] { --domain: var(--jiezi-color-light); }
 
 .today-overview-content { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
@@ -1049,9 +1076,18 @@
   width: var(--jiezi-icon-semantic-domain-block);
   height: var(--jiezi-icon-semantic-domain-block);
   border-radius: var(--jiezi-radius-md);
-  font-size: 16px;
   color: var(--domain, var(--jiezi-color-brand));
   background: color-mix(in srgb, var(--domain, var(--jiezi-color-brand)) 10%, transparent);
+}
+
+.domain-quick-icon svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .domain-quick-name {
@@ -1136,6 +1172,10 @@
   height: 8px;
   border-radius: 50%;
 }
+
+.home-daily-dot.is-coral { background: var(--jiezi-color-coral); }
+.home-daily-dot.is-brand { background: var(--jiezi-color-brand); }
+.home-daily-dot.is-gold { background: var(--jiezi-color-light); }
 
 .home-daily-empty {
   font: var(--ios-type-caption);

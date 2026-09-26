@@ -161,37 +161,37 @@
                       <div class="finance-bars" role="list">
                         <button class="finance-bar-col" type="button" data-trend="06-06" data-amount="42" aria-label="9月6日 ¥42">
                           <span class="finance-bar-amount">¥42</span>
-                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:35%"></span></span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" data-height="35"></span></span>
                           <span class="finance-bar-label">6</span>
                         </button>
                         <button class="finance-bar-col" type="button" data-trend="06-07" data-amount="128" aria-label="9月7日 ¥128">
                           <span class="finance-bar-amount">¥128</span>
-                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:78%"></span></span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" data-height="78"></span></span>
                           <span class="finance-bar-label">7</span>
                         </button>
                         <button class="finance-bar-col" type="button" data-trend="06-08" data-amount="56" aria-label="9月8日 ¥56">
                           <span class="finance-bar-amount">¥56</span>
-                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:42%"></span></span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" data-height="42"></span></span>
                           <span class="finance-bar-label">8</span>
                         </button>
                         <button class="finance-bar-col" type="button" data-trend="06-09" data-amount="0" aria-label="9月9日 ¥0">
                           <span class="finance-bar-amount">¥0</span>
-                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:4%"></span></span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" data-height="4"></span></span>
                           <span class="finance-bar-label">9</span>
                         </button>
                         <button class="finance-bar-col" type="button" data-trend="06-10" data-amount="95" aria-label="9月10日 ¥95">
                           <span class="finance-bar-amount">¥95</span>
-                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:58%"></span></span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" data-height="58"></span></span>
                           <span class="finance-bar-label">10</span>
                         </button>
                         <button class="finance-bar-col" type="button" data-trend="06-11" data-amount="37" aria-label="9月11日 ¥37">
                           <span class="finance-bar-amount">¥37</span>
-                          <span class="finance-bar-wrap"><span class="finance-bar" style="height:28%"></span></span>
+                          <span class="finance-bar-wrap"><span class="finance-bar" data-height="28"></span></span>
                           <span class="finance-bar-label">11</span>
                         </button>
                         <button class="finance-bar-col is-selected" type="button" data-trend="today" data-amount="61" aria-label="今天 ¥61">
                           <span class="finance-bar-amount">¥61</span>
-                          <span class="finance-bar-wrap"><span class="finance-bar is-today is-selected" style="height:48%"></span></span>
+                          <span class="finance-bar-wrap"><span class="finance-bar is-today is-selected" data-height="48"></span></span>
                           <span class="finance-bar-label">今</span>
                         </button>
                       </div>
@@ -210,7 +210,7 @@
                   </div>
                   <article class="jz-card jz-card--solid today-overview">
                     <button class="today-overview-row" type="button" data-toast="支出日详情">
-                      <span class="today-overview-icon expense">💸</span>
+                      <span class="today-overview-icon" data-domain="expense"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4zM8 7V5a4 4 0 0 1 8 0v2"/></svg></span>
                       <span class="today-overview-content">
                         <span class="today-overview-label">支出 ¥61.40</span>
                         <span class="today-overview-detail">支付宝×2 · 现金×1 · 交通卡×1</span>
@@ -218,7 +218,7 @@
                       <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                     </button>
                     <button class="today-overview-row is-pending" type="button" data-route="inbox">
-                      <span class="today-overview-icon pending">⚠️</span>
+                      <span class="today-overview-icon" data-domain="pending"><svg viewBox="0 0 24 24"><path d="M12 4l9 16H3zM12 10v4M12 17.5v.5"/></svg></span>
                       <span class="today-overview-content">
                         <span class="today-overview-label">待补全 ¥25.00</span>
                         <span class="today-overview-detail">1 笔已识别金额，待补全分类 ›</span>
@@ -226,7 +226,7 @@
                       <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                     </button>
                     <button class="today-overview-row" type="button" data-open-record="sport-run">
-                      <span class="today-overview-icon sport">🏃</span>
+                      <span class="today-overview-icon" data-domain="sport"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><path d="M8 21l3-6 3 2 2-5M7 12l3-3 4 1"/></svg></span>
                       <span class="today-overview-content">
                         <span class="today-overview-label">晨跑 · 公园</span>
                         <span class="today-overview-detail">32分钟 · 4.2km</span>
@@ -234,7 +234,7 @@
                       <svg class="jz-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                     </button>
                     <button class="today-overview-row" type="button" data-open-record="food-breakfast">
-                      <span class="today-overview-icon food">🍱</span>
+                      <span class="today-overview-icon" data-domain="food"><svg viewBox="0 0 24 24"><path d="M4 11h16M6 11a6 6 0 0 1 12 0M8 19h8"/></svg></span>
                       <span class="today-overview-content">
                         <span class="today-overview-label">今日饮食</span>
                         <span class="today-overview-detail">2 餐 · 约 980 千卡（估算）</span>
@@ -271,32 +271,32 @@
                   </div>
                   <div class="home-domains-grid">
                     <button class="domain-quick-card" type="button" data-toast="钱包域">
-                      <span class="domain-quick-icon" data-domain="wallet">💳</span>
+                      <span class="domain-quick-icon" data-domain="wallet"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 14h2"/></svg></span>
                       <span class="domain-quick-name">钱包</span>
                       <span class="domain-quick-count">12 条</span>
                     </button>
                     <button class="domain-quick-card" type="button" data-toast="运动域">
-                      <span class="domain-quick-icon" data-domain="sport">🏃</span>
+                      <span class="domain-quick-icon" data-domain="sport"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><path d="M8 21l3-6 3 2 2-5M7 12l3-3 4 1"/></svg></span>
                       <span class="domain-quick-name">运动</span>
                       <span class="domain-quick-count">5 条</span>
                     </button>
                     <button class="domain-quick-card" type="button" data-toast="睡眠域">
-                      <span class="domain-quick-icon" data-domain="sleep">🌙</span>
+                      <span class="domain-quick-icon" data-domain="sleep"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg></span>
                       <span class="domain-quick-name">睡眠</span>
                       <span class="domain-quick-count">8 条</span>
                     </button>
                     <button class="domain-quick-card" type="button" data-toast="饮食域">
-                      <span class="domain-quick-icon" data-domain="food">🍱</span>
+                      <span class="domain-quick-icon" data-domain="food"><svg viewBox="0 0 24 24"><path d="M4 11h16M6 11a6 6 0 0 1 12 0M8 19h8"/></svg></span>
                       <span class="domain-quick-name">饮食</span>
                       <span class="domain-quick-count">21 条</span>
                     </button>
                     <button class="domain-quick-card" type="button" data-toast="阅读域">
-                      <span class="domain-quick-icon" data-domain="reading">📖</span>
+                      <span class="domain-quick-icon" data-domain="reading"><svg viewBox="0 0 24 24"><path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/></svg></span>
                       <span class="domain-quick-name">阅读</span>
                       <span class="domain-quick-count">3 条</span>
                     </button>
                     <button class="domain-quick-card" type="button" data-toast="通用域">
-                      <span class="domain-quick-icon">✦</span>
+                      <span class="domain-quick-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/></svg></span>
                       <span class="domain-quick-name">通用</span>
                       <span class="domain-quick-count">9 条</span>
                     </button>
@@ -323,9 +323,9 @@
                       </span>
                       <span class="home-daily-divider"></span>
                       <span class="home-daily-lines">
-                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-coral)"></i><span>支出</span><strong>¥61</strong></span>
-                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-brand)"></i><span>运动</span><strong>32分</strong></span>
-                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-light)"></i><span>饮食</span><strong>2餐</strong></span>
+                        <span class="home-daily-line"><i class="home-daily-dot is-coral"></i><span>支出</span><strong>¥61</strong></span>
+                        <span class="home-daily-line"><i class="home-daily-dot is-brand"></i><span>运动</span><strong>32分</strong></span>
+                        <span class="home-daily-line"><i class="home-daily-dot is-gold"></i><span>饮食</span><strong>2餐</strong></span>
                       </span>
                     </button>
                     <button class="home-daily-card" type="button" data-toast="9月11日 明细">
@@ -335,8 +335,8 @@
                       </span>
                       <span class="home-daily-divider"></span>
                       <span class="home-daily-lines">
-                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-coral)"></i><span>支出</span><strong>¥37</strong></span>
-                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-brand)"></i><span>睡眠</span><strong>7.2h</strong></span>
+                        <span class="home-daily-line"><i class="home-daily-dot is-coral"></i><span>支出</span><strong>¥37</strong></span>
+                        <span class="home-daily-line"><i class="home-daily-dot is-brand"></i><span>睡眠</span><strong>7.2h</strong></span>
                       </span>
                     </button>
                     <button class="home-daily-card is-empty" type="button" data-toast="9月10日 空态">
@@ -346,7 +346,7 @@
                       </span>
                       <span class="home-daily-divider"></span>
                       <span class="home-daily-lines">
-                        <span class="home-daily-line"><i class="home-daily-dot" style="background:var(--jiezi-color-coral)"></i><span>支出</span><strong>¥95</strong></span>
+                        <span class="home-daily-line"><i class="home-daily-dot is-coral"></i><span>支出</span><strong>¥95</strong></span>
                       </span>
                     </button>
                     <button class="home-daily-card is-empty" type="button" data-toast="9月9日 空态">
@@ -580,7 +580,7 @@
                 <article class="jz-card">
                   <p class="finance-hero-label">近 7 日支出</p>
                   <div class="finance-hero-value">¥486.20</div>
-                  <p class="jz-status-line" style="margin: 14px 0 0">较上周下降 12% · 餐饮占比最高</p>
+                  <p class="jz-status-line is-trailing">较上周下降 12% · 餐饮占比最高</p>
                 </article>
                 <div class="jz-empty">
                   <div class="jz-empty-ring" aria-hidden="true">
@@ -783,7 +783,7 @@
                     <div class="jz-form-row">
                       <div class="jz-form-label">界面主题</div>
                       <input class="jz-input" data-bind="theme-name" value="芥青微光" readonly />
-                      <p class="jz-status-line" style="margin: 0">可用工作台「切换主题」循环九套 Token 主题。</p>
+                      <p class="jz-status-line is-flush">可用工作台「切换主题」循环九套 Token 主题。</p>
                     </div>
                   </div>
                 </section>
@@ -994,7 +994,7 @@
                     </div>
                     <button class="home-layout-close" type="button" data-action="close-export">完成</button>
                   </div>
-                  <p class="jz-status-line" style="margin:0 0 12px">选择导出范围与格式（原型演示）</p>
+                  <p class="jz-status-line is-panel-intro">选择导出范围与格式（原型演示）</p>
                   <div class="settings-chip-block">
                     <div class="jz-form-label">导出内容</div>
                     <div class="jz-chip-row" data-chip-group="export-content">
@@ -1020,7 +1020,7 @@
                     </div>
                   </div>
                   <div class="export-preview">预计导出 <strong>42</strong> 条记录</div>
-                  <button class="jz-btn jz-btn--primary" type="button" style="width:100%;margin-top:12px" data-action="do-export">开始导出</button>
+                  <button class="jz-btn jz-btn--primary export-submit" type="button" data-action="do-export">开始导出</button>
                 </div>
               </div>
             </section>
@@ -1054,7 +1054,7 @@
                   </div>
                   <div class="jz-metric">
                     <span class="jz-metric-label">净额</span>
-                    <span class="jz-metric-value jz-metric-value--hero" style="font-size: 28px">¥12,480</span>
+                    <span class="jz-metric-value jz-metric-value--hero is-compact">¥12,480</span>
                   </div>
                 </article>
 
