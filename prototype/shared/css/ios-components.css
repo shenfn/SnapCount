@@ -230,8 +230,8 @@
   width: var(--jiezi-icon-semantic-list-row-block);
   height: var(--jiezi-icon-semantic-list-row-block);
   border-radius: var(--jiezi-radius-md);
-  color: var(--jiezi-color-brand);
-  background: var(--jiezi-color-brand-alpha-8);
+  color: var(--domain, var(--jiezi-color-brand));
+  background: color-mix(in srgb, var(--domain, var(--jiezi-color-brand)) 10%, transparent);
 }
 
 .jz-row-icon svg {
@@ -244,29 +244,45 @@
   stroke-linejoin: round;
 }
 
-.jz-row-icon[data-domain="expense"] {
-  color: var(--jiezi-domain-expense);
-  background: color-mix(in srgb, var(--jiezi-domain-expense) 10%, transparent);
+/* 数据域着色：一处定义，行图标块与快捷入口共用 */
+.jz-row-icon[data-domain],
+.domain-quick-icon[data-domain] {
+  --domain: var(--jiezi-color-brand);
 }
 
-.jz-row-icon[data-domain="food"] {
-  color: var(--jiezi-domain-food);
-  background: color-mix(in srgb, var(--jiezi-domain-food) 10%, transparent);
+.jz-row-icon[data-domain="expense"],
+.domain-quick-icon[data-domain="expense"] {
+  --domain: var(--jiezi-domain-expense);
 }
 
-.jz-row-icon[data-domain="sport"] {
-  color: var(--jiezi-domain-sport);
-  background: color-mix(in srgb, var(--jiezi-domain-sport) 10%, transparent);
+.jz-row-icon[data-domain="income"],
+.domain-quick-icon[data-domain="income"] {
+  --domain: var(--jiezi-domain-income);
 }
 
-.jz-row-icon[data-domain="reading"] {
-  color: var(--jiezi-domain-reading);
-  background: color-mix(in srgb, var(--jiezi-domain-reading) 10%, transparent);
+.jz-row-icon[data-domain="wallet"],
+.domain-quick-icon[data-domain="wallet"] {
+  --domain: var(--jiezi-domain-wallet);
 }
 
-.jz-row-icon[data-domain="sleep"] {
-  color: var(--jiezi-domain-sleep);
-  background: color-mix(in srgb, var(--jiezi-domain-sleep) 10%, transparent);
+.jz-row-icon[data-domain="food"],
+.domain-quick-icon[data-domain="food"] {
+  --domain: var(--jiezi-domain-food);
+}
+
+.jz-row-icon[data-domain="sport"],
+.domain-quick-icon[data-domain="sport"] {
+  --domain: var(--jiezi-domain-sport);
+}
+
+.jz-row-icon[data-domain="reading"],
+.domain-quick-icon[data-domain="reading"] {
+  --domain: var(--jiezi-domain-reading);
+}
+
+.jz-row-icon[data-domain="sleep"],
+.domain-quick-icon[data-domain="sleep"] {
+  --domain: var(--jiezi-domain-sleep);
 }
 
 .jz-row-main {
@@ -1018,11 +1034,12 @@
 .domain-quick-icon {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: var(--jiezi-icon-semantic-domain-block);
+  height: var(--jiezi-icon-semantic-domain-block);
   border-radius: var(--jiezi-radius-md);
   font-size: 16px;
-  background: color-mix(in srgb, var(--jiezi-color-brand) 10%, transparent);
+  color: var(--domain, var(--jiezi-color-brand));
+  background: color-mix(in srgb, var(--domain, var(--jiezi-color-brand)) 10%, transparent);
 }
 
 .domain-quick-name {
