@@ -1,7 +1,7 @@
 # Jiezi Local-First Phase 1 Handoff
 
-> 更新：2026-09-19。依据：本轮已完成的产品决策、实现差距矩阵及 AI Popup 资产盘点；本文是接续快照，不是完整 PRD 或实施授权。
-> 盘点基线：`D:\Business\count`，HEAD `f24bfd4`，分支 `feature/LOCAL-003E同步错误恢复与分批上传`。工作区存在用户 WIP，必须保护。
+> 更新：2026-09-25（SL-01 文档口径收口）。依据：本轮已完成的产品决策、实现差距矩阵及 AI Popup 资产盘点；本文是接续快照，不是完整 PRD 或实施授权。
+> 盘点基线：`D:\Business\count`，HEAD `7005e81`，分支 `codex/local-first-phase1-fact-reader`。工作区存在用户 WIP，必须保护。
 
 ## 1. 当前阶段目标
 
@@ -14,9 +14,9 @@ Phase 1 的目标是尽快完成一个可发布 App Store 的 Local-First Person
 - 本地数据是正式业务事实，不是云端缓存；本地数据库独立支撑核心记录体验。
 - Phase 1 不做 Cloud Sync、多设备同步、云端换机恢复。已有同步代码冻结，不删除、不扩展，不作为第一版发布阻塞项。
 - 登录、BYOK、Hosted AI、Cloud Sync 是独立能力。登录不自动代表开启同步；AI Provider 不决定业务数据存储位置。
-- 不登录、不联网仍可创建和管理本地记录，包括查看、编辑、删除及基础账户、余额能力。此承诺不等于离线调用云端大模型。
-- 联网但不登录可使用 BYOK；联网并登录可使用 Hosted AI，登录主要服务于身份、额度、订阅和 Hosted AI。
-- 第一版继续覆盖五域：**消费、饮食、睡眠、运动、阅读**。不能因为 Expense 当前实现更成熟而缩减其他域。
+- 不登录、不联网仍可创建和管理已落地的本地记录，包括查看、编辑、删除及基础账户、余额能力。此承诺不等于离线调用云端大模型。
+- BYOK 暂缓，不纳入 Phase 1；联网并登录可使用 Hosted AI，登录主要服务于身份、额度、订阅和 Hosted AI。
+- Phase 1 范围按拍板扩展为七个本地事实域：**消费、收入、钱包快照、饮食、睡眠、运动、阅读**。收入与钱包分别由 SL-A/SL-B 进入实现；不能因为 Expense 当前实现更成熟而缩减其他域。
 - 截图 / 快捷输入、选择图片 / 拍照是核心入口；手动创建和编辑是兜底；语音暂不进入 Phase 1。
 - AI 将输入转换为结构化候选，用户最终确认后的正式记录保存到本地。
 - 图片需要真正本地保存，并具备与记录相对应的生命周期，不能只依赖远端 URL + Cache。
@@ -36,10 +36,10 @@ Phase 1 的目标是尽快完成一个可发布 App Store 的 Local-First Person
 
 ### 主要缺口
 
-- 饮食 / 睡眠 / 运动 / 阅读尚未形成完整本地正式数据闭环；未登录手动入口目前主要覆盖消费。
+- 饮食 / 睡眠 / 运动 / 阅读的未登录手动创建已走本地正式记录路径；完整候选、图片和用户闭环仍在后续 Slice。
 - 图片仍主要依赖云端 URL + 磁盘缓存，正式本地图片生命周期未接通。
 - 截图 / 快捷输入仍以登录凭据和云端上传链路为中心。
-- BYOK 尚未形成完整 iOS 闭环。
+- BYOK 暂缓移出 Phase 1，保留为冻结登记，不作为当前发布阻塞。
 - Today / Records / Account 等仍有云端依赖或混读；完整账户管理未统一到本地。
 - 跨域 AI Analysis 当前读取 Supabase 汇总和历史明细。
 - AI Popup 当前主要读取云端记录、历史、画像、曝光和反馈。
@@ -51,7 +51,7 @@ Phase 1 的目标是尽快完成一个可发布 App Store 的 Local-First Person
 - **已核实：**上述实现和调用边界来自本轮代码、文档、原型静态核查；“代码存在”不等于当前真机可发布。
 - **已有验证依据：**本地消费、账户、数据库重开、归档，以及表达选择、校验和反馈存在自动化测试；仓库历史记录有 macOS 构建及 280 个 XCTest 通过。本轮未重跑这些测试。
 - **历史使用 / 验证：**多域与跨域分析已有实际产品使用；表达文档记录过云端 owner Canary 的曝光和点评闭环。不能据此推断当前所有用户开关、五域候选质量或 Local-First 链路已验证。
-- **未验证：**本次确定的五域、图片、AI、离线、重启等完整 Phase 1 真机闭环。Windows 不能验证 Swift 编译，后续仍需 macOS CI 和真机验收。
+- **未验证：**本次确定的五域及收入/钱包范围、图片、AI、离线、重启等完整 Phase 1 真机闭环。Windows 不能验证 Swift 编译，后续仍需 macOS CI 和真机验收。
 - 原型用于体验参考；当前原型使用模拟数据，部分操作尚是占位，不能计为业务完成。
 
 关键证据入口（按需阅读，不要求重新扫描全仓库）：
@@ -96,11 +96,10 @@ Phase 1 的目标是尽快完成一个可发布 App Store 的 Local-First Person
 
 以下均为**待实施或待完成验收**的一级能力清单，不是依赖排序或实施授权：
 
-- 五域 Local-First。
+- 五域及收入/钱包 Local-First（收入/钱包分别由 SL-A/SL-B 推进）。
 - 本地图片生命周期。
 - 截图 / 快捷输入本地闭环。
-- BYOK。
-- Hosted AI 与云端业务存储解耦，可基于本地正式事实工作。
+- Hosted AI 与云端业务存储解耦并基于本地正式事实工作；BYOK 暂缓，不作为 Phase 1 blocker。
 - AI Popup Local-First 适配。
 - 跨域 AI Analysis Local-First 适配。
 - Today / Records / Account 本地事实统一。
@@ -229,3 +228,14 @@ K 片完成了 J 片 `recognize_only` 的生产上线和生产 AI smoke，但把
 - 未修改登录认证、AI 置信度阈值、图片生命周期、Cloud Sync、Outbox、数据库迁移、Edge Function 或 Planner/Analysis。
 
 新增 `LocalFirstLogoutProjectionTests`，场景覆盖 `LOCAL-P1-SPORT-001-L`：退出登录后本地 staging 重新出现在 Inbox；本地运动详情和本地消费详情在没有 session 的情况下直接从本地读取，且不触发远端 session 查询。Windows 仍无 `xcodebuild`/Swift 工具链；macOS iOS workflow `35510609001` 的 simulator build、完整 XCTest 和 iOS Build Gate 已通过，Release Validation `35510608995` 也已通过。真机验证待进行；修复完成后需要从固定提交 `27ab2c4` 重新生成 TestFlight，不能继续把旧 build `35487465615` 当作包含本修复的版本。
+
+## 20. SL-01：文档口径收口（2026-09-25）
+
+本片只修正文档基线，不修改业务代码、Spec 场景编号、同步协议或发布配置：
+
+- §3 已反映事实：未登录四域手动创建已经走本地记录路径；完整候选、图片和用户闭环仍按后续 Slice 推进。
+- Phase 1 产品范围按 Q-01 纳入收入与钱包快照，分别排入 SL-A/SL-B；BYOK 按 Q-06 暂缓移出 Phase 1。
+- 共享事实引用以代码已验证的 `local-staging/<id>` 为准；`staging/<id>` 只保留为历史文档误写说明。
+- Q-07（DM-GAP-10）维持“消费必须选账户”，Q-12 维持计数级绑定预览；两项不进入当前实现 Slice。
+
+下一 Slice 为 SL-02：投影刷新收敛与特征测试加固。同步、迁移、PWA 结构、生产部署和 TestFlight 仍冻结。
