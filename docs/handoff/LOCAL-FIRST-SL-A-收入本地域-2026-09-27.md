@@ -30,6 +30,7 @@ scope: SL-A Income 独立本地域实施与后续 SL-B 交接
 - 首轮 CI：[36289758483](https://github.com/shenfn/SnapCount/actions/runs/36289758483) 在 `Run unit tests` 编译阶段失败；问题只出在新增 `LocalIncomeTests.swift`：测试引用了 fileprivate 的 `JSONDecoder.iso8601`，并在非 MainActor 上创建/访问 `AppState`。
 - 修复提交：`cf138d9 test(local-first): fix income test actor isolation`。测试类改为 `@MainActor`，导出归档测试改用测试内配置的 ISO-8601 decoder；未改变生产代码和业务边界。
 - 第二轮 CI：[36290165757](https://github.com/shenfn/SnapCount/actions/runs/36290165757) 全绿：XcodeGen、模拟器 Build、完整 `SnapCountTests`、iOS Build Gate、Governance Validation、Release Validation 均通过。
+- 文档收口提交 `4386cc7` 的独立手动 macOS workflow：[36292691426](https://github.com/shenfn/SnapCount/actions/runs/36292691426) 也已通过模拟器 Build 与完整 `SnapCountTests`；该运行不替代 PR Gate，仅用于确认文档提交未改变代码结果。
 
 ## 明确未实现项
 
