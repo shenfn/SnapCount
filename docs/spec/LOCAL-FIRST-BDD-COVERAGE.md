@@ -524,7 +524,7 @@ Feature: AI Provider 可插拔且 Key 不出设备
 
 ```gherkin
 Feature: 收入与钱包快照的本地域
-  现状：云端完整；SL-A 已完成方案 B 的最小本地实现并通过 macOS CI，SL-B 仍待单独 Grooming。Income 登录态新建保留 Cloud 路径仅是同步冻结期 Transitional 行为，不是最终 Local-First 架构。
+  现状：云端完整；SL-A 已完成方案 B 的最小本地实现并通过 macOS CI，SL-B 已按独立 local_wallet_snapshots 进入 TDD，macOS CI 待验证。Income/Wallet 登录态新建保留 Cloud 路径仅是同步冻结期 Transitional 行为，不是最终 Local-First 架构。
 
   [LF-032-A] Scenario: 未登录创建收入并绑定账户
     Given 未登录用户已有本地 profile 和可选本地账户
@@ -550,11 +550,16 @@ Feature: 收入与钱包快照的本地域
     When 新建一笔 Income
     Then 沿用现有 Cloud 路径；该双轨仅是 Transitional 行为，不视为最终架构
 
-  [登记 LF-033] Scenario: 钱包快照本地域（SL-B，最小形态只记快照事实）
+  [LF-033-A/B/C/D] Scenario: 钱包快照本地域（SL-B，最小形态只记快照事实）
     Given 用户录入一张负债/现金快照截图或手动表单
     When 本地保存
-    Then 快照与本地账户关联语义明确；Analysis 财务推演可读取
-    # 具体表/复用 local_records 的选择留到 SL-B 新会话 Grooming
+    Then 快照写入独立 local_wallet_snapshots，金额使用 amount_minor
+    And 可选关联同 profile 且资产/负债类型兼容的既有本地账户
+    And 不写 account entry、outbox，不改变账户余额
+    And LocalFactReader 返回 wallet/<uuid>，Today/Records 可见
+    And JSON/CSV 沿用 LocalFactPortability schemaVersion 2 导出
+    And 删除后 tombstone 不进入事实读取
+    And 不实现还款周期、自动扣款、转账或当前余额推演
 ```
 
 ## 5. 反向遗漏检查（PWA/iOS 能力 → Local-First 覆盖）
@@ -563,7 +568,7 @@ Feature: 收入与钱包快照的本地域
 |---|---|---|
 | 五域手动 CRUD | F1 | 已覆盖（LF-001 补编号） |
 | 收入域 | F14 / LF-032 | **SL-A 已实现且 macOS CI 通过；方案 B 独立 `local_incomes`，登录态新建仍为 Transitional Cloud 路由；PR #201 / `cf138d9`** |
-| 钱包快照域 | F14/F6 / LF-033 | **范围已拍板，待 SL-B 新会话单独 Grooming；最小形态只记快照事实** |
+| 钱包快照域 | F14/F6 / LF-033 | **SL-B 已进入 TDD；独立 local_wallet_snapshots，macOS CI 待验证；最小形态只记快照事实** |
 | 还款/撤销/截图还款/补绑 | F6 | 登录态保留；本地化待裁决（Q-03） |
 | 批量归档/销毁中转 | F3（单条）；批量本地候选未定义 | 记录差异：本地候选暂无批量操作，低优先 |
 | 账单补全（pending 交易三出口） | F6/收件箱 | 登录态云端保留；未登录无此对象（本地无 pending 交易概念），可接受 |
@@ -583,12 +588,12 @@ Feature: 收入与钱包快照的本地域
 | 首页组件开关排序（localStorage） | iOS 无对应配置 | 记录差异：iOS Today 布局固定，非 Local-First 阻塞项 |
 | 快捷指令上传凭据 | Keychain upload_token | 已覆盖 |
 
-反向检查结论：**除收入/钱包域（Q-01）外，未发现其他被完全遗漏的现有产品能力**；批量操作、词表、首页组件配置为记录级差异，不阻塞 Phase 1。
+反向检查结论：**收入/钱包域（Q-01）已分别进入 SL-A/SL-B；其余未发现被完全遗漏的现有产品能力**；批量操作、词表、首页组件配置为记录级差异，不阻塞 Phase 1。
 
 ## 6. 发现的遗漏与风险
 
 1. **AI 三链路数据供给全部在云端**（表达/Analysis/识别的配置与历史）：表达核心可移植但零移植；曝光/反馈/偏好三件套无本地存储形态（DM §5.2 留白）。这是 Phase 1 承诺"保留 AI Popup"与现状之间最大的工作量与设计空白。
-2. **收入/钱包本地缺位**与"功能不缩水"承诺冲突；unsupported domain 静默回退云端 ingest 会产生"云端有、本地无"的分叉数据（LF-008/032/033）。
+2. **收入/钱包的登录态 Transitional 双轨**仍与最终 Local-First 目标有差异；SL-A 已完成，SL-B 已进入独立快照事实实现，macOS CI 验证前仍不能宣称完成（LF-008/032/033）。
 3. **单设备单 profile 的账号轮换**：换账号登录后 mismatch 只能暂不同步，且会看到前任账号的本地数据（LF-026）——隐私与体验双重风险。
 4. **删除 App = 本地数据全丢**，产品无任何提示或兜底（LF-025）；四域导入缺失使"导出→导入"自助换机桥不完整（LF-021）。
 5. ** discardStaging 不幂等**（重复调用抛错）：与状态-001"终态不死锁"精神一致但语义未成文（V-6）。

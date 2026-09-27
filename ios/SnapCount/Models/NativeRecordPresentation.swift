@@ -260,14 +260,17 @@ enum NativeRecordDetailPresentationAdapter {
         case "wallet":
             let amount = payload.double("amount")
                 ?? payload.double("snapshot_balance")
+                ?? payload.double("amount_minor").map { $0 / 100 }
                 ?? payload.double("current_balance")
+            let recordKind = payload.string("record_kind")
+                ?? (payload.string("snapshot_kind") == "liability" ? "liability_snapshot" : "cash_snapshot")
             return [
                 NativeDetailRow(label: "标题", value: detail.title),
                 NativeDetailRow(label: "账户/平台", value: payload.string("account_name") ?? payload.string("institution") ?? "未填写"),
                 NativeDetailRow(label: "金额", value: amount.map { String(format: "¥%.2f", $0) } ?? "--"),
-                NativeDetailRow(label: "记录类型", value: walletRecordKindLabel(payload.string("record_kind"))),
+                NativeDetailRow(label: "记录类型", value: walletRecordKindLabel(recordKind)),
                 NativeDetailRow(label: "还款日", value: payload.string("due_date") ?? "--"),
-                NativeDetailRow(label: "关联账户", value: payload.string("linked_account_id") ?? "未绑定"),
+                NativeDetailRow(label: "关联账户", value: payload.string("linked_account_id") ?? payload.string("account_id") ?? "未绑定"),
                 NativeDetailRow(label: "发生日期", value: detail.recordDate ?? "--"),
                 NativeDetailRow(label: "模板版本", value: detail.domainVersion ?? "1.0"),
                 NativeDetailRow(label: "来源类型", value: sourceLabel(for: detail)),

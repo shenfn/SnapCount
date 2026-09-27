@@ -257,6 +257,42 @@ final class LocalDatabase {
                     ON local_incomes(profile_id, income_date, income_time, created_at);
                 """)
         }
+        migrator.registerMigration("local-v9-phase1-wallet-snapshots") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_wallet_snapshots (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT REFERENCES local_accounts(id),
+                    snapshot_kind TEXT NOT NULL CHECK (snapshot_kind IN ('asset', 'liability')),
+                    amount_minor INTEGER NOT NULL CHECK (amount_minor >= 0),
+                    minimum_payment_minor INTEGER CHECK (
+                        minimum_payment_minor IS NULL OR minimum_payment_minor >= 0
+                    ),
+                    currency TEXT NOT NULL,
+                    account_name TEXT NOT NULL,
+                    account_type TEXT NOT NULL,
+                    snapshot_date TEXT NOT NULL,
+                    snapshot_time TEXT,
+                    due_date TEXT,
+                    bill_day INTEGER CHECK (bill_day IS NULL OR (bill_day >= 1 AND bill_day <= 31)),
+                    note TEXT,
+                    payload_json TEXT NOT NULL,
+                    image_path TEXT,
+                    image_hash TEXT,
+                    source_kind TEXT NOT NULL,
+                    local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    deleted_at DATETIME
+                );
+
+                CREATE INDEX local_wallet_snapshots_profile_date_idx
+                    ON local_wallet_snapshots(profile_id, snapshot_date, snapshot_time, created_at);
+
+                CREATE INDEX local_wallet_snapshots_profile_account_idx
+                    ON local_wallet_snapshots(profile_id, account_id, snapshot_date, created_at);
+                """)
+        }
         return migrator
     }
 }

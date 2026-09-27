@@ -22,6 +22,10 @@ enum LocalFactReadModel {
                         kind = .income
                         value = currencyValue(from: fact, prefix: "+")
                         domainKey = "income"
+                    } else if fact.domainKey == "wallet" {
+                        kind = .wallet
+                        value = currencyValue(from: fact, prefix: "")
+                        domainKey = "wallet"
                     } else {
                         kind = NativeDayRecordKind(rawValue: fact.domainKey) ?? .all
                         value = ""
@@ -61,7 +65,7 @@ enum LocalFactReadModel {
         imageStore: LocalImageStore? = nil
     ) -> NativeRecordDetail {
         let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
-        let amount = fact.kind == .expense || fact.domainKey == "income"
+        let amount = fact.kind == .expense || fact.domainKey == "income" || fact.domainKey == "wallet"
             ? payload.double("amount_minor").map { $0 / 100 }
             : nil
         let imageURL = localImageURL(fact.imagePath, imageStore: imageStore)
@@ -73,7 +77,9 @@ enum LocalFactReadModel {
             subtitle: fact.recordTime.map { "\(fact.businessDate) \($0)" } ?? fact.businessDate,
             value: fact.kind == .expense
                 ? currencyValue(from: fact, prefix: "")
-                : fact.domainKey == "income" ? currencyValue(from: fact, prefix: "+") : fact.summary,
+                : fact.domainKey == "income" || fact.domainKey == "wallet"
+                    ? currencyValue(from: fact, prefix: fact.domainKey == "income" ? "+" : "")
+                    : fact.summary,
             detailRows: [],
             imageURL: imageURL,
             imageLoadError: fact.imagePath != nil && imageURL == nil,

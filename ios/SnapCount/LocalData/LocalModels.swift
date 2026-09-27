@@ -156,6 +156,79 @@ struct LocalIncomeTombstone: Equatable {
     let deletedAt: Date
 }
 
+struct LocalWalletSnapshotDraft: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID?
+    let snapshotKind: String
+    let amountMinor: Int64
+    let minimumPaymentMinor: Int64?
+    let currency: String
+    let accountName: String
+    let accountType: String
+    let snapshotDate: String
+    let snapshotTime: String?
+    let dueDate: String?
+    let billDay: Int?
+    let note: String?
+    let payloadJSON: String
+    let imagePath: String?
+    let imageHash: String?
+    let sourceKind: String
+    let createdAt: Date
+}
+
+struct LocalWalletSnapshotUpdate: Equatable {
+    let id: UUID
+    let expectedVersion: Int64
+    let accountID: UUID?
+    let snapshotKind: String
+    let amountMinor: Int64
+    let minimumPaymentMinor: Int64?
+    let currency: String
+    let accountName: String
+    let accountType: String
+    let snapshotDate: String
+    let snapshotTime: String?
+    let dueDate: String?
+    let billDay: Int?
+    let note: String?
+    let payloadJSON: String
+    let updatedAt: Date
+}
+
+struct LocalWalletSnapshot: Equatable, Identifiable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID?
+    let snapshotKind: String
+    let amountMinor: Int64
+    let minimumPaymentMinor: Int64?
+    let currency: String
+    let accountName: String
+    let accountType: String
+    let snapshotDate: String
+    let snapshotTime: String?
+    let dueDate: String?
+    let billDay: Int?
+    let note: String?
+    let payloadJSON: String
+    let imagePath: String?
+    let imageHash: String?
+    let sourceKind: String
+    let localVersion: Int64
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+struct LocalWalletSnapshotTombstone: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let localVersion: Int64
+    let deletedAt: Date
+    let imagePath: String?
+}
+
 struct LocalAccountEntry: Equatable {
     let id: UUID
     let profileID: UUID
