@@ -21,7 +21,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
     }
 
     func createSnapshot(_ draft: LocalWalletSnapshotDraft) throws -> LocalWalletSnapshot {
-        try validate(
+        try Self.validate(
             snapshotKind: draft.snapshotKind,
             amountMinor: draft.amountMinor,
             minimumPaymentMinor: draft.minimumPaymentMinor,
@@ -34,7 +34,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
             billDay: draft.billDay
         )
         return try database.writer.write { db in
-            try validateAccount(
+            try Self.validateAccount(
                 accountID: draft.accountID,
                 profileID: draft.profileID,
                 snapshotKind: draft.snapshotKind,
@@ -89,7 +89,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
         _ update: LocalWalletSnapshotUpdate,
         profileID: UUID
     ) throws -> LocalWalletSnapshot {
-        try validate(
+        try Self.validate(
             snapshotKind: update.snapshotKind,
             amountMinor: update.amountMinor,
             minimumPaymentMinor: update.minimumPaymentMinor,
@@ -110,7 +110,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
                     actual: current.localVersion
                 )
             }
-            try validateAccount(
+            try Self.validateAccount(
                 accountID: update.accountID,
                 profileID: profileID,
                 snapshotKind: update.snapshotKind,
