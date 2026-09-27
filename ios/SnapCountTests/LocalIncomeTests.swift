@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import SnapCount
 
+@MainActor
 final class LocalIncomeTests: XCTestCase {
     func testLOCALP1LF032AmountParserRejectsSubMinorPrecision() {
         XCTAssertThrowsError(try LocalIncomeMoney.amountMinor("1.005", currency: "CNY"))
@@ -164,7 +165,9 @@ final class LocalIncomeTests: XCTestCase {
             request: request,
             exportedAt: fixedDate
         )
-        let archive = try JSONDecoder.iso8601.decode(LocalFactArchive.self, from: archiveData)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let archive = try decoder.decode(LocalFactArchive.self, from: archiveData)
         XCTAssertEqual(archive.schemaVersion, 2)
         XCTAssertEqual(archive.facts.map(\.reference), [incomeFact.reference])
         XCTAssertTrue(archive.facts[0].payloadJSON.contains("amount_minor"))
