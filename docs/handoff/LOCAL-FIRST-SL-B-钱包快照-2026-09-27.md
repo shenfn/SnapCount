@@ -40,5 +40,6 @@
 ## 验证状态
 
 - 已完成：红灯测试文件、最小实现、`git diff --check`。
-- 未完成：Windows 无 Swift/Xcode 工具链，尚未运行 iOS 编译和 XCTest。
-- 下一步：在 macOS CI 上验证 `SnapCountTests/LocalWalletSnapshotTests.swift`，修复编译或测试失败后再进入回归和提交。
+- macOS CI 已通过：workflow `ios-build.yml` run `36303877470`，`Build for simulator` 和 `Run unit tests` 均成功。
+- CI 期间修复了静态校验调用和异步断言问题，最终代码提交为 `54065da`。
+- Windows 无 Swift/Xcode 工具链；未执行本地 Swift 编译、真机验收、TestFlight 或生产验证。
