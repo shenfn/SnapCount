@@ -108,6 +108,7 @@ final class AppState: ObservableObject {
     private let dashboardRepository: DashboardRepositoryProtocol
     private let recordRepository: RecordRepositoryProtocol
     private let localExpenseUseCase: LocalExpenseUseCaseProtocol?
+    private let localIncomeUseCase: LocalIncomeUseCaseProtocol?
     private let localRecordUseCase: LocalRecordUseCaseProtocol?
     private let localFactReader: LocalFactReader?
     private let localImageStore: LocalImageStore?
@@ -171,6 +172,7 @@ final class AppState: ObservableObject {
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
         recordRepository: RecordRepositoryProtocol = RecordRepository(),
         localExpenseUseCase: LocalExpenseUseCaseProtocol? = nil,
+        localIncomeUseCase: LocalIncomeUseCaseProtocol? = nil,
         localRecordUseCase: LocalRecordUseCaseProtocol? = nil,
         localFactReader: LocalFactReader? = nil,
         localFactPortability: LocalFactPortability? = nil,
@@ -203,11 +205,14 @@ final class AppState: ObservableObject {
             try await Task<Never, Never>.sleep(nanoseconds: $0)
         }
     ) {
+        let usesDefaultLocalStorage = localExpenseUseCase == nil
+            && localIncomeUseCase == nil
+            && localRecordUseCase == nil
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
         self.localExpenseUseCase = localExpenseUseCase ?? Self.defaultLocalExpenseUseCase()
+        self.localIncomeUseCase = localIncomeUseCase ?? (usesDefaultLocalStorage ? Self.defaultLocalIncomeUseCase() : nil)
         self.localRecordUseCase = localRecordUseCase ?? Self.defaultLocalRecordUseCase()
-        let usesDefaultLocalStorage = localExpenseUseCase == nil && localRecordUseCase == nil
         self.localFactReader = usesDefaultLocalStorage
             ? (localFactReader ?? Self.defaultLocalFactReader())
             : localFactReader
@@ -976,7 +981,9 @@ final class AppState: ObservableObject {
         let todayKey = NativeLocalDate.dateKey(Date())
         let groups = recordGroups(monthKey: Self.currentMonthKey)
         let expenses = month.facts.filter { $0.kind == .expense }
+        let incomes = month.facts.filter { $0.kind == .record && $0.domainKey == "income" }
         let todayExpenses = expenses.filter { $0.businessDate == todayKey }
+        let todayIncomes = incomes.filter { $0.businessDate == todayKey }
         dashboard.dayRecordGroups = groups
         dashboard.dailySummaries = groups.map { group in
             let expense = expenses
@@ -985,10 +992,16 @@ final class AppState: ObservableObject {
                     let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
                     return total + ((payload.double("amount_minor") ?? 0) / 100)
                 }
+            let income = incomes
+                .filter { $0.businessDate == group.dateKey }
+                .reduce(0.0) { total, fact in
+                    let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+                    return total + ((payload.double("amount_minor") ?? 0) / 100)
+                }
             return NativeDailySummary(
                 dateKey: group.dateKey,
                 expense: expense,
-                income: 0,
+                income: income,
                 pendingCount: 0,
                 recordCount: group.records.count
             )
@@ -1003,8 +1016,14 @@ final class AppState: ObservableObject {
             let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
             return total + ((payload.double("amount_minor") ?? 0) / 100)
         }
-        dashboard.todayIncome = 0
-        dashboard.monthIncome = 0
+        dashboard.todayIncome = todayIncomes.reduce(0) { total, fact in
+            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+            return total + ((payload.double("amount_minor") ?? 0) / 100)
+        }
+        dashboard.monthIncome = incomes.reduce(0) { total, fact in
+            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+            return total + ((payload.double("amount_minor") ?? 0) / 100)
+        }
         dashboard.pendingCount = 0
         dashboard.recordDetails = localRecordMonthDetails[Self.currentMonthKey] ?? [:]
         dashboard.recentRecords = []
@@ -2845,6 +2864,10 @@ final class AppState: ObservableObject {
             await loadLocalExpenseDetail(reference: reference, force: force, generation: generation)
             return
         }
+        if parsedReference.kind == "income", await hasLocalIncome(reference: reference) {
+            await loadLocalIncomeDetail(reference: reference, force: force, generation: generation)
+            return
+        }
         if parsedReference.kind == "local-data"
             || (parsedReference.kind == "data" && isKnownLocalFactReference(reference)) {
             await loadLocalDomainDetail(reference: reference, force: force, generation: generation)
@@ -2885,6 +2908,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func hasLocalIncome(reference: String) async -> Bool {
+        guard let localIncomeUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
+            return false
+        }
+        do {
+            return try await localIncomeUseCase.income(id: id) != nil
+        } catch {
+            return false
+        }
+    }
+
     private func isLocalExpenseReference(_ reference: String) -> Bool {
         let parsed = NativeRecordReference(reference)
         return parsed.kind == "local-expense"
@@ -2895,6 +2930,11 @@ final class AppState: ObservableObject {
         let parsed = NativeRecordReference(reference)
         return parsed.kind == "local-data"
             || (parsed.kind == "data" && isKnownLocalFactReference(reference))
+    }
+
+    private func isLocalIncomeReference(_ reference: String) -> Bool {
+        let parsed = NativeRecordReference(reference)
+        return parsed.kind == "income" && isKnownLocalFactReference(reference)
     }
 
     private func isKnownLocalFactReference(_ reference: String) -> Bool {
@@ -2938,6 +2978,53 @@ final class AppState: ObservableObject {
             guard generation == userStateGeneration,
                   activeRecordReference == canonicalReference else { return }
             let detail = LocalExpenseReadModel.detail(from: expense)
+            recordDetailCache[canonicalReference] = detail
+            selectedRecordDetail = detail
+        } catch {
+            if activeRecordReference == canonicalReference {
+                recordDetailMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadLocalIncomeDetail(
+        reference: String,
+        force: Bool,
+        generation: Int
+    ) async {
+        guard let localIncomeUseCase else {
+            recordDetailMessage = "本地数据不可用"
+            return
+        }
+        let resolved = NativeRecordReference(reference)
+        guard let id = UUID(uuidString: resolved.rawId) else {
+            recordDetailMessage = "本地记录标识无效"
+            return
+        }
+        let canonicalReference = resolved.canonicalValue
+        if !force, let cached = recordDetailCache[canonicalReference] {
+            selectedRecordDetail = cached
+            return
+        }
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
+            selectedRecordDetail = nil
+        }
+        do {
+            guard try await localIncomeUseCase.income(id: id) != nil else {
+                throw LocalDataError.recordNotFound
+            }
+            let detail = localRecordMonthDetails.values
+                .compactMap { details in
+                    details.first { NativeRecordReference($0.key).canonicalValue == canonicalReference }?.value
+                }
+                .first
+                ?? localFactMonths.values
+                    .flatMap(\.facts)
+                    .first { NativeRecordReference($0.reference).canonicalValue == canonicalReference }
+                    .map { LocalFactReadModel.detail(from: $0, imageStore: localImageStore) }
+            guard let detail else { throw LocalDataError.recordNotFound }
+            guard generation == userStateGeneration,
+                  activeRecordReference == canonicalReference else { return }
             recordDetailCache[canonicalReference] = detail
             selectedRecordDetail = detail
         } catch {
@@ -3511,6 +3598,19 @@ final class AppState: ObservableObject {
         return expense
     }
 
+    private func localIncomeForReference(_ reference: String) async throws -> LocalIncome {
+        guard let localIncomeUseCase else { throw LocalDataError.invalidRecord }
+        let resolved = NativeRecordReference(reference)
+        guard resolved.kind == "income",
+              let id = UUID(uuidString: resolved.rawId) else {
+            throw LocalDataError.invalidIdentifier
+        }
+        guard let income = try await localIncomeUseCase.income(id: id) else {
+            throw LocalDataError.recordNotFound
+        }
+        return income
+    }
+
     private func saveLocalRecordDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
         guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
         let current = try await localExpenseForReference(draft.reference)
@@ -3560,6 +3660,50 @@ final class AppState: ObservableObject {
         recordsPath = NavigationPath()
         _ = await prepareLocalWorkspace()
         await refreshLocalMonthProjection(monthKey: monthKey)
+        return true
+    }
+
+    private func saveLocalIncomeDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
+        guard let localIncomeUseCase else { throw LocalDataError.invalidRecord }
+        let current = try await localIncomeForReference(draft.reference)
+        let accountID = draft.accountId.flatMap(UUID.init(uuidString:))
+        let command = LocalIncomeUpdateCommand(
+            id: current.id,
+            expectedVersion: current.localVersion,
+            accountID: accountID,
+            amountText: draft.amountText,
+            currency: current.currency,
+            incomeCategory: draft.category,
+            sourceName: draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.title,
+            incomeDate: draft.recordDate,
+            incomeTime: draft.transactionTime,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            updatedAt: Date()
+        )
+        let outcome = try await localIncomeUseCase.update(command)
+        let oldMonth = String(current.incomeDate.prefix(7))
+        let newMonth = String(outcome.income.incomeDate.prefix(7))
+        invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
+        await refreshLocalMonthProjection(monthKey: oldMonth)
+        if newMonth != oldMonth {
+            await refreshLocalMonthProjection(monthKey: newMonth)
+        }
+        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
+        await loadRecordDetail(reference: "income/\(outcome.income.id.uuidString)", force: true)
+        return true
+    }
+
+    private func deleteLocalIncome(reference: String) async throws -> Bool {
+        guard let localIncomeUseCase else { throw LocalDataError.invalidRecord }
+        let current = try await localIncomeForReference(reference)
+        _ = try await localIncomeUseCase.delete(LocalIncomeDeleteCommand(
+            id: current.id,
+            expectedVersion: current.localVersion,
+            deletedAt: Date()
+        ))
+        invalidateRecordExpressionPlanState(afterChanging: [reference])
+        recordsPath = NavigationPath()
+        await refreshLocalMonthProjection(monthKey: String(current.incomeDate.prefix(7)))
         return true
     }
 
@@ -3661,6 +3805,9 @@ final class AppState: ObservableObject {
             if isLocalExpenseReference(draft.reference) {
                 return try await saveLocalRecordDetail(draft)
             }
+            if isLocalIncomeReference(draft.reference) {
+                return try await saveLocalIncomeDetail(draft)
+            }
             if isLocalDomainReference(draft.reference) {
                 return try await saveLocalDomainRecord(draft)
             }
@@ -3680,6 +3827,9 @@ final class AppState: ObservableObject {
         do {
             if isLocalExpenseReference(reference) {
                 return try await deleteLocalRecord(reference: reference)
+            }
+            if isLocalIncomeReference(reference) {
+                return try await deleteLocalIncome(reference: reference)
             }
             if isLocalDomainReference(reference) {
                 return try await deleteLocalDomainRecord(reference: reference)
@@ -4398,6 +4548,62 @@ final class AppState: ObservableObject {
         return outcome.expense != nil
     }
 
+    private func createLocalIncome(_ draft: NativeManualRecordDraft) async throws -> Bool {
+        guard let localIncomeUseCase else { throw LocalDataError.invalidRecord }
+        guard draft.validationMessage(domain: nil) == nil else {
+            throw LocalDataError.invalidRecord
+        }
+        let accountID = draft.accountId.flatMap(UUID.init(uuidString:))
+        let incomeDate = draft.dateKey
+        let incomeTime = draft.timeKey
+        let cleanSource = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceName = cleanSource.isEmpty ? nil : cleanSource
+        let note = draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note
+
+        if let existingRawID = draft.existingRawId,
+           let existingID = UUID(uuidString: existingRawID),
+           let current = try await localIncomeUseCase.income(id: existingID) {
+            let oldMonth = String(current.incomeDate.prefix(7))
+            let updated = try await localIncomeUseCase.update(LocalIncomeUpdateCommand(
+                id: existingID,
+                expectedVersion: current.localVersion,
+                accountID: accountID,
+                amountText: draft.amountText,
+                currency: "CNY",
+                incomeCategory: draft.category,
+                sourceName: sourceName,
+                incomeDate: incomeDate,
+                incomeTime: incomeTime,
+                note: note,
+                updatedAt: Date()
+            ))
+            await refreshLocalMonthProjection(monthKey: oldMonth)
+            let newMonth = String(updated.income.incomeDate.prefix(7))
+            if newMonth != oldMonth {
+                await refreshLocalMonthProjection(monthKey: newMonth)
+            }
+            manualRecordMessage = "记录已更新（本机）"
+            return true
+        }
+
+        guard draft.existingRawId == nil else { throw LocalDataError.recordNotFound }
+        let created = try await localIncomeUseCase.create(LocalIncomeCommand(
+            id: UUID(),
+            accountID: accountID,
+            amountText: draft.amountText,
+            currency: "CNY",
+            incomeCategory: draft.category,
+            sourceName: sourceName,
+            incomeDate: incomeDate,
+            incomeTime: incomeTime,
+            note: note,
+            createdAt: Date()
+        ))
+        await refreshLocalMonthProjection(monthKey: String(created.income.incomeDate.prefix(7)))
+        manualRecordMessage = "记录已保存（本机）"
+        return true
+    }
+
     private func createLocalDomainRecord(
         _ draft: NativeManualRecordDraft,
         domain: NativeDomainDefinition?
@@ -4466,6 +4672,11 @@ final class AppState: ObservableObject {
         if draft.kind == .expense, localExpenseUseCase != nil {
             return try await createLocalExpense(draft)
         }
+        if draft.kind == .income,
+           localIncomeUseCase != nil,
+           await shouldCreateLocalIncome(for: draft) {
+            return try await createLocalIncome(draft)
+        }
         if draft.kind == .universal,
            localRecordUseCase != nil,
            LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey),
@@ -4473,6 +4684,16 @@ final class AppState: ObservableObject {
             return try await createLocalDomainRecord(draft, domain: domain)
         }
         return try await createRemoteManualRecord(draft, domain: domain)
+    }
+
+    private func shouldCreateLocalIncome(for draft: NativeManualRecordDraft) async -> Bool {
+        guard let localIncomeUseCase else { return false }
+        if !isSignedIn { return true }
+        guard let existingRawID = draft.existingRawId,
+              let existingID = UUID(uuidString: existingRawID) else {
+            return false
+        }
+        return (try? await localIncomeUseCase.income(id: existingID)) != nil
     }
 
     private func shouldCreateLocalDomainRecord(for draft: NativeManualRecordDraft) async -> Bool {
@@ -4527,6 +4748,15 @@ final class AppState: ObservableObject {
         guard let database = try? LocalDatabase(),
               let repository = try? LocalExpenseRepository(database: database) else { return nil }
         return LocalExpenseUseCase(profileStore: LocalProfileStore(database: database), repository: repository)
+    }
+
+    private static func defaultLocalIncomeUseCase() -> LocalIncomeUseCaseProtocol? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalIncomeRepository(database: database) else { return nil }
+        return LocalIncomeUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: repository
+        )
     }
 
     private static func defaultLocalRecordUseCase() -> LocalRecordUseCaseProtocol? {

@@ -163,7 +163,6 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
     func createExpense(_ draft: LocalExpenseDraft, operationID: UUID) throws -> LocalExpense {
         guard draft.amountMinor > 0 else { throw LocalDataError.invalidAmount }
         let localVersion: Int64 = 1
-        let entryID = UUID()
         let expense = LocalExpense(
             id: draft.id,
             profileID: draft.profileID,
@@ -211,21 +210,16 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 ]
             )
 
-            try db.execute(
-                sql: """
-                    INSERT INTO local_account_entries (
-                        id, profile_id, account_id, direction, amount_minor, entry_kind,
-                        source_kind, source_id, occurred_at, voided_at
-                    ) VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
-                    """,
-                arguments: [
-                    entryID.uuidString,
-                    draft.profileID.uuidString,
-                    draft.accountID.uuidString,
-                    draft.amountMinor,
-                    draft.id.uuidString,
-                    draft.createdAt
-                ]
+            try LocalAccountEntryWriter.insertEntry(
+                profileID: draft.profileID,
+                accountID: draft.accountID,
+                direction: "out",
+                amountMinor: draft.amountMinor,
+                entryKind: "expense",
+                sourceKind: "expense",
+                sourceID: draft.id,
+                occurredAt: draft.createdAt,
+                database: db
             )
 
             try db.execute(
@@ -275,15 +269,17 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         draft.category, draft.paymentMethod, draft.transactionDate,
                         draft.transactionTime, draft.note, draft.createdAt, draft.createdAt
                     ])
-                try db.execute(sql: """
-                    INSERT OR IGNORE INTO local_account_entries (
-                        id, profile_id, account_id, direction, amount_minor, entry_kind,
-                        source_kind, source_id, occurred_at, voided_at
-                    ) VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
-                    """, arguments: [
-                        UUID().uuidString, draft.profileID.uuidString, draft.accountID.uuidString,
-                        draft.amountMinor, draft.id.uuidString, draft.createdAt
-                    ])
+                try LocalAccountEntryWriter.insertEntry(
+                    profileID: draft.profileID,
+                    accountID: draft.accountID,
+                    direction: "out",
+                    amountMinor: draft.amountMinor,
+                    entryKind: "expense",
+                    sourceKind: "expense",
+                    sourceID: draft.id,
+                    occurredAt: draft.createdAt,
+                    database: db
+                )
             }
         }
     }
@@ -299,7 +295,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     actual: existing.localVersion
                 )
             }
-            try Self.validateAccount(
+            try LocalAccountEntryWriter.validateAccount(
                 id: update.accountID,
                 profileID: existing.profileID,
                 database: db
@@ -327,14 +323,20 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 || existing.amountMinor != update.amountMinor
 
             if replacesLedger {
-                try Self.voidActiveEntry(
+                guard try LocalAccountEntryWriter.voidActiveEntry(
+                    sourceKind: "expense",
                     sourceID: update.id,
                     voidedAt: update.updatedAt,
                     database: db
-                )
-                try Self.insertExpenseEntry(
-                    id: UUID(),
-                    expense: updated,
+                ) else { throw LocalDataError.invalidRecord }
+                try LocalAccountEntryWriter.insertEntry(
+                    profileID: updated.profileID,
+                    accountID: updated.accountID,
+                    direction: "out",
+                    amountMinor: updated.amountMinor,
+                    entryKind: "expense",
+                    sourceKind: "expense",
+                    sourceID: updated.id,
                     occurredAt: update.updatedAt,
                     database: db
                 )
@@ -401,7 +403,12 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 deletedAt: deletedAt
             )
 
-            try Self.voidActiveEntry(sourceID: id, voidedAt: deletedAt, database: db)
+            guard try LocalAccountEntryWriter.voidActiveEntry(
+                sourceKind: "expense",
+                sourceID: id,
+                voidedAt: deletedAt,
+                database: db
+            ) else { throw LocalDataError.invalidRecord }
             try db.execute(
                 sql: """
                     UPDATE local_expenses
@@ -882,65 +889,6 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             throw LocalDataError.recordNotFound
         }
         return try expense(from: row)
-    }
-
-    private static func validateAccount(
-        id: UUID,
-        profileID: UUID,
-        database: Database
-    ) throws {
-        guard let storedProfileID = try String.fetchOne(
-            database,
-            sql: "SELECT profile_id FROM local_accounts WHERE id = ?",
-            arguments: [id.uuidString]
-        ), storedProfileID == profileID.uuidString else {
-            throw LocalDataError.invalidIdentifier
-        }
-    }
-
-    private static func voidActiveEntry(
-        sourceID: UUID,
-        voidedAt: Date,
-        database: Database
-    ) throws {
-        guard let entryID = try String.fetchOne(
-            database,
-            sql: """
-                SELECT id FROM local_account_entries
-                WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL
-                """,
-            arguments: [sourceID.uuidString]
-        ) else {
-            throw LocalDataError.invalidRecord
-        }
-        try database.execute(
-            sql: "UPDATE local_account_entries SET voided_at = ? WHERE id = ?",
-            arguments: [voidedAt, entryID]
-        )
-    }
-
-    private static func insertExpenseEntry(
-        id: UUID,
-        expense: LocalExpense,
-        occurredAt: Date,
-        database: Database
-    ) throws {
-        try database.execute(
-            sql: """
-                INSERT INTO local_account_entries (
-                    id, profile_id, account_id, direction, amount_minor, entry_kind,
-                    source_kind, source_id, occurred_at, voided_at
-                ) VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
-                """,
-            arguments: [
-                id.uuidString,
-                expense.profileID.uuidString,
-                expense.accountID.uuidString,
-                expense.amountMinor,
-                expense.id.uuidString,
-                occurredAt
-            ]
-        )
     }
 
     private static func insertOutbox(

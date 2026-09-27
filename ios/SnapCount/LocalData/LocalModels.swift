@@ -105,6 +105,57 @@ struct LocalExpenseTombstone: Equatable {
     let deletedAt: Date
 }
 
+struct LocalIncomeDraft: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID?
+    let amountMinor: Int64
+    let currency: String
+    let incomeCategory: String
+    let sourceName: String?
+    let incomeDate: String
+    let incomeTime: String?
+    let note: String?
+    let createdAt: Date
+}
+
+struct LocalIncomeUpdate: Equatable {
+    let id: UUID
+    let expectedVersion: Int64
+    let accountID: UUID?
+    let amountMinor: Int64
+    let currency: String
+    let incomeCategory: String
+    let sourceName: String?
+    let incomeDate: String
+    let incomeTime: String?
+    let note: String?
+    let updatedAt: Date
+}
+
+struct LocalIncome: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID?
+    let amountMinor: Int64
+    let currency: String
+    let incomeCategory: String
+    let sourceName: String?
+    let incomeDate: String
+    let incomeTime: String?
+    let note: String?
+    let localVersion: Int64
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+struct LocalIncomeTombstone: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let localVersion: Int64
+    let deletedAt: Date
+}
+
 struct LocalAccountEntry: Equatable {
     let id: UUID
     let profileID: UUID
