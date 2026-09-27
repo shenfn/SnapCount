@@ -93,10 +93,20 @@ final class LocalFactReader {
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
             ).map { try Self.fact(incomeRow: $0) }
+            let walletSnapshots = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM local_wallet_snapshots
+                    WHERE profile_id = ?
+                      AND snapshot_date BETWEEN ? AND ?
+                      AND deleted_at IS NULL
+                    """,
+                arguments: [profileID.uuidString, startDate, endDate]
+            ).map { try Self.fact(walletRow: $0) }
 
             return LocalFactMonth(
                 profileID: profileID,
-                facts: (expenses + records + incomes).sorted(by: Self.isNewer)
+                facts: (expenses + records + incomes + walletSnapshots).sorted(by: Self.isNewer)
             )
         }
     }
@@ -205,6 +215,44 @@ final class LocalFactReader {
             note: note,
             imagePath: nil,
             imageHash: nil,
+            localVersion: row["local_version"],
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    private static func fact(walletRow row: Row) throws -> LocalFact {
+        guard let id = UUID(uuidString: row["id"]),
+              let profileID = UUID(uuidString: row["profile_id"]),
+              let snapshotKind: String = row["snapshot_kind"],
+              let accountName: String = row["account_name"],
+              let payloadJSON: String = row["payload_json"],
+              let snapshotDate: String = row["snapshot_date"],
+              let sourceKind: String = row["source_kind"],
+              let createdAt: Date = row["created_at"],
+              let updatedAt: Date = row["updated_at"] else {
+            throw LocalDataError.invalidRecord
+        }
+        return LocalFact(
+            id: id,
+            profileID: profileID,
+            reference: "wallet/\(id.uuidString)",
+            kind: .record,
+            domainKey: "wallet",
+            sourceKind: sourceKind,
+            domainVersion: "wallet-v1",
+            title: accountName,
+            summary: snapshotKind == "liability" ? "负债快照" : "资产快照",
+            payloadJSON: payloadJSON,
+            businessDate: snapshotDate,
+            recordTime: row["snapshot_time"],
+            occurredAt: NativeLocalDate.financeOccurredAt(
+                dateKey: snapshotDate,
+                timeKey: row["snapshot_time"]
+            ),
+            note: row["note"],
+            imagePath: row["image_path"],
+            imageHash: row["image_hash"],
             localVersion: row["local_version"],
             createdAt: createdAt,
             updatedAt: updatedAt

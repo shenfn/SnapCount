@@ -109,6 +109,7 @@ final class AppState: ObservableObject {
     private let recordRepository: RecordRepositoryProtocol
     private let localExpenseUseCase: LocalExpenseUseCaseProtocol?
     private let localIncomeUseCase: LocalIncomeUseCaseProtocol?
+    private let localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol?
     private let localRecordUseCase: LocalRecordUseCaseProtocol?
     private let localFactReader: LocalFactReader?
     private let localImageStore: LocalImageStore?
@@ -173,6 +174,7 @@ final class AppState: ObservableObject {
         recordRepository: RecordRepositoryProtocol = RecordRepository(),
         localExpenseUseCase: LocalExpenseUseCaseProtocol? = nil,
         localIncomeUseCase: LocalIncomeUseCaseProtocol? = nil,
+        localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol? = nil,
         localRecordUseCase: LocalRecordUseCaseProtocol? = nil,
         localFactReader: LocalFactReader? = nil,
         localFactPortability: LocalFactPortability? = nil,
@@ -207,11 +209,14 @@ final class AppState: ObservableObject {
     ) {
         let usesDefaultLocalStorage = localExpenseUseCase == nil
             && localIncomeUseCase == nil
+            && localWalletSnapshotUseCase == nil
             && localRecordUseCase == nil
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
         self.localExpenseUseCase = localExpenseUseCase ?? Self.defaultLocalExpenseUseCase()
         self.localIncomeUseCase = localIncomeUseCase ?? (usesDefaultLocalStorage ? Self.defaultLocalIncomeUseCase() : nil)
+        self.localWalletSnapshotUseCase = localWalletSnapshotUseCase
+            ?? (usesDefaultLocalStorage ? Self.defaultLocalWalletSnapshotUseCase() : nil)
         self.localRecordUseCase = localRecordUseCase ?? Self.defaultLocalRecordUseCase()
         self.localFactReader = usesDefaultLocalStorage
             ? (localFactReader ?? Self.defaultLocalFactReader())
@@ -2868,6 +2873,10 @@ final class AppState: ObservableObject {
             await loadLocalIncomeDetail(reference: reference, force: force, generation: generation)
             return
         }
+        if parsedReference.kind == "wallet", await hasLocalWalletSnapshot(reference: reference) {
+            await loadLocalWalletSnapshotDetail(reference: reference, force: force, generation: generation)
+            return
+        }
         if parsedReference.kind == "local-data"
             || (parsedReference.kind == "data" && isKnownLocalFactReference(reference)) {
             await loadLocalDomainDetail(reference: reference, force: force, generation: generation)
@@ -2920,6 +2929,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func hasLocalWalletSnapshot(reference: String) async -> Bool {
+        guard let localWalletSnapshotUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
+            return false
+        }
+        do {
+            return try await localWalletSnapshotUseCase.snapshot(id: id) != nil
+        } catch {
+            return false
+        }
+    }
+
     private func isLocalExpenseReference(_ reference: String) -> Bool {
         let parsed = NativeRecordReference(reference)
         return parsed.kind == "local-expense"
@@ -2935,6 +2956,11 @@ final class AppState: ObservableObject {
     private func isLocalIncomeReference(_ reference: String) -> Bool {
         let parsed = NativeRecordReference(reference)
         return parsed.kind == "income" && isKnownLocalFactReference(reference)
+    }
+
+    private func isLocalWalletReference(_ reference: String) -> Bool {
+        let parsed = NativeRecordReference(reference)
+        return parsed.kind == "wallet" && isKnownLocalFactReference(reference)
     }
 
     private func isKnownLocalFactReference(_ reference: String) -> Bool {
@@ -3023,6 +3049,46 @@ final class AppState: ObservableObject {
                     .first { NativeRecordReference($0.reference).canonicalValue == canonicalReference }
                     .map { LocalFactReadModel.detail(from: $0, imageStore: localImageStore) }
             guard let detail else { throw LocalDataError.recordNotFound }
+            guard generation == userStateGeneration,
+                  activeRecordReference == canonicalReference else { return }
+            recordDetailCache[canonicalReference] = detail
+            selectedRecordDetail = detail
+        } catch {
+            if activeRecordReference == canonicalReference {
+                recordDetailMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadLocalWalletSnapshotDetail(
+        reference: String,
+        force: Bool,
+        generation: Int
+    ) async {
+        guard localWalletSnapshotUseCase != nil else {
+            recordDetailMessage = "本地数据不可用"
+            return
+        }
+        let resolved = NativeRecordReference(reference)
+        guard UUID(uuidString: resolved.rawId) != nil else {
+            recordDetailMessage = "本地记录标识无效"
+            return
+        }
+        let canonicalReference = resolved.canonicalValue
+        if !force, let cached = recordDetailCache[canonicalReference] {
+            selectedRecordDetail = cached
+            return
+        }
+        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
+            selectedRecordDetail = nil
+        }
+        do {
+            guard let detail = localFactMonths.values
+                .flatMap(\.facts)
+                .first(where: { NativeRecordReference($0.reference).canonicalValue == canonicalReference })
+                .map({ LocalFactReadModel.detail(from: $0, imageStore: localImageStore) }) else {
+                throw LocalDataError.recordNotFound
+            }
             guard generation == userStateGeneration,
                   activeRecordReference == canonicalReference else { return }
             recordDetailCache[canonicalReference] = detail
@@ -3707,6 +3773,61 @@ final class AppState: ObservableObject {
         return true
     }
 
+    private func saveLocalWalletSnapshotDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
+        guard let localWalletSnapshotUseCase else { throw LocalDataError.invalidRecord }
+        let id = UUID(uuidString: draft.rawId)
+            ?? UUID(uuidString: NativeRecordReference(draft.reference).rawId)
+        guard let id, let current = try await localWalletSnapshotUseCase.snapshot(id: id) else {
+            throw LocalDataError.recordNotFound
+        }
+        let payload = (try? LocalRecordCodec.decode(current.payloadJSON)) ?? [:]
+        let updated = try await localWalletSnapshotUseCase.update(LocalWalletSnapshotUpdateCommand(
+            id: current.id,
+            expectedVersion: current.localVersion,
+            accountID: draft.accountId.flatMap(UUID.init(uuidString:)),
+            snapshotKind: current.snapshotKind,
+            amountText: draft.amountText,
+            minimumPaymentText: current.minimumPaymentMinor.map { String(format: "%.2f", Double($0) / 100) },
+            currency: current.currency,
+            accountName: draft.title,
+            accountType: current.accountType,
+            snapshotDate: draft.recordDate,
+            snapshotTime: draft.transactionTime,
+            dueDate: current.dueDate,
+            billDay: current.billDay,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            payload: payload,
+            updatedAt: Date()
+        ))
+        let oldMonth = String(current.snapshotDate.prefix(7))
+        let newMonth = String(updated.snapshot.snapshotDate.prefix(7))
+        await refreshLocalMonthProjection(monthKey: oldMonth)
+        if newMonth != oldMonth {
+            await refreshLocalMonthProjection(monthKey: newMonth)
+        }
+        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
+        await loadRecordDetail(reference: "wallet/\(updated.snapshot.id.uuidString)", force: true)
+        manualRecordMessage = "记录已更新（本机）"
+        return true
+    }
+
+    private func deleteLocalWalletSnapshot(reference: String) async throws -> Bool {
+        guard let localWalletSnapshotUseCase else { throw LocalDataError.invalidRecord }
+        let id = UUID(uuidString: NativeRecordReference(reference).rawId)
+        guard let id, let current = try await localWalletSnapshotUseCase.snapshot(id: id) else {
+            throw LocalDataError.recordNotFound
+        }
+        _ = try await localWalletSnapshotUseCase.delete(LocalWalletSnapshotDeleteCommand(
+            id: current.id,
+            expectedVersion: current.localVersion,
+            deletedAt: Date()
+        ))
+        invalidateRecordExpressionPlanState(afterChanging: [reference])
+        recordsPath = NavigationPath()
+        await refreshLocalMonthProjection(monthKey: String(current.snapshotDate.prefix(7)))
+        return true
+    }
+
     private func localDomainRecordForReference(_ reference: String) async throws -> LocalRecord {
         guard let localRecordUseCase else { throw LocalDataError.invalidRecord }
         let resolved = NativeRecordReference(reference)
@@ -3808,6 +3929,9 @@ final class AppState: ObservableObject {
             if isLocalIncomeReference(draft.reference) {
                 return try await saveLocalIncomeDetail(draft)
             }
+            if isLocalWalletReference(draft.reference) {
+                return try await saveLocalWalletSnapshotDetail(draft)
+            }
             if isLocalDomainReference(draft.reference) {
                 return try await saveLocalDomainRecord(draft)
             }
@@ -3830,6 +3954,9 @@ final class AppState: ObservableObject {
             }
             if isLocalIncomeReference(reference) {
                 return try await deleteLocalIncome(reference: reference)
+            }
+            if isLocalWalletReference(reference) {
+                return try await deleteLocalWalletSnapshot(reference: reference)
             }
             if isLocalDomainReference(reference) {
                 return try await deleteLocalDomainRecord(reference: reference)
@@ -4604,6 +4731,83 @@ final class AppState: ObservableObject {
         return true
     }
 
+    private func createLocalWalletSnapshot(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async throws -> Bool {
+        guard let localWalletSnapshotUseCase else { throw LocalDataError.invalidRecord }
+        guard draft.validationMessage(domain: domain) == nil else {
+            throw LocalDataError.invalidRecord
+        }
+        let snapshotKind = draft.walletRecordKind == "liability_snapshot" ? "liability" : "asset"
+        let accountID = draft.accountId.flatMap(UUID.init(uuidString:))
+        let accountName = draft.dimension.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dueDate = draft.walletDueDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? nil
+            : draft.walletDueDate
+        let billDay = Int(draft.walletBillDay)
+        let payload = draft.universalPayload(domain: domain)
+
+        if let existingRawID = draft.existingRawId,
+           let existingID = UUID(uuidString: existingRawID),
+           let current = try await localWalletSnapshotUseCase.snapshot(id: existingID) {
+            let oldMonth = String(current.snapshotDate.prefix(7))
+            let updated = try await localWalletSnapshotUseCase.update(LocalWalletSnapshotUpdateCommand(
+                id: existingID,
+                expectedVersion: current.localVersion,
+                accountID: accountID,
+                snapshotKind: snapshotKind,
+                amountText: draft.primaryValueText,
+                minimumPaymentText: walletMinimumPaymentText(from: draft.originalPayload),
+                currency: "CNY",
+                accountName: accountName,
+                accountType: draft.walletAccountType,
+                snapshotDate: draft.dateKey,
+                snapshotTime: draft.timeKey,
+                dueDate: dueDate,
+                billDay: billDay,
+                note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+                payload: payload,
+                updatedAt: Date()
+            ))
+            await refreshLocalMonthProjection(monthKey: oldMonth)
+            let newMonth = String(updated.snapshot.snapshotDate.prefix(7))
+            if newMonth != oldMonth {
+                await refreshLocalMonthProjection(monthKey: newMonth)
+            }
+            manualRecordMessage = "记录已更新（本机）"
+            return true
+        }
+
+        guard draft.existingRawId == nil else { throw LocalDataError.recordNotFound }
+        let created = try await localWalletSnapshotUseCase.create(LocalWalletSnapshotCommand(
+            id: UUID(),
+            accountID: accountID,
+            snapshotKind: snapshotKind,
+            amountText: draft.primaryValueText,
+            minimumPaymentText: nil,
+            currency: "CNY",
+            accountName: accountName,
+            accountType: draft.walletAccountType,
+            snapshotDate: draft.dateKey,
+            snapshotTime: draft.timeKey,
+            dueDate: dueDate,
+            billDay: billDay,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            payload: payload,
+            imageData: draft.imageData,
+            createdAt: Date()
+        ))
+        await refreshLocalMonthProjection(monthKey: String(created.snapshot.snapshotDate.prefix(7)))
+        manualRecordMessage = "记录已保存（本机）"
+        return true
+    }
+
+    private func walletMinimumPaymentText(from payload: [String: AnyCodable]) -> String? {
+        guard let minor = payload.double("minimum_payment_minor") else { return nil }
+        return String(format: "%.2f", minor / 100)
+    }
+
     private func createLocalDomainRecord(
         _ draft: NativeManualRecordDraft,
         domain: NativeDomainDefinition?
@@ -4678,6 +4882,12 @@ final class AppState: ObservableObject {
             return try await createLocalIncome(draft)
         }
         if draft.kind == .universal,
+           draft.domainKey == "wallet",
+           localWalletSnapshotUseCase != nil,
+           await shouldCreateLocalWalletSnapshot(for: draft) {
+            return try await createLocalWalletSnapshot(draft, domain: domain)
+        }
+        if draft.kind == .universal,
            localRecordUseCase != nil,
            LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey),
            await shouldCreateLocalDomainRecord(for: draft) {
@@ -4694,6 +4904,16 @@ final class AppState: ObservableObject {
             return false
         }
         return (try? await localIncomeUseCase.income(id: existingID)) != nil
+    }
+
+    private func shouldCreateLocalWalletSnapshot(for draft: NativeManualRecordDraft) async -> Bool {
+        guard let localWalletSnapshotUseCase else { return false }
+        if !isSignedIn { return true }
+        guard let existingRawID = draft.existingRawId,
+              let existingID = UUID(uuidString: existingRawID) else {
+            return false
+        }
+        return (try? await localWalletSnapshotUseCase.snapshot(id: existingID)) != nil
     }
 
     private func shouldCreateLocalDomainRecord(for draft: NativeManualRecordDraft) async -> Bool {
@@ -4756,6 +4976,16 @@ final class AppState: ObservableObject {
         return LocalIncomeUseCase(
             profileStore: LocalProfileStore(database: database),
             repository: repository
+        )
+    }
+
+    private static func defaultLocalWalletSnapshotUseCase() -> LocalWalletSnapshotUseCaseProtocol? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalWalletSnapshotRepository(database: database) else { return nil }
+        return LocalWalletSnapshotUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: repository,
+            imageStore: try? LocalImageStore()
         )
     }
 

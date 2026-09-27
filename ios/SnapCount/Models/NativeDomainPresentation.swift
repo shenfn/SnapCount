@@ -52,7 +52,9 @@ enum NativeDomainPresentationAdapter {
             distribution: distribution(for: definition, records: records, details: details, fact: primaryFact, dimension: primaryDimension, currency: isCurrency),
             recentRecords: records.prefix(8).map { recentRecord($0, details: details, fact: primaryFact, currency: isCurrency) },
             trendIsCurrency: isCurrency,
-            trendScope: records.isEmpty ? "模板预览" : "本周"
+            trendScope: definition.id == "wallet"
+                ? "快照记录"
+                : records.isEmpty ? "模板预览" : "本周"
         )
     }
 
@@ -79,6 +81,16 @@ enum NativeDomainPresentationAdapter {
                 NativeDomainMetric(label: "记录数", value: "\(records.count)"),
                 NativeDomainMetric(label: "月度结余", value: currency(dashboard.monthIncome - dashboard.monthExpense)),
                 NativeDomainMetric(label: "最高单笔", value: currency(amounts.max() ?? 0))
+            ]
+        }
+        if definition.id == "wallet" {
+            let latest = records.first.flatMap { detail(for: $0, in: details) }
+            let latestKind = latest?.payload?.string("snapshot_kind") == "liability" ? "负债" : "资产"
+            return [
+                NativeDomainMetric(label: "快照数", value: "(records.count)"),
+                NativeDomainMetric(label: "最近账户", value: latest?.title ?? "—"),
+                NativeDomainMetric(label: "最近金额", value: currency(latest?.amount ?? 0)),
+                NativeDomainMetric(label: "最近类型", value: latest == nil ? "—" : latestKind)
             ]
         }
         guard let fact, !records.isEmpty else {
@@ -108,6 +120,7 @@ enum NativeDomainPresentationAdapter {
         fact: DomainField?,
         now: Date
     ) -> [NativeDomainTrendPoint] {
+        if definition.id == "wallet" { return [] }
         let calendar = chinaCalendar
         let weekday = calendar.component(.weekday, from: now)
         let daysFromMonday = weekday == 1 ? 6 : weekday - 2
@@ -139,6 +152,24 @@ enum NativeDomainPresentationAdapter {
         dimension: DomainField?,
         currency: Bool
     ) -> [NativeDomainDistributionItem] {
+        if definition.id == "wallet" {
+            var counts: [String: Double] = [:]
+            for record in records {
+                let detail = detail(for: record, in: details)
+                let name = detail?.payload?.string("account_name") ?? detail?.title ?? record.title
+                counts[name, default: 0] += 1
+            }
+            let entries = counts.sorted { $0.value > $1.value }.prefix(6)
+            let maximum = entries.first?.value ?? 1
+            return entries.map { name, value in
+                NativeDomainDistributionItem(
+                    name: name,
+                    value: value,
+                    displayValue: "(Int(value)) 次",
+                    fraction: maximum > 0 ? value / maximum : 0
+                )
+            }
+        }
         var grouped: [String: Double] = [:]
         for record in records {
             let detail = detail(for: record, in: details)
@@ -268,7 +299,11 @@ enum NativeDomainPresentationAdapter {
         case "calories":
             return payload.double("calories") ?? payload.double("calories_kcal") ?? 0
         case "amount" where domainKey == "wallet":
-            return payload.double("amount") ?? payload.double("snapshot_balance") ?? payload.double("current_balance") ?? 0
+            return payload.double("amount")
+                ?? payload.double("snapshot_balance")
+                ?? payload.double("amount_minor").map { $0 / 100 }
+                ?? payload.double("current_balance")
+                ?? 0
         default:
             return payload.double(fact.key) ?? 0
         }
