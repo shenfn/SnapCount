@@ -209,6 +209,94 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertEqual(records.map(\.id), [recordID])
     }
 
+    func testLOCALP1LF006EditedCandidateConfirmationUsesUserValuesAndRemainsIdempotent() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let useCase = LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: try LocalRecordRepository(database: database)
+        )
+        let staging = try await useCase.stage(LocalRecordCandidate(
+            id: "staging-edited-confirmation",
+            domainKey: "sport",
+            title: "AI 运动",
+            summary: "AI 摘要",
+            payload: ["sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(30)],
+            confidence: 0.62,
+            recordDate: "2026-09-19",
+            recordTime: nil,
+            imageData: nil,
+            createdAt: Date()
+        ))
+        let recordID = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
+
+        let confirmed = try await useCase.confirmStaging(LocalStagingConfirmationCommand(
+            id: staging.record.id,
+            recordID: recordID,
+            title: "用户修正运动",
+            summary: "用户修正摘要",
+            payload: ["sport_type": AnyCodable("骑行"), "duration_minutes": AnyCodable(45)],
+            recordDate: "2026-09-20",
+            recordTime: "08:30",
+            note: "用户备注",
+            updatedAt: Date()
+        ))
+        XCTAssertEqual(confirmed.record.id, recordID)
+        XCTAssertEqual(confirmed.record.title, "用户修正运动")
+        XCTAssertEqual(confirmed.record.recordDate, "2026-09-20")
+        XCTAssertEqual(confirmed.record.recordTime, "08:30")
+        XCTAssertEqual(confirmed.record.note, "用户备注")
+        let payload = try LocalRecordCodec.decode(confirmed.record.payloadJSON)
+        XCTAssertEqual(payload.string("sport_type"), "骑行")
+        XCTAssertEqual(payload.double("duration_minutes"), 45)
+
+        let repeated = try await useCase.confirmStaging(LocalStagingConfirmationCommand(
+            id: staging.record.id,
+            recordID: UUID(),
+            title: "不应覆盖",
+            summary: "不应覆盖",
+            payload: ["sport_type": AnyCodable("游泳"), "duration_minutes": AnyCodable(99)],
+            recordDate: "2026-09-21",
+            recordTime: nil,
+            note: nil,
+            updatedAt: Date()
+        ))
+        XCTAssertEqual(repeated.record.id, recordID)
+        XCTAssertEqual(repeated.record.title, "用户修正运动")
+        XCTAssertEqual(repeated.record.recordDate, "2026-09-20")
+    }
+
+    func testLOCALP1Q013DiscardingStagingTwiceIsIdempotent() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let useCase = LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: try LocalRecordRepository(database: database)
+        )
+        let staging = try await useCase.stage(LocalRecordCandidate(
+            id: "staging-discard-idempotent",
+            domainKey: "reading",
+            title: "待丢弃阅读",
+            summary: "候选",
+            payload: ["book_name": AnyCodable("原则"), "reading_minutes": AnyCodable(20)],
+            confidence: 0.20,
+            recordDate: "2026-09-19",
+            recordTime: nil,
+            imageData: nil,
+            createdAt: Date()
+        ))
+
+        try await useCase.discardStaging(id: staging.record.id)
+        try await useCase.discardStaging(id: staging.record.id)
+
+        let discarded = try await useCase.staging(id: staging.record.id)
+        XCTAssertEqual(discarded?.status, .discarded)
+        let pending = try await useCase.stagingRecords()
+        XCTAssertTrue(pending.isEmpty)
+    }
+
     func testLOCALP1DM008StaleVersionCannotOverwriteFormalFact() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

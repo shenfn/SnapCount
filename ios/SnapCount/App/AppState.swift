@@ -2658,6 +2658,15 @@ final class AppState: ObservableObject {
         domain: NativeDomainDefinition?,
         preserveInboxNavigation: Bool = false
     ) async -> String? {
+        if let localID = LocalStagingReadModel.localID(from: record.id) {
+            return await archiveLocalStagingRecord(
+                localID,
+                record: record,
+                draft: draft,
+                domain: domain,
+                preserveInboxNavigation: preserveInboxNavigation
+            )
+        }
         let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
         return await archiveStagingRecord(
             adjustedRecord,
@@ -2692,6 +2701,8 @@ final class AppState: ObservableObject {
     private func archiveLocalStagingRecord(
         _ localID: String,
         record: NativeStagingRecord,
+        draft: NativeManualRecordDraft? = nil,
+        domain: NativeDomainDefinition? = nil,
         preserveInboxNavigation: Bool
     ) async -> String? {
         guard let localRecordUseCase else { return nil }
@@ -2700,10 +2711,30 @@ final class AppState: ObservableObject {
         inboxActionMessageIsError = false
         defer { inboxActionRecordId = nil }
         do {
-            let outcome = try await localRecordUseCase.confirmStaging(
-                id: localID,
-                recordID: UUID()
-            )
+            let outcome: LocalRecordOutcome
+            if let draft {
+                let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
+                outcome = try await localRecordUseCase.confirmStaging(
+                    LocalStagingConfirmationCommand(
+                        id: localID,
+                        recordID: UUID(),
+                        title: adjustedRecord.title,
+                        summary: adjustedRecord.summary,
+                        payload: adjustedRecord.extracted,
+                        recordDate: adjustedRecord.dateKey,
+                        recordTime: draft.timeKey,
+                        note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? nil
+                            : draft.note.trimmingCharacters(in: .whitespacesAndNewlines),
+                        updatedAt: Date()
+                    )
+                )
+            } else {
+                outcome = try await localRecordUseCase.confirmStaging(
+                    id: localID,
+                    recordID: UUID()
+                )
+            }
             removeStagingRecordLocally(record.id)
             let monthKey = String(outcome.record.recordDate.prefix(7))
             await refreshLocalMonthProjection(monthKey: monthKey)

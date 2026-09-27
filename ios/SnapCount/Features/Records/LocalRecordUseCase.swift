@@ -13,6 +13,7 @@ protocol LocalRecordUseCaseProtocol {
     func staging(id: String) async throws -> LocalStagingRecord?
     func stagingRecords() async throws -> [LocalStagingRecord]
     func confirmStaging(id: String, recordID: UUID) async throws -> LocalRecordOutcome
+    func confirmStaging(_ command: LocalStagingConfirmationCommand) async throws -> LocalRecordOutcome
     func discardStaging(id: String) async throws
 }
 
@@ -256,11 +257,77 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
     }
 
     func confirmStaging(id: String, recordID: UUID) async throws -> LocalRecordOutcome {
-        let profile = try profileStore.activeProfile()
-        let record = try repository.archiveStaging(
+        let command = LocalStagingConfirmationCommand(
             id: id,
             recordID: recordID,
-            updatedAt: Date(),
+            title: "",
+            summary: "",
+            payload: [:],
+            recordDate: "",
+            recordTime: nil,
+            note: nil,
+            updatedAt: Date()
+        )
+        return try await confirmStaging(command, useStagingValues: true)
+    }
+
+    func confirmStaging(_ command: LocalStagingConfirmationCommand) async throws -> LocalRecordOutcome {
+        let profile = try profileStore.activeProfile()
+        guard let staging = try repository.staging(id: command.id), staging.profileID == profile.id else {
+            throw LocalDataError.invalidIdentifier
+        }
+        let domainKey = staging.domainKey
+        try LocalRecordValidation.validate(
+            domainKey: domainKey,
+            title: command.title,
+            recordDate: command.recordDate,
+            recordTime: command.recordTime
+        )
+        let normalized = LocalStagingConfirmationCommand(
+            id: command.id,
+            recordID: command.recordID,
+            title: command.title.trimmingCharacters(in: .whitespacesAndNewlines),
+            summary: command.summary,
+            payload: try LocalRecordCodec.normalizedPayload(
+                domainKey: domainKey,
+                payload: command.payload,
+                requireFacts: false
+            ),
+            recordDate: command.recordDate,
+            recordTime: command.recordTime,
+            note: command.note,
+            updatedAt: command.updatedAt
+        )
+        return try await confirmStaging(normalized, useStagingValues: false)
+    }
+
+    private func confirmStaging(
+        _ command: LocalStagingConfirmationCommand,
+        useStagingValues: Bool
+    ) async throws -> LocalRecordOutcome {
+        let profile = try profileStore.activeProfile()
+        let resolved: LocalStagingConfirmationCommand
+        if useStagingValues {
+            guard let staging = try repository.staging(id: command.id), staging.profileID == profile.id else {
+                throw LocalDataError.invalidIdentifier
+            }
+            let payload = try LocalRecordCodec.decode(staging.payloadJSON)
+            resolved = LocalStagingConfirmationCommand(
+                id: command.id,
+                recordID: command.recordID,
+                title: staging.title,
+                summary: staging.summary,
+                payload: payload,
+                recordDate: staging.recordDate,
+                recordTime: staging.recordTime,
+                note: payload.string("note"),
+                updatedAt: command.updatedAt
+            )
+        } else {
+            resolved = command
+        }
+        let record = try repository.archiveStaging(
+            resolved,
             profileID: profile.id
         )
         return LocalRecordOutcome(record: record, profileID: profile.id)
