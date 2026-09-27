@@ -234,6 +234,29 @@ final class LocalDatabase {
                 ADD COLUMN missing_fields_json TEXT NOT NULL DEFAULT '[]';
                 """)
         }
+        migrator.registerMigration("local-v8-phase1-income") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_incomes (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT REFERENCES local_accounts(id),
+                    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+                    currency TEXT NOT NULL,
+                    income_category TEXT NOT NULL,
+                    source_name TEXT,
+                    income_date TEXT NOT NULL,
+                    income_time TEXT,
+                    note TEXT,
+                    local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    deleted_at DATETIME
+                );
+
+                CREATE INDEX local_incomes_profile_date_idx
+                    ON local_incomes(profile_id, income_date, income_time, created_at);
+                """)
+        }
         return migrator
     }
 }

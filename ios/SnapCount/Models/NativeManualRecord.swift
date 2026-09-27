@@ -162,13 +162,24 @@ struct NativeManualRecordDraft {
     }
 
     init(detail: NativeRecordDetail) {
-        self.init(kind: .universal, domainKey: detail.domainKey ?? detail.category ?? "sport")
+        let detailKind: NativeManualRecordKind
+        switch detail.kind {
+        case "expense": detailKind = .expense
+        case "income": detailKind = .income
+        default: detailKind = .universal
+        }
+        self.init(kind: detailKind, domainKey: detail.domainKey ?? detail.category ?? "sport")
         existingRawId = detail.rawId
         originalPayload = detail.payload ?? [:]
         title = detail.title
         note = detail.note ?? ""
         imagePath = detail.imagePath
         imageHash = detail.imageHash
+        accountId = detail.accountId
+        if detailKind == .income {
+            amountText = detail.amount.map { String(format: "%.2f", $0) } ?? ""
+            category = originalPayload.string("income_category") ?? detail.category ?? "other"
+        }
         if let recordDate = detail.recordDate, let parsedDate = Self.dateFormatter.date(from: recordDate) {
             date = parsedDate
         }

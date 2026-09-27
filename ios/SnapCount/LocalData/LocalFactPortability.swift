@@ -3,7 +3,7 @@ import GRDB
 
 struct LocalFactArchive: Codable, Equatable {
     static let currentFormat = "jiezi-local-fact-archive"
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     let format: String
     let schemaVersion: Int
