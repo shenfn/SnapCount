@@ -222,7 +222,8 @@ final class LocalWalletSnapshotTests: XCTestCase {
             deletedAt: fixedDate.addingTimeInterval(120)
         ))
         XCTAssertNotNil(deleted.tombstone.deletedAt)
-        XCTAssertNil(try await walletUseCase.snapshot(id: updated.snapshot.id))
+        let deletedSnapshot = try await walletUseCase.snapshot(id: updated.snapshot.id)
+        XCTAssertNil(deletedSnapshot)
 
         let profile = try profileStore.activeProfile()
         let month = try LocalFactReader(database: database).month(
