@@ -161,7 +161,7 @@ F1 五域事实 ◄── F2 图片 ◄── F3 识别/候选      F12 同步(�
 - 复用：C3 图片移交、C8 缓存失效、C4 投影刷新（SL-02 产物）。
 - 不做：不做候选跨域改判（SL-04）、不做批量、不触远端 staging。
 
-### SL-A 收入本地域（已完成切片 Grooming，正在 TDD）
+### SL-A 收入本地域（已实现，macOS CI 验证通过）
 - 选型：采用方案 B。收入独立存储于 `local_incomes`，不复用 `local_records`；`local_records` 继续只承载 food/sleep/sport/reading。这样财务行、账户分录、编辑替换和作废规则仍属于财务 Repository，不把第二套财务实现藏进通用记录域。
 - 迁移：`local-v8-phase1-income` 只新增 `local_incomes` 及 profile/date 索引，不重建 `local_records`/`local_staging_records`，不改 Wallet 表结构。
 - 表字段：`id/profile_id/account_id? / amount_minor / currency / income_category / source_name? / income_date / income_time? / note? / local_version / created_at / updated_at / deleted_at`。`amount_minor` 为货币最小单位；当前输入默认 CNY，表不以 CHECK 封死未来 currency；日期真实合法性校验不在本 Slice，单独列公共能力 Slice。
@@ -169,7 +169,8 @@ F1 五域事实 ◄── F2 图片 ◄── F3 识别/候选      F12 同步(�
 - 输入规则：金额严格按当前 CNY 两位小数解析，`1.005` 拒绝，`1.01` 得到 `101`；类别限定 `salary/bonus/freelance/investment/reimbursement/other`；文本 trim；当前只要求日期非空，不顺手加入真实日历校验。
 - 读取与可携：`LocalFactReader` 追加 `local_incomes`，以 `income/<uuid>` 事实引用输出；Today/Records/详情按收入展示正金额并参与日/月聚合；`LocalFactArchive.currentSchemaVersion` 提升为 2，JSON payload 使用 `amount_minor` 等 v2 字段。Wallet 不在本 Slice 的 FactReader/表方案内。
 - 路由：未登录新建 Income 走 Local；登录态新建 Income 暂沿用现有 Cloud，已存在本地 Income 的编辑可走 Local。这是同步冻结期间的 Transitional 行为，不是最终 Local-First 架构；Sync/AI 新路由后续处理。
-- 红灯/覆盖：`ios/SnapCountTests/LocalIncomeTests.swift` 覆盖严格金额、收入+可选分录同事务、编辑替换/删除作废、FactReader/导出、未登录 Today/Records 聚合。Windows 无 Swift/Xcode，运行结果以 macOS CI 为准。
+- 红灯/覆盖：`ios/SnapCountTests/LocalIncomeTests.swift` 覆盖严格金额、收入+可选分录同事务、编辑替换/删除作废、FactReader/导出、未登录 Today/Records 聚合。PR #201 的实现 head 为 `cf138d9`；macOS CI run `36290165757` 已通过 Build、完整 XCTest 与 iOS Build Gate。
+- CI 修复记录：首轮 run `36289758483` 仅因新增测试的 fileprivate decoder 引用和 MainActor 隔离失败；`cf138d9` 修正测试隔离与 decoder 后重跑全绿，不改变生产实现边界。
 - 不做：Wallet（SL-B 新会话单独 Grooming）、日期真实合法性公共校验、收入导入/同步/Outbox、登录态新建 Cloud 路由收敛、Expense 全量重构。
 
 ### SL-B 钱包快照本地域（延期）
@@ -234,7 +235,7 @@ F1 五域事实 ◄── F2 图片 ◄── F3 识别/候选      F12 同步(�
 ```text
 SL-01 文档收口
   → SL-02 投影收敛+特征加固        [风险最低、收益最大：后续所有片踩在稳定读模型上]
-  → SL-A 收入本地域                 [方案 B；已进入 TDD]
+  → SL-A 收入本地域                 [方案 B；已实现且 macOS CI 通过]
   → SL-B 钱包快照本地域             [SL-A 完成后新会话 Grooming]
   → SL-03 候选编辑确认
   → SL-04 候选重试/域重判          [完成后 Inbox 本地闭环 = HANDOFF §15 延期项清零]
@@ -260,7 +261,7 @@ SL-01 文档收口
 | SL-07 | INV-11 特征化、D4 可达性 | — |
 | SL-08 | LF-023、LF-024 | LF-023、LF-024 |
 | SL-09 | LOCAL-002F 模式复用、LF-021 | LF-021 |
-| SL-A | LF-032 | 已进入 TDD；方案 B，Windows 静态推进，macOS CI 为 XCTest 证据 |
+| SL-A | LF-032 | 已实现且 macOS CI 验证通过；方案 B，PR #201 / head `cf138d9` |
 | SL-B | LF-033 | 延期；SL-A 完成后新会话单独 Grooming |
 | SL-C~I | LF-005/008/009/010~013/015/016/017/019/020/022/025~031、033 | 随启动时分配子编号 |
 
@@ -272,7 +273,7 @@ SL-01 文档收口
 
 | # | 问题 | 结论 | 对 Slice 的影响 |
 |---|---|---|---|
-| Q-01 | 收入/钱包 | **进 Phase 1 本地化**。Income 采用独立 `local_incomes`（方案 B）；Wallet 仍只记快照事实，但具体复用 `local_records` 还是独立表留到 SL-B 新会话 Grooming；不做还款周期/账务推演（依赖 Q-03 不本地化）。登录态新建 Income 在迁移期继续走 Cloud，Income 本地化不代表最终路由收敛 | SL-A 已解锁并进入 TDD；SL-B 只登记为后续 Grooming；LF-008 回退边界仅对未登录 Income 收窄；导出 schema v2 已由 SL-A 落地，Wallet 是否进聚合随 SL-B 细化 |
+| Q-01 | 收入/钱包 | **进 Phase 1 本地化**。Income 采用独立 `local_incomes`（方案 B）；Wallet 仍只记快照事实，但具体复用 `local_records` 还是独立表留到 SL-B 新会话 Grooming；不做还款周期/账务推演（依赖 Q-03 不本地化）。登录态新建 Income 在迁移期继续走 Cloud，Income 本地化不代表最终路由收敛 | SL-A 已实现并通过 PR #201 的 macOS CI；SL-B 只登记为后续 Grooming；LF-008 回退边界仅对未登录 Income 收窄；导出 schema v2 已由 SL-A 落地，Wallet 是否进聚合随 SL-B 细化 |
 | Q-02 | 换账号归属 | 维持现状（mismatch 只能[暂不同步/退出]，B 可见 A 本地数据），不做多 profile | SL-G 关闭（不实施）；风险已知并接受 |
 | Q-03 | 还款/截图还款/补绑/周期本地化 | **不做**。云端 RPC 是原子权威（ADR-040），本地重写状态机成本高且制造双权威；Phase 1 维持"登录可用" | SL 门关闭；SL-B 钱包因此定形为"只记事实" |
 | Q-04 | 设置本地镜像 | 未登录设置存本地；登录后"谁改得晚谁赢"（以后修改时间合并），之后以云端为准 | SL-C 解锁，策略固定 |
@@ -295,7 +296,7 @@ SL-01 文档收口
 ```text
 SL-01 文档收口（含：DM-GAP-10 标记不采纳、BDD LF-017/LF-028/LF-029~031 状态更新、BYOK 移出 Phase 1）
   → SL-02 投影收敛+特征测试加固（LF-002 特征化保留）
-  → SL-A 收入本地域（方案 B，已进入 TDD）
+  → SL-A 收入本地域（方案 B，已实现且 macOS CI 通过）
   → SL-B 钱包快照本地域（SL-A 完成后新会话 Grooming）
   → SL-03 候选编辑确认（并入 discard 幂等 Q-13）→ SL-04 候选重试/域重判
   → M1 五域真机验收（Gate：K 片待真机清单 + LF-004 重启图片）
@@ -309,6 +310,6 @@ SL-01 文档收口（含：DM-GAP-10 标记不采纳、BDD LF-017/LF-028/LF-029~
 
 ## 11. 验证边界声明
 
-- 本文结论基于 2026-09-25 静态只读阅读（分支 `codex/local-first-phase1-fact-reader`）；iOS 编译/XCTest 以 macOS CI 为准。
+- 本文基础结论基于 2026-09-25 静态只读阅读（分支 `codex/local-first-phase1-fact-reader`）；SL-A 实现与 XCTest 已由 PR #201、head `cf138d9`、macOS CI run `36290165757` 验证通过。
 - 冻结项（F11/F12、PWA 结构、生产迁移/部署/TestFlight）未被本文解冻；任何 Slice 不得触碰 `local_outbox_operations`/`local_sync_state` 之外的同步面、Edge Function、PWA。
 - SL-02 的特征测试固定的是**现状行为**（含 LF-002 登录态走云端这一与"本地优先"直觉相反的现状）；特征化≠认可，Q-08 拍板后才改语义。

@@ -1,7 +1,7 @@
 # 芥子 Local-First 全景 BDD 场景梳理
 
 > 规格编号：LOCAL-FIRST-BDD-001
-> 状态：已评审并持续回填；SL-02 已完成，SL-A 方案 B 已完成切片级 Grooming 并进入 TDD；SL-B 延期到 SL-A 完成后的新会话单独 Grooming
+> 状态：已评审并持续回填；SL-02 已完成，SL-A 方案 B 已实现并通过 macOS CI；SL-B 延期到 SL-A 完成后的新会话单独 Grooming
 > 日期：2026-09-25
 > 基线：`origin/main`（HEAD `7c64bae`，SL-02 已合入）；本次 Grooming 使用独立分支 `feature/local-first-sl-a-sl-b-grooming`，根工作区存在用户 WIP，未触碰
 > 编号纪律：沿用既有场景编号（REC/EXP/CORE/PWA/A4-IOS/D-REMOTE/LOCAL-002/LOCAL-003/LOCAL-P1-DM/LOCAL-P1-SPORT/LOCAL-DATA）；仅对**尚无编号的真实缺口**分配新前缀 `LF-001` 起的编号。同一不变量不另造平行编号。
@@ -51,7 +51,7 @@
 
 | 能力 | 云端接口 | 本地替代 | 说明 |
 |---|---|---|---|
-| 收入记录（创建/编辑/补绑） | `save_income_with_account` | ⚠️ | 未登录创建/编辑已进入独立 `local_incomes`；登录态新建仍走 Cloud（迁移期 Transitional），补绑/同步后续 |
+| 收入记录（创建/编辑/补绑） | `save_income_with_account` | ⚠️（本地 Income 已实现） | 未登录创建/编辑已进入独立 `local_incomes`；登录态新建仍走 Cloud（迁移期 Transitional），补绑/同步后续；PR #201 / macOS CI 已验证 |
 | 钱包快照（读取/创建账户/关联） | `apply_wallet_snapshot` | ❌ | DomainsView.swift:377-432 |
 | 还款确认/撤销/周期准备/截图还款 | `set_repayment_cycle_paid_amount`/`revoke_liability_payment`/`ensure_liability_repayment_cycles`/`confirm_staging_repayment` | ❌ | A4-IOS-003/005/006，需登录 |
 | 补绑（单条/批量） | `save_transaction_with_account` 等 | ❌ | 推荐引擎本地，写入云端 |
@@ -114,17 +114,17 @@
 | 13 | 单设备同步（expense/账户） | 🧊 冻结（已上生产） | F12 | LOCAL-003-D1~D4、DREMOTE-010~017 |
 | 14 | 老用户迁移 L2 | ❌ 待开始 | F11 | LOCAL-DATA-010/011（提议） |
 | 15 | BYOK | 🧊 冻结登记（协议就位，零实现） | F13 | LF-029~031、BYOK-Grooming |
-| 16 | 收入 | 🚧 SL-A TDD 实施中（方案 B） | F14 | Q-01、LF-032 |
+| 16 | 收入 | ✅ SL-A 已实现并通过 macOS CI（方案 B） | F14 | Q-01、LF-032 |
 | 17 | 钱包快照 | ⏳ 范围已拍板，待 SL-B（最小形态） | F14 | Q-01、LF-033 |
 | 18 | 异常恢复（重启/断网/低存储/迁移失败） | ⚠️ 重启/断网已测；低存储/迁移失败未测 | F9 | LOCAL-002B/G、DM-013、LF-023~025 |
 | 19 | 登录绑定/退出登录/账号轮换 | ✅ 基础闭环；轮换归属未定义 | F10 | LOCAL-003C、DREMOTE-010~017、SPORT-001-L、LF-026~028 |
 
-### 3.1 切片执行状态（2026-09-26）
+### 3.1 切片执行状态（2026-09-27）
 
 | Slice | 覆盖场景/能力 | 状态 | 证据/下一步 |
 |---|---|---|---|
 | SL-02 | LF-001、LF-002、DM-004/005/011/014、三套引用前缀路由、C4 投影刷新收敛 | ✅ 已完成并合入 main | PR #200 / merge `7c64bae`；交接回填 `docs/handoff/LOCAL-FIRST-SL-02-投影刷新收敛-2026-09-25.md` |
-| SL-A | LF-032 收入本地域 | 🚧 TDD 实施中 | 方案 B：独立 `local_incomes`；v8 新增表；FactReader/导出 schema v2/Today/Records 聚合已接入；Windows 无 Swift/Xcode，macOS CI 为测试证据 |
+| SL-A | LF-032 收入本地域 | ✅ 已实现并 CI 验证通过 | 方案 B：独立 `local_incomes`；v8 新增表；FactReader/导出 schema v2/Today/Records 聚合已接入；PR #201，head `cf138d9`，macOS CI run `36290165757` 全绿 |
 | SL-B | LF-033 钱包快照本地域（最小形态） | ⏸ 延期 | SL-A 完成后新开会话单独 Grooming；本轮不决定复用 `local_records` 还是独立表；不做还款周期/账务推演 |
 
 ## 4. BDD 场景
@@ -524,7 +524,7 @@ Feature: AI Provider 可插拔且 Key 不出设备
 
 ```gherkin
 Feature: 收入与钱包快照的本地域
-  现状：云端完整；SL-A 已完成方案 B 的最小本地实现并进入 TDD，SL-B 仍待单独 Grooming。Income 登录态新建保留 Cloud 路径仅是同步冻结期 Transitional 行为，不是最终 Local-First 架构。
+  现状：云端完整；SL-A 已完成方案 B 的最小本地实现并通过 macOS CI，SL-B 仍待单独 Grooming。Income 登录态新建保留 Cloud 路径仅是同步冻结期 Transitional 行为，不是最终 Local-First 架构。
 
   [LF-032-A] Scenario: 未登录创建收入并绑定账户
     Given 未登录用户已有本地 profile 和可选本地账户
@@ -562,7 +562,7 @@ Feature: 收入与钱包快照的本地域
 | PWA/iOS 能力 | Local-First 覆盖 | 结论 |
 |---|---|---|
 | 五域手动 CRUD | F1 | 已覆盖（LF-001 补编号） |
-| 收入域 | F14 / LF-032 | **SL-A TDD 实施中；方案 B 独立 `local_incomes`，登录态新建仍为 Transitional Cloud 路由** |
+| 收入域 | F14 / LF-032 | **SL-A 已实现且 macOS CI 通过；方案 B 独立 `local_incomes`，登录态新建仍为 Transitional Cloud 路由；PR #201 / `cf138d9`** |
 | 钱包快照域 | F14/F6 / LF-033 | **范围已拍板，待 SL-B 新会话单独 Grooming；最小形态只记快照事实** |
 | 还款/撤销/截图还款/补绑 | F6 | 登录态保留；本地化待裁决（Q-03） |
 | 批量归档/销毁中转 | F3（单条）；批量本地候选未定义 | 记录差异：本地候选暂无批量操作，低优先 |
@@ -597,7 +597,7 @@ Feature: 收入与钱包快照的本地域
 8. **低存储、迁移失败无测试**（LF-023/024），06-计划 §7 的最高规格验证未闭环。
 9. **文档口径分裂**（V-1/V-4/V-5）：已由 SL-01 收口；历史差异仍保留在 V 表中作为追踪证据，当前入口以阶段索引和 Phase 1 Handoff 为准。
 10. **`local_records` CHECK 含 expense 的死分支**与引用体系三套并存（`expense//data//local-expense//local-data//local-staging/`）：架构债务，建议在收敛切片处理。
-11. **macOS CI 依赖**：本文全部代码结论来自静态阅读；iOS 编译/XCTest/真机验收以 GitHub macOS 与 TestFlight 为准（K 片待真机清单仍未关闭）。
+11. **macOS CI 依赖**：SL-A 的 iOS 编译/XCTest 已由 GitHub macOS CI run `36290165757` 验证；真机验收仍未执行，K 片待真机清单仍未关闭。
 
 ## 7. 需要拍板的问题
 
@@ -631,13 +631,13 @@ Feature: 收入与钱包快照的本地域
 6. **编辑替换图片**：LF-003（DM-GAP-06 残余）。
 7. **五域导入恢复**：LF-021（换机自助桥闭环）。
 8. **异常恢复加固**：LF-023 低存储、LF-024 迁移失败回滚。
-9. **按已拍板范围推进**：SL-A Income（LF-032，方案 B）完成后新会话 Grooming SL-B Wallet（LF-033）；设置本地镜像（LF-019/020）、AI 本地适配最小切片（LF-014/015 + LF-010~013 中的拍板口径）；BYOK（LF-029~031）保持冻结登记。
+9. **按已拍板范围推进**：SL-A Income（LF-032，方案 B）已完成并通过 CI；下一个会话 Grooming SL-B Wallet（LF-033）；设置本地镜像（LF-019/020）、AI 本地适配最小切片（LF-014/015 + LF-010~013 中的拍板口径）；BYOK（LF-029~031）保持冻结登记。
 10. **显式决策后才启动**：L2 迁移（F11）、同步解冻（F12）、账号轮换流程（LF-026）。
 
 明确不进入：Cloud Sync/多设备/CRDT/Outbox 扩展、生产迁移、部署、TestFlight（除非当轮用户明确授权）。
 
 ## 9. 验证边界声明
 
-- 本文所有代码结论来自 2026-09-25 静态只读阅读（分支 `codex/local-first-phase1-fact-reader`）；Windows 无 Swift 工具链，编译与 XCTest 以 macOS CI 为准。
+- 本文基础盘点来自 2026-09-25 静态只读阅读（分支 `codex/local-first-phase1-fact-reader`）；SL-A 实现与 XCTest 已在 PR #201 的 macOS CI run `36290165757` 通过。Windows 无 Swift 工具链，真机验收仍以设备/TestFlight 为准。
 - 生产同步 RPC、Edge Function 生产版本以 HANDOFF §12/18 记录为准，本文未在线复核生产库。
 - PWA 盘点以 git HEAD 为基线；磁盘上 `index.html` 存在被未提交 WIP 覆盖的异常，如需以磁盘文件为准请先处理该 WIP。
