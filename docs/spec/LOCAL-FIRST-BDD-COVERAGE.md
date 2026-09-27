@@ -1,7 +1,7 @@
 # 芥子 Local-First 全景 BDD 场景梳理
 
 > 规格编号：LOCAL-FIRST-BDD-001
-> 状态：Phase 1 RC 收口中；SL-02、SL-A Income、SL-B Wallet 已实现并有 macOS CI 证据；SL-03 本地候选编辑确认已实现，待本分支 CI 与 M1 真机验收
+> 状态：Phase 1 RC 收口中；SL-02、SL-A Income、SL-B Wallet、SL-03 已实现并有 macOS CI 证据（PR #203 / run `36312172384`）；低存储/migration failure 证据与 M1 真机验收待完成
 > 日期：2026-09-25
 > 基线：`origin/main`（HEAD `7af5070`，SL-B Wallet 已合入）；本次 RC 使用独立分支 `codex/phase1-closure-sl03`，根工作区存在用户 WIP，未触碰
 > 编号纪律：沿用既有场景编号（REC/EXP/CORE/PWA/A4-IOS/D-REMOTE/LOCAL-002/LOCAL-003/LOCAL-P1-DM/LOCAL-P1-SPORT/LOCAL-DATA）；仅对**尚无编号的真实缺口**分配新前缀 `LF-001` 起的编号。同一不变量不另造平行编号。
