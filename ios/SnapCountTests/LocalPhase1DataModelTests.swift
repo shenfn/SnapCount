@@ -3,6 +3,20 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testPhase1DomainDefinitionsFillMissingBuiltIns() {
+        let sport = NativeDomainDefinition(
+            id: "sport", name: "运动记录", description: "", icon: "", isSystem: true,
+            schema: [:], display: [:], recordCount: 0
+        )
+
+        let completed = AppState.completeDomainDefinitions([sport])
+
+        XCTAssertEqual(
+            Set(completed.map(\.id)),
+            Set(["expense", "income", "sport", "sleep", "reading", "food", "wallet"])
+        )
+    }
+
     func testLOCALP1DM002IntakePreservesCandidateAndFormalSourceKinds() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

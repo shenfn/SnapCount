@@ -87,8 +87,9 @@ struct InsightsView: View {
         }
         .navigationTitle("报告")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .task(id: "\(mode.rawValue)-\(range.rawValue)") {
-            if mode == .linkage { await appState.loadInsights(range: range) }
+        .task(id: "\(mode.rawValue)-\(range.rawValue)-\(appState.isSignedIn)") {
+            guard mode == .linkage, appState.isSignedIn else { return }
+            await appState.loadInsights(range: range)
         }
     }
 
