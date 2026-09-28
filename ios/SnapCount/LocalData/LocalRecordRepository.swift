@@ -11,7 +11,7 @@ protocol LocalRecordRepositoryProtocol {
     func createStaging(_ draft: LocalStagingDraft) throws -> LocalStagingRecord
     func staging(id: String) throws -> LocalStagingRecord?
     func stagingRecords(profileID: UUID) throws -> [LocalStagingRecord]
-    func archiveStaging(id: String, recordID: UUID, updatedAt: Date, profileID: UUID) throws -> LocalRecord
+    func archiveStaging(_ command: LocalStagingConfirmationCommand, profileID: UUID) throws -> LocalRecord
     func discardStaging(id: String, updatedAt: Date, profileID: UUID) throws
 }
 
@@ -264,16 +264,14 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
     }
 
     func archiveStaging(
-        id: String,
-        recordID: UUID,
-        updatedAt: Date,
+        _ command: LocalStagingConfirmationCommand,
         profileID: UUID
     ) throws -> LocalRecord {
         try database.writer.write { db in
             guard let stagingRow = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_staging_records WHERE id = ?",
-                arguments: [id]
+                arguments: [command.id]
             ) else { throw LocalDataError.recordNotFound }
             try Self.assertProfile(stagingRow, profileID: profileID)
             let status: String = stagingRow["status"]
@@ -292,19 +290,14 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
             }
             let stagingProfileID: String = stagingRow["profile_id"]
             let domainKey: String = stagingRow["domain_key"]
-            let title: String = stagingRow["title"]
-            let summary: String = stagingRow["summary"]
-            let payloadJSON: String = stagingRow["payload_json"]
-            let recordDate: String = stagingRow["record_date"]
-            let recordTime: String? = stagingRow["record_time"]
+            let title = command.title
+            let summary = command.summary
+            let payloadJSON = try LocalRecordCodec.encode(command.payload)
+            let recordDate = command.recordDate
+            let recordTime = command.recordTime
             let imagePath: String? = stagingRow["image_path"]
             let imageHash: String? = stagingRow["image_hash"]
             let createdAt: Date = stagingRow["created_at"]
-            let payload = try LocalRecordCodec.normalizedPayload(
-                domainKey: domainKey,
-                payload: try LocalRecordCodec.decode(payloadJSON)
-            )
-            let normalizedPayloadJSON = try LocalRecordCodec.encode(payload)
 
             try db.execute(
                 sql: """
@@ -312,23 +305,24 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         id, profile_id, domain_key, title, summary, payload_json,
                         record_date, record_time, note, image_path, image_hash,
                         source_kind, domain_version, local_version, created_at, updated_at, deleted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, NULL)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
                     """,
                 arguments: [
-                    recordID.uuidString,
+                    command.recordID.uuidString,
                     stagingProfileID,
                     domainKey,
                     title,
                     summary,
-                    normalizedPayloadJSON,
+                    payloadJSON,
                     recordDate,
                     recordTime,
+                    command.note,
                     imagePath,
                     imageHash,
                     LocalRecordSourceKind.aiConfirmed.rawValue,
                     stagingRow["domain_version"],
                     createdAt,
-                    updatedAt
+                    command.updatedAt
                 ]
             )
             try db.execute(
@@ -338,12 +332,12 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         resolved_at = ?, image_path = NULL, image_hash = NULL, updated_at = ?
                     WHERE id = ? AND status = 'pending_review'
                     """,
-                arguments: [recordID.uuidString, updatedAt, updatedAt, id]
+                arguments: [command.recordID.uuidString, command.updatedAt, command.updatedAt, command.id]
             )
             guard let recordRow = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_records WHERE id = ?",
-                arguments: [recordID.uuidString]
+                arguments: [command.recordID.uuidString]
             ) else { throw LocalDataError.recordNotFound }
             return try Self.record(from: recordRow)
         }
@@ -358,6 +352,9 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
             ) else { throw LocalDataError.recordNotFound }
             try Self.assertProfile(row, profileID: profileID)
             let status: String = row["status"]
+            if status == LocalStagingRecordStatus.discarded.rawValue {
+                return
+            }
             guard status == LocalStagingRecordStatus.pendingReview.rawValue else {
                 throw LocalDataError.invalidRecord
             }

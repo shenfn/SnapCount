@@ -1,16 +1,16 @@
 # 芥子 Local-First 全景 BDD 场景梳理
 
 > 规格编号：LOCAL-FIRST-BDD-001
-> 状态：已评审并持续回填；SL-02 已完成，SL-A 方案 B 已实现并通过 macOS CI；SL-B 延期到 SL-A 完成后的新会话单独 Grooming
+> 状态：Phase 1 RC 收口中；SL-02、SL-A Income、SL-B Wallet、SL-03 已实现并有 macOS CI 证据（PR #203 / run `36312172384`）；低存储/migration failure 证据与 M1 真机验收待完成
 > 日期：2026-09-25
-> 基线：`origin/main`（HEAD `7c64bae`，SL-02 已合入）；本次 Grooming 使用独立分支 `feature/local-first-sl-a-sl-b-grooming`，根工作区存在用户 WIP，未触碰
+> 基线：`origin/main`（HEAD `7af5070`，SL-B Wallet 已合入）；本次 RC 使用独立分支 `codex/phase1-closure-sl03`，根工作区存在用户 WIP，未触碰
 > 编号纪律：沿用既有场景编号（REC/EXP/CORE/PWA/A4-IOS/D-REMOTE/LOCAL-002/LOCAL-003/LOCAL-P1-DM/LOCAL-P1-SPORT/LOCAL-DATA）；仅对**尚无编号的真实缺口**分配新前缀 `LF-001` 起的编号。同一不变量不另造平行编号。
 
 ## 1. 目的与事实来源
 
 以现有 iOS + PWA 完整产品能力为基线，确认 Local-First 改造最终需要覆盖的全部用户能力和业务场景；反向检查遗漏；为后续 TDD 切片提供可直接引用的 BDD 场景。
 
-事实来源（六个只读盘点 + 主流程二次验证，全部附代码行号，未做任何修改）：
+事实来源（六个只读盘点 + 主流程二次验证，全部附代码行号；原始盘点阶段未做业务修改）：
 
 1. iOS 本地数据层（`ios/SnapCount/LocalData/`、`AppState.swift`、`Features/Records/`）
 2. PWA 功能面（`src/`、`src/domains/registry.js`、各 Page/Modal/Feature，以 git HEAD 的 `index.html` 为生产入口）
@@ -21,7 +21,7 @@
 
 关键结论经主流程对源码二次抽查确认：`discardStaging` 不幂等（[LocalRecordRepository.swift:352-373](file:///d:/Business/count/ios/SnapCount/LocalData/LocalRecordRepository.swift#L352-L373)）、置信度分域阈值（[LocalRecordModels.swift:367-394](file:///d:/Business/count/ios/SnapCount/LocalData/LocalRecordModels.swift#L367-L394)）、staging 引用前缀 `local-staging/`（[LocalStagingReadModel.swift:4](file:///d:/Business/count/ios/SnapCount/Features/Records/LocalStagingReadModel.swift#L4)）、未登录四域手动创建走本地（[AppState.swift:4492-4494](file:///d:/Business/count/ios/SnapCount/App/AppState.swift#L4492-L4494)）。
 
-明确不在本文范围：修改业务代码；解冻同步主线；重新讨论已拍板的产品范围（五域及收入/钱包、AI Popup/Analysis 不合并、Cloud Sync 冻结）。
+明确不在本文范围：解冻同步主线；重新讨论已拍板的产品范围（五域及收入/钱包、AI Popup/Analysis 不合并、Cloud Sync 冻结）。本 RC 的 SL-03 实现以对应交接快照为准。
 
 ## 2. 现有能力基线
 
@@ -52,7 +52,7 @@
 | 能力 | 云端接口 | 本地替代 | 说明 |
 |---|---|---|---|
 | 收入记录（创建/编辑/补绑） | `save_income_with_account` | ⚠️（本地 Income 已实现） | 未登录创建/编辑已进入独立 `local_incomes`；登录态新建仍走 Cloud（迁移期 Transitional），补绑/同步后续；PR #201 / macOS CI 已验证 |
-| 钱包快照（读取/创建账户/关联） | `apply_wallet_snapshot` | ❌ | DomainsView.swift:377-432 |
+| 钱包快照（本地读取/创建/编辑；登录态新建与云端账户关联仍走 Cloud） | `apply_wallet_snapshot` | ⚠️（本地最小快照已实现） | `LocalWalletSnapshotRepository.swift`、`AppState.swift:4765-4825`；云端关联仍由 `WalletSnapshotRepository` 负责 |
 | 还款确认/撤销/周期准备/截图还款 | `set_repayment_cycle_paid_amount`/`revoke_liability_payment`/`ensure_liability_repayment_cycles`/`confirm_staging_repayment` | ❌ | A4-IOS-003/005/006，需登录 |
 | 补绑（单条/批量） | `save_transaction_with_account` 等 | ❌ | 推荐引擎本地，写入云端 |
 | 待补全确认 | `confirm_pending_transaction_with_account` | ❌ | InboxRepository.swift:142-157 |
@@ -93,7 +93,7 @@
 - `local_records` 表 CHECK 允许 `expense` 但校验层禁止（可达 schema、不可达业务）。
 - 本地 expense 无业务唯一约束：手动重复录入同笔消费会重复（云端 ingest 有三层去重；本地手动无）。
 - 同一设备本地库只有单一 profile；绑定第二个云账号会 mismatch，仅能"暂不同步/退出登录"，本地数据仍属第一账号（见 Q-02）。
-- Wallet 仍未本地化；其存储模型留到 SL-B 新会话 Grooming。登录态 Income 新建继续 Cloud 是同步冻结期间的 Transitional 行为，不是最终 Local-First 架构。
+- Wallet 最小快照已本地化（未登录创建/编辑，登录态编辑本地快照）；登录态新建和云端账户关联继续 Cloud，是同步冻结期间的 Transitional 行为。还款、周期账务和补绑不在 RC 范围。
 
 ## 3. 覆盖关系总表
 
@@ -115,7 +115,7 @@
 | 14 | 老用户迁移 L2 | ❌ 待开始 | F11 | LOCAL-DATA-010/011（提议） |
 | 15 | BYOK | 🧊 冻结登记（协议就位，零实现） | F13 | LF-029~031、BYOK-Grooming |
 | 16 | 收入 | ✅ SL-A 已实现并通过 macOS CI（方案 B） | F14 | Q-01、LF-032 |
-| 17 | 钱包快照 | ⏳ 范围已拍板，待 SL-B（最小形态） | F14 | Q-01、LF-033 |
+| 17 | 钱包快照 | ✅ 已实现并通过 macOS CI；待 M1 真机验收 | F14 | Q-01、LF-033 |
 | 18 | 异常恢复（重启/断网/低存储/迁移失败） | ⚠️ 重启/断网已测；低存储/迁移失败未测 | F9 | LOCAL-002B/G、DM-013、LF-023~025 |
 | 19 | 登录绑定/退出登录/账号轮换 | ✅ 基础闭环；轮换归属未定义 | F10 | LOCAL-003C、DREMOTE-010~017、SPORT-001-L、LF-026~028 |
 
@@ -125,7 +125,7 @@
 |---|---|---|---|
 | SL-02 | LF-001、LF-002、DM-004/005/011/014、三套引用前缀路由、C4 投影刷新收敛 | ✅ 已完成并合入 main | PR #200 / merge `7c64bae`；交接回填 `docs/handoff/LOCAL-FIRST-SL-02-投影刷新收敛-2026-09-25.md` |
 | SL-A | LF-032 收入本地域 | ✅ 已实现并 CI 验证通过 | 方案 B：独立 `local_incomes`；v8 新增表；FactReader/导出 schema v2/Today/Records 聚合已接入；PR #201，head `cf138d9`，macOS CI run `36290165757` 全绿 |
-| SL-B | LF-033 钱包快照本地域（最小形态） | ⏸ 延期 | SL-A 完成后新开会话单独 Grooming；本轮不决定复用 `local_records` 还是独立表；不做还款周期/账务推演 |
+| SL-B | LF-033 钱包快照本地域（最小形态） | ✅ 已实现并 CI 验证 | 独立 `local_wallet_snapshots`；macOS CI run `36303877470`；待 M1 真机验收；不做还款周期/账务推演 |
 
 ## 4. BDD 场景
 
@@ -524,7 +524,7 @@ Feature: AI Provider 可插拔且 Key 不出设备
 
 ```gherkin
 Feature: 收入与钱包快照的本地域
-  现状：云端完整；SL-A 已完成方案 B 的最小本地实现并通过 macOS CI，SL-B 已按独立 local_wallet_snapshots 进入 TDD，macOS CI 待验证。Income/Wallet 登录态新建保留 Cloud 路径仅是同步冻结期 Transitional 行为，不是最终 Local-First 架构。
+  现状：云端完整；SL-A Income 与 SL-B Wallet 最小本地事实均已实现并有 macOS CI 证据。Income/Wallet 登录态新建保留 Cloud 路径仅是同步冻结期 Transitional 行为，不是最终 Local-First 架构。
 
   [LF-032-A] Scenario: 未登录创建收入并绑定账户
     Given 未登录用户已有本地 profile 和可选本地账户
@@ -568,7 +568,7 @@ Feature: 收入与钱包快照的本地域
 |---|---|---|
 | 五域手动 CRUD | F1 | 已覆盖（LF-001 补编号） |
 | 收入域 | F14 / LF-032 | **SL-A 已实现且 macOS CI 通过；方案 B 独立 `local_incomes`，登录态新建仍为 Transitional Cloud 路由；PR #201 / `cf138d9`** |
-| 钱包快照域 | F14/F6 / LF-033 | **SL-B 已进入 TDD；独立 local_wallet_snapshots，macOS CI 待验证；最小形态只记快照事实** |
+| 钱包快照域 | F14/F6 / LF-033 | **SL-B 已完成；独立 local_wallet_snapshots，macOS CI run `36303877470` 已验证；最小形态只记快照事实，待 M1 真机验收** |
 | 还款/撤销/截图还款/补绑 | F6 | 登录态保留；本地化待裁决（Q-03） |
 | 批量归档/销毁中转 | F3（单条）；批量本地候选未定义 | 记录差异：本地候选暂无批量操作，低优先 |
 | 账单补全（pending 交易三出口） | F6/收件箱 | 登录态云端保留；未登录无此对象（本地无 pending 交易概念），可接受 |
@@ -593,7 +593,7 @@ Feature: 收入与钱包快照的本地域
 ## 6. 发现的遗漏与风险
 
 1. **AI 三链路数据供给全部在云端**（表达/Analysis/识别的配置与历史）：表达核心可移植但零移植；曝光/反馈/偏好三件套无本地存储形态（DM §5.2 留白）。这是 Phase 1 承诺"保留 AI Popup"与现状之间最大的工作量与设计空白。
-2. **收入/钱包的登录态 Transitional 双轨**仍与最终 Local-First 目标有差异；SL-A 已完成，SL-B 已进入独立快照事实实现，macOS CI 验证前仍不能宣称完成（LF-008/032/033）。
+2. **收入/钱包的登录态 Transitional 双轨**仍与最终 Local-First 目标有差异；SL-A/SL-B 已完成最小本地事实实现并通过各自 macOS CI，登录态新建继续 Cloud，必须在发布说明中明确。
 3. **单设备单 profile 的账号轮换**：换账号登录后 mismatch 只能暂不同步，且会看到前任账号的本地数据（LF-026）——隐私与体验双重风险。
 4. **删除 App = 本地数据全丢**，产品无任何提示或兜底（LF-025）；四域导入缺失使"导出→导入"自助换机桥不完整（LF-021）。
 5. ** discardStaging 不幂等**（重复调用抛错）：与状态-001"终态不死锁"精神一致但语义未成文（V-6）。
@@ -636,7 +636,7 @@ Feature: 收入与钱包快照的本地域
 6. **编辑替换图片**：LF-003（DM-GAP-06 残余）。
 7. **五域导入恢复**：LF-021（换机自助桥闭环）。
 8. **异常恢复加固**：LF-023 低存储、LF-024 迁移失败回滚。
-9. **按已拍板范围推进**：SL-A Income（LF-032，方案 B）已完成并通过 CI；下一个会话 Grooming SL-B Wallet（LF-033）；设置本地镜像（LF-019/020）、AI 本地适配最小切片（LF-014/015 + LF-010~013 中的拍板口径）；BYOK（LF-029~031）保持冻结登记。
+9. **按 RC 范围推进**：SL-A Income（LF-032）、SL-B Wallet（LF-033）已完成并有 CI 证据；当前只收口 SL-03 编辑确认、失败保护与 M1 真机验收。AI Popup/Analysis、SL-04、SL-05、SL-09、设置本地镜像列入 Phase 1.1；BYOK（LF-029~031）保持冻结登记。
 10. **显式决策后才启动**：L2 迁移（F11）、同步解冻（F12）、账号轮换流程（LF-026）。
 
 明确不进入：Cloud Sync/多设备/CRDT/Outbox 扩展、生产迁移、部署、TestFlight（除非当轮用户明确授权）。
