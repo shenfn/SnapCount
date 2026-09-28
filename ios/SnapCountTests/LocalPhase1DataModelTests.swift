@@ -3,6 +3,7 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    @MainActor
     func testPhase1DomainDefinitionsFillMissingBuiltIns() {
         let sport = NativeDomainDefinition(
             id: "sport", name: "运动记录", description: "", icon: "", isSystem: true,
