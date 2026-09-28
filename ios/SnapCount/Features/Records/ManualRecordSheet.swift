@@ -421,6 +421,14 @@ struct ManualRecordSheet: View {
                         .jieziInputSurface()
                 }
             }
+            .confirmationDialog("选择数据域", isPresented: $showDomainPicker, titleVisibility: .visible) {
+                ForEach(universalDomains) { domain in
+                    Button(domain.shortName) {
+                        draft.domainKey = domain.id
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            }
 
             if draft.domainKey == "wallet" {
                 JieziFormSection(title: "钱包快照") {
@@ -459,14 +467,6 @@ struct ManualRecordSheet: View {
                         }
                     }
                 }
-            }
-            .confirmationDialog("选择数据域", isPresented: $showDomainPicker, titleVisibility: .visible) {
-                ForEach(universalDomains) { domain in
-                    Button(domain.shortName) {
-                        draft.domainKey = domain.id
-                    }
-                }
-                Button("取消", role: .cancel) {}
             }
         }
     }
