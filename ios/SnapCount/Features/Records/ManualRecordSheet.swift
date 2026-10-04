@@ -9,6 +9,7 @@ struct ManualRecordSheet: View {
     @State private var showLocalCameraPicker = false
     @State private var showLocalPhotoLibraryPicker = false
     @State private var showLocalPhotoOptions = false
+    @State private var showDomainPicker = false
     private let stagingRecord: NativeStagingRecord?
     private let preserveInboxNavigation: Bool
     private let onResolved: (() -> Void)?
@@ -45,7 +46,24 @@ struct ManualRecordSheet: View {
     }
 
     private var universalDomains: [NativeDomainDefinition] {
-        appState.dashboard.domains.filter { !["expense", "income"].contains($0.id) }
+        let remoteDomains = appState.dashboard.domains.filter { !["expense", "income"].contains($0.id) }
+        var domains = remoteDomains
+        for fallback in InboxArchiveDomains.all where !["expense", "income"].contains(fallback.id) {
+            guard !domains.contains(where: { $0.id == fallback.id }) else { continue }
+            domains.append(
+                NativeDomainDefinition(
+                    id: fallback.id,
+                    name: fallback.title,
+                    description: "",
+                    icon: "",
+                    isSystem: true,
+                    schema: [:],
+                    display: [:],
+                    recordCount: 0
+                )
+            )
+        }
+        return domains
     }
 
     private var selectedDomain: NativeDomainDefinition? {
@@ -381,16 +399,13 @@ struct ManualRecordSheet: View {
         VStack(spacing: JieziSpacing.xl2) {
             JieziFormSection(title: "数据域字段", subtitle: "只填写能从原图或文字事实中确认的内容。") {
                 JieziFormRow(title: "数据域", systemImage: "square.grid.2x2", showsDivider: true) {
-                    Menu {
-                        ForEach(universalDomains) { domain in
-                            Button("\(domain.icon) \(domain.shortName)") {
-                                draft.domainKey = domain.id
-                            }
-                        }
+                    Button {
+                        showDomainPicker = true
                     } label: {
                         selectorLabel(selectedDomain?.shortName ?? draft.domainKey, placeholder: "选择数据域")
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Rectangle())
                 }
                 JieziFormRow(title: "标题", systemImage: "textformat", showsDivider: true) {
                     TextField("标题（可选）", text: $draft.title)
@@ -405,6 +420,14 @@ struct ManualRecordSheet: View {
                         .keyboardType(.decimalPad)
                         .jieziInputSurface()
                 }
+            }
+            .confirmationDialog("选择数据域", isPresented: $showDomainPicker, titleVisibility: .visible) {
+                ForEach(universalDomains) { domain in
+                    Button(domain.shortName) {
+                        draft.domainKey = domain.id
+                    }
+                }
+                Button("取消", role: .cancel) {}
             }
 
             if draft.domainKey == "wallet" {

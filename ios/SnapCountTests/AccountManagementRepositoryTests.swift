@@ -62,6 +62,34 @@ final class AccountManagementRepositoryTests: XCTestCase {
         }
     }
 
+    func testA4IOS004EntriesAllowMissingOccurredAtAndUseLedgerTime() async throws {
+        let client = AccountManagementRemoteClientStub()
+        client.getResponses["rest/v1/account_entries"] = Data("""
+        [{
+          "id": "entry-1", "account_id": "account-1", "direction": "in", "amount": 12.5,
+          "entry_type": "income", "source_table": "income_records", "source_id": null,
+          "occurred_at": null, "created_at": "2026-09-28T10:00:00Z", "note": "到账",
+          "is_voided": false, "voided_reason": null
+        }]
+        """.utf8)
+        let repository = AccountRepository(remoteClient: client)
+
+        let detail = await repository.fetchDetail(
+            account: NativeAccount(
+                id: "account-1", name: "测试账户", type: .walletBalance, institution: "",
+                last4: "", currency: "CNY", initialBalance: 0, currentBalance: 0,
+                snapshotBalance: nil, snapshotAt: nil, sourceRecordTable: "", sourceRecordId: "",
+                billDay: nil, paymentDueDay: nil, autoDebitAccountId: nil,
+                autoConfirmRepayment: false, gracePeriodDays: 0, lastReconciledAt: nil,
+                isDefaultExpense: false, isDefaultIncome: false, isArchived: false, sortOrder: 0
+            ),
+            accessToken: "token"
+        )
+
+        XCTAssertNil(detail.loadError(for: .entries))
+        XCTAssertEqual(detail.entries.first?.occurredAt, "2026-09-28T10:00:00Z")
+    }
+
     private func saveCommand() -> AccountManagementSaveCommand {
         AccountManagementSaveCommand(
             accountId: nil,
@@ -85,8 +113,11 @@ private final class AccountManagementRemoteClientStub: SupabaseRemoteClientProto
     var rpcBody: [String: AnyCodable]?
     var rpcResponse = Data("{}".utf8)
     var rpcError: Error?
+    var getResponses: [String: Data] = [:]
 
-    func get<T: Decodable>(_ type: T.Type, path: String, queryItems: [URLQueryItem], accessToken: String) async throws -> T { fatalError("unused") }
+    func get<T: Decodable>(_ type: T.Type, path: String, queryItems: [URLQueryItem], accessToken: String) async throws -> T {
+        try JSONDecoder().decode(type, from: getResponses[path] ?? Data("[]".utf8))
+    }
     func patch(path: String, queryItems: [URLQueryItem], body: [String: AnyCodable], accessToken: String) async throws { fatalError("unused") }
     func delete(path: String, queryItems: [URLQueryItem], accessToken: String) async throws { fatalError("unused") }
     func post<T: Decodable>(_ type: T.Type, path: String, queryItems: [URLQueryItem], body: [String: AnyCodable], accessToken: String) async throws -> T { fatalError("unused") }

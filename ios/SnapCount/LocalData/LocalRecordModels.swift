@@ -126,6 +126,18 @@ struct LocalRecordUpdateCommand {
     let updatedAt: Date
 }
 
+struct LocalStagingConfirmationCommand {
+    let id: String
+    let recordID: UUID
+    let title: String
+    let summary: String
+    let payload: [String: AnyCodable]
+    let recordDate: String
+    let recordTime: String?
+    let note: String?
+    let updatedAt: Date
+}
+
 struct LocalRecordDeleteCommand {
     let id: UUID
     let expectedVersion: Int64

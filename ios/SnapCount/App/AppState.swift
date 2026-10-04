@@ -682,7 +682,9 @@ final class AppState: ObservableObject {
             cachedImageURLs,
             markMissingAsFailure: false
         )
-        let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+        let definitions = Self.completeDomainDefinitions(
+            dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+        )
         prepared.domains = domainsWithUpdatedCounts(definitions, snapshot: prepared)
         return prepared
     }
@@ -731,7 +733,9 @@ final class AppState: ObservableObject {
 
     private func restoreDashboardSnapshot(userId: String) {
         guard let persisted = try? snapshotStore.load(userId: userId) else { return }
-        dashboard = persisted.dashboardSnapshot
+        var restored = persisted.dashboardSnapshot
+        restored.domains = Self.completeDomainDefinitions(restored.domains)
+        dashboard = restored
         isShowingCachedDashboard = true
         lastDashboardRefreshAt = persisted.savedAt
     }
@@ -755,7 +759,9 @@ final class AppState: ObservableObject {
     }
 
     private func resolvedDomains(accessToken: String, snapshot: DashboardSnapshot) async -> [NativeDomainDefinition] {
-        let definitions = (try? await domainRepository.fetchDefinitions(accessToken: accessToken)) ?? Self.fallbackDomains
+        let definitions = Self.completeDomainDefinitions(
+            (try? await domainRepository.fetchDefinitions(accessToken: accessToken)) ?? []
+        )
         return domainsWithUpdatedCounts(definitions, snapshot: snapshot)
     }
 
@@ -781,6 +787,14 @@ final class AppState: ObservableObject {
     }
 
     private static let fallbackDomains = InboxArchiveDomains.all.map { NativeDomainDefinition(id: $0.id, name: $0.title, description: "", icon: "", isSystem: true, schema: [:], display: [:], recordCount: 0) }
+
+    static func completeDomainDefinitions(_ definitions: [NativeDomainDefinition]) -> [NativeDomainDefinition] {
+        var completed = definitions
+        for fallback in fallbackDomains where !completed.contains(where: { $0.id == fallback.id }) {
+            completed.append(fallback)
+        }
+        return completed
+    }
 
     private func prefetchDashboardImages(_ snapshot: DashboardSnapshot) {
         let urls = snapshot.recordDetails.values.compactMap(\.imageURL)
@@ -1044,7 +1058,9 @@ final class AppState: ObservableObject {
         }
         do {
             let records = try await localRecordUseCase.stagingRecords()
-            let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+            let definitions = Self.completeDomainDefinitions(
+                dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+            )
             dashboard.stagingRecords = records.map { record in
                 let domainName = definitions.first(where: { $0.id == record.domainKey })?.shortName
                 return LocalStagingReadModel.native(
@@ -1211,7 +1227,9 @@ final class AppState: ObservableObject {
         snapshot.monthIncome = details.values
             .filter { $0.kind == "income" }
             .reduce(0) { $0 + ($1.amount ?? 0) }
-        let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+        let definitions = Self.completeDomainDefinitions(
+            dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
+        )
         snapshot.domains = domainsWithUpdatedCounts(definitions, snapshot: snapshot)
         return snapshot
     }
@@ -2658,6 +2676,15 @@ final class AppState: ObservableObject {
         domain: NativeDomainDefinition?,
         preserveInboxNavigation: Bool = false
     ) async -> String? {
+        if let localID = LocalStagingReadModel.localID(from: record.id) {
+            return await archiveLocalStagingRecord(
+                localID,
+                record: record,
+                draft: draft,
+                domain: domain,
+                preserveInboxNavigation: preserveInboxNavigation
+            )
+        }
         let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
         return await archiveStagingRecord(
             adjustedRecord,
@@ -2692,6 +2719,8 @@ final class AppState: ObservableObject {
     private func archiveLocalStagingRecord(
         _ localID: String,
         record: NativeStagingRecord,
+        draft: NativeManualRecordDraft? = nil,
+        domain: NativeDomainDefinition? = nil,
         preserveInboxNavigation: Bool
     ) async -> String? {
         guard let localRecordUseCase else { return nil }
@@ -2700,10 +2729,30 @@ final class AppState: ObservableObject {
         inboxActionMessageIsError = false
         defer { inboxActionRecordId = nil }
         do {
-            let outcome = try await localRecordUseCase.confirmStaging(
-                id: localID,
-                recordID: UUID()
-            )
+            let outcome: LocalRecordOutcome
+            if let draft {
+                let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
+                outcome = try await localRecordUseCase.confirmStaging(
+                    LocalStagingConfirmationCommand(
+                        id: localID,
+                        recordID: UUID(),
+                        title: adjustedRecord.title,
+                        summary: adjustedRecord.summary,
+                        payload: adjustedRecord.extracted,
+                        recordDate: adjustedRecord.dateKey,
+                        recordTime: draft.timeKey,
+                        note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? nil
+                            : draft.note.trimmingCharacters(in: .whitespacesAndNewlines),
+                        updatedAt: Date()
+                    )
+                )
+            } else {
+                outcome = try await localRecordUseCase.confirmStaging(
+                    id: localID,
+                    recordID: UUID()
+                )
+            }
             removeStagingRecordLocally(record.id)
             let monthKey = String(outcome.record.recordDate.prefix(7))
             await refreshLocalMonthProjection(monthKey: monthKey)
@@ -4401,10 +4450,27 @@ final class AppState: ObservableObject {
             apply(session: refreshed)
             return refreshed
         }
-        let session = try await authService.currentSession()
-        try save(session: session)
-        apply(session: session)
-        return session
+        do {
+            let session = try await authService.currentSession()
+            try save(session: session)
+            apply(session: session)
+            return session
+        } catch {
+            // Recover a valid refresh token kept by the app when the SDK
+            // session store is empty after a cold start or local reset.
+            guard let legacy = try? requireSession(),
+                  let refreshToken = legacy.refreshToken,
+                  !refreshToken.isEmpty else {
+                throw error
+            }
+            let restored = try await authService.restoreSession(
+                accessToken: legacy.accessToken,
+                refreshToken: refreshToken
+            )
+            try save(session: restored)
+            apply(session: restored)
+            return restored
+        }
     }
 
     private func isCurrentUserLoad(_ generation: Int, userId: String) -> Bool {
