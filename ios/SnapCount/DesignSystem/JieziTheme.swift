@@ -105,7 +105,7 @@ struct JieziPressableButtonStyle: ButtonStyle {
             .contentShape(Rectangle())
             .scaleEffect(configuration.isPressed ? pressedScale : 1)
             .opacity(configuration.isPressed ? 0.82 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(JieziEasing.spring, value: configuration.isPressed)
     }
 }
 
