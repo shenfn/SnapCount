@@ -59,7 +59,7 @@ struct DomainDatePickerView: View {
     }
 }
 
-private struct DomainCalendarSheet: View {
+struct DomainCalendarSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var previewDateKey: String

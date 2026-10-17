@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct NativeDomainDayValue: Identifiable {
     let dateKey: String
@@ -10,6 +11,7 @@ struct NativeDomainDayValue: Identifiable {
 }
 
 struct NativeDomainScenePresentation {
+    private static let signposter = OSSignposter(subsystem: "com.jiezi.app", category: "DomainScene")
     let dateKey: String
     let records: [NativeDayRecord]
     let weeklyValues: [NativeDomainDayValue]
@@ -41,6 +43,8 @@ struct NativeDomainScenePresentation {
         errorMessage: String?,
         todayKey: String = NativeLocalDate.dateKey(Date())
     ) -> Self {
+        let interval = signposter.beginInterval("BuildDomainPresentation", id: signposter.makeSignpostID())
+        defer { signposter.endInterval("BuildDomainPresentation", interval) }
         let allRecords = weekGroups.flatMap(\.records).filter(NativeRecordQuery.isFormal)
         let dayRecords = allRecords.filter { $0.dateKey == dateKey }
         let records: [NativeDayRecord]

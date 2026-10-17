@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 typealias NativeSessionProvider = (_ forceRefresh: Bool) async throws -> SupabaseAuthSession
 typealias NativeSleepProvider = (_ nanoseconds: UInt64) async throws -> Void
@@ -20,6 +21,7 @@ private struct PendingRecordExpressionPlanDelivery {
 
 @MainActor
 final class AppState: ObservableObject {
+    private static let calendarSignposter = OSSignposter(subsystem: "com.jiezi.app", category: "DomainCalendar")
     @Published var selectedDomain: AppDomain = .expense
     @Published var selectedDateKey = NativeLocalDate.dateKey(Date())
     @Published var presentedOverlay: AppOverlay = .none
@@ -849,6 +851,8 @@ final class AppState: ObservableObject {
     }
 
     func dailyExpenseAmounts(monthKey: String) -> [String: Double] {
+        let interval = Self.calendarSignposter.beginInterval("AggregateCalendarExpense", id: Self.calendarSignposter.makeSignpostID())
+        defer { Self.calendarSignposter.endInterval("AggregateCalendarExpense", interval) }
         let groups = recordGroups(monthKey: monthKey)
         let days = NativeLocalDate.monthDateKeys(monthKey)
         guard let firstDay = days.first, let lastDay = days.last else { return [:] }

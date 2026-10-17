@@ -68,7 +68,11 @@ struct MainShellView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("芥子")
 
-                syncStatusIcon
+                Button { appState.presentedOverlay = .settings } label: {
+                    syncStatusIcon.frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("查看同步设置")
 
                 Spacer()
 
@@ -98,6 +102,7 @@ struct MainShellView: View {
                         .font(.headline)
                         .foregroundStyle(scene.foreground)
                         .frame(minWidth: 44, minHeight: 44)
+                        .background(scene.surface.opacity(0.55), in: Circle())
                 }
                 .accessibilityLabel("更多功能")
             }
@@ -140,6 +145,17 @@ struct MainShellView: View {
                 domainPageButtons
                 bottomControls(compact: true)
             }
+            VStack(spacing: 4) {
+                domainPageButtons
+                Text(appState.selectedDomain.title)
+                    .font(JieziFont.caption)
+                    .foregroundStyle(scene.foreground)
+                HStack {
+                    pendingButton
+                    Spacer(minLength: 8)
+                    addButton
+                }
+            }
         }
         .padding(.horizontal, JieziPrototypeLayout.page_inset)
         .padding(.vertical, 8)
@@ -150,31 +166,8 @@ struct MainShellView: View {
     }
 
     private func bottomControls(compact: Bool) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                appState.presentedOverlay = .inbox
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "tray.full")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("待确认")
-                        .font(JieziFont.caption)
-                        .fixedSize()
-                    Text("\(appState.dashboard.pendingCount)")
-                        .font(JieziType.moneyInline.monospacedDigit())
-                        .contentTransition(.numericText())
-                }
-                .foregroundStyle(scene.foreground)
-                .padding(.horizontal, 12)
-                .frame(minHeight: 44)
-                .background(scene.surface.opacity(0.82), in: Capsule())
-                .overlay(Capsule().stroke(scene.accent.opacity(0.12), lineWidth: 1))
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("收件箱，\(appState.dashboard.pendingCount) 条待确认")
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
+        ShellBottomLayout {
+            pendingButton
 
             VStack(spacing: 5) {
                 if !compact {
@@ -189,7 +182,7 @@ struct MainShellView: View {
                 } label: {
                     VStack(spacing: 1) {
                         Text(appState.selectedDomain.title).font(JieziFont.caption)
-                        if !compact && !dynamicTypeSize.isAccessibilitySize {
+                        if !dynamicTypeSize.isAccessibilitySize {
                             Text(domainEnglishName).font(JieziFont.caption2)
                         }
                     }
@@ -200,19 +193,46 @@ struct MainShellView: View {
                 .accessibilityLabel("当前\(appState.selectedDomain.title)，选择领域")
             }
 
-            Spacer()
-
-            Button {
-                showManualRecordSheet = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: JieziPrototypeLayout.add_button_size, height: JieziPrototypeLayout.add_button_size)
-                    .background(scene.accent, in: Circle())
-            }
-            .accessibilityLabel("记一笔")
+            addButton
         }
+    }
+
+    private var pendingButton: some View {
+        Button {
+            appState.presentedOverlay = .inbox
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "tray.full")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("待确认")
+                    .font(JieziFont.caption)
+                    .fixedSize()
+                Text("\(appState.dashboard.pendingCount)")
+                    .font(JieziType.moneyInline.monospacedDigit())
+                    .contentTransition(.numericText())
+            }
+            .foregroundStyle(scene.foreground)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(scene.surface.opacity(0.82), in: Capsule())
+            .overlay(Capsule().stroke(scene.accent.opacity(0.12), lineWidth: 1))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("收件箱，\(appState.dashboard.pendingCount) 条待确认")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var addButton: some View {
+        Button {
+            showManualRecordSheet = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: JieziPrototypeLayout.add_button_size, height: JieziPrototypeLayout.add_button_size)
+                .background(JieziScene.expense.accent, in: Circle())
+        }
+        .accessibilityLabel("记一笔")
     }
 
     private var domainPageButtons: some View {
@@ -300,5 +320,27 @@ struct MainShellView: View {
                     }
                 }
             }
+    }
+}
+
+/// 左右栏按较宽的一侧留位，中心组始终位于屏幕中线；空间不足交给 ViewThatFits 换行。
+private struct ShellBottomLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        assert(subviews.count == 3)
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let side = max(sizes[0].width, sizes[2].width)
+        return CGSize(
+            width: max(proposal.width ?? 0, side * 2 + sizes[1].width + 16),
+            height: sizes.map(\.height).max() ?? 0
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        assert(subviews.count == 3)
+        let left = subviews[0].sizeThatFits(.unspecified)
+        let right = subviews[2].sizeThatFits(.unspecified)
+        subviews[0].place(at: CGPoint(x: bounds.minX + left.width / 2, y: bounds.midY), anchor: .center, proposal: .unspecified)
+        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: .unspecified)
+        subviews[2].place(at: CGPoint(x: bounds.maxX - right.width / 2, y: bounds.midY), anchor: .center, proposal: .unspecified)
     }
 }

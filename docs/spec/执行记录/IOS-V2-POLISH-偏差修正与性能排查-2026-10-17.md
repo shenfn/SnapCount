@@ -41,6 +41,9 @@
 - 另一个失败为既有 `testA4IOS004DReusesSameCommandAndDoesNotDuplicateTransport`（archiveCallCount 实际 2、预期 1）；此提交只增加日期测试，没有账户实现变动。单列为基线问题，不冒充日期修正回归。
 - 最小修正：睡眠/饮食按截止所选日近七日；记账/运动/阅读保留自然周。AppState 一次加载两种窗口涉及的月份，避免跨月切域窗口缺读；无全局缓存或持久化变更。
 - 绿灯等待本轮固定提交的 macOS CI。
+- 第一轮实现提交 `fec47ca`：https://github.com/shenfn/SnapCount/actions/runs/39018186972 。
+- 原重试场景的 `2000-01-05` 在近七日口径下涉及 `1999-12` 和 `2000-01`，后续加强为断言双月明确顺序、force 后两个月都重读、两个错误均清除；不删除重试断言。
+- 既有账户复用测试的时序修正：不再用可能晚于首请求完成才启动的 `async let duplicate`；在当前 MainActor 任务中进入重复调用，释放由另一个 MainActor 任务执行。保留一次 transport 的断言，不修改账户业务实现。
 
 ### 生成链：009、010、011-B
 
@@ -85,3 +88,11 @@
 - 本地收入读取、睡眠个人基线、阅读总页数/当前页仍受交接中已说明的真实字段能力约束，不编造事实。
 - 当前没有新截图对照、手势、VoiceOver 或真机性能采样，不宣称像素还原、无障碍或流畅度通过。
 - 最终 Build/XCTest、提交清单和剩余差异在本文件续记。
+
+## 原生截图与性能采样准备
+
+- `IOSPrototypeRenderingTests` 使用独立临时数据库、虚构事实和固定业务日期。导出五域内容普通/无障碍字号、390×844 空壳、六行月份的 390×422 日历、引导欢迎页；内容截面为 390×720。
+- CI 使用 XCTest attachment 和 xcresulttool 导出 PNG；只上传合成图和附件映射，不上传私有原型、原型素材或完整 xcresult/构建日志。
+- 截图导出测试不包含像素正确性断言，生成成功不能替代视觉对照。实际图片仍需下载审查。
+- 五域内容已按领域分开组织；当前睡眠区间、饮食餐次、运动分布、阅读书目复用现有真实字段。商户排行、前日比较、区间图、平均/累计等剩余区块继续实施。
+- Instruments 可采样 `com.jiezi.app` 的 `DomainScene / BuildDomainPresentation` 与 `DomainCalendar / AggregateCalendarExpense`。只记录区间，不记录金额、书名、商户或凭据。没有真机采样前不给帧率/操作延迟结论。

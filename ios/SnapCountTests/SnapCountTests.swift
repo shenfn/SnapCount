@@ -2694,12 +2694,16 @@ final class SnapCountTests: XCTestCase {
         state.isSignedIn = true
         state.currentUserId = Self.expressionTestSession.user.id
         await state.loadRecordDateWindow(around: "2000-01-05")
-        XCTAssertEqual(repository.fetchMonthCount, 1)
+        XCTAssertEqual(repository.fetchMonthKeys, ["1999-12", "2000-01"])
+        XCTAssertEqual(repository.fetchMonthCount, 2)
 
+        state.recordMonthMessages["1999-12"] = "暂时读取失败"
         state.recordMonthMessages["2000-01"] = "暂时读取失败"
         await state.loadRecordDateWindow(around: "2000-01-05", force: true)
 
-        XCTAssertEqual(repository.fetchMonthCount, 2)
+        XCTAssertEqual(repository.fetchMonthKeys, ["1999-12", "2000-01", "1999-12", "2000-01"])
+        XCTAssertEqual(repository.fetchMonthCount, 4)
+        XCTAssertNil(state.recordMonthMessages["1999-12"])
         XCTAssertNil(state.recordMonthMessages["2000-01"])
     }
 
@@ -3761,6 +3765,7 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     private(set) var acknowledgementCount = 0
     private(set) var createCount = 0
     private(set) var fetchMonthCount = 0
+    private(set) var fetchMonthKeys: [String] = []
 
     init(
         details: [NativeRecordDetail] = [],
@@ -3780,6 +3785,7 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
 
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
         fetchMonthCount += 1
+        fetchMonthKeys.append(monthKey)
         return NativeRecordMonthSnapshot(groups: [], details: [:])
     }
 

@@ -26,7 +26,7 @@ struct NativeDomainPageView: View {
     }
 }
 
-private struct NativeDomainPageContent: View {
+struct NativeDomainPageContent: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let domain: AppDomain
@@ -54,17 +54,8 @@ private struct NativeDomainPageContent: View {
                             .padding(.horizontal, 4)
                     }
 
-                    metricShelf
-                    weeklyTrend
-                    if domain == .expense, let highestExpense = model.highestExpense {
-                        highestExpenseCard(highestExpense)
-                    }
-
-                    if model.records.isEmpty {
-                        emptyState
-                    } else {
-                        recordsCard
-                    }
+                    domainSections
+                    observationEntry
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -76,6 +67,118 @@ private struct NativeDomainPageContent: View {
         .sheet(isPresented: $showManualRecordSheet) {
             manualRecordSheet
         }
+    }
+
+    @ViewBuilder
+    private var domainSections: some View {
+        switch domain {
+        case .expense:
+            metricShelf
+            weeklyTrend
+            if let highest = model.highestExpense { highestExpenseCard(highest) }
+            recordsOrEmpty
+        case .sleep:
+            if !model.records.isEmpty { sleepIntervals }
+            weeklyTrend
+            recordsOrEmpty
+        case .food:
+            recordsOrEmpty
+            metricShelf
+            weeklyTrend
+        case .sport:
+            weeklyTrend
+            metricShelf
+            recordsOrEmpty
+        case .reading:
+            if !model.records.isEmpty { readingBooks }
+            weeklyTrend
+            metricShelf
+            recordsOrEmpty
+        }
+    }
+
+    @ViewBuilder
+    private var recordsOrEmpty: some View {
+        if model.records.isEmpty { emptyState } else { recordsCard }
+    }
+
+    private var sleepIntervals: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("入睡与醒来")
+                .font(JieziType.cardTitle)
+            ForEach(model.records) { record in
+                Button { appState.openDayRecord(record) } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(sleepInterval(for: record) ?? "区间未提供", systemImage: "moon.zzz")
+                            .font(JieziFont.body)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(recordValue(record))
+                            .font(JieziType.moneyCard.monospacedDigit())
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("睡眠记录，\(sleepInterval(for: record) ?? "区间未提供")，\(recordValue(record))，打开详情")
+            }
+            Text("未记录完整区间时，仅显示睡眠时长。")
+                .font(JieziFont.caption)
+                .foregroundStyle(scene.muted)
+        }
+        .foregroundStyle(scene.foreground)
+        .padding(JieziPrototypeLayout.card_inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(scene.surface.opacity(0.66), in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius))
+    }
+
+    private var readingBooks: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("这一天的书目")
+                .font(JieziFont.caption)
+                .foregroundStyle(scene.muted)
+            ForEach(model.records) { record in
+                Button { appState.openDayRecord(record) } label: {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: "book.closed")
+                            .font(JieziType.display)
+                            .foregroundStyle(scene.accent)
+                            .frame(width: 48, height: 64)
+                            .background(scene.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(detail(for: record)?.payload?.string("book_name") ?? "书名未提供")
+                                .font(JieziType.prototypeBook)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(recordValue(record))
+                                .font(JieziType.moneyInline.monospacedDigit())
+                                .foregroundStyle(scene.muted)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .foregroundStyle(scene.foreground)
+        .padding(JieziPrototypeLayout.card_inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(scene.surface.opacity(0.66), in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius))
+    }
+
+    private var observationEntry: some View {
+        Button { appState.presentedOverlay = .insights } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                Text("查看观察与月报").font(JieziType.cardTitle)
+                Spacer()
+                Image(systemName: "chevron.right")
+            }
+            .foregroundStyle(scene.foreground)
+            .padding(JieziPrototypeLayout.card_inset)
+            .frame(minHeight: 44)
+            .background(scene.surface.opacity(0.66), in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius))
+        }
+        .buttonStyle(.plain)
     }
 
     private var dailyHero: some View {
@@ -227,7 +330,7 @@ private struct NativeDomainPageContent: View {
     private var weekTrendTitle: String {
         switch domain {
         case .expense: return "本周支出"
-        case .sleep: return "近七日睡眠"
+        case .sleep: return "近七夜睡眠"
         case .food: return "近七日估算热量"
         case .sport: return "本周运动时长"
         case .reading: return "本周阅读时长"
@@ -294,7 +397,7 @@ private struct NativeDomainPageContent: View {
     private var recordsCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(domain == .expense ? "收支明细" : "当日记录")
+                Text(domain == .expense ? "收支明细" : domain == .food ? "餐次明细" : "当日记录")
                     .font(JieziType.sectionTitle)
                     .foregroundStyle(scene.foreground)
                 Spacer()

@@ -79,11 +79,14 @@ final class AccountManagementActionUseCaseTests: XCTestCase {
 
         async let first = harness.useCase.perform(command)
         await gate.waitUntilEntered()
-        async let duplicate = harness.useCase.perform(command)
 
         XCTAssertEqual(repository.archiveCallCount, 1)
-        await gate.release()
-        let (firstResult, duplicateResult) = await (first, duplicate)
+        // 在当前 MainActor 任务中先进入重用分支，再让释放任务运行。
+        // async let duplicate 不能保证在 gate.release 前启动，可能意外测成两次顺序调用。
+        let release = Task { await gate.release() }
+        let duplicateResult = await harness.useCase.perform(command)
+        let firstResult = await first
+        await release.value
         XCTAssertEqual(firstResult.transaction.acceptedAccount?.id, "account-1")
         XCTAssertEqual(duplicateResult.transaction.acceptedAccount?.id, "account-1")
         XCTAssertEqual(repository.archiveCallCount, 1)

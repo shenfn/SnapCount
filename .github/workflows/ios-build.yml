@@ -143,6 +143,7 @@ jobs:
             SNAPCOUNT_PHOTO_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_PHOTO_SHORTCUT_TEMPLATE_URL }}" \
             SNAPCOUNT_SCREENSHOT_SHORTCUT_TEMPLATE_URL="${{ secrets.IOS_SCREENSHOT_SHORTCUT_TEMPLATE_URL }}" \
             -only-testing:SnapCountTests \
+            -resultBundlePath "$RUNNER_TEMP/SnapCountTests.xcresult" \
             test 2>&1 | tee "$LOG_PATH"
           STATUS=${PIPESTATUS[0]}
           if [ "$STATUS" -ne 0 ]; then
@@ -150,6 +151,27 @@ jobs:
             tail -n 250 "$LOG_PATH"
             exit "$STATUS"
           fi
+
+      - name: Export synthetic prototype captures
+        if: always()
+        shell: bash
+        run: |
+          if [ -d "$RUNNER_TEMP/SnapCountTests.xcresult" ]; then
+            xcrun xcresulttool export attachments \
+              --path "$RUNNER_TEMP/SnapCountTests.xcresult" \
+              --output-path "$RUNNER_TEMP/prototype-captures"
+          fi
+
+      - name: Save synthetic prototype captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-prototype-captures
+          path: |
+            ${{ runner.temp }}/prototype-captures/**/*.png
+            ${{ runner.temp }}/prototype-captures/manifest.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Show available destinations on failure help
         if: always()

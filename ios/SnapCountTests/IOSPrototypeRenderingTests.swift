@@ -1,0 +1,140 @@
+import XCTest
+import SwiftUI
+import UIKit
+@testable import SnapCount
+
+/// 合成事实的原生渲染证据，只证明能生成图片，不代替视觉、手势或真机性能验收。
+@MainActor
+final class IOSPrototypeRenderingTests: XCTestCase {
+    func testIOSV2POLISH004ExportFiveDomainContentAtNormalAndAccessibleType() async throws {
+        let sizes: [DynamicTypeSize] = [.large, .accessibility3]
+        for domain in AppDomain.allCases {
+            for size in sizes {
+                let date = "2026-10-17"
+                let record = NativeDayRecord(
+                    id: "fixture-\(domain.rawValue)", reference: "fixture/\(domain.rawValue)",
+                    dateKey: date, kind: NativeDayRecordKind(rawValue: domain.rawValue)!,
+                    domainKey: domain.rawValue, title: domain == .expense ? "示例咖啡店" : domain.title,
+                    subtitle: "", value: domain == .expense ? "¥42.00" : "",
+                    timeLabel: "12:30", systemImage: domain.systemImage, status: "done"
+                )
+                let detail = NativeRecordDetail(
+                    id: record.reference, rawId: record.id, kind: domain == .expense ? "expense" : "data",
+                    title: record.title, subtitle: "", value: record.value, detailRows: [], imageURL: nil,
+                    imageLoadError: false, imagePath: nil, imageHash: nil,
+                    amount: domain == .expense ? 42 : nil, merchantName: domain == .expense ? record.title : nil,
+                    platform: nil, category: nil, paymentMethod: nil, recordDate: date, note: nil,
+                    companionMessage: nil, accountId: nil, systemImage: domain.systemImage,
+                    payload: [
+                        "sleep_minutes": AnyCodable(480),
+                        "sleep_start_at": AnyCodable("2026-10-16T23:30:00+08:00"),
+                        "wake_at": AnyCodable("2026-10-17T07:30:00+08:00"),
+                        "total_calorie_kcal": AnyCodable(780), "meal_type": AnyCodable("lunch"),
+                        "duration_minutes": AnyCodable(30), "sport_type": AnyCodable("骑行"),
+                        "reading_minutes": AnyCodable(32), "pages": AnyCodable(18),
+                        "book_name": AnyCodable("示例书目：一段需要在大字体下完整显示的长书名")
+                    ], domainKey: domain.rawValue
+                )
+                let details = [record.reference: detail]
+                let groups = [NativeDayRecordGroup(dateKey: date, records: [record])]
+                let model = NativeDomainScenePresentation.make(
+                    domain: domain, dateKey: date, weekGroups: groups, details: details,
+                    isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: date
+                )
+                let state = try makeIsolatedState()
+                state.selectedDateKey = date
+                state.selectedDomain = domain
+                let view = ZStack(alignment: .topTrailing) {
+                    DomainSceneView(domain: domain)
+                    if !size.isAccessibilitySize {
+                        DomainCatView(domain: domain)
+                            .padding(.trailing, JieziPrototypeLayout.metric_inset)
+                    }
+                    NativeDomainPageContent(
+                        domain: domain, weekDates: model.weeklyValues.map(\.dateKey),
+                        details: details, loadingWindow: false, model: model
+                    )
+                }
+                .environmentObject(state)
+                .environment(\.dynamicTypeSize, size)
+                .environment(\.accessibilityReduceMotion, true)
+                try await capture(view, name: "content-\(domain.rawValue)-\(size)")
+            }
+        }
+    }
+
+    func testIOSV2POLISH001ExportEmptyShellAtNormalAndAccessibleType() async throws {
+        let sizes: [DynamicTypeSize] = [.large, .accessibility3]
+        for size in sizes {
+            let state = try makeIsolatedState()
+            state.selectedDateKey = "2026-10-17"
+            await state.loadRecordDateWindow(around: state.selectedDateKey)
+            let view = MainShellView()
+                .environmentObject(state)
+                .environmentObject(JieziThemeManager.shared)
+                .environment(\.dynamicTypeSize, size)
+                .environment(\.accessibilityReduceMotion, true)
+            try await capture(view, name: "shell-empty-\(size)", height: 844)
+        }
+    }
+
+    func testIOSV2POLISH002ExportSixRowCalendarInMediumHeight() async throws {
+        let sizes: [DynamicTypeSize] = [.large, .accessibility3]
+        for size in sizes {
+            let state = try makeIsolatedState()
+            await state.loadRecordMonth("2026-08")
+            let view = DomainCalendarSheet(initialDateKey: "2026-08-17")
+                .environmentObject(state)
+                .environment(\.dynamicTypeSize, size)
+            try await capture(view, name: "calendar-six-rows-\(size)", height: 422)
+        }
+    }
+
+    func testIOSV2POLISH007ExportOnboardingWelcome() async throws {
+        let sizes: [DynamicTypeSize] = [.large, .accessibility3]
+        for size in sizes {
+            let view = OnboardingFlowView()
+                .environmentObject(try makeIsolatedState())
+                .environment(\.dynamicTypeSize, size)
+                .environment(\.accessibilityReduceMotion, true)
+            try await capture(view, name: "onboarding-welcome-\(size)", height: 844)
+        }
+    }
+
+    private func makeIsolatedState() throws -> AppState {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("jiezi-capture-\(UUID().uuidString)", isDirectory: true)
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("fixture.sqlite"))
+        let profiles = try LocalProfileStore(database: database)
+        _ = try profiles.activeProfile()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return AppState(
+            localExpenseUseCase: LocalExpenseUseCase(profileStore: profiles, repository: try LocalExpenseRepository(database: database)),
+            localRecordUseCase: LocalRecordUseCase(profileStore: profiles, repository: try LocalRecordRepository(database: database)),
+            localFactReader: try LocalFactReader(database: database),
+            localBindingRepository: profiles,
+            sessionProvider: { _ in throw NSError(domain: "synthetic-capture-no-session", code: 1) }
+        )
+    }
+
+    private func capture<V: View>(_ view: V, name: String, height: CGFloat = 720) async throws {
+        let host = UIHostingController(rootView: view)
+        let bounds = CGRect(x: 0, y: 0, width: 390, height: height)
+        let window = UIWindow(frame: bounds)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true }
+        host.view.frame = bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        // 等待 SwiftUI 提交首帧布局，不用此延时模拟任何业务成功。
+        try await Task.sleep(for: .milliseconds(100))
+        let image = UIGraphicsImageRenderer(bounds: bounds).image { _ in
+            XCTAssertTrue(host.view.drawHierarchy(in: bounds, afterScreenUpdates: true))
+        }
+        XCTAssertGreaterThan(try XCTUnwrap(image.pngData()).count, 1_000)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
