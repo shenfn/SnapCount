@@ -2730,15 +2730,19 @@ final class SnapCountTests: XCTestCase {
     func testIOSV2POLISH002AF03CancelledPageAndSameMonthReentryAwaitReadableRecords() async {
         let started = expectation(description: "历史月请求已开始")
         var releaseFetch: CheckedContinuation<Void, Never>?
+        var requestCount = 0
         let remote = NativeDayRecord(
             id: "reentry-sport", reference: "data/reentry-sport", dateKey: "2000-01-05",
             kind: .sport, domainKey: "sport", title: "散步", subtitle: "30 分钟", value: "",
             timeLabel: "09:00", systemImage: "figure.walk", status: "done"
         )
         let repository = RecordRepositoryStub(onMonthFetch: { _ in
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                releaseFetch = continuation
-                started.fulfill()
+            requestCount += 1
+            if requestCount == 1 {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    releaseFetch = continuation
+                    started.fulfill()
+                }
             }
             try Task.checkCancellation()
             return NativeRecordMonthSnapshot(
@@ -2753,15 +2757,22 @@ final class SnapCountTests: XCTestCase {
         guard releaseFetch != nil else { firstPage.cancel(); return }
         firstPage.cancel()
 
-        // 直接进入新调用；它必须挂起等待共享读取，不能因“同月正在读取”立即返回。
-        let release = Task { @MainActor in
-            await Task.yield()
-            releaseFetch?.resume()
-            releaseFetch = nil
+        let secondEntered = expectation(description: "新页面已进入同月读取")
+        let returnedBeforeFetch = expectation(description: "读取完成前不能提前返回")
+        returnedBeforeFetch.isInverted = true
+        var fetchReleased = false
+        let secondPage = Task { @MainActor in
+            secondEntered.fulfill()
+            await state.loadRecordMonth("2000-01")
+            if !fetchReleased { returnedBeforeFetch.fulfill() }
         }
-        await state.loadRecordMonth("2000-01")
+        await fulfillment(of: [secondEntered], timeout: 5)
+        await fulfillment(of: [returnedBeforeFetch], timeout: 0.1)
+        fetchReleased = true
+        releaseFetch?.resume()
+        releaseFetch = nil
+        await secondPage.value
         XCTAssertTrue(state.recordGroups(monthKey: "2000-01").flatMap(\.records).contains { $0.reference == remote.reference })
-        await release.value
         await firstPage.value
         XCTAssertNil(state.recordMonthMessages["2000-01"], "页面取消不是业务读取失败")
         XCTAssertNil(state.loadingRecordMonthKey)
