@@ -30,12 +30,14 @@
 - 第二轮提交：`1058e0486ae9e9ddbf7e9c3bf1f79e63bdcde10d`；[macOS CI 39001385651](https://github.com/shenfn/SnapCount/actions/runs/39001385651)。Build 通过，新增与重开断言已通过；仍有 8 条删除后空态/计数断言失败，其余测试无失败。
 - 继续定位：数据库删除成功，但 `recordGroups` 将旧的本地 Dashboard 投影作为远端数据合入，重新带回已删除记录。修复共享读取函数：未登录且月份成功加载后，使用本地结果（含空月）；登录态合并规则保持。
 - 回归增加公共 `recordGroups` 的删除后断言，保证列表与域页同时移除记录；不是只隐藏域页数字。
-- 绿灯状态：共享读取修复已准备，等待下一轮 macOS CI；尚不宣称通过。
+- 绿灯提交：`b3bce8f3ba4ff7d5348ae3109becd3bcc888169b`；[macOS CI 39001958079](https://github.com/shenfn/SnapCount/actions/runs/39001958079) 已完成且结论为 `success`，模拟器 Build 和完整 320 个 XCTest 全部通过（0 failures），新增生命周期测试通过。
+- 此后仅回填验证文档，代码验证基线固定为上述提交。
 
 ## 验证与发布边界
 
 - `node scripts/check-project-governance.mjs`、`node scripts/check-architecture-boundaries.mjs` 和 `git diff --check` 通过；架构检查保留既有人工清单警告。
-- 本轮尚未确认 macOS Build/XCTest 结果，不能宣布 iOS 骨架验收完成。
+- 已验证：上述固定提交的 macOS 模拟器 Build、320 个 XCTest，以及本地 9 项源码门禁/回归、治理和架构检查。
+- 未验证：下列模拟器/真机交互与视觉；CI 通过不等于骨架全部验收完成。
 - 用户已授权本轮逐文件提交、推送独立分支及后续修复推送，运行 GitHub macOS CI；未授权合并主线、生产部署或 TestFlight。
 
 ## 尚待模拟器/真机的骨架交互验收
