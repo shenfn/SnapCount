@@ -33,6 +33,7 @@ test('IOS-V2-POLISH-001/004 prototype metrics retain 44/40pt numbers and serif b
   assert.ok(swift.includes('static let prototypeHero = Font.custom(JieziFontFamily.numeric, size: 44, relativeTo: .largeTitle)'), '主值应为原型 44pt');
   assert.ok(swift.includes('static let prototypeSleepHero = Font.custom(JieziFontFamily.numeric, size: 40, relativeTo: .largeTitle)'), '睡眠主值应为 40pt');
   assert.ok(swift.includes('static let prototypeBrand = Font.custom(JieziFontFamily.serif, size: 20, relativeTo: .title2)'), '品牌应使用衬线');
+  assert.ok(swift.includes('static let prototypeBook = Font.custom(JieziFontFamily.serif, size: 32, relativeTo: .title)'), '阅读书名应遵循主原型 32pt 衬线主值');
 });
 
 test('IOS-V2-POLISH-009 reading scene keeps alternating 10pt bands and the reference dark wash', () => {

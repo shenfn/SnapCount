@@ -597,7 +597,7 @@ enum JieziType {
     static let prototypeBrand = Font.custom(JieziFontFamily.serif, size: 20, relativeTo: .title2).weight(.bold)
     static let prototypeHero = Font.custom(JieziFontFamily.numeric, size: 44, relativeTo: .largeTitle).weight(.bold)
     static let prototypeSleepHero = Font.custom(JieziFontFamily.numeric, size: 40, relativeTo: .largeTitle).weight(.bold)
-    static let prototypeBook = Font.custom(JieziFontFamily.serif, size: 28, relativeTo: .title).weight(.bold)
+    static let prototypeBook = Font.custom(JieziFontFamily.serif, size: 32, relativeTo: .title).weight(.bold)
     static let prototypeOnboarding = Font.custom(JieziFontFamily.serif, size: 32, relativeTo: .largeTitle).weight(.bold)
 }
 

@@ -476,7 +476,7 @@
       "prototypeBrand": { "family": "serif", "size": 20, "relative_to": "title2", "weight": "bold" },
       "prototypeHero": { "family": "numeric", "size": 44, "relative_to": "largeTitle", "weight": "bold" },
       "prototypeSleepHero": { "family": "numeric", "size": 40, "relative_to": "largeTitle", "weight": "bold" },
-      "prototypeBook": { "family": "serif", "size": 28, "relative_to": "title", "weight": "bold" },
+      "prototypeBook": { "family": "serif", "size": 32, "relative_to": "title", "weight": "bold" },
       "prototypeOnboarding": { "family": "serif", "size": 32, "relative_to": "largeTitle", "weight": "bold" }
     },
     "domains": {

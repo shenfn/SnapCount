@@ -4,6 +4,7 @@ import SwiftUI
 // 用于财务状态卡的 2×2 指标格、统计卡网格等场景。
 
 struct JieziMetric: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var palette: JieziGeneratedPalette = JieziThemeManager.shared.palette
     let label: String
     let value: String
@@ -18,7 +19,8 @@ struct JieziMetric: View {
                 .font(JieziType.moneyCard)
                 .monospacedDigit()
                 .foregroundStyle(valueTint ?? palette.ink)
-                .lineLimit(1)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .fixedSize(horizontal: false, vertical: true)
                 .minimumScaleFactor(0.72)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
