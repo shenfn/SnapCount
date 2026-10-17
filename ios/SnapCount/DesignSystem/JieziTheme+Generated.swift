@@ -210,12 +210,12 @@ enum JieziScene {
 
     static func tokens(for domain: String) -> JieziSceneTokens {
         switch domain {
-        case "expense": return .expense
-        case "sleep": return .sleep
-        case "food": return .food
-        case "sport": return .sport
-        case "reading": return .reading
-        default: return .expense
+        case "expense": return JieziScene.expense
+        case "sleep": return JieziScene.sleep
+        case "food": return JieziScene.food
+        case "sport": return JieziScene.sport
+        case "reading": return JieziScene.reading
+        default: return JieziScene.expense
         }
     }
 }

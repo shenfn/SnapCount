@@ -45,4 +45,12 @@
 - 用户“检查并触发 CI/CD”的本次授权用于推送当前功能分支并手动运行 `ios-build.yml`；不触发 TestFlight、后端/生产部署，不合并主线。
 - 本节在获得实际 workflow 结果后补充固定提交、run URL、Build 与测试结果。运行成功不代表第 2 节缺项消失。
 
-当前远端执行状态：待触发。
+首轮固定代码：`9a381a8ee7e8ac3b14a633206d7e37b759abffe9`。
+
+- 仓库治理检查通过：https://github.com/shenfn/SnapCount/actions/runs/39011990895 。
+- macOS 首轮：https://github.com/shenfn/SnapCount/actions/runs/39012002392 。Token 一致性与工程生成通过，模拟器编译失败，未进入 XCTest。
+- 编译根因：生成器输出 `return .expense` 等成员访问，返回类型 JieziSceneTokens 没有这些成员；实际静态值属于 JieziScene。修复生成器为显式 JieziScene 限定，再执行 --sync-app；不手改生成文件。
+- 新增本地重试测试与旧模型测试迁移仍待后续 macOS XCTest，首轮失败不作为业务红灯。
+- 远端仓库已配置拍照/截图模板 URL 的 Secret 名称；没有读取 Secret 值，不能以本地未配置推断远端缺失，也不能从名称存在证明实际安装和回调成功。
+
+当前远端执行状态：修复生成器后重跑。

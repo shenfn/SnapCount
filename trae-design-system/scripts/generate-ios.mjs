@@ -198,8 +198,8 @@ Object.entries(tokens.ios_prototype.domains).forEach(([id, scene]) => {
 lines.push('');
 lines.push('    static func tokens(for domain: String) -> JieziSceneTokens {');
 lines.push('        switch domain {');
-Object.keys(tokens.ios_prototype.domains).forEach((id) => lines.push(`        case "${id}": return .${id}`));
-lines.push('        default: return .expense');
+Object.keys(tokens.ios_prototype.domains).forEach((id) => lines.push(`        case "${id}": return JieziScene.${id}`));
+lines.push('        default: return JieziScene.expense');
 lines.push('        }');
 lines.push('    }');
 lines.push('}');
