@@ -296,6 +296,7 @@ struct RecordsView: View {
 
 struct RecordDetailView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
     let reference: String
     @State private var imagePreview: ImagePreviewRoute?
@@ -538,7 +539,10 @@ struct RecordDetailView: View {
     }
 
     private func recordHeader(_ detail: NativeRecordDetail) -> some View {
-        HStack(spacing: 12) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Image(systemName: detail.systemImage)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(JieziTheme.brand)
@@ -548,7 +552,7 @@ struct RecordDetailView: View {
                 Text(detail.title).font(.headline)
                 Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
             }
-            Spacer()
+            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
             if !detail.value.isEmpty {
                 Text(detail.value).font(.headline.monospacedDigit())
             }
@@ -561,9 +565,16 @@ struct RecordDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title).font(.headline).padding(.bottom, 12)
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                HStack(alignment: .top, spacing: 16) {
-                    Text(row.label).font(.subheadline).foregroundStyle(.secondary).frame(width: 82, alignment: .leading)
-                    Text(row.value).font(.subheadline).frame(maxWidth: .infinity, alignment: .trailing).multilineTextAlignment(.trailing)
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                layout {
+                    Text(row.label).font(.subheadline).foregroundStyle(.secondary)
+                        .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 82, alignment: .leading)
+                    Text(row.value).font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+                        .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 10)
                 if index < rows.count - 1 { Divider() }

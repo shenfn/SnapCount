@@ -199,7 +199,7 @@ struct NativeDomainPageContent: View {
                 .chartYScale(domain: -1...1)
                 .chartYAxis(.hidden)
                 .chartXAxis {
-                    AxisMarks(values: [0, 360, 720, 1080, 1440]) { value in
+                    AxisMarks(values: dynamicTypeSize.isAccessibilitySize ? [0, 720, 1440] : [0, 360, 720, 1080, 1440]) { value in
                         AxisValueLabel {
                             if let minute = value.as(Int.self) { Text(clockLabel(minute)).foregroundStyle(scene.muted) }
                         }

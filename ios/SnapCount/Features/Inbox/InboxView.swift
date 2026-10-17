@@ -102,8 +102,8 @@ struct InboxView: View {
             }
         }
         .navigationTitle("待确认")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         .navigationDestination(for: NativeInboxRoute.self) { route in
             switch route {
             case .category(let filter):
@@ -861,7 +861,7 @@ struct InboxVerdictStageView: View {
                 Text("\(item.statusLabel) · \(contextLabel(for: item))")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(statusColor(for: item))
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             Text("\(currentIndex + 1) / \(items.count)")
@@ -878,7 +878,7 @@ struct InboxVerdictStageView: View {
             Text(item.stagingRecord?.summary ?? item.title)
                 .font(.headline)
                 .foregroundStyle(JieziTheme.ink)
-                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
             if let record = item.stagingRecord {
                 HStack(spacing: JieziSpacing.md) {
                     if let confidence = record.confidencePercent {
@@ -1269,7 +1269,7 @@ private struct StagingVerdictStageView: View {
                 Text("\(record.statusLabel) · \(record.domainName ?? record.recordTypeLabel)")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(statusColor(for: record))
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             Text("\(currentIndex + 1) / \(records.count)")
@@ -1286,7 +1286,7 @@ private struct StagingVerdictStageView: View {
             Text(record.summary)
                 .font(.headline)
                 .foregroundStyle(JieziTheme.ink)
-                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: JieziSpacing.md) {
                 if let confidence = record.confidencePercent {
                     HStack(spacing: 5) {

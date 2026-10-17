@@ -52,6 +52,11 @@ struct ManualRecordSheet: View {
         universalDomains.first { $0.id == draft.domainKey }
     }
 
+    private var selectedDomainTitle: String {
+        selectedDomain?.shortName ?? AppDomain(rawValue: draft.domainKey)?.title
+            ?? (draft.domainKey == "wallet" ? "钱包" : "其他记录")
+    }
+
     private var metadata: NativeManualDomainMetadata {
         NativeManualDomainMetadata.resolve(selectedDomain, fallbackDomainKey: draft.domainKey)
     }
@@ -273,7 +278,8 @@ struct ManualRecordSheet: View {
 
     private var sheetTitle: String {
         if stagingRecord != nil { return "核对并收下" }
-        return draft.existingRawId == nil ? "手动记录" : "编辑记录"
+        if draft.existingRawId != nil { return "编辑记录" }
+        return draft.kind == .universal ? "\(selectedDomainTitle)记录" : "手动记录"
     }
 
     @ViewBuilder
@@ -290,7 +296,7 @@ struct ManualRecordSheet: View {
                 JieziFormRow(title: "准备归档到", systemImage: "tray.and.arrow.down") {
                     Text(
                         draft.kind == .universal
-                            ? selectedDomain?.shortName ?? draft.domainKey
+                            ? selectedDomainTitle
                             : draft.kind.title
                     )
                     .jieziInputSurface()
@@ -301,7 +307,7 @@ struct ManualRecordSheet: View {
                 JieziFormRow(title: "类型", systemImage: "square.grid.2x2") {
                     Picker("记录类型", selection: $draft.kind) {
                         ForEach(NativeManualRecordKind.allCases) { kind in
-                            Text(kind.title).tag(kind)
+                            Text(kind == .universal ? "生活记录" : kind.title).tag(kind)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -309,8 +315,8 @@ struct ManualRecordSheet: View {
             }
         } else {
             JieziFormSection(title: "记录类型") {
-                JieziFormRow(title: "当前数据域", systemImage: "square.grid.2x2") {
-                    Text(selectedDomain?.shortName ?? "数据域")
+                JieziFormRow(title: "当前类别", systemImage: "square.grid.2x2") {
+                    Text(selectedDomainTitle)
                         .jieziInputSurface()
                 }
             }
@@ -379,8 +385,8 @@ struct ManualRecordSheet: View {
 
     private var universalFields: some View {
         VStack(spacing: JieziSpacing.xl2) {
-            JieziFormSection(title: "数据域字段", subtitle: "只填写能从原图或文字事实中确认的内容。") {
-                JieziFormRow(title: "数据域", systemImage: "square.grid.2x2", showsDivider: true) {
+            JieziFormSection(title: "记录内容", subtitle: "只填写能从原图或文字事实中确认的内容。") {
+                JieziFormRow(title: "记录类别", systemImage: "square.grid.2x2", showsDivider: true) {
                     Menu {
                         ForEach(universalDomains) { domain in
                             Button("\(domain.icon) \(domain.shortName)") {
@@ -388,9 +394,10 @@ struct ManualRecordSheet: View {
                             }
                         }
                     } label: {
-                        selectorLabel(selectedDomain?.shortName ?? draft.domainKey, placeholder: "选择数据域")
+                        selectorLabel(selectedDomainTitle, placeholder: "选择记录类别")
                     }
                     .buttonStyle(.plain)
+                    .disabled(universalDomains.isEmpty)
                 }
                 JieziFormRow(title: "标题", systemImage: "textformat", showsDivider: true) {
                     TextField("标题（可选）", text: $draft.title)

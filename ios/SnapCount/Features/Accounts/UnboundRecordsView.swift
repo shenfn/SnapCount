@@ -49,11 +49,14 @@ struct UnboundRecordsView: View {
                     ProgressView("正在加载未绑定记录…")
                         .frame(maxWidth: .infinity)
                 } else if visibleRecords.isEmpty {
-                    ContentUnavailableView(
-                        "这个月份没有待补绑记录",
-                        systemImage: "checkmark.circle",
-                        description: Text("只有已完成且尚未绑定账户的消费、收入会显示在这里。")
-                    )
+                    ContentUnavailableView {
+                        Label {
+                            Text("这个月份没有待补绑记录")
+                                .lineLimit(nil).fixedSize(horizontal: false, vertical: true)
+                        } icon: { Image(systemName: "checkmark.circle") }
+                    } description: {
+                        Text("只有已完成且尚未绑定账户的消费、收入会显示在这里。")
+                    }
                 } else {
                     Section("待补绑") {
                         ForEach(visibleRecords) { record in
