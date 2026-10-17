@@ -22,6 +22,15 @@ struct NativeDomainScenePresentation {
     let knownPrimaryTotal: Double?
     let stateMessage: String?
 
+    static func trendDateKeys(for domain: AppDomain, dateKey: String) -> [String] {
+        switch domain {
+        case .sleep, .food:
+            return (-6...0).compactMap { NativeLocalDate.shiftedDateKey(dateKey, byDays: $0) }
+        case .expense, .sport, .reading:
+            return NativeLocalDate.weekDateKeys(containing: dateKey)
+        }
+    }
+
     static func make(
         domain: AppDomain,
         dateKey: String,
@@ -115,7 +124,7 @@ struct NativeDomainScenePresentation {
             note = missingPrimaryCount > 0 ? "\(missingPrimaryCount) 条记录未提供阅读时长" : "未提供书籍总页数，不显示阅读进度"
         }
 
-        let weeklyValues = NativeLocalDate.weekDateKeys(containing: dateKey).map { weekDay in
+        let weeklyValues = trendDateKeys(for: domain, dateKey: dateKey).map { weekDay in
             let dailyRecords = allRecords.filter { $0.dateKey == weekDay }
             let scoped: [NativeDayRecord]
             switch domain {

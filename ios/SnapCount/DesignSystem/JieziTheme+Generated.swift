@@ -198,15 +198,17 @@ struct JieziSceneTokens {
     let foreground: Color
     let muted: Color
     let surface: Color
+    let glow: Color
+    let glowOpacity: Double
     let usesDiagonalTexture: Bool
 }
 
 enum JieziScene {
-    static let expense = JieziSceneTokens(background: [Color(jieziHex: "#EADCC4"), Color(jieziHex: "#F1E8D8"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), usesDiagonalTexture: false)
-    static let sleep = JieziSceneTokens(background: [Color(jieziHex: "#1C2140"), Color(jieziHex: "#17312D"), Color(jieziHex: "#0F1E1C")], accent: Color(jieziHex: "#DCBF74"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#10211F"), usesDiagonalTexture: false)
-    static let food = JieziSceneTokens(background: [Color(jieziHex: "#F2DCC4"), Color(jieziHex: "#F4EADB"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#C2410C"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), usesDiagonalTexture: false)
-    static let sport = JieziSceneTokens(background: [Color(jieziHex: "#D5E2D6"), Color(jieziHex: "#E6EBE0"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), usesDiagonalTexture: false)
-    static let reading = JieziSceneTokens(background: [Color(jieziHex: "#4A5E6E"), Color(jieziHex: "#43566A"), Color(jieziHex: "#10211F")], accent: Color(jieziHex: "#DCBF74"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#17312D"), usesDiagonalTexture: true)
+    static let expense = JieziSceneTokens(background: [Color(jieziHex: "#EADCC4"), Color(jieziHex: "#F1E8D8"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#DCBF74"), glowOpacity: 0.45, usesDiagonalTexture: false)
+    static let sleep = JieziSceneTokens(background: [Color(jieziHex: "#1C2140"), Color(jieziHex: "#17312D"), Color(jieziHex: "#0F1E1C")], accent: Color(jieziHex: "#DCBF74"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#10211F"), glow: Color(jieziHex: "#6E78C8"), glowOpacity: 0.35, usesDiagonalTexture: false)
+    static let food = JieziSceneTokens(background: [Color(jieziHex: "#F2DCC4"), Color(jieziHex: "#F4EADB"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#C2410C"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#EA580C"), glowOpacity: 0.22, usesDiagonalTexture: false)
+    static let sport = JieziSceneTokens(background: [Color(jieziHex: "#D5E2D6"), Color(jieziHex: "#E6EBE0"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#DCBF74"), glowOpacity: 0.4, usesDiagonalTexture: false)
+    static let reading = JieziSceneTokens(background: [Color(jieziHex: "#4A5E6E"), Color(jieziHex: "#43566A"), Color(jieziHex: "#10211F")], accent: Color(jieziHex: "#DCBF74"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#17312D"), glow: Color(jieziHex: "#10211F"), glowOpacity: 0, usesDiagonalTexture: true)
 
     static func tokens(for domain: String) -> JieziSceneTokens {
         switch domain {
@@ -223,6 +225,9 @@ enum JieziScene {
 enum JieziPrototypeLayout {
     static let page_inset: CGFloat = 14
     static let metric_inset: CGFloat = 20
+    static let hero_min_height: CGFloat = 170
+    static let cat_width: CGFloat = 140
+    static let cat_height: CGFloat = 150
     static let column_gap: CGFloat = 12
     static let card_inset: CGFloat = 16
     static let card_radius: CGFloat = 24
@@ -543,21 +548,21 @@ extension View {
 // MARK: - 字体 Token（HIG 层级）
 
 enum JieziFont {
-    static let caption2 = Font.custom(JieziFontFamily.sans, size: 11, relativeTo: .caption2).weight(.regular)
-    static let caption = Font.custom(JieziFontFamily.sans, size: 12, relativeTo: .caption).weight(.regular)
-    static let footnote = Font.custom(JieziFontFamily.sans, size: 13, relativeTo: .footnote).weight(.regular)
-    static let subheadline = Font.custom(JieziFontFamily.sans, size: 15, relativeTo: .subheadline).weight(.regular)
-    static let body = Font.custom(JieziFontFamily.sans, size: 17, relativeTo: .body).weight(.regular)
-    static let callout = Font.custom(JieziFontFamily.sans, size: 16, relativeTo: .callout).weight(.medium)
-    static let headline = Font.custom(JieziFontFamily.sans, size: 17, relativeTo: .headline).weight(.semibold)
-    static let title3 = Font.custom(JieziFontFamily.sans, size: 20, relativeTo: .title3).weight(.semibold)
-    static let title2 = Font.custom(JieziFontFamily.sans, size: 22, relativeTo: .title2).weight(.semibold)
-    static let title1 = Font.custom(JieziFontFamily.sans, size: 28, relativeTo: .title).weight(.bold)
-    static let largeTitle = Font.custom(JieziFontFamily.sans, size: 34, relativeTo: .largeTitle).weight(.bold)
+    static let caption2 = Font.system(.caption2).weight(.regular)
+    static let caption = Font.system(.caption).weight(.regular)
+    static let footnote = Font.system(.footnote).weight(.regular)
+    static let subheadline = Font.system(.subheadline).weight(.regular)
+    static let body = Font.system(.body).weight(.regular)
+    static let callout = Font.system(.callout).weight(.medium)
+    static let headline = Font.system(.headline).weight(.semibold)
+    static let title3 = Font.system(.title3).weight(.semibold)
+    static let title2 = Font.system(.title2).weight(.semibold)
+    static let title1 = Font.system(.title).weight(.bold)
+    static let largeTitle = Font.system(.largeTitle).weight(.bold)
 }
 
 enum JieziFontFamily {
-    static let sans = "NotoSansSC-Thin"
+    static let sans = "system"
     static let serif = "NotoSerifSC-ExtraLight"
     static let numeric = "Nunito-ExtraLight"
 }
@@ -576,15 +581,20 @@ enum JieziType {
     /// 列表行内金额
     static let moneyInline = Font.custom(JieziFontFamily.numeric, size: 17, relativeTo: .headline).weight(.semibold)
     /// 区块标题（如「财务状态」「每日明细」）
-    static let sectionTitle = Font.custom(JieziFontFamily.sans, size: 20, relativeTo: .title3).weight(.semibold)
+    static let sectionTitle = Font.system(.title3).weight(.semibold)
     /// 卡片内标题、列表行主文字
-    static let cardTitle = Font.custom(JieziFontFamily.sans, size: 17, relativeTo: .headline).weight(.semibold)
+    static let cardTitle = Font.system(.headline).weight(.semibold)
     /// 按钮文字
-    static let button = Font.custom(JieziFontFamily.sans, size: 16, relativeTo: .callout).weight(.semibold)
+    static let button = Font.system(.callout).weight(.semibold)
     /// 分类 Chip、胶囊标签
-    static let chip = Font.custom(JieziFontFamily.sans, size: 13, relativeTo: .footnote).weight(.medium)
+    static let chip = Font.system(.footnote).weight(.medium)
     /// 指标说明文字（如「可用现金」）
-    static let metricLabel = Font.custom(JieziFontFamily.sans, size: 12, relativeTo: .caption).weight(.regular)
+    static let metricLabel = Font.system(.caption).weight(.regular)
+    static let prototypeBrand = Font.custom(JieziFontFamily.serif, size: 20, relativeTo: .title2).weight(.bold)
+    static let prototypeHero = Font.custom(JieziFontFamily.numeric, size: 44, relativeTo: .largeTitle).weight(.bold)
+    static let prototypeSleepHero = Font.custom(JieziFontFamily.numeric, size: 40, relativeTo: .largeTitle).weight(.bold)
+    static let prototypeBook = Font.custom(JieziFontFamily.serif, size: 28, relativeTo: .title).weight(.bold)
+    static let prototypeOnboarding = Font.custom(JieziFontFamily.serif, size: 32, relativeTo: .largeTitle).weight(.bold)
 }
 
 // MARK: - 描边 Token（金线 0.5mm 为骨）
@@ -756,21 +766,13 @@ struct JieziCardStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .padding(18)
-            .background {
-                if solid {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(JieziScene.expense.surface)
-                } else {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(JieziScene.expense.surface)
-                }
-            }
+            .padding(16)
+            .background(JieziScene.expense.surface.opacity(solid ? 0.92 : 0.66), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(palette.brand.opacity(solid ? 0.08 : 0.11), lineWidth: 1)
+                    .stroke(palette.brand.opacity(0.11), lineWidth: 1)
             }
-            .jieziShadow(solid ? JieziShadows.sm(palette) : JieziShadows.Semantic.card(palette))
+            .shadow(color: palette.space.opacity(solid ? 0 : 0.07), radius: 22, x: 0, y: 12)
     }
 }
 

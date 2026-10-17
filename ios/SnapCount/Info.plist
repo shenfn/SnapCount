@@ -18,7 +18,6 @@
   <string>APPL</string>
   <key>UIAppFonts</key>
   <array>
-    <string>Fonts/NotoSansSC-Variable.ttf</string>
     <string>Fonts/NotoSerifSC-Variable.ttf</string>
     <string>Fonts/Nunito-Variable.ttf</string>
   </array>

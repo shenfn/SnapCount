@@ -838,7 +838,9 @@ final class AppState: ObservableObject {
     }
 
     func loadRecordDateWindow(around dateKey: String, force: Bool = false) async {
-        let days = NativeLocalDate.weekDateKeys(containing: dateKey)
+        // 五域共享浏览日期：一次补齐自然周和截止所选日的近七日，切域无需再等一次跨月读取。
+        let days = (NativeLocalDate.weekDateKeys(containing: dateKey)
+            + NativeDomainScenePresentation.trendDateKeys(for: .sleep, dateKey: dateKey)).sorted()
         guard let start = days.first, let end = days.last else { return }
         for monthKey in NativeLocalDate.monthKeys(from: start, through: end) {
             if Task.isCancelled { return }

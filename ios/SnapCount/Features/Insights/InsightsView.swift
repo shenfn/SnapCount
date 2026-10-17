@@ -86,7 +86,7 @@ struct InsightsView: View {
             }
         }
         .navigationTitle("报告")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .task(id: "\(mode.rawValue)-\(range.rawValue)") {
             if mode == .linkage { await appState.loadInsights(range: range) }
         }

@@ -232,7 +232,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("设置")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .alert("永久删除账户？", isPresented: $showDeleteAccountConfirmation) {
             Button("删除账户及全部数据", role: .destructive) {
                 Task { _ = await appState.deleteAccount() }
@@ -690,7 +690,7 @@ struct ShortcutSetupView: View {
                             .font(.title2)
                             .foregroundStyle(appState.hasUploadToken ? JieziTheme.mint : JieziTheme.coral)
                             .frame(width: 38, height: 38)
-                            .background(.thinMaterial, in: Circle())
+                            .background(JieziTheme.brand.opacity(0.08), in: Circle())
                         VStack(alignment: .leading, spacing: 3) {
                             Text(appState.hasUploadToken ? "凭据已同步" : "凭据未同步")
                                 .font(.headline)
@@ -779,7 +779,7 @@ struct ShortcutSetupView: View {
             .tint(JieziTheme.brand)
         }
         .navigationTitle("快捷指令")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
     }
 
     private func openShortcutTemplate(_ template: ShortcutTemplateKind) {
@@ -807,7 +807,7 @@ private struct ShortcutActionRow: View {
                 .font(.body.weight(.semibold))
                 .foregroundStyle(JieziTheme.mint)
                 .frame(width: 28, height: 28)
-                .background(.thinMaterial, in: Circle())
+                .background(JieziTheme.brand.opacity(0.08), in: Circle())
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)

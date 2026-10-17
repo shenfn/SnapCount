@@ -34,16 +34,22 @@ struct LoginView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: "circle.hexagongrid.fill")
-                .font(.system(size: 32, weight: .semibold))
-                .foregroundStyle(JieziTheme.brand)
-                .frame(width: 52, height: 52)
-                .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1))
-
-            Text("芥子")
-                .font(.system(size: 38, weight: .bold, design: .rounded))
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("芥子")
+                        .font(JieziType.displayLarge)
+                    Text("JIEZI")
+                        .font(JieziFont.caption)
+                        .tracking(2)
+                        .foregroundStyle(JieziTheme.muted)
+                }
                 .foregroundStyle(JieziTheme.ink)
+                Spacer()
+                JieziCatShape(pose: .expense)
+                    .stroke(JieziTheme.brand, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                    .frame(width: 110, height: 110)
+                    .accessibilityHidden(true)
+            }
             Text("登录后同步快捷指令凭据，用截图和照片快速生成记录。")
                 .font(.callout)
                 .foregroundStyle(JieziTheme.muted)

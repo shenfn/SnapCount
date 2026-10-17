@@ -44,7 +44,6 @@ targets:
         CFBundleName: SnapCount
         CFBundlePackageType: APPL
         UIAppFonts:
-          - Fonts/NotoSansSC-Variable.ttf
           - Fonts/NotoSerifSC-Variable.ttf
           - Fonts/Nunito-Variable.ttf
         CFBundleShortVersionString: $(MARKETING_VERSION)

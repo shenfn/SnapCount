@@ -2,44 +2,69 @@ import SwiftUI
 
 struct DomainSceneView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
     let domain: AppDomain
-
-    @State private var catPose: JieziCatPose = .expense
-    @State private var catProgress: CGFloat = 1
-    @State private var transitionTask: Task<Void, Never>?
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: domain.rawValue) }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack {
             LinearGradient(
                 colors: scene.background,
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: domain)
-
             if scene.usesDiagonalTexture {
                 diagonalTexture
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: domain)
             }
-
-            JieziCatShape(pose: catPose)
-                .trim(from: 0, to: catProgress)
-                .stroke(
-                    scene.accent,
-                    style: StrokeStyle(lineWidth: 2.35, lineCap: .round, lineJoin: .round)
+            GeometryReader { geometry in
+                RadialGradient(
+                    colors: [scene.glow.opacity(scene.glowOpacity), .clear],
+                    center: UnitPoint(x: 0.82, y: 0.12),
+                    startRadius: 0,
+                    endRadius: geometry.size.width * 0.7
                 )
-                .frame(width: 112, height: 112)
-                .opacity(0.48)
-                .padding(.trailing, 14)
-                .padding(.bottom, 74)
-                .accessibilityHidden(true)
-                .allowsHitTesting(false)
+            }
         }
         .ignoresSafeArea()
+        .animation(reduceMotion ? nil : .easeInOut(duration: JieziPrototypeMotion.background_ms), value: domain)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var diagonalTexture: some View {
+        Canvas { context, size in
+            var x: CGFloat = -size.height
+            while x < size.width {
+                var stripe = Path()
+                stripe.move(to: CGPoint(x: x, y: size.height))
+                stripe.addLine(to: CGPoint(x: x + size.height, y: 0))
+                context.stroke(stripe, with: .color(.white.opacity(0.035)), lineWidth: 1)
+                x += 16
+            }
+        }
+    }
+}
+
+/// 猫属于主值右侧的独立视觉层，不参与分页命中和业务状态。
+struct DomainCatView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    let domain: AppDomain
+    @State private var catPose: JieziCatPose = .expense
+    @State private var catProgress: CGFloat = 1
+    @State private var transitionTask: Task<Void, Never>?
+
+    var body: some View {
+        JieziCatShape(pose: catPose)
+            .trim(from: 0, to: catProgress)
+            .stroke(
+                JieziScene.tokens(for: domain.rawValue).accent,
+                style: StrokeStyle(lineWidth: 2.35, lineCap: .round, lineJoin: .round)
+            )
+            .frame(width: JieziPrototypeLayout.cat_width, height: JieziPrototypeLayout.cat_height)
+            .opacity(0.65)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
         .onAppear {
             transitionTask?.cancel()
             transitionTask = nil
@@ -67,21 +92,6 @@ struct DomainSceneView: View {
             transitionTask?.cancel()
             transitionTask = nil
         }
-    }
-
-    private var diagonalTexture: some View {
-        Canvas { context, size in
-            var x: CGFloat = -size.height
-            while x < size.width {
-                var stripe = Path()
-                stripe.move(to: CGPoint(x: x, y: size.height))
-                stripe.addLine(to: CGPoint(x: x + size.height, y: 0))
-                context.stroke(stripe, with: .color(.white.opacity(0.035)), lineWidth: 1)
-                x += 16
-            }
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 
     private func transition(to newDomain: AppDomain) {

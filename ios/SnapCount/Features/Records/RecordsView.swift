@@ -114,7 +114,7 @@ struct RecordsView: View {
             .refreshable { await appState.loadRecordMonth(selectedMonthKey, force: true) }
         }
         .navigationTitle("记录")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -443,7 +443,7 @@ struct RecordDetailView: View {
             }
         }
         .navigationTitle("记录详情")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .toolbar {
             if let detail {
                 if detail.isEditable {

@@ -3,52 +3,44 @@ import SwiftUI
 struct NativeDomainPageView: View {
     @EnvironmentObject private var appState: AppState
     let domain: AppDomain
+
+    var body: some View {
+        // 每次状态求值只读取一次窗口并创建一次模型；不跨帧缓存，增删改和身份切换自然刷新。
+        let dates = NativeDomainScenePresentation.trendDateKeys(for: domain, dateKey: appState.selectedDateKey)
+        let first = dates.first ?? appState.selectedDateKey
+        let last = dates.last ?? appState.selectedDateKey
+        let months = NativeLocalDate.monthKeys(from: first, through: last)
+        let groups = appState.recordGroups(from: first, through: last)
+        let details = appState.recordDetails(from: first, through: last)
+        let loading = appState.loadingRecordMonthKey.map { months.contains($0) } ?? false
+        let model = NativeDomainScenePresentation.make(
+            domain: domain,
+            dateKey: appState.selectedDateKey,
+            weekGroups: groups,
+            details: details,
+            isSignedIn: appState.isSignedIn,
+            isLoading: loading,
+            errorMessage: months.compactMap { appState.recordMonthMessages[$0] }.first
+        )
+        NativeDomainPageContent(domain: domain, weekDates: dates, details: details, loadingWindow: loading, model: model)
+    }
+}
+
+private struct NativeDomainPageContent: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let domain: AppDomain
+    let weekDates: [String]
+    let details: [String: NativeRecordDetail]
+    let loadingWindow: Bool
+    let model: NativeDomainScenePresentation
     @State private var showManualRecordSheet = false
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: domain.rawValue) }
-    private var weekDates: [String] { NativeLocalDate.weekDateKeys(containing: appState.selectedDateKey) }
-
-    private var weekGroups: [NativeDayRecordGroup] {
-        guard let first = weekDates.first, let last = weekDates.last else { return [] }
-        return appState.recordGroups(from: first, through: last)
-    }
-
-    private var details: [String: NativeRecordDetail] {
-        guard let first = weekDates.first, let last = weekDates.last else { return [:] }
-        return appState.recordDetails(from: first, through: last)
-    }
-
-    private var windowMonthKeys: [String] {
-        guard let first = weekDates.first, let last = weekDates.last else { return [] }
-        return NativeLocalDate.monthKeys(from: first, through: last)
-    }
-
-    private var loadingWindow: Bool {
-        guard let loadingKey = appState.loadingRecordMonthKey else { return false }
-        return windowMonthKeys.contains(loadingKey)
-    }
-
-    private var windowError: String? {
-        windowMonthKeys.compactMap { appState.recordMonthMessages[$0] }.first
-    }
-
-    private var model: NativeDomainScenePresentation {
-        NativeDomainScenePresentation.make(
-            domain: domain,
-            dateKey: appState.selectedDateKey,
-            weekGroups: weekGroups,
-            details: details,
-            isSignedIn: appState.isSignedIn,
-            isLoading: loadingWindow,
-            errorMessage: windowError
-        )
-    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                pageHeading
-
                 if let stateMessage = model.stateMessage {
                     loadStateCard(stateMessage)
                 } else {
@@ -77,8 +69,8 @@ struct NativeDomainPageView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, JieziPrototypeLayout.page_inset)
-            .padding(.top, 146)
-            .padding(.bottom, 134)
+            .padding(.top, 14)
+            .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
         .sheet(isPresented: $showManualRecordSheet) {
@@ -86,27 +78,13 @@ struct NativeDomainPageView: View {
         }
     }
 
-    private var pageHeading: some View {
-        HStack(alignment: .lastTextBaseline) {
-            Text(domain.title)
-                .font(JieziType.display)
-                .foregroundStyle(scene.foreground)
-            Spacer()
-            Text(appState.selectedDateKey)
-                .font(JieziFont.caption)
-                .foregroundStyle(scene.muted)
-                .monospacedDigit()
-        }
-        .accessibilityElement(children: .combine)
-    }
-
     private var dailyHero: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        HStack(alignment: .top, spacing: 0) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(domain == .expense ? "当日收支" : model.primaryLabel)
-                    .font(JieziType.sectionTitle)
+                Text(domain == .expense ? "当日支出" : model.primaryLabel)
+                    .font(JieziFont.caption)
                     .foregroundStyle(scene.foreground)
-                Spacer()
                 if domain == .food, !model.records.isEmpty {
                     Text("估算")
                         .font(JieziFont.caption2)
@@ -119,33 +97,25 @@ struct NativeDomainPageView: View {
 
             if domain == .expense {
                 VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("支出")
-                            .font(JieziFont.caption)
-                            .foregroundStyle(scene.muted)
-                        Spacer()
                         Text(model.primaryValue)
-                            .font(JieziType.moneyHero.monospacedDigit())
+                            .font(JieziType.prototypeHero.monospacedDigit())
                             .foregroundStyle(scene.foreground)
-                            .lineLimit(1)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                             .minimumScaleFactor(0.68)
-                    }
-                    Rectangle().fill(scene.foreground.opacity(0.10)).frame(height: 1)
                     HStack(alignment: .firstTextBaseline) {
                         Text(model.secondaryLabel)
                             .font(JieziFont.caption)
                             .foregroundStyle(scene.muted)
-                        Spacer()
                         Text(model.secondaryValue)
                             .font(JieziType.moneyCard.monospacedDigit())
                             .foregroundStyle(scene.accent)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                             .minimumScaleFactor(0.75)
                     }
                 }
             } else {
                 Text(model.primaryValue)
-                    .font(JieziType.moneyHero.monospacedDigit())
+                    .font((domain == .sleep ? JieziType.prototypeSleepHero : JieziType.prototypeHero).monospacedDigit())
                     .foregroundStyle(scene.foreground)
                     .lineLimit(2)
                     .minimumScaleFactor(0.72)
@@ -155,17 +125,23 @@ struct NativeDomainPageView: View {
                     .foregroundStyle(scene.muted)
             }
         }
-        .padding(20)
-        .background(scene.surface.opacity(0.92), in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous)
-                .stroke(scene.foreground.opacity(domain == .sleep || domain == .reading ? 0.13 : 0.08), lineWidth: 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        if !dynamicTypeSize.isAccessibilitySize {
+            Color.clear.frame(width: JieziPrototypeLayout.cat_width)
+                .accessibilityHidden(true)
         }
-        .shadow(color: scene.foreground.opacity(0.06), radius: 12, x: 0, y: 5)
+        }
+        .padding(.horizontal, JieziPrototypeLayout.metric_inset - JieziPrototypeLayout.page_inset)
+        .frame(minHeight: JieziPrototypeLayout.hero_min_height, alignment: .topLeading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(appState.selectedDateKey)，\(domain.title)，\(model.primaryLabel)\(model.primaryValue)，\(model.secondaryLabel)\(model.secondaryValue)")
     }
 
     private var metricShelf: some View {
-        HStack(spacing: JieziPrototypeLayout.column_gap) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: JieziPrototypeLayout.column_gap))
+            : AnyLayout(HStackLayout(spacing: JieziPrototypeLayout.column_gap))
+        return layout {
             ForEach(secondaryMetrics, id: \.0) { metric in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(metric.0)
@@ -174,7 +150,6 @@ struct NativeDomainPageView: View {
                     Text(metric.1)
                         .font(JieziType.cardTitle)
                         .foregroundStyle(scene.foreground)
-                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
@@ -212,7 +187,8 @@ struct NativeDomainPageView: View {
     }
 
     private var weeklyTrend: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let maximum = max(model.weeklyValues.compactMap(\.value).max() ?? 0, 1)
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text(weekTrendTitle)
                     .font(JieziType.sectionTitle)
@@ -231,7 +207,7 @@ struct NativeDomainPageView: View {
                         Spacer(minLength: 0)
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
                             .fill(barColor(for: item))
-                            .frame(height: barHeight(for: item))
+                            .frame(height: barHeight(for: item, maximum: maximum))
                         Text(item.dayLabel)
                             .font(JieziFont.caption2.monospacedDigit())
                             .foregroundStyle(item.dateKey == appState.selectedDateKey ? scene.accent : scene.muted)
@@ -258,9 +234,8 @@ struct NativeDomainPageView: View {
         }
     }
 
-    private func barHeight(for item: NativeDomainDayValue) -> CGFloat {
+    private func barHeight(for item: NativeDomainDayValue, maximum: Double) -> CGFloat {
         guard let value = item.value else { return 3 }
-        let maximum = max(model.weeklyValues.compactMap(\.value).max() ?? 0, 1)
         return value == 0 ? 3 : max(7, CGFloat(value / maximum) * 66)
     }
 

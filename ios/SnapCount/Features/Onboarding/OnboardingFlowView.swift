@@ -4,6 +4,7 @@ struct OnboardingFlowView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var activeStep: OnboardingStep = .welcome
     @State private var completedSteps: Set<OnboardingStep> = []
@@ -13,11 +14,11 @@ struct OnboardingFlowView: View {
 
     var body: some View {
         ZStack {
-            JieziPageBackground()
+            DomainSceneView(domain: .expense)
 
             VStack(spacing: 0) {
                 header
-                timeline
+                stepPage
             }
         }
         .interactiveDismissDisabled()
@@ -42,193 +43,83 @@ struct OnboardingFlowView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(JieziTheme.brand.opacity(0.11))
-                Image(systemName: "circle.hexagongrid.fill")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(JieziTheme.brand)
+        HStack(spacing: 14) {
+            HStack(spacing: 6) {
+                ForEach(OnboardingStep.allCases) { step in
+                    Capsule()
+                        .fill(step.rawValue <= activeStep.rawValue ? JieziTheme.brand : JieziTheme.brand.opacity(0.15))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 4)
+                }
             }
-            .frame(width: 42, height: 42)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("芥子")
-                    .font(.headline)
-                    .foregroundStyle(JieziTheme.ink)
-                Text("第 \(activeStep.rawValue + 1) 步 · 共 5 步")
-                    .font(.caption)
-                    .foregroundStyle(JieziTheme.muted)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("第 \(activeStep.rawValue + 1) 步，共 5 步")
+            Button(activeStep == .ready ? "完成" : "稍后设置") {
+                appState.finishOnboarding(skipped: activeStep != .ready)
             }
-
-            Spacer(minLength: 8)
-
-            Button("稍后") {
-                appState.finishOnboarding(skipped: true)
-            }
-            .font(.subheadline.weight(.semibold))
+            .font(JieziFont.caption)
             .foregroundStyle(JieziTheme.brand)
+            .fixedSize()
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(JieziScene.expense.surface.opacity(0.6), in: Capsule())
         }
         .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 12)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(JieziTheme.line)
-                .frame(height: 1)
-        }
+        .padding(.vertical, 12)
     }
 
-    private var timeline: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    intro
-
-                    ForEach(OnboardingStep.allCases) { step in
-                        timelineNode(step)
-                            .id(step.id)
-                    }
-
-                    Text("图片保留、通知和 AI 语气仍可在设置调整；本引导不会改变现有隐私策略。")
-                        .font(.caption)
+    private var stepPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                if activeStep == .welcome || activeStep == .ready {
+                    JieziCatShape(pose: activeStep == .ready ? .reading : .expense)
+                        .stroke(JieziTheme.ink, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                        .frame(width: 200, height: 200)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityHidden(true)
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(activeStep == .welcome ? "留下事实，\n回看生活。" : activeStep.title)
+                        .font(JieziType.prototypeOnboarding)
+                        .foregroundStyle(JieziTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(activeStep.detail)
+                        .font(JieziFont.body)
                         .foregroundStyle(JieziTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.leading, 52)
-                        .padding(.top, 8)
-                        .padding(.bottom, 32)
                 }
-                .padding(.horizontal, 18)
-            }
-            .scrollIndicators(.hidden)
-            .onChange(of: activeStep) { _, step in
-                withAnimation(JieziEasing.spring) {
-                    proxy.scrollTo(step.id, anchor: .center)
+                stepContent(activeStep)
+                if let localMessage {
+                    Text(localMessage)
+                        .font(JieziFont.caption)
+                        .foregroundStyle(JieziTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.updatesFrequently)
                 }
-            }
-        }
-    }
-
-    private var intro: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(activeStep.title)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(JieziTheme.ink)
-            Text(activeStep.detail)
-                .font(.subheadline)
-                .foregroundStyle(JieziTheme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            ProgressView(
-                value: Double(completedSteps.count + (completedSteps.contains(activeStep) ? 0 : 1)),
-                total: Double(OnboardingStep.allCases.count)
-            )
-            .tint(JieziTheme.brand)
-            .padding(.top, 4)
-            .accessibilityLabel("引导进度")
-        }
-        .padding(.top, 24)
-        .padding(.bottom, 22)
-    }
-
-    private func timelineNode(_ step: OnboardingStep) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(spacing: 0) {
-                timelineDot(step)
-                if step.rawValue < OnboardingStep.allCases.count - 1 {
-                    Rectangle()
-                        .fill(completedSteps.contains(step) ? JieziTheme.brand.opacity(0.45) : JieziTheme.line)
-                        .frame(width: 2)
-                        .frame(maxHeight: .infinity)
-                }
-            }
-            .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    guard step.rawValue <= activeStep.rawValue || completedSteps.contains(step) else { return }
-                    activeStep = step
-                } label: {
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(step.eyebrow)
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(stepColor(step))
-                            Text(step.title)
-                                .font(.headline)
-                                .foregroundStyle(JieziTheme.ink)
-                            Text(step.detail)
-                                .font(.caption)
-                                .foregroundStyle(JieziTheme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 8)
-                        if completedSteps.contains(step) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(JieziTheme.brand)
-                        } else if activeStep == step {
-                            Text("当前")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(JieziTheme.brand)
-                        }
+                if activeStep != .welcome {
+                    Button {
+                        guard !isSavingStep,
+                              let previous = OnboardingStep(rawValue: activeStep.rawValue - 1) else { return }
+                        localMessage = nil
+                        activeStep = previous
+                    } label: {
+                        Label("上一步", systemImage: "arrow.left")
+                            .font(JieziType.button)
+                            .frame(minHeight: 44)
                     }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(step.rawValue > activeStep.rawValue && !completedSteps.contains(step))
-
-                if activeStep == step {
-                    Divider()
-                        .overlay(JieziTheme.line)
-                        .padding(.vertical, 14)
-                    stepContent(step)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    if let localMessage {
-                        Text(localMessage)
-                            .font(.caption)
-                            .foregroundStyle(
-                                localMessage.contains("失败") || localMessage.contains("不可用")
-                                    || localMessage.contains("未能打开") || localMessage.contains("无法打开")
-                                    ? JieziTheme.coral : JieziTheme.muted
-                            )
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 10)
-                    }
+                    .foregroundStyle(JieziTheme.brand)
+                    .disabled(isSavingStep)
                 }
             }
-            .padding(16)
-            .background(
-                .white.opacity(activeStep == step ? 0.88 : 0.62),
-                in: RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: JieziRadius.Semantic.card, style: .continuous)
-                    .stroke(activeStep == step ? JieziTheme.brand.opacity(0.2) : JieziTheme.line, lineWidth: 1)
-            }
-            .opacity(step.rawValue > activeStep.rawValue ? 0.58 : 1)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 22)
+            .padding(.top, 24)
+            .padding(.bottom, 24)
         }
-        .animation(JieziEasing.spring, value: activeStep)
-        .animation(JieziEasing.spring, value: completedSteps)
-    }
-
-    private func timelineDot(_ step: OnboardingStep) -> some View {
-        ZStack {
-            Circle()
-                .fill(completedSteps.contains(step) ? JieziTheme.brand : JieziTheme.paper)
-            Circle()
-                .stroke(stepColor(step), lineWidth: activeStep == step ? 2 : 1)
-            if completedSteps.contains(step) {
-                Image(systemName: "checkmark")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white)
-            } else {
-                Image(systemName: step.systemImage)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(stepColor(step))
-            }
-        }
-        .frame(width: 22, height: 22)
+        .scrollIndicators(.hidden)
+        .id(activeStep)
+        .transition(.opacity)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: activeStep)
     }
 
     @ViewBuilder
@@ -466,10 +357,7 @@ struct OnboardingFlowView: View {
         return appState.hasUploadToken ? "登录凭据已同步到本机。" : "登录凭据暂不可用，可稍后在设置检查。"
     }
 
-    private func stepColor(_ step: OnboardingStep) -> Color {
-        if completedSteps.contains(step) || activeStep == step { return JieziTheme.brand }
-        return JieziTheme.muted.opacity(0.7)
-    }
+
 }
 
 private enum OnboardingStep: Int, CaseIterable, Identifiable {
@@ -481,15 +369,7 @@ private enum OnboardingStep: Int, CaseIterable, Identifiable {
 
     var id: Int { rawValue }
 
-    var eyebrow: String {
-        switch self {
-        case .welcome: return "欢迎"
-        case .flow: return "记录如何流动"
-        case .shortcuts: return "设置快捷指令"
-        case .trial: return "试一次"
-        case .ready: return "准备完成"
-        }
-    }
+
 
     var title: String {
         switch self {
@@ -511,13 +391,5 @@ private enum OnboardingStep: Int, CaseIterable, Identifiable {
         }
     }
 
-    var systemImage: String {
-        switch self {
-        case .welcome: return "hand.wave"
-        case .flow: return "arrow.triangle.branch"
-        case .shortcuts: return "bolt.fill"
-        case .trial: return "play.circle"
-        case .ready: return "checkmark.seal"
-        }
-    }
+
 }

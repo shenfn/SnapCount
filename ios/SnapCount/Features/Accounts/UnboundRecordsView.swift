@@ -133,7 +133,7 @@ struct UnboundRecordsView: View {
                     Image(systemName: record.kind.systemImage)
                         .foregroundStyle(record.kind == .income ? JieziTheme.mint : JieziTheme.coral)
                         .frame(width: 34, height: 34)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                        .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(record.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                         Text("\(record.date) · \(record.kind.title)")

@@ -188,12 +188,14 @@ lines.push('    let accent: Color');
 lines.push('    let foreground: Color');
 lines.push('    let muted: Color');
 lines.push('    let surface: Color');
+lines.push('    let glow: Color');
+lines.push('    let glowOpacity: Double');
 lines.push('    let usesDiagonalTexture: Bool');
 lines.push('}');
 lines.push('');
 lines.push('enum JieziScene {');
 Object.entries(tokens.ios_prototype.domains).forEach(([id, scene]) => {
-  lines.push(`    static let ${id} = JieziSceneTokens(background: [${scene.background.map((color) => `Color(jieziHex: "${color}")`).join(', ')}], accent: Color(jieziHex: "${scene.accent}"), foreground: Color(jieziHex: "${scene.foreground}"), muted: Color(jieziHex: "${scene.muted}"), surface: Color(jieziHex: "${scene.surface}"), usesDiagonalTexture: ${scene.texture === 'diagonal'})`);
+  lines.push(`    static let ${id} = JieziSceneTokens(background: [${scene.background.map((color) => `Color(jieziHex: "${color}")`).join(', ')}], accent: Color(jieziHex: "${scene.accent}"), foreground: Color(jieziHex: "${scene.foreground}"), muted: Color(jieziHex: "${scene.muted}"), surface: Color(jieziHex: "${scene.surface}"), glow: Color(jieziHex: "${scene.glow}"), glowOpacity: ${scene.glow_opacity}, usesDiagonalTexture: ${scene.texture === 'diagonal'})`);
 });
 lines.push('');
 lines.push('    static func tokens(for domain: String) -> JieziSceneTokens {');
@@ -387,7 +389,10 @@ lines.push('// MARK: - 字体 Token（HIG 层级）');
 lines.push('');
 lines.push('enum JieziFont {');
 tokens.typography.scale.forEach((f) => {
-  lines.push(`    static let ${f.id} = Font.custom(JieziFontFamily.sans, size: ${f.ios_size}, relativeTo: .${swiftTextStyle(f.id)}).weight(${swiftWeight(f.ios_weight)})`);
+  const font = tokens.typography.font_families.ios.prototype_sans === 'system'
+    ? `Font.system(.${swiftTextStyle(f.id)})`
+    : `Font.custom(JieziFontFamily.sans, size: ${f.ios_size}, relativeTo: .${swiftTextStyle(f.id)})`;
+  lines.push(`    static let ${f.id} = ${font}.weight(${swiftWeight(f.ios_weight)})`);
 });
 lines.push('}');
 lines.push('');
@@ -409,7 +414,13 @@ Object.entries(tokens.typography.roles).forEach(([roleId, role]) => {
   const weight = role.weight_override || base.ios_weight;
   const family = role.numeric ? 'numeric' : role.design === 'serif' ? 'serif' : 'sans';
   lines.push(`    /// ${role.usage}`);
-  lines.push(`    static let ${roleId} = Font.custom(JieziFontFamily.${family}, size: ${base.ios_size}, relativeTo: .${swiftTextStyle(role.ref)}).weight(${swiftWeight(weight)})`);
+  const font = family === 'sans' && tokens.typography.font_families.ios.prototype_sans === 'system'
+    ? `Font.system(.${swiftTextStyle(role.ref)})`
+    : `Font.custom(JieziFontFamily.${family}, size: ${base.ios_size}, relativeTo: .${swiftTextStyle(role.ref)})`;
+  lines.push(`    static let ${roleId} = ${font}.weight(${swiftWeight(weight)})`);
+});
+Object.entries(tokens.ios_prototype.typography).forEach(([roleId, role]) => {
+  lines.push(`    static let ${roleId} = Font.custom(JieziFontFamily.${role.family}, size: ${role.size}, relativeTo: .${role.relative_to}).weight(${swiftWeight(role.weight)})`);
 });
 lines.push('}');
 lines.push('');
@@ -563,8 +574,7 @@ lines.push('}');
 lines.push('');
 
 // MARK: 卡片表面
-const glass = tokens.glass.card;
-const solid = tokens.glass.solid_card;
+const prototypeCard = tokens.ios_prototype.card;
 lines.push('// MARK: - 卡片表面修饰符（玻璃卡 / 实卡）');
 lines.push('');
 lines.push('struct JieziCardStyle: ViewModifier {');
@@ -573,21 +583,13 @@ lines.push('    var solid: Bool = false');
 lines.push('');
 lines.push('    func body(content: Content) -> some View {');
 lines.push('        content');
-lines.push(`            .padding(${glass.padding.value})`);
-lines.push('            .background {');
-lines.push('                if solid {');
-lines.push(`                    RoundedRectangle(cornerRadius: ${solid.radius.value}, style: .continuous)`);
-lines.push('                        .fill(JieziScene.expense.surface)');
-lines.push('                } else {');
-lines.push(`                    RoundedRectangle(cornerRadius: ${glass.radius.value}, style: .continuous)`);
-lines.push('                        .fill(JieziScene.expense.surface)');
-lines.push('                }');
-lines.push('            }');
+lines.push(`            .padding(${tokens.ios_prototype.layout.card_inset})`);
+lines.push(`            .background(JieziScene.expense.surface.opacity(solid ? ${prototypeCard.solid_alpha} : ${prototypeCard.surface_alpha}), in: RoundedRectangle(cornerRadius: ${tokens.ios_prototype.layout.card_radius}, style: .continuous))`);
 lines.push('            .overlay {');
-lines.push(`                RoundedRectangle(cornerRadius: ${glass.radius.value}, style: .continuous)`);
-lines.push(`                    .stroke(palette.brand.opacity(solid ? ${solid.stroke_alpha} : ${glass.stroke_alpha}), lineWidth: 1)`);
+lines.push(`                RoundedRectangle(cornerRadius: ${tokens.ios_prototype.layout.card_radius}, style: .continuous)`);
+lines.push(`                    .stroke(palette.brand.opacity(${prototypeCard.stroke_alpha}), lineWidth: 1)`);
 lines.push('            }');
-lines.push('            .jieziShadow(solid ? JieziShadows.sm(palette) : JieziShadows.Semantic.card(palette))');
+lines.push(`            .shadow(color: palette.space.opacity(solid ? 0 : ${prototypeCard.shadow_alpha}), radius: ${prototypeCard.shadow_radius}, x: 0, y: ${prototypeCard.shadow_y})`);
 lines.push('    }');
 lines.push('}');
 lines.push('');

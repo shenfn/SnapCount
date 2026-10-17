@@ -7,6 +7,8 @@ struct MainShellView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var themeManager: JieziThemeManager
     @State private var showManualRecordSheet = false
+    @State private var showsCalendar = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: appState.selectedDomain.rawValue) }
 
@@ -20,10 +22,16 @@ struct MainShellView: View {
     var body: some View {
         ZStack {
             DomainSceneView(domain: appState.selectedDomain)
+            if !dynamicTypeSize.isAccessibilitySize {
+                DomainCatView(domain: appState.selectedDomain)
+                    .padding(.top, 14)
+                    .padding(.trailing, JieziPrototypeLayout.metric_inset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
             domainPager
         }
-        .overlay(alignment: .top) { shellTopBar }
-        .overlay(alignment: .bottom) { shellBottomBar }
+        .safeAreaInset(edge: .top, spacing: 0) { shellTopBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) { shellBottomBar }
         .task(id: appState.selectedDateKey) {
             await appState.loadRecordDateWindow(around: appState.selectedDateKey)
         }
@@ -52,16 +60,25 @@ struct MainShellView: View {
     private var shellTopBar: some View {
         VStack(spacing: 8) {
             HStack(spacing: JieziSpacing.md) {
-                Image(systemName: "circle.hexagongrid.fill")
-                    .font(.headline)
-                    .foregroundStyle(scene.accent)
-                Text("芥子")
-                    .font(JieziType.cardTitle)
-                    .foregroundStyle(scene.foreground)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("芥子").font(JieziType.prototypeBrand)
+                    Text("JIEZI").font(JieziFont.caption2).tracking(1.5)
+                }
+                .foregroundStyle(scene.foreground)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("芥子")
 
                 syncStatusIcon
 
                 Spacer()
+
+                Button { showsCalendar = true } label: {
+                    Image(systemName: "calendar")
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(scene.surface.opacity(0.55), in: Circle())
+                }
+                .foregroundStyle(scene.foreground)
+                .accessibilityLabel("选择日期，当前\(appState.selectedDateKey)")
 
                 Menu {
                     Button { appState.presentedOverlay = .insights } label: {
@@ -84,7 +101,7 @@ struct MainShellView: View {
                 }
                 .accessibilityLabel("更多功能")
             }
-            DomainDatePickerView()
+            DomainDatePickerView(showsCalendar: $showsCalendar)
         }
         .padding(.horizontal, JieziPrototypeLayout.page_inset)
         .padding(.top, 8)
@@ -96,16 +113,44 @@ struct MainShellView: View {
     }
 
     private var syncStatusIcon: some View {
-        Image(systemName: appState.isSignedIn ? "icloud" : "icloud.slash")
-            .font(.subheadline)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                Image(systemName: appState.isSignedIn ? "icloud" : "iphone")
+                    .frame(minWidth: 44, minHeight: 44)
+            } else {
+                Label(appState.isSignedIn ? "已登录" : "本地模式",
+                      systemImage: appState.isSignedIn ? "icloud" : "iphone")
+                    .fixedSize()
+            }
+        }
+            .font(JieziFont.caption2)
             .foregroundStyle(scene.muted)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(scene.surface.opacity(0.55), in: Capsule())
             .accessibilityLabel(appState.isSignedIn ? "已登录" : "本地模式")
     }
 
     // MARK: - 底部栏（SHELL-003）
 
     private var shellBottomBar: some View {
-        HStack {
+        ViewThatFits(in: .horizontal) {
+            bottomControls(compact: false)
+            VStack(spacing: 0) {
+                domainPageButtons
+                bottomControls(compact: true)
+            }
+        }
+        .padding(.horizontal, JieziPrototypeLayout.page_inset)
+        .padding(.vertical, 8)
+        .background {
+            LinearGradient(colors: scene.background, startPoint: .top, endPoint: .bottom)
+        }
+        .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
+    }
+
+    private func bottomControls(compact: Bool) -> some View {
+        HStack(spacing: 8) {
             Button {
                 appState.presentedOverlay = .inbox
             } label: {
@@ -114,6 +159,7 @@ struct MainShellView: View {
                         .font(.system(size: 15, weight: .semibold))
                     Text("待确认")
                         .font(JieziFont.caption)
+                        .fixedSize()
                     Text("\(appState.dashboard.pendingCount)")
                         .font(JieziType.moneyInline.monospacedDigit())
                         .contentTransition(.numericText())
@@ -130,24 +176,28 @@ struct MainShellView: View {
 
             Spacer()
 
-            HStack(spacing: JieziPrototypeLayout.page_dot_gap) {
-                ForEach(AppDomain.allCases) { domain in
-                    Button {
-                        appState.selectedDomain = domain
-                    } label: {
-                        Capsule()
-                            .fill(domain == appState.selectedDomain ? scene.accent : scene.foreground.opacity(0.30))
-                            .frame(
-                                width: domain == appState.selectedDomain ? JieziPrototypeLayout.selected_page_width : JieziPrototypeLayout.page_dot_size,
-                                height: JieziPrototypeLayout.page_dot_size
-                            )
-                            .frame(minWidth: JieziPrototypeLayout.page_dot_hit_width, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                        .accessibilityLabel(domain.title)
-                        .accessibilityAddTraits(domain == appState.selectedDomain ? .isSelected : [])
+            VStack(spacing: 5) {
+                if !compact {
+                    domainPageButtons
                 }
+                Menu {
+                    ForEach(AppDomain.allCases) { domain in
+                        Button { appState.selectedDomain = domain } label: {
+                            Label(domain.title, systemImage: domain == appState.selectedDomain ? "checkmark" : domain.systemImage)
+                        }
+                    }
+                } label: {
+                    VStack(spacing: 1) {
+                        Text(appState.selectedDomain.title).font(JieziFont.caption)
+                        if !compact && !dynamicTypeSize.isAccessibilitySize {
+                            Text(domainEnglishName).font(JieziFont.caption2)
+                        }
+                    }
+                    .fixedSize()
+                    .frame(minWidth: 44, minHeight: 44)
+                    .foregroundStyle(scene.foreground)
+                }
+                .accessibilityLabel("当前\(appState.selectedDomain.title)，选择领域")
             }
 
             Spacer()
@@ -163,12 +213,37 @@ struct MainShellView: View {
             }
             .accessibilityLabel("记一笔")
         }
-        .padding(.horizontal, JieziPrototypeLayout.page_inset)
-        .padding(.vertical, 8)
-        .background {
-            LinearGradient(colors: scene.background, startPoint: .top, endPoint: .bottom)
+    }
+
+    private var domainPageButtons: some View {
+        HStack(spacing: 0) {
+            ForEach(AppDomain.allCases) { domain in
+                Button { appState.selectedDomain = domain } label: {
+                    Capsule()
+                        .fill(domain == appState.selectedDomain ? scene.accent : scene.foreground.opacity(0.30))
+                        .frame(
+                            width: domain == appState.selectedDomain ? JieziPrototypeLayout.selected_page_width : JieziPrototypeLayout.page_dot_size,
+                            height: JieziPrototypeLayout.page_dot_size
+                        )
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(domain.title)
+                .accessibilityAddTraits(domain == appState.selectedDomain ? .isSelected : [])
+            }
         }
-        .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var domainEnglishName: String {
+        switch appState.selectedDomain {
+        case .expense: return "Expense"
+        case .sleep: return "Sleep"
+        case .food: return "Food"
+        case .sport: return "Movement"
+        case .reading: return "Reading"
+        }
     }
 
     // MARK: - 覆盖层（SHELL-004）

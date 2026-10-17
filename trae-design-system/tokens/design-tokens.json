@@ -247,7 +247,7 @@
         "system": ".system",
         "default_rounded": ".system(.rounded, design: .rounded)",
         "default_serif": ".system(.serif, design: .serif)",
-        "prototype_sans": "NotoSansSC-Thin",
+        "prototype_sans": "system",
         "prototype_serif": "NotoSerifSC-ExtraLight",
         "prototype_numeric": "Nunito-ExtraLight"
       },
@@ -471,12 +471,20 @@
 
   "ios_prototype": {
     "$description": "Jiezi App.dc.html iOS 场景、布局和动作参数。独立于 PWA theme，避免 iOS 原型换肤隐性改变网页。",
+    "card": { "surface_alpha": 0.66, "solid_alpha": 0.92, "stroke_alpha": 0.11, "shadow_alpha": 0.07, "shadow_radius": 22, "shadow_y": 12 },
+    "typography": {
+      "prototypeBrand": { "family": "serif", "size": 20, "relative_to": "title2", "weight": "bold" },
+      "prototypeHero": { "family": "numeric", "size": 44, "relative_to": "largeTitle", "weight": "bold" },
+      "prototypeSleepHero": { "family": "numeric", "size": 40, "relative_to": "largeTitle", "weight": "bold" },
+      "prototypeBook": { "family": "serif", "size": 28, "relative_to": "title", "weight": "bold" },
+      "prototypeOnboarding": { "family": "serif", "size": 32, "relative_to": "largeTitle", "weight": "bold" }
+    },
     "domains": {
-      "expense": { "background": ["#EADCC4", "#F1E8D8", "#F5F1E7"], "accent": "#426E63", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none" },
-      "sleep":   { "background": ["#1C2140", "#17312D", "#0F1E1C"], "accent": "#DCBF74", "foreground": "#F5F1E7", "muted": "#C7C9D0", "surface": "#10211F", "texture": "none" },
-      "food":    { "background": ["#F2DCC4", "#F4EADB", "#F5F1E7"], "accent": "#C2410C", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none" },
-      "sport":   { "background": ["#D5E2D6", "#E6EBE0", "#F5F1E7"], "accent": "#426E63", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none" },
-      "reading": { "background": ["#4A5E6E", "#43566A", "#10211F"], "accent": "#DCBF74", "foreground": "#F5F1E7", "muted": "#C7C9D0", "surface": "#17312D", "texture": "diagonal" }
+      "expense": { "background": ["#EADCC4", "#F1E8D8", "#F5F1E7"], "accent": "#426E63", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none", "glow": "#DCBF74", "glow_opacity": 0.45 },
+      "sleep":   { "background": ["#1C2140", "#17312D", "#0F1E1C"], "accent": "#DCBF74", "foreground": "#F5F1E7", "muted": "#C7C9D0", "surface": "#10211F", "texture": "none", "glow": "#6E78C8", "glow_opacity": 0.35 },
+      "food":    { "background": ["#F2DCC4", "#F4EADB", "#F5F1E7"], "accent": "#C2410C", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none", "glow": "#EA580C", "glow_opacity": 0.22 },
+      "sport":   { "background": ["#D5E2D6", "#E6EBE0", "#F5F1E7"], "accent": "#426E63", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none", "glow": "#DCBF74", "glow_opacity": 0.4 },
+      "reading": { "background": ["#4A5E6E", "#43566A", "#10211F"], "accent": "#DCBF74", "foreground": "#F5F1E7", "muted": "#C7C9D0", "surface": "#17312D", "texture": "diagonal", "glow": "#10211F", "glow_opacity": 0 }
     },
     "cat_paths": {
       "expense": "M 42 142 C 25 131 23 158 39 163 C 58 170 66 155 67 140 C 68 121 77 112 80 102 C 70 96 67 88 70 77 C 69 65 69 55 73 48 C 81 54 87 61 91 65 C 101 61 113 61 123 65 C 129 59 137 51 142 49 C 144 58 143 70 140 78 C 146 90 137 103 124 106 C 122 114 114 119 108 125 C 101 133 105 143 114 144 C 123 145 135 138 137 127 C 139 114 128 107 117 111 C 102 116 104 138 117 142 C 129 146 141 151 138 162 C 135 173 147 177 166 177",
@@ -488,6 +496,9 @@
     "layout": {
       "page_inset": 14,
       "metric_inset": 20,
+      "hero_min_height": 170,
+      "cat_width": 140,
+      "cat_height": 150,
       "column_gap": 12,
       "card_inset": 16,
       "card_radius": 24,

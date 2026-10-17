@@ -101,7 +101,7 @@ struct InboxView: View {
             }
         }
         .navigationTitle("收件箱")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .navigationDestination(for: NativeInboxRoute.self) { route in
             switch route {
@@ -2654,7 +2654,7 @@ private struct StagingRecordDetailView: View {
             }
         }
         .navigationTitle("待处理详情")
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .confirmationDialog("确认销毁这条待处理截图？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
             Button("销毁", role: .destructive) {
                 Task {

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct DomainDatePickerView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var showsCalendar = false
+    @Binding var showsCalendar: Bool
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: appState.selectedDomain.rawValue) }
 
@@ -16,34 +16,11 @@ struct DomainDatePickerView: View {
     }
 
     var body: some View {
+        let groups = weekGroups
         VStack(spacing: 9) {
-            HStack {
-                Button {
-                    showsCalendar = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(NativeLocalDate.monthTitle(NativeLocalDate.monthKey(from: appState.selectedDateKey) ?? ""))
-                            .font(JieziType.cardTitle)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(scene.foreground)
-                    .frame(minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("选择日期，当前\(appState.selectedDateKey)")
-
-                Spacer()
-
-                Text(NativeLocalDate.weekdayShortLabel(for: appState.selectedDateKey) ?? "")
-                    .font(JieziFont.caption)
-                    .foregroundStyle(scene.muted)
-            }
-
             HStack(spacing: 6) {
                 ForEach(weekDates, id: \.self) { dateKey in
-                    let count = weekGroups.first(where: { $0.dateKey == dateKey })?.records.filter(NativeRecordQuery.isFormal).count ?? 0
+                    let count = groups.first(where: { $0.dateKey == dateKey })?.records.filter(NativeRecordQuery.isFormal).count ?? 0
                     let isSelected = dateKey == appState.selectedDateKey
                     Button {
                         appState.selectedDateKey = dateKey
@@ -98,19 +75,28 @@ private struct DomainCalendarSheet: View {
     }
     private var dayGroups: [NativeDayRecordGroup] { appState.recordGroups(monthKey: monthKey) }
     private var dailyExpense: [String: Double] { appState.dailyExpenseAmounts(monthKey: monthKey) }
-    private var maxExpense: Double { dailyExpense.values.max() ?? 0 }
     private var monthIsLoading: Bool { appState.loadingRecordMonthKey == monthKey }
     private var monthLoadError: String? { appState.recordMonthMessages[monthKey] }
     private var monthHasLoaded: Bool { appState.hasLoadedRecordMonth(monthKey) }
 
     var body: some View {
+        let groups = dayGroups
+        let expenses = dailyExpense
+        let maximum = expenses.values.max() ?? 0
         ZStack {
             JieziTheme.pageBackground.ignoresSafeArea()
-            VStack(spacing: 14) {
-                header
-                weekdayHeader
-                calendarGrid
-                previewSummary
+            ScrollView {
+                VStack(spacing: 14) {
+                    header
+                    weekdayHeader
+                    calendarGrid(groups: groups, expenses: expenses, maximum: maximum)
+                    previewSummary(groups: groups)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 HStack(spacing: 10) {
                     JieziSecondaryButton(title: "取消") { dismiss() }
                     JieziPrimaryButton(title: "查看这一天", systemImage: "arrow.right") {
@@ -118,11 +104,10 @@ private struct DomainCalendarSheet: View {
                         dismiss()
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(JieziTheme.pageBackground)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 20)
-            .frame(maxHeight: .infinity, alignment: .top)
         }
         .task(id: monthKey) {
             await appState.loadRecordMonth(monthKey)
@@ -169,21 +154,21 @@ private struct DomainCalendarSheet: View {
         }
     }
 
-    private var calendarGrid: some View {
+    private func calendarGrid(groups: [NativeDayRecordGroup], expenses: [String: Double], maximum: Double) -> some View {
         LazyVGrid(columns: columns, spacing: 6) {
             ForEach(0..<leadingBlankCount, id: \.self) { _ in
                 Color.clear.frame(height: JieziPrototypeLayout.calendar_day_height).accessibilityHidden(true)
             }
             ForEach(days, id: \.self) { dateKey in
-                calendarDay(dateKey)
+                calendarDay(dateKey, groups: groups, expenses: expenses, maximum: maximum)
             }
         }
     }
 
-    private func calendarDay(_ dateKey: String) -> some View {
+    private func calendarDay(_ dateKey: String, groups: [NativeDayRecordGroup], expenses: [String: Double], maximum: Double) -> some View {
         let isSelected = previewDateKey == dateKey
-        let count = dayGroups.first(where: { $0.dateKey == dateKey })?.records.filter(NativeRecordQuery.isFormal).count ?? 0
-        let heat = maxExpense > 0 ? min((dailyExpense[dateKey] ?? 0) / maxExpense, 1) : 0
+        let count = groups.first(where: { $0.dateKey == dateKey })?.records.filter(NativeRecordQuery.isFormal).count ?? 0
+        let heat = maximum > 0 ? min((expenses[dateKey] ?? 0) / maximum, 1) : 0
         return Button {
             previewDateKey = dateKey
             JieziHaptics.tap()
@@ -212,8 +197,8 @@ private struct DomainCalendarSheet: View {
         .accessibilityLabel("\(dateKey)，\(count) 条正式记录\(heat > 0 ? "，有支出" : "")\(isSelected ? "，预览日期" : "")")
     }
 
-    private var previewSummary: some View {
-        let count = dayGroups.first(where: { $0.dateKey == previewDateKey })?.records.filter(NativeRecordQuery.isFormal).count ?? 0
+    private func previewSummary(groups: [NativeDayRecordGroup]) -> some View {
+        let count = groups.first(where: { $0.dateKey == previewDateKey })?.records.filter(NativeRecordQuery.isFormal).count ?? 0
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("预览 · \(previewDateKey)")

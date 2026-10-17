@@ -103,7 +103,7 @@ private struct AccountRowView: View {
             Image(systemName: account.type.systemImage)
                 .foregroundStyle(account.type.isLiability ? JieziTheme.coral : JieziTheme.brand)
                 .frame(width: 34, height: 34)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(account.title).font(.subheadline.weight(.semibold))
