@@ -140,8 +140,12 @@ final class IOSPrototypeRenderingTests: XCTestCase {
             let state = try makeIsolatedState()
             state.selectedDateKey = date
             state.selectedDomain = .food
-            let view = ZStack {
+            let view = ZStack(alignment: .topTrailing) {
                 DomainSceneView(domain: .food)
+                if !size.isAccessibilitySize {
+                    DomainCatView(domain: .food)
+                        .padding(.trailing, JieziPrototypeLayout.metric_inset)
+                }
                 NativeDomainPageContent(
                     domain: .food, weekDates: model.weeklyValues.map(\.dateKey),
                     details: [meal.reference: detail], loadingWindow: false, model: model

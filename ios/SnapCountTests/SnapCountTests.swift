@@ -2727,6 +2727,48 @@ final class SnapCountTests: XCTestCase {
     }
 
     @MainActor
+    func testIOSV2POLISH002AF03CancelledPageAndSameMonthReentryAwaitReadableRecords() async {
+        let started = expectation(description: "历史月请求已开始")
+        var releaseFetch: CheckedContinuation<Void, Never>?
+        let remote = NativeDayRecord(
+            id: "reentry-sport", reference: "data/reentry-sport", dateKey: "2000-01-05",
+            kind: .sport, domainKey: "sport", title: "散步", subtitle: "30 分钟", value: "",
+            timeLabel: "09:00", systemImage: "figure.walk", status: "done"
+        )
+        let repository = RecordRepositoryStub(onMonthFetch: { _ in
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                releaseFetch = continuation
+                started.fulfill()
+            }
+            try Task.checkCancellation()
+            return NativeRecordMonthSnapshot(
+                groups: [NativeDayRecordGroup(dateKey: remote.dateKey, records: [remote])], details: [:]
+            )
+        })
+        let state = AppState(recordRepository: repository, sessionProvider: { _ in Self.expressionTestSession })
+        state.isSignedIn = true
+        state.currentUserId = Self.expressionTestSession.user.id
+        let firstPage = Task { @MainActor in await state.loadRecordMonth("2000-01") }
+        await fulfillment(of: [started], timeout: 5)
+        guard releaseFetch != nil else { firstPage.cancel(); return }
+        firstPage.cancel()
+
+        // 直接进入新调用；它必须挂起等待共享读取，不能因“同月正在读取”立即返回。
+        let release = Task { @MainActor in
+            await Task.yield()
+            releaseFetch?.resume()
+            releaseFetch = nil
+        }
+        await state.loadRecordMonth("2000-01")
+        XCTAssertTrue(state.recordGroups(monthKey: "2000-01").flatMap(\.records).contains { $0.reference == remote.reference })
+        await release.value
+        await firstPage.value
+        XCTAssertNil(state.recordMonthMessages["2000-01"], "页面取消不是业务读取失败")
+        XCTAssertNil(state.loadingRecordMonthKey)
+        XCTAssertEqual(repository.fetchMonthCount, 1, "同月重入复用正在执行的读取")
+    }
+
+    @MainActor
     func testIOSV2POLISH002RetryReloadsCachedDateWindowAndClearsError() async {
         let repository = RecordRepositoryStub()
         let state = AppState(
@@ -3802,6 +3844,7 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     private let acknowledgedFeedback: NativeAIFeedback?
     private let createReference: String
     private let onAcknowledgementStarted: (@MainActor () async -> Void)?
+    private let onMonthFetch: (@MainActor (String) async throws -> NativeRecordMonthSnapshot)?
     private var acknowledgementFailuresRemaining: Int
     private(set) var expressionPlanLookupCount = 0
     private(set) var acknowledgementCount = 0
@@ -3815,7 +3858,8 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
         acknowledgedFeedback: NativeAIFeedback? = nil,
         createReference: String = "expense/record-1",
         acknowledgementFailuresRemaining: Int = 0,
-        onAcknowledgementStarted: (@MainActor () async -> Void)? = nil
+        onAcknowledgementStarted: (@MainActor () async -> Void)? = nil,
+        onMonthFetch: (@MainActor (String) async throws -> NativeRecordMonthSnapshot)? = nil
     ) {
         self.details = details
         self.expressionPlanLookups = expressionPlanLookups
@@ -3823,11 +3867,13 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
         self.createReference = createReference
         self.acknowledgementFailuresRemaining = acknowledgementFailuresRemaining
         self.onAcknowledgementStarted = onAcknowledgementStarted
+        self.onMonthFetch = onMonthFetch
     }
 
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
         fetchMonthCount += 1
         fetchMonthKeys.append(monthKey)
+        if let onMonthFetch { return try await onMonthFetch(monthKey) }
         return NativeRecordMonthSnapshot(groups: [], details: [:])
     }
 

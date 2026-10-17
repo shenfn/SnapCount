@@ -52,10 +52,11 @@ struct NativeDomainPageContent: View {
                 if let stateMessage = model.stateMessage {
                     loadStateCard(stateMessage)
                 } else {
+                    dailyHero
+
                     if let refreshMessage = model.refreshMessage {
                         loadStateCard(refreshMessage)
                     }
-                    dailyHero
 
                     if let measurementNote = model.measurementNote {
                         Text(measurementNote)
