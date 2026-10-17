@@ -15,6 +15,13 @@ struct InsightsView: View {
     @State private var mode: Mode = .report
     @State private var range: NativeInsightRange = .fourteen
     @State private var question = "这个月钱够不够花？每天最好控制在多少钱，还能不能存下钱？"
+    let initialMonthKey: String
+    let initialDomainKey: String
+
+    init(initialMonthKey: String = NativeMonthKey.current(), initialDomainKey: String = "expense") {
+        self.initialMonthKey = initialMonthKey
+        self.initialDomainKey = initialDomainKey
+    }
 
     private let quickQuestions = [
         "这个月钱够不够花？",
@@ -38,7 +45,7 @@ struct InsightsView: View {
                     .pickerStyle(.segmented)
 
                     if mode == .report {
-                        MonthlyReportContent()
+                        MonthlyReportContent(initialMonthKey: initialMonthKey, initialDomainKey: initialDomainKey)
                     } else {
                         Picker("分析范围", selection: $range) {
                             ForEach(NativeInsightRange.allCases) { item in

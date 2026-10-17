@@ -287,7 +287,12 @@ struct MainShellView: View {
             .environmentObject(themeManager)
         case .insights:
             NavigationStack {
-                overlayRoot { InsightsView() }
+                overlayRoot {
+                    InsightsView(
+                        initialMonthKey: NativeLocalDate.monthKey(from: appState.selectedDateKey) ?? NativeMonthKey.current(),
+                        initialDomainKey: appState.selectedDomain.rawValue
+                    )
+                }
             }
             .environmentObject(appState)
             .environmentObject(themeManager)

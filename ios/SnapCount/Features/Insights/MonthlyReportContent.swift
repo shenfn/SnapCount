@@ -6,6 +6,11 @@ struct MonthlyReportContent: View {
     @State private var selectedMonthKey = Self.currentMonthKey
     @State private var selectedDomainKey = "expense"
 
+    init(initialMonthKey: String = NativeMonthKey.current(), initialDomainKey: String = "expense") {
+        _selectedMonthKey = State(initialValue: initialMonthKey)
+        _selectedDomainKey = State(initialValue: initialDomainKey)
+    }
+
     private var snapshot: DashboardSnapshot { appState.reportSnapshot(monthKey: selectedMonthKey) }
     private var domains: [NativeDomainDefinition] { snapshot.domains }
     private var selectedDomain: NativeDomainDefinition? {
