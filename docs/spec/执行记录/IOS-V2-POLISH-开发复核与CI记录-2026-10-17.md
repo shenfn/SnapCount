@@ -60,4 +60,17 @@
 
 当前远端执行状态：第二轮成功。代码验证对象始终是 `625abfe6b562014447d3b51375d96295d1f2c80c`；后续仅本记录证据回填不代表又一次代码构建。
 
-未执行：真机视觉/手势/VoiceOver/快捷指令安装及真实回调、Archive/IPA 包体核验、TestFlight 上传、生产部署或主线合并。第 2 节需求缺项仍未完成，不能用 CI 绿灯消除。
+截至上述 CI 核查完成时未执行：真机视觉/手势/VoiceOver/快捷指令安装及真实回调、Archive/IPA 包体核验、TestFlight 上传、生产部署或主线合并。第 2 节需求缺项仍未完成，不能用 CI 绿灯消除。后续 TestFlight 授权与结果见第 6 节。
+
+## 6. 用户追加授权的 TestFlight 预览
+
+用户随后明确要求“触发 TestFlight”。本次按已验证代码发布预览，不将未通过的原型/真机验收描述为完成。
+
+- 固定提交：`625abfe6b562014447d3b51375d96295d1f2c80c`，对应第 5 节成功 macOS Build 与 332 项 XCTest。
+- 固定标签：`codex/ios-v2-polish-preview-20261017`，已推送；没有改写分支/标签或合并主线。
+- 上传工作流：https://github.com/shenfn/SnapCount/actions/runs/39013041290 。触发时间：2026-10-17 15:16:48（Asia/Shanghai）。
+- 工作流使用 github.run_id 写入构建号，本次为 `39013041290`，不是 workflow 的顺序编号。
+- 最终状态：工作流成功，Archive、Export IPA 与上传均通过；Apple 工具日志明确为 `UPLOAD SUCCEEDED with no errors`、`No errors uploading archive`。
+- IPA 内 Info.plist 实际打印构建号 `39013041290`，与前述预期一致。上传成功时间：2026-10-17 15:23:18；工作流完成时间：15:23:24（Asia/Shanghai）。
+- GitHub 保存 `SnapCount-ipa` artifact，ID `12093727550`；artifact ZIP 为 37,777,358 字节。此数值不是 App Store 下载/安装体积，尚未核实设备安装后占用。
+- 尚未独立核实 Apple 后续处理、测试组可见性或设备可安装状态；没有主线合并或后端生产部署。第 2 节视觉/功能缺项和真机验收仍保留。
