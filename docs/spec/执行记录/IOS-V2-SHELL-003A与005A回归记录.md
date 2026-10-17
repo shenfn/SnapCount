@@ -48,3 +48,14 @@
 - 记录、收件箱、观察、钱包、设置覆盖层可关闭；关闭后返回原领域，详情导航仍正常。
 - 首次启动时记录覆盖层与引导的呈现顺序，以及动态字体下顶底栏避让，尚未实测。
 - 猫、背景、转场、领域明细和日历不在本轮验收结论内。
+
+## 骨架 TestFlight 预览（后续单独授权）
+
+- 用户在两项修复验证完成后明确要求上传，授权仅用于本版效果预览。
+- 固定代码提交：`b3bce8f3ba4ff7d5348ae3109becd3bcc888169b`，对应上方已通过的 macOS Build/320 个 XCTest。
+- 固定标签：`codex/ios-v2-shell-preview-20261017`；未使用根工作区 WIP 或未验证的新代码。
+- 手动触发：[TestFlight workflow 39003054063](https://github.com/shenfn/SnapCount/actions/runs/39003054063)，已核对 `head_sha`；工作流 `run_number = 121`。
+- 最终状态：工作流 `completed / success`，真机 Release 归档、IPA 导出、TestFlight 上传和 IPA artifact 步骤全部通过；上传日志明确返回 `UPLOAD SUCCEEDED with no errors`。
+- 实际 IPA `CFBundleVersion = 39003054063`，已从 Upload 步骤解包读取的 Info.plist 日志核对；`121` 仅为 GitHub 工作流序号，不是实际安装包构建号。
+- 上传完成时间：2026-10-17 12:40:18（Asia/Shanghai）；来源提交与固定标签再次核对一致。
+- Apple 处理完成及 iPhone 安装、视觉/交互体验仍需独立确认；未执行主线合并或后端生产部署。
