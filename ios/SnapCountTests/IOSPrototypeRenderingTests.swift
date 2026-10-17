@@ -57,7 +57,6 @@ final class IOSPrototypeRenderingTests: XCTestCase {
                 }
                 .environmentObject(state)
                 .environment(\.dynamicTypeSize, size)
-                .environment(\.accessibilityReduceMotion, true)
                 try await capture(view, name: "content-\(domain.rawValue)-\(size)")
             }
         }
@@ -73,7 +72,6 @@ final class IOSPrototypeRenderingTests: XCTestCase {
                 .environmentObject(state)
                 .environmentObject(JieziThemeManager.shared)
                 .environment(\.dynamicTypeSize, size)
-                .environment(\.accessibilityReduceMotion, true)
             try await capture(view, name: "shell-empty-\(size)", height: 844)
         }
     }
@@ -96,7 +94,6 @@ final class IOSPrototypeRenderingTests: XCTestCase {
             let view = OnboardingFlowView()
                 .environmentObject(try makeIsolatedState())
                 .environment(\.dynamicTypeSize, size)
-                .environment(\.accessibilityReduceMotion, true)
             try await capture(view, name: "onboarding-welcome-\(size)", height: 844)
         }
     }
