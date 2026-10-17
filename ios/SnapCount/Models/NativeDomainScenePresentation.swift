@@ -17,6 +17,19 @@ struct NativeMerchantSummary: Identifiable {
     var id: String { name }
 }
 
+struct NativeTimelineEntry: Identifiable {
+    let record: NativeDayRecord
+    let minute: Int
+    var id: String { record.reference }
+}
+
+struct NativeSleepInterval: Identifiable {
+    let record: NativeDayRecord
+    let start: Date
+    let end: Date
+    var id: String { record.reference }
+}
+
 struct NativeDomainScenePresentation {
     private static let signposter = OSSignposter(subsystem: "com.jiezi.app", category: "DomainScene")
     let dateKey: String
@@ -31,6 +44,17 @@ struct NativeDomainScenePresentation {
     let knownPrimaryTotal: Double?
     let stateMessage: String?
     let merchants: [NativeMerchantSummary]
+
+    // 场景 003/004 的测试接缝；先在 macOS 证明缺失区块的业务红灯。
+    var timeline: [NativeTimelineEntry] { [] }
+    var sleepRanges: [NativeSleepInterval] { [] }
+    var periodRecordCount: Int { 0 }
+    var periodTotal: Double? { nil }
+    var validDayCount: Int { 0 }
+    var periodDailyAverage: Double? { nil }
+    var periodTypes: [String] { [] }
+    var highestMeal: NativeDayRecord? { nil }
+    var previousExpenseTotal: Double? { nil }
 
     static func trendDateKeys(for domain: AppDomain, dateKey: String) -> [String] {
         switch domain {
