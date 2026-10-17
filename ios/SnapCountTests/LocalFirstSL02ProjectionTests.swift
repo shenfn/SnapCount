@@ -280,6 +280,9 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
                 .flatMap(\.records).first { $0.domainKey == domain.rawValue })
             let deleted = await reopenedState.deleteRecord(reference: record.reference)
             XCTAssertTrue(deleted)
+            XCTAssertFalse(reopenedState.recordGroups(monthKey: monthKey)
+                .flatMap(\.records).contains { $0.reference == record.reference },
+                "正式列表也必须移除已删除记录，不能只改域页计数")
             let emptyModel = NativeDomainPageModel.make(domain: domain, dashboard: reopenedState.dashboard)
             XCTAssertTrue(emptyModel.showsContentEmptyState, "删除最后一条\(domain.title)记录后应显示空态")
             XCTAssertEqual(emptyModel.domainRecordCount, 0)

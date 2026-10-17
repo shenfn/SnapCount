@@ -793,10 +793,15 @@ final class AppState: ObservableObject {
     }
 
     func recordGroups(monthKey: String) -> [NativeDayRecordGroup] {
+        let local = (localExpenseMonthGroups[monthKey] ?? []) + (localRecordMonthGroups[monthKey] ?? [])
+        // 成功读取的本地月份（包括空月）是未登录态权威，不能把已删除的旧 Dashboard 投影合并回来。
+        if !isSignedIn,
+           localExpenseMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil {
+            return Self.mergeRecordGroups(local: local, remote: [])
+        }
         let remote = monthKey == Self.currentMonthKey
             ? dashboard.dayRecordGroups
             : (remoteRecordMonthGroups[monthKey] ?? [])
-        let local = (localExpenseMonthGroups[monthKey] ?? []) + (localRecordMonthGroups[monthKey] ?? [])
         guard !local.isEmpty else { return remote }
         return Self.mergeRecordGroups(local: local, remote: remote)
     }
