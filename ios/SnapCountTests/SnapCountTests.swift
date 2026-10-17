@@ -3,6 +3,19 @@ import UIKit
 @testable import SnapCount
 
 final class SnapCountTests: XCTestCase {
+    func testIOSV2POLISH004SleepSevenNightsEndOnSelectedMondayAcrossMonth() {
+        // 2026-10-05 为周一：近七夜必须包括九月末，不能变成 10/05～10/11。
+        let result = NativeDomainScenePresentation.make(
+            domain: .sleep, dateKey: "2026-10-05", weekGroups: [], details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: "2026-10-05"
+        )
+        XCTAssertEqual(result.weeklyValues.map(\.dateKey), [
+            "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02",
+            "2026-10-03", "2026-10-04", "2026-10-05"
+        ])
+        XCTAssertTrue(result.weeklyValues.allSatisfy { $0.value == nil })
+    }
+
     func testLocalDateKeyUsesShanghaiCalendarDay() {
         XCTAssertEqual(NativeLocalDate.dateKey("2026-07-17T16:30:00Z"), "2026-07-18")
         XCTAssertEqual(NativeLocalDate.dateKey("2026-07-18T00:30:00+08:00"), "2026-07-18")
