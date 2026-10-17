@@ -96,17 +96,22 @@ struct AccountsView: View {
 }
 
 private struct AccountRowView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let account: NativeAccount
 
     var body: some View {
-        HStack(spacing: 12) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Image(systemName: account.type.systemImage)
                 .foregroundStyle(account.type.isLiability ? JieziTheme.coral : JieziTheme.brand)
                 .frame(width: 34, height: 34)
                 .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(account.title).font(.subheadline.weight(.semibold))
+                    Text(account.title).font(JieziType.cardTitle)
+                        .fixedSize(horizontal: false, vertical: true)
                     if account.isDefaultExpense { Image(systemName: "arrow.up.circle.fill") }
                     if account.isDefaultIncome { Image(systemName: "arrow.down.circle.fill") }
                 }
@@ -116,7 +121,7 @@ private struct AccountRowView: View {
             }
             Spacer()
             Text(String(format: "¥%.2f", account.currentBalance))
-                .font(.subheadline.monospacedDigit())
+                .font(JieziType.moneyInline.monospacedDigit())
         }
     }
 }
@@ -154,7 +159,8 @@ struct AccountDetailView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text(String(format: "¥%.2f", account.currentBalance))
-                                .font(.largeTitle.bold().monospacedDigit())
+                                .font(JieziType.prototypeHero.monospacedDigit())
+                                .fixedSize(horizontal: false, vertical: true)
                             Text(account.type.title + (account.institution.isEmpty ? "" : " · \(account.institution)"))
                                 .foregroundStyle(.secondary)
                         }

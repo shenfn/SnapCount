@@ -453,10 +453,11 @@ private struct InboxThumbnailFallback: View {
 
 private struct InboxCategoryView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let filter: NativeInboxFilter
 
-    @State private var columnCount = 2
+    @State private var columnCount = 1
     @State private var stageRecordId: String?
     @State private var pendingInlineContext: PendingEditorContext?
 
@@ -615,7 +616,7 @@ private struct InboxCategoryView: View {
         LazyVGrid(
             columns: Array(
                 repeating: GridItem(.flexible(minimum: 0), spacing: JieziSpacing.lg, alignment: .top),
-                count: columnCount
+                count: dynamicTypeSize.isAccessibilitySize ? 1 : columnCount
             ),
             spacing: JieziSpacing.xl2
         ) {
@@ -631,10 +632,10 @@ private struct InboxCategoryView: View {
             Button {
                 pendingInlineContext = PendingEditorContext(itemId: item.id, reference: pending.reference)
             } label: {
-                NativeInboxFilmCard(
+                NativeInboxItemRow(
                     item: item,
                     repaymentCandidate: nil,
-                    isSingleColumn: columnCount == 1
+                    showThumbnail: dynamicTypeSize.isAccessibilitySize || columnCount == 1
                 )
             }
             .buttonStyle(.plain)
@@ -643,10 +644,10 @@ private struct InboxCategoryView: View {
             Button {
                 stageRecordId = record.id
             } label: {
-                NativeInboxFilmCard(
+                NativeInboxItemRow(
                     item: item,
                     repaymentCandidate: appState.repaymentCandidates[record.id],
-                    isSingleColumn: columnCount == 1
+                    showThumbnail: dynamicTypeSize.isAccessibilitySize || columnCount == 1
                 )
             }
             .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
@@ -672,273 +673,6 @@ private enum InboxVisualStyle {
         case .repair: return Color(hex: "8B5A2B")
         case .all: return JieziTheme.ink
         }
-    }
-}
-
-private struct NativeInboxFilmCard: View {
-    let item: NativeInboxItem
-    let repaymentCandidate: NativeRepaymentCandidate?
-    var isSingleColumn = false
-
-    private var imageURL: URL? {
-        item.stagingRecord?.imageURL ?? item.pendingExpense?.imageURL
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: JieziSpacing.sm) {
-            mediaSurface
-            caption
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private var mediaSurface: some View {
-        if isSingleColumn, imageURL != nil {
-            singleColumnMediaSurface
-        } else {
-            fixedAspectMediaSurface
-        }
-    }
-
-    private var singleColumnMediaSurface: some View {
-        ZStack(alignment: .topLeading) {
-            filmContent
-                .frame(maxWidth: .infinity)
-                .clipped()
-            InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
-                .padding(JieziSpacing.sm)
-        }
-        .frame(maxWidth: .infinity)
-        .background(JieziTheme.paper.opacity(0.74))
-        .clipShape(mediaShape)
-        .overlay {
-            mediaShape.stroke(statusColor.opacity(0.14), lineWidth: 1)
-        }
-        .shadow(color: JieziTheme.space.opacity(0.07), radius: 10, x: 0, y: 6)
-    }
-
-    private var fixedAspectMediaSurface: some View {
-        // The shape owns the grid-cell size; overlay content cannot widen the column.
-        mediaShape
-            .fill(JieziTheme.paper.opacity(0.74))
-            .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            .overlay {
-                filmContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-            }
-            .overlay(alignment: .topLeading) {
-                InboxFilmStateBadge(label: item.statusLabel, color: statusColor)
-                    .padding(JieziSpacing.sm)
-            }
-            .clipShape(mediaShape)
-            .overlay {
-                mediaShape.stroke(statusColor.opacity(0.14), lineWidth: 1)
-            }
-            .shadow(color: JieziTheme.space.opacity(0.07), radius: 10, x: 0, y: 6)
-    }
-
-    private var mediaShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous)
-    }
-
-    @ViewBuilder
-    private var filmContent: some View {
-        if let imageURL {
-            CachedRemoteImage(url: imageURL) { image in
-                if isSingleColumn || item.pendingExpense != nil {
-                    image
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
-                } else {
-                    image
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } placeholder: {
-                ProgressView()
-                    .tint(JieziTheme.brand)
-                    .frame(maxWidth: .infinity)
-                    .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
-            } failure: {
-                noteContent
-                    .aspectRatio(isSingleColumn ? 4.0 / 3.0 : 3.0 / 4.0, contentMode: .fit)
-            }
-        } else {
-            noteContent
-        }
-    }
-
-    private var caption: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: JieziSpacing.sm) {
-                Text(item.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(JieziTheme.ink)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-                captionAccessory
-            }
-
-            if item.stagingRecord != nil, !item.subtitle.isEmpty {
-                Text(item.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(JieziTheme.muted)
-                    .lineLimit(isSingleColumn ? 3 : 2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            timeStack
-        }
-        .padding(.horizontal, 2)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    @ViewBuilder
-    private var captionAccessory: some View {
-        if repaymentCandidate != nil {
-            Image(systemName: "creditcard.and.123")
-                .font(.caption)
-                .foregroundStyle(JieziTheme.brand)
-                .accessibilityLabel("可能是还款记录")
-        } else if let pending = item.pendingExpense {
-            Text(String(format: "-¥%.2f", pending.amount))
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(JieziTheme.coral)
-                .lineLimit(1)
-        } else if let confidence = item.stagingRecord?.confidencePercent {
-            Text("\(confidence)%")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(JieziTheme.muted)
-        }
-    }
-
-    @ViewBuilder
-    private var timeStack: some View {
-        if let record = item.stagingRecord {
-            inboxTimes(
-                occurredAt: record.occurredAtLabel ?? "未识别",
-                createdAt: record.createdAtLabel
-            )
-        } else if let pending = item.pendingExpense {
-            inboxTimes(
-                occurredAt: pending.occurredAtLabel ?? pending.dateKey,
-                createdAt: pending.createdAtLabel
-            )
-        }
-    }
-
-    private func inboxTimes(occurredAt: String, createdAt: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            inboxTimeRow(label: "记录", value: occurredAt)
-            inboxTimeRow(label: "上传", value: createdAt)
-        }
-        .font(.caption2)
-        .foregroundStyle(JieziTheme.muted)
-    }
-
-    private func inboxTimeRow(label: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Text(label)
-                .foregroundStyle(JieziTheme.muted.opacity(0.72))
-            Text(value)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-        }
-    }
-
-    private var noteContent: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(hex: "F8F4E9"), Color(hex: "F0EAD8")],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            VStack(alignment: .leading, spacing: 9) {
-                Text(item.stagingRecord == nil ? "账单事实" : "文字事实")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(JieziTheme.gold)
-
-                HStack(spacing: 8) {
-                    Image(systemName: item.systemImage)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(statusColor)
-                        .frame(width: 30, height: 30)
-                        .overlay(Circle().stroke(statusColor.opacity(0.22)))
-                    Text(item.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(JieziTheme.ink)
-                        .lineLimit(2)
-                }
-
-                Text(item.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(JieziTheme.muted)
-                    .lineLimit(4)
-
-                if let record = item.stagingRecord {
-                    let fields = Array(NativeStagingDetailPresentation.fields(for: record).prefix(3))
-                    if !fields.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(fields) { field in
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text(field.label)
-                                        .foregroundStyle(JieziTheme.muted)
-                                    Spacer(minLength: 4)
-                                    Text(field.value)
-                                        .foregroundStyle(JieziTheme.ink)
-                                        .lineLimit(1)
-                                }
-                                .font(.caption2)
-                            }
-                        }
-                        .padding(.top, 5)
-                        .overlay(alignment: .top) {
-                            Rectangle()
-                                .fill(JieziTheme.brand.opacity(0.12))
-                                .frame(height: 1)
-                        }
-                    }
-                }
-            }
-            .padding(16)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var statusColor: Color {
-        guard let record = item.stagingRecord else { return JieziTheme.gold }
-        switch record.status {
-        case "ai_error", "failed", "extraction_failed": return JieziTheme.coral
-        case "routing_failed", "unrouted", "unassigned": return JieziTheme.brand
-        case "schema_failed": return JieziTheme.ink
-        default: return Color(hex: "8A6D2F")
-        }
-    }
-}
-
-private struct InboxFilmStateBadge: View {
-    let label: String
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 5, height: 5)
-            Text(label).lineLimit(1)
-        }
-        .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(color)
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .background(JieziTheme.paper.opacity(0.88), in: Capsule())
-        .background(.ultraThinMaterial, in: Capsule())
     }
 }
 
@@ -979,7 +713,7 @@ private struct InboxSettledEmptyView: View {
     }
 }
 
-private struct InboxVerdictStageView: View {
+struct InboxVerdictStageView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
@@ -1002,11 +736,7 @@ private struct InboxVerdictStageView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(hex: "EFEADA"), Color(hex: "EAE4D2")],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            JieziTheme.pageBackground
             .ignoresSafeArea()
 
             if items.isEmpty {
@@ -1018,6 +748,8 @@ private struct InboxVerdictStageView: View {
                         .tint(JieziTheme.brand)
                 }
             } else if let current {
+                GeometryReader { viewport in
+                ScrollView {
                 VStack(spacing: 0) {
                     stageTopBar(current)
                     InboxStageRecordPager(
@@ -1028,7 +760,7 @@ private struct InboxVerdictStageView: View {
                         stageVisual(current)
                             .id(current.id)
                     }
-                    .frame(maxHeight: .infinity)
+                    .frame(height: max(180, min(viewport.size.height * 0.45, 360)))
 
                     stageInfo(current)
                     stageActions(current)
@@ -1037,6 +769,8 @@ private struct InboxVerdictStageView: View {
                     } else {
                         Spacer().frame(height: 24)
                     }
+                }
+                }
                 }
             }
         }
@@ -1117,10 +851,11 @@ private struct InboxVerdictStageView: View {
             Button { closeStage() } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 34, height: 34)
+                    .frame(width: 44, height: 44)
                     .foregroundStyle(JieziTheme.brand)
                     .background(JieziTheme.brand.opacity(0.08), in: Circle())
             }
+            .accessibilityLabel("关闭待确认")
             HStack(spacing: 6) {
                 Circle().fill(statusColor(for: item)).frame(width: 6, height: 6)
                 Text("\(item.statusLabel) · \(contextLabel(for: item))")
@@ -1443,11 +1178,7 @@ private struct StagingVerdictStageView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(hex: "EFEADA"), Color(hex: "EAE4D2")],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            JieziTheme.pageBackground
             .ignoresSafeArea()
 
             if records.isEmpty {
@@ -1459,6 +1190,8 @@ private struct StagingVerdictStageView: View {
                         .tint(JieziTheme.brand)
                 }
             } else if let current {
+                GeometryReader { viewport in
+                ScrollView {
                 VStack(spacing: 0) {
                     stageTopBar(current)
                     InboxStageRecordPager(
@@ -1469,11 +1202,13 @@ private struct StagingVerdictStageView: View {
                         StagingStageImage(record: current)
                             .id(current.id)
                     }
-                    .frame(maxHeight: .infinity)
+                    .frame(height: max(180, min(viewport.size.height * 0.45, 360)))
 
                     stageInfo(current)
                     stageActions(current)
                     domainStrip(current)
+                }
+                }
                 }
             }
         }
@@ -1524,10 +1259,11 @@ private struct StagingVerdictStageView: View {
             Button { closeStage() } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 34, height: 34)
+                    .frame(width: 44, height: 44)
                     .foregroundStyle(JieziTheme.brand)
                     .background(JieziTheme.brand.opacity(0.08), in: Circle())
             }
+            .accessibilityLabel("关闭待确认")
             HStack(spacing: 6) {
                 Circle().fill(statusColor(for: record)).frame(width: 6, height: 6)
                 Text("\(record.statusLabel) · \(record.domainName ?? record.recordTypeLabel)")
@@ -1864,7 +1600,7 @@ private struct InboxStageRecordPager<Content: View>: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 17, weight: .semibold))
-                .frame(width: 28, height: 44)
+                .frame(width: 44, height: 44)
                 .foregroundStyle(JieziTheme.brand)
                 .background(
                     JieziTheme.brand.opacity(0.08),
@@ -1938,12 +1674,8 @@ private struct StagingFactSheet: View {
             .padding(20)
         }
         .background(
-            LinearGradient(
-                colors: [Color(hex: "F8F4E9"), Color(hex: "F0EAD8")],
-                startPoint: .top,
-                endPoint: .bottom
-            ),
-            in: RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
+            JieziScene.expense.surface,
+            in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous)
@@ -2448,16 +2180,23 @@ private struct PendingExpenseResolutionView: View {
 }
 
 private struct NativeInboxItemRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let item: NativeInboxItem
     let repaymentCandidate: NativeRepaymentCandidate?
     var showThumbnail = true
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        let rowLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        let headingLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        return rowLayout {
             if showThumbnail { thumbnail }
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(item.title).font(JieziType.cardTitle).lineLimit(2)
+                headingLayout {
+                    Text(item.title).font(JieziType.cardTitle).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                     Spacer(minLength: 6)
                     Text(item.statusLabel)
                         .font(.caption2.weight(.semibold))
@@ -2466,9 +2205,9 @@ private struct NativeInboxItemRow: View {
                         .padding(.vertical, 3)
                         .background(statusColor.opacity(0.12), in: Capsule())
                 }
-                Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 if let record = item.stagingRecord {
-                    HStack(spacing: 8) {
+                    headingLayout {
                         Text(record.recordTypeLabel)
                         Text(record.occurredAtLabel ?? record.createdAtLabel)
                         if let confidence = record.confidencePercent {

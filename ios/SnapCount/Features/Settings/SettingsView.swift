@@ -274,7 +274,7 @@ struct SettingsView: View {
                 Text(appState.isSignedIn ? "云端身份可用" : "数据仅保存在此 iPhone")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 5)
@@ -352,7 +352,7 @@ struct SettingsView: View {
     }
 }
 
-private struct VisionSettingsView: View {
+struct VisionSettingsView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
@@ -434,7 +434,7 @@ private struct VisionSettingsView: View {
 
 }
 
-private struct CompanionSettingsView: View {
+struct CompanionSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var customNote = ""
 
@@ -467,7 +467,7 @@ private struct CompanionSettingsView: View {
     }
 }
 
-private struct InsightSettingsView: View {
+struct InsightSettingsView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
@@ -491,7 +491,7 @@ private struct InsightSettingsView: View {
     }
 }
 
-private struct PrivacySettingsView: View {
+struct PrivacySettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var pendingRetention: Int?
     @State private var showRetentionConfirmation = false
@@ -595,7 +595,7 @@ private struct PrivacySettingsView: View {
     }
 }
 
-private struct DataExportView: View {
+struct DataExportView: View {
     @EnvironmentObject private var appState: AppState
     @State private var request = NativeDataExportRequest()
     @State private var exportedFile: NativeExportedFile?

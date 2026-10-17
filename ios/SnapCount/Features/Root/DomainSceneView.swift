@@ -51,6 +51,7 @@ struct DomainCatView: View {
     @Environment(\.scenePhase) private var scenePhase
     let domain: AppDomain
     @State private var catPose: JieziCatPose = .expense
+    @State private var catDomain: AppDomain = .expense
     @State private var catProgress: CGFloat = 1
     @State private var transitionTask: Task<Void, Never>?
 
@@ -58,7 +59,7 @@ struct DomainCatView: View {
         JieziCatShape(pose: catPose)
             .trim(from: 0, to: catProgress)
             .stroke(
-                JieziScene.tokens(for: domain.rawValue).foreground,
+                JieziScene.tokens(for: catDomain.rawValue).foreground,
                 style: StrokeStyle(lineWidth: 2.35, lineCap: .round, lineJoin: .round)
             )
             .frame(width: JieziPrototypeLayout.cat_width, height: JieziPrototypeLayout.cat_height)
@@ -68,6 +69,7 @@ struct DomainCatView: View {
             transitionTask?.cancel()
             transitionTask = nil
             catPose = .forDomain(domain.rawValue)
+            catDomain = domain
             catProgress = 1
         }
         .onChange(of: domain) { _, newDomain in
@@ -78,6 +80,7 @@ struct DomainCatView: View {
             transitionTask?.cancel()
             transitionTask = nil
             catPose = .forDomain(domain.rawValue)
+            catDomain = domain
             catProgress = 1
         }
         .onChange(of: reduceMotion) { _, isEnabled in
@@ -85,6 +88,7 @@ struct DomainCatView: View {
             transitionTask?.cancel()
             transitionTask = nil
             catPose = .forDomain(domain.rawValue)
+            catDomain = domain
             catProgress = 1
         }
         .onDisappear {
@@ -99,6 +103,7 @@ struct DomainCatView: View {
         let nextPose = JieziCatPose.forDomain(newDomain.rawValue)
         guard !reduceMotion, scenePhase == .active else {
             catPose = nextPose
+            catDomain = newDomain
             catProgress = 1
             return
         }
@@ -114,6 +119,7 @@ struct DomainCatView: View {
             }
             guard !Task.isCancelled else { return }
             catPose = nextPose
+            catDomain = newDomain
             withAnimation(.easeOut(duration: JieziPrototypeMotion.cat_draw_ms)) {
                 catProgress = 1
             }

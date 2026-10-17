@@ -14,7 +14,9 @@ struct UploadScreenshotIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        let trialID = await ShortcutTrialStore.shared.claim()
         guard let image else {
+            if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
             let message = "请把“转换后的图像”或上一部 JPEG 变量传给芥子。"
             return .result(value: message)
         }
@@ -28,6 +30,7 @@ struct UploadScreenshotIntent: AppIntent {
                     provider: HostedAIImageRecognitionProvider()
                 )
                 let result: ShortcutUploadResult
+                let trialOutcome: ShortcutTrialOutcome
                 do {
                     let outcome = try await recognition.ingest(
                         imageData: imageData,
@@ -37,12 +40,14 @@ struct UploadScreenshotIntent: AppIntent {
                     )
                     switch outcome.result {
                     case .archived:
+                        trialOutcome = .archived
                         result = ShortcutUploadResult(
                             displayText: "AI 识别结果已自动记录到本机。",
                             notificationText: "AI 识别结果已自动记录到本机。",
                             route: "records"
                         )
                     case .staged:
+                        trialOutcome = .staged
                         result = ShortcutUploadResult(
                             displayText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
                             notificationText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
@@ -56,17 +61,21 @@ struct UploadScreenshotIntent: AppIntent {
                         captureKind: "screenshot",
                         filename: "shortcut-jpeg.jpg"
                     )
+                    trialOutcome = .remoteReturned
                 }
+                if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: trialOutcome) }
                 await ShortcutNotificationService.shared.notifyUploadResult(result)
                 let value = ShortcutFeedbackPreferences.resultCardEnabled ? result.displayText : result.compactDisplayText
                 return .result(value: value)
             } catch {
+                if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
                 let message = "上传失败：\(error.localizedDescription)"
                 return .result(value: message)
             }
         }
 
         let message = "快捷指令图片上传需要 iOS 18 或更高版本。"
+        if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
         return .result(value: message)
     }
 }

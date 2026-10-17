@@ -45,22 +45,29 @@ struct NativeDomainScenePresentation {
     let stateMessage: String?
     let merchants: [NativeMerchantSummary]
 
-    // 场景 003/004 的测试接缝；先在 macOS 证明缺失区块的业务红灯。
-    var timeline: [NativeTimelineEntry] { [] }
-    var sleepRanges: [NativeSleepInterval] { [] }
-    var periodRecordCount: Int { 0 }
-    var periodTotal: Double? { nil }
-    var validDayCount: Int { 0 }
-    var periodDailyAverage: Double? { nil }
-    var periodTypes: [String] { [] }
-    var highestMeal: NativeDayRecord? { nil }
-    var previousExpenseTotal: Double? { nil }
+    let timeline: [NativeTimelineEntry]
+    let sleepRanges: [NativeSleepInterval]
+    let periodTypes: [String]
+    let highestMeal: NativeDayRecord?
+    let previousExpenseTotal: Double?
+
+    var periodRecordCount: Int { weeklyValues.reduce(0) { $0 + $1.recordCount } }
+    var validDayCount: Int { weeklyValues.filter { $0.recordCount > 0 && $0.value != nil }.count }
+    var periodTotal: Double? {
+        let recordedDays = weeklyValues.filter { $0.recordCount > 0 }
+        guard !recordedDays.isEmpty, recordedDays.allSatisfy({ $0.value != nil }) else { return nil }
+        return recordedDays.compactMap(\.value).reduce(0, +)
+    }
+    var periodDailyAverage: Double? {
+        let values = weeklyValues.filter { $0.recordCount > 0 }.compactMap(\.value)
+        return values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+    }
 
     static func trendDateKeys(for domain: AppDomain, dateKey: String) -> [String] {
         switch domain {
-        case .sleep, .food:
+        case .sleep:
             return (-6...0).compactMap { NativeLocalDate.shiftedDateKey(dateKey, byDays: $0) }
-        case .expense, .sport, .reading:
+        case .expense, .food, .sport, .reading:
             return NativeLocalDate.weekDateKeys(containing: dateKey)
         }
     }
@@ -204,6 +211,48 @@ struct NativeDomainScenePresentation {
             }
         }
 
+        let timeline = domain == .expense ? records.filter(isExpense).compactMap { record -> NativeTimelineEntry? in
+            let recordDetail = detail(for: record, details: details)
+            let clock = NativeLocalDate.financeTimeKey(occurredAt: recordDetail?.occurredAt)
+                ?? recordDetail?.transactionTime ?? record.timeLabel
+            guard let occurredAt = NativeLocalDate.financeOccurredAt(dateKey: record.dateKey, timeKey: clock),
+                  let normalized = NativeLocalDate.financeTimeKey(occurredAt: occurredAt) else { return nil }
+            let parts = normalized.split(separator: ":").compactMap { Int($0) }
+            guard parts.count == 2 else { return nil }
+            return NativeTimelineEntry(record: record, minute: parts[0] * 60 + parts[1])
+        }.sorted {
+            $0.minute == $1.minute ? $0.id < $1.id : $0.minute < $1.minute
+        } : []
+
+        let sleepRanges = domain == .sleep ? records.compactMap { record -> NativeSleepInterval? in
+            guard let payload = detail(for: record, details: details)?.payload,
+                  let start = isoDate(payload.string("sleep_start_at")),
+                  let end = isoDate(payload.string("wake_at")), end > start else { return nil }
+            return NativeSleepInterval(record: record, start: start, end: end)
+        }.sorted { $0.start < $1.start } : []
+
+        let periodDates = Set(trendDateKeys(for: domain, dateKey: dateKey))
+        let sportRecords = allRecords.filter { periodDates.contains($0.dateKey) && ($0.domainKey ?? $0.kind.rawValue) == "sport" }
+        let periodTypes = domain == .sport ? Set(sportRecords.map { record -> String in
+            let payload = detail(for: record, details: details)?.payload
+            let type = (payload?.string("sport_type") ?? payload?.string("activity_type") ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return type.isEmpty ? "类型未提供" : type
+        }).sorted() : []
+
+        let highestMeal = domain == .food ? records.compactMap { record -> (NativeDayRecord, Double)? in
+            guard let value = measurement(for: record, key: primaryKey, details: details)?.value else { return nil }
+            return (record, value)
+        }.max(by: { $0.1 < $1.1 })?.0 : nil
+
+        var previousExpenseTotal: Double?
+        if domain == .expense, !isLoading, errorMessage?.isEmpty != false,
+           let previousDay = NativeLocalDate.shiftedDateKey(dateKey, byDays: -1) {
+            let previous = allRecords.filter { $0.dateKey == previousDay && isExpense($0) }
+            let amounts = previous.compactMap { expenseAmount(for: $0, details: details) }
+            if amounts.count == previous.count { previousExpenseTotal = amounts.reduce(0, +) }
+        }
+
         let stateMessage: String?
         if let errorMessage, !errorMessage.isEmpty {
             stateMessage = "记录读取失败：\(errorMessage)"
@@ -225,11 +274,25 @@ struct NativeDomainScenePresentation {
             highestExpense: highest,
             knownPrimaryTotal: knownPrimaryTotal,
             stateMessage: stateMessage,
-            merchants: merchants
+            merchants: merchants,
+            timeline: timeline,
+            sleepRanges: sleepRanges,
+            periodTypes: periodTypes,
+            highestMeal: highestMeal,
+            previousExpenseTotal: previousExpenseTotal
         )
     }
 
     private enum MeasurementUnit: Equatable { case duration, calories }
+
+    private static func isoDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = parser.date(from: value) { return date }
+        parser.formatOptions = [.withInternetDateTime]
+        return parser.date(from: value)
+    }
 
     private static func isExpense(_ record: NativeDayRecord) -> Bool {
         record.kind == .expense && record.transactionType != "income"

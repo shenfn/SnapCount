@@ -76,15 +76,18 @@ final class IOSPrototypeRenderingTests: XCTestCase {
 
     func testIOSV2POLISH001ExportEmptyShellAtNormalAndAccessibleType() async throws {
         let sizes: [DynamicTypeSize] = [.large, .accessibility3]
-        for size in sizes {
+        for domain in AppDomain.allCases {
+            for size in sizes {
             let state = try makeIsolatedState()
             state.selectedDateKey = "2026-10-17"
+            state.selectedDomain = domain
             await state.loadRecordDateWindow(around: state.selectedDateKey)
             let view = MainShellView()
                 .environmentObject(state)
                 .environmentObject(JieziThemeManager.shared)
                 .environment(\.dynamicTypeSize, size)
-            try await capture(view, name: "shell-empty-\(size)", height: 844)
+            try await capture(view, name: "shell-empty-\(domain.rawValue)-\(size)", height: 844)
+        }
         }
     }
 
@@ -100,13 +103,69 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         }
     }
 
-    func testIOSV2POLISH007ExportOnboardingWelcome() async throws {
+    func testIOSV2POLISH007ExportAllFiveOnboardingSteps() async throws {
         let sizes: [DynamicTypeSize] = [.large, .accessibility3]
         for size in sizes {
-            let view = OnboardingFlowView()
+            for step in OnboardingStep.allCases {
+            let view = OnboardingFlowView(initialStep: step)
                 .environmentObject(try makeIsolatedState())
                 .environment(\.dynamicTypeSize, size)
-            try await capture(view, name: "onboarding-welcome-\(size)", height: 844)
+            try await capture(view, name: "onboarding-\(step)-\(size)", height: 844)
+            }
+        }
+    }
+
+    func testIOSV2POLISH010ExportReachableOverlayRoots() async throws {
+        for size in [DynamicTypeSize.large, .accessibility3] {
+            let pages: [(String, AnyView)] = [
+                ("records", AnyView(RecordsView(initialMonthKey: "2026-10"))),
+                ("inbox", AnyView(InboxView())),
+                ("accounts", AnyView(AccountsView())),
+                ("unbound", AnyView(UnboundRecordsView())),
+                ("domains", AnyView(DomainsView())),
+                ("day", AnyView(DayDetailView(route: NativeDayDetailRoute(dateKey: "2026-10-17", kind: .all)))),
+                ("insights", AnyView(InsightsView())),
+                ("settings", AnyView(SettingsView())),
+                ("vision-settings", AnyView(VisionSettingsView())),
+                ("companion-settings", AnyView(CompanionSettingsView())),
+                ("insight-settings", AnyView(InsightSettingsView())),
+                ("privacy-settings", AnyView(PrivacySettingsView())),
+                ("export", AnyView(DataExportView())),
+                ("new-account", AnyView(AccountEditSheet(draft: NativeAccountDraft()))),
+                ("login", AnyView(LoginView())),
+                ("privacy-document", AnyView(LegalDocumentView(kind: .privacy))),
+                ("terms-document", AnyView(LegalDocumentView(kind: .terms))),
+                ("shortcuts", AnyView(ShortcutSetupView()))
+            ]
+            for (name, page) in pages {
+                let view = NavigationStack { page }
+                    .environmentObject(try makeIsolatedState())
+                    .environmentObject(JieziThemeManager.shared)
+                    .environment(\.dynamicTypeSize, size)
+                try await capture(view, name: "overlay-\(name)-\(size)", height: 844)
+            }
+        }
+    }
+
+    func testIOSV2POLISH006ExportInboxStatusStages() async throws {
+        for status in ["pending_review", "unassigned", "ai_error", "schema_failed", "duplicate"] {
+            let record = NativeStagingRecord(
+                id: "fixture-\(status)", dateKey: "2026-10-17", title: "示例候选 · \(status)",
+                summary: "这是一条需要保留事实并完成后续处理的合成候选记录。", status: status,
+                statusLabel: status, recordTypeLabel: "阅读", createdAtLabel: "2026-10-17 12:35",
+                occurredAtLabel: "2026-10-17 12:30", confidencePercent: 80, lastErrorMessage: nil,
+                retryCount: 0, systemImage: "book", imagePath: nil, imageURL: nil, imageLoadError: false,
+                recordType: "reading", domainKey: "reading", domainName: "阅读",
+                extracted: ["book_name": AnyCodable("合成书名"), "reading_minutes": AnyCodable(30)],
+                companionMessage: nil, targetRecordId: nil, imageHash: nil
+            )
+            let items = NativeInboxPresentation.items(pendingExpenses: [], stagingRecords: [record])
+            for size in [DynamicTypeSize.large, .accessibility3] {
+                let view = InboxVerdictStageView(items: items, selection: .constant(items.first?.id), domains: [])
+                    .environmentObject(try makeIsolatedState())
+                    .environment(\.dynamicTypeSize, size)
+                try await capture(view, name: "inbox-stage-\(status)-\(size)", height: 844)
+            }
         }
     }
 
@@ -119,6 +178,32 @@ final class IOSPrototypeRenderingTests: XCTestCase {
                 .environmentObject(state)
                 .environment(\.dynamicTypeSize, .large)
             try await capture(view, name: "entry-signed-out-\(domain.rawValue)", height: 844)
+        }
+    }
+
+    func testIOSV2POLISH010ExportPersistedLocalRecordDetailAndEditor() async throws {
+        let state = try makeIsolatedState()
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "reading")
+        draft.primaryValueText = "32"
+        draft.dimension = "一段需要完整展示的合成书名"
+        draft.date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-17T12:30:00+08:00"))
+        let saved = await state.createManualRecord(draft, domain: nil)
+        XCTAssertTrue(saved)
+        await state.loadRecordMonth("2026-10", force: true)
+        let reference = try XCTUnwrap(state.recordGroups(monthKey: "2026-10").flatMap(\.records).first?.reference)
+        await state.loadRecordDetail(reference: reference)
+        let detail = try XCTUnwrap(state.selectedRecordDetail)
+        for size in [DynamicTypeSize.large, .accessibility3] {
+            let view = NavigationStack { RecordDetailView(reference: reference) }
+                .environmentObject(state)
+                .environmentObject(JieziThemeManager.shared)
+                .environment(\.dynamicTypeSize, size)
+            try await capture(view, name: "local-record-detail-\(size)", height: 844)
+            let editor = ManualRecordSheet(editing: detail)
+                .environmentObject(state)
+                .environmentObject(JieziThemeManager.shared)
+                .environment(\.dynamicTypeSize, size)
+            try await capture(editor, name: "local-record-editor-\(size)", height: 844)
         }
     }
 

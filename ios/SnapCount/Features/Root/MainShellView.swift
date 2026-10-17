@@ -113,7 +113,7 @@ struct MainShellView: View {
         .padding(.horizontal, JieziPrototypeLayout.page_inset)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
+        .animation(reduceMotion ? nil : .easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
     }
 
     private var syncStatusIcon: some View {
@@ -158,7 +158,7 @@ struct MainShellView: View {
         }
         .padding(.horizontal, JieziPrototypeLayout.page_inset)
         .padding(.vertical, 8)
-        .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
+        .animation(reduceMotion ? nil : .easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
     }
 
     private func bottomControls(compact: Bool) -> some View {

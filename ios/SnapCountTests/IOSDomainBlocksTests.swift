@@ -47,11 +47,13 @@ final class IOSDomainBlocksTests: XCTestCase {
     }
 
     func testIOSV2POLISH003TimelineUsesEventTimeAndRetainsEqualTimeReferences() {
-        let a = record("a", date: "2026-10-05", domain: .expense, time: "09:00")
+        let a = record("a", date: "2026-10-05", domain: .expense, time: "上传 11:00")
         let b = record("b", date: "2026-10-05", domain: .expense, time: "09:00")
         let upload = record("upload", date: "2026-10-05", domain: .expense, time: "上传 10:00")
         let invalid = record("bad", date: "2026-10-05", domain: .expense, time: "99:99")
-        let result = model(.expense, records: [b, upload, invalid, a], details: [:])
+        var actual = detail(a, [:])
+        actual.occurredAt = "2026-10-05T01:00:00Z"
+        let result = model(.expense, records: [b, upload, invalid, a], details: [a.reference: actual])
         XCTAssertEqual(result.timeline.map(\.minute), [540, 540])
         XCTAssertEqual(result.timeline.map(\.record.reference), [a.reference, b.reference])
         XCTAssertEqual(result.records.count, 4, "未知业务时间只退出时间线，正式记录仍可达")

@@ -22,6 +22,7 @@ private struct PendingRecordExpressionPlanDelivery {
 @MainActor
 final class AppState: ObservableObject {
     private static let calendarSignposter = OSSignposter(subsystem: "com.jiezi.app", category: "DomainCalendar")
+    private static let recordReadSignposter = OSSignposter(subsystem: "com.jiezi.app", category: "RecordRead")
     @Published var selectedDomain: AppDomain = .expense
     @Published var selectedDateKey = NativeLocalDate.dateKey(Date())
     @Published var presentedOverlay: AppOverlay = .none
@@ -827,6 +828,8 @@ final class AppState: ObservableObject {
     }
 
     func recordDetails(from startDateKey: String, through endDateKey: String) -> [String: NativeRecordDetail] {
+        let interval = Self.recordReadSignposter.beginInterval("CollectRecordDetails", id: Self.recordReadSignposter.makeSignpostID())
+        defer { Self.recordReadSignposter.endInterval("CollectRecordDetails", interval) }
         let monthKeys = NativeLocalDate.monthKeys(from: startDateKey, through: endDateKey)
         var result = dashboard.recordDetails
         for monthKey in monthKeys {
@@ -1012,6 +1015,8 @@ final class AppState: ObservableObject {
         guard force || localFactMonths[monthKey] == nil else { return }
         guard loadingLocalExpenseMonthKey != monthKey,
               loadingLocalRecordMonthKey != monthKey else { return }
+        let interval = Self.recordReadSignposter.beginInterval("ReadAndProjectLocalFactMonth", id: Self.recordReadSignposter.makeSignpostID())
+        defer { Self.recordReadSignposter.endInterval("ReadAndProjectLocalFactMonth", interval) }
         let generation = userStateGeneration
         loadingLocalExpenseMonthKey = monthKey
         loadingLocalRecordMonthKey = monthKey
@@ -4180,11 +4185,14 @@ final class AppState: ObservableObject {
         isOnboardingPresented = false
     }
 
-    var onboardingStatusText: String {
-        let scope: OnboardingProgressScope = isSignedIn && !currentUserId.isEmpty
+    var onboardingScope: OnboardingProgressScope {
+        isSignedIn && !currentUserId.isEmpty
             ? .account(currentUserId)
             : .device
-        return onboardingProgressStore.completion(for: scope)?.statusText ?? "尚未完成"
+    }
+
+    var onboardingStatusText: String {
+        onboardingProgressStore.completion(for: onboardingScope)?.statusText ?? "尚未完成"
     }
 
     func sendTestShortcutNotification() async {
@@ -4215,6 +4223,7 @@ final class AppState: ObservableObject {
         }
         isSignedIn = true
         currentUserId = session.user.id
+        ShortcutTrialStore.shared.synchronize(scope: onboardingScope)
         currentUserEmail = session.user.email ?? ""
         refreshLocalSyncState()
     }
@@ -4280,6 +4289,7 @@ final class AppState: ObservableObject {
         try? keychain.remove(KeychainKeys.uploadToken)
         isSignedIn = false
         currentUserId = ""
+        ShortcutTrialStore.shared.synchronize(scope: onboardingScope)
         currentUserEmail = ""
         hasUploadToken = false
         shortcutCredentialMessage = nil

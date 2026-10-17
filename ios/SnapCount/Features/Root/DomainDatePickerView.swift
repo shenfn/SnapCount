@@ -5,6 +5,12 @@ struct DomainDatePickerView: View {
     @Binding var showsCalendar: Bool
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: appState.selectedDomain.rawValue) }
+    private var selectedForeground: Color {
+        switch appState.selectedDomain {
+        case .sleep, .reading: return scene.surface
+        case .expense, .food, .sport: return .white
+        }
+    }
 
     private var weekDates: [String] {
         NativeLocalDate.weekDateKeys(containing: appState.selectedDateKey)
@@ -32,10 +38,10 @@ struct DomainDatePickerView: View {
                             Text("\(NativeLocalDate.dayOfMonth(dateKey) ?? 0)")
                                 .font(JieziType.moneyInline.monospacedDigit())
                             Circle()
-                                .fill(count > 0 ? (isSelected ? .white : scene.accent) : .clear)
+                                .fill(count > 0 ? (isSelected ? selectedForeground : scene.accent) : .clear)
                                 .frame(width: 4, height: 4)
                         }
-                        .foregroundStyle(isSelected ? .white : scene.foreground)
+                        .foregroundStyle(isSelected ? selectedForeground : scene.foreground)
                         .frame(maxWidth: .infinity)
                         .frame(height: JieziPrototypeLayout.week_day_height)
                         .background(
