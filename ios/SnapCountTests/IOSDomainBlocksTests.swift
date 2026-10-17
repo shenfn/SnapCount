@@ -3,10 +3,10 @@ import XCTest
 
 final class IOSDomainBlocksTests: XCTestCase {
     func testIOSV2POLISH004FoodAverageIncludesExplicitZeroButNotMissingOrUnrecordedDays() throws {
-        let zero = record("zero", date: "2026-10-03", domain: .food)
-        let high = record("high", date: "2026-10-04", domain: .food)
-        let missing = record("missing", date: "2026-10-05", domain: .food)
-        let result = model(.food, records: [zero, high, missing], details: [
+        let zero = record("zero", date: "2026-10-05", domain: .food)
+        let high = record("high", date: "2026-10-06", domain: .food)
+        let missing = record("missing", date: "2026-10-08", domain: .food)
+        let result = model(.food, date: "2026-10-08", records: [zero, high, missing], details: [
             zero.reference: detail(zero, ["total_calorie_kcal": AnyCodable(0)]),
             high.reference: detail(high, ["total_calorie_kcal": AnyCodable(800)])
         ])
@@ -15,11 +15,18 @@ final class IOSDomainBlocksTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(result.periodDailyAverage), 400, accuracy: 0.001)
         XCTAssertNil(result.periodTotal, "缺热量的一天不得以零计入完整累计")
         XCTAssertNil(result.highestMeal, "选中日没有可读取热量，不借用其他日最大一餐")
-        let measuredDay = model(.food, date: "2026-10-04", records: [zero, high], details: [
+        let measuredDay = model(.food, date: "2026-10-06", records: [zero, high], details: [
             zero.reference: detail(zero, ["total_calorie_kcal": AnyCodable(0)]),
             high.reference: detail(high, ["total_calorie_kcal": AnyCodable(800)])
         ])
         XCTAssertEqual(measuredDay.highestMeal?.reference, high.reference)
+    }
+
+    func testIOSV2POLISH004FoodWeekIsNaturalWeekWhileSleepEndsOnSelectedDay() {
+        XCTAssertEqual(NativeDomainScenePresentation.trendDateKeys(for: .food, dateKey: "2026-10-08"), [
+            "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09", "2026-10-10", "2026-10-11"
+        ])
+        XCTAssertEqual(NativeDomainScenePresentation.trendDateKeys(for: .sleep, dateKey: "2026-10-08").first, "2026-10-02")
     }
 
     func testIOSV2POLISH004SportAndReadingPeriodUseFormalRecordsInNaturalWeek() throws {
