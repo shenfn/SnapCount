@@ -59,6 +59,7 @@ final class AppState: ObservableObject {
     @Published var recordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
     @Published var recordMonthMessages: [String: String] = [:]
     @Published var loadingRecordMonthKey: String?
+    @Published private var loadingRemoteRecordMonthKeys: Set<String> = []
     @Published var accounts: [NativeAccount] = []
     @Published var localAccounts: [LocalAccount] = []
     @Published var localAccountBalances: [UUID: Int64] = [:]
@@ -158,7 +159,7 @@ final class AppState: ObservableObject {
     private var localFactMonths: [String: LocalFactMonth] = [:]
     private var loadingLocalExpenseMonthKey: String?
     private var loadingLocalRecordMonthKey: String?
-    private var loadingRemoteRecordMonthKey: String?
+    private var remoteRecordMonthTasks: [String: Task<Void, Never>] = [:]
     private var activeRecordReference: String?
     private var prefetchingRecordReferences: Set<String> = []
     private var expressionPlanDeliveryTokens: [String: UUID] = [:]
@@ -816,6 +817,10 @@ final class AppState: ObservableObject {
             || remoteRecordMonthGroups[monthKey] != nil
     }
 
+    func isLoadingRecordMonth(_ monthKey: String) -> Bool {
+        loadingRecordMonthKey == monthKey || loadingRemoteRecordMonthKeys.contains(monthKey)
+    }
+
     func recordGroups(from startDateKey: String, through endDateKey: String) -> [NativeDayRecordGroup] {
         let monthKeys = NativeLocalDate.monthKeys(from: startDateKey, through: endDateKey)
         guard !monthKeys.isEmpty else { return [] }
@@ -1025,7 +1030,7 @@ final class AppState: ObservableObject {
         defer {
             if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
             if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
-            if loadingRecordMonthKey == monthKey, loadingRemoteRecordMonthKey != monthKey {
+            if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey) {
                 loadingRecordMonthKey = nil
             }
         }
@@ -1130,7 +1135,7 @@ final class AppState: ObservableObject {
         recordMonthMessages.removeValue(forKey: monthKey)
         defer {
             if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
-            if loadingRecordMonthKey == monthKey, loadingRemoteRecordMonthKey != monthKey {
+            if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey) {
                 loadingRecordMonthKey = nil
             }
         }
@@ -1169,7 +1174,7 @@ final class AppState: ObservableObject {
         defer {
             if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
             if loadingRecordMonthKey == monthKey,
-               loadingRemoteRecordMonthKey != monthKey,
+               !loadingRemoteRecordMonthKeys.contains(monthKey),
                loadingLocalExpenseMonthKey != monthKey {
                 loadingRecordMonthKey = nil
             }
@@ -1285,15 +1290,34 @@ final class AppState: ObservableObject {
             return
         }
         guard force || remoteRecordMonthGroups[monthKey] == nil else { return }
-        guard loadingRemoteRecordMonthKey != monthKey else { return }
+        if let task = remoteRecordMonthTasks[monthKey] {
+            await task.value
+            return
+        }
         let generation = userStateGeneration
-        loadingRemoteRecordMonthKey = monthKey
+        // 月读取属于账号会话；页面取消不取消共享请求，账号重置时集中取消。
+        let task = Task { @MainActor in
+            await self.performRemoteRecordMonthLoad(monthKey, generation: generation)
+        }
+        remoteRecordMonthTasks[monthKey] = task
+        loadingRemoteRecordMonthKeys.insert(monthKey)
+        await task.value
+    }
+
+    private func performRemoteRecordMonthLoad(_ monthKey: String, generation: Int) async {
+        guard generation == userStateGeneration else { return }
         loadingRecordMonthKey = monthKey
         recordMonthMessages.removeValue(forKey: monthKey)
         defer {
-            if loadingRemoteRecordMonthKey == monthKey { loadingRemoteRecordMonthKey = nil }
-            if loadingRecordMonthKey == monthKey, loadingLocalExpenseMonthKey != monthKey {
-                loadingRecordMonthKey = nil
+            // 旧身份请求结束时不能移除新身份的同月任务或加载状态。
+            if generation == userStateGeneration {
+                remoteRecordMonthTasks.removeValue(forKey: monthKey)
+                loadingRemoteRecordMonthKeys.remove(monthKey)
+                if loadingRecordMonthKey == monthKey,
+                   loadingLocalExpenseMonthKey != monthKey,
+                   loadingLocalRecordMonthKey != monthKey {
+                    loadingRecordMonthKey = nil
+                }
             }
         }
         do {
@@ -1311,9 +1335,11 @@ final class AppState: ObservableObject {
             }
             remoteRecordMonthGroups[monthKey] = month.groups
             await importRemoteExpenseDetails(month.details.values)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             await refreshLocalMonthProjection(monthKey: monthKey)
         } catch {
             guard generation == userStateGeneration else { return }
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return }
             recordMonthMessages[monthKey] = error.localizedDescription
         }
     }
@@ -4333,7 +4359,9 @@ final class AppState: ObservableObject {
         loadingRecordMonthKey = nil
         loadingLocalExpenseMonthKey = nil
         loadingLocalRecordMonthKey = nil
-        loadingRemoteRecordMonthKey = nil
+        for task in remoteRecordMonthTasks.values { task.cancel() }
+        remoteRecordMonthTasks.removeAll()
+        loadingRemoteRecordMonthKeys.removeAll()
         recordDetailCache.removeAll()
         activeRecordReference = nil
         prefetchingRecordReferences.removeAll()

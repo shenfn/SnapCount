@@ -47,6 +47,16 @@
 
 第二片测试：`testIOSV2POLISH002AF03CancelledPageAndSameMonthReentryAwaitReadableRecords`。通过网络边界 stub 挂起月请求，取消第一个页面 Task 后直接进入同月新调用；释放 transport 后，新调用须拿到正式记录、无普通取消错误、无残留 loading，并复用一次网络读取。采用 continuation 控制顺序，避免真实网络和固定延时；失败原因及运行证据待 macOS 执行后填写。业务实现尚未修改。
 
+第二片固定提交 `6170e18`：[CI 39054204953](https://github.com/shenfn/SnapCount/actions/runs/39054204953)。attempt 1 的 App Build 成功，XCTest 步骤长等待后取消；普通取消后状态仍在运行，随后 force-cancel 完成。取消后的日志未包含 XCTest 阶段结果，不能判定为业务红灯或证明测试编排错误。相同提交已启动 attempt 2，等待结果；不据长等待修改业务实现。
+
+本地已查看 `6fe6aac` 的普通/辅助字号刷新失败截图：提示、重试、450 kcal 虚构事实及餐次可同时展示。主指标位置和猫层补充仍待 `6170e18` 的新截图复核；图片来自 iPhone 17 Pro Simulator 合成渲染，不是用户真机、真实餐食或手势证据。
+
+测试编排纠正：静态复查发现 `Task.yield()` 释放任务可能早于新调用到达远端门禁，使新请求另起一次挂起且无人释放；这是测试可能悬挂的路径，不能冒充运行日志已证实的根因。attempt 2 已请求取消。`58e969c` 改为仅首个 transport 挂起，显式等待第二调用进入，通过 0.1 秒有界反向 expectation 检查不得过早返回，随后手动统一释放并等待两调用结束。时间窗只验证“仍应等待”的测试状态，不模拟业务成功。[新红灯 CI 39056080492](https://github.com/shenfn/SnapCount/actions/runs/39056080492) 待结果；产品请求实现依旧未改。
+
+第二片有效红灯：`58e969c` 的 CI 39056080492 App Build 通过，357 项 XCTest 中仅目标测试有三条断言失败：提前返回（fulfilled inverted expectation）、缺目标记录（XCTAssertTrue）、普通 CancellationError 留在 recordMonthMessages（XCTAssertNil）。其余测试通过。两次长等待不计入此证据。
+
+最小实现：历史月在 AppState 内按月份共享在途 Task，重入等待同一结果，页面取消不取消会话所属读取；账户重置统一取消并清空任务。保留用户/代次检查并在导入远端支出后再次核对身份。加载状态改为远端月份集合，首页、日历、记录页、月报复用 isLoadingRecordMonth，避免并行月份互相覆盖；本地读取原路径保持。任务完成清理同代状态，取消不写普通业务错误。当前月 Dashboard 独立刷新链不在本片内，不以历史月测试代表当前月全部取消/刷新场景。绿灯及设备结果待验证。
+
 本地九组业务边界检查：43/43 通过。第一次使用不存在的 test-ios-record-detail-boundary.mjs 路径未执行成功；通过 rg 查得现有 test-ios-local-record-detail-boundary.mjs 后运行，无产品修改用于绕过检查。
 
 F06 / 003 纯视觉：前一天、当天各占一行，金额使用等宽数字并允许大字号换行；算法未变，截图与真机待验证。

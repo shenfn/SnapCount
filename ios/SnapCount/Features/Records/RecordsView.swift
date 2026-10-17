@@ -12,7 +12,7 @@ struct RecordsView: View {
     private var monthGroups: [NativeDayRecordGroup] { appState.recordGroups(monthKey: selectedMonthKey) }
     private var groups: [NativeDayRecordGroup] { query.groups(from: monthGroups) }
     private var availableKinds: [NativeDayRecordKind] { query.availableKinds(from: monthGroups) }
-    private var isLoadingMonth: Bool { appState.loadingRecordMonthKey == selectedMonthKey }
+    private var isLoadingMonth: Bool { appState.isLoadingRecordMonth(selectedMonthKey) }
     private var palette: JieziGeneratedPalette { themeManager.palette }
 
     init() {

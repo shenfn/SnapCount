@@ -15,7 +15,7 @@ struct NativeDomainPageView: View {
         let months = NativeLocalDate.monthKeys(from: first, through: last)
         let groups = appState.recordGroups(from: first, through: last)
         let details = appState.recordDetails(from: first, through: last)
-        let loading = appState.loadingRecordMonthKey.map { months.contains($0) } ?? false
+        let loading = months.contains { appState.isLoadingRecordMonth($0) }
         let model = NativeDomainScenePresentation.make(
             domain: domain,
             dateKey: appState.selectedDateKey,

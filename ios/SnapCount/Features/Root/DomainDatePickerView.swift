@@ -81,7 +81,7 @@ struct DomainCalendarSheet: View {
     }
     private var dayGroups: [NativeDayRecordGroup] { appState.recordGroups(monthKey: monthKey) }
     private var dailyExpense: [String: Double] { appState.dailyExpenseAmounts(monthKey: monthKey) }
-    private var monthIsLoading: Bool { appState.loadingRecordMonthKey == monthKey }
+    private var monthIsLoading: Bool { appState.isLoadingRecordMonth(monthKey) }
     private var monthLoadError: String? { appState.recordMonthMessages[monthKey] }
     private var monthHasLoaded: Bool { appState.hasLoadedRecordMonth(monthKey) }
 

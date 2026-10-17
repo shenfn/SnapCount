@@ -25,7 +25,7 @@ struct MonthlyReportContent: View {
             )
         }
     }
-    private var isLoading: Bool { appState.loadingRecordMonthKey == selectedMonthKey }
+    private var isLoading: Bool { appState.isLoadingRecordMonth(selectedMonthKey) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
