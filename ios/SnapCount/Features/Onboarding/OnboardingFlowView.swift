@@ -28,6 +28,7 @@ struct OnboardingFlowView: View {
                 stepPage
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { stepFooter }
         .interactiveDismissDisabled()
         .sensoryFeedback(.success, trigger: completedSteps.count)
         .sheet(isPresented: $showsShortcutGuide) {
@@ -122,20 +123,6 @@ struct OnboardingFlowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.updatesFrequently)
                 }
-                if activeStep != .welcome {
-                    Button {
-                        guard !isSavingStep,
-                              let previous = OnboardingStep(rawValue: activeStep.rawValue - 1) else { return }
-                        localMessage = nil
-                        activeStep = previous
-                    } label: {
-                        Label("上一步", systemImage: "arrow.left")
-                            .font(JieziType.button)
-                            .frame(minHeight: 44)
-                    }
-                    .foregroundStyle(JieziTheme.brand)
-                    .disabled(isSavingStep)
-                }
             }
             .padding(.horizontal, 22)
             .padding(.top, 24)
@@ -167,9 +154,6 @@ struct OnboardingFlowView: View {
                 .font(JieziFont.body)
                 .foregroundStyle(JieziTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            nextButton("开始了解", systemImage: "arrow.right") {
-                await advance(from: .welcome)
-            }
         }
     }
 
@@ -190,9 +174,6 @@ struct OnboardingFlowView: View {
                 detail: "AI 可整理或表达内容；金额、日期和统计仍以保存的业务事实为准。",
                 systemImage: "sparkles"
             )
-            nextButton("下一步", systemImage: "arrow.right") {
-                await advance(from: .flow)
-            }
         }
     }
 
@@ -288,9 +269,6 @@ struct OnboardingFlowView: View {
             .foregroundStyle(JieziTheme.brand)
             .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-            nextButton("继续", systemImage: "arrow.down") {
-                await advance(from: .shortcuts)
-            }
         }
     }
 
@@ -353,19 +331,6 @@ struct OnboardingFlowView: View {
                 .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: 22))
                 .accessibilityElement(children: .contain)
             }
-            if let outcome = trialReceipt?.outcome, outcome != .failed {
-                nextButton("查看结果后继续", systemImage: "arrow.right") {
-                    await advance(from: .trial)
-                }
-            }
-            Button("跳过测试并继续") {
-                Task { await advance(from: .trial) }
-            }
-            .font(JieziType.button)
-            .foregroundStyle(JieziTheme.brand)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 44)
-            .disabled(isSavingStep)
         }
     }
 
@@ -378,11 +343,52 @@ struct OnboardingFlowView: View {
                 .font(JieziFont.body)
                 .foregroundStyle(JieziTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            nextButton("完成并进入芥子", systemImage: "checkmark.circle.fill") {
-                completedSteps.insert(.ready)
-                cancelTrial()
-                appState.finishOnboarding(skipped: false)
+        }
+    }
+
+    private var stepFooter: some View {
+        HStack(spacing: 10) {
+            if activeStep != .welcome {
+                Button {
+                    guard !isSavingStep,
+                          let previous = OnboardingStep(rawValue: activeStep.rawValue - 1) else { return }
+                    if activeStep == .trial { cancelTrial() }
+                    localMessage = nil
+                    activeStep = previous
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(JieziType.button)
+                        .frame(width: 52, height: 54)
+                        .background(JieziTheme.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(JieziTheme.brand)
+                .accessibilityLabel("上一步")
+                .disabled(isSavingStep)
             }
+            nextButton(footerTitle, systemImage: activeStep == .ready ? "checkmark" : "arrow.right") {
+                if activeStep == .ready {
+                    completedSteps.insert(.ready)
+                    cancelTrial()
+                    appState.finishOnboarding(skipped: false)
+                } else {
+                    await advance(from: activeStep)
+                }
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
+        .background(JieziScene.expense.surface.opacity(0.9))
+    }
+
+    private var footerTitle: String {
+        switch activeStep {
+        case .welcome: return "开始了解"
+        case .flow: return "下一步"
+        case .shortcuts: return "继续"
+        case .trial:
+            return trialReceipt?.outcome != nil && trialReceipt?.outcome != .failed ? "查看结果后继续" : "稍后再试，继续"
+        case .ready: return "完成并进入芥子"
         }
     }
 
