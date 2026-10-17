@@ -74,6 +74,8 @@ struct UnboundRecordsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
             .refreshable { await reload() }
         }
         .navigationTitle("未绑定记录")
@@ -235,6 +237,10 @@ private struct UnboundAccountPicker: View {
                 }
                 .disabled(appState.isBindingUnboundRecords)
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
             .navigationTitle("选择账户")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -298,6 +304,10 @@ private struct UnboundBatchBindingSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
             .navigationTitle("批量补绑预览")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

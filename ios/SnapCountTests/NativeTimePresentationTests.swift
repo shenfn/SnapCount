@@ -57,6 +57,21 @@ final class NativeTimePresentationTests: XCTestCase {
         )
     }
 
+    func testIOSV2POLISH002WeekAndMonthDateWindowsUseShanghaiCalendar() {
+        XCTAssertEqual(
+            NativeLocalDate.weekDateKeys(containing: "2026-08-02"),
+            ["2026-07-27", "2026-07-28", "2026-07-29", "2026-07-30", "2026-07-31", "2026-08-01", "2026-08-02"]
+        )
+        XCTAssertEqual(NativeLocalDate.monthDateKeys("2026-02").count, 28)
+        XCTAssertTrue(NativeLocalDate.monthDateKeys("2026-13").isEmpty)
+        XCTAssertNil(NativeLocalDate.shiftedDateKey("2026-02-30", byDays: 1))
+        XCTAssertEqual(NativeLocalDate.shiftedDateKey("2026-07-31", byDays: 1), "2026-08-01")
+        XCTAssertEqual(
+            NativeLocalDate.monthKeys(from: "2026-12-29", through: "2027-01-04"),
+            ["2026-12", "2027-01"]
+        )
+    }
+
     func testRecordDetailPrefersOccurredAtAndKeepsUploadTime() throws {
         let detail = makeExpenseDetail(
             recordDate: "2026-08-08",

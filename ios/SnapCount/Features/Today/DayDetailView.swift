@@ -20,7 +20,7 @@ struct DayDetailView: View {
 
     var body: some View {
         ZStack {
-            JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
+            JieziTheme.pageBackground.ignoresSafeArea()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: JieziSpacing.xl2) {
                     summary

@@ -19,7 +19,11 @@ enum JieziTheme {
     static var coral: Color { palette.coral }
 
     static var pageBackground: LinearGradient {
-        JieziGradient.pageBackground(palette: palette)
+        LinearGradient(
+            colors: JieziScene.expense.background,
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     static var sumeruBackground: RadialGradient {
@@ -33,21 +37,25 @@ enum JieziTheme {
 
 struct JieziPageBackground: View {
     var body: some View {
-        ZStack {
-            JieziTheme.pageBackground
-            RadialGradient(
-                colors: [JieziTheme.light.opacity(0.12), .clear],
-                center: .topTrailing,
-                startRadius: 0,
-                endRadius: 260
-            )
-            LinearGradient(
-                colors: [.white.opacity(0.22), .clear],
-                startPoint: .topLeading,
-                endPoint: .center
-            )
-        }
+        JieziTheme.pageBackground
         .ignoresSafeArea()
+    }
+}
+
+extension JieziSceneTokens {
+    var palette: JieziGeneratedPalette {
+        JieziGeneratedPalette(
+            id: "prototype-scene",
+            name: "原型场景",
+            description: "",
+            paper: surface,
+            brand: accent,
+            light: accent,
+            space: background.last ?? .black,
+            ink: foreground,
+            muted: muted,
+            coral: JieziTheme.coral
+        )
     }
 }
 
@@ -62,15 +70,37 @@ struct GlassPanel<Content: View>: View {
         content
             .padding(18)
             .background(
-                JieziTheme.paper.opacity(0.72),
+                JieziScene.expense.surface,
                 in: RoundedRectangle(cornerRadius: 24, style: .continuous)
             )
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(JieziTheme.brand.opacity(0.11), lineWidth: 1)
+                    .stroke(JieziTheme.brand.opacity(0.10), lineWidth: 1)
             }
-            .shadow(color: JieziTheme.space.opacity(0.08), radius: 22, x: 0, y: 12)
+            .shadow(color: JieziTheme.space.opacity(0.06), radius: 12, x: 0, y: 5)
+    }
+}
+
+private struct JieziPrototypePanelModifier: ViewModifier {
+    let palette: JieziGeneratedPalette
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                JieziScene.expense.surface,
+                in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous)
+                    .stroke(palette.brand.opacity(0.08), lineWidth: 1)
+            }
+            .shadow(color: palette.space.opacity(0.06), radius: 12, x: 0, y: 5)
+    }
+}
+
+extension View {
+    func jieziPrototypePanel(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> some View {
+        modifier(JieziPrototypePanelModifier(palette: palette))
     }
 }
 
@@ -88,12 +118,7 @@ struct PrimaryActionButton: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
-        .background(JieziTheme.brandWash, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.18), lineWidth: 1)
-        }
-        .shadow(color: JieziTheme.brand.opacity(0.18), radius: 14, x: 0, y: 8)
+        .background(JieziScene.expense.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 

@@ -28,24 +28,55 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, '..');
+const REPO_ROOT = resolve(ROOT, '..');
+
+const args = new Set(process.argv.slice(2));
+const knownArgs = new Set(['--check', '--sync-app']);
+for (const arg of args) {
+  if (!knownArgs.has(arg)) throw new Error(`未知参数：${arg}`);
+}
+if (args.has('--check') && args.has('--sync-app')) {
+  throw new Error('--check 与 --sync-app 不能同时使用');
+}
+const checkOnly = args.has('--check');
+const syncApp = args.has('--sync-app');
 
 const tokens = JSON.parse(readFileSync(join(ROOT, 'tokens/design-tokens.json'), 'utf8'));
 const outDir = join(ROOT, 'dist/jiezi');
-mkdirSync(outDir, { recursive: true });
 
 const swiftWeight = (w) => {
   const map = { regular: '.regular', medium: '.medium', semibold: '.semibold', bold: '.bold' };
   return map[w] || '.regular';
 };
+const swiftTextStyle = (id) => id === 'title1' ? 'title' : id;
 
 const fontById = Object.fromEntries(tokens.typography.scale.map((f) => [f.id, f]));
+
+function catPathCommands(source, pose) {
+  const parts = source.match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)/g) ?? [];
+  if (parts[0] !== 'M') throw new Error(`cat_paths.${pose} 必须以 M 开始`);
+  let index = 1;
+  const number = () => {
+    const value = Number(parts[index++]);
+    if (!Number.isFinite(value)) throw new Error(`cat_paths.${pose} 坐标无效`);
+    return value;
+  };
+  const commands = [`path.move(to: CGPoint(x: ${number()}, y: ${number()}))`];
+  while (index < parts.length) {
+    if (parts[index++] !== 'C' || index + 6 > parts.length) {
+      throw new Error(`cat_paths.${pose} 只支持单个 M 和完整 C 曲线序列`);
+    }
+    const x1 = number(), y1 = number(), x2 = number(), y2 = number(), x = number(), y = number();
+    commands.push(`path.addCurve(to: CGPoint(x: ${x}, y: ${y}), control1: CGPoint(x: ${x1}, y: ${y1}), control2: CGPoint(x: ${x2}, y: ${y2}))`);
+  }
+  return commands;
+}
 
 const lines = [];
 lines.push('//');
 lines.push('//  JieziTheme+Generated.swift');
 lines.push('//  SnapCount');
 lines.push('//');
-lines.push(`//  自动生成于 ${new Date().toISOString()}`);
 lines.push(`//  数据源：trae-design-system/tokens/design-tokens.json v${tokens.$meta.version}`);
 lines.push('//  禁止手工修改本文件。任何调整请改 SSOT 后运行 scripts/generate-ios.mjs');
 lines.push('//');
@@ -138,18 +169,74 @@ lines.push('    static let shared = JieziThemeManager()');
 lines.push('');
 lines.push('    @Published var palette: JieziGeneratedPalette');
 lines.push('    @Published var hourOffset: Int = 0');
-lines.push('    private let storageKey = "jiezi.theme.id"');
 lines.push('');
 lines.push('    init() {');
-lines.push('        let savedId = UserDefaults.standard.string(forKey: storageKey) ?? JieziGeneratedPalette.defaultPalette.id');
-lines.push('        self.palette = JieziGeneratedPalette.all.first(where: { $0.id == savedId }) ?? .defaultPalette');
+lines.push('        self.palette = .defaultPalette');
 lines.push('    }');
 lines.push('');
-lines.push('    func switchTo(_ id: String) {');
-lines.push('        if let next = JieziGeneratedPalette.all.first(where: { $0.id == id }) {');
-lines.push('            palette = next');
-lines.push('            UserDefaults.standard.set(id, forKey: storageKey)');
+lines.push('    /// 历史 jiezi.theme.id 保留，但不再控制应用外观。');
+lines.push('    func switchTo(_ id: String) {}');
+lines.push('}');
+lines.push('');
+
+// MARK: 原型五域场景
+lines.push('// MARK: - iOS 原型五域场景 Token');
+lines.push('');
+lines.push('struct JieziSceneTokens {');
+lines.push('    let background: [Color]');
+lines.push('    let accent: Color');
+lines.push('    let foreground: Color');
+lines.push('    let muted: Color');
+lines.push('    let surface: Color');
+lines.push('    let usesDiagonalTexture: Bool');
+lines.push('}');
+lines.push('');
+lines.push('enum JieziScene {');
+Object.entries(tokens.ios_prototype.domains).forEach(([id, scene]) => {
+  lines.push(`    static let ${id} = JieziSceneTokens(background: [${scene.background.map((color) => `Color(jieziHex: "${color}")`).join(', ')}], accent: Color(jieziHex: "${scene.accent}"), foreground: Color(jieziHex: "${scene.foreground}"), muted: Color(jieziHex: "${scene.muted}"), surface: Color(jieziHex: "${scene.surface}"), usesDiagonalTexture: ${scene.texture === 'diagonal'})`);
+});
+lines.push('');
+lines.push('    static func tokens(for domain: String) -> JieziSceneTokens {');
+lines.push('        switch domain {');
+Object.keys(tokens.ios_prototype.domains).forEach((id) => lines.push(`        case "${id}": return .${id}`));
+lines.push('        default: return .expense');
 lines.push('        }');
+lines.push('    }');
+lines.push('}');
+lines.push('');
+lines.push('enum JieziPrototypeLayout {');
+Object.entries(tokens.ios_prototype.layout).forEach(([id, value]) => lines.push(`    static let ${id}: CGFloat = ${value}`));
+lines.push('}');
+lines.push('');
+lines.push('enum JieziPrototypeMotion {');
+Object.entries(tokens.ios_prototype.motion).forEach(([id, value]) => lines.push(`    static let ${id}: TimeInterval = ${value / 1000}`));
+lines.push('}');
+lines.push('');
+
+lines.push('enum JieziCatPose: String {');
+Object.keys(tokens.ios_prototype.cat_paths).forEach((id) => lines.push(`    case ${id}`));
+lines.push('');
+lines.push('    static func forDomain(_ domain: String) -> JieziCatPose {');
+lines.push('        JieziCatPose(rawValue: domain) ?? .expense');
+lines.push('    }');
+lines.push('}');
+lines.push('');
+lines.push('struct JieziCatShape: Shape {');
+lines.push('    let pose: JieziCatPose');
+lines.push('');
+lines.push('    func path(in rect: CGRect) -> Path {');
+lines.push('        var path = Path()');
+lines.push('        switch pose {');
+Object.entries(tokens.ios_prototype.cat_paths).forEach(([id, source]) => {
+  lines.push(`        case .${id}:`);
+  catPathCommands(source, id).forEach((command) => lines.push(`            ${command}`));
+});
+lines.push('        }');
+lines.push('        let scale = min(rect.width / 210, rect.height / 200)');
+lines.push('        let x = rect.midX - 105 * scale');
+lines.push('        let y = rect.midY - 100 * scale');
+lines.push('        return path.applying(CGAffineTransform(scaleX: scale, y: scale))');
+lines.push('            .applying(CGAffineTransform(translationX: x, y: y))');
 lines.push('    }');
 lines.push('}');
 lines.push('');
@@ -300,8 +387,15 @@ lines.push('// MARK: - 字体 Token（HIG 层级）');
 lines.push('');
 lines.push('enum JieziFont {');
 tokens.typography.scale.forEach((f) => {
-  lines.push(`    static let ${f.id} = Font.system(size: ${f.ios_size}, weight: ${swiftWeight(f.ios_weight)})`);
+  lines.push(`    static let ${f.id} = Font.custom(JieziFontFamily.sans, size: ${f.ios_size}, relativeTo: .${swiftTextStyle(f.id)}).weight(${swiftWeight(f.ios_weight)})`);
 });
+lines.push('}');
+lines.push('');
+
+lines.push('enum JieziFontFamily {');
+lines.push(`    static let sans = "${tokens.typography.font_families.ios.prototype_sans}"`);
+lines.push(`    static let serif = "${tokens.typography.font_families.ios.prototype_serif}"`);
+lines.push(`    static let numeric = "${tokens.typography.font_families.ios.prototype_numeric}"`);
 lines.push('}');
 lines.push('');
 
@@ -313,9 +407,9 @@ Object.entries(tokens.typography.roles).forEach(([roleId, role]) => {
   if (roleId === '$description') return;
   const base = fontById[role.ref];
   const weight = role.weight_override || base.ios_weight;
-  const design = role.design ? `, design: .${role.design}` : '';
+  const family = role.numeric ? 'numeric' : role.design === 'serif' ? 'serif' : 'sans';
   lines.push(`    /// ${role.usage}`);
-  lines.push(`    static let ${roleId} = Font.system(size: ${base.ios_size}, weight: ${swiftWeight(weight)}${design})`);
+  lines.push(`    static let ${roleId} = Font.custom(JieziFontFamily.${family}, size: ${base.ios_size}, relativeTo: .${swiftTextStyle(role.ref)}).weight(${swiftWeight(weight)})`);
 });
 lines.push('}');
 lines.push('');
@@ -436,11 +530,7 @@ lines.push('');
 lines.push('enum JieziGradient {');
 lines.push('    static func pageBackground(palette: JieziGeneratedPalette = JieziThemeManager.shared.palette) -> LinearGradient {');
 lines.push('        LinearGradient(');
-lines.push('            colors: [');
-lines.push('                palette.paper,');
-lines.push('                palette.paper.jieziBlended(with: palette.brand, amount: 0.035),');
-lines.push('                palette.paper.jieziBlended(with: palette.light, amount: 0.045)');
-lines.push('            ],');
+lines.push('            colors: JieziScene.expense.background,');
 lines.push('            startPoint: .top,');
 lines.push('            endPoint: .bottomTrailing');
 lines.push('        )');
@@ -487,11 +577,10 @@ lines.push(`            .padding(${glass.padding.value})`);
 lines.push('            .background {');
 lines.push('                if solid {');
 lines.push(`                    RoundedRectangle(cornerRadius: ${solid.radius.value}, style: .continuous)`);
-lines.push(`                        .fill(palette.paper.opacity(${solid.background_alpha}))`);
+lines.push('                        .fill(JieziScene.expense.surface)');
 lines.push('                } else {');
 lines.push(`                    RoundedRectangle(cornerRadius: ${glass.radius.value}, style: .continuous)`);
-lines.push(`                        .fill(palette.paper.opacity(${glass.background_alpha}))`);
-lines.push(`                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: ${glass.radius.value}, style: .continuous))`);
+lines.push('                        .fill(JieziScene.expense.surface)');
 lines.push('                }');
 lines.push('            }');
 lines.push('            .overlay {');
@@ -510,9 +599,27 @@ lines.push('    }');
 lines.push('}');
 lines.push('');
 
+const generatedSwift = `${lines.join('\n').trimEnd()}\n`;
 const outPath = join(outDir, 'JieziTheme+Generated.swift');
-writeFileSync(outPath, lines.join('\n'));
-console.log(`✓ iOS Swift Token 已生成：${outPath}`);
+const appPath = join(REPO_ROOT, 'ios/SnapCount/DesignSystem/JieziTheme+Generated.swift');
+
+if (checkOnly) {
+  const appSwift = readFileSync(appPath, 'utf8').replace(/\r\n/g, '\n');
+  if (appSwift !== generatedSwift) {
+    console.error(`✗ App Token 副本与 SSOT 不一致：${appPath}`);
+    process.exitCode = 1;
+  } else {
+    console.log(`✓ App Token 副本与 SSOT 一致：${appPath}`);
+  }
+} else {
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(outPath, generatedSwift, 'utf8');
+  console.log(`✓ iOS Swift Token 已生成：${outPath}`);
+  if (syncApp) {
+    writeFileSync(appPath, generatedSwift, 'utf8');
+    console.log(`✓ iOS App 编译副本已同步：${appPath}`);
+  }
+}
 console.log(`  - ${tokens.color.themes.length} 个主题（含派生 line 计算属性）`);
 console.log(`  - ${tokens.time_phases.phases.length} 个时间相位 + 线性插值（transition ${tokens.time_phases.transition_minutes}min）`);
 console.log(`  - ${tokens.typography.scale.length} 个字体层级 + ${Object.keys(tokens.typography.roles).filter((k) => k !== '$description').length} 个语义角色`);

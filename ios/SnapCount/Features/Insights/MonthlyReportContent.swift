@@ -81,7 +81,7 @@ struct MonthlyReportContent: View {
             .pickerStyle(.menu)
         }
         .padding(14)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func reportSummary(_ report: NativeDomainPresentation) -> some View {
@@ -122,7 +122,7 @@ struct MonthlyReportContent: View {
             .frame(height: 190)
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func distributionSection(_ report: NativeDomainPresentation) -> some View {
@@ -146,7 +146,7 @@ struct MonthlyReportContent: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -169,7 +169,7 @@ struct MonthlyReportContent: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func recentRecordsSection(_ report: NativeDomainPresentation) -> some View {
@@ -196,7 +196,7 @@ struct MonthlyReportContent: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private var platformBreakdown: [BreakdownItem] { breakdown(keyPath: \.platform) }

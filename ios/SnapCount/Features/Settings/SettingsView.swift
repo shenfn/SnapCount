@@ -3,7 +3,6 @@ import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @EnvironmentObject private var themeManager: JieziThemeManager
     @State private var showLogin = false
     @State private var showBindingPreview = false
     @State private var showDeleteAccountConfirmation = false
@@ -86,15 +85,7 @@ struct SettingsView: View {
                 }
 
                 Section("外观") {
-                    NavigationLink {
-                        ThemeSettingsView()
-                    } label: {
-                        settingsRow(
-                            "界面主题",
-                            detail: themeManager.palette.name,
-                            systemImage: "paintpalette"
-                        )
-                    }
+                    LabeledContent("应用场景", value: "随当前领域变化")
                 }
 
                 Section("数据管理") {
@@ -235,6 +226,7 @@ struct SettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
             .refreshable {
                 if appState.isSignedIn { await appState.loadUserSettings() }
             }
@@ -360,60 +352,6 @@ struct SettingsView: View {
     }
 }
 
-private struct ThemeSettingsView: View {
-    @EnvironmentObject private var themeManager: JieziThemeManager
-
-    var body: some View {
-        List {
-            Section {
-                ForEach(JieziGeneratedPalette.all, id: \.id) { palette in
-                    Button {
-                        JieziHaptics.tap()
-                        themeManager.switchTo(palette.id)
-                    } label: {
-                        HStack(spacing: JieziSpacing.md) {
-                            themeSwatch(palette)
-                            VStack(alignment: .leading, spacing: JieziSpacing.xxs) {
-                                Text(palette.name)
-                                    .font(JieziType.cardTitle)
-                                    .foregroundStyle(themeManager.palette.ink)
-                                if themeManager.palette.id == palette.id {
-                                    Text("当前使用")
-                                        .font(JieziFont.caption)
-                                        .foregroundStyle(themeManager.palette.muted)
-                                }
-                            }
-                            Spacer(minLength: JieziSpacing.sm)
-                            Image(systemName: themeManager.palette.id == palette.id ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(themeManager.palette.id == palette.id ? themeManager.palette.brand : themeManager.palette.muted.opacity(0.45))
-                        }
-                        .padding(.vertical, JieziSpacing.xs)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .navigationTitle("界面主题")
-        .scrollContentBackground(.hidden)
-        .background(JieziGradient.pageBackground(palette: themeManager.palette))
-    }
-
-    private func themeSwatch(_ palette: JieziGeneratedPalette) -> some View {
-        HStack(spacing: 0) {
-            palette.brand
-            palette.light
-            palette.coral
-        }
-        .frame(width: 54, height: 38)
-        .clipShape(RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous)
-                .stroke(palette.space.opacity(0.12), lineWidth: 1)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
 private struct VisionSettingsView: View {
     @EnvironmentObject private var appState: AppState
 
@@ -440,6 +378,7 @@ private struct VisionSettingsView: View {
         .navigationTitle("识别模型配置")
         .scrollContentBackground(.hidden)
         .background(JieziTheme.pageBackground)
+        .tint(JieziTheme.brand)
         .disabled(appState.isSavingSettings)
     }
 
@@ -522,6 +461,7 @@ private struct CompanionSettingsView: View {
         .navigationTitle("AI 陪伴")
         .scrollContentBackground(.hidden)
         .background(JieziTheme.pageBackground)
+        .tint(JieziTheme.brand)
         .disabled(appState.isSavingSettings)
         .onAppear { customNote = appState.userSettings.companionCustomNote }
     }
@@ -546,6 +486,7 @@ private struct InsightSettingsView: View {
         .navigationTitle("AI 联动分析")
         .scrollContentBackground(.hidden)
         .background(JieziTheme.pageBackground)
+        .tint(JieziTheme.brand)
         .disabled(appState.isSavingSettings)
     }
 }
@@ -594,6 +535,7 @@ private struct PrivacySettingsView: View {
         .navigationTitle("隐私与留存")
         .scrollContentBackground(.hidden)
         .background(JieziTheme.pageBackground)
+        .tint(JieziTheme.brand)
         .disabled(appState.isSavingSettings || appState.isCleaningSourceImages)
         .confirmationDialog(retentionDialogTitle, isPresented: $showRetentionConfirmation, titleVisibility: .visible) {
             if let pendingRetention {
@@ -688,6 +630,7 @@ private struct DataExportView: View {
         .navigationTitle("数据导出")
         .scrollContentBackground(.hidden)
         .background(JieziTheme.pageBackground)
+        .tint(JieziTheme.brand)
         .sheet(item: $exportedFile) { file in
             ActivityView(activityItems: [file.url])
         }
@@ -732,7 +675,7 @@ private func asyncToggle(_ value: Bool, _ action: @escaping (Bool) async -> Void
     Binding(get: { value }, set: { newValue in Task { await action(newValue) } })
 }
 
-private struct ShortcutSetupView: View {
+struct ShortcutSetupView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.openURL) private var openURL
     @State private var setupMessage: String?
@@ -780,7 +723,7 @@ private struct ShortcutSetupView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(JieziTheme.gold)
+                        .tint(JieziTheme.brand)
 
                         Button {
                             openShortcutTemplate(.screenshot)
@@ -789,7 +732,7 @@ private struct ShortcutSetupView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .tint(JieziTheme.mint)
+                        .tint(JieziTheme.brand)
                     }
                     if let setupMessage {
                         Text(setupMessage)
@@ -833,6 +776,7 @@ private struct ShortcutSetupView: View {
             }
             .scrollContentBackground(.hidden)
             .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
         }
         .navigationTitle("快捷指令")
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)

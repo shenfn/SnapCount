@@ -27,7 +27,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- ios .github/workflows/ios-build.yml; then
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- ios trae-design-system/tokens trae-design-system/scripts .github/workflows/ios-build.yml; then
             echo "ios=false" >> "$GITHUB_OUTPUT"
           else
             echo "ios=true" >> "$GITHUB_OUTPUT"
@@ -45,6 +45,16 @@ jobs:
 
       - name: Show Xcode version
         run: xcodebuild -version
+
+      - name: Set up Node for design tokens
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check generated iOS design tokens
+        run: |
+          node --check trae-design-system/scripts/generate-ios.mjs
+          node trae-design-system/scripts/generate-ios.mjs --check
 
       - name: Install XcodeGen
         run: brew install xcodegen

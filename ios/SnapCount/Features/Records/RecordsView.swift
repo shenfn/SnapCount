@@ -26,7 +26,7 @@ struct RecordsView: View {
     var body: some View {
         ZStack {
             // 统一页面只依赖 recordGroups(monthKey:) 的本地读模型，登录态不改变业务树。
-            JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
+            JieziTheme.pageBackground.ignoresSafeArea()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: JieziSpacing.xl2) {
                     VStack(alignment: .leading, spacing: JieziSpacing.md) {
@@ -554,7 +554,7 @@ struct RecordDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func detailSection(title: String, rows: [NativeDetailRow]) -> some View {
@@ -570,7 +570,7 @@ struct RecordDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func foodDishesSection(_ dishes: [NativeFoodDish]) -> some View {
@@ -597,7 +597,7 @@ struct RecordDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func accountBindingSection(
@@ -736,7 +736,7 @@ struct RecordDetailView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func actionSection(_ detail: NativeRecordDetail) -> some View {

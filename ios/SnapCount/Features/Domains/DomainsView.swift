@@ -124,7 +124,7 @@ struct DomainDetailView: View {
             walletAccountGroup(title: "负债与待还", accounts: liabilityAccounts, emptyText: "还没有负债账户")
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func walletAccountGroup(title: String, accounts: [NativeAccount], emptyText: String) -> some View {
@@ -211,7 +211,7 @@ struct DomainDetailView: View {
                 }
             }
             .padding(16)
-            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+            .jieziPrototypePanel()
         }
     }
 
@@ -241,7 +241,7 @@ struct DomainDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private var metricGrid: some View {
@@ -253,7 +253,7 @@ struct DomainDetailView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
                 .padding(14)
-                .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+                .jieziPrototypePanel()
             }
         }
     }
@@ -304,7 +304,7 @@ struct DomainDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private var distributionSection: some View {
@@ -336,7 +336,7 @@ struct DomainDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private var recentRecordsSection: some View {
@@ -370,7 +370,7 @@ struct DomainDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -425,7 +425,7 @@ struct DomainDetailView: View {
                         .disabled(appState.walletSnapshotActionId != nil)
                     }
                     .padding(15)
-                    .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+                    .jieziPrototypePanel()
                 }
             }
         }

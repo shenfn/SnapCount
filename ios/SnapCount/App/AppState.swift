@@ -21,6 +21,7 @@ private struct PendingRecordExpressionPlanDelivery {
 @MainActor
 final class AppState: ObservableObject {
     @Published var selectedDomain: AppDomain = .expense
+    @Published var selectedDateKey = NativeLocalDate.dateKey(Date())
     @Published var presentedOverlay: AppOverlay = .none
     @Published var isSignedIn = false
     @Published var currentUserId = ""
@@ -804,6 +805,72 @@ final class AppState: ObservableObject {
             : (remoteRecordMonthGroups[monthKey] ?? [])
         guard !local.isEmpty else { return remote }
         return Self.mergeRecordGroups(local: local, remote: remote)
+    }
+
+    func hasLoadedRecordMonth(_ monthKey: String) -> Bool {
+        localExpenseMonthGroups[monthKey] != nil
+            || localRecordMonthGroups[monthKey] != nil
+            || remoteRecordMonthGroups[monthKey] != nil
+    }
+
+    func recordGroups(from startDateKey: String, through endDateKey: String) -> [NativeDayRecordGroup] {
+        let monthKeys = NativeLocalDate.monthKeys(from: startDateKey, through: endDateKey)
+        guard !monthKeys.isEmpty else { return [] }
+        let groups = monthKeys.flatMap { recordGroups(monthKey: $0) }
+        return NativeRecordQuery.groups(
+            from: groups,
+            startingOn: startDateKey,
+            through: endDateKey
+        )
+    }
+
+    func recordDetails(from startDateKey: String, through endDateKey: String) -> [String: NativeRecordDetail] {
+        let monthKeys = NativeLocalDate.monthKeys(from: startDateKey, through: endDateKey)
+        var result = dashboard.recordDetails
+        for monthKey in monthKeys {
+            result.merge(recordMonthDetails[monthKey] ?? [:], uniquingKeysWith: { _, remote in remote })
+            result.merge(localRecordMonthDetails[monthKey] ?? [:], uniquingKeysWith: { _, local in local })
+        }
+        for (reference, detail) in recordDetailCache {
+            result[reference] = detail
+        }
+        return result
+    }
+
+    func loadRecordDateWindow(around dateKey: String, force: Bool = false) async {
+        let days = NativeLocalDate.weekDateKeys(containing: dateKey)
+        guard let start = days.first, let end = days.last else { return }
+        for monthKey in NativeLocalDate.monthKeys(from: start, through: end) {
+            if Task.isCancelled { return }
+            await loadRecordMonth(monthKey, force: force)
+        }
+    }
+
+    func dailyExpenseAmounts(monthKey: String) -> [String: Double] {
+        let groups = recordGroups(monthKey: monthKey)
+        let days = NativeLocalDate.monthDateKeys(monthKey)
+        guard let firstDay = days.first, let lastDay = days.last else { return [:] }
+        let details = recordDetails(from: firstDay, through: lastDay)
+        var totals: [String: Double] = [:]
+        for record in groups.flatMap(\.records) where NativeRecordQuery.isFormal(record)
+            && record.kind == .expense && record.transactionType != "income" {
+            guard let amount = Self.expenseAmount(for: record, details: details) else { continue }
+            totals[record.dateKey, default: 0] += amount
+        }
+        return totals
+    }
+
+    private static func expenseAmount(for record: NativeDayRecord, details: [String: NativeRecordDetail]) -> Double? {
+        let canonical = NativeRecordReference(record.reference).canonicalValue
+        if let detail = details[record.reference]
+            ?? details[canonical]
+            ?? details.values.first(where: { NativeRecordReference($0.id).canonicalValue == canonical }),
+           let amount = detail.amount {
+            return amount
+        }
+        let numeric = record.value.filter { $0.isNumber || $0 == "." || $0 == "-" }
+        guard !numeric.isEmpty else { return nil }
+        return Double(numeric)
     }
 
     private static func mergeRecordGroups(
@@ -4039,32 +4106,79 @@ final class AppState: ObservableObject {
     }
 
     func presentOnboarding() {
-        guard isSignedIn, !currentUserId.isEmpty else { return }
         isOnboardingPresented = true
     }
 
     func presentOnboardingIfNeeded() {
-        guard isSignedIn,
-              !currentUserId.isEmpty,
-              !shouldDeferOnboardingForExternalRoute,
-              onboardingProgressStore.shouldPresent(for: currentUserId) else { return }
+        guard !shouldDeferOnboardingForExternalRoute else { return }
+
+        if isSignedIn, !currentUserId.isEmpty {
+            let deviceCompletion = onboardingProgressStore.completion(for: .device)
+            let deviceAccountID = onboardingProgressStore.linkedAccountIDForDeviceProgress()
+            if let accountCompletion = onboardingProgressStore.completion(for: .account(currentUserId)) {
+                if deviceAccountID == nil || deviceAccountID == currentUserId {
+                    if accountCompletion == .completed || deviceCompletion != .completed {
+                        onboardingProgressStore.mark(accountCompletion, for: .device)
+                    }
+                    onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
+                }
+                return
+            }
+
+            if let deviceCompletion,
+               onboardingProgressStore.linkedAccountIDForDeviceProgress() == currentUserId {
+                onboardingProgressStore.mark(deviceCompletion, for: .account(currentUserId))
+                return
+            }
+
+            if let deviceCompletion,
+               onboardingProgressStore.linkedAccountIDForDeviceProgress() == nil {
+                onboardingProgressStore.mark(deviceCompletion, for: .account(currentUserId))
+                onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
+                return
+            }
+
+            isOnboardingPresented = true
+            return
+        }
+
+        guard onboardingProgressStore.shouldPresent(for: .device) else { return }
         isOnboardingPresented = true
     }
 
     func finishOnboarding(skipped: Bool) {
-        guard !currentUserId.isEmpty else {
+        let completion: NativeOnboardingCompletion = skipped ? .skipped : .completed
+        guard isSignedIn, !currentUserId.isEmpty else {
+            let deviceExisting = onboardingProgressStore.completion(for: .device)
+            if !skipped || deviceExisting != .completed {
+                onboardingProgressStore.mark(completion, for: .device)
+            }
             isOnboardingPresented = false
             return
         }
-        let existing = onboardingProgressStore.completion(for: currentUserId)
+
+        let existing = onboardingProgressStore.completion(for: .account(currentUserId))
         if !skipped || existing != .completed {
-            onboardingProgressStore.mark(skipped ? .skipped : .completed, for: currentUserId)
+            onboardingProgressStore.mark(completion, for: .account(currentUserId))
+        }
+
+        let deviceAccountID = onboardingProgressStore.linkedAccountIDForDeviceProgress()
+        if deviceAccountID == nil || deviceAccountID == currentUserId {
+            let deviceExisting = onboardingProgressStore.completion(for: .device)
+            let deviceCompletion = existing == .completed || deviceExisting == .completed
+                ? NativeOnboardingCompletion.completed
+                : completion
+            onboardingProgressStore.mark(deviceCompletion, for: .device)
+            onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
         }
         isOnboardingPresented = false
     }
 
     var onboardingStatusText: String {
-        onboardingProgressStore.completion(for: currentUserId)?.statusText ?? "尚未完成"
+        let scope: OnboardingProgressScope = isSignedIn && !currentUserId.isEmpty
+            ? .account(currentUserId)
+            : .device
+        return onboardingProgressStore.completion(for: scope)?.statusText ?? "尚未完成"
     }
 
     func sendTestShortcutNotification() async {

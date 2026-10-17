@@ -36,9 +36,10 @@ struct LoginView: View {
         VStack(alignment: .leading, spacing: 12) {
             Image(systemName: "circle.hexagongrid.fill")
                 .font(.system(size: 32, weight: .semibold))
-                .foregroundStyle(JieziTheme.mint)
+                .foregroundStyle(JieziTheme.brand)
                 .frame(width: 52, height: 52)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(JieziTheme.brand.opacity(0.12), lineWidth: 1))
 
             Text("芥子")
                 .font(.system(size: 38, weight: .bold, design: .rounded))
@@ -82,10 +83,10 @@ struct LoginView: View {
                         .onSubmit { submit() }
                 }
             }
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(.white.opacity(0.45), lineWidth: 1)
+                    .stroke(JieziTheme.brand.opacity(0.10), lineWidth: 1)
             }
 
             Button(action: submit) {
@@ -105,7 +106,7 @@ struct LoginView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white)
-            .background(JieziTheme.mint, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(JieziTheme.brand, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .opacity(canSubmit ? 1 : 0.55)
             .disabled(!canSubmit)
 
@@ -132,7 +133,7 @@ struct LoginView: View {
             HStack(alignment: .top, spacing: 8) {
                 Toggle("", isOn: $acceptedTerms)
                     .labelsHidden()
-                    .tint(JieziTheme.mint)
+                    .tint(JieziTheme.brand)
                 Text("我已阅读并同意")
                     .font(.footnote)
                     .foregroundStyle(JieziTheme.muted)
@@ -150,7 +151,7 @@ struct LoginView: View {
                     .foregroundStyle(JieziTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .tint(JieziTheme.mint)
+            .tint(JieziTheme.brand)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -164,7 +165,8 @@ struct LoginView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(JieziTheme.brand.opacity(0.10), lineWidth: 1))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

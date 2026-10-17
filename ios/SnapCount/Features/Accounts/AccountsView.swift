@@ -53,6 +53,7 @@ struct AccountsView: View {
             }
             .scrollContentBackground(.hidden)
             .listStyle(.insetGrouped)
+            .tint(JieziTheme.brand)
             .refreshable { await appState.loadAccounts() }
         }
         .navigationTitle("账户与钱包")
@@ -308,6 +309,7 @@ struct AccountDetailView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .listStyle(.insetGrouped)
+                .tint(JieziTheme.brand)
                 .navigationTitle(account.title)
                 .toolbar {
                     Button {
@@ -560,6 +562,9 @@ private struct RepaymentConfirmationSheet: View {
                     Section { Text(message).foregroundStyle(JieziTheme.coral) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .tint(JieziTheme.brand)
             .navigationTitle("确认还款")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -658,6 +663,9 @@ struct AccountEditSheet: View {
                     Section { Text(message).foregroundStyle(JieziTheme.coral) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .tint(JieziTheme.brand)
             .navigationTitle(draft.isCreating ? "新建账户" : "编辑账户")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

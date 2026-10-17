@@ -1,12 +1,14 @@
 import SwiftUI
 
 /// 五域骨架主场景（IOS-V2-SHELL-001~004）：
-/// 域横滑为主体，顶部栏（logo / 同步 / 日历占位 /「…」菜单）与底部栏（待确认 / 圆点 / ＋）悬浮其上，
+/// 域横滑为主体，顶部栏（品牌 / 同步 / 日期选择 /「…」菜单）与底部栏（待确认 / 圆点 / ＋）悬浮其上，
 /// 菜单四项与待确认以全屏覆盖层呈现，关闭后回到原域页。
 struct MainShellView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var themeManager: JieziThemeManager
     @State private var showManualRecordSheet = false
+
+    private var scene: JieziSceneTokens { JieziScene.tokens(for: appState.selectedDomain.rawValue) }
 
     private var overlayItem: Binding<AppOverlay?> {
         Binding(
@@ -17,11 +19,14 @@ struct MainShellView: View {
 
     var body: some View {
         ZStack {
-            JieziTheme.pageBackground.ignoresSafeArea()
+            DomainSceneView(domain: appState.selectedDomain)
             domainPager
         }
         .overlay(alignment: .top) { shellTopBar }
         .overlay(alignment: .bottom) { shellBottomBar }
+        .task(id: appState.selectedDateKey) {
+            await appState.loadRecordDateWindow(around: appState.selectedDateKey)
+        }
         .fullScreenCover(item: overlayItem) { overlay in
             overlayDestination(overlay)
         }
@@ -45,51 +50,55 @@ struct MainShellView: View {
     // MARK: - 顶部栏（SHELL-002）
 
     private var shellTopBar: some View {
-        HStack(spacing: JieziSpacing.md) {
-            Image(systemName: "seedling")
-                .font(.headline)
-                .foregroundStyle(themeManager.palette.brand)
-
-            syncStatusIcon
-
-            Spacer()
-
-            Button {
-                // ponytail: 日历热力图为后续阶段；占位期间禁用，避免“点了没反应”的假入口。
-            } label: {
-                Image(systemName: "calendar")
-            }
-            .disabled(true)
-            .foregroundStyle(themeManager.palette.muted.opacity(0.5))
-
-            Menu {
-                Button { appState.presentedOverlay = .insights } label: {
-                    Label("观察", systemImage: "chart.xyaxis.line")
-                }
-                Button { appState.presentedOverlay = .records } label: {
-                    Label("记录", systemImage: "list.bullet.rectangle")
-                }
-                Button { appState.presentedOverlay = .wallet } label: {
-                    Label("钱包", systemImage: "wallet.pass")
-                }
-                Button { appState.presentedOverlay = .settings } label: {
-                    Label("设置", systemImage: "gearshape")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
+        VStack(spacing: 8) {
+            HStack(spacing: JieziSpacing.md) {
+                Image(systemName: "circle.hexagongrid.fill")
                     .font(.headline)
-                    .foregroundStyle(themeManager.palette.ink)
+                    .foregroundStyle(scene.accent)
+                Text("芥子")
+                    .font(JieziType.cardTitle)
+                    .foregroundStyle(scene.foreground)
+
+                syncStatusIcon
+
+                Spacer()
+
+                Menu {
+                    Button { appState.presentedOverlay = .insights } label: {
+                        Label("观察", systemImage: "chart.xyaxis.line")
+                    }
+                    Button { appState.presentedOverlay = .records } label: {
+                        Label("记录", systemImage: "list.bullet.rectangle")
+                    }
+                    Button { appState.presentedOverlay = .wallet } label: {
+                        Label("钱包", systemImage: "wallet.pass")
+                    }
+                    Button { appState.presentedOverlay = .settings } label: {
+                        Label("设置", systemImage: "gearshape")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.headline)
+                        .foregroundStyle(scene.foreground)
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel("更多功能")
             }
+            DomainDatePickerView()
         }
-        .padding(.horizontal, JieziSpacing.lg)
-        .padding(.vertical, JieziSpacing.sm)
-        .background(themeManager.palette.paper.opacity(0.94))
+        .padding(.horizontal, JieziPrototypeLayout.page_inset)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background {
+            LinearGradient(colors: scene.background, startPoint: .top, endPoint: .bottom)
+        }
+        .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
     }
 
     private var syncStatusIcon: some View {
         Image(systemName: appState.isSignedIn ? "icloud" : "icloud.slash")
             .font(.subheadline)
-            .foregroundStyle(themeManager.palette.muted)
+            .foregroundStyle(scene.muted)
             .accessibilityLabel(appState.isSignedIn ? "已登录" : "本地模式")
     }
 
@@ -100,33 +109,44 @@ struct MainShellView: View {
             Button {
                 appState.presentedOverlay = .inbox
             } label: {
-                Image(systemName: "tray.full")
-                    .font(.body)
-                    .foregroundStyle(themeManager.palette.ink)
-                    .overlay(alignment: .topTrailing) {
-                        if appState.dashboard.pendingCount > 0 {
-                            Text("\(appState.dashboard.pendingCount)")
-                                .font(.system(size: 10, weight: .bold).monospacedDigit())
-                                .foregroundStyle(.white)
-                                .padding(4)
-                                .background(Color.red, in: Circle())
-                                .offset(x: 9, y: -7)
-                                .accessibilityLabel("\(appState.dashboard.pendingCount) 条待确认")
-                        }
-                    }
+                HStack(spacing: 7) {
+                    Image(systemName: "tray.full")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("待确认")
+                        .font(JieziFont.caption)
+                    Text("\(appState.dashboard.pendingCount)")
+                        .font(JieziType.moneyInline.monospacedDigit())
+                        .contentTransition(.numericText())
+                }
+                .foregroundStyle(scene.foreground)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(scene.surface.opacity(0.82), in: Capsule())
+                .overlay(Capsule().stroke(scene.accent.opacity(0.12), lineWidth: 1))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("收件箱，\(appState.dashboard.pendingCount) 条待确认")
             }
-            .accessibilityLabel("收件箱")
+            .buttonStyle(.plain)
 
             Spacer()
 
-            HStack(spacing: JieziSpacing.sm) {
+            HStack(spacing: JieziPrototypeLayout.page_dot_gap) {
                 ForEach(AppDomain.allCases) { domain in
-                    Circle()
-                        .fill(domain == appState.selectedDomain
-                              ? themeManager.palette.brand
-                              : themeManager.palette.muted.opacity(0.35))
-                        .frame(width: 7, height: 7)
-                        .animation(.easeInOut(duration: 0.2), value: appState.selectedDomain)
+                    Button {
+                        appState.selectedDomain = domain
+                    } label: {
+                        Capsule()
+                            .fill(domain == appState.selectedDomain ? scene.accent : scene.foreground.opacity(0.30))
+                            .frame(
+                                width: domain == appState.selectedDomain ? JieziPrototypeLayout.selected_page_width : JieziPrototypeLayout.page_dot_size,
+                                height: JieziPrototypeLayout.page_dot_size
+                            )
+                            .frame(minWidth: JieziPrototypeLayout.page_dot_hit_width, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                        .accessibilityLabel(domain.title)
+                        .accessibilityAddTraits(domain == appState.selectedDomain ? .isSelected : [])
                 }
             }
 
@@ -138,14 +158,17 @@ struct MainShellView: View {
                 Image(systemName: "plus")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(themeManager.palette.brand, in: Circle())
+                    .frame(width: JieziPrototypeLayout.add_button_size, height: JieziPrototypeLayout.add_button_size)
+                    .background(scene.accent, in: Circle())
             }
             .accessibilityLabel("记一笔")
         }
-        .padding(.horizontal, JieziSpacing.lg)
-        .padding(.vertical, JieziSpacing.sm)
-        .background(themeManager.palette.paper.opacity(0.94))
+        .padding(.horizontal, JieziPrototypeLayout.page_inset)
+        .padding(.vertical, 8)
+        .background {
+            LinearGradient(colors: scene.background, startPoint: .top, endPoint: .bottom)
+        }
+        .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
     }
 
     // MARK: - 覆盖层（SHELL-004）

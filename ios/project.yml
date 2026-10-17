@@ -30,6 +30,9 @@ targets:
       - path: SnapCount
         excludes:
           - Info.plist
+          - Resources/Fonts
+      - path: SnapCount/Resources/Fonts
+        type: folder
     info:
       path: SnapCount/Info.plist
       properties:
@@ -40,6 +43,10 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: SnapCount
         CFBundlePackageType: APPL
+        UIAppFonts:
+          - Fonts/NotoSansSC-Variable.ttf
+          - Fonts/NotoSerifSC-Variable.ttf
+          - Fonts/Nunito-Variable.ttf
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false

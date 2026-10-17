@@ -36,28 +36,36 @@ final class SnapCountTests: XCTestCase {
 
     @MainActor
     func testDomainPageEmptyStateAndFinanceHeroContract() {
-        let empty = NativeDomainPageModel.make(domain: .expense, dashboard: DashboardSnapshot())
-        XCTAssertFalse(empty.showsFinanceHero)
-        XCTAssertTrue(empty.showsContentEmptyState)
+        let dateKey = "2026-10-17"
+        let empty = NativeDomainScenePresentation.make(
+            domain: .expense, dateKey: dateKey, weekGroups: [], details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: dateKey
+        )
+        XCTAssertTrue(empty.records.isEmpty)
+        XCTAssertEqual(empty.primaryValue, "¥0.00")
+        XCTAssertEqual(empty.secondaryValue, "本地暂不可读取")
 
-        var financed = DashboardSnapshot()
-        financed.monthExpense = 1200.5
-        financed.monthIncome = 7000
-        let expenseModel = NativeDomainPageModel.make(domain: .expense, dashboard: financed)
-        XCTAssertTrue(expenseModel.showsFinanceHero)
-        XCTAssertFalse(expenseModel.showsContentEmptyState)
-        XCTAssertEqual(expenseModel.monthExpense, 1200.5)
-        XCTAssertEqual(expenseModel.monthIncome, 7000)
-
-        var readingDashboard = DashboardSnapshot()
-        readingDashboard.domains = [
-            NativeDomainDefinition(
-                id: "reading", name: "阅读", description: "", icon: "book",
-                isSystem: true, schema: [:], display: [:], recordCount: 3
+        let financeRecords = [
+            NativeDayRecord(
+                id: "expense", reference: "expense/expense", dateKey: dateKey,
+                kind: .expense, domainKey: nil, title: "消费", subtitle: "", value: "¥1200.50",
+                timeLabel: nil, systemImage: "creditcard", status: "done"
+            ),
+            NativeDayRecord(
+                id: "income", reference: "income/income", dateKey: dateKey,
+                kind: .income, domainKey: nil, title: "收入", subtitle: "", value: "¥7000.00",
+                timeLabel: nil, systemImage: "arrow.down.circle", status: "done"
             )
         ]
-        let dateKey = "\(NativeMonthKey.current())-01"
-        readingDashboard.dayRecordGroups = [NativeDayRecordGroup(
+        let finance = NativeDomainScenePresentation.make(
+            domain: .expense, dateKey: dateKey,
+            weekGroups: [NativeDayRecordGroup(dateKey: dateKey, records: financeRecords)], details: [:],
+            isSignedIn: true, isLoading: false, errorMessage: nil, todayKey: dateKey
+        )
+        XCTAssertEqual(finance.primaryValue, "¥1200.50")
+        XCTAssertEqual(finance.secondaryValue, "¥7000.00")
+
+        let readingGroups = [NativeDayRecordGroup(
             dateKey: dateKey,
             records: (1...3).map { index in
                 NativeDayRecord(
@@ -68,12 +76,18 @@ final class SnapCountTests: XCTestCase {
                 )
             }
         )]
-        let readingModel = NativeDomainPageModel.make(domain: .reading, dashboard: readingDashboard)
-        XCTAssertFalse(readingModel.showsContentEmptyState)
-        XCTAssertEqual(readingModel.domainRecordCount, 3)
-        XCTAssertFalse(readingModel.showsFinanceHero)
-
-        XCTAssertTrue(NativeDomainPageModel.make(domain: .sleep, dashboard: readingDashboard).showsContentEmptyState)
+        let reading = NativeDomainScenePresentation.make(
+            domain: .reading, dateKey: dateKey, weekGroups: readingGroups, details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: dateKey
+        )
+        XCTAssertEqual(reading.records.count, 3)
+        XCTAssertEqual(reading.primaryValue, "记录字段缺失")
+        let sleep = NativeDomainScenePresentation.make(
+            domain: .sleep, dateKey: dateKey, weekGroups: readingGroups, details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: dateKey
+        )
+        XCTAssertTrue(sleep.records.isEmpty)
+        XCTAssertEqual(sleep.primaryValue, "暂无睡眠记录")
     }
 
     @MainActor
@@ -158,6 +172,100 @@ final class SnapCountTests: XCTestCase {
 
         store.mark(.skipped, for: "user-b")
         XCTAssertEqual(store.completion(for: "user-b"), .skipped)
+    }
+
+    func testOnboardingDeviceAndAccountScopesStaySeparate() throws {
+        let suiteName = "SnapCountTests.OnboardingScopes.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+
+        store.mark(.completed, for: .account("user-a"))
+        XCTAssertEqual(store.completion(for: .account("user-a")), .completed)
+        XCTAssertNil(store.completion(for: .account("user-b")))
+        XCTAssertNil(store.completion(for: .device))
+
+        store.mark(.skipped, for: .device)
+        XCTAssertEqual(store.completion(for: .device), .skipped)
+        XCTAssertEqual(store.completion(for: .account("user-a")), .completed)
+        XCTAssertNil(store.completion(for: .account("user-b")))
+    }
+
+    @MainActor
+    func testGuestOnboardingCanPresentAndPersistsDeviceProgress() throws {
+        let suiteName = "SnapCountTests.GuestOnboarding.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+        let state = AppState(onboardingProgressStore: store)
+
+        state.presentOnboardingIfNeeded()
+        XCTAssertTrue(state.isOnboardingPresented)
+        state.finishOnboarding(skipped: true)
+
+        XCTAssertFalse(state.isOnboardingPresented)
+        XCTAssertEqual(store.completion(for: .device), .skipped)
+        XCTAssertNil(store.completion(for: .account("")))
+    }
+
+    @MainActor
+    func testGuestProgressBridgesToFirstAccountWithoutLeakingToAnother() throws {
+        let suiteName = "SnapCountTests.OnboardingBridge.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+        let state = AppState(onboardingProgressStore: store)
+
+        state.finishOnboarding(skipped: true)
+        state.currentUserId = "user-a"
+        state.isSignedIn = true
+        state.presentOnboardingIfNeeded()
+
+        XCTAssertFalse(state.isOnboardingPresented)
+        XCTAssertEqual(store.completion(for: .account("user-a")), .skipped)
+        XCTAssertEqual(store.linkedAccountIDForDeviceProgress(), "user-a")
+
+        let secondAccount = AppState(onboardingProgressStore: store)
+        secondAccount.currentUserId = "user-b"
+        secondAccount.isSignedIn = true
+        secondAccount.presentOnboardingIfNeeded()
+
+        XCTAssertTrue(secondAccount.isOnboardingPresented)
+        XCTAssertNil(store.completion(for: .account("user-b")))
+
+        secondAccount.finishOnboarding(skipped: false)
+        XCTAssertEqual(store.completion(for: .account("user-a")), .skipped)
+        XCTAssertEqual(store.completion(for: .account("user-b")), .completed)
+        XCTAssertEqual(store.completion(for: .device), .skipped)
+        XCTAssertEqual(store.linkedAccountIDForDeviceProgress(), "user-a")
+    }
+
+    @MainActor
+    func testSkippingManualOnboardingReplayPreservesCompletedStatus() throws {
+        let suiteName = "SnapCountTests.OnboardingReplay.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OnboardingProgressStore(defaults: defaults)
+        let state = AppState(onboardingProgressStore: store)
+        state.currentUserId = "user-a"
+        state.isSignedIn = true
+        store.mark(.completed, for: .device)
+        store.mark(.completed, for: .account("user-a"))
+
+        state.presentOnboarding()
+        state.finishOnboarding(skipped: true)
+
+        XCTAssertFalse(state.isOnboardingPresented)
+        XCTAssertEqual(store.completion(for: .device), .completed)
+        XCTAssertEqual(store.completion(for: .account("user-a")), .completed)
+    }
+
+    @MainActor
+    func testExternalRecordRouteDefersAutomaticOnboarding() {
+        let state = AppState()
+        state.handleDeepLink(URL(string: "jiezi://records")!)
+        state.presentOnboardingIfNeeded()
+        XCTAssertFalse(state.isOnboardingPresented)
     }
 
     @MainActor
@@ -2529,6 +2637,173 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(result.flatMap(\.records).map(\.reference), ["tx-1"])
     }
 
+    func testIOSV2POLISH002ARecordQueryIncludesCrossMonthDateWindowAndExcludesCandidates() {
+        let groups = [
+            NativeDayRecordGroup(dateKey: "2026-08-03", records: [
+                NativeDayRecord(id: "sport-1", reference: "data/sport-1", dateKey: "2026-08-03", kind: .sport, domainKey: "sport", title: "散步", subtitle: "30 分钟", value: "", timeLabel: nil, systemImage: "figure.run"),
+                NativeDayRecord(id: "staging-1", reference: "staging/staging-1", dateKey: "2026-08-03", kind: .staging, domainKey: "sport", title: "待确认", subtitle: "", value: "", timeLabel: nil, systemImage: "tray"),
+                NativeDayRecord(id: "pending-1", reference: "expense/pending-1", dateKey: "2026-08-03", kind: .expense, domainKey: "expense", title: "待补全", subtitle: "", value: "¥999", timeLabel: nil, systemImage: "clock", status: "pending")
+            ]),
+            NativeDayRecordGroup(dateKey: "2026-07-31", records: [
+                NativeDayRecord(id: "expense-1", reference: "expense/expense-1", dateKey: "2026-07-31", kind: .expense, domainKey: "expense", title: "晚餐", subtitle: "", value: "¥36.00", timeLabel: "19:10", systemImage: "creditcard")
+            ]),
+            NativeDayRecordGroup(dateKey: "2026-08-04", records: [
+                NativeDayRecord(id: "outside-1", reference: "data/outside-1", dateKey: "2026-08-04", kind: .reading, domainKey: "reading", title: "阅读", subtitle: "20 分钟", value: "", timeLabel: nil, systemImage: "book")
+            ]),
+            NativeDayRecordGroup(dateKey: "2026-07-29", records: [
+                NativeDayRecord(id: "outside-2", reference: "expense/outside-2", dateKey: "2026-07-29", kind: .expense, domainKey: "expense", title: "范围外", subtitle: "", value: "¥1.00", timeLabel: nil, systemImage: "creditcard")
+            ])
+        ]
+
+        let result = NativeRecordQuery.groups(
+            from: groups,
+            startingOn: "2026-07-31",
+            through: "2026-08-03"
+        )
+
+        XCTAssertEqual(result.map(\.dateKey), ["2026-08-03", "2026-07-31"])
+        XCTAssertEqual(result.flatMap(\.records).map(\.reference), ["data/sport-1", "expense/pending-1", "expense/expense-1"])
+        XCTAssertFalse(NativeRecordQuery.isFormal(groups[0].records[2]))
+        XCTAssertTrue(NativeRecordQuery.groups(
+            from: groups,
+            startingOn: "2026-08-03",
+            through: "2026-07-31"
+        ).isEmpty)
+    }
+
+    @MainActor
+    func testIOSV2POLISH002RetryReloadsCachedDateWindowAndClearsError() async {
+        let repository = RecordRepositoryStub()
+        let state = AppState(
+            recordRepository: repository,
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+        state.isSignedIn = true
+        state.currentUserId = Self.expressionTestSession.user.id
+        await state.loadRecordDateWindow(around: "2000-01-05")
+        XCTAssertEqual(repository.fetchMonthCount, 1)
+
+        state.recordMonthMessages["2000-01"] = "暂时读取失败"
+        await state.loadRecordDateWindow(around: "2000-01-05", force: true)
+
+        XCTAssertEqual(repository.fetchMonthCount, 2)
+        XCTAssertNil(state.recordMonthMessages["2000-01"])
+    }
+
+    func testIOSV2POLISH004DomainSceneKeepsMissingMeasurementsOutOfTotals() {
+        let measured = NativeDayRecord(
+            id: "sport-1", reference: "data/sport-1", dateKey: "2026-08-03", kind: .sport,
+            domainKey: "sport", title: "散步", subtitle: "", value: "", timeLabel: nil, systemImage: "figure.run"
+        )
+        let missing = NativeDayRecord(
+            id: "sport-2", reference: "data/sport-2", dateKey: "2026-08-03", kind: .sport,
+            domainKey: "sport", title: "拉伸", subtitle: "", value: "", timeLabel: nil, systemImage: "figure.run"
+        )
+        let candidate = NativeDayRecord(
+            id: "candidate-1", reference: "staging/candidate-1", dateKey: "2026-08-03", kind: .staging,
+            domainKey: "sport", title: "待确认", subtitle: "", value: "", timeLabel: nil, systemImage: "tray"
+        )
+        let measuredDetail = NativeRecordDetail(
+            id: measured.reference, rawId: measured.id, kind: "data", title: measured.title, subtitle: "",
+            value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: nil, merchantName: nil, platform: nil, category: nil, paymentMethod: nil, recordDate: measured.dateKey,
+            note: nil, companionMessage: nil, accountId: nil, systemImage: "figure.run",
+            payload: ["duration_minutes": AnyCodable(30)], domainKey: "sport"
+        )
+        let missingDetail = NativeRecordDetail(
+            id: missing.reference, rawId: missing.id, kind: "data", title: missing.title, subtitle: "",
+            value: "", detailRows: [], imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            amount: nil, merchantName: nil, platform: nil, category: nil, paymentMethod: nil, recordDate: missing.dateKey,
+            note: nil, companionMessage: nil, accountId: nil, systemImage: "figure.run", payload: [:], domainKey: "sport"
+        )
+
+        let result = NativeDomainScenePresentation.make(
+            domain: .sport,
+            dateKey: "2026-08-03",
+            weekGroups: [NativeDayRecordGroup(dateKey: "2026-08-03", records: [measured, missing, candidate])],
+            details: [measured.reference: measuredDetail, missing.reference: missingDetail],
+            isSignedIn: false,
+            isLoading: false,
+            errorMessage: nil,
+            todayKey: "2026-08-04"
+        )
+
+        XCTAssertEqual(result.records.map(\.reference), [measured.reference, missing.reference])
+        XCTAssertEqual(result.primaryValue, "记录字段缺失")
+        XCTAssertEqual(result.measurementNote, "1 条记录未提供运动时长")
+        XCTAssertNil(result.weeklyValues.first(where: { $0.dateKey == "2026-08-03" })?.value)
+    }
+
+    func testIOSV2POLISH004UnrecordedNonFinancialDaysAreNotPresentedAsZero() {
+        let food = NativeDomainScenePresentation.make(
+            domain: .food,
+            dateKey: "2026-08-03",
+            weekGroups: [],
+            details: [:],
+            isSignedIn: false,
+            isLoading: false,
+            errorMessage: nil,
+            todayKey: "2026-08-04"
+        )
+        let expense = NativeDomainScenePresentation.make(
+            domain: .expense,
+            dateKey: "2026-08-03",
+            weekGroups: [],
+            details: [:],
+            isSignedIn: false,
+            isLoading: false,
+            errorMessage: nil,
+            todayKey: "2026-08-04"
+        )
+
+        XCTAssertNil(food.weeklyValues.first(where: { $0.dateKey == "2026-08-03" })?.value)
+        XCTAssertEqual(expense.weeklyValues.first(where: { $0.dateKey == "2026-08-03" })?.value, 0)
+    }
+
+    func testIOSV2POLISH003ExpensePresentationDoesNotInventLocalIncomeZero() {
+        let expense = NativeDayRecord(
+            id: "expense-1", reference: "expense/expense-1", dateKey: "2026-08-03", kind: .expense,
+            domainKey: "expense", title: "晚餐", subtitle: "", value: "¥36.00", timeLabel: "19:10", systemImage: "creditcard"
+        )
+        let income = NativeDayRecord(
+            id: "income-1", reference: "income/income-1", dateKey: "2026-08-03", kind: .income,
+            domainKey: "income", title: "工资", subtitle: "", value: "¥100.00", timeLabel: nil, systemImage: "arrow.down.circle"
+        )
+        let pending = NativeDayRecord(
+            id: "expense-pending", reference: "expense/pending", dateKey: "2026-08-03", kind: .expense,
+            domainKey: "expense", title: "待补全", subtitle: "", value: "¥999.00", timeLabel: nil,
+            systemImage: "clock", transactionType: "expense", status: "pending"
+        )
+        let legacyIncome = NativeDayRecord(
+            id: "legacy-income", reference: "expense/legacy-income", dateKey: "2026-08-03", kind: .expense,
+            domainKey: "expense", title: "旧收入", subtitle: "", value: "¥500.00", timeLabel: nil,
+            systemImage: "arrow.down.circle", transactionType: "income", status: "done"
+        )
+        let result = NativeDomainScenePresentation.make(
+            domain: .expense,
+            dateKey: "2026-08-03",
+            weekGroups: [NativeDayRecordGroup(dateKey: "2026-08-03", records: [expense, income, pending, legacyIncome])],
+            details: [:],
+            isSignedIn: false,
+            isLoading: false,
+            errorMessage: nil,
+            todayKey: "2026-08-04"
+        )
+
+        XCTAssertEqual(result.primaryValue, "¥36.00")
+        XCTAssertEqual(result.secondaryValue, "本地暂不可读取")
+        XCTAssertEqual(result.records.map(\.reference), ["expense/expense-1", "expense/legacy-income", "income/income-1"])
+    }
+
+    @MainActor
+    func testIOSV2POLISH005AllDomainsMapToTheirOwnSceneAndCatPose() {
+        for domain in AppDomain.allCases {
+            let scene = JieziScene.tokens(for: domain.rawValue)
+            XCTAssertGreaterThanOrEqual(scene.background.count, 2, domain.rawValue)
+            XCTAssertEqual(JieziCatPose.forDomain(domain.rawValue).rawValue, domain.rawValue)
+        }
+    }
+
     func testDomainRepositoryProtocolSupportsStubInjection() async throws {
         let repository: DomainRepositoryProtocol = DomainRepositoryStub()
         let domains = try await repository.fetchDefinitions(accessToken: "test-token")
@@ -3472,6 +3747,7 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     private(set) var expressionPlanLookupCount = 0
     private(set) var acknowledgementCount = 0
     private(set) var createCount = 0
+    private(set) var fetchMonthCount = 0
 
     init(
         details: [NativeRecordDetail] = [],
@@ -3490,7 +3766,8 @@ private final class RecordRepositoryStub: RecordRepositoryProtocol {
     }
 
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
-        NativeRecordMonthSnapshot(groups: [], details: [:])
+        fetchMonthCount += 1
+        return NativeRecordMonthSnapshot(groups: [], details: [:])
     }
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {

@@ -8,7 +8,7 @@ struct RootView: View {
         Group {
             if appState.isBootstrapping {
                 ProgressView()
-                    .tint(JieziTheme.mint)
+                    .tint(JieziTheme.brand)
             } else {
                 MainShellView()
             }
@@ -17,5 +17,7 @@ struct RootView: View {
             OnboardingFlowView()
                 .environmentObject(appState)
         }
+        .preferredColorScheme(.light)
+        .tint(JieziTheme.brand)
     }
 }

@@ -16,6 +16,12 @@
   <string>SnapCount</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>UIAppFonts</key>
+  <array>
+    <string>Fonts/NotoSansSC-Variable.ttf</string>
+    <string>Fonts/NotoSerifSC-Variable.ttf</string>
+    <string>Fonts/Nunito-Variable.ttf</string>
+  </array>
   <key>CFBundleShortVersionString</key>
   <string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key>

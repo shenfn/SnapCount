@@ -341,9 +341,9 @@ private struct NativeInboxCategoryCard: View {
             .padding(12)
         }
         .frame(width: 232, alignment: .leading)
-        .background(Color.white.opacity(0.76), in: RoundedRectangle(cornerRadius: JieziRadius.lg, style: .continuous))
+        .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: JieziRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius, style: .continuous)
                 .stroke(tint.opacity(0.16), lineWidth: 1)
         }
         .shadow(color: JieziTheme.space.opacity(0.08), radius: 12, x: 0, y: 6)
@@ -2045,7 +2045,7 @@ private struct PendingExpenseResolutionView: View {
 
     var body: some View {
         ZStack {
-            JieziGradient.pageBackground(palette: palette).ignoresSafeArea()
+            JieziTheme.pageBackground.ignoresSafeArea()
             if let detail, let draftBinding = Binding($draft) {
                 GeometryReader { scrollViewport in
                     ScrollView {
@@ -2743,7 +2743,7 @@ private struct StagingRecordDetailView: View {
             Text(record.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -2752,7 +2752,7 @@ private struct StagingRecordDetailView: View {
             Button { imagePreview = StagingImagePreviewRoute(url: imageURL) } label: {
                 StagingImagePreview(url: imageURL) { Task { await resolveImage() } }
                     .padding(8)
-                    .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                    .jieziPrototypePanel()
             }
             .buttonStyle(.plain)
         } else if record.imagePath != nil {
@@ -2766,7 +2766,7 @@ private struct StagingRecordDetailView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 120)
                 .padding(8)
-                .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                .jieziPrototypePanel()
             }
             .buttonStyle(.plain)
         }
@@ -2839,7 +2839,7 @@ private struct StagingRecordDetailView: View {
             .disabled(appState.stagingRepaymentId != nil)
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func statusMessage(_ message: String, isError: Bool) -> some View {
@@ -2883,7 +2883,7 @@ private struct StagingRecordDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
         .disabled(appState.inboxActionRecordId != nil)
     }
 
@@ -2896,7 +2896,7 @@ private struct StagingRecordDetailView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func detailRow(_ label: String, _ value: String) -> some View {

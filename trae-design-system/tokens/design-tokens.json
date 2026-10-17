@@ -246,7 +246,10 @@
       "ios": {
         "system": ".system",
         "default_rounded": ".system(.rounded, design: .rounded)",
-        "default_serif": ".system(.serif, design: .serif)"
+        "default_serif": ".system(.serif, design: .serif)",
+        "prototype_sans": "NotoSansSC-Thin",
+        "prototype_serif": "NotoSerifSC-ExtraLight",
+        "prototype_numeric": "Nunito-ExtraLight"
       },
       "pwa": {
         "sans": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
@@ -464,5 +467,46 @@
       { "id": "modal",     "value": 10000 },
       { "id": "toast",     "value": 100000 }
     ]
+  },
+
+  "ios_prototype": {
+    "$description": "Jiezi App.dc.html iOS 场景、布局和动作参数。独立于 PWA theme，避免 iOS 原型换肤隐性改变网页。",
+    "domains": {
+      "expense": { "background": ["#EADCC4", "#F1E8D8", "#F5F1E7"], "accent": "#426E63", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none" },
+      "sleep":   { "background": ["#1C2140", "#17312D", "#0F1E1C"], "accent": "#DCBF74", "foreground": "#F5F1E7", "muted": "#C7C9D0", "surface": "#10211F", "texture": "none" },
+      "food":    { "background": ["#F2DCC4", "#F4EADB", "#F5F1E7"], "accent": "#C2410C", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none" },
+      "sport":   { "background": ["#D5E2D6", "#E6EBE0", "#F5F1E7"], "accent": "#426E63", "foreground": "#202A27", "muted": "#6E7773", "surface": "#FBF9F4", "texture": "none" },
+      "reading": { "background": ["#4A5E6E", "#43566A", "#10211F"], "accent": "#DCBF74", "foreground": "#F5F1E7", "muted": "#C7C9D0", "surface": "#17312D", "texture": "diagonal" }
+    },
+    "cat_paths": {
+      "expense": "M 42 142 C 25 131 23 158 39 163 C 58 170 66 155 67 140 C 68 121 77 112 80 102 C 70 96 67 88 70 77 C 69 65 69 55 73 48 C 81 54 87 61 91 65 C 101 61 113 61 123 65 C 129 59 137 51 142 49 C 144 58 143 70 140 78 C 146 90 137 103 124 106 C 122 114 114 119 108 125 C 101 133 105 143 114 144 C 123 145 135 138 137 127 C 139 114 128 107 117 111 C 102 116 104 138 117 142 C 129 146 141 151 138 162 C 135 173 147 177 166 177",
+      "sleep": "M 32 174 C 47 174 61 172 74 174 C 93 178 99 170 88 165 C 79 161 67 164 58 158 C 48 153 46 143 50 136 C 49 127 49 117 53 111 C 60 116 63 121 66 125 C 73 121 82 122 87 125 C 93 120 97 112 102 111 C 105 119 105 128 103 134 C 117 111 145 109 163 121 C 182 134 187 159 171 171 C 156 183 126 180 116 173 C 102 163 116 148 134 149 C 155 150 159 168 146 172 C 137 176 127 170 124 164",
+      "food": "M 42 142 C 25 131 23 158 39 163 C 58 170 66 155 67 140 C 68 121 77 112 80 102 C 70 96 67 88 70 77 C 69 65 69 55 73 48 C 81 54 87 61 91 65 C 101 61 113 61 123 65 C 129 59 137 51 142 49 C 144 58 143 70 140 78 C 146 90 137 103 124 106 C 119 112 109 116 101 125 C 96 130 97 136 102 137 C 112 142 128 140 145 134 C 143 152 133 162 118 162 C 102 162 91 151 89 133 C 105 127 130 127 145 134 C 148 142 146 157 151 169 C 154 176 163 177 173 177",
+      "sport": "M 179 59 C 186 43 199 53 190 65 C 180 79 179 88 169 105 C 178 124 179 150 176 174 C 172 178 163 177 154 177 C 157 165 153 157 143 153 C 127 147 112 153 96 160 C 77 168 56 175 33 176 C 35 169 50 166 61 157 C 51 149 49 140 53 131 C 52 122 53 114 57 109 C 64 115 68 120 72 123 C 80 121 89 123 94 126 C 101 121 106 115 111 115 C 113 122 111 132 108 138 C 104 151 91 160 78 158 C 95 162 112 148 126 132 C 143 111 151 99 169 105",
+      "reading": "M 42 142 C 25 131 23 158 39 163 C 58 170 66 155 67 140 C 68 121 77 112 80 102 C 70 96 67 88 70 77 C 69 65 69 55 73 48 C 81 54 87 61 91 65 C 101 61 113 61 123 65 C 129 59 137 51 142 49 C 144 58 143 70 140 78 C 146 90 137 103 124 106 C 127 113 130 120 128 126 C 124 133 118 133 113 127 C 105 120 93 119 85 120 C 86 132 88 146 90 158 C 101 157 113 159 124 166 C 124 150 124 137 123 129 C 136 122 148 120 161 121 C 158 134 157 146 156 159 C 144 158 133 161 124 166 C 129 176 146 179 170 177"
+    },
+    "layout": {
+      "page_inset": 14,
+      "metric_inset": 20,
+      "column_gap": 12,
+      "card_inset": 16,
+      "card_radius": 24,
+      "sheet_radius": 32,
+      "selected_page_width": 22,
+      "page_dot_size": 8,
+      "page_dot_gap": 6,
+      "page_dot_hit_width": 32,
+      "add_button_size": 48,
+      "week_day_height": 52,
+      "calendar_day_height": 44,
+      "calendar_arrow_hit_size": 44
+    },
+    "motion": {
+      "page_transition_ms": 450,
+      "background_ms": 700,
+      "cat_retract_ms": 360,
+      "cat_draw_ms": 1150,
+      "calendar_feedback_ms": 260
+    }
   }
 }

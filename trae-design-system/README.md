@@ -52,11 +52,18 @@ node scripts/generate-tailwind.mjs
 
 ### 2. 接入 iOS 项目
 
-将 `dist/jiezi/JieziTheme+Generated.swift` 拖入 `ios/SnapCount/DesignSystem/`，无需修改现有 `JieziTheme.swift`。
+`generate-ios.mjs` 默认生成忽略目录 `dist/jiezi/`。应用源码副本由生成器同步或检查：
+
+```bash
+node scripts/generate-ios.mjs --sync-app # 生成并同步 iOS 编译副本
+node scripts/generate-ios.mjs --check    # 只读检查编译副本是否与 Token 一致
+```
+
+`--check` 不写文件；`--sync-app` 更新 `ios/SnapCount/DesignSystem/JieziTheme+Generated.swift`。原型字体资源位于 `ios/SnapCount/Resources/Fonts/`，应用通过 `UIAppFonts` 离线加载。
 
 ```swift
 @StateObject private var themeManager = JieziThemeManager()
-// 切换主题：themeManager.switchTo("springWood")
+// iOS 原型场景从 JieziScene 按五域读取；历史 jiezi.theme.id 不再覆盖应用外观。
 ```
 
 ### 3. 接入 PWA 项目

@@ -51,6 +51,9 @@ struct LocalExpenseEntryView: View {
                     Section { Text(message).foregroundStyle(.secondary) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(JieziTheme.pageBackground)
+            .tint(JieziTheme.brand)
             .navigationTitle("新增本地支出")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

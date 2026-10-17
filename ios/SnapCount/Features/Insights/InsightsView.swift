@@ -113,8 +113,7 @@ struct InsightsView: View {
             TextEditor(text: $question)
                 .frame(minHeight: 84)
                 .padding(8)
-                .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(JieziTheme.brand.opacity(0.15)))
+                .jieziPrototypePanel()
 
             HStack {
                 Menu {
@@ -176,7 +175,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -292,7 +291,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -342,7 +341,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     private func financeCompressionSummary(
@@ -421,7 +420,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -465,7 +464,7 @@ struct InsightsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 
     @ViewBuilder
@@ -550,6 +549,6 @@ struct InsightMetric: View {
         }
         .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
         .padding(12)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8))
+        .jieziPrototypePanel()
     }
 }

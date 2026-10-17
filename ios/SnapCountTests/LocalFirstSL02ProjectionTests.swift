@@ -240,6 +240,16 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         let state = harness.state
         state.resetUserScopedState()
 
+        func presentation(for domain: AppDomain, in state: AppState) -> NativeDomainScenePresentation {
+            let dateKey = NativeLocalDate.dateKey(Date())
+            return NativeDomainScenePresentation.make(
+                domain: domain, dateKey: dateKey,
+                weekGroups: state.recordGroups(monthKey: NativeMonthKey.current()),
+                details: state.recordDetails(from: dateKey, through: dateKey),
+                isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: dateKey
+            )
+        }
+
         var sport = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
         sport.primaryValueText = "30"
         sport.dimension = "跑步"
@@ -250,9 +260,9 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
 
         let domains: [AppDomain] = [.sleep, .food, .sport, .reading]
         for domain in domains {
-            let model = NativeDomainPageModel.make(domain: domain, dashboard: state.dashboard)
-            XCTAssertFalse(model.showsContentEmptyState, "\(domain.title) 已有本地事实，不应显示空态")
-            XCTAssertEqual(model.domainRecordCount, 1)
+            let model = presentation(for: domain, in: state)
+            XCTAssertFalse(model.records.isEmpty, "\(domain.title) 已有本地事实，不应显示空态")
+            XCTAssertEqual(model.records.count, 1)
         }
 
         let reopenedDatabase = try LocalDatabase(databaseURL: harness.databaseURL)
@@ -272,9 +282,9 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         await reopenedState.loadRecordMonth(monthKey, force: true)
 
         for domain in domains {
-            let reopenedModel = NativeDomainPageModel.make(domain: domain, dashboard: reopenedState.dashboard)
-            XCTAssertFalse(reopenedModel.showsContentEmptyState, "重开数据库后\(domain.title)仍应非空")
-            XCTAssertEqual(reopenedModel.domainRecordCount, 1)
+            let reopenedModel = presentation(for: domain, in: reopenedState)
+            XCTAssertFalse(reopenedModel.records.isEmpty, "重开数据库后\(domain.title)仍应非空")
+            XCTAssertEqual(reopenedModel.records.count, 1)
 
             let record = try XCTUnwrap(reopenedState.recordGroups(monthKey: monthKey)
                 .flatMap(\.records).first { $0.domainKey == domain.rawValue })
@@ -283,9 +293,9 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             XCTAssertFalse(reopenedState.recordGroups(monthKey: monthKey)
                 .flatMap(\.records).contains { $0.reference == record.reference },
                 "正式列表也必须移除已删除记录，不能只改域页计数")
-            let emptyModel = NativeDomainPageModel.make(domain: domain, dashboard: reopenedState.dashboard)
-            XCTAssertTrue(emptyModel.showsContentEmptyState, "删除最后一条\(domain.title)记录后应显示空态")
-            XCTAssertEqual(emptyModel.domainRecordCount, 0)
+            let emptyModel = presentation(for: domain, in: reopenedState)
+            XCTAssertTrue(emptyModel.records.isEmpty, "删除最后一条\(domain.title)记录后应显示空态")
+            XCTAssertEqual(emptyModel.records.count, 0)
         }
         XCTAssertEqual(harness.sessionCounter.current, 0)
     }

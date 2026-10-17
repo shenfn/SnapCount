@@ -17,6 +17,75 @@ enum NativeLocalDate {
         formatter("yyyy-MM-dd").string(from: date)
     }
 
+    static func monthKey(from dateKey: String) -> String? {
+        guard let date = date(fromKey: dateKey) else { return nil }
+        return formatter("yyyy-MM").string(from: date)
+    }
+
+    static func shiftedDateKey(_ dateKey: String, byDays days: Int) -> String? {
+        guard let date = date(fromKey: dateKey),
+              let shifted = calendar.date(byAdding: .day, value: days, to: date) else { return nil }
+        return self.dateKey(shifted)
+    }
+
+    static func weekDateKeys(containing dateKey: String) -> [String] {
+        guard let date = date(fromKey: dateKey) else { return [] }
+        let day = calendar.component(.weekday, from: date)
+        let daysFromMonday = day == 1 ? 6 : day - 2
+        guard let monday = calendar.date(byAdding: .day, value: -daysFromMonday, to: date) else { return [] }
+        return (0..<7).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: monday).map(self.dateKey)
+        }
+    }
+
+    static func monthDateKeys(_ monthKey: String) -> [String] {
+        guard monthKey.range(of: #"^\d{4}-\d{2}$"#, options: .regularExpression) != nil,
+              let firstDay = formatter("yyyy-MM-dd").date(from: "\(monthKey)-01"),
+              formatter("yyyy-MM").string(from: firstDay) == monthKey,
+              let dayRange = calendar.range(of: .day, in: .month, for: firstDay) else { return [] }
+        return dayRange.compactMap { day in
+            calendar.date(byAdding: .day, value: day - 1, to: firstDay).map(self.dateKey)
+        }
+    }
+
+    static func monthKeys(from startDateKey: String, through endDateKey: String) -> [String] {
+        guard startDateKey <= endDateKey,
+              date(fromKey: startDateKey) != nil,
+              date(fromKey: endDateKey) != nil else { return [] }
+        var result: [String] = []
+        var cursor = startDateKey
+        while cursor <= endDateKey {
+            guard let month = monthKey(from: cursor),
+                  let next = shiftedDateKey(cursor, byDays: 1) else { return [] }
+            if result.last != month { result.append(month) }
+            cursor = next
+        }
+        return result
+    }
+
+    static func weekdayMondayFirstIndex(for dateKey: String) -> Int? {
+        guard let date = date(fromKey: dateKey) else { return nil }
+        let weekday = calendar.component(.weekday, from: date)
+        return weekday == 1 ? 6 : weekday - 2
+    }
+
+    static func weekdayShortLabel(for dateKey: String) -> String? {
+        guard let date = date(fromKey: dateKey) else { return nil }
+        let labels = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        return labels[calendar.component(.weekday, from: date) - 1]
+    }
+
+    static func monthTitle(_ monthKey: String) -> String {
+        let parts = monthKey.split(separator: "-")
+        guard parts.count == 2, let month = Int(parts[1]) else { return monthKey }
+        return "\(parts[0])年\(month)月"
+    }
+
+    static func dayOfMonth(_ dateKey: String) -> Int? {
+        guard let date = date(fromKey: dateKey) else { return nil }
+        return calendar.component(.day, from: date)
+    }
+
     static func timeKey(_ value: String) -> String? {
         guard let date = parse(value) else {
             guard value.count >= 16 else { return nil }
@@ -131,6 +200,21 @@ enum NativeLocalDate {
         let standard = ISO8601DateFormatter()
         standard.formatOptions = [.withInternetDateTime]
         return standard.date(from: value)
+    }
+
+    private static func date(fromKey value: String) -> Date? {
+        guard value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil,
+              let date = formatter("yyyy-MM-dd").date(from: value),
+              dateKey(date) == value else { return nil }
+        return date
+    }
+
+    private static var calendar: Calendar {
+        var value = Calendar(identifier: .gregorian)
+        value.timeZone = timeZone
+        value.firstWeekday = 2
+        value.minimumDaysInFirstWeek = 4
+        return value
     }
 
     private static func formatter(_ format: String) -> DateFormatter {
