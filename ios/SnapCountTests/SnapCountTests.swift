@@ -56,6 +56,18 @@ final class SnapCountTests: XCTestCase {
                 isSystem: true, schema: [:], display: [:], recordCount: 3
             )
         ]
+        let dateKey = "\(NativeMonthKey.current())-01"
+        readingDashboard.dayRecordGroups = [NativeDayRecordGroup(
+            dateKey: dateKey,
+            records: (1...3).map { index in
+                NativeDayRecord(
+                    id: "reading-\(index)", reference: "data/reading-\(index)",
+                    dateKey: dateKey, kind: .reading, domainKey: "reading",
+                    title: "阅读记录", subtitle: "25 分钟", value: "",
+                    timeLabel: nil, systemImage: "book", status: "local"
+                )
+            }
+        )]
         let readingModel = NativeDomainPageModel.make(domain: .reading, dashboard: readingDashboard)
         XCTAssertFalse(readingModel.showsContentEmptyState)
         XCTAssertEqual(readingModel.domainRecordCount, 3)

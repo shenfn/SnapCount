@@ -24,8 +24,10 @@
 - 问题：域页依赖 `dashboard.domains[].recordCount`，但当前本地事实刷新不更新该元数据，造成真实记录已存在时仍显示空态。
 - 测试边界：真实 SQLite → `AppState.createManualRecord`/`loadRecordMonth`/`deleteRecord` → `NativeDomainPageModel.make`。
 - 已编写：`LocalFirstSL02ProjectionTests.testIOSV2SHELL005ALocalDomainPagesFollowCreateReopenAndDelete`，覆盖睡眠、饮食、运动、阅读的新增、数据库重开与删除最后一条。
-- 当前状态：Windows 未安装 Swift/Xcode；Swift 测试尚未执行，不将环境不可用当作业务红灯。产品实现等待 macOS 红灯确认。
-- 计划：复用当月正式记录的现有查询口径，排除其他月份和候选，不增加持久化计数或远端请求。
+- 红灯提交：`bb95b5b7f2b60b4c0fcc9b8eb306a45bac0cf36a`；[macOS CI 39000867759](https://github.com/shenfn/SnapCount/actions/runs/39000867759)。模拟器 Build 通过，320 个 XCTest 中，新增生命周期测试在四域新增后、重开数据库后的空态/计数断言共出现预期的 16 条失败（期望 1，实际 0），其他测试无失败。
+- 最小实现：`NativeDomainPageModel.make` 复用 `NativeRecordQuery` 按当月筛选正式记录，再按域统计；不增加持久化计数、AppState 计数维护或远端请求。
+- 原模型测试补充实际记录分组；既有查询测试继续保护跨月过滤与候选排除。
+- 绿灯状态：实现已准备，等待后续 macOS CI；尚不宣称通过。
 
 ## 验证与发布边界
 

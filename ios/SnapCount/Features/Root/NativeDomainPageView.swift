@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// 口径（拍板 1b / 2026-10-17 确认单）：
 /// - 记账域空态 = 本月收支均为零（monthExpense == 0 && monthIncome == 0）；
-/// - 其余四域空态 = dashboard.domains 中对应旧域的本月 recordCount == 0（域定义缺失视为空）；
+/// - 其余四域空态 = 当月正式记录中对应域的数量为零，不使用可能陈旧的领域定义计数；
 /// - 记账 hero 永远显示收支两行，空态时不显示 hero。
 struct NativeDomainPageModel {
     let showsFinanceHero: Bool
@@ -14,8 +14,12 @@ struct NativeDomainPageModel {
     let domainRecordCount: Int
 
     static func make(domain: AppDomain, dashboard: DashboardSnapshot) -> Self {
-        let domainRecordCount = dashboard.domains
-            .first { $0.id == domain.legacyDomainKey }?.recordCount ?? 0
+        let records = NativeRecordQuery(monthKey: NativeMonthKey.current())
+            .groups(from: dashboard.dayRecordGroups)
+            .flatMap(\.records)
+        let domainRecordCount = records.filter {
+            ($0.domainKey ?? $0.kind.rawValue) == domain.legacyDomainKey
+        }.count
         let financeEmpty = dashboard.monthExpense == 0 && dashboard.monthIncome == 0
         switch domain {
         case .expense:
