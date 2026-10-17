@@ -10,6 +10,13 @@ struct NativeDomainDayValue: Identifiable {
     var dayLabel: String { String(dateKey.suffix(2)) }
 }
 
+struct NativeMerchantSummary: Identifiable {
+    let name: String
+    let total: Double?
+    let records: [NativeDayRecord]
+    var id: String { name }
+}
+
 struct NativeDomainScenePresentation {
     private static let signposter = OSSignposter(subsystem: "com.jiezi.app", category: "DomainScene")
     let dateKey: String
@@ -23,6 +30,8 @@ struct NativeDomainScenePresentation {
     let highestExpense: NativeDayRecord?
     let knownPrimaryTotal: Double?
     let stateMessage: String?
+    // IOS-V2-POLISH-003：先固定可运行红灯，汇总实现随后接入。
+    var merchants: [NativeMerchantSummary] { [] }
 
     static func trendDateKeys(for domain: AppDomain, dateKey: String) -> [String] {
         switch domain {

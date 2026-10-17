@@ -3,6 +3,30 @@ import UIKit
 @testable import SnapCount
 
 final class SnapCountTests: XCTestCase {
+    func testIOSV2POLISH003MerchantRankingUsesOnlySameDayFormalExpenses() throws {
+        func record(_ id: String, _ merchant: String, _ value: String, kind: NativeDayRecordKind = .expense) -> NativeDayRecord {
+            NativeDayRecord(
+                id: id, reference: "\(kind.rawValue)/\(id)", dateKey: "2026-10-17", kind: kind,
+                domainKey: nil, title: merchant, subtitle: "", value: value,
+                timeLabel: nil, systemImage: "creditcard", status: "done"
+            )
+        }
+        let records = [
+            record("a1", "示例商户 A", "¥12.00"), record("a2", "示例商户 A", "¥3.20"),
+            record("b1", "示例商户 B", "¥8.00"), record("income", "示例商户 A", "¥100.00", kind: .income),
+            record("candidate", "示例商户 A", "¥999.00", kind: .staging)
+        ]
+        let result = NativeDomainScenePresentation.make(
+            domain: .expense, dateKey: "2026-10-17",
+            weekGroups: [NativeDayRecordGroup(dateKey: "2026-10-17", records: records)], details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: "2026-10-17"
+        )
+        XCTAssertEqual(result.merchants.map(\.name), ["示例商户 A", "示例商户 B"])
+        XCTAssertEqual(try XCTUnwrap(result.merchants.first?.total), 15.2, accuracy: 0.001)
+        XCTAssertEqual(result.merchants.first?.records.map(\.id), ["a1", "a2"])
+        XCTAssertEqual(try XCTUnwrap(result.merchants.last?.total), 8, accuracy: 0.001)
+    }
+
     func testIOSV2POLISH004SleepSevenNightsEndOnSelectedMondayAcrossMonth() {
         // 2026-10-05 为周一：近七夜必须包括九月末，不能变成 10/05～10/11。
         let result = NativeDomainScenePresentation.make(
