@@ -256,8 +256,8 @@ struct NativeManualRecordDraft {
             guard !category.isEmpty else { return "请选择收入类型" }
         case .universal:
             let metadata = NativeManualDomainMetadata.resolve(domain, fallbackDomainKey: domainKey)
-            guard let primaryValue, primaryValue <= metadata.maximumValue else { return "请输入有效(metadata.primaryLabel)" }
-            guard !dimension.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "请填写(metadata.dimensionLabel)" }
+            guard let primaryValue, primaryValue <= metadata.maximumValue else { return "请输入有效\(metadata.primaryLabel)" }
+            guard !dimension.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "请填写\(metadata.dimensionLabel)" }
             if domainKey == "wallet", walletRecordKind == "liability_snapshot", !walletBillDay.isEmpty {
                 guard let billDay = Int(walletBillDay), (1...31).contains(billDay) else { return "每月还款日必须是 1-31 之间的整数" }
             }

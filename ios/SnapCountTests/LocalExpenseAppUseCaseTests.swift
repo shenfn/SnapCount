@@ -437,15 +437,15 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         let state = AppState(localExpenseUseCase: localUseCase)
         state.isSignedIn = true
         state.currentUserId = "cloud-user"
-        state.selectedTab = .settings
+        state.presentedOverlay = .settings
 
         state.isSignedIn = false
         state.currentUserId = ""
         state.resetUserScopedState()
-        state.selectedTab = .records
+        state.presentedOverlay = .records
         await state.loadRecordMonth("2026-07", force: true)
 
-        XCTAssertEqual(state.selectedTab, .records)
+        XCTAssertEqual(state.presentedOverlay, .records)
         XCTAssertEqual(localUseCase.monthKeys, ["2026-07"])
         XCTAssertEqual(state.recordGroups(monthKey: "2026-07").first?.records.first?.reference, "local-expense/22222222-2222-2222-2222-222222222222")
     }

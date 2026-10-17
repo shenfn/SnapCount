@@ -233,6 +233,60 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         ]))
     }
 
+    // IOS-V2-SHELL-005A：通过实际本地写入与重开数据库验证域页，不能手填领域计数。
+    func testIOSV2SHELL005ALocalDomainPagesFollowCreateReopenAndDelete() async throws {
+        let harness = try Self.makeHarness(session: nil, expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.resetUserScopedState()
+
+        var sport = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
+        sport.primaryValueText = "30"
+        sport.dimension = "跑步"
+        for draft in Self.manualUniversalDrafts() + [sport] {
+            let saved = await state.createManualRecord(draft, domain: nil)
+            XCTAssertTrue(saved, "\(draft.domainKey) 创建应成功")
+        }
+
+        let domains: [AppDomain] = [.sleep, .food, .sport, .reading]
+        for domain in domains {
+            let model = NativeDomainPageModel.make(domain: domain, dashboard: state.dashboard)
+            XCTAssertFalse(model.showsContentEmptyState, "\(domain.title) 已有本地事实，不应显示空态")
+            XCTAssertEqual(model.domainRecordCount, 1)
+        }
+
+        let reopenedDatabase = try LocalDatabase(databaseURL: harness.databaseURL)
+        let reopenedStore = LocalProfileStore(database: reopenedDatabase)
+        let reopenedUseCase = LocalRecordUseCase(
+            profileStore: reopenedStore,
+            repository: try LocalRecordRepository(database: reopenedDatabase)
+        )
+        let reopenedState = AppState(
+            localExpenseUseCase: harness.expenseUseCase,
+            localRecordUseCase: reopenedUseCase,
+            localFactReader: try LocalFactReader(database: reopenedDatabase),
+            localBindingRepository: reopenedStore,
+            sessionProvider: { _ in throw SL02TestError.missingSession }
+        )
+        let monthKey = NativeMonthKey.current()
+        await reopenedState.loadRecordMonth(monthKey, force: true)
+
+        for domain in domains {
+            let reopenedModel = NativeDomainPageModel.make(domain: domain, dashboard: reopenedState.dashboard)
+            XCTAssertFalse(reopenedModel.showsContentEmptyState, "重开数据库后\(domain.title)仍应非空")
+            XCTAssertEqual(reopenedModel.domainRecordCount, 1)
+
+            let record = try XCTUnwrap(reopenedState.recordGroups(monthKey: monthKey)
+                .flatMap(\.records).first { $0.domainKey == domain.rawValue })
+            let deleted = await reopenedState.deleteRecord(reference: record.reference)
+            XCTAssertTrue(deleted)
+            let emptyModel = NativeDomainPageModel.make(domain: domain, dashboard: reopenedState.dashboard)
+            XCTAssertTrue(emptyModel.showsContentEmptyState, "删除最后一条\(domain.title)记录后应显示空态")
+            XCTAssertEqual(emptyModel.domainRecordCount, 0)
+        }
+        XCTAssertEqual(harness.sessionCounter.current, 0)
+    }
+
     // MARK: - Fixtures
 
     private static func manualUniversalDrafts() -> [NativeManualRecordDraft] {

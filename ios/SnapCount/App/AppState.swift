@@ -20,7 +20,8 @@ private struct PendingRecordExpressionPlanDelivery {
 
 @MainActor
 final class AppState: ObservableObject {
-    @Published var selectedTab: AppTab = .today
+    @Published var selectedDomain: AppDomain = .expense
+    @Published var presentedOverlay: AppOverlay = .none
     @Published var isSignedIn = false
     @Published var currentUserId = ""
     @Published var currentUserEmail = ""
@@ -258,7 +259,7 @@ final class AppState: ObservableObject {
             }
             await restoreAuthentication()
             if !isSignedIn {
-                selectedTab = .records
+                presentedOverlay = .records
                 await loadRecordMonth(Self.currentMonthKey, force: true)
             }
             isBootstrapping = false
@@ -2364,12 +2365,12 @@ final class AppState: ObservableObject {
     }
 
     func openUnboundRecord(_ record: NativeUnboundRecord) {
-        selectedTab = .records
+        presentedOverlay = .records
         recordsPath = NavigationPath([NativeRecordRoute(reference: record.reference)])
     }
 
     func openWalletSnapshot(_ snapshot: NativeWalletSnapshot) {
-        selectedTab = .records
+        presentedOverlay = .records
         let reference = "data/\(snapshot.id)"
         recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
     }
@@ -2420,23 +2421,23 @@ final class AppState: ObservableObject {
 
     func openDayRecord(_ record: NativeDayRecord) {
         if record.reference.hasPrefix("staging-") {
-            selectedTab = .inbox
+            presentedOverlay = .inbox
             inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: String(record.reference.dropFirst("staging-".count)))])
         } else {
-            selectedTab = .records
+            presentedOverlay = .records
             recordsPath = NavigationPath([NativeRecordRoute(reference: record.reference)])
         }
     }
 
     func openPendingExpense(_ pending: NativePendingExpense) {
-        selectedTab = .inbox
+        presentedOverlay = .inbox
         // Keep completion inside the inbox queue. The card opens the inline
         // editor, while the queue remains responsible for next-item routing.
         inboxPath = NavigationPath([NativeInboxRoute.category(filter: .pendingExpense)])
     }
 
     func openInbox(filter: NativeInboxFilter) {
-        selectedTab = .inbox
+        presentedOverlay = .inbox
         inboxPath = NavigationPath([NativeInboxRoute.category(filter: filter)])
     }
 
@@ -2447,13 +2448,13 @@ final class AppState: ObservableObject {
 
         switch url.host {
         case "inbox":
-            selectedTab = .inbox
+            presentedOverlay = .inbox
         case "records", "record":
-            selectedTab = .records
+            presentedOverlay = .records
         case "settings":
-            selectedTab = .settings
+            presentedOverlay = .settings
         default:
-            selectedTab = .today
+            presentedOverlay = .none
         }
 
         guard isSignedIn else { return }
@@ -2473,19 +2474,19 @@ final class AppState: ObservableObject {
 
         switch target {
         case "inbox":
-            selectedTab = .inbox
+            presentedOverlay = .inbox
             if !detailPath.isEmpty {
                 inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: detailPath)])
             }
         case "records":
-            selectedTab = .records
+            presentedOverlay = .records
             if !detailPath.isEmpty {
                 recordsPath = NavigationPath([NativeRecordRoute(reference: detailPath)])
             }
         case "settings":
-            selectedTab = .settings
+            presentedOverlay = .settings
         default:
-            selectedTab = .today
+            presentedOverlay = .none
         }
 
         guard isSignedIn else { return }
@@ -4159,7 +4160,7 @@ final class AppState: ObservableObject {
         shortcutCredentialMessage = nil
         resetUserScopedState()
         refreshLocalSyncState()
-        selectedTab = .records
+        presentedOverlay = .records
         Task { await RemoteImageRepository.shared.clear() }
         authMessage = message
         authMessageIsError = !message.isEmpty
@@ -4257,7 +4258,8 @@ final class AppState: ObservableObject {
         isOnboardingPresented = false
         dashboardMessage = nil
         isShowingCachedDashboard = false
-        selectedTab = .today
+        presentedOverlay = .none
+        selectedDomain = .expense
         lastDashboardRefreshAt = nil
     }
 
@@ -4597,32 +4599,64 @@ final class AppState: ObservableObject {
     }
 }
 
-enum AppTab: String, CaseIterable, Identifiable {
-    case today
+/// 五域主场景的横滑域（IOS-V2-SHELL-001）。
+enum AppDomain: String, CaseIterable, Identifiable {
+    case expense
+    case sleep
+    case food
+    case sport
+    case reading
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .expense: return "记账"
+        case .sleep: return "睡眠"
+        case .food: return "饮食"
+        case .sport: return "运动"
+        case .reading: return "阅读"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .expense: return "creditcard"
+        case .sleep: return "moon.zzz"
+        case .food: return "fork.knife"
+        case .sport: return "figure.run"
+        case .reading: return "book"
+        }
+    }
+
+    /// 新壳五域与 dashboard.domains 中旧域 key 的对应关系（用于空态判定与后续内容接线）。
+    var legacyDomainKey: String {
+        switch self {
+        case .expense: return "expense"
+        case .sleep, .food, .sport, .reading: return rawValue
+        }
+    }
+}
+
+/// 主场景之上的全屏覆盖层（IOS-V2-SHELL-004）；`.none` 表示无覆盖层、停留在五域横滑。
+enum AppOverlay: String, CaseIterable, Identifiable {
+    case none
     case inbox
     case records
     case insights
+    case wallet
     case settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .today: return "今日"
+        case .none: return ""
         case .inbox: return "收件箱"
         case .records: return "记录"
-        case .insights: return "分析"
+        case .insights: return "观察"
+        case .wallet: return "钱包"
         case .settings: return "设置"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .today: return "sparkles"
-        case .inbox: return "tray.full"
-        case .records: return "list.bullet.rectangle"
-        case .insights: return "chart.xyaxis.line"
-        case .settings: return "gearshape"
         }
     }
 }

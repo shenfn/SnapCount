@@ -394,7 +394,7 @@ struct OnboardingFlowView: View {
             .padding(.horizontal, 30)
 
             Button {
-                appState.selectedTab = .today
+                appState.presentedOverlay = .none
                 appState.finishOnboarding(skipped: false)
             } label: {
                 Label("进入芥子", systemImage: "arrow.right.circle.fill")

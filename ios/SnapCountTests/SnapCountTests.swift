@@ -21,9 +21,83 @@ final class SnapCountTests: XCTestCase {
         )
     }
 
-    func testAppTabsHaveTitles() {
-        XCTAssertEqual(AppTab.allCases.count, 5)
-        XCTAssertTrue(AppTab.allCases.allSatisfy { !$0.title.isEmpty })
+    @MainActor
+    func testAppShellDomainsMatchFiveDomainContract() {
+        XCTAssertEqual(AppDomain.allCases.map(\.rawValue), ["expense", "sleep", "food", "sport", "reading"])
+        XCTAssertEqual(AppDomain.allCases.map(\.title), ["记账", "睡眠", "饮食", "运动", "阅读"])
+        XCTAssertTrue(AppDomain.allCases.allSatisfy { !$0.title.isEmpty })
+    }
+
+    @MainActor
+    func testAppShellOverlaysMatchMenuContract() {
+        XCTAssertEqual(AppOverlay.allCases.map(\.rawValue), ["none", "inbox", "records", "insights", "wallet", "settings"])
+        XCTAssertEqual(AppOverlay.allCases.filter { $0 != .none }.map(\.title), ["收件箱", "记录", "观察", "钱包", "设置"])
+    }
+
+    @MainActor
+    func testDomainPageEmptyStateAndFinanceHeroContract() {
+        let empty = NativeDomainPageModel.make(domain: .expense, dashboard: DashboardSnapshot())
+        XCTAssertFalse(empty.showsFinanceHero)
+        XCTAssertTrue(empty.showsContentEmptyState)
+
+        var financed = DashboardSnapshot()
+        financed.monthExpense = 1200.5
+        financed.monthIncome = 7000
+        let expenseModel = NativeDomainPageModel.make(domain: .expense, dashboard: financed)
+        XCTAssertTrue(expenseModel.showsFinanceHero)
+        XCTAssertFalse(expenseModel.showsContentEmptyState)
+        XCTAssertEqual(expenseModel.monthExpense, 1200.5)
+        XCTAssertEqual(expenseModel.monthIncome, 7000)
+
+        var readingDashboard = DashboardSnapshot()
+        readingDashboard.domains = [
+            NativeDomainDefinition(
+                id: "reading", name: "阅读", description: "", icon: "book",
+                isSystem: true, schema: [:], display: [:], recordCount: 3
+            )
+        ]
+        let readingModel = NativeDomainPageModel.make(domain: .reading, dashboard: readingDashboard)
+        XCTAssertFalse(readingModel.showsContentEmptyState)
+        XCTAssertEqual(readingModel.domainRecordCount, 3)
+        XCTAssertFalse(readingModel.showsFinanceHero)
+
+        XCTAssertTrue(NativeDomainPageModel.make(domain: .sleep, dashboard: readingDashboard).showsContentEmptyState)
+    }
+
+    @MainActor
+    func testDeepLinkRoutesToNewShellOverlays() {
+        let state = AppState()
+
+        state.handleDeepLink(URL(string: "jiezi://inbox")!)
+        XCTAssertEqual(state.presentedOverlay, .inbox)
+
+        state.handleDeepLink(URL(string: "jiezi://records")!)
+        XCTAssertEqual(state.presentedOverlay, .records)
+
+        state.handleDeepLink(URL(string: "jiezi://settings")!)
+        XCTAssertEqual(state.presentedOverlay, .settings)
+
+        state.handleDeepLink(URL(string: "jiezi://today")!)
+        XCTAssertEqual(state.presentedOverlay, .none)
+    }
+
+    @MainActor
+    func testShortcutNotificationRouteMapsToNewShellOverlays() {
+        let state = AppState()
+
+        state.handleShortcutNotificationRoute("inbox/staging-1")
+        XCTAssertEqual(state.presentedOverlay, .inbox)
+        XCTAssertEqual(state.inboxPath.count, 1)
+
+        state.handleShortcutNotificationRoute("records/expense/record-1")
+        XCTAssertEqual(state.presentedOverlay, .records)
+        XCTAssertEqual(state.recordsPath.count, 1)
+
+        state.handleShortcutNotificationRoute("settings")
+        XCTAssertEqual(state.presentedOverlay, .settings)
+
+        state.handleShortcutNotificationRoute(nil)
+        XCTAssertEqual(state.presentedOverlay, .none)
     }
 
     func testInboxCategoriesKeepActionOrderAndHideEmptyGroups() {
@@ -77,7 +151,7 @@ final class SnapCountTests: XCTestCase {
     @MainActor
     func testResetUserScopedStateClearsNavigationAndDetails() {
         let state = AppState()
-        state.selectedTab = .records
+        state.presentedOverlay = .records
         state.dashboard = DashboardSnapshot(todayCount: 3)
         state.todayPath.append(NativeDayDetailRoute(dateKey: "2026-07-17", kind: .all))
         state.inboxPath.append(NativeInboxRoute.staging(recordId: "staging-1"))
@@ -107,7 +181,8 @@ final class SnapCountTests: XCTestCase {
 
         state.resetUserScopedState()
 
-        XCTAssertEqual(state.selectedTab, .today)
+        XCTAssertEqual(state.presentedOverlay, .none)
+        XCTAssertEqual(state.selectedDomain, .expense)
         XCTAssertEqual(state.dashboard.todayCount, 0)
         XCTAssertTrue(state.todayPath.isEmpty)
         XCTAssertEqual(state.inboxPath.count, 0)
@@ -119,12 +194,12 @@ final class SnapCountTests: XCTestCase {
     }
 
     @MainActor
-    func testOpeningInboxCategorySwitchesTabAndCreatesOneRoute() {
+    func testOpeningInboxCategoryPresentsOverlayAndCreatesOneRoute() {
         let state = AppState()
 
         state.openInbox(filter: .failed)
 
-        XCTAssertEqual(state.selectedTab, .inbox)
+        XCTAssertEqual(state.presentedOverlay, .inbox)
         XCTAssertEqual(state.inboxPath.count, 1)
     }
 
@@ -2252,6 +2327,15 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNil(draft.validationMessage(domain: nil))
         XCTAssertEqual(draft.amount, 28.5)
         XCTAssertEqual(NativeManualRecordDraft.expenseCategories.map(\.id), ["food", "shopping", "transport", "entertainment", "life", "health", "education", "other"])
+    }
+
+    func testManualUniversalValidationInterpolatesDomainLabels() {
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "reading")
+        XCTAssertEqual(draft.validationMessage(domain: nil), "请输入有效阅读时长（分钟）")
+        draft.primaryValueText = "45"
+        XCTAssertEqual(draft.validationMessage(domain: nil), "请填写书名")
+        draft.dimension = "三体"
+        XCTAssertNil(draft.validationMessage(domain: nil))
     }
 
     func testFinanceVocabularyKeepsDynamicValuesAndStablePrimaryCategories() {
