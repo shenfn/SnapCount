@@ -43,6 +43,7 @@ struct NativeDomainScenePresentation {
     let highestExpense: NativeDayRecord?
     let knownPrimaryTotal: Double?
     let stateMessage: String?
+    let refreshMessage: String?
     let merchants: [NativeMerchantSummary]
 
     let timeline: [NativeTimelineEntry]
@@ -253,14 +254,23 @@ struct NativeDomainScenePresentation {
             if amounts.count == previous.count { previousExpenseTotal = amounts.reduce(0, +) }
         }
 
-        let stateMessage: String?
+        let readMessage: String?
         if let errorMessage, !errorMessage.isEmpty {
-            stateMessage = "记录读取失败：\(errorMessage)"
+            readMessage = "记录读取失败：\(errorMessage)"
         } else if isLoading {
-            stateMessage = "正在读取本机与云端记录…"
+            readMessage = "正在读取本机与云端记录…"
         } else {
-            stateMessage = nil
+            readMessage = nil
         }
+        // 已读正式事实和刷新状态独立；周内其他日期的事实也应继续可回看。
+        let hasReadableFacts = allRecords.contains { record in
+            domain == .expense ? isExpense(record) || isIncome(record)
+                : (record.domainKey ?? record.kind.rawValue) == domain.rawValue
+        }
+        let stateMessage = hasReadableFacts ? nil : readMessage
+        let refreshMessage = hasReadableFacts ? readMessage.map {
+            "\($0)\n以下为已读取记录，统计可能尚不完整。"
+        } : nil
 
         return Self(
             dateKey: dateKey,
@@ -274,6 +284,7 @@ struct NativeDomainScenePresentation {
             highestExpense: highest,
             knownPrimaryTotal: knownPrimaryTotal,
             stateMessage: stateMessage,
+            refreshMessage: refreshMessage,
             merchants: merchants,
             timeline: timeline,
             sleepRanges: sleepRanges,

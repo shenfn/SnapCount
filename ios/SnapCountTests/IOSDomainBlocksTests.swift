@@ -15,6 +15,7 @@ final class IOSDomainBlocksTests: XCTestCase {
             XCTAssertEqual(result.records.map(\.reference), [meal.reference])
             XCTAssertEqual(result.knownPrimaryTotal, 450)
             XCTAssertNil(result.stateMessage, "本地正式事实可读时，远端刷新状态不能使页面进入整页加载/错误态")
+            XCTAssertNotNil(result.refreshMessage, "读取未完成时仍须提示，不能把已知小计冒充完整总量")
         }
     }
 

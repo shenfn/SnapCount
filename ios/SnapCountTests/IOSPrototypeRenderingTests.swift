@@ -115,6 +115,44 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         }
     }
 
+    func testIOSV2POLISH004F03ExportReadableFoodDuringRemoteFailure() async throws {
+        let date = "2026-10-17"
+        let meal = NativeDayRecord(
+            id: "refresh-meal", reference: "data/refresh-meal", dateKey: date, kind: .food,
+            domainKey: "food", title: "合成午餐", subtitle: "午餐 · 估算", value: "",
+            timeLabel: "12:30", systemImage: "fork.knife", status: "done"
+        )
+        let detail = NativeRecordDetail(
+            id: meal.reference, rawId: meal.id, kind: "data", title: meal.title,
+            subtitle: meal.subtitle, value: "", detailRows: [], imageURL: nil,
+            imageLoadError: false, imagePath: nil, imageHash: nil, amount: nil,
+            merchantName: nil, platform: nil, category: nil, paymentMethod: nil,
+            recordDate: date, note: nil, companionMessage: nil, accountId: nil,
+            systemImage: meal.systemImage, payload: ["total_calorie_kcal": AnyCodable(450)], domainKey: "food"
+        )
+        let model = NativeDomainScenePresentation.make(
+            domain: .food, dateKey: date,
+            weekGroups: [NativeDayRecordGroup(dateKey: date, records: [meal])],
+            details: [meal.reference: detail], isSignedIn: true, isLoading: false,
+            errorMessage: "网络不可用", todayKey: date
+        )
+        for size in [DynamicTypeSize.large, .accessibility3] {
+            let state = try makeIsolatedState()
+            state.selectedDateKey = date
+            state.selectedDomain = .food
+            let view = ZStack {
+                DomainSceneView(domain: .food)
+                NativeDomainPageContent(
+                    domain: .food, weekDates: model.weeklyValues.map(\.dateKey),
+                    details: [meal.reference: detail], loadingWindow: false, model: model
+                )
+            }
+            .environmentObject(state)
+            .environment(\.dynamicTypeSize, size)
+            try await capture(view, name: "content-food-refresh-failure-\(size)")
+        }
+    }
+
     func testIOSV2POLISH010ExportReachableOverlayRoots() async throws {
         for size in [DynamicTypeSize.large, .accessibility3] {
             let pages: [(String, AnyView)] = [

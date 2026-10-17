@@ -52,6 +52,9 @@ struct NativeDomainPageContent: View {
                 if let stateMessage = model.stateMessage {
                     loadStateCard(stateMessage)
                 } else {
+                    if let refreshMessage = model.refreshMessage {
+                        loadStateCard(refreshMessage)
+                    }
                     dailyHero
 
                     if let measurementNote = model.measurementNote {
@@ -238,8 +241,13 @@ struct NativeDomainPageContent: View {
                 let delta = current - previous
                 Text(delta == 0 ? "持平" : "\(delta > 0 ? "+" : "−")\(formatted(abs(delta)))")
                     .font(JieziType.moneyCard.monospacedDigit())
-                Text("前一天 \(formatted(previous)) · 当天 \(formatted(current))")
-                    .font(JieziFont.caption).foregroundStyle(scene.muted)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("前一天 \(formatted(previous))")
+                    Text("当天 \(formatted(current))")
+                }
+                .font(JieziFont.caption.monospacedDigit())
+                .foregroundStyle(scene.muted)
+                .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("金额或读取结果不完整，暂不能比较。")
                     .font(JieziFont.caption).foregroundStyle(scene.muted)
