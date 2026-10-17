@@ -2,6 +2,35 @@ import XCTest
 @testable import SnapCount
 
 final class IOSDomainBlocksTests: XCTestCase {
+    func testIOSV2POLISH004F03RemoteRefreshDoesNotHideReadableFormalRecords() {
+        let meal = record("local-meal", date: "2026-10-05", domain: .food)
+        let groups = [NativeDayRecordGroup(dateKey: meal.dateKey, records: [meal])]
+        let details = [meal.reference: detail(meal, ["total_calorie_kcal": AnyCodable(450)])]
+
+        for (loading, error) in [(true, nil as String?), (false, "网络不可用")] {
+            let result = NativeDomainScenePresentation.make(
+                domain: .food, dateKey: meal.dateKey, weekGroups: groups, details: details,
+                isSignedIn: true, isLoading: loading, errorMessage: error, todayKey: meal.dateKey
+            )
+            XCTAssertEqual(result.records.map(\.reference), [meal.reference])
+            XCTAssertEqual(result.knownPrimaryTotal, 450)
+            XCTAssertNil(result.stateMessage, "本地正式事实可读时，远端刷新状态不能使页面进入整页加载/错误态")
+        }
+    }
+
+    func testIOSV2POLISH004F03WithoutReadableRecordsLoadingAndFailureRemainExplicit() {
+        let loading = NativeDomainScenePresentation.make(
+            domain: .food, dateKey: "2026-10-05", weekGroups: [], details: [:],
+            isSignedIn: true, isLoading: true, errorMessage: nil
+        )
+        XCTAssertEqual(loading.stateMessage, "正在读取本机与云端记录…")
+        let failed = NativeDomainScenePresentation.make(
+            domain: .food, dateKey: "2026-10-05", weekGroups: [], details: [:],
+            isSignedIn: true, isLoading: false, errorMessage: "网络不可用"
+        )
+        XCTAssertEqual(failed.stateMessage, "记录读取失败：网络不可用")
+    }
+
     func testIOSV2POLISH004FoodAverageIncludesExplicitZeroButNotMissingOrUnrecordedDays() throws {
         let zero = record("zero", date: "2026-10-05", domain: .food)
         let high = record("high", date: "2026-10-06", domain: .food)
