@@ -195,20 +195,24 @@ final class JieziThemeManager: ObservableObject {
 struct JieziSceneTokens {
     let background: [Color]
     let accent: Color
+    let dataAccent: Color
+    let pagerAccent: Color
     let foreground: Color
     let muted: Color
     let surface: Color
     let glow: Color
     let glowOpacity: Double
     let usesDiagonalTexture: Bool
+    let stripeWidth: CGFloat
+    let textureWash: [Gradient.Stop]
 }
 
 enum JieziScene {
-    static let expense = JieziSceneTokens(background: [Color(jieziHex: "#EADCC4"), Color(jieziHex: "#F1E8D8"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#DCBF74"), glowOpacity: 0.45, usesDiagonalTexture: false)
-    static let sleep = JieziSceneTokens(background: [Color(jieziHex: "#1C2140"), Color(jieziHex: "#17312D"), Color(jieziHex: "#0F1E1C")], accent: Color(jieziHex: "#DCBF74"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#10211F"), glow: Color(jieziHex: "#6E78C8"), glowOpacity: 0.35, usesDiagonalTexture: false)
-    static let food = JieziSceneTokens(background: [Color(jieziHex: "#F2DCC4"), Color(jieziHex: "#F4EADB"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#C2410C"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#EA580C"), glowOpacity: 0.22, usesDiagonalTexture: false)
-    static let sport = JieziSceneTokens(background: [Color(jieziHex: "#D5E2D6"), Color(jieziHex: "#E6EBE0"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#DCBF74"), glowOpacity: 0.4, usesDiagonalTexture: false)
-    static let reading = JieziSceneTokens(background: [Color(jieziHex: "#4A5E6E"), Color(jieziHex: "#43566A"), Color(jieziHex: "#10211F")], accent: Color(jieziHex: "#DCBF74"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#17312D"), glow: Color(jieziHex: "#10211F"), glowOpacity: 0, usesDiagonalTexture: true)
+    static let expense = JieziSceneTokens(background: [Color(jieziHex: "#EADCC4"), Color(jieziHex: "#F1E8D8"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), dataAccent: Color(jieziHex: "#C2410C"), pagerAccent: Color(jieziHex: "#C2410C"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#DCBF74"), glowOpacity: 0.45, usesDiagonalTexture: false, stripeWidth: 0, textureWash: [])
+    static let sleep = JieziSceneTokens(background: [Color(jieziHex: "#1C2140"), Color(jieziHex: "#17312D"), Color(jieziHex: "#0F1E1C")], accent: Color(jieziHex: "#DCBF74"), dataAccent: Color(jieziHex: "#9A96F0"), pagerAccent: Color(jieziHex: "#9A96F0"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#10211F"), glow: Color(jieziHex: "#6E78C8"), glowOpacity: 0.35, usesDiagonalTexture: false, stripeWidth: 0, textureWash: [])
+    static let food = JieziSceneTokens(background: [Color(jieziHex: "#F2DCC4"), Color(jieziHex: "#F4EADB"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#C2410C"), dataAccent: Color(jieziHex: "#EA580C"), pagerAccent: Color(jieziHex: "#EA580C"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#EA580C"), glowOpacity: 0.22, usesDiagonalTexture: false, stripeWidth: 0, textureWash: [])
+    static let sport = JieziSceneTokens(background: [Color(jieziHex: "#D5E2D6"), Color(jieziHex: "#E6EBE0"), Color(jieziHex: "#F5F1E7")], accent: Color(jieziHex: "#426E63"), dataAccent: Color(jieziHex: "#B45309"), pagerAccent: Color(jieziHex: "#B45309"), foreground: Color(jieziHex: "#202A27"), muted: Color(jieziHex: "#6E7773"), surface: Color(jieziHex: "#FBF9F4"), glow: Color(jieziHex: "#DCBF74"), glowOpacity: 0.4, usesDiagonalTexture: false, stripeWidth: 0, textureWash: [])
+    static let reading = JieziSceneTokens(background: [Color(jieziHex: "#4A5E6E"), Color(jieziHex: "#43566A"), Color(jieziHex: "#10211F")], accent: Color(jieziHex: "#DCBF74"), dataAccent: Color(jieziHex: "#DCBF74"), pagerAccent: Color(jieziHex: "#DCBF74"), foreground: Color(jieziHex: "#F5F1E7"), muted: Color(jieziHex: "#C7C9D0"), surface: Color(jieziHex: "#17312D"), glow: Color(jieziHex: "#10211F"), glowOpacity: 0, usesDiagonalTexture: true, stripeWidth: 10, textureWash: [.init(color: Color(jieziHex: "#10211F").opacity(0.35), location: 0), .init(color: Color(jieziHex: "#10211F").opacity(0.82), location: 0.6), .init(color: Color(jieziHex: "#10211F").opacity(1), location: 1)])
 
     static func tokens(for domain: String) -> JieziSceneTokens {
         switch domain {

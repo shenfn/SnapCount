@@ -8,13 +8,11 @@ struct DomainSceneView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: scene.background,
-                startPoint: .top,
-                endPoint: .bottom
-            )
             if scene.usesDiagonalTexture {
                 diagonalTexture
+                LinearGradient(stops: scene.textureWash, startPoint: .top, endPoint: .bottom)
+            } else {
+                LinearGradient(colors: scene.background, startPoint: .top, endPoint: .bottom)
             }
             GeometryReader { geometry in
                 RadialGradient(
@@ -33,13 +31,15 @@ struct DomainSceneView: View {
 
     private var diagonalTexture: some View {
         Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(scene.background[0]))
+            guard scene.stripeWidth > 0 else { return }
             var x: CGFloat = -size.height
             while x < size.width {
                 var stripe = Path()
                 stripe.move(to: CGPoint(x: x, y: size.height))
                 stripe.addLine(to: CGPoint(x: x + size.height, y: 0))
-                context.stroke(stripe, with: .color(.white.opacity(0.035)), lineWidth: 1)
-                x += 16
+                context.stroke(stripe, with: .color(scene.background[1]), lineWidth: scene.stripeWidth)
+                x += scene.stripeWidth * 2 * sqrt(2)
             }
         }
     }
@@ -58,11 +58,10 @@ struct DomainCatView: View {
         JieziCatShape(pose: catPose)
             .trim(from: 0, to: catProgress)
             .stroke(
-                JieziScene.tokens(for: domain.rawValue).accent,
+                JieziScene.tokens(for: domain.rawValue).foreground,
                 style: StrokeStyle(lineWidth: 2.35, lineCap: .round, lineJoin: .round)
             )
             .frame(width: JieziPrototypeLayout.cat_width, height: JieziPrototypeLayout.cat_height)
-            .opacity(0.65)
             .accessibilityHidden(true)
             .allowsHitTesting(false)
         .onAppear {

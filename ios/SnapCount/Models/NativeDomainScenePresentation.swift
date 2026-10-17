@@ -30,8 +30,7 @@ struct NativeDomainScenePresentation {
     let highestExpense: NativeDayRecord?
     let knownPrimaryTotal: Double?
     let stateMessage: String?
-    // IOS-V2-POLISH-003：先固定可运行红灯，汇总实现随后接入。
-    var merchants: [NativeMerchantSummary] { [] }
+    let merchants: [NativeMerchantSummary]
 
     static func trendDateKeys(for domain: AppDomain, dateKey: String) -> [String] {
         switch domain {
@@ -160,6 +159,27 @@ struct NativeDomainScenePresentation {
             return NativeDomainDayValue(dateKey: weekDay, value: value, recordCount: scoped.count)
         }
 
+        let merchantGroups = Dictionary(grouping: records.filter(isExpense)) { record -> String in
+            let raw = detail(for: record, details: details)?.merchantName ?? record.title
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? "商户未提供" : name
+        }
+        let merchants = merchantGroups.map { name, merchantRecords in
+            let amounts = merchantRecords.compactMap { expenseAmount(for: $0, details: details) }
+            return NativeMerchantSummary(
+                name: name,
+                total: amounts.count == merchantRecords.count ? amounts.reduce(0, +) : nil,
+                records: merchantRecords.sorted(by: chronologicalOrder)
+            )
+        }.sorted { left, right in
+            switch (left.total, right.total) {
+            case let (a?, b?) where a != b: return a > b
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: return left.name < right.name
+            }
+        }
+
         let stateMessage: String?
         if let errorMessage, !errorMessage.isEmpty {
             stateMessage = "记录读取失败：\(errorMessage)"
@@ -180,7 +200,8 @@ struct NativeDomainScenePresentation {
             measurementNote: note,
             highestExpense: highest,
             knownPrimaryTotal: knownPrimaryTotal,
-            stateMessage: stateMessage
+            stateMessage: stateMessage,
+            merchants: merchants
         )
     }
 

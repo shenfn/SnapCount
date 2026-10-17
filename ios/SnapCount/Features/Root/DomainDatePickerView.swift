@@ -90,6 +90,10 @@ struct DomainCalendarSheet: View {
                     header
                     weekdayHeader
                     calendarGrid(groups: groups, expenses: expenses, maximum: maximum)
+                    Text("深浅表示支出；圆点表示当天任意领域有正式记录")
+                        .font(JieziFont.caption2)
+                        .foregroundStyle(JieziScene.expense.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                     previewSummary(groups: groups)
                 }
                 .padding(.horizontal, 20)
@@ -99,10 +103,11 @@ struct DomainCalendarSheet: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 HStack(spacing: 10) {
                     JieziSecondaryButton(title: "取消") { dismiss() }
-                    JieziPrimaryButton(title: "查看这一天", systemImage: "arrow.right") {
+                    JieziPrimaryButton(title: "查看", systemImage: "arrow.right") {
                         appState.selectedDateKey = previewDateKey
                         dismiss()
                     }
+                    .accessibilityLabel("查看\(previewDateKey)的记录")
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -127,9 +132,6 @@ struct DomainCalendarSheet: View {
             VStack(spacing: 2) {
                 Text(NativeLocalDate.monthTitle(monthKey))
                     .font(JieziType.sectionTitle)
-                Text("日历热度表示支出；圆点表示任意领域正式记录")
-                    .font(JieziFont.caption2)
-                    .foregroundStyle(JieziScene.expense.muted)
             }
             Spacer()
 

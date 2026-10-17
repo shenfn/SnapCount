@@ -1,11 +1,23 @@
 import XCTest
 import SwiftUI
 import UIKit
+import CoreText
 @testable import SnapCount
 
 /// 合成事实的原生渲染证据，只证明能生成图片，不代替视觉、手势或真机性能验收。
 @MainActor
 final class IOSPrototypeRenderingTests: XCTestCase {
+    func testIOSV2POLISH011RegisteredFontsResolveAndCoverRepresentativeText() throws {
+        let serif = try XCTUnwrap(UIFont(name: JieziFontFamily.serif, size: 24))
+        let numeric = try XCTUnwrap(UIFont(name: JieziFontFamily.numeric, size: 44))
+        for (font, text) in [(serif, "芥子阅读记录收入书名"), (numeric, "0123456789¥.")] {
+            let characters = Array(text.utf16)
+            var glyphs = Array<CGGlyph>(repeating: 0, count: characters.count)
+            let coreFont = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
+            XCTAssertTrue(CTFontGetGlyphsForCharacters(coreFont, characters, &glyphs, characters.count))
+        }
+    }
+
     func testIOSV2POLISH004ExportFiveDomainContentAtNormalAndAccessibleType() async throws {
         let sizes: [DynamicTypeSize] = [.large, .accessibility3]
         for domain in AppDomain.allCases {
@@ -98,6 +110,18 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         }
     }
 
+    func testIOSV2POLISH002ExportDomainAwareSignedOutEntry() async throws {
+        for domain in AppDomain.allCases {
+            let state = try makeIsolatedState()
+            state.selectedDateKey = "2025-01-01"
+            state.selectedDomain = domain
+            let view = UnifiedManualRecordEntry(domain: domain)
+                .environmentObject(state)
+                .environment(\.dynamicTypeSize, .large)
+            try await capture(view, name: "entry-signed-out-\(domain.rawValue)", height: 844)
+        }
+    }
+
     private func makeIsolatedState() throws -> AppState {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("jiezi-capture-\(UUID().uuidString)", isDirectory: true)
         let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("fixture.sqlite"))
@@ -114,7 +138,8 @@ final class IOSPrototypeRenderingTests: XCTestCase {
     }
 
     private func capture<V: View>(_ view: V, name: String, height: CGFloat = 720) async throws {
-        let host = UIHostingController(rootView: view)
+        let host = UIHostingController(rootView: view.environment(\.locale, Locale(identifier: "zh_CN")))
+        host.overrideUserInterfaceStyle = .light
         let bounds = CGRect(x: 0, y: 0, width: 390, height: height)
         let window = UIWindow(frame: bounds)
         window.rootViewController = host

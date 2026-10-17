@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// 五域骨架主场景（IOS-V2-SHELL-001~004）：
-/// 域横滑为主体，顶部栏（品牌 / 同步 / 日期选择 /「…」菜单）与底部栏（待确认 / 圆点 / ＋）悬浮其上，
+/// 域横滑为主体，顶底栏按实际高度参与安全区布局，背景和猫为独立层，
 /// 菜单四项与待确认以全屏覆盖层呈现，关闭后回到原域页。
 struct MainShellView: View {
     @EnvironmentObject private var appState: AppState
@@ -9,6 +9,7 @@ struct MainShellView: View {
     @State private var showManualRecordSheet = false
     @State private var showsCalendar = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: appState.selectedDomain.rawValue) }
 
@@ -39,7 +40,7 @@ struct MainShellView: View {
             overlayDestination(overlay)
         }
         .sheet(isPresented: $showManualRecordSheet) {
-            UnifiedManualRecordEntry()
+            UnifiedManualRecordEntry(domain: appState.selectedDomain)
         }
     }
 
@@ -53,6 +54,7 @@ struct MainShellView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        .animation(reduceMotion ? nil : .easeInOut(duration: JieziPrototypeMotion.page_transition_ms), value: appState.selectedDomain)
     }
 
     // MARK: - 顶部栏（SHELL-002）
@@ -111,9 +113,6 @@ struct MainShellView: View {
         .padding(.horizontal, JieziPrototypeLayout.page_inset)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .background {
-            LinearGradient(colors: scene.background, startPoint: .top, endPoint: .bottom)
-        }
         .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
     }
 
@@ -159,9 +158,6 @@ struct MainShellView: View {
         }
         .padding(.horizontal, JieziPrototypeLayout.page_inset)
         .padding(.vertical, 8)
-        .background {
-            LinearGradient(colors: scene.background, startPoint: .top, endPoint: .bottom)
-        }
         .animation(.easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
     }
 
@@ -240,7 +236,7 @@ struct MainShellView: View {
             ForEach(AppDomain.allCases) { domain in
                 Button { appState.selectedDomain = domain } label: {
                     Capsule()
-                        .fill(domain == appState.selectedDomain ? scene.accent : scene.foreground.opacity(0.30))
+                        .fill(domain == appState.selectedDomain ? scene.pagerAccent : scene.foreground.opacity(0.30))
                         .frame(
                             width: domain == appState.selectedDomain ? JieziPrototypeLayout.selected_page_width : JieziPrototypeLayout.page_dot_size,
                             height: JieziPrototypeLayout.page_dot_size
@@ -258,10 +254,10 @@ struct MainShellView: View {
 
     private var domainEnglishName: String {
         switch appState.selectedDomain {
-        case .expense: return "Expense"
+        case .expense: return "Spending"
         case .sleep: return "Sleep"
         case .food: return "Food"
-        case .sport: return "Movement"
+        case .sport: return "Exercise"
         case .reading: return "Reading"
         }
     }
@@ -283,7 +279,9 @@ struct MainShellView: View {
             .environmentObject(themeManager)
         case .records:
             NavigationStack(path: $appState.recordsPath) {
-                overlayRoot { RecordsView() }
+                overlayRoot {
+                    RecordsView(initialMonthKey: NativeLocalDate.monthKey(from: appState.selectedDateKey) ?? NativeMonthKey.current())
+                }
             }
             .environmentObject(appState)
             .environmentObject(themeManager)

@@ -3,6 +3,24 @@ import UIKit
 @testable import SnapCount
 
 final class SnapCountTests: XCTestCase {
+    func testIOSV2POLISH003MerchantMissingAmountIsNotPresentedAsZeroOrPartialTotal() {
+        let records = [
+            NativeDayRecord(id: "known", reference: "expense/known", dateKey: "2026-10-17", kind: .expense,
+                domainKey: nil, title: "示例商户 A", subtitle: "", value: "¥12.00", timeLabel: nil, systemImage: "creditcard", status: "done"),
+            NativeDayRecord(id: "missing", reference: "expense/missing", dateKey: "2026-10-17", kind: .expense,
+                domainKey: nil, title: "示例商户 A", subtitle: "", value: "", timeLabel: nil, systemImage: "creditcard", status: "done")
+        ]
+        let result = NativeDomainScenePresentation.make(
+            domain: .expense, dateKey: "2026-10-17",
+            weekGroups: [NativeDayRecordGroup(dateKey: "2026-10-17", records: records)], details: [:],
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: "2026-10-17"
+        )
+        XCTAssertEqual(result.merchants.count, 1)
+        XCTAssertEqual(result.merchants.first?.records.count, 2)
+        XCTAssertNil(result.merchants.first?.total)
+        XCTAssertNil(result.knownPrimaryTotal)
+    }
+
     func testIOSV2POLISH003MerchantRankingUsesOnlySameDayFormalExpenses() throws {
         func record(_ id: String, _ merchant: String, _ value: String, kind: NativeDayRecordKind = .expense) -> NativeDayRecord {
             NativeDayRecord(

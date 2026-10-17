@@ -2,9 +2,10 @@ import SwiftUI
 
 struct InboxView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var scope: NativeInboxScope = .today
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var scope: NativeInboxScope = .all
     @State private var filter: NativeInboxFilter = .all
-    @State private var columnCount = 2
+    @State private var columnCount = 1
     @State private var stageItemId: String?
 
     private var allItems: [NativeInboxItem] {
@@ -100,7 +101,7 @@ struct InboxView: View {
                 await appState.refreshInboxProjection()
             }
         }
-        .navigationTitle("收件箱")
+        .navigationTitle("待确认")
         .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .navigationDestination(for: NativeInboxRoute.self) { route in
@@ -152,8 +153,8 @@ struct InboxView: View {
     private var pendingSummary: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(allItems.isEmpty ? "微尘皆已落定" : "先整理，再连续翻阅")
-                    .font(.headline)
+                Text(allItems.isEmpty ? "暂时没有待确认记录" : "核对这些记录")
+                    .font(JieziType.prototypeBrand)
                     .foregroundStyle(JieziTheme.ink)
                 if !allItems.isEmpty {
                     Text("\(allItems.count) 条待处理记录")
@@ -185,8 +186,8 @@ struct InboxView: View {
                 Text(scope == .today ? "今天发生的记录" : "全部待处理记录")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(JieziTheme.brand)
-                Text("待处理底片")
-                    .font(.title3.weight(.semibold))
+                Text("待处理记录")
+                    .font(JieziType.cardTitle)
                     .foregroundStyle(JieziTheme.ink)
             }
             Spacer()
@@ -214,7 +215,7 @@ struct InboxView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(filter == option ? .white : JieziTheme.ink)
                         .padding(.horizontal, 12)
-                        .frame(height: 34)
+                        .frame(minHeight: 44)
                         .background(
                             filter == option ? InboxVisualStyle.color(for: option) : Color.white.opacity(0.56),
                             in: Capsule()
@@ -240,7 +241,7 @@ struct InboxView: View {
                 LazyVGrid(
                     columns: Array(
                         repeating: GridItem(.flexible(minimum: 0), spacing: JieziSpacing.lg, alignment: .top),
-                        count: columnCount
+                        count: dynamicTypeSize.isAccessibilitySize ? 1 : columnCount
                     ),
                     spacing: JieziSpacing.xl2
                 ) {
@@ -248,11 +249,12 @@ struct InboxView: View {
                         Button {
                             stageItemId = item.id
                         } label: {
-                            NativeInboxFilmCard(
+                            NativeInboxItemRow(
                                 item: item,
                                 repaymentCandidate: item.stagingRecord.flatMap { appState.repaymentCandidates[$0.id] },
-                                isSingleColumn: columnCount == 1
+                                showThumbnail: dynamicTypeSize.isAccessibilitySize || columnCount == 1
                             )
+                            .jieziCard()
                         }
                         .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
                         .frame(maxWidth: .infinity)
@@ -2448,13 +2450,14 @@ private struct PendingExpenseResolutionView: View {
 private struct NativeInboxItemRow: View {
     let item: NativeInboxItem
     let repaymentCandidate: NativeRepaymentCandidate?
+    var showThumbnail = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            thumbnail
+            if showThumbnail { thumbnail }
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Text(item.title).font(JieziType.cardTitle).lineLimit(2)
                     Spacer(minLength: 6)
                     Text(item.statusLabel)
                         .font(.caption2.weight(.semibold))
@@ -2520,7 +2523,7 @@ private struct NativeInboxItemRow: View {
             .font(.body.weight(.semibold))
             .foregroundStyle(statusColor)
             .frame(width: 48, height: 48)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(JieziScene.expense.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var statusColor: Color {

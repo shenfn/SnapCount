@@ -35,6 +35,21 @@ test('IOS-V2-POLISH-001/004 prototype metrics retain 44/40pt numbers and serif b
   assert.ok(swift.includes('static let prototypeBrand = Font.custom(JieziFontFamily.serif, size: 20, relativeTo: .title2)'), '品牌应使用衬线');
 });
 
+test('IOS-V2-POLISH-009 reading scene keeps alternating 10pt bands and the reference dark wash', () => {
+  const swift = generate();
+  assert.ok(swift.includes('let stripeWidth: CGFloat'));
+  assert.ok(swift.includes('stripeWidth: 10'));
+  assert.ok(swift.includes('Color(jieziHex: "#10211F").opacity(0.82), location: 0.6'));
+});
+
+test('IOS-V2-POLISH-009 domain data colors remain distinct from the green action color', () => {
+  const swift = generate();
+  assert.ok(swift.includes('let dataAccent: Color'));
+  assert.ok(swift.includes('let pagerAccent: Color'));
+  assert.ok(swift.includes('dataAccent: Color(jieziHex: "#9A96F0")'));
+  assert.ok(swift.includes('dataAccent: Color(jieziHex: "#B45309")'));
+});
+
 test('IOS-V2-POLISH-011-B repeated iOS generation is deterministic', () => {
   assert.equal(generate(), generate());
 });

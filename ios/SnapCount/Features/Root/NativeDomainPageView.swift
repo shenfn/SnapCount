@@ -35,6 +35,10 @@ struct NativeDomainPageContent: View {
     let loadingWindow: Bool
     let model: NativeDomainScenePresentation
     @State private var showManualRecordSheet = false
+    @State private var selectedMerchant: MerchantSelection?
+    @State private var showDayRecords = false
+
+    private struct MerchantSelection: Identifiable { let id: String }
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: domain.rawValue) }
 
@@ -67,14 +71,27 @@ struct NativeDomainPageContent: View {
         .sheet(isPresented: $showManualRecordSheet) {
             manualRecordSheet
         }
+        .sheet(item: $selectedMerchant) { selection in
+            merchantDrill(id: selection.id)
+        }
+        .sheet(isPresented: $showDayRecords) {
+            NavigationStack {
+                recordDrill(records: model.records)
+                    .navigationTitle("\(model.dateKey) · \(domain.title)")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { showDayRecords = false }
+                        }
+                    }
+            }
+        }
     }
 
     @ViewBuilder
     private var domainSections: some View {
         switch domain {
         case .expense:
-            metricShelf
-            weeklyTrend
+            merchantRanking
             if let highest = model.highestExpense { highestExpenseCard(highest) }
             recordsOrEmpty
         case .sleep:
@@ -95,6 +112,104 @@ struct NativeDomainPageContent: View {
             metricShelf
             recordsOrEmpty
         }
+    }
+
+    private var merchantRanking: some View {
+        let maximum = max(model.merchants.compactMap(\.total).max() ?? 0, 1)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("商户排行").font(JieziType.cardTitle)
+                Text("By merchant").font(JieziFont.caption2).foregroundStyle(scene.muted)
+            }
+            if model.merchants.isEmpty {
+                Text("这一天还没有可汇总的商户记录")
+                    .font(JieziFont.caption)
+                    .foregroundStyle(scene.muted)
+            }
+            ForEach(model.merchants) { merchant in
+                Button { selectedMerchant = MerchantSelection(id: merchant.id) } label: {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(merchant.name)
+                                .font(JieziFont.body)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 4)
+                            Text(merchant.total.map { formatted($0) } ?? "金额字段缺失")
+                                .font(JieziType.moneyInline.monospacedDigit())
+                        }
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(scene.foreground.opacity(0.08))
+                                if let total = merchant.total {
+                                    Capsule().fill(scene.dataAccent.opacity(0.75))
+                                        .frame(width: geometry.size.width * CGFloat(min(max(total / maximum, 0), 1)))
+                                }
+                            }
+                        }
+                        .frame(height: 5)
+                        .accessibilityHidden(true)
+                        Text("\(merchant.records.count) 笔 · 查看明细")
+                            .font(JieziFont.caption2)
+                            .foregroundStyle(scene.muted)
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .foregroundStyle(scene.foreground)
+        .padding(JieziPrototypeLayout.card_inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(scene.surface.opacity(0.66), in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius))
+    }
+
+    private func merchantDrill(id: String) -> some View {
+        NavigationStack {
+            Group {
+                if let message = model.stateMessage {
+                    loadStateCard(message)
+                } else if let merchant = model.merchants.first(where: { $0.id == id }) {
+                    recordDrill(records: merchant.records)
+                        .navigationTitle(merchant.name)
+                } else {
+                    ContentUnavailableView("这一天已没有该商户记录", systemImage: "list.bullet")
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { selectedMerchant = nil }
+                }
+            }
+        }
+    }
+
+    private func recordDrill(records: [NativeDayRecord]) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                Text(model.dateKey)
+                    .font(JieziFont.caption)
+                    .foregroundStyle(JieziTheme.muted)
+                if let message = model.stateMessage {
+                    Text(message).foregroundStyle(JieziTheme.muted)
+                    Button("重试读取") {
+                        Task { await appState.loadRecordDateWindow(around: model.dateKey, force: true) }
+                    }
+                } else if records.isEmpty {
+                    ContentUnavailableView("这一天还没有正式记录", systemImage: "list.bullet")
+                }
+                ForEach(records) { record in
+                    NavigationLink {
+                        RecordDetailView(reference: record.reference)
+                    } label: {
+                        recordRowContent(record, neutral: true)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(JieziPrototypeLayout.page_inset)
+        }
+        .background(JieziScene.expense.surface)
     }
 
     @ViewBuilder
@@ -210,18 +325,19 @@ struct NativeDomainPageContent: View {
                             .font(JieziFont.caption)
                             .foregroundStyle(scene.muted)
                         Text(model.secondaryValue)
-                            .font(JieziType.moneyCard.monospacedDigit())
-                            .foregroundStyle(scene.accent)
+                            .font(model.secondaryValue.hasPrefix("¥") ? JieziType.moneyCard.monospacedDigit() : JieziFont.caption)
+                            .foregroundStyle(model.secondaryValue.hasPrefix("¥") ? scene.accent : scene.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .minimumScaleFactor(0.75)
                     }
+                    Text("\(model.records.filter(isExpense).count) 笔支出")
+                        .font(JieziFont.caption2)
+                        .foregroundStyle(scene.muted)
                 }
             } else {
-                Text(model.primaryValue)
-                    .font((domain == .sleep ? JieziType.prototypeSleepHero : JieziType.prototypeHero).monospacedDigit())
+                nonFinancialMetric
                     .foregroundStyle(scene.foreground)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.72)
+                    .minimumScaleFactor(0.8)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(model.secondaryValue)
                     .font(JieziFont.caption)
@@ -238,6 +354,28 @@ struct NativeDomainPageContent: View {
         .frame(minHeight: JieziPrototypeLayout.hero_min_height, alignment: .topLeading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(appState.selectedDateKey)，\(domain.title)，\(model.primaryLabel)\(model.primaryValue)，\(model.secondaryLabel)\(model.secondaryValue)")
+    }
+
+    @ViewBuilder
+    private var nonFinancialMetric: some View {
+        if let value = model.knownPrimaryTotal {
+            let number = domain == .sleep ? JieziType.prototypeSleepHero : JieziType.prototypeHero
+            let rounded = Int(value.rounded())
+            if domain == .food {
+                (Text("\(rounded)").font(number) + Text(" 千卡").font(JieziFont.body))
+                    .monospacedDigit()
+            } else if rounded >= 60 {
+                (Text("\(rounded / 60)").font(number) + Text(" 小时 ").font(JieziFont.body)
+                 + Text("\(rounded % 60)").font(number) + Text(" 分钟").font(JieziFont.body))
+                    .monospacedDigit()
+            } else {
+                (Text("\(rounded)").font(number) + Text(" 分钟").font(JieziFont.body))
+                    .monospacedDigit()
+            }
+        } else {
+            Text(model.primaryValue)
+                .font(JieziType.cardTitle)
+        }
     }
 
     private var metricShelf: some View {
@@ -264,15 +402,8 @@ struct NativeDomainPageContent: View {
 
     private var secondaryMetrics: [(String, String)] {
         switch domain {
-        case .expense:
-            let maximum = model.highestExpense.flatMap { expenseAmount(for: $0) }
-            return [
-                ("支出笔数", "\(model.records.filter(isExpense).count) 笔"),
-                ("最大一笔", maximum.map { String(format: "¥%.2f", $0) } ?? "未提供金额")
-            ]
-        case .sleep:
-            let interval = model.records.count == 1 ? sleepInterval(for: model.records[0]) : nil
-            return [("睡眠记录", "\(model.records.count) 条"), ("入睡 / 醒来", interval ?? "区间未提供")]
+        case .expense, .sleep:
+            return []
         case .food:
             let meals = Set(model.records.compactMap { detail(for: $0)?.payload?.string("meal_type") }).count
             return [("记录餐次", "\(model.records.count) 餐"), ("餐次类型", meals > 0 ? "\(meals) 类" : "未填写")]
@@ -313,7 +444,7 @@ struct NativeDomainPageContent: View {
                             .frame(height: barHeight(for: item, maximum: maximum))
                         Text(item.dayLabel)
                             .font(JieziFont.caption2.monospacedDigit())
-                            .foregroundStyle(item.dateKey == appState.selectedDateKey ? scene.accent : scene.muted)
+                            .foregroundStyle(item.dateKey == appState.selectedDateKey ? scene.dataAccent : scene.muted)
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 104)
@@ -344,7 +475,7 @@ struct NativeDomainPageContent: View {
 
     private func barColor(for item: NativeDomainDayValue) -> Color {
         guard item.value != nil else { return scene.muted.opacity(0.18) }
-        return item.dateKey == appState.selectedDateKey ? scene.accent : scene.accent.opacity(0.42)
+        return item.dateKey == appState.selectedDateKey ? scene.dataAccent : scene.dataAccent.opacity(0.42)
     }
 
     private func barAccessibilityLabel(for item: NativeDomainDayValue) -> String {
@@ -371,7 +502,7 @@ struct NativeDomainPageContent: View {
                     .frame(width: 36, height: 36)
                     .background(scene.accent.opacity(0.11), in: Circle())
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("最大一笔")
+                    Text(model.knownPrimaryTotal == nil ? "最大已知一笔" : "最大一笔")
                         .font(JieziFont.caption2)
                         .foregroundStyle(scene.muted)
                     Text(record.title)
@@ -391,7 +522,7 @@ struct NativeDomainPageContent: View {
             .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("最大一笔，\(record.title)，打开记录详情")
+        .accessibilityLabel("\(model.knownPrimaryTotal == nil ? "最大已知一笔" : "最大一笔")，\(record.title)，打开记录详情")
     }
 
     private var recordsCard: some View {
@@ -409,15 +540,27 @@ struct NativeDomainPageContent: View {
             .padding(.top, 16)
             .padding(.bottom, 8)
 
-            ForEach(model.records) { record in
+            ForEach(Array(model.records.prefix(3))) { record in
                 recordRow(record)
-                if record.id != model.records.last?.id {
+                if record.id != model.records.prefix(3).last?.id {
                     Rectangle()
                         .fill(scene.foreground.opacity(0.08))
                         .frame(height: 0.5)
                         .padding(.leading, 62)
                 }
             }
+            Button { showDayRecords = true } label: {
+                HStack {
+                    Text("查看全部 \(model.records.count) 条记录")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                }
+                .font(JieziType.button)
+                .foregroundStyle(scene.accent)
+                .padding(16)
+                .frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
         }
         .background(scene.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -425,45 +568,53 @@ struct NativeDomainPageContent: View {
 
     private func recordRow(_ record: NativeDayRecord) -> some View {
         Button { appState.openDayRecord(record) } label: {
-            HStack(alignment: .top, spacing: 12) {
+            recordRowContent(record)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(record.title)，\(recordSecondaryText(record))，\(recordValue(record))，打开详情")
+    }
+
+    private func recordRowContent(_ record: NativeDayRecord, neutral: Bool = false) -> some View {
+        let rowScene = neutral ? JieziScene.expense : scene
+        let rowLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        return rowLayout {
                 Text(record.timeLabel ?? "—")
                     .font(JieziFont.caption2.monospacedDigit())
-                    .foregroundStyle(scene.muted)
-                    .frame(width: 42, alignment: .leading)
+                    .foregroundStyle(rowScene.muted)
+                    .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 42, alignment: .leading)
                     .padding(.top, 3)
 
                 Image(systemName: record.systemImage)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(scene.accent)
+                    .foregroundStyle(rowScene.accent)
                     .frame(width: 30, height: 30)
-                    .background(scene.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(rowScene.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(record.title)
                         .font(JieziType.cardTitle)
-                        .foregroundStyle(scene.foreground)
-                        .lineLimit(2)
+                        .foregroundStyle(rowScene.foreground)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                         .multilineTextAlignment(.leading)
                     Text(recordSecondaryText(record))
                         .font(JieziFont.caption2)
-                        .foregroundStyle(scene.muted)
-                        .lineLimit(2)
+                        .foregroundStyle(rowScene.muted)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                         .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 4)
                 Text(recordValue(record))
                     .font(JieziType.moneyInline.monospacedDigit())
-                    .foregroundStyle(scene.foreground)
-                    .lineLimit(2)
+                    .foregroundStyle(rowScene.foreground)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                     .multilineTextAlignment(.trailing)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(record.title)，\(recordSecondaryText(record))，\(recordValue(record))，打开详情")
     }
 
     private var emptyState: some View {
@@ -566,7 +717,9 @@ struct NativeDomainPageContent: View {
         guard let payload = detail(for: record)?.payload,
               let asleep = payload.string("sleep_start_at"),
               let wake = payload.string("wake_at") else { return nil }
-        return "\(asleep) – \(wake)"
+        let start = NativeLocalDate.financeTimeKey(occurredAt: asleep) ?? asleep
+        let end = NativeLocalDate.financeTimeKey(occurredAt: wake) ?? wake
+        return "\(start) – \(end)"
     }
 
     private func mostFrequent(_ values: [String]) -> String? {
@@ -576,10 +729,6 @@ struct NativeDomainPageContent: View {
 
     @ViewBuilder
     private var manualRecordSheet: some View {
-        if domain == .expense {
-            UnifiedManualRecordEntry()
-        } else {
-            ManualRecordSheet(kind: .universal, domainKey: domain.rawValue)
-        }
+        UnifiedManualRecordEntry(domain: domain)
     }
 }
