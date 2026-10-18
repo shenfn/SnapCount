@@ -345,6 +345,8 @@ struct NativeDomainPageContent: View {
                 }
                 .chartXSelection(value: $selectedMinute)
                 .frame(height: isDrillDown ? 200 : 140)
+                // RuleMark 顶部浮层超出绘图区时仍有空间，不遮住笔数说明。
+                .padding(.top, dynamicTypeSize.isAccessibilitySize ? 0 : 44)
                 Picker("查看时间组", selection: Binding(
                     get: { selected ?? minutes[0] }, set: { selectedMinute = $0 }
                 )) {
