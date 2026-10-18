@@ -57,6 +57,10 @@
 
 最小实现：历史月在 AppState 内按月份共享在途 Task，重入等待同一结果，页面取消不取消会话所属读取；账户重置统一取消并清空任务。保留用户/代次检查并在导入远端支出后再次核对身份。加载状态改为远端月份集合，首页、日历、记录页、月报复用 isLoadingRecordMonth，避免并行月份互相覆盖；本地读取原路径保持。任务完成清理同代状态，取消不写普通业务错误。当前月 Dashboard 独立刷新链不在本片内，不以历史月测试代表当前月全部取消/刷新场景。绿灯及设备结果待验证。
 
+实现固定提交 `61c630f863a3a1ab6f68592de9ea0ada1b6ea47e`：[CI 39056994419](https://github.com/shenfn/SnapCount/actions/runs/39056994419)。App Build 成功，取消重入目标测试通过；357 项测试中，仅未修改的图片用例 `testA4IOS011BReusesSameIdentityAndSkipsExistingURL` 两条次数断言失败（2而非1）。该测试直接构造图片 UseCase，不经过本片 AppState；原 async let duplicate 与 gate.release 无“重复调用已进入”的顺序保证。修正测试为当前 MainActor 中直接进入 perform，让释放 Task 在其等待共享任务时执行；保留 hydrated、缓存跳过和一次 transport 的全部断言，不修改图片 UseCase。完整绿灯仍待新提交验证，不将本次失败归为已通过。
+
+最终布局第二次复核：已查看 `58e969c` 的普通/辅助字号图片，主指标/猫位于原处，刷新失败及重试在指标下方，已有餐次可滚动查看。后续历史月请求实现没有布局变化，不额外重复视觉打磨。猫眼睛属于 F09 尚未开发，截图中的缺眼不作为本次全量原型验收。
+
 本地九组业务边界检查：43/43 通过。第一次使用不存在的 test-ios-record-detail-boundary.mjs 路径未执行成功；通过 rg 查得现有 test-ios-local-record-detail-boundary.mjs 后运行，无产品修改用于绕过检查。
 
 F06 / 003 纯视觉：前一天、当天各占一行，金额使用等宽数字并允许大字号换行；算法未变，截图与真机待验证。
