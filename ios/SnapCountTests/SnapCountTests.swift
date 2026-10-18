@@ -3,6 +3,16 @@ import UIKit
 @testable import SnapCount
 
 final class SnapCountTests: XCTestCase {
+    @MainActor
+    func testIOSV2POLISH002P1DateWindowLoadsSelectedMonthBeforeHistory() async {
+        let repository = RecordRepositoryStub()
+        let state = AppState(recordRepository: repository, sessionProvider: { _ in Self.expressionTestSession })
+        state.isSignedIn = true
+        state.currentUserId = Self.expressionTestSession.user.id
+        await state.loadRecordDateWindow(around: "2000-01-05")
+        XCTAssertEqual(repository.fetchMonthKeys, ["2000-01", "1999-12"], "先展示所选月，历史基准不能排在前面")
+    }
+
     func testIOSV2POLISH003MerchantMissingAmountIsNotPresentedAsZeroOrPartialTotal() {
         let records = [
             NativeDayRecord(id: "known", reference: "expense/known", dateKey: "2026-10-17", kind: .expense,

@@ -2,6 +2,26 @@ import XCTest
 @testable import SnapCount
 
 final class IOSDomainBlocksTests: XCTestCase {
+    func testIOSV2POLISH003P1TimelineValidatesEachFallbackAndIncludesCreatedTime() throws {
+        let labeled = record("valid-label", date: "2026-10-05", domain: .expense, time: "09:15")
+        let created = record("created", date: "2026-10-05", domain: .expense, time: nil)
+        let uploaded = record("legacy-upload", date: "2026-10-05", domain: .expense, time: "上传 11:00")
+        var invalidClock = detail(labeled, [:])
+        invalidClock.transactionTime = "99:99"
+        var createdDetail = detail(created, [:])
+        createdDetail.transactionTime = ""
+        createdDetail.createdAt = "2026-10-06T02:30:00Z"
+        let result = model(.expense, records: [labeled, created, uploaded], details: [
+            labeled.reference: invalidClock, created.reference: createdDetail
+        ])
+        XCTAssertEqual(result.timeline.map(\.minute), [555, 630, 660])
+        XCTAssertEqual(Set(result.timeline.map(\.record.reference)), Set([labeled.reference, created.reference, uploaded.reference]))
+        let fallback = try XCTUnwrap(result.timeline.first { $0.record.reference == created.reference })
+        XCTAssertTrue(fallback.timeSourceLabel.contains("2026-10-06"), "补录使用真实创建日期，不冒充消费日")
+        XCTAssertTrue(fallback.timeSourceLabel.contains("记录"))
+        XCTAssertTrue(try XCTUnwrap(result.timeline.first { $0.record.reference == uploaded.reference }).timeSourceLabel.contains("上传"))
+    }
+
     func testIOSV2POLISH003F10MainSleepAndIndependentThirtyDayMedians() throws {
         var records: [NativeDayRecord] = []
         var details: [String: NativeRecordDetail] = [:]
