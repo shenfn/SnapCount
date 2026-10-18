@@ -4545,20 +4545,7 @@ final class AppState: ObservableObject {
         let outcome = try await localExpenseUseCase.create(command)
         _ = await prepareLocalWorkspace()
         let monthKey = String(command.transactionDate.prefix(7))
-        let month = try await localExpenseUseCase.month(monthKey)
-        let groups = LocalExpenseReadModel.groups(from: month)
-        localExpenseMonthGroups[monthKey] = groups
-        localRecordMonthDetails[monthKey] = Dictionary(
-            uniqueKeysWithValues: month.expenses.map {
-                let detail = LocalExpenseReadModel.detail(from: $0)
-                return (detail.id, detail)
-            }
-        )
-        if monthKey == Self.currentMonthKey {
-            dashboard.dayRecordGroups = groups
-            dashboard.monthCount = month.expenses.count
-            dashboard.monthExpense = month.expenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
-        }
+        await refreshLocalMonthProjection(monthKey: monthKey)
         manualRecordMessage = outcome.expense == nil ? "本地记录未保存" : "记录已保存（本机）"
         return outcome.expense != nil
     }

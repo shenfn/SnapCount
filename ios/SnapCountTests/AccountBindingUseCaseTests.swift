@@ -26,14 +26,15 @@ final class AccountBindingUseCaseTests: XCTestCase {
 
         async let first = harness.useCase.bind(source, accountId: "account-1")
         await gate.waitUntilEntered()
-        async let duplicate = harness.useCase.bind(source, accountId: "account-1")
-        for _ in 0..<8 { await Task.yield() }
         let conflict = await harness.useCase.bind(source, accountId: "account-2")
 
         XCTAssertEqual(conflict.transaction, .conflict(.bindingConflict))
         XCTAssertEqual(repository.bindCallCount, 1)
-        await gate.release()
-        let (firstResult, duplicateResult) = await (first, duplicate)
+        // 直接进入重复调用后才让 MainActor 的释放任务运行，确保实际重叠。
+        let release = Task { @MainActor in await gate.release() }
+        let duplicateResult = await harness.useCase.bind(source, accountId: "account-1")
+        let firstResult = await first
+        await release.value
         XCTAssertEqual(firstResult.transaction.accepted?.recordId, "expense-1")
         XCTAssertEqual(duplicateResult.transaction.accepted?.accountId, "account-1")
         XCTAssertEqual(repository.bindCallCount, 1)
