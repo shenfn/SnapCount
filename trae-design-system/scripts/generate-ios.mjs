@@ -55,17 +55,20 @@ const fontById = Object.fromEntries(tokens.typography.scale.map((f) => [f.id, f]
 function catPathCommands(source, pose) {
   const parts = source.match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)/g) ?? [];
   if (parts[0] !== 'M') throw new Error(`cat_paths.${pose} 必须以 M 开始`);
-  let index = 1;
+  let index = 0;
   const number = () => {
     const value = Number(parts[index++]);
     if (!Number.isFinite(value)) throw new Error(`cat_paths.${pose} 坐标无效`);
     return value;
   };
-  const commands = [`path.move(to: CGPoint(x: ${number()}, y: ${number()}))`];
+  const commands = [];
   while (index < parts.length) {
-    if (parts[index++] !== 'C' || index + 6 > parts.length) {
-      throw new Error(`cat_paths.${pose} 只支持单个 M 和完整 C 曲线序列`);
+    const command = parts[index++];
+    if (command === 'M' && index + 2 <= parts.length) {
+      commands.push(`path.move(to: CGPoint(x: ${number()}, y: ${number()}))`);
+      continue;
     }
+    if (command !== 'C' || index + 6 > parts.length) throw new Error(`cat_paths.${pose} 只支持完整 M/C 序列`);
     const x1 = number(), y1 = number(), x2 = number(), y2 = number(), x = number(), y = number();
     commands.push(`path.addCurve(to: CGPoint(x: ${x}, y: ${y}), control1: CGPoint(x: ${x1}, y: ${y1}), control2: CGPoint(x: ${x2}, y: ${y2}))`);
   }
@@ -226,22 +229,37 @@ lines.push('');
 lines.push('    static func forDomain(_ domain: String) -> JieziCatPose {');
 lines.push('        JieziCatPose(rawValue: domain) ?? .expense');
 lines.push('    }');
+lines.push('');
+lines.push('    var decoration: (cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, color: Color, opacity: Double) {');
+lines.push('        switch self {');
+Object.entries(tokens.ios_prototype.cat_decorations).forEach(([id, d]) => {
+  lines.push(`        case .${id}: return (cx: ${d.cx}, cy: ${d.cy}, rx: ${d.rx}, ry: ${d.ry}, color: Color(jieziHex: "${d.color}"), opacity: ${d.opacity})`);
+});
+lines.push('        }');
+lines.push('    }');
 lines.push('}');
 lines.push('');
 lines.push('struct JieziCatShape: Shape {');
 lines.push('    let pose: JieziCatPose');
+lines.push('    var drawsFace = false');
 lines.push('');
 lines.push('    func path(in rect: CGRect) -> Path {');
 lines.push('        var path = Path()');
-lines.push('        switch pose {');
-Object.entries(tokens.ios_prototype.cat_paths).forEach(([id, source]) => {
-  lines.push(`        case .${id}:`);
-  catPathCommands(source, id).forEach((command) => lines.push(`            ${command}`));
+lines.push('        if drawsFace {');
+[tokens.ios_prototype.cat_face_paths, tokens.ios_prototype.cat_paths].forEach((paths, index) => {
+  if (index === 1) lines.push('        } else {');
+  lines.push('            switch pose {');
+  Object.entries(paths).forEach(([id, source]) => {
+    lines.push(`            case .${id}:`);
+    catPathCommands(source, id).forEach((command) => lines.push(`                ${command}`));
+  });
+  lines.push('            }');
 });
 lines.push('        }');
-lines.push('        let scale = min(rect.width / 210, rect.height / 200)');
-lines.push('        let x = rect.midX - 105 * scale');
-lines.push('        let y = rect.midY - 100 * scale');
+lines.push('        let extent = JieziPrototypeLayout.cat_viewbox_size');
+lines.push('        let scale = min(rect.width / extent, rect.height / extent)');
+lines.push('        let x = rect.midX - extent / 2 * scale');
+lines.push('        let y = rect.midY - extent / 2 * scale');
 lines.push('        return path.applying(CGAffineTransform(scaleX: scale, y: scale))');
 lines.push('            .applying(CGAffineTransform(translationX: x, y: y))');
 lines.push('    }');

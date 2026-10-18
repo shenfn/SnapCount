@@ -7,6 +7,51 @@ import XCTest
 @MainActor
 final class LocalFirstSL02ProjectionTests: XCTestCase {
 
+    func testIOSV2POLISH006F17NewExpensePreservesAllDomainFactsAndDetailsInWarmMonth() async throws {
+        let harness = try Self.makeHarness(session: nil, expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.resetUserScopedState()
+        var food = NativeManualRecordDraft(kind: .universal, domainKey: "food")
+        food.primaryValueText = "450"
+        food.dimension = "午餐"
+        let foodSaved = await state.createManualRecord(food, domain: nil)
+        XCTAssertTrue(foodSaved)
+        let dateKey = food.dateKey
+        let monthKey = String(dateKey.prefix(7))
+        let meal = try XCTUnwrap(state.recordGroups(monthKey: monthKey).flatMap(\.records).first { $0.domainKey == "food" })
+        XCTAssertEqual(state.recordDetails(from: dateKey, through: dateKey)[meal.reference]?.payload?.double("total_calorie_kcal"), 450)
+        let account = try harness.expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: harness.profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: food.date
+        ))
+
+        let saved = await state.createLocalExpense(
+            amountText: "12.50", accountID: account.id, merchantName: "合成便利店",
+            platform: "线下", category: "food", paymentMethod: "现金", date: food.date, note: ""
+        )
+        XCTAssertTrue(saved, state.manualRecordMessage ?? "新增支出应成功")
+        let records = state.recordGroups(monthKey: monthKey).flatMap(\.records)
+        XCTAssertEqual(records.count, 2)
+        let expense = try XCTUnwrap(records.first { $0.kind == .expense })
+        XCTAssertTrue(expense.reference.hasPrefix("expense/"), "FactReader 模式使用统一事实引用")
+        let details = state.recordDetails(from: dateKey, through: dateKey)
+        XCTAssertNotNil(details[expense.reference])
+        XCTAssertEqual(details[meal.reference]?.payload?.double("total_calorie_kcal"), 450, "新增支出不能清掉其他域详情")
+        let foodPage = NativeDomainScenePresentation.make(
+            domain: .food, dateKey: dateKey, weekGroups: state.recordGroups(monthKey: monthKey),
+            details: details, isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: dateKey
+        )
+        XCTAssertEqual(foodPage.knownPrimaryTotal, 450)
+        XCTAssertTrue(state.dashboard.dayRecordGroups.flatMap(\.records).contains { $0.reference == meal.reference })
+        XCTAssertEqual(state.localAccountBalances[account.id], 8_750)
+
+        await state.loadRecordMonth(monthKey)
+        XCTAssertEqual(state.recordGroups(monthKey: monthKey).flatMap(\.records).count, 2)
+        XCTAssertEqual(state.recordDetails(from: dateKey, through: dateKey)[meal.reference]?.payload?.double("total_calorie_kcal"), 450)
+        XCTAssertEqual(harness.sessionCounter.current, 0, "本地新增及读取无需云端会话")
+    }
+
     // MARK: - LF-001：未登录四域手动创建 → 本地事实层 + 当月投影刷新
 
     func testLOCALP1LF001SignedOutManualCreationWritesLocalFactsAndRefreshesCurrentMonthProjection() async throws {

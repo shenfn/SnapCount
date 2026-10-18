@@ -13,6 +13,19 @@ const generate = () => {
   return read('trae-design-system/dist/jiezi/JieziTheme+Generated.swift');
 };
 
+test('IOS-V2-POLISH-009 F09 exports separate prototype faces and decoration for every domain', () => {
+  const swift = generate();
+  assert.ok(swift.includes('var drawsFace = false'), '面部必须独立于主线绘制，才能最后显现');
+  assert.ok(swift.includes('var decoration:'), '装饰的位置、颜色来自 SSOT');
+  assert.ok(swift.includes('CGPoint(x: 90, y: 88)'), '记账猫眼睛来自原型坐标');
+  assert.ok(swift.includes('static let cat_face_delay_ms: TimeInterval = 0.85'));
+  const tokens = JSON.parse(read('trae-design-system/tokens/design-tokens.json')).ios_prototype;
+  assert.deepEqual(Object.keys(tokens.cat_face_paths), ['expense', 'sleep', 'food', 'sport', 'reading']);
+  for (const path of Object.values(tokens.cat_paths)) {
+    assert.equal((path.match(/M/g) ?? []).length, 1, '主线保持一条连续路径');
+  }
+});
+
 test('IOS-V2-POLISH-011-B iOS body uses native scalable text while retaining serif and numeric fonts', () => {
   const swift = generate();
   assert.ok(/static let body = Font\.system\(\.body\)/.test(swift), '正文应生成系统动态字体');

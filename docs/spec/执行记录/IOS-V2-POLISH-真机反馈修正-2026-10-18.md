@@ -59,11 +59,32 @@
 
 实现固定提交 `61c630f863a3a1ab6f68592de9ea0ada1b6ea47e`：[CI 39056994419](https://github.com/shenfn/SnapCount/actions/runs/39056994419)。App Build 成功，取消重入目标测试通过；357 项测试中，仅未修改的图片用例 `testA4IOS011BReusesSameIdentityAndSkipsExistingURL` 两条次数断言失败（2而非1）。该测试直接构造图片 UseCase，不经过本片 AppState；原 async let duplicate 与 gate.release 无“重复调用已进入”的顺序保证。修正测试为当前 MainActor 中直接进入 perform，让释放 Task 在其等待共享任务时执行；保留 hydrated、缓存跳过和一次 transport 的全部断言，不修改图片 UseCase。完整绿灯仍待新提交验证，不将本次失败归为已通过。
 
+历史月完整绿灯：`de484e2`，[CI 39081955367](https://github.com/shenfn/SnapCount/actions/runs/39081955367) App Build 成功、357 项 XCTest 全通过，含取消重入及图片重叠复用测试。至此 F03 的本片展示/历史月读取已具备红绿证据，快速跨月/用户切换/真机仍按后续验收清单保留。
+
 最终布局第二次复核：已查看 `58e969c` 的普通/辅助字号图片，主指标/猫位于原处，刷新失败及重试在指标下方，已有餐次可滚动查看。后续历史月请求实现没有布局变化，不额外重复视觉打磨。猫眼睛属于 F09 尚未开发，截图中的缺眼不作为本次全量原型验收。
+
+## F09 / 009 原型猫接入（后续视觉切片）
+
+- 主原型 SHA256 已在本轮重新核实，与交接指纹相同。只将五域猫的必要路径/装饰数据转成 SSOT，不提交原型 HTML 或其他私有素材。
+- 用原型五个主路径替换旧 cat-v3；直线/二次曲线转等价三次曲线，硬币圆弧以四段标准三次圆弧近似。面部路径独立保留多次 move，装饰位置、颜色、透明度进入 Token；统一 200×200 视框。
+- 生成器输出 drawsFace 分层和五域装饰；通过 `generate-ios.mjs --sync-app` 同步 App 副本，没有手改生成文件。
+- DomainCatView 分主线、面部、装饰；主线按原型收回后留空帧再画入，850ms 后面部渐显350ms；收回360ms、绘入1150ms。快速切域取消旧任务；减少动态效果、后台恢复显示包含眼睛的静态终态。睡眠先用原型中性闭眼姿态，不移植演示中的固定“睡够”阈值。
+- Node 红灯：`node --test --test-name-pattern=F09 scripts/test-ios-prototype-generation.mjs` 因“面部必须独立于主线绘制”失败。实现后全套生成检查 10/10 通过，包括确定性和 PWA 产物隔离；`node --check` 与 App Token `--check` 通过。
+- 涉及 Token、iOS 生成器、生成 Swift、DomainSceneView、生成检查脚本、本记录。尚待新固定提交 macOS Build/合成截图与真机动画、快速反向、减少动态效果验收；Node 结果不代替这些验收。
+
+## F17 / 006、SL-02-C4 新增支出后全域投影（下一业务切片）
+
+范围：AppState.createLocalExpense 的写后投影、LocalFirstSL02ProjectionTests 的真实 SQLite fixture；复用 refreshLocalMonthProjection，不改账户事务、数据库、远端创建或其他写入契约。
+
+场景 006-F17-支出新增：给定当前月已有一条正式饮食记录且页面已读热缓存，手工新增本地支出成功后，AppState 月列表包含两域；原饮食详情与热量仍可读取；新支出使用 FactReader 权威引用且有详情；当前月 Dashboard 保留饮食组，账户余额按新支出更新；普通非 force 重读不能再次变旧，不查询云端会话。测试入口为 AppState.createManualRecord/createLocalExpense → recordGroups/recordDetails/NativeDomainScenePresentation，fixture 使用既有真实库 harness。
+
+预期红灯：现路径以仅支出的字典替换 localRecordMonthDetails，以仅支出组替换 dashboard.dayRecordGroups，并绕开 localFactMonths 的统一刷新。应由饮食详情/指标与跨域组断言失败证明；不以 SQL、账户准备或环境失败冒充红灯。前一片完整绿灯后再写该业务测试。
 
 本地九组业务边界检查：43/43 通过。第一次使用不存在的 test-ios-record-detail-boundary.mjs 路径未执行成功；通过 rg 查得现有 test-ios-local-record-detail-boundary.mjs 后运行，无产品修改用于绕过检查。
 
 F06 / 003 纯视觉：前一天、当天各占一行，金额使用等宽数字并允许大字号换行；算法未变，截图与真机待验证。
+
+F17 当前测试：前一片完整绿灯后已新增 `testIOSV2POLISH006F17NewExpensePreservesAllDomainFactsAndDetailsInWarmMonth`。尚未修改支出写后实现；与 F09 纯视觉变更同一固定提交进行 macOS 编译/测试，F09 的 Node 红绿与本业务测试结果分别记录。
 
 ## 尚未关闭
 
@@ -77,12 +98,12 @@ F01～F18 及交接 10.2 的刷新/候选保存问题仍按原清单追踪。首
 |---|---|---|
 | F01 | MainShellView 分页为五个 44pt 点击按钮；补连续拖动仍保留点击/辅助操作，与 TabView 页面横滑区分 | 待开发 |
 | F02 | DomainDatePickerView 只列自然周；需要月内连续日期和月初阻尼/松手阈值，不能仅做换周按钮 | 待开发 |
-| F03 | 展示层遮挡与 AppState 同月读取取消为不同故障；分别建立测试，不能以消除报错文案替代请求终态 | 展示修复已提交待绿灯；取消竞态待测试 |
+| F03 | 展示层遮挡与 AppState 同月读取取消为不同故障；分别建立测试，不能以消除报错文案替代请求终态 | 本片完整 CI 绿灯；当前月/快速跨月/设备验收另列 |
 | F04 | 当前时间线保留同刻 references，但点会重叠，明细默认只列最新分钟；缺真实三笔字段，不能判断遗漏原因或擅改上传时间语义 | 待脱敏样本/设备路径；拖动提示待开发 |
 | F05/F08 | merchantDrill 目前只过滤某商户；应改为整日记账专用下钻，收支明细置于其中 | 待开发 |
 | F06 | 比较卡一条 Text 拼接前日/当日值，改分两行，不改金额算法 | 已提交待截图/设备验收 |
 | F07 | openDayRecord 把所有正式记录切到 records overlay 并压入详情，关闭先落记录页；需在共享导航边界恢复来源上下文，兼顾 DayDetailView 调用者和编辑删除 | 待开发 |
-| F09 | 当前 DomainCatView 只有生成主路径 trim/stroke；原型明确独立面部延迟显现，旧 cat-v3 禁五官已被覆盖 | 待开发；通过 Token SSOT/生成链修正 |
+| F09 | 原型要求独立面部延迟显现，旧 cat-v3 禁五官已被覆盖 | 已接入 SSOT/生成链，Node 10/10；待 macOS/视觉/设备验收 |
 | F10 | 本地归日与识别返回日期要追通；recognize_only 未复用旧睡眠 wake_at 归日；30天基准读取、主要睡眠、各项7晚、中位数均需新测试 | iOS 算法待开发；Edge 修改需另列范围 |
 | F11 | 当前 weeklyTrend 的“查看”为日期菜单，不能替代睡眠专用下钻；当前候选须单独标识，不伪造历史 | 待开发 |
 | F12 | 其他域当日记录保留；不因记账收支明细移入下钻而一并删去 | 保留现状 |

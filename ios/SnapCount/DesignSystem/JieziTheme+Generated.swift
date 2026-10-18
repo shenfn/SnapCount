@@ -232,6 +232,9 @@ enum JieziPrototypeLayout {
     static let hero_min_height: CGFloat = 170
     static let cat_width: CGFloat = 140
     static let cat_height: CGFloat = 150
+    static let cat_viewbox_size: CGFloat = 200
+    static let cat_stroke_width: CGFloat = 2.4
+    static let cat_face_stroke_width: CGFloat = 3.4
     static let column_gap: CGFloat = 12
     static let card_inset: CGFloat = 16
     static let card_radius: CGFloat = 24
@@ -251,6 +254,11 @@ enum JieziPrototypeMotion {
     static let background_ms: TimeInterval = 0.7
     static let cat_retract_ms: TimeInterval = 0.36
     static let cat_draw_ms: TimeInterval = 1.15
+    static let cat_face_delay_ms: TimeInterval = 0.85
+    static let cat_face_hide_ms: TimeInterval = 0.12
+    static let cat_reset_frame_ms: TimeInterval = 0.016
+    static let cat_face_fade_ms: TimeInterval = 0.35
+    static let cat_decoration_fade_ms: TimeInterval = 0.5
     static let calendar_feedback_ms: TimeInterval = 0.26
 }
 
@@ -264,115 +272,151 @@ enum JieziCatPose: String {
     static func forDomain(_ domain: String) -> JieziCatPose {
         JieziCatPose(rawValue: domain) ?? .expense
     }
+
+    var decoration: (cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, color: Color, opacity: Double) {
+        switch self {
+        case .expense: return (cx: 134, cy: 124, rx: 12, ry: 12, color: Color(jieziHex: "#DCBF74"), opacity: 0.6)
+        case .sleep: return (cx: 162, cy: 46, rx: 14, ry: 14, color: Color(jieziHex: "#F3E3A6"), opacity: 0.9)
+        case .food: return (cx: 120, cy: 124, rx: 30, ry: 7, color: Color(jieziHex: "#FFFFFF"), opacity: 0.95)
+        case .sport: return (cx: 92, cy: 171, rx: 78, ry: 4, color: Color(jieziHex: "#426E63"), opacity: 0.28)
+        case .reading: return (cx: 156, cy: 56, rx: 10, ry: 10, color: Color(jieziHex: "#F3D99A"), opacity: 0.85)
+        }
+    }
 }
 
 struct JieziCatShape: Shape {
     let pose: JieziCatPose
+    var drawsFace = false
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        switch pose {
-        case .expense:
-            path.move(to: CGPoint(x: 42, y: 142))
-            path.addCurve(to: CGPoint(x: 39, y: 163), control1: CGPoint(x: 25, y: 131), control2: CGPoint(x: 23, y: 158))
-            path.addCurve(to: CGPoint(x: 67, y: 140), control1: CGPoint(x: 58, y: 170), control2: CGPoint(x: 66, y: 155))
-            path.addCurve(to: CGPoint(x: 80, y: 102), control1: CGPoint(x: 68, y: 121), control2: CGPoint(x: 77, y: 112))
-            path.addCurve(to: CGPoint(x: 70, y: 77), control1: CGPoint(x: 70, y: 96), control2: CGPoint(x: 67, y: 88))
-            path.addCurve(to: CGPoint(x: 73, y: 48), control1: CGPoint(x: 69, y: 65), control2: CGPoint(x: 69, y: 55))
-            path.addCurve(to: CGPoint(x: 91, y: 65), control1: CGPoint(x: 81, y: 54), control2: CGPoint(x: 87, y: 61))
-            path.addCurve(to: CGPoint(x: 123, y: 65), control1: CGPoint(x: 101, y: 61), control2: CGPoint(x: 113, y: 61))
-            path.addCurve(to: CGPoint(x: 142, y: 49), control1: CGPoint(x: 129, y: 59), control2: CGPoint(x: 137, y: 51))
-            path.addCurve(to: CGPoint(x: 140, y: 78), control1: CGPoint(x: 144, y: 58), control2: CGPoint(x: 143, y: 70))
-            path.addCurve(to: CGPoint(x: 124, y: 106), control1: CGPoint(x: 146, y: 90), control2: CGPoint(x: 137, y: 103))
-            path.addCurve(to: CGPoint(x: 108, y: 125), control1: CGPoint(x: 122, y: 114), control2: CGPoint(x: 114, y: 119))
-            path.addCurve(to: CGPoint(x: 114, y: 144), control1: CGPoint(x: 101, y: 133), control2: CGPoint(x: 105, y: 143))
-            path.addCurve(to: CGPoint(x: 137, y: 127), control1: CGPoint(x: 123, y: 145), control2: CGPoint(x: 135, y: 138))
-            path.addCurve(to: CGPoint(x: 117, y: 111), control1: CGPoint(x: 139, y: 114), control2: CGPoint(x: 128, y: 107))
-            path.addCurve(to: CGPoint(x: 117, y: 142), control1: CGPoint(x: 102, y: 116), control2: CGPoint(x: 104, y: 138))
-            path.addCurve(to: CGPoint(x: 138, y: 162), control1: CGPoint(x: 129, y: 146), control2: CGPoint(x: 141, y: 151))
-            path.addCurve(to: CGPoint(x: 166, y: 177), control1: CGPoint(x: 135, y: 173), control2: CGPoint(x: 147, y: 177))
-        case .sleep:
-            path.move(to: CGPoint(x: 32, y: 174))
-            path.addCurve(to: CGPoint(x: 74, y: 174), control1: CGPoint(x: 47, y: 174), control2: CGPoint(x: 61, y: 172))
-            path.addCurve(to: CGPoint(x: 88, y: 165), control1: CGPoint(x: 93, y: 178), control2: CGPoint(x: 99, y: 170))
-            path.addCurve(to: CGPoint(x: 58, y: 158), control1: CGPoint(x: 79, y: 161), control2: CGPoint(x: 67, y: 164))
-            path.addCurve(to: CGPoint(x: 50, y: 136), control1: CGPoint(x: 48, y: 153), control2: CGPoint(x: 46, y: 143))
-            path.addCurve(to: CGPoint(x: 53, y: 111), control1: CGPoint(x: 49, y: 127), control2: CGPoint(x: 49, y: 117))
-            path.addCurve(to: CGPoint(x: 66, y: 125), control1: CGPoint(x: 60, y: 116), control2: CGPoint(x: 63, y: 121))
-            path.addCurve(to: CGPoint(x: 87, y: 125), control1: CGPoint(x: 73, y: 121), control2: CGPoint(x: 82, y: 122))
-            path.addCurve(to: CGPoint(x: 102, y: 111), control1: CGPoint(x: 93, y: 120), control2: CGPoint(x: 97, y: 112))
-            path.addCurve(to: CGPoint(x: 103, y: 134), control1: CGPoint(x: 105, y: 119), control2: CGPoint(x: 105, y: 128))
-            path.addCurve(to: CGPoint(x: 163, y: 121), control1: CGPoint(x: 117, y: 111), control2: CGPoint(x: 145, y: 109))
-            path.addCurve(to: CGPoint(x: 171, y: 171), control1: CGPoint(x: 182, y: 134), control2: CGPoint(x: 187, y: 159))
-            path.addCurve(to: CGPoint(x: 116, y: 173), control1: CGPoint(x: 156, y: 183), control2: CGPoint(x: 126, y: 180))
-            path.addCurve(to: CGPoint(x: 134, y: 149), control1: CGPoint(x: 102, y: 163), control2: CGPoint(x: 116, y: 148))
-            path.addCurve(to: CGPoint(x: 146, y: 172), control1: CGPoint(x: 155, y: 150), control2: CGPoint(x: 159, y: 168))
-            path.addCurve(to: CGPoint(x: 124, y: 164), control1: CGPoint(x: 137, y: 176), control2: CGPoint(x: 127, y: 170))
-        case .food:
-            path.move(to: CGPoint(x: 42, y: 142))
-            path.addCurve(to: CGPoint(x: 39, y: 163), control1: CGPoint(x: 25, y: 131), control2: CGPoint(x: 23, y: 158))
-            path.addCurve(to: CGPoint(x: 67, y: 140), control1: CGPoint(x: 58, y: 170), control2: CGPoint(x: 66, y: 155))
-            path.addCurve(to: CGPoint(x: 80, y: 102), control1: CGPoint(x: 68, y: 121), control2: CGPoint(x: 77, y: 112))
-            path.addCurve(to: CGPoint(x: 70, y: 77), control1: CGPoint(x: 70, y: 96), control2: CGPoint(x: 67, y: 88))
-            path.addCurve(to: CGPoint(x: 73, y: 48), control1: CGPoint(x: 69, y: 65), control2: CGPoint(x: 69, y: 55))
-            path.addCurve(to: CGPoint(x: 91, y: 65), control1: CGPoint(x: 81, y: 54), control2: CGPoint(x: 87, y: 61))
-            path.addCurve(to: CGPoint(x: 123, y: 65), control1: CGPoint(x: 101, y: 61), control2: CGPoint(x: 113, y: 61))
-            path.addCurve(to: CGPoint(x: 142, y: 49), control1: CGPoint(x: 129, y: 59), control2: CGPoint(x: 137, y: 51))
-            path.addCurve(to: CGPoint(x: 140, y: 78), control1: CGPoint(x: 144, y: 58), control2: CGPoint(x: 143, y: 70))
-            path.addCurve(to: CGPoint(x: 124, y: 106), control1: CGPoint(x: 146, y: 90), control2: CGPoint(x: 137, y: 103))
-            path.addCurve(to: CGPoint(x: 101, y: 125), control1: CGPoint(x: 119, y: 112), control2: CGPoint(x: 109, y: 116))
-            path.addCurve(to: CGPoint(x: 102, y: 137), control1: CGPoint(x: 96, y: 130), control2: CGPoint(x: 97, y: 136))
-            path.addCurve(to: CGPoint(x: 145, y: 134), control1: CGPoint(x: 112, y: 142), control2: CGPoint(x: 128, y: 140))
-            path.addCurve(to: CGPoint(x: 118, y: 162), control1: CGPoint(x: 143, y: 152), control2: CGPoint(x: 133, y: 162))
-            path.addCurve(to: CGPoint(x: 89, y: 133), control1: CGPoint(x: 102, y: 162), control2: CGPoint(x: 91, y: 151))
-            path.addCurve(to: CGPoint(x: 145, y: 134), control1: CGPoint(x: 105, y: 127), control2: CGPoint(x: 130, y: 127))
-            path.addCurve(to: CGPoint(x: 151, y: 169), control1: CGPoint(x: 148, y: 142), control2: CGPoint(x: 146, y: 157))
-            path.addCurve(to: CGPoint(x: 173, y: 177), control1: CGPoint(x: 154, y: 176), control2: CGPoint(x: 163, y: 177))
-        case .sport:
-            path.move(to: CGPoint(x: 179, y: 59))
-            path.addCurve(to: CGPoint(x: 190, y: 65), control1: CGPoint(x: 186, y: 43), control2: CGPoint(x: 199, y: 53))
-            path.addCurve(to: CGPoint(x: 169, y: 105), control1: CGPoint(x: 180, y: 79), control2: CGPoint(x: 179, y: 88))
-            path.addCurve(to: CGPoint(x: 176, y: 174), control1: CGPoint(x: 178, y: 124), control2: CGPoint(x: 179, y: 150))
-            path.addCurve(to: CGPoint(x: 154, y: 177), control1: CGPoint(x: 172, y: 178), control2: CGPoint(x: 163, y: 177))
-            path.addCurve(to: CGPoint(x: 143, y: 153), control1: CGPoint(x: 157, y: 165), control2: CGPoint(x: 153, y: 157))
-            path.addCurve(to: CGPoint(x: 96, y: 160), control1: CGPoint(x: 127, y: 147), control2: CGPoint(x: 112, y: 153))
-            path.addCurve(to: CGPoint(x: 33, y: 176), control1: CGPoint(x: 77, y: 168), control2: CGPoint(x: 56, y: 175))
-            path.addCurve(to: CGPoint(x: 61, y: 157), control1: CGPoint(x: 35, y: 169), control2: CGPoint(x: 50, y: 166))
-            path.addCurve(to: CGPoint(x: 53, y: 131), control1: CGPoint(x: 51, y: 149), control2: CGPoint(x: 49, y: 140))
-            path.addCurve(to: CGPoint(x: 57, y: 109), control1: CGPoint(x: 52, y: 122), control2: CGPoint(x: 53, y: 114))
-            path.addCurve(to: CGPoint(x: 72, y: 123), control1: CGPoint(x: 64, y: 115), control2: CGPoint(x: 68, y: 120))
-            path.addCurve(to: CGPoint(x: 94, y: 126), control1: CGPoint(x: 80, y: 121), control2: CGPoint(x: 89, y: 123))
-            path.addCurve(to: CGPoint(x: 111, y: 115), control1: CGPoint(x: 101, y: 121), control2: CGPoint(x: 106, y: 115))
-            path.addCurve(to: CGPoint(x: 108, y: 138), control1: CGPoint(x: 113, y: 122), control2: CGPoint(x: 111, y: 132))
-            path.addCurve(to: CGPoint(x: 78, y: 158), control1: CGPoint(x: 104, y: 151), control2: CGPoint(x: 91, y: 160))
-            path.addCurve(to: CGPoint(x: 126, y: 132), control1: CGPoint(x: 95, y: 162), control2: CGPoint(x: 112, y: 148))
-            path.addCurve(to: CGPoint(x: 169, y: 105), control1: CGPoint(x: 143, y: 111), control2: CGPoint(x: 151, y: 99))
-        case .reading:
-            path.move(to: CGPoint(x: 42, y: 142))
-            path.addCurve(to: CGPoint(x: 39, y: 163), control1: CGPoint(x: 25, y: 131), control2: CGPoint(x: 23, y: 158))
-            path.addCurve(to: CGPoint(x: 67, y: 140), control1: CGPoint(x: 58, y: 170), control2: CGPoint(x: 66, y: 155))
-            path.addCurve(to: CGPoint(x: 80, y: 102), control1: CGPoint(x: 68, y: 121), control2: CGPoint(x: 77, y: 112))
-            path.addCurve(to: CGPoint(x: 70, y: 77), control1: CGPoint(x: 70, y: 96), control2: CGPoint(x: 67, y: 88))
-            path.addCurve(to: CGPoint(x: 73, y: 48), control1: CGPoint(x: 69, y: 65), control2: CGPoint(x: 69, y: 55))
-            path.addCurve(to: CGPoint(x: 91, y: 65), control1: CGPoint(x: 81, y: 54), control2: CGPoint(x: 87, y: 61))
-            path.addCurve(to: CGPoint(x: 123, y: 65), control1: CGPoint(x: 101, y: 61), control2: CGPoint(x: 113, y: 61))
-            path.addCurve(to: CGPoint(x: 142, y: 49), control1: CGPoint(x: 129, y: 59), control2: CGPoint(x: 137, y: 51))
-            path.addCurve(to: CGPoint(x: 140, y: 78), control1: CGPoint(x: 144, y: 58), control2: CGPoint(x: 143, y: 70))
-            path.addCurve(to: CGPoint(x: 124, y: 106), control1: CGPoint(x: 146, y: 90), control2: CGPoint(x: 137, y: 103))
-            path.addCurve(to: CGPoint(x: 128, y: 126), control1: CGPoint(x: 127, y: 113), control2: CGPoint(x: 130, y: 120))
-            path.addCurve(to: CGPoint(x: 113, y: 127), control1: CGPoint(x: 124, y: 133), control2: CGPoint(x: 118, y: 133))
-            path.addCurve(to: CGPoint(x: 85, y: 120), control1: CGPoint(x: 105, y: 120), control2: CGPoint(x: 93, y: 119))
-            path.addCurve(to: CGPoint(x: 90, y: 158), control1: CGPoint(x: 86, y: 132), control2: CGPoint(x: 88, y: 146))
-            path.addCurve(to: CGPoint(x: 124, y: 166), control1: CGPoint(x: 101, y: 157), control2: CGPoint(x: 113, y: 159))
-            path.addCurve(to: CGPoint(x: 123, y: 129), control1: CGPoint(x: 124, y: 150), control2: CGPoint(x: 124, y: 137))
-            path.addCurve(to: CGPoint(x: 161, y: 121), control1: CGPoint(x: 136, y: 122), control2: CGPoint(x: 148, y: 120))
-            path.addCurve(to: CGPoint(x: 156, y: 159), control1: CGPoint(x: 158, y: 134), control2: CGPoint(x: 157, y: 146))
-            path.addCurve(to: CGPoint(x: 124, y: 166), control1: CGPoint(x: 144, y: 158), control2: CGPoint(x: 133, y: 161))
-            path.addCurve(to: CGPoint(x: 170, y: 177), control1: CGPoint(x: 129, y: 176), control2: CGPoint(x: 146, y: 179))
+        if drawsFace {
+            switch pose {
+            case .expense:
+                path.move(to: CGPoint(x: 90, y: 88))
+                path.addCurve(to: CGPoint(x: 90, y: 89.5), control1: CGPoint(x: 90, y: 88), control2: CGPoint(x: 90, y: 89.5))
+                path.move(to: CGPoint(x: 110, y: 88))
+                path.addCurve(to: CGPoint(x: 110, y: 89.5), control1: CGPoint(x: 110, y: 88), control2: CGPoint(x: 110, y: 89.5))
+            case .sleep:
+                path.move(to: CGPoint(x: 50, y: 140))
+                path.addCurve(to: CGPoint(x: 56, y: 140), control1: CGPoint(x: 52, y: 142), control2: CGPoint(x: 54, y: 142))
+                path.move(to: CGPoint(x: 64, y: 140))
+                path.addCurve(to: CGPoint(x: 70, y: 140), control1: CGPoint(x: 66, y: 142), control2: CGPoint(x: 68, y: 142))
+                path.move(to: CGPoint(x: 100, y: 92))
+                path.addCurve(to: CGPoint(x: 108, y: 92), control1: CGPoint(x: 100, y: 92), control2: CGPoint(x: 108, y: 92))
+                path.addCurve(to: CGPoint(x: 100, y: 100), control1: CGPoint(x: 108, y: 92), control2: CGPoint(x: 100, y: 100))
+                path.addCurve(to: CGPoint(x: 108, y: 100), control1: CGPoint(x: 100, y: 100), control2: CGPoint(x: 108, y: 100))
+                path.move(to: CGPoint(x: 114, y: 78))
+                path.addCurve(to: CGPoint(x: 120, y: 78), control1: CGPoint(x: 114, y: 78), control2: CGPoint(x: 120, y: 78))
+                path.addCurve(to: CGPoint(x: 114, y: 84), control1: CGPoint(x: 120, y: 78), control2: CGPoint(x: 114, y: 84))
+                path.addCurve(to: CGPoint(x: 120, y: 84), control1: CGPoint(x: 114, y: 84), control2: CGPoint(x: 120, y: 84))
+            case .food:
+                path.move(to: CGPoint(x: 83, y: 88))
+                path.addCurve(to: CGPoint(x: 91, y: 88), control1: CGPoint(x: 85.666667, y: 85.333333), control2: CGPoint(x: 88.333333, y: 85.333333))
+                path.move(to: CGPoint(x: 105, y: 88))
+                path.addCurve(to: CGPoint(x: 113, y: 88), control1: CGPoint(x: 107.666667, y: 85.333333), control2: CGPoint(x: 110.333333, y: 85.333333))
+            case .sport:
+                path.move(to: CGPoint(x: 54, y: 133))
+                path.addCurve(to: CGPoint(x: 54, y: 134.5), control1: CGPoint(x: 54, y: 133), control2: CGPoint(x: 54, y: 134.5))
+                path.move(to: CGPoint(x: 68, y: 131))
+                path.addCurve(to: CGPoint(x: 68, y: 132.5), control1: CGPoint(x: 68, y: 131), control2: CGPoint(x: 68, y: 132.5))
+            case .reading:
+                path.move(to: CGPoint(x: 88, y: 90))
+                path.addCurve(to: CGPoint(x: 88, y: 91.2), control1: CGPoint(x: 88, y: 90), control2: CGPoint(x: 88, y: 91.2))
+                path.move(to: CGPoint(x: 108, y: 90))
+                path.addCurve(to: CGPoint(x: 108, y: 91.2), control1: CGPoint(x: 108, y: 90), control2: CGPoint(x: 108, y: 91.2))
+            }
+        } else {
+            switch pose {
+            case .expense:
+                path.move(to: CGPoint(x: 34, y: 138))
+                path.addCurve(to: CGPoint(x: 46, y: 168), control1: CGPoint(x: 18, y: 140), control2: CGPoint(x: 16, y: 168))
+                path.addCurve(to: CGPoint(x: 64, y: 118), control1: CGPoint(x: 60, y: 168), control2: CGPoint(x: 58, y: 140))
+                path.addCurve(to: CGPoint(x: 66, y: 80), control1: CGPoint(x: 68, y: 104), control2: CGPoint(x: 62, y: 92))
+                path.addCurve(to: CGPoint(x: 70, y: 52), control1: CGPoint(x: 66, y: 70), control2: CGPoint(x: 66, y: 60))
+                path.addCurve(to: CGPoint(x: 88, y: 66), control1: CGPoint(x: 76, y: 58), control2: CGPoint(x: 82, y: 64))
+                path.addCurve(to: CGPoint(x: 112, y: 66), control1: CGPoint(x: 96, y: 64), control2: CGPoint(x: 104, y: 64))
+                path.addCurve(to: CGPoint(x: 130, y: 50), control1: CGPoint(x: 118, y: 60), control2: CGPoint(x: 124, y: 54))
+                path.addCurve(to: CGPoint(x: 130, y: 78), control1: CGPoint(x: 132, y: 60), control2: CGPoint(x: 132, y: 70))
+                path.addCurve(to: CGPoint(x: 108, y: 106), control1: CGPoint(x: 134, y: 92), control2: CGPoint(x: 124, y: 104))
+                path.addCurve(to: CGPoint(x: 122, y: 124), control1: CGPoint(x: 112, y: 114), control2: CGPoint(x: 116, y: 120))
+                path.addCurve(to: CGPoint(x: 134, y: 136), control1: CGPoint(x: 122, y: 130.627417), control2: CGPoint(x: 127.372583, y: 136))
+                path.addCurve(to: CGPoint(x: 146, y: 124), control1: CGPoint(x: 140.627417, y: 136), control2: CGPoint(x: 146, y: 130.627417))
+                path.addCurve(to: CGPoint(x: 134, y: 112), control1: CGPoint(x: 146, y: 117.372583), control2: CGPoint(x: 140.627417, y: 112))
+                path.addCurve(to: CGPoint(x: 122, y: 124), control1: CGPoint(x: 127.372583, y: 112), control2: CGPoint(x: 122, y: 117.372583))
+                path.addCurve(to: CGPoint(x: 126, y: 166), control1: CGPoint(x: 122, y: 140), control2: CGPoint(x: 118, y: 154))
+                path.addCurve(to: CGPoint(x: 164, y: 168), control1: CGPoint(x: 130, y: 168), control2: CGPoint(x: 136, y: 168))
+            case .sleep:
+                path.move(to: CGPoint(x: 20, y: 168))
+                path.addCurve(to: CGPoint(x: 40, y: 168), control1: CGPoint(x: 20, y: 168), control2: CGPoint(x: 40, y: 168))
+                path.addCurve(to: CGPoint(x: 48, y: 134), control1: CGPoint(x: 34, y: 156), control2: CGPoint(x: 36, y: 140))
+                path.addCurve(to: CGPoint(x: 54, y: 110), control1: CGPoint(x: 48, y: 124), control2: CGPoint(x: 50, y: 116))
+                path.addCurve(to: CGPoint(x: 70, y: 122), control1: CGPoint(x: 60, y: 116), control2: CGPoint(x: 64, y: 120))
+                path.addCurve(to: CGPoint(x: 86, y: 106), control1: CGPoint(x: 74, y: 116), control2: CGPoint(x: 80, y: 110))
+                path.addCurve(to: CGPoint(x: 86, y: 130), control1: CGPoint(x: 88, y: 116), control2: CGPoint(x: 88, y: 124))
+                path.addCurve(to: CGPoint(x: 166, y: 140), control1: CGPoint(x: 110, y: 112), control2: CGPoint(x: 154, y: 116))
+                path.addCurve(to: CGPoint(x: 144, y: 168), control1: CGPoint(x: 174, y: 156), control2: CGPoint(x: 164, y: 168))
+                path.addCurve(to: CGPoint(x: 72, y: 162), control1: CGPoint(x: 120, y: 168), control2: CGPoint(x: 92, y: 168))
+                path.addCurve(to: CGPoint(x: 74, y: 150), control1: CGPoint(x: 62, y: 158), control2: CGPoint(x: 64, y: 148))
+            case .food:
+                path.move(to: CGPoint(x: 34, y: 138))
+                path.addCurve(to: CGPoint(x: 46, y: 168), control1: CGPoint(x: 18, y: 140), control2: CGPoint(x: 16, y: 168))
+                path.addCurve(to: CGPoint(x: 64, y: 118), control1: CGPoint(x: 60, y: 168), control2: CGPoint(x: 58, y: 140))
+                path.addCurve(to: CGPoint(x: 66, y: 80), control1: CGPoint(x: 68, y: 104), control2: CGPoint(x: 62, y: 92))
+                path.addCurve(to: CGPoint(x: 70, y: 52), control1: CGPoint(x: 66, y: 70), control2: CGPoint(x: 66, y: 60))
+                path.addCurve(to: CGPoint(x: 88, y: 66), control1: CGPoint(x: 76, y: 58), control2: CGPoint(x: 82, y: 64))
+                path.addCurve(to: CGPoint(x: 112, y: 66), control1: CGPoint(x: 96, y: 64), control2: CGPoint(x: 104, y: 64))
+                path.addCurve(to: CGPoint(x: 130, y: 50), control1: CGPoint(x: 118, y: 60), control2: CGPoint(x: 124, y: 54))
+                path.addCurve(to: CGPoint(x: 130, y: 78), control1: CGPoint(x: 132, y: 60), control2: CGPoint(x: 132, y: 70))
+                path.addCurve(to: CGPoint(x: 108, y: 106), control1: CGPoint(x: 134, y: 92), control2: CGPoint(x: 124, y: 104))
+                path.addCurve(to: CGPoint(x: 88, y: 126), control1: CGPoint(x: 104, y: 116), control2: CGPoint(x: 96, y: 122))
+                path.addCurve(to: CGPoint(x: 120, y: 156), control1: CGPoint(x: 88, y: 146), control2: CGPoint(x: 102, y: 156))
+                path.addCurve(to: CGPoint(x: 152, y: 126), control1: CGPoint(x: 138, y: 156), control2: CGPoint(x: 152, y: 146))
+                path.addCurve(to: CGPoint(x: 158, y: 168), control1: CGPoint(x: 152, y: 142), control2: CGPoint(x: 148, y: 160))
+                path.addCurve(to: CGPoint(x: 172, y: 168), control1: CGPoint(x: 158, y: 168), control2: CGPoint(x: 172, y: 168))
+            case .sport:
+                path.move(to: CGPoint(x: 174, y: 62))
+                path.addCurve(to: CGPoint(x: 164, y: 58), control1: CGPoint(x: 178, y: 56), control2: CGPoint(x: 170, y: 50))
+                path.addCurve(to: CGPoint(x: 150, y: 98), control1: CGPoint(x: 156, y: 68), control2: CGPoint(x: 160, y: 84))
+                path.addCurve(to: CGPoint(x: 160, y: 168), control1: CGPoint(x: 158, y: 116), control2: CGPoint(x: 158, y: 146))
+                path.addCurve(to: CGPoint(x: 146, y: 168), control1: CGPoint(x: 160, y: 168), control2: CGPoint(x: 146, y: 168))
+                path.addCurve(to: CGPoint(x: 128, y: 146), control1: CGPoint(x: 146, y: 156), control2: CGPoint(x: 140, y: 148))
+                path.addCurve(to: CGPoint(x: 72, y: 160), control1: CGPoint(x: 108, y: 144), control2: CGPoint(x: 86, y: 150))
+                path.addCurve(to: CGPoint(x: 22, y: 168), control1: CGPoint(x: 72, y: 160), control2: CGPoint(x: 22, y: 168))
+                path.addCurve(to: CGPoint(x: 46, y: 148), control1: CGPoint(x: 30, y: 162), control2: CGPoint(x: 40, y: 156))
+                path.addCurve(to: CGPoint(x: 44, y: 116), control1: CGPoint(x: 42, y: 136), control2: CGPoint(x: 42, y: 124))
+                path.addCurve(to: CGPoint(x: 62, y: 124), control1: CGPoint(x: 50, y: 120), control2: CGPoint(x: 56, y: 124))
+                path.addCurve(to: CGPoint(x: 78, y: 108), control1: CGPoint(x: 66, y: 118), control2: CGPoint(x: 72, y: 112))
+                path.addCurve(to: CGPoint(x: 78, y: 136), control1: CGPoint(x: 80, y: 118), control2: CGPoint(x: 80, y: 128))
+                path.addCurve(to: CGPoint(x: 112, y: 134), control1: CGPoint(x: 88, y: 140), control2: CGPoint(x: 100, y: 142))
+                path.addCurve(to: CGPoint(x: 150, y: 98), control1: CGPoint(x: 126, y: 122), control2: CGPoint(x: 138, y: 100))
+            case .reading:
+                path.move(to: CGPoint(x: 34, y: 138))
+                path.addCurve(to: CGPoint(x: 46, y: 168), control1: CGPoint(x: 18, y: 140), control2: CGPoint(x: 16, y: 168))
+                path.addCurve(to: CGPoint(x: 64, y: 118), control1: CGPoint(x: 60, y: 168), control2: CGPoint(x: 58, y: 140))
+                path.addCurve(to: CGPoint(x: 66, y: 80), control1: CGPoint(x: 68, y: 104), control2: CGPoint(x: 62, y: 92))
+                path.addCurve(to: CGPoint(x: 70, y: 52), control1: CGPoint(x: 66, y: 70), control2: CGPoint(x: 66, y: 60))
+                path.addCurve(to: CGPoint(x: 88, y: 66), control1: CGPoint(x: 76, y: 58), control2: CGPoint(x: 82, y: 64))
+                path.addCurve(to: CGPoint(x: 112, y: 66), control1: CGPoint(x: 96, y: 64), control2: CGPoint(x: 104, y: 64))
+                path.addCurve(to: CGPoint(x: 130, y: 50), control1: CGPoint(x: 118, y: 60), control2: CGPoint(x: 124, y: 54))
+                path.addCurve(to: CGPoint(x: 130, y: 78), control1: CGPoint(x: 132, y: 60), control2: CGPoint(x: 132, y: 70))
+                path.addCurve(to: CGPoint(x: 108, y: 106), control1: CGPoint(x: 134, y: 92), control2: CGPoint(x: 124, y: 104))
+                path.addCurve(to: CGPoint(x: 96, y: 118), control1: CGPoint(x: 110, y: 114), control2: CGPoint(x: 104, y: 118))
+                path.addCurve(to: CGPoint(x: 84, y: 116), control1: CGPoint(x: 96, y: 118), control2: CGPoint(x: 84, y: 116))
+                path.addCurve(to: CGPoint(x: 88, y: 144), control1: CGPoint(x: 84, y: 126), control2: CGPoint(x: 86, y: 136))
+                path.addCurve(to: CGPoint(x: 118, y: 152), control1: CGPoint(x: 98, y: 146), control2: CGPoint(x: 110, y: 148))
+                path.addCurve(to: CGPoint(x: 118, y: 124), control1: CGPoint(x: 118, y: 142), control2: CGPoint(x: 118, y: 132))
+                path.addCurve(to: CGPoint(x: 152, y: 116), control1: CGPoint(x: 128, y: 118), control2: CGPoint(x: 140, y: 116))
+                path.addCurve(to: CGPoint(x: 148, y: 144), control1: CGPoint(x: 150, y: 126), control2: CGPoint(x: 150, y: 136))
+                path.addCurve(to: CGPoint(x: 118, y: 152), control1: CGPoint(x: 138, y: 146), control2: CGPoint(x: 126, y: 148))
+                path.addCurve(to: CGPoint(x: 134, y: 168), control1: CGPoint(x: 120, y: 160), control2: CGPoint(x: 124, y: 166))
+                path.addCurve(to: CGPoint(x: 164, y: 168), control1: CGPoint(x: 134, y: 168), control2: CGPoint(x: 164, y: 168))
+            }
         }
-        let scale = min(rect.width / 210, rect.height / 200)
-        let x = rect.midX - 105 * scale
-        let y = rect.midY - 100 * scale
+        let extent = JieziPrototypeLayout.cat_viewbox_size
+        let scale = min(rect.width / extent, rect.height / extent)
+        let x = rect.midX - extent / 2 * scale
+        let y = rect.midY - extent / 2 * scale
         return path.applying(CGAffineTransform(scaleX: scale, y: scale))
             .applying(CGAffineTransform(translationX: x, y: y))
     }
