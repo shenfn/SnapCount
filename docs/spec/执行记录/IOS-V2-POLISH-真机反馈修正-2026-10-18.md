@@ -146,3 +146,15 @@ F01～F18 及交接 10.2 的刷新/候选保存问题仍按原清单追踪。首
 本地支出应用与账户绑定边界脚本7/7通过。额外两份旧 shell 脚本共5/5失败：缺旧 LocalSettingsView、旧登录分树/隐藏新增断言、旧 shellBottomBar 字符串。已在临时目录从本轮起点 ddf30a2 逐文件导出对应源文件/脚本重跑，同样5/5失败；作为已验证的基线失效记录，不改产品以满足旧字符串检查，不删除或弱化脚本。
 
 已下载本次 ios-prototype-captures 到系统临时目录，查看五域 content-large、新猫均有对应面部/装饰；能量零值、3200和未估算辅助字号无冒充零值/截满；日历普通与辅助字号有今天入口，月历仍可滚动，底部取消/查看可见。能量尺辅助字号稀疏刻度部分端点文字未显示，数值和2000说明保持可读，后续设备验收留意刻度可读性。这些是合成截图，不能证明点击、滚动、动画时序、真机性能或真实数据。
+
+## 下一切片预案：006-F17-外部写入与回前台
+
+现状/目标：SnapCountApp 的 scenePhase.active 只调用 refreshDashboardIfStale(force:true)，该入口未登录直接返回；要让独立数据库写入在活跃首页、已打开历史月及当前月出现，不要求重启或切月。已有其他域的缓存、业务日期和所选领域应保留正确语义。
+
+预定范围：AppState.refreshDashboardIfStale 的本地事实重读；LocalFirstSL02ProjectionTests；本记录。复用 prepareLocalWorkspace、refreshLocalMonthProjection 及既有身份代次检查；不改 Intent 识别算法、图片、数据库或云同步权限，不新增通知框架。前一片全量绿灯后才写测试，真实目标红灯后才改实现。
+
+测试层/公开边界：真实 SQLite 的第二个 LocalDatabase/LocalRecordUseCase 连接提交当前月及2000-01历史月的两条正式饮食记录，主 AppState 事先读热缓存；调用应用实际前台入口 refreshDashboardIfStale(force:true)。从 recordGroups/recordDetails 与 NativeDomainScenePresentation 验证两月记录与不同热量均更新，所选历史日期/领域不变；未登录不请求云会话，已登录仍保留远端刷新入口。验证的是外部提交后的刷新，不冒充系统快捷指令安装、相册或真实识别测试。
+
+F17 支出切片完整绿灯：`41246b5`，[CI 39084075083](https://github.com/shenfn/SnapCount/actions/runs/39084075083) 成功，App Build 与361项 XCTest 全通过（0失败），含当前/历史月支出新增及绑定重叠测试。此结果不代表 F17 其他入口全部修复。
+
+已按上面预案新增两条公开前台入口真库测试（未登录/已登录），只改测试与本记录；回前台实现保持原状，等待固定提交 macOS 红灯。

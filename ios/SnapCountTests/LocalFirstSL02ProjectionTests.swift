@@ -7,6 +7,69 @@ import XCTest
 @MainActor
 final class LocalFirstSL02ProjectionTests: XCTestCase {
 
+    func testIOSV2POLISH006F17ForegroundReadsExternalWritesWithoutCloudSession() async throws {
+        try await assertForegroundReadsExternalWrites(signedIn: false)
+    }
+
+    func testIOSV2POLISH006F17ForegroundReadsExternalWritesWhenSignedIn() async throws {
+        try await assertForegroundReadsExternalWrites(signedIn: true)
+    }
+
+    private func assertForegroundReadsExternalWrites(signedIn: Bool) async throws {
+        let harness = try Self.makeHarness(session: signedIn ? Self.stubSession() : nil, expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.resetUserScopedState()
+        state.isSignedIn = signedIn
+        state.currentUserId = signedIn ? "cloud-user" : ""
+        state.selectedDateKey = "2000-01-05"
+        state.selectedDomain = .food
+        let todayKey = NativeLocalDate.dateKey(Date())
+        let todayMonth = NativeMonthKey.current()
+        await state.loadRecordDateWindow(around: state.selectedDateKey)
+        await state.loadRecordMonth(todayMonth)
+        XCTAssertTrue(state.recordGroups(monthKey: "2000-01").flatMap(\.records).isEmpty)
+        XCTAssertTrue(state.recordGroups(monthKey: todayMonth).flatMap(\.records).isEmpty)
+
+        // 独立连接模拟 Intent 所属进程提交，存活 AppState 不参与此次写入。
+        let externalDatabase = try LocalDatabase(databaseURL: harness.databaseURL)
+        let externalUseCase = LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: externalDatabase),
+            repository: try LocalRecordRepository(database: externalDatabase)
+        )
+        let samples = [("2000-01-05", 430.0), (todayKey, 610.0)]
+        for (dateKey, calories) in samples {
+            _ = try await externalUseCase.create(LocalRecordCommand(
+                id: UUID(), domainKey: "food", title: "外部合成餐食", summary: "",
+                payload: ["meal_type": AnyCodable("午餐"), "total_calorie_kcal": AnyCodable(calories)],
+                recordDate: dateKey, recordTime: "12:30", note: nil, imageData: nil,
+                createdAt: Date(), sourceKind: .aiAutoArchive
+            ))
+        }
+        XCTAssertTrue(state.recordGroups(monthKey: "2000-01").flatMap(\.records).isEmpty,
+                      "先证明热缓存未被测试中的外部提交直接改动")
+
+        await state.refreshDashboardIfStale(minInterval: 1, force: true)
+
+        for (dateKey, calories) in samples {
+            let monthKey = String(dateKey.prefix(7))
+            let page = NativeDomainScenePresentation.make(
+                domain: .food, dateKey: dateKey, weekGroups: state.recordGroups(monthKey: monthKey),
+                details: state.recordDetails(from: dateKey, through: dateKey),
+                isSignedIn: signedIn, isLoading: false, errorMessage: nil, todayKey: todayKey
+            )
+            XCTAssertEqual(page.records.count, 1, "回前台后当前月和已读历史月都应出现外部新增")
+            XCTAssertEqual(page.knownPrimaryTotal, calories, "列表与详情指标必须同步重读")
+        }
+        XCTAssertEqual(state.selectedDateKey, "2000-01-05")
+        XCTAssertEqual(state.selectedDomain, .food)
+        if !signedIn {
+            XCTAssertEqual(harness.sessionCounter.current, 0, "本机前台刷新不依赖云端会话")
+        } else {
+            XCTAssertGreaterThan(harness.sessionCounter.current, 0, "保留登录态远端刷新入口")
+        }
+    }
+
     func testIOSV2POLISH006F17NewExpensePreservesAllDomainFactsAndDetailsInWarmMonth() async throws {
         try await assertNewExpensePreservesDomainFacts(date: Date())
     }
