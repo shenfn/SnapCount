@@ -20,6 +20,9 @@ struct NativeMerchantSummary: Identifiable {
 struct NativeTimelineEntry: Identifiable {
     let record: NativeDayRecord
     let minute: Int
+    var amount: Double? = nil
+    var cumulativeAmount: Double? = nil
+    var timeSourceLabel: String = ""
     var id: String { record.reference }
 }
 
@@ -51,6 +54,9 @@ struct NativeDomainScenePresentation {
     let periodTypes: [String]
     let highestMeal: NativeDayRecord?
     let previousExpenseTotal: Double?
+    let previousExpenseCount: Int?
+    let previousHighestExpense: NativeDayRecord?
+    let sleep: NativeSleepSummary?
 
     var periodRecordCount: Int { weeklyValues.reduce(0) { $0 + $1.recordCount } }
     var validDayCount: Int { weeklyValues.filter { $0.recordCount > 0 && $0.value != nil }.count }
@@ -86,7 +92,14 @@ struct NativeDomainScenePresentation {
         let interval = signposter.beginInterval("BuildDomainPresentation", id: signposter.makeSignpostID())
         defer { signposter.endInterval("BuildDomainPresentation", interval) }
         let allRecords = weekGroups.flatMap(\.records).filter(NativeRecordQuery.isFormal)
-        let dayRecords = allRecords.filter { $0.dateKey == dateKey }
+        func businessDay(_ record: NativeDayRecord) -> String {
+            NativeSleepFacts.businessDate(
+                domainKey: record.domainKey ?? record.kind.rawValue,
+                payload: detail(for: record, details: details)?.payload ?? [:], fallback: record.dateKey
+            )
+        }
+        let sleep = domain == .sleep ? NativeSleepSummary.make(records: allRecords, details: details, dateKey: dateKey) : nil
+        let dayRecords = allRecords.filter { businessDay($0) == dateKey }
         let records: [NativeDayRecord]
         switch domain {
         case .expense:
@@ -169,7 +182,7 @@ struct NativeDomainScenePresentation {
         }
 
         let weeklyValues = trendDateKeys(for: domain, dateKey: dateKey).map { weekDay in
-            let dailyRecords = allRecords.filter { $0.dateKey == weekDay }
+            let dailyRecords = allRecords.filter { businessDay($0) == weekDay }
             let scoped: [NativeDayRecord]
             switch domain {
             case .expense: scoped = dailyRecords.filter(isExpense)
@@ -179,6 +192,8 @@ struct NativeDomainScenePresentation {
             let value: Double?
             if weekDay > todayKey {
                 value = nil
+            } else if domain == .sleep {
+                value = sleep?.mainMinutesByDay[weekDay]
             } else if domain == .expense {
                 let amounts = scoped.compactMap { expenseAmount(for: $0, details: details) }
                 value = amounts.count == scoped.count ? amounts.reduce(0, +) : nil
@@ -188,7 +203,7 @@ struct NativeDomainScenePresentation {
                 let measurements = scoped.compactMap { measurement(for: $0, key: primaryKey, details: details)?.value }
                 value = measurements.count == scoped.count ? measurements.reduce(0, +) : nil
             }
-            return NativeDomainDayValue(dateKey: weekDay, value: value, recordCount: scoped.count)
+            return NativeDomainDayValue(dateKey: weekDay, value: value, recordCount: domain == .sleep ? (scoped.isEmpty ? 0 : 1) : scoped.count)
         }
 
         let merchantGroups = Dictionary(grouping: records.filter(isExpense)) { record -> String in
@@ -212,7 +227,7 @@ struct NativeDomainScenePresentation {
             }
         }
 
-        let timeline = domain == .expense ? records.filter(isExpense).compactMap { record -> NativeTimelineEntry? in
+        var timeline = domain == .expense ? records.filter(isExpense).compactMap { record -> NativeTimelineEntry? in
             let recordDetail = detail(for: record, details: details)
             let clock = NativeLocalDate.financeTimeKey(occurredAt: recordDetail?.occurredAt)
                 ?? recordDetail?.transactionTime ?? record.timeLabel
@@ -220,15 +235,24 @@ struct NativeDomainScenePresentation {
                   let normalized = NativeLocalDate.financeTimeKey(occurredAt: occurredAt) else { return nil }
             let parts = normalized.split(separator: ":").compactMap { Int($0) }
             guard parts.count == 2 else { return nil }
-            return NativeTimelineEntry(record: record, minute: parts[0] * 60 + parts[1])
+            let source = NativeLocalDate.financeTimeKey(occurredAt: recordDetail?.occurredAt) != nil
+                ? "业务发生时间" : recordDetail?.transactionTime != nil ? "记录时间字段" : "记录时间标签"
+            return NativeTimelineEntry(record: record, minute: parts[0] * 60 + parts[1],
+                                       amount: expenseAmount(for: record, details: details), timeSourceLabel: source)
         }.sorted {
             $0.minute == $1.minute ? $0.id < $1.id : $0.minute < $1.minute
         } : []
+        var cumulative: Double? = 0
+        for index in timeline.indices {
+            if let previous = cumulative, let amount = timeline[index].amount { cumulative = previous + amount }
+            else { cumulative = nil }
+            timeline[index].cumulativeAmount = cumulative
+        }
 
         let sleepRanges = domain == .sleep ? records.compactMap { record -> NativeSleepInterval? in
             guard let payload = detail(for: record, details: details)?.payload,
-                  let start = isoDate(payload.string("sleep_start_at")),
-                  let end = isoDate(payload.string("wake_at")), end > start else { return nil }
+                  let start = NativeSleepFacts.timestamp(payload.string("sleep_start_at")),
+                  let end = NativeSleepFacts.timestamp(payload.string("wake_at")), end > start else { return nil }
             return NativeSleepInterval(record: record, start: start, end: end)
         }.sorted { $0.start < $1.start } : []
 
@@ -247,11 +271,19 @@ struct NativeDomainScenePresentation {
         }.max(by: { $0.1 < $1.1 })?.0 : nil
 
         var previousExpenseTotal: Double?
+        var previousExpenseCount: Int?
+        var previousHighestExpense: NativeDayRecord?
         if domain == .expense, !isLoading, errorMessage?.isEmpty != false,
            let previousDay = NativeLocalDate.shiftedDateKey(dateKey, byDays: -1) {
             let previous = allRecords.filter { $0.dateKey == previousDay && isExpense($0) }
             let amounts = previous.compactMap { expenseAmount(for: $0, details: details) }
-            if amounts.count == previous.count { previousExpenseTotal = amounts.reduce(0, +) }
+            previousExpenseCount = previous.count
+            if amounts.count == previous.count {
+                previousExpenseTotal = amounts.reduce(0, +)
+                previousHighestExpense = previous.max {
+                    (expenseAmount(for: $0, details: details) ?? 0) < (expenseAmount(for: $1, details: details) ?? 0)
+                }
+            }
         }
 
         let readMessage: String?
@@ -290,20 +322,14 @@ struct NativeDomainScenePresentation {
             sleepRanges: sleepRanges,
             periodTypes: periodTypes,
             highestMeal: highestMeal,
-            previousExpenseTotal: previousExpenseTotal
+            previousExpenseTotal: previousExpenseTotal,
+            previousExpenseCount: previousExpenseCount,
+            previousHighestExpense: previousHighestExpense,
+            sleep: sleep
         )
     }
 
     private enum MeasurementUnit: Equatable { case duration, calories }
-
-    private static func isoDate(_ value: String?) -> Date? {
-        guard let value else { return nil }
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = parser.date(from: value) { return date }
-        parser.formatOptions = [.withInternetDateTime]
-        return parser.date(from: value)
-    }
 
     private static func isExpense(_ record: NativeDayRecord) -> Bool {
         record.kind == .expense && record.transactionType != "income"

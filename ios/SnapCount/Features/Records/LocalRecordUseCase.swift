@@ -12,8 +12,14 @@ protocol LocalRecordUseCaseProtocol {
     func ingest(_ candidate: LocalRecordCandidate, recordID: UUID?) async throws -> LocalRecordIntakeOutcome
     func staging(id: String) async throws -> LocalStagingRecord?
     func stagingRecords() async throws -> [LocalStagingRecord]
-    func confirmStaging(id: String, recordID: UUID) async throws -> LocalRecordOutcome
+    func confirmStaging(id: String, recordID: UUID, changes: LocalStagingConfirmation?) async throws -> LocalRecordOutcome
     func discardStaging(id: String) async throws
+}
+
+extension LocalRecordUseCaseProtocol {
+    func confirmStaging(id: String, recordID: UUID) async throws -> LocalRecordOutcome {
+        try await confirmStaging(id: id, recordID: recordID, changes: nil)
+    }
 }
 
 final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
@@ -36,7 +42,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         try LocalRecordValidation.validate(
             domainKey: command.domainKey,
             title: command.title,
-            recordDate: command.recordDate,
+            recordDate: NativeSleepFacts.businessDate(domainKey: command.domainKey, payload: command.payload, fallback: command.recordDate),
             recordTime: command.recordTime
         )
         let payloadJSON = try LocalRecordCodec.encode(
@@ -65,7 +71,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             title: command.title.trimmingCharacters(in: .whitespacesAndNewlines),
             summary: command.summary,
             payloadJSON: payloadJSON,
-            recordDate: command.recordDate,
+            recordDate: NativeSleepFacts.businessDate(domainKey: command.domainKey, payload: command.payload, fallback: command.recordDate),
             recordTime: command.recordTime,
             note: command.note,
             imagePath: imageReference?.path,
@@ -98,7 +104,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             title: command.title,
             summary: command.summary,
             payload: try LocalRecordCodec.normalizedPayload(domainKey: domainKey, payload: command.payload),
-            recordDate: command.recordDate,
+            recordDate: NativeSleepFacts.businessDate(domainKey: domainKey, payload: command.payload, fallback: command.recordDate),
             recordTime: command.recordTime,
             note: command.note,
             updatedAt: command.updatedAt
@@ -146,7 +152,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         try LocalRecordValidation.validate(
             domainKey: candidate.domainKey,
             title: candidate.title,
-            recordDate: candidate.recordDate,
+            recordDate: NativeSleepFacts.businessDate(domainKey: candidate.domainKey, payload: candidate.payload, fallback: candidate.recordDate),
             recordTime: candidate.recordTime
         )
         let payloadJSON = try LocalRecordCodec.encode(
@@ -183,7 +189,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             title: candidate.title.trimmingCharacters(in: .whitespacesAndNewlines),
             summary: candidate.summary,
             payloadJSON: payloadJSON,
-            recordDate: candidate.recordDate,
+            recordDate: NativeSleepFacts.businessDate(domainKey: candidate.domainKey, payload: candidate.payload, fallback: candidate.recordDate),
             recordTime: candidate.recordTime,
             imagePath: imageReference?.path,
             imageHash: imageReference?.hash,
@@ -255,13 +261,14 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         return try repository.stagingRecords(profileID: profile.id)
     }
 
-    func confirmStaging(id: String, recordID: UUID) async throws -> LocalRecordOutcome {
+    func confirmStaging(id: String, recordID: UUID, changes: LocalStagingConfirmation?) async throws -> LocalRecordOutcome {
         let profile = try profileStore.activeProfile()
         let record = try repository.archiveStaging(
             id: id,
             recordID: recordID,
             updatedAt: Date(),
-            profileID: profile.id
+            profileID: profile.id,
+            changes: changes
         )
         return LocalRecordOutcome(record: record, profileID: profile.id)
     }

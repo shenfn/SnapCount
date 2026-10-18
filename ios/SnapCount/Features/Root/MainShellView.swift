@@ -21,6 +21,30 @@ struct MainShellView: View {
     }
 
     var body: some View {
+        NavigationStack(path: $appState.homePath) {
+            homeScene
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: NativeRecordRoute.self) { route in
+                    RecordDetailView(reference: route.reference)
+                        .toolbar(.visible, for: .navigationBar)
+                }
+                .navigationDestination(for: NativeDomainDrillRoute.self) { route in
+                    NativeDomainDrillView(route: route)
+                        .toolbar(.visible, for: .navigationBar)
+                }
+        }
+        .task(id: appState.selectedDateKey) {
+            await appState.loadRecordDateWindow(around: appState.selectedDateKey)
+        }
+        .fullScreenCover(item: overlayItem) { overlay in
+            overlayDestination(overlay)
+        }
+        .sheet(isPresented: $showManualRecordSheet) {
+            UnifiedManualRecordEntry(domain: appState.selectedDomain)
+        }
+    }
+
+    private var homeScene: some View {
         ZStack {
             DomainSceneView(domain: appState.selectedDomain)
             if !dynamicTypeSize.isAccessibilitySize {
@@ -33,15 +57,6 @@ struct MainShellView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) { shellTopBar }
         .safeAreaInset(edge: .bottom, spacing: 0) { shellBottomBar }
-        .task(id: appState.selectedDateKey) {
-            await appState.loadRecordDateWindow(around: appState.selectedDateKey)
-        }
-        .fullScreenCover(item: overlayItem) { overlay in
-            overlayDestination(overlay)
-        }
-        .sheet(isPresented: $showManualRecordSheet) {
-            UnifiedManualRecordEntry(domain: appState.selectedDomain)
-        }
     }
 
     // MARK: - 域横滑（SHELL-001）

@@ -4,7 +4,7 @@ enum LocalRecordReadModel {
     static func detail(from record: LocalRecord, imageStore: LocalImageStore? = nil) -> NativeRecordDetail {
         let payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
         let reference = "local-data/\(record.id.uuidString)"
-        let subtitle = record.recordTime.map { "\(record.recordDate) \($0)" } ?? record.recordDate
+        let subtitle = record.recordTime.map { "\(record.businessDate) \($0)" } ?? record.businessDate
         let imageURL = localImageURL(record.imagePath, imageStore: imageStore)
         let base = NativeRecordDetail(
             id: reference,
@@ -23,7 +23,7 @@ enum LocalRecordReadModel {
             platform: nil,
             category: nil,
             paymentMethod: nil,
-            recordDate: record.recordDate,
+            recordDate: record.businessDate,
             note: record.note,
             companionMessage: nil,
             accountId: nil,
@@ -31,7 +31,7 @@ enum LocalRecordReadModel {
             payload: payload,
             createdAt: iso8601(record.createdAt),
             occurredAt: NativeLocalDate.financeOccurredAt(
-                dateKey: record.recordDate,
+                dateKey: record.businessDate,
                 timeKey: record.recordTime
             ),
             transactionTime: record.recordTime,
@@ -74,7 +74,7 @@ enum LocalRecordReadModel {
     }
 
     static func groups(from month: LocalRecordMonth, imageStore: LocalImageStore? = nil) -> [NativeDayRecordGroup] {
-        let grouped = Dictionary(grouping: month.records, by: \.recordDate)
+        let grouped = Dictionary(grouping: month.records, by: \.businessDate)
         return grouped.map { dateKey, records in
             NativeDayRecordGroup(
                 dateKey: dateKey,
@@ -85,7 +85,7 @@ enum LocalRecordReadModel {
                     return NativeDayRecord(
                         id: record.id.uuidString,
                         reference: "local-data/\(record.id.uuidString)",
-                        dateKey: record.recordDate,
+                        dateKey: record.businessDate,
                         kind: kind,
                         domainKey: record.domainKey,
                         title: record.title,

@@ -566,7 +566,9 @@
       "calendar_day_height": 44,
       "calendar_arrow_hit_size": 44,
       "food_energy_reference_height": 90,
-      "food_energy_point_size": 64
+      "food_energy_point_size": 64,
+      "food_photo_size": 64,
+      "food_photo_radius": 12
     },
     "motion": {
       "page_transition_ms": 450,

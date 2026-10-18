@@ -2,6 +2,57 @@ import XCTest
 @testable import SnapCount
 
 final class IOSDomainBlocksTests: XCTestCase {
+    func testIOSV2POLISH003F10MainSleepAndIndependentThirtyDayMedians() throws {
+        var records: [NativeDayRecord] = []
+        var details: [String: NativeRecordDetail] = [:]
+        func add(_ id: String, day: String, minutes: Double, start: String? = nil, wake: String? = nil) {
+            let item = record(id, date: day, domain: .sleep)
+            var payload = ["sleep_minutes": AnyCodable(minutes)]
+            if let start { payload["sleep_start_at"] = AnyCodable(start) }
+            if let wake { payload["wake_at"] = AnyCodable(wake) }
+            records.append(item)
+            details[item.reference] = detail(item, payload)
+        }
+        for (index, day) in (24...30).enumerated() {
+            let date = "2026-09-\(day)"
+            add("main-\(day)", day: date, minutes: Double(420 + index * 30),
+                start: index < 4 ? "2026-09-\(day - 1)T23:30:00+08:00" : "\(date)T00:30:00+08:00",
+                wake: index == 0 ? nil : "\(date)T08:00:00+08:00")
+            add("nap-\(day)", day: date, minutes: 20,
+                start: "\(date)T13:00:00+08:00", wake: "\(date)T13:20:00+08:00")
+        }
+        add("boundary", day: "2026-09-01", minutes: 900)
+        add("outside", day: "2026-08-31", minutes: 9999)
+        add("today-main", day: "2026-10-01", minutes: 600)
+        add("today-nap", day: "2026-10-01", minutes: 20)
+        add("future", day: "2026-10-02", minutes: 9999)
+        let groups = Dictionary(grouping: records, by: \.dateKey).map { NativeDayRecordGroup(dateKey: $0.key, records: $0.value) }
+        let result = NativeDomainScenePresentation.make(domain: .sleep, dateKey: "2026-10-01", weekGroups: groups,
+            details: details, isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: "2026-10-02")
+        let sleep = try XCTUnwrap(result.sleep)
+        XCTAssertEqual(result.knownPrimaryTotal, 620, "当日总量保留午休")
+        XCTAssertEqual(result.weeklyValues.last?.value, 600, "近七夜仅主要睡眠")
+        XCTAssertEqual(sleep.mainRecord?.id, "today-main")
+        XCTAssertEqual(sleep.duration.sampleCount, 8)
+        XCTAssertEqual(sleep.duration.median, 525)
+        XCTAssertEqual(sleep.bedtime.sampleCount, 7)
+        XCTAssertEqual(sleep.bedtime.median, 1410)
+        XCTAssertEqual(sleep.wake.sampleCount, 6, "不能用午休补齐主要睡眠缺失字段")
+        XCTAssertNil(sleep.wake.median)
+        XCTAssertEqual(NativeSleepBaseline([1410, 1470, 1410, 1470, 1410, 1470, 1410, 1470]).median, 1440)
+        XCTAssertEqual(NativeSleepSummary.clockLabel(1440), "00:00")
+        XCTAssertEqual(NativeSleepSummary.clockDifference(1470, baseline: 1410), 60)
+        let a = record("tie-a", date: "2026-10-01", domain: .sleep)
+        let b = record("tie-b", date: "2026-10-01", domain: .sleep)
+        let tied = [a.reference: detail(a, ["sleep_minutes": AnyCodable(400)]),
+                    b.reference: detail(b, ["sleep_minutes": AnyCodable(400)])]
+        XCTAssertEqual(NativeSleepSummary.make(records: [b, a], details: tied, dateKey: "2026-10-01").mainRecord?.id, "tie-a")
+        XCTAssertEqual(NativeSleepSummary.make(records: [a, b], details: tied, dateKey: "2026-10-01").mainRecord?.id, "tie-a")
+        let missing = record("unknown-duration", date: "2026-10-01", domain: .sleep)
+        XCTAssertNil(NativeSleepSummary.make(records: [a, missing], details: tied, dateKey: "2026-10-01").mainRecord,
+                     "另有时长未知的睡眠时，不能把一条短记录冒充当日最长")
+    }
+
     @MainActor
     func testIOSV2POLISH002AF02MonthPullCommitsOnlyAtReleasedHorizontalBoundary() {
         func release(_ month: String = "2024-03", leading: CGFloat = 0, trailing: CGFloat = 0,

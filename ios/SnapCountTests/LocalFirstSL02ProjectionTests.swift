@@ -6,6 +6,182 @@ import XCTest
 /// DM-004/DM-005 阈值具名测试见 LocalPhase1DataModelTests，D6 死 API 改写见 LocalSportRecordTests。
 @MainActor
 final class LocalFirstSL02ProjectionTests: XCTestCase {
+    func testIOSV2POLISH006F17ForcedLocalReadCannotBeOverwrittenByOlderSnapshot() async throws {
+        let harness = try Self.makeHarness(session: nil, expenseStub: true)
+        defer { harness.cleanup() }
+        let gate = SL02DashboardGate()
+        let expense = LocalExpense(id: UUID(), profileID: harness.profile.id, accountID: UUID(), amountMinor: 1250,
+            currency: "CNY", merchantName: "写后事实", platform: "线下", category: "food", paymentMethod: "现金",
+            transactionDate: "2000-01-05", transactionTime: nil, note: nil, localVersion: 1, createdAt: Date(), updatedAt: Date())
+        harness.expenseStub.monthProvider = { _ in
+            if await gate.nextCallNumber() == 1 {
+                await gate.enterAndWait()
+                return LocalExpenseMonth(profileID: expense.profileID, expenses: [])
+            }
+            return LocalExpenseMonth(profileID: expense.profileID, expenses: [expense])
+        }
+        let counter = harness.sessionCounter
+        let state = AppState(localExpenseUseCase: harness.expenseStub, localRecordUseCase: harness.recordUseCase,
+            localBindingRepository: harness.bindingRepository,
+            sessionProvider: { _ in counter.increment(); throw SL02TestError.missingSession })
+        state.resetUserScopedState()
+        let first = Task { @MainActor in await state.loadRecordMonth("2000-01") }
+        await gate.waitUntilEntered()
+        await state.loadRecordMonth("2000-01", force: true)
+        XCTAssertEqual(state.recordGroups(monthKey: "2000-01").flatMap(\.records).map(\.title), ["写后事实"])
+        await gate.release()
+        await first.value
+        XCTAssertEqual(state.recordGroups(monthKey: "2000-01").flatMap(\.records).map(\.title), ["写后事实"])
+        XCTAssertFalse(state.isLoadingRecordMonth("2000-01"))
+        XCTAssertEqual(counter.current, 0)
+    }
+
+    func testIOSV2POLISH002AF03CurrentMonthCancellationReentryAwaitsSharedDashboard() async throws {
+        let gate = SL02DashboardGate()
+        let day = NativeLocalDate.dateKey(Date())
+        let month = NativeMonthKey.current()
+        let record = NativeDayRecord(id: "cloud-meal", reference: "data/cloud-meal", dateKey: day, kind: .food,
+            domainKey: "food", title: "云端餐食", subtitle: "", value: "", timeLabel: nil, systemImage: "fork.knife", status: "done")
+        let repository = SL02DashboardRepositoryStub(gate: gate, snapshot: DashboardSnapshot(dayRecordGroups: [
+            NativeDayRecordGroup(dateKey: day, records: [record])
+        ]))
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false, dashboard: repository)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.resetUserScopedState()
+        state.isSignedIn = true
+        state.currentUserId = "cloud-user"
+        let first = Task { @MainActor in await state.loadRecordMonth(month, force: true) }
+        await gate.waitUntilEntered()
+        XCTAssertTrue(state.isLoadingRecordMonth(month))
+        first.cancel()
+        let early = expectation(description: "重入不得在共享请求完成前返回")
+        early.isInverted = true
+        var released = false
+        let second = Task { @MainActor in
+            await state.loadRecordMonth(month)
+            if !released { early.fulfill() }
+        }
+        await fulfillment(of: [early], timeout: 0.1)
+        released = true
+        await gate.release()
+        await first.value
+        await second.value
+        XCTAssertEqual(repository.fetchCount, 1)
+        XCTAssertTrue(state.recordGroups(monthKey: month).flatMap(\.records).contains { $0.reference == record.reference })
+        XCTAssertFalse(state.isLoadingRecordMonth(month))
+        XCTAssertNil(state.dashboardMessage)
+    }
+
+    func testIOSV2POLISH006F17RemoteHistoricalWritesRefreshBothMonthSnapshots() async throws {
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.resetUserScopedState()
+        state.isSignedIn = true
+        state.currentUserId = "cloud-user"
+        state.selectedDateKey = "2000-01-05"
+        let original = harness.recordSpy.seedFood(date: "2000-01-05", calories: 430)
+        await state.loadRecordMonth("2000-01")
+        XCTAssertEqual(state.recordGroups(monthKey: "2000-01").flatMap(\.records).count, 1)
+        var fullForm = NativeManualRecordDraft(detail: original)
+        fullForm.date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2000-02-06T12:30:00+08:00"))
+        fullForm.primaryValueText = "610"
+        let moved = await state.createManualRecord(fullForm, domain: nil)
+        XCTAssertTrue(moved)
+        XCTAssertTrue(state.recordGroups(monthKey: "2000-01").flatMap(\.records).isEmpty)
+        XCTAssertEqual(state.recordGroups(monthKey: "2000-02").flatMap(\.records).count, 1)
+        let detail = try XCTUnwrap(state.recordDetails(from: "2000-02-06", through: "2000-02-06")[original.id])
+        XCTAssertEqual(detail.payload?.double("total_calorie_kcal"), 610)
+        var editor = NativeRecordEditDraft(detail: detail)
+        editor.recordDate = "2000-03-07"
+        let edited = await state.saveRecordDetail(editor)
+        XCTAssertTrue(edited)
+        XCTAssertTrue(state.recordGroups(monthKey: "2000-02").flatMap(\.records).isEmpty)
+        XCTAssertEqual(state.recordGroups(monthKey: "2000-03").flatMap(\.records).count, 1)
+        let deleted = await state.deleteRecord(reference: original.id)
+        XCTAssertTrue(deleted)
+        XCTAssertTrue(state.recordGroups(monthKey: "2000-03").flatMap(\.records).isEmpty)
+    }
+
+    func testIOSV2POLISH002AF07HomeDetailsAndDrillsPreserveSourceContext() async throws {
+        let harness = try Self.makeHarness(session: nil, expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.resetUserScopedState()
+        state.selectedDateKey = "2000-01-05"
+        state.selectedDomain = .food
+        let record = NativeDayRecord(id: "meal", reference: "data/meal", dateKey: "2000-01-05", kind: .food,
+            domainKey: "food", title: "餐食", subtitle: "", value: "", timeLabel: nil, systemImage: "fork.knife")
+        state.openDayRecord(record)
+        XCTAssertEqual(state.presentedOverlay, .none)
+        XCTAssertEqual(state.recordsPath.count, 0)
+        XCTAssertEqual(state.homePath.count, 1)
+        state.homePath.removeLast()
+        state.openDomainDrill(.sport, dateKey: "1999-12-31")
+        XCTAssertEqual(state.homePath.count, 1)
+        XCTAssertEqual(state.selectedDateKey, "2000-01-05")
+        XCTAssertEqual(state.selectedDomain, .food)
+        state.homePath.removeLast()
+        XCTAssertEqual(state.selectedDateKey, "2000-01-05")
+        state.resetUserScopedState()
+        XCTAssertEqual(state.homePath.count, 0)
+    }
+
+    func testIOSV2POLISH006F17FullFormMoveRefreshesOldAndNewMonths() async throws {
+        let harness = try Self.makeHarness(session: nil, expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.resetUserScopedState()
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "food")
+        draft.date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2000-01-05T12:00:00+08:00"))
+        draft.primaryValueText = "430"
+        draft.dimension = "午餐"
+        let created = await state.createManualRecord(draft, domain: nil)
+        XCTAssertTrue(created)
+        let original = try XCTUnwrap(state.recordGroups(monthKey: "2000-01").flatMap(\.records).first)
+        draft.existingRawId = original.id
+        draft.date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2000-02-06T12:00:00+08:00"))
+        draft.primaryValueText = "610"
+        let saved = await state.createManualRecord(draft, domain: nil)
+        XCTAssertTrue(saved)
+        XCTAssertTrue(state.recordGroups(monthKey: "2000-01").flatMap(\.records).isEmpty)
+        XCTAssertEqual(state.recordGroups(monthKey: "2000-02").flatMap(\.records).count, 1)
+        XCTAssertEqual(state.recordDetails(from: "2000-02-06", through: "2000-02-06")[original.reference]?.payload?.double("total_calorie_kcal"), 610)
+    }
+
+    func testIOSV2POLISH006F17CandidateCompletionPersistsEditedFactsAtomically() async throws {
+        let harness = try Self.makeHarness(session: nil, expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.resetUserScopedState()
+        let staged = try await harness.recordUseCase.stage(LocalRecordCandidate(
+            id: "edited-meal", domainKey: "food", title: "原候选", summary: "原摘要",
+            payload: ["meal_type": AnyCodable("午餐"), "total_calorie_kcal": AnyCodable(100)],
+            confidence: 0.4, recordDate: "2000-01-05", recordTime: "12:30", imageData: nil, createdAt: Date()
+        ))
+        let candidate = LocalStagingReadModel.native(from: staged.record, imageStore: nil)
+        var draft = NativeManualRecordDraft(stagingRecord: candidate, domainKey: "food")
+        draft.date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2000-02-06T08:00:00+08:00"))
+        draft.title = "已补全早餐"
+        draft.primaryValueText = "610"
+        draft.dimension = "早餐"
+        draft.includesTime = false
+        draft.note = "用户补全"
+        let reference = await state.archiveStagingRecord(candidate, draft: draft, domain: nil)
+        XCTAssertNotNil(reference, state.inboxActionMessage ?? "")
+        let records = try await harness.recordUseCase.records(monthKey: "2000-02")
+        let saved = try XCTUnwrap(records.first)
+        XCTAssertEqual(saved.recordDate, "2000-02-06")
+        XCTAssertNil(saved.recordTime, "明确移除时间不能回退为候选旧时间")
+        XCTAssertEqual(saved.title, "已补全早餐")
+        XCTAssertEqual(saved.note, "用户补全")
+        XCTAssertEqual(try LocalRecordCodec.decode(saved.payloadJSON).double("total_calorie_kcal"), 610)
+        let old = try await harness.recordUseCase.records(monthKey: "2000-01")
+        XCTAssertTrue(old.isEmpty)
+        let retry = try await harness.recordUseCase.confirmStaging(id: staged.record.id, recordID: UUID())
+        XCTAssertEqual(retry.record.id, saved.id, "重试仍返回首次正式事实，不重复落库")
+    }
 
     func testIOSV2POLISH006F17ForegroundReadsExternalWritesWithoutCloudSession() async throws {
         try await assertForegroundReadsExternalWrites(signedIn: false)
@@ -513,7 +689,8 @@ extension LocalFirstSL02ProjectionTests {
 
     fileprivate static func makeHarness(
         session: SupabaseAuthSession?,
-        expenseStub: Bool
+        expenseStub: Bool,
+        dashboard: SL02DashboardRepositoryStub = SL02DashboardRepositoryStub()
     ) throws -> SL02Harness {
         let databaseURL = try temporaryDatabaseURL()
         let database = try LocalDatabase(databaseURL: databaseURL)
@@ -548,13 +725,14 @@ extension LocalFirstSL02ProjectionTests {
         }
 
         let state = AppState(
-            dashboardRepository: SL02DashboardRepositoryStub(),
+            dashboardRepository: dashboard,
             recordRepository: recordSpy,
             localExpenseUseCase: resolvedExpenseUseCase,
             localRecordUseCase: recordUseCase,
             localFactReader: factReader,
             domainRepository: SL02DomainRepositoryStub(),
             snapshotStore: SL02SnapshotStoreStub(),
+            accountRepository: SL02AccountRepositoryStub(),
             financeVocabularyRepository: SL02FinanceVocabularyRepositoryStub(),
             localBindingRepository: profileStore,
             sessionProvider: sessionProvider
@@ -588,9 +766,34 @@ extension LocalFirstSL02ProjectionTests {
 private final class SL02RecordRepositorySpy: RecordRepositoryProtocol {
     private(set) var fetchMonthKeys: [String] = []
     private(set) var createDrafts: [NativeManualRecordDraft] = []
+    private var mutableFood: [String: NativeRecordDetail]?
+
+    func seedFood(date: String, calories: Double) -> NativeRecordDetail {
+        let detail = foodDetail(reference: "data/\(UUID().uuidString)", title: "云端合成餐食", date: date,
+                                payload: ["meal_type": AnyCodable("午餐"), "total_calorie_kcal": AnyCodable(calories)])
+        mutableFood = [detail.id: detail]
+        return detail
+    }
+
+    private func foodDetail(reference: String, title: String, date: String, payload: [String: AnyCodable]) -> NativeRecordDetail {
+        NativeRecordDetail(id: reference, rawId: NativeRecordReference(reference).rawId, kind: "data",
+            title: title, subtitle: date, value: "", detailRows: [], imageURL: nil, imageLoadError: false,
+            imagePath: nil, imageHash: nil, amount: nil, merchantName: nil, platform: nil, category: nil,
+            paymentMethod: nil, recordDate: date, note: nil, companionMessage: nil, accountId: nil,
+            systemImage: "fork.knife", payload: payload, domainKey: "food")
+    }
 
     func fetchMonth(monthKey: String, accessToken: String) async throws -> NativeRecordMonthSnapshot {
         fetchMonthKeys.append(monthKey)
+        if let mutableFood {
+            let details = mutableFood.values.filter { $0.recordDate?.hasPrefix(monthKey) == true }
+            let records = details.map { detail in
+                NativeDayRecord(id: detail.rawId, reference: detail.id, dateKey: detail.recordDate!, kind: .food,
+                    domainKey: "food", title: detail.title, subtitle: "", value: "", timeLabel: nil, systemImage: "fork.knife")
+            }
+            let groups = Dictionary(grouping: records, by: \.dateKey).map { NativeDayRecordGroup(dateKey: $0.key, records: $0.value) }
+            return NativeRecordMonthSnapshot(groups: groups, details: Dictionary(uniqueKeysWithValues: details.map { ($0.id, $0) }))
+        }
         return NativeRecordMonthSnapshot(
             groups: [],
             details: [SL02RemoteExpenseFixture.detail().id: SL02RemoteExpenseFixture.detail()]
@@ -598,6 +801,7 @@ private final class SL02RecordRepositorySpy: RecordRepositoryProtocol {
     }
 
     func fetchDetail(reference: String, accessToken: String) async throws -> NativeRecordDetail {
+        if let detail = mutableFood?[reference] { return detail }
         throw LocalDataError.recordNotFound
     }
 
@@ -620,14 +824,24 @@ private final class SL02RecordRepositorySpy: RecordRepositoryProtocol {
 
     func create(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?, userId: String, accessToken: String) async throws -> String {
         createDrafts.append(draft)
+        if mutableFood != nil {
+            let reference = "data/\(draft.existingRawId ?? UUID().uuidString)"
+            mutableFood?[reference] = foodDetail(reference: reference, title: draft.resolvedTitle(domain: domain), date: draft.dateKey,
+                                                  payload: draft.universalPayload(domain: domain))
+            return reference
+        }
         return "data/\(UUID().uuidString)"
     }
 
     func saveDetail(_ draft: NativeRecordEditDraft, accessToken: String) async throws -> String {
-        draft.reference
+        if let current = mutableFood?[draft.reference] {
+            mutableFood?[draft.reference] = foodDetail(reference: draft.reference, title: draft.title, date: draft.recordDate,
+                                                       payload: current.payload ?? [:])
+        }
+        return draft.reference
     }
 
-    func delete(reference: String, accessToken: String) async throws {}
+    func delete(reference: String, accessToken: String) async throws { _ = mutableFood?.removeValue(forKey: reference) }
 
     func submitFeedback(
         recordId: String,
@@ -639,8 +853,19 @@ private final class SL02RecordRepositorySpy: RecordRepositoryProtocol {
 }
 
 private final class SL02DashboardRepositoryStub: DashboardRepositoryProtocol {
+    private let gate: SL02DashboardGate?
+    private let snapshot: DashboardSnapshot
+    private(set) var fetchCount = 0
+
+    init(gate: SL02DashboardGate? = nil, snapshot: DashboardSnapshot = DashboardSnapshot()) {
+        self.gate = gate
+        self.snapshot = snapshot
+    }
+
     func fetchDashboardCore(accessToken: String) async throws -> DashboardSnapshot {
-        DashboardSnapshot()
+        fetchCount += 1
+        if let gate { await gate.enterAndWait() }
+        return snapshot
     }
 
     func hydrateDashboardImages(_ snapshot: DashboardSnapshot, accessToken: String) async throws -> DashboardSnapshot {
@@ -648,9 +873,60 @@ private final class SL02DashboardRepositoryStub: DashboardRepositoryProtocol {
     }
 }
 
+private actor SL02DashboardGate {
+    private var callNumber = 0
+    private var entered = false
+    private var released = false
+    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func nextCallNumber() -> Int { callNumber += 1; return callNumber }
+
+    func enterAndWait() async {
+        entered = true
+        enteredWaiters.forEach { $0.resume() }
+        enteredWaiters.removeAll()
+        if !released { await withCheckedContinuation { releaseWaiters.append($0) } }
+    }
+
+    func waitUntilEntered() async {
+        if !entered { await withCheckedContinuation { enteredWaiters.append($0) } }
+    }
+
+    func release() {
+        released = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
+    }
+}
+
 private final class SL02DomainRepositoryStub: DomainRepositoryProtocol {
     func fetchDefinitions(accessToken: String) async throws -> [NativeDomainDefinition] {
         []
+    }
+}
+
+private final class SL02AccountRepositoryStub: AccountRepositoryProtocol {
+    func fetchAccounts(accessToken: String) async throws -> [NativeAccount] { [] }
+    func fetchDetail(account: NativeAccount, accessToken: String) async -> NativeAccountDetail {
+        NativeAccountDetail(account: account, entries: [], repaymentCycles: [], payments: [], loadErrors: [:])
+    }
+    func fetchOpenRepaymentCycles(accessToken: String) async throws -> [NativeRepaymentCycle] { [] }
+    func save(_ draft: NativeAccountDraft, userId: String, accessToken: String) async throws -> [NativeAccount] {
+        throw SL02TestError.unexpectedFailure("测试不应修改账户")
+    }
+    func setArchived(accountId: String, archived: Bool, accessToken: String) async throws -> [NativeAccount] {
+        throw SL02TestError.unexpectedFailure("测试不应归档账户")
+    }
+    func ensureRepaymentCycles(monthKey: String, accessToken: String) async throws {
+        throw SL02TestError.unexpectedFailure("测试不应创建还款周期")
+    }
+    func confirmRepayment(cycleId: String, paidAmount: Double, debitAccountId: String?, status: NativeRepaymentStatus,
+                          note: String, accessToken: String) async throws -> NativeRepaymentCycle {
+        throw SL02TestError.unexpectedFailure("测试不应还款")
+    }
+    func revokePayment(paymentId: String, accessToken: String) async throws -> NativeRepaymentCycle? {
+        throw SL02TestError.unexpectedFailure("测试不应撤销还款")
     }
 }
 
@@ -677,6 +953,7 @@ private struct SL02SnapshotStoreStub: DashboardSnapshotStoreProtocol {
 }
 
 private final class SL02ExpenseUseCaseStub: LocalExpenseUseCaseProtocol {
+    var monthProvider: ((String) async throws -> LocalExpenseMonth)?
     private let profile = LocalProfile(id: UUID(), createdAt: Date(), cloudUserID: nil, syncEnabled: false)
     private(set) var importRemoteExpenseCalls: [[LocalExpenseDraft]] = []
     private(set) var importRemoteAccountCalls: [[LocalAccount]] = []
@@ -696,7 +973,8 @@ private final class SL02ExpenseUseCaseStub: LocalExpenseUseCaseProtocol {
     }
 
     func month(_ monthKey: String) async throws -> LocalExpenseMonth {
-        LocalExpenseMonth(profileID: profile.id, expenses: [])
+        if let monthProvider { return try await monthProvider(monthKey) }
+        return LocalExpenseMonth(profileID: profile.id, expenses: [])
     }
 
     func importRemoteExpenses(_ expenses: [LocalExpenseDraft]) async throws {

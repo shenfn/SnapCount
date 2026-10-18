@@ -78,11 +78,11 @@ final class LocalFactReader {
                     SELECT * FROM local_records
                     WHERE profile_id = ?
                       AND domain_key IN ('food', 'sleep', 'sport', 'reading')
-                      AND record_date BETWEEN ? AND ?
+                      AND (domain_key = 'sleep' OR record_date BETWEEN ? AND ?)
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(recordRow: $0) }
+            ).map { try Self.fact(recordRow: $0) }.filter { $0.businessDate >= startDate && $0.businessDate <= endDate }
 
             return LocalFactMonth(
                 profileID: profileID,
@@ -192,7 +192,11 @@ final class LocalFactReader {
     }
 
     private static func fact(from record: LocalRecord) -> LocalFact {
-        LocalFact(
+        let businessDate = NativeSleepFacts.businessDate(
+            domainKey: record.domainKey, payload: (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:], fallback: record.recordDate
+        )
+        // ponytail: 旧睡眠无需改写历史行，暂在读层按醒来日过滤；数据量增大后迁移并索引规范业务日。
+        return LocalFact(
             id: record.id,
             profileID: record.profileID,
             reference: "data/\(record.id.uuidString)",
@@ -203,10 +207,10 @@ final class LocalFactReader {
             title: record.title,
             summary: record.summary,
             payloadJSON: record.payloadJSON,
-            businessDate: record.recordDate,
+            businessDate: businessDate,
             recordTime: record.recordTime,
             occurredAt: NativeLocalDate.financeOccurredAt(
-                dateKey: record.recordDate,
+                dateKey: businessDate,
                 timeKey: record.recordTime
             ),
             note: record.note,

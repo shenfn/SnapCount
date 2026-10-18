@@ -251,6 +251,8 @@ enum JieziPrototypeLayout {
     static let calendar_arrow_hit_size: CGFloat = 44
     static let food_energy_reference_height: CGFloat = 90
     static let food_energy_point_size: CGFloat = 64
+    static let food_photo_size: CGFloat = 64
+    static let food_photo_radius: CGFloat = 12
 }
 
 enum JieziPrototypeMotion {

@@ -3,6 +3,41 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testIOSV2POLISH003F10WakeDateRoutesLegacyLocalFactAcrossMonthsWithoutRewriting() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalRecordRepository(database: database)
+        let payload = ["sleep_minutes": AnyCodable(420), "wake_at": AnyCodable("2026-09-30T16:30:00Z")]
+        let legacy = try repository.createRecord(LocalRecordDraft(
+            id: UUID(), profileID: profile.id, domainKey: "sleep", title: "补录睡眠", summary: "",
+            payloadJSON: try LocalRecordCodec.encode(payload), recordDate: "2026-11-10", recordTime: nil,
+            note: nil, imagePath: nil, imageHash: nil, createdAt: Date()
+        ))
+        let reader = try LocalFactReader(database: database)
+        let wakeMonth = try reader.month(profileID: profile.id, monthKey: "2026-10")
+        XCTAssertEqual(wakeMonth.facts.first?.businessDate, "2026-10-01")
+        XCTAssertTrue(try reader.month(profileID: profile.id, monthKey: "2026-11").facts.isEmpty)
+        XCTAssertEqual(try repository.record(id: legacy.id)?.recordDate, "2026-11-10", "不静默重写历史行")
+        XCTAssertEqual(try repository.records(profileID: profile.id, monthKey: "2026-10").count, 1)
+        XCTAssertEqual(NativeSleepFacts.businessDate(domainKey: "sleep", payload: ["sleep_minutes": AnyCodable(420)], fallback: "2026-09-28"), "2026-09-28")
+        let useCase = LocalRecordUseCase(profileStore: LocalProfileStore(database: database), repository: repository)
+        let created = try await useCase.create(LocalRecordCommand(
+            id: UUID(), domainKey: "sleep", title: "补录睡眠", summary: "", payload: payload,
+            recordDate: "2026-11-10", recordTime: nil, note: nil, imageData: nil, createdAt: Date()
+        ))
+        XCTAssertEqual(created.record.recordDate, "2026-10-01")
+        XCTAssertNil(created.record.recordTime)
+        let staged = try await useCase.stage(LocalRecordCandidate(
+            id: "wake-date-candidate", domainKey: "sleep", title: "候选睡眠", summary: "", payload: payload,
+            confidence: 0.4, recordDate: "2026-11-10", recordTime: nil, imageData: nil, createdAt: Date()
+        ))
+        XCTAssertEqual(staged.record.recordDate, "2026-10-01")
+        let confirmed = try await useCase.confirmStaging(id: staged.record.id, recordID: UUID())
+        XCTAssertEqual(confirmed.record.recordDate, "2026-10-01")
+    }
+
     func testLOCALP1DM002IntakePreservesCandidateAndFormalSourceKinds() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

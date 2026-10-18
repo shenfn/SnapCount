@@ -11,7 +11,7 @@ protocol LocalRecordRepositoryProtocol {
     func createStaging(_ draft: LocalStagingDraft) throws -> LocalStagingRecord
     func staging(id: String) throws -> LocalStagingRecord?
     func stagingRecords(profileID: UUID) throws -> [LocalStagingRecord]
-    func archiveStaging(id: String, recordID: UUID, updatedAt: Date, profileID: UUID) throws -> LocalRecord
+    func archiveStaging(id: String, recordID: UUID, updatedAt: Date, profileID: UUID, changes: LocalStagingConfirmation?) throws -> LocalRecord
     func discardStaging(id: String, updatedAt: Date, profileID: UUID) throws
 }
 
@@ -173,11 +173,11 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                 db,
                 sql: """
                     SELECT * FROM local_records
-                    WHERE profile_id = ? AND deleted_at IS NULL AND record_date LIKE ?
+                    WHERE profile_id = ? AND deleted_at IS NULL AND (domain_key = 'sleep' OR record_date LIKE ?)
                     ORDER BY record_date DESC, record_time DESC, created_at DESC, id DESC
                     """,
                 arguments: [profileID.uuidString, "\(monthKey)-%"]
-            ).map(Self.record(from:))
+            ).map(Self.record(from:)).filter { $0.businessDate.hasPrefix("\(monthKey)-") }
         }
     }
 
@@ -267,7 +267,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
         id: String,
         recordID: UUID,
         updatedAt: Date,
-        profileID: UUID
+        profileID: UUID,
+        changes: LocalStagingConfirmation? = nil
     ) throws -> LocalRecord {
         try database.writer.write { db in
             guard let stagingRow = try Row.fetchOne(
@@ -291,18 +292,21 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                 throw LocalDataError.invalidRecord
             }
             let stagingProfileID: String = stagingRow["profile_id"]
-            let domainKey: String = stagingRow["domain_key"]
-            let title: String = stagingRow["title"]
-            let summary: String = stagingRow["summary"]
+            let domainKey: String = changes?.domainKey ?? stagingRow["domain_key"]
+            let title: String = changes?.title ?? stagingRow["title"]
+            let summary: String = changes?.summary ?? stagingRow["summary"]
             let payloadJSON: String = stagingRow["payload_json"]
-            let recordDate: String = stagingRow["record_date"]
-            let recordTime: String? = stagingRow["record_time"]
+            let draftDate: String = changes?.recordDate ?? stagingRow["record_date"]
+            let recordTime: String? = changes.map(\.recordTime) ?? stagingRow["record_time"]
             let imagePath: String? = stagingRow["image_path"]
             let imageHash: String? = stagingRow["image_hash"]
             let createdAt: Date = stagingRow["created_at"]
+            let editedPayload = try changes?.payload ?? LocalRecordCodec.decode(payloadJSON)
+            let recordDate = NativeSleepFacts.businessDate(domainKey: domainKey, payload: editedPayload, fallback: draftDate)
+            try LocalRecordValidation.validate(domainKey: domainKey, title: title, recordDate: recordDate, recordTime: recordTime)
             let payload = try LocalRecordCodec.normalizedPayload(
                 domainKey: domainKey,
-                payload: try LocalRecordCodec.decode(payloadJSON)
+                payload: editedPayload
             )
             let normalizedPayloadJSON = try LocalRecordCodec.encode(payload)
 
@@ -312,7 +316,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         id, profile_id, domain_key, title, summary, payload_json,
                         record_date, record_time, note, image_path, image_hash,
                         source_kind, domain_version, local_version, created_at, updated_at, deleted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, NULL)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
                     """,
                 arguments: [
                     recordID.uuidString,
@@ -323,6 +327,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     normalizedPayloadJSON,
                     recordDate,
                     recordTime,
+                    changes?.note,
                     imagePath,
                     imageHash,
                     LocalRecordSourceKind.aiConfirmed.rawValue,

@@ -70,6 +70,12 @@ final class IOSPrototypeRenderingTests: XCTestCase {
                 .environmentObject(state)
                 .environment(\.dynamicTypeSize, size)
                 try await capture(view, name: "content-\(domain.rawValue)-\(size)")
+                if domain == .expense || domain == .sleep || domain == .sport {
+                    let drill = NativeDomainPageContent(domain: domain, weekDates: model.weeklyValues.map(\.dateKey),
+                        details: details, loadingWindow: false, model: model, isDrillDown: true)
+                        .environmentObject(state).environment(\.dynamicTypeSize, size)
+                    try await capture(drill, name: "drill-\(domain.rawValue)-\(size)", height: 1000)
+                }
             }
         }
     }
@@ -314,15 +320,49 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("jiezi-capture-\(UUID().uuidString)", isDirectory: true)
         let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("fixture.sqlite"))
         let profiles = try LocalProfileStore(database: database)
+        let images = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images", isDirectory: true))
         _ = try profiles.activeProfile()
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         return AppState(
             localExpenseUseCase: LocalExpenseUseCase(profileStore: profiles, repository: try LocalExpenseRepository(database: database)),
-            localRecordUseCase: LocalRecordUseCase(profileStore: profiles, repository: try LocalRecordRepository(database: database)),
+            localRecordUseCase: LocalRecordUseCase(profileStore: profiles, repository: try LocalRecordRepository(database: database), imageStore: images),
             localFactReader: try LocalFactReader(database: database),
+            localImageStore: images,
             localBindingRepository: profiles,
             sessionProvider: { _ in throw NSError(domain: "synthetic-capture-no-session", code: 1) }
         )
+    }
+
+    func testIOSV2POLISH004F13LocalPhotoThumbnailAndViewer() async throws {
+        let state = try makeIsolatedState()
+        state.resetUserScopedState()
+        state.selectedDateKey = "2026-10-17"
+        state.selectedDomain = .food
+        let sample = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 160)).image { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 240, height: 160))
+            UIColor.white.setFill()
+            UIBezierPath(ovalIn: CGRect(x: 55, y: 15, width: 130, height: 130)).fill()
+        }
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "food")
+        draft.title = "合成照片测试餐食"
+        draft.primaryValueText = "610"
+        draft.dimension = "午餐"
+        draft.date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-17T12:30:00+08:00"))
+        draft.imageData = try XCTUnwrap(sample.jpegData(compressionQuality: 0.8))
+        let saved = await state.createManualRecord(draft, domain: nil)
+        XCTAssertTrue(saved)
+        let record = try XCTUnwrap(state.recordGroups(monthKey: "2026-10").flatMap(\.records).first)
+        let resolved = await state.thumbnailImageURL(for: record)
+        let url = try XCTUnwrap(resolved)
+        XCTAssertTrue(url.isFileURL)
+        XCTAssertNil(state.selectedRecordDetail, "缩略图不能抢占详情/Planner的活跃记录")
+        for size in [DynamicTypeSize.large, .accessibility3] {
+            let view = MainShellView().environmentObject(state).environmentObject(JieziThemeManager.shared)
+                .environment(\.dynamicTypeSize, size)
+            try await capture(view, name: "food-photo-local-\(size)", height: 1000)
+        }
+        try await capture(RecordPhotoViewer(url: url), name: "food-photo-viewer", height: 844)
     }
 
     private func capture<V: View>(_ view: V, name: String, height: CGFloat = 720) async throws {

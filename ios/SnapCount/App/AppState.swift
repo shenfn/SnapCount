@@ -48,6 +48,7 @@ final class AppState: ObservableObject {
     @Published var todayPath = NavigationPath()
     @Published var inboxPath = NavigationPath()
     @Published var recordsPath = NavigationPath()
+    @Published var homePath = NavigationPath()
     @Published var selectedRecordDetail: NativeRecordDetail?
     @Published var recordDetailMessage: String?
     @Published var isSavingRecordDetail = false
@@ -135,6 +136,11 @@ final class AppState: ObservableObject {
     private var pendingConfirmationUseCase: PendingConfirmationUseCase?
     private var feedbackSubmissionUseCase: FeedbackSubmissionUseCase?
     private var recordDetailImageUseCase: RecordDetailImageUseCase?
+    private var thumbnailImageUseCase: RecordDetailImageUseCase?
+    private var dashboardCoreTask: Task<Void, Never>?
+    @Published private var loadingLocalReadKeys: Set<String> = []
+    private var localMonthReadVersions: [String: Int] = [:]
+    private var stagingReadVersion = 0
     private let unboundRecordRepository: UnboundRecordRepositoryProtocol
     private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
     private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
@@ -179,6 +185,7 @@ final class AppState: ObservableObject {
         localExpenseUseCase: LocalExpenseUseCaseProtocol? = nil,
         localRecordUseCase: LocalRecordUseCaseProtocol? = nil,
         localFactReader: LocalFactReader? = nil,
+        localImageStore: LocalImageStore? = nil,
         localFactPortability: LocalFactPortability? = nil,
         inboxRepository: InboxRepositoryProtocol = InboxRepository(),
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
@@ -217,7 +224,7 @@ final class AppState: ObservableObject {
         self.localFactReader = usesDefaultLocalStorage
             ? (localFactReader ?? Self.defaultLocalFactReader())
             : localFactReader
-        self.localImageStore = Self.defaultLocalImageStore()
+        self.localImageStore = localImageStore ?? Self.defaultLocalImageStore()
         self.localRecordPortability = Self.defaultLocalRecordPortability()
         self.localFactPortability = usesDefaultLocalStorage
             ? (localFactPortability ?? Self.defaultLocalFactPortability())
@@ -614,6 +621,17 @@ final class AppState: ObservableObject {
     }
 
     func refreshDashboard() async {
+        if let task = dashboardCoreTask { await task.value; return }
+        let generation = userStateGeneration
+        let task = Task { @MainActor in
+            defer { if generation == self.userStateGeneration { self.dashboardCoreTask = nil } }
+            await self.performDashboardRefresh()
+        }
+        dashboardCoreTask = task
+        await task.value
+    }
+
+    private func performDashboardRefresh() async {
         guard !isLoadingDashboard else { return }
         dashboardRefreshGeneration += 1
         let generation = dashboardRefreshGeneration
@@ -633,9 +651,11 @@ final class AppState: ObservableObject {
             let snapshot = preparedCoreSnapshot(fetchedSnapshot)
             publishDashboard(snapshot, userId: session.user.id)
             await importRemoteExpenseDetails(snapshot.recordDetails.values)
+            guard generation == dashboardRefreshGeneration else { return }
             scheduleDashboardSupplement(snapshot, session: session, generation: generation)
             Task { [weak self] in await self?.loadFinanceVocabulary() }
         } catch {
+            guard generation == dashboardRefreshGeneration, !(error is CancellationError) else { return }
             if isInvalidRefreshSessionError(error) {
                 invalidateSession(message: "登录状态已失效，请重新登录。")
             } else {
@@ -788,10 +808,28 @@ final class AppState: ObservableObject {
     }
 
     func refreshDashboardIfStale(minInterval: TimeInterval = 3, force: Bool = false) async {
-        guard isSignedIn else { return }
         if !force,
            let lastDashboardRefreshAt,
            Date().timeIntervalSince(lastDashboardRefreshAt) < minInterval {
+            return
+        }
+        let generation = userStateGeneration
+        _ = await prepareLocalWorkspace()
+        guard generation == userStateGeneration else { return }
+        // Intent 可从独立连接写入；回前台先重读当前及已打开月份的本机事实。
+        var months = Set(localFactMonths.keys)
+            .union(localExpenseMonthGroups.keys)
+            .union(localRecordMonthGroups.keys)
+        months.insert(Self.currentMonthKey)
+        if let selectedMonth = NativeLocalDate.monthKey(from: selectedDateKey) {
+            months.insert(selectedMonth)
+        }
+        for month in months.sorted() {
+            await refreshLocalMonthProjection(monthKey: month)
+            guard generation == userStateGeneration else { return }
+        }
+        guard isSignedIn else {
+            lastDashboardRefreshAt = Date()
             return
         }
         await refreshDashboard()
@@ -819,6 +857,8 @@ final class AppState: ObservableObject {
 
     func isLoadingRecordMonth(_ monthKey: String) -> Bool {
         loadingRecordMonthKey == monthKey || loadingRemoteRecordMonthKeys.contains(monthKey)
+            || loadingLocalReadKeys.contains { $0.hasSuffix(":\(monthKey)") }
+            || (monthKey == Self.currentMonthKey && isLoadingDashboard)
     }
 
     func recordGroups(from startDateKey: String, through endDateKey: String) -> [NativeDayRecordGroup] {
@@ -850,7 +890,8 @@ final class AppState: ObservableObject {
     func loadRecordDateWindow(around dateKey: String, force: Bool = false) async {
         // 五域共享浏览日期：一次补齐自然周和截止所选日的近七日，切域无需再等一次跨月读取。
         let days = (NativeLocalDate.weekDateKeys(containing: dateKey)
-            + NativeDomainScenePresentation.trendDateKeys(for: .sleep, dateKey: dateKey)).sorted()
+            + NativeDomainScenePresentation.trendDateKeys(for: .sleep, dateKey: dateKey)
+            + [NativeLocalDate.shiftedDateKey(dateKey, byDays: -30) ?? dateKey]).sorted()
         guard let start = days.first, let end = days.last else { return }
         for monthKey in NativeLocalDate.monthKeys(from: start, through: end) {
             if Task.isCancelled { return }
@@ -960,6 +1001,25 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func refreshAfterRecordWrite(affectedDateKeys: [String] = []) async {
+        let generation = userStateGeneration
+        var months = Set(remoteRecordMonthGroups.keys).union(recordMonthDetails.keys).union(remoteRecordMonthTasks.keys)
+        months.formUnion(affectedDateKeys.compactMap { NativeLocalDate.monthKey(from: $0) })
+        if let month = NativeLocalDate.monthKey(from: selectedDateKey) { months.insert(month) }
+        if let pending = dashboardCoreTask { await pending.value }
+        guard generation == userStateGeneration else { return }
+        await refreshDashboard()
+        guard generation == userStateGeneration else { return }
+        await refreshLocalMonthProjection(monthKey: Self.currentMonthKey)
+        for month in months.sorted() where month != Self.currentMonthKey {
+            // 写入前的在途读取先结束，随后强制读取写入后的事实。
+            if let task = remoteRecordMonthTasks[month] { await task.value }
+            guard generation == userStateGeneration else { return }
+            await loadRecordMonth(month, force: true)
+            guard generation == userStateGeneration else { return }
+        }
+    }
+
     // Compatibility name retained for older feature tests; new callers use the unified facade above.
     private func loadLocalExpenseMonth(_ monthKey: String, force: Bool) async {
         await readDeviceExpenseMonth(monthKey, force: force)
@@ -1018,8 +1078,11 @@ final class AppState: ObservableObject {
     private func readDeviceFactMonth(_ monthKey: String, force: Bool) async {
         guard let localFactReader else { return }
         guard force || localFactMonths[monthKey] == nil else { return }
-        guard loadingLocalExpenseMonthKey != monthKey,
-              loadingLocalRecordMonthKey != monthKey else { return }
+        let readKey = "facts:\(monthKey)"
+        guard force || !loadingLocalReadKeys.contains(readKey) else { return }
+        let readVersion = (localMonthReadVersions[readKey] ?? 0) + 1
+        localMonthReadVersions[readKey] = readVersion
+        loadingLocalReadKeys.insert(readKey)
         let interval = Self.recordReadSignposter.beginInterval("ReadAndProjectLocalFactMonth", id: Self.recordReadSignposter.makeSignpostID())
         defer { Self.recordReadSignposter.endInterval("ReadAndProjectLocalFactMonth", interval) }
         let generation = userStateGeneration
@@ -1028,16 +1091,20 @@ final class AppState: ObservableObject {
         loadingRecordMonthKey = monthKey
         recordMonthMessages.removeValue(forKey: monthKey)
         defer {
-            if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
-            if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
-            if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey) {
-                loadingRecordMonthKey = nil
+            if generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion {
+                loadingLocalReadKeys.remove(readKey)
+                if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
+                if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
+                if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey),
+                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }) {
+                    loadingRecordMonthKey = nil
+                }
             }
         }
         do {
             guard let profileID = try localFactReader.activeProfileID() else { return }
             let month = try localFactReader.month(profileID: profileID, monthKey: monthKey)
-            guard generation == userStateGeneration else { return }
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
             localFactMonths[monthKey] = month
             localExpenseMonthGroups[monthKey] = LocalFactReadModel.groups(
                 from: month,
@@ -1056,7 +1123,7 @@ final class AppState: ObservableObject {
                 await applyLocalStagingProjection()
             }
         } catch {
-            guard generation == userStateGeneration else { return }
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
             recordMonthMessages[monthKey] = error.localizedDescription
         }
     }
@@ -1102,6 +1169,9 @@ final class AppState: ObservableObject {
     }
 
     private func applyLocalStagingProjection() async {
+        stagingReadVersion += 1
+        let version = stagingReadVersion
+        let generation = userStateGeneration
         guard let localRecordUseCase else {
             dashboard.stagingRecords = []
             dashboard.pendingCount = dashboard.pendingExpenses.count
@@ -1109,6 +1179,7 @@ final class AppState: ObservableObject {
         }
         do {
             let records = try await localRecordUseCase.stagingRecords()
+            guard generation == userStateGeneration, version == stagingReadVersion else { return }
             let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
             dashboard.stagingRecords = records.map { record in
                 let domainName = definitions.first(where: { $0.id == record.domainKey })?.shortName
@@ -1120,6 +1191,7 @@ final class AppState: ObservableObject {
             }
             dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
         } catch {
+            guard generation == userStateGeneration, version == stagingReadVersion else { return }
             dashboard.stagingRecords = []
             dashboard.pendingCount = dashboard.pendingExpenses.count
             inboxFinanceMessage = "本地中转站暂时无法读取：\(error.localizedDescription)"
@@ -1128,21 +1200,29 @@ final class AppState: ObservableObject {
 
     private func readDeviceExpenseMonth(_ monthKey: String, force: Bool) async {
         guard force || localExpenseMonthGroups[monthKey] == nil else { return }
-        guard loadingLocalExpenseMonthKey != monthKey else { return }
+        let readKey = "expense:\(monthKey)"
+        guard force || !loadingLocalReadKeys.contains(readKey) else { return }
+        let readVersion = (localMonthReadVersions[readKey] ?? 0) + 1
+        localMonthReadVersions[readKey] = readVersion
+        loadingLocalReadKeys.insert(readKey)
         let generation = userStateGeneration
         loadingLocalExpenseMonthKey = monthKey
         loadingRecordMonthKey = monthKey
         recordMonthMessages.removeValue(forKey: monthKey)
         defer {
-            if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
-            if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey) {
-                loadingRecordMonthKey = nil
+            if generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion {
+                loadingLocalReadKeys.remove(readKey)
+                if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
+                if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey),
+                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }) {
+                    loadingRecordMonthKey = nil
+                }
             }
         }
         do {
             guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
             let month = try await localExpenseUseCase.month(monthKey)
-            guard generation == userStateGeneration else { return }
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
             let groups = LocalExpenseReadModel.groups(from: month)
             localExpenseMonthGroups[monthKey] = groups
             let localDomainDetails = (localRecordMonthDetails[monthKey] ?? [:]).filter {
@@ -1158,7 +1238,7 @@ final class AppState: ObservableObject {
                 applyLocalExpenseMonth(month, groups: groups)
             }
         } catch {
-            guard generation == userStateGeneration else { return }
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
             recordMonthMessages[monthKey] = error.localizedDescription
         }
     }
@@ -1166,22 +1246,29 @@ final class AppState: ObservableObject {
     private func readDeviceRecordMonth(_ monthKey: String, force: Bool) async {
         guard let localRecordUseCase else { return }
         guard force || localRecordMonthGroups[monthKey] == nil else { return }
-        guard loadingLocalRecordMonthKey != monthKey else { return }
+        let readKey = "records:\(monthKey)"
+        guard force || !loadingLocalReadKeys.contains(readKey) else { return }
+        let readVersion = (localMonthReadVersions[readKey] ?? 0) + 1
+        localMonthReadVersions[readKey] = readVersion
+        loadingLocalReadKeys.insert(readKey)
         let generation = userStateGeneration
         loadingLocalRecordMonthKey = monthKey
         loadingRecordMonthKey = monthKey
         recordMonthMessages.removeValue(forKey: monthKey)
         defer {
-            if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
-            if loadingRecordMonthKey == monthKey,
-               !loadingRemoteRecordMonthKeys.contains(monthKey),
-               loadingLocalExpenseMonthKey != monthKey {
-                loadingRecordMonthKey = nil
+            if generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion {
+                loadingLocalReadKeys.remove(readKey)
+                if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
+                if loadingRecordMonthKey == monthKey,
+                   !loadingRemoteRecordMonthKeys.contains(monthKey),
+                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }) {
+                    loadingRecordMonthKey = nil
+                }
             }
         }
         do {
             let month = try await localRecordUseCase.month(monthKey)
-            guard generation == userStateGeneration else { return }
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
             let groups = LocalRecordReadModel.groups(from: month, imageStore: localImageStore)
             localRecordMonthGroups[monthKey] = groups
             let localExpenseDetails = (localRecordMonthDetails[monthKey] ?? [:]).filter {
@@ -1201,7 +1288,7 @@ final class AppState: ObservableObject {
                 }
             }
         } catch {
-            guard generation == userStateGeneration else { return }
+            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
             recordMonthMessages[monthKey] = error.localizedDescription
         }
     }
@@ -1283,7 +1370,7 @@ final class AppState: ObservableObject {
 
     private func loadRemoteRecordMonth(_ monthKey: String, force: Bool = false) async {
         guard monthKey != Self.currentMonthKey else {
-            if force || dashboard.dayRecordGroups.isEmpty {
+            if force || dashboard.dayRecordGroups.isEmpty || dashboardCoreTask != nil {
                 await refreshDashboard()
                 await refreshLocalMonthProjection(monthKey: monthKey)
             }
@@ -1314,6 +1401,7 @@ final class AppState: ObservableObject {
                 remoteRecordMonthTasks.removeValue(forKey: monthKey)
                 loadingRemoteRecordMonthKeys.remove(monthKey)
                 if loadingRecordMonthKey == monthKey,
+                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }),
                    loadingLocalExpenseMonthKey != monthKey,
                    loadingLocalRecordMonthKey != monthKey {
                     loadingRecordMonthKey = nil
@@ -2533,9 +2621,12 @@ final class AppState: ObservableObject {
             presentedOverlay = .inbox
             inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: String(record.reference.dropFirst("staging-".count)))])
         } else {
-            presentedOverlay = .records
-            recordsPath = NavigationPath([NativeRecordRoute(reference: record.reference)])
+            homePath.append(NativeRecordRoute(reference: record.reference))
         }
+    }
+
+    func openDomainDrill(_ domain: AppDomain, dateKey: String) {
+        homePath.append(NativeDomainDrillRoute(domain: domain, dateKey: dateKey))
     }
 
     func openPendingExpense(_ pending: NativePendingExpense) {
@@ -2745,6 +2836,18 @@ final class AppState: ObservableObject {
         preserveInboxNavigation: Bool = false
     ) async -> String? {
         let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
+        if let localID = LocalStagingReadModel.localID(from: record.id) {
+            guard inboxActionRecordId == nil else { return nil }
+            let changes = LocalStagingConfirmation(
+                domainKey: draft.domainKey, title: draft.resolvedTitle(domain: domain),
+                summary: draft.resolvedSummary(domain: domain), payload: draft.universalPayload(domain: domain),
+                recordDate: draft.dateKey, recordTime: draft.timeKey,
+                note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note
+            )
+            return await archiveLocalStagingRecord(
+                localID, record: adjustedRecord, preserveInboxNavigation: preserveInboxNavigation, changes: changes
+            )
+        }
         return await archiveStagingRecord(
             adjustedRecord,
             domainKey: draft.domainKey,
@@ -2778,7 +2881,8 @@ final class AppState: ObservableObject {
     private func archiveLocalStagingRecord(
         _ localID: String,
         record: NativeStagingRecord,
-        preserveInboxNavigation: Bool
+        preserveInboxNavigation: Bool,
+        changes: LocalStagingConfirmation? = nil
     ) async -> String? {
         guard let localRecordUseCase else { return nil }
         inboxActionRecordId = record.id
@@ -2788,7 +2892,8 @@ final class AppState: ObservableObject {
         do {
             let outcome = try await localRecordUseCase.confirmStaging(
                 id: localID,
-                recordID: UUID()
+                recordID: UUID(),
+                changes: changes
             )
             removeStagingRecordLocally(record.id)
             let monthKey = String(outcome.record.recordDate.prefix(7))
@@ -2804,6 +2909,7 @@ final class AppState: ObservableObject {
     }
 
     private func removeStagingRecordLocally(_ recordId: String) {
+        stagingReadVersion += 1
         dashboard.stagingRecords.removeAll { $0.id == recordId }
         dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
     }
@@ -2834,7 +2940,7 @@ final class AppState: ObservableObject {
             },
             refresh: { [weak self] in
                 guard let self else { return }
-                await self.refreshDashboard()
+                await self.refreshAfterRecordWrite()
                 if let message = self.dashboardMessage, !message.isEmpty {
                     throw WalletSnapshotReadModelRefreshError(message: message)
                 }
@@ -2873,7 +2979,7 @@ final class AppState: ObservableObject {
                 if let message = self.accountMessage, !message.isEmpty {
                     throw WalletSnapshotReadModelRefreshError(message: message)
                 }
-                await self.refreshDashboard()
+                await self.refreshAfterRecordWrite()
                 if let message = self.dashboardMessage, !message.isEmpty {
                     throw WalletSnapshotReadModelRefreshError(message: message)
                 }
@@ -3156,6 +3262,47 @@ final class AppState: ObservableObject {
         )
         recordDetailImageUseCase = useCase
         return useCase
+    }
+
+    func thumbnailImageURL(for record: NativeDayRecord, force: Bool = false) async -> URL? {
+        let generation = userStateGeneration
+        let reference = NativeRecordReference(record.reference).canonicalValue
+        let month = String(record.dateKey.prefix(7))
+        func isListed() -> Bool {
+            recordGroups(monthKey: month).flatMap(\.records).contains {
+                NativeRecordReference($0.reference).canonicalValue == reference
+            }
+        }
+        func currentDetail() -> NativeRecordDetail? {
+            let values = recordDetails(from: record.dateKey, through: record.dateKey)
+            return values[reference] ?? values[record.reference]
+        }
+        guard isListed() else { return nil }
+        if isLocalDomainReference(record.reference) {
+            if force { await refreshLocalMonthProjection(monthKey: month) }
+            guard generation == userStateGeneration, isListed() else { return nil }
+            return currentDetail()?.imageURL
+        }
+        guard var detail = currentDetail() else { return nil }
+        if !force, let url = detail.imageURL { return url }
+        if force { detail.imageURL = nil }
+        if thumbnailImageUseCase == nil {
+            thumbnailImageUseCase = RecordDetailImageUseCase(
+                repository: recordRepository,
+                sessionProvider: { [weak self] forceRefresh in
+                    guard let self else { throw SupabaseRemoteError.requestFailed("app_state_unavailable") }
+                    return try await self.validSession(forceRefresh: forceRefresh)
+                },
+                contextProvider: { [weak self] in
+                    RecordDetailImageUserContext(userId: self?.currentUserId ?? "", generation: self?.userStateGeneration ?? -1,
+                                                 isSignedIn: self?.isSignedIn ?? false)
+                }
+            )
+        }
+        guard let useCase = thumbnailImageUseCase else { return nil }
+        let result = await useCase.perform(detail, reference: reference)
+        guard generation == userStateGeneration, isListed(), currentDetail()?.imagePath == detail.imagePath else { return nil }
+        return result.detail?.imageURL
     }
 
     private func prepareRecordExpressionPlan(
@@ -3710,7 +3857,7 @@ final class AppState: ObservableObject {
             updatedAt: Date()
         )
         let outcome = try await localRecordUseCase.update(command)
-        let oldMonth = String(current.recordDate.prefix(7))
+        let oldMonth = String(current.businessDate.prefix(7))
         let newMonth = String(outcome.record.recordDate.prefix(7))
         invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
         await refreshLocalMonthProjection(monthKey: oldMonth)
@@ -3732,7 +3879,7 @@ final class AppState: ObservableObject {
         ))
         invalidateRecordExpressionPlanState(afterChanging: [reference])
         recordsPath = NavigationPath()
-        await refreshLocalMonthProjection(monthKey: String(current.recordDate.prefix(7)))
+        await refreshLocalMonthProjection(monthKey: String(current.businessDate.prefix(7)))
         return true
     }
 
@@ -3744,7 +3891,7 @@ final class AppState: ObservableObject {
         invalidateRecordExpressionPlanState(
             afterChanging: [oldReference, savedReference]
         )
-        await refreshDashboard()
+        await refreshAfterRecordWrite(affectedDateKeys: [draft.recordDate])
         await loadAccounts()
         recordDetailCache.removeValue(forKey: savedReference)
         await loadRecordDetail(reference: savedReference, force: true)
@@ -3757,7 +3904,7 @@ final class AppState: ObservableObject {
         invalidateRecordExpressionPlanState(afterChanging: [reference])
         recordsPath = NavigationPath()
         await loadAccounts()
-        await refreshDashboard()
+        await refreshAfterRecordWrite()
         return true
     }
 
@@ -4328,8 +4475,12 @@ final class AppState: ObservableObject {
     }
 
     func resetUserScopedState() {
+        homePath = NavigationPath()
         dashboardRefreshGeneration += 1
         userStateGeneration += 1
+        stagingReadVersion += 1
+        localMonthReadVersions.removeAll()
+        loadingLocalReadKeys.removeAll()
         walletSnapshotActionUseCase?.reset()
         repaymentActionUseCase?.reset()
         accountManagementActionUseCase?.reset()
@@ -4340,8 +4491,11 @@ final class AppState: ObservableObject {
         pendingConfirmationUseCase?.reset()
         feedbackSubmissionUseCase?.reset()
         recordDetailImageUseCase?.reset()
+        thumbnailImageUseCase?.reset()
         dashboardSupplementTask?.cancel()
         dashboardSupplementTask = nil
+        dashboardCoreTask?.cancel()
+        dashboardCoreTask = nil
         isLoadingDashboard = false
         dashboard = DashboardSnapshot()
         todayPath = NavigationPath()
@@ -4565,6 +4719,7 @@ final class AppState: ObservableObject {
         let title = draft.resolvedTitle(domain: domain)
         let summary = draft.resolvedSummary(domain: domain)
         let record: LocalRecord
+        var previousMonthKey: String?
         if let existingRawId = draft.existingRawId {
             guard let existingID = UUID(uuidString: existingRawId) else {
                 throw LocalDataError.invalidIdentifier
@@ -4572,6 +4727,7 @@ final class AppState: ObservableObject {
             guard let current = try await localRecordUseCase.record(id: existingID) else {
                 throw LocalDataError.recordNotFound
             }
+            previousMonthKey = String(current.businessDate.prefix(7))
             let updated = try await localRecordUseCase.update(LocalRecordUpdateCommand(
                 id: existingID,
                 expectedVersion: current.localVersion,
@@ -4600,6 +4756,9 @@ final class AppState: ObservableObject {
             record = created.record
         }
         let monthKey = String(record.recordDate.prefix(7))
+        if let previousMonthKey, previousMonthKey != monthKey {
+            await refreshLocalMonthProjection(monthKey: previousMonthKey)
+        }
         await refreshLocalMonthProjection(monthKey: monthKey)
         if let existingRawId = draft.existingRawId {
             let oldReference = "local-data/\(existingRawId)"
@@ -4663,7 +4822,7 @@ final class AppState: ObservableObject {
                 accessToken: session.accessToken
             )
         }
-        await refreshDashboard()
+        await refreshAfterRecordWrite(affectedDateKeys: [draft.dateKey])
         if draft.kind != .universal || draft.domainKey == "wallet" {
             await loadAccounts()
         }

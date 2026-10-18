@@ -10,6 +10,11 @@ struct NativeRecordRoute: Hashable {
     let reference: String
 }
 
+struct NativeDomainDrillRoute: Hashable {
+    let domain: AppDomain
+    let dateKey: String
+}
+
 struct NativeDomainRoute: Hashable {
     let domainId: String
 }

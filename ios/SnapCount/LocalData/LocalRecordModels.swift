@@ -20,6 +20,17 @@ enum LocalRecordSourceKind: String, Codable, Equatable {
     case imported
 }
 
+/// 用户确认候选时的已编辑事实；图片与候选身份仍由仓库中的原行提供。
+struct LocalStagingConfirmation {
+    let domainKey: String
+    let title: String
+    let summary: String
+    let payload: [String: AnyCodable]
+    let recordDate: String
+    let recordTime: String?
+    let note: String?
+}
+
 struct LocalRecordCommand {
     let id: UUID
     let domainKey: String
@@ -149,6 +160,12 @@ struct LocalRecord: Equatable {
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
+
+    var businessDate: String {
+        NativeSleepFacts.businessDate(
+            domainKey: domainKey, payload: (try? LocalRecordCodec.decode(payloadJSON)) ?? [:], fallback: recordDate
+        )
+    }
 }
 
 struct LocalRecordTombstone: Equatable {
