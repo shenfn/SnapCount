@@ -2,12 +2,7 @@ import Foundation
 
 enum NativeSleepFacts {
     static func timestamp(_ value: String?) -> Date? {
-        guard let value else { return nil }
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = parser.date(from: value) { return date }
-        parser.formatOptions = [.withInternetDateTime]
-        return parser.date(from: value)
+        NativeLocalDate.timestamp(value)
     }
 
     static func businessDate(domainKey: String, payload: [String: AnyCodable], fallback: String) -> String {

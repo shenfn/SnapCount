@@ -99,7 +99,9 @@ struct NativeDomainScenePresentation {
             )
         }
         let sleep = domain == .sleep ? NativeSleepSummary.make(records: allRecords, details: details, dateKey: dateKey) : nil
-        let dayRecords = allRecords.filter { businessDay($0) == dateKey }
+        // 同一批事实只解析一次业务日期，七日趋势复用分组，避免每列重新解析睡眠起止。
+        let recordsByDay = Dictionary(grouping: allRecords, by: businessDay)
+        let dayRecords = recordsByDay[dateKey] ?? []
         let records: [NativeDayRecord]
         switch domain {
         case .expense:
@@ -182,7 +184,7 @@ struct NativeDomainScenePresentation {
         }
 
         let weeklyValues = trendDateKeys(for: domain, dateKey: dateKey).map { weekDay in
-            let dailyRecords = allRecords.filter { businessDay($0) == weekDay }
+            let dailyRecords = recordsByDay[weekDay] ?? []
             let scoped: [NativeDayRecord]
             switch domain {
             case .expense: scoped = dailyRecords.filter(isExpense)
@@ -229,16 +231,28 @@ struct NativeDomainScenePresentation {
 
         var timeline = domain == .expense ? records.filter(isExpense).compactMap { record -> NativeTimelineEntry? in
             let recordDetail = detail(for: record, details: details)
-            let clock = NativeLocalDate.financeTimeKey(occurredAt: recordDetail?.occurredAt)
-                ?? recordDetail?.transactionTime ?? record.timeLabel
-            guard let occurredAt = NativeLocalDate.financeOccurredAt(dateKey: record.dateKey, timeKey: clock),
-                  let normalized = NativeLocalDate.financeTimeKey(occurredAt: occurredAt) else { return nil }
-            let parts = normalized.split(separator: ":").compactMap { Int($0) }
-            guard parts.count == 2 else { return nil }
-            let source = NativeLocalDate.financeTimeKey(occurredAt: recordDetail?.occurredAt) != nil
-                ? "业务发生时间" : recordDetail?.transactionTime != nil ? "记录时间字段" : "记录时间标签"
-            return NativeTimelineEntry(record: record, minute: parts[0] * 60 + parts[1],
-                                       amount: expenseAmount(for: record, details: details), timeSourceLabel: source)
+            var candidates: [(String?, String)] = [
+                (NativeLocalDate.financeTimeKey(occurredAt: recordDetail?.occurredAt), "业务发生时间"),
+                (recordDetail?.transactionTime, "交易时间字段"),
+                (record.timeLabel, "记录时间标签")
+            ]
+            if let created = recordDetail?.createdAt,
+               let clock = NativeLocalDate.financeTimeKey(occurredAt: created) {
+                candidates.append((clock, "记录创建时间（\(NativeLocalDate.dateTimeLabel(created) ?? created)）"))
+            }
+            if let label = record.timeLabel, label.hasPrefix("上传 ") {
+                candidates.append((String(label.dropFirst(3)), "上传时间标签（原始日期未提供）"))
+            }
+            // 每个候选各自校验；空串/无效交易时间不能阻断后面的真实备用时间。
+            for (clock, source) in candidates {
+                guard let occurredAt = NativeLocalDate.financeOccurredAt(dateKey: record.dateKey, timeKey: clock),
+                      let normalized = NativeLocalDate.financeTimeKey(occurredAt: occurredAt) else { continue }
+                let parts = normalized.split(separator: ":").compactMap { Int($0) }
+                guard parts.count == 2 else { continue }
+                return NativeTimelineEntry(record: record, minute: parts[0] * 60 + parts[1],
+                    amount: expenseAmount(for: record, details: details), timeSourceLabel: source)
+            }
+            return nil
         }.sorted {
             $0.minute == $1.minute ? $0.id < $1.id : $0.minute < $1.minute
         } : []

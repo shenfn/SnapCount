@@ -177,8 +177,9 @@ final class IOSDomainBlocksTests: XCTestCase {
         var actual = detail(a, [:])
         actual.occurredAt = "2026-10-05T01:00:00Z"
         let result = model(.expense, records: [b, upload, invalid, a], details: [a.reference: actual])
-        XCTAssertEqual(result.timeline.map(\.minute), [540, 540])
-        XCTAssertEqual(result.timeline.map(\.record.reference), [a.reference, b.reference])
+        XCTAssertEqual(result.timeline.map(\.minute), [540, 540, 600])
+        XCTAssertEqual(result.timeline.map(\.record.reference), [a.reference, b.reference, upload.reference])
+        XCTAssertTrue(result.timeline.last?.timeSourceLabel.contains("上传") == true)
         XCTAssertEqual(result.records.count, 4, "未知业务时间只退出时间线，正式记录仍可达")
     }
 

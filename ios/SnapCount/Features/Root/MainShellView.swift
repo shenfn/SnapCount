@@ -9,7 +9,6 @@ struct MainShellView: View {
     @State private var showManualRecordSheet = false
     @State private var showsCalendar = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: appState.selectedDomain.rawValue) }
 
@@ -69,7 +68,7 @@ struct MainShellView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .animation(reduceMotion ? nil : .easeInOut(duration: JieziPrototypeMotion.page_transition_ms), value: appState.selectedDomain)
+        // 原生分页负责跟手/吸附，不再把选中变化变成整个分页树的第二次动画。
     }
 
     // MARK: - 顶部栏（SHELL-002）
@@ -128,7 +127,6 @@ struct MainShellView: View {
         .padding(.horizontal, JieziPrototypeLayout.page_inset)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .animation(reduceMotion ? nil : .easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
     }
 
     private var syncStatusIcon: some View {
@@ -173,7 +171,6 @@ struct MainShellView: View {
         }
         .padding(.horizontal, JieziPrototypeLayout.page_inset)
         .padding(.vertical, 8)
-        .animation(reduceMotion ? nil : .easeInOut(duration: JieziPrototypeMotion.background_ms), value: appState.selectedDomain)
     }
 
     private func bottomControls(compact: Bool) -> some View {
@@ -293,7 +290,8 @@ struct MainShellView: View {
     @MainActor
     private func selectPagerDomain(_ domain: AppDomain) {
         guard domain != appState.selectedDomain else { return }
-        appState.selectedDomain = domain
+        // 小点可直接跨域，不能把每个途经领域排成横穿中间页的动画。
+        withAnimation(nil) { appState.selectedDomain = domain }
         JieziHaptics.tap()
     }
 

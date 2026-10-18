@@ -1,12 +1,12 @@
 import Foundation
 import GRDB
 
-enum LocalFactKind: String, Equatable, Hashable {
+enum LocalFactKind: String, Equatable, Hashable, Sendable {
     case expense
     case record
 }
 
-struct LocalFact: Equatable, Identifiable {
+struct LocalFact: Equatable, Identifiable, Sendable {
     let id: UUID
     let profileID: UUID
     let reference: String
@@ -28,7 +28,7 @@ struct LocalFact: Equatable, Identifiable {
     let updatedAt: Date
 }
 
-struct LocalFactMonth: Equatable {
+struct LocalFactMonth: Equatable, Sendable {
     let profileID: UUID
     let facts: [LocalFact]
 }
@@ -62,6 +62,21 @@ final class LocalFactReader {
 
     func range(profileID: UUID, from startDate: String, to endDate: String) throws -> LocalFactMonth {
         try database.writer.read { db in
+            try Self.readMonth(db, profileID: profileID, from: startDate, to: endDate)
+        }
+    }
+
+    /// 用 GRDB 自己的队列读取，避免首页在主执行器同步等待 SQLite 和逐条投影。
+    /// 当前固定 GRDB 6.29.3 的异步 read 不随页面取消；AppState 仍核对身份和读取版本。
+    func activeMonth(monthKey: String) async throws -> LocalFactMonth? {
+        try await database.writer.read { db in
+            guard let value = try String.fetchOne(db, sql: "SELECT id FROM local_profiles ORDER BY created_at ASC, id ASC LIMIT 1"),
+                  let profileID = UUID(uuidString: value) else { return nil }
+            return try Self.readMonth(db, profileID: profileID, from: "\(monthKey)-01", to: "\(monthKey)-31")
+        }
+    }
+
+    private static func readMonth(_ db: Database, profileID: UUID, from startDate: String, to endDate: String) throws -> LocalFactMonth {
             let expenses = try Row.fetchAll(
                 db,
                 sql: """
@@ -88,7 +103,6 @@ final class LocalFactReader {
                 profileID: profileID,
                 facts: (expenses + records).sorted(by: Self.isNewer)
             )
-        }
     }
 
     private static func fact(expenseRow row: Row) throws -> LocalFact {

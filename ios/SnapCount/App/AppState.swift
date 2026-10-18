@@ -893,7 +893,11 @@ final class AppState: ObservableObject {
             + NativeDomainScenePresentation.trendDateKeys(for: .sleep, dateKey: dateKey)
             + [NativeLocalDate.shiftedDateKey(dateKey, byDays: -30) ?? dateKey]).sorted()
         guard let start = days.first, let end = days.last else { return }
-        for monthKey in NativeLocalDate.monthKeys(from: start, through: end) {
+        let selectedMonth = String(dateKey.prefix(7))
+        let months = NativeLocalDate.monthKeys(from: start, through: end)
+        let orderedMonths = months.contains(selectedMonth)
+            ? [selectedMonth] + months.filter { $0 != selectedMonth } : months
+        for monthKey in orderedMonths {
             if Task.isCancelled { return }
             await loadRecordMonth(monthKey, force: force)
         }
@@ -1102,8 +1106,7 @@ final class AppState: ObservableObject {
             }
         }
         do {
-            guard let profileID = try localFactReader.activeProfileID() else { return }
-            let month = try localFactReader.month(profileID: profileID, monthKey: monthKey)
+            guard let month = try await localFactReader.activeMonth(monthKey: monthKey) else { return }
             guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
             localFactMonths[monthKey] = month
             localExpenseMonthGroups[monthKey] = LocalFactReadModel.groups(

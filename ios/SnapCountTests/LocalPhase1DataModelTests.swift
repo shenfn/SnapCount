@@ -17,6 +17,8 @@ final class LocalPhase1DataModelTests: XCTestCase {
         ))
         let reader = try LocalFactReader(database: database)
         let wakeMonth = try reader.month(profileID: profile.id, monthKey: "2026-10")
+        let queuedWakeMonth = try await reader.activeMonth(monthKey: "2026-10")
+        XCTAssertEqual(queuedWakeMonth, wakeMonth, "异步队列读取与原事实语义一致，不改业务日期或历史行")
         XCTAssertEqual(wakeMonth.facts.first?.businessDate, "2026-10-01")
         XCTAssertTrue(try reader.month(profileID: profile.id, monthKey: "2026-11").facts.isEmpty)
         XCTAssertEqual(try repository.record(id: legacy.id)?.recordDate, "2026-11-10", "不静默重写历史行")

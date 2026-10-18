@@ -267,19 +267,25 @@ struct NativeDomainPageContent: View {
     }
 
     private var expenseTimeline: some View {
-        let minutes = Array(Set(model.timeline.map(\.minute))).sorted()
+        let entriesByMinute = Dictionary(grouping: model.timeline, by: \.minute)
+        let minutes = entriesByMinute.keys.sorted()
         let selected = selectedMinute.flatMap { value in minutes.min(by: { abs($0 - value) < abs($1 - value) }) } ?? minutes.last
-        let selectedEntries = model.timeline.filter { $0.minute == selected }
+        let selectedEntries = selected.flatMap { entriesByMinute[$0] } ?? []
+        let locatedReferences = Set(model.timeline.map { $0.record.reference })
+        let expenses = model.records.filter { $0.kind == .expense && $0.transactionType != "income" }
+        let missingTime = expenses.filter { !locatedReferences.contains($0.reference) }
         let maximum = isDrillDown ? max(model.timeline.compactMap(\.cumulativeAmount).max() ?? 0,
                                         model.timeline.compactMap(\.amount).max() ?? 0, 1) : 1
         return VStack(alignment: .leading, spacing: 12) {
             Text(isDrillDown ? "金额 · 按时间" : "时间分布").font(JieziType.cardTitle)
+            Text("\(expenses.count)笔支出 · \(model.timeline.count)笔有时间 · \(missingTime.count)笔时间未知")
+                .font(JieziFont.caption2).foregroundStyle(scene.muted).fixedSize(horizontal: false, vertical: true)
             if isDrillDown {
-                Text("柱为单笔支出，虚线为图中支出累计；缺业务时间的记录见下方明细。")
+                Text("柱为单笔支出，虚线为图中支出累计；时间来源见选中记录。")
                     .font(JieziFont.caption2).foregroundStyle(scene.muted)
             }
             if minutes.isEmpty {
-                Text("暂无可读取的业务发生时间；全部记录仍可在明细查看。")
+                Text("暂无可定位的时间；时间未知的记录可在下方展开。")
                     .font(JieziFont.caption).foregroundStyle(scene.muted)
             } else {
                 Chart {
@@ -295,10 +301,16 @@ struct NativeDomainPageContent: View {
                                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                                     .foregroundStyle(scene.accent)
                             }
-                        } else { PointMark(x: .value("业务时间", entry.minute), y: .value("记录", 0))
+                        } else if entry.id == entriesByMinute[entry.minute]?.first?.id {
+                            PointMark(x: .value("记录时钟", entry.minute), y: .value("记录", 0))
                             .symbolSize(entry.minute == selected ? 65 : 30)
                             .foregroundStyle(scene.dataAccent.opacity(entry.minute == selected ? 1 : 0.4))
-                            .accessibilityLabel("\(clockLabel(entry.minute))，\(entry.record.title)")
+                            .annotation(position: .top) {
+                                if (entriesByMinute[entry.minute]?.count ?? 0) > 1, entry.minute != selected {
+                                    Text("\(entriesByMinute[entry.minute]?.count ?? 0)笔").font(JieziFont.caption2).foregroundStyle(scene.foreground)
+                                }
+                            }
+                            .accessibilityLabel("\(clockLabel(entry.minute))，\(entriesByMinute[entry.minute]?.count ?? 0)笔支出")
                         }
                     }
                     if let selected {
@@ -333,24 +345,27 @@ struct NativeDomainPageContent: View {
                 }
                 .chartXSelection(value: $selectedMinute)
                 .frame(height: isDrillDown ? 200 : 140)
-                Picker("选中业务时间", selection: Binding(
+                Picker("查看时间组", selection: Binding(
                     get: { selected ?? minutes[0] }, set: { selectedMinute = $0 }
                 )) {
-                    ForEach(minutes, id: \.self) { minute in Text(clockLabel(minute)).tag(minute) }
+                    ForEach(minutes, id: \.self) { minute in
+                        Text("\(clockLabel(minute)) · \(entriesByMinute[minute]?.count ?? 0)笔").tag(minute)
+                    }
                 }
                 .pickerStyle(.menu)
                 .tint(scene.dataAccent)
+                Text("当前时间组 · \(selectedEntries.count)笔").font(JieziFont.caption2).foregroundStyle(scene.muted)
                 ForEach(selectedEntries) { entry in
                     recordRow(entry.record, timeLabel: clockLabel(entry.minute))
                     Text("时间来源：\(entry.timeSourceLabel)").font(JieziFont.caption2).foregroundStyle(scene.muted)
                 }
-                Text("相同时间的记录分别列出；上传时间不参与分布。")
+                Text("发生时间优先；缺失时使用标明来源的记录或上传时间，补录时间不代表消费发生时间。")
                     .font(JieziFont.caption2).foregroundStyle(scene.muted)
             }
-            let missingTimeCount = model.records.filter { $0.kind == .expense && $0.transactionType != "income" }.count - model.timeline.count
-            if missingTimeCount > 0 {
-                Text("\(missingTimeCount)笔支出缺少有效业务时间，保留在整日记账明细中。")
-                    .font(JieziFont.caption2).foregroundStyle(scene.muted)
+            if !missingTime.isEmpty {
+                DisclosureGroup("时间未知 · \(missingTime.count)笔") {
+                    ForEach(missingTime) { record in recordRow(record, timeLabel: "时间未提供") }
+                }.font(JieziFont.caption).tint(scene.dataAccent)
             }
         }
         .foregroundStyle(scene.foreground)

@@ -193,13 +193,13 @@ enum NativeLocalDate {
     }
 
     private static func parse(_ value: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fractional = isoFormatter(fractional: true)
         if let date = fractional.date(from: value) { return date }
+        return isoFormatter(fractional: false).date(from: value)
+    }
 
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        return standard.date(from: value)
+    static func timestamp(_ value: String?) -> Date? {
+        value.flatMap { parse($0) }
     }
 
     private static func date(fromKey value: String) -> Date? {
@@ -218,11 +218,24 @@ enum NativeLocalDate {
     }
 
     private static func formatter(_ format: String) -> DateFormatter {
+        // 日期条/睡眠投影会重复调用；每线程复用，避免滑动时逐条创建解析器。
+        let key = "com.jiezi.NativeLocalDate.\(format)"
+        if let cached = Thread.current.threadDictionary[key] as? DateFormatter { return cached }
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = timeZone
         formatter.dateFormat = format
+        Thread.current.threadDictionary[key] = formatter
+        return formatter
+    }
+
+    private static func isoFormatter(fractional: Bool) -> ISO8601DateFormatter {
+        let key = "com.jiezi.NativeLocalDate.iso.\(fractional)"
+        if let cached = Thread.current.threadDictionary[key] as? ISO8601DateFormatter { return cached }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = fractional ? [.withInternetDateTime, .withFractionalSeconds] : [.withInternetDateTime]
+        Thread.current.threadDictionary[key] = formatter
         return formatter
     }
 }

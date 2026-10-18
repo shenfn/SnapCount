@@ -7,6 +7,36 @@ import CoreText
 /// 合成事实的原生渲染证据，只证明能生成图片，不代替视觉、手势或真机性能验收。
 @MainActor
 final class IOSPrototypeRenderingTests: XCTestCase {
+    func testIOSV2POLISH003P1ExportTimelineWithCoincidentFallbackAndUnknownTimes() async throws {
+        let date = "2026-10-17"
+        let records = ["早餐", "咖啡", "补录", "未填时间"].enumerated().map { index, title in
+            NativeDayRecord(id: "timeline-\(index)", reference: "expense/timeline-\(index)", dateKey: date,
+                kind: .expense, domainKey: nil, title: title, subtitle: "", value: "¥12.00",
+                timeLabel: index < 2 ? "09:00" : nil, systemImage: "creditcard", status: "done")
+        }
+        let detail = NativeRecordDetail(id: records[2].reference, rawId: records[2].id, kind: "expense",
+            title: records[2].title, subtitle: "", value: "¥12.00", detailRows: [], imageURL: nil,
+            imageLoadError: false, imagePath: nil, imageHash: nil, amount: 12, merchantName: "示例店",
+            platform: nil, category: nil, paymentMethod: nil, recordDate: date, note: nil,
+            companionMessage: nil, accountId: nil, systemImage: "creditcard", payload: nil,
+            createdAt: "2026-10-18T02:30:00Z")
+        let details = [detail.id: detail]
+        let model = NativeDomainScenePresentation.make(domain: .expense, dateKey: date,
+            weekGroups: [NativeDayRecordGroup(dateKey: date, records: records)], details: details,
+            isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: date)
+        XCTAssertEqual(model.records.count, 4)
+        XCTAssertEqual(model.timeline.count, 3)
+        let state = try makeIsolatedState()
+        for size in [DynamicTypeSize.large, .accessibility3] {
+            let view = ZStack {
+                DomainSceneView(domain: .expense)
+                NativeDomainPageContent(domain: .expense, weekDates: model.weeklyValues.map(\.dateKey),
+                    details: details, loadingWindow: false, model: model)
+            }.environmentObject(state).environment(\.dynamicTypeSize, size)
+            try await capture(view, name: "timeline-fallback-\(size)", height: 1050)
+        }
+    }
+
     func testIOSV2POLISH011RegisteredFontsResolveAndCoverRepresentativeText() throws {
         let serif = try XCTUnwrap(UIFont(name: JieziFontFamily.serif, size: 24))
         let numeric = try XCTUnwrap(UIFont(name: JieziFontFamily.numeric, size: 44))

@@ -2814,14 +2814,14 @@ final class SnapCountTests: XCTestCase {
         state.isSignedIn = true
         state.currentUserId = Self.expressionTestSession.user.id
         await state.loadRecordDateWindow(around: "2000-01-05")
-        XCTAssertEqual(repository.fetchMonthKeys, ["1999-12", "2000-01"])
+        XCTAssertEqual(repository.fetchMonthKeys, ["2000-01", "1999-12"])
         XCTAssertEqual(repository.fetchMonthCount, 2)
 
         state.recordMonthMessages["1999-12"] = "暂时读取失败"
         state.recordMonthMessages["2000-01"] = "暂时读取失败"
         await state.loadRecordDateWindow(around: "2000-01-05", force: true)
 
-        XCTAssertEqual(repository.fetchMonthKeys, ["1999-12", "2000-01", "1999-12", "2000-01"])
+        XCTAssertEqual(repository.fetchMonthKeys, ["2000-01", "1999-12", "2000-01", "1999-12"])
         XCTAssertEqual(repository.fetchMonthCount, 4)
         XCTAssertNil(state.recordMonthMessages["1999-12"])
         XCTAssertNil(state.recordMonthMessages["2000-01"])
