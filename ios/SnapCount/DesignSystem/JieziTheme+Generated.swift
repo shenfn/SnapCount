@@ -246,6 +246,7 @@ enum JieziPrototypeLayout {
     static let page_dot_drag_distance: CGFloat = 8
     static let add_button_size: CGFloat = 48
     static let week_day_height: CGFloat = 52
+    static let date_strip_month_threshold: CGFloat = 40
     static let calendar_day_height: CGFloat = 44
     static let calendar_arrow_hit_size: CGFloat = 44
     static let food_energy_reference_height: CGFloat = 90

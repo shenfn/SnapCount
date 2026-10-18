@@ -103,6 +103,25 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         }
     }
 
+    func testIOSV2POLISH002F02ExportMonthDateStripBoundaries() async throws {
+        for dateKey in ["2024-03-01", "2024-03-31"] {
+            for size in [DynamicTypeSize.large, .accessibility3] {
+                let state = try makeIsolatedState()
+                state.selectedDateKey = dateKey
+                let view = VStack(alignment: .leading, spacing: 16) {
+                    Text("日期选择 · \(dateKey)").font(JieziFont.body)
+                    DomainDatePickerView(showsCalendar: .constant(false))
+                    Spacer()
+                }
+                .padding(20)
+                .background(JieziTheme.pageBackground)
+                .environmentObject(state)
+                .environment(\.dynamicTypeSize, size)
+                try await capture(view, name: "date-strip-\(dateKey)-\(size)", height: 300)
+            }
+        }
+    }
+
     func testIOSV2POLISH007ExportAllFiveOnboardingSteps() async throws {
         let sizes: [DynamicTypeSize] = [.large, .accessibility3]
         for size in sizes {

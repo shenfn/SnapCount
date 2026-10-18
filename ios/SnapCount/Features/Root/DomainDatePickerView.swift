@@ -3,6 +3,12 @@ import SwiftUI
 struct DomainDatePickerView: View {
     @EnvironmentObject private var appState: AppState
     @Binding var showsCalendar: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .body) private var rowHeight = JieziPrototypeLayout.week_day_height
+    @ScaledMetric(relativeTo: .body) private var minimumDayWidth: CGFloat = 44
+    @GestureState private var isDragging = false
+    @State private var leadingPull: CGFloat = 0
+    @State private var trailingPull: CGFloat = 0
 
     private var scene: JieziSceneTokens { JieziScene.tokens(for: appState.selectedDomain.rawValue) }
     private var selectedForeground: Color {
@@ -12,49 +18,78 @@ struct DomainDatePickerView: View {
         }
     }
 
-    private var weekDates: [String] {
-        NativeLocalDate.weekDateKeys(containing: appState.selectedDateKey)
-    }
-
-    private var weekGroups: [NativeDayRecordGroup] {
-        guard let first = weekDates.first, let last = weekDates.last else { return [] }
-        return appState.recordGroups(from: first, through: last)
-    }
+    private var monthKey: String { String(appState.selectedDateKey.prefix(7)) }
+    private var dates: [String] { NativeLocalDate.monthDateKeys(monthKey) }
 
     var body: some View {
-        let groups = weekGroups
-        VStack(spacing: 9) {
-            HStack(spacing: 6) {
-                ForEach(weekDates, id: \.self) { dateKey in
-                    let count = groups.first(where: { $0.dateKey == dateKey })?.records.filter(NativeRecordQuery.isFormal).count ?? 0
-                    let isSelected = dateKey == appState.selectedDateKey
-                    Button {
-                        appState.selectedDateKey = dateKey
-                        JieziHaptics.tap()
-                    } label: {
-                        VStack(spacing: 3) {
-                            Text(NativeLocalDate.weekdayShortLabel(for: dateKey)?.replacingOccurrences(of: "周", with: "") ?? "")
-                                .font(.system(size: 10, weight: .medium))
-                            Text("\(NativeLocalDate.dayOfMonth(dateKey) ?? 0)")
-                                .font(JieziType.moneyInline.monospacedDigit())
-                            Circle()
-                                .fill(count > 0 ? (isSelected ? selectedForeground : scene.accent) : .clear)
-                                .frame(width: 4, height: 4)
+        let groups = appState.recordGroups(monthKey: monthKey)
+        GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 6) {
+                        ForEach(dates, id: \.self) { dateKey in
+                            let count = groups.first(where: { $0.dateKey == dateKey })?.records.filter(NativeRecordQuery.isFormal).count ?? 0
+                            dayButton(dateKey, count: count, viewportWidth: viewport.size.width)
+                                .id(dateKey)
                         }
-                        .foregroundStyle(isSelected ? selectedForeground : scene.foreground)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: JieziPrototypeLayout.week_day_height)
-                        .background(
-                            isSelected ? scene.accent : .clear,
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(dateKey)，\(count) 条正式记录\(isSelected ? "，已选择" : "")")
+                    .background(GeometryReader { content in
+                        Color.clear.preference(
+                            key: DateStripFrameKey.self,
+                            value: content.frame(in: .named("domain-date-strip"))
+                        )
+                    })
+                }
+                .id(monthKey)
+                .scrollIndicators(.hidden)
+                .scrollBounceBehavior(.always, axes: .horizontal)
+                .coordinateSpace(name: "domain-date-strip")
+                .onPreferenceChange(DateStripFrameKey.self) { frame in
+                    guard frame.width > 0 else { return }
+                    let leading = max(0, frame.minX)
+                    let trailing = max(0, viewport.size.width - frame.maxX)
+                    // 月内正常滚动不发布逐帧位置，只观察边界回弹距离。
+                    if leadingPull != leading { leadingPull = leading }
+                    if trailingPull != trailing { trailingPull = trailing }
+                }
+                .simultaneousGesture(DragGesture(minimumDistance: 8)
+                    .updating($isDragging) { _, dragging, _ in dragging = true }
+                    .onEnded { value in
+                        if let dateKey = Self.releasedBoundaryDate(
+                            monthKey: monthKey, leadingPull: leadingPull, trailingPull: trailingPull,
+                            translation: value.translation
+                        ) {
+                            select(dateKey)
+                        }
+                    })
+                .overlay(alignment: .leading) {
+                    boundaryHint("返回上月", pull: leadingPull)
+                }
+                .overlay(alignment: .trailing) {
+                    boundaryHint("进入下月", pull: trailingPull)
+                }
+                .onChange(of: appState.selectedDateKey) { _, dateKey in
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                        proxy.scrollTo(dateKey, anchor: .center)
+                    }
+                }
+                .task(id: monthKey) {
+                    // 月份内容布局后定位；取消的旧月份不再滚动新内容。
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    proxy.scrollTo(appState.selectedDateKey, anchor: .center)
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("日期选择，\(NativeLocalDate.monthTitle(monthKey))")
+                .accessibilityAction(named: Text("上个月最后一天")) {
+                    if let first = dates.first, let date = NativeLocalDate.shiftedDateKey(first, byDays: -1) { select(date) }
+                }
+                .accessibilityAction(named: Text("下个月第一天")) {
+                    if let last = dates.last, let date = NativeLocalDate.shiftedDateKey(last, byDays: 1) { select(date) }
                 }
             }
         }
+        .frame(height: rowHeight)
         .sheet(isPresented: $showsCalendar) {
             DomainCalendarSheet(initialDateKey: appState.selectedDateKey)
                 .environmentObject(appState)
@@ -63,6 +98,69 @@ struct DomainDatePickerView: View {
                 .presentationCornerRadius(34)
         }
     }
+
+    private func select(_ dateKey: String) {
+        leadingPull = 0
+        trailingPull = 0
+        appState.selectedDateKey = dateKey
+        JieziHaptics.tap()
+    }
+
+    private func dayButton(_ dateKey: String, count: Int, viewportWidth: CGFloat) -> some View {
+        let isSelected = dateKey == appState.selectedDateKey
+        return Button { select(dateKey) } label: {
+            VStack(spacing: 3) {
+                Text(NativeLocalDate.weekdayShortLabel(for: dateKey)?.replacingOccurrences(of: "周", with: "") ?? "")
+                    .font(JieziFont.caption2)
+                Text("\(NativeLocalDate.dayOfMonth(dateKey) ?? 0)")
+                    .font(JieziType.moneyInline.monospacedDigit())
+                Circle()
+                    .fill(count > 0 ? (isSelected ? selectedForeground : scene.accent) : .clear)
+                    .frame(width: 4, height: 4)
+            }
+            .foregroundStyle(isSelected ? selectedForeground : scene.foreground)
+            .frame(width: max(minimumDayWidth, (viewportWidth - 36) / 7), height: rowHeight)
+            .background(isSelected ? scene.accent : .clear, in: RoundedRectangle(cornerRadius: 16))
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(dateKey)，\(count) 条正式记录\(isSelected ? "，已选择" : "")")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func boundaryHint(_ title: String, pull: CGFloat) -> some View {
+        Text(pull >= JieziPrototypeLayout.date_strip_month_threshold ? "松手\(title)" : "继续拖动")
+            .font(JieziFont.caption2)
+            .foregroundStyle(scene.foreground)
+            .padding(.horizontal, 6)
+            .frame(maxWidth: JieziPrototypeLayout.date_strip_month_threshold * 2)
+            .opacity(isDragging && pull > 8 ? 1 : 0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    static func releasedBoundaryDate(
+        monthKey: String, leadingPull: CGFloat, trailingPull: CGFloat, translation: CGSize
+    ) -> String? {
+        guard leadingPull.isFinite, trailingPull.isFinite,
+              translation.width.isFinite, translation.height.isFinite,
+              abs(translation.width) > abs(translation.height) else { return nil }
+        let days = NativeLocalDate.monthDateKeys(monthKey)
+        if translation.width > 0, leadingPull >= JieziPrototypeLayout.date_strip_month_threshold,
+           let first = days.first {
+            return NativeLocalDate.shiftedDateKey(first, byDays: -1)
+        }
+        if translation.width < 0, trailingPull >= JieziPrototypeLayout.date_strip_month_threshold,
+           let last = days.last {
+            return NativeLocalDate.shiftedDateKey(last, byDays: 1)
+        }
+        return nil
+    }
+}
+
+private struct DateStripFrameKey: PreferenceKey {
+    static var defaultValue: CGRect { .zero }
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 struct DomainCalendarSheet: View {

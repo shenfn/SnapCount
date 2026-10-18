@@ -2,6 +2,28 @@ import XCTest
 @testable import SnapCount
 
 final class IOSDomainBlocksTests: XCTestCase {
+    @MainActor
+    func testIOSV2POLISH002AF02MonthPullCommitsOnlyAtReleasedHorizontalBoundary() {
+        func release(_ month: String = "2024-03", leading: CGFloat = 0, trailing: CGFloat = 0,
+                     x: CGFloat = 120, y: CGFloat = 0) -> String? {
+            DomainDatePickerView.releasedBoundaryDate(
+                monthKey: month, leadingPull: leading, trailingPull: trailing,
+                translation: CGSize(width: x, height: y)
+            )
+        }
+        XCTAssertNil(release(leading: 39))
+        XCTAssertEqual(release(leading: 40), "2024-02-29")
+        XCTAssertEqual(release("2026-01", leading: 70), "2025-12-31")
+        XCTAssertEqual(release(trailing: 40, x: -120), "2024-04-01")
+        XCTAssertNil(release(leading: 60, x: -120))
+        XCTAssertNil(release(trailing: 39, x: -120))
+        XCTAssertNil(release(leading: 60, y: 140))
+        XCTAssertNil(release(leading: 60, x: 0))
+        XCTAssertNil(release(leading: .nan))
+        XCTAssertNil(release(leading: 60, x: .infinity))
+        XCTAssertNil(release("invalid", leading: 60))
+    }
+
     func testIOSV2POLISH004F03RemoteRefreshDoesNotHideReadableFormalRecords() {
         let meal = record("local-meal", date: "2026-10-05", domain: .food)
         let groups = [NativeDayRecordGroup(dateKey: meal.dateKey, records: [meal])]

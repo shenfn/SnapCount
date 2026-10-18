@@ -562,6 +562,7 @@
       "page_dot_drag_distance": 8,
       "add_button_size": 48,
       "week_day_height": 52,
+      "date_strip_month_threshold": 40,
       "calendar_day_height": 44,
       "calendar_arrow_hit_size": 44,
       "food_energy_reference_height": 90,

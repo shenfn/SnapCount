@@ -26,8 +26,9 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         state.selectedDomain = .food
         let todayKey = NativeLocalDate.dateKey(Date())
         let todayMonth = NativeMonthKey.current()
-        await state.loadRecordDateWindow(around: state.selectedDateKey)
-        await state.loadRecordMonth(todayMonth)
+        // 此场景的前提是外部提交已经成功；预热本地缓存不启动并发云端补充写入。
+        await state.refreshLocalRecognitionProjection(monthKey: "2000-01")
+        await state.refreshLocalRecognitionProjection(monthKey: todayMonth)
         XCTAssertTrue(state.recordGroups(monthKey: "2000-01").flatMap(\.records).isEmpty)
         XCTAssertTrue(state.recordGroups(monthKey: todayMonth).flatMap(\.records).isEmpty)
 
