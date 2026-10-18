@@ -242,11 +242,14 @@ enum JieziPrototypeLayout {
     static let selected_page_width: CGFloat = 22
     static let page_dot_size: CGFloat = 8
     static let page_dot_gap: CGFloat = 6
-    static let page_dot_hit_width: CGFloat = 32
+    static let page_dot_hit_width: CGFloat = 44
+    static let page_dot_drag_distance: CGFloat = 8
     static let add_button_size: CGFloat = 48
     static let week_day_height: CGFloat = 52
     static let calendar_day_height: CGFloat = 44
     static let calendar_arrow_hit_size: CGFloat = 44
+    static let food_energy_reference_height: CGFloat = 90
+    static let food_energy_point_size: CGFloat = 64
 }
 
 enum JieziPrototypeMotion {

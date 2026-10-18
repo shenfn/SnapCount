@@ -89,6 +89,21 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(AppOverlay.allCases.filter { $0 != .none }.map(\.title), ["收件箱", "记录", "观察", "钱包", "设置"])
     }
 
+    func testIOSV2POLISH005F01PagerPositionsRespectHitAreasAndClampFiniteEdges() {
+        XCTAssertEqual(JieziPrototypeLayout.page_dot_hit_width, 44)
+        XCTAssertEqual(AppDomain.pagerDomain(at: -100), .expense)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 0), .expense)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 43.99), .expense)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 44), .sleep)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 88), .food)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 132), .sport)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 176), .reading)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 220), .reading)
+        XCTAssertEqual(AppDomain.pagerDomain(at: 10_000), .reading)
+        XCTAssertNil(AppDomain.pagerDomain(at: .nan))
+        XCTAssertNil(AppDomain.pagerDomain(at: .infinity))
+    }
+
     @MainActor
     func testDomainPageEmptyStateAndFinanceHeroContract() {
         let dateKey = "2026-10-17"

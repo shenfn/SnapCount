@@ -4772,6 +4772,14 @@ enum AppDomain: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static func pagerDomain(at x: CGFloat) -> AppDomain? {
+        let width = JieziPrototypeLayout.page_dot_hit_width
+        guard x.isFinite, width > 0 else { return nil }
+        if x <= 0 { return allCases.first }
+        if x >= CGFloat(allCases.count) * width { return allCases.last }
+        return allCases[Int(x / width)]
+    }
+
     var title: String {
         switch self {
         case .expense: return "记账"

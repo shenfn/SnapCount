@@ -157,6 +157,48 @@ final class IOSPrototypeRenderingTests: XCTestCase {
         }
     }
 
+    func testIOSV2POLISH004F14ExportEnergyReferenceBoundaryStates() async throws {
+        let date = "2026-10-17"
+        let meal = NativeDayRecord(
+            id: "energy-meal", reference: "data/energy-meal", dateKey: date, kind: .food,
+            domainKey: "food", title: "合成餐食", subtitle: "午餐 · 估算", value: "",
+            timeLabel: "12:30", systemImage: "fork.knife", status: "done"
+        )
+        let cases: [(String, Double?)] = [("zero", 0), ("above-reference", 3_200), ("not-estimated", nil)]
+        for (name, energy) in cases {
+            let payload: [String: AnyCodable] = energy.map { ["total_calorie_kcal": AnyCodable($0)] } ?? [:]
+            let detail = NativeRecordDetail(
+                id: meal.reference, rawId: meal.id, kind: "data", title: meal.title,
+                subtitle: meal.subtitle, value: "", detailRows: [], imageURL: nil,
+                imageLoadError: false, imagePath: nil, imageHash: nil, amount: nil,
+                merchantName: nil, platform: nil, category: nil, paymentMethod: nil,
+                recordDate: date, note: nil, companionMessage: nil, accountId: nil,
+                systemImage: meal.systemImage, payload: payload, domainKey: "food"
+            )
+            let model = NativeDomainScenePresentation.make(
+                domain: .food, dateKey: date,
+                weekGroups: [NativeDayRecordGroup(dateKey: date, records: [meal])],
+                details: [meal.reference: detail], isSignedIn: false, isLoading: false,
+                errorMessage: nil, todayKey: date
+            )
+            for size in [DynamicTypeSize.large, .accessibility3] {
+                let state = try makeIsolatedState()
+                state.selectedDateKey = date
+                state.selectedDomain = .food
+                let view = ZStack {
+                    DomainSceneView(domain: .food)
+                    NativeDomainPageContent(
+                        domain: .food, weekDates: model.weeklyValues.map(\.dateKey),
+                        details: [meal.reference: detail], loadingWindow: false, model: model
+                    )
+                }
+                .environmentObject(state)
+                .environment(\.dynamicTypeSize, size)
+                try await capture(view, name: "food-energy-\(name)-\(size)", height: 1_100)
+            }
+        }
+    }
+
     func testIOSV2POLISH010ExportReachableOverlayRoots() async throws {
         for size in [DynamicTypeSize.large, .accessibility3] {
             let pages: [(String, AnyView)] = [

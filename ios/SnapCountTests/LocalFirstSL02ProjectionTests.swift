@@ -8,11 +8,22 @@ import XCTest
 final class LocalFirstSL02ProjectionTests: XCTestCase {
 
     func testIOSV2POLISH006F17NewExpensePreservesAllDomainFactsAndDetailsInWarmMonth() async throws {
+        try await assertNewExpensePreservesDomainFacts(date: Date())
+    }
+
+    func testIOSV2POLISH006F17NewExpensePreservesHistoricalMonthDomainDetails() async throws {
+        let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2000-01-05T12:00:00+08:00"))
+        try await assertNewExpensePreservesDomainFacts(date: date)
+    }
+
+    private func assertNewExpensePreservesDomainFacts(date: Date) async throws {
         let harness = try Self.makeHarness(session: nil, expenseStub: false)
         defer { harness.cleanup() }
         let state = harness.state
         state.resetUserScopedState()
         var food = NativeManualRecordDraft(kind: .universal, domainKey: "food")
+        food.date = date
+        food.time = date
         food.primaryValueText = "450"
         food.dimension = "午餐"
         let foodSaved = await state.createManualRecord(food, domain: nil)
@@ -43,7 +54,9 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             details: details, isSignedIn: false, isLoading: false, errorMessage: nil, todayKey: dateKey
         )
         XCTAssertEqual(foodPage.knownPrimaryTotal, 450)
-        XCTAssertTrue(state.dashboard.dayRecordGroups.flatMap(\.records).contains { $0.reference == meal.reference })
+        if monthKey == NativeMonthKey.current() {
+            XCTAssertTrue(state.dashboard.dayRecordGroups.flatMap(\.records).contains { $0.reference == meal.reference })
+        }
         XCTAssertEqual(state.localAccountBalances[account.id], 8_750)
 
         await state.loadRecordMonth(monthKey)

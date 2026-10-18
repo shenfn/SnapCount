@@ -147,7 +147,7 @@ struct NativeDomainScenePresentation {
             secondaryValue = "\(records.count) 条"
             note = missingPrimaryCount > 0 ? "\(missingPrimaryCount) 条记录未提供睡眠时长" : (primaryTotal == nil ? nil : "按记录中的实际业务日期统计")
         case .food:
-            primaryLabel = "估算热量"
+            primaryLabel = "已记录食物能量"
             primaryValue = measurementText(total: primaryTotal, recordCount: records.count, missingCount: missingPrimaryCount, empty: "暂无饮食记录", unit: .calories)
             secondaryLabel = "餐次"
             secondaryValue = "\(records.count) 餐"

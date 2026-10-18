@@ -94,6 +94,17 @@ struct DomainCalendarSheet: View {
             ScrollView {
                 VStack(spacing: 14) {
                     header
+                    Button {
+                        previewDateKey = NativeLocalDate.dateKey(Date())
+                        JieziHaptics.tap()
+                    } label: {
+                        Label("回到今天", systemImage: "calendar.badge.clock")
+                            .font(JieziType.button)
+                            .foregroundStyle(JieziScene.expense.accent)
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("在日历中选择今天，点查看后生效")
                     weekdayHeader
                     calendarGrid(groups: groups, expenses: expenses, maximum: maximum)
                     Text("深浅表示支出；圆点表示当天任意领域有正式记录")

@@ -234,14 +234,14 @@ struct MainShellView: View {
     private var domainPageButtons: some View {
         HStack(spacing: 0) {
             ForEach(AppDomain.allCases) { domain in
-                Button { appState.selectedDomain = domain } label: {
+                Button { selectPagerDomain(domain) } label: {
                     Capsule()
                         .fill(domain == appState.selectedDomain ? scene.pagerAccent : scene.foreground.opacity(0.30))
                         .frame(
                             width: domain == appState.selectedDomain ? JieziPrototypeLayout.selected_page_width : JieziPrototypeLayout.page_dot_size,
                             height: JieziPrototypeLayout.page_dot_size
                         )
-                        .frame(width: 44, height: 44)
+                        .frame(width: JieziPrototypeLayout.page_dot_hit_width, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -250,6 +250,36 @@ struct MainShellView: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
+        .contentShape(Rectangle())
+        .highPriorityGesture(
+            DragGesture(minimumDistance: JieziPrototypeLayout.page_dot_drag_distance)
+                .onChanged { value in
+                    if let domain = AppDomain.pagerDomain(at: value.location.x) {
+                        selectPagerDomain(domain)
+                    }
+                }
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("领域选择")
+        .accessibilityValue(appState.selectedDomain.title)
+        .accessibilityAdjustableAction { direction in
+            guard let index = AppDomain.allCases.firstIndex(of: appState.selectedDomain) else { return }
+            let offset: Int
+            switch direction {
+            case .increment: offset = 1
+            case .decrement: offset = -1
+            @unknown default: return
+            }
+            let x = (CGFloat(index + offset) + 0.5) * JieziPrototypeLayout.page_dot_hit_width
+            if let domain = AppDomain.pagerDomain(at: x) { selectPagerDomain(domain) }
+        }
+    }
+
+    @MainActor
+    private func selectPagerDomain(_ domain: AppDomain) {
+        guard domain != appState.selectedDomain else { return }
+        appState.selectedDomain = domain
+        JieziHaptics.tap()
     }
 
     private var domainEnglishName: String {

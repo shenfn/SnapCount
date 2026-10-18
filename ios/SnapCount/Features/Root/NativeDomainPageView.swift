@@ -41,6 +41,7 @@ struct NativeDomainPageContent: View {
     @State private var selectedMerchant: MerchantSelection?
     @State private var showDayRecords = false
     @State private var selectedMinute: Int?
+    @State private var showsEnergyReference = false
 
     private struct MerchantSelection: Identifiable { let id: String }
 
@@ -93,6 +94,11 @@ struct NativeDomainPageContent: View {
                     }
             }
         }
+        .alert("通用营养参考", isPresented: $showsEnergyReference) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("2,000 千卡是营养标签使用的通用参考值，个人需要可能不同。这不是你的个人目标或超标线，也不表示还能吃多少。点位只对应已记录的餐食，不代表全天完整摄入。")
+        }
     }
 
     @ViewBuilder
@@ -119,6 +125,7 @@ struct NativeDomainPageContent: View {
                 .font(JieziFont.caption).foregroundStyle(scene.muted)
             recordsOrEmpty
         case .food:
+            foodEnergyReference
             recordsOrEmpty
             pairedCards {
                 if let meal = model.highestMeal { highestMealCard(meal) }
@@ -268,6 +275,69 @@ struct NativeDomainPageContent: View {
         return metricCard("本周累计", value: model.periodTotal.map { formatted($0) }
             ?? (model.periodRecordCount == 0 ? "暂无正式记录" : "指标字段不完整"),
             caption: "\(model.validDayCount) 个指标完整日 · 查看日期 ›")
+    }
+
+    private var foodEnergyReference: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("能量参考尺").font(JieziType.cardTitle)
+            Button { showsEnergyReference = true } label: {
+                Label("2,000 千卡 · 通用营养参考", systemImage: "info.circle")
+                    .font(JieziFont.caption)
+                    .foregroundStyle(scene.accent)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minHeight: 44, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("查看通用参考与个人需要的区别")
+            if model.records.isEmpty {
+                Text("记录餐食后，在这里回看已记录的食物能量。")
+                    .font(JieziFont.body)
+            } else if let energy = model.knownPrimaryTotal, energy.isFinite, energy >= 0 {
+                Chart {
+                    RuleMark(y: .value("参考尺", 0.5))
+                        .foregroundStyle(scene.foreground.opacity(0.18))
+                    RuleMark(x: .value("通用参考", 2_000.0))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                        .foregroundStyle(scene.muted)
+                        .accessibilityLabel("2,000 千卡通用参考，不是个人目标")
+                    PointMark(x: .value("已记录食物能量", energy), y: .value("参考尺", 0.5))
+                        .symbolSize(JieziPrototypeLayout.food_energy_point_size)
+                        .foregroundStyle(scene.dataAccent)
+                        .accessibilityLabel("已记录食物能量约 \(String(format: "%.0f", energy)) 千卡")
+                }
+                .chartXScale(domain: .automatic(includesZero: true))
+                .chartYScale(domain: 0.0...1.0)
+                .chartYAxis(.hidden)
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: dynamicTypeSize.isAccessibilitySize ? 2 : 4)) { value in
+                        AxisTick().foregroundStyle(scene.muted)
+                        AxisValueLabel {
+                            if let energy = value.as(Double.self) {
+                                Text(energy, format: .number.precision(.fractionLength(0)))
+                                    .font(JieziFont.caption2.monospacedDigit())
+                                    .foregroundStyle(scene.muted)
+                            }
+                        }
+                    }
+                }
+                .frame(height: JieziPrototypeLayout.food_energy_reference_height)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("能量参考尺")
+                .accessibilityValue("已记录约 \(String(format: "%.0f", energy)) 千卡；2,000 千卡为通用参考，不是个人目标")
+            } else {
+                Text("部分餐次未提供完整估算，暂不标出总能量。")
+                    .font(JieziFont.body)
+            }
+            Text("千卡 · 仅对应已记录餐食；未估算的餐次不按零处理。")
+                .font(JieziFont.caption2)
+                .foregroundStyle(scene.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(scene.foreground)
+        .padding(JieziPrototypeLayout.card_inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(scene.surface.opacity(0.66), in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius))
     }
 
     private func highestMealCard(_ record: NativeDayRecord) -> some View {
@@ -556,7 +626,7 @@ struct NativeDomainPageContent: View {
             let number = domain == .sleep ? JieziType.prototypeSleepHero : JieziType.prototypeHero
             let rounded = Int(value.rounded())
             if domain == .food {
-                (Text("\(rounded)").font(number) + Text(" 千卡").font(JieziFont.body))
+                (Text("约 ").font(JieziFont.body) + Text("\(rounded)").font(number) + Text(" 千卡").font(JieziFont.body))
                     .monospacedDigit()
             } else if rounded >= 60 {
                 (Text("\(rounded / 60)").font(number) + Text(" 小时 ").font(JieziFont.body)

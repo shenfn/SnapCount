@@ -558,11 +558,14 @@
       "selected_page_width": 22,
       "page_dot_size": 8,
       "page_dot_gap": 6,
-      "page_dot_hit_width": 32,
+      "page_dot_hit_width": 44,
+      "page_dot_drag_distance": 8,
       "add_button_size": 48,
       "week_day_height": 52,
       "calendar_day_height": 44,
-      "calendar_arrow_hit_size": 44
+      "calendar_arrow_hit_size": 44,
+      "food_energy_reference_height": 90,
+      "food_energy_point_size": 64
     },
     "motion": {
       "page_transition_ms": 450,
