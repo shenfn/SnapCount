@@ -59,3 +59,11 @@
 - 截图本地目录：`C:\Users\yinli\.codex\visualizations\2026\10\17\01a148ef-70cd-7092-bd7f-4da990bb014b\ios-86d5d67`，不提交图片或私有视频。
 - 本批完成代码/编译/回归与定向截图验证；真机普通滑动、连续拖点、真实漏展示日期、冷/热历史月及新增后刷新仍待安装验证。没有 TestFlight 上传授权答复，未触发上传。
 - 保留后续事项：完整四域落库/登录写入收敛、现有全量详情字典合并成本采样、原始记录字段取证；不把这些写成已经解决。
+
+## TestFlight 上传（2026-10-19）
+
+用户已明确授权上传 TestFlight。采用最后已通过独立 Build/377 项 XCTest 的固定提交 `86d5d674eb2a2859b5f70a169c50e6249af3df02`（在首轮 `19b3390` 上仅补时间线浮层留白，已向用户说明）。
+
+手动触发一次 [TestFlight 39181281459](https://github.com/shenfn/SnapCount/actions/runs/39181281459)，核实 headSha 精确匹配，构建号 125。
+
+上传结果：工作流成功，归档/导出/上传均通过；打包参数确认 `CURRENT_PROJECT_VERSION = 125` 与 `CFBundleVersion = 125`，Apple 返回 `UPLOAD SUCCEEDED with no errors`。仅证明 Apple 接收上传，未查询 App Store Connect 后续处理/测试组可见性，未完成用户设备安装或真机验收。
