@@ -797,7 +797,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         ))
         _ = try await useCase.delete(snapshot)
 
-        XCTAssertTrue(imageStore.contains(snapshot.imagePath))
+        XCTAssertTrue(imageStore.contains(path: snapshot.imagePath))
         XCTAssertEqual(try imageStore.data(at: try XCTUnwrap(snapshot.imagePath)), image)
 
         let backup = LocalCompleteBackupPortability(database: database, imageStore: imageStore)
