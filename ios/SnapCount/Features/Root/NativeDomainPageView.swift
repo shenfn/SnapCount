@@ -48,6 +48,7 @@ struct NativeDomainPageContent: View {
     var onSelectDate: ((String) -> Void)? = nil
     @State private var showManualRecordSheet = false
     @State private var showDayRecords = false
+    @State private var selectedTimelineEntryID: String?
     @State private var selectedMinute: Int?
     @State private var showsEnergyReference = false
 
@@ -269,7 +270,8 @@ struct NativeDomainPageContent: View {
     private var expenseTimeline: some View {
         let entriesByMinute = Dictionary(grouping: model.timeline, by: \.minute)
         let minutes = entriesByMinute.keys.sorted()
-        let selected = selectedMinute.flatMap { value in minutes.min(by: { abs($0 - value) < abs($1 - value) }) } ?? minutes.last
+        let selectedEntry = selectedTimelineEntryID.flatMap { id in model.timeline.first { $0.id == id } }
+        let selected = isDrillDown ? selectedMinute : selectedEntry?.minute
         let selectedEntries = selected.flatMap { entriesByMinute[$0] } ?? []
         let locatedReferences = Set(model.timeline.map { $0.record.reference })
         let expenses = model.records.filter { $0.kind == .expense && $0.transactionType != "income" }
@@ -288,9 +290,9 @@ struct NativeDomainPageContent: View {
                 Text("暂无可定位的时间；时间未知的记录可在下方展开。")
                     .font(JieziFont.caption).foregroundStyle(scene.muted)
             } else {
-                Chart {
-                    ForEach(model.timeline) { entry in
-                        if isDrillDown {
+                if isDrillDown {
+                    Chart {
+                        ForEach(model.timeline) { entry in
                             if let amount = entry.amount {
                                 BarMark(x: .value("业务时间", entry.minute), y: .value("单笔支出", amount), width: .fixed(8))
                                     .foregroundStyle(scene.dataAccent)
@@ -301,62 +303,37 @@ struct NativeDomainPageContent: View {
                                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                                     .foregroundStyle(scene.accent)
                             }
-                        } else if entry.id == entriesByMinute[entry.minute]?.first?.id {
-                            PointMark(x: .value("记录时钟", entry.minute), y: .value("记录", 0))
-                            .symbolSize(entry.minute == selected ? 65 : 30)
-                            .foregroundStyle(scene.dataAccent.opacity(entry.minute == selected ? 1 : 0.4))
-                            .annotation(position: .top) {
-                                if (entriesByMinute[entry.minute]?.count ?? 0) > 1, entry.minute != selected {
-                                    Text("\(entriesByMinute[entry.minute]?.count ?? 0)笔").font(JieziFont.caption2).foregroundStyle(scene.foreground)
-                                }
-                            }
-                            .accessibilityLabel("\(clockLabel(entry.minute))，\(entriesByMinute[entry.minute]?.count ?? 0)笔支出")
+                        }
+                        if let selected {
+                            RuleMark(x: .value("选中时间", selected))
+                                .foregroundStyle(scene.dataAccent.opacity(0.4))
                         }
                     }
-                    if let selected {
-                        RuleMark(x: .value("选中时间", selected))
-                            .foregroundStyle(scene.dataAccent.opacity(0.4))
-                            .annotation(position: .top, alignment: selected < 480 ? .leading : selected > 960 ? .trailing : .center) {
-                                if !dynamicTypeSize.isAccessibilitySize {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("\(clockLabel(selected)) · \(selectedEntries.count)笔").font(JieziFont.caption2)
-                                    ForEach(Array(selectedEntries.prefix(2))) { entry in
-                                        Text("\(entry.record.title) · \(recordValue(entry.record))")
-                                            .font(JieziFont.caption2).lineLimit(2)
-                                    }
-                                    if selectedEntries.count > 2 { Text("其余记录见下方").font(JieziFont.caption2) }
-                                }
-                                .foregroundStyle(scene.foreground).padding(6)
-                                .frame(maxWidth: 180, alignment: .leading)
-                                .background(scene.surface, in: RoundedRectangle(cornerRadius: 8))
-                                }
+                    .chartXScale(domain: 0...1440)
+                    .chartYScale(domain: 0.0...maximum)
+                    .chartYAxis(.visible)
+                    .chartXAxis {
+                        AxisMarks(values: dynamicTypeSize.isAccessibilitySize ? [0, 720, 1440] : [0, 360, 720, 1080, 1440]) { value in
+                            AxisValueLabel {
+                                if let minute = value.as(Int.self) { Text(clockLabel(minute)).foregroundStyle(scene.muted) }
                             }
-                    }
-                }
-                .chartXScale(domain: 0...1440)
-                .chartYScale(domain: (isDrillDown ? 0.0 : -1.0)...maximum)
-                .chartYAxis(isDrillDown ? .visible : .hidden)
-                .chartXAxis {
-                    AxisMarks(values: dynamicTypeSize.isAccessibilitySize ? [0, 720, 1440] : [0, 360, 720, 1080, 1440]) { value in
-                        AxisValueLabel {
-                            if let minute = value.as(Int.self) { Text(clockLabel(minute)).foregroundStyle(scene.muted) }
                         }
                     }
+                    .chartXSelection(value: $selectedMinute)
+                    .frame(height: 200)
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 0 : 44)
+                } else {
+                    ExpenseTimelineScrubber(
+                        entries: model.timeline,
+                        scene: scene,
+                        clockLabel: clockLabel,
+                        recordValue: recordValue,
+                        onOpenEntry: { appState.openDayRecord($0.record) },
+                        selectedEntryID: $selectedTimelineEntryID
+                    )
+                    Text(selectedEntry.map { "当前选中 · \(clockLabel($0)) · \(selectedEntries.count)笔" } ?? "按住时间轴拖动选择一笔")
+                        .font(JieziFont.caption2).foregroundStyle(scene.muted)
                 }
-                .chartXSelection(value: $selectedMinute)
-                .frame(height: isDrillDown ? 200 : 140)
-                // RuleMark 顶部浮层超出绘图区时仍有空间，不遮住笔数说明。
-                .padding(.top, dynamicTypeSize.isAccessibilitySize ? 0 : 44)
-                Picker("查看时间组", selection: Binding(
-                    get: { selected ?? minutes[0] }, set: { selectedMinute = $0 }
-                )) {
-                    ForEach(minutes, id: \.self) { minute in
-                        Text("\(clockLabel(minute)) · \(entriesByMinute[minute]?.count ?? 0)笔").tag(minute)
-                    }
-                }
-                .pickerStyle(.menu)
-                .tint(scene.dataAccent)
-                Text("当前时间组 · \(selectedEntries.count)笔").font(JieziFont.caption2).foregroundStyle(scene.muted)
                 ForEach(selectedEntries) { entry in
                     recordRow(entry.record, timeLabel: clockLabel(entry.minute))
                     Text("时间来源：\(entry.timeSourceLabel)").font(JieziFont.caption2).foregroundStyle(scene.muted)
@@ -603,32 +580,62 @@ struct NativeDomainPageContent: View {
     }
 
     private var sleepIntervals: some View {
+        let primaryReference = model.sleep?.mainRecord?.reference
+        let sourceRanges = primaryReference.map { reference in
+            model.sleepRanges.filter { $0.record.reference == reference }
+        } ?? model.sleepRanges
+        let values = sourceRanges.compactMap(NativeSleepTimelineAxis.value(for:))
+        let bounds = NativeSleepTimelineAxis.bounds(for: values.map { $0.startMinute...$0.endMinute })
+        let tickValues = stride(from: bounds.lowerBound, through: bounds.upperBound, by: NativeSleepTimelineAxis.tickSpacing).map { $0 }
         VStack(alignment: .leading, spacing: 14) {
             Text("入睡与醒来")
                 .font(JieziType.cardTitle)
-            if !model.sleepRanges.isEmpty {
-                Chart(model.sleepRanges) { interval in
-                    BarMark(xStart: .value("入睡", interval.start), xEnd: .value("醒来", interval.end),
-                            y: .value("记录", interval.id), height: .fixed(16))
+            if !values.isEmpty {
+                Chart(values) { value in
+                    BarMark(xStart: .value("入睡", value.startMinute), xEnd: .value("醒来", value.endMinute),
+                            y: .value("记录", value.id), height: .fixed(16))
                         .foregroundStyle(scene.dataAccent)
                         .cornerRadius(8)
-                        .accessibilityLabel("\(sleepInterval(for: interval.record) ?? "完整睡眠区间")")
+                        .accessibilityLabel("入睡 \(NativeSleepTimelineAxis.label(for: value.startMinute))，醒来 \(NativeSleepTimelineAxis.label(for: value.endMinute))，共 \(formatted(value.durationMinutes))")
+                    if let bedtime = model.sleep?.bedtime.median {
+                        RuleMark(x: .value("平时入睡", bedtime))
+                            .foregroundStyle(scene.accent.opacity(0.8))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                    }
+                    if let wake = model.sleep?.wake.median {
+                        RuleMark(x: .value("平时醒来", wake))
+                            .foregroundStyle(scene.accent.opacity(0.8))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                    }
                 }
                 .chartYAxis(.hidden)
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                    AxisMarks(values: tickValues) { value in
                         AxisValueLabel {
-                            if let date = value.as(Date.self) { Text(NativeLocalDate.timeKey(date)).foregroundStyle(scene.muted) }
+                            if let minute = value.as(Double.self) {
+                                Text(NativeSleepTimelineAxis.label(for: minute)).foregroundStyle(scene.muted)
+                            }
                         }
                     }
                 }
-                .frame(height: CGFloat(max(1, model.sleepRanges.count)) * 32 + 30)
+                .chartXScale(domain: bounds)
+                .frame(height: CGFloat(max(1, values.count)) * 32 + 30)
+                ForEach(values) { value in
+                    HStack(spacing: 8) {
+                        Text("入睡 \(NativeSleepTimelineAxis.label(for: value.startMinute))")
+                        Spacer(minLength: 4)
+                        Text("醒来 \(NativeSleepTimelineAxis.label(for: value.endMinute))")
+                        Text("· \(formatted(value.durationMinutes))")
+                    }
+                    .font(JieziFont.caption2.monospacedDigit())
+                    .foregroundStyle(scene.muted)
+                }
             }
-            if model.sleepRanges.isEmpty {
+            if values.isEmpty {
                 Text("缺少完整起止时间，区间图留空。")
                     .font(JieziFont.body).foregroundStyle(scene.muted)
             }
-            Text("入睡和醒来时间见下方原始记录。")
+            Text("实线是本次主要睡眠；虚线是此前 30 天的平时入睡/醒来。")
                 .font(JieziFont.caption)
                 .foregroundStyle(scene.muted)
         }
@@ -1117,15 +1124,6 @@ struct NativeDomainPageContent: View {
         guard let title = detail(for: record)?.payload?.string("book_name")?.trimmingCharacters(in: .whitespacesAndNewlines),
               !title.isEmpty else { return "书名未提供" }
         return title
-    }
-
-    private func sleepInterval(for record: NativeDayRecord) -> String? {
-        guard let payload = detail(for: record)?.payload,
-              let asleep = payload.string("sleep_start_at"),
-              let wake = payload.string("wake_at") else { return nil }
-        let start = NativeLocalDate.financeTimeKey(occurredAt: asleep) ?? asleep
-        let end = NativeLocalDate.financeTimeKey(occurredAt: wake) ?? wake
-        return "\(start) – \(end)"
     }
 
     @ViewBuilder

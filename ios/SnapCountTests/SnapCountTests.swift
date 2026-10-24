@@ -114,6 +114,62 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNil(AppDomain.pagerDomain(at: .infinity))
     }
 
+    func testExpenseTimelineScrubberMapsFiniteTrackCoordinatesToMinutes() {
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: 0, width: 300), 0)
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: 150, width: 300), 720)
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: 300, width: 300), 1440)
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: -20, width: 300), 0)
+        XCTAssertEqual(NativeExpenseTimelineSelection.minute(for: 340, width: 300), 1440)
+        XCTAssertNil(NativeExpenseTimelineSelection.minute(for: .nan, width: 300))
+        XCTAssertNil(NativeExpenseTimelineSelection.minute(for: 100, width: 0))
+    }
+
+    func testExpenseTimelineScrubberSelectsNearestExpenseWithStableTieBreak() {
+        func entry(_ id: String, minute: Int) -> NativeTimelineEntry {
+            NativeTimelineEntry(
+                record: NativeDayRecord(
+                    id: id, reference: "expense/\(id)", dateKey: "2026-10-17", kind: .expense,
+                    domainKey: nil, title: id, subtitle: "", value: "¥1.00", timeLabel: nil,
+                    systemImage: "creditcard", status: "done"
+                ), minute: minute
+            )
+        }
+
+        let entries = [entry("early", minute: 600), entry("late", minute: 660)]
+        XCTAssertEqual(NativeExpenseTimelineSelection.nearestEntry(in: entries, to: 610)?.record.id, "early")
+        XCTAssertEqual(NativeExpenseTimelineSelection.nearestEntry(in: entries, to: 630)?.record.id, "early")
+        XCTAssertEqual(NativeExpenseTimelineSelection.nearestEntry(in: entries, to: 650)?.record.id, "late")
+        XCTAssertNil(NativeExpenseTimelineSelection.nearestEntry(in: [], to: 630))
+    }
+
+    func testSleepTimelineUsesNightAxisAndShowsCrossMidnightDuration() throws {
+        let start = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-17T23:00:00+08:00"))
+        let end = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-18T07:30:00+08:00"))
+        let record = NativeDayRecord(
+            id: "sleep-1", reference: "sleep/sleep-1", dateKey: "2026-10-18", kind: .sleep,
+            domainKey: "sleep", title: "睡眠", subtitle: "", value: "", timeLabel: nil,
+            systemImage: "moon.zzz", status: "done"
+        )
+        let interval = NativeSleepInterval(record: record, start: start, end: end)
+
+        let axis = try XCTUnwrap(NativeSleepTimelineAxis.value(for: interval))
+        XCTAssertEqual(axis.startMinute, 1_380, accuracy: 0.001)
+        XCTAssertEqual(axis.endMinute, 1_890, accuracy: 0.001)
+        XCTAssertEqual(axis.durationMinutes, 510, accuracy: 0.001)
+        XCTAssertEqual(NativeSleepTimelineAxis.label(for: 1_380), "23:00")
+        XCTAssertEqual(NativeSleepTimelineAxis.label(for: 1_890), "07:30")
+    }
+
+    func testSleepTimelineAxisKeepsPrototypeNightWindowButExpandsForOutOfWindowData() {
+        let normal = NativeSleepTimelineAxis.bounds(for: [1_380...1_890])
+        XCTAssertEqual(normal.lowerBound, 1_260, accuracy: 0.001)
+        XCTAssertEqual(normal.upperBound, 1_980, accuracy: 0.001)
+
+        let late = NativeSleepTimelineAxis.bounds(for: [1_200...1_950])
+        XCTAssertEqual(late.lowerBound, 1_200, accuracy: 0.001)
+        XCTAssertEqual(late.upperBound, 1_980, accuracy: 0.001)
+    }
+
     @MainActor
     func testDomainPageEmptyStateAndFinanceHeroContract() {
         let dateKey = "2026-10-17"
