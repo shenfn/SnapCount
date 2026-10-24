@@ -2102,7 +2102,7 @@ final class AppState: ObservableObject {
         do {
             _ = try await localExpenseUseCase.confirmRepayment(
                 cycleID: cycleID, paidAmountMinor: paidAmountMinor, debitAccountID: debitID,
-                status: status.rawValue, note: note, paidAt: Date()
+                status: status.rawValue, note: note, paidAt: Date(), now: Date()
             )
             await loadLocalAccounts()
             if let refreshed = accounts.first(where: { $0.id == cycle.accountId }) {
