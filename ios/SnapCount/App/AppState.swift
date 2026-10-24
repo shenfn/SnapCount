@@ -181,7 +181,6 @@ final class AppState: ObservableObject {
     private var dashboardSupplementTask: Task<Void, Never>?
     private var isLoadingFinanceVocabulary = false
     private var shouldDeferOnboardingForExternalRoute = false
-    private var activeLocalImageIntakeIDs: Set<String> = []
 
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
@@ -1084,10 +1083,6 @@ final class AppState: ObservableObject {
         guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else {
             throw LocalDataError.invalidRecord
         }
-        let profile = try localImageIntakeRepository.activeProfile()
-        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(data))"
-        activeLocalImageIntakeIDs.insert(intakeID)
-        defer { activeLocalImageIntakeIDs.remove(intakeID) }
         let recognition = LocalImageRecognitionUseCase(
             localRecordUseCase: localRecordUseCase,
             imageStore: localImageStore,
@@ -1102,7 +1097,7 @@ final class AppState: ObservableObject {
         )
     }
 
-    var supportsLocalDomainRecords: Bool { localRecordUseCase != nil }
+    var supportsLocalDomainRecords: Bool { localRecordUseCase != nil && localImageStore != nil }
 
     func localImageDataForRecord(id: String) async throws -> Data {
         guard let recordID = UUID(uuidString: id),
@@ -1171,25 +1166,13 @@ final class AppState: ObservableObject {
 
     func refreshFailedLocalImageIntakes() async {
         guard let repository = localImageIntakeRepository,
-              let imageStore = localImageStore,
               let profile = try? repository.activeProfile() else {
             failedLocalImageIntakes = []
             return
         }
         do {
-            var intakes = try repository.failedIntakes(profileID: profile.id)
-            for intake in intakes where intake.status == .receiving && !activeLocalImageIntakeIDs.contains(intake.id) {
-                try repository.markFailed(
-                    id: intake.id,
-                    profileID: profile.id,
-                    message: imageStore.contains(path: intake.imagePath)
-                        ? "识别进程已中断，可重试或手动处理"
-                        : "接收中断，原图文件缺失；请重新选择图片或关闭此输入",
-                    at: Date()
-                )
-            }
-            intakes = try repository.failedIntakes(profileID: profile.id)
-            failedLocalImageIntakes = intakes
+            try repository.recoverInterrupted(profileID: profile.id, before: Date().addingTimeInterval(-120))
+            failedLocalImageIntakes = try repository.failedIntakes(profileID: profile.id)
         } catch {
             dashboardMessage = "本地图片收件箱读取失败：\(error.localizedDescription)"
         }
@@ -1197,8 +1180,6 @@ final class AppState: ObservableObject {
 
     func retryLocalImageIntake(_ intake: LocalImageIntake) async -> Bool {
         guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else { return false }
-        activeLocalImageIntakeIDs.insert(intake.id)
-        defer { activeLocalImageIntakeIDs.remove(intake.id) }
         do {
             let recognition = LocalImageRecognitionUseCase(
                 localRecordUseCase: localRecordUseCase,
@@ -1220,18 +1201,11 @@ final class AppState: ObservableObject {
 
     func discardLocalImageIntake(_ intake: LocalImageIntake) -> Bool {
         guard let repository = localImageIntakeRepository,
-              let imageStore = localImageStore,
               let profile = try? repository.activeProfile() else { return false }
         do {
-            try repository.markFailed(
-                id: intake.id,
-                profileID: profile.id,
-                message: "用户已请求丢弃此图片",
-                at: Date()
-            )
-            try imageStore.remove(path: intake.imagePath)
             try repository.discard(id: intake.id, profileID: profile.id)
             failedLocalImageIntakes.removeAll { $0.id == intake.id }
+            pendingLocalImageCleanups = try localRecordUseCase?.retryPendingImageCleanups() ?? []
             return true
         } catch {
             inboxActionMessage = "图片未能丢弃：\(error.localizedDescription)"

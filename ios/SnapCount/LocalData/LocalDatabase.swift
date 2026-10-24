@@ -276,6 +276,11 @@ final class LocalDatabase {
                     ON local_image_cleanups(profile_id, updated_at);
                 """)
         }
+        migrator.registerMigration("local-v11-image-intake-operation-claim") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_image_intakes ADD COLUMN operation_id TEXT;
+                """)
+        }
         return migrator
     }
 }

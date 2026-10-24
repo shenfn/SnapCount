@@ -199,7 +199,7 @@ struct InboxView: View {
                                 .foregroundStyle(JieziTheme.gold)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(intake.filename).font(.subheadline.weight(.semibold))
-                                Text(intake.failureMessage ?? "识别中断，可重试或手动处理")
+                                Text(intake.status == .receiving ? "正在处理，请稍后查看" : intake.failureMessage ?? "识别中断，可重试或手动处理")
                                     .font(.caption)
                                     .foregroundStyle(JieziTheme.muted)
                             }
@@ -215,17 +215,17 @@ struct InboxView: View {
                                 .foregroundStyle(.red)
                         }
                         HStack {
-                            if appState.hasLocalImage(for: intake), intake.retryCount < 3 {
+                            if intake.status == .failed, appState.hasLocalImage(for: intake), intake.retryCount < 3 {
                                 Button("重试识别") {
                                     Task { _ = await appState.retryLocalImageIntake(intake) }
                                 }
                                 .buttonStyle(.borderedProminent)
-                            } else if appState.hasLocalImage(for: intake) {
+                            } else if intake.status == .failed, appState.hasLocalImage(for: intake) {
                                 Text("已达重试上限")
                                     .font(.caption.weight(.medium))
                                     .foregroundStyle(JieziTheme.muted)
                             }
-                            if appState.hasLocalImage(for: intake) {
+                            if intake.status == .failed, appState.hasLocalImage(for: intake) {
                                 Button("手动处理") {
                                     if let data = try? appState.localImageData(for: intake) {
                                         manualIntake = intake
@@ -234,9 +234,11 @@ struct InboxView: View {
                                 }
                                 .buttonStyle(.bordered)
                             }
-                            Button("丢弃") { intakeToDiscard = intake }
+                            if intake.status == .failed {
+                                Button("丢弃") { intakeToDiscard = intake }
                                 .buttonStyle(.bordered)
                                 .tint(.red)
+                            }
                         }
                     }
                     .padding(JieziSpacing.lg)

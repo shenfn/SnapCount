@@ -310,7 +310,8 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         guard let imageStore else { return pending }
         for cleanup in pending {
             do {
-                if try !repository.hasImageReference(path: cleanup.imagePath) {
+                let isReferenced = try repository.hasImageReference(path: cleanup.imagePath)
+                if !isReferenced {
                     try imageStore.remove(path: cleanup.imagePath)
                 }
                 try repository.finishImageCleanup(id: cleanup.id, profileID: profile.id)

@@ -189,6 +189,7 @@ final class SnapCountUploadService {
         )
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 60
         request.httpMethod = "POST"
         request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")

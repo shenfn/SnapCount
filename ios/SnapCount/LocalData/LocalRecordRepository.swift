@@ -193,9 +193,12 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         UNION ALL
                         SELECT 1 FROM local_staging_records
                         WHERE image_path = ? AND status = 'pending_review'
+                        UNION ALL
+                        SELECT 1 FROM local_image_intakes
+                        WHERE image_path = ? AND status IN ('receiving', 'failed')
                     )
                     """,
-                arguments: [path, path]
+                arguments: [path, path, path]
             ) ?? 0) != 0
         }
     }

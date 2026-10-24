@@ -357,6 +357,111 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertTrue(stagingRecords.isEmpty)
     }
 
+    @MainActor
+    func testLF00803ImageIntakeClaimIsExclusiveAndInterruptedClaimCanBeRecovered() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let profile = try context.intakeRepository.activeProfile()
+        let imageData = Data("lf008-exclusive-image".utf8)
+        let hash = LocalImageStore.sha256(imageData)
+        let intakeID = "\(profile.id.uuidString)-\(hash)"
+        let image = try context.imageStore.save(data: imageData, owner: intakeID, bucket: "intake")
+        let startedAt = Date()
+        let firstOperation = try context.intakeRepository.beginAttempt(
+            id: intakeID,
+            profileID: profile.id,
+            captureKind: "camera",
+            filename: "claim.jpg",
+            imagePath: image.path,
+            imageHash: hash,
+            at: startedAt
+        )
+        let appState = AppState(
+            localRecordUseCase: context.useCase,
+            localImageStore: context.imageStore,
+            localImageIntakeRepository: context.intakeRepository
+        )
+        await appState.refreshFailedLocalImageIntakes()
+        XCTAssertEqual(appState.failedLocalImageIntakes.first?.status, .receiving)
+
+        XCTAssertThrowsError(try context.intakeRepository.beginAttempt(
+            id: intakeID,
+            profileID: profile.id,
+            captureKind: "camera",
+            filename: "claim.jpg",
+            imagePath: image.path,
+            imageHash: hash,
+            at: Date()
+        )) { XCTAssertEqual($0 as? LocalImageRecognitionError, .alreadyInProgress) }
+        XCTAssertEqual(try context.intakeRepository.intake(id: intakeID, profileID: profile.id)?.attemptCount, 1)
+        XCTAssertTrue(try context.intakeRepository.isReceiving(
+            id: intakeID, profileID: profile.id, operationID: firstOperation
+        ))
+
+        try context.database.writer.write { db in
+            try db.execute(
+                sql: "UPDATE local_image_intakes SET updated_at = ? WHERE id = ?",
+                arguments: [Date().addingTimeInterval(-600), intakeID]
+            )
+        }
+        try context.intakeRepository.recoverInterrupted(profileID: profile.id, before: Date().addingTimeInterval(-120))
+        XCTAssertEqual(try context.intakeRepository.intake(id: intakeID, profileID: profile.id)?.status, .failed)
+        let recoveredOperation = try context.intakeRepository.beginAttempt(
+            id: intakeID,
+            profileID: profile.id,
+            captureKind: "camera",
+            filename: "claim.jpg",
+            imagePath: image.path,
+            imageHash: hash,
+            at: Date()
+        )
+        XCTAssertNotEqual(recoveredOperation, firstOperation)
+        XCTAssertFalse(try context.intakeRepository.isReceiving(
+            id: intakeID, profileID: profile.id, operationID: firstOperation
+        ))
+        XCTAssertTrue(try context.intakeRepository.isReceiving(
+            id: intakeID, profileID: profile.id, operationID: recoveredOperation
+        ))
+        XCTAssertEqual(try context.intakeRepository.intake(id: intakeID, profileID: profile.id)?.attemptCount, 2)
+    }
+
+    func testLF00804DiscardQueuesAndCleansImageWithoutDroppingFailureStateFirst() throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let profile = try context.intakeRepository.activeProfile()
+        let imageData = Data("lf008-discard-image".utf8)
+        let hash = LocalImageStore.sha256(imageData)
+        let intakeID = "\(profile.id.uuidString)-\(hash)"
+        let image = try context.imageStore.save(data: imageData, owner: intakeID, bucket: "intake")
+        let operationID = try context.intakeRepository.beginAttempt(
+            id: intakeID,
+            profileID: profile.id,
+            captureKind: "camera",
+            filename: "discard.jpg",
+            imagePath: image.path,
+            imageHash: hash,
+            at: Date()
+        )
+        XCTAssertThrowsError(try context.intakeRepository.discard(id: intakeID, profileID: profile.id))
+        XCTAssertTrue(context.imageStore.contains(path: image.path))
+        try context.intakeRepository.markFailed(
+            id: intakeID,
+            profileID: profile.id,
+            operationID: operationID,
+            message: "synthetic failure",
+            at: Date()
+        )
+
+        try context.intakeRepository.discard(id: intakeID, profileID: profile.id)
+        XCTAssertNil(try context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertTrue(context.imageStore.contains(path: image.path))
+        XCTAssertEqual(try LocalRecordRepository(database: context.database).pendingImageCleanups(profileID: profile.id).map(\.imagePath), [image.path])
+
+        let pending = try context.useCase.retryPendingImageCleanups()
+        XCTAssertTrue(pending.isEmpty)
+        XCTAssertFalse(context.imageStore.contains(path: image.path))
+    }
+
     private func makeCandidate(
         id: String = "hosted-candidate",
         domainKey: String = "sport",

@@ -11,12 +11,13 @@ final class LocalImageStore {
     private let fileManager: FileManager
 
     init(rootDirectory: URL, fileManager: FileManager = .default) throws {
-        self.rootDirectory = rootDirectory.standardizedFileURL
-        self.fileManager = fileManager
+        let standardizedRoot = rootDirectory.standardizedFileURL
         try fileManager.createDirectory(
-            at: self.rootDirectory,
+            at: standardizedRoot,
             withIntermediateDirectories: true
         )
+        self.rootDirectory = standardizedRoot.resolvingSymlinksInPath().standardizedFileURL
+        self.fileManager = fileManager
         try? fileManager.setAttributes(
             [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
             ofItemAtPath: self.rootDirectory.path
@@ -96,7 +97,12 @@ final class LocalImageStore {
         guard candidate.path == rootDirectory.path || candidate.path.hasPrefix(rootDirectory.path + "/") else {
             throw LocalDataError.invalidIdentifier
         }
-        return candidate
+        let resolvedCandidate = candidate.resolvingSymlinksInPath().standardizedFileURL
+        guard resolvedCandidate.path == rootDirectory.path
+                || resolvedCandidate.path.hasPrefix(rootDirectory.path + "/") else {
+            throw LocalDataError.invalidIdentifier
+        }
+        return resolvedCandidate
     }
 
     static func sha256(_ data: Data) -> String {

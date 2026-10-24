@@ -43,69 +43,85 @@ final class LocalImageIntakeRepository {
         imagePath: String,
         imageHash: String,
         at date: Date
-    ) throws {
+    ) throws -> UUID {
+        let operationID = UUID()
         try database.writer.write { db in
             if let row = try Row.fetchOne(
                 db,
-                sql: "SELECT attempt_count, profile_id FROM local_image_intakes WHERE id = ?",
+                sql: "SELECT attempt_count, profile_id, status FROM local_image_intakes WHERE id = ?",
                 arguments: [id]
-            ), let storedProfileID: String = row["profile_id"],
-               storedProfileID == profileID.uuidString,
-               let attempts: Int = row["attempt_count"], attempts >= 4 {
-                throw LocalImageRecognitionError.retryLimitReached
+            ) {
+                guard let storedProfileID: String = row["profile_id"], storedProfileID == profileID.uuidString else {
+                    throw LocalDataError.invalidIdentifier
+                }
+                let status: String = row["status"]
+                guard status != LocalImageIntakeStatus.receiving.rawValue else {
+                    throw LocalImageRecognitionError.alreadyInProgress
+                }
+                guard status != LocalImageIntakeStatus.completed.rawValue else {
+                    throw LocalImageRecognitionError.alreadyCompleted
+                }
+                let attempts: Int = row["attempt_count"]
+                guard attempts < 4 else { throw LocalImageRecognitionError.retryLimitReached }
+                try db.execute(
+                    sql: """
+                        UPDATE local_image_intakes
+                        SET capture_kind = ?, filename = ?, status = 'receiving', image_path = ?,
+                            image_hash = ?, failure_message = NULL, cleanup_message = NULL,
+                            attempt_count = attempt_count + 1, operation_id = ?, updated_at = ?
+                        WHERE id = ? AND profile_id = ? AND status = 'failed'
+                        """,
+                    arguments: [
+                        captureKind, filename, imagePath, imageHash,
+                        operationID.uuidString, date, id, profileID.uuidString
+                    ]
+                )
+                guard db.changesCount == 1 else { throw LocalImageRecognitionError.alreadyInProgress }
+            } else {
+                try db.execute(
+                    sql: """
+                        INSERT INTO local_image_intakes (
+                            id, profile_id, capture_kind, filename, status, image_path,
+                            image_hash, failure_message, attempt_count, created_at, updated_at, operation_id
+                        ) VALUES (?, ?, ?, ?, 'receiving', ?, ?, NULL, 1, ?, ?, ?)
+                        """,
+                    arguments: [
+                        id, profileID.uuidString, captureKind, filename, imagePath,
+                        imageHash, date, date, operationID.uuidString
+                    ]
+                )
             }
-            try db.execute(
-                sql: """
-                    INSERT INTO local_image_intakes (
-                        id, profile_id, capture_kind, filename, status, image_path,
-                        image_hash, failure_message, attempt_count, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, 'receiving', ?, ?, NULL, 1, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        capture_kind = excluded.capture_kind,
-                        filename = excluded.filename,
-                        status = 'receiving',
-                        image_path = excluded.image_path,
-                        image_hash = excluded.image_hash,
-                        failure_message = NULL,
-                        cleanup_message = NULL,
-                        attempt_count = local_image_intakes.attempt_count + 1,
-                        updated_at = excluded.updated_at
-                    WHERE local_image_intakes.profile_id = excluded.profile_id
-                    """,
-                arguments: [
-                    id, profileID.uuidString, captureKind, filename, imagePath,
-                    imageHash, date, date
-                ]
-            )
             guard try Self.intake(db, id: id)?.profileID == profileID else {
                 throw LocalDataError.invalidIdentifier
             }
         }
+        return operationID
     }
 
-    func markFailed(id: String, profileID: UUID, message: String, at date: Date) throws {
+    func markFailed(id: String, profileID: UUID, operationID: UUID, message: String, at date: Date) throws {
         try database.writer.write { db in
             try db.execute(
                 sql: """
                     UPDATE local_image_intakes
-                    SET status = 'failed', failure_message = ?, updated_at = ?
-                    WHERE id = ? AND profile_id = ? AND status = 'receiving'
+                    SET status = 'failed', failure_message = ?, operation_id = NULL, updated_at = ?
+                    WHERE id = ? AND profile_id = ? AND status = 'receiving' AND operation_id = ?
                     """,
-                arguments: [message, date, id, profileID.uuidString]
+                arguments: [message, date, id, profileID.uuidString, operationID.uuidString]
             )
         }
     }
 
-    func markCompleted(id: String, profileID: UUID, cleanupMessage: String?, at date: Date) throws {
+    func markCompleted(id: String, profileID: UUID, operationID: UUID, cleanupMessage: String?, at date: Date) throws {
         try database.writer.write { db in
             try db.execute(
                 sql: """
                     UPDATE local_image_intakes
-                    SET status = 'completed', failure_message = NULL, cleanup_message = ?, updated_at = ?
-                    WHERE id = ? AND profile_id = ?
+                    SET status = 'completed', failure_message = NULL, cleanup_message = ?, operation_id = NULL, updated_at = ?
+                    WHERE id = ? AND profile_id = ? AND status = 'receiving' AND operation_id = ?
                     """,
-                arguments: [cleanupMessage, date, id, profileID.uuidString]
+                arguments: [cleanupMessage, date, id, profileID.uuidString, operationID.uuidString]
             )
+            guard db.changesCount == 1 else { throw CancellationError() }
         }
     }
 
@@ -142,18 +158,32 @@ final class LocalImageIntakeRepository {
         }
     }
 
-    func isReceiving(id: String, profileID: UUID) throws -> Bool {
+    func isReceiving(id: String, profileID: UUID, operationID: UUID) throws -> Bool {
         try database.writer.read { db in
             (try Int.fetchOne(
                 db,
                 sql: """
                     SELECT EXISTS(
                         SELECT 1 FROM local_image_intakes
-                        WHERE id = ? AND profile_id = ? AND status = 'receiving'
+                        WHERE id = ? AND profile_id = ? AND status = 'receiving' AND operation_id = ?
                     )
                     """,
-                arguments: [id, profileID.uuidString]
+                arguments: [id, profileID.uuidString, operationID.uuidString]
             ) ?? 0) != 0
+        }
+    }
+
+    func recoverInterrupted(profileID: UUID, before date: Date) throws {
+        try database.writer.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE local_image_intakes
+                    SET status = 'failed', failure_message = '识别进程已中断，可重试或手动处理',
+                        operation_id = NULL, updated_at = ?
+                    WHERE profile_id = ? AND status = 'receiving' AND updated_at < ?
+                    """,
+                arguments: [Date(), profileID.uuidString, date]
+            )
         }
     }
 
@@ -175,15 +205,25 @@ final class LocalImageIntakeRepository {
         try database.writer.write { db in
             guard let row = try Row.fetchOne(
                 db,
-                sql: "SELECT status FROM local_image_intakes WHERE id = ? AND profile_id = ?",
+                sql: "SELECT status, image_path FROM local_image_intakes WHERE id = ? AND profile_id = ?",
                 arguments: [id, profileID.uuidString]
-            ), let status = LocalImageIntakeStatus(rawValue: row["status"]), status != .completed else {
+            ), let status = LocalImageIntakeStatus(rawValue: row["status"]), status == .failed,
+               let imagePath: String = row["image_path"] else {
                 throw LocalDataError.recordNotFound
             }
+            try db.execute(
+                sql: """
+                    INSERT OR IGNORE INTO local_image_cleanups (
+                        id, profile_id, image_path, attempt_count, last_error, created_at, updated_at
+                    ) VALUES (?, ?, ?, 0, NULL, ?, ?)
+                    """,
+                arguments: [UUID().uuidString, profileID.uuidString, imagePath, Date(), Date()]
+            )
             try db.execute(
                 sql: "DELETE FROM local_image_intakes WHERE id = ? AND profile_id = ?",
                 arguments: [id, profileID.uuidString]
             )
+            guard db.changesCount == 1 else { throw LocalDataError.recordNotFound }
         }
     }
 

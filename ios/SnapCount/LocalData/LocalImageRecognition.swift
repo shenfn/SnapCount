@@ -5,6 +5,8 @@ enum LocalImageRecognitionError: Error, Equatable, LocalizedError {
     case unsupportedDomain(String)
     case missingUploadCredential
     case retryLimitReached
+    case alreadyInProgress
+    case alreadyCompleted
 
     var errorDescription: String? {
         switch self {
@@ -16,6 +18,10 @@ enum LocalImageRecognitionError: Error, Equatable, LocalizedError {
             return "当前没有可用的 Hosted AI 凭据"
         case .retryLimitReached:
             return "已达到三次重试上限，请手动处理或丢弃图片"
+        case .alreadyInProgress:
+            return "这张图片正在处理，请稍后查看收件箱"
+        case .alreadyCompleted:
+            return "这张图片已处理，请查看本地记录或收件箱"
         }
     }
 }
@@ -124,7 +130,7 @@ final class LocalImageRecognitionUseCase {
         }
         let intakeOwner = "recognition-\(profile.id.uuidString)-\(imageHash)"
         let intakePath = LocalImageStore.relativePath(owner: intakeOwner, bucket: "intake")
-        try intakeRepository.beginAttempt(
+        let operationID = try intakeRepository.beginAttempt(
             id: intakeID,
             profileID: profile.id,
             captureKind: captureKind,
@@ -143,6 +149,7 @@ final class LocalImageRecognitionUseCase {
                 try? intakeRepository.markFailed(
                     id: intakeID,
                     profileID: profile.id,
+                    operationID: operationID,
                     message: "本地图片写入未完成，可重试或手动处理",
                     at: Date()
                 )
@@ -156,6 +163,7 @@ final class LocalImageRecognitionUseCase {
                 imageHash: imageHash,
                 intakeID: intakeID,
                 profileID: profile.id,
+                operationID: operationID,
                 imageReference: intakeReference,
                 captureKind: captureKind,
                 filename: filename,
@@ -166,6 +174,7 @@ final class LocalImageRecognitionUseCase {
             try? intakeRepository.markFailed(
                 id: intakeID,
                 profileID: profile.id,
+                operationID: operationID,
                 message: Self.safeFailureMessage(for: error),
                 at: Date()
             )
@@ -176,7 +185,7 @@ final class LocalImageRecognitionUseCase {
     func retry(intakeID: String, uploadToken: String? = nil, at date: Date = Date()) async throws -> LocalImageIntakeOutcome {
         let profile = try intakeRepository.activeProfile()
         guard let intake = try intakeRepository.intake(id: intakeID, profileID: profile.id),
-              intake.status != .completed,
+              intake.status == .failed,
               imageStore.contains(path: intake.imagePath) else {
             throw LocalDataError.recordNotFound
         }
@@ -184,7 +193,7 @@ final class LocalImageRecognitionUseCase {
         let imageData = try imageStore.data(at: intake.imagePath)
         let imageHash = LocalImageStore.sha256(imageData)
         guard imageHash == intake.imageHash else { throw LocalDataError.invalidRecord }
-        try intakeRepository.beginAttempt(
+        let operationID = try intakeRepository.beginAttempt(
             id: intake.id,
             profileID: profile.id,
             captureKind: intake.captureKind,
@@ -199,6 +208,7 @@ final class LocalImageRecognitionUseCase {
                 imageHash: imageHash,
                 intakeID: intake.id,
                 profileID: profile.id,
+                operationID: operationID,
                 imageReference: LocalImageReference(path: intake.imagePath, hash: imageHash),
                 captureKind: intake.captureKind,
                 filename: intake.filename,
@@ -209,6 +219,7 @@ final class LocalImageRecognitionUseCase {
             try? intakeRepository.markFailed(
                 id: intake.id,
                 profileID: profile.id,
+                operationID: operationID,
                 message: Self.safeFailureMessage(for: error),
                 at: Date()
             )
@@ -221,6 +232,7 @@ final class LocalImageRecognitionUseCase {
         imageHash: String,
         intakeID: String,
         profileID: UUID,
+        operationID: UUID,
         imageReference: LocalImageReference,
         captureKind: String,
         filename: String,
@@ -233,7 +245,7 @@ final class LocalImageRecognitionUseCase {
             filename: filename,
             uploadToken: uploadToken
         ))
-        guard try intakeRepository.isReceiving(id: intakeID, profileID: profileID) else {
+        guard try intakeRepository.isReceiving(id: intakeID, profileID: profileID, operationID: operationID) else {
             throw CancellationError()
         }
         guard !recognized.domainKey.isEmpty,
@@ -276,6 +288,7 @@ final class LocalImageRecognitionUseCase {
         try intakeRepository.markCompleted(
             id: intakeID,
             profileID: profileID,
+            operationID: operationID,
             cleanupMessage: cleanupMessage,
             at: Date()
         )
