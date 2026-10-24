@@ -15,10 +15,18 @@ enum NativeSleepTimelineAxis {
     static let tickSpacing = 180.0 // 3 小时
 
     static func value(for interval: NativeSleepInterval) -> NativeSleepTimelineValue? {
-        guard let startMinute = NativeSleepSummary.clockMinutes(NativeLocalDate.timeKey(interval.start)),
-              let endMinute = NativeSleepSummary.clockMinutes(NativeLocalDate.timeKey(interval.end)),
+        guard let startMinute = clockMinutes(for: interval.start),
+              let endMinute = clockMinutes(for: interval.end),
               endMinute > startMinute else { return nil }
         return NativeSleepTimelineValue(interval: interval, startMinute: startMinute, endMinute: endMinute)
+    }
+
+    private static func clockMinutes(for date: Date) -> Double? {
+        let clock = NativeLocalDate.timeKey(date)
+        let parts = clock.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2, (0...23).contains(parts[0]), (0...59).contains(parts[1]) else { return nil }
+        let value = parts[0] * 60 + parts[1]
+        return Double(value < 720 ? value + 1440 : value)
     }
 
     static func bounds(for ranges: [ClosedRange<Double>]) -> ClosedRange<Double> {
