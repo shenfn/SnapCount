@@ -182,6 +182,7 @@ final class AppState: ObservableObject {
     private var expressionPlanAcknowledgementTokens: [String: UUID] = [:]
     private var visibleRecordExpressionPlanCards: [String: String] = [:]
     private var insightsLoadedAt: Date?
+    private var insightsLoadedLocally = false
     private var dashboardRefreshGeneration = 0
     private var userStateGeneration = 0
     private var dashboardSupplementTask: Task<Void, Never>?
@@ -2899,7 +2900,9 @@ final class AppState: ObservableObject {
     }
 
     func loadInsights(range: NativeInsightRange, force: Bool = false) async {
+        let shouldLoadLocally = !mayReadRemoteBusinessData && localFactReader != nil
         if !force,
+           insightsLoadedLocally == shouldLoadLocally,
            insightsSnapshot?.range == range,
            let insightsLoadedAt,
            Date().timeIntervalSince(insightsLoadedAt) < 60 {
@@ -2925,6 +2928,7 @@ final class AppState: ObservableObject {
                 aiInsightIsCached = false
                 aiInsightMessage = nil
                 insightsLoadedAt = Date()
+                insightsLoadedLocally = true
                 return
             }
             let session = try await validSession()
@@ -2936,6 +2940,7 @@ final class AppState: ObservableObject {
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             insightsSnapshot = snapshot
             insightsLoadedAt = Date()
+            insightsLoadedLocally = false
             Task { await loadLatestAIInsight(range: range, generation: generation, userId: session.user.id) }
         } catch {
             guard generation == userStateGeneration else { return }
@@ -5302,6 +5307,7 @@ final class AppState: ObservableObject {
         walletSnapshotActionId = nil
         walletSnapshotMessage = nil
         insightsSnapshot = nil
+        insightsLoadedLocally = false
         isLoadingInsights = false
         insightsMessage = nil
         insightsLoadedAt = nil
