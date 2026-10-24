@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import GRDB
 
 struct LocalCompleteBackupPreview: Equatable {
@@ -352,6 +353,7 @@ final class LocalCompleteBackupPortability {
             }
             rows[table] = tableRows
         }
+        try Self.validateFinancialRows(rows)
 
         var images: [String: Data] = [:]
         var totalImageBytes = 0
@@ -367,6 +369,63 @@ final class LocalCompleteBackupPortability {
         }
         try Self.validateImageReferences(rows: rows, images: archive.images)
         return DecodedArchive(archive: archive, rows: rows, imageData: images)
+    }
+
+    private static func validateFinancialRows(_ rows: [String: [[String: Any]]]) throws {
+        let accounts = Set((rows["local_accounts"] ?? []).compactMap { $0["id"] as? String })
+        let records = Set((rows["local_records"] ?? []).compactMap { $0["id"] as? String })
+        let cycles = Set((rows["local_repayment_cycles"] ?? []).compactMap { $0["id"] as? String })
+
+        let amounts: [String: [(String, Bool)]] = [
+            "local_accounts": [("opening_balance_minor", false)],
+            "local_expenses": [("amount_minor", true)],
+            "local_income_records": [("amount_minor", true)],
+            "local_repayment_cycles": [
+                ("statement_amount_minor", false), ("paid_amount_minor", false),
+                ("remaining_amount_minor", false), ("carried_over_amount_minor", false),
+                ("original_statement_amount_minor", false), ("min_payment_amount_minor", false),
+                ("refund_applied_amount_minor", false)
+            ],
+            "local_liability_payments": [("amount_minor", true), ("overpayment_amount_minor", false)],
+            "local_account_entries": [("amount_minor", true)],
+            "local_wallet_snapshots": [("snapshot_balance_minor", false)]
+        ]
+        for (table, fields) in amounts {
+            for row in rows[table] ?? [] {
+                for (field, mustBePositive) in fields {
+                    if row[field] is NSNull, !mustBePositive { continue }
+                    guard let number = row[field] as? NSNumber,
+                          CFGetTypeID(number) != CFBooleanGetTypeID(),
+                          let value = Int64(number.stringValue),
+                          mustBePositive ? value > 0 : value >= 0 else {
+                        throw LocalCompleteBackupError.invalidRows(table)
+                    }
+                }
+            }
+        }
+
+        let references: [(String, String, Set<String>, Bool)] = [
+            ("local_accounts", "auto_debit_account_id", accounts, true),
+            ("local_expenses", "account_id", accounts, false),
+            ("local_income_records", "account_id", accounts, true),
+            ("local_repayment_cycles", "account_id", accounts, false),
+            ("local_repayment_cycles", "auto_debit_account_id", accounts, true),
+            ("local_repayment_cycles", "evidence_record_id", records, true),
+            ("local_liability_payments", "account_id", accounts, false),
+            ("local_liability_payments", "statement_id", cycles, true),
+            ("local_liability_payments", "debit_account_id", accounts, true),
+            ("local_liability_payments", "evidence_record_id", records, true),
+            ("local_account_entries", "account_id", accounts, false),
+            ("local_wallet_snapshots", "linked_account_id", accounts, true)
+        ]
+        for (table, field, validIDs, optional) in references {
+            for row in rows[table] ?? [] {
+                if optional && (row[field] == nil || row[field] is NSNull) { continue }
+                guard let value = row[field] as? String, validIDs.contains(value) else {
+                    throw LocalCompleteBackupError.invalidRows(table)
+                }
+            }
+        }
     }
 
     private static func columns(in db: Database, table: String) throws -> [String] {

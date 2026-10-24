@@ -401,6 +401,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(state.localWalletSnapshots.map(\.id), [snapshot.id])
         let imageData = try XCTUnwrap(draft.imageData)
         XCTAssertEqual(snapshot.balanceMinor, 50_000)
+        XCTAssertEqual(snapshot.recordTime, draft.timeKey)
         XCTAssertEqual(snapshot.occurredAt, draft.occurredAt)
         XCTAssertEqual(snapshot.imageHash, LocalImageStore.sha256(imageData))
         XCTAssertEqual(try imageStore.data(at: try XCTUnwrap(snapshot.imagePath)), imageData)

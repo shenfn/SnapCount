@@ -79,8 +79,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
               draft.currency == "CNY",
               NativeLocalDate.monthKey(from: draft.recordDate) != nil,
               (draft.recordTime == nil || draft.occurredAt != nil),
-              draft.occurredAt.map({ NativeLocalDate.financeDateKey(occurredAt: $0, legacyDate: nil) == draft.recordDate }) ?? true,
-              draft.occurredAt.map({ NativeLocalDate.financeTimeKey(occurredAt: $0) == draft.recordTime }) ?? true,
+              draft.occurredAt.map({ Self.matchesOccurredAt($0, recordDate: draft.recordDate, recordTime: draft.recordTime) }) ?? true,
               (draft.imagePath == nil) == (draft.imageHash == nil) else {
             throw LocalDataError.invalidRecord
         }
@@ -123,6 +122,20 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
                 arguments: [profileID.uuidString]
             ).map(Self.snapshot(from:))
         }
+    }
+
+    private static func matchesOccurredAt(_ occurredAt: String, recordDate: String, recordTime: String?) -> Bool {
+        let parts = recordTime?.split(separator: ":").compactMap { Int($0) } ?? []
+        guard let recordTime,
+              recordTime.range(of: #"^\d{2}:\d{2}(?::\d{2})?$"#, options: .regularExpression) != nil,
+              parts.count == 2 || parts.count == 3,
+              (0...23).contains(parts[0]), (0...59).contains(parts[1]),
+              parts.count == 2 || (0...59).contains(parts[2]),
+              NativeLocalDate.financeDateKey(occurredAt: occurredAt, legacyDate: nil) == recordDate,
+              let occurredTime = NativeLocalDate.financeTimeKey(occurredAt: occurredAt) else {
+            return false
+        }
+        return occurredTime == String(recordTime.prefix(5))
     }
 
     private static func snapshot(from row: Row) throws -> LocalWalletSnapshot {

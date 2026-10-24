@@ -136,6 +136,93 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         }
     }
 
+    func testLF02104MalformedAndDuplicateBackupsAreRejectedWithoutPartialWrites() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let backup = try source.portability.exportBackup()
+        let targetProfile = try target.profileStore.activeProfile()
+
+        XCTAssertThrowsError(try target.portability.preview(Data("{".utf8))) { error in
+            XCTAssertEqual(error as? LocalCompleteBackupError, .invalidFormat)
+        }
+
+        let duplicate = try tamper(backup) { tables in
+            var expenses = try Self.tableRows("local_expenses", in: tables)
+            expenses.append(try XCTUnwrap(expenses.first))
+            tables["local_expenses"] = try Self.encodeRows(expenses)
+        }
+        XCTAssertThrowsError(try target.portability.importBackup(duplicate, into: targetProfile.id)) { error in
+            guard case LocalCompleteBackupError.duplicateID = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+
+        var badImageArchive = try XCTUnwrap(JSONSerialization.jsonObject(with: backup) as? [String: Any])
+        var images = try XCTUnwrap(badImageArchive["images"] as? [[String: Any]])
+        images[0]["hash"] = String(repeating: "0", count: 64)
+        badImageArchive["images"] = images
+        let badImageHash = try JSONSerialization.data(withJSONObject: badImageArchive, options: [.sortedKeys])
+        XCTAssertThrowsError(try target.portability.importBackup(badImageHash, into: targetProfile.id)) { error in
+            guard case LocalCompleteBackupError.invalidImage = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+
+        images[0]["path"] = "../outside.jpg"
+        badImageArchive["images"] = images
+        let unsafeImagePath = try JSONSerialization.data(withJSONObject: badImageArchive, options: [.sortedKeys])
+        XCTAssertThrowsError(try target.portability.importBackup(unsafeImagePath, into: targetProfile.id)) { error in
+            guard case LocalCompleteBackupError.invalidImage = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_accounts"), 0)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 0)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_account_entries"), 0)
+        XCTAssertEqual(try imageFiles(in: target.imageDirectory), [])
+    }
+
+    func testLF02104InvalidExpenseAmountAndDanglingAccountFailPreflight() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let backup = try source.portability.exportBackup()
+        let targetProfile = try target.profileStore.activeProfile()
+
+        let invalidAmount = try tamper(backup) { tables in
+            var expenses = try Self.tableRows("local_expenses", in: tables)
+            expenses[0]["amount_minor"] = -1
+            tables["local_expenses"] = try Self.encodeRows(expenses)
+        }
+        XCTAssertThrowsError(try target.portability.importBackup(invalidAmount, into: targetProfile.id)) { error in
+            XCTAssertEqual(error as? LocalCompleteBackupError, .invalidRows("local_expenses"))
+        }
+
+        let nonNumericAmount = try tamper(backup) { tables in
+            var expenses = try Self.tableRows("local_expenses", in: tables)
+            expenses[0]["amount_minor"] = true
+            tables["local_expenses"] = try Self.encodeRows(expenses)
+        }
+        XCTAssertThrowsError(try target.portability.importBackup(nonNumericAmount, into: targetProfile.id)) { error in
+            XCTAssertEqual(error as? LocalCompleteBackupError, .invalidRows("local_expenses"))
+        }
+
+        let danglingAccount = try tamper(backup) { tables in
+            var expenses = try Self.tableRows("local_expenses", in: tables)
+            expenses[0]["account_id"] = UUID().uuidString
+            tables["local_expenses"] = try Self.encodeRows(expenses)
+        }
+        XCTAssertThrowsError(try target.portability.importBackup(danglingAccount, into: targetProfile.id)) { error in
+            XCTAssertEqual(error as? LocalCompleteBackupError, .invalidRows("local_expenses"))
+        }
+
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_accounts"), 0)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 0)
+        XCTAssertEqual(try imageFiles(in: target.imageDirectory), [])
+    }
+
     func testLF02108LegacyExpenseArchivePreviewsAndImportsWithoutCreatingSyncOperations() throws {
         let source = try makeFixture()
         let target = try makeEmptyFixture()
