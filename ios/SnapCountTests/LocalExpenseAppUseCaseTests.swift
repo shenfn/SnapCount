@@ -647,7 +647,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
             balanceMinor: 50_000, currency: "CNY", kind: .asset,
             imageData: nil, createdAt: Date()
         ))
-        flakyWalletRepository.failUnlinkedReads = true
+        flakyWalletRepository.failHistoryReads = true
         let state = AppState(
             localExpenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository),
             localWalletSnapshotUseCase: useCase,
@@ -1411,7 +1411,7 @@ private final class LocalShellBindingRepositoryStub: LocalBindingRepository {
 
 private final class LocalWalletSnapshotRepositoryRefreshFailure: LocalWalletSnapshotRepositoryProtocol {
     private let base: LocalWalletSnapshotRepositoryProtocol
-    var failUnlinkedReads = false
+    var failHistoryReads = false
 
     init(base: LocalWalletSnapshotRepositoryProtocol) { self.base = base }
 
@@ -1420,11 +1420,11 @@ private final class LocalWalletSnapshotRepositoryRefreshFailure: LocalWalletSnap
     }
 
     func unlinked(profileID: UUID) throws -> [LocalWalletSnapshot] {
-        if failUnlinkedReads { throw SupabaseRemoteError.requestFailed("wallet_snapshot_refresh_failed") }
         return try base.unlinked(profileID: profileID)
     }
 
     func history(profileID: UUID) throws -> [LocalWalletSnapshot] {
+        if failHistoryReads { throw SupabaseRemoteError.requestFailed("wallet_snapshot_refresh_failed") }
         try base.history(profileID: profileID)
     }
 
