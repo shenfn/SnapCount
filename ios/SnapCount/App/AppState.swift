@@ -645,6 +645,35 @@ final class AppState: ObservableObject {
             }
         }
 
+        if !mayReadRemoteBusinessData,
+           localFactReader != nil || localExpenseUseCase != nil || localRecordUseCase != nil {
+            dashboard = DashboardSnapshot()
+            dashboard.domains = Self.fallbackDomains
+            isShowingCachedDashboard = false
+            let monthKey = Self.currentMonthKey
+            var monthKeys = Set(localFactMonths.keys)
+            monthKeys.formUnion(localExpenseMonthGroups.keys)
+            monthKeys.formUnion(localRecordMonthGroups.keys)
+            monthKeys.insert(monthKey)
+            if localFactReader != nil {
+                for key in monthKeys.sorted() {
+                    await readDeviceFactMonth(key, force: true)
+                }
+            } else {
+                for key in monthKeys.sorted() {
+                    if localExpenseUseCase != nil { await readDeviceExpenseMonth(key, force: true) }
+                    if localRecordUseCase != nil { await readDeviceRecordMonth(key, force: true) }
+                }
+                if monthKey == Self.currentMonthKey {
+                    applyLocalRecordMonth()
+                    await applyLocalStagingProjection()
+                }
+            }
+            dashboard.domains = domainsWithUpdatedCounts(Self.fallbackDomains, snapshot: dashboard)
+            dashboardMessage = recordMonthMessages[monthKey]
+            return
+        }
+
         do {
             let (fetchedSnapshot, session) = try await fetchDashboardCoreWithValidSession()
             guard generation == dashboardRefreshGeneration else { return }
@@ -838,7 +867,7 @@ final class AppState: ObservableObject {
     func recordGroups(monthKey: String) -> [NativeDayRecordGroup] {
         let local = (localExpenseMonthGroups[monthKey] ?? []) + (localRecordMonthGroups[monthKey] ?? [])
         // 成功读取的本地月份（包括空月）是未登录态权威，不能把已删除的旧 Dashboard 投影合并回来。
-        if !isSignedIn,
+        if !mayReadRemoteBusinessData,
            localExpenseMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil {
             return Self.mergeRecordGroups(local: local, remote: [])
         }
@@ -850,7 +879,10 @@ final class AppState: ObservableObject {
     }
 
     func hasLoadedRecordMonth(_ monthKey: String) -> Bool {
-        localExpenseMonthGroups[monthKey] != nil
+        if !mayReadRemoteBusinessData {
+            return localExpenseMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil
+        }
+        return localExpenseMonthGroups[monthKey] != nil
             || localRecordMonthGroups[monthKey] != nil
             || remoteRecordMonthGroups[monthKey] != nil
     }
@@ -876,13 +908,17 @@ final class AppState: ObservableObject {
         let interval = Self.recordReadSignposter.beginInterval("CollectRecordDetails", id: Self.recordReadSignposter.makeSignpostID())
         defer { Self.recordReadSignposter.endInterval("CollectRecordDetails", interval) }
         let monthKeys = NativeLocalDate.monthKeys(from: startDateKey, through: endDateKey)
-        var result = dashboard.recordDetails
+        var result = mayReadRemoteBusinessData ? dashboard.recordDetails : [:]
         for monthKey in monthKeys {
-            result.merge(recordMonthDetails[monthKey] ?? [:], uniquingKeysWith: { _, remote in remote })
+            if mayReadRemoteBusinessData {
+                result.merge(recordMonthDetails[monthKey] ?? [:], uniquingKeysWith: { _, remote in remote })
+            }
             result.merge(localRecordMonthDetails[monthKey] ?? [:], uniquingKeysWith: { _, local in local })
         }
-        for (reference, detail) in recordDetailCache {
-            result[reference] = detail
+        if mayReadRemoteBusinessData {
+            for (reference, detail) in recordDetailCache {
+                result[reference] = detail
+            }
         }
         return result
     }
@@ -1125,7 +1161,7 @@ final class AppState: ObservableObject {
                 from: month,
                 imageStore: localImageStore
             )
-            if monthKey == Self.currentMonthKey && !isSignedIn {
+            if monthKey == Self.currentMonthKey && !mayReadRemoteBusinessData {
                 applyLocalFactMonth(month)
                 await applyLocalStagingProjection()
             }

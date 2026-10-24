@@ -51,6 +51,8 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         state.resetUserScopedState()
         state.isSignedIn = true
         state.currentUserId = "cloud-user"
+        _ = try harness.bindingRepository.confirmBinding(profileID: harness.profile.id, cloudUserID: "cloud-user")
+        state.refreshLocalSyncState()
         let first = Task { @MainActor in await state.loadRecordMonth(month, force: true) }
         await gate.waitUntilEntered()
         XCTAssertTrue(state.isLoadingRecordMonth(month))
@@ -81,6 +83,8 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         state.isSignedIn = true
         state.currentUserId = "cloud-user"
         state.selectedDateKey = "2000-01-05"
+        _ = try harness.bindingRepository.confirmBinding(profileID: harness.profile.id, cloudUserID: "cloud-user")
+        state.refreshLocalSyncState()
         let original = harness.recordSpy.seedFood(date: "2000-01-05", calories: 430)
         await state.loadRecordMonth("2000-01")
         XCTAssertEqual(state.recordGroups(monthKey: "2000-01").flatMap(\.records).count, 1)
@@ -187,7 +191,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         try await assertForegroundReadsExternalWrites(signedIn: false)
     }
 
-    func testIOSV2POLISH006F17ForegroundReadsExternalWritesWhenSignedIn() async throws {
+    func testLF03402ForegroundReadsExternalLocalWritesWhenSignedInWithoutSync() async throws {
         try await assertForegroundReadsExternalWrites(signedIn: true)
     }
 
@@ -243,7 +247,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         if !signedIn {
             XCTAssertEqual(harness.sessionCounter.current, 0, "本机前台刷新不依赖云端会话")
         } else {
-            XCTAssertGreaterThan(harness.sessionCounter.current, 0, "保留登录态远端刷新入口")
+            XCTAssertEqual(harness.sessionCounter.current, 0, "同步关闭时登录态前台刷新仍仅读取本地")
         }
     }
 
@@ -367,6 +371,43 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
 
         XCTAssertTrue(harness.recordSpy.fetchMonthKeys.isEmpty, "登录本身不能触发云端业务读取")
         XCTAssertTrue(state.recordGroups(monthKey: NativeMonthKey.current()).flatMap(\.records).isEmpty)
+    }
+
+    func testLF03402SignedInWithoutSyncBuildsDashboardFromLocalFacts() async throws {
+        let dashboardRepository = SL02DashboardRepositoryStub()
+        let harness = try Self.makeHarness(
+            session: Self.stubSession(),
+            expenseStub: false,
+            dashboard: dashboardRepository
+        )
+        defer { harness.cleanup() }
+        let dateKey = NativeLocalDate.dateKey(Date())
+        _ = try await harness.recordUseCase.create(LocalRecordCommand(
+            id: UUID(),
+            domainKey: "food",
+            title: "本地早餐",
+            summary: "本地事实",
+            payload: [
+                "meal_type": AnyCodable("早餐"),
+                "total_calorie_kcal": AnyCodable(320)
+            ],
+            recordDate: dateKey,
+            recordTime: "08:00",
+            note: nil,
+            imageData: nil,
+            createdAt: Date()
+        ))
+        harness.state.isSignedIn = true
+        harness.state.currentUserId = "cloud-user"
+        harness.state.refreshLocalSyncState()
+
+        await harness.state.refreshDashboard()
+
+        XCTAssertEqual(dashboardRepository.fetchCount, 0, "同步关闭时首页不应请求远端")
+        XCTAssertEqual(harness.state.dashboard.todayCount, 1)
+        XCTAssertTrue(harness.state.dashboard.dayRecordGroups.flatMap(\.records).contains { $0.title == "本地早餐" })
+        XCTAssertFalse(harness.state.isShowingCachedDashboard)
+        XCTAssertEqual(harness.sessionCounter.current, 0)
     }
 
     func testLF03404SignedInWithoutSyncReadsLocalAccountAndLedger() async throws {
