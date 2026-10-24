@@ -240,7 +240,7 @@ struct InboxView: View {
                     }
                     .padding(JieziSpacing.lg)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: JieziRadius.card))
+                    .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
                 }
             }
             .padding(.horizontal, JieziSpacing.xl2)
