@@ -25,34 +25,52 @@ struct UploadScreenshotIntent: AppIntent {
             do {
                 let rawImageData = try await image.data(contentType: .image)
                 let imageData = try ImageUploadPreprocessor.jpegData(from: rawImageData)
-                let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+                let mode = LocalVisionModeStore().mode
+                let uploadToken: String?
+                if mode == .hosted {
+                    uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+                } else {
+                    uploadToken = nil
+                }
                 let recognition = try LocalImageRecognitionUseCase.makeDefault(
                     provider: HostedAIImageRecognitionProvider()
                 )
                 let result: ShortcutUploadResult
                 let trialOutcome: ShortcutTrialOutcome
                 do {
-                    let outcome = try await recognition.ingest(
-                        imageData: imageData,
-                        captureKind: "screenshot",
-                        filename: "shortcut-jpeg.jpg",
-                        uploadToken: uploadToken
-                    )
-                    switch outcome.result {
-                    case .archived:
-                        trialOutcome = .archived
-                        result = ShortcutUploadResult(
-                            displayText: "AI 识别结果已自动记录到本机。",
-                            notificationText: "AI 识别结果已自动记录到本机。",
-                            route: "records"
+                    if mode == .disabled {
+                        _ = try recognition.receiveForManual(
+                            imageData: imageData, captureKind: "screenshot", filename: "shortcut-jpeg.jpg"
                         )
-                    case .staged:
-                        trialOutcome = .staged
                         result = ShortcutUploadResult(
-                            displayText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
-                            notificationText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
+                            displayText: "AI 识别已关闭；图片仅保存在本机，请打开芥子手动处理。",
+                            notificationText: "图片已保存在本机，请打开芥子手动处理。",
                             route: "inbox"
                         )
+                        trialOutcome = .staged
+                    } else {
+                        let outcome = try await recognition.ingest(
+                            imageData: imageData,
+                            captureKind: "screenshot",
+                            filename: "shortcut-jpeg.jpg",
+                            uploadToken: uploadToken
+                        )
+                        switch outcome.result {
+                        case .archived:
+                            trialOutcome = .archived
+                            result = ShortcutUploadResult(
+                                displayText: "AI 识别结果已自动记录到本机。",
+                                notificationText: "AI 识别结果已自动记录到本机。",
+                                route: "records"
+                            )
+                        case .staged:
+                            trialOutcome = .staged
+                            result = ShortcutUploadResult(
+                                displayText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
+                                notificationText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
+                                route: "inbox"
+                            )
+                        }
                     }
                 } catch {
                     trialOutcome = .failed

@@ -3,6 +3,47 @@ import XCTest
 @testable import SnapCount
 
 final class LocalImageRecognitionTests: XCTestCase {
+    func testLF03507DisabledRecognitionPersistsImageForManualProcessingWithoutProviderCall() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            id: "must-not-be-requested", confidence: 1, payload: [:], missingFields: []
+        ))
+        let useCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+        let imageData = Data("disabled-mode-local-image".utf8)
+
+        let intake = try useCase.receiveForManual(
+            imageData: imageData,
+            captureKind: "screenshot",
+            filename: "local-only.jpg"
+        )
+
+        XCTAssertEqual(intake.status, .failed)
+        XCTAssertEqual(intake.retryCount, 0)
+        XCTAssertTrue(intake.failureMessage?.contains("AI 识别已关闭") == true)
+        XCTAssertEqual(intake.imageHash, LocalImageStore.sha256(imageData))
+        XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
+        XCTAssertEqual(try context.intakeRepository.failedIntakes(profileID: intake.profileID), [intake])
+        XCTAssertEqual(provider.callCount, 0)
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        XCTAssertTrue(records.isEmpty)
+    }
+
+    func testLocalVisionModePersistsInDevicePreferences() {
+        let suite = "local-vision-mode-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertEqual(LocalVisionModeStore(defaults: defaults).mode, .hosted)
+        LocalVisionModeStore(defaults: defaults).save(.disabled)
+        XCTAssertEqual(LocalVisionModeStore(defaults: defaults).mode, .disabled)
+    }
+
     func testLOCALP1SPORT001JHighConfidenceCompleteImageBecomesLocalFormalFact() async throws {
         let context = try makeContext()
         defer { cleanup(context) }

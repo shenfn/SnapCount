@@ -106,6 +106,7 @@ final class AppState: ObservableObject {
     @Published var aiInsightMessage: String?
     @Published var aiInsightIsCached = false
     @Published var userSettings = NativeUserSettings()
+    @Published var localVisionMode = LocalVisionModeStore().mode
     @Published var settingsMessage: String?
     @Published var isLoadingSettings = false
     @Published var isSavingSettings = false
@@ -156,6 +157,7 @@ final class AppState: ObservableObject {
     private let sessionProvider: NativeSessionProvider?
     private let expressionPlanAcknowledgementSleep: NativeSleepProvider
     private let keychain = KeychainStore.shared
+    private let localVisionModeStore = LocalVisionModeStore()
     private var lastDashboardRefreshAt: Date?
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
     private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
@@ -1085,6 +1087,7 @@ final class AppState: ObservableObject {
         filename: String,
         uploadToken: String? = nil
     ) async throws -> LocalImageIntakeOutcome {
+        guard localVisionMode != .disabled else { throw LocalDataError.invalidRecord }
         guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else {
             throw LocalDataError.invalidRecord
         }
@@ -1100,6 +1103,32 @@ final class AppState: ObservableObject {
             filename: filename,
             uploadToken: uploadToken
         )
+    }
+
+    func receiveImageForManualProcessing(
+        data: Data,
+        captureKind: String,
+        filename: String
+    ) throws -> LocalImageIntake {
+        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else {
+            throw LocalDataError.invalidRecord
+        }
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: localRecordUseCase,
+            imageStore: localImageStore,
+            intakeRepository: localImageIntakeRepository,
+            provider: HostedAIImageRecognitionProvider()
+        )
+        let intake = try recognition.receiveForManual(
+            imageData: data, captureKind: captureKind, filename: filename
+        )
+        Task { await refreshFailedLocalImageIntakes() }
+        return intake
+    }
+
+    func setLocalVisionMode(_ mode: LocalVisionMode) {
+        localVisionModeStore.save(mode)
+        localVisionMode = mode
     }
 
     var supportsLocalDomainRecords: Bool { localRecordUseCase != nil && localImageStore != nil }
@@ -1184,6 +1213,11 @@ final class AppState: ObservableObject {
     }
 
     func retryLocalImageIntake(_ intake: LocalImageIntake) async -> Bool {
+        guard localVisionMode != .disabled else {
+            inboxActionMessage = "AI 识别已关闭；请开启后重试，或手动处理原图。"
+            inboxActionMessageIsError = true
+            return false
+        }
         guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else { return false }
         do {
             let recognition = LocalImageRecognitionUseCase(

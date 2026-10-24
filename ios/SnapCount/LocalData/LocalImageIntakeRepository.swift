@@ -42,7 +42,8 @@ final class LocalImageIntakeRepository {
         filename: String,
         imagePath: String,
         imageHash: String,
-        at date: Date
+        at date: Date,
+        allowRetryLimit: Bool = false
     ) throws -> UUID {
         let operationID = UUID()
         try database.writer.write { db in
@@ -62,7 +63,7 @@ final class LocalImageIntakeRepository {
                     throw LocalImageRecognitionError.alreadyCompleted
                 }
                 let attempts: Int = row["attempt_count"]
-                guard attempts < 4 else { throw LocalImageRecognitionError.retryLimitReached }
+                guard attempts < 4 || allowRetryLimit else { throw LocalImageRecognitionError.retryLimitReached }
                 try db.execute(
                     sql: """
                         UPDATE local_image_intakes

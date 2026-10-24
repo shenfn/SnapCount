@@ -639,6 +639,22 @@ struct TodayView: View {
     private func uploadImageData(_ data: Data, captureKind: String, filename: String) async {
         isUploading = true
         defer { isUploading = false }
+        if appState.localVisionMode == .disabled {
+            do {
+                _ = try appState.receiveImageForManualProcessing(
+                    data: data, captureKind: captureKind, filename: filename
+                )
+                pendingLocalImageData = data
+                showManualRecordSheet = true
+                uploadMessage = "AI 识别已关闭；图片仅保存在本机，可直接手动记录。"
+                uploadMessageIsError = false
+            } catch {
+                uploadMessage = "本地图像保存失败：\(error.localizedDescription)"
+                uploadMessageIsError = true
+                showUploadResult = true
+            }
+            return
+        }
         do {
             let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
             let localOutcome = try await appState.ingestHostedImageLocally(

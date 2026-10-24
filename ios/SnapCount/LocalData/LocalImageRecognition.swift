@@ -182,6 +182,50 @@ final class LocalImageRecognitionUseCase {
         }
     }
 
+    func receiveForManual(
+        imageData: Data,
+        captureKind: String,
+        filename: String,
+        createdAt: Date = Date()
+    ) throws -> LocalImageIntake {
+        let imageHash = LocalImageStore.sha256(imageData)
+        let profile = try intakeRepository.activeProfile()
+        let intakeID = Self.intakeID(profileID: profile.id, imageHash: imageHash)
+        if let existing = try intakeRepository.intake(id: intakeID, profileID: profile.id),
+           existing.status == .completed {
+            throw LocalImageRecognitionError.alreadyCompleted
+        }
+        let owner = "recognition-\(profile.id.uuidString)-\(imageHash)"
+        let imagePath = LocalImageStore.relativePath(owner: owner, bucket: "intake")
+        let operationID = try intakeRepository.beginAttempt(
+            id: intakeID, profileID: profile.id, captureKind: captureKind,
+            filename: filename, imagePath: imagePath, imageHash: imageHash,
+            at: createdAt, allowRetryLimit: true
+        )
+        do {
+            _ = try imageStore.save(data: imageData, owner: owner, bucket: "intake")
+            try intakeRepository.markFailed(
+                id: intakeID, profileID: profile.id, operationID: operationID,
+                message: "AI 识别已关闭；原图仅保存在本机，可手动处理或在开启识别后重试。",
+                at: createdAt
+            )
+            guard let intake = try intakeRepository.intake(id: intakeID, profileID: profile.id) else {
+                throw LocalDataError.recordNotFound
+            }
+            return intake
+        } catch {
+            if !imageStore.contains(path: imagePath) {
+                try? intakeRepository.removeMissingIntake(id: intakeID, profileID: profile.id)
+            } else {
+                try? intakeRepository.markFailed(
+                    id: intakeID, profileID: profile.id, operationID: operationID,
+                    message: "本地手工处理准备未完成，原图仍保留在本机。", at: Date()
+                )
+            }
+            throw error
+        }
+    }
+
     func retry(intakeID: String, uploadToken: String? = nil, at date: Date = Date()) async throws -> LocalImageIntakeOutcome {
         let profile = try intakeRepository.activeProfile()
         guard let intake = try intakeRepository.intake(id: intakeID, profileID: profile.id),

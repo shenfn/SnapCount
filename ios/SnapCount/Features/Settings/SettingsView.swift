@@ -102,7 +102,7 @@ struct SettingsView: View {
                     } label: {
                         settingsRow(
                             "截图 / 拍照识别",
-                            detail: "截图：\(providerTitle(appState.userSettings.screenshotVisionPrimary)) · 拍照：\(providerTitle(appState.userSettings.photoVisionPrimary))",
+                            detail: "图片识别：\(appState.localVisionMode.title) · 截图：\(providerTitle(appState.userSettings.screenshotVisionPrimary)) · 拍照：\(providerTitle(appState.userSettings.photoVisionPrimary))",
                             systemImage: "viewfinder"
                         )
                     }
@@ -357,6 +357,21 @@ struct VisionSettingsView: View {
 
     var body: some View {
         Form {
+            Section("识别授权") {
+                Picker("图片识别", selection: Binding(
+                    get: { appState.localVisionMode },
+                    set: { appState.setLocalVisionMode($0) }
+                )) {
+                    ForEach(LocalVisionMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                Text(appState.localVisionMode == .disabled
+                     ? "关闭后，图片只保存在本机并进入手工处理；不会发送图片或调用 OCR。"
+                     : "识别请求由 Hosted AI 处理；关闭云同步不会关闭这项单独授权。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             Section("当前链路") {
                 LabeledContent("截图") {
                     Text(routeSummary(forPhoto: false)).foregroundStyle(.secondary)
