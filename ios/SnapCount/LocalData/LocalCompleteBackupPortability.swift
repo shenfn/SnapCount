@@ -12,15 +12,20 @@ struct LocalCompleteBackupPreview: Equatable {
     var totalRows: Int { tableCounts.values.reduce(0, +) }
 
     var confirmationText: String {
+        let accounts = tableCounts["local_accounts", default: 0]
+        let expenses = tableCounts["local_expenses", default: 0]
+        let incomes = tableCounts["local_income_records", default: 0]
+        let records = tableCounts["local_records", default: 0]
+        let candidates = tableCounts["local_staging_records", default: 0]
+        let ledger = tableCounts["local_account_entries", default: 0]
+            + tableCounts["local_repayment_cycles", default: 0]
+            + tableCounts["local_liability_payments", default: 0]
+        let imageSize = ByteCountFormatter.string(fromByteCount: Int64(imageBytes), countStyle: .file)
         let scope = [
-            "账户 \(tableCounts["local_accounts", default: 0])",
-            "消费 \(tableCounts["local_expenses", default: 0])",
-            "收入 \(tableCounts["local_income_records", default: 0])",
-            "其他记录 \(tableCounts["local_records", default: 0])",
-            "候选 \(tableCounts["local_staging_records", default: 0])",
-            "账务关系/历史 \(tableCounts["local_account_entries", default: 0] + tableCounts["local_repayment_cycles", default: 0] + tableCounts["local_liability_payments", default: 0])"
+            "账户 \(accounts)", "消费 \(expenses)", "收入 \(incomes)",
+            "其他记录 \(records)", "候选 \(candidates)", "账务关系/历史 \(ledger)"
         ].joined(separator: "、")
-        return "\(formatName) v\(schemaVersion)。\(scope)。共 \(totalRows) 条，图片 \(imageCount) 张（\(ByteCountFormatter.string(fromByteCount: Int64(imageBytes), countStyle: .file)）。导入会合并到本机当前数据；冲突时整包回滚。不会恢复登录、同步授权或 API Key。"
+        return "\(formatName) v\(schemaVersion)。\(scope)。共 \(totalRows) 条，图片 \(imageCount) 张（\(imageSize)）。导入会合并到本机当前数据；冲突时整包回滚。不会恢复登录、同步授权或 API Key。"
     }
 }
 
