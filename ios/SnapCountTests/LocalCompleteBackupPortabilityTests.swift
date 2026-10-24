@@ -26,18 +26,18 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(imported.skippedRows, 0)
         XCTAssertEqual(imported.restoredImages, 3)
         XCTAssertEqual(try LocalExpenseRepository(database: target.database).accountBalanceMinor(accountID: source.cashID), 480)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_expenses WHERE deleted_at IS NOT NULL"), 1)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_liability_payments WHERE status = 'voided'"), 1)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_account_entries WHERE voided_at IS NOT NULL"), 3)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_staging_records WHERE status = 'pending_review'"), 1)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_image_intakes WHERE status = 'failed'"), 1)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_outbox_operations"), 0)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses WHERE deleted_at IS NOT NULL"), 1)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_liability_payments WHERE status = 'voided'"), 1)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_account_entries WHERE voided_at IS NOT NULL"), 3)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_staging_records WHERE status = 'pending_review'"), 1)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_image_intakes WHERE status = 'failed'"), 1)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_outbox_operations"), 0)
         XCTAssertEqual(try LocalExpenseRepository(database: target.database).accountBalanceMinor(accountID: source.liabilityID), 10_000)
 
         let repeated = try target.portability.importBackup(backup, into: targetProfile.id)
         XCTAssertEqual(repeated.insertedRows, 0)
         XCTAssertEqual(repeated.skippedRows, preview.totalRows)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_account_entries"), 5)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_account_entries"), 5)
     }
 
     func testLF02103ConflictingStableIDRejectsWholeBackupBeforeAnyInsert() throws {
@@ -71,7 +71,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
             ])
             tables["local_income_records"] = try Self.encodeRows(incomes)
         }
-        let incomeCountBefore = try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_income_records")
+        let incomeCountBefore = try count(target.database, "SELECT COUNT(*) FROM local_income_records")
         let imagesBefore = try imageFiles(in: target.imageDirectory)
 
         XCTAssertThrowsError(try target.portability.importBackup(backup, into: targetProfile.id)) { error in
@@ -79,8 +79,8 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
                 return XCTFail("unexpected error: \(error)")
             }
         }
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_income_records"), incomeCountBefore)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_expenses"), 2)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_income_records"), incomeCountBefore)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 2)
         XCTAssertEqual(try imageFiles(in: target.imageDirectory), imagesBefore)
     }
 
@@ -107,7 +107,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         }
 
         XCTAssertThrowsError(try target.portability.importBackup(backup, into: targetProfile.id))
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_accounts"), 0)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_accounts"), 0)
         XCTAssertEqual(try imageFiles(in: target.imageDirectory), [])
     }
 
@@ -140,11 +140,17 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         let imported = try target.portability.importBackup(legacyData, into: targetProfile.id)
         XCTAssertEqual(imported.insertedRows, 6) // two accounts, two expenses, two expense entries
         XCTAssertEqual(try LocalExpenseRepository(database: target.database).accountBalanceMinor(accountID: source.cashID), 480)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_outbox_operations"), 0)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_outbox_operations"), 0)
         let repeated = try target.portability.importBackup(legacyData, into: targetProfile.id)
         XCTAssertEqual(repeated.insertedRows, 0)
         XCTAssertEqual(repeated.skippedRows, 6)
-        XCTAssertEqual(try Int.fetchOne(target.database.writer, sql: "SELECT COUNT(*) FROM local_expenses"), 2)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 2)
+    }
+
+    private func count(_ database: LocalDatabase, _ sql: String) throws -> Int {
+        try database.writer.read { db in
+            try Int.fetchOne(db, sql: sql) ?? 0
+        }
     }
 
     private func makeFixture() throws -> Fixture {

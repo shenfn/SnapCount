@@ -3,6 +3,65 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testLF01401LocalInsightAggregatesOnlyCommittedFactsAcrossSixDomains() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "合成现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: Date(timeIntervalSince1970: 1_800_000_000)
+        ))
+        let day = "2026-09-19"
+        _ = try expenseRepository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: account.id, amountMinor: 1_234, currency: "CNY",
+            merchantName: "合成消费", platform: "线下", category: "other", paymentMethod: "现金",
+            transactionDate: day, transactionTime: nil, note: nil, createdAt: Date(timeIntervalSince1970: 1_800_000_001)
+        ), operationID: UUID())
+        _ = try expenseRepository.createIncome(LocalIncomeDraft(
+            id: UUID(), profileID: profile.id, accountID: account.id, amountMinor: 5_000, currency: "CNY",
+            sourceName: "合成收入", category: "other", incomeDate: day, occurredAt: nil,
+            note: nil, createdAt: Date(timeIntervalSince1970: 1_800_000_002)
+        ))
+        let records = try LocalRecordRepository(database: database)
+        let domainFacts: [(String, [String: AnyCodable])] = [
+            ("sleep", ["sleep_hours": AnyCodable(7.0), "quality_score": AnyCodable(4)]),
+            ("sport", ["sport_type": AnyCodable("走路"), "duration_minutes": AnyCodable(30)]),
+            ("reading", ["book_name": AnyCodable("合成书"), "reading_minutes": AnyCodable(20)]),
+            ("food", ["meal_type": AnyCodable("午餐"), "total_calorie_kcal": AnyCodable(650)])
+        ]
+        for (index, domainFact) in domainFacts.enumerated() {
+            _ = try records.createRecord(LocalRecordDraft(
+                id: UUID(), profileID: profile.id, domainKey: domainFact.0, title: "合成\(domainFact.0)",
+                summary: "", payloadJSON: try LocalRecordCodec.encode(domainFact.1), recordDate: day,
+                recordTime: nil, note: nil, imagePath: nil, imageHash: nil,
+                createdAt: Date(timeIntervalSince1970: 1_800_000_010 + Double(index))
+            ))
+        }
+
+        let facts = try LocalFactReader(database: database).range(profileID: profile.id, from: day, to: day).facts
+        let rows = LocalInsightAggregator.rows(from: facts)
+
+        XCTAssertEqual(rows.count, 1)
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.date, day)
+        XCTAssertEqual(row.expenseTotal, 12.34, accuracy: 0.001)
+        XCTAssertEqual(row.expenseCount, 1)
+        XCTAssertEqual(row.incomeTotal, 50, accuracy: 0.001)
+        XCTAssertEqual(row.incomeCount, 1)
+        XCTAssertEqual(row.sleepMinutes, 420, accuracy: 0.001)
+        XCTAssertEqual(row.sleepScoreAverage ?? 0, 4, accuracy: 0.001)
+        XCTAssertEqual(row.sleepCount, 1)
+        XCTAssertEqual(row.sportMinutes, 30, accuracy: 0.001)
+        XCTAssertEqual(row.sportCount, 1)
+        XCTAssertEqual(row.readingMinutes, 20, accuracy: 0.001)
+        XCTAssertEqual(row.readingCount, 1)
+        XCTAssertEqual(row.foodCalories, 650, accuracy: 0.001)
+        XCTAssertEqual(row.foodMeals, 1)
+        XCTAssertTrue(row.hasAnyData)
+    }
+
     func testLF03726BillDay31ClampsLeapAndNonLeapFebruaryAndKeepsStableCycles() throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

@@ -1049,6 +1049,7 @@ final class AppState: ObservableObject {
     /// FactReader 权威模式刷新统一事实月；降级双 UseCase 模式刷新其拥有的两个本地月缓存。
     /// 读取路径（loadUnifiedRecordMonth、识别投影）不使用本方法。
     private func refreshLocalMonthProjection(monthKey: String) async {
+        insightsLoadedAt = nil
         if localFactReader != nil {
             await readDeviceFactMonth(monthKey, force: true)
             return
@@ -2911,6 +2912,21 @@ final class AppState: ObservableObject {
         defer { isLoadingInsights = false }
 
         do {
+            if !mayReadRemoteBusinessData, let localFactReader {
+                let todayKey = NativeLocalDate.dateKey(Date())
+                let startKey = NativeLocalDate.shiftedDateKey(todayKey, byDays: -range.rawValue) ?? todayKey
+                let facts = try await localFactReader.activeRange(from: startKey, to: todayKey)?.facts ?? []
+                guard generation == userStateGeneration else { return }
+                insightsSnapshot = NativeInsightSnapshot(
+                    range: range,
+                    rows: LocalInsightAggregator.rows(from: facts)
+                )
+                aiInsight = nil
+                aiInsightIsCached = false
+                aiInsightMessage = nil
+                insightsLoadedAt = Date()
+                return
+            }
             let session = try await validSession()
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
             let snapshot = try await insightsRepository.fetchDailySummary(
@@ -4922,6 +4938,7 @@ final class AppState: ObservableObject {
         guard !isImportingLocalBackup, let portability = localCompleteBackupPortability else { return false }
         isImportingLocalBackup = true
         settingsMessage = nil
+        insightsLoadedAt = nil
         defer { isImportingLocalBackup = false }
         do {
             let result = try await Task.detached(priority: .userInitiated) {

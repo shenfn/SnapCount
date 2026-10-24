@@ -26,6 +26,33 @@ struct NativeDailyDomainSummary: Decodable, Identifiable {
     let foodMeals: Int
     let hasAnyData: Bool
 
+    init(
+        date: String,
+        expenseTotal: Double = 0, expenseCount: Int = 0,
+        incomeTotal: Double = 0, incomeCount: Int = 0,
+        sleepMinutes: Double = 0, sleepScoreAverage: Double? = nil, sleepCount: Int = 0,
+        sportMinutes: Double = 0, sportCount: Int = 0,
+        readingMinutes: Double = 0, readingCount: Int = 0,
+        foodCalories: Double = 0, foodMeals: Int = 0,
+        hasAnyData: Bool
+    ) {
+        self.date = date
+        self.expenseTotal = expenseTotal
+        self.expenseCount = expenseCount
+        self.incomeTotal = incomeTotal
+        self.incomeCount = incomeCount
+        self.sleepMinutes = sleepMinutes
+        self.sleepScoreAverage = sleepScoreAverage
+        self.sleepCount = sleepCount
+        self.sportMinutes = sportMinutes
+        self.sportCount = sportCount
+        self.readingMinutes = readingMinutes
+        self.readingCount = readingCount
+        self.foodCalories = foodCalories
+        self.foodMeals = foodMeals
+        self.hasAnyData = hasAnyData
+    }
+
     var id: String { date }
 
     enum CodingKeys: String, CodingKey {

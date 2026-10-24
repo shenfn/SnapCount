@@ -90,6 +90,25 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     }
 
     @MainActor
+    func testLF01401LoadsBasicInsightWithoutSessionOrRemoteAI() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        _ = try LocalProfileStore(database: database).activeProfile()
+        let state = AppState(
+            localFactReader: try LocalFactReader(database: database),
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+
+        await state.loadInsights(range: .seven)
+
+        XCTAssertNotNil(state.insightsSnapshot)
+        XCTAssertEqual(state.insightsSnapshot?.range, .seven)
+        XCTAssertNil(state.insightsMessage)
+        XCTAssertNil(state.aiInsight)
+    }
+
+    @MainActor
     func testLF03738AccountFormCreatesAndReadsLiabilityOffline() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

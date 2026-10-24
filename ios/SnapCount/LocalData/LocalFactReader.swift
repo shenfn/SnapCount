@@ -77,6 +77,14 @@ final class LocalFactReader {
         }
     }
 
+    func activeRange(from startDate: String, to endDate: String) async throws -> LocalFactMonth? {
+        try await database.writer.read { db in
+            guard let value = try String.fetchOne(db, sql: "SELECT id FROM local_profiles ORDER BY created_at ASC, id ASC LIMIT 1"),
+                  let profileID = UUID(uuidString: value) else { return nil }
+            return try Self.readMonth(db, profileID: profileID, from: startDate, to: endDate)
+        }
+    }
+
     private static func readMonth(_ db: Database, profileID: UUID, from startDate: String, to endDate: String) throws -> LocalFactMonth {
             let expenses = try Row.fetchAll(
                 db,
