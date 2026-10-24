@@ -89,6 +89,43 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(groups.first?.records.first?.value, "¥12.30")
     }
 
+    @MainActor
+    func testLF03201ManualIncomePersistsAndCreditsItsLocalAccountWithoutSession() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let repository = try LocalExpenseRepository(database: database)
+        let profile = try profileStore.activeProfile()
+        let account = try repository.createAccount(LocalAccountDraft(
+            id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+            profileID: profile.id,
+            name: "现金",
+            kind: "cash",
+            currency: "CNY",
+            openingBalanceMinor: 10_000,
+            createdAt: Date(timeIntervalSince1970: 1_800_000_000)
+        ))
+        let localUseCase = LocalExpenseUseCase(profileStore: profileStore, repository: repository)
+        let state = AppState(
+            localExpenseUseCase: localUseCase,
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+        var draft = NativeManualRecordDraft(kind: .income)
+        draft.amountText = "20.00"
+        draft.title = "薪资"
+        draft.category = "salary"
+        draft.accountId = account.id.uuidString
+        draft.date = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let saved = await state.createManualRecord(draft, domain: nil)
+
+        XCTAssertTrue(saved, "未登录收入应在本地保存")
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 12_000)
+        XCTAssertEqual(try repository.accountEntries(accountID: account.id).filter { $0.voidedAt == nil }.map(\.direction), ["in"])
+        XCTAssertEqual(state.manualRecordMessage, "收入已记录（本机）")
+    }
+
     func testLocalExpenseDetailUsesStableReferenceAndLocalOnlyFields() {
         let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let detail = LocalExpenseReadModel.detail(from: localExpense(profileID: profileID))
