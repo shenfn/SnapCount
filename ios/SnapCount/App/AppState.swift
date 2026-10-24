@@ -1561,9 +1561,11 @@ final class AppState: ObservableObject {
         snapshot.recordDetails = details
         snapshot.monthCount = records.count
         snapshot.monthExpense = NativeHomeInsightAnalytics.confirmedExpenseTotal(from: snapshot)
-        snapshot.monthIncome = details.values
-            .filter { $0.kind == "income" }
-            .reduce(0) { $0 + ($1.amount ?? 0) }
+        snapshot.monthIncome = records
+            .filter { $0.kind == .income }
+            .reduce(0) { total, record in
+                total + (details[record.reference]?.amount ?? details[record.id]?.amount ?? record.amount ?? 0)
+            }
         let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
         snapshot.domains = domainsWithUpdatedCounts(definitions, snapshot: snapshot)
         return snapshot
@@ -1662,7 +1664,18 @@ final class AppState: ObservableObject {
                         kind: account.type.rawValue,
                         currency: account.currency,
                         openingBalanceMinor: Int64((account.initialBalance * 100).rounded()),
-                        createdAt: Date()
+                        createdAt: Date(),
+                        institution: account.institution,
+                        last4: account.last4,
+                        billDay: account.billDay,
+                        paymentDueDay: account.paymentDueDay,
+                        autoDebitAccountID: account.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
+                        autoConfirmRepayment: account.autoConfirmRepayment,
+                        gracePeriodDays: account.gracePeriodDays,
+                        isDefaultExpense: account.isDefaultExpense,
+                        isDefaultIncome: account.isDefaultIncome,
+                        isArchived: account.isArchived,
+                        sortOrder: account.sortOrder
                     )
                 }
                 try await localExpenseUseCase.importRemoteAccounts(localAccounts)
@@ -1693,7 +1706,18 @@ final class AppState: ObservableObject {
                 kind: account.type.rawValue,
                 currency: account.currency,
                 openingBalanceMinor: Int64((account.initialBalance * 100).rounded()),
-                createdAt: Date()
+                createdAt: Date(),
+                institution: account.institution,
+                last4: account.last4,
+                billDay: account.billDay,
+                paymentDueDay: account.paymentDueDay,
+                autoDebitAccountID: account.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
+                autoConfirmRepayment: account.autoConfirmRepayment,
+                gracePeriodDays: account.gracePeriodDays,
+                isDefaultExpense: account.isDefaultExpense,
+                isDefaultIncome: account.isDefaultIncome,
+                isArchived: account.isArchived,
+                sortOrder: account.sortOrder
             )
         }
         if !missingAccounts.isEmpty {
@@ -1759,8 +1783,8 @@ final class AppState: ObservableObject {
             id: account.id.uuidString,
             name: account.name,
             type: NativeAccountType.normalized(account.kind),
-            institution: "",
-            last4: "",
+            institution: account.institution,
+            last4: account.last4,
             currency: account.currency,
             initialBalance: Double(account.openingBalanceMinor) / 100,
             currentBalance: Double(balanceMinor) / 100,
@@ -1768,16 +1792,16 @@ final class AppState: ObservableObject {
             snapshotAt: nil,
             sourceRecordTable: "",
             sourceRecordId: "",
-            billDay: nil,
-            paymentDueDay: nil,
-            autoDebitAccountId: nil,
-            autoConfirmRepayment: false,
-            gracePeriodDays: 0,
+            billDay: account.billDay,
+            paymentDueDay: account.paymentDueDay,
+            autoDebitAccountId: account.autoDebitAccountID?.uuidString,
+            autoConfirmRepayment: account.autoConfirmRepayment,
+            gracePeriodDays: account.gracePeriodDays,
             lastReconciledAt: nil,
-            isDefaultExpense: false,
-            isDefaultIncome: false,
-            isArchived: false,
-            sortOrder: 0
+            isDefaultExpense: account.isDefaultExpense,
+            isDefaultIncome: account.isDefaultIncome,
+            isArchived: account.isArchived,
+            sortOrder: account.sortOrder
         )
     }
 
@@ -2280,6 +2304,9 @@ final class AppState: ObservableObject {
     }
 
     func saveAccount(_ draft: NativeAccountDraft) async -> Bool {
+        if !mayReadRemoteBusinessData {
+            return await saveLocalManagedAccount(draft)
+        }
         guard let initialBalance = Double(draft.initialBalanceText.isEmpty ? "0" : draft.initialBalanceText) else {
             accountMessage = "初始余额必须是数字"
             return false
@@ -2304,9 +2331,105 @@ final class AppState: ObservableObject {
     }
 
     func setAccountArchived(_ account: NativeAccount, archived: Bool) async -> Bool {
+        if !mayReadRemoteBusinessData {
+            _ = await prepareLocalWorkspace()
+            guard let id = UUID(uuidString: account.id), let local = localAccounts.first(where: { $0.id == id }) else {
+                accountMessage = "本地账户不可用，请刷新后重试。"
+                return false
+            }
+            guard let localExpenseUseCase else {
+                accountMessage = "本地账户存储暂不可用。"
+                return false
+            }
+            do {
+                _ = try await localExpenseUseCase.updateAccount(LocalAccountEditCommand(
+                    id: local.id, expectedVersion: local.localVersion, name: local.name,
+                    kind: local.kind, institution: local.institution, last4: local.last4,
+                    billDay: local.billDay, paymentDueDay: local.paymentDueDay,
+                    autoDebitAccountID: archived ? nil : local.autoDebitAccountID,
+                    autoConfirmRepayment: archived ? false : local.autoConfirmRepayment,
+                    gracePeriodDays: local.gracePeriodDays,
+                    isDefaultExpense: archived ? false : local.isDefaultExpense,
+                    isDefaultIncome: archived ? false : local.isDefaultIncome,
+                    isArchived: archived, sortOrder: local.sortOrder
+                ))
+                await loadLocalAccounts()
+                accountMessage = archived ? "账户已归档" : "账户已恢复"
+                return true
+            } catch {
+                accountMessage = error.localizedDescription
+                return false
+            }
+        }
         return await performAccountManagementAction(
             .setArchived(accountId: account.id, archived: archived)
         )
+    }
+
+    private func saveLocalManagedAccount(_ draft: NativeAccountDraft) async -> Bool {
+        guard !isSavingAccount else { return false }
+        isSavingAccount = true
+        accountMessage = nil
+        defer { isSavingAccount = false }
+        if let validation = draft.validationMessage {
+            accountMessage = validation
+            return false
+        }
+        _ = await prepareLocalWorkspace()
+        return await persistLocalManagedAccount(draft)
+    }
+
+    private func persistLocalManagedAccount(_ draft: NativeAccountDraft) async -> Bool {
+        guard let localExpenseUseCase else {
+            accountMessage = "本地账户存储暂不可用。"
+            return false
+        }
+        let autoDebitID: UUID?
+        if let value = draft.autoDebitAccountId {
+            guard let parsed = UUID(uuidString: value) else {
+                accountMessage = "自动扣款账户无效。"
+                return false
+            }
+            autoDebitID = parsed
+        } else {
+            autoDebitID = nil
+        }
+        do {
+            if let accountIDText = draft.accountId {
+                guard let accountID = UUID(uuidString: accountIDText),
+                      let local = localAccounts.first(where: { $0.id == accountID }) else {
+                    accountMessage = "本地账户不可用，请刷新后重试。"
+                    return false
+                }
+                _ = try await localExpenseUseCase.updateAccount(LocalAccountEditCommand(
+                    id: local.id, expectedVersion: local.localVersion,
+                    name: draft.name, kind: draft.type.rawValue, institution: draft.institution,
+                    last4: draft.last4, billDay: Int(draft.billDayText),
+                    paymentDueDay: Int(draft.paymentDueDayText), autoDebitAccountID: autoDebitID,
+                    autoConfirmRepayment: draft.autoConfirmRepayment,
+                    gracePeriodDays: Int(draft.gracePeriodDaysText) ?? 0,
+                    isDefaultExpense: draft.isDefaultExpense, isDefaultIncome: draft.isDefaultIncome,
+                    isArchived: local.isArchived, sortOrder: local.sortOrder
+                ))
+            } else {
+                let command = LocalAccountSetupCommand(
+                    id: UUID(), name: draft.name, kind: draft.type.rawValue,
+                    openingBalanceText: draft.initialBalanceText.isEmpty ? "0" : draft.initialBalanceText,
+                    createdAt: Date(), institution: draft.institution, last4: draft.last4,
+                    billDay: Int(draft.billDayText), paymentDueDay: Int(draft.paymentDueDayText),
+                    autoDebitAccountID: autoDebitID, autoConfirmRepayment: draft.autoConfirmRepayment,
+                    gracePeriodDays: Int(draft.gracePeriodDaysText) ?? 0,
+                    isDefaultExpense: draft.isDefaultExpense, isDefaultIncome: draft.isDefaultIncome
+                )
+                _ = try await localExpenseUseCase.createAccount(command)
+            }
+            await loadLocalAccounts()
+            accountMessage = "账户已保存在此设备"
+            return true
+        } catch {
+            accountMessage = error.localizedDescription
+            return false
+        }
     }
 
     private func performAccountManagementAction(_ command: AccountManagementActionCommand) async -> Bool {
@@ -4026,12 +4149,13 @@ final class AppState: ObservableObject {
     private func saveLocalRecordDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
         guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
         let current = try await localExpenseForReference(draft.reference)
+        guard let expectedVersion = draft.localVersion else { throw LocalDataError.invalidRecord }
         guard let accountID = UUID(uuidString: draft.accountId ?? current.accountID.uuidString) else {
             throw LocalDataError.invalidIdentifier
         }
         let command = LocalExpenseUpdateCommand(
             id: current.id,
-            expectedVersion: current.localVersion,
+            expectedVersion: expectedVersion,
             accountID: accountID,
             amountText: draft.amountText,
             currency: current.currency,
@@ -4062,7 +4186,8 @@ final class AppState: ObservableObject {
     private func saveLocalIncomeDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
         guard let localExpenseUseCase,
               let id = UUID(uuidString: NativeRecordReference(draft.reference).rawId),
-              let current = try await localExpenseUseCase.income(id: id) else {
+              let current = try await localExpenseUseCase.income(id: id),
+              let expectedVersion = draft.localVersion else {
             throw LocalDataError.recordNotFound
         }
         let eventTime: Date?
@@ -4080,7 +4205,7 @@ final class AppState: ObservableObject {
         let saved = try await localExpenseUseCase.updateIncome(LocalIncomeUpdate(
             id: current.id,
             profileID: profile.id,
-            expectedVersion: current.localVersion,
+            expectedVersion: expectedVersion,
             accountID: draft.accountId.flatMap(UUID.init(uuidString:)),
             amountMinor: try LocalExpenseMapper.amountMinor(draft.amountText),
             currency: current.currency,
@@ -4148,6 +4273,7 @@ final class AppState: ObservableObject {
     private func saveLocalDomainRecord(_ draft: NativeRecordEditDraft) async throws -> Bool {
         guard let localRecordUseCase else { throw LocalDataError.invalidRecord }
         let current = try await localDomainRecordForReference(draft.reference)
+        guard let expectedVersion = draft.localVersion else { throw LocalDataError.invalidRecord }
         var payload = (try? LocalRecordCodec.decode(current.payloadJSON)) ?? [:]
         let trimmedNote = draft.note.trimmingCharacters(in: .whitespacesAndNewlines)
         payload["note"] = trimmedNote.isEmpty
@@ -4155,7 +4281,7 @@ final class AppState: ObservableObject {
             : AnyCodable(trimmedNote)
         let command = LocalRecordUpdateCommand(
             id: current.id,
-            expectedVersion: current.localVersion,
+            expectedVersion: expectedVersion,
             title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? current.title
                 : draft.title,
@@ -4944,7 +5070,7 @@ final class AppState: ObservableObject {
         guard let localExpenseUseCase else { return nil }
         do {
             let account = try await localExpenseUseCase.createAccount(command)
-            _ = await prepareLocalWorkspace()
+            await loadLocalAccounts()
             localAccountMessage = nil
             return account
         } catch {
@@ -4996,7 +5122,18 @@ final class AppState: ObservableObject {
                 kind: cloudAccount.type.rawValue,
                 currency: cloudAccount.currency,
                 openingBalanceMinor: Int64((cloudAccount.initialBalance * 100).rounded()),
-                createdAt: Date()
+                createdAt: Date(),
+                institution: cloudAccount.institution,
+                last4: cloudAccount.last4,
+                billDay: cloudAccount.billDay,
+                paymentDueDay: cloudAccount.paymentDueDay,
+                autoDebitAccountID: cloudAccount.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
+                autoConfirmRepayment: cloudAccount.autoConfirmRepayment,
+                gracePeriodDays: cloudAccount.gracePeriodDays,
+                isDefaultExpense: cloudAccount.isDefaultExpense,
+                isDefaultIncome: cloudAccount.isDefaultIncome,
+                isArchived: cloudAccount.isArchived,
+                sortOrder: cloudAccount.sortOrder
             )
             try await localExpenseUseCase.importRemoteAccounts([mirror])
             _ = await prepareLocalWorkspace()
@@ -5035,7 +5172,13 @@ final class AppState: ObservableObject {
             let mirror = LocalAccount(
                 id: accountID, profileID: UUID(), name: cloudAccount.name,
                 kind: cloudAccount.type.rawValue, currency: cloudAccount.currency,
-                openingBalanceMinor: Int64((cloudAccount.initialBalance * 100).rounded()), createdAt: Date()
+                openingBalanceMinor: Int64((cloudAccount.initialBalance * 100).rounded()), createdAt: Date(),
+                institution: cloudAccount.institution, last4: cloudAccount.last4,
+                billDay: cloudAccount.billDay, paymentDueDay: cloudAccount.paymentDueDay,
+                autoDebitAccountID: cloudAccount.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
+                autoConfirmRepayment: cloudAccount.autoConfirmRepayment, gracePeriodDays: cloudAccount.gracePeriodDays,
+                isDefaultExpense: cloudAccount.isDefaultExpense, isDefaultIncome: cloudAccount.isDefaultIncome,
+                isArchived: cloudAccount.isArchived, sortOrder: cloudAccount.sortOrder
             )
             try await localExpenseUseCase.importRemoteAccounts([mirror])
             _ = await prepareLocalWorkspace()

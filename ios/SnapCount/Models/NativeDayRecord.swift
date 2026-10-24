@@ -20,6 +20,7 @@ struct NativeDayRecord: Identifiable {
     let systemImage: String
     let transactionType: String?
     let status: String?
+    let amount: Double?
 
     init(
         id: String,
@@ -33,7 +34,8 @@ struct NativeDayRecord: Identifiable {
         timeLabel: String?,
         systemImage: String,
         transactionType: String? = nil,
-        status: String? = nil
+        status: String? = nil,
+        amount: Double? = nil
     ) {
         self.id = id
         self.reference = reference
@@ -47,6 +49,7 @@ struct NativeDayRecord: Identifiable {
         self.systemImage = systemImage
         self.transactionType = transactionType
         self.status = status
+        self.amount = amount
     }
 }
 

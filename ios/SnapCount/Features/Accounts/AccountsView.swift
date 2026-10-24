@@ -170,6 +170,7 @@ struct AccountDetailView: View {
                         Section("还款设置") {
                             LabeledContent("账单日", value: account.billDay.map { "每月\($0)日" } ?? "未设置")
                             LabeledContent("还款日", value: account.paymentDueDay.map { "每月\($0)日" } ?? "未设置")
+                            LabeledContent("宽限期", value: "\(account.gracePeriodDays) 天")
                             LabeledContent("自动确认", value: account.autoConfirmRepayment ? "已开启" : "需手动确认")
                         }
 
@@ -647,6 +648,7 @@ struct AccountEditSheet: View {
                     Section("负债设置") {
                         TextField("账单日（1-31）", text: $draft.billDayText).keyboardType(.numberPad)
                         TextField("还款日（1-31）", text: $draft.paymentDueDayText).keyboardType(.numberPad)
+                        TextField("宽限期（天）", text: $draft.gracePeriodDaysText).keyboardType(.numberPad)
                         Picker("自动扣款账户", selection: $draft.autoDebitAccountId) {
                             Text("不设置").tag(String?.none)
                             ForEach(debitAccounts) { account in

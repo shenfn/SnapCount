@@ -90,6 +90,60 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     }
 
     @MainActor
+    func testLF03738AccountFormCreatesAndReadsLiabilityOffline() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let repository = try LocalExpenseRepository(database: database)
+        let profile = try profileStore.activeProfile()
+        let debitAccount = try repository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 20_000, createdAt: Date()
+        ))
+        let useCase = LocalExpenseUseCase(profileStore: profileStore, repository: repository)
+        let state = AppState(
+            localExpenseUseCase: useCase,
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+        var draft = NativeAccountDraft()
+        draft.name = "示例信用卡"
+        draft.type = .creditCard
+        draft.institution = "示例银行"
+        draft.last4 = "1234"
+        draft.initialBalanceText = "500.00"
+        draft.billDayText = "15"
+        draft.paymentDueDayText = "25"
+        draft.gracePeriodDaysText = "3"
+        draft.autoDebitAccountId = debitAccount.id.uuidString
+
+        let didSave = await state.saveAccount(draft)
+        XCTAssertTrue(didSave)
+        let saved = try XCTUnwrap(state.accounts.first { $0.type == .creditCard })
+        XCTAssertEqual(saved.institution, "示例银行")
+        XCTAssertEqual(saved.last4, "1234")
+        XCTAssertEqual(saved.currentBalance, 500, accuracy: 0.001)
+        XCTAssertEqual(saved.billDay, 15)
+        XCTAssertEqual(saved.paymentDueDay, 25)
+        XCTAssertEqual(saved.autoDebitAccountId, debitAccount.id.uuidString)
+        XCTAssertEqual(saved.gracePeriodDays, 3)
+        XCTAssertEqual(state.accountMessage, "账户已保存在此设备")
+
+        await state.loadAccountDetail(saved)
+        XCTAssertEqual(state.selectedAccountDetail?.account.id, saved.id)
+        XCTAssertNil(state.accountMessage)
+        let archived = await state.setAccountArchived(saved, archived: true)
+        XCTAssertTrue(archived)
+        let archivedAccount = try XCTUnwrap(state.accounts.first { $0.id == saved.id })
+        XCTAssertTrue(archivedAccount.isArchived)
+        XCTAssertEqual(archivedAccount.currentBalance, 500, accuracy: 0.001)
+        let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let reopenedAccount = try XCTUnwrap(reopened.accounts(profileID: profile.id).first { $0.kind == "credit_card" })
+        XCTAssertEqual(reopenedAccount.last4, "1234")
+        XCTAssertTrue(reopenedAccount.isArchived)
+    }
+
+    @MainActor
     func testLF03201ManualIncomePersistsAndCreditsItsLocalAccountWithoutSession() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

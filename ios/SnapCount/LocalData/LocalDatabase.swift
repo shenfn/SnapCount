@@ -336,6 +336,36 @@ final class LocalDatabase {
                     ON local_account_entries(account_id, occurred_at);
                 """)
         }
+        migrator.registerMigration("local-v13-managed-account-configuration") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_accounts ADD COLUMN institution TEXT NOT NULL DEFAULT '';
+                ALTER TABLE local_accounts ADD COLUMN last4 TEXT NOT NULL DEFAULT ''
+                    CHECK (last4 = '' OR (length(last4) = 4 AND last4 NOT GLOB '*[^0-9]*'));
+                ALTER TABLE local_accounts ADD COLUMN bill_day INTEGER
+                    CHECK (bill_day IS NULL OR bill_day BETWEEN 1 AND 31);
+                ALTER TABLE local_accounts ADD COLUMN payment_due_day INTEGER
+                    CHECK (payment_due_day IS NULL OR payment_due_day BETWEEN 1 AND 31);
+                ALTER TABLE local_accounts ADD COLUMN auto_debit_account_id TEXT REFERENCES local_accounts(id);
+                ALTER TABLE local_accounts ADD COLUMN auto_confirm_repayment BOOLEAN NOT NULL DEFAULT 0
+                    CHECK (auto_confirm_repayment IN (0, 1));
+                ALTER TABLE local_accounts ADD COLUMN grace_period_days INTEGER NOT NULL DEFAULT 0
+                    CHECK (grace_period_days >= 0);
+                ALTER TABLE local_accounts ADD COLUMN is_default_expense BOOLEAN NOT NULL DEFAULT 0
+                    CHECK (is_default_expense IN (0, 1));
+                ALTER TABLE local_accounts ADD COLUMN is_default_income BOOLEAN NOT NULL DEFAULT 0
+                    CHECK (is_default_income IN (0, 1));
+                ALTER TABLE local_accounts ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0
+                    CHECK (is_archived IN (0, 1));
+                ALTER TABLE local_accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE local_accounts ADD COLUMN local_version INTEGER NOT NULL DEFAULT 1
+                    CHECK (local_version > 0);
+
+                CREATE UNIQUE INDEX local_accounts_default_expense_idx
+                    ON local_accounts(profile_id) WHERE is_default_expense = 1 AND is_archived = 0;
+                CREATE UNIQUE INDEX local_accounts_default_income_idx
+                    ON local_accounts(profile_id) WHERE is_default_income = 1 AND is_archived = 0;
+                """)
+        }
         return migrator
     }
 }

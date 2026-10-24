@@ -78,6 +78,34 @@ struct LocalAccountSetupCommand: Equatable {
     let kind: String
     let openingBalanceText: String
     let createdAt: Date
+    var institution: String = ""
+    var last4: String = ""
+    var billDay: Int? = nil
+    var paymentDueDay: Int? = nil
+    var autoDebitAccountID: UUID? = nil
+    var autoConfirmRepayment: Bool = false
+    var gracePeriodDays: Int = 0
+    var isDefaultExpense: Bool = false
+    var isDefaultIncome: Bool = false
+    var sortOrder: Int = 0
+}
+
+struct LocalAccountEditCommand: Equatable {
+    let id: UUID
+    let expectedVersion: Int64
+    let name: String
+    let kind: String
+    let institution: String
+    let last4: String
+    let billDay: Int?
+    let paymentDueDay: Int?
+    let autoDebitAccountID: UUID?
+    let autoConfirmRepayment: Bool
+    let gracePeriodDays: Int
+    let isDefaultExpense: Bool
+    let isDefaultIncome: Bool
+    let isArchived: Bool
+    let sortOrder: Int
 }
 
 protocol LocalExpenseUseCaseProtocol {
@@ -87,6 +115,7 @@ protocol LocalExpenseUseCaseProtocol {
     func accountBalanceMinor(_ accountID: UUID) async throws -> Int64
     func expense(id: UUID) async throws -> LocalExpense?
     func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount
+    func updateAccount(_ command: LocalAccountEditCommand) async throws -> LocalAccount
     func importRemoteAccounts(_ accounts: [LocalAccount]) async throws
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome
     func createIncome(_ command: LocalIncomeCommand) async throws -> LocalIncome
@@ -115,6 +144,10 @@ extension LocalExpenseUseCaseProtocol {
     func expense(id: UUID) async throws -> LocalExpense? { nil }
 
     func createAccount(_ command: LocalAccountSetupCommand) async throws -> LocalAccount {
+        throw LocalDataError.invalidRecord
+    }
+
+    func updateAccount(_ command: LocalAccountEditCommand) async throws -> LocalAccount {
         throw LocalDataError.invalidRecord
     }
 
@@ -186,13 +219,41 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
             kind: command.kind,
             currency: "CNY",
             openingBalanceMinor: try LocalExpenseMapper.openingBalanceMinor(command.openingBalanceText),
-            createdAt: command.createdAt
+            createdAt: command.createdAt,
+            institution: command.institution,
+            last4: command.last4,
+            billDay: command.billDay,
+            paymentDueDay: command.paymentDueDay,
+            autoDebitAccountID: command.autoDebitAccountID,
+            autoConfirmRepayment: command.autoConfirmRepayment,
+            gracePeriodDays: command.gracePeriodDays,
+            isDefaultExpense: command.isDefaultExpense,
+            isDefaultIncome: command.isDefaultIncome,
+            sortOrder: command.sortOrder
         )
         guard !draft.name.isEmpty else { throw LocalDataError.invalidRecord }
+        guard draft.openingBalanceMinor >= 0 else { throw LocalDataError.invalidAmount }
         guard LocalExpenseMapper.allowedAccountKinds.contains(draft.kind) else {
             throw LocalDataError.invalidAccountKind
         }
         return try repository.createAccount(draft)
+    }
+
+    func updateAccount(_ command: LocalAccountEditCommand) async throws -> LocalAccount {
+        let profile = try profileStore.activeProfile()
+        guard !command.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              LocalExpenseMapper.allowedAccountKinds.contains(command.kind) else {
+            throw LocalDataError.invalidRecord
+        }
+        return try repository.updateAccount(LocalAccountUpdate(
+            id: command.id, profileID: profile.id, expectedVersion: command.expectedVersion,
+            name: command.name.trimmingCharacters(in: .whitespacesAndNewlines), kind: command.kind,
+            institution: command.institution, last4: command.last4, billDay: command.billDay,
+            paymentDueDay: command.paymentDueDay, autoDebitAccountID: command.autoDebitAccountID,
+            autoConfirmRepayment: command.autoConfirmRepayment, gracePeriodDays: command.gracePeriodDays,
+            isDefaultExpense: command.isDefaultExpense, isDefaultIncome: command.isDefaultIncome,
+            isArchived: command.isArchived, sortOrder: command.sortOrder, updatedAt: Date()
+        ))
     }
 
     func importRemoteAccounts(_ accounts: [LocalAccount]) async throws {
@@ -205,7 +266,18 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
                 kind: account.kind,
                 currency: account.currency,
                 openingBalanceMinor: account.openingBalanceMinor,
-                createdAt: account.createdAt
+                createdAt: account.createdAt,
+                institution: account.institution,
+                last4: account.last4,
+                billDay: account.billDay,
+                paymentDueDay: account.paymentDueDay,
+                autoDebitAccountID: account.autoDebitAccountID,
+                autoConfirmRepayment: account.autoConfirmRepayment,
+                gracePeriodDays: account.gracePeriodDays,
+                isDefaultExpense: account.isDefaultExpense,
+                isDefaultIncome: account.isDefaultIncome,
+                isArchived: account.isArchived,
+                sortOrder: account.sortOrder
             )
         }
         try repository.importRemoteAccounts(drafts)

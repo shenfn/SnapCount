@@ -3,6 +3,103 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testLF03738LiabilityAccountConfigurationPersistsAcrossDatabaseReopen() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let debitAccountID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: debitAccountID, profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 20_000, createdAt: Date(timeIntervalSince1970: 1_000)
+        ))
+        let liabilityID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: liabilityID, profileID: profile.id, name: "示例信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 50_000, createdAt: Date(timeIntervalSince1970: 2_000),
+            institution: "示例银行", last4: "1234", billDay: 15, paymentDueDay: 25,
+            autoDebitAccountID: debitAccountID, autoConfirmRepayment: false, gracePeriodDays: 3,
+            isDefaultExpense: false, isDefaultIncome: false, isArchived: false, sortOrder: 1
+        ))
+        _ = try repository.createExpense(LocalExpenseDraft(
+            id: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+            profileID: profile.id, accountID: liabilityID, amountMinor: 3_000, currency: "CNY",
+            merchantName: "示例消费", platform: "", category: "other", paymentMethod: "credit_card",
+            transactionDate: "2026-10-25", transactionTime: nil, note: nil,
+            createdAt: Date(timeIntervalSince1970: 3_000)
+        ), operationID: UUID())
+
+        let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let saved = try XCTUnwrap(reopened.accounts(profileID: profile.id).first { $0.id == liabilityID })
+        XCTAssertEqual(saved.kind, "credit_card")
+        XCTAssertEqual(saved.openingBalanceMinor, 50_000)
+        XCTAssertEqual(saved.institution, "示例银行")
+        XCTAssertEqual(saved.last4, "1234")
+        XCTAssertEqual(saved.billDay, 15)
+        XCTAssertEqual(saved.paymentDueDay, 25)
+        XCTAssertEqual(saved.autoDebitAccountID, debitAccountID)
+        XCTAssertEqual(saved.gracePeriodDays, 3)
+        XCTAssertFalse(saved.isArchived)
+        XCTAssertEqual(try reopened.accountBalanceMinor(accountID: liabilityID), 53_000, "信用消费增加待还金额")
+        XCTAssertEqual(try reopened.accountEntries(sourceID: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!).first?.direction, "in")
+        _ = try reopened.createIncome(LocalIncomeDraft(
+            id: UUID(), profileID: profile.id, accountID: liabilityID, amountMinor: 500, currency: "CNY",
+            sourceName: "按既有流水合同记入账户", category: "other", incomeDate: "2026-10-25",
+            occurredAt: nil, note: nil, createdAt: Date()
+        ))
+        XCTAssertEqual(try reopened.accountBalanceMinor(accountID: liabilityID), 53_500)
+    }
+
+    func testLF03739LocalDefaultsArchiveAndAutoDebitCleanupAreTransactional() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let assetID = UUID(), secondAssetID = UUID(), liabilityID = UUID()
+        let createdAt = Date(timeIntervalSince1970: 1_000)
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: assetID, profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 20_000, createdAt: createdAt,
+            isDefaultExpense: true, isDefaultIncome: true
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: secondAssetID, profileID: profile.id, name: "银行卡", kind: "debit_card", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: createdAt
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: liabilityID, profileID: profile.id, name: "信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 50_000, createdAt: createdAt, autoDebitAccountID: assetID,
+            isDefaultIncome: true
+        ))
+        let asset = try XCTUnwrap(repository.accounts(profileID: profile.id).first { $0.id == assetID })
+        _ = try repository.updateAccount(LocalAccountUpdate(
+            id: secondAssetID, profileID: profile.id, expectedVersion: 1, name: "银行卡", kind: "debit_card",
+            institution: "", last4: "", billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil,
+            autoConfirmRepayment: false, gracePeriodDays: 0, isDefaultExpense: true, isDefaultIncome: false,
+            isArchived: false, sortOrder: 1, updatedAt: Date()
+        ))
+        var accounts = try repository.accounts(profileID: profile.id)
+        XCTAssertFalse(try XCTUnwrap(accounts.first { $0.id == assetID }).isDefaultExpense)
+        XCTAssertTrue(try XCTUnwrap(accounts.first { $0.id == secondAssetID }).isDefaultExpense)
+        XCTAssertTrue(try XCTUnwrap(accounts.first { $0.id == liabilityID }).isDefaultIncome)
+
+        _ = try repository.updateAccount(LocalAccountUpdate(
+            id: asset.id, profileID: profile.id, expectedVersion: asset.localVersion, name: "现金", kind: "cash",
+            institution: "", last4: "", billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil,
+            autoConfirmRepayment: false, gracePeriodDays: 0, isDefaultExpense: true, isDefaultIncome: true,
+            isArchived: true, sortOrder: 0, updatedAt: Date()
+        ))
+        accounts = try repository.accounts(profileID: profile.id)
+        let archivedAsset = try XCTUnwrap(accounts.first { $0.id == assetID })
+        let liability = try XCTUnwrap(accounts.first { $0.id == liabilityID })
+        XCTAssertTrue(archivedAsset.isArchived)
+        XCTAssertFalse(archivedAsset.isDefaultExpense)
+        XCTAssertFalse(archivedAsset.isDefaultIncome)
+        XCTAssertNil(liability.autoDebitAccountID, "归档扣款资产时清除仍有效的扣款配置")
+    }
+
     func testIOSV2POLISH003F10WakeDateRoutesLegacyLocalFactAcrossMonthsWithoutRewriting() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

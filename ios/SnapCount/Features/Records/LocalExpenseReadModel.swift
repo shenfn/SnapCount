@@ -48,7 +48,8 @@ enum LocalExpenseReadModel {
             transactionTime: expense.transactionTime,
             domainKey: nil,
             source: "local",
-            status: "local"
+            status: "local",
+            localVersion: expense.localVersion
         )
     }
 

@@ -25,7 +25,8 @@ enum LocalIncomeReadModel {
             note: income.note, companionMessage: nil, accountId: income.accountID?.uuidString,
             systemImage: "arrow.down.circle", payload: nil,
             occurredAt: income.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
-            transactionTime: time, domainKey: "income", source: "local", status: "local"
+            transactionTime: time, domainKey: "income", source: "local", status: "local",
+            localVersion: income.localVersion
         )
     }
 
@@ -41,7 +42,8 @@ enum LocalIncomeReadModel {
                         title: income.sourceName.isEmpty ? "收入记录" : income.sourceName, subtitle: income.category,
                         value: String(format: "+¥%.2f", Double(income.amountMinor) / 100),
                         timeLabel: income.occurredAt.map { NativeLocalDate.timeKey($0) },
-                        systemImage: "arrow.down.circle", status: "local"
+                        systemImage: "arrow.down.circle", status: "local",
+                        amount: Double(income.amountMinor) / 100
                     )
                 }.sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }
             )

@@ -4,6 +4,7 @@ import GRDB
 protocol LocalExpenseRepositoryProtocol {
     func createProfile(id: UUID, createdAt: Date) throws -> LocalProfile
     func createAccount(_ draft: LocalAccountDraft) throws -> LocalAccount
+    func updateAccount(_ update: LocalAccountUpdate) throws -> LocalAccount
     func importRemoteAccounts(_ drafts: [LocalAccountDraft]) throws
     func accounts(profileID: UUID) throws -> [LocalAccount]
     func createExpense(_ draft: LocalExpenseDraft, operationID: UUID) throws -> LocalExpense
@@ -64,21 +65,51 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
     }
 
     func createAccount(_ draft: LocalAccountDraft) throws -> LocalAccount {
+        guard draft.openingBalanceMinor >= 0 else { throw LocalDataError.invalidAmount }
+        let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 30 else { throw LocalDataError.invalidRecord }
         try database.writer.write { db in
+            try Self.validateAccountConfiguration(
+                kind: draft.kind, last4: draft.last4, billDay: draft.billDay,
+                paymentDueDay: draft.paymentDueDay, autoDebitAccountID: draft.autoDebitAccountID,
+                autoConfirmRepayment: draft.autoConfirmRepayment, gracePeriodDays: draft.gracePeriodDays,
+                isDefaultExpense: draft.isDefaultExpense, isDefaultIncome: draft.isDefaultIncome,
+                isArchived: draft.isArchived, profileID: draft.profileID, accountID: draft.id, database: db
+            )
+            if draft.isDefaultExpense {
+                try db.execute(sql: "UPDATE local_accounts SET is_default_expense = 0 WHERE profile_id = ?", arguments: [draft.profileID.uuidString])
+            }
+            if draft.isDefaultIncome {
+                try db.execute(sql: "UPDATE local_accounts SET is_default_income = 0 WHERE profile_id = ?", arguments: [draft.profileID.uuidString])
+            }
             try db.execute(
                 sql: """
                     INSERT INTO local_accounts (
-                        id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local')
+                        id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin,
+                        institution, last4, bill_day, payment_due_day, auto_debit_account_id,
+                        auto_confirm_repayment, grace_period_days, is_default_expense, is_default_income,
+                        is_archived, sort_order
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                 arguments: [
                     draft.id.uuidString,
                     draft.profileID.uuidString,
-                    draft.name,
+                    name,
                     draft.kind,
                     draft.currency,
                     draft.openingBalanceMinor,
-                    draft.createdAt
+                    draft.createdAt,
+                    draft.institution,
+                    draft.last4,
+                    draft.billDay,
+                    draft.paymentDueDay,
+                    draft.autoDebitAccountID?.uuidString,
+                    draft.autoConfirmRepayment,
+                    draft.gracePeriodDays,
+                    draft.isDefaultExpense,
+                    draft.isDefaultIncome,
+                    draft.isArchived,
+                    draft.sortOrder
                 ]
             )
             try Self.insertOutbox(
@@ -96,12 +127,91 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         return LocalAccount(
             id: draft.id,
             profileID: draft.profileID,
-            name: draft.name,
+            name: name,
             kind: draft.kind,
             currency: draft.currency,
             openingBalanceMinor: draft.openingBalanceMinor,
-            createdAt: draft.createdAt
+            createdAt: draft.createdAt,
+            institution: draft.institution,
+            last4: draft.last4,
+            billDay: draft.billDay,
+            paymentDueDay: draft.paymentDueDay,
+            autoDebitAccountID: draft.autoDebitAccountID,
+            autoConfirmRepayment: draft.autoConfirmRepayment,
+            gracePeriodDays: draft.gracePeriodDays,
+            isDefaultExpense: draft.isDefaultExpense,
+            isDefaultIncome: draft.isDefaultIncome,
+            isArchived: draft.isArchived,
+            sortOrder: draft.sortOrder
         )
+    }
+
+    func updateAccount(_ update: LocalAccountUpdate) throws -> LocalAccount {
+        let name = update.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 30 else { throw LocalDataError.invalidRecord }
+        try database.writer.write { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM local_accounts WHERE id = ? AND profile_id = ?",
+                arguments: [update.id.uuidString, update.profileID.uuidString]
+            ) else { throw LocalDataError.recordNotFound }
+            let currentVersion: Int64 = row["local_version"]
+            guard currentVersion == update.expectedVersion else {
+                throw LocalDataError.versionConflict(expected: update.expectedVersion, actual: currentVersion)
+            }
+            let currentKind: String = row["kind"]
+            let liabilityKinds: Set<String> = ["credit_card", "credit_line"]
+            if liabilityKinds.contains(currentKind) != liabilityKinds.contains(update.kind) {
+                let hasEntries = try Row.fetchOne(db, sql: """
+                    SELECT 1 FROM local_account_entries WHERE account_id = ? LIMIT 1
+                    """, arguments: [update.id.uuidString]) != nil
+                let hasExpenses = try Row.fetchOne(db, sql: "SELECT 1 FROM local_expenses WHERE account_id = ? LIMIT 1", arguments: [update.id.uuidString]) != nil
+                let hasIncome = try Row.fetchOne(db, sql: "SELECT 1 FROM local_income_records WHERE account_id = ? LIMIT 1", arguments: [update.id.uuidString]) != nil
+                guard !(hasEntries || hasExpenses || hasIncome) else { throw LocalDataError.invalidAccountKind }
+            }
+            try Self.validateAccountConfiguration(
+                kind: update.kind, last4: update.last4, billDay: update.billDay,
+                paymentDueDay: update.paymentDueDay, autoDebitAccountID: update.autoDebitAccountID,
+                autoConfirmRepayment: update.autoConfirmRepayment, gracePeriodDays: update.gracePeriodDays,
+                isDefaultExpense: update.isArchived ? false : update.isDefaultExpense,
+                isDefaultIncome: update.isArchived ? false : update.isDefaultIncome,
+                isArchived: update.isArchived, profileID: update.profileID, accountID: update.id, database: db
+            )
+            if update.isDefaultExpense {
+                try db.execute(sql: "UPDATE local_accounts SET is_default_expense = 0 WHERE profile_id = ? AND id != ?", arguments: [update.profileID.uuidString, update.id.uuidString])
+            }
+            if update.isDefaultIncome {
+                try db.execute(sql: "UPDATE local_accounts SET is_default_income = 0 WHERE profile_id = ? AND id != ?", arguments: [update.profileID.uuidString, update.id.uuidString])
+            }
+            if update.isArchived {
+                try db.execute(sql: """
+                    UPDATE local_accounts
+                    SET auto_debit_account_id = NULL, auto_confirm_repayment = 0, local_version = local_version + 1
+                    WHERE profile_id = ? AND auto_debit_account_id = ?
+                    """, arguments: [update.profileID.uuidString, update.id.uuidString])
+            }
+            try db.execute(sql: """
+                UPDATE local_accounts SET name = ?, kind = ?, institution = ?, last4 = ?, bill_day = ?,
+                    payment_due_day = ?, auto_debit_account_id = ?, auto_confirm_repayment = ?,
+                    grace_period_days = ?, is_default_expense = ?, is_default_income = ?, is_archived = ?,
+                    sort_order = ?, local_version = local_version + 1
+                WHERE id = ? AND profile_id = ? AND local_version = ?
+                """, arguments: [
+                    name, update.kind, update.institution, update.last4, update.billDay,
+                    update.paymentDueDay, update.autoDebitAccountID?.uuidString, update.autoConfirmRepayment,
+                    update.gracePeriodDays, update.isArchived ? false : update.isDefaultExpense,
+                    update.isArchived ? false : update.isDefaultIncome, update.isArchived,
+                    update.sortOrder, update.id.uuidString, update.profileID.uuidString, update.expectedVersion
+                ])
+            guard db.changesCount == 1 else {
+                let actual = try Int64.fetchOne(db, sql: "SELECT local_version FROM local_accounts WHERE id = ?", arguments: [update.id.uuidString]) ?? 0
+                throw LocalDataError.versionConflict(expected: update.expectedVersion, actual: actual)
+            }
+        }
+        guard let saved = try accounts(profileID: update.profileID).first(where: { $0.id == update.id }) else {
+            throw LocalDataError.recordNotFound
+        }
+        return saved
     }
 
     /// Mirrors already-authoritative cloud accounts without enqueueing uploads.
@@ -109,16 +219,41 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
     /// still goes through createAccount and produces an outbox operation.
     func importRemoteAccounts(_ drafts: [LocalAccountDraft]) throws {
         guard !drafts.isEmpty else { return }
+        let orderedDrafts = drafts.sorted { left, right in
+            let liabilities: Set<String> = ["credit_card", "credit_line"]
+            return liabilities.contains(left.kind) == false && liabilities.contains(right.kind)
+        }
         try database.writer.write { db in
-            for draft in drafts {
+            for draft in orderedDrafts {
+                if draft.isDefaultExpense {
+                    try db.execute(sql: "UPDATE local_accounts SET is_default_expense = 0 WHERE profile_id = ? AND id != ?", arguments: [draft.profileID.uuidString, draft.id.uuidString])
+                }
+                if draft.isDefaultIncome {
+                    try db.execute(sql: "UPDATE local_accounts SET is_default_income = 0 WHERE profile_id = ? AND id != ?", arguments: [draft.profileID.uuidString, draft.id.uuidString])
+                }
                 try db.execute(sql: """
-                    INSERT INTO local_accounts (id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'remote')
+                    INSERT INTO local_accounts (
+                        id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin,
+                        institution, last4, bill_day, payment_due_day, auto_debit_account_id,
+                        auto_confirm_repayment, grace_period_days, is_default_expense, is_default_income,
+                        is_archived, sort_order
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'remote', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         kind = excluded.kind,
                         currency = excluded.currency,
                         opening_balance_minor = excluded.opening_balance_minor,
+                        institution = excluded.institution,
+                        last4 = excluded.last4,
+                        bill_day = excluded.bill_day,
+                        payment_due_day = excluded.payment_due_day,
+                        auto_debit_account_id = excluded.auto_debit_account_id,
+                        auto_confirm_repayment = excluded.auto_confirm_repayment,
+                        grace_period_days = excluded.grace_period_days,
+                        is_default_expense = excluded.is_default_expense,
+                        is_default_income = excluded.is_default_income,
+                        is_archived = excluded.is_archived,
+                        sort_order = excluded.sort_order,
                         origin = CASE WHEN EXISTS (
                             SELECT 1 FROM local_outbox_operations
                             WHERE aggregate_kind = 'account'
@@ -128,7 +263,11 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         ) THEN local_accounts.origin ELSE 'remote' END
                     """, arguments: [
                         draft.id.uuidString, draft.profileID.uuidString, draft.name,
-                        draft.kind, draft.currency, draft.openingBalanceMinor, draft.createdAt
+                        draft.kind, draft.currency, draft.openingBalanceMinor, draft.createdAt,
+                        draft.institution, draft.last4, draft.billDay, draft.paymentDueDay,
+                        draft.autoDebitAccountID?.uuidString, draft.autoConfirmRepayment,
+                        draft.gracePeriodDays, draft.isDefaultExpense, draft.isDefaultIncome,
+                        draft.isArchived, draft.sortOrder
                     ])
             }
         }
@@ -139,7 +278,10 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin
+                    SELECT id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin,
+                           institution, last4, bill_day, payment_due_day, auto_debit_account_id,
+                           auto_confirm_repayment, grace_period_days, is_default_expense, is_default_income,
+                           is_archived, sort_order, local_version
                     FROM local_accounts
                     WHERE profile_id = ?
                     ORDER BY created_at ASC, id ASC
@@ -159,7 +301,19 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     currency: row["currency"],
                     openingBalanceMinor: row["opening_balance_minor"],
                     createdAt: createdAt,
-                    origin: row["origin"] ?? "local"
+                    origin: row["origin"] ?? "local",
+                    institution: row["institution"],
+                    last4: row["last4"],
+                    billDay: row["bill_day"],
+                    paymentDueDay: row["payment_due_day"],
+                    autoDebitAccountID: (row["auto_debit_account_id"] as String?).flatMap(UUID.init(uuidString:)),
+                    autoConfirmRepayment: row["auto_confirm_repayment"],
+                    gracePeriodDays: row["grace_period_days"],
+                    isDefaultExpense: row["is_default_expense"],
+                    isDefaultIncome: row["is_default_income"],
+                    isArchived: row["is_archived"],
+                    sortOrder: row["sort_order"],
+                    localVersion: row["local_version"]
                 )
             }
         }
@@ -189,6 +343,10 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         let payload = try Self.outboxPayload(expense: expense)
 
         try database.writer.write { db in
+            try Self.validateActiveAccount(id: draft.accountID, profileID: draft.profileID, database: db)
+            let direction = try Self.expenseEntryDirection(
+                accountID: draft.accountID, profileID: draft.profileID, database: db
+            )
             try db.execute(
                 sql: """
                     INSERT INTO local_expenses (
@@ -221,12 +379,13 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     INSERT INTO local_account_entries (
                         id, profile_id, account_id, direction, amount_minor, entry_kind,
                         source_kind, source_id, occurred_at, voided_at
-                    ) VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
+                    ) VALUES (?, ?, ?, ?, ?, 'expense', 'expense', ?, ?, NULL)
                     """,
                 arguments: [
                     entryID.uuidString,
                     draft.profileID.uuidString,
                     draft.accountID.uuidString,
+                    direction,
                     draft.amountMinor,
                     draft.id.uuidString,
                     draft.createdAt
@@ -268,7 +427,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         )
         try database.writer.write { db in
             if let accountID = draft.accountID {
-                try Self.validateAccount(id: accountID, profileID: draft.profileID, database: db)
+                try Self.validateActiveIncomeAccount(id: accountID, profileID: draft.profileID, database: db)
             }
             try db.execute(sql: """
                 INSERT INTO local_income_records (
@@ -299,7 +458,11 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 throw LocalDataError.versionConflict(expected: update.expectedVersion, actual: existing.localVersion)
             }
             if let accountID = update.accountID {
-                try Self.validateAccount(id: accountID, profileID: existing.profileID, database: db)
+                if update.accountID != existing.accountID {
+                    try Self.validateActiveIncomeAccount(id: accountID, profileID: existing.profileID, database: db)
+                } else {
+                    try Self.validateIncomeAccount(id: accountID, profileID: existing.profileID, database: db)
+                }
             }
             let next = LocalIncome(
                 id: existing.id, profileID: existing.profileID, accountID: update.accountID,
@@ -371,6 +534,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     arguments: [draft.id.uuidString, draft.profileID.uuidString]
                 ) != nil
                 if exists { continue }
+                let direction = try Self.expenseEntryDirection(
+                    accountID: draft.accountID, profileID: draft.profileID, database: db
+                )
                 try db.execute(sql: """
                     INSERT INTO local_expenses (
                         id, profile_id, account_id, amount_minor, currency, merchant_name,
@@ -387,10 +553,10 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     INSERT OR IGNORE INTO local_account_entries (
                         id, profile_id, account_id, direction, amount_minor, entry_kind,
                         source_kind, source_id, occurred_at, voided_at
-                    ) VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
+                    ) VALUES (?, ?, ?, ?, ?, 'expense', 'expense', ?, ?, NULL)
                     """, arguments: [
                         UUID().uuidString, draft.profileID.uuidString, draft.accountID.uuidString,
-                        draft.amountMinor, draft.id.uuidString, draft.createdAt
+                        direction, draft.amountMinor, draft.id.uuidString, draft.createdAt
                     ])
             }
         }
@@ -407,11 +573,10 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     actual: existing.localVersion
                 )
             }
-            try Self.validateAccount(
-                id: update.accountID,
-                profileID: existing.profileID,
-                database: db
-            )
+            try Self.validateAccount(id: update.accountID, profileID: existing.profileID, database: db)
+            if update.accountID != existing.accountID {
+                try Self.validateActiveAccount(id: update.accountID, profileID: existing.profileID, database: db)
+            }
 
             let nextVersion = existing.localVersion + 1
             let updated = LocalExpense(
@@ -1034,6 +1199,90 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         }
     }
 
+    private static func validateAccountConfiguration(
+        kind: String,
+        last4: String,
+        billDay: Int?,
+        paymentDueDay: Int?,
+        autoDebitAccountID: UUID?,
+        autoConfirmRepayment: Bool,
+        gracePeriodDays: Int,
+        isDefaultExpense: Bool,
+        isDefaultIncome: Bool,
+        isArchived: Bool,
+        profileID: UUID,
+        accountID: UUID,
+        database: Database
+    ) throws {
+        let liabilityKinds: Set<String> = ["credit_card", "credit_line"]
+        guard ["cash", "wallet_balance", "debit_card", "credit_card", "credit_line", "other"].contains(kind),
+              last4.isEmpty || last4.range(of: #"^\d{4}$"#, options: .regularExpression) != nil,
+              billDay.map({ (1...31).contains($0) }) ?? true,
+              paymentDueDay.map({ (1...31).contains($0) }) ?? true,
+              gracePeriodDays >= 0,
+              !(isArchived && (isDefaultExpense || isDefaultIncome)),
+              !autoConfirmRepayment || liabilityKinds.contains(kind) else {
+            throw LocalDataError.invalidRecord
+        }
+        if let autoDebitAccountID {
+            guard autoDebitAccountID != accountID,
+                  let row = try Row.fetchOne(
+                    database,
+                    sql: "SELECT kind, is_archived FROM local_accounts WHERE id = ? AND profile_id = ?",
+                    arguments: [autoDebitAccountID.uuidString, profileID.uuidString]
+                  ) else { throw LocalDataError.invalidIdentifier }
+            let debitKind: String = row["kind"]
+            let archived: Bool = row["is_archived"]
+            guard !archived, !liabilityKinds.contains(debitKind) else { throw LocalDataError.invalidAccountKind }
+        }
+    }
+
+    private static func validateIncomeAccount(
+        id: UUID,
+        profileID: UUID,
+        database: Database
+    ) throws {
+        try validateAccount(id: id, profileID: profileID, database: database)
+    }
+
+    private static func validateActiveIncomeAccount(
+        id: UUID,
+        profileID: UUID,
+        database: Database
+    ) throws {
+        try validateActiveAccount(id: id, profileID: profileID, database: database)
+        try validateIncomeAccount(id: id, profileID: profileID, database: database)
+    }
+
+    private static func validateActiveAccount(
+        id: UUID,
+        profileID: UUID,
+        database: Database
+    ) throws {
+        try validateAccount(id: id, profileID: profileID, database: database)
+        guard let row = try Row.fetchOne(
+            database,
+            sql: "SELECT is_archived FROM local_accounts WHERE id = ? AND profile_id = ?",
+            arguments: [id.uuidString, profileID.uuidString]
+        ) else { throw LocalDataError.invalidIdentifier }
+        let isArchived: Bool = row["is_archived"]
+        guard !isArchived else { throw LocalDataError.invalidAccountKind }
+    }
+
+    private static func expenseEntryDirection(
+        accountID: UUID,
+        profileID: UUID,
+        database: Database
+    ) throws -> String {
+        try validateAccount(id: accountID, profileID: profileID, database: database)
+        guard let kind = try String.fetchOne(
+            database,
+            sql: "SELECT kind FROM local_accounts WHERE id = ? AND profile_id = ?",
+            arguments: [accountID.uuidString, profileID.uuidString]
+        ) else { throw LocalDataError.invalidIdentifier }
+        return kind == "credit_card" || kind == "credit_line" ? "in" : "out"
+    }
+
     private static func voidActiveEntry(
         sourceID: UUID,
         sourceKind: String = "expense",
@@ -1062,17 +1311,21 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         occurredAt: Date,
         database: Database
     ) throws {
+        let direction = try expenseEntryDirection(
+            accountID: expense.accountID, profileID: expense.profileID, database: database
+        )
         try database.execute(
             sql: """
                 INSERT INTO local_account_entries (
                     id, profile_id, account_id, direction, amount_minor, entry_kind,
                     source_kind, source_id, occurred_at, voided_at
-                ) VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
+                ) VALUES (?, ?, ?, ?, ?, 'expense', 'expense', ?, ?, NULL)
                 """,
             arguments: [
                 id.uuidString,
                 expense.profileID.uuidString,
                 expense.accountID.uuidString,
+                direction,
                 expense.amountMinor,
                 expense.id.uuidString,
                 occurredAt

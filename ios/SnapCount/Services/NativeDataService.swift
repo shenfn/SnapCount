@@ -91,6 +91,7 @@ struct NativeRecordDetail: Identifiable {
     var legacyAiFeedback: NativeAIFeedback? = nil
     var plannerAiFeedback: NativeAIFeedback? = nil
     var aiSummary: String? = nil
+    var localVersion: Int64? = nil
 
     var voiceAiFeedback: NativeAIFeedback? {
         legacyAiFeedback ?? aiFeedback.flatMap { $0.source == "expression_planner" ? nil : $0 }
@@ -168,6 +169,7 @@ struct NativeRecordEditDraft: Identifiable, Equatable {
     var source: String?
     var isLargeTransport: Bool
     var transportType: String?
+    var localVersion: Int64?
 
     var id: String { reference }
 
@@ -192,6 +194,7 @@ struct NativeRecordEditDraft: Identifiable, Equatable {
         source = detail.source
         isLargeTransport = detail.isLargeTransport
         transportType = detail.transportType
+        localVersion = detail.localVersion
     }
 }
 

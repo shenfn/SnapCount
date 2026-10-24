@@ -39,7 +39,10 @@ enum LocalFactReadModel {
                         timeLabel: fact.recordTime,
                         systemImage: kind == .expense ? "creditcard" : kind.systemImage,
                         transactionType: fact.domainKey,
-                        status: "local"
+                        status: "local",
+                        amount: fact.kind == .income
+                            ? (try? LocalRecordCodec.decode(fact.payloadJSON))?.double("amount_minor").map { $0 / 100 }
+                            : nil
                     )
                 }
             )
@@ -94,7 +97,8 @@ enum LocalFactReadModel {
             domainKey: fact.kind == .expense ? nil : fact.domainKey,
             source: fact.sourceKind,
             status: "local",
-            domainVersion: fact.domainVersion
+            domainVersion: fact.domainVersion,
+            localVersion: fact.localVersion
         )
         return NativeRecordDetail(
             id: base.id,
@@ -125,7 +129,8 @@ enum LocalFactReadModel {
             domainKey: base.domainKey,
             source: base.source,
             status: base.status,
-            domainVersion: base.domainVersion
+            domainVersion: base.domainVersion,
+            localVersion: base.localVersion
         )
     }
 

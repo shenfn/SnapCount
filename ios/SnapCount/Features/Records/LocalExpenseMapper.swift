@@ -1,7 +1,7 @@
 import Foundation
 
 enum LocalExpenseMapper {
-    static let allowedAccountKinds: Set<String> = ["cash", "wallet_balance", "debit_card"]
+    static let allowedAccountKinds: Set<String> = ["cash", "wallet_balance", "debit_card", "credit_card", "credit_line", "other"]
 
     static func createDraft(
         _ command: LocalExpenseCommand,

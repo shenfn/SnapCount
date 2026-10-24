@@ -15,6 +15,37 @@ struct LocalAccountDraft: Equatable {
     let currency: String
     let openingBalanceMinor: Int64
     let createdAt: Date
+    var institution: String = ""
+    var last4: String = ""
+    var billDay: Int? = nil
+    var paymentDueDay: Int? = nil
+    var autoDebitAccountID: UUID? = nil
+    var autoConfirmRepayment: Bool = false
+    var gracePeriodDays: Int = 0
+    var isDefaultExpense: Bool = false
+    var isDefaultIncome: Bool = false
+    var isArchived: Bool = false
+    var sortOrder: Int = 0
+}
+
+struct LocalAccountUpdate: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let expectedVersion: Int64
+    let name: String
+    let kind: String
+    let institution: String
+    let last4: String
+    let billDay: Int?
+    let paymentDueDay: Int?
+    let autoDebitAccountID: UUID?
+    let autoConfirmRepayment: Bool
+    let gracePeriodDays: Int
+    let isDefaultExpense: Bool
+    let isDefaultIncome: Bool
+    let isArchived: Bool
+    let sortOrder: Int
+    let updatedAt: Date
 }
 
 struct LocalAccount: Equatable, Identifiable {
@@ -26,6 +57,18 @@ struct LocalAccount: Equatable, Identifiable {
     let openingBalanceMinor: Int64
     let createdAt: Date
     let origin: String
+    let institution: String
+    let last4: String
+    let billDay: Int?
+    let paymentDueDay: Int?
+    let autoDebitAccountID: UUID?
+    let autoConfirmRepayment: Bool
+    let gracePeriodDays: Int
+    let isDefaultExpense: Bool
+    let isDefaultIncome: Bool
+    let isArchived: Bool
+    let sortOrder: Int
+    let localVersion: Int64
 
     init(
         id: UUID,
@@ -35,7 +78,19 @@ struct LocalAccount: Equatable, Identifiable {
         currency: String,
         openingBalanceMinor: Int64,
         createdAt: Date,
-        origin: String = "local"
+        origin: String = "local",
+        institution: String = "",
+        last4: String = "",
+        billDay: Int? = nil,
+        paymentDueDay: Int? = nil,
+        autoDebitAccountID: UUID? = nil,
+        autoConfirmRepayment: Bool = false,
+        gracePeriodDays: Int = 0,
+        isDefaultExpense: Bool = false,
+        isDefaultIncome: Bool = false,
+        isArchived: Bool = false,
+        sortOrder: Int = 0,
+        localVersion: Int64 = 1
     ) {
         self.id = id
         self.profileID = profileID
@@ -45,6 +100,18 @@ struct LocalAccount: Equatable, Identifiable {
         self.openingBalanceMinor = openingBalanceMinor
         self.createdAt = createdAt
         self.origin = origin
+        self.institution = institution
+        self.last4 = last4
+        self.billDay = billDay
+        self.paymentDueDay = paymentDueDay
+        self.autoDebitAccountID = autoDebitAccountID
+        self.autoConfirmRepayment = autoConfirmRepayment
+        self.gracePeriodDays = gracePeriodDays
+        self.isDefaultExpense = isDefaultExpense
+        self.isDefaultIncome = isDefaultIncome
+        self.isArchived = isArchived
+        self.sortOrder = sortOrder
+        self.localVersion = localVersion
     }
 }
 
