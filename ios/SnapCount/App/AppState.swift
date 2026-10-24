@@ -160,6 +160,7 @@ final class AppState: ObservableObject {
     private var recordDetailCache: [String: NativeRecordDetail] = [:]
     private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
     private var localExpenseMonthGroups: [String: [NativeDayRecordGroup]] = [:]
+    private var localIncomeMonthGroups: [String: [NativeDayRecordGroup]] = [:]
     private var localRecordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
     // Remote and local projections have different freshness and deletion
     // semantics. Keep them separate so loading one cannot erase the other.
@@ -853,6 +854,7 @@ final class AppState: ObservableObject {
         // Intent 可从独立连接写入；回前台先重读当前及已打开月份的本机事实。
         var months = Set(localFactMonths.keys)
             .union(localExpenseMonthGroups.keys)
+            .union(localIncomeMonthGroups.keys)
             .union(localRecordMonthGroups.keys)
         months.insert(Self.currentMonthKey)
         if let selectedMonth = NativeLocalDate.monthKey(from: selectedDateKey) {
@@ -870,10 +872,12 @@ final class AppState: ObservableObject {
     }
 
     func recordGroups(monthKey: String) -> [NativeDayRecordGroup] {
-        let local = (localExpenseMonthGroups[monthKey] ?? []) + (localRecordMonthGroups[monthKey] ?? [])
+        let local = (localExpenseMonthGroups[monthKey] ?? [])
+            + (localIncomeMonthGroups[monthKey] ?? [])
+            + (localRecordMonthGroups[monthKey] ?? [])
         // 成功读取的本地月份（包括空月）是未登录态权威，不能把已删除的旧 Dashboard 投影合并回来。
         if !mayReadRemoteBusinessData,
-           localExpenseMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil {
+           localExpenseMonthGroups[monthKey] != nil || localIncomeMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil {
             return Self.mergeRecordGroups(local: local, remote: [])
         }
         let remote = monthKey == Self.currentMonthKey
@@ -885,9 +889,10 @@ final class AppState: ObservableObject {
 
     func hasLoadedRecordMonth(_ monthKey: String) -> Bool {
         if !mayReadRemoteBusinessData {
-            return localExpenseMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil
+            return localExpenseMonthGroups[monthKey] != nil || localIncomeMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil
         }
         return localExpenseMonthGroups[monthKey] != nil
+            || localIncomeMonthGroups[monthKey] != nil
             || localRecordMonthGroups[monthKey] != nil
             || remoteRecordMonthGroups[monthKey] != nil
     }
@@ -1272,8 +1277,9 @@ final class AppState: ObservableObject {
             localFactMonths[monthKey] = month
             localExpenseMonthGroups[monthKey] = LocalFactReadModel.groups(
                 from: month,
-                including: [.expense]
+                including: [.expense, .income]
             )
+            localIncomeMonthGroups[monthKey] = []
             localRecordMonthGroups[monthKey] = LocalFactReadModel.groups(
                 from: month,
                 including: [.record]
@@ -1296,7 +1302,9 @@ final class AppState: ObservableObject {
         let todayKey = NativeLocalDate.dateKey(Date())
         let groups = recordGroups(monthKey: Self.currentMonthKey)
         let expenses = month.facts.filter { $0.kind == .expense }
+        let incomes = month.facts.filter { $0.kind == .income }
         let todayExpenses = expenses.filter { $0.businessDate == todayKey }
+        let todayIncomes = incomes.filter { $0.businessDate == todayKey }
         dashboard.dayRecordGroups = groups
         dashboard.dailySummaries = groups.map { group in
             let expense = expenses
@@ -1305,10 +1313,16 @@ final class AppState: ObservableObject {
                     let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
                     return total + ((payload.double("amount_minor") ?? 0) / 100)
                 }
+            let income = incomes
+                .filter { $0.businessDate == group.dateKey }
+                .reduce(0.0) { total, fact in
+                    let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+                    return total + ((payload.double("amount_minor") ?? 0) / 100)
+                }
             return NativeDailySummary(
                 dateKey: group.dateKey,
                 expense: expense,
-                income: 0,
+                income: income,
                 pendingCount: 0,
                 recordCount: group.records.count
             )
@@ -1323,8 +1337,14 @@ final class AppState: ObservableObject {
             let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
             return total + ((payload.double("amount_minor") ?? 0) / 100)
         }
-        dashboard.todayIncome = 0
-        dashboard.monthIncome = 0
+        dashboard.todayIncome = todayIncomes.reduce(0) { total, fact in
+            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+            return total + ((payload.double("amount_minor") ?? 0) / 100)
+        }
+        dashboard.monthIncome = incomes.reduce(0) { total, fact in
+            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+            return total + ((payload.double("amount_minor") ?? 0) / 100)
+        }
         dashboard.pendingCount = 0
         dashboard.recordDetails = localRecordMonthDetails[Self.currentMonthKey] ?? [:]
         dashboard.recentRecords = []
@@ -1386,9 +1406,14 @@ final class AppState: ObservableObject {
         do {
             guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
             let month = try await localExpenseUseCase.month(monthKey)
+            let incomeMonth = try await localExpenseUseCase.incomes(monthKey)
             guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
-            let groups = LocalExpenseReadModel.groups(from: month)
-            localExpenseMonthGroups[monthKey] = groups
+            let groups = Self.mergeRecordGroups(
+                local: LocalExpenseReadModel.groups(from: month) + LocalIncomeReadModel.groups(from: incomeMonth),
+                remote: []
+            )
+            localExpenseMonthGroups[monthKey] = LocalExpenseReadModel.groups(from: month)
+            localIncomeMonthGroups[monthKey] = LocalIncomeReadModel.groups(from: incomeMonth)
             let localDomainDetails = (localRecordMonthDetails[monthKey] ?? [:]).filter {
                 $0.value.kind == "data"
             }
@@ -1397,9 +1422,14 @@ final class AppState: ObservableObject {
                     let detail = LocalExpenseReadModel.detail(from: $0)
                     return (detail.id, detail)
                 }
+            ).merging(
+                Dictionary(uniqueKeysWithValues: incomeMonth.incomes.map {
+                    let detail = LocalIncomeReadModel.detail(from: $0)
+                    return (detail.id, detail)
+                }), uniquingKeysWith: { _, income in income }
             ).merging(localDomainDetails, uniquingKeysWith: { local, _ in local })
             if monthKey == Self.currentMonthKey && !isSignedIn {
-                applyLocalExpenseMonth(month, groups: groups)
+                applyLocalExpenseMonth(month, incomeMonth: incomeMonth, groups: groups)
             }
         } catch {
             guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
@@ -1482,9 +1512,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func applyLocalExpenseMonth(_ month: LocalExpenseMonth, groups: [NativeDayRecordGroup]) {
+    private func applyLocalExpenseMonth(
+        _ month: LocalExpenseMonth,
+        incomeMonth: LocalIncomeMonth,
+        groups: [NativeDayRecordGroup]
+    ) {
         let todayKey = NativeLocalDate.dateKey(Date())
         let todayExpenses = month.expenses.filter { $0.transactionDate == todayKey }
+        let todayIncomes = incomeMonth.incomes.filter { $0.incomeDate == todayKey }
         dashboard.dayRecordGroups = groups
         dashboard.dailySummaries = groups.map { group in
             let expense = group.records.reduce(0.0) { total, record in
@@ -1494,19 +1529,21 @@ final class AppState: ObservableObject {
             return NativeDailySummary(
                 dateKey: group.dateKey,
                 expense: expense,
-                income: 0,
+                income: group.records.filter { $0.kind == .income }.reduce(0) { total, record in
+                    total + (incomeMonth.incomes.first(where: { $0.id.uuidString == record.id }).map { Double($0.amountMinor) / 100 } ?? 0)
+                },
                 pendingCount: 0,
                 recordCount: group.records.count
             )
         }
-        dashboard.todayCount = todayExpenses.count
-        dashboard.monthCount = month.expenses.count
+        dashboard.todayCount = todayExpenses.count + todayIncomes.count
+        dashboard.monthCount = month.expenses.count + incomeMonth.incomes.count
         dashboard.todayExpense = todayExpenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
         dashboard.monthExpense = month.expenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
-        dashboard.todayIncome = 0
-        dashboard.monthIncome = 0
+        dashboard.todayIncome = todayIncomes.reduce(0) { $0 + Double($1.amountMinor) / 100 }
+        dashboard.monthIncome = incomeMonth.incomes.reduce(0) { $0 + Double($1.amountMinor) / 100 }
         dashboard.pendingCount = 0
-        dashboard.recordDetails = [:]
+        dashboard.recordDetails = localRecordMonthDetails[Self.currentMonthKey] ?? [:]
         dashboard.recentRecords = []
         dashboard.stagingRecords = []
         dashboard.pendingExpenses = []
@@ -1886,7 +1923,7 @@ final class AppState: ObservableObject {
                     entryType: entry.entryKind,
                     sourceTable: entry.sourceKind,
                     sourceId: entry.sourceID.uuidString,
-                    occurredAt: ISO8601DateFormatter().string(from: entry.occurredAt),
+                    occurredAt: entry.occurredAt.map { ISO8601DateFormatter().string(from: $0) } ?? "",
                     note: "",
                     isVoided: entry.voidedAt != nil,
                     voidedReason: entry.voidedAt == nil ? "" : "本地已作废"
@@ -3237,6 +3274,10 @@ final class AppState: ObservableObject {
             await loadLocalExpenseDetail(reference: reference, force: force, generation: generation)
             return
         }
+        if parsedReference.kind == "local-income" {
+            await loadLocalIncomeDetail(reference: reference, force: force, generation: generation)
+            return
+        }
         if parsedReference.kind == "local-data"
             || (parsedReference.kind == "data" && isKnownLocalFactReference(reference)) {
             await loadLocalDomainDetail(reference: reference, force: force, generation: generation)
@@ -3248,6 +3289,10 @@ final class AppState: ObservableObject {
         }
         if parsedReference.kind == "expense", await hasLocalExpense(reference: reference) {
             await loadLocalExpenseDetail(reference: reference, force: force, generation: generation)
+            return
+        }
+        if parsedReference.kind == "income", await hasLocalIncome(reference: reference) {
+            await loadLocalIncomeDetail(reference: reference, force: force, generation: generation)
             return
         }
         await loadRemoteRecordDetail(reference: canonicalReference, force: force, generation: generation)
@@ -3277,10 +3322,44 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func hasLocalIncome(reference: String) async -> Bool {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else { return false }
+        return (try? await localExpenseUseCase.income(id: id)) != nil
+    }
+
+    private func isLocalIncomeReference(_ reference: String) -> Bool {
+        let parsed = NativeRecordReference(reference)
+        return parsed.kind == "local-income"
+            || (parsed.kind == "income" && isKnownLocalFactReference(reference))
+    }
+
     private func isLocalExpenseReference(_ reference: String) -> Bool {
         let parsed = NativeRecordReference(reference)
         return parsed.kind == "local-expense"
             || (parsed.kind == "expense" && isKnownLocalFactReference(reference))
+    }
+
+    private func loadLocalIncomeDetail(reference: String, force: Bool, generation: Int) async {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
+            recordDetailMessage = "本地收入记录不可用"
+            return
+        }
+        let canonicalReference = NativeRecordReference(reference).canonicalValue
+        if !force, let cached = recordDetailCache[canonicalReference] {
+            selectedRecordDetail = cached
+            return
+        }
+        do {
+            guard let income = try await localExpenseUseCase.income(id: id) else { throw LocalDataError.recordNotFound }
+            guard generation == userStateGeneration, activeRecordReference == canonicalReference else { return }
+            let detail = LocalIncomeReadModel.detail(from: income)
+            recordDetailCache[canonicalReference] = detail
+            selectedRecordDetail = detail
+        } catch {
+            if activeRecordReference == canonicalReference { recordDetailMessage = error.localizedDescription }
+        }
     }
 
     private func isLocalDomainReference(_ reference: String) -> Bool {
@@ -3980,6 +4059,63 @@ final class AppState: ObservableObject {
         return true
     }
 
+    private func saveLocalIncomeDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(draft.reference).rawId),
+              let current = try await localExpenseUseCase.income(id: id) else {
+            throw LocalDataError.recordNotFound
+        }
+        let eventTime: Date?
+        if let time = draft.transactionTime {
+            guard let timestamp = NativeLocalDate.financeOccurredAt(dateKey: draft.recordDate, timeKey: time),
+                  let parsed = ISO8601DateFormatter().date(from: timestamp),
+                  NativeLocalDate.dateKey(parsed) == draft.recordDate else {
+                throw LocalDataError.invalidRecord
+            }
+            eventTime = parsed
+        } else {
+            eventTime = nil
+        }
+        let profile = try await localExpenseUseCase.prepareProfile()
+        let saved = try await localExpenseUseCase.updateIncome(LocalIncomeUpdate(
+            id: current.id,
+            profileID: profile.id,
+            expectedVersion: current.localVersion,
+            accountID: draft.accountId.flatMap(UUID.init(uuidString:)),
+            amountMinor: try LocalExpenseMapper.amountMinor(draft.amountText),
+            currency: current.currency,
+            sourceName: draft.title.trimmingCharacters(in: .whitespacesAndNewlines),
+            category: draft.category,
+            incomeDate: draft.recordDate,
+            occurredAt: eventTime,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            updatedAt: Date()
+        ))
+        let oldMonth = String(current.incomeDate.prefix(7))
+        let newMonth = String(saved.incomeDate.prefix(7))
+        invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
+        _ = await prepareLocalWorkspace()
+        await refreshLocalMonthProjection(monthKey: oldMonth)
+        if oldMonth != newMonth { await refreshLocalMonthProjection(monthKey: newMonth) }
+        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
+        await loadRecordDetail(reference: "local-income/\(saved.id.uuidString)", force: true)
+        return true
+    }
+
+    private func deleteLocalIncome(reference: String) async throws -> Bool {
+        guard let localExpenseUseCase,
+              let id = UUID(uuidString: NativeRecordReference(reference).rawId),
+              let current = try await localExpenseUseCase.income(id: id) else {
+            throw LocalDataError.recordNotFound
+        }
+        _ = try await localExpenseUseCase.deleteIncome(id: current.id, expectedVersion: current.localVersion, deletedAt: Date())
+        invalidateRecordExpressionPlanState(afterChanging: [reference])
+        recordsPath = NavigationPath()
+        _ = await prepareLocalWorkspace()
+        await refreshLocalMonthProjection(monthKey: String(current.incomeDate.prefix(7)))
+        return true
+    }
+
     private func deleteLocalRecord(reference: String) async throws -> Bool {
         guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
         let current = try await localExpenseForReference(reference)
@@ -4091,6 +4227,9 @@ final class AppState: ObservableObject {
         defer { isSavingRecordDetail = false }
 
         do {
+            if isLocalIncomeReference(draft.reference) {
+                return try await saveLocalIncomeDetail(draft)
+            }
             if isLocalExpenseReference(draft.reference) {
                 return try await saveLocalRecordDetail(draft)
             }
@@ -4111,6 +4250,9 @@ final class AppState: ObservableObject {
         defer { isDeletingRecordDetail = false }
 
         do {
+            if isLocalIncomeReference(reference) {
+                return try await deleteLocalIncome(reference: reference)
+            }
             if isLocalExpenseReference(reference) {
                 return try await deleteLocalRecord(reference: reference)
             }
@@ -4681,6 +4823,7 @@ final class AppState: ObservableObject {
         recordMonthGroups = [:]
         remoteRecordMonthGroups = [:]
         localExpenseMonthGroups = [:]
+        localIncomeMonthGroups = [:]
         localRecordMonthGroups = [:]
         localRecordMonthDetails = [:]
         localFactMonths = [:]
@@ -4880,6 +5023,46 @@ final class AppState: ObservableObject {
         return outcome.expense != nil
     }
 
+    private func createLocalIncome(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async throws -> Bool {
+        guard draft.existingRawId == nil, let localExpenseUseCase else { throw LocalDataError.invalidRecord }
+        guard draft.validationMessage(domain: domain) == nil else { throw LocalDataError.invalidRecord }
+        let accountID = draft.accountId.flatMap(UUID.init(uuidString:))
+        if let accountID, !localAccounts.contains(where: { $0.id == accountID }),
+           let cloudAccount = accounts.first(where: { $0.id == accountID.uuidString }) {
+            let mirror = LocalAccount(
+                id: accountID, profileID: UUID(), name: cloudAccount.name,
+                kind: cloudAccount.type.rawValue, currency: cloudAccount.currency,
+                openingBalanceMinor: Int64((cloudAccount.initialBalance * 100).rounded()), createdAt: Date()
+            )
+            try await localExpenseUseCase.importRemoteAccounts([mirror])
+            _ = await prepareLocalWorkspace()
+        }
+        let occurredAt: Date?
+        if let timestamp = draft.occurredAt {
+            guard let parsed = ISO8601DateFormatter().date(from: timestamp),
+                  NativeLocalDate.dateKey(parsed) == draft.dateKey else {
+                throw LocalDataError.invalidRecord
+            }
+            occurredAt = parsed
+        } else {
+            occurredAt = nil
+        }
+        let saved = try await localExpenseUseCase.createIncome(LocalIncomeCommand(
+            id: UUID(), accountID: accountID, amountText: draft.amountText, currency: "CNY",
+            sourceName: draft.title, category: draft.category, incomeDate: draft.dateKey,
+            occurredAt: occurredAt,
+            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
+            createdAt: Date()
+        ))
+        _ = await prepareLocalWorkspace()
+        await refreshLocalMonthProjection(monthKey: String(saved.incomeDate.prefix(7)))
+        manualRecordMessage = "收入已记录（本机）"
+        return true
+    }
+
     private func createLocalDomainRecord(
         _ draft: NativeManualRecordDraft,
         domain: NativeDomainDefinition?
@@ -4954,6 +5137,9 @@ final class AppState: ObservableObject {
     ) async throws -> Bool {
         if draft.kind == .expense, localExpenseUseCase != nil {
             return try await createLocalExpense(draft)
+        }
+        if draft.kind == .income, localExpenseUseCase != nil {
+            return try await createLocalIncome(draft, domain: domain)
         }
         if draft.kind == .universal,
            localRecordUseCase != nil,

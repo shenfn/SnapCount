@@ -18,6 +18,10 @@ enum LocalFactReadModel {
                         kind = .expense
                         value = expenseValue(from: fact)
                         domainKey = nil
+                    } else if fact.kind == .income {
+                        kind = .income
+                        value = incomeValue(from: fact)
+                        domainKey = "income"
                     } else {
                         kind = NativeDayRecordKind(rawValue: fact.domainKey) ?? .all
                         value = ""
@@ -57,34 +61,32 @@ enum LocalFactReadModel {
         imageStore: LocalImageStore? = nil
     ) -> NativeRecordDetail {
         let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
-        let amount = fact.kind == .expense
+        let amount = fact.kind == .expense || fact.kind == .income
             ? payload.double("amount_minor").map { $0 / 100 }
             : nil
         let imageURL = localImageURL(fact.imagePath, imageStore: imageStore)
         let base = NativeRecordDetail(
             id: fact.reference,
             rawId: fact.id.uuidString,
-            kind: fact.kind == .expense ? "expense" : "data",
+            kind: fact.kind == .expense ? "expense" : fact.kind == .income ? "income" : "data",
             title: fact.title,
             subtitle: fact.recordTime.map { "\(fact.businessDate) \($0)" } ?? fact.businessDate,
-            value: fact.kind == .expense ? expenseValue(from: fact) : fact.summary,
+            value: fact.kind == .expense ? expenseValue(from: fact) : fact.kind == .income ? incomeValue(from: fact) : fact.summary,
             detailRows: [],
             imageURL: imageURL,
             imageLoadError: fact.imagePath != nil && imageURL == nil,
             imagePath: fact.imagePath,
             imageHash: fact.imageHash,
             amount: amount,
-            merchantName: fact.kind == .expense ? fact.title : nil,
+            merchantName: fact.kind == .expense || fact.kind == .income ? fact.title : nil,
             platform: payload.string("platform"),
-            category: fact.kind == .expense ? payload.string("category") : nil,
+            category: fact.kind == .expense || fact.kind == .income ? payload.string("category") : nil,
             paymentMethod: payload.string("payment_method"),
             recordDate: fact.businessDate,
             note: fact.note,
             companionMessage: nil,
             accountId: payload.string("account_id"),
-            systemImage: fact.kind == .expense
-                ? "creditcard"
-                : NativeDayRecordKind(rawValue: fact.domainKey)?.systemImage ?? "square.grid.2x2",
+            systemImage: fact.kind == .expense ? "creditcard" : NativeDayRecordKind(rawValue: fact.domainKey)?.systemImage ?? "square.grid.2x2",
             payload: payload,
             createdAt: iso8601(fact.createdAt),
             occurredAt: fact.occurredAt,
@@ -131,6 +133,12 @@ enum LocalFactReadModel {
         let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
         let amount = (payload.double("amount_minor") ?? 0) / 100
         return String(format: "¥%.2f", amount)
+    }
+
+    private static func incomeValue(from fact: LocalFact) -> String {
+        let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+        let amount = (payload.double("amount_minor") ?? 0) / 100
+        return String(format: "+¥%.2f", amount)
     }
 
     private static func isNewer(_ lhs: LocalFact, _ rhs: LocalFact) -> Bool {

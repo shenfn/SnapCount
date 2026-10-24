@@ -3,6 +3,7 @@ import GRDB
 
 enum LocalFactKind: String, Equatable, Hashable, Sendable {
     case expense
+    case income
     case record
 }
 
@@ -87,6 +88,14 @@ final class LocalFactReader {
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
             ).map { try Self.fact(expenseRow: $0) }
+            let incomes = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM local_income_records
+                    WHERE profile_id = ? AND income_date BETWEEN ? AND ? AND deleted_at IS NULL
+                    """,
+                arguments: [profileID.uuidString, startDate, endDate]
+            ).map { try Self.fact(incomeRow: $0) }
             let records = try Row.fetchAll(
                 db,
                 sql: """
@@ -101,7 +110,7 @@ final class LocalFactReader {
 
             return LocalFactMonth(
                 profileID: profileID,
-                facts: (expenses + records).sorted(by: Self.isNewer)
+                facts: (expenses + incomes + records).sorted(by: Self.isNewer)
             )
     }
 
@@ -131,6 +140,24 @@ final class LocalFactReader {
             createdAt: createdAt,
             updatedAt: updatedAt
         ))
+    }
+
+    private static func fact(incomeRow row: Row) throws -> LocalFact {
+        guard let id = UUID(uuidString: row["id"]),
+              let profileID = UUID(uuidString: row["profile_id"]),
+              let incomeDate: String = row["income_date"],
+              let createdAt: Date = row["created_at"],
+              let updatedAt: Date = row["updated_at"] else { throw LocalDataError.invalidRecord }
+        let accountText: String? = row["account_id"]
+        let income = LocalIncome(
+            id: id, profileID: profileID,
+            accountID: accountText.flatMap(UUID.init(uuidString:)),
+            amountMinor: row["amount_minor"], currency: row["currency"],
+            sourceName: row["source_name"], category: row["category"],
+            incomeDate: incomeDate, occurredAt: row["occurred_at"], note: row["note"],
+            localVersion: row["local_version"], createdAt: createdAt, updatedAt: updatedAt
+        )
+        return fact(from: income)
     }
 
     private static func fact(recordRow row: Row) throws -> LocalFact {
@@ -202,6 +229,25 @@ final class LocalFactReader {
             localVersion: expense.localVersion,
             createdAt: expense.createdAt,
             updatedAt: expense.updatedAt
+        )
+    }
+
+    private static func fact(from income: LocalIncome) -> LocalFact {
+        let payload = IncomeFactPayload(
+            amountMinor: income.amountMinor, currency: income.currency,
+            sourceName: income.sourceName, category: income.category,
+            accountID: income.accountID?.uuidString
+        )
+        return LocalFact(
+            id: income.id, profileID: income.profileID,
+            reference: "income/\(income.id.uuidString)", kind: .income,
+            domainKey: "income", sourceKind: "manual", domainVersion: "local-v1",
+            title: income.sourceName.isEmpty ? "收入记录" : income.sourceName, summary: income.category,
+            payloadJSON: (try? encode(payload)) ?? "{}", businessDate: income.incomeDate,
+            recordTime: income.occurredAt.map { NativeLocalDate.timeKey($0) },
+            occurredAt: income.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
+            note: income.note, imagePath: nil, imageHash: nil,
+            localVersion: income.localVersion, createdAt: income.createdAt, updatedAt: income.updatedAt
         )
     }
 
@@ -280,6 +326,21 @@ private struct ExpenseFactPayload: Encodable {
         case transactionDate = "transaction_date"
         case transactionTime = "transaction_time"
         case note
+        case accountID = "account_id"
+    }
+}
+
+private struct IncomeFactPayload: Encodable {
+    let amountMinor: Int64
+    let currency: String
+    let sourceName: String
+    let category: String
+    let accountID: String?
+    enum CodingKeys: String, CodingKey {
+        case amountMinor = "amount_minor"
+        case currency
+        case sourceName = "source_name"
+        case category
         case accountID = "account_id"
     }
 }

@@ -17,6 +17,11 @@ protocol LocalExpenseRepositoryProtocol {
     ) throws -> LocalExpenseTombstone
     func expense(id: UUID) throws -> LocalExpense?
     func expenses(profileID: UUID, monthKey: String) throws -> [LocalExpense]
+    func createIncome(_ draft: LocalIncomeDraft) throws -> LocalIncome
+    func updateIncome(_ update: LocalIncomeUpdate) throws -> LocalIncome
+    func deleteIncome(id: UUID, profileID: UUID, expectedVersion: Int64, deletedAt: Date) throws -> LocalIncomeTombstone
+    func income(id: UUID) throws -> LocalIncome?
+    func incomes(profileID: UUID, monthKey: String) throws -> [LocalIncome]
     func expenseTombstone(id: UUID) throws -> LocalExpenseTombstone?
     func expenseCount() throws -> Int
     func accountEntryCount() throws -> Int
@@ -249,6 +254,109 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         }
 
         return expense
+    }
+
+    func createIncome(_ draft: LocalIncomeDraft) throws -> LocalIncome {
+        guard draft.amountMinor > 0 else { throw LocalDataError.invalidAmount }
+        let income = LocalIncome(
+            id: draft.id, profileID: draft.profileID, accountID: draft.accountID,
+            amountMinor: draft.amountMinor, currency: draft.currency,
+            sourceName: draft.sourceName, category: draft.category,
+            incomeDate: draft.incomeDate, occurredAt: draft.occurredAt,
+            note: draft.note, localVersion: 1, createdAt: draft.createdAt,
+            updatedAt: draft.createdAt
+        )
+        try database.writer.write { db in
+            if let accountID = draft.accountID {
+                try Self.validateAccount(id: accountID, profileID: draft.profileID, database: db)
+            }
+            try db.execute(sql: """
+                INSERT INTO local_income_records (
+                    id, profile_id, account_id, amount_minor, currency, source_name,
+                    category, income_date, occurred_at, note, local_version,
+                    created_at, updated_at, deleted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+                """, arguments: [
+                    income.id.uuidString, income.profileID.uuidString,
+                    income.accountID?.uuidString, income.amountMinor, income.currency,
+                    income.sourceName, income.category, income.incomeDate,
+                    income.occurredAt, income.note, income.createdAt, income.updatedAt
+                ])
+            if let accountID = income.accountID {
+                try Self.insertIncomeEntry(
+                    id: UUID(), income: income, accountID: accountID, database: db
+                )
+            }
+        }
+        return income
+    }
+
+    func updateIncome(_ update: LocalIncomeUpdate) throws -> LocalIncome {
+        guard update.amountMinor > 0 else { throw LocalDataError.invalidAmount }
+        return try database.writer.write { db in
+            let existing = try Self.activeIncome(id: update.id, profileID: update.profileID, database: db)
+            guard existing.localVersion == update.expectedVersion else {
+                throw LocalDataError.versionConflict(expected: update.expectedVersion, actual: existing.localVersion)
+            }
+            if let accountID = update.accountID {
+                try Self.validateAccount(id: accountID, profileID: existing.profileID, database: db)
+            }
+            let next = LocalIncome(
+                id: existing.id, profileID: existing.profileID, accountID: update.accountID,
+                amountMinor: update.amountMinor, currency: update.currency,
+                sourceName: update.sourceName, category: update.category,
+                incomeDate: update.incomeDate, occurredAt: update.occurredAt,
+                note: update.note, localVersion: existing.localVersion + 1,
+                createdAt: existing.createdAt, updatedAt: update.updatedAt
+            )
+            if existing.accountID != nil {
+                try Self.voidActiveEntry(sourceID: update.id, sourceKind: "income", voidedAt: update.updatedAt, database: db)
+            }
+            try db.execute(sql: """
+                UPDATE local_income_records SET account_id = ?, amount_minor = ?, currency = ?,
+                    source_name = ?, category = ?, income_date = ?, occurred_at = ?, note = ?,
+                    local_version = ?, updated_at = ?
+                WHERE id = ? AND deleted_at IS NULL
+                """, arguments: [
+                    next.accountID?.uuidString, next.amountMinor, next.currency,
+                    next.sourceName, next.category, next.incomeDate, next.occurredAt,
+                    next.note, next.localVersion, next.updatedAt, next.id.uuidString
+                ])
+            if let accountID = next.accountID {
+                try Self.insertIncomeEntry(id: UUID(), income: next, accountID: accountID, database: db)
+            }
+            return next
+        }
+    }
+
+    func deleteIncome(id: UUID, profileID: UUID, expectedVersion: Int64, deletedAt: Date) throws -> LocalIncomeTombstone {
+        try database.writer.write { db in
+            let existing = try Self.activeIncome(id: id, profileID: profileID, database: db)
+            guard existing.localVersion == expectedVersion else {
+                throw LocalDataError.versionConflict(expected: expectedVersion, actual: existing.localVersion)
+            }
+            if existing.accountID != nil {
+                try Self.voidActiveEntry(sourceID: id, sourceKind: "income", voidedAt: deletedAt, database: db)
+            }
+            let nextVersion = existing.localVersion + 1
+            try db.execute(sql: "UPDATE local_income_records SET deleted_at = ?, local_version = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+                           arguments: [deletedAt, nextVersion, deletedAt, id.uuidString])
+            return LocalIncomeTombstone(id: id, profileID: existing.profileID, localVersion: nextVersion, deletedAt: deletedAt)
+        }
+    }
+
+    func income(id: UUID) throws -> LocalIncome? {
+        try database.writer.read { db in
+            guard let row = try Row.fetchOne(db, sql: "SELECT * FROM local_income_records WHERE id = ? AND deleted_at IS NULL", arguments: [id.uuidString]) else { return nil }
+            return try Self.income(from: row)
+        }
+    }
+
+    func incomes(profileID: UUID, monthKey: String) throws -> [LocalIncome] {
+        try database.writer.read { db in
+            try Row.fetchAll(db, sql: "SELECT * FROM local_income_records WHERE profile_id = ? AND income_date LIKE ? AND deleted_at IS NULL ORDER BY income_date DESC, occurred_at DESC, created_at DESC",
+                             arguments: [profileID.uuidString, "\(monthKey)%"]).map(Self.income(from:))
+        }
     }
 
     /// Imports cloud facts into the local projection. No outbox operation is
@@ -852,6 +960,25 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         )
     }
 
+    private static func income(from row: Row) throws -> LocalIncome {
+        guard let id = UUID(uuidString: row["id"]),
+              let profileID = UUID(uuidString: row["profile_id"]),
+              let createdAt: Date = row["created_at"],
+              let updatedAt: Date = row["updated_at"] else {
+            throw LocalDataError.invalidRecord
+        }
+        let accountText: String? = row["account_id"]
+        return LocalIncome(
+            id: id, profileID: profileID,
+            accountID: accountText.flatMap(UUID.init(uuidString:)),
+            amountMinor: row["amount_minor"], currency: row["currency"],
+            sourceName: row["source_name"], category: row["category"],
+            incomeDate: row["income_date"], occurredAt: row["occurred_at"],
+            note: row["note"], localVersion: row["local_version"],
+            createdAt: createdAt, updatedAt: updatedAt
+        )
+    }
+
     private static func outboxOperation(from row: Row) throws -> LocalOutboxOperation {
         guard let operationID = UUID(uuidString: row["operation_id"]),
               let profileID = UUID(uuidString: row["profile_id"]),
@@ -884,6 +1011,15 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         return try expense(from: row)
     }
 
+    private static func activeIncome(id: UUID, profileID: UUID, database: Database) throws -> LocalIncome {
+        guard let row = try Row.fetchOne(
+            database,
+            sql: "SELECT * FROM local_income_records WHERE id = ? AND profile_id = ? AND deleted_at IS NULL",
+            arguments: [id.uuidString, profileID.uuidString]
+        ) else { throw LocalDataError.recordNotFound }
+        return try income(from: row)
+    }
+
     private static func validateAccount(
         id: UUID,
         profileID: UUID,
@@ -900,6 +1036,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
 
     private static func voidActiveEntry(
         sourceID: UUID,
+        sourceKind: String = "expense",
         voidedAt: Date,
         database: Database
     ) throws {
@@ -907,9 +1044,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             database,
             sql: """
                 SELECT id FROM local_account_entries
-                WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL
+                WHERE source_kind = ? AND source_id = ? AND voided_at IS NULL
                 """,
-            arguments: [sourceID.uuidString]
+            arguments: [sourceKind, sourceID.uuidString]
         ) else {
             throw LocalDataError.invalidRecord
         }
@@ -941,6 +1078,23 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 occurredAt
             ]
         )
+    }
+
+    private static func insertIncomeEntry(
+        id: UUID,
+        income: LocalIncome,
+        accountID: UUID,
+        database: Database
+    ) throws {
+        try database.execute(sql: """
+            INSERT INTO local_account_entries (
+                id, profile_id, account_id, direction, amount_minor, entry_kind,
+                source_kind, source_id, occurred_at, voided_at
+            ) VALUES (?, ?, ?, 'in', ?, 'income', 'income', ?, ?, NULL)
+            """, arguments: [
+                id.uuidString, income.profileID.uuidString, accountID.uuidString,
+                income.amountMinor, income.id.uuidString, income.occurredAt
+            ])
     }
 
     private static func insertOutbox(

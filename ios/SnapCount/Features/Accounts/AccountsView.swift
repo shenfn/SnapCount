@@ -260,7 +260,7 @@ struct AccountDetailView: View {
                                 HStack {
                                     VStack(alignment: .leading) {
                                         Text(entry.note.isEmpty ? entry.entryType : entry.note).font(.subheadline)
-                                        Text(entry.occurredAt).font(.caption2).foregroundStyle(.secondary)
+                                        Text(entry.occurredAt.isEmpty ? "时间未记录" : entry.occurredAt).font(.caption2).foregroundStyle(.secondary)
                                     }
                                     Spacer()
                                     Text((entry.direction == "in" ? "+" : "-") + "¥" + amount(entry.amount))

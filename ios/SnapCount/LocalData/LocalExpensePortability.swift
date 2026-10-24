@@ -56,7 +56,7 @@ struct LocalExpenseArchive: Codable, Equatable {
         let entryKind: String
         let sourceKind: String
         let sourceID: UUID
-        let occurredAt: Date
+        let occurredAt: Date?
         let voidedAt: Date?
     }
 }
@@ -134,7 +134,7 @@ final class LocalExpensePortability {
                     SELECT id, profile_id, account_id, direction, amount_minor,
                            entry_kind, source_kind, source_id, occurred_at, voided_at
                     FROM local_account_entries
-                    WHERE profile_id = ?
+                    WHERE profile_id = ? AND source_kind = 'expense'
                     ORDER BY occurred_at ASC, id ASC
                     """,
                 arguments: [profileID.uuidString]

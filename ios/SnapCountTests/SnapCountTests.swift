@@ -6,7 +6,11 @@ final class SnapCountTests: XCTestCase {
     @MainActor
     func testIOSV2POLISH002P1DateWindowLoadsSelectedMonthBeforeHistory() async {
         let repository = RecordRepositoryStub()
-        let state = AppState(recordRepository: repository, sessionProvider: { _ in Self.expressionTestSession })
+        let state = AppState(
+            recordRepository: repository,
+            localBindingRepository: TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
         state.isSignedIn = true
         state.currentUserId = Self.expressionTestSession.user.id
         authorizeRemoteReads(for: state.currentUserId, in: state)
@@ -2831,7 +2835,11 @@ final class SnapCountTests: XCTestCase {
                 groups: [NativeDayRecordGroup(dateKey: remote.dateKey, records: [remote])], details: [:]
             )
         })
-        let state = AppState(recordRepository: repository, sessionProvider: { _ in Self.expressionTestSession })
+        let state = AppState(
+            recordRepository: repository,
+            localBindingRepository: TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
         state.isSignedIn = true
         state.currentUserId = Self.expressionTestSession.user.id
         authorizeRemoteReads(for: state.currentUserId, in: state)
@@ -2867,6 +2875,7 @@ final class SnapCountTests: XCTestCase {
         let repository = RecordRepositoryStub()
         let state = AppState(
             recordRepository: repository,
+            localBindingRepository: TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
             sessionProvider: { _ in Self.expressionTestSession }
         )
         state.isSignedIn = true
@@ -4159,6 +4168,30 @@ private extension SnapCountTests {
             pendingMutationCount: 0
         )
     }
+}
+
+private final class TestLocalBindingRepositoryStub: LocalBindingRepository {
+    private let userID: String
+    private let profile = LocalProfile(
+        id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+        createdAt: Date(), cloudUserID: nil, syncEnabled: false
+    )
+
+    init(userID: String) { self.userID = userID }
+
+    func activeProfile() throws -> LocalProfile { profile }
+    func workspaceSummary(profileID: UUID) throws -> LocalWorkspaceSummary {
+        LocalWorkspaceSummary(workspaceID: profileID, expenseCount: 0, accountCount: 0, pendingOutboxCount: 0)
+    }
+    func syncState(profileID: UUID) throws -> LocalSyncState {
+        LocalSyncState(
+            workspaceID: profileID, binding: .bound(userID), status: .synced, conflictState: .none,
+            syncGeneration: 1, pullCursor: nil, lastSuccessfulSyncAt: Date(), activeAttemptID: nil,
+            pendingMutationCount: 0
+        )
+    }
+    func confirmBinding(profileID: UUID, cloudUserID: String) throws -> LocalSyncState { try syncState(profileID: profileID) }
+    func disableSync(profileID: UUID) throws -> LocalSyncState { try syncState(profileID: profileID) }
 }
 
 private func makeInsightDay(

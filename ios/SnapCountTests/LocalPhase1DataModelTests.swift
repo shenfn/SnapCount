@@ -360,6 +360,20 @@ final class LocalPhase1DataModelTests: XCTestCase {
             note: nil,
             createdAt: Date(timeIntervalSince1970: 1_100)
         ), operationID: UUID())
+        let incomeID = UUID()
+        _ = try expenseRepository.createIncome(LocalIncomeDraft(
+            id: incomeID,
+            profileID: profile.id,
+            accountID: account.id,
+            amountMinor: 3_000,
+            currency: "CNY",
+            sourceName: "稿费",
+            category: "other",
+            incomeDate: "2026-09-19",
+            occurredAt: nil,
+            note: nil,
+            createdAt: Date(timeIntervalSince1970: 3_150)
+        ))
 
         let useCase = LocalRecordUseCase(
             profileStore: LocalProfileStore(database: database),
@@ -422,10 +436,11 @@ final class LocalPhase1DataModelTests: XCTestCase {
 
         XCTAssertEqual(month.facts.map(\.reference), [
             "data/\(activeSportID.uuidString)",
-            "expense/\(expenseID.uuidString)"
+            "expense/\(expenseID.uuidString)",
+            "income/\(incomeID.uuidString)"
         ])
-        XCTAssertEqual(month.facts.map(\.domainKey), ["sport", "expense"])
-        XCTAssertEqual(month.facts.map(\.kind), [.record, .expense])
+        XCTAssertEqual(month.facts.map(\.domainKey), ["sport", "expense", "income"])
+        XCTAssertEqual(month.facts.map(\.kind), [.record, .expense, .income])
         XCTAssertEqual(month.facts.last?.payloadJSON.contains("amount_minor"), true)
         XCTAssertFalse(month.facts.contains { $0.id == deletedReadingID })
         let stagingRecords = try await useCase.stagingRecords()
@@ -533,6 +548,20 @@ final class LocalPhase1DataModelTests: XCTestCase {
             note: nil,
             createdAt: Date(timeIntervalSince1970: 3_100)
         ), operationID: UUID())
+        let incomeID = UUID()
+        _ = try expenseRepository.createIncome(LocalIncomeDraft(
+            id: incomeID,
+            profileID: profile.id,
+            accountID: account.id,
+            amountMinor: 3_000,
+            currency: "CNY",
+            sourceName: "稿费",
+            category: "other",
+            incomeDate: "2026-09-19",
+            occurredAt: nil,
+            note: nil,
+            createdAt: Date(timeIntervalSince1970: 3_150)
+        ))
         let recordID = UUID()
         let recordRepository = try LocalRecordRepository(database: database)
         _ = try recordRepository.createRecord(LocalRecordDraft(
@@ -567,9 +596,12 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertEqual(archive.format, LocalFactArchive.currentFormat)
         XCTAssertEqual(Set(archive.facts.map(\.reference)), [
             "expense/\(expenseID.uuidString)",
+            "income/\(incomeID.uuidString)",
             "data/\(recordID.uuidString)"
         ])
         XCTAssertTrue(archive.facts.contains { $0.payloadJSON.contains("reading_minutes") })
+        XCTAssertEqual(archive.facts.first(where: { $0.kind == "income" })?.occurredAt, nil)
+        XCTAssertTrue(archive.facts.first(where: { $0.kind == "income" })?.payloadJSON.contains("amount_minor") == true)
 
         request.format = .csv
         request.includeFullPayload = false
@@ -581,6 +613,7 @@ final class LocalPhase1DataModelTests: XCTestCase {
             as: UTF8.self
         )
         XCTAssertTrue(csv.contains("expense/\(expenseID.uuidString)"))
+        XCTAssertTrue(csv.contains("income/\(incomeID.uuidString)"))
         XCTAssertTrue(csv.contains("data/\(recordID.uuidString)"))
         XCTAssertTrue(csv.contains(",{}"))
     }

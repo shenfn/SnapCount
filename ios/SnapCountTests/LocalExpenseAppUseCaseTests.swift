@@ -124,6 +124,101 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 12_000)
         XCTAssertEqual(try repository.accountEntries(accountID: account.id).filter { $0.voidedAt == nil }.map(\.direction), ["in"])
         XCTAssertEqual(state.manualRecordMessage, "收入已记录（本机）")
+        let entry = try XCTUnwrap(repository.accountEntries(accountID: account.id).first)
+        XCTAssertNil(entry.occurredAt, "未记录时间时账务事实必须保留 nil")
+    }
+
+    @MainActor
+    func testLF03202LocalIncomeEditAndDeleteVoidLedgerExactlyOnce() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let repository = try LocalExpenseRepository(database: database)
+        let profile = try profileStore.activeProfile()
+        let account = try repository.createAccount(LocalAccountDraft(
+            id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+            profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: Date()
+        ))
+        let state = AppState(
+            localExpenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: repository),
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+        var draft = NativeManualRecordDraft(kind: .income)
+        draft.amountText = "20.00"
+        draft.title = "薪资"
+        draft.category = "salary"
+        draft.accountId = account.id.uuidString
+        draft.date = Date(timeIntervalSince1970: 1_800_000_000)
+        let created = await state.createManualRecord(draft, domain: nil)
+        XCTAssertTrue(created)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 12_000)
+
+        let reference = try XCTUnwrap(state.recordGroups(monthKey: NativeLocalDate.monthKey(from: NativeLocalDate.dateKey(draft.date))!).flatMap(\.records).first?.reference)
+        await state.loadRecordDetail(reference: reference)
+        var edit = NativeRecordEditDraft(detail: try XCTUnwrap(state.selectedRecordDetail))
+        edit.amountText = "30.00"
+        let updated = await state.saveRecordDetail(edit)
+        XCTAssertTrue(updated)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 13_000)
+        let staleRetry = await state.saveRecordDetail(edit)
+        XCTAssertFalse(staleRetry)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 13_000)
+
+        let deleted = await state.deleteRecord(reference: reference)
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 10_000)
+        let deleteRetry = await state.deleteRecord(reference: reference)
+        XCTAssertFalse(deleteRetry)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 10_000)
+        let entries = try repository.accountEntries(accountID: account.id)
+        XCTAssertEqual(entries.count, 3)
+        XCTAssertTrue(entries.allSatisfy { $0.voidedAt != nil })
+    }
+
+    @MainActor
+    func testLF03203IncomeAndExpenseRemainSeparateOnSameDay() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let repository = try LocalExpenseRepository(database: database)
+        let profile = try profileStore.activeProfile()
+        let account = try repository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: Date()
+        ))
+        let state = AppState(
+            localExpenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: repository),
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+        let day = ISO8601DateFormatter().date(from: "2026-10-25T04:00:00Z")!
+        var expense = NativeManualRecordDraft(kind: .expense)
+        expense.accountId = account.id.uuidString
+        expense.amountText = "5.00"
+        expense.title = "午餐"
+        expense.category = "food"
+        expense.paymentMethod = "现金"
+        expense.date = day
+        let expenseSaved = await state.createManualRecord(expense, domain: nil)
+        XCTAssertTrue(expenseSaved)
+
+        var income = NativeManualRecordDraft(kind: .income)
+        income.accountId = account.id.uuidString
+        income.amountText = "20.00"
+        income.title = "报销"
+        income.category = "other"
+        income.date = day
+        let incomeSaved = await state.createManualRecord(income, domain: nil)
+        XCTAssertTrue(incomeSaved)
+
+        let monthKey = String(NativeLocalDate.dateKey(day).prefix(7))
+        let dayRecords = try XCTUnwrap(state.recordGroups(monthKey: monthKey).first(where: { $0.dateKey == NativeLocalDate.dateKey(day) }))
+        XCTAssertEqual(Set(dayRecords.records.map(\.kind)), Set([.expense, .income]))
+        let snapshot = state.reportSnapshot(monthKey: monthKey)
+        XCTAssertEqual(snapshot.monthExpense, 5, accuracy: 0.001)
+        XCTAssertEqual(snapshot.monthIncome, 20, accuracy: 0.001)
     }
 
     func testLocalExpenseDetailUsesStableReferenceAndLocalOnlyFields() {
@@ -324,6 +419,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         let state = AppState(
             recordRepository: repository,
             localExpenseUseCase: localUseCase,
+            localBindingRepository: LocalShellBindingRepositoryStub(userID: userID),
             sessionProvider: { _ in LocalShellRecordRepositorySpy.session }
         )
         state.isSignedIn = true
@@ -366,6 +462,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         let state = AppState(
             recordRepository: repository,
             localExpenseUseCase: localUseCase,
+            localBindingRepository: LocalShellBindingRepositoryStub(userID: userID),
             sessionProvider: { _ in LocalShellRecordRepositorySpy.session }
         )
         state.isSignedIn = true
@@ -649,6 +746,32 @@ private final class LocalShellRecordRepositorySpy: RecordRepositoryProtocol {
         exposureEventId: String?,
         accessToken: String
     ) async throws {}
+}
+
+private final class LocalShellBindingRepositoryStub: LocalBindingRepository {
+    private let userID: String
+    private let profile = LocalProfile(
+        id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+        createdAt: Date(),
+        cloudUserID: nil,
+        syncEnabled: false
+    )
+
+    init(userID: String) { self.userID = userID }
+
+    func activeProfile() throws -> LocalProfile { profile }
+    func workspaceSummary(profileID: UUID) throws -> LocalWorkspaceSummary {
+        LocalWorkspaceSummary(workspaceID: profileID, expenseCount: 0, accountCount: 0, pendingOutboxCount: 0)
+    }
+    func syncState(profileID: UUID) throws -> LocalSyncState {
+        LocalSyncState(
+            workspaceID: profileID, binding: .bound(userID), status: .synced, conflictState: .none,
+            syncGeneration: 1, pullCursor: nil, lastSuccessfulSyncAt: Date(), activeAttemptID: nil,
+            pendingMutationCount: 0
+        )
+    }
+    func confirmBinding(profileID: UUID, cloudUserID: String) throws -> LocalSyncState { try syncState(profileID: profileID) }
+    func disableSync(profileID: UUID) throws -> LocalSyncState { try syncState(profileID: profileID) }
 }
 
 private func temporaryDatabaseURL() -> URL {

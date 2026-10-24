@@ -281,6 +281,61 @@ final class LocalDatabase {
                 ALTER TABLE local_image_intakes ADD COLUMN operation_id TEXT;
                 """)
         }
+        migrator.registerMigration("local-v12-income-facts-and-optional-entry-time") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_income_records (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT REFERENCES local_accounts(id),
+                    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+                    currency TEXT NOT NULL,
+                    source_name TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    income_date TEXT NOT NULL,
+                    occurred_at DATETIME,
+                    note TEXT,
+                    local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    deleted_at DATETIME
+                );
+
+                CREATE INDEX local_income_profile_date_idx
+                    ON local_income_records(profile_id, income_date, created_at);
+
+                CREATE TABLE local_account_entries_v12 (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT NOT NULL REFERENCES local_accounts(id),
+                    direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
+                    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+                    entry_kind TEXT NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    occurred_at DATETIME,
+                    voided_at DATETIME
+                );
+
+                INSERT INTO local_account_entries_v12
+                    (id, profile_id, account_id, direction, amount_minor, entry_kind,
+                     source_kind, source_id, occurred_at, voided_at)
+                SELECT id, profile_id, account_id, direction, amount_minor, entry_kind,
+                       source_kind, source_id, occurred_at, voided_at
+                FROM local_account_entries;
+
+                DROP INDEX local_account_entries_active_source_idx;
+                DROP INDEX local_account_entries_account_idx;
+                DROP TABLE local_account_entries;
+                ALTER TABLE local_account_entries_v12 RENAME TO local_account_entries;
+
+                CREATE UNIQUE INDEX local_account_entries_active_source_idx
+                    ON local_account_entries(source_kind, source_id)
+                    WHERE voided_at IS NULL;
+
+                CREATE INDEX local_account_entries_account_idx
+                    ON local_account_entries(account_id, occurred_at);
+                """)
+        }
         return migrator
     }
 }

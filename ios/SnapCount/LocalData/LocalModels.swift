@@ -98,6 +98,58 @@ struct LocalExpense: Equatable {
     let updatedAt: Date
 }
 
+struct LocalIncomeDraft: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID?
+    let amountMinor: Int64
+    let currency: String
+    let sourceName: String
+    let category: String
+    let incomeDate: String
+    let occurredAt: Date?
+    let note: String?
+    let createdAt: Date
+}
+
+struct LocalIncomeUpdate: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let expectedVersion: Int64
+    let accountID: UUID?
+    let amountMinor: Int64
+    let currency: String
+    let sourceName: String
+    let category: String
+    let incomeDate: String
+    let occurredAt: Date?
+    let note: String?
+    let updatedAt: Date
+}
+
+struct LocalIncome: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID?
+    let amountMinor: Int64
+    let currency: String
+    let sourceName: String
+    let category: String
+    let incomeDate: String
+    let occurredAt: Date?
+    let note: String?
+    let localVersion: Int64
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+struct LocalIncomeTombstone: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let localVersion: Int64
+    let deletedAt: Date
+}
+
 struct LocalExpenseTombstone: Equatable {
     let id: UUID
     let profileID: UUID
@@ -114,7 +166,7 @@ struct LocalAccountEntry: Equatable {
     let entryKind: String
     let sourceKind: String
     let sourceID: UUID
-    let occurredAt: Date
+    let occurredAt: Date?
     let voidedAt: Date?
 }
 
