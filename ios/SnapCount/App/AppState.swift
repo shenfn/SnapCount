@@ -59,6 +59,7 @@ final class AppState: ObservableObject {
     @Published var recordExpressionPlanExposureState: NativeRecordExpressionPlanExposureState = .idle
     @Published var isCreatingManualRecord = false
     @Published var manualRecordMessage: String?
+    @Published var localStorageInitializationMessage: String?
     @Published var recordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
     @Published var recordMonthMessages: [String: String] = [:]
     @Published var loadingRecordMonthKey: String?
@@ -197,6 +198,7 @@ final class AppState: ObservableObject {
         recordRepository: RecordRepositoryProtocol = RecordRepository(),
         localExpenseUseCase: LocalExpenseUseCaseProtocol? = nil,
         localRecordUseCase: LocalRecordUseCaseProtocol? = nil,
+        localStorageInitializationMessage: String? = nil,
         localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol? = nil,
         localFactReader: LocalFactReader? = nil,
         localImageStore: LocalImageStore? = nil,
@@ -278,6 +280,7 @@ final class AppState: ObservableObject {
         self.onboardingProgressStore = onboardingProgressStore
         self.sessionProvider = sessionProvider
         self.expressionPlanAcknowledgementSleep = expressionPlanAcknowledgementSleep
+        self.localStorageInitializationMessage = localStorageInitializationMessage
     }
 
     func bootstrap() {

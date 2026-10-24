@@ -4,6 +4,28 @@ import UIKit
 
 final class SnapCountTests: XCTestCase {
     @MainActor
+    func testLF03408LocalStorageInitializationFailureNeverFallsBackToRemoteSave() async {
+        let repository = RecordRepositoryStub()
+        let state = AppState(
+            recordRepository: repository,
+            localStorageInitializationMessage: "本地数据库无法打开",
+            sessionProvider: { _ in Self.expressionTestSession }
+        )
+        var draft = NativeManualRecordDraft(kind: .expense)
+        draft.amountText = "12.30"
+        draft.title = "合成商户"
+        draft.category = "food"
+        draft.accountId = UUID().uuidString
+
+        let saved = await state.createManualRecord(draft, domain: nil)
+
+        XCTAssertFalse(saved)
+        XCTAssertEqual(repository.createCount, 0, "本地存储失败不能把核心记录写到云端")
+        XCTAssertTrue(state.manualRecordMessage?.contains("本地数据库无法打开") == true)
+        XCTAssertEqual(state.localStorageInitializationMessage, "本地数据库无法打开")
+    }
+
+    @MainActor
     func testIOSV2POLISH002P1DateWindowLoadsSelectedMonthBeforeHistory() async {
         let repository = RecordRepositoryStub()
         let state = AppState(
