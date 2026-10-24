@@ -165,6 +165,30 @@ final class SnapCountTests: XCTestCase {
         XCTAssertEqual(NativeSleepTimelineAxis.label(for: 1_890), "07:30")
     }
 
+    func testLF03805SleepTimelinePreservesNoonAndMultiDayDateDuration() throws {
+        func interval(id: String, startValue: String, endValue: String) throws -> NativeSleepInterval {
+            let formatter = ISO8601DateFormatter()
+            let start = try XCTUnwrap(formatter.date(from: startValue))
+            let end = try XCTUnwrap(formatter.date(from: endValue))
+            let record = NativeDayRecord(
+                id: id, reference: "sleep/\(id)", dateKey: "2026-10-19", kind: .sleep,
+                domainKey: "sleep", title: "睡眠", subtitle: "", value: "", timeLabel: nil,
+                systemImage: "moon.zzz", status: "done"
+            )
+            return NativeSleepInterval(record: record, start: start, end: end)
+        }
+
+        let noon = try XCTUnwrap(NativeSleepTimelineAxis.value(for: interval(
+            id: "noon", startValue: "2026-10-17T11:00:00+08:00", endValue: "2026-10-17T13:00:00+08:00"
+        )))
+        XCTAssertEqual(noon.durationMinutes, 120, accuracy: 0.001)
+
+        let multiDay = try XCTUnwrap(NativeSleepTimelineAxis.value(for: interval(
+            id: "multi-day", startValue: "2026-10-17T23:00:00+08:00", endValue: "2026-10-19T07:30:00+08:00"
+        )))
+        XCTAssertEqual(multiDay.durationMinutes, 1_950, accuracy: 0.001)
+    }
+
     func testSleepTimelineAxisKeepsPrototypeNightWindowButExpandsForOutOfWindowData() {
         let normal = NativeSleepTimelineAxis.bounds(for: [1_380...1_890])
         XCTAssertEqual(normal.lowerBound, 1_260, accuracy: 0.001)
