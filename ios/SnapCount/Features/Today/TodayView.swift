@@ -656,7 +656,9 @@ struct TodayView: View {
             return
         }
         do {
-            let uploadToken = try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+            let uploadToken = appState.localVisionMode == .hosted
+                ? try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+                : nil
             let localOutcome = try await appState.ingestHostedImageLocally(
                 data: data,
                 captureKind: captureKind,

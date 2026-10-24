@@ -32,9 +32,16 @@ struct UploadScreenshotIntent: AppIntent {
                 } else {
                     uploadToken = nil
                 }
-                let recognition = try LocalImageRecognitionUseCase.makeDefault(
-                    provider: HostedAIImageRecognitionProvider()
-                )
+                let provider: LocalImageRecognitionProvider
+                switch mode {
+                case .disabled, .hosted:
+                    provider = HostedAIImageRecognitionProvider()
+                case .byok:
+                    provider = QwenBYOKImageRecognitionProvider(
+                        apiKey: (try? KeychainStore.shared.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
+                    )
+                }
+                let recognition = try LocalImageRecognitionUseCase.makeDefault(provider: provider)
                 let result: ShortcutUploadResult
                 let trialOutcome: ShortcutTrialOutcome
                 do {

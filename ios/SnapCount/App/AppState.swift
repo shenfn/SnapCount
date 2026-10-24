@@ -107,6 +107,7 @@ final class AppState: ObservableObject {
     @Published var aiInsightIsCached = false
     @Published var userSettings = NativeUserSettings()
     @Published var localVisionMode = LocalVisionModeStore().mode
+    @Published var hasBYOKAPIKey = (try? KeychainStore.shared.string(for: KeychainKeys.byokQwenAPIKey))?.isEmpty == false
     @Published var settingsMessage: String?
     @Published var isLoadingSettings = false
     @Published var isSavingSettings = false
@@ -1091,17 +1092,30 @@ final class AppState: ObservableObject {
         guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else {
             throw LocalDataError.invalidRecord
         }
+        let provider: LocalImageRecognitionProvider
+        let recognitionUploadToken: String?
+        switch localVisionMode {
+        case .disabled:
+            throw LocalDataError.invalidRecord
+        case .hosted:
+            provider = HostedAIImageRecognitionProvider()
+            recognitionUploadToken = uploadToken
+        case .byok:
+            let apiKey = (try? keychain.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
+            provider = QwenBYOKImageRecognitionProvider(apiKey: apiKey)
+            recognitionUploadToken = nil
+        }
         let recognition = LocalImageRecognitionUseCase(
             localRecordUseCase: localRecordUseCase,
             imageStore: localImageStore,
             intakeRepository: localImageIntakeRepository,
-            provider: HostedAIImageRecognitionProvider()
+            provider: provider
         )
         return try await recognition.ingest(
             imageData: data,
             captureKind: captureKind,
             filename: filename,
-            uploadToken: uploadToken
+            uploadToken: recognitionUploadToken
         )
     }
 
@@ -1127,8 +1141,43 @@ final class AppState: ObservableObject {
     }
 
     func setLocalVisionMode(_ mode: LocalVisionMode) {
+        if mode == .byok, !hasBYOKAPIKey {
+            settingsMessage = "先保存 BYOK API Key，再启用 BYOK。"
+            return
+        }
         localVisionModeStore.save(mode)
         localVisionMode = mode
+    }
+
+    func saveBYOKAPIKey(_ apiKey: String) -> Bool {
+        let normalized = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            settingsMessage = "API Key 不能为空。"
+            return false
+        }
+        do {
+            try keychain.setString(normalized, for: KeychainKeys.byokQwenAPIKey)
+            hasBYOKAPIKey = true
+            settingsMessage = "API Key 已安全保存；尚未发送任何图片。"
+            setLocalVisionMode(.byok)
+            return true
+        } catch {
+            settingsMessage = "API Key 未能保存到 Keychain：\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func deleteBYOKAPIKey() -> Bool {
+        do {
+            try keychain.remove(KeychainKeys.byokQwenAPIKey)
+            hasBYOKAPIKey = false
+            if localVisionMode == .byok { setLocalVisionMode(.disabled) }
+            settingsMessage = "本机 BYOK API Key 已删除；供应商账户中的 Key 仍需单独撤销。"
+            return true
+        } catch {
+            settingsMessage = "API Key 未能从 Keychain 删除：\(error.localizedDescription)"
+            return false
+        }
     }
 
     var supportsLocalDomainRecords: Bool { localRecordUseCase != nil && localImageStore != nil }
@@ -1220,13 +1269,26 @@ final class AppState: ObservableObject {
         }
         guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else { return false }
         do {
+            let provider: LocalImageRecognitionProvider
+            let uploadToken: String?
+            switch localVisionMode {
+            case .disabled:
+                return false
+            case .hosted:
+                provider = HostedAIImageRecognitionProvider()
+                uploadToken = try? keychain.string(for: KeychainKeys.uploadToken)
+            case .byok:
+                let apiKey = (try? keychain.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
+                provider = QwenBYOKImageRecognitionProvider(apiKey: apiKey)
+                uploadToken = nil
+            }
             let recognition = LocalImageRecognitionUseCase(
                 localRecordUseCase: localRecordUseCase,
                 imageStore: localImageStore,
                 intakeRepository: localImageIntakeRepository,
-                provider: HostedAIImageRecognitionProvider()
+                provider: provider
             )
-            _ = try await recognition.retry(intakeID: intake.id, uploadToken: try? keychain.string(for: KeychainKeys.uploadToken))
+            _ = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
             await refreshFailedLocalImageIntakes()
             await refreshLocalRecognitionProjection()
             return true
@@ -2061,7 +2123,7 @@ final class AppState: ObservableObject {
                 status: status, note: note
             )
         }
-        await performRepaymentAction(.confirm(
+        return await performRepaymentAction(.confirm(
             cycleId: cycle.id,
             accountId: cycle.accountId,
             paidAmount: paidAmount,
@@ -2084,7 +2146,9 @@ final class AppState: ObservableObject {
             repaymentMessage = nil
             defer { isSubmittingRepayment = false }
             do {
-                _ = try await localExpenseUseCase.revokeLiabilityPayment(id: paymentID, reason: "用户撤销还款")
+                _ = try await localExpenseUseCase.revokeLiabilityPayment(
+                    id: paymentID, reason: "用户撤销还款", now: Date()
+                )
                 await loadLocalAccounts()
                 if let refreshed = accounts.first(where: { $0.id == accountId }) {
                     await loadLocalAccountDetail(refreshed)
@@ -2096,7 +2160,7 @@ final class AppState: ObservableObject {
                 return false
             }
         }
-        await performRepaymentAction(.revoke(
+        return await performRepaymentAction(.revoke(
             paymentId: payment.id,
             cycleId: payment.statementId ?? "",
             accountId: accountId
@@ -2136,7 +2200,7 @@ final class AppState: ObservableObject {
         do {
             _ = try await localExpenseUseCase.confirmRepayment(
                 cycleID: cycleID, paidAmountMinor: paidAmountMinor, debitAccountID: debitID,
-                status: status.rawValue, note: note, paidAt: Date(), now: Date()
+                status: status.rawValue, note: note, paidAt: Date()
             )
             await loadLocalAccounts()
             if let refreshed = accounts.first(where: { $0.id == cycle.accountId }) {

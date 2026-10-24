@@ -354,6 +354,8 @@ struct SettingsView: View {
 
 struct VisionSettingsView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var byokAPIKeyInput = ""
+    @State private var showDeleteBYOKConfirmation = false
 
     var body: some View {
         Form {
@@ -368,9 +370,35 @@ struct VisionSettingsView: View {
                 }
                 Text(appState.localVisionMode == .disabled
                      ? "关闭后，图片只保存在本机并进入手工处理；不会发送图片或调用 OCR。"
-                     : "识别请求由 Hosted AI 处理；关闭云同步不会关闭这项单独授权。")
+                     : appState.localVisionMode == .hosted
+                     ? "图片发送到芥子 Hosted AI；关闭云同步不会关闭这项单独授权。"
+                     : "图片经 TLS 直接发送至阿里云百炼北京端点的 Qwen 3.6 Flash；费用由你的供应商账户承担。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+            Section("单模型 BYOK") {
+                Text("固定模型：Qwen 3.6 Flash · 北京地域。只需 API Key，不会自动验证或发送图片。Key 使用本机 Keychain，删除本机副本不会撤销供应商账户中的 Key。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                SecureField("粘贴 API Key", text: $byokAPIKeyInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("保存并启用 BYOK") {
+                    if appState.saveBYOKAPIKey(byokAPIKeyInput) { byokAPIKeyInput = "" }
+                }
+                .disabled(byokAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                LabeledContent("本机 Key") {
+                    Text(appState.hasBYOKAPIKey ? "已保存（不显示）" : "未保存")
+                        .foregroundStyle(.secondary)
+                }
+                if appState.hasBYOKAPIKey {
+                    Button("删除本机 Key…", role: .destructive) {
+                        showDeleteBYOKConfirmation = true
+                    }
+                }
+                if let message = appState.settingsMessage {
+                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                }
             }
             Section("当前链路") {
                 LabeledContent("截图") {
@@ -395,6 +423,16 @@ struct VisionSettingsView: View {
         .background(JieziTheme.pageBackground)
         .tint(JieziTheme.brand)
         .disabled(appState.isSavingSettings)
+        .confirmationDialog(
+            "删除本机 BYOK Key？",
+            isPresented: $showDeleteBYOKConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("删除 Key", role: .destructive) { _ = appState.deleteBYOKAPIKey() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("只删除此设备 Keychain 中的副本。若要彻底停用，请另到供应商控制台撤销 Key。")
+        }
     }
 
     private func providerSection(title: String, selection: String, forPhoto: Bool) -> some View {

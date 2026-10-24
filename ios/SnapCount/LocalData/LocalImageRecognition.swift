@@ -4,6 +4,7 @@ enum LocalImageRecognitionError: Error, Equatable, LocalizedError {
     case invalidCandidate
     case unsupportedDomain(String)
     case missingUploadCredential
+    case missingBYOKKey
     case retryLimitReached
     case alreadyInProgress
     case alreadyCompleted
@@ -16,6 +17,8 @@ enum LocalImageRecognitionError: Error, Equatable, LocalizedError {
             return "本地首片暂不支持数据域：\(domainKey)"
         case .missingUploadCredential:
             return "当前没有可用的 Hosted AI 凭据"
+        case .missingBYOKKey:
+            return "未找到 BYOK API Key；图片仍保存在本机，可手动处理"
         case .retryLimitReached:
             return "已达到三次重试上限，请手动处理或丢弃图片"
         case .alreadyInProgress:

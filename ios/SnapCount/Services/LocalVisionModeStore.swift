@@ -3,6 +3,7 @@ import Foundation
 enum LocalVisionMode: String, CaseIterable, Identifiable {
     case disabled
     case hosted
+    case byok
 
     var id: String { rawValue }
 
@@ -10,6 +11,7 @@ enum LocalVisionMode: String, CaseIterable, Identifiable {
         switch self {
         case .disabled: "关闭识别"
         case .hosted: "Hosted AI"
+        case .byok: "自带 Key · Qwen 3.6 Flash"
         }
     }
 }
@@ -23,7 +25,7 @@ struct LocalVisionModeStore {
     }
 
     var mode: LocalVisionMode {
-        LocalVisionMode(rawValue: defaults.string(forKey: key) ?? "") ?? .hosted
+        LocalVisionMode(rawValue: defaults.string(forKey: key) ?? "") ?? .disabled
     }
 
     func save(_ mode: LocalVisionMode) {

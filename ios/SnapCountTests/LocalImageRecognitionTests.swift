@@ -39,7 +39,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        XCTAssertEqual(LocalVisionModeStore(defaults: defaults).mode, .hosted)
+        XCTAssertEqual(LocalVisionModeStore(defaults: defaults).mode, .disabled)
         LocalVisionModeStore(defaults: defaults).save(.disabled)
         XCTAssertEqual(LocalVisionModeStore(defaults: defaults).mode, .disabled)
     }
