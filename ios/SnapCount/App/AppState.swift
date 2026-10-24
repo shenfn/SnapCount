@@ -964,9 +964,7 @@ final class AppState: ObservableObject {
     private func loadUnifiedRecordMonth(_ monthKey: String, force: Bool = false) async {
         if localFactReader != nil {
             await readDeviceFactMonth(monthKey, force: force)
-            if isSignedIn {
-                // Keep remote records available when the user is signed in;
-                // the local projection remains the authoritative local layer.
+            if mayReadRemoteBusinessData {
                 await loadRemoteRecordMonth(monthKey, force: force)
             }
             return
@@ -978,15 +976,21 @@ final class AppState: ObservableObject {
             if localRecordUseCase != nil {
                 await readDeviceRecordMonth(monthKey, force: force)
             }
-            if isSignedIn {
-                // A non-empty local projection is not evidence that the
-                // remote month is complete. Pull it as well so other domains
-                // and cloud-only records can be merged into the same page.
+            if mayReadRemoteBusinessData {
                 await loadRemoteRecordMonth(monthKey, force: force)
             }
             return
         }
         await loadRemoteRecordMonth(monthKey, force: force)
+    }
+
+    private var mayReadRemoteBusinessData: Bool {
+        guard isSignedIn, !currentUserId.isEmpty,
+              localSyncState?.binding == .bound(currentUserId),
+              localSyncState?.status != .disabled else {
+            return false
+        }
+        return true
     }
 
     /// SL-02（C4）：所有写路径的"写后当月投影刷新"统一走这里。
@@ -1441,6 +1445,13 @@ final class AppState: ObservableObject {
         isLoadingAccounts = true
         accountMessage = nil
         defer { isLoadingAccounts = false }
+        if localExpenseUseCase != nil, !mayReadRemoteBusinessData {
+            await loadLocalAccounts()
+            if accounts.isEmpty, let localAccountMessage {
+                accountMessage = localAccountMessage
+            }
+            return
+        }
         do {
             let session = try await validSession()
             guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
@@ -1659,6 +1670,11 @@ final class AppState: ObservableObject {
         selectedAccountDetail = nil
         selectedAccountSourceSnapshot = nil
         accountMessage = nil
+        if let accountID = UUID(uuidString: account.id),
+           localAccounts.contains(where: { $0.id == accountID }) {
+            await loadLocalAccountDetail(account)
+            return
+        }
         let session = try? await validSession()
         guard let session else {
             await loadLocalAccountDetail(account)

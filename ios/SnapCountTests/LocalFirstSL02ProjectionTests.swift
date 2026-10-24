@@ -355,7 +355,63 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         XCTAssertEqual(harness.sessionCounter.current, 0, "登录态本地新建不应读取会话或触发云端写入")
     }
 
-    // MARK: - DM-014：已登录但未确认绑定 → 不发生云端与本地静默拼接
+    func testLF03402SignedInWithoutSyncDoesNotReadRemoteBusinessRecords() async throws {
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.isSignedIn = true
+        state.currentUserId = "cloud-user"
+        state.refreshLocalSyncState()
+
+        await state.loadRecordMonth(NativeMonthKey.current(), force: true)
+
+        XCTAssertTrue(harness.recordSpy.fetchMonthKeys.isEmpty, "登录本身不能触发云端业务读取")
+        XCTAssertTrue(state.recordGroups(monthKey: NativeMonthKey.current()).flatMap(\.records).isEmpty)
+    }
+
+    func testLF03404SignedInWithoutSyncReadsLocalAccountAndLedger() async throws {
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
+        defer { harness.cleanup() }
+        let accountID = UUID()
+        _ = try await harness.expenseUseCase.createAccount(LocalAccountSetupCommand(
+            id: accountID,
+            name: "本地现金账户",
+            kind: "cash",
+            openingBalanceText: "100",
+            createdAt: Date()
+        ))
+        _ = try await harness.expenseUseCase.create(LocalExpenseCommand(
+            id: UUID(),
+            accountID: accountID,
+            amountText: "15.00",
+            currency: "CNY",
+            merchantName: "本地流水",
+            platform: "线下",
+            category: "food",
+            paymentMethod: "现金",
+            transactionDate: NativeLocalDate.dateKey(Date()),
+            transactionTime: nil,
+            note: nil,
+            createdAt: Date()
+        ))
+        let state = harness.state
+        state.isSignedIn = true
+        state.currentUserId = "cloud-user"
+        state.refreshLocalSyncState()
+
+        await state.loadAccounts()
+        let account = try XCTUnwrap(state.accounts.first { $0.id == accountID.uuidString })
+        await state.loadAccountDetail(account)
+
+        XCTAssertEqual(state.selectedAccountDetail?.account.id, accountID.uuidString)
+        XCTAssertEqual(state.selectedAccountDetail?.entries.count, 1)
+        XCTAssertEqual(state.selectedAccountDetail?.account.currentBalance, 85)
+        XCTAssertTrue(harness.accountRepository.fetchAccountsCalls.isEmpty)
+        XCTAssertEqual(harness.accountRepository.fetchDetailCalls, 0)
+        XCTAssertEqual(harness.sessionCounter.current, 0)
+    }
+
+    // MARK: - LF-034.02 / DM-014：登录本身不拉取云端业务事实，绑定后按授权读取
 
     func testLOCALP1DM014RemoteExpenseProjectionRequiresConfirmedBinding() async throws {
         let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: true)
@@ -373,7 +429,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
 
         await state.loadRecordMonth(monthKey, force: true)
 
-        XCTAssertEqual(harness.recordSpy.fetchMonthKeys, [monthKey])
+        XCTAssertTrue(harness.recordSpy.fetchMonthKeys.isEmpty, "未绑定时不得读取云端业务记录")
         XCTAssertTrue(harness.expenseStub.importRemoteExpenseCalls.isEmpty, "未绑定时不得把云端消费写入本地")
         XCTAssertTrue(harness.expenseStub.importRemoteAccountCalls.isEmpty)
 
@@ -387,7 +443,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         }
         await state.loadRecordMonth(monthKey, force: true)
 
-        XCTAssertEqual(harness.recordSpy.fetchMonthKeys.count, 2)
+        XCTAssertEqual(harness.recordSpy.fetchMonthKeys, [monthKey])
         XCTAssertEqual(harness.expenseStub.importRemoteExpenseCalls.count, 1)
         XCTAssertEqual(harness.expenseStub.importRemoteExpenseCalls.first?.first?.amountMinor, 1_250)
         XCTAssertTrue(harness.expenseStub.importRemoteAccountCalls.isEmpty)
@@ -672,6 +728,7 @@ private struct SL02Harness {
     let recordUseCase: LocalRecordUseCase
     let profile: LocalProfile
     let bindingRepository: LocalBindingRepository
+    let accountRepository: SL02AccountRepositoryStub
     let sessionCounter: SL02Counter
 
     func cleanup() {
@@ -723,6 +780,7 @@ extension LocalFirstSL02ProjectionTests {
             }
         }
 
+        let accountRepository = SL02AccountRepositoryStub()
         let state = AppState(
             dashboardRepository: dashboard,
             recordRepository: recordSpy,
@@ -731,7 +789,7 @@ extension LocalFirstSL02ProjectionTests {
             localFactReader: factReader,
             domainRepository: SL02DomainRepositoryStub(),
             snapshotStore: SL02SnapshotStoreStub(),
-            accountRepository: SL02AccountRepositoryStub(),
+            accountRepository: accountRepository,
             financeVocabularyRepository: SL02FinanceVocabularyRepositoryStub(),
             localBindingRepository: profileStore,
             sessionProvider: sessionProvider
@@ -748,6 +806,7 @@ extension LocalFirstSL02ProjectionTests {
             recordUseCase: recordUseCase,
             profile: profile,
             bindingRepository: profileStore,
+            accountRepository: accountRepository,
             sessionCounter: sessionCounter
         )
     }
@@ -906,9 +965,15 @@ private final class SL02DomainRepositoryStub: DomainRepositoryProtocol {
 }
 
 private final class SL02AccountRepositoryStub: AccountRepositoryProtocol {
-    func fetchAccounts(accessToken: String) async throws -> [NativeAccount] { [] }
+    private(set) var fetchAccountsCalls: [String] = []
+    private(set) var fetchDetailCalls = 0
+    func fetchAccounts(accessToken: String) async throws -> [NativeAccount] {
+        fetchAccountsCalls.append(accessToken)
+        return []
+    }
     func fetchDetail(account: NativeAccount, accessToken: String) async -> NativeAccountDetail {
-        NativeAccountDetail(account: account, entries: [], repaymentCycles: [], payments: [], loadErrors: [:])
+        fetchDetailCalls += 1
+        return NativeAccountDetail(account: account, entries: [], repaymentCycles: [], payments: [], loadErrors: [:])
     }
     func fetchOpenRepaymentCycles(accessToken: String) async throws -> [NativeRepaymentCycle] { [] }
     func save(_ draft: NativeAccountDraft, userId: String, accessToken: String) async throws -> [NativeAccount] {
