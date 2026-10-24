@@ -78,12 +78,12 @@ struct ExpenseTimelineScrubber: View {
                                 .fill(isSelected ? scene.foreground : scene.dataAccent.opacity(0.58))
                                 .overlay(Circle().stroke(scene.surface, lineWidth: 2))
                                 .frame(width: isSelected ? 16 : 12, height: isSelected ? 16 : 12)
-                                .position(x: trackX(for: entry.minute, width: proxy.size.width), y: 43)
+                                .position(x: trackX(for: entry.minute, width: proxy.size.width), y: 26)
                                 .allowsHitTesting(false)
                         }
                         if let selectedEntry {
                             Rectangle().fill(scene.foreground).frame(width: 1.5, height: 48)
-                                .position(x: trackX(for: selectedEntry.minute, width: proxy.size.width), y: 43)
+                                .position(x: trackX(for: selectedEntry.minute, width: proxy.size.width), y: 26)
                                 .allowsHitTesting(false)
                         }
                         Color.clear
