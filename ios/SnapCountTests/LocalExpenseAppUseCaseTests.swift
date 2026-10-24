@@ -389,12 +389,13 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
 
         XCTAssertTrue(saved, "离线手工钱包快照应保存在本地")
         guard saved else { return }
-        let occurredAt = try XCTUnwrap(database.writer.read { db -> Date? in
+        let occurredAtText = try await database.writer.read { db -> String? in
             guard let row = try Row.fetchOne(db, sql: "SELECT occurred_at FROM local_wallet_snapshots ORDER BY id LIMIT 1") else {
                 return nil
             }
             return row["occurred_at"]
-        })
+        }
+        let occurredAt = try XCTUnwrap(occurredAtText.flatMap(ISO8601DateFormatter().date(from:)))
         XCTAssertEqual(occurredAt.timeIntervalSince1970, 1_792_909_800, accuracy: 1)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 10_000)
         XCTAssertTrue(try repository.accountEntries(accountID: account.id).isEmpty)
