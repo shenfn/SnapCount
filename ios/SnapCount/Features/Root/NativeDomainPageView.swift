@@ -596,7 +596,7 @@ struct NativeDomainPageContent: View {
                             y: .value("记录", value.id), height: .fixed(16))
                         .foregroundStyle(scene.dataAccent)
                         .cornerRadius(8)
-                        .accessibilityLabel("入睡 \(NativeSleepTimelineAxis.label(for: value.startMinute))，醒来 \(NativeSleepTimelineAxis.label(for: value.endMinute))，共 \(formatted(value.durationMinutes))")
+                        .accessibilityLabel("\(value.startDateKey) 入睡 \(NativeSleepTimelineAxis.label(for: value.startMinute))，\(value.endDateKey) 醒来 \(NativeSleepTimelineAxis.label(for: value.endMinute))，共 \(formatted(value.durationMinutes))")
                     if let bedtime = model.sleep?.bedtime.median {
                         RuleMark(x: .value("平时入睡", bedtime))
                             .foregroundStyle(scene.accent.opacity(0.8))
@@ -621,11 +621,13 @@ struct NativeDomainPageContent: View {
                 .chartXScale(domain: bounds)
                 .frame(height: CGFloat(max(1, values.count)) * 32 + 30)
                 ForEach(values) { value in
-                    HStack(spacing: 8) {
-                        Text("入睡 \(NativeSleepTimelineAxis.label(for: value.startMinute))")
-                        Spacer(minLength: 4)
-                        Text("醒来 \(NativeSleepTimelineAxis.label(for: value.endMinute))")
-                        Text("· \(formatted(value.durationMinutes))")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("入睡 \(value.startDateKey) \(NativeSleepTimelineAxis.label(for: value.startMinute))")
+                        HStack {
+                            Text("醒来 \(value.endDateKey) \(NativeSleepTimelineAxis.label(for: value.endMinute))")
+                            Spacer(minLength: 4)
+                            Text("· \(formatted(value.durationMinutes))")
+                        }
                     }
                     .font(JieziFont.caption2.monospacedDigit())
                     .foregroundStyle(scene.muted)

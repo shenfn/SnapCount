@@ -182,11 +182,15 @@ final class SnapCountTests: XCTestCase {
             id: "noon", startValue: "2026-10-17T11:00:00+08:00", endValue: "2026-10-17T13:00:00+08:00"
         )))
         XCTAssertEqual(noon.durationMinutes, 120, accuracy: 0.001)
+        XCTAssertEqual(noon.startDateKey, "2026-10-17")
+        XCTAssertEqual(noon.endDateKey, "2026-10-17")
 
         let multiDay = try XCTUnwrap(NativeSleepTimelineAxis.value(for: interval(
             id: "multi-day", startValue: "2026-10-17T23:00:00+08:00", endValue: "2026-10-19T07:30:00+08:00"
         )))
         XCTAssertEqual(multiDay.durationMinutes, 1_950, accuracy: 0.001)
+        XCTAssertEqual(multiDay.startDateKey, "2026-10-17")
+        XCTAssertEqual(multiDay.endDateKey, "2026-10-19")
     }
 
     func testSleepTimelineAxisKeepsPrototypeNightWindowButExpandsForOutOfWindowData() {

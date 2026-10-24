@@ -4,6 +4,8 @@ struct NativeSleepTimelineValue: Identifiable {
     let interval: NativeSleepInterval
     let startMinute: Double
     let endMinute: Double
+    let startDateKey: String
+    let endDateKey: String
 
     var id: String { interval.id }
     var durationMinutes: Double { max(0, endMinute - startMinute) }
@@ -15,10 +17,16 @@ enum NativeSleepTimelineAxis {
     static let tickSpacing = 180.0 // 3 小时
 
     static func value(for interval: NativeSleepInterval) -> NativeSleepTimelineValue? {
-        guard let startMinute = clockMinutes(for: interval.start),
-              let endMinute = clockMinutes(for: interval.end),
-              endMinute > startMinute else { return nil }
-        return NativeSleepTimelineValue(interval: interval, startMinute: startMinute, endMinute: endMinute)
+        guard let startMinute = clockMinutes(for: interval.start) else { return nil }
+        let durationMinutes = interval.end.timeIntervalSince(interval.start) / 60
+        guard durationMinutes.isFinite, durationMinutes > 0 else { return nil }
+        return NativeSleepTimelineValue(
+            interval: interval,
+            startMinute: startMinute,
+            endMinute: startMinute + durationMinutes,
+            startDateKey: NativeLocalDate.dateKey(interval.start),
+            endDateKey: NativeLocalDate.dateKey(interval.end)
+        )
     }
 
     private static func clockMinutes(for date: Date) -> Double? {

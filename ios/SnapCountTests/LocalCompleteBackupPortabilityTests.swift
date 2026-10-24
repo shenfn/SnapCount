@@ -20,7 +20,13 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         let target = try makeEmptyFixture()
         defer { cleanup(target) }
         let targetProfile = try target.profileStore.activeProfile()
-        let imported = try target.portability.importBackup(backup, into: targetProfile.id)
+        let imported: LocalCompleteBackupImportResult
+        do {
+            imported = try target.portability.importBackup(backup, into: targetProfile.id)
+        } catch {
+            XCTFail("首次完整恢复失败：\(error)")
+            return
+        }
 
         XCTAssertEqual(imported.insertedRows, preview.totalRows)
         XCTAssertEqual(imported.skippedRows, 0)
@@ -34,7 +40,13 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_outbox_operations"), 0)
         XCTAssertEqual(try LocalExpenseRepository(database: target.database).accountBalanceMinor(accountID: source.liabilityID), 10_000)
 
-        let repeated = try target.portability.importBackup(backup, into: targetProfile.id)
+        let repeated: LocalCompleteBackupImportResult
+        do {
+            repeated = try target.portability.importBackup(backup, into: targetProfile.id)
+        } catch {
+            XCTFail("重复完整恢复失败：\(error)")
+            return
+        }
         XCTAssertEqual(repeated.insertedRows, 0)
         XCTAssertEqual(repeated.skippedRows, preview.totalRows)
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_account_entries"), 5)
