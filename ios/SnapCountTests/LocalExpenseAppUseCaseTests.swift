@@ -450,6 +450,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(try LocalExpenseRepository(database: restoredDatabase).accountBalanceMinor(accountID: account.id), 10_000)
     }
 
+    @MainActor
     func testLF03302OfflineCreateFromSnapshotIsAtomicAndIdempotent() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("jiezi-wallet-create-\(UUID().uuidString)", isDirectory: true)
@@ -486,7 +487,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: accounts[0].id), 50_000)
         XCTAssertEqual(entries.count, 1)
         XCTAssertEqual(entries[0].entryKind, "snapshot_initialization")
-        XCTAssertEqual(walletRepository.unlinked(profileID: profile.id), [])
+        XCTAssertEqual(try walletRepository.unlinked(profileID: profile.id), [])
         XCTAssertEqual(try expenseRepository.pendingOutboxOperations().filter { $0.aggregateKind == "account" }.count, 1)
     }
 
@@ -627,6 +628,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(try expenseRepository.accounts(profileID: profile.id).count, 1)
     }
 
+    @MainActor
     func testLF03302AcceptedLocalActionIsNotRepeatedWhenListRefreshFails() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("jiezi-wallet-refresh-failure-\(UUID().uuidString)", isDirectory: true)
