@@ -23,7 +23,7 @@ final class LocalBYOKProviderTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(fakeKey)")
         XCTAssertEqual(candidate.domainKey, "food")
         XCTAssertEqual(candidate.title, "早餐")
-        let body = try XCTUnwrap(request.httpBody)
+        let body = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
         let bodyText = String(decoding: body, as: UTF8.self)
         XCTAssertTrue(bodyText.contains(image.base64EncodedString()))
         XCTAssertFalse(bodyText.contains(fakeKey))
@@ -37,7 +37,11 @@ final class LocalBYOKProviderTests: XCTestCase {
         defer { try? keychain.remove(KeychainKeys.byokQwenAPIKey) }
         let sentinel = "sk-test-keychain-only-sentinel"
 
-        try keychain.setString(sentinel, for: KeychainKeys.byokQwenAPIKey)
+        do {
+            try keychain.setString(sentinel, for: KeychainKeys.byokQwenAPIKey)
+        } catch KeychainStoreError.unexpectedStatus(let status) where status == -34_018 {
+            throw XCTSkip("This unsigned simulator test runner has no Keychain entitlement; verify persistence on a signed device build.")
+        }
         XCTAssertEqual(try keychain.string(for: KeychainKeys.byokQwenAPIKey), sentinel)
         try keychain.remove(KeychainKeys.byokQwenAPIKey)
         XCTAssertNil(try keychain.string(for: KeychainKeys.byokQwenAPIKey))
@@ -95,7 +99,7 @@ final class LocalBYOKProviderTests: XCTestCase {
         XCTAssertEqual(try intakeRepository.intake(id: intakeID, profileID: staged.profileID)?.status, .completed)
         let captured = try XCTUnwrap(BYOKURLProtocolStub.capturedRequest)
         XCTAssertEqual(captured.url, QwenBYOKImageRecognitionProvider.endpoint)
-        XCTAssertFalse(String(decoding: try XCTUnwrap(captured.httpBody), as: UTF8.self).contains("upload_token"))
+        XCTAssertFalse(String(decoding: try XCTUnwrap(BYOKURLProtocolStub.capturedBody), as: UTF8.self).contains("upload_token"))
     }
 
     func testLF03101BYOKRejectedKeyIsRedactedFromFailure() async throws {
@@ -123,6 +127,7 @@ final class LocalBYOKProviderTests: XCTestCase {
 final class BYOKURLProtocolStub: URLProtocol {
     private static let lock = NSLock()
     private static var storedRequest: URLRequest?
+    private static var storedBody: Data?
     private static var storedResponseData = Data()
     private static var storedStatusCode = 200
 
@@ -131,9 +136,15 @@ final class BYOKURLProtocolStub: URLProtocol {
         return storedRequest
     }
 
+    static var capturedBody: Data? {
+        lock.lock(); defer { lock.unlock() }
+        return storedBody
+    }
+
     static func configure(statusCode: Int, responseData: Data) {
         lock.lock(); defer { lock.unlock() }
         storedRequest = nil
+        storedBody = nil
         storedStatusCode = statusCode
         storedResponseData = responseData
     }
@@ -142,8 +153,10 @@ final class BYOKURLProtocolStub: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        let body = Self.requestBody(request)
         Self.lock.lock()
         Self.storedRequest = request
+        Self.storedBody = body
         let data = Self.storedResponseData
         let status = Self.storedStatusCode
         Self.lock.unlock()
@@ -157,4 +170,21 @@ final class BYOKURLProtocolStub: URLProtocol {
     }
 
     override func stopLoading() {}
+
+    private static func requestBody(_ request: URLRequest) -> Data? {
+        if let httpBody = request.httpBody { return httpBody }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 8_192)
+        while true {
+            let count = buffer.withUnsafeMutableBufferPointer {
+                stream.read($0.baseAddress!, maxLength: $0.count)
+            }
+            if count <= 0 { break }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+        return data
+    }
 }

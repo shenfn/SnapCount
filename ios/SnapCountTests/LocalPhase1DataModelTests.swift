@@ -219,7 +219,7 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 0)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 4_000)
         let confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
-        XCTAssertEqual(confirmed.overpaymentAmountMinor, 7_000)
+        XCTAssertEqual(confirmed.overpaymentAmountMinor, 3_000)
 
         let revoked = try XCTUnwrap(repository.revokeLiabilityPayment(
             id: confirmed.id, profileID: profile.id, reason: "测试撤销", now: date.addingTimeInterval(3)

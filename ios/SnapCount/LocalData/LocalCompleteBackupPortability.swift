@@ -129,14 +129,9 @@ final class LocalCompleteBackupPortability {
                 guard LocalImageStore.sha256(data) == expectedHash else {
                     throw LocalCompleteBackupError.invalidImage(path)
                 }
-                return ImageFile(path: path, hash: expectedHash, dataBase64: data.base64EncodedString())
+                return ImageFile(path: path, hash: expectedHash, data: data)
             }
-            let imageBytes = try images.reduce(0) { total, image in
-                guard let data = Data(base64Encoded: image.dataBase64) else {
-                    throw LocalCompleteBackupError.invalidImage(image.path)
-                }
-                return total + data.count
-            }
+            let imageBytes = images.reduce(0) { $0 + $1.data.count }
             guard imageBytes <= Self.maximumImageBytes else { throw LocalCompleteBackupError.archiveTooLarge }
             let rowCount = try tables.values.reduce(0) { total, json in
                 guard let value = try? JSONSerialization.jsonObject(with: Data(json.utf8)),
@@ -184,7 +179,7 @@ final class LocalCompleteBackupPortability {
             schemaVersion: decoded.archive.schemaVersion,
             tableCounts: decoded.rows.mapValues(\.count),
             imageCount: decoded.imageData.count,
-            imageBytes: decoded.imageData.values.reduce(0) { $0 + $1.count }
+            imageBytes: decoded.archive.images.reduce(0) { $0 + $1.data.count }
         )
     }
 
@@ -344,13 +339,12 @@ final class LocalCompleteBackupPortability {
         for image in archive.images {
             guard Self.isAllowedImagePath(image.path),
                   images[image.path] == nil,
-                  let imageData = Data(base64Encoded: image.dataBase64),
-                  LocalImageStore.sha256(imageData) == image.hash else {
+                  LocalImageStore.sha256(image.data) == image.hash else {
                 throw LocalCompleteBackupError.invalidImage(image.path)
             }
-            totalImageBytes += imageData.count
+            totalImageBytes += image.data.count
             guard totalImageBytes <= Self.maximumImageBytes else { throw LocalCompleteBackupError.archiveTooLarge }
-            images[image.path] = imageData
+            images[image.path] = image.data
         }
         try Self.validateImageReferences(rows: rows, images: archive.images)
         return DecodedArchive(archive: archive, rows: rows, imageData: images)
@@ -441,7 +435,7 @@ final class LocalCompleteBackupPortability {
     private struct ImageFile: Codable {
         let path: String
         let hash: String
-        let dataBase64: String
+        let data: Data
     }
 
     private struct DecodedArchive {

@@ -180,6 +180,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
             sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
         )
         await state.prepareLocalWorkspace()
+        await state.loadAccounts()
         let account = try XCTUnwrap(state.accounts.first { $0.id == liabilityID.uuidString })
         await state.loadAccountDetail(account)
         let cycle = try XCTUnwrap(state.selectedAccountDetail?.repaymentCycles.first { $0.cycleMonth == currentMonth })
