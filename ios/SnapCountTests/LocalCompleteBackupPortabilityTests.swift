@@ -160,6 +160,65 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(try imageFiles(in: target.imageDirectory), [])
     }
 
+    func testLF02110ResumeAfterImagesWereWrittenBeforeDatabaseCommit() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let targetProfile = try target.profileStore.activeProfile()
+        let backup = try source.portability.exportBackup()
+        let archive = try XCTUnwrap(JSONSerialization.jsonObject(with: backup) as? [String: Any])
+        let images = try XCTUnwrap(archive["images"] as? [[String: Any]])
+
+        // A terminated import can leave atomically written, content-addressed files while the DB transaction rolls back.
+        for image in images {
+            let path = try XCTUnwrap(image["path"] as? String)
+            let hash = try XCTUnwrap(image["hash"] as? String)
+            let encoded = try XCTUnwrap(image["data"] as? String)
+            let data = try XCTUnwrap(Data(base64Encoded: encoded))
+            XCTAssertTrue(try target.imageStore.restore(data: data, at: path, expectedHash: hash))
+        }
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_records"), 0)
+
+        let preview = try target.portability.preview(backup)
+        let imported = try target.portability.importBackup(backup, into: targetProfile.id)
+        XCTAssertEqual(imported.insertedRows, preview.totalRows)
+        XCTAssertEqual(imported.skippedRows, 0)
+        XCTAssertEqual(imported.restoredImages, 0)
+        XCTAssertEqual(try imageFiles(in: target.imageDirectory).count, images.count)
+
+        let repeated = try target.portability.importBackup(backup, into: targetProfile.id)
+        XCTAssertEqual(repeated.insertedRows, 0)
+        XCTAssertEqual(repeated.skippedRows, preview.totalRows)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 2)
+        XCTAssertEqual(try imageFiles(in: target.imageDirectory).count, images.count)
+    }
+
+    func testLF02110ImageWriteFailureRemovesEarlierFilesAndLeavesDatabaseUnchanged() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let targetProfile = try target.profileStore.activeProfile()
+        let backup = try source.portability.exportBackup()
+        let earlierPath = LocalImageStore.relativePath(owner: "recognition-\(source.profileID.uuidString)-\(LocalImageStore.sha256(Data("backup-intake-image".utf8)))", bucket: "intake")
+        let laterPath = LocalImageStore.relativePath(owner: "candidate-1", bucket: "staging")
+        let blocker = Data("existing file that conflicts with archive image".utf8)
+        let blockerURL = target.imageStore.url(for: laterPath)
+        try FileManager.default.createDirectory(
+            at: blockerURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try blocker.write(to: blockerURL)
+
+        XCTAssertThrowsError(try target.portability.importBackup(backup, into: targetProfile.id))
+
+        XCTAssertFalse(target.imageStore.contains(path: earlierPath))
+        XCTAssertTrue(target.imageStore.contains(path: laterPath))
+        XCTAssertEqual(try target.imageStore.data(at: laterPath), blocker)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_accounts"), 0)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_records"), 0)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 0)
+    }
+
     func testLF02105CompleteExportFailsWhenReferencedImageIsMissing() throws {
         let fixture = try makeFixture()
         defer { cleanup(fixture) }
