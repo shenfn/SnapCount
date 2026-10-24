@@ -1,4 +1,5 @@
 import XCTest
+import GRDB
 @testable import SnapCount
 
 final class LocalExpenseAppUseCaseTests: XCTestCase {
@@ -350,6 +351,53 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         let snapshot = state.reportSnapshot(monthKey: monthKey)
         XCTAssertEqual(snapshot.monthExpense, 5, accuracy: 0.001)
         XCTAssertEqual(snapshot.monthIncome, 20, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testLF03301OfflineWalletSnapshotIsSavedWithoutChangingDerivedBalance() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-snapshot-\(UUID().uuidString)", isDirectory: true)
+        let databaseURL = directory.appendingPathComponent("local.sqlite")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let repository = try LocalExpenseRepository(database: database)
+        let profile = try profileStore.activeProfile()
+        let account = try repository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: Date()
+        ))
+        let imageStore = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images", isDirectory: true))
+        let localRecords = try LocalRecordRepository(database: database)
+        let state = AppState(
+            localExpenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: repository),
+            localRecordUseCase: LocalRecordUseCase(profileStore: profileStore, repository: localRecords, imageStore: imageStore),
+            localImageStore: imageStore,
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "wallet")
+        draft.primaryValueText = "500.00"
+        draft.dimension = "微信"
+        draft.title = "微信零钱"
+        draft.walletRecordKind = "cash_snapshot"
+        draft.walletAccountType = "wechat"
+        draft.date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-25T04:00:00Z"))
+        draft.time = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-25T06:30:00Z"))
+        draft.includesTime = true
+
+        let saved = await state.createManualRecord(draft, domain: nil)
+
+        XCTAssertTrue(saved, "离线手工钱包快照应保存在本地")
+        guard saved else { return }
+        let occurredAt = try XCTUnwrap(database.writer.read { db -> Date? in
+            guard let row = try Row.fetchOne(db, sql: "SELECT occurred_at FROM local_wallet_snapshots ORDER BY id LIMIT 1") else {
+                return nil
+            }
+            return row["occurred_at"]
+        })
+        XCTAssertEqual(occurredAt.timeIntervalSince1970, 1_792_909_800, accuracy: 1)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 10_000)
+        XCTAssertTrue(try repository.accountEntries(accountID: account.id).isEmpty)
     }
 
     func testLocalExpenseDetailUsesStableReferenceAndLocalOnlyFields() {
