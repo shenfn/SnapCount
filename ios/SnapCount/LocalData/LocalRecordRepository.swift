@@ -6,6 +6,10 @@ protocol LocalRecordRepositoryProtocol {
     func updateRecord(_ update: LocalRecordUpdateCommand, profileID: UUID) throws -> LocalRecord
     func deleteRecord(_ command: LocalRecordDeleteCommand, profileID: UUID) throws -> LocalRecordTombstone
     func record(id: UUID) throws -> LocalRecord?
+    func hasImageReference(path: String) throws -> Bool
+    func pendingImageCleanups(profileID: UUID) throws -> [LocalImageCleanup]
+    func finishImageCleanup(id: UUID, profileID: UUID) throws
+    func failImageCleanup(id: UUID, profileID: UUID, message: String, at date: Date) throws
     func records(profileID: UUID, monthKey: String) throws -> [LocalRecord]
     func recordTombstone(id: UUID) throws -> LocalRecordTombstone?
     func createStaging(_ draft: LocalStagingDraft) throws -> LocalStagingRecord
@@ -86,7 +90,8 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                 sql: """
                     UPDATE local_records
                     SET title = ?, summary = ?, payload_json = ?, record_date = ?,
-                        record_time = ?, note = ?, local_version = local_version + 1,
+                        record_time = ?, note = ?, image_path = ?, image_hash = ?,
+                        local_version = local_version + 1,
                         updated_at = ?
                     WHERE id = ? AND deleted_at IS NULL AND local_version = ?
                     """,
@@ -97,11 +102,17 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     update.recordDate,
                     update.recordTime,
                     update.note,
+                    update.imagePath,
+                    update.imageHash,
                     update.updatedAt,
                     update.id.uuidString,
                     update.expectedVersion
                 ]
             )
+            let oldImagePath: String? = current["image_path"]
+            if let oldImagePath, oldImagePath != update.imagePath {
+                try Self.enqueueImageCleanup(db, profileID: profileID, imagePath: oldImagePath, at: update.updatedAt)
+            }
             guard let row = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_records WHERE id = ?",
@@ -145,6 +156,10 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     command.expectedVersion
                 ]
             )
+            let imagePath: String? = current["image_path"]
+            if let imagePath {
+                try Self.enqueueImageCleanup(db, profileID: profileID, imagePath: imagePath, at: command.deletedAt)
+            }
             guard let row = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_records WHERE id = ?",
@@ -164,6 +179,72 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                 arguments: [id.uuidString]
             ) else { return nil }
             return try Self.record(from: row)
+        }
+    }
+
+    func hasImageReference(path: String) throws -> Bool {
+        try database.writer.read { db in
+            (try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT EXISTS (
+                        SELECT 1 FROM local_records
+                        WHERE image_path = ? AND deleted_at IS NULL
+                        UNION ALL
+                        SELECT 1 FROM local_staging_records
+                        WHERE image_path = ? AND status = 'pending_review'
+                    )
+                    """,
+                arguments: [path, path]
+            ) ?? 0) != 0
+        }
+    }
+
+    func pendingImageCleanups(profileID: UUID) throws -> [LocalImageCleanup] {
+        try database.writer.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM local_image_cleanups WHERE profile_id = ? ORDER BY updated_at, id",
+                arguments: [profileID.uuidString]
+            ).map { row in
+                guard let id = UUID(uuidString: row["id"]),
+                      let profileID = UUID(uuidString: row["profile_id"]),
+                      let createdAt: Date = row["created_at"],
+                      let updatedAt: Date = row["updated_at"] else {
+                    throw LocalDataError.invalidRecord
+                }
+                return LocalImageCleanup(
+                    id: id,
+                    profileID: profileID,
+                    imagePath: row["image_path"],
+                    attemptCount: row["attempt_count"],
+                    lastError: row["last_error"],
+                    createdAt: createdAt,
+                    updatedAt: updatedAt
+                )
+            }
+        }
+    }
+
+    func finishImageCleanup(id: UUID, profileID: UUID) throws {
+        try database.writer.write { db in
+            try db.execute(
+                sql: "DELETE FROM local_image_cleanups WHERE id = ? AND profile_id = ?",
+                arguments: [id.uuidString, profileID.uuidString]
+            )
+        }
+    }
+
+    func failImageCleanup(id: UUID, profileID: UUID, message: String, at date: Date) throws {
+        try database.writer.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE local_image_cleanups
+                    SET attempt_count = attempt_count + 1, last_error = ?, updated_at = ?
+                    WHERE id = ? AND profile_id = ?
+                    """,
+                arguments: [message, date, id.uuidString, profileID.uuidString]
+            )
         }
     }
 
@@ -374,7 +455,22 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                     """,
                 arguments: [updatedAt, updatedAt, id]
             )
+            let imagePath: String? = row["image_path"]
+            if let imagePath {
+                try Self.enqueueImageCleanup(db, profileID: profileID, imagePath: imagePath, at: updatedAt)
+            }
         }
+    }
+
+    private static func enqueueImageCleanup(_ db: Database, profileID: UUID, imagePath: String, at date: Date) throws {
+        try db.execute(
+            sql: """
+                INSERT OR IGNORE INTO local_image_cleanups (
+                    id, profile_id, image_path, attempt_count, last_error, created_at, updated_at
+                ) VALUES (?, ?, ?, 0, NULL, ?, ?)
+                """,
+            arguments: [UUID().uuidString, profileID.uuidString, imagePath, date, date]
+        )
     }
 
     private static func assertProfile(_ row: Row, profileID: UUID) throws {

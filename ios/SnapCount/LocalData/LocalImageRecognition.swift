@@ -259,12 +259,19 @@ final class LocalImageRecognitionUseCase {
         )
         let recordID = Self.uuidFromHash(imageHash)
         let result = try await localRecordUseCase.ingest(candidate, recordID: recordID)
-        let cleanupMessage: String?
+        var cleanupMessage: String?
         do {
             try imageStore.remove(path: imageReference.path)
-            cleanupMessage = nil
         } catch {
-            cleanupMessage = "记录已保存；输入副本清理失败"
+            do {
+                try intakeRepository.enqueueImageCleanup(
+                    profileID: profileID,
+                    imagePath: imageReference.path,
+                    at: Date()
+                )
+            } catch {
+                cleanupMessage = "记录已保存；输入副本清理待恢复"
+            }
         }
         try intakeRepository.markCompleted(
             id: intakeID,
@@ -272,6 +279,7 @@ final class LocalImageRecognitionUseCase {
             cleanupMessage: cleanupMessage,
             at: Date()
         )
+        _ = try? localRecordUseCase.retryPendingImageCleanups()
         return LocalImageIntakeOutcome(result: result, imageHash: imageHash)
     }
 

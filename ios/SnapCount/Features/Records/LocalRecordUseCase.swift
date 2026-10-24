@@ -12,6 +12,7 @@ protocol LocalRecordUseCaseProtocol {
     func ingest(_ candidate: LocalRecordCandidate, recordID: UUID?) async throws -> LocalRecordIntakeOutcome
     func staging(id: String) async throws -> LocalStagingRecord?
     func stagingRecords() async throws -> [LocalStagingRecord]
+    func retryPendingImageCleanups() throws -> [LocalImageCleanup]
     func confirmStaging(id: String, recordID: UUID, changes: LocalStagingConfirmation?) async throws -> LocalRecordOutcome
     func discardStaging(id: String) async throws
 }
@@ -92,31 +93,55 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
     func update(_ command: LocalRecordUpdateCommand) async throws -> LocalRecordOutcome {
         let profile = try profileStore.activeProfile()
         let domainKey = try currentDomainKey(for: command.id, profileID: profile.id)
+        guard let current = try repository.record(id: command.id) else { throw LocalDataError.recordNotFound }
         try LocalRecordValidation.validate(
             domainKey: domainKey,
             title: command.title,
             recordDate: command.recordDate,
             recordTime: command.recordTime
         )
+        let payload = try LocalRecordCodec.normalizedPayload(domainKey: domainKey, payload: command.payload)
+        if command.imageData != nil, imageStore == nil { throw LocalDataError.invalidRecord }
+        let replacementReference: LocalImageReference?
+        if let imageData = command.imageData {
+            replacementReference = try imageStore?.save(
+                data: imageData,
+                owner: "record-\(command.id.uuidString)-\(UUID().uuidString)",
+                bucket: "records"
+            )
+        } else {
+            replacementReference = nil
+        }
+        let imagePath = replacementReference?.path ?? (command.removeImage ? nil : current.imagePath)
+        let imageHash = replacementReference?.hash ?? (command.removeImage ? nil : current.imageHash)
         let normalized = LocalRecordUpdateCommand(
             id: command.id,
             expectedVersion: command.expectedVersion,
             title: command.title,
             summary: command.summary,
-            payload: try LocalRecordCodec.normalizedPayload(domainKey: domainKey, payload: command.payload),
+            payload: payload,
             recordDate: NativeSleepFacts.businessDate(domainKey: domainKey, payload: command.payload, fallback: command.recordDate),
             recordTime: command.recordTime,
             note: command.note,
-            updatedAt: command.updatedAt
+            updatedAt: command.updatedAt,
+            imagePath: imagePath,
+            imageHash: imageHash
         )
-        let record = try repository.updateRecord(normalized, profileID: profile.id)
+        let record: LocalRecord
+        do {
+            record = try repository.updateRecord(normalized, profileID: profile.id)
+        } catch {
+            try? imageStore?.remove(path: replacementReference?.path)
+            throw error
+        }
+        if current.imagePath != record.imagePath { _ = try? retryPendingImageCleanups() }
         return LocalRecordOutcome(record: record, profileID: profile.id)
     }
 
     func delete(_ command: LocalRecordDeleteCommand) async throws -> LocalRecordDeleteOutcome {
         let profile = try profileStore.activeProfile()
         let tombstone = try repository.deleteRecord(command, profileID: profile.id)
-        try? imageStore?.remove(path: tombstone.imagePath)
+        if tombstone.imagePath != nil { _ = try? retryPendingImageCleanups() }
         return LocalRecordDeleteOutcome(tombstone: tombstone, profileID: profile.id)
     }
 
@@ -275,9 +300,30 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
 
     func discardStaging(id: String) async throws {
         let profile = try profileStore.activeProfile()
-        let staging = try repository.staging(id: id)
         try repository.discardStaging(id: id, updatedAt: Date(), profileID: profile.id)
-        try? imageStore?.remove(path: staging?.imagePath)
+        _ = try? retryPendingImageCleanups()
+    }
+
+    func retryPendingImageCleanups() throws -> [LocalImageCleanup] {
+        let profile = try profileStore.activeProfile()
+        let pending = try repository.pendingImageCleanups(profileID: profile.id)
+        guard let imageStore else { return pending }
+        for cleanup in pending {
+            do {
+                if try !repository.hasImageReference(path: cleanup.imagePath) {
+                    try imageStore.remove(path: cleanup.imagePath)
+                }
+                try repository.finishImageCleanup(id: cleanup.id, profileID: profile.id)
+            } catch {
+                try repository.failImageCleanup(
+                    id: cleanup.id,
+                    profileID: profile.id,
+                    message: "本机原图清理失败，可重试",
+                    at: Date()
+                )
+            }
+        }
+        return try repository.pendingImageCleanups(profileID: profile.id)
     }
 
     private func currentDomainKey(for id: UUID, profileID: UUID) throws -> String {

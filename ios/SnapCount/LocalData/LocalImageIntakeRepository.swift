@@ -109,6 +109,19 @@ final class LocalImageIntakeRepository {
         }
     }
 
+    func enqueueImageCleanup(profileID: UUID, imagePath: String, at date: Date) throws {
+        try database.writer.write { db in
+            try db.execute(
+                sql: """
+                    INSERT OR IGNORE INTO local_image_cleanups (
+                        id, profile_id, image_path, attempt_count, last_error, created_at, updated_at
+                    ) VALUES (?, ?, ?, 0, NULL, ?, ?)
+                    """,
+                arguments: [UUID().uuidString, profileID.uuidString, imagePath, date, date]
+            )
+        }
+    }
+
     func removeMissingIntake(id: String, profileID: UUID) throws {
         try database.writer.write { db in
             try db.execute(

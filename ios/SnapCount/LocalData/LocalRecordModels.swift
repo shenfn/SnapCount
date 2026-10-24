@@ -135,6 +135,10 @@ struct LocalRecordUpdateCommand {
     let recordTime: String?
     let note: String?
     let updatedAt: Date
+    var imageData: Data? = nil
+    var removeImage = false
+    var imagePath: String? = nil
+    var imageHash: String? = nil
 }
 
 struct LocalRecordDeleteCommand {
@@ -174,6 +178,16 @@ struct LocalRecordTombstone: Equatable {
     let localVersion: Int64
     let deletedAt: Date
     let imagePath: String?
+}
+
+struct LocalImageCleanup: Equatable, Identifiable {
+    let id: UUID
+    let profileID: UUID
+    let imagePath: String
+    let attemptCount: Int
+    let lastError: String?
+    let createdAt: Date
+    let updatedAt: Date
 }
 
 struct LocalRecordMonth: Equatable {

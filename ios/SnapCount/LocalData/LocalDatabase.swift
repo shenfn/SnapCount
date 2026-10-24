@@ -260,6 +260,22 @@ final class LocalDatabase {
                 ADD COLUMN cleanup_message TEXT;
                 """)
         }
+        migrator.registerMigration("local-v10-image-cleanup-queue") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_image_cleanups (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    image_path TEXT NOT NULL UNIQUE,
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+                    last_error TEXT,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                );
+
+                CREATE INDEX local_image_cleanups_profile_idx
+                    ON local_image_cleanups(profile_id, updated_at);
+                """)
+        }
         return migrator
     }
 }

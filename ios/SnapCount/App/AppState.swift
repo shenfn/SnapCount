@@ -37,6 +37,7 @@ final class AppState: ObservableObject {
     @Published var hasUploadToken = false
     @Published var dashboard = DashboardSnapshot()
     @Published var failedLocalImageIntakes: [LocalImageIntake] = []
+    @Published var pendingLocalImageCleanups: [LocalImageCleanup] = []
     @Published var dashboardMessage: String?
     @Published var isLoadingDashboard = false
     @Published var isShowingCachedDashboard = false
@@ -1101,6 +1102,19 @@ final class AppState: ObservableObject {
         )
     }
 
+    var supportsLocalDomainRecords: Bool { localRecordUseCase != nil }
+
+    func localImageDataForRecord(id: String) async throws -> Data {
+        guard let recordID = UUID(uuidString: id),
+              let localRecordUseCase,
+              let localImageStore,
+              let record = try await localRecordUseCase.record(id: recordID),
+              let imagePath = record.imagePath else {
+            throw LocalDataError.recordNotFound
+        }
+        return try localImageStore.data(at: imagePath)
+    }
+
     func refreshLocalRecognitionProjection(monthKey requestedMonthKey: String? = nil) async {
         let monthKey = requestedMonthKey ?? Self.currentMonthKey
         if localFactReader != nil {
@@ -1124,10 +1138,35 @@ final class AppState: ObservableObject {
     /// session-scoped and are intentionally loaded only when signed in.
     func refreshInboxProjection() async {
         await refreshFailedLocalImageIntakes()
+        await refreshLocalImageCleanups()
         if !isSignedIn {
             await refreshLocalRecognitionProjection()
         }
         await loadInboxRepaymentCandidates()
+    }
+
+    func refreshLocalImageCleanups() async {
+        guard let localRecordUseCase else {
+            pendingLocalImageCleanups = []
+            return
+        }
+        do {
+            pendingLocalImageCleanups = try localRecordUseCase.retryPendingImageCleanups()
+        } catch {
+            inboxActionMessage = "本地图片清理状态读取失败：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+        }
+    }
+
+    func retryLocalImageCleanups() async {
+        await refreshLocalImageCleanups()
+        if pendingLocalImageCleanups.isEmpty {
+            inboxActionMessage = "本机图片清理已完成"
+            inboxActionMessageIsError = false
+        } else {
+            inboxActionMessage = "仍有 \(pendingLocalImageCleanups.count) 张图片待清理"
+            inboxActionMessageIsError = true
+        }
     }
 
     func refreshFailedLocalImageIntakes() async {
@@ -4900,7 +4939,9 @@ final class AppState: ObservableObject {
                 recordDate: draft.dateKey,
                 recordTime: draft.timeKey,
                 note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
-                updatedAt: Date()
+                updatedAt: Date(),
+                imageData: draft.imageData,
+                removeImage: draft.removeImage
             ))
             record = updated.record
         } else {

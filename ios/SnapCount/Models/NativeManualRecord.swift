@@ -133,6 +133,9 @@ struct NativeManualRecordDraft {
     var imagePath: String?
     var imageHash: String?
     var imageData: Data?
+    var existingImageData: Data?
+    var removeImage = false
+    var isLocalRecord = false
 
     init(
         kind: NativeManualRecordKind = .expense,
@@ -164,6 +167,7 @@ struct NativeManualRecordDraft {
     init(detail: NativeRecordDetail) {
         self.init(kind: .universal, domainKey: detail.domainKey ?? detail.category ?? "sport")
         existingRawId = detail.rawId
+        isLocalRecord = detail.status == "local"
         originalPayload = detail.payload ?? [:]
         title = detail.title
         note = detail.note ?? ""

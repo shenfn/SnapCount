@@ -83,8 +83,9 @@ struct InboxView: View {
                     }
 
                     failedImageIntakesSection
+                    failedImageCleanupSection
 
-                    if allItems.isEmpty && appState.failedLocalImageIntakes.isEmpty {
+                    if allItems.isEmpty && appState.failedLocalImageIntakes.isEmpty && appState.pendingLocalImageCleanups.isEmpty {
                         InboxSettledEmptyView()
                     } else if !allItems.isEmpty {
                         scopeControl
@@ -249,14 +250,14 @@ struct InboxView: View {
     }
 
     private var pendingSummary: some View {
-        let pendingCount = allItems.count + appState.failedLocalImageIntakes.count
-        HStack(alignment: .firstTextBaseline) {
+        let pendingCount = allItems.count + appState.failedLocalImageIntakes.count + appState.pendingLocalImageCleanups.count
+        return HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(pendingCount == 0 ? "暂时没有待处理内容" : "核对这些记录")
                     .font(JieziType.prototypeBrand)
                     .foregroundStyle(JieziTheme.ink)
                 if pendingCount > 0 {
-                    Text("\(allItems.count) 条候选 · \(appState.failedLocalImageIntakes.count) 张待处理图片")
+                    Text("\(allItems.count) 条候选 · \(appState.failedLocalImageIntakes.count) 张待处理图片 · \(appState.pendingLocalImageCleanups.count) 张待清理")
                         .font(.subheadline)
                         .foregroundStyle(JieziTheme.muted)
                 }
@@ -266,6 +267,41 @@ struct InboxView: View {
         .padding(.horizontal, JieziSpacing.xl2)
         .padding(.top, JieziSpacing.sm)
         .padding(.bottom, JieziSpacing.md)
+    }
+
+    @ViewBuilder
+    private var failedImageCleanupSection: some View {
+        if !appState.pendingLocalImageCleanups.isEmpty {
+            VStack(alignment: .leading, spacing: JieziSpacing.md) {
+                Text("尚未清理的本机图片")
+                    .font(.headline)
+                    .foregroundStyle(JieziTheme.ink)
+                ForEach(appState.pendingLocalImageCleanups) { cleanup in
+                    HStack(alignment: .top, spacing: JieziSpacing.md) {
+                        Image(systemName: "trash.slash")
+                            .foregroundStyle(JieziTheme.coral)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(URL(fileURLWithPath: cleanup.imagePath).lastPathComponent)
+                                .font(.subheadline.weight(.semibold))
+                            Text(cleanup.lastError ?? "图片尚未清理；重试不会影响记录内容。")
+                                .font(.caption)
+                                .foregroundStyle(JieziTheme.muted)
+                            Text("已尝试 \(cleanup.attemptCount) 次")
+                                .font(.caption2)
+                                .foregroundStyle(JieziTheme.muted)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(JieziSpacing.lg)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
+                }
+                Button("重试清理") { Task { await appState.retryLocalImageCleanups() } }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal, JieziSpacing.xl2)
+            .padding(.bottom, JieziSpacing.lg)
+        }
     }
 
     private var scopeControl: some View {

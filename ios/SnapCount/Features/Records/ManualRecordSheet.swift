@@ -189,6 +189,12 @@ struct ManualRecordSheet: View {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
             await appState.loadFinanceVocabulary()
             normalizeDomainSelection()
+            if draft.isLocalRecord,
+               draft.imageData == nil,
+               let existingRawId = draft.existingRawId,
+               draft.imagePath != nil {
+                draft.existingImageData = try? await appState.localImageDataForRecord(id: existingRawId)
+            }
             if stagingRecord != nil {
                 if draft.kind == .universal { hydrateUniversalFields() }
             } else if draft.existingRawId == nil {
@@ -212,7 +218,9 @@ struct ManualRecordSheet: View {
     }
 
     private var canAttachLocalImage: Bool {
-        !appState.isSignedIn && draft.kind == .universal && draft.existingRawId == nil
+        draft.kind == .universal
+            && appState.supportsLocalDomainRecords
+            && (draft.existingRawId == nil || draft.isLocalRecord)
     }
 
     private var localImageSection: some View {
@@ -220,7 +228,7 @@ struct ManualRecordSheet: View {
             title: "本地图片",
             subtitle: "图片只保存在本机，并随这条记录一起导出或删除。"
         ) {
-            if let imageData = draft.imageData,
+            if let imageData = draft.imageData ?? draft.existingImageData,
                let image = UIImage(data: imageData) {
                 Image(uiImage: image)
                     .resizable()
@@ -231,8 +239,29 @@ struct ManualRecordSheet: View {
                 HStack(spacing: JieziSpacing.md) {
                     Button("重新选择") { showLocalPhotoOptions = true }
                         .buttonStyle(.bordered)
-                    Button("移除图片", role: .destructive) { draft.imageData = nil }
+                    Button("移除图片", role: .destructive) {
+                        draft.imageData = nil
+                        draft.existingImageData = nil
+                        draft.imagePath = nil
+                        draft.existingImageData = nil
+                        draft.imageHash = nil
+                        draft.removeImage = true
+                    }
                         .buttonStyle(.bordered)
+                }
+            } else if draft.imagePath != nil && !draft.removeImage {
+                Text("当前保留一张本机原图")
+                    .font(.subheadline)
+                    .foregroundStyle(JieziTheme.muted)
+                HStack(spacing: JieziSpacing.md) {
+                    Button("重新选择") { showLocalPhotoOptions = true }
+                        .buttonStyle(.bordered)
+                    Button("移除图片", role: .destructive) {
+                        draft.imagePath = nil
+                        draft.imageHash = nil
+                        draft.removeImage = true
+                    }
+                    .buttonStyle(.bordered)
                 }
             } else {
                 HStack(spacing: JieziSpacing.md) {
@@ -261,6 +290,8 @@ struct ManualRecordSheet: View {
             CameraPicker { data in
                 showLocalCameraPicker = false
                 draft.imageData = data
+                draft.existingImageData = nil
+                draft.removeImage = false
             } onCancel: {
                 showLocalCameraPicker = false
             }
@@ -270,6 +301,8 @@ struct ManualRecordSheet: View {
             PhotoLibraryPicker { data in
                 showLocalPhotoLibraryPicker = false
                 draft.imageData = data
+                draft.existingImageData = nil
+                draft.removeImage = false
             } onCancel: {
                 showLocalPhotoLibraryPicker = false
             }
