@@ -398,7 +398,7 @@ final class LocalImageRecognitionTests: XCTestCase {
             id: intakeID, profileID: profile.id, operationID: firstOperation
         ))
 
-        try context.database.writer.write { db in
+        try await context.database.writer.write { db in
             try db.execute(
                 sql: "UPDATE local_image_intakes SET updated_at = ? WHERE id = ?",
                 arguments: [Date().addingTimeInterval(-600), intakeID]
