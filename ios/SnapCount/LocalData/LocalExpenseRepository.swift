@@ -1034,7 +1034,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     SELECT id, profile_id, account_id, direction, amount_minor, entry_kind,
                            source_kind, source_id, occurred_at, voided_at
                     FROM local_account_entries
-                    WHERE source_kind = 'expense' AND source_id = ?
+                    WHERE source_id = ?
                     ORDER BY occurred_at ASC, id ASC
                     """,
                 arguments: [sourceID.uuidString]

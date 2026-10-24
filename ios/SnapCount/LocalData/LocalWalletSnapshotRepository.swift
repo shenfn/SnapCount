@@ -458,7 +458,9 @@ final class LocalWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        let timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+        formatter.calendar?.timeZone = timeZone
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.isLenient = false
         guard let date = formatter.date(from: value), formatter.string(from: date) == value else { return nil }
