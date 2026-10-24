@@ -52,6 +52,43 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_account_entries"), 5)
     }
 
+    func testLF021SupportsVersion17DeletedWalletTombstoneWithoutArchivedImage() async throws {
+        let source = try makeEmptyFixture()
+        defer { cleanup(source) }
+        let walletRepository = LocalWalletSnapshotRepository(database: source.database)
+        let useCase = LocalWalletSnapshotUseCase(
+            profileStore: source.profileStore,
+            repository: walletRepository,
+            imageStore: source.imageStore
+        )
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "旧备份删除快照", summary: "v17行为兼容",
+            payload: ["account_type": AnyCodable("cash")],
+            recordDate: "2026-10-24", recordTime: nil, occurredAt: nil,
+            balanceMinor: 500, currency: "CNY", kind: .asset,
+            imageData: Data("synthetic legacy tombstone image".utf8), createdAt: Date()
+        ))
+        _ = try await useCase.delete(snapshot)
+        let currentBackup = try source.portability.exportBackup()
+        var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: currentBackup) as? [String: Any])
+        archive["schemaVersion"] = 17
+        archive["images"] = [[String: Any]]()
+        let version17Backup = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
+
+        let target = try makeEmptyFixture()
+        defer { cleanup(target) }
+        let targetProfile = try target.profileStore.activeProfile()
+        let preview = try target.portability.preview(version17Backup)
+        XCTAssertEqual(preview.imageCount, 0)
+        let imported = try target.portability.importBackup(version17Backup, into: targetProfile.id)
+        XCTAssertEqual(imported.insertedRows, preview.totalRows)
+        let restored = try XCTUnwrap(
+            LocalWalletSnapshotRepository(database: target.database).history(profileID: targetProfile.id).first
+        )
+        XCTAssertNotNil(restored.deletedAt)
+        XCTAssertEqual(restored.id, snapshot.id)
+    }
+
     func testLF02103ConflictingStableIDRejectsWholeBackupBeforeAnyInsert() throws {
         let source = try makeFixture()
         let target = try makeEmptyFixture()

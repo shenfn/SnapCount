@@ -25,6 +25,7 @@ struct LocalWalletSnapshot: Equatable, Identifiable {
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
+    let deletedAt: Date?
 
     var balance: Double { Double(balanceMinor) / 100 }
 }
@@ -61,6 +62,17 @@ struct LocalWalletSnapshotDraft: Equatable {
     let createdAt: Date
 }
 
+struct LocalWalletSnapshotUpdateDraft: Equatable {
+    let id: UUID
+    let profileID: UUID
+    let expectedVersion: Int64
+    let title: String
+    let summary: String
+    let payloadJSON: String
+    let balanceMinor: Int64
+    let updatedAt: Date
+}
+
 enum LocalWalletSnapshotActionKind: String, Equatable {
     case created
     case linked
@@ -75,11 +87,13 @@ struct LocalWalletSnapshotActionResult: Equatable {
 enum LocalWalletSnapshotActionError: Error, Equatable, LocalizedError {
     case conflict
     case incompatibleAccount
+    case futureEvidence
 
     var errorDescription: String? {
         switch self {
         case .conflict: return "这条快照已经执行过另一种关联操作。"
         case .incompatibleAccount: return "快照类型与账户类型不匹配，无法关联。"
+        case .futureEvidence: return "未来日期的快照不能作为当前账户证据。"
         }
     }
 }
@@ -87,6 +101,9 @@ enum LocalWalletSnapshotActionError: Error, Equatable, LocalizedError {
 protocol LocalWalletSnapshotRepositoryProtocol {
     func create(_ draft: LocalWalletSnapshotDraft) throws -> LocalWalletSnapshot
     func unlinked(profileID: UUID) throws -> [LocalWalletSnapshot]
+    func history(profileID: UUID) throws -> [LocalWalletSnapshot]
+    func update(_ draft: LocalWalletSnapshotUpdateDraft) throws -> LocalWalletSnapshot
+    func delete(id: UUID, profileID: UUID, expectedVersion: Int64, deletedAt: Date) throws -> LocalWalletSnapshot
     func createAccountFromSnapshot(
         _ snapshot: LocalWalletSnapshot,
         account: LocalAccountDraft
@@ -146,10 +163,89 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
                 sql: """
                     SELECT * FROM local_wallet_snapshots
                     WHERE profile_id = ? AND linked_account_id IS NULL AND deleted_at IS NULL
-                    ORDER BY record_date DESC, occurred_at DESC, created_at DESC, id
+                    ORDER BY record_date DESC, record_time DESC, created_at DESC, id
                     """,
                 arguments: [profileID.uuidString]
             ).map(Self.snapshot(from:))
+        }
+    }
+
+    func history(profileID: UUID) throws -> [LocalWalletSnapshot] {
+        try database.writer.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM local_wallet_snapshots
+                    WHERE profile_id = ?
+                    ORDER BY record_date DESC, record_time DESC, created_at DESC, id
+                    """,
+                arguments: [profileID.uuidString]
+            ).map(Self.snapshot(from:))
+        }
+    }
+
+    func update(_ draft: LocalWalletSnapshotUpdateDraft) throws -> LocalWalletSnapshot {
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, draft.balanceMinor >= 0,
+              (try? JSONSerialization.jsonObject(with: Data(draft.payloadJSON.utf8))) is [String: Any] else {
+            throw LocalDataError.invalidRecord
+        }
+        return try database.writer.write { db in
+            guard let current = try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM local_wallet_snapshots WHERE id = ?",
+                arguments: [draft.id.uuidString]
+            ) else { throw LocalDataError.recordNotFound }
+            let storedProfileID: String = current["profile_id"]
+            guard storedProfileID == draft.profileID.uuidString else { throw LocalDataError.invalidIdentifier }
+            let deletedAt: Date? = current["deleted_at"]
+            guard deletedAt == nil else { throw LocalDataError.recordNotFound }
+            let actualVersion: Int64 = current["local_version"]
+            guard actualVersion == draft.expectedVersion else {
+                throw LocalDataError.versionConflict(expected: draft.expectedVersion, actual: actualVersion)
+            }
+            try db.execute(sql: """
+                UPDATE local_wallet_snapshots
+                SET title = ?, summary = ?, payload_json = ?, snapshot_balance_minor = ?,
+                    local_version = local_version + 1, updated_at = ?
+                WHERE id = ? AND profile_id = ? AND local_version = ? AND deleted_at IS NULL
+                """, arguments: [
+                    title, draft.summary, draft.payloadJSON, draft.balanceMinor, draft.updatedAt,
+                    draft.id.uuidString, draft.profileID.uuidString, draft.expectedVersion
+                ])
+            guard db.changesCount == 1,
+                  let row = try Row.fetchOne(db, sql: "SELECT * FROM local_wallet_snapshots WHERE id = ?", arguments: [draft.id.uuidString]) else {
+                throw LocalDataError.versionConflict(expected: draft.expectedVersion, actual: actualVersion)
+            }
+            return try Self.snapshot(from: row)
+        }
+    }
+
+    func delete(id: UUID, profileID: UUID, expectedVersion: Int64, deletedAt: Date) throws -> LocalWalletSnapshot {
+        try database.writer.write { db in
+            guard let current = try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM local_wallet_snapshots WHERE id = ?",
+                arguments: [id.uuidString]
+            ) else { throw LocalDataError.recordNotFound }
+            let storedProfileID: String = current["profile_id"]
+            guard storedProfileID == profileID.uuidString else { throw LocalDataError.invalidIdentifier }
+            let alreadyDeleted: Date? = current["deleted_at"]
+            guard alreadyDeleted == nil else { throw LocalDataError.recordNotFound }
+            let actualVersion: Int64 = current["local_version"]
+            guard actualVersion == expectedVersion else {
+                throw LocalDataError.versionConflict(expected: expectedVersion, actual: actualVersion)
+            }
+            try db.execute(sql: """
+                UPDATE local_wallet_snapshots
+                SET deleted_at = ?, updated_at = ?, local_version = local_version + 1
+                WHERE id = ? AND profile_id = ? AND local_version = ? AND deleted_at IS NULL
+                """, arguments: [deletedAt, deletedAt, id.uuidString, profileID.uuidString, expectedVersion])
+            guard db.changesCount == 1,
+                  let row = try Row.fetchOne(db, sql: "SELECT * FROM local_wallet_snapshots WHERE id = ?", arguments: [id.uuidString]) else {
+                throw LocalDataError.versionConflict(expected: expectedVersion, actual: actualVersion)
+            }
+            return try Self.snapshot(from: row)
         }
     }
 
@@ -167,6 +263,9 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
             let storedSnapshot = try Self.snapshot(from: row)
             let deletedAt: Date? = row["deleted_at"]
             guard deletedAt == nil else { throw LocalDataError.recordNotFound }
+            guard !Self.isFutureEvidence(storedSnapshot, now: Date()) else {
+                throw LocalWalletSnapshotActionError.futureEvidence
+            }
             let linkedID: String? = row["linked_account_id"]
             let linkedAction: String? = row["linked_action"]
             if let linkedID {
@@ -207,6 +306,9 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
             let storedSnapshot = try Self.snapshot(from: snapshotRow)
             let deletedAt: Date? = snapshotRow["deleted_at"]
             guard deletedAt == nil else { throw LocalDataError.recordNotFound }
+            guard !Self.isFutureEvidence(storedSnapshot, now: Date()) else {
+                throw LocalWalletSnapshotActionError.futureEvidence
+            }
             let linkedID: String? = snapshotRow["linked_account_id"]
             let linkedAction: String? = snapshotRow["linked_action"]
             if let linkedID {
@@ -261,6 +363,15 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
         return occurredTime == String(recordTime.prefix(5))
     }
 
+    private static func isFutureEvidence(_ snapshot: LocalWalletSnapshot, now: Date) -> Bool {
+        guard snapshot.recordDate <= NativeLocalDate.dateKey(now) else { return true }
+        guard let occurredAt = snapshot.occurredAt else { return false }
+        let formatter = ISO8601DateFormatter()
+        if let occurredAtDate = formatter.date(from: occurredAt) { return occurredAtDate > now }
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: occurredAt).map { $0 > now } ?? false
+    }
+
     private static func snapshot(from row: Row) throws -> LocalWalletSnapshot {
         guard let id = UUID(uuidString: row["id"]),
               let profileID = UUID(uuidString: row["profile_id"]),
@@ -288,7 +399,8 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
             imageHash: row["image_hash"],
             localVersion: row["local_version"],
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            deletedAt: row["deleted_at"]
         )
     }
 
@@ -356,6 +468,9 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
 protocol LocalWalletSnapshotUseCaseProtocol {
     func create(_ command: LocalWalletSnapshotCommand) async throws -> LocalWalletSnapshot
     func unlinked() async throws -> [LocalWalletSnapshot]
+    func history() async throws -> [LocalWalletSnapshot]
+    func update(_ snapshot: LocalWalletSnapshot, title: String, summary: String, balanceMinor: Int64) async throws -> LocalWalletSnapshot
+    func delete(_ snapshot: LocalWalletSnapshot) async throws -> LocalWalletSnapshot
     func createAccount(from snapshot: LocalWalletSnapshot) async throws -> LocalWalletSnapshotActionResult
     func link(_ snapshot: LocalWalletSnapshot, to accountID: UUID) async throws -> LocalWalletSnapshotActionResult
 }
@@ -414,6 +529,44 @@ final class LocalWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol {
     func unlinked() async throws -> [LocalWalletSnapshot] {
         let profile = try profileStore.activeProfile()
         return try repository.unlinked(profileID: profile.id)
+    }
+
+    func history() async throws -> [LocalWalletSnapshot] {
+        let profile = try profileStore.activeProfile()
+        return try repository.history(profileID: profile.id)
+    }
+
+    func update(
+        _ snapshot: LocalWalletSnapshot,
+        title: String,
+        summary: String,
+        balanceMinor: Int64
+    ) async throws -> LocalWalletSnapshot {
+        let profile = try profileStore.activeProfile()
+        guard profile.id == snapshot.profileID else { throw LocalDataError.invalidIdentifier }
+        var payload = try LocalRecordCodec.decode(snapshot.payloadJSON)
+        payload["snapshot_balance"] = AnyCodable(Double(balanceMinor) / 100)
+        return try repository.update(LocalWalletSnapshotUpdateDraft(
+            id: snapshot.id,
+            profileID: profile.id,
+            expectedVersion: snapshot.localVersion,
+            title: title,
+            summary: summary,
+            payloadJSON: try LocalRecordCodec.encode(payload),
+            balanceMinor: balanceMinor,
+            updatedAt: Date()
+        ))
+    }
+
+    func delete(_ snapshot: LocalWalletSnapshot) async throws -> LocalWalletSnapshot {
+        let profile = try profileStore.activeProfile()
+        guard profile.id == snapshot.profileID else { throw LocalDataError.invalidIdentifier }
+        return try repository.delete(
+            id: snapshot.id,
+            profileID: profile.id,
+            expectedVersion: snapshot.localVersion,
+            deletedAt: Date()
+        )
     }
 
     func createAccount(from snapshot: LocalWalletSnapshot) async throws -> LocalWalletSnapshotActionResult {

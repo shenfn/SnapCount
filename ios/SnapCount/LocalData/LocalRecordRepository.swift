@@ -196,9 +196,12 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         UNION ALL
                         SELECT 1 FROM local_image_intakes
                         WHERE image_path = ? AND status IN ('receiving', 'failed')
+                        UNION ALL
+                        SELECT 1 FROM local_wallet_snapshots
+                        WHERE image_path = ?
                     )
                     """,
-                arguments: [path, path, path]
+                arguments: [path, path, path, path]
             ) ?? 0) != 0
         }
     }

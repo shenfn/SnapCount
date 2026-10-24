@@ -1,5 +1,6 @@
 import Charts
 import SwiftUI
+import UIKit
 
 struct DomainsView: View {
     @EnvironmentObject private var appState: AppState
@@ -43,6 +44,7 @@ struct DomainDetailView: View {
     let domain: NativeDomainDefinition
     @State private var snapshotForAccountPicker: NativeWalletSnapshot?
     @State private var localSnapshotForAccountPicker: LocalWalletSnapshot?
+    @State private var localSnapshotForDetail: LocalWalletSnapshot?
     @State private var accountDraft: NativeAccountDraft?
     @State private var showWalletRecordSheet = false
     private var presentation: NativeDomainPresentation { NativeDomainPresentationAdapter.presentation(for: domain, dashboard: appState.dashboard) }
@@ -82,6 +84,9 @@ struct DomainDetailView: View {
         }
         .sheet(item: $localSnapshotForAccountPicker) { snapshot in
             LocalWalletSnapshotAccountPicker(snapshot: snapshot)
+        }
+        .sheet(item: $localSnapshotForDetail) { snapshot in
+            LocalWalletSnapshotDetailSheet(snapshot: snapshot)
         }
         .sheet(item: $accountDraft) { draft in
             AccountEditSheet(draft: draft)
@@ -438,10 +443,10 @@ struct DomainDetailView: View {
             }
 
             if !appState.localWalletSnapshots.isEmpty {
-                Text("本机快照")
+                Text("待关联本机快照")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(JieziTheme.ink)
-                ForEach(appState.localWalletSnapshots.prefix(5)) { snapshot in
+                ForEach(appState.localWalletSnapshots) { snapshot in
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: snapshot.kind == .liability ? "creditcard" : "wallet.pass")
@@ -455,6 +460,10 @@ struct DomainDetailView: View {
                             Spacer()
                             Text(String(format: "¥%.2f", snapshot.balance))
                                 .font(.subheadline.weight(.semibold).monospacedDigit())
+                        }
+                        if snapshot.recordDate > NativeLocalDate.dateKey(Date()) {
+                            Text("日期在未来；该快照不能作为当前账户余额依据。")
+                                .font(.caption).foregroundStyle(.orange)
                         }
                         HStack(spacing: 10) {
                             Button {
@@ -471,8 +480,56 @@ struct DomainDetailView: View {
                             }
                             .buttonStyle(.bordered)
                         }
-                        .disabled(appState.walletSnapshotActionId != nil)
+                        .disabled(appState.walletSnapshotActionId != nil || snapshot.recordDate > NativeLocalDate.dateKey(Date()))
                     }
+                    .padding(15)
+                    .jieziPrototypePanel()
+                }
+            }
+
+            if !appState.localWalletSnapshotHistory.isEmpty {
+                Text("本机快照来源历史")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(JieziTheme.ink)
+                ForEach(appState.localWalletSnapshotHistory) { snapshot in
+                    Button {
+                        localSnapshotForDetail = snapshot
+                    } label: {
+                        HStack(spacing: 12) {
+                            if snapshot.deletedAt == nil {
+                                Image(systemName: snapshot.kind == .liability ? "creditcard" : "wallet.pass")
+                                    .foregroundStyle(JieziTheme.brand)
+                            } else {
+                                Image(systemName: snapshot.kind == .liability ? "creditcard" : "wallet.pass")
+                                    .foregroundStyle(.secondary)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(snapshot.title).font(.headline).foregroundStyle(JieziTheme.ink)
+                                Text([snapshot.recordDate, snapshot.recordTime].compactMap { $0 }.joined(separator: " "))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                if let linkedAccountID = snapshot.linkedAccountID {
+                                    Text("关联账户：\(appState.localAccounts.first(where: { $0.id == linkedAccountID })?.name ?? "本机账户")")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                } else if snapshot.deletedAt != nil {
+                                    Text("未关联账户").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text(String(format: "¥%.2f", snapshot.balance))
+                                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(JieziTheme.ink)
+                                if snapshot.deletedAt != nil {
+                                    Text("已删除").font(.caption2).foregroundStyle(.secondary)
+                                } else if snapshot.recordDate > NativeLocalDate.dateKey(Date()) {
+                                    Text("未来来源").font(.caption2).foregroundStyle(.orange)
+                                }
+                            }
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                     .padding(15)
                     .jieziPrototypePanel()
                 }
@@ -652,6 +709,161 @@ private struct LocalWalletSnapshotAccountPicker: View {
                         .disabled(appState.walletSnapshotActionId != nil)
                 }
             }
+        }
+    }
+}
+
+private struct LocalWalletSnapshotDetailSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    let snapshot: LocalWalletSnapshot
+    @State private var title: String
+    @State private var summary: String
+    @State private var balanceText: String
+    @State private var imageData: Data?
+    @State private var imageLoadFailed = false
+    @State private var showingDeleteConfirmation = false
+
+    private var isDeleted: Bool { snapshot.deletedAt != nil }
+
+    init(snapshot: LocalWalletSnapshot) {
+        self.snapshot = snapshot
+        _title = State(initialValue: snapshot.title)
+        _summary = State(initialValue: snapshot.summary)
+        _balanceText = State(initialValue: String(
+            format: "%.2f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            snapshot.balance
+        ))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("来源与关系") {
+                    LabeledContent("来源时间", value: [snapshot.recordDate, snapshot.recordTime].compactMap { $0 }.joined(separator: " "))
+                    LabeledContent("快照类型", value: snapshot.kind == .liability ? "负债" : "资产")
+                    if let occurredAt = snapshot.occurredAt {
+                        LabeledContent("原始发生时间", value: NativeLocalDate.dateTimeLabel(occurredAt) ?? occurredAt)
+                    }
+                    if let linkedAccountID = snapshot.linkedAccountID {
+                        LabeledContent("关联账户", value: appState.localAccounts.first(where: { $0.id == linkedAccountID })?.name ?? "本机账户")
+                    } else {
+                        LabeledContent("关联账户", value: "未关联")
+                    }
+                    if let deletedAt = snapshot.deletedAt {
+                        LabeledContent("删除时间", value: NativeLocalDate.dateTimeLabel(ISO8601DateFormatter().string(from: deletedAt)) ?? "已删除")
+                        Text("删除仅将快照移入历史；账户关系、流水和原图仍保留。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if snapshot.recordDate > NativeLocalDate.dateKey(Date()), !isDeleted {
+                        Label("未来日期快照不能作为当前账户证据。", systemImage: "clock")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
+                }
+
+                if snapshot.imagePath != nil {
+                    Section("原图") {
+                        if let imageData, let image = UIImage(data: imageData) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .frame(maxHeight: 280)
+                                .accessibilityLabel("钱包快照原图")
+                        } else if imageLoadFailed {
+                            Label("原图当前无法读取；快照和删除历史仍保留。", systemImage: "exclamationmark.triangle")
+                                .font(.footnote).foregroundStyle(.orange)
+                        } else {
+                            ProgressView("读取本机原图…")
+                        }
+                    }
+                }
+
+                Section("快照内容") {
+                    TextField("标题", text: $title)
+                        .disabled(isDeleted)
+                    TextField("摘要", text: $summary, axis: .vertical)
+                        .lineLimit(2...4)
+                        .disabled(isDeleted)
+                    TextField("快照金额", text: $balanceText)
+                        .keyboardType(.decimalPad)
+                        .disabled(isDeleted)
+                    Text("来源日期和时间作为原始证据保留；这里只编辑标题、摘要和快照金额。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Text("修改快照不会改变已关联账户余额或已有账务流水。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+
+                if !isDeleted {
+                    Section {
+                        Button("删除快照", role: .destructive) {
+                            showingDeleteConfirmation = true
+                        }
+                        .disabled(appState.walletSnapshotActionId != nil)
+                    }
+                }
+                if let message = appState.walletSnapshotMessage, !message.isEmpty {
+                    Section { Text(message).font(.footnote).foregroundStyle(.orange) }
+                }
+            }
+            .navigationTitle(isDeleted ? "快照历史" : "快照来源")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                        .disabled(appState.walletSnapshotActionId != nil)
+                }
+                if !isDeleted {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存") { Task { await save() } }
+                            .disabled(appState.walletSnapshotActionId != nil)
+                    }
+                }
+            }
+            .confirmationDialog(
+                "将这条钱包快照移入删除历史？",
+                isPresented: $showingDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("删除快照", role: .destructive) { Task { await delete() } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("关联账户、账户流水和原图不会被撤销或删除。")
+            }
+            .task {
+                guard snapshot.imagePath != nil else { return }
+                do {
+                    imageData = try appState.localImageDataForWalletSnapshot(id: snapshot.id)
+                } catch {
+                    imageLoadFailed = true
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func save() async {
+        do {
+            let balanceMinor = try LocalExpenseMapper.openingBalanceMinor(balanceText)
+            if await appState.updateLocalWalletSnapshot(
+                snapshot,
+                title: title,
+                summary: summary,
+                balanceMinor: balanceMinor
+            ) {
+                dismiss()
+            }
+        } catch {
+            appState.walletSnapshotMessage = "快照金额无效"
+        }
+    }
+
+    @MainActor
+    private func delete() async {
+        if await appState.deleteLocalWalletSnapshot(snapshot) {
+            dismiss()
         }
     }
 }

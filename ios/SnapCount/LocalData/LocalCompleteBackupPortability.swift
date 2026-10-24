@@ -63,7 +63,7 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 17
+    static let currentSchemaVersion = 18
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
     private static let maximumImageBytes = 128 * 1024 * 1024
     private static let maximumArchiveBytes = 180 * 1024 * 1024
@@ -116,7 +116,7 @@ final class LocalCompleteBackupPortability {
                 ("local_records", "deleted_at IS NULL"),
                 ("local_staging_records", "status IN ('pending_review', 'failed')"),
                 ("local_image_intakes", "status IN ('failed', 'receiving')"),
-                ("local_wallet_snapshots", "deleted_at IS NULL")
+                ("local_wallet_snapshots", "1 = 1")
             ] {
                 for row in try Row.fetchAll(
                     db,
@@ -317,7 +317,7 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard [15, 16, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
+        guard [15, 16, 17, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
         var tables = archive.tables
@@ -377,7 +377,7 @@ final class LocalCompleteBackupPortability {
             guard totalImageBytes <= Self.maximumImageBytes else { throw LocalCompleteBackupError.archiveTooLarge }
             images[image.path] = image.data
         }
-        try Self.validateImageReferences(rows: rows, images: archive.images)
+        try Self.validateImageReferences(rows: rows, images: archive.images, schemaVersion: archive.schemaVersion)
         return DecodedArchive(archive: archive, rows: rows, imageData: images)
     }
 
@@ -457,7 +457,11 @@ final class LocalCompleteBackupPortability {
             }
     }
 
-    private static func validateImageReferences(rows: [String: [[String: Any]]], images: [ImageFile]) throws {
+    private static func validateImageReferences(
+        rows: [String: [[String: Any]]],
+        images: [ImageFile],
+        schemaVersion: Int
+    ) throws {
         let imageHashes = Dictionary(uniqueKeysWithValues: images.map { ($0.path, $0.hash) })
         for (table, statusField, activeStatuses) in [
             ("local_records", "deleted_at", Set(["active"])),
@@ -467,7 +471,9 @@ final class LocalCompleteBackupPortability {
         ] {
             for row in rows[table] ?? [] {
                 let active: Bool
-                if statusField == "deleted_at" {
+                if table == "local_wallet_snapshots" {
+                    active = schemaVersion >= 18 || (row["deleted_at"] is NSNull)
+                } else if statusField == "deleted_at" {
                     active = row[statusField] is NSNull
                 } else {
                     active = activeStatuses.contains(row[statusField] as? String ?? "")

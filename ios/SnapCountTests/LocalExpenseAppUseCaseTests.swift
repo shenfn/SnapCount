@@ -664,6 +664,198 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(try expenseRepository.accountEntries(sourceID: snapshot.id).count, 1)
     }
 
+    func testLF03303FutureWalletSnapshotCannotBeUsedAsCurrentAccountEvidence() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-future-evidence-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: walletRepository)
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: Date()
+        ))
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "未来账单", summary: "未来来源不能建账",
+            payload: ["account_type": AnyCodable("wechat")],
+            recordDate: "2999-01-01", recordTime: nil, occurredAt: nil,
+            balanceMinor: 50_000, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date()
+        ))
+
+        do {
+            _ = try await useCase.createAccount(from: snapshot)
+            XCTFail("未来快照不能作为当前账户余额证据")
+        } catch {
+            XCTAssertEqual(error as? LocalWalletSnapshotActionError, .futureEvidence)
+        }
+        do {
+            _ = try await useCase.link(snapshot, to: account.id)
+            XCTFail("未来快照不能初始化或关联本地账户")
+        } catch {
+            XCTAssertEqual(error as? LocalWalletSnapshotActionError, .futureEvidence)
+        }
+
+        XCTAssertEqual(try expenseRepository.accounts(profileID: profile.id).map(\.id), [account.id])
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: account.id), 0)
+        XCTAssertEqual(try expenseRepository.accountEntries(sourceID: snapshot.id), [])
+        XCTAssertEqual(try walletRepository.unlinked(profileID: profile.id).map(\.id), [snapshot.id])
+    }
+
+    func testLF03303HistoryEditAndDeleteKeepSourceTimeRelationAndAccountLedger() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-history-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: walletRepository)
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "储蓄账户", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: Date()
+        ))
+        let older = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "旧余额", summary: "来源A",
+            payload: ["account_type": AnyCodable("cash"), "snapshot_balance": AnyCodable(500.0)],
+            recordDate: "2026-10-24", recordTime: "08:30", occurredAt: "2026-10-24T00:30:00Z",
+            balanceMinor: 50_000, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+        let newer = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "新余额", summary: "来源B",
+            payload: ["account_type": AnyCodable("cash"), "snapshot_balance": AnyCodable(800.0)],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 80_000, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date()
+        ))
+
+        _ = try await useCase.link(older, to: account.id)
+        let initialHistory = try await useCase.history()
+        XCTAssertEqual(initialHistory.map(\.id), [newer.id, older.id])
+        XCTAssertEqual(initialHistory[1].linkedAccountID, account.id)
+        XCTAssertEqual(initialHistory[1].occurredAt, older.occurredAt)
+
+        let linkedSnapshot = try XCTUnwrap(initialHistory.first(where: { $0.id == older.id }))
+        let edited = try await useCase.update(
+            linkedSnapshot,
+            title: "已核对余额",
+            summary: "人工核对",
+            balanceMinor: 70_000
+        )
+        XCTAssertEqual(edited.localVersion, linkedSnapshot.localVersion + 1)
+        XCTAssertEqual(edited.recordDate, older.recordDate)
+        XCTAssertEqual(edited.recordTime, older.recordTime)
+        XCTAssertEqual(edited.occurredAt, older.occurredAt)
+        XCTAssertEqual(edited.linkedAccountID, account.id)
+        XCTAssertEqual(edited.balanceMinor, 70_000)
+
+        do {
+            _ = try await useCase.update(linkedSnapshot, title: "陈旧编辑", summary: "", balanceMinor: 1)
+            XCTFail("stale snapshot edit must fail its local version check")
+        } catch {
+            XCTAssertEqual(error as? LocalDataError, .versionConflict(expected: linkedSnapshot.localVersion, actual: edited.localVersion))
+        }
+
+        let deleted = try await useCase.delete(edited)
+        XCTAssertNotNil(deleted.deletedAt)
+        XCTAssertEqual(deleted.linkedAccountID, account.id)
+        do {
+            _ = try await useCase.createAccount(from: deleted)
+            XCTFail("deleted snapshot cannot be replayed as current evidence")
+        } catch {
+            XCTAssertEqual(error as? LocalDataError, .recordNotFound)
+        }
+        XCTAssertEqual(try walletRepository.unlinked(profileID: profile.id).map(\.id), [newer.id])
+        let historyAfterDelete = try await useCase.history()
+        XCTAssertEqual(historyAfterDelete.map(\.id), [newer.id, older.id])
+        XCTAssertNotNil(historyAfterDelete.last?.deletedAt)
+        XCTAssertEqual(try expenseRepository.accountEntries(sourceID: older.id).map(\.entryKind), ["snapshot_initialization"])
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: account.id), 50_000)
+    }
+
+    func testLF03303DeletedWalletSnapshotImageRemainsInLocalBackup() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-deleted-image-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let imageStore = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images", isDirectory: true))
+        let repository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: repository, imageStore: imageStore)
+        let image = Data("synthetic deleted wallet snapshot image".utf8)
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "历史快照", summary: "保留原图",
+            payload: ["account_type": AnyCodable("cash")],
+            recordDate: "2026-10-24", recordTime: nil, occurredAt: nil,
+            balanceMinor: 500, currency: "CNY", kind: .asset,
+            imageData: image, createdAt: Date()
+        ))
+        _ = try await useCase.delete(snapshot)
+
+        XCTAssertTrue(imageStore.contains(snapshot.imagePath))
+        XCTAssertEqual(try imageStore.data(at: try XCTUnwrap(snapshot.imagePath)), image)
+
+        let backup = LocalCompleteBackupPortability(database: database, imageStore: imageStore)
+        let data = try backup.exportBackup()
+        let preview = try backup.preview(data)
+        XCTAssertEqual(preview.imageCount, 1)
+        let restoreDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-deleted-restore-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: restoreDirectory) }
+        let restoredDatabase = try LocalDatabase(databaseURL: restoreDirectory.appendingPathComponent("local.sqlite"))
+        let restoredProfile = try LocalProfileStore(database: restoredDatabase).activeProfile()
+        let restoredImages = try LocalImageStore(rootDirectory: restoreDirectory.appendingPathComponent("images", isDirectory: true))
+        _ = try LocalCompleteBackupPortability(database: restoredDatabase, imageStore: restoredImages)
+            .importBackup(data, into: restoredProfile.id)
+        let restoredSnapshot = try XCTUnwrap(try LocalWalletSnapshotRepository(database: restoredDatabase)
+            .history(profileID: restoredProfile.id).first)
+        XCTAssertNotNil(restoredSnapshot.deletedAt)
+        XCTAssertEqual(try restoredImages.data(at: try XCTUnwrap(restoredSnapshot.imagePath)), image)
+    }
+
+    @MainActor
+    func testLF03303AppStateRefreshesSnapshotHistoryAfterEditAndDelete() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-appstate-history-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: walletRepository)
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "原始快照", summary: "",
+            payload: ["account_type": AnyCodable("cash"), "snapshot_balance": AnyCodable(25.0)],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 2_500, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date()
+        ))
+        let state = AppState(
+            localExpenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository),
+            localWalletSnapshotUseCase: useCase,
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+
+        await state.loadWalletSnapshots()
+        XCTAssertEqual(state.localWalletSnapshots.map(\.id), [snapshot.id])
+        XCTAssertEqual(state.localWalletSnapshotHistory.map(\.id), [snapshot.id])
+        let updated = await state.updateLocalWalletSnapshot(snapshot, title: "已编辑", summary: "核对", balanceMinor: 3_000)
+        XCTAssertTrue(updated)
+        XCTAssertEqual(state.localWalletSnapshotHistory.first?.title, "已编辑")
+        XCTAssertEqual(state.localWalletSnapshotHistory.first?.balanceMinor, 3_000)
+        let currentSnapshot = try XCTUnwrap(state.localWalletSnapshotHistory.first)
+        let deleted = await state.deleteLocalWalletSnapshot(currentSnapshot)
+        XCTAssertTrue(deleted)
+        XCTAssertTrue(state.localWalletSnapshots.isEmpty)
+        XCTAssertNotNil(state.localWalletSnapshotHistory.first?.deletedAt)
+        XCTAssertTrue(state.walletSnapshotMessage?.contains("删除历史") == true)
+    }
+
     func testLocalExpenseDetailUsesStableReferenceAndLocalOnlyFields() {
         let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let detail = LocalExpenseReadModel.detail(from: localExpense(profileID: profileID))
@@ -1230,6 +1422,18 @@ private final class LocalWalletSnapshotRepositoryRefreshFailure: LocalWalletSnap
     func unlinked(profileID: UUID) throws -> [LocalWalletSnapshot] {
         if failUnlinkedReads { throw SupabaseRemoteError.requestFailed("wallet_snapshot_refresh_failed") }
         return try base.unlinked(profileID: profileID)
+    }
+
+    func history(profileID: UUID) throws -> [LocalWalletSnapshot] {
+        try base.history(profileID: profileID)
+    }
+
+    func update(_ draft: LocalWalletSnapshotUpdateDraft) throws -> LocalWalletSnapshot {
+        try base.update(draft)
+    }
+
+    func delete(id: UUID, profileID: UUID, expectedVersion: Int64, deletedAt: Date) throws -> LocalWalletSnapshot {
+        try base.delete(id: id, profileID: profileID, expectedVersion: expectedVersion, deletedAt: deletedAt)
     }
 
     func createAccountFromSnapshot(

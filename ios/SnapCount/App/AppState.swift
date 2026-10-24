@@ -96,6 +96,7 @@ final class AppState: ObservableObject {
     @Published var isBindingUnboundRecords = false
     @Published var walletSnapshots: [NativeWalletSnapshot] = []
     @Published var localWalletSnapshots: [LocalWalletSnapshot] = []
+    @Published var localWalletSnapshotHistory: [LocalWalletSnapshot] = []
     @Published var isLoadingWalletSnapshots = false
     @Published var walletSnapshotActionId: String?
     @Published var walletSnapshotMessage: String?
@@ -1198,6 +1199,15 @@ final class AppState: ObservableObject {
               let localImageStore,
               let record = try await localRecordUseCase.record(id: recordID),
               let imagePath = record.imagePath else {
+            throw LocalDataError.recordNotFound
+        }
+        return try localImageStore.data(at: imagePath)
+    }
+
+    func localImageDataForWalletSnapshot(id: UUID) throws -> Data {
+        guard let snapshot = localWalletSnapshotHistory.first(where: { $0.id == id }),
+              let imagePath = snapshot.imagePath,
+              let localImageStore else {
             throw LocalDataError.recordNotFound
         }
         return try localImageStore.data(at: imagePath)
@@ -2892,9 +2902,10 @@ final class AppState: ObservableObject {
 
         if let localWalletSnapshotUseCase {
             do {
-                let loaded = try await localWalletSnapshotUseCase.unlinked()
+                let loaded = try await localWalletSnapshotUseCase.history()
                 guard generation == userStateGeneration else { return }
-                localWalletSnapshots = loaded
+                localWalletSnapshotHistory = loaded
+                localWalletSnapshots = loaded.filter { $0.linkedAccountID == nil && $0.deletedAt == nil }
             } catch {
                 guard generation == userStateGeneration else { return }
                 walletSnapshotMessage = error.localizedDescription
@@ -3062,6 +3073,51 @@ final class AppState: ObservableObject {
         }
     }
 
+    func updateLocalWalletSnapshot(
+        _ snapshot: LocalWalletSnapshot,
+        title: String,
+        summary: String,
+        balanceMinor: Int64
+    ) async -> Bool {
+        await performLocalWalletSnapshotMutation(snapshot, successMessage: "本机快照已更新") {
+            try await $0.update(snapshot, title: title, summary: summary, balanceMinor: balanceMinor)
+        }
+    }
+
+    func deleteLocalWalletSnapshot(_ snapshot: LocalWalletSnapshot) async -> Bool {
+        await performLocalWalletSnapshotMutation(snapshot, successMessage: "本机快照已移入删除历史") {
+            try await $0.delete(snapshot)
+        }
+    }
+
+    private func performLocalWalletSnapshotMutation(
+        _ snapshot: LocalWalletSnapshot,
+        successMessage: String,
+        mutation: (LocalWalletSnapshotUseCaseProtocol) async throws -> LocalWalletSnapshot
+    ) async -> Bool {
+        guard walletSnapshotActionId == nil,
+              let localWalletSnapshotUseCase else { return false }
+        let actionID = snapshot.id.uuidString
+        walletSnapshotActionId = actionID
+        walletSnapshotMessage = nil
+        defer {
+            if walletSnapshotActionId == actionID { walletSnapshotActionId = nil }
+        }
+        do {
+            _ = try await mutation(localWalletSnapshotUseCase)
+        } catch {
+            walletSnapshotMessage = error.localizedDescription
+            return false
+        }
+        do {
+            try await loadLocalWalletSnapshots()
+            walletSnapshotMessage = successMessage
+        } catch {
+            walletSnapshotMessage = "\(successMessage)，但历史刷新失败：\(error.localizedDescription)"
+        }
+        return true
+    }
+
     private func performLocalWalletSnapshotAction(
         _ snapshot: LocalWalletSnapshot,
         action: (LocalWalletSnapshotUseCaseProtocol) async throws -> LocalWalletSnapshotActionResult
@@ -3109,7 +3165,9 @@ final class AppState: ObservableObject {
 
     private func loadLocalWalletSnapshots() async throws {
         guard let localWalletSnapshotUseCase else { return }
-        localWalletSnapshots = try await localWalletSnapshotUseCase.unlinked()
+        let history = try await localWalletSnapshotUseCase.history()
+        localWalletSnapshotHistory = history
+        localWalletSnapshots = history.filter { $0.linkedAccountID == nil && $0.deletedAt == nil }
     }
 
     private func performWalletSnapshotAction(
@@ -5385,6 +5443,7 @@ final class AppState: ObservableObject {
         unboundBindingMessage = nil
         walletSnapshots = []
         localWalletSnapshots = []
+        localWalletSnapshotHistory = []
         isLoadingWalletSnapshots = false
         walletSnapshotActionId = nil
         walletSnapshotMessage = nil
@@ -5711,7 +5770,7 @@ final class AppState: ObservableObject {
             createdAt: Date()
         ))
         do {
-            localWalletSnapshots = try await localWalletSnapshotUseCase.unlinked()
+            try await loadLocalWalletSnapshots()
         } catch {
             manualRecordMessage = "快照已保存在本机，但列表刷新失败：\(error.localizedDescription)"
             return true
