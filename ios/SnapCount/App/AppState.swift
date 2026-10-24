@@ -3050,6 +3050,68 @@ final class AppState: ObservableObject {
         )
     }
 
+    func createLocalAccountFromWalletSnapshot(_ snapshot: LocalWalletSnapshot) async -> Bool {
+        await performLocalWalletSnapshotAction(snapshot) {
+            try await $0.createAccount(from: snapshot)
+        }
+    }
+
+    func linkLocalWalletSnapshot(_ snapshot: LocalWalletSnapshot, to accountID: UUID) async -> Bool {
+        await performLocalWalletSnapshotAction(snapshot) {
+            try await $0.link(snapshot, to: accountID)
+        }
+    }
+
+    private func performLocalWalletSnapshotAction(
+        _ snapshot: LocalWalletSnapshot,
+        action: (LocalWalletSnapshotUseCaseProtocol) async throws -> LocalWalletSnapshotActionResult
+    ) async -> Bool {
+        guard walletSnapshotActionId == nil,
+              let localWalletSnapshotUseCase else { return false }
+        let actionID = snapshot.id.uuidString
+        walletSnapshotActionId = actionID
+        walletSnapshotMessage = nil
+        defer {
+            if walletSnapshotActionId == actionID { walletSnapshotActionId = nil }
+        }
+        do {
+            let result = try await action(localWalletSnapshotUseCase)
+            let outcomeText: String
+            switch result.kind {
+            case .created: outcomeText = "已从本机快照创建账户"
+            case .linked: outcomeText = "本机快照已关联账户"
+            case .replayed: outcomeText = "本机快照关联已存在"
+            }
+            let confirmationText = snapshot.kind == .liability
+                ? "；没有生成账期或还款流水，需单独确认账单"
+                : ""
+            var refreshErrors: [String] = []
+            do {
+                try await loadLocalWalletSnapshots()
+            } catch {
+                refreshErrors.append("列表刷新失败：\(error.localizedDescription)")
+            }
+            if mayReadRemoteBusinessData {
+                _ = await prepareLocalWorkspace()
+            } else {
+                await loadLocalAccounts()
+            }
+            if let localAccountMessage, !localAccountMessage.isEmpty {
+                refreshErrors.append("账户刷新失败：\(localAccountMessage)")
+            }
+            walletSnapshotMessage = ([outcomeText + confirmationText] + refreshErrors).joined(separator: "；")
+            return true
+        } catch {
+            walletSnapshotMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func loadLocalWalletSnapshots() async throws {
+        guard let localWalletSnapshotUseCase else { return }
+        localWalletSnapshots = try await localWalletSnapshotUseCase.unlinked()
+    }
+
     private func performWalletSnapshotAction(
         _ command: WalletSnapshotActionCommand,
         snapshot: NativeWalletSnapshot,

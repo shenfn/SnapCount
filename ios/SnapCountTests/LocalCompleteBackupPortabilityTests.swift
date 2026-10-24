@@ -267,6 +267,46 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_wallet_snapshots"), 0)
     }
 
+    func testLF02111Version16BackupImportsWalletRowsWithoutLinkedActionColumn() async throws {
+        let source = try makeEmptyFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let sourceProfile = try source.profileStore.activeProfile()
+        let wallets = LocalWalletSnapshotRepository(database: source.database)
+        _ = try await LocalWalletSnapshotUseCase(
+            profileStore: source.profileStore,
+            repository: wallets
+        ).create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "微信零钱", summary: "余额快照",
+            payload: ["account_type": AnyCodable("wechat"), "snapshot_balance": AnyCodable(12.34)],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 1_234, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date()
+        ))
+        var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: source.portability.exportBackup()) as? [String: Any])
+        var tables = try XCTUnwrap(archive["tables"] as? [String: String])
+        var walletRows = try Self.tableRows("local_wallet_snapshots", in: tables)
+        XCTAssertEqual(walletRows.count, 1)
+        walletRows[0].removeValue(forKey: "linked_action")
+        tables["local_wallet_snapshots"] = try Self.encodeRows(walletRows)
+        archive["tables"] = tables
+        archive["schemaVersion"] = 16
+        let version16 = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
+
+        let preview = try target.portability.preview(version16)
+        XCTAssertEqual(preview.schemaVersion, 16)
+        XCTAssertEqual(preview.tableCounts["local_wallet_snapshots"], 1)
+        let targetProfile = try target.profileStore.activeProfile()
+        let imported = try target.portability.importBackup(version16, into: targetProfile.id)
+
+        XCTAssertEqual(imported.insertedRows, preview.totalRows)
+        let restored = try XCTUnwrap(LocalWalletSnapshotRepository(database: target.database)
+            .unlinked(profileID: targetProfile.id).first)
+        XCTAssertNil(restored.linkedAction)
+        XCTAssertEqual(restored.balanceMinor, 1_234)
+        XCTAssertNotEqual(targetProfile.id, sourceProfile.id)
+    }
+
     private func count(_ database: LocalDatabase, _ sql: String) throws -> Int {
         try database.writer.read { db in
             try Int.fetchOne(db, sql: sql) ?? 0

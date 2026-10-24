@@ -78,66 +78,70 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
     }
 
     func createAccount(_ draft: LocalAccountDraft) throws -> LocalAccount {
+        try database.writer.write { db in
+            try Self.insertAccount(draft, database: db)
+        }
+    }
+
+    static func insertAccount(_ draft: LocalAccountDraft, database db: Database) throws -> LocalAccount {
         guard draft.openingBalanceMinor >= 0 else { throw LocalDataError.invalidAmount }
         let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 30 else { throw LocalDataError.invalidRecord }
-        try database.writer.write { db in
-            try Self.validateAccountConfiguration(
-                kind: draft.kind, last4: draft.last4, billDay: draft.billDay,
-                paymentDueDay: draft.paymentDueDay, autoDebitAccountID: draft.autoDebitAccountID,
-                autoConfirmRepayment: draft.autoConfirmRepayment, gracePeriodDays: draft.gracePeriodDays,
-                isDefaultExpense: draft.isDefaultExpense, isDefaultIncome: draft.isDefaultIncome,
-                isArchived: draft.isArchived, profileID: draft.profileID, accountID: draft.id, database: db
-            )
-            if draft.isDefaultExpense {
-                try db.execute(sql: "UPDATE local_accounts SET is_default_expense = 0 WHERE profile_id = ?", arguments: [draft.profileID.uuidString])
-            }
-            if draft.isDefaultIncome {
-                try db.execute(sql: "UPDATE local_accounts SET is_default_income = 0 WHERE profile_id = ?", arguments: [draft.profileID.uuidString])
-            }
-            try db.execute(
-                sql: """
-                    INSERT INTO local_accounts (
-                        id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin,
-                        institution, last4, bill_day, payment_due_day, auto_debit_account_id,
-                        auto_confirm_repayment, grace_period_days, last_reconciled_at, is_default_expense, is_default_income,
-                        is_archived, sort_order
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    draft.id.uuidString,
-                    draft.profileID.uuidString,
-                    name,
-                    draft.kind,
-                    draft.currency,
-                    draft.openingBalanceMinor,
-                    draft.createdAt,
-                    draft.institution,
-                    draft.last4,
-                    draft.billDay,
-                    draft.paymentDueDay,
-                    draft.autoDebitAccountID?.uuidString,
-                    draft.autoConfirmRepayment,
-                    draft.gracePeriodDays,
-                    draft.lastReconciledAt,
-                    draft.isDefaultExpense,
-                    draft.isDefaultIncome,
-                    draft.isArchived,
-                    draft.sortOrder
-                ]
-            )
-            try Self.insertOutbox(
-                operationID: UUID(),
-                profileID: draft.profileID,
-                aggregateKind: "account",
-                aggregateID: draft.id,
-                operationKind: "upsert",
-                aggregateVersion: 1,
-                payload: try Self.outboxPayload(account: draft),
-                createdAt: draft.createdAt,
-                database: db
-            )
+        try Self.validateAccountConfiguration(
+            kind: draft.kind, last4: draft.last4, billDay: draft.billDay,
+            paymentDueDay: draft.paymentDueDay, autoDebitAccountID: draft.autoDebitAccountID,
+            autoConfirmRepayment: draft.autoConfirmRepayment, gracePeriodDays: draft.gracePeriodDays,
+            isDefaultExpense: draft.isDefaultExpense, isDefaultIncome: draft.isDefaultIncome,
+            isArchived: draft.isArchived, profileID: draft.profileID, accountID: draft.id, database: db
+        )
+        if draft.isDefaultExpense {
+            try db.execute(sql: "UPDATE local_accounts SET is_default_expense = 0 WHERE profile_id = ?", arguments: [draft.profileID.uuidString])
         }
+        if draft.isDefaultIncome {
+            try db.execute(sql: "UPDATE local_accounts SET is_default_income = 0 WHERE profile_id = ?", arguments: [draft.profileID.uuidString])
+        }
+        try db.execute(
+            sql: """
+                INSERT INTO local_accounts (
+                    id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin,
+                    institution, last4, bill_day, payment_due_day, auto_debit_account_id,
+                    auto_confirm_repayment, grace_period_days, last_reconciled_at, is_default_expense, is_default_income,
+                    is_archived, sort_order
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                draft.id.uuidString,
+                draft.profileID.uuidString,
+                name,
+                draft.kind,
+                draft.currency,
+                draft.openingBalanceMinor,
+                draft.createdAt,
+                draft.institution,
+                draft.last4,
+                draft.billDay,
+                draft.paymentDueDay,
+                draft.autoDebitAccountID?.uuidString,
+                draft.autoConfirmRepayment,
+                draft.gracePeriodDays,
+                draft.lastReconciledAt,
+                draft.isDefaultExpense,
+                draft.isDefaultIncome,
+                draft.isArchived,
+                draft.sortOrder
+            ]
+        )
+        try Self.insertOutbox(
+            operationID: UUID(),
+            profileID: draft.profileID,
+            aggregateKind: "account",
+            aggregateID: draft.id,
+            operationKind: "upsert",
+            aggregateVersion: 1,
+            payload: try Self.outboxPayload(account: draft),
+            createdAt: draft.createdAt,
+            database: db
+        )
         return LocalAccount(
             id: draft.id,
             profileID: draft.profileID,

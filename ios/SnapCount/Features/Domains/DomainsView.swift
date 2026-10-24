@@ -42,6 +42,7 @@ struct DomainDetailView: View {
     @EnvironmentObject private var appState: AppState
     let domain: NativeDomainDefinition
     @State private var snapshotForAccountPicker: NativeWalletSnapshot?
+    @State private var localSnapshotForAccountPicker: LocalWalletSnapshot?
     @State private var accountDraft: NativeAccountDraft?
     @State private var showWalletRecordSheet = false
     private var presentation: NativeDomainPresentation { NativeDomainPresentationAdapter.presentation(for: domain, dashboard: appState.dashboard) }
@@ -79,6 +80,9 @@ struct DomainDetailView: View {
         .sheet(item: $snapshotForAccountPicker) { snapshot in
             WalletSnapshotAccountPicker(snapshot: snapshot)
         }
+        .sheet(item: $localSnapshotForAccountPicker) { snapshot in
+            LocalWalletSnapshotAccountPicker(snapshot: snapshot)
+        }
         .sheet(item: $accountDraft) { draft in
             AccountEditSheet(draft: draft)
         }
@@ -91,6 +95,7 @@ struct DomainDetailView: View {
                 async let snapshots: Void = appState.loadWalletSnapshots()
                 async let unbound: Void = appState.loadUnboundRecords(monthKey: Self.currentMonthKey)
                 _ = await (accounts, snapshots, unbound)
+                _ = await appState.prepareLocalWorkspace()
             }
         }
     }
@@ -437,17 +442,61 @@ struct DomainDetailView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(JieziTheme.ink)
                 ForEach(appState.localWalletSnapshots.prefix(5)) { snapshot in
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: snapshot.kind == .liability ? "creditcard" : "wallet.pass")
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: snapshot.kind == .liability ? "creditcard" : "wallet.pass")
+                                .foregroundStyle(JieziTheme.brand)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(snapshot.title).font(.headline)
+                                Text([snapshot.recordDate, snapshot.recordTime].compactMap { $0 }.joined(separator: " "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(String(format: "¥%.2f", snapshot.balance))
+                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                        }
+                        HStack(spacing: 10) {
+                            Button {
+                                Task { _ = await appState.createLocalAccountFromWalletSnapshot(snapshot) }
+                            } label: {
+                                Label("创建本地账户", systemImage: "plus.circle")
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button {
+                                localSnapshotForAccountPicker = snapshot
+                            } label: {
+                                Label("关联本地账户", systemImage: "link")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .disabled(appState.walletSnapshotActionId != nil)
+                    }
+                    .padding(15)
+                    .jieziPrototypePanel()
+                }
+            }
+
+            let remoteAccountIDs = Set(appState.accounts.map(\.id))
+            let localOnlyAccounts = appState.localAccounts.filter { !remoteAccountIDs.contains($0.id.uuidString) }
+            if !localOnlyAccounts.isEmpty {
+                Text("本机账户")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(JieziTheme.ink)
+                ForEach(localOnlyAccounts) { account in
+                    HStack(spacing: 12) {
+                        Image(systemName: ["credit_card", "credit_line"].contains(account.kind) ? "creditcard" : "wallet.pass")
                             .foregroundStyle(JieziTheme.brand)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(snapshot.title).font(.headline)
-                            Text([snapshot.recordDate, snapshot.recordTime].compactMap { $0 }.joined(separator: " "))
+                            Text(account.name).font(.headline)
+                            Text(NativeAccountType.normalized(account.kind).title)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(String(format: "¥%.2f", snapshot.balance))
+                        let balance = appState.localAccountBalances[account.id] ?? account.openingBalanceMinor
+                        Text(String(format: "¥%.2f", Double(balance) / 100))
                             .font(.subheadline.weight(.semibold).monospacedDigit())
                     }
                     .padding(12)
@@ -539,6 +588,68 @@ private struct WalletSnapshotAccountPicker: View {
                     ProgressView("正在关联…")
                         .padding(20)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+    }
+}
+
+private struct LocalWalletSnapshotAccountPicker: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    let snapshot: LocalWalletSnapshot
+
+    private var accounts: [LocalAccount] {
+        appState.localAccounts.filter { account in
+            guard !account.isArchived else { return false }
+            switch snapshot.kind {
+            case .asset: return !["credit_card", "credit_line"].contains(account.kind)
+            case .liability: return ["credit_card", "credit_line"].contains(account.kind)
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if accounts.isEmpty {
+                    ContentUnavailableView(
+                        "暂无可关联的本地账户",
+                        systemImage: "wallet.pass",
+                        description: Text(snapshot.kind == .liability ? "先创建信用卡或消费额度账户。" : "先创建资产账户。")
+                    )
+                } else {
+                    ForEach(accounts) { account in
+                        Button {
+                            Task {
+                                if await appState.linkLocalWalletSnapshot(snapshot, to: account.id) {
+                                    dismiss()
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(account.name).font(.headline)
+                                    Text(account.institution.isEmpty ? account.kind : "\(account.kind) · \(account.institution)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                let balance = appState.localAccountBalances[account.id] ?? account.openingBalanceMinor
+                                Text(String(format: "¥%.2f", Double(balance) / 100))
+                                    .font(.subheadline.monospacedDigit())
+                            }
+                        }
+                        .disabled(appState.walletSnapshotActionId != nil)
+                    }
+                }
+            }
+            .navigationTitle("关联本地账户")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                        .disabled(appState.walletSnapshotActionId != nil)
                 }
             }
         }

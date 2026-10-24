@@ -466,6 +466,12 @@ final class LocalDatabase {
                     ON local_wallet_snapshots(profile_id, record_date DESC, occurred_at DESC, created_at DESC);
                 """)
         }
+        migrator.registerMigration("local-v17-wallet-snapshot-link-action") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_wallet_snapshots
+                ADD COLUMN linked_action TEXT CHECK (linked_action IN ('create', 'link'));
+                """)
+        }
         return migrator
     }
 }

@@ -63,7 +63,7 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 16
+    static let currentSchemaVersion = 17
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
     private static let maximumImageBytes = 128 * 1024 * 1024
     private static let maximumArchiveBytes = 180 * 1024 * 1024
@@ -317,13 +317,13 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard archive.schemaVersion == Self.currentSchemaVersion || archive.schemaVersion == 15 else {
+        guard [15, 16, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
         var tables = archive.tables
         let archiveTables = Set(tables.keys)
         let legacyTables = Set(Self.tableNames.dropLast())
-        let hasCurrentTables = archive.schemaVersion == Self.currentSchemaVersion
+        let hasCurrentTables = archive.schemaVersion >= 16
             && archiveTables == Set(Self.tableNames)
         let hasLegacyTables = archive.schemaVersion == 15 && archiveTables == legacyTables
         guard UUID(uuidString: archive.profileID) != nil,
@@ -352,6 +352,16 @@ final class LocalCompleteBackupPortability {
                 guard ids.insert(id).inserted else { throw LocalCompleteBackupError.duplicateID(id) }
             }
             rows[table] = tableRows
+        }
+        if archive.schemaVersion == 16 {
+            if var wallets = rows["local_wallet_snapshots"] {
+                for index in wallets.indices {
+                    if wallets[index]["linked_action"] == nil {
+                        wallets[index]["linked_action"] = NSNull()
+                    }
+                }
+                rows["local_wallet_snapshots"] = wallets
+            }
         }
         try Self.validateFinancialRows(rows)
 
@@ -423,6 +433,17 @@ final class LocalCompleteBackupPortability {
                 if optional && (row[field] == nil || row[field] is NSNull) { continue }
                 guard let value = row[field] as? String, validIDs.contains(value) else {
                     throw LocalCompleteBackupError.invalidRows(table)
+                }
+            }
+        }
+        for row in rows["local_wallet_snapshots"] ?? [] {
+            let linkedAccountID = row["linked_account_id"] as? String
+            let linkedAction = row["linked_action"] as? String
+            if linkedAccountID == nil {
+                guard linkedAction == nil else { throw LocalCompleteBackupError.invalidRows("local_wallet_snapshots") }
+            } else {
+                guard let linkedAction, ["create", "link"].contains(linkedAction) else {
+                    throw LocalCompleteBackupError.invalidRows("local_wallet_snapshots")
                 }
             }
         }

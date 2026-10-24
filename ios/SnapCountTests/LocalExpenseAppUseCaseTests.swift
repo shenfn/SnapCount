@@ -450,6 +450,218 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(try LocalExpenseRepository(database: restoredDatabase).accountBalanceMinor(accountID: account.id), 10_000)
     }
 
+    func testLF03302OfflineCreateFromSnapshotIsAtomicAndIdempotent() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-create-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: walletRepository)
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "微信零钱", summary: "余额快照",
+            payload: ["account_type": AnyCodable("wechat"), "snapshot_balance": AnyCodable(500.0)],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 50_000, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date()
+        ))
+        let state = AppState(
+            localExpenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository),
+            localWalletSnapshotUseCase: useCase,
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+
+        let saved = await state.createLocalAccountFromWalletSnapshot(snapshot)
+        let replay = try await useCase.createAccount(from: snapshot)
+        let accounts = try expenseRepository.accounts(profileID: profile.id)
+        let entries = try expenseRepository.accountEntries(sourceID: snapshot.id)
+
+        XCTAssertTrue(saved)
+        XCTAssertEqual(replay.kind, .replayed)
+        XCTAssertEqual(accounts.count, 1)
+        XCTAssertEqual(accounts[0].kind, "wallet_balance")
+        XCTAssertEqual(accounts[0].openingBalanceMinor, 50_000)
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: accounts[0].id), 50_000)
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].entryKind, "snapshot_initialization")
+        XCTAssertEqual(walletRepository.unlinked(profileID: profile.id), [])
+        XCTAssertEqual(try expenseRepository.pendingOutboxOperations().filter { $0.aggregateKind == "account" }.count, 1)
+    }
+
+    func testLF03302LinkOnlyAdoptsSnapshotIntoEmptyCompatibleAccountOnce() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-link-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: walletRepository)
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "备用钱包", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: Date()
+        ))
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "微信零钱", summary: "余额快照",
+            payload: ["account_type": AnyCodable("wechat"), "snapshot_balance": AnyCodable(500.0)],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 50_000, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date()
+        ))
+
+        let linked = try await useCase.link(snapshot, to: account.id)
+        let replay = try await useCase.link(snapshot, to: account.id)
+
+        XCTAssertEqual(linked.kind, .linked)
+        XCTAssertEqual(replay.kind, .replayed)
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: account.id), 50_000)
+        XCTAssertEqual(try expenseRepository.accountEntries(sourceID: snapshot.id).count, 1)
+        do {
+            _ = try await useCase.createAccount(from: snapshot)
+            XCTFail("create after explicit link must conflict")
+        } catch {
+            XCTAssertEqual(error as? LocalWalletSnapshotActionError, .conflict)
+        }
+        XCTAssertEqual(try expenseRepository.accounts(profileID: profile.id).count, 1)
+    }
+
+    func testLF03302LinkToNonemptyAccountDoesNotChangeDerivedBalance() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-nonempty-link-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: walletRepository)
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: Date()
+        ))
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "微信零钱", summary: "余额快照",
+            payload: ["account_type": AnyCodable("wechat"), "snapshot_balance": AnyCodable(500.0)],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 50_000, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date()
+        ))
+
+        _ = try await useCase.link(snapshot, to: account.id)
+
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: account.id), 10_000)
+        XCTAssertEqual(try expenseRepository.accountEntries(sourceID: snapshot.id), [])
+        XCTAssertEqual(try expenseRepository.accounts(profileID: profile.id).count, 1)
+    }
+
+    func testLF03302FailedAccountCreationLeavesSnapshotUnlinkedAndWritesNothing() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-create-rollback-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: walletRepository)
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: String(repeating: "长", count: 31), summary: "余额快照",
+            payload: ["account_type": AnyCodable("wechat"), "snapshot_balance": AnyCodable(500.0)],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 50_000, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date()
+        ))
+
+        do {
+            _ = try await useCase.createAccount(from: snapshot)
+            XCTFail("invalid account name must abort the action")
+        } catch {
+            XCTAssertEqual(error as? LocalDataError, .invalidRecord)
+        }
+
+        XCTAssertEqual(try expenseRepository.accounts(profileID: profile.id), [])
+        XCTAssertEqual(try expenseRepository.accountEntries(sourceID: snapshot.id), [])
+        XCTAssertEqual(try expenseRepository.pendingOutboxOperations(), [])
+        XCTAssertEqual(try walletRepository.unlinked(profileID: profile.id).map(\.id), [snapshot.id])
+    }
+
+    func testLF03302LiabilitySnapshotCreatesDebtAccountWithoutGuessingRepaymentCycle() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-liability-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: walletRepository)
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "信用卡待还", summary: "账单快照",
+            payload: [
+                "account_type": AnyCodable("credit_card"),
+                "snapshot_balance": AnyCodable(125.0),
+                "bill_day": AnyCodable(12),
+                "due_date": AnyCodable("2026-11-05")
+            ],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 12_500, currency: "CNY", kind: .liability,
+            imageData: nil, createdAt: Date()
+        ))
+
+        let result = try await useCase.createAccount(from: snapshot)
+        let cycles = try expenseRepository.repaymentCycles(accountID: result.account.id)
+        let payments = try expenseRepository.liabilityPayments(accountID: result.account.id)
+
+        XCTAssertEqual(result.kind, .created)
+        XCTAssertEqual(result.account.kind, "credit_card")
+        XCTAssertEqual(result.account.openingBalanceMinor, 12_500)
+        XCTAssertEqual(result.account.billDay, 12)
+        XCTAssertEqual(result.account.paymentDueDay, 5)
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: result.account.id), 12_500)
+        XCTAssertTrue(cycles.isEmpty, "未识别显式账期身份，不猜测生成账期")
+        XCTAssertTrue(payments.isEmpty, "待还快照不能伪造还款流水")
+        XCTAssertEqual(try expenseRepository.accountEntries(sourceID: snapshot.id).map(\.entryKind), ["snapshot_initialization"])
+        XCTAssertEqual(try expenseRepository.accounts(profileID: profile.id).count, 1)
+    }
+
+    func testLF03302AcceptedLocalActionIsNotRepeatedWhenListRefreshFails() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-refresh-failure-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let baseWalletRepository = LocalWalletSnapshotRepository(database: database)
+        let flakyWalletRepository = LocalWalletSnapshotRepositoryRefreshFailure(base: baseWalletRepository)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: flakyWalletRepository)
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "微信零钱", summary: "余额快照",
+            payload: ["account_type": AnyCodable("wechat"), "snapshot_balance": AnyCodable(500.0)],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 50_000, currency: "CNY", kind: .asset,
+            imageData: nil, createdAt: Date()
+        ))
+        flakyWalletRepository.failUnlinkedReads = true
+        let state = AppState(
+            localExpenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository),
+            localWalletSnapshotUseCase: useCase,
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+
+        let accepted = await state.createLocalAccountFromWalletSnapshot(snapshot)
+        XCTAssertTrue(accepted)
+        XCTAssertTrue(state.walletSnapshotMessage?.contains("列表刷新失败") == true)
+        let retry = try await useCase.createAccount(from: snapshot)
+
+        XCTAssertEqual(retry.kind, .replayed)
+        XCTAssertEqual(try expenseRepository.accounts(profileID: profile.id).count, 1)
+        XCTAssertEqual(try expenseRepository.accountEntries(sourceID: snapshot.id).count, 1)
+    }
+
     func testLocalExpenseDetailUsesStableReferenceAndLocalOnlyFields() {
         let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let detail = LocalExpenseReadModel.detail(from: localExpense(profileID: profileID))
@@ -1001,6 +1213,33 @@ private final class LocalShellBindingRepositoryStub: LocalBindingRepository {
     }
     func confirmBinding(profileID: UUID, cloudUserID: String) throws -> LocalSyncState { try syncState(profileID: profileID) }
     func disableSync(profileID: UUID) throws -> LocalSyncState { try syncState(profileID: profileID) }
+}
+
+private final class LocalWalletSnapshotRepositoryRefreshFailure: LocalWalletSnapshotRepositoryProtocol {
+    private let base: LocalWalletSnapshotRepositoryProtocol
+    var failUnlinkedReads = false
+
+    init(base: LocalWalletSnapshotRepositoryProtocol) { self.base = base }
+
+    func create(_ draft: LocalWalletSnapshotDraft) throws -> LocalWalletSnapshot {
+        try base.create(draft)
+    }
+
+    func unlinked(profileID: UUID) throws -> [LocalWalletSnapshot] {
+        if failUnlinkedReads { throw SupabaseRemoteError.requestFailed("wallet_snapshot_refresh_failed") }
+        return try base.unlinked(profileID: profileID)
+    }
+
+    func createAccountFromSnapshot(
+        _ snapshot: LocalWalletSnapshot,
+        account: LocalAccountDraft
+    ) throws -> LocalWalletSnapshotActionResult {
+        try base.createAccountFromSnapshot(snapshot, account: account)
+    }
+
+    func link(_ snapshot: LocalWalletSnapshot, to accountID: UUID) throws -> LocalWalletSnapshotActionResult {
+        try base.link(snapshot, to: accountID)
+    }
 }
 
 private func temporaryDatabaseURL() -> URL {
