@@ -331,7 +331,7 @@ struct NativeDomainPageContent: View {
                         onOpenEntry: { appState.openDayRecord($0.record) },
                         selectedEntryID: $selectedTimelineEntryID
                     )
-                    Text(selectedEntry.map { "当前选中 · \(clockLabel($0)) · \(selectedEntries.count)笔" } ?? "按住时间轴拖动选择一笔")
+                    Text(selectedEntry.map { "当前选中 · \(clockLabel($0.minute)) · \(selectedEntries.count)笔" } ?? "按住时间轴拖动选择一笔")
                         .font(JieziFont.caption2).foregroundStyle(scene.muted)
                 }
                 ForEach(selectedEntries) { entry in
@@ -420,7 +420,7 @@ struct NativeDomainPageContent: View {
     }
 
     private var foodEnergyReference: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 14) {
             Text("能量参考尺").font(JieziType.cardTitle)
             Button { showsEnergyReference = true } label: {
                 Label("2,000 千卡 · 通用营养参考", systemImage: "info.circle")
@@ -587,7 +587,7 @@ struct NativeDomainPageContent: View {
         let values = sourceRanges.compactMap(NativeSleepTimelineAxis.value(for:))
         let bounds = NativeSleepTimelineAxis.bounds(for: values.map { $0.startMinute...$0.endMinute })
         let tickValues = stride(from: bounds.lowerBound, through: bounds.upperBound, by: NativeSleepTimelineAxis.tickSpacing).map { $0 }
-        VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 14) {
             Text("入睡与醒来")
                 .font(JieziType.cardTitle)
             if !values.isEmpty {
