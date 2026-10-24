@@ -7,6 +7,9 @@ struct InboxView: View {
     @State private var filter: NativeInboxFilter = .all
     @State private var columnCount = 1
     @State private var stageItemId: String?
+    @State private var manualIntakeData: Data?
+    @State private var manualIntake: LocalImageIntake?
+    @State private var intakeToDiscard: LocalImageIntake?
 
     private var allItems: [NativeInboxItem] {
         NativeInboxPresentation.items(
@@ -79,9 +82,11 @@ struct InboxView: View {
                         )
                     }
 
-                    if allItems.isEmpty {
+                    failedImageIntakesSection
+
+                    if allItems.isEmpty && appState.failedLocalImageIntakes.isEmpty {
                         InboxSettledEmptyView()
-                    } else {
+                    } else if !allItems.isEmpty {
                         scopeControl
                         workspaceHeading
                         filterBar
@@ -144,20 +149,114 @@ struct InboxView: View {
             )
             .environmentObject(appState)
         }
+        .sheet(isPresented: Binding(
+            get: { manualIntakeData != nil },
+            set: { if !$0 { manualIntakeData = nil; manualIntake = nil } }
+        )) {
+            ManualRecordSheet(initialImageData: manualIntakeData) {
+                if let intake = manualIntake {
+                    _ = appState.discardLocalImageIntake(intake)
+                    Task { await appState.refreshFailedLocalImageIntakes() }
+                }
+            }
+                .environmentObject(appState)
+        }
+        .confirmationDialog(
+            "丢弃这张原图？",
+            isPresented: Binding(
+                get: { intakeToDiscard != nil },
+                set: { if !$0 { intakeToDiscard = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("丢弃原图", role: .destructive) {
+                guard let intake = intakeToDiscard else { return }
+                _ = appState.discardLocalImageIntake(intake)
+                intakeToDiscard = nil
+            }
+            Button("取消", role: .cancel) { intakeToDiscard = nil }
+        } message: {
+            Text("丢弃后会删除本机保存的输入图片，此操作不可撤销。")
+        }
         .onChange(of: scope) { _, _ in
             if (filterCounts[filter] ?? 0) == 0 { filter = .all }
         }
         .task { await appState.refreshInboxProjection() }
     }
 
+    @ViewBuilder
+    private var failedImageIntakesSection: some View {
+        if !appState.failedLocalImageIntakes.isEmpty {
+            VStack(alignment: .leading, spacing: JieziSpacing.md) {
+                Text("未完成的图片")
+                    .font(.headline)
+                    .foregroundStyle(JieziTheme.ink)
+                ForEach(appState.failedLocalImageIntakes) { intake in
+                    VStack(alignment: .leading, spacing: JieziSpacing.sm) {
+                        HStack {
+                            Image(systemName: "photo.badge.exclamationmark")
+                                .foregroundStyle(JieziTheme.gold)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(intake.filename).font(.subheadline.weight(.semibold))
+                                Text(intake.failureMessage ?? "识别中断，可重试或手动处理")
+                                    .font(.caption)
+                                    .foregroundStyle(JieziTheme.muted)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        if appState.hasLocalImage(for: intake) {
+                            Text("已重试 \(intake.retryCount)/3 次")
+                                .font(.caption2)
+                                .foregroundStyle(JieziTheme.muted)
+                        } else {
+                            Text("本机原图文件缺失；请重新选择图片，或关闭这条输入。")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                        HStack {
+                            if appState.hasLocalImage(for: intake), intake.retryCount < 3 {
+                                Button("重试识别") {
+                                    Task { _ = await appState.retryLocalImageIntake(intake) }
+                                }
+                                .buttonStyle(.borderedProminent)
+                            } else if appState.hasLocalImage(for: intake) {
+                                Text("已达重试上限")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(JieziTheme.muted)
+                            }
+                            if appState.hasLocalImage(for: intake) {
+                                Button("手动处理") {
+                                    if let data = try? appState.localImageData(for: intake) {
+                                        manualIntake = intake
+                                        manualIntakeData = data
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            Button("丢弃") { intakeToDiscard = intake }
+                                .buttonStyle(.bordered)
+                                .tint(.red)
+                        }
+                    }
+                    .padding(JieziSpacing.lg)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: JieziRadius.card))
+                }
+            }
+            .padding(.horizontal, JieziSpacing.xl2)
+            .padding(.bottom, JieziSpacing.lg)
+        }
+    }
+
     private var pendingSummary: some View {
+        let pendingCount = allItems.count + appState.failedLocalImageIntakes.count
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(allItems.isEmpty ? "暂时没有待确认记录" : "核对这些记录")
+                Text(pendingCount == 0 ? "暂时没有待处理内容" : "核对这些记录")
                     .font(JieziType.prototypeBrand)
                     .foregroundStyle(JieziTheme.ink)
-                if !allItems.isEmpty {
-                    Text("\(allItems.count) 条待处理记录")
+                if pendingCount > 0 {
+                    Text("\(allItems.count) 条候选 · \(appState.failedLocalImageIntakes.count) 张待处理图片")
                         .font(.subheadline)
                         .foregroundStyle(JieziTheme.muted)
                 }

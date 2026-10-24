@@ -139,7 +139,9 @@ struct TodayView: View {
             pendingLocalImageData = nil
         }) {
             if let pendingLocalImageData {
-                ManualRecordSheet(initialImageData: pendingLocalImageData)
+                ManualRecordSheet(initialImageData: pendingLocalImageData) {
+                    _ = appState.discardLocalImageIntake(matching: pendingLocalImageData)
+                }
             } else {
                 ManualRecordSheet()
             }
@@ -653,32 +655,12 @@ struct TodayView: View {
             }
             uploadMessageIsError = false
             await appState.refreshLocalRecognitionProjection()
-        } catch LocalImageRecognitionError.unsupportedDomain(_) where appState.isSignedIn {
-            do {
-                guard let uploadToken = try KeychainStore.shared.string(for: KeychainKeys.uploadToken), !uploadToken.isEmpty else {
-                    throw SnapCountUploadServiceError.requestFailed("登录凭据未同步，请重新登录")
-                }
-                let result = try await SnapCountUploadService().uploadNativeImageResult(
-                    data: data,
-                    uploadToken: uploadToken,
-                    captureKind: captureKind,
-                    filename: filename
-                )
-                uploadMessage = result.notificationText
-                uploadMessageIsError = false
-                await appState.refreshDashboard()
-            } catch {
-                uploadMessage = "上传失败：\(error.localizedDescription)"
-                uploadMessageIsError = true
-            }
         } catch {
-            if !appState.isSignedIn {
-                pendingLocalImageData = data
-                showManualRecordSheet = true
-                return
-            }
-            uploadMessage = "AI 识别失败：\(error.localizedDescription)"
+            pendingLocalImageData = data
+            showManualRecordSheet = true
+            uploadMessage = "识别未完成；原图已保留，可重试或手动记录。"
             uploadMessageIsError = true
+            return
         }
         showUploadResult = true
     }

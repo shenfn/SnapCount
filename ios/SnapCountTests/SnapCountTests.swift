@@ -9,6 +9,7 @@ final class SnapCountTests: XCTestCase {
         let state = AppState(recordRepository: repository, sessionProvider: { _ in Self.expressionTestSession })
         state.isSignedIn = true
         state.currentUserId = Self.expressionTestSession.user.id
+        authorizeRemoteReads(for: state.currentUserId, in: state)
         await state.loadRecordDateWindow(around: "2000-01-05")
         XCTAssertEqual(repository.fetchMonthKeys, ["2000-01", "1999-12"], "先展示所选月，历史基准不能排在前面")
     }
@@ -2833,6 +2834,7 @@ final class SnapCountTests: XCTestCase {
         let state = AppState(recordRepository: repository, sessionProvider: { _ in Self.expressionTestSession })
         state.isSignedIn = true
         state.currentUserId = Self.expressionTestSession.user.id
+        authorizeRemoteReads(for: state.currentUserId, in: state)
         let firstPage = Task { @MainActor in await state.loadRecordMonth("2000-01") }
         await fulfillment(of: [started], timeout: 5)
         guard releaseFetch != nil else { firstPage.cancel(); return }
@@ -2869,6 +2871,7 @@ final class SnapCountTests: XCTestCase {
         )
         state.isSignedIn = true
         state.currentUserId = Self.expressionTestSession.user.id
+        authorizeRemoteReads(for: state.currentUserId, in: state)
         await state.loadRecordDateWindow(around: "2000-01-05")
         XCTAssertEqual(repository.fetchMonthKeys, ["2000-01", "1999-12"])
         XCTAssertEqual(repository.fetchMonthCount, 2)
@@ -4139,6 +4142,23 @@ private func makeRepaymentCycle(accountId: String, amount: Double, dueDate: Stri
         autoDebitAccountId: nil, autoConfirmRepayment: false, source: "screenshot",
         evidenceRecordId: nil, confidence: 0.95, note: "", confirmedAt: nil
     )
+}
+
+private extension SnapCountTests {
+    @MainActor
+    func authorizeRemoteReads(for userID: String, in state: AppState) {
+        state.localSyncState = LocalSyncState(
+            workspaceID: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            binding: .bound(userID),
+            status: .synced,
+            conflictState: .none,
+            syncGeneration: 1,
+            pullCursor: nil,
+            lastSuccessfulSyncAt: Date(),
+            activeAttemptID: nil,
+            pendingMutationCount: 0
+        )
+    }
 }
 
 private func makeInsightDay(

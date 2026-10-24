@@ -33,8 +33,7 @@ final class LocalImageStore {
 
     func save(data: Data, owner: String, bucket: String = "records") throws -> LocalImageReference {
         let hash = Self.sha256(data)
-        let filename = Self.sha256(Data(owner.utf8)) + ".jpg"
-        let relativePath = "\(bucket)/\(filename)"
+        let relativePath = Self.relativePath(owner: owner, bucket: bucket)
         let destination = try validatedURL(for: relativePath)
         try fileManager.createDirectory(
             at: destination.deletingLastPathComponent(),
@@ -42,6 +41,10 @@ final class LocalImageStore {
         )
         try data.write(to: destination, options: .atomic)
         return LocalImageReference(path: relativePath, hash: hash)
+    }
+
+    static func relativePath(owner: String, bucket: String) -> String {
+        "\(bucket)/\(sha256(Data(owner.utf8))).jpg"
     }
 
     func move(_ reference: LocalImageReference, to bucket: String) throws -> LocalImageReference {
@@ -65,6 +68,10 @@ final class LocalImageStore {
 
     func url(for relativePath: String) -> URL {
         (try? validatedURL(for: relativePath)) ?? rootDirectory.appendingPathComponent("invalid")
+    }
+
+    func data(at relativePath: String) throws -> Data {
+        try Data(contentsOf: validatedURL(for: relativePath))
     }
 
     func remove(path: String?) throws {

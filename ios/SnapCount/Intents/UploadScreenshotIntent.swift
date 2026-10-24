@@ -54,14 +54,13 @@ struct UploadScreenshotIntent: AppIntent {
                             route: "inbox"
                         )
                     }
-                } catch LocalImageRecognitionError.unsupportedDomain(_) where uploadToken?.isEmpty == false {
-                    result = try await SnapCountUploadService().uploadShortcutImageResult(
-                        data: imageData,
-                        uploadToken: uploadToken!,
-                        captureKind: "screenshot",
-                        filename: "shortcut-jpeg.jpg"
+                } catch {
+                    trialOutcome = .failed
+                    result = ShortcutUploadResult(
+                        displayText: "识别未完成；图片保留在本机，请打开收件箱重试或手动处理。",
+                        notificationText: "识别未完成；图片保留在本机，请打开收件箱重试或手动处理。",
+                        route: "inbox"
                     )
-                    trialOutcome = .remoteReturned
                 }
                 if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: trialOutcome) }
                 await ShortcutNotificationService.shared.notifyUploadResult(result)

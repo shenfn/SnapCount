@@ -4,6 +4,7 @@ enum LocalImageRecognitionError: Error, Equatable, LocalizedError {
     case invalidCandidate
     case unsupportedDomain(String)
     case missingUploadCredential
+    case retryLimitReached
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +14,8 @@ enum LocalImageRecognitionError: Error, Equatable, LocalizedError {
             return "本地首片暂不支持数据域：\(domainKey)"
         case .missingUploadCredential:
             return "当前没有可用的 Hosted AI 凭据"
+        case .retryLimitReached:
+            return "已达到三次重试上限，请手动处理或丢弃图片"
         }
     }
 }
@@ -51,15 +54,18 @@ struct LocalImageIntakeOutcome: Equatable {
 final class LocalImageRecognitionUseCase {
     private let localRecordUseCase: LocalRecordUseCaseProtocol
     private let imageStore: LocalImageStore
+    private let intakeRepository: LocalImageIntakeRepository
     private let provider: LocalImageRecognitionProvider
 
     init(
         localRecordUseCase: LocalRecordUseCaseProtocol,
         imageStore: LocalImageStore,
+        intakeRepository: LocalImageIntakeRepository,
         provider: LocalImageRecognitionProvider
     ) {
         self.localRecordUseCase = localRecordUseCase
         self.imageStore = imageStore
+        self.intakeRepository = intakeRepository
         self.provider = provider
     }
 
@@ -75,6 +81,7 @@ final class LocalImageRecognitionUseCase {
         return LocalImageRecognitionUseCase(
             localRecordUseCase: recordUseCase,
             imageStore: imageStore,
+            intakeRepository: LocalImageIntakeRepository(database: database),
             provider: provider
         )
     }
@@ -87,19 +94,148 @@ final class LocalImageRecognitionUseCase {
         createdAt: Date = Date()
     ) async throws -> LocalImageIntakeOutcome {
         let imageHash = LocalImageStore.sha256(imageData)
-        let intakeReference = try imageStore.save(
-            data: imageData,
-            owner: "recognition-\(imageHash)",
-            bucket: "intake"
+        let profile = try intakeRepository.activeProfile()
+        let intakeID = Self.intakeID(profileID: profile.id, imageHash: imageHash)
+        if let completed = try intakeRepository.intake(id: intakeID, profileID: profile.id),
+           completed.status == .completed {
+            let recordID = Self.uuidFromHash(imageHash)
+            if let record = try await localRecordUseCase.record(id: recordID) {
+                return LocalImageIntakeOutcome(
+                    result: .archived(LocalRecordOutcome(record: record, profileID: profile.id)),
+                    imageHash: imageHash
+                )
+            }
+            if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
+               staging.status == .pendingReview {
+                return LocalImageIntakeOutcome(
+                    result: .staged(LocalStagingOutcome(record: staging, profileID: profile.id)),
+                    imageHash: imageHash
+                )
+            }
+            if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
+               staging.status == .archived,
+               let targetRecordID = staging.targetRecordID,
+               let record = try await localRecordUseCase.record(id: targetRecordID) {
+                return LocalImageIntakeOutcome(
+                    result: .archived(LocalRecordOutcome(record: record, profileID: profile.id)),
+                    imageHash: imageHash
+                )
+            }
+        }
+        let intakeOwner = "recognition-\(profile.id.uuidString)-\(imageHash)"
+        let intakePath = LocalImageStore.relativePath(owner: intakeOwner, bucket: "intake")
+        try intakeRepository.beginAttempt(
+            id: intakeID,
+            profileID: profile.id,
+            captureKind: captureKind,
+            filename: filename,
+            imagePath: intakePath,
+            imageHash: imageHash,
+            at: createdAt
         )
-        defer { try? imageStore.remove(path: intakeReference.path) }
+        let intakeReference: LocalImageReference
+        do {
+            intakeReference = try imageStore.save(data: imageData, owner: intakeOwner, bucket: "intake")
+        } catch {
+            if !imageStore.contains(path: intakePath) {
+                try? intakeRepository.removeMissingIntake(id: intakeID, profileID: profile.id)
+            } else {
+                try? intakeRepository.markFailed(
+                    id: intakeID,
+                    profileID: profile.id,
+                    message: "本地图片写入未完成，可重试或手动处理",
+                    at: Date()
+                )
+            }
+            throw error
+        }
 
+        do {
+            return try await recognizeAndSave(
+                imageData: imageData,
+                imageHash: imageHash,
+                intakeID: intakeID,
+                profileID: profile.id,
+                imageReference: intakeReference,
+                captureKind: captureKind,
+                filename: filename,
+                uploadToken: uploadToken,
+                createdAt: createdAt
+            )
+        } catch {
+            try? intakeRepository.markFailed(
+                id: intakeID,
+                profileID: profile.id,
+                message: Self.safeFailureMessage(for: error),
+                at: Date()
+            )
+            throw error
+        }
+    }
+
+    func retry(intakeID: String, uploadToken: String? = nil, at date: Date = Date()) async throws -> LocalImageIntakeOutcome {
+        let profile = try intakeRepository.activeProfile()
+        guard let intake = try intakeRepository.intake(id: intakeID, profileID: profile.id),
+              intake.status != .completed,
+              imageStore.contains(path: intake.imagePath) else {
+            throw LocalDataError.recordNotFound
+        }
+        guard intake.retryCount < 3 else { throw LocalImageRecognitionError.retryLimitReached }
+        let imageData = try imageStore.data(at: intake.imagePath)
+        let imageHash = LocalImageStore.sha256(imageData)
+        guard imageHash == intake.imageHash else { throw LocalDataError.invalidRecord }
+        try intakeRepository.beginAttempt(
+            id: intake.id,
+            profileID: profile.id,
+            captureKind: intake.captureKind,
+            filename: intake.filename,
+            imagePath: intake.imagePath,
+            imageHash: intake.imageHash,
+            at: date
+        )
+        do {
+            return try await recognizeAndSave(
+                imageData: imageData,
+                imageHash: imageHash,
+                intakeID: intake.id,
+                profileID: profile.id,
+                imageReference: LocalImageReference(path: intake.imagePath, hash: imageHash),
+                captureKind: intake.captureKind,
+                filename: intake.filename,
+                uploadToken: uploadToken,
+                createdAt: date
+            )
+        } catch {
+            try? intakeRepository.markFailed(
+                id: intake.id,
+                profileID: profile.id,
+                message: Self.safeFailureMessage(for: error),
+                at: Date()
+            )
+            throw error
+        }
+    }
+
+    private func recognizeAndSave(
+        imageData: Data,
+        imageHash: String,
+        intakeID: String,
+        profileID: UUID,
+        imageReference: LocalImageReference,
+        captureKind: String,
+        filename: String,
+        uploadToken: String?,
+        createdAt: Date
+    ) async throws -> LocalImageIntakeOutcome {
         let recognized = try await provider.recognize(LocalImageRecognitionRequest(
             imageData: imageData,
             captureKind: captureKind,
             filename: filename,
             uploadToken: uploadToken
         ))
+        guard try intakeRepository.isReceiving(id: intakeID, profileID: profileID) else {
+            throw CancellationError()
+        }
         guard !recognized.domainKey.isEmpty,
               !recognized.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !recognized.recordDate.isEmpty,
@@ -116,15 +252,42 @@ final class LocalImageRecognitionUseCase {
             confidence: recognized.confidence,
             recordDate: recognized.recordDate,
             recordTime: recognized.recordTime,
-            imageData: nil,
+            imageData: imageData,
             createdAt: createdAt,
-            imageReference: intakeReference,
             evidenceFields: recognized.evidenceFields,
             missingFields: recognized.missingFields
         )
         let recordID = Self.uuidFromHash(imageHash)
         let result = try await localRecordUseCase.ingest(candidate, recordID: recordID)
+        let cleanupMessage: String?
+        do {
+            try imageStore.remove(path: imageReference.path)
+            cleanupMessage = nil
+        } catch {
+            cleanupMessage = "记录已保存；输入副本清理失败"
+        }
+        try intakeRepository.markCompleted(
+            id: intakeID,
+            profileID: profileID,
+            cleanupMessage: cleanupMessage,
+            at: Date()
+        )
         return LocalImageIntakeOutcome(result: result, imageHash: imageHash)
+    }
+
+    private static func intakeID(profileID: UUID, imageHash: String) -> String {
+        "\(profileID.uuidString)-\(imageHash)"
+    }
+
+    private static func safeFailureMessage(for error: Error) -> String {
+        if let recognitionError = error as? LocalImageRecognitionError,
+           case .unsupportedDomain(let domainKey) = recognitionError {
+            return "本地暂不支持数据域：\(domainKey)"
+        }
+        if error is CancellationError {
+            return "识别已取消，可重试或手动处理"
+        }
+        return "AI 识别未完成，可重试或手动处理"
     }
 
     private static func uuidFromHash(_ hash: String) -> UUID {

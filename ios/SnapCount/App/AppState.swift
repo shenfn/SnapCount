@@ -36,6 +36,7 @@ final class AppState: ObservableObject {
     @Published var authMessageIsError = false
     @Published var hasUploadToken = false
     @Published var dashboard = DashboardSnapshot()
+    @Published var failedLocalImageIntakes: [LocalImageIntake] = []
     @Published var dashboardMessage: String?
     @Published var isLoadingDashboard = false
     @Published var isShowingCachedDashboard = false
@@ -118,6 +119,7 @@ final class AppState: ObservableObject {
     private let localRecordUseCase: LocalRecordUseCaseProtocol?
     private let localFactReader: LocalFactReader?
     private let localImageStore: LocalImageStore?
+    private let localImageIntakeRepository: LocalImageIntakeRepository?
     private let localRecordPortability: LocalRecordPortability?
     private let localFactPortability: LocalFactPortability?
     private let inboxRepository: InboxRepositoryProtocol
@@ -178,6 +180,7 @@ final class AppState: ObservableObject {
     private var dashboardSupplementTask: Task<Void, Never>?
     private var isLoadingFinanceVocabulary = false
     private var shouldDeferOnboardingForExternalRoute = false
+    private var activeLocalImageIntakeIDs: Set<String> = []
 
     init(
         dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
@@ -186,6 +189,7 @@ final class AppState: ObservableObject {
         localRecordUseCase: LocalRecordUseCaseProtocol? = nil,
         localFactReader: LocalFactReader? = nil,
         localImageStore: LocalImageStore? = nil,
+        localImageIntakeRepository: LocalImageIntakeRepository? = nil,
         localFactPortability: LocalFactPortability? = nil,
         inboxRepository: InboxRepositoryProtocol = InboxRepository(),
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
@@ -225,6 +229,7 @@ final class AppState: ObservableObject {
             ? (localFactReader ?? Self.defaultLocalFactReader())
             : localFactReader
         self.localImageStore = localImageStore ?? Self.defaultLocalImageStore()
+        self.localImageIntakeRepository = localImageIntakeRepository ?? Self.defaultLocalImageIntakeRepository()
         self.localRecordPortability = Self.defaultLocalRecordPortability()
         self.localFactPortability = usesDefaultLocalStorage
             ? (localFactPortability ?? Self.defaultLocalFactPortability())
@@ -1075,12 +1080,17 @@ final class AppState: ObservableObject {
         filename: String,
         uploadToken: String? = nil
     ) async throws -> LocalImageIntakeOutcome {
-        guard let localRecordUseCase, let localImageStore else {
+        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else {
             throw LocalDataError.invalidRecord
         }
+        let profile = try localImageIntakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(data))"
+        activeLocalImageIntakeIDs.insert(intakeID)
+        defer { activeLocalImageIntakeIDs.remove(intakeID) }
         let recognition = LocalImageRecognitionUseCase(
             localRecordUseCase: localRecordUseCase,
             imageStore: localImageStore,
+            intakeRepository: localImageIntakeRepository,
             provider: HostedAIImageRecognitionProvider()
         )
         return try await recognition.ingest(
@@ -1113,10 +1123,108 @@ final class AppState: ObservableObject {
     /// cloud session is available. Remote repayment candidates remain
     /// session-scoped and are intentionally loaded only when signed in.
     func refreshInboxProjection() async {
+        await refreshFailedLocalImageIntakes()
         if !isSignedIn {
             await refreshLocalRecognitionProjection()
         }
         await loadInboxRepaymentCandidates()
+    }
+
+    func refreshFailedLocalImageIntakes() async {
+        guard let repository = localImageIntakeRepository,
+              let imageStore = localImageStore,
+              let profile = try? repository.activeProfile() else {
+            failedLocalImageIntakes = []
+            return
+        }
+        do {
+            var intakes = try repository.failedIntakes(profileID: profile.id)
+            for intake in intakes where intake.status == .receiving && !activeLocalImageIntakeIDs.contains(intake.id) {
+                try repository.markFailed(
+                    id: intake.id,
+                    profileID: profile.id,
+                    message: imageStore.contains(path: intake.imagePath)
+                        ? "识别进程已中断，可重试或手动处理"
+                        : "接收中断，原图文件缺失；请重新选择图片或关闭此输入",
+                    at: Date()
+                )
+            }
+            intakes = try repository.failedIntakes(profileID: profile.id)
+            failedLocalImageIntakes = intakes
+        } catch {
+            dashboardMessage = "本地图片收件箱读取失败：\(error.localizedDescription)"
+        }
+    }
+
+    func retryLocalImageIntake(_ intake: LocalImageIntake) async -> Bool {
+        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else { return false }
+        activeLocalImageIntakeIDs.insert(intake.id)
+        defer { activeLocalImageIntakeIDs.remove(intake.id) }
+        do {
+            let recognition = LocalImageRecognitionUseCase(
+                localRecordUseCase: localRecordUseCase,
+                imageStore: localImageStore,
+                intakeRepository: localImageIntakeRepository,
+                provider: HostedAIImageRecognitionProvider()
+            )
+            _ = try await recognition.retry(intakeID: intake.id, uploadToken: try? keychain.string(for: KeychainKeys.uploadToken))
+            await refreshFailedLocalImageIntakes()
+            await refreshLocalRecognitionProjection()
+            return true
+        } catch {
+            await refreshFailedLocalImageIntakes()
+            inboxActionMessage = "重试未完成：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+            return false
+        }
+    }
+
+    func discardLocalImageIntake(_ intake: LocalImageIntake) -> Bool {
+        guard let repository = localImageIntakeRepository,
+              let imageStore = localImageStore,
+              let profile = try? repository.activeProfile() else { return false }
+        do {
+            try repository.markFailed(
+                id: intake.id,
+                profileID: profile.id,
+                message: "用户已请求丢弃此图片",
+                at: Date()
+            )
+            try imageStore.remove(path: intake.imagePath)
+            try repository.discard(id: intake.id, profileID: profile.id)
+            failedLocalImageIntakes.removeAll { $0.id == intake.id }
+            return true
+        } catch {
+            inboxActionMessage = "图片未能丢弃：\(error.localizedDescription)"
+            inboxActionMessageIsError = true
+            return false
+        }
+    }
+
+    func localImageData(for intake: LocalImageIntake) throws -> Data {
+        guard let repository = localImageIntakeRepository,
+              let imageStore = localImageStore,
+              let profile = try? repository.activeProfile(),
+              intake.profileID == profile.id else {
+            throw LocalDataError.invalidIdentifier
+        }
+        return try imageStore.data(at: intake.imagePath)
+    }
+
+    func hasLocalImage(for intake: LocalImageIntake) -> Bool {
+        localImageStore?.contains(path: intake.imagePath) == true
+    }
+
+    func discardLocalImageIntake(matching imageData: Data) -> Bool {
+        guard let repository = localImageIntakeRepository,
+              let profile = try? repository.activeProfile() else { return false }
+        let id = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        do {
+            guard let intake = try repository.intake(id: id, profileID: profile.id) else { return true }
+            return discardLocalImageIntake(intake)
+        } catch {
+            return false
+        }
     }
 
     private func readDeviceFactMonth(_ monthKey: String, force: Bool) async {
@@ -4911,6 +5019,11 @@ final class AppState: ObservableObject {
 
     private static func defaultLocalImageStore() -> LocalImageStore? {
         try? LocalImageStore()
+    }
+
+    private static func defaultLocalImageIntakeRepository() -> LocalImageIntakeRepository? {
+        guard let database = try? LocalDatabase() else { return nil }
+        return LocalImageIntakeRepository(database: database)
     }
 
     private static func defaultLocalRecordPortability() -> LocalRecordPortability? {

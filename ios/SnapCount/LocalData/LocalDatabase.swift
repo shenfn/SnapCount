@@ -234,6 +234,32 @@ final class LocalDatabase {
                 ADD COLUMN missing_fields_json TEXT NOT NULL DEFAULT '[]';
                 """)
         }
+        migrator.registerMigration("local-v8-image-intake") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_image_intakes (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    capture_kind TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('receiving', 'failed', 'completed')),
+                    image_path TEXT NOT NULL,
+                    image_hash TEXT NOT NULL,
+                    failure_message TEXT,
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                );
+
+                CREATE INDEX local_image_intakes_profile_status_idx
+                    ON local_image_intakes(profile_id, status, updated_at DESC);
+                """)
+        }
+        migrator.registerMigration("local-v9-image-intake-cleanup") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_image_intakes
+                ADD COLUMN cleanup_message TEXT;
+                """)
+        }
         return migrator
     }
 }

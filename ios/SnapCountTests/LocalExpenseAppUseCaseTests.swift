@@ -260,7 +260,12 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
 
     @MainActor
     func testAppStateFallsBackToRemoteWhenSignedInLocalMonthIsEmpty() async throws {
-        let localUseCase = LocalShellExpenseUseCaseStub.empty
+        let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let userID = LocalShellRecordRepositorySpy.session.user.id
+        let localUseCase = LocalShellExpenseUseCaseStub(
+            profile: LocalProfile(id: profileID, createdAt: Date(), cloudUserID: userID, syncEnabled: true),
+            month: LocalExpenseMonth(profileID: profileID, expenses: [])
+        )
         let remoteGroup = NativeDayRecordGroup(
             dateKey: "2026-07-20",
             records: [NativeDayRecord(
@@ -286,6 +291,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         )
         state.isSignedIn = true
         state.currentUserId = LocalShellRecordRepositorySpy.session.user.id
+        state.localSyncState = syncState(for: state.currentUserId)
 
         await state.loadRecordMonth("2026-07", force: true)
 
@@ -297,8 +303,9 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     @MainActor
     func testAppStateMergesRemoteMonthWhenLocalMonthIsNonEmpty() async throws {
         let profileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let userID = LocalShellRecordRepositorySpy.session.user.id
         let localUseCase = LocalShellExpenseUseCaseStub(
-            profile: LocalProfile(id: profileID, createdAt: Date(), cloudUserID: nil, syncEnabled: false),
+            profile: LocalProfile(id: profileID, createdAt: Date(), cloudUserID: userID, syncEnabled: true),
             month: LocalExpenseMonth(profileID: profileID, expenses: [localExpense(profileID: profileID)])
         )
         let remoteGroup = NativeDayRecordGroup(
@@ -326,6 +333,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         )
         state.isSignedIn = true
         state.currentUserId = LocalShellRecordRepositorySpy.session.user.id
+        state.localSyncState = syncState(for: state.currentUserId)
 
         await state.loadRecordMonth("2026-07", force: true)
 
@@ -472,17 +480,23 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
             updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
         )
     }
+
+    private func syncState(for userID: String) -> LocalSyncState {
+        LocalSyncState(
+            workspaceID: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            binding: .bound(userID),
+            status: .synced,
+            conflictState: .none,
+            syncGeneration: 1,
+            pullCursor: nil,
+            lastSuccessfulSyncAt: Date(),
+            activeAttemptID: nil,
+            pendingMutationCount: 0
+        )
+    }
 }
 
 private final class LocalShellExpenseUseCaseStub: LocalExpenseUseCaseProtocol {
-    static var empty: LocalShellExpenseUseCaseStub {
-        let profile = LocalProfile(id: UUID(), createdAt: Date(), cloudUserID: nil, syncEnabled: false)
-        return LocalShellExpenseUseCaseStub(
-            profile: profile,
-            month: LocalExpenseMonth(profileID: profile.id, expenses: [])
-        )
-    }
-
     let profile: LocalProfile
     let monthResult: LocalExpenseMonth
     let expenseResult: LocalExpense?

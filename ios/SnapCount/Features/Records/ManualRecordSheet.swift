@@ -23,10 +23,10 @@ struct ManualRecordSheet: View {
         )
     }
 
-    init(initialImageData: Data?) {
+    init(initialImageData: Data?, onResolved: (() -> Void)? = nil) {
         stagingRecord = nil
         preserveInboxNavigation = false
-        onResolved = nil
+        self.onResolved = onResolved
         var initialDraft = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
         initialDraft.imageData = initialImageData
         _draft = State(initialValue: initialDraft)
@@ -663,6 +663,7 @@ struct ManualRecordSheet: View {
                 localMessage = appState.inboxActionMessage ?? "归档失败，请稍后重试。"
             }
         } else if await appState.createManualRecord(draft, domain: selectedDomain) {
+            onResolved?()
             dismiss()
         } else {
             localMessage = appState.manualRecordMessage ?? "保存失败，请稍后重试。"
