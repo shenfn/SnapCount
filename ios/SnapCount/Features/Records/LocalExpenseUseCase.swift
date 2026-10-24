@@ -128,6 +128,11 @@ protocol LocalExpenseUseCaseProtocol {
     func delete(_ command: LocalExpenseDeleteCommand) async throws -> LocalExpenseOutcome
     func accountEntries(accountID: UUID) async throws -> [LocalAccountEntry]
     func month(_ monthKey: String) async throws -> LocalExpenseMonth
+    func ensureRepaymentCycles(_ monthKey: String, now: Date) async throws -> [LocalRepaymentCycle]
+    func repaymentCycles(accountID: UUID) async throws -> [LocalRepaymentCycle]
+    func liabilityPayments(accountID: UUID) async throws -> [LocalLiabilityPayment]
+    func confirmRepayment(cycleID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, status: String?, note: String, paidAt: Date) async throws -> LocalRepaymentCycle
+    func revokeLiabilityPayment(id: UUID, reason: String, now: Date) async throws -> LocalRepaymentCycle?
 }
 
 extension LocalExpenseUseCaseProtocol {
@@ -161,6 +166,11 @@ extension LocalExpenseUseCaseProtocol {
     func updateIncome(_ update: LocalIncomeUpdate) async throws -> LocalIncome { throw LocalDataError.invalidRecord }
     func deleteIncome(id: UUID, expectedVersion: Int64, deletedAt: Date) async throws -> LocalIncomeTombstone { throw LocalDataError.invalidRecord }
     func accountEntries(accountID: UUID) async throws -> [LocalAccountEntry] { [] }
+    func ensureRepaymentCycles(_ monthKey: String, now: Date) async throws -> [LocalRepaymentCycle] { throw LocalDataError.invalidRecord }
+    func repaymentCycles(accountID: UUID) async throws -> [LocalRepaymentCycle] { [] }
+    func liabilityPayments(accountID: UUID) async throws -> [LocalLiabilityPayment] { [] }
+    func confirmRepayment(cycleID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, status: String?, note: String, paidAt: Date) async throws -> LocalRepaymentCycle { throw LocalDataError.invalidRecord }
+    func revokeLiabilityPayment(id: UUID, reason: String, now: Date) async throws -> LocalRepaymentCycle? { throw LocalDataError.invalidRecord }
 }
 
 final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
@@ -274,6 +284,7 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
                 autoDebitAccountID: account.autoDebitAccountID,
                 autoConfirmRepayment: account.autoConfirmRepayment,
                 gracePeriodDays: account.gracePeriodDays,
+                lastReconciledAt: account.lastReconciledAt,
                 isDefaultExpense: account.isDefaultExpense,
                 isDefaultIncome: account.isDefaultIncome,
                 isArchived: account.isArchived,
@@ -411,5 +422,41 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
     func accountEntries(accountID: UUID) async throws -> [LocalAccountEntry] {
         let profile = try profileStore.activeProfile()
         return try repository.accountEntries(accountID: accountID).filter { $0.profileID == profile.id }
+    }
+
+    func ensureRepaymentCycles(_ monthKey: String, now: Date = Date()) async throws -> [LocalRepaymentCycle] {
+        let profile = try profileStore.activeProfile()
+        return try repository.ensureRepaymentCycles(profileID: profile.id, monthKey: monthKey, now: now)
+    }
+
+    func repaymentCycles(accountID: UUID) async throws -> [LocalRepaymentCycle] {
+        let profile = try profileStore.activeProfile()
+        return try repository.repaymentCycles(accountID: accountID).filter { $0.profileID == profile.id }
+    }
+
+    func liabilityPayments(accountID: UUID) async throws -> [LocalLiabilityPayment] {
+        let profile = try profileStore.activeProfile()
+        return try repository.liabilityPayments(accountID: accountID).filter { $0.profileID == profile.id }
+    }
+
+    func confirmRepayment(
+        cycleID: UUID,
+        paidAmountMinor: Int64,
+        debitAccountID: UUID?,
+        status: String?,
+        note: String,
+        paidAt: Date
+    ) async throws -> LocalRepaymentCycle {
+        guard paidAmountMinor >= 0 else { throw LocalDataError.invalidAmount }
+        let profile = try profileStore.activeProfile()
+        return try repository.confirmRepayment(
+            cycleID: cycleID, profileID: profile.id, paidAmountMinor: paidAmountMinor,
+            debitAccountID: debitAccountID, status: status, note: note, paidAt: paidAt
+        )
+    }
+
+    func revokeLiabilityPayment(id: UUID, reason: String, now: Date = Date()) async throws -> LocalRepaymentCycle? {
+        let profile = try profileStore.activeProfile()
+        return try repository.revokeLiabilityPayment(id: id, profileID: profile.id, reason: reason, now: now)
     }
 }

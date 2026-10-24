@@ -144,6 +144,63 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     }
 
     @MainActor
+    func testLF03711OfflineAccountDetailConfirmsAndRevokesRepaymentLocally() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let repository = try LocalExpenseRepository(database: database)
+        let profile = try profileStore.activeProfile()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let current = Date()
+        let currentMonth = NativeLocalDate.monthKey(from: NativeLocalDate.dateKey(current))!
+        let currentMonthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: current))!
+        let previousMonth = calendar.date(byAdding: .month, value: -1, to: currentMonthStart)!
+        let expenseDate = calendar.date(bySetting: .day, value: 20, of: previousMonth)!
+        let liabilityID = UUID(), debitID = UUID()
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: debitID, profileID: profile.id, name: "本机现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 20_000, createdAt: current
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: liabilityID, profileID: profile.id, name: "本机信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: current, billDay: 15, paymentDueDay: 25,
+            autoDebitAccountID: debitID
+        ))
+        _ = try repository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: liabilityID, amountMinor: 5_000,
+            currency: "CNY", merchantName: "合成账单消费", platform: "", category: "other",
+            paymentMethod: "credit_card", transactionDate: NativeLocalDate.dateKey(expenseDate),
+            transactionTime: nil, note: nil, createdAt: current
+        ), operationID: UUID())
+        let useCase = LocalExpenseUseCase(profileStore: profileStore, repository: repository)
+        let state = AppState(
+            localExpenseUseCase: useCase,
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+        await state.prepareLocalWorkspace()
+        let account = try XCTUnwrap(state.accounts.first { $0.id == liabilityID.uuidString })
+        await state.loadAccountDetail(account)
+        let cycle = try XCTUnwrap(state.selectedAccountDetail?.repaymentCycles.first { $0.cycleMonth == currentMonth })
+        XCTAssertEqual(cycle.statementAmount, 50, accuracy: 0.001)
+
+        let confirmed = await state.confirmRepayment(
+            cycle: cycle, paidAmount: 30, debitAccountId: debitID.uuidString, status: .partialPaid, note: "离线测试"
+        )
+        XCTAssertTrue(confirmed)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 15_000 - 3_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 17_000)
+        let payment = try XCTUnwrap(state.selectedAccountDetail?.payments.first { $0.status == "confirmed" })
+
+        let revoked = await state.revokeLiabilityPayment(payment: payment, accountId: liabilityID.uuidString)
+        XCTAssertTrue(revoked)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 15_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 20_000)
+        XCTAssertEqual(state.selectedAccountDetail?.payments.first?.status, "voided")
+    }
+
+    @MainActor
     func testLF03201ManualIncomePersistsAndCreditsItsLocalAccountWithoutSession() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
@@ -227,7 +284,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertFalse(deleteRetry)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 10_000)
         let entries = try repository.accountEntries(accountID: account.id)
-        XCTAssertEqual(entries.count, 3)
+        XCTAssertEqual(entries.count, 2, "陈旧版本重试不应留下第三笔账务流水")
         XCTAssertTrue(entries.allSatisfy { $0.voidedAt != nil })
     }
 

@@ -7,6 +7,11 @@ protocol LocalExpenseRepositoryProtocol {
     func updateAccount(_ update: LocalAccountUpdate) throws -> LocalAccount
     func importRemoteAccounts(_ drafts: [LocalAccountDraft]) throws
     func accounts(profileID: UUID) throws -> [LocalAccount]
+    func ensureRepaymentCycles(profileID: UUID, monthKey: String, now: Date) throws -> [LocalRepaymentCycle]
+    func confirmRepayment(cycleID: UUID, profileID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, status: String?, note: String, paidAt: Date) throws -> LocalRepaymentCycle
+    func revokeLiabilityPayment(id: UUID, profileID: UUID, reason: String, now: Date) throws -> LocalRepaymentCycle?
+    func repaymentCycles(accountID: UUID) throws -> [LocalRepaymentCycle]
+    func liabilityPayments(accountID: UUID) throws -> [LocalLiabilityPayment]
     func createExpense(_ draft: LocalExpenseDraft, operationID: UUID) throws -> LocalExpense
     func importRemoteExpenses(_ drafts: [LocalExpenseDraft]) throws
     func updateExpense(_ update: LocalExpenseUpdate, operationID: UUID) throws -> LocalExpense
@@ -42,6 +47,14 @@ protocol LocalExpenseRepositoryProtocol {
         excludingExpenseIDs: Set<UUID>,
         excludingAccountIDs: Set<UUID>
     ) throws -> Int
+}
+
+extension LocalExpenseRepositoryProtocol {
+    func ensureRepaymentCycles(profileID: UUID, monthKey: String, now: Date) throws -> [LocalRepaymentCycle] { throw LocalDataError.invalidRecord }
+    func confirmRepayment(cycleID: UUID, profileID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, status: String?, note: String, paidAt: Date) throws -> LocalRepaymentCycle { throw LocalDataError.invalidRecord }
+    func revokeLiabilityPayment(id: UUID, profileID: UUID, reason: String, now: Date) throws -> LocalRepaymentCycle? { throw LocalDataError.invalidRecord }
+    func repaymentCycles(accountID: UUID) throws -> [LocalRepaymentCycle] { [] }
+    func liabilityPayments(accountID: UUID) throws -> [LocalLiabilityPayment] { [] }
 }
 
 final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
@@ -87,9 +100,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     INSERT INTO local_accounts (
                         id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin,
                         institution, last4, bill_day, payment_due_day, auto_debit_account_id,
-                        auto_confirm_repayment, grace_period_days, is_default_expense, is_default_income,
+                        auto_confirm_repayment, grace_period_days, last_reconciled_at, is_default_expense, is_default_income,
                         is_archived, sort_order
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                 arguments: [
                     draft.id.uuidString,
@@ -106,6 +119,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     draft.autoDebitAccountID?.uuidString,
                     draft.autoConfirmRepayment,
                     draft.gracePeriodDays,
+                    draft.lastReconciledAt,
                     draft.isDefaultExpense,
                     draft.isDefaultIncome,
                     draft.isArchived,
@@ -139,6 +153,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             autoDebitAccountID: draft.autoDebitAccountID,
             autoConfirmRepayment: draft.autoConfirmRepayment,
             gracePeriodDays: draft.gracePeriodDays,
+            lastReconciledAt: draft.lastReconciledAt,
             isDefaultExpense: draft.isDefaultExpense,
             isDefaultIncome: draft.isDefaultIncome,
             isArchived: draft.isArchived,
@@ -235,9 +250,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     INSERT INTO local_accounts (
                         id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin,
                         institution, last4, bill_day, payment_due_day, auto_debit_account_id,
-                        auto_confirm_repayment, grace_period_days, is_default_expense, is_default_income,
+                        auto_confirm_repayment, grace_period_days, last_reconciled_at, is_default_expense, is_default_income,
                         is_archived, sort_order
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'remote', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'remote', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         kind = excluded.kind,
@@ -250,6 +265,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         auto_debit_account_id = excluded.auto_debit_account_id,
                         auto_confirm_repayment = excluded.auto_confirm_repayment,
                         grace_period_days = excluded.grace_period_days,
+                        last_reconciled_at = excluded.last_reconciled_at,
                         is_default_expense = excluded.is_default_expense,
                         is_default_income = excluded.is_default_income,
                         is_archived = excluded.is_archived,
@@ -266,7 +282,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         draft.kind, draft.currency, draft.openingBalanceMinor, draft.createdAt,
                         draft.institution, draft.last4, draft.billDay, draft.paymentDueDay,
                         draft.autoDebitAccountID?.uuidString, draft.autoConfirmRepayment,
-                        draft.gracePeriodDays, draft.isDefaultExpense, draft.isDefaultIncome,
+                        draft.gracePeriodDays, draft.lastReconciledAt, draft.isDefaultExpense, draft.isDefaultIncome,
                         draft.isArchived, draft.sortOrder
                     ])
             }
@@ -280,7 +296,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 sql: """
                     SELECT id, profile_id, name, kind, currency, opening_balance_minor, created_at, origin,
                            institution, last4, bill_day, payment_due_day, auto_debit_account_id,
-                           auto_confirm_repayment, grace_period_days, is_default_expense, is_default_income,
+                           auto_confirm_repayment, grace_period_days, last_reconciled_at, is_default_expense, is_default_income,
                            is_archived, sort_order, local_version
                     FROM local_accounts
                     WHERE profile_id = ?
@@ -309,6 +325,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     autoDebitAccountID: (row["auto_debit_account_id"] as String?).flatMap(UUID.init(uuidString:)),
                     autoConfirmRepayment: row["auto_confirm_repayment"],
                     gracePeriodDays: row["grace_period_days"],
+                    lastReconciledAt: row["last_reconciled_at"],
                     isDefaultExpense: row["is_default_expense"],
                     isDefaultIncome: row["is_default_income"],
                     isArchived: row["is_archived"],
@@ -316,6 +333,241 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     localVersion: row["local_version"]
                 )
             }
+        }
+    }
+
+    func ensureRepaymentCycles(profileID: UUID, monthKey: String, now: Date) throws -> [LocalRepaymentCycle] {
+        guard Self.isMonthKey(monthKey), let monthStart = Self.financeDate("\(monthKey)-01") else {
+            throw LocalDataError.invalidRecord
+        }
+        let today = Self.financeDateKey(now)
+        try database.writer.write { db in
+            try db.execute(sql: """
+                UPDATE local_repayment_cycles
+                SET status = 'historical_unconfirmed', local_version = local_version + 1, updated_at = ?
+                WHERE profile_id = ? AND source = 'system' AND status = 'overdue_unconfirmed'
+                  AND paid_amount_minor = 0 AND due_date IS NOT NULL
+                  AND date(due_date, printf('%+d days', COALESCE((
+                      SELECT grace_period_days FROM local_accounts
+                      WHERE local_accounts.id = local_repayment_cycles.account_id
+                        AND local_accounts.profile_id = local_repayment_cycles.profile_id
+                  ), 0))) < ?
+                """, arguments: [now, profileID.uuidString, today])
+            let liabilityAccounts = try Row.fetchAll(db, sql: """
+                SELECT * FROM local_accounts
+                WHERE profile_id = ? AND kind IN ('credit_card', 'credit_line')
+                  AND is_archived = 0 AND bill_day IS NOT NULL AND payment_due_day IS NOT NULL
+                """, arguments: [profileID.uuidString])
+            for account in liabilityAccounts {
+                guard let accountID = UUID(uuidString: account["id"]),
+                      let billDay: Int = account["bill_day"], let dueDay: Int = account["payment_due_day"],
+                      let cycleStart = Self.billDate(day: billDay, monthStart: monthStart, offsetMonths: -1),
+                      let cycleEnd = Self.billDate(day: billDay, monthStart: monthStart, offsetMonths: 0),
+                      let dueDate = Self.billDate(day: dueDay, monthStart: monthStart, offsetMonths: 0),
+                      let statementStart = Self.shiftedFinanceDate(cycleStart, component: .day, value: 1) else {
+                    throw LocalDataError.invalidRecord
+                }
+                let lastReconciledAt: Date? = account["last_reconciled_at"]
+                let amount = try Int64.fetchOne(db, sql: """
+                    SELECT COALESCE(SUM(expense.amount_minor), 0)
+                    FROM local_expenses AS expense
+                    JOIN local_account_entries AS entry
+                      ON entry.source_kind = 'expense' AND entry.source_id = expense.id
+                     AND entry.account_id = expense.account_id AND entry.voided_at IS NULL
+                    WHERE expense.profile_id = ? AND expense.account_id = ?
+                      AND expense.deleted_at IS NULL
+                      AND (? IS NULL OR entry.occurred_at > ?)
+                      AND expense.transaction_date > ? AND expense.transaction_date <= ?
+                    """, arguments: [profileID.uuidString, accountID.uuidString, lastReconciledAt, lastReconciledAt,
+                                      Self.financeDateKey(cycleStart), Self.financeDateKey(cycleEnd)]) ?? 0
+                let existing = try Row.fetchOne(db, sql: """
+                    SELECT * FROM local_repayment_cycles WHERE account_id = ? AND cycle_month = ?
+                    """, arguments: [accountID.uuidString, monthKey])
+                if amount <= 0 {
+                    if let existing, (existing["source"] as String) == "system",
+                       ["pending", "due_today", "overdue_unconfirmed"].contains(existing["status"] as String),
+                       (existing["paid_amount_minor"] as Int64) == 0 {
+                        try db.execute(sql: "DELETE FROM local_repayment_cycles WHERE id = ?", arguments: [existing["id"] as String])
+                    }
+                    continue
+                }
+                let proposedStatus = today == Self.financeDateKey(dueDate) ? "due_today"
+                    : (Self.financeDateKey(dueDate) < today ? "overdue_unconfirmed" : "pending")
+                let currentAutoDebit = (account["auto_debit_account_id"] as String?).flatMap(UUID.init(uuidString:))
+                let autoConfirm: Bool = account["auto_confirm_repayment"]
+                if let existing {
+                    let oldStatus: String = existing["status"]
+                    let oldSource: String = existing["source"]
+                    let oldPaid: Int64 = existing["paid_amount_minor"]
+                    let canRefresh = oldSource == "system"
+                        && ["pending", "due_today", "overdue_unconfirmed"].contains(oldStatus)
+                        && oldPaid == 0
+                    guard canRefresh else { continue }
+                    try db.execute(sql: """
+                        UPDATE local_repayment_cycles SET statement_start_date = ?, statement_end_date = ?, due_date = ?,
+                            statement_amount_minor = ?, remaining_amount_minor = ?, status = ?, auto_debit_account_id = ?,
+                            auto_confirm_repayment = ?, note = '按已绑定消费流水估算', local_version = local_version + 1, updated_at = ?
+                        WHERE id = ?
+                        """, arguments: [Self.financeDateKey(statementStart), Self.financeDateKey(cycleEnd),
+                                          Self.financeDateKey(dueDate), amount, amount, proposedStatus,
+                                          currentAutoDebit?.uuidString, autoConfirm, now, existing["id"] as String])
+                } else {
+                    try db.execute(sql: """
+                        INSERT INTO local_repayment_cycles (
+                            id, profile_id, account_id, cycle_month, statement_start_date, statement_end_date, due_date,
+                            statement_amount_minor, remaining_amount_minor, status, auto_debit_account_id,
+                            auto_confirm_repayment, source, note, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', '按已绑定消费流水估算', ?, ?)
+                        """, arguments: [UUID().uuidString, profileID.uuidString, accountID.uuidString, monthKey,
+                                          Self.financeDateKey(statementStart), Self.financeDateKey(cycleEnd),
+                                          Self.financeDateKey(dueDate), amount, amount, proposedStatus,
+                                          currentAutoDebit?.uuidString, autoConfirm, now, now])
+                }
+            }
+        }
+        return try database.writer.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM local_repayment_cycles WHERE profile_id = ? AND cycle_month = ?
+                ORDER BY due_date ASC, created_at DESC
+                """, arguments: [profileID.uuidString, monthKey]).map { try Self.repaymentCycle(from: $0) }
+        }
+    }
+
+    func repaymentCycles(accountID: UUID) throws -> [LocalRepaymentCycle] {
+        try database.writer.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM local_repayment_cycles WHERE account_id = ? ORDER BY cycle_month DESC, created_at DESC
+                """, arguments: [accountID.uuidString]).map { try Self.repaymentCycle(from: $0) }
+        }
+    }
+
+    func liabilityPayments(accountID: UUID) throws -> [LocalLiabilityPayment] {
+        try database.writer.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM local_liability_payments WHERE account_id = ? ORDER BY paid_at DESC, created_at DESC
+                """, arguments: [accountID.uuidString]).map { try Self.liabilityPayment(from: $0) }
+        }
+    }
+
+    func confirmRepayment(
+        cycleID: UUID,
+        profileID: UUID,
+        paidAmountMinor: Int64,
+        debitAccountID: UUID?,
+        status requestedStatus: String?,
+        note: String,
+        paidAt: Date
+    ) throws -> LocalRepaymentCycle {
+        guard paidAmountMinor >= 0 else { throw LocalDataError.invalidAmount }
+        guard requestedStatus.map({ ["partial_paid", "minimum_paid", "carried_over", "paid", "ignored"].contains($0) }) ?? true else {
+            throw LocalDataError.invalidRecord
+        }
+        try database.writer.write { db in
+            guard let cycleRow = try Row.fetchOne(db, sql: "SELECT * FROM local_repayment_cycles WHERE id = ? AND profile_id = ?", arguments: [cycleID.uuidString, profileID.uuidString]),
+                  let accountRow = try Row.fetchOne(db, sql: "SELECT * FROM local_accounts WHERE id = ? AND profile_id = ?", arguments: [cycleRow["account_id"] as String, profileID.uuidString]) else {
+                throw LocalDataError.recordNotFound
+            }
+            let kind: String = accountRow["kind"]
+            guard ["credit_card", "credit_line"].contains(kind) else { throw LocalDataError.invalidAccountKind }
+            let effectiveDebitID: UUID? = try {
+                if let debitAccountID {
+                    try Self.validateActiveDebitAccount(id: debitAccountID, profileID: profileID, database: db)
+                    return debitAccountID
+                }
+                let cycleDebit = (cycleRow["auto_debit_account_id"] as String?).flatMap(UUID.init(uuidString:))
+                let accountDebit = (accountRow["auto_debit_account_id"] as String?).flatMap(UUID.init(uuidString:))
+                guard let resolved = cycleDebit ?? accountDebit else { return nil }
+                try Self.validateActiveDebitAccount(id: resolved, profileID: profileID, database: db)
+                return resolved
+            }()
+            try db.execute(sql: """
+                UPDATE local_liability_payments SET status = 'voided',
+                    note = COALESCE(note, '') || CASE WHEN note IS NULL OR note = '' THEN '' ELSE '；' END || '重新确认还款时作废',
+                    updated_at = ? WHERE statement_id = ? AND profile_id = ? AND status != 'voided'
+                """, arguments: [paidAt, cycleID.uuidString, profileID.uuidString])
+            try db.execute(sql: """
+                UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?)
+                WHERE profile_id = ? AND source_kind = 'liability_payment' AND voided_at IS NULL
+                  AND source_id IN (SELECT id FROM local_liability_payments WHERE statement_id = ?)
+                """, arguments: [paidAt, profileID.uuidString, cycleID.uuidString])
+
+            let liabilityBalance = try Self.accountBalanceMinor(accountID: UUID(uuidString: accountRow["id"])!, database: db)
+            let overpayment = paidAmountMinor > liabilityBalance ? paidAmountMinor - liabilityBalance : 0
+            let effectiveLiabilityPayment = max(paidAmountMinor - overpayment, 0)
+            let statementAmount: Int64 = cycleRow["statement_amount_minor"]
+            let remaining = max(statementAmount - min(paidAmountMinor, statementAmount), 0)
+            let minimum: Int64? = cycleRow["min_payment_amount_minor"]
+            let cycleStatus = requestedStatus ?? (paidAmountMinor <= 0 ? "pending"
+                : (remaining <= 0 ? "paid"
+                    : (minimum.map { paidAmountMinor >= $0 } == true ? "minimum_paid" : "partial_paid")))
+            let finalRemaining = cycleStatus == "paid" ? 0 : remaining
+            if paidAmountMinor > 0 && cycleStatus != "ignored" {
+                let id = UUID()
+                try db.execute(sql: """
+                    INSERT INTO local_liability_payments (
+                        id, profile_id, account_id, statement_id, debit_account_id, amount_minor,
+                        overpayment_amount_minor, paid_at, source, status, note, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual', 'confirmed', ?, ?, ?)
+                    """, arguments: [id.uuidString, profileID.uuidString, cycleRow["account_id"] as String,
+                                      cycleID.uuidString, effectiveDebitID?.uuidString, paidAmountMinor,
+                                      overpayment, paidAt, note, paidAt, paidAt])
+                if effectiveLiabilityPayment > 0 {
+                    try Self.insertRepaymentEntry(id: UUID(), profileID: profileID, accountID: UUID(uuidString: accountRow["id"])!,
+                                                  paymentID: id, amountMinor: effectiveLiabilityPayment, occurredAt: paidAt, database: db)
+                }
+                if let effectiveDebitID {
+                    try Self.insertRepaymentEntry(id: UUID(), profileID: profileID, accountID: effectiveDebitID,
+                                                  paymentID: id, amountMinor: paidAmountMinor, occurredAt: paidAt, database: db)
+                }
+            }
+            let currentSource: String = cycleRow["source"]
+            try db.execute(sql: """
+                UPDATE local_repayment_cycles SET paid_amount_minor = ?, remaining_amount_minor = ?,
+                    carried_over_amount_minor = ?, status = ?, auto_debit_account_id = ?,
+                    source = ?, note = COALESCE(?, note), confirmed_at = ?,
+                    local_version = local_version + 1, updated_at = ?
+                WHERE id = ? AND profile_id = ?
+                """, arguments: [paidAmountMinor, finalRemaining,
+                                  cycleStatus == "carried_over" ? remaining : 0, cycleStatus,
+                                  effectiveDebitID?.uuidString, currentSource == "system" ? "manual" : currentSource,
+                                  note.isEmpty ? nil : note,
+                                  (paidAmountMinor > 0 || ["paid", "ignored"].contains(cycleStatus)) ? paidAt : nil,
+                                  paidAt, cycleID.uuidString, profileID.uuidString])
+        }
+        guard let cycle = try database.writer.read({ db in
+            try Row.fetchOne(db, sql: "SELECT * FROM local_repayment_cycles WHERE id = ? AND profile_id = ?", arguments: [cycleID.uuidString, profileID.uuidString]).map { try Self.repaymentCycle(from: $0) }
+        }) else { throw LocalDataError.recordNotFound }
+        return cycle
+    }
+
+    func revokeLiabilityPayment(id: UUID, profileID: UUID, reason: String, now: Date) throws -> LocalRepaymentCycle? {
+        try database.writer.write { db in
+            guard let payment = try Row.fetchOne(db, sql: "SELECT * FROM local_liability_payments WHERE id = ? AND profile_id = ?", arguments: [id.uuidString, profileID.uuidString]) else {
+                throw LocalDataError.recordNotFound
+            }
+            let cycleID = (payment["statement_id"] as String?).flatMap(UUID.init(uuidString:))
+            let status: String = payment["status"]
+            if status != "voided" {
+                try db.execute(sql: "UPDATE local_liability_payments SET status = 'voided', note = COALESCE(note, '') || CASE WHEN note IS NULL OR note = '' THEN '' ELSE '；' END || ?, updated_at = ? WHERE id = ?", arguments: [reason, now, id.uuidString])
+                try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE profile_id = ? AND source_kind = 'liability_payment' AND source_id = ? AND voided_at IS NULL", arguments: [now, profileID.uuidString, id.uuidString])
+            }
+            guard let cycleID,
+                  let cycle = try Row.fetchOne(db, sql: "SELECT * FROM local_repayment_cycles WHERE id = ? AND profile_id = ?", arguments: [cycleID.uuidString, profileID.uuidString]) else {
+                return nil
+            }
+            if status != "voided" {
+                let paid = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount_minor), 0) FROM local_liability_payments WHERE statement_id = ? AND profile_id = ? AND status = 'confirmed'", arguments: [cycleID.uuidString, profileID.uuidString]) ?? 0
+                let statementAmount: Int64 = cycle["statement_amount_minor"]
+                let remaining = max(statementAmount - min(paid, statementAmount), 0)
+                let dueDate: String? = cycle["due_date"]
+                let today = Self.financeDateKey(now)
+                let derivedStatus = paid <= 0
+                    ? ((dueDate == nil || dueDate! > today) ? "pending" : (dueDate! == today ? "due_today" : "overdue_unconfirmed"))
+                    : (remaining <= 0 ? "paid"
+                        : (((cycle["min_payment_amount_minor"] as Int64?).map { paid >= $0 }) == true ? "minimum_paid" : "partial_paid"))
+                try db.execute(sql: "UPDATE local_repayment_cycles SET paid_amount_minor = ?, remaining_amount_minor = ?, carried_over_amount_minor = 0, status = ?, confirmed_at = ?, local_version = local_version + 1, updated_at = ? WHERE id = ?", arguments: [paid, remaining, derivedStatus, paid > 0 ? (cycle["confirmed_at"] as Date?) : nil, now, cycleID.uuidString])
+            }
+            return try Row.fetchOne(db, sql: "SELECT * FROM local_repayment_cycles WHERE id = ?", arguments: [cycleID.uuidString]).map { try Self.repaymentCycle(from: $0) }
         }
     }
 
@@ -1199,6 +1451,122 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         }
     }
 
+    private static func repaymentCycle(from row: Row) throws -> LocalRepaymentCycle {
+        guard let id = UUID(uuidString: row["id"]),
+              let profileID = UUID(uuidString: row["profile_id"]),
+              let accountID = UUID(uuidString: row["account_id"]),
+              let createdAt: Date = row["created_at"], let updatedAt: Date = row["updated_at"] else {
+            throw LocalDataError.invalidRecord
+        }
+        return LocalRepaymentCycle(
+            id: id, profileID: profileID, accountID: accountID, cycleMonth: row["cycle_month"],
+            statementStartDate: row["statement_start_date"], statementEndDate: row["statement_end_date"],
+            dueDate: row["due_date"], statementAmountMinor: row["statement_amount_minor"],
+            paidAmountMinor: row["paid_amount_minor"], remainingAmountMinor: row["remaining_amount_minor"],
+            carriedOverAmountMinor: row["carried_over_amount_minor"],
+            originalStatementAmountMinor: row["original_statement_amount_minor"],
+            minPaymentAmountMinor: row["min_payment_amount_minor"],
+            refundAppliedAmountMinor: row["refund_applied_amount_minor"], status: row["status"],
+            autoDebitAccountID: (row["auto_debit_account_id"] as String?).flatMap(UUID.init(uuidString:)),
+            autoConfirmRepayment: row["auto_confirm_repayment"], source: row["source"],
+            evidenceRecordID: (row["evidence_record_id"] as String?).flatMap(UUID.init(uuidString:)),
+            confidence: row["confidence"], note: row["note"], confirmedAt: row["confirmed_at"],
+            localVersion: row["local_version"], createdAt: createdAt, updatedAt: updatedAt
+        )
+    }
+
+    private static func liabilityPayment(from row: Row) throws -> LocalLiabilityPayment {
+        guard let id = UUID(uuidString: row["id"]),
+              let profileID = UUID(uuidString: row["profile_id"]),
+              let accountID = UUID(uuidString: row["account_id"]),
+              let paidAt: Date = row["paid_at"], let createdAt: Date = row["created_at"],
+              let updatedAt: Date = row["updated_at"] else { throw LocalDataError.invalidRecord }
+        return LocalLiabilityPayment(
+            id: id, profileID: profileID, accountID: accountID,
+            statementID: (row["statement_id"] as String?).flatMap(UUID.init(uuidString:)),
+            debitAccountID: (row["debit_account_id"] as String?).flatMap(UUID.init(uuidString:)),
+            amountMinor: row["amount_minor"], overpaymentAmountMinor: row["overpayment_amount_minor"],
+            paidAt: paidAt, source: row["source"],
+            evidenceRecordID: (row["evidence_record_id"] as String?).flatMap(UUID.init(uuidString:)),
+            status: row["status"], note: row["note"], createdAt: createdAt, updatedAt: updatedAt
+        )
+    }
+
+    private static func validateActiveDebitAccount(id: UUID, profileID: UUID, database: Database) throws {
+        guard let row = try Row.fetchOne(database, sql: "SELECT kind, is_archived FROM local_accounts WHERE id = ? AND profile_id = ?", arguments: [id.uuidString, profileID.uuidString]) else {
+            throw LocalDataError.invalidIdentifier
+        }
+        let kind: String = row["kind"]
+        let archived: Bool = row["is_archived"]
+        guard !archived, !["credit_card", "credit_line"].contains(kind) else { throw LocalDataError.invalidAccountKind }
+    }
+
+    private static func accountBalanceMinor(accountID: UUID, database: Database) throws -> Int64 {
+        guard let row = try Row.fetchOne(database, sql: """
+            SELECT account.opening_balance_minor AS opening_balance_minor,
+                   COALESCE(SUM(CASE entry.direction WHEN 'in' THEN entry.amount_minor WHEN 'out' THEN -entry.amount_minor END), 0) AS delta
+            FROM local_accounts account LEFT JOIN local_account_entries entry
+              ON entry.account_id = account.id AND entry.voided_at IS NULL
+            WHERE account.id = ? GROUP BY account.id
+            """, arguments: [accountID.uuidString]) else { throw LocalDataError.invalidIdentifier }
+        let opening: Int64 = row["opening_balance_minor"]
+        let delta: Int64 = row["delta"]
+        return opening + delta
+    }
+
+    private static func insertRepaymentEntry(
+        id: UUID, profileID: UUID, accountID: UUID, paymentID: UUID,
+        amountMinor: Int64, occurredAt: Date, database: Database
+    ) throws {
+        try database.execute(sql: """
+            INSERT INTO local_account_entries (
+                id, profile_id, account_id, direction, amount_minor, entry_kind,
+                source_kind, source_id, occurred_at, voided_at
+            ) VALUES (?, ?, ?, 'out', ?, 'transfer', 'liability_payment', ?, ?, NULL)
+            """, arguments: [id.uuidString, profileID.uuidString, accountID.uuidString,
+                              amountMinor, paymentID.uuidString, occurredAt])
+    }
+
+    private static func isMonthKey(_ value: String) -> Bool {
+        value.range(of: #"^\d{4}-(0[1-9]|1[0-2])$"#, options: .regularExpression) != nil
+    }
+
+    private static func financeDate(_ value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: value)
+    }
+
+    private static func financeDateKey(_ value: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: value)
+    }
+
+    private static func shiftedFinanceDate(_ date: Date, component: Calendar.Component, value: Int) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return calendar.date(byAdding: component, value: value, to: date)
+    }
+
+    private static func billDate(day: Int, monthStart: Date, offsetMonths: Int) -> Date? {
+        guard let shifted = shiftedFinanceDate(monthStart, component: .month, value: offsetMonths) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let components = calendar.dateComponents([.year, .month], from: shifted)
+        guard let year = components.year, let month = components.month,
+              let lastDay = calendar.range(of: .day, in: .month, for: shifted)?.count else { return nil }
+        var date = DateComponents()
+        date.year = year
+        date.month = month
+        date.day = min(day, lastDay)
+        return calendar.date(from: date)
+    }
+
     private static func validateAccountConfiguration(
         kind: String,
         last4: String,
@@ -1219,7 +1587,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
               last4.isEmpty || last4.range(of: #"^\d{4}$"#, options: .regularExpression) != nil,
               billDay.map({ (1...31).contains($0) }) ?? true,
               paymentDueDay.map({ (1...31).contains($0) }) ?? true,
-              gracePeriodDays >= 0,
+              (0...60).contains(gracePeriodDays),
               !(isArchived && (isDefaultExpense || isDefaultIncome)),
               !autoConfirmRepayment || liabilityKinds.contains(kind) else {
             throw LocalDataError.invalidRecord

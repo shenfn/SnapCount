@@ -1672,6 +1672,7 @@ final class AppState: ObservableObject {
                         autoDebitAccountID: account.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
                         autoConfirmRepayment: account.autoConfirmRepayment,
                         gracePeriodDays: account.gracePeriodDays,
+                        lastReconciledAt: Self.parseISO8601(account.lastReconciledAt),
                         isDefaultExpense: account.isDefaultExpense,
                         isDefaultIncome: account.isDefaultIncome,
                         isArchived: account.isArchived,
@@ -1714,6 +1715,7 @@ final class AppState: ObservableObject {
                 autoDebitAccountID: account.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
                 autoConfirmRepayment: account.autoConfirmRepayment,
                 gracePeriodDays: account.gracePeriodDays,
+                lastReconciledAt: Self.parseISO8601(account.lastReconciledAt),
                 isDefaultExpense: account.isDefaultExpense,
                 isDefaultIncome: account.isDefaultIncome,
                 isArchived: account.isArchived,
@@ -1797,11 +1799,46 @@ final class AppState: ObservableObject {
             autoDebitAccountId: account.autoDebitAccountID?.uuidString,
             autoConfirmRepayment: account.autoConfirmRepayment,
             gracePeriodDays: account.gracePeriodDays,
-            lastReconciledAt: nil,
+            lastReconciledAt: account.lastReconciledAt.map { ISO8601DateFormatter().string(from: $0) },
             isDefaultExpense: account.isDefaultExpense,
             isDefaultIncome: account.isDefaultIncome,
             isArchived: account.isArchived,
             sortOrder: account.sortOrder
+        )
+    }
+
+    private static func nativeRepaymentCycle(from cycle: LocalRepaymentCycle) throws -> NativeRepaymentCycle {
+        guard let status = NativeRepaymentStatus(rawValue: cycle.status) else { throw LocalDataError.invalidRecord }
+        return NativeRepaymentCycle(
+            id: cycle.id.uuidString, accountId: cycle.accountID.uuidString, cycleMonth: cycle.cycleMonth,
+            statementStartDate: cycle.statementStartDate, statementEndDate: cycle.statementEndDate,
+            dueDate: cycle.dueDate, statementAmount: Double(cycle.statementAmountMinor) / 100,
+            paidAmount: Double(cycle.paidAmountMinor) / 100, remainingAmount: Double(cycle.remainingAmountMinor) / 100,
+            carriedOverAmount: Double(cycle.carriedOverAmountMinor) / 100,
+            originalStatementAmount: cycle.originalStatementAmountMinor.map { Double($0) / 100 },
+            minPaymentAmount: cycle.minPaymentAmountMinor.map { Double($0) / 100 },
+            refundAppliedAmount: Double(cycle.refundAppliedAmountMinor) / 100, status: status,
+            autoDebitAccountId: cycle.autoDebitAccountID?.uuidString,
+            autoConfirmRepayment: cycle.autoConfirmRepayment, source: cycle.source,
+            evidenceRecordId: cycle.evidenceRecordID?.uuidString, confidence: cycle.confidence,
+            note: cycle.note, confirmedAt: cycle.confirmedAt.map { ISO8601DateFormatter().string(from: $0) }
+        )
+    }
+
+    private static func parseISO8601(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        return ISO8601DateFormatter().date(from: value)
+    }
+
+    private static func nativeLiabilityPayment(from payment: LocalLiabilityPayment) -> NativeLiabilityPayment {
+        NativeLiabilityPayment(
+            id: payment.id.uuidString, accountId: payment.accountID.uuidString,
+            statementId: payment.statementID?.uuidString, debitAccountId: payment.debitAccountID?.uuidString,
+            amount: Double(payment.amountMinor) / 100,
+            overpaymentAmount: Double(payment.overpaymentAmountMinor) / 100,
+            paidAt: ISO8601DateFormatter().string(from: payment.paidAt), source: payment.source,
+            evidenceRecordId: payment.evidenceRecordID?.uuidString, status: payment.status,
+            note: payment.note ?? ""
         )
     }
 
@@ -1888,7 +1925,8 @@ final class AppState: ObservableObject {
         selectedAccountDetail = nil
         selectedAccountSourceSnapshot = nil
         accountMessage = nil
-        if let accountID = UUID(uuidString: account.id),
+        if !mayReadRemoteBusinessData,
+           let accountID = UUID(uuidString: account.id),
            localAccounts.contains(where: { $0.id == accountID }) {
             await loadLocalAccountDetail(account)
             return
@@ -1937,6 +1975,8 @@ final class AppState: ObservableObject {
             return
         }
         do {
+            await loadLocalAccounts()
+            let currentAccount = accounts.first(where: { $0.id == account.id }) ?? account
             let entries = try await localExpenseUseCase.accountEntries(accountID: accountID)
             let nativeEntries = entries.map { entry in
                 NativeAccountEntry(
@@ -1953,11 +1993,18 @@ final class AppState: ObservableObject {
                     voidedReason: entry.voidedAt == nil ? "" : "本地已作废"
                 )
             }
+            var cycles: [NativeRepaymentCycle] = []
+            var payments: [NativeLiabilityPayment] = []
+            if currentAccount.type.isLiability {
+                _ = try await localExpenseUseCase.ensureRepaymentCycles(Self.currentMonthKey, now: Date())
+                cycles = try await localExpenseUseCase.repaymentCycles(accountID: accountID).map(Self.nativeRepaymentCycle(from:))
+                payments = try await localExpenseUseCase.liabilityPayments(accountID: accountID).map(Self.nativeLiabilityPayment(from:))
+            }
             selectedAccountDetail = NativeAccountDetail(
-                account: account,
+                account: currentAccount,
                 entries: nativeEntries,
-                repaymentCycles: [],
-                payments: [],
+                repaymentCycles: cycles,
+                payments: payments,
                 loadErrors: [:]
             )
             accountMessage = nil
@@ -1973,6 +2020,13 @@ final class AppState: ObservableObject {
         status: NativeRepaymentStatus,
         note: String
     ) async -> Bool {
+        if !mayReadRemoteBusinessData,
+           localAccounts.contains(where: { $0.id.uuidString == cycle.accountId }) {
+            return await confirmLocalRepayment(
+                cycle: cycle, paidAmount: paidAmount, debitAccountId: debitAccountId,
+                status: status, note: note
+            )
+        }
         await performRepaymentAction(.confirm(
             cycleId: cycle.id,
             accountId: cycle.accountId,
@@ -1987,11 +2041,79 @@ final class AppState: ObservableObject {
         payment: NativeLiabilityPayment,
         accountId: String
     ) async -> Bool {
+        if !mayReadRemoteBusinessData,
+           localAccounts.contains(where: { $0.id.uuidString == accountId }) {
+            guard !isSubmittingRepayment,
+                  let localExpenseUseCase,
+                  let paymentID = UUID(uuidString: payment.id) else { return false }
+            isSubmittingRepayment = true
+            repaymentMessage = nil
+            defer { isSubmittingRepayment = false }
+            do {
+                _ = try await localExpenseUseCase.revokeLiabilityPayment(id: paymentID, reason: "用户撤销还款")
+                await loadLocalAccounts()
+                if let refreshed = accounts.first(where: { $0.id == accountId }) {
+                    await loadLocalAccountDetail(refreshed)
+                }
+                repaymentMessage = "还款已在此设备撤销"
+                return true
+            } catch {
+                repaymentMessage = error.localizedDescription
+                return false
+            }
+        }
         await performRepaymentAction(.revoke(
             paymentId: payment.id,
             cycleId: payment.statementId ?? "",
             accountId: accountId
         ))
+    }
+
+    private func confirmLocalRepayment(
+        cycle: NativeRepaymentCycle,
+        paidAmount: Double,
+        debitAccountId: String?,
+        status: NativeRepaymentStatus,
+        note: String
+    ) async -> Bool {
+        guard !isSubmittingRepayment, paidAmount.isFinite, paidAmount >= 0,
+              let localExpenseUseCase,
+              let cycleID = UUID(uuidString: cycle.id) else { return false }
+        let debitID: UUID?
+        if let debitAccountId {
+            guard let parsed = UUID(uuidString: debitAccountId) else {
+                repaymentMessage = "扣款账户无效。"
+                return false
+            }
+            debitID = parsed
+        } else {
+            debitID = nil
+        }
+        let paidAmountMinor: Int64
+        do {
+            paidAmountMinor = try LocalExpenseMapper.nonnegativeAmountMinor(String(paidAmount))
+        } catch {
+            repaymentMessage = error.localizedDescription
+            return false
+        }
+        isSubmittingRepayment = true
+        repaymentMessage = nil
+        defer { isSubmittingRepayment = false }
+        do {
+            _ = try await localExpenseUseCase.confirmRepayment(
+                cycleID: cycleID, paidAmountMinor: paidAmountMinor, debitAccountID: debitID,
+                status: status.rawValue, note: note, paidAt: Date()
+            )
+            await loadLocalAccounts()
+            if let refreshed = accounts.first(where: { $0.id == cycle.accountId }) {
+                await loadLocalAccountDetail(refreshed)
+            }
+            repaymentMessage = "还款已保存在此设备"
+            return true
+        } catch {
+            repaymentMessage = error.localizedDescription
+            return false
+        }
     }
 
     private func performRepaymentAction(_ command: RepaymentActionCommand) async -> Bool {
@@ -5130,6 +5252,7 @@ final class AppState: ObservableObject {
                 autoDebitAccountID: cloudAccount.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
                 autoConfirmRepayment: cloudAccount.autoConfirmRepayment,
                 gracePeriodDays: cloudAccount.gracePeriodDays,
+                lastReconciledAt: Self.parseISO8601(cloudAccount.lastReconciledAt),
                 isDefaultExpense: cloudAccount.isDefaultExpense,
                 isDefaultIncome: cloudAccount.isDefaultIncome,
                 isArchived: cloudAccount.isArchived,
@@ -5177,6 +5300,7 @@ final class AppState: ObservableObject {
                 billDay: cloudAccount.billDay, paymentDueDay: cloudAccount.paymentDueDay,
                 autoDebitAccountID: cloudAccount.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
                 autoConfirmRepayment: cloudAccount.autoConfirmRepayment, gracePeriodDays: cloudAccount.gracePeriodDays,
+                lastReconciledAt: Self.parseISO8601(cloudAccount.lastReconciledAt),
                 isDefaultExpense: cloudAccount.isDefaultExpense, isDefaultIncome: cloudAccount.isDefaultIncome,
                 isArchived: cloudAccount.isArchived, sortOrder: cloudAccount.sortOrder
             )

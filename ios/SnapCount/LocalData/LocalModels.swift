@@ -22,6 +22,7 @@ struct LocalAccountDraft: Equatable {
     var autoDebitAccountID: UUID? = nil
     var autoConfirmRepayment: Bool = false
     var gracePeriodDays: Int = 0
+    var lastReconciledAt: Date? = nil
     var isDefaultExpense: Bool = false
     var isDefaultIncome: Bool = false
     var isArchived: Bool = false
@@ -64,6 +65,7 @@ struct LocalAccount: Equatable, Identifiable {
     let autoDebitAccountID: UUID?
     let autoConfirmRepayment: Bool
     let gracePeriodDays: Int
+    let lastReconciledAt: Date?
     let isDefaultExpense: Bool
     let isDefaultIncome: Bool
     let isArchived: Bool
@@ -86,6 +88,7 @@ struct LocalAccount: Equatable, Identifiable {
         autoDebitAccountID: UUID? = nil,
         autoConfirmRepayment: Bool = false,
         gracePeriodDays: Int = 0,
+        lastReconciledAt: Date? = nil,
         isDefaultExpense: Bool = false,
         isDefaultIncome: Bool = false,
         isArchived: Bool = false,
@@ -107,12 +110,58 @@ struct LocalAccount: Equatable, Identifiable {
         self.autoDebitAccountID = autoDebitAccountID
         self.autoConfirmRepayment = autoConfirmRepayment
         self.gracePeriodDays = gracePeriodDays
+        self.lastReconciledAt = lastReconciledAt
         self.isDefaultExpense = isDefaultExpense
         self.isDefaultIncome = isDefaultIncome
         self.isArchived = isArchived
         self.sortOrder = sortOrder
         self.localVersion = localVersion
     }
+}
+
+struct LocalRepaymentCycle: Equatable, Identifiable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID
+    let cycleMonth: String
+    let statementStartDate: String?
+    let statementEndDate: String?
+    let dueDate: String?
+    let statementAmountMinor: Int64
+    let paidAmountMinor: Int64
+    let remainingAmountMinor: Int64
+    let carriedOverAmountMinor: Int64
+    let originalStatementAmountMinor: Int64?
+    let minPaymentAmountMinor: Int64?
+    let refundAppliedAmountMinor: Int64
+    let status: String
+    let autoDebitAccountID: UUID?
+    let autoConfirmRepayment: Bool
+    let source: String
+    let evidenceRecordID: UUID?
+    let confidence: Double?
+    let note: String
+    let confirmedAt: Date?
+    let localVersion: Int64
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+struct LocalLiabilityPayment: Equatable, Identifiable {
+    let id: UUID
+    let profileID: UUID
+    let accountID: UUID
+    let statementID: UUID?
+    let debitAccountID: UUID?
+    let amountMinor: Int64
+    let overpaymentAmountMinor: Int64
+    let paidAt: Date
+    let source: String
+    let evidenceRecordID: UUID?
+    let status: String
+    let note: String?
+    let createdAt: Date
+    let updatedAt: Date
 }
 
 struct LocalExpenseDraft: Equatable {

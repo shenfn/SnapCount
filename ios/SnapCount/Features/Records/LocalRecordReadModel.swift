@@ -38,7 +38,8 @@ enum LocalRecordReadModel {
             domainKey: record.domainKey,
             source: record.sourceKind.rawValue,
             status: "local",
-            domainVersion: "local-v\(record.domainVersion)"
+            domainVersion: "local-v\(record.domainVersion)",
+            localVersion: record.localVersion
         )
         return NativeRecordDetail(
             id: base.id,
@@ -69,7 +70,8 @@ enum LocalRecordReadModel {
             domainKey: base.domainKey,
             source: base.source,
             status: base.status,
-            domainVersion: base.domainVersion
+            domainVersion: base.domainVersion,
+            localVersion: base.localVersion
         )
     }
 

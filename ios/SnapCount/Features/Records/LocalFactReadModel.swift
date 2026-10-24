@@ -27,6 +27,9 @@ enum LocalFactReadModel {
                         value = ""
                         domainKey = fact.domainKey
                     }
+                    let incomeAmountMinor = fact.kind == .income
+                        ? (try? LocalRecordCodec.decode(fact.payloadJSON))?.double("amount_minor")
+                        : nil
                     return NativeDayRecord(
                         id: fact.id.uuidString,
                         reference: fact.reference,
@@ -40,9 +43,7 @@ enum LocalFactReadModel {
                         systemImage: kind == .expense ? "creditcard" : kind.systemImage,
                         transactionType: fact.domainKey,
                         status: "local",
-                        amount: fact.kind == .income
-                            ? (try? LocalRecordCodec.decode(fact.payloadJSON))?.double("amount_minor").map { $0 / 100 }
-                            : nil
+                        amount: incomeAmountMinor.map { $0 / 100 }
                     )
                 }
             )

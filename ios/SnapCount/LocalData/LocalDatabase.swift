@@ -366,6 +366,79 @@ final class LocalDatabase {
                     ON local_accounts(profile_id) WHERE is_default_income = 1 AND is_archived = 0;
                 """)
         }
+        migrator.registerMigration("local-v14-repayment-cycles-and-payments") { database in
+            try database.execute(sql: """
+                DROP INDEX local_account_entries_active_source_idx;
+                CREATE UNIQUE INDEX local_account_entries_active_source_idx
+                    ON local_account_entries(source_kind, source_id, account_id)
+                    WHERE voided_at IS NULL;
+
+                CREATE TABLE local_repayment_cycles (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT NOT NULL REFERENCES local_accounts(id),
+                    cycle_month TEXT NOT NULL CHECK (cycle_month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+                    statement_start_date TEXT,
+                    statement_end_date TEXT,
+                    due_date TEXT,
+                    statement_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (statement_amount_minor >= 0),
+                    paid_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (paid_amount_minor >= 0),
+                    remaining_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (remaining_amount_minor >= 0),
+                    carried_over_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (carried_over_amount_minor >= 0),
+                    original_statement_amount_minor INTEGER CHECK (original_statement_amount_minor IS NULL OR original_statement_amount_minor >= 0),
+                    min_payment_amount_minor INTEGER CHECK (min_payment_amount_minor IS NULL OR min_payment_amount_minor >= 0),
+                    refund_applied_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (refund_applied_amount_minor >= 0),
+                    status TEXT NOT NULL,
+                    auto_debit_account_id TEXT REFERENCES local_accounts(id),
+                    auto_confirm_repayment BOOLEAN NOT NULL DEFAULT 0 CHECK (auto_confirm_repayment IN (0, 1)),
+                    source TEXT NOT NULL,
+                    evidence_record_id TEXT REFERENCES local_records(id) ON DELETE SET NULL,
+                    confidence REAL,
+                    note TEXT NOT NULL DEFAULT '',
+                    confirmed_at DATETIME,
+                    local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    UNIQUE(account_id, cycle_month)
+                );
+                CREATE INDEX local_repayment_cycles_profile_month_idx
+                    ON local_repayment_cycles(profile_id, cycle_month DESC);
+
+                CREATE TABLE local_liability_payments (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT NOT NULL REFERENCES local_accounts(id),
+                    statement_id TEXT REFERENCES local_repayment_cycles(id) ON DELETE SET NULL,
+                    debit_account_id TEXT REFERENCES local_accounts(id) ON DELETE SET NULL,
+                    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+                    overpayment_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (overpayment_amount_minor >= 0),
+                    paid_at DATETIME NOT NULL,
+                    source TEXT NOT NULL CHECK (source IN ('screenshot', 'manual', 'auto_debit_assumed', 'system_match')),
+                    evidence_record_id TEXT REFERENCES local_records(id) ON DELETE SET NULL,
+                    status TEXT NOT NULL CHECK (status IN ('pending_review', 'confirmed', 'voided')),
+                    note TEXT,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                );
+                CREATE INDEX local_liability_payments_profile_time_idx
+                    ON local_liability_payments(profile_id, paid_at DESC);
+                CREATE INDEX local_liability_payments_cycle_status_idx
+                    ON local_liability_payments(statement_id, status);
+                """)
+        }
+        migrator.registerMigration("local-v15-account-reconciliation-time") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_accounts ADD COLUMN last_reconciled_at DATETIME;
+                CREATE TRIGGER local_accounts_grace_days_insert_check
+                BEFORE INSERT ON local_accounts
+                WHEN NEW.grace_period_days NOT BETWEEN 0 AND 60
+                BEGIN SELECT RAISE(ABORT, 'grace period must be between 0 and 60 days'); END;
+                CREATE TRIGGER local_accounts_grace_days_update_check
+                BEFORE UPDATE OF grace_period_days ON local_accounts
+                WHEN NEW.grace_period_days NOT BETWEEN 0 AND 60
+                BEGIN SELECT RAISE(ABORT, 'grace period must be between 0 and 60 days'); END;
+                """)
+        }
         return migrator
     }
 }

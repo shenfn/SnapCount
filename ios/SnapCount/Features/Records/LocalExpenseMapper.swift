@@ -75,4 +75,18 @@ enum LocalExpenseMapper {
         }
         return NSDecimalNumber(decimal: rounded).int64Value
     }
+
+    static func nonnegativeAmountMinor(_ text: String) throws -> Int64 {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+              let decimal = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
+              decimal >= 0 else {
+            throw LocalDataError.invalidAmount
+        }
+        var scaled = decimal * Decimal(100)
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .bankers)
+        guard rounded >= 0, rounded <= Decimal(Int64.max) else { throw LocalDataError.invalidAmount }
+        return NSDecimalNumber(decimal: rounded).int64Value
+    }
 }

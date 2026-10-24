@@ -616,9 +616,12 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
             from: recordOutcome.record,
             imageStore: nil
         ))
+        XCTAssertEqual(recordDraft.localVersion, recordOutcome.record.localVersion)
         recordDraft.note = "编辑后备注"
         let recordSaved = await state.saveRecordDetail(recordDraft)
         XCTAssertTrue(recordSaved)
+        let staleRecordSaved = await state.saveRecordDetail(recordDraft)
+        XCTAssertFalse(staleRecordSaved, "陈旧详情版本不得覆盖已保存的本地记录")
 
         let references = Set(state.recordGroups(monthKey: monthKey).flatMap(\.records).map(\.reference))
         XCTAssertEqual(references, Set([
