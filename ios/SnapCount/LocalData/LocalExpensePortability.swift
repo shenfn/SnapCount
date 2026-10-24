@@ -156,11 +156,20 @@ final class LocalExpensePortability {
         }
     }
 
+    func previewArchive(_ data: Data) throws -> LocalExpenseArchive {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let archive = try decoder.decode(LocalExpenseArchive.self, from: data)
+        try validate(archive)
+        return archive
+    }
+
     func importArchive(
         _ data: Data,
         importedAt: Date = Date(),
         enqueueOutbox: Bool = true,
-        expectedProfileID: UUID? = nil
+        expectedProfileID: UUID? = nil,
+        remapProfileID: UUID? = nil
     ) throws -> LocalExpenseImportResult {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -171,11 +180,22 @@ final class LocalExpensePortability {
         }
 
         return try database.writer.write { db in
-            let existingProfile = try Row.fetchOne(
-                db,
-                sql: "SELECT id, created_at FROM local_profiles WHERE id = ?",
-                arguments: [archive.profile.id.uuidString]
-            )
+            let destinationProfileID = remapProfileID ?? archive.profile.id
+            let existingProfile: Row?
+            if remapProfileID == nil {
+                existingProfile = try Row.fetchOne(
+                    db,
+                    sql: "SELECT id, created_at FROM local_profiles WHERE id = ?",
+                    arguments: [archive.profile.id.uuidString]
+                )
+            } else {
+                existingProfile = nil
+            }
+            if let remapProfileID {
+                guard try Int.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM local_profiles WHERE id = ?)", arguments: [remapProfileID.uuidString]) == 1 else {
+                    throw LocalDataError.invalidIdentifier
+                }
+            }
             if let existingProfile {
                 let existingCreatedAt: Date = existingProfile["created_at"]
                 if existingCreatedAt != archive.profile.createdAt {
@@ -188,7 +208,9 @@ final class LocalExpensePortability {
 
             var insertedProfiles = 0
             var skippedProfiles = 0
-            if existingProfile != nil {
+            if remapProfileID != nil {
+                skippedProfiles = 1
+            } else if existingProfile != nil {
                 skippedProfiles = 1
             } else {
                 try db.execute(
@@ -215,7 +237,7 @@ final class LocalExpensePortability {
                     arguments: [account.id.uuidString]
                 )
                 if let existing {
-                    guard Self.accountMatches(existing, account) else {
+                    guard Self.accountMatches(existing, account, profileID: destinationProfileID) else {
                         throw LocalExpenseArchiveError.conflictingStableID(entity: "account", id: account.id)
                     }
                     skippedAccounts += 1
@@ -229,7 +251,7 @@ final class LocalExpensePortability {
                             """,
                         arguments: [
                             account.id.uuidString,
-                            account.profileID.uuidString,
+                            destinationProfileID.uuidString,
                             account.name,
                             account.kind,
                             account.currency,
@@ -255,7 +277,7 @@ final class LocalExpensePortability {
                     arguments: [expense.id.uuidString]
                 )
                 if let existing {
-                    guard Self.expenseMatches(existing, expense) else {
+                    guard Self.expenseMatches(existing, expense, profileID: destinationProfileID) else {
                         throw LocalExpenseArchiveError.conflictingStableID(entity: "expense", id: expense.id)
                     }
                     skippedExpenses += 1
@@ -270,7 +292,7 @@ final class LocalExpensePortability {
                             """,
                         arguments: [
                             expense.id.uuidString,
-                            expense.profileID.uuidString,
+                            destinationProfileID.uuidString,
                             expense.accountID.uuidString,
                             expense.amountMinor,
                             expense.currency,
@@ -299,7 +321,7 @@ final class LocalExpensePortability {
                     arguments: [entry.id.uuidString]
                 )
                 if let existing {
-                    guard Self.entryMatches(existing, entry) else {
+                    guard Self.entryMatches(existing, entry, profileID: destinationProfileID) else {
                         throw LocalExpenseArchiveError.conflictingStableID(entity: "account_entry", id: entry.id)
                     }
                     skippedEntries += 1
@@ -313,7 +335,7 @@ final class LocalExpensePortability {
                             """,
                         arguments: [
                             entry.id.uuidString,
-                            entry.profileID.uuidString,
+                            destinationProfileID.uuidString,
                             entry.accountID.uuidString,
                             entry.direction,
                             entry.amountMinor,
@@ -340,7 +362,7 @@ final class LocalExpensePortability {
                         """,
                     arguments: [
                         operationID().uuidString,
-                        account.profileID.uuidString,
+                        destinationProfileID.uuidString,
                         account.id.uuidString,
                         UUID().uuidString,
                         try Self.outboxPayload(for: account),
@@ -360,7 +382,7 @@ final class LocalExpensePortability {
                         """,
                     arguments: [
                         operationID().uuidString,
-                        expense.profileID.uuidString,
+                        destinationProfileID.uuidString,
                         expense.id.uuidString,
                         expense.deletedAt == nil ? "upsert" : "delete",
                         expense.localVersion,
@@ -468,7 +490,7 @@ final class LocalExpensePortability {
         )
     }
 
-    private static func accountMatches(_ row: Row, _ value: LocalExpenseArchive.Account) -> Bool {
+    private static func accountMatches(_ row: Row, _ value: LocalExpenseArchive.Account, profileID expectedProfileID: UUID? = nil) -> Bool {
         guard let id = UUID(uuidString: row["id"]),
               let profileID = UUID(uuidString: row["profile_id"]) else {
             return false
@@ -479,7 +501,7 @@ final class LocalExpensePortability {
         let currency: String = row["currency"]
         let openingBalanceMinor: Int64 = row["opening_balance_minor"]
         return id == value.id
-            && profileID == value.profileID
+            && profileID == (expectedProfileID ?? value.profileID)
             && name == value.name
             && kind == value.kind
             && currency == value.currency
@@ -487,12 +509,38 @@ final class LocalExpensePortability {
             && createdAt == value.createdAt
     }
 
-    private static func expenseMatches(_ row: Row, _ value: LocalExpenseArchive.Expense) -> Bool {
-        expenseArchive(row) == value
+    private static func expenseMatches(_ row: Row, _ value: LocalExpenseArchive.Expense, profileID: UUID? = nil) -> Bool {
+        let existing = expenseArchive(row)
+        return existing.id == value.id
+            && existing.profileID == (profileID ?? value.profileID)
+            && existing.accountID == value.accountID
+            && existing.amountMinor == value.amountMinor
+            && existing.currency == value.currency
+            && existing.merchantName == value.merchantName
+            && existing.platform == value.platform
+            && existing.category == value.category
+            && existing.paymentMethod == value.paymentMethod
+            && existing.transactionDate == value.transactionDate
+            && existing.transactionTime == value.transactionTime
+            && existing.note == value.note
+            && existing.localVersion == value.localVersion
+            && existing.createdAt == value.createdAt
+            && existing.updatedAt == value.updatedAt
+            && existing.deletedAt == value.deletedAt
     }
 
-    private static func entryMatches(_ row: Row, _ value: LocalExpenseArchive.AccountEntry) -> Bool {
-        entryArchive(row) == value
+    private static func entryMatches(_ row: Row, _ value: LocalExpenseArchive.AccountEntry, profileID: UUID? = nil) -> Bool {
+        let existing = entryArchive(row)
+        return existing.id == value.id
+            && existing.profileID == (profileID ?? value.profileID)
+            && existing.accountID == value.accountID
+            && existing.direction == value.direction
+            && existing.amountMinor == value.amountMinor
+            && existing.entryKind == value.entryKind
+            && existing.sourceKind == value.sourceKind
+            && existing.sourceID == value.sourceID
+            && existing.occurredAt == value.occurredAt
+            && existing.voidedAt == value.voidedAt
     }
 
     private static func outboxPayload(for expense: LocalExpenseArchive.Expense) throws -> String {

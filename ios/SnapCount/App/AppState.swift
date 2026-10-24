@@ -113,6 +113,7 @@ final class AppState: ObservableObject {
     @Published var isSavingSettings = false
     @Published var isCleaningSourceImages = false
     @Published var isExportingData = false
+    @Published var isImportingLocalBackup = false
     @Published var isDeletingAccount = false
 
     private let authService = SupabaseAuthService()
@@ -125,6 +126,7 @@ final class AppState: ObservableObject {
     private let localImageIntakeRepository: LocalImageIntakeRepository?
     private let localRecordPortability: LocalRecordPortability?
     private let localFactPortability: LocalFactPortability?
+    private let localCompleteBackupPortability: LocalCompleteBackupPortability?
     private let inboxRepository: InboxRepositoryProtocol
     private let domainRepository: DomainRepositoryProtocol
     private let snapshotStore: DashboardSnapshotStoreProtocol
@@ -238,6 +240,7 @@ final class AppState: ObservableObject {
         self.localFactPortability = usesDefaultLocalStorage
             ? (localFactPortability ?? Self.defaultLocalFactPortability())
             : localFactPortability
+        self.localCompleteBackupPortability = Self.defaultLocalCompleteBackupPortability()
         self.inboxRepository = inboxRepository
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore
@@ -4889,6 +4892,65 @@ final class AppState: ObservableObject {
         }
     }
 
+    func exportCompleteLocalBackup() async -> NativeExportedFile? {
+        guard !isExportingData, let portability = localCompleteBackupPortability else { return nil }
+        isExportingData = true
+        settingsMessage = nil
+        defer { isExportingData = false }
+        do {
+            let data = try await Task.detached(priority: .userInitiated) {
+                try portability.exportBackup()
+            }.value
+            let filename = "jiezi-local-complete-backup-\(NativeLocalDate.dateKey(Date())).json"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            try data.write(to: url, options: .atomic)
+            return NativeExportedFile(url: url)
+        } catch {
+            settingsMessage = "完整本地备份失败：\(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func previewCompleteLocalBackup(_ data: Data) async throws -> LocalCompleteBackupPreview {
+        guard let portability = localCompleteBackupPortability else { throw LocalDataError.invalidRecord }
+        return try await Task.detached(priority: .userInitiated) {
+            try portability.preview(data)
+        }.value
+    }
+
+    func importCompleteLocalBackup(_ data: Data) async -> Bool {
+        guard !isImportingLocalBackup, let portability = localCompleteBackupPortability else { return false }
+        isImportingLocalBackup = true
+        settingsMessage = nil
+        defer { isImportingLocalBackup = false }
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try portability.importBackupIntoActiveProfile(data)
+            }.value
+            recordDetailCache.removeAll()
+            recordMonthDetails.removeAll()
+            localFactMonths.removeAll()
+            let monthKeys = Set([Self.currentMonthKey, String(selectedDateKey.prefix(7))])
+            if localFactReader != nil {
+                for monthKey in monthKeys { await readDeviceFactMonth(monthKey, force: true) }
+            } else {
+                for monthKey in monthKeys {
+                    await readDeviceExpenseMonth(monthKey, force: true)
+                    await readDeviceRecordMonth(monthKey, force: true)
+                }
+            }
+            if !mayReadRemoteBusinessData {
+                await loadLocalAccounts()
+                await applyLocalStagingProjection()
+            }
+            settingsMessage = "本地恢复完成：新增 \(result.insertedRows) 条，已存在 \(result.skippedRows) 条，恢复 \(result.restoredImages) 张图片。"
+            return true
+        } catch {
+            settingsMessage = "本地恢复失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
     func deleteAccount() async -> Bool {
         guard !isDeletingAccount else { return false }
         let generation = userStateGeneration
@@ -5602,6 +5664,12 @@ final class AppState: ObservableObject {
         guard let database = try? LocalDatabase(),
               let imageStore = try? LocalImageStore() else { return nil }
         return LocalFactPortability(database: database, imageStore: imageStore)
+    }
+
+    private static func defaultLocalCompleteBackupPortability() -> LocalCompleteBackupPortability? {
+        guard let database = try? LocalDatabase(),
+              let imageStore = try? LocalImageStore() else { return nil }
+        return LocalCompleteBackupPortability(database: database, imageStore: imageStore)
     }
 
     private static func defaultLocalBindingRepository() -> LocalBindingRepository? {

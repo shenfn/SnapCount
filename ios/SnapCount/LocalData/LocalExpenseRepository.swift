@@ -1237,6 +1237,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     LEFT JOIN local_account_entries AS entries
                       ON entries.account_id = accounts.id
                      AND entries.voided_at IS NULL
+                     AND entries.entry_kind != 'snapshot_initialization'
                     WHERE accounts.id = ?
                     GROUP BY accounts.id
                     """,
@@ -1507,6 +1508,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                    COALESCE(SUM(CASE entry.direction WHEN 'in' THEN entry.amount_minor WHEN 'out' THEN -entry.amount_minor END), 0) AS delta
             FROM local_accounts account LEFT JOIN local_account_entries entry
               ON entry.account_id = account.id AND entry.voided_at IS NULL
+             AND entry.entry_kind != 'snapshot_initialization'
             WHERE account.id = ? GROUP BY account.id
             """, arguments: [accountID.uuidString]) else { throw LocalDataError.invalidIdentifier }
         let opening: Int64 = row["opening_balance_minor"]

@@ -44,6 +44,34 @@ final class LocalImageStore {
         return LocalImageReference(path: relativePath, hash: hash)
     }
 
+    @discardableResult
+    func restore(data: Data, at relativePath: String, expectedHash: String) throws -> Bool {
+        guard Self.sha256(data) == expectedHash else { throw LocalDataError.invalidRecord }
+        let destination = try validatedURL(for: relativePath)
+        if fileManager.fileExists(atPath: destination.path) {
+            let existing = try Data(contentsOf: destination)
+            guard Self.sha256(existing) == expectedHash, existing == data else {
+                throw LocalDataError.invalidRecord
+            }
+            return false
+        }
+        try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try data.write(to: destination, options: .atomic)
+        do {
+            try fileManager.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: destination.path
+            )
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+        return true
+    }
+
     static func relativePath(owner: String, bucket: String) -> String {
         "\(bucket)/\(sha256(Data(owner.utf8))).jpg"
     }

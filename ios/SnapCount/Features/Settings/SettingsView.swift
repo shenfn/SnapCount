@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
@@ -652,6 +653,11 @@ struct DataExportView: View {
     @EnvironmentObject private var appState: AppState
     @State private var request = NativeDataExportRequest()
     @State private var exportedFile: NativeExportedFile?
+    @State private var backupForImport: Data?
+    @State private var backupPreview: LocalCompleteBackupPreview?
+    @State private var isShowingBackupImporter = false
+    @State private var isShowingBackupConfirmation = false
+    @State private var backupImportError: String?
 
     var body: some View {
         Form {
@@ -679,6 +685,29 @@ struct DataExportView: View {
                 }
                 .disabled(appState.isExportingData)
             }
+            Section("完整本地备份") {
+                Text("包含本机业务事实、账户流水、待处理图片和历史状态；不包含登录、同步授权或 API Key。完整备份遇到缺失图片时会失败。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button {
+                    Task { exportedFile = await appState.exportCompleteLocalBackup() }
+                } label: {
+                    Label("导出可恢复备份", systemImage: "externaldrive.badge.timemachine")
+                }
+                .disabled(appState.isExportingData)
+                Button {
+                    isShowingBackupImporter = true
+                } label: {
+                    if appState.isImportingLocalBackup { ProgressView() }
+                    else { Label("恢复本地备份", systemImage: "arrow.down.doc") }
+                }
+                .disabled(appState.isImportingLocalBackup)
+                if let message = appState.settingsMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(message.contains("失败") ? JieziTheme.coral : JieziTheme.mint)
+                }
+            }
         }
         .navigationTitle("数据导出")
         .scrollContentBackground(.hidden)
@@ -686,6 +715,59 @@ struct DataExportView: View {
         .tint(JieziTheme.brand)
         .sheet(item: $exportedFile) { file in
             ActivityView(activityItems: [file.url])
+        }
+        .fileImporter(isPresented: $isShowingBackupImporter, allowedContentTypes: [.json]) { result in
+            do {
+                let url = try result.get()
+                let hasAccess = url.startAccessingSecurityScopedResource()
+                defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+                let values = try url.resourceValues(forKeys: [.fileSizeKey])
+                guard let size = values.fileSize, size <= 180 * 1024 * 1024 else {
+                    throw LocalCompleteBackupError.archiveTooLarge
+                }
+                let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+                Task {
+                    do {
+                        let preview = try await appState.previewCompleteLocalBackup(data)
+                        backupForImport = data
+                        backupPreview = preview
+                        isShowingBackupConfirmation = true
+                    } catch {
+                        backupImportError = error.localizedDescription
+                    }
+                }
+            } catch {
+                backupImportError = error.localizedDescription
+            }
+        }
+        .confirmationDialog(
+            "确认恢复本地备份？",
+            isPresented: $isShowingBackupConfirmation,
+            titleVisibility: .visible,
+            presenting: backupPreview
+        ) { _ in
+            Button("确认合并并恢复", role: .destructive) {
+                guard let backupForImport else { return }
+                Task {
+                    _ = await appState.importCompleteLocalBackup(backupForImport)
+                    self.backupForImport = nil
+                    self.backupPreview = nil
+                }
+            }
+            Button("取消", role: .cancel) {
+                backupForImport = nil
+                backupPreview = nil
+            }
+        } message: { preview in
+            Text(preview.confirmationText)
+        }
+        .alert("无法读取备份", isPresented: Binding(
+            get: { backupImportError != nil },
+            set: { if !$0 { backupImportError = nil } }
+        )) {
+            Button("好", role: .cancel) { backupImportError = nil }
+        } message: {
+            Text(backupImportError ?? "")
         }
     }
 }
