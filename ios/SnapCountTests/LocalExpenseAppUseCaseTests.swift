@@ -1425,7 +1425,7 @@ private final class LocalWalletSnapshotRepositoryRefreshFailure: LocalWalletSnap
 
     func history(profileID: UUID) throws -> [LocalWalletSnapshot] {
         if failHistoryReads { throw SupabaseRemoteError.requestFailed("wallet_snapshot_refresh_failed") }
-        try base.history(profileID: profileID)
+        return try base.history(profileID: profileID)
     }
 
     func update(_ draft: LocalWalletSnapshotUpdateDraft) throws -> LocalWalletSnapshot {
