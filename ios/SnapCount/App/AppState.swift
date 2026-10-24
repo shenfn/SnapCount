@@ -4791,11 +4791,8 @@ final class AppState: ObservableObject {
 
     private func shouldCreateLocalDomainRecord(for draft: NativeManualRecordDraft) async -> Bool {
         guard let localRecordUseCase else { return false }
-        if !isSignedIn { return true }
-        guard let existingRawId = draft.existingRawId,
-              let existingID = UUID(uuidString: existingRawId) else {
-            return false
-        }
+        guard let existingRawId = draft.existingRawId else { return true }
+        guard let existingID = UUID(uuidString: existingRawId) else { return false }
         return (try? await localRecordUseCase.record(id: existingID)) != nil
     }
 

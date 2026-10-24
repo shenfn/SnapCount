@@ -330,9 +330,9 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         XCTAssertEqual(harness.sessionCounter.current, 0, "未登录手动创建不应触发任何会话查询")
     }
 
-    // MARK: - LF-002（Q-08）：登录态四域手动创建 → 走云端，不落本地事实层
+    // MARK: - LF-034.03：登录不改变四域手动创建的本地事实路径
 
-    func testLOCALP1LF002SignedInManualUniversalRecordRoutesToCloudInsteadOfLocalFacts() async throws {
+    func testLF03403SignedInManualUniversalRecordWritesLocalFactsWithoutCloudCreation() async throws {
         let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
         defer { harness.cleanup() }
         let state = harness.state
@@ -345,15 +345,14 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         let saved = await state.createManualRecord(draft, domain: nil)
 
         XCTAssertTrue(saved)
-        XCTAssertEqual(state.manualRecordMessage, "记录已保存")
-        XCTAssertEqual(harness.recordSpy.createDrafts.count, 1)
-        XCTAssertEqual(harness.recordSpy.createDrafts.first?.domainKey, "sport")
+        XCTAssertEqual(state.manualRecordMessage, "记录已保存（本机）")
+        XCTAssertTrue(harness.recordSpy.createDrafts.isEmpty)
 
         let monthKey = NativeMonthKey.current()
         let facts = try harness.factReader.month(profileID: harness.profile.id, monthKey: monthKey)
-        XCTAssertTrue(facts.facts.isEmpty, "登录态新建不应写入本地事实层")
-        XCTAssertTrue(state.recordGroups(monthKey: monthKey).flatMap(\.records).isEmpty)
-        XCTAssertGreaterThanOrEqual(harness.sessionCounter.current, 1, "登录态新建应走云端链路")
+        XCTAssertEqual(facts.facts.map(\.domainKey), ["sport"])
+        XCTAssertTrue(state.recordGroups(monthKey: monthKey).flatMap(\.records).contains { $0.domainKey == "sport" })
+        XCTAssertEqual(harness.sessionCounter.current, 0, "登录态本地新建不应读取会话或触发云端写入")
     }
 
     // MARK: - DM-014：已登录但未确认绑定 → 不发生云端与本地静默拼接
