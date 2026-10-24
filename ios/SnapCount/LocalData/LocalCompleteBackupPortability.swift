@@ -16,6 +16,7 @@ struct LocalCompleteBackupPreview: Equatable {
         let expenses = tableCounts["local_expenses", default: 0]
         let incomes = tableCounts["local_income_records", default: 0]
         let records = tableCounts["local_records", default: 0]
+        let wallets = tableCounts["local_wallet_snapshots", default: 0]
         let candidates = tableCounts["local_staging_records", default: 0]
         let ledger = tableCounts["local_account_entries", default: 0]
             + tableCounts["local_repayment_cycles", default: 0]
@@ -23,7 +24,7 @@ struct LocalCompleteBackupPreview: Equatable {
         let imageSize = ByteCountFormatter.string(fromByteCount: Int64(imageBytes), countStyle: .file)
         let scope = [
             "账户 \(accounts)", "消费 \(expenses)", "收入 \(incomes)",
-            "其他记录 \(records)", "候选 \(candidates)", "账务关系/历史 \(ledger)"
+            "其他记录 \(records)", "钱包快照 \(wallets)", "候选 \(candidates)", "账务关系/历史 \(ledger)"
         ].joined(separator: "、")
         return "\(formatName) v\(schemaVersion)。\(scope)。共 \(totalRows) 条，图片 \(imageCount) 张（\(imageSize)）。导入会合并到本机当前数据；冲突时整包回滚。不会恢复登录、同步授权或 API Key。"
     }
@@ -61,7 +62,7 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 15
+    static let currentSchemaVersion = 16
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
     private static let maximumImageBytes = 128 * 1024 * 1024
     private static let maximumArchiveBytes = 180 * 1024 * 1024
@@ -76,7 +77,8 @@ final class LocalCompleteBackupPortability {
         "local_repayment_cycles",
         "local_liability_payments",
         "local_account_entries",
-        "local_image_intakes"
+        "local_image_intakes",
+        "local_wallet_snapshots"
     ]
 
     private let database: LocalDatabase
@@ -112,7 +114,8 @@ final class LocalCompleteBackupPortability {
             for (table, condition) in [
                 ("local_records", "deleted_at IS NULL"),
                 ("local_staging_records", "status IN ('pending_review', 'failed')"),
-                ("local_image_intakes", "status IN ('failed', 'receiving')")
+                ("local_image_intakes", "status IN ('failed', 'receiving')"),
+                ("local_wallet_snapshots", "deleted_at IS NULL")
             ] {
                 for row in try Row.fetchAll(
                     db,
@@ -228,7 +231,11 @@ final class LocalCompleteBackupPortability {
                             incoming["id"] = targetID
                             incoming["profile_id"] = targetProfileID.uuidString
                             Self.normalizeInterruptedIntake(&incoming)
-                            guard try Self.canonicalJSON(existing) == Self.canonicalJSON(incoming) else {
+                            let existingObject = try JSONSerialization.jsonObject(
+                                with: Data(existing.utf8),
+                                options: [.fragmentsAllowed]
+                            )
+                            guard try Self.canonicalJSON(existingObject) == Self.canonicalJSON(incoming) else {
                                 throw LocalCompleteBackupError.conflictingStableID(id)
                             }
                             skipped.insert("\(table):\(id)")
@@ -309,18 +316,25 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard archive.schemaVersion == Self.currentSchemaVersion else {
+        guard archive.schemaVersion == Self.currentSchemaVersion || archive.schemaVersion == 15 else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
+        var tables = archive.tables
+        let archiveTables = Set(tables.keys)
+        let legacyTables = Set(Self.tableNames.dropLast())
+        let hasCurrentTables = archive.schemaVersion == Self.currentSchemaVersion
+            && archiveTables == Set(Self.tableNames)
+        let hasLegacyTables = archive.schemaVersion == 15 && archiveTables == legacyTables
         guard UUID(uuidString: archive.profileID) != nil,
-              Set(archive.tables.keys) == Set(Self.tableNames) else {
+              hasCurrentTables || hasLegacyTables else {
             throw LocalCompleteBackupError.invalidFormat
         }
+        if hasLegacyTables { tables["local_wallet_snapshots"] = "[]" }
 
         var rows: [String: [[String: Any]]] = [:]
         var totalRows = 0
         for table in Self.tableNames {
-            guard let json = archive.tables[table],
+            guard let json = tables[table],
                   let value = try? JSONSerialization.jsonObject(with: Data(json.utf8)),
                   let tableRows = value as? [[String: Any]] else {
                 throw LocalCompleteBackupError.invalidRows(table)
@@ -368,7 +382,8 @@ final class LocalCompleteBackupPortability {
         for (table, statusField, activeStatuses) in [
             ("local_records", "deleted_at", Set(["active"])),
             ("local_staging_records", "status", Set(["pending_review", "failed"])),
-            ("local_image_intakes", "status", Set(["receiving", "failed"]))
+            ("local_image_intakes", "status", Set(["receiving", "failed"])),
+            ("local_wallet_snapshots", "deleted_at", Set<String>())
         ] {
             for row in rows[table] ?? [] {
                 let active: Bool

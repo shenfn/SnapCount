@@ -369,9 +369,15 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         ))
         let imageStore = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images", isDirectory: true))
         let localRecords = try LocalRecordRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
         let state = AppState(
             localExpenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: repository),
             localRecordUseCase: LocalRecordUseCase(profileStore: profileStore, repository: localRecords, imageStore: imageStore),
+            localWalletSnapshotUseCase: LocalWalletSnapshotUseCase(
+                profileStore: profileStore,
+                repository: walletRepository,
+                imageStore: imageStore
+            ),
             localImageStore: imageStore,
             sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
         )
@@ -381,6 +387,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         draft.title = "微信零钱"
         draft.walletRecordKind = "cash_snapshot"
         draft.walletAccountType = "wechat"
+        draft.imageData = Data("synthetic wallet snapshot image".utf8)
         draft.date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-25T04:00:00Z"))
         draft.time = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-25T06:30:00Z"))
         draft.includesTime = true
@@ -389,16 +396,57 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
 
         XCTAssertTrue(saved, "离线手工钱包快照应保存在本地")
         guard saved else { return }
+        let snapshot = try XCTUnwrap(walletRepository.unlinked(profileID: profile.id).first)
+        await state.loadWalletSnapshots()
+        XCTAssertEqual(state.localWalletSnapshots.map(\.id), [snapshot.id])
+        let imageData = try XCTUnwrap(draft.imageData)
+        XCTAssertEqual(snapshot.balanceMinor, 50_000)
+        XCTAssertEqual(snapshot.occurredAt, draft.occurredAt)
+        XCTAssertEqual(snapshot.imageHash, LocalImageStore.sha256(imageData))
+        XCTAssertEqual(try imageStore.data(at: try XCTUnwrap(snapshot.imagePath)), imageData)
         let occurredAtText = try await database.writer.read { db -> String? in
             guard let row = try Row.fetchOne(db, sql: "SELECT occurred_at FROM local_wallet_snapshots ORDER BY id LIMIT 1") else {
                 return nil
             }
             return row["occurred_at"]
         }
-        let occurredAt = try XCTUnwrap(occurredAtText.flatMap(ISO8601DateFormatter().date(from:)))
-        XCTAssertEqual(occurredAt.timeIntervalSince1970, 1_792_909_800, accuracy: 1)
+        let occurredAt = try XCTUnwrap(occurredAtText)
+        XCTAssertEqual(occurredAt, draft.occurredAt)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 10_000)
         XCTAssertTrue(try repository.accountEntries(accountID: account.id).isEmpty)
+
+        let backup = LocalCompleteBackupPortability(database: database, imageStore: imageStore)
+        let data = try backup.exportBackup()
+        let preview = try backup.preview(data)
+        XCTAssertEqual(preview.tableCounts["local_wallet_snapshots"], 1)
+        XCTAssertEqual(preview.imageCount, 1)
+        XCTAssertTrue(preview.confirmationText.contains("钱包快照 1"))
+
+        let restoredDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-restore-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: restoredDirectory) }
+        let restoredDatabase = try LocalDatabase(databaseURL: restoredDirectory.appendingPathComponent("local.sqlite"))
+        let restoredProfile = try LocalProfileStore(database: restoredDatabase).activeProfile()
+        let restoredImages = try LocalImageStore(rootDirectory: restoredDirectory.appendingPathComponent("images", isDirectory: true))
+        let restored = try LocalCompleteBackupPortability(database: restoredDatabase, imageStore: restoredImages)
+            .importBackup(data, into: restoredProfile.id)
+        XCTAssertEqual(restored.insertedRows, preview.totalRows)
+        XCTAssertEqual(restored.restoredImages, 1)
+        let restoredSnapshot = try XCTUnwrap(
+            LocalWalletSnapshotRepository(database: restoredDatabase).unlinked(profileID: restoredProfile.id).first
+        )
+        XCTAssertEqual(restoredSnapshot.id, snapshot.id)
+        XCTAssertEqual(restoredSnapshot.profileID, restoredProfile.id)
+        XCTAssertEqual(restoredSnapshot.title, snapshot.title)
+        XCTAssertEqual(restoredSnapshot.summary, snapshot.summary)
+        XCTAssertEqual(restoredSnapshot.payloadJSON, snapshot.payloadJSON)
+        XCTAssertEqual(restoredSnapshot.recordDate, snapshot.recordDate)
+        XCTAssertEqual(restoredSnapshot.recordTime, snapshot.recordTime)
+        XCTAssertEqual(restoredSnapshot.balanceMinor, snapshot.balanceMinor)
+        XCTAssertEqual(restoredSnapshot.occurredAt, snapshot.occurredAt)
+        XCTAssertEqual(restoredSnapshot.imageHash, snapshot.imageHash)
+        XCTAssertEqual(try restoredImages.data(at: try XCTUnwrap(snapshot.imagePath)), imageData)
+        XCTAssertEqual(try LocalExpenseRepository(database: restoredDatabase).accountBalanceMinor(accountID: account.id), 10_000)
     }
 
     func testLocalExpenseDetailUsesStableReferenceAndLocalOnlyFields() {

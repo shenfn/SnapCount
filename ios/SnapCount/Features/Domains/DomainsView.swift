@@ -386,13 +386,16 @@ struct DomainDetailView: View {
                 Text(message).font(.footnote).foregroundStyle(JieziTheme.brand)
             }
 
-            if appState.walletSnapshots.isEmpty, !appState.isLoadingWalletSnapshots {
+            if appState.walletSnapshots.isEmpty,
+               appState.localWalletSnapshots.isEmpty,
+               !appState.isLoadingWalletSnapshots {
                 Text("没有待关联的钱包快照")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 8)
-            } else {
+            }
+            if !appState.walletSnapshots.isEmpty {
                 ForEach(appState.walletSnapshots.prefix(5)) { snapshot in
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .top) {
@@ -425,6 +428,29 @@ struct DomainDetailView: View {
                         .disabled(appState.walletSnapshotActionId != nil)
                     }
                     .padding(15)
+                    .jieziPrototypePanel()
+                }
+            }
+
+            if !appState.localWalletSnapshots.isEmpty {
+                Text("本机快照")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(JieziTheme.ink)
+                ForEach(appState.localWalletSnapshots.prefix(5)) { snapshot in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: snapshot.kind == .liability ? "creditcard" : "wallet.pass")
+                            .foregroundStyle(JieziTheme.brand)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(snapshot.title).font(.headline)
+                            Text([snapshot.recordDate, snapshot.recordTime].compactMap { $0 }.joined(separator: " "))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(String(format: "¥%.2f", snapshot.balance))
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                    }
+                    .padding(12)
                     .jieziPrototypePanel()
                 }
             }

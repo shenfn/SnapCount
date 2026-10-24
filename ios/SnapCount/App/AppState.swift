@@ -95,6 +95,7 @@ final class AppState: ObservableObject {
     @Published var isLoadingUnboundRecords = false
     @Published var isBindingUnboundRecords = false
     @Published var walletSnapshots: [NativeWalletSnapshot] = []
+    @Published var localWalletSnapshots: [LocalWalletSnapshot] = []
     @Published var isLoadingWalletSnapshots = false
     @Published var walletSnapshotActionId: String?
     @Published var walletSnapshotMessage: String?
@@ -121,6 +122,7 @@ final class AppState: ObservableObject {
     private let recordRepository: RecordRepositoryProtocol
     private let localExpenseUseCase: LocalExpenseUseCaseProtocol?
     private let localRecordUseCase: LocalRecordUseCaseProtocol?
+    private let localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol?
     private let localFactReader: LocalFactReader?
     private let localImageStore: LocalImageStore?
     private let localImageIntakeRepository: LocalImageIntakeRepository?
@@ -194,6 +196,7 @@ final class AppState: ObservableObject {
         recordRepository: RecordRepositoryProtocol = RecordRepository(),
         localExpenseUseCase: LocalExpenseUseCaseProtocol? = nil,
         localRecordUseCase: LocalRecordUseCaseProtocol? = nil,
+        localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol? = nil,
         localFactReader: LocalFactReader? = nil,
         localImageStore: LocalImageStore? = nil,
         localImageIntakeRepository: LocalImageIntakeRepository? = nil,
@@ -232,6 +235,8 @@ final class AppState: ObservableObject {
         self.localExpenseUseCase = localExpenseUseCase ?? Self.defaultLocalExpenseUseCase()
         self.localRecordUseCase = localRecordUseCase ?? Self.defaultLocalRecordUseCase()
         let usesDefaultLocalStorage = localExpenseUseCase == nil && localRecordUseCase == nil
+        self.localWalletSnapshotUseCase = localWalletSnapshotUseCase
+            ?? (usesDefaultLocalStorage ? Self.defaultLocalWalletSnapshotUseCase() : nil)
         self.localFactReader = usesDefaultLocalStorage
             ? (localFactReader ?? Self.defaultLocalFactReader())
             : localFactReader
@@ -2885,6 +2890,20 @@ final class AppState: ObservableObject {
         walletSnapshotMessage = nil
         defer { isLoadingWalletSnapshots = false }
 
+        if let localWalletSnapshotUseCase {
+            do {
+                let loaded = try await localWalletSnapshotUseCase.unlinked()
+                guard generation == userStateGeneration else { return }
+                localWalletSnapshots = loaded
+            } catch {
+                guard generation == userStateGeneration else { return }
+                walletSnapshotMessage = error.localizedDescription
+            }
+        }
+        guard mayReadRemoteBusinessData else {
+            walletSnapshots = []
+            return
+        }
         do {
             let session = try await validSession()
             async let snapshotRows = walletSnapshotRepository.fetchUnlinked(accessToken: session.accessToken)
@@ -5303,6 +5322,7 @@ final class AppState: ObservableObject {
         unboundRecordsMessage = nil
         unboundBindingMessage = nil
         walletSnapshots = []
+        localWalletSnapshots = []
         isLoadingWalletSnapshots = false
         walletSnapshotActionId = nil
         walletSnapshotMessage = nil
@@ -5585,6 +5605,10 @@ final class AppState: ObservableObject {
         _ draft: NativeManualRecordDraft,
         domain: NativeDomainDefinition?
     ) async throws -> Bool {
+        if draft.kind == .universal, draft.domainKey == "wallet",
+           draft.existingRawId == nil, localWalletSnapshotUseCase != nil {
+            return try await createLocalWalletSnapshot(draft, domain: domain)
+        }
         if draft.kind == .expense, localExpenseUseCase != nil {
             return try await createLocalExpense(draft)
         }
@@ -5598,6 +5622,40 @@ final class AppState: ObservableObject {
             return try await createLocalDomainRecord(draft, domain: domain)
         }
         return try await createRemoteManualRecord(draft, domain: domain)
+    }
+
+    private func createLocalWalletSnapshot(
+        _ draft: NativeManualRecordDraft,
+        domain: NativeDomainDefinition?
+    ) async throws -> Bool {
+        guard let localWalletSnapshotUseCase, draft.existingRawId == nil,
+              draft.validationMessage(domain: domain) == nil else {
+            throw LocalDataError.invalidRecord
+        }
+        let amountMinor = try LocalExpenseMapper.amountMinor(draft.primaryValueText)
+        let payload = draft.universalPayload(domain: domain)
+        _ = try await localWalletSnapshotUseCase.create(LocalWalletSnapshotCommand(
+            id: UUID(),
+            title: draft.resolvedTitle(domain: domain),
+            summary: draft.resolvedSummary(domain: domain),
+            payload: payload,
+            recordDate: draft.dateKey,
+            recordTime: draft.timeKey,
+            occurredAt: draft.occurredAt,
+            balanceMinor: amountMinor,
+            currency: "CNY",
+            kind: draft.walletRecordKind == "liability_snapshot" ? .liability : .asset,
+            imageData: draft.imageData,
+            createdAt: Date()
+        ))
+        do {
+            localWalletSnapshots = try await localWalletSnapshotUseCase.unlinked()
+        } catch {
+            manualRecordMessage = "快照已保存在本机，但列表刷新失败：\(error.localizedDescription)"
+            return true
+        }
+        manualRecordMessage = "钱包快照已保存（本机）"
+        return true
     }
 
     private func shouldCreateLocalDomainRecord(for draft: NativeManualRecordDraft) async -> Bool {
@@ -5656,6 +5714,17 @@ final class AppState: ObservableObject {
               let repository = try? LocalRecordRepository(database: database),
               let imageStore = try? LocalImageStore() else { return nil }
         return LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: repository,
+            imageStore: imageStore
+        )
+    }
+
+    private static func defaultLocalWalletSnapshotUseCase() -> LocalWalletSnapshotUseCaseProtocol? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalWalletSnapshotRepository(database: database),
+              let imageStore = try? LocalImageStore() else { return nil }
+        return LocalWalletSnapshotUseCase(
             profileStore: LocalProfileStore(database: database),
             repository: repository,
             imageStore: imageStore

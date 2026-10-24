@@ -159,6 +159,27 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 2)
     }
 
+    func testLF02111Version15CompleteBackupRemainsImportableAfterWalletTableWasAdded() throws {
+        let source = try makeEmptyFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let currentData = try source.portability.exportBackup()
+        var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: currentData) as? [String: Any])
+        var tables = try XCTUnwrap(archive["tables"] as? [String: String])
+        XCTAssertNotNil(tables.removeValue(forKey: "local_wallet_snapshots"))
+        archive["tables"] = tables
+        archive["schemaVersion"] = 15
+        let version15 = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
+
+        let preview = try target.portability.preview(version15)
+        XCTAssertEqual(preview.schemaVersion, 15)
+        XCTAssertEqual(preview.tableCounts["local_wallet_snapshots"], 0)
+        let targetProfile = try target.profileStore.activeProfile()
+        let imported = try target.portability.importBackup(version15, into: targetProfile.id)
+        XCTAssertEqual(imported.insertedRows, preview.totalRows)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_wallet_snapshots"), 0)
+    }
+
     private func count(_ database: LocalDatabase, _ sql: String) throws -> Int {
         try database.writer.read { db in
             try Int.fetchOne(db, sql: sql) ?? 0

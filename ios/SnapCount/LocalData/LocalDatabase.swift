@@ -439,6 +439,33 @@ final class LocalDatabase {
                 BEGIN SELECT RAISE(ABORT, 'grace period must be between 0 and 60 days'); END;
                 """)
         }
+        migrator.registerMigration("local-v16-wallet-snapshot-facts") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_wallet_snapshots (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    record_date TEXT NOT NULL,
+                    record_time TEXT,
+                    occurred_at TEXT,
+                    snapshot_balance_minor INTEGER NOT NULL CHECK (snapshot_balance_minor >= 0),
+                    currency TEXT NOT NULL,
+                    account_snapshot_kind TEXT NOT NULL CHECK (account_snapshot_kind IN ('asset', 'liability')),
+                    linked_account_id TEXT REFERENCES local_accounts(id) ON DELETE SET NULL,
+                    image_path TEXT,
+                    image_hash TEXT,
+                    local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    deleted_at DATETIME
+                );
+
+                CREATE INDEX local_wallet_snapshots_profile_date_idx
+                    ON local_wallet_snapshots(profile_id, record_date DESC, occurred_at DESC, created_at DESC);
+                """)
+        }
         return migrator
     }
 }
