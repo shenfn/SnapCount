@@ -188,7 +188,21 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     """, arguments: [update.id.uuidString]) != nil
                 let hasExpenses = try Row.fetchOne(db, sql: "SELECT 1 FROM local_expenses WHERE account_id = ? LIMIT 1", arguments: [update.id.uuidString]) != nil
                 let hasIncome = try Row.fetchOne(db, sql: "SELECT 1 FROM local_income_records WHERE account_id = ? LIMIT 1", arguments: [update.id.uuidString]) != nil
-                guard !(hasEntries || hasExpenses || hasIncome) else { throw LocalDataError.invalidAccountKind }
+                let hasCycleReference = try Row.fetchOne(db, sql: """
+                    SELECT 1 FROM local_repayment_cycles
+                    WHERE profile_id = ? AND (account_id = ? OR auto_debit_account_id = ?) LIMIT 1
+                    """, arguments: [update.profileID.uuidString, update.id.uuidString, update.id.uuidString]) != nil
+                let hasPaymentReference = try Row.fetchOne(db, sql: """
+                    SELECT 1 FROM local_liability_payments
+                    WHERE profile_id = ? AND (account_id = ? OR debit_account_id = ?) LIMIT 1
+                    """, arguments: [update.profileID.uuidString, update.id.uuidString, update.id.uuidString]) != nil
+                let hasAutoDebitReference = try Row.fetchOne(db, sql: """
+                    SELECT 1 FROM local_accounts
+                    WHERE profile_id = ? AND id != ? AND auto_debit_account_id = ? LIMIT 1
+                    """, arguments: [update.profileID.uuidString, update.id.uuidString, update.id.uuidString]) != nil
+                guard !(hasEntries || hasExpenses || hasIncome || hasCycleReference || hasPaymentReference || hasAutoDebitReference) else {
+                    throw LocalDataError.invalidAccountKind
+                }
             }
             try Self.validateAccountConfiguration(
                 kind: update.kind, last4: update.last4, billDay: update.billDay,
