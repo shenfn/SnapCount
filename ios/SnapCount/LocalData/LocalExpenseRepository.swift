@@ -527,13 +527,13 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             let currentSource: String = cycleRow["source"]
             try db.execute(sql: """
                 UPDATE local_repayment_cycles SET paid_amount_minor = ?, remaining_amount_minor = ?,
-                    carried_over_amount_minor = ?, status = ?, auto_debit_account_id = ?,
+                    carried_over_amount_minor = ?, status = ?,
                     source = ?, note = COALESCE(?, note), confirmed_at = ?,
                     local_version = local_version + 1, updated_at = ?
                 WHERE id = ? AND profile_id = ?
                 """, arguments: [paidAmountMinor, finalRemaining,
                                   cycleStatus == "carried_over" ? remaining : 0, cycleStatus,
-                                  effectiveDebitID?.uuidString, currentSource == "system" ? "manual" : currentSource,
+                                  currentSource == "system" ? "manual" : currentSource,
                                   note.isEmpty ? nil : note,
                                   (paidAmountMinor > 0 || ["paid", "ignored"].contains(cycleStatus)) ? paidAt : nil,
                                   paidAt, cycleID.uuidString, profileID.uuidString])
