@@ -435,6 +435,58 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertTrue(stagingRecords.isEmpty)
     }
 
+    func testLF00803ConcurrentAppAndShortcutIngestShareOneActiveImageClaim() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+
+        let imageData = Data("lf008-app-shortcut-race".utf8)
+        let provider = DelayedLocalImageRecognitionProvider(candidate: makeCandidate())
+        let appUseCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+        let shortcutUseCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: StubLocalImageRecognitionProvider(candidate: makeCandidate())
+        )
+        let appTask = Task {
+            try await appUseCase.ingest(imageData: imageData, captureKind: "camera", filename: "app.jpg")
+        }
+
+        for _ in 0..<100 where provider.callCount == 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(provider.callCount, 1, "第一条入口应已取得持久化认领并进入Provider")
+
+        do {
+            _ = try await shortcutUseCase.ingest(
+                imageData: imageData, captureKind: "screenshot", filename: "shortcut.jpg"
+            )
+            XCTFail("并发的快捷指令入口不得启动第二次识别")
+        } catch {
+            XCTAssertEqual(error as? LocalImageRecognitionError, .alreadyInProgress)
+        }
+
+        let outcome = try await appTask.value
+        guard case .archived = outcome.result else {
+            return XCTFail("唯一一次识别应保存一个正式本地事实")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .completed)
+        XCTAssertEqual(provider.callCount, 1)
+        XCTAssertFalse(context.imageStore.contains(path: intake.imagePath))
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        let stagingRecords = try await context.useCase.stagingRecords()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertTrue(stagingRecords.isEmpty)
+    }
+
     @MainActor
     func testLF00803ImageIntakeClaimIsExclusiveAndInterruptedClaimCanBeRecovered() async throws {
         let context = try makeContext()
@@ -632,6 +684,29 @@ private final class StubLocalImageRecognitionProvider: LocalImageRecognitionProv
         callCount += 1
         if let failure { throw failure }
         guard let candidate else { throw StubProviderError.missingCandidate }
+        return candidate
+    }
+}
+
+private final class DelayedLocalImageRecognitionProvider: LocalImageRecognitionProvider, @unchecked Sendable {
+    private let candidate: LocalRecognitionCandidate
+    private let lock = NSLock()
+    private var requests = 0
+
+    var callCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return requests
+    }
+
+    init(candidate: LocalRecognitionCandidate) {
+        self.candidate = candidate
+    }
+
+    func recognize(_ request: LocalImageRecognitionRequest) async throws -> LocalRecognitionCandidate {
+        lock.lock()
+        requests += 1
+        lock.unlock()
+        try await Task.sleep(nanoseconds: 1_000_000_000)
         return candidate
     }
 }
