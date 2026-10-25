@@ -533,6 +533,21 @@ final class LocalDatabase {
                     WHERE evidence_staging_id IS NOT NULL;
                 """)
         }
+        migrator.registerMigration("local-v21-history-migration-checkpoint") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_history_migrations (
+                    profile_id TEXT PRIMARY KEY NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    cloud_user_id TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (generation > 0),
+                    status TEXT NOT NULL CHECK (status IN ('running', 'paused', 'completed')),
+                    pull_cursor TEXT,
+                    imported_row_count INTEGER NOT NULL DEFAULT 0 CHECK (imported_row_count >= 0),
+                    started_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    completed_at DATETIME
+                );
+                """)
+        }
         return migrator
     }
 }
