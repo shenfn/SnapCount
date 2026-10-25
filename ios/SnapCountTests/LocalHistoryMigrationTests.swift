@@ -12,6 +12,10 @@ final class LocalHistoryMigrationTests: XCTestCase {
         let profile = try LocalProfileStore(database: database).activeProfile()
         let store = LocalHistoryMigrationStore(database: database)
         let startedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertThrowsError(try store.startOrResume(profileID: profile.id, cloudUserID: "  ")) { error in
+            XCTAssertEqual(error as? LocalHistoryMigrationError, .invalidCloudIdentity)
+        }
+        XCTAssertNil(try store.state(profileID: profile.id))
         let firstRun = try store.startOrResume(profileID: profile.id, cloudUserID: "synthetic-user-a", at: startedAt)
 
         let firstRecordID = UUID()

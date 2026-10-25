@@ -21,6 +21,7 @@ struct LocalHistoryMigrationState: Equatable {
 
 enum LocalHistoryMigrationError: Error, Equatable {
     case invalidWorkspace
+    case invalidCloudIdentity
     case identityMismatch
     case alreadyCompleted
     case staleAttempt
@@ -35,6 +36,9 @@ final class LocalHistoryMigrationStore {
     }
 
     func startOrResume(profileID: UUID, cloudUserID: String, at now: Date = Date()) throws -> LocalHistoryMigrationState {
+        guard !cloudUserID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw LocalHistoryMigrationError.invalidCloudIdentity
+        }
         try database.writer.write { db in
             guard try Int.fetchOne(
                 db,
