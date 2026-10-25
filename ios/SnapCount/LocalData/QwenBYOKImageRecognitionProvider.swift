@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 enum QwenBYOKError: Error, Equatable, LocalizedError {
     case missingKey
@@ -23,7 +25,7 @@ enum QwenBYOKError: Error, Equatable, LocalizedError {
 final class QwenBYOKImageRecognitionProvider: LocalImageRecognitionProvider {
     static let model = "qwen3.6-flash"
     static let endpoint = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")!
-    private static let maximumImageBytes = 20 * 1024 * 1024
+    static let maximumImageBytes = 20 * 1024 * 1024
 
     private let apiKey: String
     private let session: URLSession
@@ -38,7 +40,8 @@ final class QwenBYOKImageRecognitionProvider: LocalImageRecognitionProvider {
             throw QwenBYOKError.missingKey
         }
         guard !request.imageData.isEmpty,
-              request.imageData.count <= Self.maximumImageBytes else {
+              request.imageData.count <= Self.maximumImageBytes,
+              Self.isValidJPEG(request.imageData) else {
             throw QwenBYOKError.invalidImage
         }
 
@@ -111,6 +114,21 @@ final class QwenBYOKImageRecognitionProvider: LocalImageRecognitionProvider {
             missingFields: candidate.missingFields ?? [],
             imageHash: candidate.imageHash
         )
+    }
+
+    private static func isValidJPEG(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              let sourceType = CGImageSourceGetType(source),
+              UTType(sourceType as String)?.conforms(to: .jpeg) == true else {
+            return false
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1,
+            kCGImageSourceShouldCacheImmediately: false
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) != nil
     }
 }
 

@@ -356,6 +356,10 @@ final class LocalImageRecognitionUseCase {
     }
 
     private static func safeFailureMessage(for error: Error) -> String {
+        if let providerError = error as? QwenBYOKError,
+           providerError == .invalidImage {
+            return providerError.localizedDescription
+        }
         if let recognitionError = error as? LocalImageRecognitionError,
            case .unsupportedDomain(let domainKey) = recognitionError {
             return "本地暂不支持数据域：\(domainKey)"

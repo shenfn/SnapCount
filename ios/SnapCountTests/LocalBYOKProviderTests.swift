@@ -25,8 +25,12 @@ final class LocalBYOKProviderTests: XCTestCase {
         XCTAssertEqual(candidate.domainKey, "food")
         XCTAssertEqual(candidate.title, "早餐")
         let body = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
+        let bodyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let messages = try XCTUnwrap(bodyObject["messages"] as? [[String: Any]])
+        let content = try XCTUnwrap(messages.first?["content"] as? [[String: Any]])
+        let imageURL = try XCTUnwrap(content.last?["image_url"] as? [String: String])
+        XCTAssertEqual(imageURL["url"], "data:image/jpeg;base64,\(image.base64EncodedString())")
         let bodyText = String(decoding: body, as: UTF8.self)
-        XCTAssertTrue(bodyText.contains(image.base64EncodedString()))
         XCTAssertFalse(bodyText.contains(fakeKey))
         XCTAssertFalse(bodyText.contains("private-name.jpg"))
         XCTAssertFalse(request.url!.absoluteString.contains("supabase"))
@@ -147,7 +151,29 @@ final class LocalBYOKProviderTests: XCTestCase {
         let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(corruptBytes))"
         let intake = try XCTUnwrap(intakeRepository.intake(id: intakeID, profileID: profile.id))
         XCTAssertEqual(intake.status, .failed)
+        XCTAssertEqual(intake.failureMessage, QwenBYOKError.invalidImage.localizedDescription)
         XCTAssertEqual(try imageStore.data(at: intake.imagePath), corruptBytes)
+        XCTAssertNil(BYOKURLProtocolStub.capturedRequest)
+    }
+
+    func testLF03505BYOKSupplierLimitIsCheckedBeforeRequestCreation() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BYOKURLProtocolStub.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data())
+        let provider = QwenBYOKImageRecognitionProvider(apiKey: "sk-test-size-limit", session: session)
+
+        do {
+            _ = try await provider.recognize(LocalImageRecognitionRequest(
+                imageData: Data(repeating: 0xFF, count: QwenBYOKImageRecognitionProvider.maximumImageBytes + 1),
+                captureKind: "shortcut", filename: "oversized.jpg", uploadToken: nil
+            ))
+            XCTFail("provider size limit must reject oversized input")
+        } catch let error as QwenBYOKError {
+            XCTAssertEqual(error, .invalidImage)
+        }
+
         XCTAssertNil(BYOKURLProtocolStub.capturedRequest)
     }
 
