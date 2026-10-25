@@ -813,6 +813,72 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(cycle.confidence, 0.98)
     }
 
+    func testLF03729ValidDueDateCanIdentifySnapshotCycleWithoutUsingRecordDate() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-due-date-cycle-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(
+            profileStore: profileStore,
+            repository: LocalWalletSnapshotRepository(database: database)
+        )
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "账单到期信息", summary: "只有有效到期日作为账期身份",
+            payload: ["account_type": AnyCodable("credit_card"), "due_date": AnyCodable("2026-11-05")],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 12_500, currency: "CNY", kind: .liability,
+            imageData: nil, createdAt: Date()
+        ))
+
+        let result = try await useCase.createAccount(from: snapshot)
+        let cycle = try XCTUnwrap(expenseRepository.repaymentCycles(accountID: result.account.id).first)
+
+        XCTAssertFalse(result.reviewRequired)
+        XCTAssertEqual(cycle.cycleMonth, "2026-11")
+        XCTAssertEqual(cycle.dueDate, "2026-11-05")
+    }
+
+    func testLF03726SnapshotDueDayThirtyOneClampsToFebruaryEnd() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-snapshot-february-due-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(
+            profileStore: profileStore,
+            repository: LocalWalletSnapshotRepository(database: database)
+        )
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "账单日31信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 50_000, createdAt: Date(), paymentDueDay: 31
+        ))
+
+        for (month, recordDate, expectedDueDate) in [
+            ("2025-02", "2025-02-25", "2025-02-28"),
+            ("2024-02", "2024-02-25", "2024-02-29")
+        ] {
+            let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+                id: UUID(), title: "二月账单", summary: "月底到期日裁剪",
+                payload: ["cycle_month": AnyCodable(month), "status": AnyCodable("pending")],
+                recordDate: recordDate, recordTime: nil, occurredAt: nil,
+                balanceMinor: 12_500, currency: "CNY", kind: .liability,
+                imageData: nil, createdAt: Date()
+            ))
+
+            let result = try await useCase.link(snapshot, to: account.id)
+            let cycle = try XCTUnwrap(expenseRepository.repaymentCycles(accountID: account.id).first { $0.cycleMonth == month })
+
+            XCTAssertFalse(result.reviewRequired)
+            XCTAssertEqual(cycle.dueDate, expectedDueDate)
+            XCTAssertEqual(cycle.status, "overdue_unconfirmed")
+        }
+    }
+
     func testLF03729ExplicitSnapshotPromotesOnlyEligibleSystemCycle() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("jiezi-wallet-cycle-promotion-\(UUID().uuidString)", isDirectory: true)
