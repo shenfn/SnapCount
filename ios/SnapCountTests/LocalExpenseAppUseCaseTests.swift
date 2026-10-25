@@ -610,6 +610,13 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(entries[0].entryKind, "snapshot_initialization")
         XCTAssertEqual(try walletRepository.unlinked(profileID: profile.id), [])
         XCTAssertEqual(try expenseRepository.pendingOutboxOperations().filter { $0.aggregateKind == "account" }.count, 1)
+
+        _ = try expenseRepository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: accounts[0].id, amountMinor: 2_000, currency: "CNY",
+            merchantName: "合成钱包消费", platform: "线下", category: "other", paymentMethod: "钱包余额",
+            transactionDate: "2026-10-25", transactionTime: nil, note: nil, createdAt: Date()
+        ), operationID: UUID())
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: accounts[0].id), 48_000)
     }
 
     func testLF03302LinkOnlyAdoptsSnapshotIntoEmptyCompatibleAccountOnce() async throws {
