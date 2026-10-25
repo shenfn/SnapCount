@@ -52,6 +52,63 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_account_entries"), 5)
     }
 
+    func testLF02109And11RestoreKeepsWakeDateDeletionAndLedgerProjection() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let sourceProfile = try XCTUnwrap(source.profileID)
+        let sleepID = UUID()
+        let sleepPayload = [
+            "sleep_minutes": AnyCodable(420),
+            "wake_at": AnyCodable("2026-09-30T16:30:00Z")
+        ]
+        _ = try LocalRecordRepository(database: source.database).createRecord(LocalRecordDraft(
+            id: sleepID,
+            profileID: sourceProfile,
+            domainKey: "sleep",
+            title: "跨月睡眠",
+            summary: "按醒来日统计",
+            payloadJSON: try LocalRecordCodec.encode(sleepPayload),
+            recordDate: "2026-11-10",
+            recordTime: nil,
+            note: nil,
+            imagePath: nil,
+            imageHash: nil,
+            createdAt: Date()
+        ))
+
+        let backup = try source.portability.exportBackup()
+        let targetProfile = try target.profileStore.activeProfile()
+        _ = try target.portability.importBackup(backup, into: targetProfile.id)
+
+        let reader = try LocalFactReader(database: target.database)
+        let octoberFacts = try reader.range(
+            profileID: targetProfile.id,
+            from: "2026-10-01",
+            to: "2026-10-31"
+        ).facts
+        let restoredSleep = try XCTUnwrap(octoberFacts.first { $0.id == sleepID })
+        XCTAssertEqual(restoredSleep.businessDate, "2026-10-01")
+        XCTAssertTrue(try reader.range(
+            profileID: targetProfile.id,
+            from: "2026-11-01",
+            to: "2026-11-30"
+        ).facts.allSatisfy { $0.id != sleepID })
+
+        let rows = LocalInsightAggregator.rows(from: octoberFacts)
+        let daily = try XCTUnwrap(rows.first { $0.date == "2026-10-25" })
+        XCTAssertEqual(daily.expenseTotal, 0.20, accuracy: 0.0001)
+        XCTAssertEqual(daily.expenseCount, 1)
+        XCTAssertEqual(daily.incomeTotal, 35, accuracy: 0.0001)
+        XCTAssertEqual(daily.incomeCount, 1)
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.expenseTotal }, 0.20, accuracy: 0.0001)
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.incomeTotal }, 35, accuracy: 0.0001)
+        let deletedExpenseID = UUID(uuidString: "00000000-0000-4000-8000-000000000005")!
+        XCTAssertFalse(octoberFacts.contains { $0.id == deletedExpenseID })
+        XCTAssertEqual(try LocalExpenseRepository(database: target.database).accountBalanceMinor(accountID: source.cashID), 480)
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_outbox_operations"), 0)
+    }
+
     func testLF021SupportsVersion17DeletedWalletTombstoneWithoutArchivedImage() async throws {
         let source = try makeEmptyFixture()
         defer { cleanup(source) }
