@@ -19,6 +19,14 @@ private struct PendingRecordExpressionPlanDelivery {
     let generation: Int
 }
 
+private struct AppDefaultLocalStorage {
+    let expenseUseCase: LocalExpenseUseCaseProtocol
+    let recordUseCase: LocalRecordUseCaseProtocol
+    let walletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol
+    let factReader: LocalFactReader
+    let imageStore: LocalImageStore
+}
+
 @MainActor
 final class AppState: ObservableObject {
     private static let calendarSignposter = OSSignposter(subsystem: "com.jiezi.app", category: "DomainCalendar")
@@ -236,20 +244,44 @@ final class AppState: ObservableObject {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
         let simulatesLocalStorageInitializationFailure = localStorageInitializationMessage != nil
-        self.localExpenseUseCase = simulatesLocalStorageInitializationFailure
-            ? nil
-            : localExpenseUseCase ?? Self.defaultLocalExpenseUseCase()
-        self.localRecordUseCase = simulatesLocalStorageInitializationFailure
-            ? nil
-            : localRecordUseCase ?? Self.defaultLocalRecordUseCase()
         let usesDefaultLocalStorage = !simulatesLocalStorageInitializationFailure
             && localExpenseUseCase == nil && localRecordUseCase == nil
+        let defaultLocalStorage: AppDefaultLocalStorage?
+        var storageInitializationMessage = localStorageInitializationMessage
+        if usesDefaultLocalStorage {
+            do {
+                defaultLocalStorage = try Self.makeDefaultLocalStorage()
+            } catch {
+                defaultLocalStorage = nil
+                storageInitializationMessage = "本地数据初始化失败：\(error.localizedDescription)"
+            }
+        } else {
+            defaultLocalStorage = nil
+        }
+        if let localExpenseUseCase {
+            self.localExpenseUseCase = localExpenseUseCase
+        } else if usesDefaultLocalStorage {
+            self.localExpenseUseCase = defaultLocalStorage?.expenseUseCase
+        } else {
+            self.localExpenseUseCase = simulatesLocalStorageInitializationFailure
+                ? nil
+                : Self.defaultLocalExpenseUseCase()
+        }
+        if let localRecordUseCase {
+            self.localRecordUseCase = localRecordUseCase
+        } else if usesDefaultLocalStorage {
+            self.localRecordUseCase = defaultLocalStorage?.recordUseCase
+        } else {
+            self.localRecordUseCase = simulatesLocalStorageInitializationFailure
+                ? nil
+                : Self.defaultLocalRecordUseCase()
+        }
         self.localWalletSnapshotUseCase = localWalletSnapshotUseCase
-            ?? (usesDefaultLocalStorage ? Self.defaultLocalWalletSnapshotUseCase() : nil)
+            ?? (usesDefaultLocalStorage ? defaultLocalStorage?.walletSnapshotUseCase : nil)
         self.localFactReader = usesDefaultLocalStorage
-            ? (localFactReader ?? Self.defaultLocalFactReader())
+            ? (localFactReader ?? defaultLocalStorage?.factReader)
             : localFactReader
-        self.localImageStore = localImageStore ?? Self.defaultLocalImageStore()
+        self.localImageStore = localImageStore ?? defaultLocalStorage?.imageStore ?? Self.defaultLocalImageStore()
         self.localImageIntakeRepository = localImageIntakeRepository ?? Self.defaultLocalImageIntakeRepository()
         self.localRecordPortability = Self.defaultLocalRecordPortability()
         self.localFactPortability = usesDefaultLocalStorage
@@ -286,11 +318,17 @@ final class AppState: ObservableObject {
         self.onboardingProgressStore = onboardingProgressStore
         self.sessionProvider = sessionProvider
         self.expressionPlanAcknowledgementSleep = expressionPlanAcknowledgementSleep
-        self.localStorageInitializationMessage = localStorageInitializationMessage
+        self.localStorageInitializationMessage = storageInitializationMessage
     }
 
     func bootstrap() {
         Task {
+            if let localStorageInitializationMessage {
+                manualRecordMessage = localStorageInitializationMessage
+                presentedOverlay = .settings
+                isBootstrapping = false
+                return
+            }
             do {
                 _ = try await localExpenseUseCase?.prepareProfile()
                 refreshLocalSyncState()
@@ -5491,6 +5529,10 @@ final class AppState: ObservableObject {
 
     func createManualRecord(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?) async -> Bool {
         guard !isCreatingManualRecord else { return false }
+        guard localStorageInitializationMessage == nil else {
+            manualRecordMessage = localStorageInitializationMessage
+            return false
+        }
         isCreatingManualRecord = true
         manualRecordMessage = nil
         defer { isCreatingManualRecord = false }
@@ -5833,6 +5875,31 @@ final class AppState: ObservableObject {
         return true
     }
 
+    private static func makeDefaultLocalStorage() throws -> AppDefaultLocalStorage {
+        let database = try LocalDatabase()
+        let imageStore = try LocalImageStore()
+        let profileStore = LocalProfileStore(database: database)
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let recordRepository = try LocalRecordRepository(database: database)
+        let walletSnapshotRepository = try LocalWalletSnapshotRepository(database: database)
+        let factReader = try LocalFactReader(database: database)
+        return AppDefaultLocalStorage(
+            expenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository),
+            recordUseCase: LocalRecordUseCase(
+                profileStore: profileStore,
+                repository: recordRepository,
+                imageStore: imageStore
+            ),
+            walletSnapshotUseCase: LocalWalletSnapshotUseCase(
+                profileStore: profileStore,
+                repository: walletSnapshotRepository,
+                imageStore: imageStore
+            ),
+            factReader: factReader,
+            imageStore: imageStore
+        )
+    }
+
     private static func defaultLocalExpenseUseCase() -> LocalExpenseUseCaseProtocol? {
         guard let database = try? LocalDatabase(),
               let repository = try? LocalExpenseRepository(database: database) else { return nil }
@@ -5848,23 +5915,6 @@ final class AppState: ObservableObject {
             repository: repository,
             imageStore: imageStore
         )
-    }
-
-    private static func defaultLocalWalletSnapshotUseCase() -> LocalWalletSnapshotUseCaseProtocol? {
-        guard let database = try? LocalDatabase(),
-              let repository = try? LocalWalletSnapshotRepository(database: database),
-              let imageStore = try? LocalImageStore() else { return nil }
-        return LocalWalletSnapshotUseCase(
-            profileStore: LocalProfileStore(database: database),
-            repository: repository,
-            imageStore: imageStore
-        )
-    }
-
-    private static func defaultLocalFactReader() -> LocalFactReader? {
-        guard let database = try? LocalDatabase(),
-              let reader = try? LocalFactReader(database: database) else { return nil }
-        return reader
     }
 
     private static func defaultLocalImageStore() -> LocalImageStore? {

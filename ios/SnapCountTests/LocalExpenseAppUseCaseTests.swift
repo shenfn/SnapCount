@@ -38,6 +38,20 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         )
     }
 
+    func testLF03408DatabaseOpenFailurePreservesExistingFile() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        try FileManager.default.createDirectory(
+            at: databaseURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let existingBytes = Data("existing local database bytes".utf8)
+        try existingBytes.write(to: databaseURL)
+
+        XCTAssertThrowsError(try LocalDatabase(databaseURL: databaseURL))
+        XCTAssertEqual(try Data(contentsOf: databaseURL), existingBytes)
+    }
+
     func testAmountMapperUsesDecimalMinorUnits() throws {
         XCTAssertEqual(try LocalExpenseMapper.amountMinor("10.235"), 1_024)
         XCTAssertEqual(try LocalExpenseMapper.amountMinor("0.01"), 1)
