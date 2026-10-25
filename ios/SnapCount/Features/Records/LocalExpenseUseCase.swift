@@ -132,6 +132,7 @@ protocol LocalExpenseUseCaseProtocol {
     func repaymentCycles(accountID: UUID) async throws -> [LocalRepaymentCycle]
     func liabilityPayments(accountID: UUID) async throws -> [LocalLiabilityPayment]
     func confirmRepayment(cycleID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, status: String?, note: String, paidAt: Date) async throws -> LocalRepaymentCycle
+    func confirmScreenshotRepayment(stagingID: String, cycleID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, note: String, paidAt: Date) async throws -> LocalRepaymentCycle
     func revokeLiabilityPayment(id: UUID, reason: String, now: Date) async throws -> LocalRepaymentCycle?
 }
 
@@ -170,6 +171,7 @@ extension LocalExpenseUseCaseProtocol {
     func repaymentCycles(accountID: UUID) async throws -> [LocalRepaymentCycle] { [] }
     func liabilityPayments(accountID: UUID) async throws -> [LocalLiabilityPayment] { [] }
     func confirmRepayment(cycleID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, status: String?, note: String, paidAt: Date) async throws -> LocalRepaymentCycle { throw LocalDataError.invalidRecord }
+    func confirmScreenshotRepayment(stagingID: String, cycleID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, note: String, paidAt: Date) async throws -> LocalRepaymentCycle { throw LocalDataError.invalidRecord }
     func revokeLiabilityPayment(id: UUID, reason: String, now: Date) async throws -> LocalRepaymentCycle? { throw LocalDataError.invalidRecord }
 }
 
@@ -452,6 +454,23 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         return try repository.confirmRepayment(
             cycleID: cycleID, profileID: profile.id, paidAmountMinor: paidAmountMinor,
             debitAccountID: debitAccountID, status: status, note: note, paidAt: paidAt
+        )
+    }
+
+    func confirmScreenshotRepayment(
+        stagingID: String,
+        cycleID: UUID,
+        paidAmountMinor: Int64,
+        debitAccountID: UUID?,
+        note: String,
+        paidAt: Date
+    ) async throws -> LocalRepaymentCycle {
+        guard paidAmountMinor > 0 else { throw LocalDataError.invalidAmount }
+        let profile = try profileStore.activeProfile()
+        return try repository.confirmScreenshotRepayment(
+            stagingID: stagingID, cycleID: cycleID, profileID: profile.id,
+            paidAmountMinor: paidAmountMinor, debitAccountID: debitAccountID,
+            note: note, paidAt: paidAt
         )
     }
 

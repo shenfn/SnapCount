@@ -194,6 +194,10 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         SELECT 1 FROM local_staging_records
                         WHERE image_path = ? AND status = 'pending_review'
                         UNION ALL
+                        SELECT 1 FROM local_staging_records
+                        WHERE image_path = ? AND domain_key = 'wallet' AND status = 'archived'
+                          AND resolved_action = 'liability_repayment_confirmed'
+                        UNION ALL
                         SELECT 1 FROM local_image_intakes
                         WHERE image_path = ? AND status IN ('receiving', 'failed')
                         UNION ALL
@@ -201,7 +205,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         WHERE image_path = ?
                     )
                     """,
-                arguments: [path, path, path, path]
+                arguments: [path, path, path, path, path]
             ) ?? 0) != 0
         }
     }
@@ -280,7 +284,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
     }
 
     func createStaging(_ draft: LocalStagingDraft) throws -> LocalStagingRecord {
-        guard LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey) else {
+        guard LocalRecordValidation.supportedStagingDomainKeys.contains(draft.domainKey) else {
             throw LocalDataError.invalidRecord
         }
         return try database.writer.write { db in

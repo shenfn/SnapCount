@@ -63,7 +63,7 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 19
+    static let currentSchemaVersion = 20
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
     private static let maximumImageBytes = 128 * 1024 * 1024
     private static let maximumArchiveBytes = 180 * 1024 * 1024
@@ -114,7 +114,7 @@ final class LocalCompleteBackupPortability {
             var imageReferences: [String: String] = [:]
             for (table, condition) in [
                 ("local_records", "deleted_at IS NULL"),
-                ("local_staging_records", "status IN ('pending_review', 'failed')"),
+                ("local_staging_records", "status IN ('pending_review', 'failed') OR (domain_key = 'wallet' AND resolved_action = 'liability_repayment_confirmed')"),
                 ("local_image_intakes", "status IN ('failed', 'receiving')"),
                 ("local_wallet_snapshots", "1 = 1")
             ] {
@@ -317,7 +317,7 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard [15, 16, 17, 18, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
+        guard [15, 16, 17, 18, 19, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
         var tables = archive.tables
@@ -384,6 +384,7 @@ final class LocalCompleteBackupPortability {
     private static func validateFinancialRows(_ rows: [String: [[String: Any]]]) throws {
         let accounts = Set((rows["local_accounts"] ?? []).compactMap { $0["id"] as? String })
         let records = Set((rows["local_records"] ?? []).compactMap { $0["id"] as? String })
+        let staging = Set((rows["local_staging_records"] ?? []).compactMap { $0["id"] as? String })
         let walletSnapshots = Set((rows["local_wallet_snapshots"] ?? []).compactMap { $0["id"] as? String })
         let cycles = Set((rows["local_repayment_cycles"] ?? []).compactMap { $0["id"] as? String })
 
@@ -427,6 +428,7 @@ final class LocalCompleteBackupPortability {
             ("local_liability_payments", "statement_id", cycles, true),
             ("local_liability_payments", "debit_account_id", accounts, true),
             ("local_liability_payments", "evidence_record_id", records, true),
+            ("local_liability_payments", "evidence_staging_id", staging, true),
             ("local_account_entries", "account_id", accounts, false),
             ("local_wallet_snapshots", "linked_account_id", accounts, true)
         ]
@@ -467,7 +469,7 @@ final class LocalCompleteBackupPortability {
         let imageHashes = Dictionary(uniqueKeysWithValues: images.map { ($0.path, $0.hash) })
         for (table, statusField, activeStatuses) in [
             ("local_records", "deleted_at", Set(["active"])),
-            ("local_staging_records", "status", Set(["pending_review", "failed"])),
+            ("local_staging_records", "status", Set(["pending_review", "failed", "archived"])),
             ("local_image_intakes", "status", Set(["receiving", "failed"])),
             ("local_wallet_snapshots", "deleted_at", Set<String>())
         ] {
@@ -475,6 +477,11 @@ final class LocalCompleteBackupPortability {
                 let active: Bool
                 if table == "local_wallet_snapshots" {
                     active = schemaVersion >= 18 || (row["deleted_at"] is NSNull)
+                } else if table == "local_staging_records" {
+                    active = activeStatuses.contains(row[statusField] as? String ?? "")
+                        && ((row["status"] as? String) != "archived"
+                            || (row["domain_key"] as? String) == "wallet"
+                            && (row["resolved_action"] as? String) == "liability_repayment_confirmed")
                 } else if statusField == "deleted_at" {
                     active = row[statusField] is NSNull
                 } else {

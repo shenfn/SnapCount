@@ -306,7 +306,7 @@ final class LocalImageRecognitionUseCase {
         guard !recognized.domainKey.isEmpty,
               !recognized.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !recognized.recordDate.isEmpty,
-              LocalRecordValidation.supportedDomainKeys.contains(recognized.domainKey) else {
+              LocalRecordValidation.supportedStagingDomainKeys.contains(recognized.domainKey) else {
             throw LocalImageRecognitionError.unsupportedDomain(recognized.domainKey)
         }
 

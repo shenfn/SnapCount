@@ -174,19 +174,39 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
 
     func stage(_ candidate: LocalRecordCandidate) async throws -> LocalStagingOutcome {
         let profile = try profileStore.activeProfile()
-        try LocalRecordValidation.validate(
+        guard LocalRecordValidation.supportedStagingDomainKeys.contains(candidate.domainKey) else {
+            throw LocalDataError.invalidRecord
+        }
+        let businessDate = NativeSleepFacts.businessDate(
             domainKey: candidate.domainKey,
-            title: candidate.title,
-            recordDate: NativeSleepFacts.businessDate(domainKey: candidate.domainKey, payload: candidate.payload, fallback: candidate.recordDate),
-            recordTime: candidate.recordTime
+            payload: candidate.payload,
+            fallback: candidate.recordDate
         )
-        let payloadJSON = try LocalRecordCodec.encode(
-            LocalRecordCodec.normalizedPayload(
+        if candidate.domainKey == "wallet" {
+            try LocalRecordValidation.validateWalletRepaymentCandidate(candidate.payload)
+            guard !candidate.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  businessDate.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil,
+                  candidate.recordTime.map({
+                      $0.range(of: #"^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$"#, options: .regularExpression) != nil
+                  }) ?? true else {
+                throw LocalDataError.invalidRecord
+            }
+        } else {
+            try LocalRecordValidation.validate(
+                domainKey: candidate.domainKey,
+                title: candidate.title,
+                recordDate: businessDate,
+                recordTime: candidate.recordTime
+            )
+        }
+        let normalizedPayload = candidate.domainKey == "wallet"
+            ? candidate.payload
+            : try LocalRecordCodec.normalizedPayload(
                 domainKey: candidate.domainKey,
                 payload: candidate.payload,
                 requireFacts: false
             )
-        )
+        let payloadJSON = try LocalRecordCodec.encode(normalizedPayload)
         if (candidate.imageData != nil || candidate.imageReference != nil), imageStore == nil {
             throw LocalDataError.invalidRecord
         }
@@ -214,7 +234,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             title: candidate.title.trimmingCharacters(in: .whitespacesAndNewlines),
             summary: candidate.summary,
             payloadJSON: payloadJSON,
-            recordDate: NativeSleepFacts.businessDate(domainKey: candidate.domainKey, payload: candidate.payload, fallback: candidate.recordDate),
+            recordDate: businessDate,
             recordTime: candidate.recordTime,
             imagePath: imageReference?.path,
             imageHash: imageReference?.hash,
@@ -247,6 +267,9 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             case .discarded, .failed:
                 break
             }
+        }
+        if candidate.domainKey == "wallet" {
+            return .staged(try await stage(candidate))
         }
         switch LocalRecordIntakeRouter.route(
             domainKey: candidate.domainKey,

@@ -517,6 +517,15 @@ enum LocalRecordCodec {
 
 enum LocalRecordValidation {
     static let supportedDomainKeys: Set<String> = ["food", "sleep", "sport", "reading"]
+    static let supportedStagingDomainKeys = supportedDomainKeys.union(["wallet"])
+
+    static func validateWalletRepaymentCandidate(_ payload: [String: AnyCodable]) throws {
+        guard payload.string("status") == "paid",
+              payload.string("account_snapshot_kind") == "liability"
+                || payload.string("record_kind") == "liability_snapshot" else {
+            throw LocalDataError.invalidRecord
+        }
+    }
 
     static func validate(
         domainKey: String,

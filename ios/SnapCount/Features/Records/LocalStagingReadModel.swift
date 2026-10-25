@@ -29,7 +29,9 @@ enum LocalStagingReadModel {
             confidencePercent: record.confidence.map { max(0, min(100, Int(($0 * 100).rounded()))) },
             lastErrorMessage: record.status == .failed ? "本地候选处理失败" : nil,
             retryCount: 0,
-            systemImage: NativeDayRecordKind(rawValue: record.domainKey)?.systemImage ?? "sparkles",
+            systemImage: record.domainKey == "wallet"
+                ? "creditcard"
+                : (NativeDayRecordKind(rawValue: record.domainKey)?.systemImage ?? "sparkles"),
             imagePath: record.imagePath,
             imageURL: imageURL,
             imageLoadError: record.imagePath != nil && imageURL == nil,
@@ -72,6 +74,7 @@ enum LocalStagingReadModel {
         case "sleep": return "睡眠"
         case "sport": return "运动"
         case "reading": return "阅读"
+        case "wallet": return "还款证据"
         default: return "本地记录"
         }
     }

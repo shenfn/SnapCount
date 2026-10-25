@@ -479,6 +479,60 @@ final class LocalDatabase {
                     REFERENCES local_wallet_snapshots(id) ON DELETE SET NULL;
                 """)
         }
+        migrator.registerMigration("local-v19-wallet-repayment-staging") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_staging_records_v19 (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    domain_key TEXT NOT NULL CHECK (domain_key IN ('expense', 'wallet', 'food', 'sleep', 'sport', 'reading')),
+                    status TEXT NOT NULL CHECK (status IN ('pending_review', 'archived', 'discarded', 'failed')),
+                    confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    record_date TEXT NOT NULL,
+                    record_time TEXT,
+                    image_path TEXT,
+                    image_hash TEXT,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    target_record_id TEXT,
+                    resolved_action TEXT,
+                    resolved_at DATETIME,
+                    source_kind TEXT NOT NULL DEFAULT 'ai_candidate'
+                        CHECK (source_kind IN ('manual', 'ai_auto_archive', 'ai_candidate', 'ai_confirmed', 'imported')),
+                    domain_version INTEGER NOT NULL DEFAULT 1 CHECK (domain_version > 0),
+                    evidence_json TEXT NOT NULL DEFAULT '[]',
+                    missing_fields_json TEXT NOT NULL DEFAULT '[]'
+                );
+                INSERT INTO local_staging_records_v19 (
+                    id, profile_id, domain_key, status, confidence, title, summary, payload_json,
+                    record_date, record_time, image_path, image_hash, created_at, updated_at,
+                    target_record_id, resolved_action, resolved_at, source_kind, domain_version,
+                    evidence_json, missing_fields_json
+                ) SELECT
+                    id, profile_id, domain_key, status, confidence, title, summary, payload_json,
+                    record_date, record_time, image_path, image_hash, created_at, updated_at,
+                    target_record_id, resolved_action, resolved_at, source_kind, domain_version,
+                    evidence_json, missing_fields_json
+                FROM local_staging_records;
+                DROP TABLE local_staging_records;
+                ALTER TABLE local_staging_records_v19 RENAME TO local_staging_records;
+                CREATE INDEX local_staging_profile_status_idx
+                    ON local_staging_records(profile_id, status, record_date, created_at);
+                CREATE INDEX local_staging_target_record_idx
+                    ON local_staging_records(target_record_id);
+                """)
+        }
+        migrator.registerMigration("local-v20-screenshot-payment-evidence") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_liability_payments
+                ADD COLUMN evidence_staging_id TEXT REFERENCES local_staging_records(id) ON DELETE SET NULL;
+                CREATE UNIQUE INDEX local_liability_payments_evidence_staging_idx
+                    ON local_liability_payments(evidence_staging_id)
+                    WHERE evidence_staging_id IS NOT NULL;
+                """)
+        }
         return migrator
     }
 }

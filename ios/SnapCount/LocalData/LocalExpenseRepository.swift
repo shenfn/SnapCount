@@ -9,6 +9,7 @@ protocol LocalExpenseRepositoryProtocol {
     func accounts(profileID: UUID) throws -> [LocalAccount]
     func ensureRepaymentCycles(profileID: UUID, monthKey: String, now: Date) throws -> [LocalRepaymentCycle]
     func confirmRepayment(cycleID: UUID, profileID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, status: String?, note: String, paidAt: Date) throws -> LocalRepaymentCycle
+    func confirmScreenshotRepayment(stagingID: String, cycleID: UUID, profileID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, note: String, paidAt: Date) throws -> LocalRepaymentCycle
     func revokeLiabilityPayment(id: UUID, profileID: UUID, reason: String, now: Date) throws -> LocalRepaymentCycle?
     func repaymentCycles(accountID: UUID) throws -> [LocalRepaymentCycle]
     func liabilityPayments(accountID: UUID) throws -> [LocalLiabilityPayment]
@@ -52,6 +53,7 @@ protocol LocalExpenseRepositoryProtocol {
 extension LocalExpenseRepositoryProtocol {
     func ensureRepaymentCycles(profileID: UUID, monthKey: String, now: Date) throws -> [LocalRepaymentCycle] { throw LocalDataError.invalidRecord }
     func confirmRepayment(cycleID: UUID, profileID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, status: String?, note: String, paidAt: Date) throws -> LocalRepaymentCycle { throw LocalDataError.invalidRecord }
+    func confirmScreenshotRepayment(stagingID: String, cycleID: UUID, profileID: UUID, paidAmountMinor: Int64, debitAccountID: UUID?, note: String, paidAt: Date) throws -> LocalRepaymentCycle { throw LocalDataError.invalidRecord }
     func revokeLiabilityPayment(id: UUID, profileID: UUID, reason: String, now: Date) throws -> LocalRepaymentCycle? { throw LocalDataError.invalidRecord }
     func repaymentCycles(accountID: UUID) throws -> [LocalRepaymentCycle] { [] }
     func liabilityPayments(accountID: UUID) throws -> [LocalLiabilityPayment] { [] }
@@ -462,6 +464,40 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         note: String,
         paidAt: Date
     ) throws -> LocalRepaymentCycle {
+        try confirmRepayment(
+            cycleID: cycleID, profileID: profileID, paidAmountMinor: paidAmountMinor,
+            debitAccountID: debitAccountID, status: requestedStatus, note: note,
+            paidAt: paidAt, screenshotStagingID: nil
+        )
+    }
+
+    func confirmScreenshotRepayment(
+        stagingID: String,
+        cycleID: UUID,
+        profileID: UUID,
+        paidAmountMinor: Int64,
+        debitAccountID: UUID?,
+        note: String,
+        paidAt: Date
+    ) throws -> LocalRepaymentCycle {
+        guard paidAmountMinor > 0 else { throw LocalDataError.invalidAmount }
+        try confirmRepayment(
+            cycleID: cycleID, profileID: profileID, paidAmountMinor: paidAmountMinor,
+            debitAccountID: debitAccountID, status: nil, note: note,
+            paidAt: paidAt, screenshotStagingID: stagingID
+        )
+    }
+
+    private func confirmRepayment(
+        cycleID: UUID,
+        profileID: UUID,
+        paidAmountMinor: Int64,
+        debitAccountID: UUID?,
+        status requestedStatus: String?,
+        note: String,
+        paidAt: Date,
+        screenshotStagingID: String?
+    ) throws -> LocalRepaymentCycle {
         guard paidAmountMinor >= 0 else { throw LocalDataError.invalidAmount }
         guard requestedStatus.map({ ["partial_paid", "minimum_paid", "carried_over", "paid", "ignored"].contains($0) }) ?? true else {
             throw LocalDataError.invalidRecord
@@ -473,6 +509,47 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             }
             let kind: String = accountRow["kind"]
             guard ["credit_card", "credit_line"].contains(kind) else { throw LocalDataError.invalidAccountKind }
+            if let screenshotStagingID {
+                guard let staging = try Row.fetchOne(
+                    db,
+                    sql: "SELECT * FROM local_staging_records WHERE id = ? AND profile_id = ?",
+                    arguments: [screenshotStagingID, profileID.uuidString]
+                ) else { throw LocalDataError.recordNotFound }
+                let domainKey: String = staging["domain_key"]
+                let stagingStatus: String = staging["status"]
+                let action: String? = staging["resolved_action"]
+                let targetID: String? = staging["target_record_id"]
+                guard domainKey == "wallet" else { throw LocalDataError.invalidRecord }
+                if stagingStatus == "archived" {
+                    guard action == "liability_repayment_confirmed",
+                          targetID == cycleID.uuidString,
+                          let payment = try Row.fetchOne(
+                              db,
+                              sql: "SELECT * FROM local_liability_payments WHERE evidence_staging_id = ? AND profile_id = ?",
+                              arguments: [screenshotStagingID, profileID.uuidString]
+                          ) else { throw LocalDataError.invalidRecord }
+                    let paymentCycleID: String? = payment["statement_id"]
+                    let paymentAmount: Int64 = payment["amount_minor"]
+                    let paymentDebitID: String? = payment["debit_account_id"]
+                    let paymentStatus: String = payment["status"]
+                    let cycleDebitID: String? = cycleRow["auto_debit_account_id"]
+                    let accountDebitID: String? = accountRow["auto_debit_account_id"]
+                    let expectedDebitID = debitAccountID?.uuidString ?? cycleDebitID ?? accountDebitID
+                    guard paymentCycleID == cycleID.uuidString,
+                          paymentAmount == paidAmountMinor,
+                          paymentDebitID == expectedDebitID,
+                          paymentStatus == "confirmed" else { throw LocalDataError.invalidRecord }
+                    return
+                }
+                guard stagingStatus == "pending_review" else { throw LocalDataError.invalidRecord }
+                let payloadJSON: String = staging["payload_json"]
+                let payload = try LocalRecordCodec.decode(payloadJSON)
+                try LocalRecordValidation.validateWalletRepaymentCandidate(payload)
+                let cycleStatus: String = cycleRow["status"]
+                guard ["pending", "due_today", "overdue_unconfirmed", "partial_paid", "minimum_paid", "carried_over"].contains(cycleStatus) else {
+                    throw LocalDataError.invalidRecord
+                }
+            }
             let effectiveDebitID: UUID? = try {
                 if let debitAccountID {
                     try Self.validateActiveDebitAccount(id: debitAccountID, profileID: profileID, database: db)
@@ -510,11 +587,12 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 try db.execute(sql: """
                     INSERT INTO local_liability_payments (
                         id, profile_id, account_id, statement_id, debit_account_id, amount_minor,
-                        overpayment_amount_minor, paid_at, source, status, note, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual', 'confirmed', ?, ?, ?)
+                        overpayment_amount_minor, paid_at, source, evidence_staging_id, status, note, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?)
                     """, arguments: [id.uuidString, profileID.uuidString, cycleRow["account_id"] as String,
                                       cycleID.uuidString, effectiveDebitID?.uuidString, paidAmountMinor,
-                                      overpayment, paidAt, note, paidAt, paidAt])
+                                      overpayment, paidAt, screenshotStagingID == nil ? "manual" : "screenshot",
+                                      screenshotStagingID, note, paidAt, paidAt])
                 if effectiveLiabilityPayment > 0 {
                     try Self.insertRepaymentEntry(id: UUID(), profileID: profileID, accountID: UUID(uuidString: accountRow["id"])!,
                                                   paymentID: id, amountMinor: effectiveLiabilityPayment, occurredAt: paidAt, database: db)
@@ -525,6 +603,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 }
             }
             let currentSource: String = cycleRow["source"]
+            let updatedSource = screenshotStagingID == nil
+                ? (currentSource == "system" ? "manual" : currentSource)
+                : "screenshot"
             try db.execute(sql: """
                 UPDATE local_repayment_cycles SET paid_amount_minor = ?, remaining_amount_minor = ?,
                     carried_over_amount_minor = ?, status = ?,
@@ -533,10 +614,19 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 WHERE id = ? AND profile_id = ?
                 """, arguments: [paidAmountMinor, finalRemaining,
                                   cycleStatus == "carried_over" ? remaining : 0, cycleStatus,
-                                  currentSource == "system" ? "manual" : currentSource,
+                                  updatedSource,
                                   note.isEmpty ? nil : note,
                                   (paidAmountMinor > 0 || ["paid", "ignored"].contains(cycleStatus)) ? paidAt : nil,
                                   paidAt, cycleID.uuidString, profileID.uuidString])
+            if let screenshotStagingID {
+                try db.execute(sql: """
+                    UPDATE local_staging_records
+                    SET status = 'archived', target_record_id = ?,
+                        resolved_action = 'liability_repayment_confirmed', resolved_at = ?, updated_at = ?
+                    WHERE id = ? AND profile_id = ? AND status = 'pending_review'
+                    """, arguments: [cycleID.uuidString, paidAt, paidAt, screenshotStagingID, profileID.uuidString])
+                guard db.changesCount == 1 else { throw LocalDataError.invalidRecord }
+            }
         }
         guard let cycle = try database.writer.read({ db in
             try Row.fetchOne(db, sql: "SELECT * FROM local_repayment_cycles WHERE id = ? AND profile_id = ?", arguments: [cycleID.uuidString, profileID.uuidString]).map { try Self.repaymentCycle(from: $0) }

@@ -1291,7 +1291,7 @@ final class AppState: ObservableObject {
     func refreshInboxProjection() async {
         await refreshFailedLocalImageIntakes()
         await refreshLocalImageCleanups()
-        if !isSignedIn {
+        if !mayReadRemoteBusinessData {
             await refreshLocalRecognitionProjection()
         }
         await loadInboxRepaymentCandidates()
@@ -2484,6 +2484,10 @@ final class AppState: ObservableObject {
     }
 
     func loadInboxRepaymentCandidates() async {
+        if !mayReadRemoteBusinessData, localExpenseUseCase != nil {
+            await loadLocalInboxRepaymentCandidates()
+            return
+        }
         guard isSignedIn else {
             repaymentCandidates = [:]
             inboxFinanceMessage = nil
@@ -2529,6 +2533,40 @@ final class AppState: ObservableObject {
               let candidate = repaymentCandidates[record.id] else {
             return false
         }
+        if let localStagingID = LocalStagingReadModel.localID(from: record.id) {
+            guard let localExpenseUseCase,
+                  let cycleID = UUID(uuidString: candidate.cycle.id) else { return false }
+            let debitIDText = candidate.cycle.autoDebitAccountId ?? candidate.account.autoDebitAccountId
+            let debitID = debitIDText.flatMap(UUID.init(uuidString:))
+            guard debitIDText == nil || debitID != nil else { return false }
+            stagingRepaymentId = record.id
+            inboxFinanceMessage = nil
+            defer { stagingRepaymentId = nil }
+            do {
+                let paidAmountMinor = try LocalExpenseMapper.amountMinor(String(candidate.amount))
+                _ = try await localExpenseUseCase.confirmScreenshotRepayment(
+                    stagingID: localStagingID,
+                    cycleID: cycleID,
+                    paidAmountMinor: paidAmountMinor,
+                    debitAccountID: debitID,
+                    note: "根据还款截图确认",
+                    paidAt: Date()
+                )
+                repaymentCandidates.removeValue(forKey: record.id)
+                removeStagingRecordLocally(record.id)
+                await loadLocalAccounts()
+                if selectedAccountDetail?.account.id == candidate.account.id,
+                   let refreshed = accounts.first(where: { $0.id == candidate.account.id }) {
+                    await loadLocalAccountDetail(refreshed)
+                }
+                await refreshDashboard()
+                inboxFinanceMessage = "截图还款已保存在此设备"
+                return true
+            } catch {
+                inboxFinanceMessage = "本地截图还款未确认：\(error.localizedDescription)"
+                return false
+            }
+        }
         stagingRepaymentId = record.id
         inboxFinanceMessage = nil
         defer { stagingRepaymentId = nil }
@@ -2562,6 +2600,44 @@ final class AppState: ObservableObject {
             }
         )
         return projectScreenshotRepaymentResult(result)
+    }
+
+    private func loadLocalInboxRepaymentCandidates() async {
+        guard let localExpenseUseCase, let localRecordUseCase else {
+            repaymentCandidates = [:]
+            return
+        }
+        let generation = userStateGeneration
+        do {
+            let staging = try await localRecordUseCase.stagingRecords()
+            let candidates = try staging.map { record in
+                LocalStagingReadModel.native(from: record, imageStore: localImageStore)
+            }
+            await loadLocalAccounts()
+            guard generation == userStateGeneration else { return }
+            _ = try await localExpenseUseCase.ensureRepaymentCycles(Self.currentMonthKey, now: Date())
+            var cycles: [NativeRepaymentCycle] = []
+            for account in accounts where account.type.isLiability && !account.isArchived {
+                guard let id = UUID(uuidString: account.id) else { continue }
+                let localCycles = try await localExpenseUseCase.repaymentCycles(accountID: id)
+                cycles += try localCycles.map(Self.nativeRepaymentCycle(from:))
+            }
+            guard generation == userStateGeneration else { return }
+            repaymentCandidates = Dictionary(
+                uniqueKeysWithValues: candidates.compactMap { record in
+                    NativeRepaymentCandidateEngine.candidate(
+                        for: record,
+                        accounts: accounts,
+                        cycles: cycles
+                    ).map { (record.id, $0) }
+                }
+            )
+            inboxFinanceMessage = nil
+        } catch {
+            guard generation == userStateGeneration else { return }
+            repaymentCandidates = [:]
+            inboxFinanceMessage = "本地还款候选暂时无法匹配：\(error.localizedDescription)"
+        }
     }
 
     private func refreshAfterRepayment(accountId: String) async throws {
