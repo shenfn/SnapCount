@@ -78,6 +78,57 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertNotNil(payload["note"])
     }
 
+    func testLF03709ArchivedLocalAccountKeepsBalanceAndHistoryAcrossReopenAndRestore() throws {
+        let databaseURL = temporaryLocalDatabaseURL()
+        defer { removeLocalDatabase(at: databaseURL) }
+        let repository = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let profile = try repository.createProfile(id: UUID(), createdAt: fixedDate)
+        let accountID = UUID()
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: accountID, profileID: profile.id, name: "本地现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: fixedDate, isDefaultExpense: true
+        ))
+        let expenseID = UUID()
+        _ = try repository.createExpense(
+            expenseDraft(id: expenseID, profileID: profile.id, accountID: accountID, amountMinor: 1_280),
+            operationID: UUID()
+        )
+        let beforeArchive = try XCTUnwrap(repository.accounts(profileID: profile.id).first { $0.id == accountID })
+        _ = try repository.updateAccount(LocalAccountUpdate(
+            id: accountID, profileID: profile.id, expectedVersion: beforeArchive.localVersion,
+            name: beforeArchive.name, kind: beforeArchive.kind, institution: beforeArchive.institution,
+            last4: beforeArchive.last4, billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil,
+            autoConfirmRepayment: false, gracePeriodDays: 0, isDefaultExpense: false,
+            isDefaultIncome: false, isArchived: true, sortOrder: beforeArchive.sortOrder, updatedAt: editedDate
+        ))
+
+        let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let archived = try XCTUnwrap(reopened.accounts(profileID: profile.id).first { $0.id == accountID })
+        XCTAssertTrue(archived.isArchived)
+        XCTAssertFalse(archived.isDefaultExpense)
+        XCTAssertEqual(try reopened.accountBalanceMinor(accountID: accountID), 8_720)
+        XCTAssertEqual(try reopened.expense(id: expenseID)?.amountMinor, 1_280)
+        XCTAssertEqual(try reopened.accountEntries(accountID: accountID).map(\.sourceID), [expenseID.uuidString])
+        XCTAssertThrowsError(try reopened.createExpense(
+            expenseDraft(id: UUID(), profileID: profile.id, accountID: accountID, amountMinor: 100),
+            operationID: UUID()
+        ))
+
+        _ = try reopened.updateAccount(LocalAccountUpdate(
+            id: accountID, profileID: profile.id, expectedVersion: archived.localVersion,
+            name: archived.name, kind: archived.kind, institution: archived.institution,
+            last4: archived.last4, billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil,
+            autoConfirmRepayment: false, gracePeriodDays: 0, isDefaultExpense: false,
+            isDefaultIncome: false, isArchived: false, sortOrder: archived.sortOrder, updatedAt: editedDate
+        ))
+        let restored = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let active = try XCTUnwrap(restored.accounts(profileID: profile.id).first { $0.id == accountID })
+        XCTAssertFalse(active.isArchived)
+        XCTAssertFalse(active.isDefaultExpense, "恢复不自动重建归档前默认项")
+        XCTAssertEqual(try restored.accountBalanceMinor(accountID: accountID), 8_720)
+        XCTAssertEqual(try restored.accountEntries(accountID: accountID).count, 1)
+    }
+
     func testLOCALDATA004AOutboxConflictRollsBackExpenseAndEntry() throws {
         let databaseURL = temporaryLocalDatabaseURL()
         defer { removeLocalDatabase(at: databaseURL) }
