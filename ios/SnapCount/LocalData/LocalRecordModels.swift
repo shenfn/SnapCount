@@ -500,7 +500,9 @@ enum LocalRecordCodec {
         case let value as Int: return Double(value)
         case let value as Int64: return Double(value)
         case let value as NSNumber: return value.doubleValue.isFinite ? value.doubleValue : nil
-        case let value as String: return Double(value)
+        case let value as String:
+            guard let number = Double(value), number.isFinite else { return nil }
+            return number
         default: return nil
         }
     }

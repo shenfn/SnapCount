@@ -5161,7 +5161,7 @@ final class AppState: ObservableObject {
         settingsMessage = nil
         defer { isExportingData = false }
         do {
-            if !isSignedIn, request.content == .universal {
+            if request.content == .universal {
                 let data: Data
                 let filenamePrefix: String
                 if let localFactPortability {
