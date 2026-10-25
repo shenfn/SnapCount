@@ -109,7 +109,23 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
         let database = try LocalDatabase(databaseURL: databaseURL)
-        _ = try LocalProfileStore(database: database).activeProfile()
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "合成统计账户", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: Date()
+        ))
+        let today = NativeLocalDate.dateKey(Date())
+        _ = try expenseRepository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: account.id, amountMinor: 1_230, currency: "CNY",
+            merchantName: "合成支出", platform: "线下", category: "other", paymentMethod: "cash",
+            transactionDate: today, transactionTime: nil, note: nil, createdAt: Date()
+        ), operationID: UUID())
+        _ = try expenseRepository.createIncome(LocalIncomeDraft(
+            id: UUID(), profileID: profile.id, accountID: account.id, amountMinor: 5_000, currency: "CNY",
+            sourceName: "合成收入", category: "other", incomeDate: today, occurredAt: nil,
+            note: nil, createdAt: Date()
+        ))
         let state = AppState(
             localFactReader: try LocalFactReader(database: database),
             sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
@@ -119,6 +135,9 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
 
         XCTAssertNotNil(state.insightsSnapshot)
         XCTAssertEqual(state.insightsSnapshot?.range, .seven)
+        XCTAssertEqual(state.insightsSnapshot?.expenseTotal ?? 0, 12.30, accuracy: 0.0001)
+        XCTAssertEqual(state.insightsSnapshot?.incomeTotal ?? 0, 50, accuracy: 0.0001)
+        XCTAssertEqual(state.insightsSnapshot?.netBalance ?? 0, 37.70, accuracy: 0.0001)
         XCTAssertNil(state.insightsMessage)
         XCTAssertNil(state.aiInsight)
     }
