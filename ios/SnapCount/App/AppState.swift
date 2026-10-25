@@ -2995,7 +2995,7 @@ final class AppState: ObservableObject {
         do {
             if !mayReadRemoteBusinessData, let localFactReader {
                 let todayKey = NativeLocalDate.dateKey(Date())
-                let startKey = NativeLocalDate.shiftedDateKey(todayKey, byDays: -range.rawValue) ?? todayKey
+                let startKey = NativeLocalDate.shiftedDateKey(todayKey, byDays: -(range.rawValue - 1)) ?? todayKey
                 let facts = try await localFactReader.activeRange(from: startKey, to: todayKey)?.facts ?? []
                 guard generation == userStateGeneration else { return }
                 insightsSnapshot = NativeInsightSnapshot(
