@@ -9,7 +9,7 @@ final class LocalBYOKProviderTests: XCTestCase {
         configuration.protocolClasses = [BYOKURLProtocolStub.self]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
-        let response = #"{"choices":[{"message":{"content":"{\"schema_version\":\"local-recognition-candidate-v1\",\"operation\":\"recognize_only\",\"candidate\":{\"domain_key\":\"food\",\"title\":\"早餐\",\"summary\":\"豆浆\",\"payload\":{\"food_name\":\"豆浆\"},\"confidence\":0.8,\"record_date\":\"2026-10-25\",\"evidence_fields\":[\"food_name\"],\"missing_fields\":[]}}"}}]}"#
+        let response = #"{"choices":[{"message":{"content":"{\"schema_version\":\"local-recognition-candidate-v1\",\"operation\":\"recognize_only\",\"candidate\":{\"domain_key\":\"wallet\",\"title\":\"已还款截图\",\"summary\":\"还款40元\",\"payload\":{\"record_kind\":\"liability_snapshot\",\"status\":\"paid\",\"amount\":40},\"confidence\":0.8,\"record_date\":\"2026-10-25\",\"evidence_fields\":[\"status\",\"amount\"],\"missing_fields\":[]}}"}}]}"#
         BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(response.utf8))
         let fakeKey = "sk-test-synthetic-never-real"
         let image = try syntheticJPEG()
@@ -22,12 +22,16 @@ final class LocalBYOKProviderTests: XCTestCase {
         let request = try XCTUnwrap(BYOKURLProtocolStub.capturedRequest)
         XCTAssertEqual(request.url, QwenBYOKImageRecognitionProvider.endpoint)
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(fakeKey)")
-        XCTAssertEqual(candidate.domainKey, "food")
-        XCTAssertEqual(candidate.title, "早餐")
+        XCTAssertEqual(candidate.domainKey, "wallet")
+        XCTAssertEqual(candidate.title, "已还款截图")
         let body = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
         let bodyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         let messages = try XCTUnwrap(bodyObject["messages"] as? [[String: Any]])
         let content = try XCTUnwrap(messages.first?["content"] as? [[String: Any]])
+        let prompt = try XCTUnwrap(content.first?["text"] as? String)
+        XCTAssertTrue(prompt.contains("account_snapshot_kind=liability"))
+        XCTAssertTrue(prompt.contains("status=paid"))
+        XCTAssertTrue(prompt.contains("只能交由用户复核"))
         let imageURL = try XCTUnwrap(content.last?["image_url"] as? [String: String])
         XCTAssertEqual(imageURL["url"], "data:image/jpeg;base64,\(image.base64EncodedString())")
         let bodyText = String(decoding: body, as: UTF8.self)
