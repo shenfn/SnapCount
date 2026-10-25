@@ -104,7 +104,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         let cycle = try XCTUnwrap(
             LocalExpenseRepository(database: source.database).repaymentCycles(accountID: source.liabilityID).first
         )
-        try source.database.writer.write { db in
+        try await source.database.writer.write { db in
             try db.execute(sql: """
                 UPDATE local_repayment_cycles
                 SET paid_amount_minor = 0, remaining_amount_minor = statement_amount_minor,
@@ -147,13 +147,14 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         let payment = try XCTUnwrap(LocalExpenseRepository(database: target.database)
             .liabilityPayments(accountID: source.liabilityID)
             .first(where: { $0.source == "screenshot" }))
-        let evidenceStagingID = try XCTUnwrap(try target.database.writer.read { db in
+        let evidenceStagingIDValue = try await target.database.writer.read { db in
             try String.fetchOne(
                 db,
                 sql: "SELECT evidence_staging_id FROM local_liability_payments WHERE id = ?",
                 arguments: [payment.id.uuidString]
             )
-        })
+        }
+        let evidenceStagingID = try XCTUnwrap(evidenceStagingIDValue)
         XCTAssertEqual(evidenceStagingID, candidate.record.id)
         let targetRecordUseCase = LocalRecordUseCase(
             profileStore: target.profileStore,
