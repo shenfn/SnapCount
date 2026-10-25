@@ -756,6 +756,48 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(try expenseRepository.accounts(profileID: profile.id).count, 1)
     }
 
+    func testLF03729ExplicitUnpaidSnapshotIdentityCreatesScreenshotCycleOnce() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-screenshot-cycle-\\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let walletRepository = LocalWalletSnapshotRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(profileStore: profileStore, repository: walletRepository)
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "信用卡账单", summary: "明确十月账单",
+            payload: [
+                "account_type": AnyCodable("credit_card"),
+                "cycle_month": AnyCodable("2026-10"),
+                "due_date": AnyCodable("2026-11-05"),
+                "status": AnyCodable("pending"),
+                "confidence": AnyCodable(0.98)
+            ],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 12_500, currency: "CNY", kind: .liability,
+            imageData: nil, createdAt: Date()
+        ))
+
+        let created = try await useCase.createAccount(from: snapshot)
+        let replay = try await useCase.createAccount(from: snapshot)
+        let cycles = try expenseRepository.repaymentCycles(accountID: created.account.id)
+
+        XCTAssertEqual(created.kind, .created)
+        XCTAssertEqual(replay.kind, .replayed)
+        XCTAssertEqual(cycles.count, 1)
+        XCTAssertEqual(cycles[0].cycleMonth, "2026-10")
+        XCTAssertEqual(cycles[0].dueDate, "2026-11-05")
+        XCTAssertEqual(cycles[0].statementAmountMinor, 12_500)
+        XCTAssertEqual(cycles[0].originalStatementAmountMinor, 12_500)
+        XCTAssertEqual(cycles[0].paidAmountMinor, 0)
+        XCTAssertEqual(cycles[0].remainingAmountMinor, 12_500)
+        XCTAssertEqual(cycles[0].source, "screenshot")
+        XCTAssertEqual(cycles[0].evidenceRecordID, snapshot.id)
+        XCTAssertEqual(cycles[0].confidence, 0.98)
+    }
+
     @MainActor
     func testLF03302AcceptedLocalActionIsNotRepeatedWhenListRefreshFails() async throws {
         let directory = FileManager.default.temporaryDirectory
