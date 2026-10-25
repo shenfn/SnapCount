@@ -65,20 +65,26 @@ final class LocalImageRecognitionUseCase {
     private let imageStore: LocalImageStore
     private let intakeRepository: LocalImageIntakeRepository
     private let provider: LocalImageRecognitionProvider
+    private let isRecognitionRequestCurrent: () -> Bool
 
     init(
         localRecordUseCase: LocalRecordUseCaseProtocol,
         imageStore: LocalImageStore,
         intakeRepository: LocalImageIntakeRepository,
-        provider: LocalImageRecognitionProvider
+        provider: LocalImageRecognitionProvider,
+        isRecognitionRequestCurrent: @escaping () -> Bool = { true }
     ) {
         self.localRecordUseCase = localRecordUseCase
         self.imageStore = imageStore
         self.intakeRepository = intakeRepository
         self.provider = provider
+        self.isRecognitionRequestCurrent = isRecognitionRequestCurrent
     }
 
-    static func makeDefault(provider: LocalImageRecognitionProvider) throws -> LocalImageRecognitionUseCase {
+    static func makeDefault(
+        provider: LocalImageRecognitionProvider,
+        isRecognitionRequestCurrent: @escaping () -> Bool = { true }
+    ) throws -> LocalImageRecognitionUseCase {
         let database = try LocalDatabase()
         let imageStore = try LocalImageStore()
         let repository = try LocalRecordRepository(database: database)
@@ -91,7 +97,8 @@ final class LocalImageRecognitionUseCase {
             localRecordUseCase: recordUseCase,
             imageStore: imageStore,
             intakeRepository: LocalImageIntakeRepository(database: database),
-            provider: provider
+            provider: provider,
+            isRecognitionRequestCurrent: isRecognitionRequestCurrent
         )
     }
 

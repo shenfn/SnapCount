@@ -253,6 +253,43 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertEqual(appState.failedLocalImageIntakes.map(\.id), [intakeID])
     }
 
+    func testLF03003CredentialReplacementDropsLateRecognitionAndKeepsImage() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let credentialValidity = RecognitionCredentialValidity()
+        let imageData = Data("synthetic-key-replacement-image".utf8)
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: CredentialInvalidatingLocalImageRecognitionProvider(
+                candidate: makeCandidate(),
+                credentialValidity: credentialValidity
+            ),
+            isRecognitionRequestCurrent: { credentialValidity.isCurrent }
+        )
+
+        do {
+            _ = try await recognition.ingest(
+                imageData: imageData, captureKind: "camera", filename: "synthetic.jpg"
+            )
+            XCTFail("旧 Key 请求的晚回包不应写入本地候选或正式记录")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .failed)
+        XCTAssertFalse(credentialValidity.isCurrent)
+        XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        let stagingRecords = try await context.useCase.stagingRecords()
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertTrue(stagingRecords.isEmpty)
+    }
+
     func testLF00701RetryUsesSameIntakeAndStoresRetryCount() async throws {
         let context = try makeContext()
         defer { cleanup(context) }
@@ -595,6 +632,36 @@ private final class StubLocalImageRecognitionProvider: LocalImageRecognitionProv
         callCount += 1
         if let failure { throw failure }
         guard let candidate else { throw StubProviderError.missingCandidate }
+        return candidate
+    }
+}
+
+private final class RecognitionCredentialValidity {
+    private let lock = NSLock()
+    private var current = true
+
+    var isCurrent: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return current
+    }
+
+    func invalidate() {
+        lock.lock(); defer { lock.unlock() }
+        current = false
+    }
+}
+
+private final class CredentialInvalidatingLocalImageRecognitionProvider: LocalImageRecognitionProvider {
+    let candidate: LocalRecognitionCandidate
+    let credentialValidity: RecognitionCredentialValidity
+
+    init(candidate: LocalRecognitionCandidate, credentialValidity: RecognitionCredentialValidity) {
+        self.candidate = candidate
+        self.credentialValidity = credentialValidity
+    }
+
+    func recognize(_ request: LocalImageRecognitionRequest) async throws -> LocalRecognitionCandidate {
+        credentialValidity.invalidate()
         return candidate
     }
 }
