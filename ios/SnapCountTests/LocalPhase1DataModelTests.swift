@@ -250,6 +250,95 @@ final class LocalPhase1DataModelTests: XCTestCase {
         }
     }
 
+    func testLF03715DebitAccountUsesExplicitThenCycleThenLiabilityDefaultAndRejectsInvalidExplicit() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let now = ISO8601DateFormatter().date(from: "2026-03-10T00:00:00+08:00")!
+        let accountDefaultID = UUID(), cycleDefaultID = UUID(), explicitID = UUID(), liabilityID = UUID()
+        for (id, name, balance) in [
+            (accountDefaultID, "账户默认", Int64(20_000)),
+            (cycleDefaultID, "账期默认", Int64(30_000)),
+            (explicitID, "显式扣款", Int64(40_000))
+        ] {
+            _ = try repository.createAccount(LocalAccountDraft(
+                id: id, profileID: profile.id, name: name, kind: "cash", currency: "CNY",
+                openingBalanceMinor: balance, createdAt: now
+            ))
+        }
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: liabilityID, profileID: profile.id, name: "优先级信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: now, billDay: 15, paymentDueDay: 20,
+            autoDebitAccountID: accountDefaultID
+        ))
+        _ = try repository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: liabilityID, amountMinor: 10_000, currency: "CNY",
+            merchantName: "合成账单消费", platform: "线下", category: "other", paymentMethod: "信用卡",
+            transactionDate: "2026-03-01", transactionTime: nil, note: nil, createdAt: now
+        ), operationID: UUID())
+        let cycle = try XCTUnwrap(repository.ensureRepaymentCycles(
+            profileID: profile.id, monthKey: "2026-03", now: now
+        ).first)
+        try database.writer.write { db in
+            try db.execute(sql: "UPDATE local_repayment_cycles SET auto_debit_account_id = ? WHERE id = ?",
+                           arguments: [cycleDefaultID.uuidString, cycle.id.uuidString])
+        }
+
+        XCTAssertThrowsError(try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 1_000,
+            debitAccountID: liabilityID, status: nil, note: "显式非法账户不得回退", paidAt: now
+        ))
+        XCTAssertTrue(try repository.liabilityPayments(accountID: liabilityID).isEmpty)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 10_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: accountDefaultID), 20_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: cycleDefaultID), 30_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: explicitID), 40_000)
+
+        _ = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 1_000,
+            debitAccountID: explicitID, status: nil, note: "显式优先", paidAt: now
+        )
+        var confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertEqual(confirmed.debitAccountID, explicitID)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: explicitID), 39_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: cycleDefaultID), 30_000)
+
+        _ = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 2_000,
+            debitAccountID: nil, status: nil, note: "账期默认优先于账户默认", paidAt: now.addingTimeInterval(1)
+        )
+        confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertEqual(confirmed.debitAccountID, cycleDefaultID)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: explicitID), 40_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: cycleDefaultID), 28_000)
+
+        try database.writer.write { db in
+            try db.execute(sql: "UPDATE local_repayment_cycles SET auto_debit_account_id = NULL WHERE id = ?",
+                           arguments: [cycle.id.uuidString])
+        }
+        _ = try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 3_000,
+            debitAccountID: nil, status: nil, note: "使用负债账户默认", paidAt: now.addingTimeInterval(2)
+        )
+        confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertEqual(confirmed.debitAccountID, accountDefaultID)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: accountDefaultID), 17_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: cycleDefaultID), 30_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: explicitID), 40_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 7_000)
+
+        XCTAssertThrowsError(try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 4_000,
+            debitAccountID: liabilityID, status: nil, note: "非法显式账户不得破坏原付款", paidAt: now.addingTimeInterval(3)
+        ))
+        confirmed = try XCTUnwrap(repository.liabilityPayments(accountID: liabilityID).first { $0.status == "confirmed" })
+        XCTAssertEqual(confirmed.amountMinor, 3_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: accountDefaultID), 17_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 7_000)
+    }
+
     func testLF03711To18LocalRepaymentReconfirmationAndRevocationAreAtomicAndIdempotent() throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
