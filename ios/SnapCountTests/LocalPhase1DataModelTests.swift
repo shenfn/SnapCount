@@ -3,6 +3,25 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testLF03417StringNonFiniteDurationsAreRejectedAtSharedBoundary() throws {
+        for value in ["inf", "-inf", "nan", "1e309"] {
+            for (domain, field, required) in [
+                ("sport", "duration_minutes", "sport_type"),
+                ("reading", "reading_minutes", "book_name")
+            ] {
+                XCTAssertThrowsError(try LocalRecordCodec.normalizedPayload(
+                    domainKey: domain,
+                    payload: [field: AnyCodable(value), required: AnyCodable("合成记录")]
+                ), "\(domain) must reject \(value)")
+            }
+        }
+        let valid = try LocalRecordCodec.normalizedPayload(
+            domainKey: "sport",
+            payload: ["duration_minutes": AnyCodable("20"), "sport_type": AnyCodable("跑步")]
+        )
+        XCTAssertEqual(valid["duration_minutes"]?.value as? String, "20")
+    }
+
     func testLF03721LocalWalletRepaymentScreenshotIsKeptAsReviewableCandidate() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
