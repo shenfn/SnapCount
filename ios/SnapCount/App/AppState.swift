@@ -5489,6 +5489,7 @@ final class AppState: ObservableObject {
                 downloader: LocalHistoryImageDownloader(baseURL: baseURL), cache: cache
             ).prepare(profileID: profile.id, cloudUserID: session.user.id,
                       accessToken: session.accessToken, isCurrent: isCurrent)
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
             let inspection = prepared.inspection
             historyMigrationCheckpoint = prepared.state
             guard inspection.blockers.isEmpty else {
