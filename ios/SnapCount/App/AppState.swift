@@ -212,6 +212,7 @@ final class AppState: ObservableObject {
         localImageStore: LocalImageStore? = nil,
         localImageIntakeRepository: LocalImageIntakeRepository? = nil,
         localFactPortability: LocalFactPortability? = nil,
+        localCompleteBackupPortability: LocalCompleteBackupPortability? = nil,
         inboxRepository: InboxRepositoryProtocol = InboxRepository(),
         domainRepository: DomainRepositoryProtocol = DomainRepository(),
         snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
@@ -287,7 +288,7 @@ final class AppState: ObservableObject {
         self.localFactPortability = usesDefaultLocalStorage
             ? (localFactPortability ?? Self.defaultLocalFactPortability())
             : localFactPortability
-        self.localCompleteBackupPortability = Self.defaultLocalCompleteBackupPortability()
+        self.localCompleteBackupPortability = localCompleteBackupPortability ?? Self.defaultLocalCompleteBackupPortability()
         self.inboxRepository = inboxRepository
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore

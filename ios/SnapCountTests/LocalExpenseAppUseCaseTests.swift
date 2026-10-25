@@ -124,6 +124,87 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     }
 
     @MainActor
+    func testLF02101AppStateRestoreRefreshesLocalRecordsImagesAndInsights() async throws {
+        let sourceURL = temporaryDatabaseURL()
+        let targetURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: sourceURL); removeDatabase(at: targetURL) }
+        let today = NativeLocalDate.dateKey(Date())
+        let monthKey = String(today.prefix(7))
+
+        let sourceDatabase = try LocalDatabase(databaseURL: sourceURL)
+        let sourceProfileStore = LocalProfileStore(database: sourceDatabase)
+        let sourceProfile = try sourceProfileStore.activeProfile()
+        let sourceExpenseRepository = try LocalExpenseRepository(database: sourceDatabase)
+        let sourceAccount = try sourceExpenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: sourceProfile.id, name: "合成现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: Date()
+        ))
+        let sourceExpense = try sourceExpenseRepository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: sourceProfile.id, accountID: sourceAccount.id,
+            amountMinor: 2_300, currency: "CNY", merchantName: "合成消费", platform: "线下",
+            category: "food", paymentMethod: "cash", transactionDate: today,
+            transactionTime: nil, note: nil, createdAt: Date()
+        ), operationID: UUID())
+        let sourceImages = try LocalImageStore(rootDirectory: sourceURL.deletingLastPathComponent().appendingPathComponent("images"))
+        let sourceRecordID = UUID()
+        let sourceImage = Data("synthetic restored image".utf8)
+        let sourceImageReference = try sourceImages.save(data: sourceImage, owner: sourceRecordID.uuidString)
+        _ = try LocalRecordRepository(database: sourceDatabase).createRecord(LocalRecordDraft(
+            id: sourceRecordID, profileID: sourceProfile.id, domainKey: "sport",
+            title: "合成步行", summary: "30分钟",
+            payloadJSON: try LocalRecordCodec.encode([
+                "sport_type": AnyCodable("walk"), "duration_minutes": AnyCodable(30)
+            ]),
+            recordDate: today, recordTime: nil, note: nil,
+            imagePath: sourceImageReference.path, imageHash: sourceImageReference.hash,
+            createdAt: Date()
+        ))
+        let sourceBackup = LocalCompleteBackupPortability(database: sourceDatabase, imageStore: sourceImages)
+        let backupData = try sourceBackup.exportBackup()
+
+        let targetDatabase = try LocalDatabase(databaseURL: targetURL)
+        let targetProfileStore = LocalProfileStore(database: targetDatabase)
+        _ = try targetProfileStore.activeProfile()
+        let targetExpenseRepository = try LocalExpenseRepository(database: targetDatabase)
+        let targetRecordRepository = try LocalRecordRepository(database: targetDatabase)
+        let targetImages = try LocalImageStore(rootDirectory: targetURL.deletingLastPathComponent().appendingPathComponent("images"))
+        let targetFactReader = try LocalFactReader(database: targetDatabase)
+        let targetBackup = LocalCompleteBackupPortability(database: targetDatabase, imageStore: targetImages)
+        let state = AppState(
+            localExpenseUseCase: LocalExpenseUseCase(profileStore: targetProfileStore, repository: targetExpenseRepository),
+            localRecordUseCase: LocalRecordUseCase(profileStore: targetProfileStore, repository: targetRecordRepository, imageStore: targetImages),
+            localFactReader: targetFactReader,
+            localImageStore: targetImages,
+            localCompleteBackupPortability: targetBackup,
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+
+        let preview = try await state.previewCompleteLocalBackup(backupData)
+        XCTAssertEqual(preview.tableCounts["local_expenses"], 1)
+        XCTAssertEqual(preview.imageCount, 1)
+        let imported = await state.importCompleteLocalBackup(backupData)
+        XCTAssertTrue(imported)
+
+        let records = state.recordGroups(monthKey: monthKey).flatMap(\.records)
+        XCTAssertTrue(records.contains { $0.reference == "expense/\(sourceExpense.id.uuidString)" })
+        XCTAssertTrue(records.contains { $0.reference == "data/\(sourceRecordID.uuidString)" })
+        XCTAssertEqual(try targetImages.data(at: sourceImageReference.path), sourceImage)
+        XCTAssertEqual(try targetExpenseRepository.accountBalanceMinor(accountID: sourceAccount.id), 7_700)
+        XCTAssertEqual(state.localAccounts.map(\.id), [sourceAccount.id])
+
+        await state.loadInsights(range: .seven, force: true)
+        XCTAssertEqual(state.insightsSnapshot?.expenseTotal ?? 0, 23, accuracy: 0.0001)
+        XCTAssertEqual(try targetDatabase.writer.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM local_outbox_operations") ?? 0
+        }, 0)
+
+        let corrupted = await state.importCompleteLocalBackup(Data("not-json".utf8))
+        XCTAssertFalse(corrupted)
+        XCTAssertTrue(state.settingsMessage?.contains("本地恢复失败") == true)
+        XCTAssertEqual(try targetExpenseRepository.accountBalanceMinor(accountID: sourceAccount.id), 7_700)
+    }
+
+    @MainActor
     func testLF03738AccountFormCreatesAndReadsLiabilityOffline() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
