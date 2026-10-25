@@ -13,7 +13,9 @@ final class LocalPhase1DataModelTests: XCTestCase {
             repository: try LocalRecordRepository(database: database)
         )
 
-        let outcome = try await recordUseCase.stage(LocalRecordCandidate(
+        let outcome: LocalStagingOutcome
+        do {
+            outcome = try await recordUseCase.stage(LocalRecordCandidate(
             id: "synthetic-wallet-repayment",
             domainKey: "wallet",
             title: "合成信用卡还款截图",
@@ -28,8 +30,12 @@ final class LocalPhase1DataModelTests: XCTestCase {
             recordTime: "12:30",
             imageData: nil,
             createdAt: Date(timeIntervalSince1970: 1_800_000_000),
-            evidenceFields: ["status", "amount"]
-        ))
+                evidenceFields: ["status", "amount"]
+            ))
+        } catch {
+            XCTFail("本地还款截图候选应进入待复核队列，实际失败：\(error)")
+            return
+        }
 
         XCTAssertEqual(outcome.record.domainKey, "wallet")
         XCTAssertEqual(outcome.record.status, .pendingReview)
