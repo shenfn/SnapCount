@@ -620,6 +620,60 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertNil(liability.autoDebitAccountID, "归档扣款资产时清除仍有效的扣款配置")
     }
 
+    func testLF03710LiabilityTypeChangeRejectsExistingRelationshipsWithoutPartialMutation() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let debitID = UUID(), referencedLiabilityID = UUID(), cycleOnlyID = UUID()
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: debitID, profileID: profile.id, name: "资产扣款账户", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 20_000, createdAt: now
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: referencedLiabilityID, profileID: profile.id, name: "绑定信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 30_000, createdAt: now, billDay: 15, paymentDueDay: 25,
+            autoDebitAccountID: debitID
+        ))
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: cycleOnlyID, profileID: profile.id, name: "仅有账期的信用额度", kind: "credit_line", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: now, billDay: 10, paymentDueDay: 20
+        ))
+        let cycleID = UUID()
+        try database.writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO local_repayment_cycles (
+                    id, profile_id, account_id, cycle_month, statement_amount_minor,
+                    remaining_amount_minor, status, source, created_at, updated_at
+                ) VALUES (?, ?, ?, '2026-09', 1_000, 1_000, 'pending', 'manual', ?, ?)
+                """, arguments: [cycleID.uuidString, profile.id.uuidString, cycleOnlyID.uuidString, now, now])
+        }
+
+        let debitAccount = try XCTUnwrap(repository.accounts(profileID: profile.id).first { $0.id == debitID })
+        XCTAssertThrowsError(try repository.updateAccount(LocalAccountUpdate(
+            id: debitID, profileID: profile.id, expectedVersion: debitAccount.localVersion,
+            name: "改成负债后不得破坏扣款引用", kind: "credit_card", institution: "", last4: "",
+            billDay: 15, paymentDueDay: 25, autoDebitAccountID: nil, autoConfirmRepayment: false,
+            gracePeriodDays: 0, isDefaultExpense: false, isDefaultIncome: false,
+            isArchived: false, sortOrder: debitAccount.sortOrder, updatedAt: now
+        )))
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).first { $0.id == debitID }?.kind, "cash")
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).first { $0.id == referencedLiabilityID }?.autoDebitAccountID, debitID)
+
+        let cycleAccount = try XCTUnwrap(repository.accounts(profileID: profile.id).first { $0.id == cycleOnlyID })
+        XCTAssertThrowsError(try repository.updateAccount(LocalAccountUpdate(
+            id: cycleOnlyID, profileID: profile.id, expectedVersion: cycleAccount.localVersion,
+            name: "有账期的账户不可改成资产", kind: "cash", institution: "", last4: "",
+            billDay: nil, paymentDueDay: nil, autoDebitAccountID: nil, autoConfirmRepayment: false,
+            gracePeriodDays: 0, isDefaultExpense: false, isDefaultIncome: false,
+            isArchived: false, sortOrder: cycleAccount.sortOrder, updatedAt: now
+        )))
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).first { $0.id == cycleOnlyID }?.kind, "credit_line")
+        XCTAssertEqual(try repository.repaymentCycles(accountID: cycleOnlyID).map(\.id), [cycleID])
+    }
+
     func testIOSV2POLISH003F10WakeDateRoutesLegacyLocalFactAcrossMonthsWithoutRewriting() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
