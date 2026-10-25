@@ -4,29 +4,6 @@ import XCTest
 @testable import SnapCount
 
 final class LocalCompleteBackupPortabilityTests: XCTestCase {
-    func testLF02105CompleteBackupRefusesMissingReferencedImageAndPreservesDatabase() throws {
-        let fixture = try makeEmptyFixture()
-        defer { cleanup(fixture) }
-        let profile = try fixture.profileStore.activeProfile()
-        let recordID = UUID()
-        let imagePath = "records/missing-synthetic-image.jpg"
-        let imageHash = String(repeating: "a", count: 64)
-        try fixture.database.writer.write { db in
-            try db.execute(sql: """
-                INSERT INTO local_records (
-                    id, profile_id, domain_key, title, summary, payload_json, record_date,
-                    image_path, image_hash, created_at, updated_at, source_kind, domain_version
-                ) VALUES (?, ?, 'food', '本地记录', '合成fixture', '{}', '2026-10-25', ?, ?, ?, ?, 'manual', 1)
-                """, arguments: [recordID.uuidString, profile.id.uuidString, imagePath, imageHash, Date(), Date()])
-        }
-
-        XCTAssertThrowsError(try fixture.portability.exportBackup()) { error in
-            XCTAssertEqual(error as? LocalCompleteBackupError, .missingImage(imagePath))
-        }
-        XCTAssertEqual(try count(fixture.database, "SELECT COUNT(*) FROM local_records WHERE id = '\(recordID.uuidString)'"), 1)
-        XCTAssertFalse(fixture.imageStore.contains(path: imagePath))
-    }
-
     func testLF02101CompleteBackupRestoresFinancialHistoryCandidatesAndImagesWithoutOutbox() throws {
         let source = try makeFixture()
         defer { cleanup(source) }
@@ -425,6 +402,8 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
                 return XCTFail("unexpected error: \(error)")
             }
         }
+        XCTAssertEqual(try count(fixture.database, "SELECT COUNT(*) FROM local_records WHERE image_path = '\(recordImagePath)'"), 1)
+        XCTAssertFalse(fixture.imageStore.contains(path: recordImagePath))
     }
 
     func testLF02104MalformedAndDuplicateBackupsAreRejectedWithoutPartialWrites() throws {
