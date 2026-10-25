@@ -343,6 +343,119 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
     }
 
     @MainActor
+    func testLF03721LocalScreenshotRepaymentIsAtomicIdempotentAndKeepsEvidence() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        let imageDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("local-screenshot-evidence-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            removeDatabase(at: databaseURL)
+            try? FileManager.default.removeItem(at: imageDirectory)
+        }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let recordRepository = try LocalRecordRepository(database: database)
+        let imageStore = try LocalImageStore(rootDirectory: imageDirectory)
+        let profile = try profileStore.activeProfile()
+        let month = String(NativeLocalDate.dateKey(Date()).prefix(7))
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "合成信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: Date(), billDay: 15, paymentDueDay: 25
+        ))
+        _ = try expenseRepository.createExpense(LocalExpenseDraft(
+            id: UUID(), profileID: profile.id, accountID: account.id, amountMinor: 10_000,
+            currency: "CNY", merchantName: "合成消费", platform: "线下", category: "other",
+            paymentMethod: "credit_card", transactionDate: "\(month)-05", transactionTime: nil,
+            note: nil, createdAt: Date()
+        ), operationID: UUID())
+        let expenseUseCase = LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository)
+        let recordUseCase = LocalRecordUseCase(
+            profileStore: profileStore, repository: recordRepository, imageStore: imageStore
+        )
+        let imageData = Data("synthetic-local-repayment-evidence".utf8)
+        let staged = try await recordUseCase.stage(LocalRecordCandidate(
+            id: "synthetic-local-repayment-atomic", domainKey: "wallet",
+            title: "合成信用卡已还款", summary: "合成信用卡还款 40 元",
+            payload: [
+                "record_kind": AnyCodable("liability_snapshot"),
+                "status": AnyCodable("paid"),
+                "amount": AnyCodable(40.0)
+            ],
+            confidence: 0.9, recordDate: NativeLocalDate.dateKey(Date()), recordTime: nil,
+            imageData: imageData, createdAt: Date()
+        ))
+        let state = AppState(
+            localExpenseUseCase: expenseUseCase,
+            localRecordUseCase: recordUseCase,
+            localImageStore: imageStore,
+            localImageIntakeRepository: LocalImageIntakeRepository(database: database),
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+        await state.prepareLocalWorkspace()
+        await state.refreshInboxProjection()
+        let nativeID = LocalStagingReadModel.id(for: staged.record.id)
+        let candidate = try XCTUnwrap(state.repaymentCandidates[nativeID])
+        let cycleID = try XCTUnwrap(UUID(uuidString: candidate.cycle.id))
+        let imagePath = try XCTUnwrap(staged.record.imagePath)
+
+        try database.writer.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER fail_local_screenshot_archive
+                BEFORE UPDATE OF status ON local_staging_records
+                WHEN OLD.id = '\(staged.record.id)' AND NEW.status = 'archived'
+                BEGIN SELECT RAISE(ABORT, 'synthetic staging archive failure'); END
+                """)
+        }
+        do {
+            _ = try await expenseUseCase.confirmScreenshotRepayment(
+                stagingID: staged.record.id, cycleID: cycleID, paidAmountMinor: 4_000,
+                debitAccountID: nil, note: "合成确认", paidAt: Date()
+            )
+            XCTFail("staging archive failure must roll back the repayment")
+        } catch {
+            XCTAssertEqual(try expenseRepository.liabilityPayments(accountID: account.id).count, 0)
+        }
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: account.id), 10_000)
+        let pendingAfterFailure = try await recordUseCase.staging(id: staged.record.id)
+        XCTAssertEqual(pendingAfterFailure?.status, .pendingReview)
+        XCTAssertEqual(try imageStore.data(at: imagePath), imageData)
+
+        try database.writer.write { db in
+            try db.execute(sql: "DROP TRIGGER fail_local_screenshot_archive")
+        }
+        let accepted = await state.confirmStagingRepayment(
+            LocalStagingReadModel.native(from: staged.record, imageStore: imageStore)
+        )
+        XCTAssertTrue(accepted)
+        XCTAssertNil(state.repaymentCandidates[nativeID])
+        let archived = try await recordUseCase.staging(id: staged.record.id)
+        XCTAssertEqual(archived?.status, .archived)
+        XCTAssertEqual(archived?.resolvedAction, "liability_repayment_confirmed")
+        XCTAssertEqual(archived?.targetRecordID, cycleID)
+        let payments = try expenseRepository.liabilityPayments(accountID: account.id)
+        XCTAssertEqual(payments.count, 1)
+        XCTAssertEqual(payments.first?.source, "screenshot")
+        XCTAssertEqual(payments.first?.amountMinor, 4_000)
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: account.id), 6_000)
+        XCTAssertEqual(try imageStore.data(at: imagePath), imageData)
+        let replay = try await expenseUseCase.confirmScreenshotRepayment(
+            stagingID: staged.record.id, cycleID: cycleID, paidAmountMinor: 4_000,
+            debitAccountID: nil, note: "合成确认", paidAt: Date()
+        )
+        XCTAssertEqual(replay.id, cycleID)
+        XCTAssertEqual(try expenseRepository.liabilityPayments(accountID: account.id).count, 1)
+        do {
+            _ = try await expenseUseCase.confirmScreenshotRepayment(
+                stagingID: staged.record.id, cycleID: cycleID, paidAmountMinor: 4_100,
+                debitAccountID: nil, note: "冲突重放", paidAt: Date()
+            )
+            XCTFail("the same screenshot must reject a different repayment command")
+        } catch {
+            XCTAssertEqual(try expenseRepository.liabilityPayments(accountID: account.id).count, 1)
+        }
+    }
+
+    @MainActor
     func testLF03201ManualIncomePersistsAndCreditsItsLocalAccountWithoutSession() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

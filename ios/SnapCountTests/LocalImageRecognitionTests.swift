@@ -370,25 +370,63 @@ final class LocalImageRecognitionTests: XCTestCase {
             localRecordUseCase: context.useCase,
             imageStore: context.imageStore,
             intakeRepository: context.intakeRepository,
-            provider: StubLocalImageRecognitionProvider(candidate: makeCandidate(domainKey: "wallet"))
+            provider: StubLocalImageRecognitionProvider(candidate: makeCandidate(domainKey: "tax"))
         )
         do {
             _ = try await useCase.ingest(imageData: imageData, captureKind: "camera", filename: "wallet.jpg")
             XCTFail("当前本地不支持的候选必须进入失败输入状态")
         } catch {
-            XCTAssertEqual(error as? LocalImageRecognitionError, .unsupportedDomain("wallet"))
+            XCTAssertEqual(error as? LocalImageRecognitionError, .unsupportedDomain("tax"))
         }
 
         let profile = try context.intakeRepository.activeProfile()
         let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
         let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
         XCTAssertEqual(intake.status, .failed)
-        XCTAssertEqual(intake.failureMessage, "本地暂不支持数据域：wallet")
+        XCTAssertEqual(intake.failureMessage, "本地暂不支持数据域：tax")
         XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
         let records = try await context.useCase.records(monthKey: "2026-09")
         let staging = try await context.useCase.stagingRecords()
         XCTAssertTrue(records.isEmpty)
         XCTAssertTrue(staging.isEmpty)
+    }
+
+    func testLF03721LocalWalletScreenshotRecognitionRetainsImageInReviewQueue() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let imageData = Data("synthetic-wallet-repayment-image".utf8)
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "wallet",
+            confidence: 0.93,
+            payload: [
+                "record_kind": AnyCodable("liability_snapshot"),
+                "status": AnyCodable("paid"),
+                "amount": AnyCodable(40.0)
+            ],
+            missingFields: []
+        ))
+        let useCase = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+
+        let outcome = try await useCase.ingest(
+            imageData: imageData,
+            captureKind: "screenshot",
+            filename: "synthetic-repayment.jpg"
+        )
+
+        guard case .staged(let staged) = outcome.result else {
+            return XCTFail("wallet 还款截图必须先进入人工复核，不能自动入账")
+        }
+        XCTAssertEqual(staged.record.domainKey, "wallet")
+        XCTAssertEqual(staged.record.status, .pendingReview)
+        XCTAssertEqual(try context.imageStore.data(at: try XCTUnwrap(staged.record.imagePath)), imageData)
+        let records = try await context.useCase.records(monthKey: "2026-09")
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertEqual(provider.callCount, 1)
     }
 
     func testLOCALP1SPORT001JRetryingTheSameImageDoesNotCreateDuplicateFormalFacts() async throws {

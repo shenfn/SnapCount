@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import XCTest
 @testable import SnapCount
 
@@ -93,6 +94,76 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(restored.evidenceWalletSnapshotID, snapshotID)
         XCTAssertNil(restored.evidenceRecordID)
         XCTAssertEqual(try LocalWalletSnapshotRepository(database: target.database).history(profileID: targetProfile.id).map(\.id), [snapshotID])
+    }
+
+    func testLF021BackupPreservesConfirmedScreenshotPaymentAndOriginalImage() async throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let profile = try XCTUnwrap(source.profileID)
+        let cycle = try XCTUnwrap(
+            LocalExpenseRepository(database: source.database).repaymentCycles(accountID: source.liabilityID).first
+        )
+        try source.database.writer.write { db in
+            try db.execute(sql: """
+                UPDATE local_repayment_cycles
+                SET paid_amount_minor = 0, remaining_amount_minor = statement_amount_minor,
+                    status = 'pending', source = 'manual'
+                WHERE id = ?
+                """, arguments: [cycle.id.uuidString])
+        }
+        let imageData = Data("synthetic-confirmed-repayment-evidence".utf8)
+        let recordUseCase = LocalRecordUseCase(
+            profileStore: source.profileStore,
+            repository: try LocalRecordRepository(database: source.database),
+            imageStore: source.imageStore
+        )
+        let candidate = try await recordUseCase.stage(LocalRecordCandidate(
+            id: "backup-screenshot-\(UUID().uuidString)", domainKey: "wallet",
+            title: "合成已还款截图", summary: "备份证据关联",
+            payload: [
+                "record_kind": AnyCodable("liability_snapshot"),
+                "status": AnyCodable("paid"),
+                "amount": AnyCodable(20.0)
+            ],
+            confidence: 0.9, recordDate: "2026-10-25", recordTime: nil,
+            imageData: imageData, createdAt: Date()
+        ))
+        _ = try await LocalExpenseUseCase(
+            profileStore: source.profileStore,
+            repository: LocalExpenseRepository(database: source.database)
+        ).confirmScreenshotRepayment(
+            stagingID: candidate.record.id, cycleID: cycle.id, paidAmountMinor: 2_000,
+            debitAccountID: source.cashID, note: "备份截图还款", paidAt: Date()
+        )
+
+        let backup = try source.portability.exportBackup()
+        let preview = try source.portability.preview(backup)
+        XCTAssertEqual(preview.schemaVersion, 20)
+        XCTAssertEqual(preview.imageCount, 4)
+        let targetProfile = try target.profileStore.activeProfile()
+        _ = try target.portability.importBackup(backup, into: targetProfile.id)
+
+        let payment = try XCTUnwrap(LocalExpenseRepository(database: target.database)
+            .liabilityPayments(accountID: source.liabilityID)
+            .first(where: { $0.source == "screenshot" }))
+        let evidenceStagingID = try XCTUnwrap(try target.database.writer.read { db in
+            try String.fetchOne(
+                db,
+                sql: "SELECT evidence_staging_id FROM local_liability_payments WHERE id = ?",
+                arguments: [payment.id.uuidString]
+            )
+        })
+        XCTAssertEqual(evidenceStagingID, candidate.record.id)
+        let targetRecordUseCase = LocalRecordUseCase(
+            profileStore: target.profileStore,
+            repository: try LocalRecordRepository(database: target.database),
+            imageStore: target.imageStore
+        )
+        let restoredCandidateMaybe = try await targetRecordUseCase.staging(id: evidenceStagingID)
+        let restoredCandidate = try XCTUnwrap(restoredCandidateMaybe)
+        XCTAssertEqual(restoredCandidate.status, .archived)
+        XCTAssertEqual(try target.imageStore.data(at: try XCTUnwrap(restoredCandidate.imagePath)), imageData)
     }
 
     func testLF02109And11RestoreKeepsWakeDateDeletionAndLedgerProjection() throws {
