@@ -3,6 +3,24 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testLF03417CalendarDatesMustExist() throws {
+        for day in ["2026-02-29", "2026-04-31", "2026-13-01"] {
+            XCTAssertThrowsError(try LocalRecordValidation.validate(domainKey: "sport", title: "跑步", recordDate: day))
+        }
+        XCTAssertNoThrow(try LocalRecordValidation.validate(domainKey: "sport", title: "跑步", recordDate: "2024-02-29"))
+    }
+
+    func testLF00603RepeatedStagingDiscardKeepsTerminalState() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalRecordRepository(database: database)
+        let useCase = LocalRecordUseCase(profileStore: LocalProfileStore(database: database), repository: repository)
+        let staged = try await useCase.stage(LocalRecordCandidate(id: "discard-idempotence", domainKey: "sport", title: "运动", summary: "候选", payload: ["sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(20)], confidence: 0.5, recordDate: "2026-10-25", recordTime: nil, imageData: nil, createdAt: Date()))
+        try repository.discardStaging(id: staged.record.id, updatedAt: Date(), profileID: profile.id)
+        XCTAssertNoThrow(try repository.discardStaging(id: staged.record.id, updatedAt: Date(), profileID: profile.id))
+    }
     func testLF03417StringNonFiniteDurationsAreRejectedAtSharedBoundary() throws {
         for value in ["inf", "-inf", "nan", "1e309"] {
             for (domain, field, required) in [
@@ -1306,6 +1324,12 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertTrue(csv.contains("income/\(incomeID.uuidString)"))
         XCTAssertTrue(csv.contains("data/\(recordID.uuidString)"))
         XCTAssertTrue(csv.contains(",{}"))
+        for (content, expected) in [(NativeExportContent.expense, Set(["expense"])), (.income, Set(["income"])), (.allFinance, Set(["expense", "income"]))] {
+            request.content = content
+            request.format = .json
+            let filtered = try JSONDecoder.iso8601.decode(LocalFactArchive.self, from: portability.exportArchive(request: request, exportedAt: Date(timeIntervalSince1970: 1_800_000_000)))
+            XCTAssertEqual(Set(filtered.facts.map(\.kind)), expected)
+        }
     }
 
     private func temporaryDatabaseURL() -> URL {

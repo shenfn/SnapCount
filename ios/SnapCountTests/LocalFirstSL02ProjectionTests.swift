@@ -1,4 +1,5 @@
 import XCTest
+import GRDB
 @testable import SnapCount
 
 /// SL-02（投影刷新收敛与特征测试加固）特征测试。
@@ -6,6 +7,71 @@ import XCTest
 /// DM-004/DM-005 阈值具名测试见 LocalPhase1DataModelTests，D6 死 API 改写见 LocalSportRecordTests。
 @MainActor
 final class LocalFirstSL02ProjectionTests: XCTestCase {
+    // LF-034 写后投影失败：写入结果和显示刷新结果必须分开，不能鼓励重复记账。
+    func testLF034CommittedRecordReportsProjectionFailureWithoutUndoingTheFact() async throws {
+        let harness = try Self.makeHarness(session: nil, expenseStub: false)
+        defer { harness.cleanup() }
+        let readURL = try Self.temporaryDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: readURL.deletingLastPathComponent()) }
+        let readDatabase = try LocalDatabase(databaseURL: readURL)
+        _ = try LocalProfileStore(database: readDatabase).activeProfile()
+        try readDatabase.writer.write { db in try db.execute(sql: "DROP TABLE local_records") }
+        let state = AppState(localExpenseUseCase: harness.expenseUseCase,
+            localRecordUseCase: harness.recordUseCase, localFactReader: try LocalFactReader(database: readDatabase),
+            localBindingRepository: harness.bindingRepository,
+            sessionProvider: { _ in XCTFail("本机保存不依赖会话"); throw SL02TestError.missingSession })
+        var draft = NativeManualRecordDraft(kind: .universal, domainKey: "sport")
+        draft.primaryValueText = "30"
+        draft.dimension = "跑步"
+        let saved = await state.createManualRecord(draft, domain: nil)
+        XCTAssertTrue(saved, "事实已提交，不能提示重新保存")
+        let committed = try await harness.recordUseCase.month(draft.dateKey.prefix(7).description)
+        XCTAssertEqual(committed.records.count, 1)
+        XCTAssertTrue(state.manualRecordMessage?.contains("刷新失败") == true)
+    }
+
+    // LF-034.01 / LF-040.01：绑定仅授权 expense/accounts 同步协议，不能打开旧全域 Dashboard。
+    func testLF03401BoundDeviceDashboardReadsLocalAuthorityWithoutLegacyCloudRequests() async throws {
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.isSignedIn = true
+        state.currentUserId = "cloud-user"
+        _ = try harness.bindingRepository.confirmBinding(profileID: harness.profile.id, cloudUserID: "cloud-user")
+        state.refreshLocalSyncState()
+        await state.refreshDashboard()
+        XCTAssertEqual(harness.sessionCounter.current, 0, "同步授权不得启动旧 Dashboard 五类请求")
+        XCTAssertFalse(state.isShowingCachedDashboard)
+    }
+
+    // LF-034.01 / LF-037.16：同步关闭时领域补绑入口必须读取本机，而不是先取云会话。
+    func testLF03401UnboundListDoesNotRequestCloudSessionWhileSyncIsOff() async throws {
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
+        defer { harness.cleanup() }
+        harness.state.isSignedIn = true
+        harness.state.currentUserId = "cloud-user"
+        await harness.state.loadUnboundRecords(monthKey: NativeMonthKey.current())
+        XCTAssertEqual(harness.sessionCounter.current, 0)
+    }
+
+    // LF-034.01：缓存缺失不是允许向远端回退的授权。
+    func testLF03401UnknownLocalAccountDetailFailsClosedWithoutCloudSession() async throws {
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
+        defer { harness.cleanup() }
+        _ = try harness.expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: harness.profile.id, name: "合成现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: Date()))
+        let state = harness.state
+        state.isSignedIn = true
+        state.currentUserId = "cloud-user"
+        await state.loadAccounts()
+        let account = try XCTUnwrap(state.accounts.first)
+        state.localAccounts = []
+        await state.loadAccountDetail(account)
+        XCTAssertEqual(harness.sessionCounter.current, 0)
+        XCTAssertNotNil(state.selectedAccountDetail)
+    }
+
     func testIOSV2POLISH006F17ForcedLocalReadCannotBeOverwrittenByOlderSnapshot() async throws {
         let harness = try Self.makeHarness(session: nil, expenseStub: true)
         defer { harness.cleanup() }

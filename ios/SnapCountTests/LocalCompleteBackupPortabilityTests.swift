@@ -4,6 +4,33 @@ import XCTest
 @testable import SnapCount
 
 final class LocalCompleteBackupPortabilityTests: XCTestCase {
+    func testLF02104DanglingLedgerSourceCannotBeRestored() throws {
+        let source = try makeFixture()
+        defer { cleanup(source) }
+        let backup = try tamper(source.portability.exportBackup()) { tables in
+            var entries = try Self.tableRows("local_account_entries", in: tables)
+            entries[0]["source_id"] = UUID().uuidString
+            tables["local_account_entries"] = try Self.encodeRows(entries)
+        }
+        XCTAssertThrowsError(try source.portability.preview(backup))
+    }
+
+    func testLF03601FinancialImageReferencesSurviveCompleteBackup() throws {
+        let source = try makeFixture()
+        defer { cleanup(source) }
+        let bytes = Data("synthetic-financial-original".utf8)
+        let image = try source.imageStore.save(data: bytes, owner: UUID().uuidString)
+        try source.database.writer.write { db in
+            try db.execute(sql: "UPDATE local_income_records SET image_path = ?, image_hash = ?", arguments: [image.path, image.hash])
+        }
+        let backup = try source.portability.exportBackup()
+        XCTAssertEqual(try source.portability.preview(backup).imageCount, 4)
+        let target = try makeEmptyFixture()
+        defer { cleanup(target) }
+        _ = try target.portability.importBackup(backup, into: target.profileStore.activeProfile().id)
+        XCTAssertEqual(try target.imageStore.data(at: image.path), bytes)
+    }
+
     func testLF02101CompleteBackupRestoresFinancialHistoryCandidatesAndImagesWithoutOutbox() throws {
         let source = try makeFixture()
         defer { cleanup(source) }
