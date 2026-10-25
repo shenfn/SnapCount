@@ -96,6 +96,56 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertEqual(try repository.ensureRepaymentCycles(profileID: profile.id, monthKey: "2025-02", now: now).count, 1)
     }
 
+    func testLF03725BillWindowUsesShanghaiInclusiveEdgesAndExcludesVoidedAndIncomeEntries() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let accountID = UUID()
+        let now = ISO8601DateFormatter().date(from: "2026-03-20T00:00:00+08:00")!
+        _ = try repository.createAccount(LocalAccountDraft(
+            id: accountID, profileID: profile.id, name: "账单窗口边界", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: now, billDay: 15, paymentDueDay: 20
+        ))
+        let createdAt: (String) -> Date = { day in
+            ISO8601DateFormatter().date(from: "\(day)T12:00:00+08:00")!
+        }
+        let createExpense: (String, Int64) throws -> UUID = { day, amount in
+            let id = UUID()
+            _ = try repository.createExpense(LocalExpenseDraft(
+                id: id, profileID: profile.id, accountID: accountID, amountMinor: amount, currency: "CNY",
+                merchantName: "合成边界消费", platform: "线下", category: "other", paymentMethod: "信用卡",
+                transactionDate: day, transactionTime: nil, note: nil, createdAt: createdAt(day)
+            ), operationID: UUID())
+            return id
+        }
+        _ = try createExpense("2026-02-15", 100)
+        _ = try createExpense("2026-02-16", 200)
+        let voidedExpenseID = try createExpense("2026-03-01", 500)
+        _ = try createExpense("2026-03-15", 300)
+        _ = try createExpense("2026-03-16", 400)
+        _ = try repository.createIncome(LocalIncomeDraft(
+            id: UUID(), profileID: profile.id, accountID: accountID, amountMinor: 600, currency: "CNY",
+            sourceName: "合成收入", category: "other", incomeDate: "2026-03-10", occurredAt: createdAt("2026-03-10"),
+            note: nil, createdAt: createdAt("2026-03-10")
+        ))
+        try database.writer.write { db in
+            try db.execute(sql: """
+                UPDATE local_account_entries SET voided_at = ?
+                WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL
+                """, arguments: [now, voidedExpenseID.uuidString])
+        }
+
+        let cycle = try XCTUnwrap(repository.ensureRepaymentCycles(
+            profileID: profile.id, monthKey: "2026-03", now: now
+        ).first)
+
+        XCTAssertEqual(cycle.statementStartDate, "2026-02-16")
+        XCTAssertEqual(cycle.statementEndDate, "2026-03-15")
+        XCTAssertEqual(cycle.statementAmountMinor, 500)
+    }
+
     func testLF03725And30ReconciliationCutoffAndHistoricalGraceTransitionPersistLocally() throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
