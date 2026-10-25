@@ -464,7 +464,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         note: String,
         paidAt: Date
     ) throws -> LocalRepaymentCycle {
-        try confirmRepayment(
+        return try confirmRepayment(
             cycleID: cycleID, profileID: profileID, paidAmountMinor: paidAmountMinor,
             debitAccountID: debitAccountID, status: requestedStatus, note: note,
             paidAt: paidAt, screenshotStagingID: nil
@@ -481,7 +481,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         paidAt: Date
     ) throws -> LocalRepaymentCycle {
         guard paidAmountMinor > 0 else { throw LocalDataError.invalidAmount }
-        try confirmRepayment(
+        return try confirmRepayment(
             cycleID: cycleID, profileID: profileID, paidAmountMinor: paidAmountMinor,
             debitAccountID: debitAccountID, status: nil, note: note,
             paidAt: paidAt, screenshotStagingID: stagingID

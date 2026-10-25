@@ -2610,7 +2610,7 @@ final class AppState: ObservableObject {
         let generation = userStateGeneration
         do {
             let staging = try await localRecordUseCase.stagingRecords()
-            let candidates = try staging.map { record in
+            let candidates = staging.map { record in
                 LocalStagingReadModel.native(from: record, imageStore: localImageStore)
             }
             await loadLocalAccounts()
