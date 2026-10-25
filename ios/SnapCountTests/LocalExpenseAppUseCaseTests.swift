@@ -213,9 +213,10 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
 
         await state.loadInsights(range: .seven, force: true)
         XCTAssertEqual(state.insightsSnapshot?.expenseTotal ?? 0, 23, accuracy: 0.0001)
-        XCTAssertEqual(try targetDatabase.writer.read { db in
+        let restoredOutboxCount = try await targetDatabase.writer.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM local_outbox_operations") ?? 0
-        }, 0)
+        }
+        XCTAssertEqual(restoredOutboxCount, 0)
 
         let corrupted = await state.importCompleteLocalBackup(Data("not-json".utf8))
         XCTAssertFalse(corrupted)
