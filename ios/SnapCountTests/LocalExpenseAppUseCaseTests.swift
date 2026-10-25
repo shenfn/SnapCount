@@ -897,7 +897,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         ))
         let cycleID = UUID()
         let now = Date()
-        try database.writer.write { db in
+        try await database.writer.write { db in
             try db.execute(sql: """
                 INSERT INTO local_repayment_cycles (
                     id, profile_id, account_id, cycle_month, statement_amount_minor,
@@ -950,7 +950,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
             openingBalanceMinor: 10_000, createdAt: Date()
         ))
         let cycleID = UUID(), paymentID = UUID(), now = Date()
-        try database.writer.write { db in
+        try await database.writer.write { db in
             try db.execute(sql: """
                 INSERT INTO local_repayment_cycles (
                     id, profile_id, account_id, cycle_month, statement_amount_minor,
