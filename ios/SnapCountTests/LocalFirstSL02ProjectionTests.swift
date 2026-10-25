@@ -15,7 +15,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: readURL.deletingLastPathComponent()) }
         let readDatabase = try LocalDatabase(databaseURL: readURL)
         _ = try LocalProfileStore(database: readDatabase).activeProfile()
-        try readDatabase.writer.write { db in try db.execute(sql: "DROP TABLE local_records") }
+        try await readDatabase.writer.write { db in try db.execute(sql: "DROP TABLE local_records") }
         let state = AppState(localExpenseUseCase: harness.expenseUseCase,
             localRecordUseCase: harness.recordUseCase, localFactReader: try LocalFactReader(database: readDatabase),
             localBindingRepository: harness.bindingRepository,
