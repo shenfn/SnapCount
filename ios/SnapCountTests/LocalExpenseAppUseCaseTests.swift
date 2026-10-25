@@ -4,6 +4,49 @@ import GRDB
 
 final class LocalExpenseAppUseCaseTests: XCTestCase {
     @MainActor
+    func testLF03601FinancialManualInputMustNotSucceedWithoutKeepingItsImage() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let repository = try LocalExpenseRepository(database: database)
+        let account = try repository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "合成现金", kind: "cash", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: Date()
+        ))
+        let images = try LocalImageStore(rootDirectory: databaseURL.deletingLastPathComponent()
+            .appendingPathComponent("images"))
+        let records = LocalRecordUseCase(profileStore: profileStore,
+                                        repository: try LocalRecordRepository(database: database), imageStore: images)
+        let intakeRepository = LocalImageIntakeRepository(database: database)
+        let useCase = LocalExpenseUseCase(profileStore: profileStore, repository: repository)
+        let state = AppState(localExpenseUseCase: useCase, localRecordUseCase: records,
+                             localImageStore: images, localImageIntakeRepository: intakeRepository,
+                             sessionProvider: { _ in throw SupabaseRemoteError.missingSession })
+        let bytes = Data("synthetic-manual-financial-input".utf8)
+        let intake = try state.receiveImageForManualProcessing(data: bytes, captureKind: "screenshot", filename: "fixture.jpg")
+        for kind in [NativeManualRecordKind.expense, .income] {
+            var draft = NativeManualRecordDraft(kind: kind)
+            draft.accountId = account.id.uuidString
+            draft.amountText = "20.00"
+            draft.title = "合成账务"
+            draft.category = "other"
+            draft.paymentMethod = "现金"
+            draft.imageData = bytes
+            let saved = await state.createManualRecord(draft, domain: nil)
+            XCTAssertFalse(saved, "原图尚无财务持久引用时，不得报成功并触发onResolved丢弃输入")
+            XCTAssertNotNil(state.manualRecordMessage)
+            XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 10_000)
+            XCTAssertEqual(try images.data(at: intake.imagePath), bytes)
+            XCTAssertNotNil(try intakeRepository.intake(id: intake.id, profileID: profile.id))
+        }
+        XCTAssertEqual(try repository.expenseCount(), 0)
+        let incomes = try await useCase.incomes(String(NativeLocalDate.dateKey(Date()).prefix(7)))
+        XCTAssertTrue(incomes.incomes.isEmpty)
+    }
+
+    @MainActor
     func testLF02201SignedInExportIncludesDeviceFactsWithoutCloudSession() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
