@@ -235,9 +235,15 @@ final class AppState: ObservableObject {
     ) {
         self.dashboardRepository = dashboardRepository
         self.recordRepository = recordRepository
-        self.localExpenseUseCase = localExpenseUseCase ?? Self.defaultLocalExpenseUseCase()
-        self.localRecordUseCase = localRecordUseCase ?? Self.defaultLocalRecordUseCase()
-        let usesDefaultLocalStorage = localExpenseUseCase == nil && localRecordUseCase == nil
+        let simulatesLocalStorageInitializationFailure = localStorageInitializationMessage != nil
+        self.localExpenseUseCase = simulatesLocalStorageInitializationFailure
+            ? nil
+            : localExpenseUseCase ?? Self.defaultLocalExpenseUseCase()
+        self.localRecordUseCase = simulatesLocalStorageInitializationFailure
+            ? nil
+            : localRecordUseCase ?? Self.defaultLocalRecordUseCase()
+        let usesDefaultLocalStorage = !simulatesLocalStorageInitializationFailure
+            && localExpenseUseCase == nil && localRecordUseCase == nil
         self.localWalletSnapshotUseCase = localWalletSnapshotUseCase
             ?? (usesDefaultLocalStorage ? Self.defaultLocalWalletSnapshotUseCase() : nil)
         self.localFactReader = usesDefaultLocalStorage
