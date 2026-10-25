@@ -1153,6 +1153,7 @@ final class AppState: ObservableObject {
         }
         let provider: LocalImageRecognitionProvider
         let recognitionUploadToken: String?
+        var isRecognitionRequestCurrent: () -> Bool = { true }
         switch localVisionMode {
         case .disabled:
             throw LocalDataError.invalidRecord
@@ -1162,13 +1163,18 @@ final class AppState: ObservableObject {
         case .byok:
             let apiKey = (try? keychain.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
             provider = QwenBYOKImageRecognitionProvider(apiKey: apiKey)
+            let credentialStore = keychain
+            isRecognitionRequestCurrent = {
+                (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) == apiKey
+            }
             recognitionUploadToken = nil
         }
         let recognition = LocalImageRecognitionUseCase(
             localRecordUseCase: localRecordUseCase,
             imageStore: localImageStore,
             intakeRepository: localImageIntakeRepository,
-            provider: provider
+            provider: provider,
+            isRecognitionRequestCurrent: isRecognitionRequestCurrent
         )
         return try await recognition.ingest(
             imageData: data,
@@ -1339,6 +1345,7 @@ final class AppState: ObservableObject {
         do {
             let provider: LocalImageRecognitionProvider
             let uploadToken: String?
+            var isRecognitionRequestCurrent: () -> Bool = { true }
             switch localVisionMode {
             case .disabled:
                 return false
@@ -1348,13 +1355,18 @@ final class AppState: ObservableObject {
             case .byok:
                 let apiKey = (try? keychain.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
                 provider = QwenBYOKImageRecognitionProvider(apiKey: apiKey)
+                let credentialStore = keychain
+                isRecognitionRequestCurrent = {
+                    (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) == apiKey
+                }
                 uploadToken = nil
             }
             let recognition = LocalImageRecognitionUseCase(
                 localRecordUseCase: localRecordUseCase,
                 imageStore: localImageStore,
                 intakeRepository: localImageIntakeRepository,
-                provider: provider
+                provider: provider,
+                isRecognitionRequestCurrent: isRecognitionRequestCurrent
             )
             _ = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
             await refreshFailedLocalImageIntakes()

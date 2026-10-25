@@ -299,6 +299,7 @@ final class LocalImageRecognitionUseCase {
             filename: filename,
             uploadToken: uploadToken
         ))
+        guard isRecognitionRequestCurrent() else { throw CancellationError() }
         guard try intakeRepository.isReceiving(id: intakeID, profileID: profileID, operationID: operationID) else {
             throw CancellationError()
         }

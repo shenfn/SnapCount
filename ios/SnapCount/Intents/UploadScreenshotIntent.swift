@@ -33,15 +33,24 @@ struct UploadScreenshotIntent: AppIntent {
                     uploadToken = nil
                 }
                 let provider: LocalImageRecognitionProvider
+                var isRecognitionRequestCurrent: () -> Bool = { true }
                 switch mode {
                 case .disabled, .hosted:
                     provider = HostedAIImageRecognitionProvider()
                 case .byok:
+                    let credentialStore = KeychainStore.shared
+                    let apiKey = (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
                     provider = QwenBYOKImageRecognitionProvider(
-                        apiKey: (try? KeychainStore.shared.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
+                        apiKey: apiKey
                     )
+                    isRecognitionRequestCurrent = {
+                        (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) == apiKey
+                    }
                 }
-                let recognition = try LocalImageRecognitionUseCase.makeDefault(provider: provider)
+                let recognition = try LocalImageRecognitionUseCase.makeDefault(
+                    provider: provider,
+                    isRecognitionRequestCurrent: isRecognitionRequestCurrent
+                )
                 let result: ShortcutUploadResult
                 let trialOutcome: ShortcutTrialOutcome
                 do {
