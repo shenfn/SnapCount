@@ -109,7 +109,7 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertEqual(try reopened.accountBalanceMinor(accountID: accountID), 8_720)
         XCTAssertEqual(try reopened.expense(id: expenseID)?.amountMinor, 1_280)
         let archivedEntrySourceIDs = try reopened.accountEntries(accountID: accountID).map(\.sourceID)
-        XCTAssertEqual(archivedEntrySourceIDs, [expenseID.uuidString])
+        XCTAssertEqual(archivedEntrySourceIDs, [expenseID])
         XCTAssertThrowsError(try reopened.createExpense(
             expenseDraft(id: UUID(), profileID: profile.id, accountID: accountID, amountMinor: 100),
             operationID: UUID()

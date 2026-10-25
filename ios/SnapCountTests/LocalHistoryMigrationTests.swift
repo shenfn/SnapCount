@@ -8,25 +8,39 @@ final class LocalHistoryMigrationTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("local-history-migration-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        var database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
         let profile = try LocalProfileStore(database: database).activeProfile()
-        let store = LocalHistoryMigrationStore(database: database)
+        var store = LocalHistoryMigrationStore(database: database)
         let startedAt = Date(timeIntervalSince1970: 1_800_000_000)
-        XCTAssertThrowsError(try store.startOrResume(profileID: profile.id, cloudUserID: "  ")) { error in
+        XCTAssertThrowsError(try store.startOrResume(
+            profileID: profile.id, cloudUserID: "  ", expectedScopes: ["records"]
+        )) { error in
             XCTAssertEqual(error as? LocalHistoryMigrationError, .invalidCloudIdentity)
         }
+        XCTAssertThrowsError(try store.startOrResume(
+            profileID: profile.id, cloudUserID: "synthetic-user-a", expectedScopes: []
+        )) { error in
+            XCTAssertEqual(error as? LocalHistoryMigrationError, .invalidExpectedScopes)
+        }
         XCTAssertNil(try store.state(profileID: profile.id))
-        let firstRun = try store.startOrResume(profileID: profile.id, cloudUserID: "synthetic-user-a", at: startedAt)
+        let expectedScopes: Set<String> = ["records", "accounts"]
+        let firstRun = try store.startOrResume(
+            profileID: profile.id, cloudUserID: "synthetic-user-a", expectedScopes: expectedScopes, at: startedAt
+        )
 
         let firstRecordID = UUID()
         let firstBatch = try store.commitBatch(
             profileID: profile.id, cloudUserID: "synthetic-user-a", generation: firstRun.generation,
-            nextCursor: "records:1", importedRowCount: 1, at: startedAt.addingTimeInterval(1)
+            scope: "records", nextCursor: "records:1", importedRowCount: 1, at: startedAt.addingTimeInterval(1)
         ) { db in
             try Self.insertRecord(id: firstRecordID, profileID: profile.id, title: "第一批", db: db)
         }
-        XCTAssertEqual(firstBatch.pullCursor, "records:1")
+        XCTAssertEqual(firstBatch.cursors.nextByScope["records"], "records:1")
         XCTAssertEqual(firstBatch.importedRowCount, 1)
+        _ = try store.commitBatch(
+            profileID: profile.id, cloudUserID: "synthetic-user-a", generation: firstRun.generation,
+            scope: "accounts", nextCursor: "accounts:1", importedRowCount: 0
+        ) { _ in }
 
         try database.writer.write { db in
             try db.execute(sql: """
@@ -39,45 +53,75 @@ final class LocalHistoryMigrationTests: XCTestCase {
         let failedRecordID = UUID()
         XCTAssertThrowsError(try store.commitBatch(
             profileID: profile.id, cloudUserID: "synthetic-user-a", generation: firstRun.generation,
-            nextCursor: "records:2", importedRowCount: 1, at: startedAt.addingTimeInterval(2)
+            scope: "records", nextCursor: "records:2", importedRowCount: 1, at: startedAt.addingTimeInterval(2)
         ) { db in
             try Self.insertRecord(id: failedRecordID, profileID: profile.id, title: "失败批次", db: db)
         })
         let afterFailure = try XCTUnwrap(store.state(profileID: profile.id))
-        XCTAssertEqual(afterFailure.pullCursor, "records:1")
+        XCTAssertEqual(afterFailure.cursors.nextByScope["records"], "records:1")
+        XCTAssertEqual(afterFailure.cursors.nextByScope["accounts"], "accounts:1")
         XCTAssertEqual(afterFailure.importedRowCount, 1)
-        XCTAssertEqual(try Int.fetchOne(database.writer, sql: "SELECT COUNT(*) FROM local_records WHERE id = ?", arguments: [failedRecordID.uuidString]), 0)
+        let failedRecordCount = try database.writer.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM local_records WHERE id = ?", arguments: [failedRecordID.uuidString])
+        }
+        XCTAssertEqual(failedRecordCount, 0)
 
         _ = try store.pause(profileID: profile.id, cloudUserID: "synthetic-user-a", generation: firstRun.generation)
-        let resumed = try store.startOrResume(profileID: profile.id, cloudUserID: "synthetic-user-a", at: startedAt.addingTimeInterval(3))
+        try database.writer.close()
+        database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        store = LocalHistoryMigrationStore(database: database)
+        let resumed = try store.startOrResume(
+            profileID: profile.id, cloudUserID: "synthetic-user-a", expectedScopes: expectedScopes,
+            at: startedAt.addingTimeInterval(3)
+        )
         XCTAssertEqual(resumed.generation, firstRun.generation + 1)
-        XCTAssertEqual(resumed.pullCursor, "records:1")
+        XCTAssertEqual(resumed.cursors.nextByScope["records"], "records:1")
+        XCTAssertEqual(resumed.cursors.nextByScope["accounts"], "accounts:1")
+        XCTAssertThrowsError(try store.startOrResume(
+            profileID: profile.id, cloudUserID: "synthetic-user-a", expectedScopes: ["records"]
+        )) { error in
+            XCTAssertEqual(error as? LocalHistoryMigrationError, .expectedScopesChanged)
+        }
+        XCTAssertThrowsError(try store.complete(
+            profileID: profile.id, cloudUserID: "synthetic-user-a", generation: resumed.generation
+        )) { error in
+            XCTAssertEqual(error as? LocalHistoryMigrationError, .incompleteScopes)
+        }
 
         var staleBatchWasApplied = false
         XCTAssertThrowsError(try store.commitBatch(
             profileID: profile.id, cloudUserID: "synthetic-user-a", generation: firstRun.generation,
-            nextCursor: "stale", importedRowCount: 1
+            scope: "records", nextCursor: "stale", importedRowCount: 1
         ) { _ in staleBatchWasApplied = true }) { error in
             XCTAssertEqual(error as? LocalHistoryMigrationError, .staleAttempt)
         }
         XCTAssertFalse(staleBatchWasApplied)
-        XCTAssertThrowsError(try store.startOrResume(profileID: profile.id, cloudUserID: "synthetic-user-b")) { error in
+        XCTAssertThrowsError(try store.startOrResume(
+            profileID: profile.id, cloudUserID: "synthetic-user-b", expectedScopes: expectedScopes
+        )) { error in
             XCTAssertEqual(error as? LocalHistoryMigrationError, .identityMismatch)
         }
 
         let secondRecordID = UUID()
         _ = try store.commitBatch(
             profileID: profile.id, cloudUserID: "synthetic-user-a", generation: resumed.generation,
-            nextCursor: nil, importedRowCount: 1
+            scope: "records", nextCursor: nil, importedRowCount: 1
         ) { db in
             try Self.insertRecord(id: secondRecordID, profileID: profile.id, title: "第二批", db: db)
         }
+        _ = try store.commitBatch(
+            profileID: profile.id, cloudUserID: "synthetic-user-a", generation: resumed.generation,
+            scope: "accounts", nextCursor: nil, importedRowCount: 0
+        ) { _ in }
         let completed = try store.complete(
             profileID: profile.id, cloudUserID: "synthetic-user-a", generation: resumed.generation
         )
         XCTAssertEqual(completed.status, .completed)
         XCTAssertEqual(completed.importedRowCount, 2)
-        XCTAssertEqual(try Int.fetchOne(database.writer, sql: "SELECT COUNT(*) FROM local_records WHERE profile_id = ?", arguments: [profile.id.uuidString]), 2)
+        let importedRecordCount = try database.writer.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM local_records WHERE profile_id = ?", arguments: [profile.id.uuidString])
+        }
+        XCTAssertEqual(importedRecordCount, 2)
     }
 
     private static func insertRecord(id: UUID, profileID: UUID, title: String, db: Database) throws {

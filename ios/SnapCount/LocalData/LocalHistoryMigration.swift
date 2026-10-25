@@ -12,16 +12,36 @@ struct LocalHistoryMigrationState: Equatable {
     let cloudUserID: String
     let generation: Int64
     let status: LocalHistoryMigrationStatus
-    let pullCursor: String?
+    let expectedScopes: Set<String>
+    let cursors: LocalHistoryMigrationCursors
     let importedRowCount: Int
     let startedAt: Date
     let updatedAt: Date
     let completedAt: Date?
 }
 
+struct LocalHistoryMigrationCursors: Codable, Equatable {
+    fileprivate(set) var nextByScope: [String: String] = [:]
+    fileprivate(set) var completedScopes: Set<String> = []
+
+    mutating func advance(scope: String, nextCursor: String?) {
+        if let nextCursor {
+            nextByScope[scope] = nextCursor
+            completedScopes.remove(scope)
+        } else {
+            nextByScope.removeValue(forKey: scope)
+            completedScopes.insert(scope)
+        }
+    }
+}
+
 enum LocalHistoryMigrationError: Error, Equatable {
     case invalidWorkspace
     case invalidCloudIdentity
+    case invalidCursorScope
+    case invalidExpectedScopes
+    case expectedScopesChanged
+    case incompleteScopes
     case identityMismatch
     case alreadyCompleted
     case staleAttempt
@@ -35,11 +55,23 @@ final class LocalHistoryMigrationStore {
         self.database = database
     }
 
-    func startOrResume(profileID: UUID, cloudUserID: String, at now: Date = Date()) throws -> LocalHistoryMigrationState {
+    func startOrResume(
+        profileID: UUID,
+        cloudUserID: String,
+        expectedScopes: Set<String>,
+        at now: Date = Date()
+    ) throws -> LocalHistoryMigrationState {
         guard !cloudUserID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LocalHistoryMigrationError.invalidCloudIdentity
         }
-        try database.writer.write { db in
+        let normalizedScopes = Set(expectedScopes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        guard !normalizedScopes.isEmpty,
+              normalizedScopes.count == expectedScopes.count,
+              !normalizedScopes.contains("") else {
+            throw LocalHistoryMigrationError.invalidExpectedScopes
+        }
+        let expectedScopesJSON = try JSONEncoder().encode(normalizedScopes.sorted())
+        return try database.writer.write { db in
             guard try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM local_profiles WHERE id = ?",
@@ -53,6 +85,7 @@ final class LocalHistoryMigrationStore {
             ) {
                 let current = try Self.state(from: row)
                 guard current.cloudUserID == cloudUserID else { throw LocalHistoryMigrationError.identityMismatch }
+                guard current.expectedScopes == normalizedScopes else { throw LocalHistoryMigrationError.expectedScopesChanged }
                 guard current.status != .completed else { throw LocalHistoryMigrationError.alreadyCompleted }
                 try db.execute(sql: """
                     UPDATE local_history_migrations
@@ -62,10 +95,10 @@ final class LocalHistoryMigrationStore {
             } else {
                 try db.execute(sql: """
                     INSERT INTO local_history_migrations (
-                        profile_id, cloud_user_id, generation, status, pull_cursor,
+                        profile_id, cloud_user_id, generation, status, expected_scopes_json, source_cursors_json,
                         imported_row_count, started_at, updated_at, completed_at
-                    ) VALUES (?, ?, 1, 'running', NULL, 0, ?, ?, NULL)
-                    """, arguments: [profileID.uuidString, cloudUserID, now, now])
+                    ) VALUES (?, ?, 1, 'running', ?, '{"nextByScope":{},"completedScopes":[]}', 0, ?, ?, NULL)
+                    """, arguments: [profileID.uuidString, cloudUserID, String(decoding: expectedScopesJSON, as: UTF8.self), now, now])
             }
             return try Self.fetch(profileID: profileID, database: db)
         }
@@ -87,24 +120,38 @@ final class LocalHistoryMigrationStore {
         profileID: UUID,
         cloudUserID: String,
         generation: Int64,
+        scope: String,
         nextCursor: String?,
         importedRowCount: Int,
         at now: Date = Date(),
         apply: (Database) throws -> Void
     ) throws -> LocalHistoryMigrationState {
+        let normalizedScope = scope.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedScope.isEmpty else {
+            throw LocalHistoryMigrationError.invalidCursorScope
+        }
         guard importedRowCount >= 0 else { throw LocalDataError.invalidRecord }
         return try database.writer.write { db in
             let current = try Self.fetch(profileID: profileID, database: db)
             guard current.cloudUserID == cloudUserID,
                   current.generation == generation,
                   current.status == .running else { throw LocalHistoryMigrationError.staleAttempt }
+            guard current.expectedScopes.contains(normalizedScope) else {
+                throw LocalHistoryMigrationError.invalidCursorScope
+            }
 
             try apply(db)
+            var cursors = current.cursors
+            cursors.advance(scope: normalizedScope, nextCursor: nextCursor)
+            let cursorData = try JSONEncoder().encode(cursors)
+            guard let cursorsJSON = String(data: cursorData, encoding: .utf8) else {
+                throw LocalDataError.invalidRecord
+            }
             try db.execute(sql: """
                 UPDATE local_history_migrations
-                SET pull_cursor = ?, imported_row_count = imported_row_count + ?, updated_at = ?
+                SET source_cursors_json = ?, imported_row_count = imported_row_count + ?, updated_at = ?
                 WHERE profile_id = ? AND cloud_user_id = ? AND generation = ? AND status = 'running'
-                """, arguments: [nextCursor, importedRowCount, now, profileID.uuidString, cloudUserID, generation])
+                """, arguments: [cursorsJSON, importedRowCount, now, profileID.uuidString, cloudUserID, generation])
             guard db.changesCount == 1 else { throw LocalHistoryMigrationError.staleAttempt }
             return try Self.fetch(profileID: profileID, database: db)
         }
@@ -123,6 +170,17 @@ final class LocalHistoryMigrationStore {
 
     func complete(profileID: UUID, cloudUserID: String, generation: Int64, at now: Date = Date()) throws -> LocalHistoryMigrationState {
         try database.writer.write { db in
+            let current = try Self.fetch(profileID: profileID, database: db)
+            guard current.cloudUserID == cloudUserID,
+                  current.generation == generation,
+                  current.status == .running else { throw LocalHistoryMigrationError.staleAttempt }
+            guard current.expectedScopes.isSubset(of: current.cursors.completedScopes) else {
+                throw LocalHistoryMigrationError.incompleteScopes
+            }
+            guard current.cursors.completedScopes.isSubset(of: current.expectedScopes),
+                  Set(current.cursors.nextByScope.keys).isSubset(of: current.expectedScopes) else {
+                throw LocalHistoryMigrationError.invalidCursorScope
+            }
             try db.execute(sql: """
                 UPDATE local_history_migrations
                 SET status = 'completed', updated_at = ?, completed_at = ?
@@ -149,12 +207,23 @@ final class LocalHistoryMigrationStore {
               let updatedAt: Date = row["updated_at"] else {
             throw LocalDataError.invalidRecord
         }
+        let expectedJSON: String = row["expected_scopes_json"]
+        guard let expectedData = expectedJSON.data(using: .utf8),
+              let expectedScopeList = try? JSONDecoder().decode([String].self, from: expectedData) else {
+            throw LocalDataError.invalidRecord
+        }
+        let cursorJSON: String = row["source_cursors_json"]
+        guard let cursorData = cursorJSON.data(using: .utf8),
+              let cursors = try? JSONDecoder().decode(LocalHistoryMigrationCursors.self, from: cursorData) else {
+            throw LocalDataError.invalidRecord
+        }
         return LocalHistoryMigrationState(
             profileID: profileID,
             cloudUserID: row["cloud_user_id"],
             generation: row["generation"],
             status: status,
-            pullCursor: row["pull_cursor"],
+            expectedScopes: Set(expectedScopeList),
+            cursors: cursors,
             importedRowCount: row["imported_row_count"],
             startedAt: startedAt,
             updatedAt: updatedAt,
