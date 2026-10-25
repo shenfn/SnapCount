@@ -32,9 +32,9 @@
   <key>UIRequiresFullScreen</key>
   <true/>
   <key>NSCameraUsageDescription</key>
-  <string>用于拍摄账单、食物、运动等截图或照片，并上传给 AI 识别为个人记录。</string>
+  <string>用于拍摄照片并添加到本机记录；拍摄不会自动授权 AI 识别或上传。</string>
   <key>NSPhotoLibraryUsageDescription</key>
-  <string>用于选择截图或照片，并上传给 AI 识别为个人记录。</string>
+  <string>用于选择照片并添加到本机记录；选择不会自动授权 AI 识别或上传。</string>
   <key>NSPhotoLibraryAddUsageDescription</key>
   <string>用于在你主动保存图片时写入相册。</string>
   <key>UILaunchScreen</key>
