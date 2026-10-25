@@ -398,7 +398,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         let cycleID = try XCTUnwrap(UUID(uuidString: candidate.cycle.id))
         let imagePath = try XCTUnwrap(staged.record.imagePath)
 
-        try database.writer.write { db in
+        try await database.writer.write { db in
             try db.execute(sql: """
                 CREATE TRIGGER fail_local_screenshot_archive
                 BEFORE UPDATE OF status ON local_staging_records
@@ -420,7 +420,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(pendingAfterFailure?.status, .pendingReview)
         XCTAssertEqual(try imageStore.data(at: imagePath), imageData)
 
-        try database.writer.write { db in
+        try await database.writer.write { db in
             try db.execute(sql: "DROP TRIGGER fail_local_screenshot_archive")
         }
         let accepted = await state.confirmStagingRepayment(
