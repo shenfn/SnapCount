@@ -42,6 +42,8 @@ final class WalletSnapshotActionUseCaseTests: XCTestCase {
         async let first = harness.useCase.perform(.create(recordId: snapshot.id), snapshot: snapshot)
         await gate.waitUntilEntered()
         async let duplicate = harness.useCase.perform(.create(recordId: snapshot.id), snapshot: snapshot)
+        // Enter the actor before the first request is released; the conflicting path may not suspend.
+        await Task.yield()
         let conflict = await harness.useCase.perform(
             .link(recordId: snapshot.id, accountId: "account-2"),
             snapshot: snapshot,
