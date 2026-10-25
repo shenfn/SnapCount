@@ -3,6 +3,43 @@ import GRDB
 @testable import SnapCount
 
 final class LocalExpenseAppUseCaseTests: XCTestCase {
+    @MainActor
+    func testLF02201SignedInExportIncludesDeviceFactsWithoutCloudSession() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let recordID = UUID()
+        _ = try LocalRecordRepository(database: database).createRecord(LocalRecordDraft(
+            id: recordID, profileID: profile.id, domainKey: "sport", title: "本地跑步",
+            summary: "20 分钟", payloadJSON: try LocalRecordCodec.encode([
+                "sport_type": AnyCodable("跑步"), "duration_minutes": AnyCodable(20)
+            ]), recordDate: "2000-01-01", recordTime: nil, note: nil,
+            imagePath: nil, imageHash: nil, createdAt: Date()
+        ))
+        let state = AppState(
+            localFactPortability: LocalFactPortability(database: database),
+            sessionProvider: { _ in
+                XCTFail("本机导出不得请求云会话")
+                throw SupabaseRemoteError.missingSession
+            }
+        )
+        state.isSignedIn = true
+        state.currentUserId = "synthetic-export-user"
+        var request = NativeDataExportRequest()
+        request.content = .universal
+        request.range = .all
+        request.format = .json
+        let result = await state.exportData(request)
+        let exported = try XCTUnwrap(result)
+        defer { try? FileManager.default.removeItem(at: exported.url) }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let archive = try decoder.decode(LocalFactArchive.self, from: Data(contentsOf: exported.url))
+        XCTAssertEqual(archive.facts.map(\.id), [recordID])
+        XCTAssertNil(state.settingsMessage)
+    }
+
     func testLocalAppBoundaryTypesExistBeforeImplementation() {
         XCTAssertNotNil(LocalProfileStoreProtocol.self)
         XCTAssertNotNil(LocalExpenseUseCaseProtocol.self)
