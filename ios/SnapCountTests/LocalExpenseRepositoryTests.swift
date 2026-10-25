@@ -3,6 +3,33 @@ import XCTest
 @testable import SnapCount
 
 final class LocalExpenseRepositoryTests: XCTestCase {
+    func testLF04004EqualVersionLiveSnapshotCannotChargeDeletedExpenseAgain() throws {
+        let url = temporaryLocalDatabaseURL()
+        defer { removeLocalDatabase(at: url) }
+        let repository = try LocalExpenseRepository(database: LocalDatabase(databaseURL: url))
+        let fixture = try makeFixture(repository: repository)
+        let id = UUID()
+        let draft = expenseDraft(id: id, profileID: fixture.profile.id,
+                                 accountID: fixture.account.id, amountMinor: 2_680)
+        _ = try repository.createExpense(draft, operationID: UUID())
+        let deleted = try repository.deleteExpense(id: id, expectedVersion: 1,
+                                                   deletedAt: editedDate, operationID: UUID())
+        let snapshot = LocalRemoteSnapshot(accounts: [], expenses: [LocalRemoteExpense(
+            id: id, accountID: fixture.account.id, amountMinor: draft.amountMinor,
+            currency: draft.currency, merchantName: draft.merchantName, platform: draft.platform,
+            category: draft.category, paymentMethod: draft.paymentMethod,
+            transactionDate: draft.transactionDate, transactionTime: draft.transactionTime,
+            note: draft.note, version: deleted.localVersion, deletedAt: nil
+        )], accountEntries: [])
+        for _ in 0..<2 {
+            _ = try repository.applyRemoteSnapshot(snapshot, profileID: fixture.profile.id)
+            XCTAssertNil(try repository.expense(id: id))
+            XCTAssertEqual(try repository.expenseTombstone(id: id), deleted)
+            XCTAssertTrue(try repository.accountEntries(sourceID: id).allSatisfy { $0.voidedAt != nil })
+            XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.account.id), 10_000)
+        }
+    }
+
     func testLOCAL003ProjectionImportsCloudFactsWithoutCreatingOutbox() throws {
         let databaseURL = temporaryLocalDatabaseURL()
         defer { removeLocalDatabase(at: databaseURL) }
