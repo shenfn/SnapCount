@@ -437,6 +437,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(payments.first?.source, "screenshot")
         XCTAssertEqual(payments.first?.amountMinor, 4_000)
         XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: account.id), 6_000)
+        XCTAssertTrue(try recordRepository.hasImageReference(path: imagePath))
         XCTAssertEqual(try imageStore.data(at: imagePath), imageData)
         let replay = try await expenseUseCase.confirmScreenshotRepayment(
             stagingID: staged.record.id, cycleID: cycleID, paidAmountMinor: 4_000,
