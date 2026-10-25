@@ -126,6 +126,12 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
             sourceName: "合成收入", category: "other", incomeDate: today, occurredAt: nil,
             note: nil, createdAt: Date()
         ))
+        let outsideSevenDayRange = NativeLocalDate.shiftedDateKey(today, byDays: -7) ?? today
+        _ = try expenseRepository.createIncome(LocalIncomeDraft(
+            id: UUID(), profileID: profile.id, accountID: account.id, amountMinor: 9_900, currency: "CNY",
+            sourceName: "窗口外收入", category: "other", incomeDate: outsideSevenDayRange, occurredAt: nil,
+            note: nil, createdAt: Date()
+        ))
         let state = AppState(
             localFactReader: try LocalFactReader(database: database),
             sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
