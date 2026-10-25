@@ -435,6 +435,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertTrue(stagingRecords.isEmpty)
     }
 
+    @MainActor
     func testLF00803ConcurrentAppAndShortcutIngestShareOneActiveImageClaim() async throws {
         let context = try makeContext()
         defer { cleanup(context) }
@@ -447,10 +448,17 @@ final class LocalImageRecognitionTests: XCTestCase {
             intakeRepository: context.intakeRepository,
             provider: provider
         )
+        let shortcutDatabase = try LocalDatabase(databaseURL: context.databaseURL)
+        let shortcutImageStore = try LocalImageStore(rootDirectory: context.imageDirectory)
+        let shortcutUseCaseRecords = LocalRecordUseCase(
+            profileStore: LocalProfileStore(database: shortcutDatabase),
+            repository: try LocalRecordRepository(database: shortcutDatabase),
+            imageStore: shortcutImageStore
+        )
         let shortcutUseCase = LocalImageRecognitionUseCase(
-            localRecordUseCase: context.useCase,
-            imageStore: context.imageStore,
-            intakeRepository: context.intakeRepository,
+            localRecordUseCase: shortcutUseCaseRecords,
+            imageStore: shortcutImageStore,
+            intakeRepository: LocalImageIntakeRepository(database: shortcutDatabase),
             provider: StubLocalImageRecognitionProvider(candidate: makeCandidate())
         )
         let appTask = Task {
