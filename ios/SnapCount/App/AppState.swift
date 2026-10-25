@@ -3198,9 +3198,7 @@ final class AppState: ObservableObject {
             case .linked: outcomeText = "本机快照已关联账户"
             case .replayed: outcomeText = "本机快照关联已存在"
             }
-            let confirmationText = snapshot.kind == .liability
-                ? "；没有生成账期或还款流水，需单独确认账单"
-                : ""
+            let confirmationText = result.reviewRequired ? "；账户已关联，账期/还款需要确认" : ""
             var refreshErrors: [String] = []
             do {
                 try await loadLocalWalletSnapshots()

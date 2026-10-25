@@ -139,6 +139,7 @@ struct LocalRepaymentCycle: Equatable, Identifiable {
     let autoConfirmRepayment: Bool
     let source: String
     let evidenceRecordID: UUID?
+    let evidenceWalletSnapshotID: UUID?
     let confidence: Double?
     let note: String
     let confirmedAt: Date?

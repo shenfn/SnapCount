@@ -63,7 +63,7 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 18
+    static let currentSchemaVersion = 19
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
     private static let maximumImageBytes = 128 * 1024 * 1024
     private static let maximumArchiveBytes = 180 * 1024 * 1024
@@ -71,6 +71,7 @@ final class LocalCompleteBackupPortability {
 
     private static let tableNames = [
         "local_accounts",
+        "local_wallet_snapshots",
         "local_records",
         "local_expenses",
         "local_income_records",
@@ -78,8 +79,7 @@ final class LocalCompleteBackupPortability {
         "local_repayment_cycles",
         "local_liability_payments",
         "local_account_entries",
-        "local_image_intakes",
-        "local_wallet_snapshots"
+        "local_image_intakes"
     ]
 
     private let database: LocalDatabase
@@ -317,12 +317,12 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard [15, 16, 17, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
+        guard [15, 16, 17, 18, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
         var tables = archive.tables
         let archiveTables = Set(tables.keys)
-        let legacyTables = Set(Self.tableNames.dropLast())
+        let legacyTables = Set(Self.tableNames).subtracting(["local_wallet_snapshots"])
         let hasCurrentTables = archive.schemaVersion >= 16
             && archiveTables == Set(Self.tableNames)
         let hasLegacyTables = archive.schemaVersion == 15 && archiveTables == legacyTables
@@ -384,6 +384,7 @@ final class LocalCompleteBackupPortability {
     private static func validateFinancialRows(_ rows: [String: [[String: Any]]]) throws {
         let accounts = Set((rows["local_accounts"] ?? []).compactMap { $0["id"] as? String })
         let records = Set((rows["local_records"] ?? []).compactMap { $0["id"] as? String })
+        let walletSnapshots = Set((rows["local_wallet_snapshots"] ?? []).compactMap { $0["id"] as? String })
         let cycles = Set((rows["local_repayment_cycles"] ?? []).compactMap { $0["id"] as? String })
 
         let amounts: [String: [(String, Bool)]] = [
@@ -421,6 +422,7 @@ final class LocalCompleteBackupPortability {
             ("local_repayment_cycles", "account_id", accounts, false),
             ("local_repayment_cycles", "auto_debit_account_id", accounts, true),
             ("local_repayment_cycles", "evidence_record_id", records, true),
+            ("local_repayment_cycles", "evidence_wallet_snapshot_id", walletSnapshots, true),
             ("local_liability_payments", "account_id", accounts, false),
             ("local_liability_payments", "statement_id", cycles, true),
             ("local_liability_payments", "debit_account_id", accounts, true),

@@ -717,6 +717,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(try walletRepository.unlinked(profileID: profile.id).map(\.id), [snapshot.id])
     }
 
+    @MainActor
     func testLF03302LiabilitySnapshotCreatesDebtAccountWithoutGuessingRepaymentCycle() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("jiezi-wallet-liability-\(UUID().uuidString)", isDirectory: true)
@@ -732,8 +733,7 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
             payload: [
                 "account_type": AnyCodable("credit_card"),
                 "snapshot_balance": AnyCodable(125.0),
-                "bill_day": AnyCodable(12),
-                "due_date": AnyCodable("2026-11-05")
+                "bill_day": AnyCodable(12)
             ],
             recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
             balanceMinor: 12_500, currency: "CNY", kind: .liability,
@@ -748,17 +748,29 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertEqual(result.account.kind, "credit_card")
         XCTAssertEqual(result.account.openingBalanceMinor, 12_500)
         XCTAssertEqual(result.account.billDay, 12)
-        XCTAssertEqual(result.account.paymentDueDay, 5)
+        XCTAssertNil(result.account.paymentDueDay)
+        XCTAssertTrue(result.reviewRequired, "未识别账期身份时应显式保留待确认状态")
         XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: result.account.id), 12_500)
         XCTAssertTrue(cycles.isEmpty, "未识别显式账期身份，不猜测生成账期")
         XCTAssertTrue(payments.isEmpty, "待还快照不能伪造还款流水")
         XCTAssertEqual(try expenseRepository.accountEntries(sourceID: snapshot.id).map(\.entryKind), ["snapshot_initialization"])
         XCTAssertEqual(try expenseRepository.accounts(profileID: profile.id).count, 1)
+
+        let state = AppState(
+            localExpenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository),
+            localWalletSnapshotUseCase: useCase,
+            sessionProvider: { _ in throw SupabaseRemoteError.missingSession }
+        )
+        let accepted = await state.createLocalAccountFromWalletSnapshot(snapshot)
+        XCTAssertTrue(accepted)
+        XCTAssertTrue(state.walletSnapshotMessage?.contains("账期/还款需要确认") == true)
+        XCTAssertTrue(state.localWalletSnapshots.isEmpty)
+        XCTAssertEqual(state.localWalletSnapshotHistory.first?.linkedAccountID, result.account.id)
     }
 
     func testLF03729ExplicitUnpaidSnapshotIdentityCreatesScreenshotCycleOnce() async throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("jiezi-wallet-screenshot-cycle-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("jiezi-wallet-screenshot-cycle-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
         let profileStore = LocalProfileStore(database: database)
@@ -783,19 +795,135 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         let created = try await useCase.createAccount(from: snapshot)
         let replay = try await useCase.createAccount(from: snapshot)
         let cycles = try expenseRepository.repaymentCycles(accountID: created.account.id)
+        let cycle = try XCTUnwrap(cycles.first, "显式账期身份应写入本地账期")
 
         XCTAssertEqual(created.kind, .created)
         XCTAssertEqual(replay.kind, .replayed)
+        XCTAssertFalse(created.reviewRequired)
+        XCTAssertFalse(replay.reviewRequired)
         XCTAssertEqual(cycles.count, 1)
-        XCTAssertEqual(cycles[0].cycleMonth, "2026-10")
-        XCTAssertEqual(cycles[0].dueDate, "2026-11-05")
-        XCTAssertEqual(cycles[0].statementAmountMinor, 12_500)
-        XCTAssertEqual(cycles[0].originalStatementAmountMinor, 12_500)
-        XCTAssertEqual(cycles[0].paidAmountMinor, 0)
-        XCTAssertEqual(cycles[0].remainingAmountMinor, 12_500)
-        XCTAssertEqual(cycles[0].source, "screenshot")
-        XCTAssertEqual(cycles[0].evidenceRecordID, snapshot.id)
-        XCTAssertEqual(cycles[0].confidence, 0.98)
+        XCTAssertEqual(cycle.cycleMonth, "2026-10")
+        XCTAssertEqual(cycle.dueDate, "2026-11-05")
+        XCTAssertEqual(cycle.statementAmountMinor, 12_500)
+        XCTAssertEqual(cycle.originalStatementAmountMinor, 12_500)
+        XCTAssertEqual(cycle.paidAmountMinor, 0)
+        XCTAssertEqual(cycle.remainingAmountMinor, 12_500)
+        XCTAssertEqual(cycle.source, "screenshot")
+        XCTAssertEqual(cycle.evidenceWalletSnapshotID, snapshot.id)
+        XCTAssertEqual(cycle.confidence, 0.98)
+    }
+
+    func testLF03729ExplicitSnapshotPromotesOnlyEligibleSystemCycle() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-cycle-promotion-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(
+            profileStore: profileStore,
+            repository: LocalWalletSnapshotRepository(database: database)
+        )
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 0, createdAt: Date()
+        ))
+        let cycleID = UUID()
+        let now = Date()
+        try database.writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO local_repayment_cycles (
+                    id, profile_id, account_id, cycle_month, statement_amount_minor,
+                    paid_amount_minor, remaining_amount_minor, original_statement_amount_minor,
+                    status, source, note, created_at, updated_at
+                ) VALUES (?, ?, ?, '2026-10', 10_000, 0, 10_000, 10_000, 'pending', 'system', '估算', ?, ?)
+                """, arguments: [cycleID.uuidString, profile.id.uuidString, account.id.uuidString, now, now])
+        }
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "信用卡账单", summary: "截图账单",
+            payload: [
+                "account_type": AnyCodable("credit_card"),
+                "cycle_month": AnyCodable("2026-10"),
+                "due_date": AnyCodable("2026-11-05"),
+                "status": AnyCodable("pending")
+            ],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 12_500, currency: "CNY", kind: .liability,
+            imageData: nil, createdAt: Date()
+        ))
+
+        let result = try await useCase.link(snapshot, to: account.id)
+        let cycle = try XCTUnwrap(expenseRepository.repaymentCycles(accountID: account.id).first)
+
+        XCTAssertEqual(result.kind, .linked)
+        XCTAssertFalse(result.reviewRequired)
+        XCTAssertEqual(cycle.id, cycleID)
+        XCTAssertEqual(cycle.statementAmountMinor, 12_500)
+        XCTAssertEqual(cycle.originalStatementAmountMinor, 12_500)
+        XCTAssertEqual(cycle.remainingAmountMinor, 12_500)
+        XCTAssertEqual(cycle.paidAmountMinor, 0)
+        XCTAssertEqual(cycle.source, "screenshot")
+        XCTAssertEqual(cycle.evidenceWalletSnapshotID, snapshot.id)
+    }
+
+    func testLF03729ManualPaidCycleIsPreservedAndSnapshotRequiresReview() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-wallet-cycle-review-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profileStore = LocalProfileStore(database: database)
+        let profile = try profileStore.activeProfile()
+        let expenseRepository = try LocalExpenseRepository(database: database)
+        let useCase = LocalWalletSnapshotUseCase(
+            profileStore: profileStore,
+            repository: LocalWalletSnapshotRepository(database: database)
+        )
+        let account = try expenseRepository.createAccount(LocalAccountDraft(
+            id: UUID(), profileID: profile.id, name: "信用卡", kind: "credit_card", currency: "CNY",
+            openingBalanceMinor: 10_000, createdAt: Date()
+        ))
+        let cycleID = UUID(), paymentID = UUID(), now = Date()
+        try database.writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO local_repayment_cycles (
+                    id, profile_id, account_id, cycle_month, statement_amount_minor,
+                    paid_amount_minor, remaining_amount_minor, status, source, note, created_at, updated_at
+                ) VALUES (?, ?, ?, '2026-10', 10_000, 2_500, 7_500, 'partial_paid', 'manual', '手工确认', ?, ?)
+                """, arguments: [cycleID.uuidString, profile.id.uuidString, account.id.uuidString, now, now])
+            try db.execute(sql: """
+                INSERT INTO local_liability_payments (
+                    id, profile_id, account_id, statement_id, amount_minor, paid_at,
+                    source, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 2_500, ?, 'manual', 'confirmed', ?, ?)
+                """, arguments: [paymentID.uuidString, profile.id.uuidString, account.id.uuidString,
+                                  cycleID.uuidString, now, now, now])
+        }
+        let snapshot = try await useCase.create(LocalWalletSnapshotCommand(
+            id: UUID(), title: "信用卡账单", summary: "新截图不覆盖付款事实",
+            payload: [
+                "account_type": AnyCodable("credit_card"),
+                "cycle_month": AnyCodable("2026-10"),
+                "status": AnyCodable("pending")
+            ],
+            recordDate: "2026-10-25", recordTime: nil, occurredAt: nil,
+            balanceMinor: 12_500, currency: "CNY", kind: .liability,
+            imageData: nil, createdAt: Date()
+        ))
+
+        let result = try await useCase.link(snapshot, to: account.id)
+        let cycle = try XCTUnwrap(expenseRepository.repaymentCycles(accountID: account.id).first)
+        let payments = try expenseRepository.liabilityPayments(accountID: account.id)
+
+        XCTAssertEqual(result.kind, .linked)
+        XCTAssertTrue(result.reviewRequired)
+        XCTAssertEqual(cycle.statementAmountMinor, 10_000)
+        XCTAssertEqual(cycle.paidAmountMinor, 2_500)
+        XCTAssertEqual(cycle.remainingAmountMinor, 7_500)
+        XCTAssertEqual(cycle.source, "manual")
+        XCTAssertNil(cycle.evidenceWalletSnapshotID)
+        XCTAssertEqual(payments.map(\.id), [paymentID])
+        XCTAssertEqual(try expenseRepository.accountBalanceMinor(accountID: account.id), 10_000)
     }
 
     @MainActor

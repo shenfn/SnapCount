@@ -82,6 +82,13 @@ enum LocalWalletSnapshotActionKind: String, Equatable {
 struct LocalWalletSnapshotActionResult: Equatable {
     let kind: LocalWalletSnapshotActionKind
     let account: LocalAccount
+    let reviewRequired: Bool
+
+    init(kind: LocalWalletSnapshotActionKind, account: LocalAccount, reviewRequired: Bool = false) {
+        self.kind = kind
+        self.account = account
+        self.reviewRequired = reviewRequired
+    }
 }
 
 enum LocalWalletSnapshotActionError: Error, Equatable, LocalizedError {
@@ -254,7 +261,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
         account draft: LocalAccountDraft
     ) throws -> LocalWalletSnapshotActionResult {
         guard draft.profileID == snapshot.profileID else { throw LocalDataError.invalidIdentifier }
-        let result = try database.writer.write { db -> (LocalWalletSnapshotActionKind, UUID) in
+        let result = try database.writer.write { db -> (LocalWalletSnapshotActionKind, UUID, Bool) in
             guard let row = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_wallet_snapshots WHERE id = ? AND profile_id = ?",
@@ -274,7 +281,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
                       try Self.accountExists(accountID, profileID: snapshot.profileID, database: db) else {
                     throw LocalWalletSnapshotActionError.conflict
                 }
-                return (.replayed, accountID)
+                return (.replayed, accountID, try Self.snapshotNeedsConfirmation(storedSnapshot, accountID: accountID, database: db))
             }
             guard linkedAction == nil else { throw LocalWalletSnapshotActionError.conflict }
             guard draft.openingBalanceMinor == storedSnapshot.balanceMinor,
@@ -288,16 +295,17 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
                 profileID: storedSnapshot.profileID,
                 database: db
             )
+            let reviewRequired = try Self.applyLiabilitySnapshotCycle(storedSnapshot, accountID: account.id, database: db)
             try Self.markLinked(snapshotID: storedSnapshot.id, profileID: storedSnapshot.profileID, accountID: account.id, action: "create", database: db)
-            return (.created, account.id)
+            return (.created, account.id, reviewRequired)
         }
         guard let account = try LocalExpenseRepository(database: database).accounts(profileID: snapshot.profileID)
             .first(where: { $0.id == result.1 }) else { throw LocalDataError.recordNotFound }
-        return LocalWalletSnapshotActionResult(kind: result.0, account: account)
+        return LocalWalletSnapshotActionResult(kind: result.0, account: account, reviewRequired: result.2)
     }
 
     func link(_ snapshot: LocalWalletSnapshot, to accountID: UUID) throws -> LocalWalletSnapshotActionResult {
-        let result = try database.writer.write { db -> (LocalWalletSnapshotActionKind, UUID) in
+        let result = try database.writer.write { db -> (LocalWalletSnapshotActionKind, UUID, Bool) in
             guard let snapshotRow = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM local_wallet_snapshots WHERE id = ? AND profile_id = ?",
@@ -316,7 +324,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
                       try Self.accountExists(accountID, profileID: snapshot.profileID, database: db) else {
                     throw LocalWalletSnapshotActionError.conflict
                 }
-                return (.replayed, accountID)
+                return (.replayed, accountID, try Self.snapshotNeedsConfirmation(storedSnapshot, accountID: accountID, database: db))
             }
             guard linkedAction == nil,
                   let accountRow = try Row.fetchOne(
@@ -341,12 +349,154 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
                                arguments: [snapshotBalance, accountID.uuidString, snapshot.profileID.uuidString])
                 try Self.insertInitializationEntry(snapshot: storedSnapshot, accountID: accountID, profileID: snapshot.profileID, database: db)
             }
+            let reviewRequired = try Self.applyLiabilitySnapshotCycle(storedSnapshot, accountID: accountID, database: db)
             try Self.markLinked(snapshotID: snapshot.id, profileID: snapshot.profileID, accountID: accountID, action: "link", database: db)
-            return (.linked, accountID)
+            return (.linked, accountID, reviewRequired)
         }
         guard let account = try LocalExpenseRepository(database: database).accounts(profileID: snapshot.profileID)
             .first(where: { $0.id == result.1 }) else { throw LocalDataError.recordNotFound }
-        return LocalWalletSnapshotActionResult(kind: result.0, account: account)
+        return LocalWalletSnapshotActionResult(kind: result.0, account: account, reviewRequired: result.2)
+    }
+
+    private static func applyLiabilitySnapshotCycle(
+        _ snapshot: LocalWalletSnapshot,
+        accountID: UUID,
+        database: Database
+    ) throws -> Bool {
+        guard snapshot.kind == .liability else { return false }
+        let payload = try LocalRecordCodec.decode(snapshot.payloadJSON)
+        guard payload.string("status") != "paid",
+              let cycleMonth = screenshotCycleMonth(payload) else { return true }
+        let statementStart = validDateKey(payload.string("statement_start_date"))
+        let statementEnd = validDateKey(payload.string("statement_end_date"))
+        if let statementStart, let statementEnd, statementStart > statementEnd { return true }
+        guard let account = try Row.fetchOne(
+            database,
+            sql: "SELECT payment_due_day, auto_debit_account_id, auto_confirm_repayment FROM local_accounts WHERE id = ? AND profile_id = ?",
+            arguments: [accountID.uuidString, snapshot.profileID.uuidString]
+        ) else { throw LocalDataError.recordNotFound }
+
+        let dueDate = validDateKey(payload.string("due_date"))
+            ?? derivedDueDate(cycleMonth: cycleMonth, paymentDueDay: account["payment_due_day"] as Int?)
+        let today = NativeLocalDate.dateKey(Date())
+        let cycleStatus = dueDate.map { $0 == today ? "due_today" : ($0 < today ? "overdue_unconfirmed" : "pending") }
+            ?? "pending"
+        let confidence = payload.double("confidence").flatMap { $0.isFinite && $0 >= 0 ? min($0, 1) : nil }
+        let now = Date()
+
+        if let existing = try Row.fetchOne(database, sql: """
+            SELECT cycle.*,
+                (SELECT COUNT(*) FROM local_liability_payments payment
+                 WHERE payment.statement_id = cycle.id AND payment.status != 'voided') AS active_payment_count
+            FROM local_repayment_cycles cycle
+            WHERE cycle.account_id = ? AND cycle.cycle_month = ?
+            """, arguments: [accountID.uuidString, cycleMonth]) {
+            let source: String = existing["source"]
+            let evidenceID: String? = existing["evidence_wallet_snapshot_id"]
+            let paidAmount: Int64 = existing["paid_amount_minor"]
+            let status: String = existing["status"]
+            let activePayments: Int = existing["active_payment_count"]
+            let eligibleStatuses = ["draft_estimated", "pending", "due_today", "overdue_unconfirmed"]
+            if source == "screenshot", evidenceID == snapshot.id.uuidString,
+               paidAmount == 0, activePayments == 0, eligibleStatuses.contains(status) {
+                return false
+            }
+            guard source == "system", paidAmount == 0, activePayments == 0,
+                  eligibleStatuses.contains(status) else { return true }
+            try database.execute(sql: """
+                UPDATE local_repayment_cycles SET statement_start_date = COALESCE(?, statement_start_date),
+                    statement_end_date = COALESCE(?, statement_end_date), due_date = COALESCE(?, due_date),
+                    statement_amount_minor = ?, original_statement_amount_minor = ?, remaining_amount_minor = ?,
+                    source = 'screenshot', evidence_record_id = NULL, evidence_wallet_snapshot_id = ?,
+                    confidence = ?, status = ?,
+                    note = '依据负债钱包截图补全', local_version = local_version + 1, updated_at = ?
+                WHERE id = ? AND profile_id = ?
+                """, arguments: [statementStart, statementEnd, dueDate, snapshot.balanceMinor,
+                                  snapshot.balanceMinor, snapshot.balanceMinor, snapshot.id.uuidString,
+                                  confidence, cycleStatus, now, existing["id"] as String, snapshot.profileID.uuidString])
+            return false
+        }
+
+        let accountDueDebitID: String? = account["auto_debit_account_id"]
+        let accountAutoConfirm: Bool = account["auto_confirm_repayment"]
+        try database.execute(sql: """
+            INSERT INTO local_repayment_cycles (
+                id, profile_id, account_id, cycle_month, statement_start_date, statement_end_date, due_date,
+                statement_amount_minor, paid_amount_minor, remaining_amount_minor, original_statement_amount_minor,
+                status, auto_debit_account_id, auto_confirm_repayment, source, evidence_record_id,
+                evidence_wallet_snapshot_id, confidence,
+                note, local_version, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'screenshot', NULL, ?, ?, '依据负债钱包截图补全', 1, ?, ?)
+            """, arguments: [UUID().uuidString, snapshot.profileID.uuidString, accountID.uuidString, cycleMonth,
+                              statementStart, statementEnd, dueDate, snapshot.balanceMinor, snapshot.balanceMinor,
+                              snapshot.balanceMinor, cycleStatus, accountDueDebitID, accountAutoConfirm,
+                              snapshot.id.uuidString, confidence, now, now])
+        return false
+    }
+
+    private static func snapshotNeedsConfirmation(
+        _ snapshot: LocalWalletSnapshot,
+        accountID: UUID,
+        database: Database
+    ) throws -> Bool {
+        guard snapshot.kind == .liability else { return false }
+        let payload = try LocalRecordCodec.decode(snapshot.payloadJSON)
+        guard let cycleMonth = screenshotCycleMonth(payload),
+              let cycle = try Row.fetchOne(database, sql: """
+                SELECT evidence_wallet_snapshot_id FROM local_repayment_cycles
+                WHERE account_id = ? AND cycle_month = ?
+                """, arguments: [accountID.uuidString, cycleMonth]) else { return true }
+        let evidenceID: String? = cycle["evidence_wallet_snapshot_id"]
+        return evidenceID != snapshot.id.uuidString
+    }
+
+    private static func screenshotCycleMonth(_ payload: [String: AnyCodable]) -> String? {
+        for key in ["cycle_month", "statement_month", "bill_month"] {
+            if let value = payload.string(key), validMonthKey(value) { return value }
+        }
+        guard let dueDate = validDateKey(payload.string("due_date")) else { return nil }
+        return String(dueDate.prefix(7))
+    }
+
+    private static func validMonthKey(_ value: String) -> Bool {
+        value.range(of: #"^\d{4}-(0[1-9]|1[0-2])$"#, options: .regularExpression) != nil
+            && validDateKey(value + "-01") != nil
+    }
+
+    private static func validDateKey(_ value: String?) -> String? {
+        guard let value,
+              value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.isLenient = false
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: value), formatter.string(from: date) == value else { return nil }
+        return value
+    }
+
+    private static func derivedDueDate(cycleMonth: String, paymentDueDay: Int?) -> String? {
+        guard let paymentDueDay, (1...31).contains(paymentDueDay),
+              let firstDay = validDateKey(cycleMonth + "-01").flatMap({ key in
+                  var calendar = Calendar(identifier: .gregorian)
+                  calendar.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+                  let formatter = DateFormatter()
+                  formatter.locale = Locale(identifier: "en_US_POSIX")
+                  formatter.calendar = calendar
+                  formatter.timeZone = calendar.timeZone
+                  formatter.dateFormat = "yyyy-MM-dd"
+                  return formatter.date(from: key)
+              }) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+        guard let dayRange = calendar.range(of: .day, in: .month, for: firstDay),
+              let monthDay = calendar.date(byAdding: .day, value: min(paymentDueDay, dayRange.count) - 1, to: firstDay) else {
+            return nil
+        }
+        return NativeLocalDate.dateKey(monthDay)
     }
 
     private static func matchesOccurredAt(_ occurredAt: String, recordDate: String, recordTime: String?) -> Bool {

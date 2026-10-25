@@ -1475,6 +1475,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             autoDebitAccountID: (row["auto_debit_account_id"] as String?).flatMap(UUID.init(uuidString:)),
             autoConfirmRepayment: row["auto_confirm_repayment"], source: row["source"],
             evidenceRecordID: (row["evidence_record_id"] as String?).flatMap(UUID.init(uuidString:)),
+            evidenceWalletSnapshotID: (row["evidence_wallet_snapshot_id"] as String?).flatMap(UUID.init(uuidString:)),
             confidence: row["confidence"], note: row["note"], confirmedAt: row["confirmed_at"],
             localVersion: row["local_version"], createdAt: createdAt, updatedAt: updatedAt
         )

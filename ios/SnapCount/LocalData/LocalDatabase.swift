@@ -472,6 +472,13 @@ final class LocalDatabase {
                 ADD COLUMN linked_action TEXT CHECK (linked_action IN ('create', 'link'));
                 """)
         }
+        migrator.registerMigration("local-v18-wallet-snapshot-cycle-evidence") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_repayment_cycles
+                ADD COLUMN evidence_wallet_snapshot_id TEXT
+                    REFERENCES local_wallet_snapshots(id) ON DELETE SET NULL;
+                """)
+        }
         return migrator
     }
 }

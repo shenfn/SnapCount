@@ -52,6 +52,49 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_account_entries"), 5)
     }
 
+    func testLF021CompleteBackupPreservesWalletSnapshotRepaymentEvidence() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let profile = try source.profileStore.activeProfile()
+        let snapshotID = UUID()
+        let snapshot = try LocalWalletSnapshotRepository(database: source.database).create(LocalWalletSnapshotDraft(
+            id: snapshotID,
+            profileID: profile.id,
+            title: "账单证据",
+            summary: "备份关联验证",
+            payloadJSON: try LocalRecordCodec.encode(["cycle_month": AnyCodable("2026-10")]),
+            recordDate: "2026-10-25",
+            recordTime: nil,
+            occurredAt: nil,
+            balanceMinor: 10_000,
+            currency: "CNY",
+            kind: .liability,
+            imagePath: nil,
+            imageHash: nil,
+            createdAt: Date()
+        ))
+        let cycle = try XCTUnwrap(LocalExpenseRepository(database: source.database).repaymentCycles(accountID: source.liabilityID).first)
+        try source.database.writer.write { db in
+            try db.execute(sql: """
+                UPDATE local_repayment_cycles
+                SET evidence_record_id = NULL, evidence_wallet_snapshot_id = ?
+                WHERE id = ?
+                """, arguments: [snapshot.id.uuidString, cycle.id.uuidString])
+        }
+
+        let backup = try source.portability.exportBackup()
+        let targetProfile = try target.profileStore.activeProfile()
+        _ = try target.portability.importBackup(backup, into: targetProfile.id)
+        let restored = try XCTUnwrap(
+            LocalExpenseRepository(database: target.database).repaymentCycles(accountID: source.liabilityID).first
+        )
+
+        XCTAssertEqual(restored.evidenceWalletSnapshotID, snapshotID)
+        XCTAssertNil(restored.evidenceRecordID)
+        XCTAssertEqual(try LocalWalletSnapshotRepository(database: target.database).history(profileID: targetProfile.id).map(\.id), [snapshotID])
+    }
+
     func testLF02109And11RestoreKeepsWakeDateDeletionAndLedgerProjection() throws {
         let source = try makeFixture()
         let target = try makeEmptyFixture()
