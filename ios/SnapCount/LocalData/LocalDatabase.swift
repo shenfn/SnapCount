@@ -439,6 +439,12 @@ final class LocalDatabase {
                 BEGIN SELECT RAISE(ABORT, 'grace period must be between 0 and 60 days'); END;
                 """)
         }
+        // Released v8/v9 used a different financial schema. Run the bridge before
+        // v16 even when a previous launch already committed the newer v8-v15.
+        migrator.registerMigration("local-v26-legacy-financial-compatibility") { database in
+            try LocalLegacySchemaUpgrade.prepareWalletV16(database)
+            try LocalLegacySchemaUpgrade.copyLegacyIncome(database)
+        }
         migrator.registerMigration("local-v16-wallet-snapshot-facts") { database in
             try database.execute(sql: """
                 CREATE TABLE local_wallet_snapshots (
@@ -465,12 +471,20 @@ final class LocalDatabase {
                 CREATE INDEX local_wallet_snapshots_profile_date_idx
                     ON local_wallet_snapshots(profile_id, record_date DESC, occurred_at DESC, created_at DESC);
                 """)
+            try LocalLegacySchemaUpgrade.finishWalletV16(database)
         }
         migrator.registerMigration("local-v17-wallet-snapshot-link-action") { database in
             try database.execute(sql: """
                 ALTER TABLE local_wallet_snapshots
                 ADD COLUMN linked_action TEXT CHECK (linked_action IN ('create', 'link'));
                 """)
+            if try database.tableExists("local_wallet_snapshots_legacy_v9") {
+                try database.execute(sql: """
+                    UPDATE local_wallet_snapshots SET linked_action = 'link'
+                    WHERE linked_account_id IS NOT NULL
+                      AND id IN (SELECT id FROM local_wallet_snapshots_legacy_v9);
+                    """)
+            }
         }
         migrator.registerMigration("local-v18-wallet-snapshot-cycle-evidence") { database in
             try database.execute(sql: """
