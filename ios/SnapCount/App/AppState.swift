@@ -5620,6 +5620,10 @@ final class AppState: ObservableObject {
             manualRecordMessage = localStorageInitializationMessage
             return false
         }
+        if draft.imageData != nil, draft.kind == .expense || draft.kind == .income {
+            manualRecordMessage = "消费和收入暂不支持归档原图；记录未保存，输入原图仍保留。请返回收件箱处理，或移除图片后再保存。"
+            return false
+        }
         isCreatingManualRecord = true
         manualRecordMessage = nil
         defer { isCreatingManualRecord = false }
