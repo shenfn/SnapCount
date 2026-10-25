@@ -303,6 +303,42 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(repository.repaymentCycles(accountID: liabilityID).first).status, "pending")
         try database.writer.write { db in try db.execute(sql: "DROP TRIGGER fail_synthetic_repayment_entry") }
 
+        try database.writer.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER fail_synthetic_repayment_second_side BEFORE INSERT ON local_account_entries
+                WHEN NEW.entry_kind = 'transfer' AND NEW.account_id = '\(debitID.uuidString)'
+                BEGIN SELECT RAISE(ABORT, 'synthetic second-side failure'); END;
+                """)
+        }
+        XCTAssertThrowsError(try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 3_000,
+            debitAccountID: nil, status: nil, note: "第二侧失败注入", paidAt: date
+        ))
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 13_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 20_000)
+        XCTAssertTrue(try repository.liabilityPayments(accountID: liabilityID).isEmpty)
+        XCTAssertEqual(try XCTUnwrap(repository.repaymentCycles(accountID: liabilityID).first).status, "pending")
+        try database.writer.write { db in try db.execute(sql: "DROP TRIGGER fail_synthetic_repayment_second_side") }
+
+        try database.writer.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER fail_synthetic_repayment_cycle BEFORE UPDATE ON local_repayment_cycles
+                WHEN OLD.id = '\(cycle.id.uuidString)'
+                BEGIN SELECT RAISE(ABORT, 'synthetic repayment cycle failure'); END;
+                """)
+        }
+        XCTAssertThrowsError(try repository.confirmRepayment(
+            cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 3_000,
+            debitAccountID: nil, status: nil, note: "周期更新失败注入", paidAt: date
+        ))
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: liabilityID), 13_000)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: debitID), 20_000)
+        XCTAssertTrue(try repository.liabilityPayments(accountID: liabilityID).isEmpty)
+        XCTAssertEqual(try repository.accountEntries(accountID: liabilityID).filter { $0.voidedAt == nil }.count, 4)
+        XCTAssertEqual(try repository.accountEntries(accountID: debitID).filter { $0.voidedAt == nil }.count, 0)
+        XCTAssertEqual(try XCTUnwrap(repository.repaymentCycles(accountID: liabilityID).first).status, "pending")
+        try database.writer.write { db in try db.execute(sql: "DROP TRIGGER fail_synthetic_repayment_cycle") }
+
         let first = try repository.confirmRepayment(
             cycleID: cycle.id, profileID: profile.id, paidAmountMinor: 3_000,
             debitAccountID: nil, status: nil, note: "第一次", paidAt: date
