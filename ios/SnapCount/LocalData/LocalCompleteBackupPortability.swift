@@ -498,7 +498,11 @@ final class LocalCompleteBackupPortability {
         }
         for row in rows["local_staging_records"] ?? [] {
             guard let id = row["target_record_id"] as? String else { continue }
-            let targets = (row["resolved_action"] as? String) == "liability_repayment_confirmed" ? cycles : records
+            let targets: Set<String>
+            if (row["resolved_action"] as? String) == "liability_repayment_confirmed" { targets = cycles }
+            else if (row["domain_key"] as? String) == "wallet" { targets = walletSnapshots }
+            else if (row["domain_key"] as? String) == "expense" { targets = sources["expense"] ?? [] }
+            else { targets = records }
             guard targets.contains(id) else { throw LocalCompleteBackupError.invalidRows("local_staging_records") }
         }
         for row in rows["local_wallet_snapshots"] ?? [] {

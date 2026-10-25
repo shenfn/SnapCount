@@ -55,7 +55,9 @@ final class LocalHistoryMigrationMapper {
                     let sourceTable = row["source_table"] as? String
                     let kinds = ["transactions": "expense", "income_records": "income", "liability_payments": "liability_payment", "data_records": "wallet_snapshot", "account_repayment_cycles": "repayment_cycle"]
                     mapped["source_kind"] = sourceTable.flatMap { kinds[$0] } ?? "historical_entry"
-                    mapped["source_id"] = sourceTable.flatMap { kinds[$0] } == nil ? id : (row["source_id"] as? String ?? id)
+                    if sourceTable.flatMap({ kinds[$0] }) != nil {
+                        mapped["source_id"] = try text(row, "source_id")
+                    } else { mapped["source_id"] = id }
                     mapped["is_voided"] = (row["is_voided"] as? Bool) == true ? 1 : 0
                     mapped["source_metadata_json"] = String(decoding: try JSONSerialization.data(withJSONObject: [
                         "source_table": row["source_table"] ?? NSNull(), "source_id": row["source_id"] ?? NSNull()
@@ -100,16 +102,23 @@ final class LocalHistoryMigrationMapper {
                 case .staging:
                     table = "local_staging_records"
                     let payload = row["extracted_json"] as? [String: Any] ?? [:]
-                    let domain = try text(row, "detected_domain_key")
-                    guard LocalRecordValidation.supportedStagingDomainKeys.contains(domain) else { throw LocalHistoryMappingError.unsupported("候选 \(id) 域尚未支持") }
+                    let domain = (row["resolved_domain_key"] as? String) ?? (row["detected_domain_key"] as? String) ?? ""
                     let status = try text(row, "status")
-                    guard let localStatus = ["unassigned": "pending_review", "assigned": "archived", "discarded": "discarded", "failed": "failed"][status] else { throw LocalDataError.invalidRecord }
-                    guard let recordDate = payload["record_date"] as? String, NativeLocalDate.monthKey(from: recordDate) != nil else { throw LocalHistoryMappingError.unsupported("候选 \(id) 缺少真实业务日期") }
-                    if status == "assigned", domain == "wallet" { throw LocalHistoryMappingError.unsupported("钱包候选 \(id) 归档目标需核对还款/快照关系") }
+                    guard let localStatus = ["unassigned": "pending_review", "pending_review": "pending_review", "assigned": "archived", "confirmed": "archived", "archived": "archived", "discarded": "discarded", "failed": "failed"][status] else {
+                        throw LocalHistoryMappingError.unsupported("候选 \(id) 的历史状态 \(status) 需要显式兼容")
+                    }
+                    guard LocalRecordValidation.supportedStagingDomainKeys.contains(domain)
+                            || (localStatus == "archived" && domain == "expense") else { throw LocalHistoryMappingError.unsupported("候选 \(id) 域尚未支持：\(domain)") }
+                    let nested = payload["payload_jsonb"] as? [String: Any] ?? [:]
+                    let recordDate = (payload["record_date"] ?? nested["record_date"]) as? String
+                    guard let recordDate, NativeLocalDate.monthKey(from: recordDate) != nil else { throw LocalHistoryMappingError.unsupported("候选 \(id) 缺少真实业务日期") }
+                    if localStatus == "archived", row["target_record_id"] as? String == nil {
+                        throw LocalHistoryMappingError.unsupported("候选 \(id) 缺少可核对的归档目标")
+                    }
                     mapped["domain_key"] = domain; mapped["status"] = localStatus; mapped["record_date"] = recordDate
                     mapped["payload_json"] = String(decoding: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]), as: UTF8.self)
                     mapped["title"] = row["ai_summary"] ?? "历史候选"; mapped["summary"] = row["ai_summary"] ?? ""
-                    for key in ["confidence", "created_at", "updated_at", "target_record_id"] { copy(key) }
+                    for key in ["confidence", "created_at", "updated_at", "target_record_id", "resolved_action", "resolved_at"] { copy(key) }
                     mapped["source_kind"] = "imported"
                 }
                 let imagePath = (row["image_url"] ?? row["source_image_path"] ?? row["image_path"]) as? String

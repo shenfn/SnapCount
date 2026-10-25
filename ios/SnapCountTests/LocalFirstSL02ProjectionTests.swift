@@ -7,6 +7,20 @@ import GRDB
 /// DM-004/DM-005 阈值具名测试见 LocalPhase1DataModelTests，D6 死 API 改写见 LocalSportRecordTests。
 @MainActor
 final class LocalFirstSL02ProjectionTests: XCTestCase {
+    func testLF04005LogoutInvalidatesVisibleSessionBeforeAnyNetworkAwait() async throws {
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
+        defer { harness.cleanup() }
+        let state = harness.state
+        state.isSignedIn = true; state.currentUserId = "cloud-user"
+        state.dashboard = DashboardSnapshot(todayCount: 5)
+        state.signOut()
+        XCTAssertFalse(state.isSignedIn)
+        XCTAssertEqual(state.currentUserId, "")
+        XCTAssertEqual(state.dashboard.todayCount, 0)
+        XCTAssertTrue(state.isSigningOut)
+        XCTAssertEqual(try harness.bindingRepository.activeProfile().id, harness.profile.id)
+    }
+
     // LF-034 写后投影失败：写入结果和显示刷新结果必须分开，不能鼓励重复记账。
     func testLF034CommittedRecordReportsProjectionFailureWithoutUndoingTheFact() async throws {
         let harness = try Self.makeHarness(session: nil, expenseStub: false)

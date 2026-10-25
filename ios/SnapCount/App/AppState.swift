@@ -42,6 +42,7 @@ final class AppState: ObservableObject {
     @Published var lastShortcutMessage: String?
     @Published var isBootstrapping = true
     @Published var isSigningIn = false
+    @Published var isSigningOut = false
     @Published var authMessage: String?
     @Published var authMessageIsError = false
     @Published var hasUploadToken = false
@@ -369,6 +370,7 @@ final class AppState: ObservableObject {
     }
 
     private func restoreAuthentication() async {
+        let generation = userStateGeneration
         do {
             let session: SupabaseAuthSession
             do {
@@ -382,6 +384,7 @@ final class AppState: ObservableObject {
                 }
                 session = try await authService.restoreSession(accessToken: legacy.accessToken, refreshToken: refreshToken)
             }
+            guard generation == userStateGeneration else { return }
             try save(session: session)
             apply(session: session)
             if mayReadRemoteBusinessData { restoreDashboardSnapshot(userId: session.user.id) }
@@ -403,6 +406,7 @@ final class AppState: ObservableObject {
     }
 
     func signIn(email: String, password: String) async {
+        guard !isSigningOut else { authMessage = "正在完成上次退出，请稍后重试。"; return }
         guard !isSigningIn else { return }
         isSigningIn = true
         defer { isSigningIn = false }
@@ -444,6 +448,7 @@ final class AppState: ObservableObject {
         acceptedTerms: Bool,
         acceptedSensitiveData: Bool
     ) async {
+        guard !isSigningOut else { authMessage = "正在完成上次退出，请稍后重试。"; return }
         guard !isSigningIn else { return }
         guard acceptedTerms else {
             authMessage = "请先阅读并同意服务协议与隐私政策"
@@ -495,22 +500,22 @@ final class AppState: ObservableObject {
     }
 
     func signOut() {
-        let userId = try? requireSession().user.id
+        guard !isSigningOut else { return }
+        let userId = currentUserId.isEmpty ? (try? requireSession().user.id) : currentUserId
+        // Revoke UI/request generations before awaiting the SDK's network work.
+        invalidateSession(message: "")
+        isSigningOut = true
+        let generation = userStateGeneration
+        if let userId { try? snapshotStore.remove(userId: userId) }
         Task {
-            try? await authService.signOut()
+            defer { isSigningOut = false }
             do {
-                try keychain.remove(KeychainKeys.authSession)
-                try keychain.remove(KeychainKeys.uploadToken)
+                try await authService.signOut()
             } catch {
-                authMessage = error.localizedDescription
+                guard generation == userStateGeneration else { return }
+                authMessage = "本机已退出；云端会话注销暂未确认：\(error.localizedDescription)"
                 authMessageIsError = true
             }
-            if let userId { try? snapshotStore.remove(userId: userId) }
-            invalidateSession(message: "")
-            authMessage = nil
-            authMessageIsError = false
-            hasUploadToken = false
-            shortcutCredentialMessage = nil
         }
     }
 
@@ -1136,6 +1141,7 @@ final class AppState: ObservableObject {
     /// FactReader 权威模式刷新统一事实月；降级双 UseCase 模式刷新其拥有的两个本地月缓存。
     /// 读取路径（loadUnifiedRecordMonth、识别投影）不使用本方法。
     private func refreshLocalMonthProjection(monthKey: String) async {
+        let generation = userStateGeneration
         insightsLoadedAt = nil
         if localFactReader != nil {
             await readDeviceFactMonth(monthKey, force: true)
@@ -1145,6 +1151,7 @@ final class AppState: ObservableObject {
         if localFactReader == nil, localRecordUseCase != nil {
             await readDeviceRecordMonth(monthKey, force: true)
         }
+        guard generation == userStateGeneration else { return }
         if recordMonthMessages[monthKey] != nil {
             pendingLocalRefreshMonths.insert(monthKey)
         } else {
@@ -3080,15 +3087,19 @@ final class AppState: ObservableObject {
         isBindingUnboundRecords = true
         unboundBindingMessage = nil
         defer { isBindingUnboundRecords = false }
+        let generation = userStateGeneration
         if !mayReadRemoteBusinessData {
             do {
                 try await bindLocalFinancialRecord(record, accountId: accountId)
+                guard generation == userStateGeneration else { return true }
                 await loadUnboundRecords(monthKey: monthKey)
                 await loadLocalAccounts()
                 await refreshLocalMonthProjection(monthKey: String(record.date.prefix(7)))
+                guard generation == userStateGeneration else { return true }
                 unboundBindingMessage = localWriteMessage("已补绑本机账户并生成流水")
                 return true
             } catch {
+                guard generation == userStateGeneration else { return false }
                 unboundBindingMessage = "本机补绑失败：\(error.localizedDescription)"
                 return false
             }
@@ -3135,9 +3146,11 @@ final class AppState: ObservableObject {
                     months.insert(String(candidate.record.date.prefix(7)))
                 } catch { failures.append("\(candidate.record.title)：\(error.localizedDescription)") }
             }
+            guard generation == userStateGeneration else { return succeeded > 0 }
             await loadUnboundRecords(monthKey: monthKey)
             await loadLocalAccounts()
             for month in months { await refreshLocalMonthProjection(monthKey: month) }
+            guard generation == userStateGeneration else { return succeeded > 0 }
             unboundBindingMessage = localWriteMessage("已补绑 \(succeeded) 条，失败 \(failures.count) 条" + (failures.isEmpty ? "" : "：" + failures.joined(separator: "；")))
             return succeeded > 0
         }
@@ -3164,11 +3177,13 @@ final class AppState: ObservableObject {
     }
 
     private func bindLocalFinancialRecord(_ record: NativeUnboundRecord, accountId: String) async throws {
+        let generation = userStateGeneration
         guard let repository = localFinancialBindingRepository,
               let profile = try await localExpenseUseCase?.prepareProfile(),
               let id = UUID(uuidString: record.id), let accountID = UUID(uuidString: accountId) else {
             throw LocalDataError.invalidIdentifier
         }
+        guard generation == userStateGeneration else { throw CancellationError() }
         switch record.kind {
         case .expense: try repository.bindExpense(profileID: profile.id, id: id, accountID: accountID)
         case .income: try repository.bindIncome(profileID: profile.id, id: id, accountID: accountID)
@@ -5095,20 +5110,24 @@ final class AppState: ObservableObject {
         isConfirmingPendingRecord = true
         pendingResolutionMessage = "正在保存…"
         defer { isConfirmingPendingRecord = false }
+        let generation = userStateGeneration
         if !mayReadRemoteBusinessData {
             do {
                 guard let repository = localPendingFinancialRepository,
                       let profile = try await localExpenseUseCase?.prepareProfile(),
                       let id = UUID(uuidString: draft.pendingId),
                       let source = try repository.record(profileID: profile.id, id: id) else { throw LocalDataError.recordNotFound }
+                guard generation == userStateGeneration else { return false }
                 _ = try repository.resolve(profileID: profile.id, pendingID: id, draft: draft)
                 await loadLocalAccounts()
                 await refreshLocalMonthProjection(monthKey: String(source.transactionDate.prefix(7)))
                 await applyLocalStagingProjection()
+                guard generation == userStateGeneration else { return true }
                 if !preserveInboxNavigation { inboxPath = NavigationPath() }
                 pendingResolutionMessage = localWriteMessage(draft.kind == .income ? "收入已记录（本机）" : (draft.accountId == nil ? "支出已补全（仅本机，待补绑账户）" : "支出已补全（本机）"))
                 return true
             } catch {
+                guard generation == userStateGeneration else { return false }
                 pendingResolutionMessage = "保存失败：\(error.localizedDescription)"
                 return false
             }
