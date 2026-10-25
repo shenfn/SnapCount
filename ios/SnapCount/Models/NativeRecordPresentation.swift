@@ -136,7 +136,7 @@ enum NativeRecordDetailPresentationAdapter {
             NativeDetailRow(label: "金额", value: detail.amount.map { String(format: "-¥%.2f", $0) } ?? "--"),
             NativeDetailRow(label: "商家", value: detail.merchantName ?? "未识别商家"),
             NativeDetailRow(label: "消费渠道", value: detail.platform ?? "未知"),
-            NativeDetailRow(label: "消费分类", value: detail.category ?? "未知"),
+            NativeDetailRow(label: "消费分类", value: NativeFinanceOptionCatalog.categoryTitle(for: detail.category) ?? detail.category ?? "未知"),
             NativeDetailRow(label: "支付方式", value: detail.paymentMethod ?? "未知"),
             NativeDetailRow(
                 label: "交易日期",
@@ -353,6 +353,8 @@ enum NativeRecordDetailPresentationAdapter {
 
     private static func sourceLabel(for detail: NativeRecordDetail) -> String {
         switch detail.source {
+        case "local": return "本机"
+        case "imported": return "历史导入"
         case "ai_scan": return "截图识别"
         case "staging": return "中转站归档"
         case "manual", nil, "": return "手动录入"

@@ -7,6 +7,47 @@ import GRDB
 /// DM-004/DM-005 阈值具名测试见 LocalPhase1DataModelTests，D6 死 API 改写见 LocalSportRecordTests。
 @MainActor
 final class LocalFirstSL02ProjectionTests: XCTestCase {
+    func testLF03735LocalBatchKeepsPartialSuccessAndRetryDoesNotDoubleCharge() async throws {
+        let harness = try Self.makeHarness(session: nil, expenseStub: false)
+        defer { harness.cleanup() }
+        let cash = try harness.expenseRepository.createAccount(LocalAccountDraft(id: UUID(), profileID: harness.profile.id,
+            name: "现金", kind: "cash", currency: "CNY", openingBalanceMinor: 10000, createdAt: Date()))
+        _ = try harness.expenseRepository.createAccount(LocalAccountDraft(id: UUID(), profileID: harness.profile.id,
+            name: "已归档账户", kind: "cash", currency: "CNY", openingBalanceMinor: 0, createdAt: Date(), isArchived: true))
+        for title in ["甲", "乙", "丙"] {
+            _ = try harness.expenseRepository.createExpense(LocalExpenseDraft(id: UUID(), profileID: harness.profile.id,
+                accountID: nil, amountMinor: 2000, currency: "CNY", merchantName: title, platform: "线下",
+                category: "food", paymentMethod: "现金", transactionDate: NativeLocalDate.dateKey(Date()),
+                transactionTime: nil, note: nil, createdAt: Date()), operationID: UUID())
+        }
+        let database = try LocalDatabase(databaseURL: harness.databaseURL)
+        let bindings = try LocalFinancialBindingRepository(database: database)
+        let state = AppState(localExpenseUseCase: harness.expenseUseCase, localRecordUseCase: harness.recordUseCase,
+            localFactReader: harness.factReader, localFinancialBindingRepository: bindings,
+            localBindingRepository: harness.bindingRepository,
+            sessionProvider: { _ in XCTFail("本地补绑不能请求会话"); throw SL02TestError.missingSession })
+        await state.loadAccounts()
+        await state.loadUnboundRecords(monthKey: NativeMonthKey.current())
+        let active = try XCTUnwrap(state.accounts.first { $0.id == cash.id.uuidString })
+        let archived = try XCTUnwrap(state.accounts.first(where: \.isArchived))
+        let original = state.unboundRecords
+        let candidates = original.map { record in NativeUnboundBindingCandidate(record: record,
+            recommendation: NativeAccountRecommendation(account: record.title == "乙" ? archived : active, reason: "合成故障注入", confidence: "测试")) }
+        let partial = await state.batchBindUnboundRecords(candidates, monthKey: NativeMonthKey.current())
+        XCTAssertTrue(partial)
+        XCTAssertEqual(try harness.expenseRepository.accountBalanceMinor(accountID: cash.id), 6000)
+        XCTAssertEqual(state.unboundRecords.map(\.title), ["乙"])
+        let failed = try XCTUnwrap(state.unboundRecords.first)
+        let retried = await state.bindUnboundRecord(failed, accountId: cash.id.uuidString, monthKey: NativeMonthKey.current())
+        XCTAssertTrue(retried)
+        let repeatAll = original.map { NativeUnboundBindingCandidate(record: $0,
+            recommendation: NativeAccountRecommendation(account: active, reason: "重放", confidence: "测试")) }
+        _ = await state.batchBindUnboundRecords(repeatAll, monthKey: NativeMonthKey.current())
+        XCTAssertEqual(try harness.expenseRepository.accountBalanceMinor(accountID: cash.id), 4000)
+        XCTAssertEqual(try harness.expenseRepository.accountEntryCount(), 3)
+        XCTAssertTrue(state.unboundRecords.isEmpty)
+    }
+
     func testLF04005LogoutInvalidatesVisibleSessionBeforeAnyNetworkAwait() async throws {
         let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
         defer { harness.cleanup() }

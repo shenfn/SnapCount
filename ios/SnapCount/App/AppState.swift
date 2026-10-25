@@ -396,6 +396,7 @@ final class AppState: ObservableObject {
                 await loadRecordMonth(Self.currentMonthKey, force: true)
             }
         } catch {
+            guard generation == userStateGeneration else { return }
             if isInvalidRefreshSessionError(error) {
                 invalidateSession(message: "登录状态已失效，请重新登录。")
             } else {

@@ -593,7 +593,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
         try database.execute(sql: """
             INSERT INTO local_account_entries (
                 id, profile_id, account_id, direction, amount_minor, entry_kind,
-                source_kind, source_id, occurred_at, voided_at, is_voided
+                source_kind, source_id, occurred_at, voided_at
             ) VALUES (?, ?, ?, 'in', ?, 'snapshot_initialization', 'wallet_snapshot', ?, ?, NULL)
             """, arguments: [UUID().uuidString, profileID.uuidString, accountID.uuidString,
                               snapshot.balanceMinor, snapshot.id.uuidString, occurredAt])
