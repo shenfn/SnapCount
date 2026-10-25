@@ -2,6 +2,41 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryImageDownloaderTests: XCTestCase {
+    func testLF03905HTTPFailuresAreDistinctAndNeverExposeBearer() async throws {
+        let user = UUID().uuidString.lowercased()
+        let cases: [(Int, LocalHistoryImageDownloadError)] = [(401, .sessionExpired), (403, .accessDenied), (404, .missingImage)]
+        for (status, expected) in cases {
+            let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!) { request in
+                (Data("Bearer synthetic-private-token".utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+            }
+            do {
+                _ = try await downloader.download(paths: ["\(user)/image.jpg"], cloudUserID: user, accessToken: "synthetic-private-token")
+                XCTFail("HTTP error must not become a successful image")
+            } catch {
+                XCTAssertEqual(error as? LocalHistoryImageDownloadError, expected)
+                XCTAssertFalse(error.localizedDescription.contains("synthetic-private-token"))
+                XCTAssertFalse(error.localizedDescription.contains("Bearer"))
+            }
+        }
+    }
+
+    func testLF03905ExpiredSignedURLRetriesOnlySameOwnersAuthenticatedObject() async throws {
+        let user = UUID().uuidString.lowercased()
+        let bytes = Data("original".utf8)
+        let path = "https://fixture.invalid/storage/v1/object/sign/receipt-images/\(user)/image.jpg?token=expired-synthetic"
+        var requests: [URLRequest] = []
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!) { request in
+            requests.append(request)
+            let signed = request.url!.path.contains("/sign/")
+            return (signed ? Data() : bytes, HTTPURLResponse(url: request.url!, statusCode: signed ? 400 : 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let result = try await downloader.download(paths: [path], cloudUserID: user, accessToken: "synthetic-private-token")
+        XCTAssertEqual(result[path], bytes)
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[1].url?.path, "/storage/v1/object/authenticated/receipt-images/\(user)/image.jpg")
+        XCTAssertNil(requests[1].url?.query)
+        XCTAssertEqual(requests[1].url?.host, "fixture.invalid")
+    }
     func testLF039ImageDownloadsStayInCurrentOwnersStorageAndCheckHash() async throws {
         let user = UUID().uuidString.lowercased()
         let path = "\(user)/original.jpg"

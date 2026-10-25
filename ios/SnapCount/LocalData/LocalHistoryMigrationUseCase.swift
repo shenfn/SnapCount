@@ -15,7 +15,7 @@ struct LocalHistoryMigrationInspection {
     }
     var summary: String {
         let detail = LocalHistorySourceTable.allCases.map { "\($0.rawValue)：\(rows[$0, default: []].count)" }.joined(separator: "、")
-        return "只读预检：\(detail)。" + (blockers.isEmpty ? "已读取源数据；尚未写入本机。" : "尚未迁移：" + blockers.joined(separator: "；"))
+        return "源数据预检：\(detail)。" + (blockers.isEmpty ? "已读取源数据；尚未入账。" : "尚未迁移：" + blockers.joined(separator: "；"))
     }
 }
 
@@ -40,7 +40,7 @@ final class LocalHistoryMigrationUseCase {
         return LocalHistoryMigrationInspection(cloudUserID: cloudUserID, rows: rows, blockers: Self.blockers(rows))
     }
 
-    private static func blockers(_ rows: [LocalHistorySourceTable: [[String: AnyCodable]]]) -> [String] {
+    static func blockers(_ rows: [LocalHistorySourceTable: [[String: AnyCodable]]]) -> [String] {
         var result: [String] = []
         for row in rows[.records, default: []] {
             let domain = row["domain_key"]?.value as? String ?? ""

@@ -1,5 +1,17 @@
 import Foundation
 
+enum LocalHistoryImageDownloadError: Error, Equatable, LocalizedError {
+    case sessionExpired, accessDenied, missingImage, invalidResponse(Int)
+    var errorDescription: String? {
+        switch self {
+        case .sessionExpired: return "图片下载凭据已失效（401），请重新登录后继续；已缓存内容保留。"
+        case .accessDenied: return "当前账户无权读取此图片（403）；原图未删除，已缓存内容保留。"
+        case .missingImage: return "云端原图不存在（404）；请核对原图来源，迁移未完成。"
+        case .invalidResponse(let code): return "图片服务返回异常状态（\(code)），迁移未完成。"
+        }
+    }
+}
+
 /// Authenticated migration downloads never follow redirects or send a user's
 /// bearer token to an arbitrary URL stored in a historical row.
 final class LocalHistoryImageDownloader {
@@ -26,13 +38,28 @@ final class LocalHistoryImageDownloader {
         var byteCount = 0
         for path in paths.sorted() {
             guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
-            let url = try validatedURL(path: path, user: user)
+            var url = try validatedURL(path: path, user: user)
             var request = URLRequest(url: url)
             request.timeoutInterval = 30
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-            let (data, response) = try await fetch(request)
+            var (data, response) = try await fetch(request)
             guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
-            guard response.statusCode == 200, response.url == url,
+            let signedPrefix = "/storage/v1/object/sign/receipt-images/"
+            if [400, 401, 403].contains(response.statusCode), url.path.lowercased().hasPrefix(signedPrefix) {
+                let relative = String(url.path.dropFirst(signedPrefix.count))
+                url = try validatedURL(path: relative, user: user)
+                request.url = url
+                (data, response) = try await fetch(request)
+                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+            }
+            switch response.statusCode {
+            case 200: break
+            case 401: throw LocalHistoryImageDownloadError.sessionExpired
+            case 403: throw LocalHistoryImageDownloadError.accessDenied
+            case 404: throw LocalHistoryImageDownloadError.missingImage
+            default: throw LocalHistoryImageDownloadError.invalidResponse(response.statusCode)
+            }
+            guard response.url == url,
                   !data.isEmpty, data.count <= 16 * 1024 * 1024 else { throw LocalDataError.invalidRecord }
             byteCount += data.count
             guard byteCount <= 128 * 1024 * 1024 else { throw LocalDataError.invalidRecord }

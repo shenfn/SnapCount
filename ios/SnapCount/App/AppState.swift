@@ -27,6 +27,7 @@ private struct AppDefaultLocalStorage {
     let imageStore: LocalImageStore
     let pendingFinancialRepository: LocalPendingFinancialRepository
     let financialBindingRepository: LocalFinancialBindingRepository
+    let historyMigrationCache: LocalHistoryMigrationCache
 }
 
 @MainActor
@@ -132,12 +133,17 @@ final class AppState: ObservableObject {
     @Published var isImportingLocalBackup = false
     @Published var isDeletingAccount = false
     @Published var isPreparingHistoryMigration = false
+    @Published var canPauseHistoryMigration = false
     @Published var historyMigrationPreview: String?
     @Published var historyMigrationMessage: String?
     private var historyMigrationArchive: Data?
     private var historyMigrationOwner: String?
     private var historyMigrationGeneration: Int?
     private var historyMigrationSourceDigest: Data?
+    private var historyMigrationImageDigests: [String: String] = [:]
+    private var historyMigrationAttempt = 0
+    private var historyMigrationCheckpoint: LocalHistoryMigrationState?
+    private var historyMigrationProfileID: UUID?
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -153,6 +159,7 @@ final class AppState: ObservableObject {
     private let localCompleteBackupPortability: LocalCompleteBackupPortability?
     private let localPendingFinancialRepository: LocalPendingFinancialRepository?
     private let localFinancialBindingRepository: LocalFinancialBindingRepository?
+    private let localHistoryMigrationCache: LocalHistoryMigrationCache?
     private let inboxRepository: InboxRepositoryProtocol
     private let domainRepository: DomainRepositoryProtocol
     private let snapshotStore: DashboardSnapshotStoreProtocol
@@ -309,6 +316,7 @@ final class AppState: ObservableObject {
         self.localCompleteBackupPortability = localCompleteBackupPortability ?? Self.defaultLocalCompleteBackupPortability()
         self.localPendingFinancialRepository = localPendingFinancialRepository ?? defaultLocalStorage?.pendingFinancialRepository
         self.localFinancialBindingRepository = localFinancialBindingRepository ?? defaultLocalStorage?.financialBindingRepository
+        self.localHistoryMigrationCache = defaultLocalStorage?.historyMigrationCache
         self.inboxRepository = inboxRepository
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore
@@ -5435,54 +5443,111 @@ final class AppState: ObservableObject {
         }.value
     }
 
-    /// Explicit settings action: preview is read-only and never enables sync.
+    /// Explicit settings action: caches source bytes, never writes business facts or enables sync.
     func prepareCloudHistoryMigration() async {
         guard !isPreparingHistoryMigration, !isImportingLocalBackup else { return }
         isPreparingHistoryMigration = true
+        canPauseHistoryMigration = true
+        historyMigrationAttempt += 1
+        let attempt = historyMigrationAttempt
         let generation = userStateGeneration
         historyMigrationArchive = nil
         historyMigrationPreview = nil
         historyMigrationMessage = nil
-        defer { if generation == userStateGeneration { isPreparingHistoryMigration = false } }
+        historyMigrationCheckpoint = nil
+        defer {
+            if generation == userStateGeneration, attempt == historyMigrationAttempt {
+                isPreparingHistoryMigration = false
+                canPauseHistoryMigration = false
+            }
+        }
         do {
             let session = try await validSession()
             guard isCurrentUserLoad(generation, userId: session.user.id),
                   let profile = try await localExpenseUseCase?.prepareProfile(),
                   let portability = localCompleteBackupPortability,
+                  let cache = localHistoryMigrationCache,
                   let baseURL = URL(string: AppConfig.supabaseURL) else { throw LocalDataError.invalidRecord }
             guard profile.cloudUserID == nil || profile.cloudUserID == session.user.id else {
                 throw LocalHistoryMappingError.unsupported("本机工作区仍绑定另一个云账户，请先核对数据归属。")
             }
-            let isCurrent = { [weak self] in self?.isCurrentUserLoad(generation, userId: session.user.id) == true }
-            let inspection = try await LocalHistoryMigrationUseCase().inspect(cloudUserID: session.user.id,
-                accessToken: session.accessToken, isCurrent: isCurrent)
+            historyMigrationProfileID = profile.id
+            let isCurrent = { [weak self] in
+                self?.isCurrentUserLoad(generation, userId: session.user.id) == true
+                    && self?.historyMigrationAttempt == attempt
+            }
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+            if let existing = try cache.state(profileID: profile.id) {
+                guard existing.cloudUserID == session.user.id else { throw LocalHistoryMigrationError.identityMismatch }
+                if existing.status == .completed {
+                    try? cache.cleanupAfterCompletion(existing)
+                    historyMigrationMessage = "此本机工作区已完成该云账户的历史迁移。后续云端变化请使用已授权的同步范围。"
+                    return
+                }
+            }
+            let prepared = try await LocalHistoryMigrationCoordinator(
+                downloader: LocalHistoryImageDownloader(baseURL: baseURL), cache: cache
+            ).prepare(profileID: profile.id, cloudUserID: session.user.id,
+                      accessToken: session.accessToken, isCurrent: isCurrent)
+            let inspection = prepared.inspection
+            historyMigrationCheckpoint = prepared.state
             guard inspection.blockers.isEmpty else {
+                try cache.pause(prepared.state)
                 historyMigrationMessage = inspection.summary
                 return
             }
-            let images = try await LocalHistoryImageDownloader(baseURL: baseURL).download(
-                paths: inspection.sourceImagePaths, cloudUserID: session.user.id,
-                accessToken: session.accessToken, isCurrent: isCurrent)
-            guard isCurrent() else { return }
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
             let archive = try LocalHistoryMigrationMapper(schema: LocalDatabase()).buildArchive(
-                inspection, profileID: profile.id, images: images)
+                inspection, profileID: profile.id, images: prepared.images)
             let preview = try portability.preview(archive)
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             historyMigrationSourceDigest = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
+            historyMigrationImageDigests = prepared.images.mapValues(LocalImageStore.sha256)
             historyMigrationArchive = archive
             historyMigrationOwner = session.user.id
             historyMigrationGeneration = generation
             historyMigrationPreview = "云账户：\(session.user.email ?? session.user.id)。将合并到此 iPhone 现有账本，换号不会另建本机账本。\n" + inspection.summary + "\n" + preview.confirmationText
-            historyMigrationMessage = "预检通过，尚未写入本机。请核对范围后确认恢复；相同ID不同内容会整包拒绝。"
+            historyMigrationMessage = "预检通过，源数据与图片已暂存在本机，尚未入账。确认前会重新核对源数据；相同ID不同内容会整包拒绝。"
         } catch {
-            guard generation == userStateGeneration else { return }
-            historyMigrationMessage = "迁移预检失败，未写入本机：\(error.localizedDescription)"
+            guard generation == userStateGeneration, attempt == historyMigrationAttempt else { return }
+            if let state = historyMigrationCheckpoint { try? localHistoryMigrationCache?.pause(state) }
+            historyMigrationMessage = "迁移预检暂停，尚未入账。再次预检将续传缺失页和图片：\(error.localizedDescription)"
         }
+    }
+
+    func pauseCloudHistoryMigration() {
+        guard canPauseHistoryMigration else { return }
+        if let profileID = historyMigrationProfileID,
+           let state = try? localHistoryMigrationCache?.state(profileID: profileID) {
+            try? localHistoryMigrationCache?.pause(state)
+        }
+        historyMigrationAttempt += 1
+        canPauseHistoryMigration = false
+        isPreparingHistoryMigration = false
+        historyMigrationMessage = "已暂停，尚未入账。再次预检将从已缓存的页和图片继续。"
+    }
+
+    func restartCloudHistoryMigrationPreview() {
+        guard !isPreparingHistoryMigration, !isImportingLocalBackup,
+              let profileID = historyMigrationProfileID, let cache = localHistoryMigrationCache else { return }
+        do {
+            guard let checkpoint = try cache.state(profileID: profileID), checkpoint.cloudUserID == currentUserId else {
+                throw LocalHistoryMigrationError.identityMismatch
+            }
+            try cache.restartSource(checkpoint)
+            historyMigrationCheckpoint = nil
+            historyMigrationArchive = nil
+            historyMigrationPreview = nil
+            historyMigrationSourceDigest = nil
+            historyMigrationImageDigests = [:]
+            historyMigrationMessage = "已丢弃预检缓存。再次预检会重新读取云端历史，本机原有账目和图片未改变。"
+        } catch { historyMigrationMessage = "无法丢弃旧预检：\(error.localizedDescription)" }
     }
 
     func confirmCloudHistoryMigration() async -> Bool {
         guard !isPreparingHistoryMigration, !isImportingLocalBackup,
               let archive = historyMigrationArchive, let owner = historyMigrationOwner,
+              let checkpoint = historyMigrationCheckpoint, let cache = localHistoryMigrationCache,
               let generation = historyMigrationGeneration,
               isCurrentUserLoad(generation, userId: owner) else { return false }
         isPreparingHistoryMigration = true
@@ -5496,16 +5561,35 @@ final class AppState: ObservableObject {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let current = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
             guard inspection.blockers.isEmpty, current == historyMigrationSourceDigest else {
+                try cache.restartSource(checkpoint)
                 historyMigrationArchive = nil
                 historyMigrationPreview = nil
-                historyMigrationMessage = "云端源数据已变化，请重新预检；尚未写入本机。"
+                historyMigrationCheckpoint = nil
+                historyMigrationMessage = "云端源数据已变化，旧预检缓存已失效。请重新预检；尚未入账。"
                 return false
             }
-            let imported = await importCompleteLocalBackup(archive)
+            // Rows may omit a source hash; a stable URL alone cannot prove unchanged image bytes.
+            guard let baseURL = URL(string: AppConfig.supabaseURL) else { throw LocalDataError.invalidRecord }
+            let currentImages = try await LocalHistoryImageDownloader(baseURL: baseURL).download(
+                paths: inspection.sourceImagePaths, cloudUserID: owner, accessToken: session.accessToken,
+                isCurrent: { [weak self] in self?.isCurrentUserLoad(generation, userId: owner) == true })
+            guard currentImages.mapValues(LocalImageStore.sha256) == historyMigrationImageDigests else {
+                try cache.restartSource(checkpoint)
+                historyMigrationArchive = nil
+                historyMigrationPreview = nil
+                historyMigrationCheckpoint = nil
+                historyMigrationMessage = "云端原图已变化，旧预检缓存已失效。请重新预检；尚未入账。"
+                return false
+            }
+            guard isCurrentUserLoad(generation, userId: owner), !Task.isCancelled else { return false }
+            try cache.assertCurrent(checkpoint)
+            let imported = await importCompleteLocalBackup(archive, historyMigration: checkpoint)
+            if imported { try? cache.cleanupAfterCompletion(checkpoint) }
             guard isCurrentUserLoad(generation, userId: owner) else { return false }
             if imported {
                 historyMigrationArchive = nil
                 historyMigrationPreview = nil
+                historyMigrationCheckpoint = nil
                 historyMigrationMessage = settingsMessage
             } else { historyMigrationMessage = settingsMessage }
             return imported
@@ -5516,7 +5600,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    func importCompleteLocalBackup(_ data: Data) async -> Bool {
+    func importCompleteLocalBackup(_ data: Data, historyMigration: LocalHistoryMigrationState? = nil) async -> Bool {
         guard !isImportingLocalBackup, let portability = localCompleteBackupPortability else { return false }
         isImportingLocalBackup = true
         settingsMessage = nil
@@ -5524,7 +5608,7 @@ final class AppState: ObservableObject {
         defer { isImportingLocalBackup = false }
         do {
             let result = try await Task.detached(priority: .userInitiated) {
-                try portability.importBackupIntoActiveProfile(data)
+                try portability.importBackupIntoActiveProfile(data, historyMigration: historyMigration)
             }.value
             recordDetailCache.removeAll()
             recordMonthDetails.removeAll()
@@ -5802,11 +5886,20 @@ final class AppState: ObservableObject {
     }
 
     func resetUserScopedState() {
+        if let profileID = historyMigrationProfileID,
+           let state = try? localHistoryMigrationCache?.state(profileID: profileID), state.status == .running {
+            try? localHistoryMigrationCache?.pause(state)
+        }
+        historyMigrationProfileID = nil
         historyMigrationArchive = nil
         historyMigrationPreview = nil
         historyMigrationOwner = nil
         historyMigrationGeneration = nil
         historyMigrationSourceDigest = nil
+        historyMigrationImageDigests = [:]
+        historyMigrationCheckpoint = nil
+        historyMigrationAttempt += 1
+        canPauseHistoryMigration = false
         historyMigrationMessage = nil
         isPreparingHistoryMigration = false
         homePath = NavigationPath()
@@ -6334,7 +6427,8 @@ final class AppState: ObservableObject {
             factReader: factReader,
             imageStore: imageStore,
             pendingFinancialRepository: LocalPendingFinancialRepository(database: database),
-            financialBindingRepository: try LocalFinancialBindingRepository(database: database)
+            financialBindingRepository: try LocalFinancialBindingRepository(database: database),
+            historyMigrationCache: LocalHistoryMigrationCache(database: database, imageStore: imageStore)
         )
     }
 

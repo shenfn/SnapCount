@@ -196,9 +196,10 @@ final class LocalCompleteBackupPortability {
         )
     }
 
-    func importBackup(_ data: Data, into targetProfileID: UUID) throws -> LocalCompleteBackupImportResult {
+    func importBackup(_ data: Data, into targetProfileID: UUID, historyMigration: LocalHistoryMigrationState? = nil) throws -> LocalCompleteBackupImportResult {
         guard data.count <= Self.maximumArchiveBytes else { throw LocalCompleteBackupError.archiveTooLarge }
         if Self.isLegacyExpenseArchive(data) {
+            guard historyMigration == nil else { throw LocalHistoryMigrationError.invalidWorkspace }
             let result = try LocalExpensePortability(database: database).importArchive(
                 data,
                 enqueueOutbox: false,
@@ -214,6 +215,10 @@ final class LocalCompleteBackupPortability {
         var createdImagePaths: [String] = []
         do {
             return try database.writer.write { db in
+                if let historyMigration {
+                    guard historyMigration.profileID == targetProfileID else { throw LocalHistoryMigrationError.invalidWorkspace }
+                    try LocalHistoryMigrationStore.assertReady(historyMigration, database: db)
+                }
                 guard try Int.fetchOne(
                     db,
                     sql: "SELECT EXISTS(SELECT 1 FROM local_profiles WHERE id = ?)",
@@ -298,6 +303,9 @@ final class LocalCompleteBackupPortability {
                         arguments: [json, id, targetProfileID.uuidString]
                     )
                 }
+                if let historyMigration {
+                    _ = try LocalHistoryMigrationStore.complete(profileID: targetProfileID, cloudUserID: historyMigration.cloudUserID, generation: historyMigration.generation, database: db)
+                }
                 return LocalCompleteBackupImportResult(
                     insertedRows: inserted,
                     skippedRows: skipped.count,
@@ -310,9 +318,10 @@ final class LocalCompleteBackupPortability {
         }
     }
 
-    func importBackupIntoActiveProfile(_ data: Data) throws -> LocalCompleteBackupImportResult {
+    func importBackupIntoActiveProfile(_ data: Data, historyMigration: LocalHistoryMigrationState? = nil) throws -> LocalCompleteBackupImportResult {
         let profile = try profileStore.activeProfile()
-        return try importBackup(data, into: profile.id)
+        if let historyMigration, historyMigration.profileID != profile.id { throw LocalHistoryMigrationError.invalidWorkspace }
+        return try importBackup(data, into: profile.id, historyMigration: historyMigration)
     }
 
     private func decode(_ data: Data) throws -> DecodedArchive {

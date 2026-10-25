@@ -47,6 +47,21 @@ enum LocalHistoryMigrationError: Error, Equatable {
     case staleAttempt
 }
 
+extension LocalHistoryMigrationError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .identityMismatch: return "迁移缓存属于另一个云账户，请核对登录账户和本机工作区。"
+        case .alreadyCompleted: return "此工作区已完成历史迁移，不能将已完成任务重新作为首次迁移。"
+        case .staleAttempt: return "迁移已暂停或身份代次已变化，请重新预检后继续。"
+        case .incompleteScopes: return "源数据仍有未完成的分页，不能提交迁移。"
+        case .invalidCloudIdentity: return "云账户或会话无效，请重新登录后继续。"
+        case .invalidWorkspace: return "迁移与当前本机工作区不匹配，尚未入账。"
+        case .invalidCursorScope, .invalidExpectedScopes, .expectedScopesChanged:
+            return "迁移范围或分页状态不一致，请丢弃预检后重新读取。"
+        }
+    }
+}
+
 /// Keeps one explicitly authorized cloud-history import identity per local workspace.
 final class LocalHistoryMigrationStore {
     private let database: LocalDatabase
@@ -170,7 +185,22 @@ final class LocalHistoryMigrationStore {
 
     func complete(profileID: UUID, cloudUserID: String, generation: Int64, at now: Date = Date()) throws -> LocalHistoryMigrationState {
         try database.writer.write { db in
-            let current = try Self.fetch(profileID: profileID, database: db)
+            try Self.complete(profileID: profileID, cloudUserID: cloudUserID, generation: generation, at: now, database: db)
+        }
+    }
+
+    static func assertReady(_ state: LocalHistoryMigrationState, database db: Database) throws {
+        let current = try fetch(profileID: state.profileID, database: db)
+        guard current.cloudUserID == state.cloudUserID, current.generation == state.generation,
+              current.status == .running else { throw LocalHistoryMigrationError.staleAttempt }
+        guard current.expectedScopes == state.expectedScopes,
+              current.expectedScopes.isSubset(of: current.cursors.completedScopes) else { throw LocalHistoryMigrationError.incompleteScopes }
+        guard current.cursors.completedScopes.isSubset(of: current.expectedScopes),
+              Set(current.cursors.nextByScope.keys).isSubset(of: current.expectedScopes) else { throw LocalHistoryMigrationError.invalidCursorScope }
+    }
+
+    static func complete(profileID: UUID, cloudUserID: String, generation: Int64, at now: Date = Date(), database db: Database) throws -> LocalHistoryMigrationState {
+            let current = try fetch(profileID: profileID, database: db)
             guard current.cloudUserID == cloudUserID,
                   current.generation == generation,
                   current.status == .running else { throw LocalHistoryMigrationError.staleAttempt }
@@ -187,8 +217,7 @@ final class LocalHistoryMigrationStore {
                 WHERE profile_id = ? AND cloud_user_id = ? AND generation = ? AND status = 'running'
                 """, arguments: [now, now, profileID.uuidString, cloudUserID, generation])
             guard db.changesCount == 1 else { throw LocalHistoryMigrationError.staleAttempt }
-            return try Self.fetch(profileID: profileID, database: db)
-        }
+            return try fetch(profileID: profileID, database: db)
     }
 
     private static func fetch(profileID: UUID, database: Database) throws -> LocalHistoryMigrationState {

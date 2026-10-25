@@ -659,24 +659,35 @@ struct PrivacySettingsView: View {
 struct LocalHistoryMigrationView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsConfirmation = false
+    @State private var preparationTask: Task<Void, Never>?
 
     var body: some View {
         Form {
             Section("迁移范围") {
-                Text("读取当前登录云账户的账户、流水、还款、消费、收入、四域记录、候选和原图。预检不写本机数据，也不会自动开启云同步。")
-                Text("遇到缺图、余额不一致、无法等价恢复的历史状态或同ID内容冲突时，整包停止并显示原因。中断后可重新预检，已恢复的相同事实不会重复入账。")
+                Text("读取当前登录云账户的账户、流水、还款、消费、收入、四域记录、候选和原图。预检会在本机缓存源数据和原图，确认前不会入账，也不会自动开启云同步。")
+                Text("遇到缺图、余额不一致、无法等价恢复的历史状态或同ID内容冲突时，整包停止并显示原因。中断或重启后再次预检，将续传缺失页和图片；确认前仍会重新核对源数据。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section {
-                Button("只读预检云端历史") { Task { await appState.prepareCloudHistoryMigration() } }
+                Button("预检或继续迁移") {
+                    preparationTask = Task { await appState.prepareCloudHistoryMigration() }
+                }
                     .disabled(!appState.isSignedIn || appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
                 if !appState.isSignedIn { Text("请先登录要迁入的云账户。") }
                 if appState.isPreparingHistoryMigration { ProgressView("正在核对源数据与图片") }
+                if appState.canPauseHistoryMigration {
+                    Button("暂停，保留进度") {
+                        preparationTask?.cancel()
+                        appState.pauseCloudHistoryMigration()
+                    }
+                }
                 if let preview = appState.historyMigrationPreview {
                     Text(preview).font(.footnote).textSelection(.enabled)
                     Button("确认恢复到本机") { showsConfirmation = true }
                         .disabled(appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
                 }
+                Button("丢弃预检，重新读取") { appState.restartCloudHistoryMigrationPreview() }
+                    .disabled(appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
                 if let message = appState.historyMigrationMessage {
                     Text(message).font(.footnote).textSelection(.enabled)
                 }
@@ -687,7 +698,7 @@ struct LocalHistoryMigrationView: View {
             Button("确认恢复") { Task { _ = await appState.confirmCloudHistoryMigration() } }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("确认前会再次核对云端源数据。恢复不删除云副本，不改变云同步授权。建议先导出完整本地备份。")
+            Text("确认前会再次读取云端源数据和原图校验，可能产生下载流量。恢复不删除云副本，不改变云同步授权。建议先导出完整本地备份。")
         }
     }
 }

@@ -601,6 +601,19 @@ final class LocalDatabase {
                     WHERE voided_at IS NULL AND is_voided = 0;
                 """)
         }
+        migrator.registerMigration("local-v25-history-migration-cache") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_history_migration_cache (
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    cloud_user_id TEXT NOT NULL,
+                    cache_kind TEXT NOT NULL CHECK(cache_kind IN ('page','image')),
+                    cache_key TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    PRIMARY KEY(profile_id, cache_kind, cache_key)
+                );
+                """)
+        }
         return migrator
     }
 }
