@@ -1394,9 +1394,13 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             }
             for expense in snapshot.expenses {
                 if excludingExpenseIDs.contains(expense.id) { continue }
-                let row = try Row.fetchOne(db, sql: "SELECT local_version FROM local_expenses WHERE id = ? AND profile_id = ?", arguments: [expense.id.uuidString, profileID.uuidString])
+                let row = try Row.fetchOne(db, sql: "SELECT local_version, deleted_at FROM local_expenses WHERE id = ? AND profile_id = ?", arguments: [expense.id.uuidString, profileID.uuidString])
                 let localVersion: Int64 = row?["local_version"] ?? 0
                 guard expense.version >= localVersion else { continue }
+                let localDeletedAt: Date? = row?["deleted_at"]
+                if localDeletedAt != nil, expense.deletedAt == nil, expense.version <= localVersion {
+                    continue
+                }
                 if expense.deletedAt != nil {
                     try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL", arguments: [expense.deletedAt, expense.id.uuidString])
                     try db.execute(sql: "UPDATE local_expenses SET local_version = ?, deleted_at = ?, updated_at = ? WHERE id = ? AND profile_id = ?", arguments: [expense.version, expense.deletedAt, Date(), expense.id.uuidString, profileID.uuidString])
