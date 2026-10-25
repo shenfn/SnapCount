@@ -111,7 +111,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         let repository = SL02DashboardRepositoryStub(gate: gate, snapshot: DashboardSnapshot(dayRecordGroups: [
             NativeDayRecordGroup(dateKey: day, records: [record])
         ]))
-        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false, dashboard: repository)
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false, dashboard: repository, usesLocalAuthority: false)
         defer { harness.cleanup() }
         let state = harness.state
         state.resetUserScopedState()
@@ -142,7 +142,7 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
     }
 
     func testIOSV2POLISH006F17RemoteHistoricalWritesRefreshBothMonthSnapshots() async throws {
-        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false)
+        let harness = try Self.makeHarness(session: Self.stubSession(), expenseStub: false, usesLocalAuthority: false)
         defer { harness.cleanup() }
         let state = harness.state
         state.resetUserScopedState()
@@ -550,9 +550,8 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
         }
         await state.loadRecordMonth(monthKey, force: true)
 
-        XCTAssertEqual(harness.recordSpy.fetchMonthKeys, [monthKey])
-        XCTAssertEqual(harness.expenseStub.importRemoteExpenseCalls.count, 1)
-        XCTAssertEqual(harness.expenseStub.importRemoteExpenseCalls.first?.first?.amountMinor, 1_250)
+        XCTAssertTrue(harness.recordSpy.fetchMonthKeys.isEmpty, "绑定仅授权同步协调器，不打开旧全域REST")
+        XCTAssertTrue(harness.expenseStub.importRemoteExpenseCalls.isEmpty)
         XCTAssertTrue(harness.expenseStub.importRemoteAccountCalls.isEmpty)
     }
 
@@ -619,8 +618,8 @@ final class LocalFirstSL02ProjectionTests: XCTestCase {
 
         await state.loadRecordDetail(reference: "local-staging/stage-001")
         XCTAssertNil(state.selectedRecordDetail, "local-staging 引用不应进入正式详情路由")
-        XCTAssertNotNil(state.recordDetailMessage, "local-staging 引用只应触发会话查询失败")
-        XCTAssertEqual(harness.sessionCounter.current, 1)
+        XCTAssertNotNil(state.recordDetailMessage, "未知引用应在本机失败，不回退云端")
+        XCTAssertEqual(harness.sessionCounter.current, 0)
     }
 
     // MARK: - SL-02-C4（红灯先行）：FactReader 模式编辑后投影引用保持权威前缀
@@ -856,7 +855,8 @@ extension LocalFirstSL02ProjectionTests {
     fileprivate static func makeHarness(
         session: SupabaseAuthSession?,
         expenseStub: Bool,
-        dashboard: SL02DashboardRepositoryStub = SL02DashboardRepositoryStub()
+        dashboard: SL02DashboardRepositoryStub = SL02DashboardRepositoryStub(),
+        usesLocalAuthority: Bool = true
     ) throws -> SL02Harness {
         let databaseURL = try temporaryDatabaseURL()
         let database = try LocalDatabase(databaseURL: databaseURL)
@@ -896,7 +896,7 @@ extension LocalFirstSL02ProjectionTests {
             recordRepository: recordSpy,
             localExpenseUseCase: resolvedExpenseUseCase,
             localRecordUseCase: recordUseCase,
-            localFactReader: factReader,
+            localFactReader: usesLocalAuthority ? factReader : nil,
             domainRepository: SL02DomainRepositoryStub(),
             snapshotStore: SL02SnapshotStoreStub(),
             accountRepository: accountRepository,

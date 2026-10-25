@@ -203,9 +203,15 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
                         UNION ALL
                         SELECT 1 FROM local_wallet_snapshots
                         WHERE image_path = ?
+                        UNION ALL
+                        SELECT 1 FROM local_expenses WHERE image_path = ? AND deleted_at IS NULL
+                        UNION ALL
+                        SELECT 1 FROM local_income_records WHERE image_path = ? AND deleted_at IS NULL
+                        UNION ALL
+                        SELECT 1 FROM local_pending_transactions WHERE image_path = ? AND status = 'pending'
                     )
                     """,
-                arguments: [path, path, path, path, path]
+                arguments: [path, path, path, path, path, path, path, path]
             ) ?? 0) != 0
         }
     }
@@ -454,6 +460,7 @@ final class LocalRecordRepository: LocalRecordRepositoryProtocol {
             ) else { throw LocalDataError.recordNotFound }
             try Self.assertProfile(row, profileID: profileID)
             let status: String = row["status"]
+            if status == LocalStagingRecordStatus.discarded.rawValue { return }
             guard status == LocalStagingRecordStatus.pendingReview.rawValue else {
                 throw LocalDataError.invalidRecord
             }

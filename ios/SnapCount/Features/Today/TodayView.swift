@@ -200,12 +200,12 @@ struct TodayView: View {
         if appState.isLoadingDashboard && appState.dashboard.monthCount == 0 {
             HStack(spacing: 10) {
                 ProgressView()
-                Text("正在同步 PWA 数据")
+                Text("正在读取本机记录")
             }
             .font(.subheadline)
             .foregroundStyle(JieziTheme.muted)
         } else if appState.isShowingCachedDashboard {
-            Text(appState.dashboardMessage ?? "正在展示本地数据，芥子会在后台同步最新内容。")
+            Text(appState.dashboardMessage ?? "正在展示已缓存的数据，可手动刷新。")
                 .font(.footnote)
                 .foregroundStyle(JieziTheme.gold)
         } else if let message = appState.dashboardMessage {
@@ -668,7 +668,7 @@ struct TodayView: View {
             switch localOutcome.result {
             case .archived:
                 uploadMessage = "AI 识别结果已按高置信度规则自动记录到本机。"
-            case .staged:
+            case .staged, .financialPending:
                 uploadMessage = "AI 识别结果已保存到本地收件箱，请确认后归档。"
             }
             uploadMessageIsError = false

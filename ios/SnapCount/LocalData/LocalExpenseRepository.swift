@@ -680,6 +680,12 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
     }
 
     func createExpense(_ draft: LocalExpenseDraft, operationID: UUID) throws -> LocalExpense {
+        try database.writer.write { db in
+            try Self.insertExpense(draft, operationID: operationID, database: db)
+        }
+    }
+
+    static func insertExpense(_ draft: LocalExpenseDraft, operationID: UUID, database db: Database) throws -> LocalExpense {
         guard draft.amountMinor > 0 else { throw LocalDataError.invalidAmount }
         let localVersion: Int64 = 1
         let entryID = UUID()
@@ -698,27 +704,25 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             note: draft.note,
             localVersion: localVersion,
             createdAt: draft.createdAt,
-            updatedAt: draft.createdAt
+            updatedAt: draft.createdAt, imagePath: draft.imagePath, imageHash: draft.imageHash
         )
         let payload = try Self.outboxPayload(expense: expense)
 
-        try database.writer.write { db in
-            try Self.validateActiveAccount(id: draft.accountID, profileID: draft.profileID, database: db)
-            let direction = try Self.expenseEntryDirection(
-                accountID: draft.accountID, profileID: draft.profileID, database: db
-            )
+            if let accountID = draft.accountID {
+                try Self.validateActiveAccount(id: accountID, profileID: draft.profileID, database: db)
+            }
             try db.execute(
                 sql: """
                     INSERT INTO local_expenses (
                         id, profile_id, account_id, amount_minor, currency, merchant_name,
                         platform, category, payment_method, transaction_date, transaction_time,
-                        note, local_version, created_at, updated_at, deleted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                        note, local_version, created_at, updated_at, deleted_at, image_path, image_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
                     """,
                 arguments: [
                     draft.id.uuidString,
                     draft.profileID.uuidString,
-                    draft.accountID.uuidString,
+                    draft.accountID?.uuidString,
                     draft.amountMinor,
                     draft.currency,
                     draft.merchantName,
@@ -730,28 +734,14 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     draft.note,
                     localVersion,
                     draft.createdAt,
-                    draft.createdAt
+                    draft.createdAt, draft.imagePath, draft.imageHash
                 ]
             )
 
-            try db.execute(
-                sql: """
-                    INSERT INTO local_account_entries (
-                        id, profile_id, account_id, direction, amount_minor, entry_kind,
-                        source_kind, source_id, occurred_at, voided_at
-                    ) VALUES (?, ?, ?, ?, ?, 'expense', 'expense', ?, ?, NULL)
-                    """,
-                arguments: [
-                    entryID.uuidString,
-                    draft.profileID.uuidString,
-                    draft.accountID.uuidString,
-                    direction,
-                    draft.amountMinor,
-                    draft.id.uuidString,
-                    draft.createdAt
-                ]
-            )
-
+            if expense.accountID != nil {
+                try Self.insertExpenseEntry(id: entryID, expense: expense, occurredAt: draft.createdAt, database: db)
+            }
+            if expense.accountID != nil {
             try db.execute(
                 sql: """
                     INSERT INTO local_outbox_operations (
@@ -770,12 +760,16 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     draft.createdAt
                 ]
             )
-        }
 
+            }
         return expense
     }
 
     func createIncome(_ draft: LocalIncomeDraft) throws -> LocalIncome {
+        try database.writer.write { db in try Self.insertIncome(draft, database: db) }
+    }
+
+    static func insertIncome(_ draft: LocalIncomeDraft, database db: Database) throws -> LocalIncome {
         guard draft.amountMinor > 0 else { throw LocalDataError.invalidAmount }
         let income = LocalIncome(
             id: draft.id, profileID: draft.profileID, accountID: draft.accountID,
@@ -783,9 +777,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             sourceName: draft.sourceName, category: draft.category,
             incomeDate: draft.incomeDate, occurredAt: draft.occurredAt,
             note: draft.note, localVersion: 1, createdAt: draft.createdAt,
-            updatedAt: draft.createdAt
+            updatedAt: draft.createdAt, imagePath: draft.imagePath, imageHash: draft.imageHash
         )
-        try database.writer.write { db in
             if let accountID = draft.accountID {
                 try Self.validateActiveIncomeAccount(id: accountID, profileID: draft.profileID, database: db)
             }
@@ -793,20 +786,19 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 INSERT INTO local_income_records (
                     id, profile_id, account_id, amount_minor, currency, source_name,
                     category, income_date, occurred_at, note, local_version,
-                    created_at, updated_at, deleted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+                    created_at, updated_at, deleted_at, image_path, image_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?)
                 """, arguments: [
                     income.id.uuidString, income.profileID.uuidString,
                     income.accountID?.uuidString, income.amountMinor, income.currency,
                     income.sourceName, income.category, income.incomeDate,
-                    income.occurredAt, income.note, income.createdAt, income.updatedAt
+                    income.occurredAt, income.note, income.createdAt, income.updatedAt, income.imagePath, income.imageHash
                 ])
             if let accountID = income.accountID {
                 try Self.insertIncomeEntry(
                     id: UUID(), income: income, accountID: accountID, database: db
                 )
             }
-        }
         return income
     }
 
@@ -830,8 +822,13 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 sourceName: update.sourceName, category: update.category,
                 incomeDate: update.incomeDate, occurredAt: update.occurredAt,
                 note: update.note, localVersion: existing.localVersion + 1,
-                createdAt: existing.createdAt, updatedAt: update.updatedAt
+                createdAt: existing.createdAt, updatedAt: update.updatedAt, imagePath: update.removeImage ? nil : (update.imagePath ?? existing.imagePath), imageHash: update.removeImage ? nil : (update.imageHash ?? existing.imageHash)
             )
+            if next.imagePath != existing.imagePath {
+                try Self.enqueueFinancialImageCleanup(existing.imagePath, profileID: existing.profileID, at: update.updatedAt, database: db)
+            }
+            try db.execute(sql: "UPDATE local_income_records SET image_path = ?, image_hash = ? WHERE id = ?",
+                           arguments: [next.imagePath, next.imageHash, update.id.uuidString])
             if existing.accountID != nil {
                 try Self.voidActiveEntry(sourceID: update.id, sourceKind: "income", voidedAt: update.updatedAt, database: db)
             }
@@ -861,6 +858,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             if existing.accountID != nil {
                 try Self.voidActiveEntry(sourceID: id, sourceKind: "income", voidedAt: deletedAt, database: db)
             }
+            try Self.enqueueFinancialImageCleanup(existing.imagePath, profileID: existing.profileID, at: deletedAt, database: db)
             let nextVersion = existing.localVersion + 1
             try db.execute(sql: "UPDATE local_income_records SET deleted_at = ?, local_version = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
                            arguments: [deletedAt, nextVersion, deletedAt, id.uuidString])
@@ -888,6 +886,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         guard !drafts.isEmpty else { return }
         try database.writer.write { db in
             for draft in drafts where draft.amountMinor > 0 {
+                guard let accountID = draft.accountID else { throw LocalDataError.accountRequired }
                 let exists = try Row.fetchOne(
                     db,
                     sql: "SELECT id FROM local_expenses WHERE id = ? AND profile_id = ?",
@@ -895,7 +894,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 ) != nil
                 if exists { continue }
                 let direction = try Self.expenseEntryDirection(
-                    accountID: draft.accountID, profileID: draft.profileID, database: db
+                    accountID: accountID, profileID: draft.profileID, database: db
                 )
                 try db.execute(sql: """
                     INSERT INTO local_expenses (
@@ -904,7 +903,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         note, local_version, created_at, updated_at, deleted_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
                     """, arguments: [
-                        draft.id.uuidString, draft.profileID.uuidString, draft.accountID.uuidString,
+                        draft.id.uuidString, draft.profileID.uuidString, draft.accountID?.uuidString,
                         draft.amountMinor, draft.currency, draft.merchantName, draft.platform,
                         draft.category, draft.paymentMethod, draft.transactionDate,
                         draft.transactionTime, draft.note, draft.createdAt, draft.createdAt
@@ -915,7 +914,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         source_kind, source_id, occurred_at, voided_at
                     ) VALUES (?, ?, ?, ?, ?, 'expense', 'expense', ?, ?, NULL)
                     """, arguments: [
-                        UUID().uuidString, draft.profileID.uuidString, draft.accountID.uuidString,
+                        UUID().uuidString, draft.profileID.uuidString, draft.accountID?.uuidString,
                         direction, draft.amountMinor, draft.id.uuidString, draft.createdAt
                     ])
             }
@@ -933,9 +932,18 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     actual: existing.localVersion
                 )
             }
-            try Self.validateAccount(id: update.accountID, profileID: existing.profileID, database: db)
-            if update.accountID != existing.accountID {
-                try Self.validateActiveAccount(id: update.accountID, profileID: existing.profileID, database: db)
+            if existing.accountID != nil && update.accountID == nil {
+                let authorized = try Int.fetchOne(db, sql: """
+                    SELECT EXISTS(SELECT 1 FROM local_profiles p JOIN local_sync_state s ON s.profile_id=p.id
+                    WHERE p.id=? AND p.cloud_user_id IS NOT NULL AND p.sync_enabled=1 AND s.sync_status!='disabled')
+                    """, arguments: [existing.profileID.uuidString]) == 1
+                guard !authorized else { throw LocalFinancialMutationError.synchronizedExpenseCannotUnbind }
+            }
+            if let accountID = update.accountID {
+                try Self.validateAccount(id: accountID, profileID: existing.profileID, database: db)
+                if accountID != existing.accountID {
+                    try Self.validateActiveAccount(id: accountID, profileID: existing.profileID, database: db)
+                }
             }
 
             let nextVersion = existing.localVersion + 1
@@ -954,8 +962,13 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 note: update.note,
                 localVersion: nextVersion,
                 createdAt: existing.createdAt,
-                updatedAt: update.updatedAt
+                updatedAt: update.updatedAt, imagePath: update.removeImage ? nil : (update.imagePath ?? existing.imagePath), imageHash: update.removeImage ? nil : (update.imageHash ?? existing.imageHash)
             )
+            if updated.imagePath != existing.imagePath {
+                try Self.enqueueFinancialImageCleanup(existing.imagePath, profileID: existing.profileID, at: update.updatedAt, database: db)
+            }
+            try db.execute(sql: "UPDATE local_expenses SET image_path = ?, image_hash = ? WHERE id = ?",
+                           arguments: [updated.imagePath, updated.imageHash, update.id.uuidString])
             let replacesLedger = existing.accountID != update.accountID
                 || existing.amountMinor != update.amountMinor
 
@@ -982,7 +995,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     WHERE id = ? AND deleted_at IS NULL
                     """,
                 arguments: [
-                    updated.accountID.uuidString,
+                    updated.accountID?.uuidString,
                     updated.amountMinor,
                     updated.currency,
                     updated.merchantName,
@@ -998,6 +1011,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 ]
             )
 
+            if updated.accountID != nil {
             try Self.insertOutbox(
                 operationID: operationID,
                 profileID: updated.profileID,
@@ -1009,6 +1023,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 createdAt: update.updatedAt,
                 database: db
             )
+            } else {
+                try db.execute(sql: "DELETE FROM local_outbox_operations WHERE aggregate_kind = 'expense' AND aggregate_id = ? AND status IN ('pending','failed')", arguments: [updated.id.uuidString])
+            }
             return updated
         }
     }
@@ -1034,6 +1051,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 deletedAt: deletedAt
             )
 
+            try Self.enqueueFinancialImageCleanup(existing.imagePath, profileID: existing.profileID, at: deletedAt, database: db)
             try Self.voidActiveEntry(sourceID: id, voidedAt: deletedAt, database: db)
             try db.execute(
                 sql: """
@@ -1430,16 +1448,24 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         }
     }
 
+    private static func enqueueFinancialImageCleanup(_ path: String?, profileID: UUID, at date: Date, database: Database) throws {
+        guard let path else { return }
+        try database.execute(sql: """
+            INSERT OR IGNORE INTO local_image_cleanups
+            (id, profile_id, image_path, attempt_count, last_error, created_at, updated_at)
+            VALUES (?, ?, ?, 0, NULL, ?, ?)
+            """, arguments: [UUID().uuidString, profileID.uuidString, path, date, date])
+    }
+
     private static func expense(from row: Row) throws -> LocalExpense {
         guard let id = UUID(uuidString: row["id"]),
-              let profileID = UUID(uuidString: row["profile_id"]),
-              let accountID = UUID(uuidString: row["account_id"]) else {
+              let profileID = UUID(uuidString: row["profile_id"]) else {
             throw LocalDataError.invalidRecord
         }
         return LocalExpense(
             id: id,
             profileID: profileID,
-            accountID: accountID,
+            accountID: (row["account_id"] as String?).flatMap(UUID.init(uuidString:)),
             amountMinor: row["amount_minor"],
             currency: row["currency"],
             merchantName: row["merchant_name"],
@@ -1451,7 +1477,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             note: row["note"],
             localVersion: row["local_version"],
             createdAt: row["created_at"],
-            updatedAt: row["updated_at"]
+            updatedAt: row["updated_at"], imagePath: row["image_path"], imageHash: row["image_hash"]
         )
     }
 
@@ -1505,7 +1531,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             sourceName: row["source_name"], category: row["category"],
             incomeDate: row["income_date"], occurredAt: row["occurred_at"],
             note: row["note"], localVersion: row["local_version"],
-            createdAt: createdAt, updatedAt: updatedAt
+            createdAt: createdAt, updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"]
         )
     }
 
@@ -1794,8 +1820,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         occurredAt: Date,
         database: Database
     ) throws {
+        guard let accountID = expense.accountID else { return }
         let direction = try expenseEntryDirection(
-            accountID: expense.accountID, profileID: expense.profileID, database: database
+            accountID: accountID, profileID: expense.profileID, database: database
         )
         try database.execute(
             sql: """
@@ -1807,7 +1834,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             arguments: [
                 id.uuidString,
                 expense.profileID.uuidString,
-                expense.accountID.uuidString,
+                accountID.uuidString,
                 direction,
                 expense.amountMinor,
                 expense.id.uuidString,
@@ -1924,7 +1951,7 @@ private struct ExpenseOutboxPayload: Encodable {
     let profileID: UUID
     let type: String
     let source: String
-    let accountID: UUID
+    let accountID: UUID?
     let amountMinor: Int64
     let currency: String
     let merchantName: String
@@ -1955,4 +1982,12 @@ private struct AccountOutboxPayload: Encodable {
     let openingBalanceMinor: Int64
     let localVersion: Int64
     let createdAt: Date
+}
+
+
+enum LocalFinancialMutationError: Error, LocalizedError {
+    case synchronizedExpenseCannotUnbind
+    var errorDescription: String? {
+        "同步已开启，当前同步协议不支持消费解绑。请保留账户绑定；关闭同步后可仅在本机解绑。"
+    }
 }

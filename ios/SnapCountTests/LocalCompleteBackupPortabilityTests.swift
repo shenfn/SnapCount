@@ -4,6 +4,58 @@ import XCTest
 @testable import SnapCount
 
 final class LocalCompleteBackupPortabilityTests: XCTestCase {
+    func testLF024MigrationPreservesOldExpenseBeforeAllowingUnboundRecords() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("old.sqlite")
+        let queue = try DatabaseQueue(path: url.path)
+        try LocalDatabase.migrator.migrate(queue, upTo: "local-v21-history-migration-checkpoint")
+        let profile = UUID(), account = UUID(), expense = UUID()
+        try queue.write { db in
+            try db.execute(sql: "INSERT INTO local_profiles(id, created_at) VALUES (?, ?)", arguments: [profile.uuidString, Date()])
+            try db.execute(sql: "INSERT INTO local_accounts(id, profile_id, name, kind, currency, opening_balance_minor, created_at) VALUES (?, ?, 'synthetic', 'cash', 'CNY', 10000, ?)", arguments: [account.uuidString, profile.uuidString, Date()])
+            try db.execute(sql: "INSERT INTO local_expenses(id, profile_id, account_id, amount_minor, currency, merchant_name, platform, category, payment_method, transaction_date, created_at, updated_at) VALUES (?, ?, ?, 2000, 'CNY', 'synthetic', '', 'other', 'cash', '2026-10-25', ?, ?)", arguments: [expense.uuidString, profile.uuidString, account.uuidString, Date(), Date()])
+        }
+        for _ in 0..<2 {
+            let database = try LocalDatabase(databaseURL: url)
+            let preserved = try XCTUnwrap(try LocalExpenseRepository(database: database).expense(id: expense))
+            XCTAssertEqual(preserved.amountMinor, 2000)
+            XCTAssertEqual(preserved.accountID, account)
+            XCTAssertNil(preserved.imagePath)
+            try database.writer.read { db in
+                XCTAssertTrue(try Row.fetchAll(db, sql: "PRAGMA foreign_key_check").isEmpty)
+            }
+        }
+    }
+
+    func testLF036FinancialOriginalSurvivesCreateEditAndReopen() async throws {
+        let fixture = try makeEmptyFixture()
+        defer { cleanup(fixture) }
+        let repository = try LocalExpenseRepository(database: fixture.database)
+        let useCase = LocalExpenseUseCase(profileStore: fixture.profileStore, repository: repository, imageStore: fixture.imageStore)
+        let bytes = Data("synthetic-income-original".utf8)
+        let income = try await useCase.createIncome(LocalIncomeCommand(id: UUID(), accountID: nil,
+            amountText: "20", currency: "CNY", sourceName: "合成收入", category: "其他",
+            incomeDate: "2026-10-25", occurredAt: nil, note: nil, createdAt: Date(), imageData: bytes))
+        let path = try XCTUnwrap(income.imagePath)
+        XCTAssertEqual(try fixture.imageStore.data(at: path), bytes)
+        let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: fixture.directory.appendingPathComponent("local.sqlite")))
+        XCTAssertEqual(try reopened.income(id: income.id)?.imageHash, LocalImageStore.sha256(bytes))
+        let edited = try await useCase.updateIncome(LocalIncomeUpdate(id: income.id, profileID: income.profileID,
+            expectedVersion: income.localVersion, accountID: nil, amountMinor: 3000, currency: "CNY",
+            sourceName: "合成收入", category: "其他", incomeDate: "2026-10-25", occurredAt: nil,
+            note: "edited", updatedAt: Date()))
+        XCTAssertEqual(edited.imagePath, path)
+        let cleared = try await useCase.updateIncome(LocalIncomeUpdate(id: income.id, profileID: income.profileID,
+            expectedVersion: edited.localVersion, accountID: nil, amountMinor: 3000, currency: "CNY",
+            sourceName: "合成收入", category: "其他", incomeDate: "2026-10-25", occurredAt: nil,
+            note: nil, updatedAt: Date(), removeImage: true))
+        XCTAssertNil(cleared.imagePath)
+        let cleanupRows = try LocalRecordRepository(database: fixture.database).pendingImageCleanups(profileID: income.profileID)
+        XCTAssertTrue(cleanupRows.contains { $0.imagePath == path })
+    }
+
     func testLF02104DanglingLedgerSourceCannotBeRestored() throws {
         let source = try makeFixture()
         defer { cleanup(source) }
@@ -166,7 +218,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
 
         let backup = try source.portability.exportBackup()
         let preview = try source.portability.preview(backup)
-        XCTAssertEqual(preview.schemaVersion, 20)
+        XCTAssertEqual(preview.schemaVersion, 23)
         XCTAssertEqual(preview.imageCount, 4)
         let targetProfile = try target.profileStore.activeProfile()
         _ = try target.portability.importBackup(backup, into: targetProfile.id)

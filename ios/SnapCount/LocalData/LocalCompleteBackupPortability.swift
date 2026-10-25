@@ -63,7 +63,7 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 20
+    static let currentSchemaVersion = 23
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
     private static let maximumImageBytes = 128 * 1024 * 1024
     private static let maximumArchiveBytes = 180 * 1024 * 1024
@@ -79,7 +79,8 @@ final class LocalCompleteBackupPortability {
         "local_repayment_cycles",
         "local_liability_payments",
         "local_account_entries",
-        "local_image_intakes"
+        "local_image_intakes",
+        "local_pending_transactions"
     ]
 
     private let database: LocalDatabase
@@ -114,6 +115,9 @@ final class LocalCompleteBackupPortability {
             var imageReferences: [String: String] = [:]
             for (table, condition) in [
                 ("local_records", "deleted_at IS NULL"),
+                ("local_expenses", "deleted_at IS NULL"),
+                ("local_income_records", "deleted_at IS NULL"),
+                ("local_pending_transactions", "status = 'pending'"),
                 ("local_staging_records", "status IN ('pending_review', 'failed') OR (domain_key = 'wallet' AND resolved_action = 'liability_repayment_confirmed')"),
                 ("local_image_intakes", "status IN ('failed', 'receiving')"),
                 ("local_wallet_snapshots", "1 = 1")
@@ -317,10 +321,11 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard [15, 16, 17, 18, 19, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
+        guard [15, 16, 17, 18, 19, 20, 22, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
         var tables = archive.tables
+        if archive.schemaVersion < 22 { tables["local_pending_transactions"] = "[]" }
         let archiveTables = Set(tables.keys)
         let legacyTables = Set(Self.tableNames).subtracting(["local_wallet_snapshots"])
         let hasCurrentTables = archive.schemaVersion >= 16
@@ -363,6 +368,17 @@ final class LocalCompleteBackupPortability {
                 rows["local_wallet_snapshots"] = wallets
             }
         }
+        if archive.schemaVersion < 22 {
+            for table in ["local_expenses", "local_income_records"] {
+                var financialRows = rows[table] ?? []
+                for index in financialRows.indices {
+                    financialRows[index]["image_path"] = NSNull()
+                    financialRows[index]["image_hash"] = NSNull()
+                    if table == "local_income_records" { financialRows[index]["source_pending_transaction_id"] = NSNull() }
+                }
+                rows[table] = financialRows
+            }
+        }
         try Self.validateFinancialRows(rows)
 
         var images: [String: Data] = [:]
@@ -392,6 +408,7 @@ final class LocalCompleteBackupPortability {
             "local_accounts": [("opening_balance_minor", false)],
             "local_expenses": [("amount_minor", true)],
             "local_income_records": [("amount_minor", true)],
+            "local_pending_transactions": [("amount_minor", false)],
             "local_repayment_cycles": [
                 ("statement_amount_minor", false), ("paid_amount_minor", false),
                 ("remaining_amount_minor", false), ("carried_over_amount_minor", false),
@@ -418,7 +435,7 @@ final class LocalCompleteBackupPortability {
 
         let references: [(String, String, Set<String>, Bool)] = [
             ("local_accounts", "auto_debit_account_id", accounts, true),
-            ("local_expenses", "account_id", accounts, false),
+            ("local_expenses", "account_id", accounts, true),
             ("local_income_records", "account_id", accounts, true),
             ("local_repayment_cycles", "account_id", accounts, false),
             ("local_repayment_cycles", "auto_debit_account_id", accounts, true),
@@ -439,6 +456,42 @@ final class LocalCompleteBackupPortability {
                     throw LocalCompleteBackupError.invalidRows(table)
                 }
             }
+        }
+        let sources: [String: Set<String>] = [
+            "expense": Set((rows["local_expenses"] ?? []).compactMap { $0["id"] as? String }),
+            "income": Set((rows["local_income_records"] ?? []).compactMap { $0["id"] as? String }),
+            "liability_payment": Set((rows["local_liability_payments"] ?? []).compactMap { $0["id"] as? String }),
+            "wallet_snapshot": walletSnapshots,
+            "repayment_cycle": cycles,
+            "historical_entry": Set((rows["local_account_entries"] ?? []).compactMap { $0["id"] as? String })
+        ]
+        for row in rows["local_account_entries"] ?? [] {
+            guard let kind = row["source_kind"] as? String,
+                  let id = row["source_id"] as? String,
+                  sources[kind]?.contains(id) == true else {
+                throw LocalCompleteBackupError.invalidRows("local_account_entries")
+            }
+        }
+        let pendingIDs = Set((rows["local_pending_transactions"] ?? []).compactMap { $0["id"] as? String })
+        for row in rows["local_income_records"] ?? [] {
+            if let source = row["source_pending_transaction_id"] as? String, !pendingIDs.contains(source) {
+                throw LocalCompleteBackupError.invalidRows("local_income_records")
+            }
+        }
+        for row in rows["local_pending_transactions"] ?? [] {
+            let status = row["status"] as? String
+            if status == "done" || status == "converted" {
+                guard let kind = row["target_kind"] as? String,
+                      let id = row["target_id"] as? String,
+                      ["expense", "income"].contains(kind), sources[kind]?.contains(id) == true else {
+                    throw LocalCompleteBackupError.invalidRows("local_pending_transactions")
+                }
+            }
+        }
+        for row in rows["local_staging_records"] ?? [] {
+            guard let id = row["target_record_id"] as? String else { continue }
+            let targets = (row["resolved_action"] as? String) == "liability_repayment_confirmed" ? cycles : records
+            guard targets.contains(id) else { throw LocalCompleteBackupError.invalidRows("local_staging_records") }
         }
         for row in rows["local_wallet_snapshots"] ?? [] {
             let linkedAccountID = row["linked_account_id"] as? String
@@ -469,6 +522,9 @@ final class LocalCompleteBackupPortability {
         let imageHashes = Dictionary(uniqueKeysWithValues: images.map { ($0.path, $0.hash) })
         for (table, statusField, activeStatuses) in [
             ("local_records", "deleted_at", Set(["active"])),
+            ("local_expenses", "deleted_at", Set(["active"])),
+            ("local_income_records", "deleted_at", Set(["active"])),
+            ("local_pending_transactions", "status", Set(["pending"])),
             ("local_staging_records", "status", Set(["pending_review", "failed", "archived"])),
             ("local_image_intakes", "status", Set(["receiving", "failed"])),
             ("local_wallet_snapshots", "deleted_at", Set<String>())

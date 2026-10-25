@@ -3,6 +3,33 @@ import XCTest
 @testable import SnapCount
 
 final class LocalExpenseRepositoryTests: XCTestCase {
+    func testLF037UnboundExpenseHasNoLedgerUntilBoundAndUnbindRestoresBalance() throws {
+        let url = temporaryLocalDatabaseURL()
+        defer { removeLocalDatabase(at: url) }
+        let repository = try LocalExpenseRepository(database: LocalDatabase(databaseURL: url))
+        let fixture = try makeFixture(repository: repository)
+        let draft = LocalExpenseDraft(id: UUID(), profileID: fixture.profile.id, accountID: nil,
+            amountMinor: 2000, currency: "CNY", merchantName: "合成消费", platform: "",
+            category: "餐饮", paymentMethod: "现金", transactionDate: "2026-10-25",
+            transactionTime: nil, note: nil, createdAt: Date())
+        let original = try repository.createExpense(draft, operationID: UUID())
+        XCTAssertNil(original.accountID)
+        XCTAssertTrue(try repository.accountEntries(sourceID: draft.id).isEmpty)
+        let bound = try repository.updateExpense(LocalExpenseUpdate(id: draft.id, expectedVersion: 1,
+            accountID: fixture.account.id, amountMinor: 2000, currency: "CNY", merchantName: "合成消费",
+            platform: "", category: "餐饮", paymentMethod: "现金", transactionDate: "2026-10-25",
+            transactionTime: nil, note: nil, updatedAt: Date()), operationID: UUID())
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.account.id), 8000)
+        _ = try repository.updateExpense(LocalExpenseUpdate(id: draft.id, expectedVersion: bound.localVersion,
+            accountID: nil, amountMinor: 2000, currency: "CNY", merchantName: "合成消费", platform: "",
+            category: "餐饮", paymentMethod: "现金", transactionDate: "2026-10-25", transactionTime: nil,
+            note: nil, updatedAt: Date()), operationID: UUID())
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.account.id), 10000)
+        XCTAssertTrue(try repository.accountEntries(sourceID: draft.id).allSatisfy { $0.voidedAt != nil })
+        let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: url))
+        XCTAssertNil(try reopened.expense(id: draft.id)?.accountID)
+    }
+
     func testLF04004EqualVersionLiveSnapshotCannotChargeDeletedExpenseAgain() throws {
         let url = temporaryLocalDatabaseURL()
         defer { removeLocalDatabase(at: url) }

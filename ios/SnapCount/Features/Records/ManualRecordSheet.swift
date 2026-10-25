@@ -6,6 +6,7 @@ struct ManualRecordSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: NativeManualRecordDraft
     @State private var localMessage: String?
+    @State private var hasCommittedRecord = false
     @State private var showLocalCameraPicker = false
     @State private var showLocalPhotoLibraryPicker = false
     @State private var showLocalPhotoOptions = false
@@ -143,14 +144,15 @@ struct ManualRecordSheet: View {
                 VStack(spacing: 0) {
                     JieziFormTopBar(
                         title: sheetTitle,
-                        primaryTitle: stagingRecord == nil ? "保存" : "收下",
+                        primaryTitle: hasCommittedRecord ? "完成" : (stagingRecord == nil ? "保存" : "收下"),
                         isWorking: isSaving,
                         onCancel: { dismiss() },
-                        onSubmit: { Task { await save() } }
+                        onSubmit: { if hasCommittedRecord { dismiss() } else { Task { await save() } } }
                     )
 
                     ScrollView {
                         VStack(alignment: .leading, spacing: JieziSpacing.xl2) {
+                            Group {
                             recordContextSection
 
                             switch draft.kind {
@@ -168,9 +170,18 @@ struct ManualRecordSheet: View {
 
                             dateFields
                             noteSection
+                            }.disabled(hasCommittedRecord)
 
                             if let message = localMessage ?? appState.manualRecordMessage {
                                 JieziFormMessage(message: message)
+                            }
+                            if hasCommittedRecord, appState.localProjectionRefreshMessage != nil {
+                                Button("只重试列表刷新") {
+                                    Task {
+                                        await appState.retryLocalProjectionRefresh()
+                                        localMessage = appState.localProjectionRefreshMessage ?? "记录已保存，列表已刷新。"
+                                    }
+                                }
                             }
                         }
                         .padding(.horizontal, JieziSpacing.Semantic.page_padding)
@@ -218,8 +229,7 @@ struct ManualRecordSheet: View {
     }
 
     private var canAttachLocalImage: Bool {
-        draft.kind == .universal
-            && appState.supportsLocalDomainRecords
+        appState.supportsLocalDomainRecords
             && (draft.existingRawId == nil || draft.isLocalRecord)
     }
 
@@ -697,7 +707,10 @@ struct ManualRecordSheet: View {
             }
         } else if await appState.createManualRecord(draft, domain: selectedDomain) {
             onResolved?()
-            dismiss()
+            if let warning = appState.localProjectionRefreshMessage {
+                hasCommittedRecord = true
+                localMessage = warning
+            } else { dismiss() }
         } else {
             localMessage = appState.manualRecordMessage ?? "保存失败，请稍后重试。"
         }

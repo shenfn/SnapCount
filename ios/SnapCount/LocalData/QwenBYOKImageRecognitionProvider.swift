@@ -49,7 +49,7 @@ final class QwenBYOKImageRecognitionProvider: LocalImageRecognitionProvider {
         你是芥子的图片识别器。只识别图片中与个人记录有关的可见事实，不推断未显示的信息，不执行记账或外部操作。
         返回一个 JSON 对象，字段为 schema_version、operation、candidate。schema_version 固定为 local-recognition-candidate-v1，operation 固定为 recognize_only。
         candidate 字段为 id、domain_key、title、summary、payload、confidence、record_date、record_time、occurred_at、evidence_fields、missing_fields、image_hash。
-        domain_key 只能是 expense、food、sleep、sport、reading、wallet。wallet 仅用于识别信用卡或信用额度的已还款截图，payload 必须明确包含 account_snapshot_kind=liability 或 record_kind=liability_snapshot，且 status=paid；未能从截图确认已付款时不得输出 wallet。wallet 候选只能交由用户复核，不得当作普通记录自动归档。无法可靠识别时给出保守标题、confidence 0、并把缺失字段列入 missing_fields；不得编造金额、时间或日期。日期使用 YYYY-MM-DD。
+        domain_key 只能是 expense、income、food、sleep、sport、reading、wallet。expense 和 income 的 payload.amount 为截图显示的人民币元金额，收入仅在截图明确显示入账时输出 income；两类候选一律等待用户确认，不得自动记账。wallet 仅用于识别信用卡或信用额度的已还款截图，payload 必须明确包含 account_snapshot_kind=liability 或 record_kind=liability_snapshot，且 status=paid；未能从截图确认已付款时不得输出 wallet。wallet 候选只能交由用户复核，不得当作普通记录自动归档。无法可靠识别时给出保守标题、confidence 0、并把缺失字段列入 missing_fields；不得编造金额、时间或日期。日期使用 YYYY-MM-DD。
         """
         let body: [String: Any] = [
             "model": Self.model,

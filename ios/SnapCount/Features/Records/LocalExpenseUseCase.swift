@@ -2,7 +2,7 @@ import Foundation
 
 struct LocalExpenseCommand: Equatable {
     let id: UUID
-    let accountID: UUID
+    let accountID: UUID?
     let amountText: String
     let currency: String
     let merchantName: String
@@ -13,6 +13,7 @@ struct LocalExpenseCommand: Equatable {
     let transactionTime: String?
     let note: String?
     let createdAt: Date
+    var imageData: Data? = nil
 }
 
 struct LocalIncomeCommand: Equatable {
@@ -26,12 +27,13 @@ struct LocalIncomeCommand: Equatable {
     let occurredAt: Date?
     let note: String?
     let createdAt: Date
+    var imageData: Data? = nil
 }
 
 struct LocalExpenseUpdateCommand: Equatable {
     let id: UUID
     let expectedVersion: Int64
-    let accountID: UUID
+    let accountID: UUID?
     let amountText: String
     let currency: String
     let merchantName: String
@@ -42,6 +44,8 @@ struct LocalExpenseUpdateCommand: Equatable {
     let transactionTime: String?
     let note: String?
     let updatedAt: Date
+    var imageData: Data? = nil
+    var removeImage: Bool = false
 }
 
 struct LocalExpenseDeleteCommand: Equatable {
@@ -179,15 +183,24 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
     private let profileStore: LocalProfileStoreProtocol
     private let repository: LocalExpenseRepositoryProtocol
     private let operationIDProvider: () -> UUID
+    private let imageStore: LocalImageStore?
 
     init(
         profileStore: LocalProfileStoreProtocol,
         repository: LocalExpenseRepositoryProtocol,
-        operationIDProvider: @escaping () -> UUID = UUID.init
+        operationIDProvider: @escaping () -> UUID = UUID.init,
+        imageStore: LocalImageStore? = nil
     ) {
         self.profileStore = profileStore
         self.repository = repository
         self.operationIDProvider = operationIDProvider
+        self.imageStore = imageStore
+    }
+
+    private func saveImage(_ data: Data?) throws -> LocalImageReference? {
+        guard let data else { return nil }
+        guard let imageStore else { throw LocalDataError.invalidRecord }
+        return try imageStore.save(data: data, owner: UUID().uuidString)
     }
 
     func prepareProfile() async throws -> LocalProfile {
@@ -298,11 +311,17 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
 
     func create(_ command: LocalExpenseCommand) async throws -> LocalExpenseOutcome {
         let profile = try profileStore.activeProfile()
-        guard try repository.accounts(profileID: profile.id).contains(where: { $0.id == command.accountID }) else {
-            throw LocalDataError.accountRequired
+        if let accountID = command.accountID {
+            guard try repository.accounts(profileID: profile.id).contains(where: { $0.id == accountID }) else {
+                throw LocalDataError.accountRequired
+            }
         }
-        let draft = try LocalExpenseMapper.createDraft(command, profileID: profile.id)
-        let expense = try repository.createExpense(draft, operationID: operationIDProvider())
+        var draft = try LocalExpenseMapper.createDraft(command, profileID: profile.id)
+        let image = try saveImage(command.imageData)
+        draft.imagePath = image?.path; draft.imageHash = image?.hash
+        let expense: LocalExpense
+        do { expense = try repository.createExpense(draft, operationID: operationIDProvider()) }
+        catch { try? imageStore?.remove(path: image?.path); throw error }
         return LocalExpenseOutcome(expense: expense, tombstone: nil, profileID: profile.id)
     }
 
@@ -318,14 +337,17 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
             throw LocalDataError.invalidRecord
         }
         guard amountMinor <= 99_999_999 else { throw LocalDataError.invalidAmount }
-        let draft = LocalIncomeDraft(
+        var draft = LocalIncomeDraft(
             id: command.id, profileID: profile.id, accountID: command.accountID,
             amountMinor: amountMinor,
             currency: command.currency, sourceName: name, category: category,
             incomeDate: command.incomeDate, occurredAt: command.occurredAt,
             note: command.note, createdAt: command.createdAt
         )
-        return try repository.createIncome(draft)
+        let image = try saveImage(command.imageData)
+        draft.imagePath = image?.path; draft.imageHash = image?.hash
+        do { return try repository.createIncome(draft) }
+        catch { try? imageStore?.remove(path: image?.path); throw error }
     }
 
     func income(id: UUID) async throws -> LocalIncome? {
@@ -351,7 +373,7 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
               update.occurredAt.map({ NativeLocalDate.dateKey($0) == update.incomeDate }) ?? true else {
             throw LocalDataError.invalidRecord
         }
-        let scopedUpdate = LocalIncomeUpdate(
+        var scopedUpdate = LocalIncomeUpdate(
             id: update.id, profileID: profile.id, expectedVersion: update.expectedVersion,
             accountID: update.accountID, amountMinor: update.amountMinor, currency: update.currency,
             sourceName: update.sourceName.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -359,7 +381,12 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
             incomeDate: update.incomeDate, occurredAt: update.occurredAt, note: update.note,
             updatedAt: update.updatedAt
         )
-        let value = try repository.updateIncome(scopedUpdate)
+        let image = try saveImage(update.imageData)
+        scopedUpdate.imagePath = image?.path; scopedUpdate.imageHash = image?.hash
+        scopedUpdate.removeImage = update.removeImage
+        let value: LocalIncome
+        do { value = try repository.updateIncome(scopedUpdate) }
+        catch { try? imageStore?.remove(path: image?.path); throw error }
         guard value.profileID == profile.id else { throw LocalDataError.invalidIdentifier }
         return value
     }
@@ -395,14 +422,21 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
 
     func update(_ command: LocalExpenseUpdateCommand) async throws -> LocalExpenseOutcome {
         let profile = try profileStore.activeProfile()
-        let update = try LocalExpenseMapper.update(command)
-        let expense = try repository.updateExpense(update, operationID: operationIDProvider())
+        guard try repository.expense(id: command.id)?.profileID == profile.id else { throw LocalDataError.invalidIdentifier }
+        var update = try LocalExpenseMapper.update(command)
+        let image = try saveImage(command.imageData)
+        update.imagePath = image?.path; update.imageHash = image?.hash
+        update.removeImage = command.removeImage
+        let expense: LocalExpense
+        do { expense = try repository.updateExpense(update, operationID: operationIDProvider()) }
+        catch { try? imageStore?.remove(path: image?.path); throw error }
         guard expense.profileID == profile.id else { throw LocalDataError.invalidIdentifier }
         return LocalExpenseOutcome(expense: expense, tombstone: nil, profileID: profile.id)
     }
 
     func delete(_ command: LocalExpenseDeleteCommand) async throws -> LocalExpenseOutcome {
         let profile = try profileStore.activeProfile()
+        guard try repository.expense(id: command.id)?.profileID == profile.id else { throw LocalDataError.invalidIdentifier }
         let tombstone = try repository.deleteExpense(
             id: command.id,
             expectedVersion: command.expectedVersion,

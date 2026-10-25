@@ -65,25 +65,28 @@ final class LocalImageRecognitionUseCase {
     private let imageStore: LocalImageStore
     private let intakeRepository: LocalImageIntakeRepository
     private let provider: LocalImageRecognitionProvider
-    private let isRecognitionRequestCurrent: () -> Bool
+    private let isRecognitionRequestCurrent: @MainActor () -> Bool
+    private let pendingRepository: LocalPendingFinancialRepository?
 
     init(
         localRecordUseCase: LocalRecordUseCaseProtocol,
         imageStore: LocalImageStore,
         intakeRepository: LocalImageIntakeRepository,
         provider: LocalImageRecognitionProvider,
-        isRecognitionRequestCurrent: @escaping () -> Bool = { true }
+        isRecognitionRequestCurrent: @escaping @MainActor () -> Bool = { true },
+        pendingRepository: LocalPendingFinancialRepository? = nil
     ) {
         self.localRecordUseCase = localRecordUseCase
         self.imageStore = imageStore
         self.intakeRepository = intakeRepository
         self.provider = provider
         self.isRecognitionRequestCurrent = isRecognitionRequestCurrent
+        self.pendingRepository = pendingRepository
     }
 
     static func makeDefault(
         provider: LocalImageRecognitionProvider,
-        isRecognitionRequestCurrent: @escaping () -> Bool = { true }
+        isRecognitionRequestCurrent: @escaping @MainActor () -> Bool = { true }
     ) throws -> LocalImageRecognitionUseCase {
         let database = try LocalDatabase()
         let imageStore = try LocalImageStore()
@@ -98,7 +101,8 @@ final class LocalImageRecognitionUseCase {
             imageStore: imageStore,
             intakeRepository: LocalImageIntakeRepository(database: database),
             provider: provider,
-            isRecognitionRequestCurrent: isRecognitionRequestCurrent
+            isRecognitionRequestCurrent: isRecognitionRequestCurrent,
+            pendingRepository: LocalPendingFinancialRepository(database: database)
         )
     }
 
@@ -115,6 +119,9 @@ final class LocalImageRecognitionUseCase {
         if let completed = try intakeRepository.intake(id: intakeID, profileID: profile.id),
            completed.status == .completed {
             let recordID = Self.uuidFromHash(imageHash)
+            if try pendingRepository?.hasProcessedTransaction(profileID: profile.id, id: recordID) == true {
+                return LocalImageIntakeOutcome(result: .financialPending(recordID), imageHash: imageHash)
+            }
             if let record = try await localRecordUseCase.record(id: recordID) {
                 return LocalImageIntakeOutcome(
                     result: .archived(LocalRecordOutcome(record: record, profileID: profile.id)),
@@ -299,9 +306,26 @@ final class LocalImageRecognitionUseCase {
             filename: filename,
             uploadToken: uploadToken
         ))
-        guard isRecognitionRequestCurrent() else { throw CancellationError() }
+        guard await isRecognitionRequestCurrent() else { throw CancellationError() }
         guard try intakeRepository.isReceiving(id: intakeID, profileID: profileID, operationID: operationID) else {
             throw CancellationError()
+        }
+        if ["expense", "income"].contains(recognized.domainKey), let pendingRepository {
+            let id = Self.uuidFromHash(imageHash)
+            let rawAmount = recognized.payload["amount"]?.value
+            let amountText = rawAmount.map { String(describing: $0) } ?? "0"
+            let amount = (try? LocalExpenseMapper.amountMinor(amountText)) ?? 0
+            try pendingRepository.stage(LocalPendingFinancialRecord(id: id, profileID: profileID,
+                amountMinor: amount, currency: "CNY", merchantName: recognized.title,
+                transactionDate: recognized.recordDate, transactionTime: recognized.recordTime,
+                occurredAt: recognized.occurredAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+                createdAt: createdAt, imagePath: imageReference.path, imageHash: imageHash,
+                preferredKind: NativePendingEntryKind(rawValue: recognized.domainKey) ?? .expense))
+            // The pending fact now owns this exact original path; do not remove
+            // it as if it were a redundant universal-domain intake copy.
+            try intakeRepository.markCompleted(id: intakeID, profileID: profileID,
+                operationID: operationID, cleanupMessage: nil, at: Date())
+            return LocalImageIntakeOutcome(result: .financialPending(id), imageHash: imageHash)
         }
         guard !recognized.domainKey.isEmpty,
               !recognized.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

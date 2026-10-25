@@ -7,6 +7,58 @@ import CoreText
 /// 合成事实的原生渲染证据，只证明能生成图片，不代替视觉、手势或真机性能验收。
 @MainActor
 final class IOSPrototypeRenderingTests: XCTestCase {
+    /// LF-034/LF-036/LF-037: real local writes feed the actual pages.
+    /// Captures prove native rendering of synthetic facts, not device gestures.
+    func testLF034FinancialScenesUseCommittedLocalFactsAndOriginalImages() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("local-scenes-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("scene.sqlite"))
+        let profiles = LocalProfileStore(database: database)
+        let profile = try profiles.activeProfile()
+        let images = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images"))
+        let repository = try LocalExpenseRepository(database: database)
+        let account = try repository.createAccount(LocalAccountDraft(id: UUID(), profileID: profile.id,
+            name: "合成现金", kind: "cash", currency: "CNY", openingBalanceMinor: 10_000, createdAt: Date()))
+        let pending = LocalPendingFinancialRepository(database: database)
+        let state = AppState(localExpenseUseCase: LocalExpenseUseCase(profileStore: profiles, repository: repository, imageStore: images),
+            localRecordUseCase: LocalRecordUseCase(profileStore: profiles, repository: try LocalRecordRepository(database: database), imageStore: images),
+            localFactReader: try LocalFactReader(database: database), localImageStore: images,
+            localPendingFinancialRepository: pending, localFinancialBindingRepository: try LocalFinancialBindingRepository(database: database),
+            localBindingRepository: profiles,
+            sessionProvider: { _ in XCTFail("本机场景不能请求云会话"); throw SupabaseRemoteError.missingSession })
+        let sample = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 160)).image { context in
+            UIColor.systemOrange.setFill(); context.fill(CGRect(x: 0, y: 0, width: 240, height: 160))
+            ("合成午餐 ¥20" as NSString).draw(at: CGPoint(x: 20, y: 60), withAttributes: [.foregroundColor: UIColor.black])
+        }
+        var draft = NativeManualRecordDraft(kind: .expense)
+        draft.accountId = account.id.uuidString; draft.amountText = "20"; draft.title = "合成午餐"
+        draft.platform = "线下"; draft.category = "food"; draft.paymentMethod = "现金"
+        draft.imageData = try XCTUnwrap(sample.jpegData(compressionQuality: 0.8))
+        let created = await state.createManualRecord(draft, domain: nil)
+        XCTAssertTrue(created)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 8000)
+        await state.loadAccounts()
+        try await capture(NavigationStack { AccountsView() }.environmentObject(state), name: "local-cash100-expense20-balance80", height: 844)
+        let record = try XCTUnwrap(state.recordGroups(monthKey: NativeMonthKey.current()).flatMap(\.records).first)
+        await state.loadRecordDetail(reference: record.reference, force: true)
+        let detail = try XCTUnwrap(state.selectedRecordDetail)
+        XCTAssertNotNil(detail.imageURL)
+        try await capture(NavigationStack { RecordDetailView(reference: record.reference) }.environmentObject(state)
+            .environmentObject(JieziThemeManager.shared), name: "local-expense-original-detail", height: 1000)
+        try await capture(ManualRecordSheet(editing: detail).environmentObject(state)
+            .environmentObject(JieziThemeManager.shared), name: "local-expense-edit-original", height: 1000)
+        var edit = NativeManualRecordDraft(detail: detail)
+        edit.amountText = "30"
+        let edited = await state.createManualRecord(edit, domain: nil)
+        XCTAssertTrue(edited)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 7000)
+        let deleted = await state.deleteRecord(reference: record.reference)
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 10000)
+        await state.loadAccounts()
+        try await capture(NavigationStack { AccountsView() }.environmentObject(state), name: "local-delete-restores-balance100", height: 844)
+    }
+
     func testIOSV2POLISH003P1ExportTimelineWithCoincidentFallbackAndUnknownTimes() async throws {
         let date = "2026-10-17"
         let records = ["早餐", "咖啡", "补录", "未填时间"].enumerated().map { index, title in

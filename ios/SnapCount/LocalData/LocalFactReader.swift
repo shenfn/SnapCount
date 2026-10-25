@@ -125,7 +125,6 @@ final class LocalFactReader {
     private static func fact(expenseRow row: Row) throws -> LocalFact {
         guard let id = UUID(uuidString: row["id"]),
               let profileID = UUID(uuidString: row["profile_id"]),
-              let accountID = UUID(uuidString: row["account_id"]),
               let transactionDate: String = row["transaction_date"],
               let createdAt: Date = row["created_at"],
               let updatedAt: Date = row["updated_at"] else {
@@ -134,7 +133,7 @@ final class LocalFactReader {
         return fact(from: LocalExpense(
             id: id,
             profileID: profileID,
-            accountID: accountID,
+            accountID: (row["account_id"] as String?).flatMap(UUID.init(uuidString:)),
             amountMinor: row["amount_minor"],
             currency: row["currency"],
             merchantName: row["merchant_name"],
@@ -146,7 +145,7 @@ final class LocalFactReader {
             note: row["note"],
             localVersion: row["local_version"],
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"]
         ))
     }
 
@@ -163,7 +162,7 @@ final class LocalFactReader {
             amountMinor: row["amount_minor"], currency: row["currency"],
             sourceName: row["source_name"], category: row["category"],
             incomeDate: incomeDate, occurredAt: row["occurred_at"], note: row["note"],
-            localVersion: row["local_version"], createdAt: createdAt, updatedAt: updatedAt
+            localVersion: row["local_version"], createdAt: createdAt, updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"]
         )
         return fact(from: income)
     }
@@ -211,7 +210,7 @@ final class LocalFactReader {
             transactionDate: expense.transactionDate,
             transactionTime: expense.transactionTime,
             note: expense.note,
-            accountID: expense.accountID.uuidString
+            accountID: expense.accountID?.uuidString
         )
         let payloadJSON = (try? encode(payload)) ?? "{}"
         return LocalFact(
@@ -232,8 +231,8 @@ final class LocalFactReader {
                 timeKey: expense.transactionTime
             ),
             note: expense.note,
-            imagePath: nil,
-            imageHash: nil,
+            imagePath: expense.imagePath,
+            imageHash: expense.imageHash,
             localVersion: expense.localVersion,
             createdAt: expense.createdAt,
             updatedAt: expense.updatedAt
@@ -254,7 +253,7 @@ final class LocalFactReader {
             payloadJSON: (try? encode(payload)) ?? "{}", businessDate: income.incomeDate,
             recordTime: income.occurredAt.map { NativeLocalDate.timeKey($0) },
             occurredAt: income.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
-            note: income.note, imagePath: nil, imageHash: nil,
+            note: income.note, imagePath: income.imagePath, imageHash: income.imageHash,
             localVersion: income.localVersion, createdAt: income.createdAt, updatedAt: income.updatedAt
         )
     }
@@ -322,7 +321,7 @@ private struct ExpenseFactPayload: Encodable {
     let transactionDate: String
     let transactionTime: String?
     let note: String?
-    let accountID: String
+    let accountID: String?
 
     enum CodingKeys: String, CodingKey {
         case amountMinor = "amount_minor"

@@ -135,6 +135,7 @@ struct NativeManualRecordDraft {
     var imageData: Data?
     var existingImageData: Data?
     var removeImage = false
+    var localVersion: Int64?
     var isLocalRecord = false
 
     init(
@@ -165,9 +166,18 @@ struct NativeManualRecordDraft {
     }
 
     init(detail: NativeRecordDetail) {
-        self.init(kind: .universal, domainKey: detail.domainKey ?? detail.category ?? "sport")
+        let kind: NativeManualRecordKind = detail.kind == "expense" ? .expense : detail.kind == "income" ? .income : .universal
+        self.init(kind: kind, domainKey: detail.domainKey ?? detail.category ?? "sport")
         existingRawId = detail.rawId
+        localVersion = detail.localVersion
         isLocalRecord = detail.status == "local"
+        accountId = detail.accountId
+        if kind != .universal {
+            amountText = detail.amount.map { String(format: "%.2f", $0) } ?? ""
+            platform = detail.platform ?? ""
+            category = detail.category ?? ""
+            paymentMethod = detail.paymentMethod ?? ""
+        }
         originalPayload = detail.payload ?? [:]
         title = detail.title
         note = detail.note ?? ""

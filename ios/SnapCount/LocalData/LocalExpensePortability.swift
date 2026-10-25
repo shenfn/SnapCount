@@ -31,7 +31,7 @@ struct LocalExpenseArchive: Codable, Equatable {
     struct Expense: Codable, Equatable {
         let id: UUID
         let profileID: UUID
-        let accountID: UUID
+        let accountID: UUID?
         let amountMinor: Int64
         let currency: String
         let merchantName: String
@@ -293,7 +293,7 @@ final class LocalExpensePortability {
                         arguments: [
                             expense.id.uuidString,
                             destinationProfileID.uuidString,
-                            expense.accountID.uuidString,
+                            expense.accountID?.uuidString,
                             expense.amountMinor,
                             expense.currency,
                             expense.merchantName,
@@ -371,7 +371,7 @@ final class LocalExpensePortability {
                 )
                 insertedOutbox += 1
             }
-            for expense in archive.expenses where enqueueOutbox && insertedExpenseIDs.contains(expense.id) {
+            for expense in archive.expenses where enqueueOutbox && expense.accountID != nil && insertedExpenseIDs.contains(expense.id) {
                 try db.execute(
                     sql: """
                         INSERT INTO local_outbox_operations (
@@ -423,7 +423,7 @@ final class LocalExpensePortability {
         let expenseIDs = Set(archive.expenses.map(\.id))
         guard archive.accounts.allSatisfy({ $0.profileID == archive.profile.id }),
               archive.expenses.allSatisfy({
-                  $0.profileID == archive.profile.id && accountIDs.contains($0.accountID)
+                  $0.profileID == archive.profile.id && ($0.accountID.map { accountIDs.contains($0) } ?? true)
               }),
               archive.accountEntries.allSatisfy({
                   $0.profileID == archive.profile.id
@@ -458,7 +458,7 @@ final class LocalExpensePortability {
         LocalExpenseArchive.Expense(
             id: UUID(uuidString: row["id"])!,
             profileID: UUID(uuidString: row["profile_id"])!,
-            accountID: UUID(uuidString: row["account_id"])!,
+            accountID: (row["account_id"] as String?).flatMap(UUID.init(uuidString:)),
             amountMinor: row["amount_minor"],
             currency: row["currency"],
             merchantName: row["merchant_name"],
@@ -565,7 +565,7 @@ private struct ImportedExpenseOutboxPayload: Encodable {
     let profileID: UUID
     let type: String
     let source: String
-    let accountID: UUID
+    let accountID: UUID?
     let amountMinor: Int64
     let currency: String
     let merchantName: String

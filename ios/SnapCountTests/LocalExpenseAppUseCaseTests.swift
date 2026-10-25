@@ -4,7 +4,7 @@ import GRDB
 
 final class LocalExpenseAppUseCaseTests: XCTestCase {
     @MainActor
-    func testLF03601FinancialManualInputMustNotSucceedWithoutKeepingItsImage() async throws {
+    func testLF03601FinancialManualInputTransfersOriginalToDurableFinancialReferences() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
         let database = try LocalDatabase(databaseURL: databaseURL)
@@ -20,8 +20,9 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         let records = LocalRecordUseCase(profileStore: profileStore,
                                         repository: try LocalRecordRepository(database: database), imageStore: images)
         let intakeRepository = LocalImageIntakeRepository(database: database)
-        let useCase = LocalExpenseUseCase(profileStore: profileStore, repository: repository)
+        let useCase = LocalExpenseUseCase(profileStore: profileStore, repository: repository, imageStore: images)
         let state = AppState(localExpenseUseCase: useCase, localRecordUseCase: records,
+                             localFactReader: try LocalFactReader(database: database),
                              localImageStore: images, localImageIntakeRepository: intakeRepository,
                              sessionProvider: { _ in throw SupabaseRemoteError.missingSession })
         let bytes = Data("synthetic-manual-financial-input".utf8)
@@ -31,19 +32,29 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
             draft.accountId = account.id.uuidString
             draft.amountText = "20.00"
             draft.title = "合成账务"
+            draft.platform = "线下"
             draft.category = "other"
             draft.paymentMethod = "现金"
             draft.imageData = bytes
             let saved = await state.createManualRecord(draft, domain: nil)
-            XCTAssertFalse(saved, "原图尚无财务持久引用时，不得报成功并触发onResolved丢弃输入")
+            XCTAssertTrue(saved, "成功必须意味着事实和原图引用都已持久化")
             XCTAssertNotNil(state.manualRecordMessage)
-            XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), 10_000)
+            XCTAssertEqual(try repository.accountBalanceMinor(accountID: account.id), kind == .expense ? 8_000 : 10_000)
             XCTAssertEqual(try images.data(at: intake.imagePath), bytes)
             XCTAssertNotNil(try intakeRepository.intake(id: intake.id, profileID: profile.id))
         }
-        XCTAssertEqual(try repository.expenseCount(), 0)
+        XCTAssertEqual(try repository.expenseCount(), 1)
         let incomes = try await useCase.incomes(String(NativeLocalDate.dateKey(Date()).prefix(7)))
-        XCTAssertTrue(incomes.incomes.isEmpty)
+        XCTAssertEqual(incomes.incomes.count, 1)
+        let month = try LocalFactReader(database: database).month(profileID: profile.id, monthKey: NativeMonthKey.current())
+        XCTAssertEqual(month.facts.count, 2)
+        XCTAssertTrue(state.discardLocalImageIntake(matching: bytes), "模拟实际表单onResolved交接")
+        await state.retryLocalImageCleanups()
+        for fact in month.facts {
+            XCTAssertEqual(try images.data(at: XCTUnwrap(fact.imagePath)), bytes, "输入副本清理不能删除财务原图")
+            await state.loadRecordDetail(reference: fact.reference, force: true)
+            XCTAssertNotNil(state.selectedRecordDetail?.imageURL, "详情必须可达本机图")
+        }
     }
 
     @MainActor

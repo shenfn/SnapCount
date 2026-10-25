@@ -168,7 +168,7 @@ struct LocalLiabilityPayment: Equatable, Identifiable {
 struct LocalExpenseDraft: Equatable {
     let id: UUID
     let profileID: UUID
-    let accountID: UUID
+    let accountID: UUID?
     let amountMinor: Int64
     let currency: String
     let merchantName: String
@@ -179,12 +179,14 @@ struct LocalExpenseDraft: Equatable {
     let transactionTime: String?
     let note: String?
     let createdAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
 }
 
 struct LocalExpenseUpdate: Equatable {
     let id: UUID
     let expectedVersion: Int64
-    let accountID: UUID
+    let accountID: UUID?
     let amountMinor: Int64
     let currency: String
     let merchantName: String
@@ -195,12 +197,16 @@ struct LocalExpenseUpdate: Equatable {
     let transactionTime: String?
     let note: String?
     let updatedAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
+    var imageData: Data? = nil
+    var removeImage: Bool = false
 }
 
 struct LocalExpense: Equatable {
     let id: UUID
     let profileID: UUID
-    let accountID: UUID
+    let accountID: UUID?
     let amountMinor: Int64
     let currency: String
     let merchantName: String
@@ -213,6 +219,8 @@ struct LocalExpense: Equatable {
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
 }
 
 struct LocalIncomeDraft: Equatable {
@@ -227,6 +235,8 @@ struct LocalIncomeDraft: Equatable {
     let occurredAt: Date?
     let note: String?
     let createdAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
 }
 
 struct LocalIncomeUpdate: Equatable {
@@ -242,6 +252,10 @@ struct LocalIncomeUpdate: Equatable {
     let occurredAt: Date?
     let note: String?
     let updatedAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
+    var imageData: Data? = nil
+    var removeImage: Bool = false
 }
 
 struct LocalIncome: Equatable {
@@ -258,6 +272,8 @@ struct LocalIncome: Equatable {
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
+    var imagePath: String? = nil
+    var imageHash: String? = nil
 }
 
 struct LocalIncomeTombstone: Equatable {

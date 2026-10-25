@@ -54,7 +54,18 @@ struct MainShellView: View {
             }
             domainPager
         }
-        .safeAreaInset(edge: .top, spacing: 0) { shellTopBar }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 4) {
+                shellTopBar
+                if let warning = appState.localProjectionRefreshMessage {
+                    Button { Task { await appState.retryLocalProjectionRefresh() } } label: {
+                        Label(warning + " 点此重试读取", systemImage: "arrow.clockwise")
+                            .font(.footnote)
+                            .padding(.horizontal)
+                    }
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) { shellBottomBar }
     }
 
@@ -132,11 +143,11 @@ struct MainShellView: View {
     private var syncStatusIcon: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
-                Image(systemName: appState.isSignedIn ? "icloud" : "iphone")
+                Image(systemName: appState.isSynchronizingLocalData ? "arrow.triangle.2.circlepath" : "iphone")
                     .frame(minWidth: 44, minHeight: 44)
             } else {
-                Label(appState.isSignedIn ? "已登录" : "本地模式",
-                      systemImage: appState.isSignedIn ? "icloud" : "iphone")
+                Label(appState.isSynchronizingLocalData ? "同步中" : "本机数据",
+                      systemImage: appState.isSynchronizingLocalData ? "arrow.triangle.2.circlepath" : "iphone")
                     .fixedSize()
             }
         }
@@ -145,7 +156,7 @@ struct MainShellView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(scene.surface.opacity(0.55), in: Capsule())
-            .accessibilityLabel(appState.isSignedIn ? "已登录" : "本地模式")
+            .accessibilityLabel(appState.isSynchronizingLocalData ? "本机数据，正在同步授权范围" : "本机数据，点击查看同步设置")
     }
 
     // MARK: - 底部栏（SHELL-003）

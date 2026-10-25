@@ -95,6 +95,11 @@ struct SettingsView: View {
                     } label: {
                         settingsRow("数据导出", detail: "导出支出、收入和通用记录", systemImage: "square.and.arrow.up")
                     }
+                    NavigationLink {
+                        LocalHistoryMigrationView()
+                    } label: {
+                        settingsRow("历史云数据迁入本机", detail: "先只读预检，再确认恢复", systemImage: "icloud.and.arrow.down")
+                    }
                 }
 
                 Section("AI 能力") {
@@ -145,7 +150,7 @@ struct SettingsView: View {
                     } label: {
                         settingsRow(
                             "快捷指令设置",
-                            detail: appState.hasUploadToken ? "凭据已同步" : "需要重新登录同步凭据",
+                            detail: appState.localVisionMode == .disabled ? "AI 已关闭，可保存到本机收件箱" : (appState.localVisionMode == .byok ? "使用本机 BYOK 凭据" : (appState.hasUploadToken ? "Hosted 凭据已同步" : "Hosted 凭据暂不可用")),
                             systemImage: "wand.and.stars"
                         )
                     }
@@ -186,7 +191,7 @@ struct SettingsView: View {
                     Button(role: .destructive) {
                         showDeleteAccountConfirmation = true
                     } label: {
-                        Label("删除账户及全部数据", systemImage: "person.crop.circle.badge.xmark")
+                        Label("删除云端账户及云端数据", systemImage: "person.crop.circle.badge.xmark")
                     }
                     .disabled(appState.isDeletingAccount)
                 }
@@ -235,12 +240,12 @@ struct SettingsView: View {
         .navigationTitle("设置")
         .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .alert("永久删除账户？", isPresented: $showDeleteAccountConfirmation) {
-            Button("删除账户及全部数据", role: .destructive) {
+            Button("删除云端账户及云端数据", role: .destructive) {
                 Task { _ = await appState.deleteAccount() }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("这会删除云端记录、账户流水、AI 识别数据和原图，且无法恢复。")
+            Text("这会永久删除云端账户及其云端记录和原图。本机数据库、原图与导出的备份仍保留。")
         }
         .sheet(isPresented: $showLogin) {
             NavigationStack { LoginView() }
@@ -552,7 +557,7 @@ struct PrivacySettingsView: View {
 
     var body: some View {
         Form {
-            Section("识别数据") {
+            Section("Hosted 云端识别数据") {
                 Toggle("AI 日志记录", isOn: asyncToggle(appState.userSettings.aiLogsEnabled, appState.setAILogsEnabled))
                 Toggle("Prompt 优化参与", isOn: asyncToggle(appState.userSettings.promptOptimizationEnabled, appState.setPromptOptimizationEnabled))
                 Text("Prompt 优化开启后会保留脱敏后的模型原始输出，默认关闭。")
@@ -563,7 +568,9 @@ struct PrivacySettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Section("截图原图留存") {
+            Section("云端截图原图留存") {
+                Text("以下期限仅影响云端原图。本机收件箱、财务和四域原图按本机记录引用保留；删除云图不会删除本机副本。")
+                    .font(.footnote).foregroundStyle(.secondary)
                 retentionButton("不保留", value: 0)
                 retentionButton("保留 7 天", value: 7)
                 retentionButton("保留 30 天", value: 30)
@@ -649,6 +656,42 @@ struct PrivacySettingsView: View {
     }
 }
 
+struct LocalHistoryMigrationView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var showsConfirmation = false
+
+    var body: some View {
+        Form {
+            Section("迁移范围") {
+                Text("读取当前登录云账户的账户、流水、还款、消费、收入、四域记录、候选和原图。预检不写本机数据，也不会自动开启云同步。")
+                Text("遇到缺图、余额不一致、无法等价恢复的历史状态或同ID内容冲突时，整包停止并显示原因。中断后可重新预检，已恢复的相同事实不会重复入账。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section {
+                Button("只读预检云端历史") { Task { await appState.prepareCloudHistoryMigration() } }
+                    .disabled(!appState.isSignedIn || appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
+                if !appState.isSignedIn { Text("请先登录要迁入的云账户。") }
+                if appState.isPreparingHistoryMigration { ProgressView("正在核对源数据与图片") }
+                if let preview = appState.historyMigrationPreview {
+                    Text(preview).font(.footnote).textSelection(.enabled)
+                    Button("确认恢复到本机") { showsConfirmation = true }
+                        .disabled(appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
+                }
+                if let message = appState.historyMigrationMessage {
+                    Text(message).font(.footnote).textSelection(.enabled)
+                }
+            }
+        }
+        .navigationTitle("历史数据迁移")
+        .confirmationDialog("确认将预检中的历史恢复到本机？", isPresented: $showsConfirmation, titleVisibility: .visible) {
+            Button("确认恢复") { Task { _ = await appState.confirmCloudHistoryMigration() } }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("确认前会再次核对云端源数据。恢复不删除云副本，不改变云同步授权。建议先导出完整本地备份。")
+        }
+    }
+}
+
 struct DataExportView: View {
     @EnvironmentObject private var appState: AppState
     @State private var request = NativeDataExportRequest()
@@ -671,10 +714,8 @@ struct DataExportView: View {
                 Picker("文件格式", selection: $request.format) {
                     ForEach(NativeExportFormat.allCases) { Text($0.title).tag($0) }
                 }
-                if request.content == .universal {
-                    Toggle("包含完整 payload", isOn: $request.includeFullPayload)
-                    Toggle("包含本地图片", isOn: $request.includeImages)
-                }
+                Toggle("包含完整 payload", isOn: $request.includeFullPayload)
+                Toggle("包含本地图片", isOn: $request.includeImages)
             }
             Section {
                 Button {

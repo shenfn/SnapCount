@@ -1,0 +1,193 @@
+import Foundation
+import GRDB
+
+enum LocalHistoryMappingError: Error, LocalizedError {
+    case unsupported(String)
+    var errorDescription: String? { if case .unsupported(let reason) = self { return reason }; return nil }
+}
+
+/// Produces a recovery archive, never writes into the user's database.
+final class LocalHistoryMigrationMapper {
+    private let schema: LocalDatabase
+    init(schema: LocalDatabase) { self.schema = schema }
+
+    func buildArchive(_ inspection: LocalHistoryMigrationInspection, profileID: UUID, images: [String: Data], at now: Date = Date()) throws -> Data {
+        var tables: [String: [[String: Any]]] = [:]
+        var imageFiles: [String: [String: Any]] = [:]
+        let walletIDs = Set(inspection.rows[.records, default: []].filter { ($0["domain_key"]?.value as? String) == "wallet" }.compactMap { ($0["id"]?.value as? String)?.lowercased() })
+        try reconcile(inspection)
+        for source in LocalHistorySourceTable.allCases {
+            let raw = try JSONEncoder().encode(inspection.rows[source, default: []])
+            guard let rows = try JSONSerialization.jsonObject(with: raw) as? [[String: Any]] else { throw LocalDataError.invalidRecord }
+            for row in rows {
+                let id = try text(row, "id")
+                guard UUID(uuidString: id) != nil else { throw LocalDataError.invalidIdentifier }
+                guard let owner = row["user_id"] as? String,
+                      UUID(uuidString: owner) == UUID(uuidString: inspection.cloudUserID) else { throw LocalHistoryMigrationError.identityMismatch }
+                var table: String
+                var mapped: [String: Any] = ["id": id.uppercased(), "profile_id": profileID.uuidString]
+                func copy(_ source: String, _ target: String? = nil) { if let value = row[source], !(value is NSNull) { mapped[target ?? source] = value } }
+                func minor(_ source: String, _ target: String) throws { if let value = row[source], !(value is NSNull) { mapped[target] = try Self.minor(value) } }
+                switch source {
+                case .accounts:
+                    table = "local_accounts"
+                    for key in ["name", "currency", "institution", "last4", "bill_day", "payment_due_day", "auto_debit_account_id", "auto_confirm_repayment", "grace_period_days", "is_default_expense", "is_default_income", "is_archived", "last_reconciled_at", "created_at", "updated_at"] { copy(key) }
+                    copy("type", "kind"); try minor("initial_balance", "opening_balance_minor"); mapped["origin"] = "remote"
+                case .transactions:
+                    guard (row["type"] as? String) == "expense" else { throw LocalHistoryMappingError.unsupported("交易 \(id) 类型不是消费，需核对收入转换关系") }
+                    let pending = (row["status"] as? String) == "pending"
+                    table = pending ? "local_pending_transactions" : "local_expenses"
+                    guard pending || (row["status"] as? String) == "done" else { throw LocalDataError.invalidRecord }
+                    for key in ["account_id", "merchant_name", "platform", "category", "payment_method", "transaction_date", "transaction_time", "note", "created_at", "updated_at", "occurred_at"] { copy(key) }
+                    mapped["currency"] = row["currency"] ?? "CNY"
+                    try minor("amount", "amount_minor")
+                    if pending { mapped["status"] = "pending" }
+                case .incomes:
+                    table = "local_income_records"
+                    for key in ["account_id", "source_name", "category", "income_date", "occurred_at", "note", "created_at", "updated_at", "source_pending_transaction_id"] { copy(key) }
+                    mapped["currency"] = row["currency"] ?? "CNY"; try minor("amount", "amount_minor")
+                case .accountEntries:
+                    table = "local_account_entries"
+                    for key in ["account_id", "direction", "occurred_at"] { copy(key) }
+                    copy("entry_type", "entry_kind"); try minor("amount", "amount_minor")
+                    let sourceTable = row["source_table"] as? String
+                    let kinds = ["transactions": "expense", "income_records": "income", "liability_payments": "liability_payment", "data_records": "wallet_snapshot", "account_repayment_cycles": "repayment_cycle"]
+                    mapped["source_kind"] = sourceTable.flatMap { kinds[$0] } ?? "historical_entry"
+                    mapped["source_id"] = sourceTable.flatMap { kinds[$0] } == nil ? id : (row["source_id"] as? String ?? id)
+                    if (row["is_voided"] as? Bool) == true {
+                        throw LocalHistoryMappingError.unsupported("流水 \(id) 仅有作废布尔值，缺少本地voided_at语义兼容；不会伪造作废日期")
+                    }
+                case .repaymentCycles:
+                    table = "local_repayment_cycles"
+                    for key in ["account_id", "cycle_month", "statement_start_date", "statement_end_date", "due_date", "status", "auto_debit_account_id", "auto_confirm_repayment", "source", "evidence_record_id", "confidence", "note", "confirmed_at", "created_at", "updated_at"] { copy(key) }
+                    for key in ["statement_amount", "paid_amount", "remaining_amount", "carried_over_amount", "original_statement_amount", "min_payment_amount", "refund_applied_amount"] { try minor(key, key + "_minor") }
+                    if let evidence = mapped["evidence_record_id"] as? String, walletIDs.contains(evidence.lowercased()) {
+                        mapped.removeValue(forKey: "evidence_record_id"); mapped["evidence_wallet_snapshot_id"] = evidence
+                    }
+                case .payments:
+                    table = "local_liability_payments"
+                    for key in ["account_id", "statement_id", "debit_account_id", "paid_at", "source", "evidence_record_id", "status", "note", "created_at", "updated_at"] { copy(key) }
+                    try minor("amount", "amount_minor"); try minor("overpayment_amount", "overpayment_amount_minor")
+                    if let evidence = mapped["evidence_record_id"] as? String, walletIDs.contains(evidence.lowercased()) {
+                        throw LocalHistoryMappingError.unsupported("付款 \(id) 引用钱包证据，需本地付款wallet证据兼容；不会丢弃证据引用")
+                    }
+                case .records:
+                    let domain = try text(row, "domain_key")
+                    table = domain == "wallet" ? "local_wallet_snapshots" : "local_records"
+                    let payload = row["payload_jsonb"] as? [String: Any] ?? [:]
+                    mapped["payload_json"] = String(decoding: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]), as: UTF8.self)
+                    mapped["domain_key"] = domain
+                    for key in ["title", "summary", "occurred_at", "created_at", "updated_at", "linked_account_id", "account_snapshot_kind"] { copy(key) }
+                    mapped["record_date"] = try Self.day(try text(row, "occurred_at"))
+                    if domain == "wallet" {
+                        try minor("snapshot_balance", "snapshot_balance_minor")
+                        guard mapped["snapshot_balance_minor"] != nil else { throw LocalHistoryMappingError.unsupported("钱包 \(id) 缺少snapshot_balance") }
+                        mapped["currency"] = payload["currency"] ?? "CNY"
+                        if mapped["linked_account_id"] != nil { mapped["linked_action"] = "link" }
+                    } else {
+                        guard LocalRecordValidation.supportedDomainKeys.contains(domain) else { throw LocalHistoryMappingError.unsupported("不支持的域：\(domain)") }
+                        let version = row["domain_version"] as? String ?? "1.0"
+                        guard ["1", "1.0"].contains(version) else { throw LocalHistoryMappingError.unsupported("域版本 \(version) 需要显式迁移") }
+                        mapped["domain_version"] = 1; mapped["source_kind"] = "imported"
+                    }
+                case .staging:
+                    table = "local_staging_records"
+                    let payload = row["extracted_json"] as? [String: Any] ?? [:]
+                    let domain = try text(row, "detected_domain_key")
+                    guard LocalRecordValidation.supportedStagingDomainKeys.contains(domain) else { throw LocalHistoryMappingError.unsupported("候选 \(id) 域尚未支持") }
+                    let status = try text(row, "status")
+                    guard let localStatus = ["unassigned": "pending_review", "assigned": "archived", "discarded": "discarded", "failed": "failed"][status] else { throw LocalDataError.invalidRecord }
+                    guard let recordDate = payload["record_date"] as? String, NativeLocalDate.monthKey(from: recordDate) != nil else { throw LocalHistoryMappingError.unsupported("候选 \(id) 缺少真实业务日期") }
+                    if status == "assigned", domain == "wallet" { throw LocalHistoryMappingError.unsupported("钱包候选 \(id) 归档目标需核对还款/快照关系") }
+                    mapped["domain_key"] = domain; mapped["status"] = localStatus; mapped["record_date"] = recordDate
+                    mapped["payload_json"] = String(decoding: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]), as: UTF8.self)
+                    mapped["title"] = row["ai_summary"] ?? "历史候选"; mapped["summary"] = row["ai_summary"] ?? ""
+                    for key in ["confidence", "created_at", "updated_at", "target_record_id"] { copy(key) }
+                    mapped["source_kind"] = "imported"
+                }
+                let imagePath = (row["image_url"] ?? row["source_image_path"] ?? row["image_path"]) as? String
+                if let imagePath, !imagePath.isEmpty {
+                    guard let bytes = images[imagePath] else { throw LocalHistoryMappingError.unsupported("缺少原图：\(imagePath)") }
+                    let hash = LocalImageStore.sha256(bytes)
+                    if let expected = (row["image_hash"] ?? row["source_image_hash"]) as? String,
+                       expected.range(of: "^[0-9a-fA-F]{64}$", options: .regularExpression) != nil,
+                       expected.lowercased() != hash { throw LocalCompleteBackupError.invalidImage(imagePath) }
+                    let path = "records/history-\(hash).jpg"
+                    mapped["image_path"] = path; mapped["image_hash"] = hash
+                    imageFiles[path] = ["path": path, "hash": hash, "data": bytes.base64EncodedString()]
+                }
+                if mapped["updated_at"] == nil { mapped["updated_at"] = mapped["created_at"] }
+                let completed = try normalized(mapped, table: table)
+                tables[table, default: []].append(completed)
+            }
+        }
+        let allTables = ["local_accounts", "local_wallet_snapshots", "local_records", "local_expenses", "local_income_records", "local_staging_records", "local_repayment_cycles", "local_liability_payments", "local_account_entries", "local_image_intakes", "local_pending_transactions"]
+        var encoded: [String: String] = [:]
+        for table in allTables {
+            encoded[table] = String(decoding: try JSONSerialization.data(withJSONObject: tables[table, default: []], options: [.sortedKeys]), as: UTF8.self)
+        }
+        return try JSONSerialization.data(withJSONObject: ["format": "jiezi-local-complete-backup", "schemaVersion": LocalCompleteBackupPortability.currentSchemaVersion, "exportedAt": ISO8601DateFormatter().string(from: now), "profileID": profileID.uuidString, "tables": encoded, "images": Array(imageFiles.values)], options: [.sortedKeys])
+    }
+
+    private func normalized(_ values: [String: Any], table: String) throws -> [String: Any] {
+        try schema.writer.read { db in
+            var output: [String: Any] = [:]
+            for column in try Row.fetchAll(db, sql: "PRAGMA table_info(\(table))") {
+                let name: String = column["name"]
+                if ["operation_id", "cloud_user_id", "sync_enabled"].contains(name) { continue }
+                if let value = values[name] {
+                    if let string = value as? String, let uuid = UUID(uuidString: string) { output[name] = uuid.uuidString }
+                    else if name.hasSuffix("_at"), let string = value as? String {
+                        let iso = ISO8601DateFormatter()
+                        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        guard let date = iso.date(from: string) ?? ISO8601DateFormatter().date(from: string) else { throw LocalDataError.invalidRecord }
+                        let sql = DateFormatter(); sql.locale = Locale(identifier: "en_US_POSIX"); sql.timeZone = TimeZone(secondsFromGMT: 0); sql.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+                        output[name] = sql.string(from: date)
+                    } else { output[name] = value }
+                    continue
+                }
+                if let defaultSQL: String = column["dflt_value"] {
+                    let json = try String.fetchOne(db, sql: "SELECT json_quote(\(defaultSQL))") ?? "null"
+                    output[name] = try JSONSerialization.jsonObject(with: Data(json.utf8), options: [.fragmentsAllowed])
+                } else if (column["notnull"] as Int) == 0 { output[name] = NSNull() }
+                else { throw LocalHistoryMappingError.unsupported("\(table).\(name) 缺少可确认的源字段") }
+            }
+            return output
+        }
+    }
+
+    private func text(_ row: [String: Any], _ key: String) throws -> String {
+        guard let value = row[key] as? String, !value.isEmpty else { throw LocalDataError.invalidRecord }; return value
+    }
+    private func reconcile(_ inspection: LocalHistoryMigrationInspection) throws {
+        for account in inspection.rows[.accounts, default: []] {
+            guard let id = account["id"]?.value as? String,
+                  let opening = account["initial_balance"], let current = account["current_balance"] else { throw LocalDataError.invalidRecord }
+            var balance = try Self.minor(opening.value)
+            for entry in inspection.rows[.accountEntries, default: []] where (entry["account_id"]?.value as? String)?.lowercased() == id.lowercased() {
+                if (entry["is_voided"]?.value as? Bool) == true || (entry["entry_type"]?.value as? String) == "snapshot_initialization" { continue }
+                guard let amount = entry["amount"], let direction = entry["direction"]?.value as? String, ["in", "out"].contains(direction) else { throw LocalDataError.invalidRecord }
+                let delta = try Self.minor(amount.value)
+                guard delta > 0 else { throw LocalDataError.invalidRecord }
+                let sum = balance.addingReportingOverflow(direction == "in" ? delta : -delta)
+                guard !sum.overflow else { throw LocalDataError.invalidRecord }; balance = sum.partialValue
+            }
+            guard balance == (try Self.minor(current.value)) else { throw LocalHistoryMappingError.unsupported("账户 \(id) 的期初与有效流水不等于云端当前余额，迁移前必须核对") }
+        }
+    }
+    private static func minor(_ value: Any) throws -> Int64 {
+        guard let decimal = Decimal(string: String(describing: value), locale: Locale(identifier: "en_US_POSIX")) else { throw LocalDataError.invalidRecord }
+        let number = NSDecimalNumber(decimal: decimal * 100)
+        let result = number.int64Value
+        guard number == NSDecimalNumber(value: result) else { throw LocalDataError.invalidRecord }
+        return result
+    }
+    private static func day(_ value: String) throws -> String {
+        let date = String(value.prefix(10))
+        guard NativeLocalDate.monthKey(from: date) != nil else { throw LocalDataError.invalidRecord }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let parsed = formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value) else { throw LocalDataError.invalidRecord }
+        return NativeLocalDate.dateKey(parsed)
+    }
+}

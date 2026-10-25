@@ -79,7 +79,7 @@ struct UploadScreenshotIntent: AppIntent {
                                 notificationText: "AI 识别结果已自动记录到本机。",
                                 route: "records"
                             )
-                        case .staged:
+                        case .staged, .financialPending:
                             trialOutcome = .staged
                             result = ShortcutUploadResult(
                                 displayText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",

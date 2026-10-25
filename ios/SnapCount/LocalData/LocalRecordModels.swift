@@ -388,6 +388,7 @@ struct LocalStagingOutcome: Equatable {
 enum LocalRecordIntakeOutcome: Equatable {
     case archived(LocalRecordOutcome)
     case staged(LocalStagingOutcome)
+    case financialPending(UUID)
 }
 
 enum LocalRecordIntakeRoute: Equatable {
@@ -453,9 +454,11 @@ enum LocalRecordCodec {
             }
         case "sleep":
             if let minutes = numberValue(normalized["sleep_minutes"]) {
-                normalized["sleep_minutes"] = AnyCodable(Int(minutes.rounded()))
+                guard let value = Int(exactly: minutes.rounded()) else { throw LocalDataError.invalidRecord }
+                normalized["sleep_minutes"] = AnyCodable(value)
             } else if let hours = numberValue(normalized["sleep_hours"]) {
-                normalized["sleep_minutes"] = AnyCodable(Int((hours * 60).rounded()))
+                guard let value = Int(exactly: (hours * 60).rounded()) else { throw LocalDataError.invalidRecord }
+                normalized["sleep_minutes"] = AnyCodable(value)
             }
             normalized.removeValue(forKey: "sleep_hours")
             if requireFacts && positiveNumber(normalized["sleep_minutes"]) == nil {
@@ -539,7 +542,7 @@ enum LocalRecordValidation {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LocalDataError.invalidRecord
         }
-        guard recordDate.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else {
+        guard NativeLocalDate.monthKey(from: recordDate) != nil else {
             throw LocalDataError.invalidRecord
         }
         if let recordTime {

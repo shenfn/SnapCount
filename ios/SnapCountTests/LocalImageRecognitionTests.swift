@@ -3,6 +3,30 @@ import XCTest
 @testable import SnapCount
 
 final class LocalImageRecognitionTests: XCTestCase {
+    func testLF03731RecognizedFinanceAlwaysWaitsForConfirmationAndKeepsOriginal() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 1, payload: ["amount": AnyCodable(20)], missingFields: []))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending)
+        let data = Data("financial-original".utf8)
+        let outcome = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
+        guard case .financialPending(let id) = outcome.result else { return XCTFail("Finance must wait for explicit account confirmation") }
+        let profile = try context.intakeRepository.activeProfile()
+        let candidate = try XCTUnwrap(pending.record(profileID: profile.id, id: id))
+        XCTAssertEqual(candidate.amountMinor, 2000)
+        XCTAssertEqual(try context.imageStore.data(at: XCTUnwrap(candidate.imagePath)), data)
+        let repeated = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
+        XCTAssertEqual(repeated, outcome)
+        XCTAssertEqual(provider.callCount, 1)
+        XCTAssertEqual(try pending.pending(profileID: profile.id).count, 1)
+        XCTAssertTrue(try LocalExpenseRepository(database: context.database).expenses(profileID: profile.id, monthKey: "2026-09").isEmpty)
+        XCTAssertTrue(try context.useCase.retryPendingImageCleanups().isEmpty)
+        XCTAssertEqual(try context.imageStore.data(at: XCTUnwrap(candidate.imagePath)), data)
+    }
     func testLF03507DisabledRecognitionPersistsImageForManualProcessingWithoutProviderCall() async throws {
         let context = try makeContext()
         defer { cleanup(context) }

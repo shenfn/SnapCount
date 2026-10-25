@@ -34,7 +34,7 @@ final class LocalDatabase {
         )
     }
 
-    private static var migrator: DatabaseMigrator {
+    static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("local-v1") { database in
             try database.execute(sql: """
@@ -547,6 +547,47 @@ final class LocalDatabase {
                     updated_at DATETIME NOT NULL,
                     completed_at DATETIME
                 );
+                """)
+        }
+        migrator.registerMigration("local-v22-financial-images-and-pending") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_expenses ADD COLUMN image_path TEXT;
+                ALTER TABLE local_expenses ADD COLUMN image_hash TEXT;
+                ALTER TABLE local_income_records ADD COLUMN image_path TEXT;
+                ALTER TABLE local_income_records ADD COLUMN image_hash TEXT;
+                ALTER TABLE local_income_records ADD COLUMN source_pending_transaction_id TEXT;
+                CREATE UNIQUE INDEX local_income_pending_source_idx ON local_income_records(source_pending_transaction_id);
+                CREATE TABLE local_pending_transactions (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id),
+                    amount_minor INTEGER NOT NULL CHECK(amount_minor >= 0),
+                    currency TEXT NOT NULL, merchant_name TEXT NOT NULL,
+                    transaction_date TEXT NOT NULL, transaction_time TEXT, occurred_at DATETIME,
+                    created_at DATETIME NOT NULL, image_path TEXT, image_hash TEXT,
+                    status TEXT NOT NULL CHECK(status IN ('pending','done','converted','deleted')),
+                    target_kind TEXT, target_id TEXT,
+                    preferred_kind TEXT NOT NULL DEFAULT 'expense' CHECK(preferred_kind IN ('expense','income'))
+                );
+                """)
+        }
+        migrator.registerMigration("local-v23-unbound-expense") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_expenses_unbound (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    account_id TEXT REFERENCES local_accounts(id),
+                    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+                    currency TEXT NOT NULL, merchant_name TEXT NOT NULL,
+                    platform TEXT NOT NULL, category TEXT NOT NULL, payment_method TEXT NOT NULL,
+                    transaction_date TEXT NOT NULL, transaction_time TEXT, note TEXT,
+                    local_version INTEGER NOT NULL DEFAULT 1 CHECK (local_version > 0),
+                    created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, deleted_at DATETIME,
+                    image_path TEXT, image_hash TEXT
+                );
+                INSERT INTO local_expenses_unbound SELECT * FROM local_expenses;
+                DROP TABLE local_expenses;
+                ALTER TABLE local_expenses_unbound RENAME TO local_expenses;
+                CREATE INDEX local_expenses_profile_date_idx ON local_expenses(profile_id, transaction_date, created_at);
                 """)
         }
         return migrator

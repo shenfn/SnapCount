@@ -19,7 +19,7 @@ enum LocalIncomeReadModel {
             id: reference, rawId: income.id.uuidString, kind: "income",
             title: sourceName, subtitle: dateLabel,
             value: String(format: "+¥%.2f", amount), detailRows: rows,
-            imageURL: nil, imageLoadError: false, imagePath: nil, imageHash: nil,
+            imageURL: nil, imageLoadError: false, imagePath: income.imagePath, imageHash: income.imageHash,
             amount: amount, merchantName: sourceName, platform: nil,
             category: income.category, paymentMethod: nil, recordDate: income.incomeDate,
             note: income.note, companionMessage: nil, accountId: income.accountID?.uuidString,

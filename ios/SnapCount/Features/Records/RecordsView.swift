@@ -449,7 +449,7 @@ struct RecordDetailView: View {
             if let detail {
                 if detail.isEditable {
                     Button {
-                        if detail.kind == "data" {
+                        if detail.kind == "data" || detail.status == "local" {
                             universalEditDetail = detail
                         } else {
                             editDraft = NativeRecordEditDraft(detail: detail)
@@ -522,7 +522,7 @@ struct RecordDetailView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("删除后会同步处理关联账户流水，截图文件是否清理仍沿用现有服务端规则。")
+            Text("删除后会冲销关联账户流水。本机原图在没有其他记录引用后清理；清理失败可在收件箱重试。已上传的云副本受同步状态约束。")
         }
     }
 
@@ -754,7 +754,7 @@ struct RecordDetailView: View {
         HStack(spacing: 12) {
             if detail.isEditable {
                 Button {
-                    if detail.kind == "data" { universalEditDetail = detail }
+                    if detail.kind == "data" || detail.status == "local" { universalEditDetail = detail }
                     else { editDraft = NativeRecordEditDraft(detail: detail) }
                 } label: {
                     Label(detail.status == "pending" ? "补充信息" : "编辑", systemImage: "square.and.pencil")

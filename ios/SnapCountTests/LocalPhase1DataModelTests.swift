@@ -3,6 +3,11 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testLF03417SleepMinutesRejectFiniteIntegerOverflow() {
+        for field in ["sleep_minutes", "sleep_hours"] {
+            XCTAssertThrowsError(try LocalRecordCodec.normalizedPayload(domainKey: "sleep", payload: [field: AnyCodable(1e100)]))
+        }
+    }
     func testLF03417CalendarDatesMustExist() throws {
         for day in ["2026-02-29", "2026-04-31", "2026-13-01"] {
             XCTAssertThrowsError(try LocalRecordValidation.validate(domainKey: "sport", title: "跑步", recordDate: day))
@@ -1276,7 +1281,7 @@ final class LocalPhase1DataModelTests: XCTestCase {
             id: recordID,
             profileID: profile.id,
             domainKey: "reading",
-            title: "原则",
+            title: "=1+1",
             summary: "25 分钟",
             payloadJSON: try LocalRecordCodec.encode([
                 "book_name": AnyCodable("原则"),
@@ -1324,6 +1329,7 @@ final class LocalPhase1DataModelTests: XCTestCase {
         XCTAssertTrue(csv.contains("income/\(incomeID.uuidString)"))
         XCTAssertTrue(csv.contains("data/\(recordID.uuidString)"))
         XCTAssertTrue(csv.contains(",{}"))
+        XCTAssertTrue(csv.contains("'=1+1"), "LF-030.06 spreadsheet formulas must be exported as text")
         for (content, expected) in [(NativeExportContent.expense, Set(["expense"])), (.income, Set(["income"])), (.allFinance, Set(["expense", "income"]))] {
             request.content = content
             request.format = .json

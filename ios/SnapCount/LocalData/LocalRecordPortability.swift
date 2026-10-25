@@ -145,6 +145,9 @@ final class LocalRecordPortability {
     }
 
     private static func csvField(_ value: String) -> String {
+        let first = value.trimmingCharacters(in: .whitespacesAndNewlines).first
+        let dangerous = first.map { "=+-@".contains($0) } ?? false
+        let value = dangerous || value.hasPrefix("\t") || value.hasPrefix("\r") ? "'" + value : value
         guard value.contains(",") || value.contains("\"") || value.contains("\n") else { return value }
         return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
     }
