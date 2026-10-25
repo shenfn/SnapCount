@@ -3,6 +3,40 @@ import XCTest
 @testable import SnapCount
 
 final class LocalPhase1DataModelTests: XCTestCase {
+    func testLF03721LocalWalletRepaymentScreenshotIsKeptAsReviewableCandidate() async throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { removeDatabase(at: databaseURL) }
+        let database = try LocalDatabase(databaseURL: databaseURL)
+        let profileStore = LocalProfileStore(database: database)
+        let recordUseCase = LocalRecordUseCase(
+            profileStore: profileStore,
+            repository: try LocalRecordRepository(database: database)
+        )
+
+        let outcome = try await recordUseCase.stage(LocalRecordCandidate(
+            id: "synthetic-wallet-repayment",
+            domainKey: "wallet",
+            title: "合成信用卡还款截图",
+            summary: "识别到已还款状态与金额",
+            payload: [
+                "record_kind": AnyCodable("liability_snapshot"),
+                "status": AnyCodable("paid"),
+                "amount": AnyCodable(40.0)
+            ],
+            confidence: 0.91,
+            recordDate: "2026-10-25",
+            recordTime: "12:30",
+            imageData: nil,
+            createdAt: Date(timeIntervalSince1970: 1_800_000_000),
+            evidenceFields: ["status", "amount"]
+        ))
+
+        XCTAssertEqual(outcome.record.domainKey, "wallet")
+        XCTAssertEqual(outcome.record.status, .pendingReview)
+        let month = try await recordUseCase.month("2026-10")
+        XCTAssertTrue(month.records.isEmpty, "截图候选不能自动变成普通记录")
+    }
+
     func testLF01401LocalInsightAggregatesOnlyCommittedFactsAcrossSixDomains() throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }
