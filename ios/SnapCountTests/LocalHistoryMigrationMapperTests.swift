@@ -27,7 +27,11 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
             .accountEntries: [row(["id": entry.uuidString, "user_id": user.uuidString,
                 "account_id": account.uuidString, "direction": "out", "amount": 20,
                 "entry_type": "expense", "source_table": "transactions", "source_id": expense.uuidString,
-                "occurred_at": timestamp, "created_at": timestamp, "is_voided": false])]
+                "occurred_at": timestamp, "created_at": timestamp, "is_voided": false]),
+                row(["id": UUID().uuidString, "user_id": user.uuidString,
+                    "account_id": account.uuidString, "direction": "out", "amount": 99,
+                    "entry_type": "expense", "source_table": "transactions", "source_id": expense.uuidString,
+                    "occurred_at": timestamp, "created_at": timestamp, "is_voided": true])]
         ], blockers: [])
         let data = try LocalHistoryMigrationMapper(schema: schema).buildArchive(inspection,
             profileID: profile.id, images: [imagePath: bytes])
@@ -36,6 +40,10 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
         _ = try backup.importBackup(data, into: profile.id)
         let repository = try LocalExpenseRepository(database: destination)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: account), 8000)
+        let entries = try repository.accountEntries(accountID: account)
+        XCTAssertEqual(entries.count, 2, "保留作废历史，不能丢行")
+        let voided = try XCTUnwrap(entries.first(where: \.isVoided))
+        XCTAssertNil(voided.voidedAt, "云端没有作废时间，不能伪造日期")
         let restored = try XCTUnwrap(repository.expense(id: expense))
         XCTAssertEqual(restored.transactionDate, "2026-10-24")
         XCTAssertEqual(restored.imageHash, LocalImageStore.sha256(bytes))

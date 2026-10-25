@@ -590,6 +590,17 @@ final class LocalDatabase {
                 CREATE INDEX local_expenses_profile_date_idx ON local_expenses(profile_id, transaction_date, created_at);
                 """)
         }
+        migrator.registerMigration("local-v24-history-ledger-evidence") { database in
+            try database.execute(sql: """
+                ALTER TABLE local_account_entries ADD COLUMN is_voided INTEGER NOT NULL DEFAULT 0 CHECK(is_voided IN (0,1));
+                ALTER TABLE local_account_entries ADD COLUMN source_metadata_json TEXT;
+                ALTER TABLE local_liability_payments ADD COLUMN evidence_wallet_snapshot_id TEXT REFERENCES local_wallet_snapshots(id);
+                DROP INDEX local_account_entries_active_source_idx;
+                CREATE UNIQUE INDEX local_account_entries_active_source_idx
+                    ON local_account_entries(source_kind, source_id, account_id)
+                    WHERE voided_at IS NULL AND is_voided = 0;
+                """)
+        }
         return migrator
     }
 }

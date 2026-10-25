@@ -594,10 +594,11 @@ struct PrivacySettingsView: View {
             }
         }
         .navigationTitle("隐私与留存")
+        .task { await appState.loadCloudPrivacySettings() }
         .scrollContentBackground(.hidden)
         .background(JieziTheme.pageBackground)
         .tint(JieziTheme.brand)
-        .disabled(appState.isSavingSettings || appState.isCleaningSourceImages)
+        .disabled(appState.isLoadingSettings || appState.isSavingSettings || appState.isCleaningSourceImages)
         .confirmationDialog(retentionDialogTitle, isPresented: $showRetentionConfirmation, titleVisibility: .visible) {
             if let pendingRetention {
                 Button(retentionPrimaryActionTitle) {
@@ -617,7 +618,6 @@ struct PrivacySettingsView: View {
 
     private func retentionButton(_ title: String, value: Int) -> some View {
         Button {
-            guard currentRetention != value else { return }
             pendingRetention = value
             showRetentionConfirmation = true
         } label: {
@@ -727,7 +727,7 @@ struct DataExportView: View {
                 .disabled(appState.isExportingData)
             }
             Section("完整本地备份") {
-                Text("包含本机业务事实、账户流水、待处理图片和历史状态；不包含登录、同步授权或 API Key。完整备份遇到缺失图片时会失败。")
+                Text("上方普通导出不包含账户流水、钱包快照和候选；完整恢复请使用本节备份。备份包含本机业务事实、账户流水、待处理图片和历史状态，不包含登录、同步授权或 API Key；缺失图片时会失败。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button {

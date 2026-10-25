@@ -301,6 +301,7 @@ struct LocalAccountEntry: Equatable {
     let sourceID: UUID
     let occurredAt: Date?
     let voidedAt: Date?
+    var isVoided: Bool = false
 }
 
 struct LocalOutboxOperation: Equatable {

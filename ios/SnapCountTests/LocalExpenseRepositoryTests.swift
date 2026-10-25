@@ -6,7 +6,8 @@ final class LocalExpenseRepositoryTests: XCTestCase {
     func testLF037UnboundExpenseHasNoLedgerUntilBoundAndUnbindRestoresBalance() throws {
         let url = temporaryLocalDatabaseURL()
         defer { removeLocalDatabase(at: url) }
-        let repository = try LocalExpenseRepository(database: LocalDatabase(databaseURL: url))
+        let database = try LocalDatabase(databaseURL: url)
+        let repository = try LocalExpenseRepository(database: database)
         let fixture = try makeFixture(repository: repository)
         let draft = LocalExpenseDraft(id: UUID(), profileID: fixture.profile.id, accountID: nil,
             amountMinor: 2000, currency: "CNY", merchantName: "合成消费", platform: "",
@@ -26,6 +27,7 @@ final class LocalExpenseRepositoryTests: XCTestCase {
             note: nil, updatedAt: Date()), operationID: UUID())
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: fixture.account.id), 10000)
         XCTAssertTrue(try repository.accountEntries(sourceID: draft.id).allSatisfy { $0.voidedAt != nil })
+        try database.writer.close()
         let reopened = try LocalExpenseRepository(database: LocalDatabase(databaseURL: url))
         XCTAssertNil(try reopened.expense(id: draft.id)?.accountID)
     }

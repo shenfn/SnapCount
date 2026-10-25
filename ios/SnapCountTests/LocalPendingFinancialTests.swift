@@ -3,6 +3,24 @@ import GRDB
 @testable import SnapCount
 
 final class LocalPendingFinancialTests: XCTestCase {
+    func testLF037PendingExpenseCanRemainUnboundUntilAccountCompletion() throws {
+        try withFixture { database, profile, cash, repository in
+            let pending = LocalPendingFinancialRepository(database: database)
+            let id = UUID()
+            try pending.stage(LocalPendingFinancialRecord(id: id, profileID: profile, amountMinor: 2000,
+                currency: "CNY", merchantName: "合成未绑消费", transactionDate: "2026-10-24",
+                transactionTime: nil, occurredAt: nil, createdAt: Date()))
+            var draft = makeDraft(id: id, account: cash, kind: .expense)
+            draft.accountId = nil
+            _ = try pending.resolve(profileID: profile, pendingID: id, draft: draft)
+            _ = try pending.resolve(profileID: profile, pendingID: id, draft: draft)
+            XCTAssertNil(try repository.expense(id: id)?.accountID)
+            XCTAssertEqual(try repository.expenseCount(), 1)
+            XCTAssertEqual(try repository.accountBalanceMinor(accountID: cash), 10000)
+            XCTAssertEqual(try LocalFinancialBindingRepository(database: database).unboundRecords(profileID: profile).count, 1)
+        }
+    }
+
     func testLF03731ExpenseConfirmationRetainsIDAndChargesOnlyOnce() throws {
         try withFixture { database, profile, account, repository in
             let pending = LocalPendingFinancialRepository(database: database)

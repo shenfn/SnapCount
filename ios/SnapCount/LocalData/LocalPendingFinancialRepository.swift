@@ -69,7 +69,6 @@ final class LocalPendingFinancialRepository {
             let targetID: UUID
             switch draft.kind {
             case .expense:
-                guard let accountID else { throw LocalDataError.invalidRecord }
                 targetID = pendingID
                 var expense = LocalExpenseDraft(id: targetID, profileID: profileID,
                     accountID: accountID, amountMinor: amount, currency: source.currency,

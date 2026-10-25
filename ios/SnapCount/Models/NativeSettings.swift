@@ -100,8 +100,8 @@ enum NativeExportContent: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .expense: return "支出记录"
         case .income: return "收入记录"
-        case .allFinance: return "全部财务"
-        case .universal: return "通用记录"
+        case .allFinance: return "全部收支"
+        case .universal: return "本机全部正式记录"
         }
     }
 }

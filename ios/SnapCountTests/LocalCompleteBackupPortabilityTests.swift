@@ -172,7 +172,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
 
         XCTAssertEqual(restored.evidenceWalletSnapshotID, snapshotID)
         XCTAssertNil(restored.evidenceRecordID)
-        XCTAssertEqual(try LocalWalletSnapshotRepository(database: target.database).history(profileID: targetProfile.id).map(\.id), [snapshotID])
+        XCTAssertTrue(try LocalWalletSnapshotRepository(database: target.database).history(profileID: targetProfile.id).map(\.id).contains(snapshotID))
     }
 
     func testLF021BackupPreservesConfirmedScreenshotPaymentAndOriginalImage() async throws {
@@ -218,7 +218,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
 
         let backup = try source.portability.exportBackup()
         let preview = try source.portability.preview(backup)
-        XCTAssertEqual(preview.schemaVersion, 23)
+        XCTAssertEqual(preview.schemaVersion, 24)
         XCTAssertEqual(preview.imageCount, 4)
         let targetProfile = try target.profileStore.activeProfile()
         _ = try target.portability.importBackup(backup, into: targetProfile.id)
@@ -674,6 +674,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         let incomeID = UUID(uuidString: "00000000-0000-4000-8000-000000000006")!
         let cycleID = UUID(uuidString: "00000000-0000-4000-8000-000000000007")!
         let paymentID = UUID(uuidString: "00000000-0000-4000-8000-000000000008")!
+        let openingSnapshotID = UUID(uuidString: "00000000-0000-4000-8000-000000000009")!
         let image = Data("backup-record-image".utf8)
         let stagingImage = Data("backup-staging-image".utf8)
         let intakeImage = Data("backup-intake-image".utf8)
@@ -763,8 +764,13 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
                     UUID().uuidString, profile.id.uuidString, cashID.uuidString, deletedExpenseID.uuidString, now, deletedAt,
                     UUID().uuidString, profile.id.uuidString, cashID.uuidString, paymentID.uuidString, now, deletedAt,
                     UUID().uuidString, profile.id.uuidString, liabilityID.uuidString, paymentID.uuidString, now, deletedAt,
-                    UUID().uuidString, profile.id.uuidString, cashID.uuidString, "in", 500, "snapshot_initialization", "wallet_snapshot", UUID().uuidString, now, NSNull()
+                    UUID().uuidString, profile.id.uuidString, cashID.uuidString, "in", 500, "snapshot_initialization", "wallet_snapshot", openingSnapshotID.uuidString, now, NSNull()
                 ])
+            try db.execute(sql: """
+                INSERT INTO local_wallet_snapshots(id,profile_id,title,summary,payload_json,record_date,
+                    snapshot_balance_minor,currency,account_snapshot_kind,linked_account_id,linked_action,created_at,updated_at)
+                VALUES (?,?,'期初快照','合成来源','{}','2026-10-25',500,'CNY','asset',?,'create',?,?)
+                """, arguments: [openingSnapshotID.uuidString, profile.id.uuidString, cashID.uuidString, now, now])
         }
         fixture.profileID = profile.id
         fixture.createdAt = now

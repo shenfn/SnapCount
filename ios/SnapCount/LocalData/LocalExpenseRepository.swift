@@ -393,7 +393,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     FROM local_expenses AS expense
                     JOIN local_account_entries AS entry
                       ON entry.source_kind = 'expense' AND entry.source_id = expense.id
-                     AND entry.account_id = expense.account_id AND entry.voided_at IS NULL
+                     AND entry.account_id = expense.account_id AND entry.voided_at IS NULL AND entry.is_voided = 0
                     WHERE expense.profile_id = ? AND expense.account_id = ?
                       AND expense.deleted_at IS NULL
                       AND (? IS NULL OR entry.occurred_at > ?)
@@ -575,6 +575,13 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 try Self.validateActiveDebitAccount(id: resolved, profileID: profileID, database: db)
                 return resolved
             }()
+            // Older cloud repayments used a cycle directly as the ledger
+            // source. A cumulative reconfirmation replaces those entries too.
+            try db.execute(sql: """
+                UPDATE local_account_entries SET voided_at = ?
+                WHERE profile_id = ? AND source_kind = 'repayment_cycle' AND source_id = ?
+                  AND voided_at IS NULL AND is_voided = 0
+                """, arguments: [paidAt, profileID.uuidString, cycleID.uuidString])
             try db.execute(sql: """
                 UPDATE local_liability_payments SET status = 'voided',
                     note = COALESCE(note, '') || CASE WHEN note IS NULL OR note = '' THEN '' ELSE '；' END || '重新确认还款时作废',
@@ -582,7 +589,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 """, arguments: [paidAt, cycleID.uuidString, profileID.uuidString])
             try db.execute(sql: """
                 UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?)
-                WHERE profile_id = ? AND source_kind = 'liability_payment' AND voided_at IS NULL
+                WHERE profile_id = ? AND source_kind = 'liability_payment' AND voided_at IS NULL AND is_voided = 0
                   AND source_id IN (SELECT id FROM local_liability_payments WHERE statement_id = ?)
                 """, arguments: [paidAt, profileID.uuidString, cycleID.uuidString])
 
@@ -657,7 +664,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             let status: String = payment["status"]
             if status != "voided" {
                 try db.execute(sql: "UPDATE local_liability_payments SET status = 'voided', note = COALESCE(note, '') || CASE WHEN note IS NULL OR note = '' THEN '' ELSE '；' END || ?, updated_at = ? WHERE id = ?", arguments: [reason, now, id.uuidString])
-                try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE profile_id = ? AND source_kind = 'liability_payment' AND source_id = ? AND voided_at IS NULL", arguments: [now, profileID.uuidString, id.uuidString])
+                try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE profile_id = ? AND source_kind = 'liability_payment' AND source_id = ? AND voided_at IS NULL AND is_voided = 0", arguments: [now, profileID.uuidString, id.uuidString])
             }
             guard let cycleID,
                   let cycle = try Row.fetchOne(db, sql: "SELECT * FROM local_repayment_cycles WHERE id = ? AND profile_id = ?", arguments: [cycleID.uuidString, profileID.uuidString]) else {
@@ -973,11 +980,13 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 || existing.amountMinor != update.amountMinor
 
             if replacesLedger {
+                if existing.accountID != nil {
                 try Self.voidActiveEntry(
                     sourceID: update.id,
                     voidedAt: update.updatedAt,
                     database: db
                 )
+                }
                 try Self.insertExpenseEntry(
                     id: UUID(),
                     expense: updated,
@@ -1052,7 +1061,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             )
 
             try Self.enqueueFinancialImageCleanup(existing.imagePath, profileID: existing.profileID, at: deletedAt, database: db)
-            try Self.voidActiveEntry(sourceID: id, voidedAt: deletedAt, database: db)
+            if existing.accountID != nil {
+                try Self.voidActiveEntry(sourceID: id, voidedAt: deletedAt, database: db)
+            }
             try db.execute(
                 sql: """
                     UPDATE local_expenses
@@ -1108,7 +1119,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                       AND deleted_at IS NULL
                     ORDER BY transaction_date DESC, transaction_time DESC, created_at DESC, id DESC
                     """,
-                arguments: [profileID.uuidString, "\(monthKey)-%"]
+                arguments: [profileID.uuidString, monthKey.isEmpty ? "%" : "\(monthKey)-%"]
             ).map { try Self.expense(from: $0) }
         }
     }
@@ -1143,7 +1154,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         try database.writer.read { db in
             try Int.fetchOne(
                 db,
-                sql: "SELECT COUNT(*) FROM local_account_entries WHERE voided_at IS NULL"
+                sql: "SELECT COUNT(*) FROM local_account_entries WHERE voided_at IS NULL AND is_voided = 0"
             ) ?? 0
         }
     }
@@ -1154,7 +1165,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 db,
                 sql: """
                     SELECT id, profile_id, account_id, direction, amount_minor, entry_kind,
-                           source_kind, source_id, occurred_at, voided_at
+                           source_kind, source_id, occurred_at, voided_at, is_voided
                     FROM local_account_entries
                     WHERE source_id = ?
                     ORDER BY occurred_at ASC, id ASC
@@ -1170,7 +1181,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 db,
                 sql: """
                     SELECT id, profile_id, account_id, direction, amount_minor, entry_kind,
-                           source_kind, source_id, occurred_at, voided_at
+                           source_kind, source_id, occurred_at, voided_at, is_voided
                     FROM local_account_entries
                     WHERE account_id = ?
                     ORDER BY occurred_at DESC, id DESC
@@ -1362,7 +1373,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     FROM local_accounts AS accounts
                     LEFT JOIN local_account_entries AS entries
                       ON entries.account_id = accounts.id
-                     AND entries.voided_at IS NULL
+                     AND entries.voided_at IS NULL AND entries.is_voided = 0
                      AND entries.entry_kind != 'snapshot_initialization'
                     WHERE accounts.id = ?
                     GROUP BY accounts.id
@@ -1420,7 +1431,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     continue
                 }
                 if expense.deletedAt != nil {
-                    try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL", arguments: [expense.deletedAt, expense.id.uuidString])
+                    try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL AND is_voided = 0", arguments: [expense.deletedAt, expense.id.uuidString])
                     try db.execute(sql: "UPDATE local_expenses SET local_version = ?, deleted_at = ?, updated_at = ? WHERE id = ? AND profile_id = ?", arguments: [expense.version, expense.deletedAt, Date(), expense.id.uuidString, profileID.uuidString])
                 } else if row == nil {
                     try db.execute(sql: """
@@ -1433,7 +1444,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         """, arguments: [UUID().uuidString, profileID.uuidString, expense.accountID.uuidString, expense.amountMinor, expense.id.uuidString, Date()])
                     imported += 1
                 } else {
-                    try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL", arguments: [Date(), expense.id.uuidString])
+                    try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL AND is_voided = 0", arguments: [Date(), expense.id.uuidString])
                     try db.execute(sql: """
                         UPDATE local_expenses SET account_id = ?, amount_minor = ?, currency = ?, merchant_name = ?, platform = ?, category = ?, payment_method = ?, transaction_date = ?, transaction_time = ?, note = ?, local_version = ?, updated_at = ?
                         WHERE id = ? AND profile_id = ?
@@ -1512,7 +1523,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             sourceKind: row["source_kind"],
             sourceID: sourceID,
             occurredAt: row["occurred_at"],
-            voidedAt: row["voided_at"]
+            voidedAt: row["voided_at"],
+            isVoided: row.hasColumn("is_voided") ? row["is_voided"] : false
         )
     }
 
@@ -1646,7 +1658,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             SELECT account.opening_balance_minor AS opening_balance_minor,
                    COALESCE(SUM(CASE entry.direction WHEN 'in' THEN entry.amount_minor WHEN 'out' THEN -entry.amount_minor END), 0) AS delta
             FROM local_accounts account LEFT JOIN local_account_entries entry
-              ON entry.account_id = account.id AND entry.voided_at IS NULL
+              ON entry.account_id = account.id AND entry.voided_at IS NULL AND entry.is_voided = 0
              AND entry.entry_kind != 'snapshot_initialization'
             WHERE account.id = ? GROUP BY account.id
             """, arguments: [accountID.uuidString]) else { throw LocalDataError.invalidIdentifier }
@@ -1802,7 +1814,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             database,
             sql: """
                 SELECT id FROM local_account_entries
-                WHERE source_kind = ? AND source_id = ? AND voided_at IS NULL
+                WHERE source_kind = ? AND source_id = ? AND voided_at IS NULL AND is_voided = 0
                 """,
             arguments: [sourceKind, sourceID.uuidString]
         ) else {

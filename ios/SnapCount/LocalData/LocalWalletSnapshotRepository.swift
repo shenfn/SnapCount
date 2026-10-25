@@ -340,7 +340,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
             let openingBalance: Int64 = accountRow["opening_balance_minor"]
             let activeEntryCount = try Int.fetchOne(db, sql: """
                 SELECT COUNT(*) FROM local_account_entries
-                WHERE profile_id = ? AND account_id = ? AND voided_at IS NULL
+                WHERE profile_id = ? AND account_id = ? AND voided_at IS NULL AND is_voided = 0
                   AND entry_kind != 'snapshot_initialization'
                 """, arguments: [snapshot.profileID.uuidString, accountID.uuidString]) ?? 0
             let snapshotBalance = storedSnapshot.balanceMinor
@@ -571,7 +571,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
             SELECT account.opening_balance_minor AS opening_balance_minor,
                    COALESCE(SUM(CASE entry.direction WHEN 'in' THEN entry.amount_minor WHEN 'out' THEN -entry.amount_minor END), 0) AS delta
             FROM local_accounts account LEFT JOIN local_account_entries entry
-              ON entry.account_id = account.id AND entry.voided_at IS NULL
+              ON entry.account_id = account.id AND entry.voided_at IS NULL AND entry.is_voided = 0
              AND entry.entry_kind != 'snapshot_initialization'
             WHERE account.id = ? AND account.is_archived = 0 GROUP BY account.id
             """, arguments: [accountID.uuidString]) else { throw LocalDataError.invalidIdentifier }
@@ -593,7 +593,7 @@ final class LocalWalletSnapshotRepository: LocalWalletSnapshotRepositoryProtocol
         try database.execute(sql: """
             INSERT INTO local_account_entries (
                 id, profile_id, account_id, direction, amount_minor, entry_kind,
-                source_kind, source_id, occurred_at, voided_at
+                source_kind, source_id, occurred_at, voided_at, is_voided
             ) VALUES (?, ?, ?, 'in', ?, 'snapshot_initialization', 'wallet_snapshot', ?, ?, NULL)
             """, arguments: [UUID().uuidString, profileID.uuidString, accountID.uuidString,
                               snapshot.balanceMinor, snapshot.id.uuidString, occurredAt])

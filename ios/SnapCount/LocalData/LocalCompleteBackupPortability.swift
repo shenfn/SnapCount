@@ -63,7 +63,7 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 23
+    static let currentSchemaVersion = 24
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
     private static let maximumImageBytes = 128 * 1024 * 1024
     private static let maximumArchiveBytes = 180 * 1024 * 1024
@@ -321,7 +321,7 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard [15, 16, 17, 18, 19, 20, 22, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
+        guard [15, 16, 17, 18, 19, 20, 22, 23, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
         var tables = archive.tables
@@ -378,6 +378,17 @@ final class LocalCompleteBackupPortability {
                 }
                 rows[table] = financialRows
             }
+        }
+        if archive.schemaVersion < 24 {
+            var entries = rows["local_account_entries"] ?? []
+            for index in entries.indices {
+                entries[index]["is_voided"] = 0
+                entries[index]["source_metadata_json"] = NSNull()
+            }
+            rows["local_account_entries"] = entries
+            var payments = rows["local_liability_payments"] ?? []
+            for index in payments.indices { payments[index]["evidence_wallet_snapshot_id"] = NSNull() }
+            rows["local_liability_payments"] = payments
         }
         try Self.validateFinancialRows(rows)
 
@@ -446,6 +457,7 @@ final class LocalCompleteBackupPortability {
             ("local_liability_payments", "debit_account_id", accounts, true),
             ("local_liability_payments", "evidence_record_id", records, true),
             ("local_liability_payments", "evidence_staging_id", staging, true),
+            ("local_liability_payments", "evidence_wallet_snapshot_id", walletSnapshots, true),
             ("local_account_entries", "account_id", accounts, false),
             ("local_wallet_snapshots", "linked_account_id", accounts, true)
         ]
@@ -472,12 +484,8 @@ final class LocalCompleteBackupPortability {
                 throw LocalCompleteBackupError.invalidRows("local_account_entries")
             }
         }
-        let pendingIDs = Set((rows["local_pending_transactions"] ?? []).compactMap { $0["id"] as? String })
-        for row in rows["local_income_records"] ?? [] {
-            if let source = row["source_pending_transaction_id"] as? String, !pendingIDs.contains(source) {
-                throw LocalCompleteBackupError.invalidRows("local_income_records")
-            }
-        }
+        // Cloud RPC 031 deletes a converted pending row. Its immutable source
+        // ID is an audit reference and can legitimately outlive that row.
         for row in rows["local_pending_transactions"] ?? [] {
             let status = row["status"] as? String
             if status == "done" || status == "converted" {

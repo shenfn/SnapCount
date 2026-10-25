@@ -113,7 +113,12 @@ final class RepaymentActionUseCaseTests: XCTestCase {
     func testA4IOS003FAppStateKeepsPublicEntryAndProjectsAcceptedResult() async {
         let repository = RepaymentActionRepositoryStub()
         let harness = makeHarness(repository: repository)
-        let state = AppState(repaymentActionUseCase: harness.useCase)
+        let state = AppState(localExpenseUseCase: LegacyRemoteExpenseUseCaseStub(), repaymentActionUseCase: harness.useCase)
+        state.isSignedIn = true
+        state.currentUserId = "user-a"
+        state.localSyncState = LocalSyncState(workspaceID: UUID(), binding: .bound("user-a"), status: .synced,
+            conflictState: .none, syncGeneration: 1, pullCursor: nil, lastSuccessfulSyncAt: nil,
+            activeAttemptID: nil, pendingMutationCount: 0)
 
         let accepted = await state.confirmRepayment(
             cycle: repaymentCycle(),

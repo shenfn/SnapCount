@@ -2,6 +2,24 @@ import XCTest
 @testable import SnapCount
 
 final class LocalUserSettingsStoreTests: XCTestCase {
+    @MainActor
+    func testLF01901SettingsPageActionsStayOfflineAndSurviveSessionReset() async throws {
+        let suite = "LocalSettingsActions.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = LocalUserSettingsStore(defaults: defaults)
+        let state = AppState(sessionProvider: { _ in XCTFail("本机偏好不得查询会话"); throw SupabaseRemoteError.missingSession }, localUserSettingsStore: store)
+        await state.setCompanionPersona("warm")
+        await state.setCompanionMemoryEnabled(false)
+        state.resetUserScopedState()
+        XCTAssertEqual(state.userSettings.companionPersona, "warm")
+        XCTAssertFalse(state.userSettings.companionMemoryEnabled)
+        await state.loadUserSettings()
+        XCTAssertEqual(state.userSettings.companionPersona, "warm")
+        XCTAssertFalse(state.userSettings.companionMemoryEnabled)
+        XCTAssertNil(state.settingsMessage)
+    }
+
     func testLF01901OrdinaryPreferencesSurviveReopeningWithoutAccountOrConsent() throws {
         let suite = "LocalUserSettingsStoreTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

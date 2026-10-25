@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import GRDB
 
 enum LocalHistoryMappingError: Error, LocalizedError {
@@ -28,6 +29,7 @@ final class LocalHistoryMigrationMapper {
                 var mapped: [String: Any] = ["id": id.uppercased(), "profile_id": profileID.uuidString]
                 func copy(_ source: String, _ target: String? = nil) { if let value = row[source], !(value is NSNull) { mapped[target ?? source] = value } }
                 func minor(_ source: String, _ target: String) throws { if let value = row[source], !(value is NSNull) { mapped[target] = try Self.minor(value) } }
+                copy("deleted_at")
                 switch source {
                 case .accounts:
                     table = "local_accounts"
@@ -54,9 +56,10 @@ final class LocalHistoryMigrationMapper {
                     let kinds = ["transactions": "expense", "income_records": "income", "liability_payments": "liability_payment", "data_records": "wallet_snapshot", "account_repayment_cycles": "repayment_cycle"]
                     mapped["source_kind"] = sourceTable.flatMap { kinds[$0] } ?? "historical_entry"
                     mapped["source_id"] = sourceTable.flatMap { kinds[$0] } == nil ? id : (row["source_id"] as? String ?? id)
-                    if (row["is_voided"] as? Bool) == true {
-                        throw LocalHistoryMappingError.unsupported("流水 \(id) 仅有作废布尔值，缺少本地voided_at语义兼容；不会伪造作废日期")
-                    }
+                    mapped["is_voided"] = (row["is_voided"] as? Bool) == true ? 1 : 0
+                    mapped["source_metadata_json"] = String(decoding: try JSONSerialization.data(withJSONObject: [
+                        "source_table": row["source_table"] ?? NSNull(), "source_id": row["source_id"] ?? NSNull()
+                    ], options: [.sortedKeys]), as: UTF8.self)
                 case .repaymentCycles:
                     table = "local_repayment_cycles"
                     for key in ["account_id", "cycle_month", "statement_start_date", "statement_end_date", "due_date", "status", "auto_debit_account_id", "auto_confirm_repayment", "source", "evidence_record_id", "confidence", "note", "confirmed_at", "created_at", "updated_at"] { copy(key) }
@@ -69,7 +72,8 @@ final class LocalHistoryMigrationMapper {
                     for key in ["account_id", "statement_id", "debit_account_id", "paid_at", "source", "evidence_record_id", "status", "note", "created_at", "updated_at"] { copy(key) }
                     try minor("amount", "amount_minor"); try minor("overpayment_amount", "overpayment_amount_minor")
                     if let evidence = mapped["evidence_record_id"] as? String, walletIDs.contains(evidence.lowercased()) {
-                        throw LocalHistoryMappingError.unsupported("付款 \(id) 引用钱包证据，需本地付款wallet证据兼容；不会丢弃证据引用")
+                        mapped.removeValue(forKey: "evidence_record_id")
+                        mapped["evidence_wallet_snapshot_id"] = evidence
                     }
                 case .records:
                     let domain = try text(row, "domain_key")
@@ -89,6 +93,9 @@ final class LocalHistoryMigrationMapper {
                         let version = row["domain_version"] as? String ?? "1.0"
                         guard ["1", "1.0"].contains(version) else { throw LocalHistoryMappingError.unsupported("域版本 \(version) 需要显式迁移") }
                         mapped["domain_version"] = 1; mapped["source_kind"] = "imported"
+                        let validated = try LocalRecordCodec.normalizedPayload(domainKey: domain,
+                            payload: try JSONDecoder().decode([String: AnyCodable].self, from: JSONSerialization.data(withJSONObject: payload)))
+                        mapped["payload_json"] = try LocalRecordCodec.encode(validated)
                     }
                 case .staging:
                     table = "local_staging_records"
@@ -109,6 +116,9 @@ final class LocalHistoryMigrationMapper {
                 if let imagePath, !imagePath.isEmpty {
                     guard let bytes = images[imagePath] else { throw LocalHistoryMappingError.unsupported("缺少原图：\(imagePath)") }
                     let hash = LocalImageStore.sha256(bytes)
+                    if let expected = (row["image_hash"] ?? row["source_image_hash"]) as? String, !expected.isEmpty {
+                        guard expected.lowercased() == hash else { throw LocalCompleteBackupError.invalidImage(imagePath) }
+                    }
                     if let expected = (row["image_hash"] ?? row["source_image_hash"]) as? String,
                        expected.range(of: "^[0-9a-fA-F]{64}$", options: .regularExpression) != nil,
                        expected.lowercased() != hash { throw LocalCompleteBackupError.invalidImage(imagePath) }
@@ -176,6 +186,9 @@ final class LocalHistoryMigrationMapper {
         }
     }
     private static func minor(_ value: Any) throws -> Int64 {
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            throw LocalDataError.invalidRecord
+        }
         guard let decimal = Decimal(string: String(describing: value), locale: Locale(identifier: "en_US_POSIX")) else { throw LocalDataError.invalidRecord }
         let number = NSDecimalNumber(decimal: decimal * 100)
         let result = number.int64Value

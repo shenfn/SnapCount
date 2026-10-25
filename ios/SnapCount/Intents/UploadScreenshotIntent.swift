@@ -90,9 +90,10 @@ struct UploadScreenshotIntent: AppIntent {
                     }
                 } catch {
                     trialOutcome = .failed
+                    let persisted = recognition.hasPersistedOriginal(imageData: imageData)
                     result = ShortcutUploadResult(
-                        displayText: "识别未完成；图片保留在本机，请打开收件箱重试或手动处理。",
-                        notificationText: "识别未完成；图片保留在本机，请打开收件箱重试或手动处理。",
+                        displayText: persisted ? "识别未完成；图片已保存在本机，请打开收件箱重试或手动处理。" : "图片未能确认保存在本机，请保留原始输入并重新运行快捷指令。",
+                        notificationText: persisted ? "识别未完成；图片已保存在本机，请打开收件箱重试或手动处理。" : "图片未能确认保存在本机，请保留原始输入后重试。",
                         route: "inbox"
                     )
                 }

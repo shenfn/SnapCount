@@ -28,7 +28,7 @@ final class SnapCountTests: XCTestCase {
     @MainActor
     func testIOSV2POLISH002P1DateWindowLoadsSelectedMonthBeforeHistory() async {
         let repository = RecordRepositoryStub()
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             localBindingRepository: TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
             sessionProvider: { _ in Self.expressionTestSession }
@@ -1840,7 +1840,7 @@ final class SnapCountTests: XCTestCase {
             ))],
             acknowledgedFeedback: acknowledgedFeedback
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -1903,7 +1903,7 @@ final class SnapCountTests: XCTestCase {
                 feedback: plannerPreview
             ))]
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -1959,7 +1959,7 @@ final class SnapCountTests: XCTestCase {
             ))],
             acknowledgedFeedback: mismatchedAcknowledgement
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -2025,7 +2025,7 @@ final class SnapCountTests: XCTestCase {
             ],
             acknowledgedFeedback: acknowledged
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -2079,7 +2079,7 @@ final class SnapCountTests: XCTestCase {
             acknowledgedFeedback: acknowledgedFeedback,
             acknowledgementFailuresRemaining: 4
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession },
             expressionPlanAcknowledgementSleep: { _ in }
@@ -2130,7 +2130,7 @@ final class SnapCountTests: XCTestCase {
             acknowledgementFailuresRemaining: 1
         )
         var stateReference: AppState?
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession },
             expressionPlanAcknowledgementSleep: { _ in
@@ -2170,7 +2170,7 @@ final class SnapCountTests: XCTestCase {
             expressionRecordDetail(feedback: acknowledgedFeedback),
             expressionRecordDetail(feedback: legacyFeedback)
         ])
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -2203,7 +2203,7 @@ final class SnapCountTests: XCTestCase {
                 feedback: previewFeedback
             ))]
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -2256,7 +2256,7 @@ final class SnapCountTests: XCTestCase {
                 )
             }
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
         )
@@ -2298,7 +2298,7 @@ final class SnapCountTests: XCTestCase {
                 .unavailable(reason: "no_selected_candidate")
             ]
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession },
             expressionPlanAcknowledgementSleep: { _ in }
@@ -2356,7 +2356,7 @@ final class SnapCountTests: XCTestCase {
             ))],
             createReference: "data/record-1"
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             dashboardRepository: DashboardRepositoryStub(snapshot: DashboardSnapshot()),
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
@@ -2405,7 +2405,7 @@ final class SnapCountTests: XCTestCase {
             ],
             createReference: "data/record-1"
         )
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             dashboardRepository: DashboardRepositoryStub(snapshot: DashboardSnapshot()),
             recordRepository: repository,
             sessionProvider: { _ in Self.expressionTestSession }
@@ -2885,7 +2885,7 @@ final class SnapCountTests: XCTestCase {
                 groups: [NativeDayRecordGroup(dateKey: remote.dateKey, records: [remote])], details: [:]
             )
         })
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             localBindingRepository: TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
             sessionProvider: { _ in Self.expressionTestSession }
@@ -2923,7 +2923,7 @@ final class SnapCountTests: XCTestCase {
     @MainActor
     func testIOSV2POLISH002RetryReloadsCachedDateWindowAndClearsError() async {
         let repository = RecordRepositoryStub()
-        let state = AppState(
+        let state = makeRemoteExpressionState(
             recordRepository: repository,
             localBindingRepository: TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
             sessionProvider: { _ in Self.expressionTestSession }
@@ -4204,6 +4204,25 @@ private func makeRepaymentCycle(accountId: String, amount: Double, dueDate: Stri
 }
 
 private extension SnapCountTests {
+    @MainActor
+    func makeRemoteExpressionState(
+        dashboardRepository: DashboardRepositoryProtocol = DashboardRepositoryStub(snapshot: DashboardSnapshot()),
+        recordRepository: RecordRepositoryProtocol,
+        localBindingRepository: LocalBindingRepository? = nil,
+        sessionProvider: NativeSessionProvider? = nil,
+        expressionPlanAcknowledgementSleep: @escaping NativeSleepProvider = { try await Task<Never, Never>.sleep(nanoseconds: $0) }
+    ) -> AppState {
+        let state = AppState(dashboardRepository: dashboardRepository, recordRepository: recordRepository,
+            localExpenseUseCase: LegacyRemoteExpenseUseCaseStub(),
+            localBindingRepository: localBindingRepository ?? TestLocalBindingRepositoryStub(userID: Self.expressionTestSession.user.id),
+            sessionProvider: sessionProvider ?? { _ in Self.expressionTestSession },
+            expressionPlanAcknowledgementSleep: expressionPlanAcknowledgementSleep)
+        state.isSignedIn = true
+        state.currentUserId = Self.expressionTestSession.user.id
+        state.refreshLocalSyncState()
+        return state
+    }
+
     @MainActor
     func authorizeRemoteReads(for userID: String, in state: AppState) {
         state.localSyncState = LocalSyncState(

@@ -1260,6 +1260,14 @@ final class AppState: ObservableObject {
         return intake
     }
 
+    func hasPersistedInputImage(_ data: Data) -> Bool {
+        guard let repository = localImageIntakeRepository, let store = localImageStore,
+              let profile = try? repository.activeProfile(),
+              let intake = try? repository.intake(id: "\(profile.id.uuidString)-\(LocalImageStore.sha256(data))", profileID: profile.id),
+              let saved = try? store.data(at: intake.imagePath) else { return false }
+        return saved == data
+    }
+
     func setLocalVisionMode(_ mode: LocalVisionMode) {
         if mode == .byok, !hasBYOKAPIKey {
             settingsMessage = "先保存 BYOK API Key，再启用 BYOK。"
@@ -2248,8 +2256,8 @@ final class AppState: ObservableObject {
                     sourceId: entry.sourceID.uuidString,
                     occurredAt: entry.occurredAt.map { ISO8601DateFormatter().string(from: $0) } ?? "",
                     note: "",
-                    isVoided: entry.voidedAt != nil,
-                    voidedReason: entry.voidedAt == nil ? "" : "本地已作废"
+                    isVoided: entry.voidedAt != nil || entry.isVoided,
+                    voidedReason: entry.voidedAt == nil && !entry.isVoided ? "" : "已作废"
                 )
             }
             var cycles: [NativeRepaymentCycle] = []
@@ -5098,7 +5106,7 @@ final class AppState: ObservableObject {
                 await refreshLocalMonthProjection(monthKey: String(source.transactionDate.prefix(7)))
                 await applyLocalStagingProjection()
                 if !preserveInboxNavigation { inboxPath = NavigationPath() }
-                pendingResolutionMessage = localWriteMessage(draft.kind == .income ? "收入已记录（本机）" : "支出已补全（本机）")
+                pendingResolutionMessage = localWriteMessage(draft.kind == .income ? "收入已记录（本机）" : (draft.accountId == nil ? "支出已补全（仅本机，待补绑账户）" : "支出已补全（本机）"))
                 return true
             } catch {
                 pendingResolutionMessage = "保存失败：\(error.localizedDescription)"
@@ -5213,6 +5221,34 @@ final class AppState: ObservableObject {
     func loadUserSettings() async {
         userSettings = localUserSettingsStore.load()
         settingsMessage = nil
+    }
+
+    func loadCloudPrivacySettings() async {
+        guard !isLoadingSettings else { return }
+        guard isSignedIn else {
+            settingsMessage = "登录后可读取或修改云端策略；本机原图不受这些期限影响。"
+            return
+        }
+        let generation = userStateGeneration
+        isLoadingSettings = true
+        defer { if generation == userStateGeneration { isLoadingSettings = false } }
+        do {
+            let session = try await validSession()
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            let remote = try await settingsRepository.fetch(userId: session.user.id, accessToken: session.accessToken)
+            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
+            // Display cloud policy without importing ordinary preferences or
+            // changing the device AI mode and its explicit consent.
+            userSettings.aiLogsEnabled = remote.aiLogsEnabled
+            userSettings.promptOptimizationEnabled = remote.promptOptimizationEnabled
+            userSettings.expressionImprovementEnabled = remote.expressionImprovementEnabled
+            userSettings.keepSourceImages = remote.keepSourceImages
+            userSettings.imageRetentionDays = remote.imageRetentionDays
+            settingsMessage = nil
+        } catch {
+            guard generation == userStateGeneration else { return }
+            settingsMessage = "未能确认当前云端策略，请联网后重试：\(error.localizedDescription)"
+        }
     }
 
     func setCompanionEnabled(_ enabled: Bool) async {
@@ -5394,6 +5430,9 @@ final class AppState: ObservableObject {
                   let profile = try await localExpenseUseCase?.prepareProfile(),
                   let portability = localCompleteBackupPortability,
                   let baseURL = URL(string: AppConfig.supabaseURL) else { throw LocalDataError.invalidRecord }
+            guard profile.cloudUserID == nil || profile.cloudUserID == session.user.id else {
+                throw LocalHistoryMappingError.unsupported("本机工作区仍绑定另一个云账户，请先核对数据归属。")
+            }
             let isCurrent = { [weak self] in self?.isCurrentUserLoad(generation, userId: session.user.id) == true }
             let inspection = try await LocalHistoryMigrationUseCase().inspect(cloudUserID: session.user.id,
                 accessToken: session.accessToken, isCurrent: isCurrent)
@@ -5413,7 +5452,7 @@ final class AppState: ObservableObject {
             historyMigrationArchive = archive
             historyMigrationOwner = session.user.id
             historyMigrationGeneration = generation
-            historyMigrationPreview = inspection.summary + "\n" + preview.confirmationText
+            historyMigrationPreview = "云账户：\(session.user.email ?? session.user.id)。将合并到此 iPhone 现有账本，换号不会另建本机账本。\n" + inspection.summary + "\n" + preview.confirmationText
             historyMigrationMessage = "预检通过，尚未写入本机。请核对范围后确认恢复；相同ID不同内容会整包拒绝。"
         } catch {
             guard generation == userStateGeneration else { return }
@@ -5471,14 +5510,6 @@ final class AppState: ObservableObject {
             recordMonthDetails.removeAll()
             localFactMonths.removeAll()
             let monthKeys = Set([Self.currentMonthKey, String(selectedDateKey.prefix(7))])
-            if localFactReader != nil {
-                for monthKey in monthKeys { await readDeviceFactMonth(monthKey, force: true) }
-            } else {
-                for monthKey in monthKeys {
-                    await readDeviceExpenseMonth(monthKey, force: true)
-                    await readDeviceRecordMonth(monthKey, force: true)
-                }
-            }
             if !mayReadRemoteBusinessData {
                 await loadLocalAccounts()
                 await applyLocalStagingProjection()

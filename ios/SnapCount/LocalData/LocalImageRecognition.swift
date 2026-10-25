@@ -106,6 +106,13 @@ final class LocalImageRecognitionUseCase {
         )
     }
 
+    func hasPersistedOriginal(imageData: Data) -> Bool {
+        guard let profile = try? intakeRepository.activeProfile(),
+              let intake = try? intakeRepository.intake(id: Self.intakeID(profileID: profile.id, imageHash: LocalImageStore.sha256(imageData)), profileID: profile.id),
+              let bytes = try? imageStore.data(at: intake.imagePath) else { return false }
+        return bytes == imageData
+    }
+
     func ingest(
         imageData: Data,
         captureKind: String,

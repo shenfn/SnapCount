@@ -676,7 +676,9 @@ struct TodayView: View {
         } catch {
             pendingLocalImageData = data
             showManualRecordSheet = true
-            uploadMessage = "识别未完成；原图已保留，可重试或手动记录。"
+            uploadMessage = appState.hasPersistedInputImage(data)
+                ? "识别未完成；原图已保存在本机收件箱，可重试或手动记录。"
+                : "识别未完成，原图尚未确认保存在本机；当前表单仍保留输入，请勿退出，先重试保存。"
             uploadMessageIsError = true
             return
         }

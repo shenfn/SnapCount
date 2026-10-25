@@ -42,11 +42,6 @@ final class LocalHistoryMigrationUseCase {
 
     private static func blockers(_ rows: [LocalHistorySourceTable: [[String: AnyCodable]]]) -> [String] {
         var result: [String] = []
-        for row in rows[.accountEntries, default: []] {
-            if (row["is_voided"]?.value as? Bool) == true {
-                result.append("流水 \(row["id"]?.value as? String ?? "未知") 缺少可确认的作废时间兼容，尚未写入")
-            }
-        }
         for row in rows[.records, default: []] {
             let domain = row["domain_key"]?.value as? String ?? ""
             if !Set(["food", "sleep", "sport", "reading", "wallet"]).contains(domain) {
