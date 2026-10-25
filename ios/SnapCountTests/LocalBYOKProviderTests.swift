@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 @testable import SnapCount
 
@@ -11,7 +12,7 @@ final class LocalBYOKProviderTests: XCTestCase {
         let response = #"{"choices":[{"message":{"content":"{\"schema_version\":\"local-recognition-candidate-v1\",\"operation\":\"recognize_only\",\"candidate\":{\"domain_key\":\"food\",\"title\":\"早餐\",\"summary\":\"豆浆\",\"payload\":{\"food_name\":\"豆浆\"},\"confidence\":0.8,\"record_date\":\"2026-10-25\",\"evidence_fields\":[\"food_name\"],\"missing_fields\":[]}}"}}]}"#
         BYOKURLProtocolStub.configure(statusCode: 200, responseData: Data(response.utf8))
         let fakeKey = "sk-test-synthetic-never-real"
-        let image = Data("synthetic image bytes".utf8)
+        let image = try syntheticJPEG()
         let provider = QwenBYOKImageRecognitionProvider(apiKey: fakeKey, session: session)
 
         let candidate = try await provider.recognize(LocalImageRecognitionRequest(
@@ -80,7 +81,7 @@ final class LocalBYOKProviderTests: XCTestCase {
             intakeRepository: intakeRepository,
             provider: provider
         )
-        let imageData = Data("byok-local-image-fixture".utf8)
+        let imageData = try syntheticJPEG()
 
         let outcome = try await recognition.ingest(
             imageData: imageData, captureKind: "camera", filename: "private-name.jpg", uploadToken: nil
@@ -102,6 +103,54 @@ final class LocalBYOKProviderTests: XCTestCase {
         XCTAssertFalse(String(decoding: try XCTUnwrap(BYOKURLProtocolStub.capturedBody), as: UTF8.self).contains("upload_token"))
     }
 
+    func testLF03505CorruptImageIsRejectedBeforeNetworkAndKeptInLocalIntake() async throws {
+        let databaseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("corrupt-image-database-\(UUID().uuidString)", isDirectory: true)
+        let imageDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("corrupt-image-files-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: databaseDirectory)
+            try? FileManager.default.removeItem(at: imageDirectory)
+        }
+        let database = try LocalDatabase(databaseURL: databaseDirectory.appendingPathComponent("local.sqlite"))
+        let imageStore = try LocalImageStore(rootDirectory: imageDirectory)
+        let profileStore = LocalProfileStore(database: database)
+        let recordUseCase = LocalRecordUseCase(
+            profileStore: profileStore,
+            repository: try LocalRecordRepository(database: database),
+            imageStore: imageStore
+        )
+        let intakeRepository = LocalImageIntakeRepository(database: database)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BYOKURLProtocolStub.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        BYOKURLProtocolStub.configure(statusCode: 400, responseData: Data("synthetic rejection".utf8))
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: recordUseCase,
+            imageStore: imageStore,
+            intakeRepository: intakeRepository,
+            provider: QwenBYOKImageRecognitionProvider(apiKey: "sk-test-corrupt-image", session: session)
+        )
+        let corruptBytes = Data("not an encoded image".utf8)
+
+        do {
+            _ = try await recognition.ingest(
+                imageData: corruptBytes, captureKind: "shortcut", filename: "corrupt.jpg"
+            )
+            XCTFail("corrupt image bytes must be rejected")
+        } catch let error as QwenBYOKError {
+            XCTAssertEqual(error, .invalidImage)
+        }
+
+        let profile = try profileStore.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(corruptBytes))"
+        let intake = try XCTUnwrap(intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .failed)
+        XCTAssertEqual(try imageStore.data(at: intake.imagePath), corruptBytes)
+        XCTAssertNil(BYOKURLProtocolStub.capturedRequest)
+    }
+
     func testLF03101BYOKRejectedKeyIsRedactedFromFailure() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [BYOKURLProtocolStub.self]
@@ -113,7 +162,7 @@ final class LocalBYOKProviderTests: XCTestCase {
 
         do {
             _ = try await provider.recognize(LocalImageRecognitionRequest(
-                imageData: Data("synthetic image".utf8), captureKind: "screenshot",
+                imageData: try syntheticJPEG(), captureKind: "screenshot",
                 filename: "private.jpg", uploadToken: nil
             ))
             XCTFail("invalid key response should fail")
@@ -121,6 +170,14 @@ final class LocalBYOKProviderTests: XCTestCase {
             XCTAssertEqual(error, .keyRejected)
             XCTAssertFalse(error.localizedDescription.contains(fakeKey))
         }
+    }
+
+    private func syntheticJPEG() throws -> Data {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8))
+        return try XCTUnwrap(renderer.image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }.jpegData(compressionQuality: 0.8))
     }
 }
 
