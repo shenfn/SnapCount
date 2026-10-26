@@ -28,7 +28,11 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
         let first = LocalHistoryMigrationCoordinator(source: source, downloader: downloader,
             cache: LocalHistoryMigrationCache(database: database, imageStore: store))
         do { _ = try await first.prepare(profileID: profile.id, cloudUserID: user, accessToken: "synthetic", isCurrent: { true }); XCTFail("network must fail") }
-        catch { XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet) }
+        catch {
+            let context = try XCTUnwrap(error as? LocalHistoryMigrationContextError)
+            XCTAssertEqual(context.table, "accounts")
+            XCTAssertEqual((context.underlying as? URLError)?.code, .notConnectedToInternet)
+        }
         fail = false
         try database.writer.close()
         let reopened = try LocalDatabase(databaseURL: url)
@@ -53,7 +57,9 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
         let source = LocalHistoryMigrationSource { path, _, _ in
             guard path == "rest/v1/transactions" else { return [] }
             return ["a.jpg", "b.jpg"].enumerated().map { index, name in
-                ["id": AnyCodable(String(format: "00000000-0000-0000-0000-%012d", index + 1)), "user_id": AnyCodable(user), "image_url": AnyCodable(user.lowercased() + "/" + name)]
+                ["id": AnyCodable(String(format: "00000000-0000-0000-0000-%012d", index + 1)), "user_id": AnyCodable(user),
+                 "type": AnyCodable("expense"), "status": AnyCodable("done"),
+                 "image_url": AnyCodable(user.lowercased() + "/" + name)]
             }
         }
         var calls: [String: Int] = [:]
@@ -66,9 +72,20 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
         }
         let cache = LocalHistoryMigrationCache(database: database, imageStore: try LocalImageStore(rootDirectory: directory.appendingPathComponent("images")))
         let coordinator = LocalHistoryMigrationCoordinator(source: source, downloader: downloader, cache: cache)
-        do { _ = try await coordinator.prepare(profileID: profile.id, cloudUserID: user, accessToken: "synthetic", isCurrent: { true }); XCTFail("download must fail") } catch { }
+        do {
+            _ = try await coordinator.prepare(profileID: profile.id, cloudUserID: user, accessToken: "synthetic", isCurrent: { true })
+            XCTFail("download must fail")
+        } catch {
+            let context = try XCTUnwrap(error as? LocalHistoryMigrationContextError)
+            XCTAssertEqual(context.table, "transactions")
+            XCTAssertEqual(context.field, "image_url")
+            XCTAssertEqual((context.underlying as? URLError)?.code, .timedOut)
+        }
+        XCTAssertEqual(try LocalHistoryMigrationStore(database: database).state(profileID: profile.id)?.status, .paused)
+        XCTAssertEqual(try LocalExpenseRepository(database: database).expenses(profileID: profile.id, monthKey: "2026-10").count, 0)
         fail = false
         let result = try await coordinator.prepare(profileID: profile.id, cloudUserID: user, accessToken: "synthetic", isCurrent: { true })
+        XCTAssertTrue(result.inspection.blockers.isEmpty)
         XCTAssertEqual(calls["a.jpg"], 1)
         XCTAssertEqual(calls["b.jpg"], 2)
         XCTAssertEqual(result.images.count, 2)
