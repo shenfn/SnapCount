@@ -218,7 +218,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
 
         let backup = try source.portability.exportBackup()
         let preview = try source.portability.preview(backup)
-        XCTAssertEqual(preview.schemaVersion, 24)
+        XCTAssertEqual(preview.schemaVersion, LocalCompleteBackupPortability.currentSchemaVersion)
         XCTAssertEqual(preview.imageCount, 4)
         let targetProfile = try target.profileStore.activeProfile()
         _ = try target.portability.importBackup(backup, into: targetProfile.id)

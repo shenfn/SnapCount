@@ -116,4 +116,34 @@ final class LocalHistoryInventoryTests: XCTestCase {
         XCTAssertEqual(snapshot.counts["images.verified"], 1)
         XCTAssertEqual(snapshot.counts["images.missing"], 0)
     }
+    func testLF03921HistoricalUnresolvedInventoryIsSeparateAndProfileScoped() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let images = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images"))
+        let first = UUID(), second = UUID()
+        let bytes = Data("synthetic-unresolved-image".utf8)
+        let image = try images.save(data: bytes, owner: "fixture", bucket: "records")
+        try database.writer.write { db in
+            for (index, profile) in [first, second].enumerated() {
+                try db.execute(sql: "INSERT INTO local_profiles(id,created_at,cloud_user_id,sync_enabled) VALUES(?,?,NULL,0)",
+                    arguments: [profile.uuidString, Date(timeIntervalSince1970: Double(index + 1))])
+                let sourceID = UUID().uuidString.lowercased()
+                try db.execute(sql: """
+                    INSERT INTO local_history_unresolved_records
+                    (id,profile_id,source_table,source_id,source_json,issues_json,image_path,image_hash,created_at,updated_at)
+                    VALUES(?,?,'data_records',?,'{}','["synthetic"]',?,?,?,?)
+                    """, arguments: ["data_records/\(sourceID)", profile.uuidString, sourceID,
+                        image.path, image.hash, Date(), Date()])
+            }
+        }
+        let snapshot = try LocalHistoryInventoryReader(database: database, imageStore: images).readLocal()
+        XCTAssertEqual(snapshot.counts["history.unresolved"], 1)
+        XCTAssertEqual(snapshot.counts["records.food"], 0)
+        XCTAssertEqual(snapshot.counts["records.wallet"], 0)
+        XCTAssertEqual(snapshot.counts["expenses"], 0)
+        XCTAssertEqual(snapshot.counts["images.references"], 1)
+        XCTAssertEqual(snapshot.counts["images.verified"], 1)
+        XCTAssertTrue(LocalHistoryInventoryCatalog.rows.contains { $0.key == "history.unresolved" && $0.sourceTable == nil })
+    }
 }

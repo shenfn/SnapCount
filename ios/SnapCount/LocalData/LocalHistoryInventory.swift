@@ -75,6 +75,7 @@ enum LocalHistoryInventoryCatalog {
         Row(id: "entries", title: "账户流水（总数 / 有效）", sourceTable: .accountEntries, key: "account_entries"),
         Row(id: "cycles", title: "还款周期", sourceTable: .repaymentCycles, key: "repayment_cycles"),
         Row(id: "payments", title: "还款记录", sourceTable: .payments, key: "payments"),
+        Row(id: "history-unresolved", title: "历史待核对（仅保留）", sourceTable: nil, key: "history.unresolved"),
         Row(id: "images", title: "原图（引用 / 去重文件）", sourceTable: nil, key: "images.references")
     ]
 
@@ -190,6 +191,7 @@ final class LocalHistoryInventoryReader {
             counts["account_entries.effective"] = try Self.count(db, "SELECT COUNT(*) FROM local_account_entries WHERE profile_id = ? AND is_voided = 0 AND voided_at IS NULL", profileID)
             counts["repayment_cycles"] = try Self.count(db, "SELECT COUNT(*) FROM local_repayment_cycles WHERE profile_id = ?", profileID)
             counts["payments"] = try Self.count(db, "SELECT COUNT(*) FROM local_liability_payments WHERE profile_id = ?", profileID)
+            counts["history.unresolved"] = try Self.count(db, "SELECT COUNT(*) FROM local_history_unresolved_records WHERE profile_id = ?", profileID)
             let imageRows = try Self.imageRows(db, profileID: profileID)
             counts["images.references"] = imageRows.count
             return LocalRead(profileID: profileID, counts: counts, imageRows: imageRows)
@@ -240,7 +242,7 @@ final class LocalHistoryInventoryReader {
         ["accounts", "accounts.archived", "expenses", "pending_expenses", "transactions.deleted", "incomes", "incomes.deleted", "records.food", "records.sleep", "records.sport",
          "records.reading", "records.wallet", "staging.pending_review", "staging.archived", "staging.discarded",
          "records.other", "records.deleted", "transactions.other", "staging.failed", "staging.other", "account_entries", "account_entries.effective", "repayment_cycles", "payments",
-         "images.references", "images.unique", "images.cached", "images.verified", "images.missing", "images.unverified"]
+         "history.unresolved", "images.references", "images.unique", "images.cached", "images.verified", "images.missing", "images.unverified"]
             .reduce(into: [:]) { $0[$1] = 0 }
     }
 
@@ -250,9 +252,9 @@ final class LocalHistoryInventoryReader {
 
     private static func imageRows(_ db: Database, profileID: String) throws -> [ImageRow] {
         var rows: [ImageRow] = []
-        for table in ["local_expenses", "local_income_records", "local_records", "local_wallet_snapshots", "local_staging_records", "local_pending_transactions"] {
+        for table in ["local_expenses", "local_income_records", "local_records", "local_wallet_snapshots", "local_staging_records", "local_pending_transactions", "local_history_unresolved_records"] {
             let sql: String
-            if table == "local_staging_records" {
+            if table == "local_staging_records" || table == "local_history_unresolved_records" {
                 sql = "SELECT image_path,image_hash FROM \(table) WHERE profile_id = ? AND image_path IS NOT NULL"
             } else if table == "local_pending_transactions" {
                 sql = "SELECT image_path,image_hash FROM \(table) WHERE profile_id = ? AND status <> 'deleted' AND image_path IS NOT NULL"

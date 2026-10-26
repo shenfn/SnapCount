@@ -8,18 +8,23 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
         let schema = try LocalDatabase(databaseURL: directory.appendingPathComponent("schema.sqlite"))
         defer { try? schema.writer.close() }
         let user = UUID(), record = UUID(), candidate = UUID()
+        let profile = try LocalProfileStore(database: schema).activeProfile()
+        let bytes = Data("synthetic-history-photo".utf8)
+        let sourcePath = user.uuidString.lowercased() + "/history.jpg"
         let rows: [LocalHistorySourceTable: [[String: AnyCodable]]] = [
             .records: [["id": AnyCodable(record.uuidString), "user_id": AnyCodable(user.uuidString),
                 "domain_key": AnyCodable("food"), "payload_jsonb": AnyCodable(["legacy_fact": "保留原文"]),
-                "occurred_at": AnyCodable(NSNull()), "created_at": AnyCodable("2026-10-24T10:00:00Z")]],
+                "source_image_path": AnyCodable(sourcePath), "source_image_hash": AnyCodable(LocalImageStore.sha256(bytes)),
+                "occurred_at": AnyCodable(NSNull()), "created_at": AnyCodable("2026-10-24T10:00:00Z"),
+                "updated_at": AnyCodable("2026-10-24T10:00:00Z")]],
             .staging: [["id": AnyCodable(candidate.uuidString), "user_id": AnyCodable(user.uuidString),
                 "status": AnyCodable("unrouted"), "raw_text": AnyCodable("合成未识别截图"),
-                "created_at": AnyCodable("2026-10-24T11:00:00Z")]]
+                "created_at": AnyCodable("2026-10-24T11:00:00Z"), "updated_at": AnyCodable("2026-10-24T11:00:00Z")]]
         ]
         XCTAssertTrue(LocalHistoryMigrationUseCase.blockers(rows).isEmpty)
         let archive = try LocalHistoryMigrationMapper(schema: schema).buildArchive(
             LocalHistoryMigrationInspection(cloudUserID: user.uuidString, rows: rows, blockers: []),
-            profileID: UUID(), images: [:])
+            profileID: profile.id, images: [sourcePath: bytes])
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
         let tables = try XCTUnwrap(root["tables"] as? [String: String])
         let preservedJSON = try XCTUnwrap(tables["local_history_unresolved_records"])
@@ -32,6 +37,31 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
         XCTAssertTrue(source["occurred_at"] is NSNull)
         XCTAssertTrue(raw.contains("保留原文"))
         XCTAssertNil(preserved.first?["record_date"], "原文保全不能伪造业务日期")
+        let images = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images"))
+        let portability = LocalCompleteBackupPortability(database: schema, imageStore: images)
+        XCTAssertEqual(try portability.preview(archive).imageCount, 1)
+        let result = try portability.importBackup(archive, into: profile.id)
+        XCTAssertEqual(result.preservedRows, 2)
+        _ = try portability.importBackup(archive, into: profile.id)
+        let repository = LocalHistoryUnresolvedRepository(database: schema)
+        XCTAssertEqual(try repository.count(profileID: profile.id), 2)
+        let restored = try XCTUnwrap(repository.records(profileID: profile.id).first { $0.sourceID == record })
+        XCTAssertEqual(try images.data(at: XCTUnwrap(restored.imagePath)), bytes)
+        XCTAssertTrue(try LocalFactReader(database: schema).month(profileID: profile.id, monthKey: "2026-10").facts.isEmpty)
+    }
+
+    func testLF03919PreservedRecordReferencedByLedgerRemainsHardBlocked() throws {
+        let record = UUID(), user = UUID()
+        let rows: [LocalHistorySourceTable: [[String: AnyCodable]]] = [
+            .records: [["id": AnyCodable(record.uuidString), "user_id": AnyCodable(user.uuidString),
+                "domain_key": AnyCodable("wallet"), "occurred_at": AnyCodable(NSNull()),
+                "created_at": AnyCodable("2026-10-24T10:00:00Z"), "updated_at": AnyCodable("2026-10-24T10:00:00Z")]],
+            .accountEntries: [["source_table": AnyCodable("data_records"), "source_id": AnyCodable(record.uuidString)]]
+        ]
+        XCTAssertTrue(LocalHistoryMigrationUseCase.blockers(rows).contains { $0.contains("financial_reference") })
+        var withoutSourceTime = rows
+        withoutSourceTime[.records]?[0].removeValue(forKey: "updated_at")
+        XCTAssertTrue(LocalHistoryMigrationUseCase.blockers(withoutSourceTime).contains { $0.contains("updated_at") })
     }
 
     func testLF03917WalletUsesLegacyPayloadOnlyWhenTopLevelValueIsAbsent() throws {
@@ -73,7 +103,7 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
         XCTAssertEqual(try LocalWalletSnapshotRepository(database: schema).history(profileID: profile).count, 2)
     }
 
-    func testLF039MissingOccurredAtReportsSourceTableFieldAndRedactedRecord() throws {
+    func testLF03919MissingOccurredAtIsPreservedWithoutInventingBusinessDate() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let schema = try LocalDatabase(databaseURL: directory.appendingPathComponent("schema.sqlite"))
@@ -87,18 +117,23 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
                     "domain_version": AnyCodable("1.0"),
                     "payload_jsonb": AnyCodable(["meal_type": "午餐", "total_calorie_kcal": 500]),
                     "occurred_at": AnyCodable(NSNull()),
-                    "created_at": AnyCodable("2026-10-24T10:00:00Z")
+                    "created_at": AnyCodable("2026-10-24T10:00:00Z"),
+                    "updated_at": AnyCodable("2026-10-24T10:00:00Z")
                 ]
             ]
         ], blockers: [])
 
-        XCTAssertThrowsError(try LocalHistoryMigrationMapper(schema: schema).buildArchive(
+        let archive = try LocalHistoryMigrationMapper(schema: schema).buildArchive(
             inspection, profileID: UUID(), images: [:]
-        )) { error in
-            XCTAssertTrue(error.localizedDescription.contains("data_records"))
-            XCTAssertTrue(error.localizedDescription.contains("occurred_at"))
-            XCTAssertFalse(error.localizedDescription.contains(record.uuidString))
-        }
+        )
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
+        let tables = try XCTUnwrap(root["tables"] as? [String: String])
+        XCTAssertEqual(tables["local_records"], "[]")
+        let json = try XCTUnwrap(tables["local_history_unresolved_records"])
+        let preserved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
+        XCTAssertEqual(preserved.count, 1)
+        XCTAssertTrue((preserved.first?["issues_json"] as? String)?.contains("occurred_at") == true)
+        XCTAssertNil(preserved.first?["record_date"])
     }
 
     func testLF039HistoryArchiveRestoresReconciledBalanceAndOriginalImage() throws {

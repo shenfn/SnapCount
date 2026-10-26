@@ -30,6 +30,7 @@ private struct AppDefaultLocalStorage {
     let historyMigrationCache: LocalHistoryMigrationCache
     let historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore?
     let historyInventoryReader: LocalHistoryInventoryReader
+    let historyUnresolvedRepository: LocalHistoryUnresolvedRepository
 }
 
 @MainActor
@@ -146,6 +147,11 @@ final class AppState: ObservableObject {
     @Published var historyMigrationProgress: LocalHistoryMigrationProgress?
     @Published var historyMigrationBlockers: [String] = []
     @Published var historyMigrationBlockerCount = 0
+    @Published var historyMigrationUnresolvedCount = 0
+    @Published var historyMigrationPreservationIssues: [String] = []
+    @Published var localHistoryUnresolvedRecords: [LocalHistoryUnresolvedRecord] = []
+    @Published var isLoadingHistoryUnresolvedRecords = false
+    @Published var historyUnresolvedRecordsError: String?
     @Published var localHistoryInventory: LocalHistoryInventorySnapshot?
     @Published var localHistoryInventoryError: String?
     @Published var isLoadingLocalHistoryInventory = false
@@ -163,6 +169,7 @@ final class AppState: ObservableObject {
     private var historyMigrationImportError: Error?
     private let historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore?
     private let historyInventoryReader: LocalHistoryInventoryReader?
+    private let historyUnresolvedRepository: LocalHistoryUnresolvedRepository?
 
     private let authService = SupabaseAuthService()
     private let dashboardRepository: DashboardRepositoryProtocol
@@ -283,6 +290,7 @@ final class AppState: ObservableObject {
         sessionProvider: NativeSessionProvider? = nil,
         localUserSettingsStore: LocalUserSettingsStore = LocalUserSettingsStore(),
         historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore? = nil,
+        historyUnresolvedRepository: LocalHistoryUnresolvedRepository? = nil,
         expressionPlanAcknowledgementSleep: @escaping NativeSleepProvider = {
             try await Task<Never, Never>.sleep(nanoseconds: $0)
         }
@@ -343,6 +351,7 @@ final class AppState: ObservableObject {
             ?? defaultLocalStorage?.historyMigrationDiagnosticStore
             ?? (try? LocalHistoryMigrationDiagnosticStore())
         self.historyInventoryReader = defaultLocalStorage?.historyInventoryReader
+        self.historyUnresolvedRepository = historyUnresolvedRepository ?? defaultLocalStorage?.historyUnresolvedRepository
         self.inboxRepository = inboxRepository
         self.domainRepository = domainRepository
         self.snapshotStore = snapshotStore
@@ -1318,8 +1327,10 @@ final class AppState: ObservableObject {
         if let diagnostic = historyMigrationDiagnostic, diagnostic.code == "HIST-POST-COMMIT-REFRESH" {
             try? historyMigrationDiagnosticStore?.resolve(diagnostic.id, outcome: "本机列表已刷新；迁移入账未重放。", expectedAccountID: currentUserId)
             loadLatestHistoryMigrationDiagnostic()
-            if historyMigrationPhase == "已入账" {
-                historyMigrationMessage = "历史记录已入账；本机列表刷新完成，未重复提交。"
+            if historyMigrationPhase == "已入账" || historyMigrationPhase == "已保留待核对" {
+                historyMigrationMessage = historyMigrationUnresolvedCount > 0
+                    ? "迁移内容已保存，含 \(historyMigrationUnresolvedCount) 条历史待核对原文；列表刷新完成，未重复提交。"
+                    : "历史记录已入账；本机列表刷新完成，未重复提交。"
             }
         }
     }
@@ -5608,6 +5619,8 @@ final class AppState: ObservableObject {
         historyMigrationProgress = nil
         historyMigrationBlockers = []
         historyMigrationBlockerCount = 0
+        historyMigrationUnresolvedCount = 0
+        historyMigrationPreservationIssues = []
         historyMigrationPhase = "验证会话"
         defer {
             if generation == userStateGeneration, attempt == historyMigrationAttempt {
@@ -5635,7 +5648,9 @@ final class AppState: ObservableObject {
                 guard existing.cloudUserID == session.user.id else { throw LocalHistoryMigrationError.identityMismatch }
                 if existing.status == .completed {
                     try? cache.cleanupAfterCompletion(existing)
-                    historyMigrationMessage = "此本机工作区已完成该云账户的历史迁移。后续云端变化请使用已授权的同步范围。"
+                    historyMigrationUnresolvedCount = try historyUnresolvedRepository?.count(profileID: profile.id) ?? 0
+                    historyMigrationPhase = historyMigrationUnresolvedCount > 0 ? "已保留待核对" : "已入账"
+                    historyMigrationMessage = "此工作区已完成一次历史迁入，历史待核对 \(historyMigrationUnresolvedCount) 条仍不属于正式入账。普通同步只支持其已声明范围，不代表全域云本一致。"
                     return
                 }
             }
@@ -5652,7 +5667,7 @@ final class AppState: ObservableObject {
                 try cache.pause(prepared.state)
                 historyMigrationPhase = "预检阻塞"
                 historyMigrationBlockerCount = inspection.blockers.count
-                historyMigrationBlockers = Array(inspection.blockers.prefix(200))
+                historyMigrationBlockers = inspection.blockers
                 historyMigrationMessage = inspection.summary
                 return
             }
@@ -5663,6 +5678,12 @@ final class AppState: ObservableObject {
             let archive = try LocalHistoryMigrationMapper(schema: LocalDatabase()).buildArchive(
                 inspection, profileID: profile.id, images: prepared.images)
             let preview = try portability.preview(archive)
+            historyMigrationUnresolvedCount = preview.tableCounts["local_history_unresolved_records", default: 0]
+            historyMigrationPreservationIssues = [LocalHistorySourceTable.records, .staging].flatMap { table in
+                inspection.rows[table, default: []].flatMap {
+                    LocalHistoryMigrationUseCase.preservationIssues(table: table, row: $0, rows: inspection.rows)
+                }
+            }
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             historyMigrationSourceDigest = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
             historyMigrationImageDigests = prepared.images.mapValues(LocalImageStore.sha256)
@@ -5671,7 +5692,7 @@ final class AppState: ObservableObject {
             historyMigrationGeneration = generation
             historyMigrationPhase = "等待用户确认"
             historyMigrationPreview = "云账户：\(session.user.email ?? session.user.id)。将合并到此 iPhone 现有账本，换号不会另建本机账本。\n" + inspection.summary + "\n" + preview.confirmationText
-            historyMigrationMessage = "预检通过，源数据与图片已暂存在本机，尚未入账。确认前会重新核对源数据；相同ID不同内容会整包拒绝。"
+            historyMigrationMessage = "预检通过，源数据与图片已暂存在本机，尚未提交。确认会一起保存可等价转换的数据与 \(historyMigrationUnresolvedCount) 条历史待核对原文；原文不会计入日统计。确认前重新核对源数据，冲突仍整包拒绝。"
             if let diagnostic = historyMigrationDiagnostic,
                diagnostic.operation == "history-migration", !diagnostic.committed, diagnostic.resolution == nil,
                diagnostic.accountHint == LocalHistoryMigrationDiagnosticStore.identityHint(session.user.id) {
@@ -5689,6 +5710,42 @@ final class AppState: ObservableObject {
             historyMigrationPhase = "预检暂停"
             historyMigrationMessage = recordHistoryMigrationFailure(error, committed: false, phase: failedPhase)
         }
+    }
+
+    func loadLocalHistoryUnresolvedRecords() async {
+        guard !isLoadingHistoryUnresolvedRecords else { return }
+        let generation = userStateGeneration
+        isLoadingHistoryUnresolvedRecords = true
+        historyUnresolvedRecordsError = nil
+        defer { if generation == userStateGeneration { isLoadingHistoryUnresolvedRecords = false } }
+        do {
+            guard let repository = historyUnresolvedRepository else { throw LocalDataError.invalidRecord }
+            guard let profileID = try localFactReader?.activeProfileID() else {
+                localHistoryUnresolvedRecords = []
+                return
+            }
+            let records = try await Task.detached(priority: .utility) {
+                try repository.records(profileID: profileID)
+            }.value
+            guard generation == userStateGeneration else { return }
+            localHistoryUnresolvedRecords = records
+        } catch {
+            guard generation == userStateGeneration else { return }
+            localHistoryUnresolvedRecords = []
+            historyUnresolvedRecordsError = "历史待核对记录读取失败；未按空清单显示，请重试本机读取。"
+        }
+    }
+
+    func localImageDataForHistoryUnresolvedRecord(id: String) async throws -> Data {
+        let generation = userStateGeneration
+        guard let repository = historyUnresolvedRepository, let store = localImageStore,
+              let profileID = try localFactReader?.activeProfileID(),
+              let record = try repository.record(id: id, profileID: profileID),
+              let path = record.imagePath, let hash = record.imageHash else { throw LocalDataError.recordNotFound }
+        let bytes = try await Task.detached(priority: .utility) { try store.data(at: path) }.value
+        guard generation == userStateGeneration else { throw CancellationError() }
+        guard LocalImageStore.sha256(bytes) == hash else { throw LocalCompleteBackupError.invalidImage("history-image") }
+        return bytes
     }
 
     func loadLocalHistoryInventory() async {
@@ -5843,6 +5900,8 @@ final class AppState: ObservableObject {
             historyMigrationBlockers = []
             historyMigrationBlockerCount = 0
             historyMigrationPhase = "预检已丢弃"
+            historyMigrationPreservationIssues = []
+            historyMigrationUnresolvedCount = 0
             historyMigrationMessage = "已丢弃预检缓存。再次预检会重新读取云端历史，本机原有账目和图片未改变。"
         } catch { historyMigrationMessage = "无法丢弃旧预检：\(error.localizedDescription)" }
     }
@@ -5870,6 +5929,7 @@ final class AppState: ObservableObject {
                 historyMigrationArchive = nil
                 historyMigrationPreview = nil
                 historyMigrationCheckpoint = nil
+                historyMigrationPreservationIssues = []
                 historyMigrationMessage = "云端源数据已变化，旧预检缓存已失效。请重新预检；尚未入账。"
                 return false
             }
@@ -5898,14 +5958,18 @@ final class AppState: ObservableObject {
             if imported { try? cache.cleanupAfterCompletion(checkpoint) }
             guard isCurrentUserLoad(generation, userId: owner) else { return false }
             if imported {
-                historyMigrationPhase = "已入账"
+                let savedPhase = historyMigrationUnresolvedCount > 0 ? "已保留待核对" : "已入账"
+                historyMigrationPhase = savedPhase
+                historyMigrationPreservationIssues = []
+                historyMigrationBlockers = []
+                historyMigrationBlockerCount = 0
                 historyMigrationArchive = nil
                 historyMigrationPreview = nil
                 historyMigrationCheckpoint = nil
                 if localProjectionRefreshMessage != nil {
                     historyMigrationPhase = "入账后刷新"
                     historyMigrationMessage = recordHistoryMigrationFailure(LocalHistoryMigrationPostCommitRefreshError(), committed: true)
-                    historyMigrationPhase = "已入账"
+                    historyMigrationPhase = savedPhase
                 } else {
                     historyMigrationMessage = settingsMessage
                 }
@@ -5947,7 +6011,11 @@ final class AppState: ObservableObject {
                 await applyLocalStagingProjection()
             }
             for monthKey in monthKeys { await refreshLocalMonthProjection(monthKey: monthKey) }
-            settingsMessage = localWriteMessage("本地恢复完成：新增 \(result.insertedRows) 条，已存在 \(result.skippedRows) 条，恢复 \(result.restoredImages) 张图片。")
+            let preserved = result.preservedRows > 0
+                ? "包中 \(result.preservedRows) 条历史待核对原文已保留，尚未转为正式记录，不计入日统计。" : ""
+            settingsMessage = localWriteMessage("本地恢复完成：新增 \(result.insertedRows) 条，已存在 \(result.skippedRows) 条，恢复 \(result.restoredImages) 张图片。" + preserved)
+            await loadLocalHistoryUnresolvedRecords()
+            await loadLocalHistoryInventory()
             return true
         } catch {
             if historyMigration != nil { historyMigrationImportError = error }
@@ -5960,7 +6028,7 @@ final class AppState: ObservableObject {
         let failurePhase = phase ?? historyMigrationPhase
         guard let store = historyMigrationDiagnosticStore else {
             let diagnosticID = UUID().uuidString.lowercased()
-            let impact = committed ? "数据已入账，但后续刷新未完成。" : "本次尚未入账。"
+            let impact = committed ? "迁移内容已保存（可能包含待核对原文），但后续刷新未完成。" : "本次尚未入账。"
             return "历史迁移在\(failurePhase)暂停。\(impact)请查看错误阶段后处理。诊断编号：\(diagnosticID)。"
         }
         let progressSummary: String? = historyMigrationProgress.map { progress in
@@ -6232,6 +6300,11 @@ final class AppState: ObservableObject {
     }
 
     func resetUserScopedState() {
+        localHistoryUnresolvedRecords = []
+        isLoadingHistoryUnresolvedRecords = false
+        historyUnresolvedRecordsError = nil
+        historyMigrationUnresolvedCount = 0
+        historyMigrationPreservationIssues = []
         cloudHistoryInventory = .notRead
         isReadingCloudHistoryInventory = false
         localSyncFailureDiagnostic = nil
@@ -6787,7 +6860,8 @@ final class AppState: ObservableObject {
             financialBindingRepository: try LocalFinancialBindingRepository(database: database),
             historyMigrationCache: LocalHistoryMigrationCache(database: database, imageStore: imageStore),
             historyMigrationDiagnosticStore: try? LocalHistoryMigrationDiagnosticStore(),
-            historyInventoryReader: LocalHistoryInventoryReader(database: database, imageStore: imageStore)
+            historyInventoryReader: LocalHistoryInventoryReader(database: database, imageStore: imageStore),
+            historyUnresolvedRepository: LocalHistoryUnresolvedRepository(database: database)
         )
     }
 

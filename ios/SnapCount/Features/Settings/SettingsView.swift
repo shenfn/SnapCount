@@ -839,25 +839,17 @@ struct LocalHistoryMigrationView: View {
 
             if appState.historyMigrationBlockerCount > 0 {
                 Section("迁移问题与恢复") {
-                    Text("共有 \(appState.historyMigrationBlockerCount) 项需要核对；本次尚未入账。先核对源表、字段和历史写入合同，不会自动跳过或补造事实。")
-                        .font(.subheadline)
-                        .foregroundStyle(JieziTheme.coral)
-                    DisclosureGroup("查看问题列表（最多展示 200 项）") {
-                        ForEach(Array(appState.historyMigrationBlockers.enumerated()), id: \.offset) { _, issue in
-                            Text(issue)
-                                .font(.caption)
-                                .textSelection(.enabled)
-                        }
-                        if appState.historyMigrationBlockerCount > appState.historyMigrationBlockers.count {
-                            Text("其余 \(appState.historyMigrationBlockerCount - appState.historyMigrationBlockers.count) 项已汇总，重新读取可查看最新清单。")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    Text("恢复：核对具体字段或来源后重新读取；若源数据仍不能等价映射，保留阻塞并导出诊断。")
-                        .font(.caption).foregroundStyle(.secondary)
+                    LocalHistoryMigrationIssueList(blockers: appState.historyMigrationBlockers)
                 }
             }
 
+            if !appState.historyMigrationPreservationIssues.isEmpty {
+                Section("将保留的历史待核对") {
+                    Text("这些兼容问题不会跳过记录；确认后将保存历史原文和原图，暂不作为正式记录，也不计入账目、余额或按日统计。")
+                        .font(.subheadline)
+                    LocalHistoryMigrationIssueList(blockers: appState.historyMigrationPreservationIssues)
+                }
+            }
             if let diagnostic = appState.historyMigrationDiagnostic {
                 Section("最近诊断") {
                     Text(diagnostic.userMessage)
@@ -879,6 +871,12 @@ struct LocalHistoryMigrationView: View {
                 }
             }
 
+            Section("本机历史保留") {
+                NavigationLink("查看历史待核对记录") { LocalHistoryUnresolvedRecordsView() }
+                Text("确认恢复后，无法等价转换的记录会单独保留原文和原图，不混入账目与余额。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("迁移操作") {
                 Button("预检或继续迁移") {
                     preparationTask = Task { await appState.prepareCloudHistoryMigration() }
@@ -898,11 +896,11 @@ struct LocalHistoryMigrationView: View {
                     Button("确认恢复到本机") { showsConfirmation = true }
                         .disabled(appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
                 }
-                if appState.historyMigrationPhase == "已入账", appState.localProjectionRefreshMessage != nil {
+                if ["已入账", "已保留待核对"].contains(appState.historyMigrationPhase), appState.localProjectionRefreshMessage != nil {
                     Button("只读重试本机列表刷新") {
                         Task { await appState.retryLocalProjectionRefresh() }
                     }
-                    Text("迁移数据已经入账。此操作只重新读取本机列表，不会再次导入或增加流水。")
+                    Text("迁移内容已经保存。此操作只重新读取本机列表，不会再次恢复、转为正式记录或增加流水。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Button("丢弃预检缓存并重新读取") { appState.restartCloudHistoryMigrationPreview() }
@@ -914,7 +912,7 @@ struct LocalHistoryMigrationView: View {
             Section("迁移范围与规则") {
                 DisclosureGroup("查看详细说明") {
                     Text("读取当前登录云账户的账户、流水、还款、消费、收入、四域记录、候选和原图。预检会在本机缓存源数据和原图，确认前不会入账，也不会自动开启云同步。")
-                    Text("遇到缺图、余额不一致、无法等价恢复的历史状态或同ID内容冲突时，整包停止并显示原因。中断或重启后再次预检，将续传缺失页和图片；确认前仍会重新核对源数据。")
+                    Text("无法等价转换的历史记录会连同原文、原图和核对原因单独保留，不计入正式记录、余额或按日统计。身份不符、账务关系不完整、余额不一致、缺图或同ID内容冲突等硬失败仍会阻塞整包恢复。中断后可继续预检；确认前仍会重新核对源数据。")
                 }
                 .font(.footnote).foregroundStyle(.secondary)
             }
@@ -930,13 +928,14 @@ struct LocalHistoryMigrationView: View {
             Button("确认恢复") { Task { _ = await appState.confirmCloudHistoryMigration() } }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("确认前会再次读取云端源数据和原图校验，可能产生下载流量。恢复不删除云副本，不改变云同步授权。建议先导出完整本地备份。")
+            Text("确认前会再次读取云端源数据并校验原图，可能产生下载流量。可等价转换的内容恢复为正式记录，其余历史记录连同原文、原图和核对原因保存在本机历史待核对清单，不计入余额或按日统计。硬失败仍会阻塞整包恢复。恢复不删除云副本，不改变同步授权。建议先导出完整本地备份。")
         }
     }
 
     private var statusSummary: String {
         if appState.isPreparingHistoryMigration { return "历史迁移正在 \(appState.historyMigrationPhase)，尚未确认入账。" }
         if appState.historyMigrationPhase == "已入账" { return "历史迁移已入账；请核对本机数量和恢复结果。" }
+        if appState.historyMigrationPhase == "已保留待核对" { return "迁移内容已保存，其中历史待核对尚未转为正式记录。请核对本机数量和历史待核对清单。" }
         if appState.historyMigrationPreview != nil { return "预检已通过，等待你确认；当前尚未入账。" }
         if appState.historyMigrationPhase == "预检暂停" || appState.historyMigrationPhase == "预检阻塞" || appState.historyMigrationPhase == "事务入账" { return "历史迁移暂停；请先查看问题和诊断。" }
         if appState.historyMigrationPhase == "已取消" || appState.historyMigrationPhase == "已暂停" { return "预检已暂停，未入账；已缓存进度可继续。" }
@@ -957,6 +956,7 @@ struct LocalHistoryMigrationView: View {
     }
 
     private func cloudValue(for row: LocalHistoryInventoryCatalog.Row) -> String {
+        if row.key == "history.unresolved" { return "本机保留" }
         let inventory = appState.cloudHistoryInventory
         guard inventory.status != .notRead else { return "未读取" }
         let value = inventory.counts[row.key, default: 0]
@@ -1322,5 +1322,53 @@ private struct ShortcutStepRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+
+private struct LocalHistoryMigrationIssueList: View {
+    let blockers: [String]
+    @State private var page = 0
+    @State private var didCopy = false
+
+    var body: some View {
+        let report = LocalHistoryMigrationIssueReport(blockers: blockers)
+        let currentPage = min(page, max(0, report.pageCount - 1))
+        Text(report.summary)
+            .font(.subheadline)
+            .foregroundStyle(JieziTheme.coral)
+        Text("这是迁移兼容检查结果，不代表这些记录已损坏。同一条记录可能出现多项问题。请保留数据并分享脱敏清单，由开发核对历史兼容；重复预检不会自动修复。")
+            .font(.caption).foregroundStyle(.secondary)
+        ForEach(report.groups) { group in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(group.title).font(.subheadline)
+                Text("\(group.issueCount) 项 · \(group.recordCount) 条可识别记录")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+        }
+        DisclosureGroup("查看全部 \(report.issues.count) 项问题") {
+            Text("第 \(currentPage + 1) / \(report.pageCount) 页 · 每页最多 \(LocalHistoryMigrationIssueReport.pageSize) 项")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(Array(report.issues(onPage: currentPage).enumerated()), id: \.offset) { index, issue in
+                Text("\(currentPage * LocalHistoryMigrationIssueReport.pageSize + index + 1). \(issue)")
+                    .font(.caption).textSelection(.enabled)
+            }
+            HStack {
+                Button("上一页") { page = currentPage - 1 }.disabled(currentPage == 0)
+                Spacer()
+                Button("下一页") { page = currentPage + 1 }.disabled(currentPage + 1 >= report.pageCount)
+            }
+            .buttonStyle(.borderless)
+        }
+        Button(didCopy ? "已复制完整脱敏清单" : "复制完整脱敏清单") {
+            UIPasteboard.general.string = report.exportText
+            didCopy = true
+        }
+        ShareLink("分享完整脱敏清单", item: report.exportText)
+        .onChange(of: blockers) { _, _ in
+            page = 0
+            didCopy = false
+        }
     }
 }

@@ -63,7 +63,7 @@ struct LocalHistoryMigrationDiagnostic: Codable, Equatable, Identifiable {
             : (operation == "local-storage-init" ? "初始化失败" : "失败")
         let impact: String
         switch operation {
-        case "history-migration": impact = committed ? "数据已入账，但后续刷新未完成。" : "本次尚未入账。"
+        case "history-migration": impact = committed ? "迁移内容已提交（可能含待核对原文），但后续刷新未完成。" : "本次尚未入账。"
         case "local-sync": impact = "本机事实仍保留；云端同步结果可能未完整确认。"
         case "local-storage-init": impact = "本机数据库不可用；未改用空库或云端覆盖。"
         case "local-write-refresh": impact = "数据已保存；当前列表尚未刷新。"
@@ -90,7 +90,7 @@ struct LocalHistoryMigrationDiagnostic: Codable, Equatable, Identifiable {
 
     private var commitSummary: String {
         switch operation ?? "history-migration" {
-        case "history-migration": return committed ? "已入账" : "尚未入账"
+        case "history-migration": return committed ? "迁移内容已提交，待核对原文不等于正式入账" : "尚未入账"
         case "local-write-refresh": return committed ? "原数据已保存" : "原数据未确认保存"
         case "local-sync": return committed ? "同步完整完成" : "未确认全部完成"
         default: return committed ? "业务数据已修改" : "未修改业务数据"
@@ -381,7 +381,7 @@ final class LocalHistoryMigrationDiagnosticStore {
                 return "迁移范围或分页状态不一致。"
             }
         }
-        if error is LocalHistoryMigrationPostCommitRefreshError { return "历史数据已入账，但本机列表尚未刷新。" }
+        if error is LocalHistoryMigrationPostCommitRefreshError { return "迁移内容已保存（可能包含待核对原文），但本机列表尚未刷新。" }
         if error is LocalWriteRefreshError { return "原数据已保存，但本机列表尚未刷新。" }
         if error is CancellationError { return "操作已取消，未将取消视为数据失败。" }
         if let error = error as? LocalCompleteBackupError {

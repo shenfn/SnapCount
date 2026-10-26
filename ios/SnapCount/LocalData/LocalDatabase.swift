@@ -628,6 +628,23 @@ final class LocalDatabase {
                 );
                 """)
         }
+        migrator.registerMigration("local-v27-history-unresolved-originals") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_history_unresolved_records (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    source_table TEXT NOT NULL CHECK(source_table IN ('data_records','staging_records')),
+                    source_id TEXT NOT NULL,
+                    source_json TEXT NOT NULL CHECK(json_valid(source_json) AND json_type(source_json) = 'object'),
+                    issues_json TEXT NOT NULL CHECK(json_valid(issues_json) AND json_type(issues_json) = 'array' AND json_array_length(issues_json) > 0),
+                    image_path TEXT, image_hash TEXT,
+                    created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+                    CHECK ((image_path IS NULL AND image_hash IS NULL) OR (image_path IS NOT NULL AND image_hash IS NOT NULL)),
+                    UNIQUE(profile_id, source_table, source_id)
+                );
+                CREATE INDEX local_history_unresolved_profile_idx ON local_history_unresolved_records(profile_id, created_at, id);
+                """)
+        }
         return migrator
     }
 }

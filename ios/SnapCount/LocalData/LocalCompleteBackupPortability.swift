@@ -25,7 +25,7 @@ struct LocalCompleteBackupPreview: Equatable {
         let imageSize = ByteCountFormatter.string(fromByteCount: Int64(imageBytes), countStyle: .file)
         let scope = [
             "账户 \(accounts)", "消费 \(expenses)", "收入 \(incomes)",
-            "其他记录 \(records)", "钱包快照 \(wallets)", "候选 \(candidates)", "账务关系/历史 \(ledger)"
+            "其他记录 \(records)", "钱包快照 \(wallets)", "候选 \(candidates)", "历史待核对 \(tableCounts["local_history_unresolved_records", default: 0])", "账务关系/历史 \(ledger)"
         ].joined(separator: "、")
         return "\(formatName) v\(schemaVersion)。\(scope)。共 \(totalRows) 条，图片 \(imageCount) 张（\(imageSize)）。导入会合并到本机当前数据；冲突时整包回滚。不会恢复登录、同步授权或 API Key。"
     }
@@ -35,6 +35,7 @@ struct LocalCompleteBackupImportResult: Equatable {
     let insertedRows: Int
     let skippedRows: Int
     let restoredImages: Int
+    var preservedRows: Int = 0
 }
 
 enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
@@ -63,7 +64,7 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 24
+    static let currentSchemaVersion = 27
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
     private static let maximumImageBytes = 128 * 1024 * 1024
     private static let maximumArchiveBytes = 180 * 1024 * 1024
@@ -80,7 +81,8 @@ final class LocalCompleteBackupPortability {
         "local_liability_payments",
         "local_account_entries",
         "local_image_intakes",
-        "local_pending_transactions"
+        "local_pending_transactions",
+        "local_history_unresolved_records"
     ]
 
     private let database: LocalDatabase
@@ -120,7 +122,8 @@ final class LocalCompleteBackupPortability {
                 ("local_pending_transactions", "status = 'pending'"),
                 ("local_staging_records", "status IN ('pending_review', 'failed') OR (domain_key = 'wallet' AND resolved_action = 'liability_repayment_confirmed')"),
                 ("local_image_intakes", "status IN ('failed', 'receiving')"),
-                ("local_wallet_snapshots", "1 = 1")
+                ("local_wallet_snapshots", "1 = 1"),
+                ("local_history_unresolved_records", "1 = 1")
             ] {
                 for row in try Row.fetchAll(
                     db,
@@ -309,7 +312,8 @@ final class LocalCompleteBackupPortability {
                 return LocalCompleteBackupImportResult(
                     insertedRows: inserted,
                     skippedRows: skipped.count,
-                    restoredImages: createdImagePaths.count
+                    restoredImages: createdImagePaths.count,
+                    preservedRows: decoded.rows["local_history_unresolved_records", default: []].count
                 )
             }
         } catch {
@@ -330,10 +334,14 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard [15, 16, 17, 18, 19, 20, 22, 23, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
+        guard [15, 16, 17, 18, 19, 20, 22, 23, 24, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
         var tables = archive.tables
+        if archive.schemaVersion < 27 {
+            guard tables["local_history_unresolved_records"] == nil else { throw LocalCompleteBackupError.invalidFormat }
+            tables["local_history_unresolved_records"] = "[]"
+        }
         if archive.schemaVersion < 22 { tables["local_pending_transactions"] = "[]" }
         let archiveTables = Set(tables.keys)
         let legacyTables = Set(Self.tableNames).subtracting(["local_wallet_snapshots"])
@@ -400,6 +408,9 @@ final class LocalCompleteBackupPortability {
             rows["local_liability_payments"] = payments
         }
         try Self.validateFinancialRows(rows)
+        for row in rows["local_history_unresolved_records"] ?? [] {
+            try LocalHistoryUnresolvedRepository.validate(row)
+        }
 
         var images: [String: Data] = [:]
         var totalImageBytes = 0
@@ -548,11 +559,14 @@ final class LocalCompleteBackupPortability {
             ("local_pending_transactions", "status", Set(["pending"])),
             ("local_staging_records", "status", Set(["pending_review", "failed", "archived"])),
             ("local_image_intakes", "status", Set(["receiving", "failed"])),
-            ("local_wallet_snapshots", "deleted_at", Set<String>())
+            ("local_wallet_snapshots", "deleted_at", Set<String>()),
+            ("local_history_unresolved_records", "", Set<String>())
         ] {
             for row in rows[table] ?? [] {
                 let active: Bool
-                if table == "local_wallet_snapshots" {
+                if table == "local_history_unresolved_records" {
+                    active = true
+                } else if table == "local_wallet_snapshots" {
                     active = schemaVersion >= 18 || (row["deleted_at"] is NSNull)
                 } else if table == "local_staging_records" {
                     active = activeStatuses.contains(row[statusField] as? String ?? "")

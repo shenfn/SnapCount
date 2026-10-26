@@ -29,6 +29,9 @@ final class LocalHistoryMigrationMapper {
         var tables: [String: [[String: Any]]] = [:]
         var imageFiles: [String: [String: Any]] = [:]
         let walletIDs = Set(inspection.rows[.records, default: []].filter { ($0["domain_key"]?.value as? String) == "wallet" }.compactMap { ($0["id"]?.value as? String)?.lowercased() })
+        if let blocker = LocalHistoryMigrationUseCase.blockers(inspection.rows).first {
+            throw LocalHistoryMappingError.unsupported(blocker)
+        }
         try reconcile(inspection)
         for source in LocalHistorySourceTable.allCases {
             let raw = try JSONEncoder().encode(inspection.rows[source, default: []])
@@ -44,6 +47,17 @@ final class LocalHistoryMigrationMapper {
                 func copy(_ source: String, _ target: String? = nil) { if let value = row[source], !(value is NSNull) { mapped[target ?? source] = value } }
                 func minor(_ source: String, _ target: String) throws { if let value = row[source], !(value is NSNull) { mapped[target] = try Self.minor(value) } }
                 copy("deleted_at")
+                let preservationIssues = LocalHistoryMigrationUseCase.preservationIssues(
+                    table: source, row: row.mapValues(AnyCodable.init), rows: inspection.rows)
+                if !preservationIssues.isEmpty {
+                    table = "local_history_unresolved_records"
+                    mapped["id"] = source.rawValue + "/" + id.lowercased()
+                    mapped["source_table"] = source.rawValue
+                    mapped["source_id"] = id
+                    mapped["source_json"] = String(decoding: try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys]), as: UTF8.self)
+                    mapped["issues_json"] = String(decoding: try JSONSerialization.data(withJSONObject: preservationIssues, options: [.sortedKeys]), as: UTF8.self)
+                    copy("created_at"); copy("updated_at")
+                } else {
                 switch source {
                 case .accounts:
                     table = "local_accounts"
@@ -98,6 +112,8 @@ final class LocalHistoryMigrationMapper {
                     mapped["payload_json"] = String(decoding: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]), as: UTF8.self)
                     mapped["domain_key"] = domain
                     for key in ["title", "summary", "occurred_at", "created_at", "updated_at", "linked_account_id", "account_snapshot_kind"] { copy(key) }
+                    mapped["title"] = row["title"] as? String ?? "历史记录"
+                    mapped["summary"] = row["summary"] as? String ?? ""
                     guard let occurredAt = row["occurred_at"] as? String, !occurredAt.isEmpty else {
                         throw LocalHistoryMappingError.sourceFieldMissing(table: "data_records", field: "occurred_at", recordID: id)
                     }
@@ -107,8 +123,13 @@ final class LocalHistoryMigrationMapper {
                         throw LocalHistoryMappingError.sourceFieldInvalid(table: "data_records", field: "occurred_at", recordID: id)
                     }
                     if domain == "wallet" {
-                        try minor("snapshot_balance", "snapshot_balance_minor")
-                        guard mapped["snapshot_balance_minor"] != nil else { throw LocalHistoryMappingError.unsupported("钱包 \(id) 缺少snapshot_balance") }
+                        guard let balance = LocalHistorySourceCompatibility.walletValue(row, field: "snapshot_balance") else {
+                            throw LocalHistoryMappingError.sourceFieldMissing(table: "data_records", field: "snapshot_balance", recordID: id)
+                        }
+                        mapped["snapshot_balance_minor"] = try Self.minor(balance)
+                        for key in ["linked_account_id", "account_snapshot_kind"] {
+                            if let value = LocalHistorySourceCompatibility.walletValue(row, field: key) { mapped[key] = value }
+                        }
                         mapped["currency"] = payload["currency"] ?? "CNY"
                         if mapped["linked_account_id"] != nil { mapped["linked_action"] = "link" }
                     } else {
@@ -131,16 +152,18 @@ final class LocalHistoryMigrationMapper {
                     guard LocalRecordValidation.supportedStagingDomainKeys.contains(domain)
                             || (localStatus == "archived" && domain == "expense") else { throw LocalHistoryMappingError.unsupported("候选 \(id) 域尚未支持：\(domain)") }
                     let nested = payload["payload_jsonb"] as? [String: Any] ?? [:]
-                    let recordDate = (payload["record_date"] ?? nested["record_date"]) as? String
+                    let recordDate = (payload["record_date"] as? String) ?? (nested["record_date"] as? String)
                     guard let recordDate, NativeLocalDate.monthKey(from: recordDate) != nil else { throw LocalHistoryMappingError.unsupported("候选 \(id) 缺少真实业务日期") }
                     if localStatus == "archived", row["target_record_id"] as? String == nil {
                         throw LocalHistoryMappingError.unsupported("候选 \(id) 缺少可核对的归档目标")
                     }
                     mapped["domain_key"] = domain; mapped["status"] = localStatus; mapped["record_date"] = recordDate
                     mapped["payload_json"] = String(decoding: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]), as: UTF8.self)
-                    mapped["title"] = row["ai_summary"] ?? "历史候选"; mapped["summary"] = row["ai_summary"] ?? ""
+                    mapped["title"] = row["ai_summary"] as? String ?? "历史候选"
+                    mapped["summary"] = row["ai_summary"] as? String ?? ""
                     for key in ["confidence", "created_at", "updated_at", "target_record_id", "resolved_action", "resolved_at"] { copy(key) }
                     mapped["source_kind"] = "imported"
+                }
                 }
                 let imageReference = ["image_url", "source_image_path", "image_path"].compactMap { field -> (String, String)? in
                     guard let path = row[field] as? String, !path.isEmpty else { return nil }
@@ -190,7 +213,7 @@ final class LocalHistoryMigrationMapper {
                 }
             }
         }
-        let allTables = ["local_accounts", "local_wallet_snapshots", "local_records", "local_expenses", "local_income_records", "local_staging_records", "local_repayment_cycles", "local_liability_payments", "local_account_entries", "local_image_intakes", "local_pending_transactions"]
+        let allTables = ["local_accounts", "local_wallet_snapshots", "local_records", "local_expenses", "local_income_records", "local_staging_records", "local_repayment_cycles", "local_liability_payments", "local_account_entries", "local_image_intakes", "local_pending_transactions", "local_history_unresolved_records"]
         var encoded: [String: String] = [:]
         for table in allTables {
             encoded[table] = String(decoding: try JSONSerialization.data(withJSONObject: tables[table, default: []], options: [.sortedKeys]), as: UTF8.self)
