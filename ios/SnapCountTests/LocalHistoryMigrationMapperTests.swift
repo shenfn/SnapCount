@@ -2,15 +2,50 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryMigrationMapperTests: XCTestCase {
+    func testLF03918UnknownDateAndUnroutedCandidateArePreservedWithoutFormalFacts() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let schema = try LocalDatabase(databaseURL: directory.appendingPathComponent("schema.sqlite"))
+        defer { try? schema.writer.close() }
+        let user = UUID(), record = UUID(), candidate = UUID()
+        let rows: [LocalHistorySourceTable: [[String: AnyCodable]]] = [
+            .records: [["id": AnyCodable(record.uuidString), "user_id": AnyCodable(user.uuidString),
+                "domain_key": AnyCodable("food"), "payload_jsonb": AnyCodable(["legacy_fact": "保留原文"]),
+                "occurred_at": AnyCodable(NSNull()), "created_at": AnyCodable("2026-10-24T10:00:00Z")]],
+            .staging: [["id": AnyCodable(candidate.uuidString), "user_id": AnyCodable(user.uuidString),
+                "status": AnyCodable("unrouted"), "raw_text": AnyCodable("合成未识别截图"),
+                "created_at": AnyCodable("2026-10-24T11:00:00Z")]]
+        ]
+        XCTAssertTrue(LocalHistoryMigrationUseCase.blockers(rows).isEmpty)
+        let archive = try LocalHistoryMigrationMapper(schema: schema).buildArchive(
+            LocalHistoryMigrationInspection(cloudUserID: user.uuidString, rows: rows, blockers: []),
+            profileID: UUID(), images: [:])
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
+        let tables = try XCTUnwrap(root["tables"] as? [String: String])
+        let preservedJSON = try XCTUnwrap(tables["local_history_unresolved_records"])
+        let preserved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(preservedJSON.utf8)) as? [[String: Any]])
+        XCTAssertEqual(preserved.count, 2)
+        XCTAssertEqual(tables["local_records"], "[]")
+        XCTAssertEqual(tables["local_staging_records"], "[]")
+        let raw = try XCTUnwrap(preserved.first { ($0["source_table"] as? String) == "data_records" }?["source_json"] as? String)
+        let source = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        XCTAssertTrue(source["occurred_at"] is NSNull)
+        XCTAssertTrue(raw.contains("保留原文"))
+        XCTAssertNil(preserved.first?["record_date"], "原文保全不能伪造业务日期")
+    }
+
     func testLF03917WalletUsesLegacyPayloadOnlyWhenTopLevelValueIsAbsent() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let schema = try LocalDatabase(databaseURL: directory.appendingPathComponent("schema.sqlite"))
         defer { try? schema.writer.close() }
-        let user = UUID(), profile = UUID()
+        let user = UUID(), profile = try LocalProfileStore(database: schema).activeProfile().id
+        let imageStore = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images"))
+        let portability = LocalCompleteBackupPortability(database: schema, imageStore: imageStore)
         for (top, expected) in [(NSNull() as Any, 12345), (200 as Any, 20000)] {
+            let record = UUID()
             let values: [String: Any] = [
-                "id": UUID().uuidString, "user_id": user.uuidString, "domain_key": "wallet",
+                "id": record.uuidString, "user_id": user.uuidString, "domain_key": "wallet",
                 "occurred_at": "2026-10-24T10:00:00Z", "created_at": "2026-10-24T10:00:00Z",
                 "title": "合成历史钱包", "summary": "", "snapshot_balance": top,
                 "account_snapshot_kind": NSNull(),
@@ -28,7 +63,14 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
             XCTAssertEqual(wallet["snapshot_balance_minor"] as? Int, expected)
             XCTAssertEqual(wallet["account_snapshot_kind"] as? String, "asset")
             XCTAssertTrue((wallet["payload_json"] as? String)?.contains("snapshot_balance") == true)
+            XCTAssertEqual(try portability.preview(archive).tableCounts["local_wallet_snapshots"], 1)
+            _ = try portability.importBackup(archive, into: profile)
+            _ = try portability.importBackup(archive, into: profile)
+            let restored = try XCTUnwrap(LocalWalletSnapshotRepository(database: schema).history(profileID: profile).first { $0.id == record })
+            XCTAssertEqual(restored.balanceMinor, Int64(expected))
+            XCTAssertTrue(try LocalExpenseRepository(database: schema).accounts(profileID: profile).isEmpty)
         }
+        XCTAssertEqual(try LocalWalletSnapshotRepository(database: schema).history(profileID: profile).count, 2)
     }
 
     func testLF039MissingOccurredAtReportsSourceTableFieldAndRedactedRecord() throws {
