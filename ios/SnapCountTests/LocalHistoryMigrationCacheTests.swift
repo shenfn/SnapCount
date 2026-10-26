@@ -2,6 +2,72 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryMigrationCacheTests: XCTestCase {
+    @MainActor
+    func testLF03925BoundedParallelDownloadsReuseCacheAndRecheckFreshBytes() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        defer { try? database.writer.close() }
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let user = UUID().uuidString.lowercased()
+        let timestamp = "2026-10-24T00:30:00Z"
+        let rows: [[String: AnyCodable]] = (1...6).map { index in
+            ["id": AnyCodable(String(format: "00000000-0000-0000-0000-%012d", index)),
+             "user_id": AnyCodable(user), "domain_key": AnyCodable("food"),
+             "domain_version": AnyCodable("1.0"), "created_at": AnyCodable(timestamp),
+             "updated_at": AnyCodable(timestamp), "occurred_at": AnyCodable(timestamp),
+             "payload_jsonb": AnyCodable(["meal_type": "午餐", "total_calorie_kcal": 500]),
+             "source_image_path": AnyCodable("2026-10-24/image-\(index).jpg")]
+        }
+        let source = LocalHistoryMigrationSource { table, _, _ in table == "rest/v1/data_records" ? rows : [] }
+        let probe = HistoryImageConcurrencyProbe()
+        // A broken serial implementation is released after two seconds so the test fails instead of hanging.
+        let timeout = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if !Task.isCancelled { probe.release() }
+        }
+        defer { timeout.cancel(); probe.release() }
+        var calls = 0
+        var fail = false
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!) { request in
+            calls += 1
+            await probe.enter()
+            defer { probe.leave() }
+            return (Data("synthetic-original".utf8), HTTPURLResponse(url: request.url!, statusCode: fail ? 400 : 200,
+                httpVersion: nil, headerFields: nil)!)
+        }
+        let cache = LocalHistoryMigrationCache(database: database,
+            imageStore: try LocalImageStore(rootDirectory: directory.appendingPathComponent("images")))
+        let coordinator = LocalHistoryMigrationCoordinator(source: source, downloader: downloader, cache: cache)
+        let prepared = try await coordinator.prepare(profileID: profile.id, cloudUserID: user,
+            accessToken: "synthetic-token", isCurrent: { true })
+        XCTAssertEqual(probe.peak, 3, "Downloads must overlap, but never exceed three in flight")
+        XCTAssertEqual(calls, 6)
+        XCTAssertEqual(prepared.images.count, 6)
+
+        let resumed = try await coordinator.prepare(profileID: profile.id, cloudUserID: user,
+            accessToken: "synthetic-token", isCurrent: { true })
+        XCTAssertEqual(calls, 6, "Valid preflight caches must not be downloaded again")
+        XCTAssertEqual(resumed.images, prepared.images)
+        let fresh = try await coordinator.loadImages(inspection: prepared.inspection, cloudUserID: user,
+            accessToken: "synthetic-token", isCurrent: { true })
+        XCTAssertEqual(calls, 12, "Confirmation must still recheck original bytes without using preflight cache")
+        XCTAssertEqual(fresh, prepared.images)
+
+        fail = true
+        do {
+            _ = try await coordinator.loadImages(inspection: prepared.inspection, cloudUserID: user,
+                accessToken: "synthetic-token", isCurrent: { true })
+            XCTFail("Failed confirmation downloads must not be accepted")
+        } catch {
+            let context = try XCTUnwrap(error as? LocalHistoryMigrationContextError)
+            XCTAssertEqual((context.underlying as? LocalHistoryImageHTTPError)?.statusCode, 400)
+        }
+        XCTAssertEqual(calls, 15, "No additional work may be enqueued after the initial three requests fail")
+        XCTAssertLessThanOrEqual(probe.peak, 3)
+        XCTAssertTrue(try LocalRecordRepository(database: database).records(profileID: profile.id, monthKey: "2026-10").isEmpty)
+    }
+
     func testLF03923TotalImageLimitUsesDistinctOverflowError() throws {
         let limit = 128 * 1024 * 1024
         XCTAssertEqual(try LocalHistoryMigrationCoordinator.checkedImageByteCount(current: limit - 1, adding: 1), limit)
@@ -292,5 +358,27 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
         XCTAssertThrowsError(try reopened.begin(profileID: profile.id, cloudUserID: user)) { error in
             XCTAssertEqual(error as? LocalHistoryMigrationError, .alreadyCompleted)
         }
+    }
+}
+
+@MainActor
+private final class HistoryImageConcurrencyProbe {
+    private var active = 0
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var peak = 0
+
+    func enter() async {
+        active += 1
+        peak = max(peak, active)
+        if active >= 3 { release() }
+        if !released { await withCheckedContinuation { waiters.append($0) } }
+    }
+    func leave() { active -= 1 }
+    func release() {
+        released = true
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
     }
 }

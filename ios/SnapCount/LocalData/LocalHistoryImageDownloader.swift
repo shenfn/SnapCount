@@ -32,10 +32,25 @@ enum LocalHistoryImageDownloadError: Error, Equatable, LocalizedError {
     }
 }
 
+/// Contains only bounded, allowlisted response metadata, never a URL or raw body.
+struct LocalHistoryImageHTTPError: Error, LocalizedError {
+    let failure: LocalHistoryImageDownloadError
+    let statusCode: Int
+    let storageCode: String?
+    let attempts: Int
+    let elapsedMilliseconds: Int
+    let responseBytes: Int
+
+    var errorDescription: String? {
+        "HTTP \(statusCode)，类别 \(storageCode ?? "Unknown")，尝试 \(attempts) 次；\(failure.localizedDescription)"
+    }
+}
+
 /// Authenticated migration downloads never follow redirects or send a user's
 /// bearer token to an arbitrary URL stored in a historical row.
 final class LocalHistoryImageDownloader {
-    typealias Fetch = (URLRequest) async throws -> (Data, HTTPURLResponse)
+    typealias Fetch = @MainActor (URLRequest) async throws -> (Data, HTTPURLResponse)
+    typealias Pause = @MainActor (UInt64) async throws -> Void
     private struct ValidatedStoragePath {
         let requestURL: URL
         let isTemporary: Bool
@@ -43,22 +58,39 @@ final class LocalHistoryImageDownloader {
 
     private let baseURL: URL
     private let fetch: Fetch
+    private let pause: Pause
+    private let session: URLSession?
     private static let maximumImageBytes = 16 * 1024 * 1024
     private static let unreservedASCII = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
-    init(baseURL: URL, fetch: Fetch? = nil) {
+    init(baseURL: URL,
+         pause: @escaping Pause = { try await Task.sleep(nanoseconds: $0) },
+         fetch: Fetch? = nil) {
         self.baseURL = baseURL
-        self.fetch = fetch ?? { request in
-            let session = URLSession(configuration: .ephemeral, delegate: HistoryNoRedirectDelegate(), delegateQueue: nil)
-            defer { session.invalidateAndCancel() }
+        self.pause = pause
+        if let fetch {
+            self.fetch = fetch
+            self.session = nil
+        } else {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.httpMaximumConnectionsPerHost = 3
+            configuration.urlCache = nil
+            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            let session = URLSession(configuration: configuration, delegate: HistoryNoRedirectDelegate(), delegateQueue: nil)
+            self.session = session
+            self.fetch = { request in
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw LocalHistoryImageDownloadError.invalidResponse(0)
             }
             return (data, http)
+            }
         }
     }
 
+    deinit { session?.invalidateAndCancel() }
+
+    @MainActor
     func download(reference: LocalHistoryMigrationImageReference,
                   inspection: LocalHistoryMigrationInspection,
                   cloudUserID: String,
@@ -81,21 +113,39 @@ final class LocalHistoryImageDownloader {
         var request = URLRequest(url: validated.requestURL)
         request.timeoutInterval = 30
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await fetch(request)
-        guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
-
-        switch response.statusCode {
-        case 200: break
-        case 401: throw LocalHistoryImageDownloadError.sessionExpired
-        case 403: throw LocalHistoryImageDownloadError.accessDenied
-        case 404:
-            throw validated.isTemporary
-                ? LocalHistoryImageDownloadError.missingTemporaryImage
-                : LocalHistoryImageDownloadError.missingImage
-        default: throw LocalHistoryImageDownloadError.invalidResponse(response.statusCode)
-        }
-        guard response.url == validated.requestURL else {
-            throw LocalHistoryImageDownloadError.responseAddressMismatch
+        let started = ProcessInfo.processInfo.systemUptime
+        var attempt = 0
+        var data = Data()
+        while true {
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+            attempt += 1
+            let (body, response) = try await fetch(request)
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+            guard response.url == validated.requestURL else {
+                throw LocalHistoryImageDownloadError.responseAddressMismatch
+            }
+            if response.statusCode == 200 { data = body; break }
+            let storageCode = Self.storageErrorCode(body)
+            // Only transient HTTP responses are retried; auth, missing objects and bad paths fail immediately.
+            if [429, 500, 502, 503, 504].contains(response.statusCode), attempt < 3 {
+                let suggested = response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init)
+                let seconds = suggested.flatMap { $0.isFinite && $0 >= 0 ? min($0, 5) : nil }
+                    ?? (Double(attempt) * 0.5)
+                try await pause(UInt64(seconds * 1_000_000_000))
+                continue
+            }
+            let failure: LocalHistoryImageDownloadError
+            switch response.statusCode {
+            case 401: failure = .sessionExpired
+            case 403: failure = .accessDenied
+            case 404:
+                failure = validated.isTemporary ? .missingTemporaryImage : .missingImage
+            default: failure = .invalidResponse(response.statusCode)
+            }
+            throw LocalHistoryImageHTTPError(failure: failure, statusCode: response.statusCode,
+                storageCode: storageCode, attempts: attempt,
+                elapsedMilliseconds: Int((ProcessInfo.processInfo.systemUptime - started) * 1000),
+                responseBytes: body.count)
         }
         guard !data.isEmpty else { throw LocalHistoryImageDownloadError.emptyResponse }
         guard data.count <= Self.maximumImageBytes else { throw LocalHistoryImageDownloadError.imageTooLarge }
@@ -105,6 +155,18 @@ final class LocalHistoryImageDownloader {
             }
         }
         return [reference.path: data]
+    }
+
+    private static func storageErrorCode(_ body: Data) -> String? {
+        guard body.count <= 16 * 1024,
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return nil }
+        let known: Set<String> = ["NoSuchKey", "NoSuchBucket", "InvalidJWT", "InvalidRequest", "InvalidKey",
+            "AccessDenied", "SlowDown", "InternalError", "DatabaseError", "DatabaseTimeout", "TenantNotFound",
+            "not_found", "unauthorized", "too many requests", "internal_server_error", "database_timeout"]
+        for key in ["code", "error"] {
+            if let value = json[key] as? String, known.contains(value) { return value }
+        }
+        return nil
     }
 
     private func validatedURL(path: String, user: UUID) throws -> ValidatedStoragePath {

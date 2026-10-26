@@ -2,6 +2,116 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryImageDownloaderTests: XCTestCase {
+    @MainActor
+    func testLF03924TransientHTTPRetriesAreBoundedAndCanRecover() async throws {
+        let user = UUID().uuidString.lowercased()
+        let path = "2026-10-24/legacy.jpg"
+        let (inspection, reference) = try source(user: user, path: path)
+        var calls = 0
+        var delays: [UInt64] = []
+        let bytes = Data("synthetic-original".utf8)
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!,
+            pause: { delays.append($0) }) { request in
+            calls += 1
+            return (calls < 3 ? Data("temporary".utf8) : bytes,
+                HTTPURLResponse(url: request.url!, statusCode: calls < 3 ? 503 : 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let result = try await downloader.download(reference: reference, inspection: inspection,
+            cloudUserID: user, accessToken: "synthetic-token")
+        XCTAssertEqual(result[path], bytes)
+        XCTAssertEqual(calls, 3)
+        XCTAssertEqual(delays, [500_000_000, 1_000_000_000])
+    }
+
+    @MainActor
+    func testLF03924HTTPMetadataSurvivesDiagnosticWithoutResponseSecrets() async throws {
+        let user = UUID().uuidString.lowercased()
+        let path = "2026-10-24/legacy.jpg"
+        let (inspection, reference) = try source(user: user, path: path)
+        let body = Data(#"{"code":"SlowDown","message":"https://private.invalid/photo?token=synthetic-secret"}"#.utf8)
+        var calls = 0
+        var delays: [UInt64] = []
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!,
+            pause: { delays.append($0) }) { request in
+            calls += 1
+            return (body, HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil,
+                headerFields: ["Retry-After": "999"])!)
+        }
+        do {
+            _ = try await downloader.download(reference: reference, inspection: inspection,
+                cloudUserID: user, accessToken: "synthetic-token")
+            XCTFail("Persistent throttling must stop after the retry budget")
+        } catch {
+            let http = try XCTUnwrap(error as? LocalHistoryImageHTTPError)
+            XCTAssertEqual(http.statusCode, 429)
+            XCTAssertEqual(http.storageCode, "SlowDown")
+            XCTAssertEqual(http.attempts, 3)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("diagnostics.json")
+            defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+            let store = try LocalHistoryMigrationDiagnosticStore(fileURL: url)
+            let context = LocalHistoryMigrationContextError(table: reference.table, field: reference.field,
+                recordID: reference.recordID, underlying: http)
+            let entry = store.record(context, phase: "下载历史原图", attemptID: UUID(), committed: false)
+            XCTAssertEqual(entry.httpStatus, 429)
+            XCTAssertEqual(entry.storageCode, "SlowDown")
+            XCTAssertEqual(entry.requestAttempts, 3)
+            XCTAssertEqual(entry.responseBytes, body.count)
+            XCTAssertNotNil(entry.elapsedMilliseconds)
+            XCTAssertTrue(entry.shareText.contains("429"))
+            XCTAssertFalse(entry.shareText.contains("private.invalid"))
+            XCTAssertFalse(entry.shareText.contains("synthetic-secret"))
+            XCTAssertFalse(entry.shareText.contains(reference.recordID))
+            let reopened = try LocalHistoryMigrationDiagnosticStore(fileURL: url)
+            XCTAssertEqual(try reopened.recent().first?.httpStatus, 429)
+        }
+        XCTAssertEqual(calls, 3)
+        XCTAssertEqual(delays, [5_000_000_000, 5_000_000_000])
+    }
+
+    @MainActor
+    func testLF03924BadRequestNeverRetriesOrExportsUnknownBodyCode() async throws {
+        let user = UUID().uuidString.lowercased()
+        let (inspection, reference) = try source(user: user, path: "2026-10-24/legacy.jpg")
+        var calls = 0
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!,
+            pause: { _ in XCTFail("Bad requests must not be retried") }) { request in
+            calls += 1
+            return (Data(#"{"code":"private-token-and-path","message":"private-data"}"#.utf8),
+                HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!)
+        }
+        do {
+            _ = try await downloader.download(reference: reference, inspection: inspection,
+                cloudUserID: user, accessToken: "synthetic-token")
+            XCTFail("Bad request must remain a failure")
+        } catch {
+            let http = try XCTUnwrap(error as? LocalHistoryImageHTTPError)
+            XCTAssertEqual(http.statusCode, 400)
+            XCTAssertEqual(http.attempts, 1)
+            XCTAssertNil(http.storageCode)
+            XCTAssertFalse(http.localizedDescription.contains("private-"))
+        }
+        XCTAssertEqual(calls, 1)
+    }
+
+    @MainActor
+    func testLF03924AccountChangeDuringBackoffStopsRetry() async throws {
+        let user = UUID().uuidString.lowercased()
+        let (inspection, reference) = try source(user: user, path: "2026-10-24/legacy.jpg")
+        var current = true
+        var calls = 0
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!,
+            pause: { _ in current = false }) { request in
+            calls += 1
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+        }
+        do {
+            _ = try await downloader.download(reference: reference, inspection: inspection,
+                cloudUserID: user, accessToken: "synthetic-token", isCurrent: { current })
+            XCTFail("Stale migration must not retry")
+        } catch is CancellationError { }
+        XCTAssertEqual(calls, 1)
+    }
+
     func testLF03922CurrentAndLegacyObjectPathsUseAuthenticatedReceiptBucket() async throws {
         let user = UUID().uuidString.lowercased()
         let token = "synthetic-current-session"
@@ -101,7 +211,7 @@ final class LocalHistoryImageDownloaderTests: XCTestCase {
                     cloudUserID: user, accessToken: "synthetic-private-token")
                 XCTFail("Accepted path outside migration scope: \(path)")
             } catch {
-                XCTAssertEqual(error as? LocalHistoryImageDownloadError, expected)
+                XCTAssertEqual((error as? LocalHistoryImageHTTPError)?.failure ?? (error as? LocalHistoryImageDownloadError), expected)
             }
         }
 
@@ -136,7 +246,7 @@ final class LocalHistoryImageDownloaderTests: XCTestCase {
                     cloudUserID: user, accessToken: "synthetic-private-token")
                 XCTFail("HTTP error must not be accepted as an image")
             } catch {
-                XCTAssertEqual(error as? LocalHistoryImageDownloadError, expected)
+                XCTAssertEqual((error as? LocalHistoryImageHTTPError)?.failure ?? (error as? LocalHistoryImageDownloadError), expected)
                 XCTAssertFalse(error.localizedDescription.contains("synthetic-private-token"))
                 XCTAssertFalse(error.localizedDescription.contains("Bearer"))
             }
@@ -160,7 +270,7 @@ final class LocalHistoryImageDownloaderTests: XCTestCase {
                 cloudUserID: user, accessToken: "synthetic-token")
             XCTFail("Redirect responses must not be followed")
         } catch {
-            XCTAssertEqual(error as? LocalHistoryImageDownloadError, .invalidResponse(302))
+            XCTAssertEqual((error as? LocalHistoryImageHTTPError)?.failure, .invalidResponse(302))
         }
         XCTAssertEqual(requestCount, 1)
     }

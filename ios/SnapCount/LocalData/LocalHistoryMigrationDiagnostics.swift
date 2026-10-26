@@ -45,6 +45,11 @@ struct LocalHistoryMigrationDiagnostic: Codable, Equatable, Identifiable {
     let recoveryAction: String
     var resolution: String? = nil
     var resolvedAt: Date? = nil
+    var httpStatus: Int? = nil
+    var storageCode: String? = nil
+    var requestAttempts: Int? = nil
+    var elapsedMilliseconds: Int? = nil
+    var responseBytes: Int? = nil
 
     var userMessage: String {
         let location = sourceTable.map { "（来源表 \($0)\(sourceField.map { ".\($0)" } ?? "")）" } ?? ""
@@ -82,6 +87,9 @@ struct LocalHistoryMigrationDiagnostic: Codable, Equatable, Identifiable {
             recordHint.map { "脱敏记录：#\($0)" }, "尝试编号：\(attemptID)",
             "构建版本：\(buildVersion)", "时间：\(ISO8601DateFormatter().string(from: occurredAt))",
             "原因类别：\(code)", safeReason.map { "安全原因说明：\($0)" },
+            httpStatus.map { "HTTP状态：\($0)" }, storageCode.map { "存储错误类别：\($0)" },
+            requestAttempts.map { "请求尝试次数：\($0)" },
+            elapsedMilliseconds.map { "本图请求耗时毫秒：\($0)" }, responseBytes.map { "响应字节数：\($0)" },
             "底层原因：\(underlyingCause)", progressSummary.map { "进度：\($0)" }, "操作结果：\(commitSummary)",
             "恢复建议：\(recoveryAction)", resolution.map { "恢复结果：\($0)" },
             resolvedAt.map { "恢复时间：\(ISO8601DateFormatter().string(from: $0))" }
@@ -144,7 +152,7 @@ final class LocalHistoryMigrationDiagnosticStore {
         let nsError = underlyingError as NSError
         let mappingContext = Self.mappingContext(for: error)
         let contextualRecordID = contextual.flatMap { $0.recordID.isEmpty ? nil : $0.recordID }
-        let entry = LocalHistoryMigrationDiagnostic(
+        var entry = LocalHistoryMigrationDiagnostic(
             id: UUID().uuidString.lowercased(),
             code: codeOverride.map { Self.safeText($0, limit: 48) } ?? Self.code(for: underlyingError),
             operation: Self.safeText(operation, limit: 48),
@@ -162,6 +170,16 @@ final class LocalHistoryMigrationDiagnosticStore {
             committed: committed,
             recoveryAction: Self.safeText(recoveryAction ?? Self.recovery(for: underlyingError), limit: 120)
         )
+        if let http = underlyingError as? LocalHistoryImageHTTPError {
+            entry.httpStatus = http.statusCode
+            entry.storageCode = http.storageCode
+            entry.requestAttempts = http.attempts
+            entry.elapsedMilliseconds = http.elapsedMilliseconds
+            entry.responseBytes = http.responseBytes
+        } else if let imageError = underlyingError as? LocalHistoryImageDownloadError,
+                  case .invalidResponse(let status) = imageError, status > 0 {
+            entry.httpStatus = status
+        }
 
         lock.lock()
         defer { lock.unlock() }
@@ -249,6 +267,7 @@ final class LocalHistoryMigrationDiagnosticStore {
     }
 
     private static func code(for error: Error) -> String {
+        if let http = error as? LocalHistoryImageHTTPError { return code(for: http.failure) }
         if (error as NSError).domain == NSURLErrorDomain { return "NETWORK-REQUEST-FAILED" }
         if let error = error as? LocalHistoryMigrationValidationError,
            case .accountBalanceMismatch = error { return "HIST-ACCOUNT-BALANCE-MISMATCH" }
@@ -318,6 +337,15 @@ final class LocalHistoryMigrationDiagnosticStore {
     }
 
     private static func recovery(for error: Error) -> String {
+        if let http = error as? LocalHistoryImageHTTPError {
+            if http.statusCode == 400 {
+                return "服务器拒绝图片读取请求；请按HTTP状态和存储错误类别核对。未入账，缓存保留，不反复重试无效请求。"
+            }
+            if [429, 500, 502, 503, 504].contains(http.statusCode) {
+                return "临时服务错误已达到有限重试次数；稍后继续迁移，已缓存内容保留。"
+            }
+            return recovery(for: http.failure)
+        }
         if (error as NSError).domain == NSURLErrorDomain { return "请检查网络后重试；已缓存的源页和图片会保留。" }
         if let error = error as? LocalHistoryMigrationValidationError,
            case .accountBalanceMismatch = error {
@@ -347,6 +375,9 @@ final class LocalHistoryMigrationDiagnosticStore {
     }
 
     private static func safeReason(for error: Error) -> String? {
+        if let http = error as? LocalHistoryImageHTTPError {
+            return "HTTP \(http.statusCode)，存储类别 \(http.storageCode ?? "Unknown")；\(safeReason(for: http.failure) ?? "图片请求失败")"
+        }
         if (error as NSError).domain == NSURLErrorDomain { return "网络请求未完成，源数据尚未全部核对。" }
         if let error = error as? LocalHistoryMigrationValidationError,
            case .accountBalanceMismatch = error {
@@ -372,7 +403,8 @@ final class LocalHistoryMigrationDiagnosticStore {
             case .accessDenied: return "当前账户无权读取该图片。"
             case .missingTemporaryImage: return "同账户临时图片当前不可读取，具体是已清理还是路径失效尚未确认。"
             case .missingImage: return "历史图片当前不可读取，来源状态尚未确认。"
-            case .invalidResponse: return "图片服务未返回可用内容。"
+            case .invalidResponse(let status):
+                return status > 0 ? "图片服务返回HTTP \(status)，未取得可用原图。" : "图片服务未返回HTTP响应。"
             case .emptyResponse: return "图片服务返回空内容，未把空响应当作原图。"
             case .imageTooLarge: return "单张历史图片超过本机迁移上限。"
             case .totalSizeExceeded: return "历史图片合计超过本机迁移上限。"

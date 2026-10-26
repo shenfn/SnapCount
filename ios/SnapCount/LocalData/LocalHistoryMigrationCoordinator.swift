@@ -28,8 +28,9 @@ final class LocalHistoryMigrationCoordinator {
         self.source = source; self.downloader = downloader; self.cache = cache
     }
 
+    @MainActor
     func prepare(profileID: UUID, cloudUserID: String, accessToken: String,
-                 isCurrent: () -> Bool,
+                 isCurrent: @escaping () -> Bool,
                  onProgress: (@MainActor (LocalHistoryMigrationProgress) -> Void)? = nil) async throws -> LocalHistoryMigrationPreparedSource {
         guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
         let state = try cache.begin(profileID: profileID, cloudUserID: cloudUserID)
@@ -81,55 +82,12 @@ final class LocalHistoryMigrationCoordinator {
             if !inspection.blockers.isEmpty {
                 return LocalHistoryMigrationPreparedSource(inspection: inspection, images: [:], state: state)
             }
-            var images: [String: Data] = [:]
-            await onProgress?(LocalHistoryMigrationProgress(
-                phase: .downloadingImages, currentTable: nil, rowsRead: rowsRead, knownRowTotal: rowsRead,
-                pagesRead: pagesRead, imagesProcessed: 0, imagesTotal: inspection.sourceImagePaths.count
-            ))
-            var byteCount = 0
-            for path in inspection.sourceImagePaths.sorted() {
-                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
-                guard let reference = inspection.imageReference(for: path) else {
-                    throw LocalHistoryMigrationContextError(table: "image_objects", field: "path", recordID: "",
-                        underlying: LocalHistoryImageDownloadError.sourceScopeMismatch)
-                }
-                let bytes: Data
-                let needsCacheWrite: Bool
-                do {
-                    let expectedHash = try inspection.expectedImageHash(for: path)
-                    let cached = try cache.image(state: state, sourcePath: path)
-                    if let cached, expectedHash.map({ LocalImageStore.sha256(cached) == $0 }) ?? true {
-                        bytes = cached
-                        needsCacheWrite = false
-                    }
-                    else {
-                        let fetched = try await downloader.download(reference: reference, inspection: inspection,
-                            cloudUserID: cloudUserID, accessToken: accessToken, isCurrent: isCurrent)
-                        guard let data = fetched[path] else { throw LocalHistoryImageDownloadError.sourceScopeMismatch }
-                        bytes = data
-                        needsCacheWrite = true
-                    }
-                    guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
-                    let nextByteCount = try Self.checkedImageByteCount(current: byteCount, adding: bytes.count)
-                    if needsCacheWrite { try cache.saveImage(state: state, sourcePath: path, data: bytes) }
-                    byteCount = nextByteCount
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch let error as LocalHistoryMigrationContextError {
-                    throw error
-                } catch {
-                    let source = inspection.imageReference(for: path)
-                    throw LocalHistoryMigrationContextError(
-                        table: source?.table ?? "image_objects",
-                        field: source?.field ?? "path",
-                        recordID: source?.recordID ?? "",
-                        underlying: error
-                    )
-                }
-                images[path] = bytes
-                await onProgress?(LocalHistoryMigrationProgress(
+            let imageTotal = inspection.sourceImagePaths.count
+            let images = try await loadImages(inspection: inspection, cloudUserID: cloudUserID,
+                accessToken: accessToken, state: state, isCurrent: isCurrent) { processed in
+                onProgress?(LocalHistoryMigrationProgress(
                     phase: .downloadingImages, currentTable: nil, rowsRead: rowsRead, knownRowTotal: rowsRead,
-                    pagesRead: pagesRead, imagesProcessed: images.count, imagesTotal: inspection.sourceImagePaths.count
+                    pagesRead: pagesRead, imagesProcessed: processed, imagesTotal: imageTotal
                 ))
             }
             guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
@@ -137,6 +95,109 @@ final class LocalHistoryMigrationCoordinator {
         } catch {
             try? cache.pause(state)
             throw error
+        }
+    }
+
+    private struct ImageResult {
+        let reference: LocalHistoryMigrationImageReference
+        let result: Result<Data, Error>
+    }
+
+    /// Shared by preflight and confirmation. Passing no state forces a fresh integrity recheck.
+    @MainActor
+    func loadImages(inspection: LocalHistoryMigrationInspection, cloudUserID: String, accessToken: String,
+                    state: LocalHistoryMigrationState? = nil, isCurrent: @escaping () -> Bool,
+                    onProgress: (@MainActor (Int) -> Void)? = nil) async throws -> [String: Data] {
+        guard inspection.blockers.isEmpty,
+              let owner = UUID(uuidString: cloudUserID), owner == UUID(uuidString: inspection.cloudUserID),
+              state.map({ UUID(uuidString: $0.cloudUserID) == owner }) ?? true else {
+            throw LocalHistoryImageDownloadError.sourceScopeMismatch
+        }
+        guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+        var images: [String: Data] = [:]
+        var byteCount = 0
+        var pending: [LocalHistoryMigrationImageReference] = []
+        onProgress?(0)
+        for path in inspection.sourceImagePaths.sorted() {
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+            guard let reference = inspection.imageReference(for: path) else {
+                throw LocalHistoryImageDownloadError.sourceScopeMismatch
+            }
+            do {
+                let expectedHash = try inspection.expectedImageHash(for: path)
+                let cached = try state.flatMap { try cache.image(state: $0, sourcePath: path) }
+                if let cached, expectedHash.map({ LocalImageStore.sha256(cached) == $0 }) ?? true {
+                    byteCount = try Self.checkedImageByteCount(current: byteCount, adding: cached.count)
+                    images[path] = cached
+                    onProgress?(images.count)
+                } else { pending.append(reference) }
+            } catch {
+                throw LocalHistoryMigrationContextError(table: reference.table, field: reference.field,
+                    recordID: reference.recordID, underlying: error)
+            }
+        }
+
+        try await withThrowingTaskGroup(of: ImageResult.self) { group in
+            var next = 0
+            var firstError: Error?
+            // ponytail: At most three requests in flight; keep this bound until device measurements justify changing it.
+            for _ in 0..<min(3, pending.count) {
+                let reference = pending[next]; next += 1
+                group.addTask { @MainActor in
+                    await self.downloadResult(reference, inspection: inspection, cloudUserID: cloudUserID,
+                        accessToken: accessToken, isCurrent: isCurrent)
+                }
+            }
+            while let outcome = try await group.next() {
+                guard isCurrent(), !Task.isCancelled else { group.cancelAll(); throw CancellationError() }
+                let reference = outcome.reference
+                switch outcome.result {
+                case .success(let bytes):
+                    do {
+                        let total = try Self.checkedImageByteCount(current: byteCount, adding: bytes.count)
+                        if let state { try cache.saveImage(state: state, sourcePath: reference.path, data: bytes) }
+                        byteCount = total
+                        images[reference.path] = bytes
+                        onProgress?(images.count)
+                    } catch {
+                        if firstError == nil {
+                            firstError = LocalHistoryMigrationContextError(table: reference.table, field: reference.field,
+                                recordID: reference.recordID, underlying: error)
+                        }
+                    }
+                case .failure(let error):
+                    if error is CancellationError { group.cancelAll(); throw error }
+                    if firstError == nil { firstError = error }
+                }
+                // Drain already-started successes into cache after a failure, but do not start another request.
+                if firstError == nil, next < pending.count {
+                    let reference = pending[next]; next += 1
+                    group.addTask { @MainActor in
+                        await self.downloadResult(reference, inspection: inspection, cloudUserID: cloudUserID,
+                            accessToken: accessToken, isCurrent: isCurrent)
+                    }
+                }
+            }
+            if let firstError { throw firstError }
+        }
+        guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+        return images
+    }
+
+    @MainActor
+    private func downloadResult(_ reference: LocalHistoryMigrationImageReference,
+                                inspection: LocalHistoryMigrationInspection, cloudUserID: String,
+                                accessToken: String, isCurrent: () -> Bool) async -> ImageResult {
+        do {
+            let fetched = try await downloader.download(reference: reference, inspection: inspection,
+                cloudUserID: cloudUserID, accessToken: accessToken, isCurrent: isCurrent)
+            guard let data = fetched[reference.path] else { throw LocalHistoryImageDownloadError.sourceScopeMismatch }
+            return ImageResult(reference: reference, result: .success(data))
+        } catch is CancellationError {
+            return ImageResult(reference: reference, result: .failure(CancellationError()))
+        } catch {
+            return ImageResult(reference: reference, result: .failure(LocalHistoryMigrationContextError(
+                table: reference.table, field: reference.field, recordID: reference.recordID, underlying: error)))
         }
     }
 

@@ -5951,38 +5951,19 @@ final class AppState: ObservableObject {
             // Rows may omit a source hash; a stable URL alone cannot prove unchanged image bytes.
             guard let baseURL = URL(string: AppConfig.supabaseURL) else { throw LocalDataError.invalidRecord }
             let downloader = LocalHistoryImageDownloader(baseURL: baseURL)
-            var currentImages: [String: Data] = [:]
-            var currentImageBytes = 0
             historyMigrationPhase = "确认前复核原图"
-            let imagePaths = inspection.sourceImagePaths.sorted()
+            let imageTotal = inspection.sourceImagePaths.count
             let sourceRowsRead = inspection.rows.values.reduce(0) { $0 + $1.count }
             let sourcePagesRead = historyMigrationProgress?.pagesRead ?? 0
             historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
                 rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
-                imagesProcessed: 0, imagesTotal: imagePaths.count)
-            for path in imagePaths {
-                guard let reference = inspection.imageReference(for: path) else {
-                    throw LocalHistoryMigrationContextError(table: "image_objects", field: "path", recordID: "",
-                        underlying: LocalHistoryImageDownloadError.sourceScopeMismatch)
-                }
-                do {
-                    let fetched = try await downloader.download(reference: reference, inspection: inspection,
-                        cloudUserID: owner, accessToken: session.accessToken, isCurrent: isCurrentAttempt)
-                    guard let data = fetched[path] else { throw LocalHistoryImageDownloadError.sourceScopeMismatch }
-                    currentImageBytes = try LocalHistoryMigrationCoordinator.checkedImageByteCount(
-                        current: currentImageBytes, adding: data.count)
-                    currentImages[path] = data
-                    historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
-                        rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
-                        imagesProcessed: currentImages.count, imagesTotal: imagePaths.count)
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch let error as LocalHistoryMigrationContextError {
-                    throw error
-                } catch {
-                    throw LocalHistoryMigrationContextError(table: reference.table, field: reference.field,
-                        recordID: reference.recordID, underlying: error)
-                }
+                imagesProcessed: 0, imagesTotal: imageTotal)
+            let coordinator = LocalHistoryMigrationCoordinator(downloader: downloader, cache: cache)
+            let currentImages = try await coordinator.loadImages(inspection: inspection, cloudUserID: owner,
+                accessToken: session.accessToken, isCurrent: isCurrentAttempt) { processed in
+                self.historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
+                    rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
+                    imagesProcessed: processed, imagesTotal: imageTotal)
             }
             guard isCurrentAttempt(), !Task.isCancelled else { throw CancellationError() }
             guard currentImages.mapValues(LocalImageStore.sha256) == historyMigrationImageDigests else {

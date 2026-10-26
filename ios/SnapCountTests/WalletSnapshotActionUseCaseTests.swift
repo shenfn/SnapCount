@@ -36,14 +36,22 @@ final class WalletSnapshotActionUseCaseTests: XCTestCase {
     func testA4IOS002BReusesSameTaskAndRejectsDifferentSignature() async {
         let gate = WalletSnapshotActionGate()
         let repository = WalletSnapshotActionRepositoryStub(gate: gate)
-        let harness = makeHarness(repository: repository)
+        let duplicateEntered = expectation(description: "Duplicate entered the use case while the first request is blocked")
+        var waitingForDuplicate = false
+        let harness = makeHarness(repository: repository, context: {
+            if waitingForDuplicate {
+                waitingForDuplicate = false
+                duplicateEntered.fulfill()
+            }
+            return WalletSnapshotActionUserContext(userId: "user-1", generation: 1, isSignedIn: true)
+        })
         let snapshot = walletSnapshot()
 
         async let first = harness.useCase.perform(.create(recordId: snapshot.id), snapshot: snapshot)
         await gate.waitUntilEntered()
+        waitingForDuplicate = true
         async let duplicate = harness.useCase.perform(.create(recordId: snapshot.id), snapshot: snapshot)
-        // Enter the actor before the first request is released; the conflicting path may not suspend.
-        await Task.yield()
+        await fulfillment(of: [duplicateEntered], timeout: 2)
         let conflict = await harness.useCase.perform(
             .link(recordId: snapshot.id, accountId: "account-2"),
             snapshot: snapshot,
