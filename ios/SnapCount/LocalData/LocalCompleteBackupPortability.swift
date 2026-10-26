@@ -552,7 +552,7 @@ final class LocalCompleteBackupPortability {
         schemaVersion: Int
     ) throws {
         let imageHashes = Dictionary(uniqueKeysWithValues: images.map { ($0.path, $0.hash) })
-        for (table, statusField, activeStatuses) in [
+        let imageScopes: [(String, String, Set<String>)] = [
             ("local_records", "deleted_at", Set(["active"])),
             ("local_expenses", "deleted_at", Set(["active"])),
             ("local_income_records", "deleted_at", Set(["active"])),
@@ -561,7 +561,8 @@ final class LocalCompleteBackupPortability {
             ("local_image_intakes", "status", Set(["receiving", "failed"])),
             ("local_wallet_snapshots", "deleted_at", Set<String>()),
             ("local_history_unresolved_records", "", Set<String>())
-        ] {
+        ]
+        for (table, statusField, activeStatuses) in imageScopes {
             for row in rows[table] ?? [] {
                 let active: Bool
                 if table == "local_history_unresolved_records" {
