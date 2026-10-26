@@ -2,6 +2,35 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryMigrationMapperTests: XCTestCase {
+    func testLF03917WalletUsesLegacyPayloadOnlyWhenTopLevelValueIsAbsent() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let schema = try LocalDatabase(databaseURL: directory.appendingPathComponent("schema.sqlite"))
+        defer { try? schema.writer.close() }
+        let user = UUID(), profile = UUID()
+        for (top, expected) in [(NSNull() as Any, 12345), (200 as Any, 20000)] {
+            let values: [String: Any] = [
+                "id": UUID().uuidString, "user_id": user.uuidString, "domain_key": "wallet",
+                "occurred_at": "2026-10-24T10:00:00Z", "created_at": "2026-10-24T10:00:00Z",
+                "title": "合成历史钱包", "summary": "", "snapshot_balance": top,
+                "account_snapshot_kind": NSNull(),
+                "payload_jsonb": ["snapshot_balance": 123.45, "account_snapshot_kind": "asset", "currency": "CNY"]
+            ]
+            let inspection = LocalHistoryMigrationInspection(cloudUserID: user.uuidString,
+                rows: [.records: [values.mapValues(AnyCodable.init)]], blockers: [])
+            XCTAssertTrue(LocalHistoryMigrationUseCase.blockers(inspection.rows).isEmpty)
+            let archive = try LocalHistoryMigrationMapper(schema: schema).buildArchive(inspection, profileID: profile, images: [:])
+            let root = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
+            let tables = try XCTUnwrap(root["tables"] as? [String: String])
+            let json = try XCTUnwrap(tables["local_wallet_snapshots"])
+            let wallets = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
+            let wallet = try XCTUnwrap(wallets.first)
+            XCTAssertEqual(wallet["snapshot_balance_minor"] as? Int, expected)
+            XCTAssertEqual(wallet["account_snapshot_kind"] as? String, "asset")
+            XCTAssertTrue((wallet["payload_json"] as? String)?.contains("snapshot_balance") == true)
+        }
+    }
+
     func testLF039MissingOccurredAtReportsSourceTableFieldAndRedactedRecord() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
