@@ -19,7 +19,7 @@ final class LocalHistoryUnresolvedRepositoryTests: XCTestCase {
         let owner = UUID()
         let original = "{\"id\":\"\(sourceID.uuidString)\",\"user_id\":\"\(owner.uuidString)\",\"created_at\":\"1970-01-01T00:16:40Z\",\"updated_at\":\"1970-01-01T00:16:40Z\",\"occurred_at\":null,\"summary\":\"合成原文\"}"
         let image = try sourceImages.save(data: Data("synthetic-original".utf8), owner: sourceID.uuidString)
-        try source.writer.write { db in
+        try await source.writer.write { db in
             try db.execute(sql: "INSERT INTO local_history_unresolved_records(id,profile_id,source_table,source_id,source_json,issues_json,image_path,image_hash,created_at,updated_at) VALUES (?,?,'data_records',?,?,?,?,?,?,?)",
                 arguments: [id, profile.id.uuidString, sourceID.uuidString, original, "[\"缺少发生日期\"]", image.path, image.hash, Date(timeIntervalSince1970: 1000), Date(timeIntervalSince1970: 1000)])
         }
