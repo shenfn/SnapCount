@@ -6,6 +6,8 @@ final class LocalHistoryImageDownloaderTests: XCTestCase {
         let user = UUID().uuidString.lowercased()
         let token = "synthetic-current-session"
         let objectPaths = [
+            "\(user)/original.jpg",
+            "tmp/\(user)/original.jpg",
             "\(user)/2026-10-24/new.jpg",
             "tmp/\(user)/2026-10-24/new-temp.jpg",
             "2026-10-24/legacy.jpg",

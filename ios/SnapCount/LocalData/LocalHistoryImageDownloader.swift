@@ -169,19 +169,18 @@ final class LocalHistoryImageDownloader {
             guard firstOwner.uuidString.lowercased() == owner else {
                 throw LocalHistoryImageDownloadError.sourceScopeMismatch
             }
-            guard parts.count == 3,
-                  (Self.isDate(parts[1]) || parts[1] == "legacy-signed-url"), Self.isFilename(parts[2]) else {
+            guard parts.count >= 2, parts.dropFirst().allSatisfy(Self.isFilename) else {
                 throw LocalHistoryImageDownloadError.unsupportedPathFormat
             }
             return false
         }
 
         if parts.first == "tmp" {
-            if parts.count == 4, let pathOwner = UUID(uuidString: parts[1]) {
+            if parts.count >= 3, let pathOwner = UUID(uuidString: parts[1]) {
                 guard pathOwner.uuidString.lowercased() == owner else {
                     throw LocalHistoryImageDownloadError.sourceScopeMismatch
                 }
-                guard Self.isDate(parts[2]), Self.isFilename(parts[3]) else {
+                guard parts.dropFirst(2).allSatisfy(Self.isFilename) else {
                     throw LocalHistoryImageDownloadError.unsupportedPathFormat
                 }
                 return true

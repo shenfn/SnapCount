@@ -36,7 +36,7 @@ final class LocalHistoryMigrationDiagnosticsTests: XCTestCase {
             XCTAssertEqual(entry.sourceTable, "data_records")
             XCTAssertEqual(entry.sourceField, "source_image_path")
             XCTAssertEqual(entry.recordHint, String(LocalImageStore.sha256(Data(privateID.lowercased().utf8)).prefix(10)))
-            XCTAssertEqual(entry.progressSummary, "2221行，28页，原图0/1368")
+            XCTAssertEqual(entry.progressSummary, "2221行28页原图0/1368")
             XCTAssertFalse(entry.committed)
             XCTAssertTrue(entry.userMessage.contains("本次尚未入账"))
             XCTAssertFalse(entry.shareText.contains(privateID))
