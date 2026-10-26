@@ -179,14 +179,14 @@ final class LocalHistoryMigrationMapper {
                     switch error {
                     case .sourceFieldMissing, .sourceFieldInvalid: throw error
                     case .unsupported:
-                        throw LocalHistoryMigrationContextError(table: source.rawValue, recordID: row["id"] as? String ?? "", underlying: error)
+                        throw LocalHistoryMigrationContextError(table: source.rawValue, field: nil, recordID: row["id"] as? String ?? "", underlying: error)
                     }
                 } catch let error as LocalHistoryMigrationError {
                     throw error
                 } catch let error as LocalHistoryMigrationContextError {
                     throw error
                 } catch {
-                    throw LocalHistoryMigrationContextError(table: source.rawValue, recordID: row["id"] as? String ?? "", underlying: error)
+                    throw LocalHistoryMigrationContextError(table: source.rawValue, field: nil, recordID: row["id"] as? String ?? "", underlying: error)
                 }
             }
         }
