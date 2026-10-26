@@ -33,6 +33,10 @@ final class LocalHistoryMigrationDiagnosticsTests: XCTestCase {
                 attemptID: UUID(), committed: false)
 
             XCTAssertEqual(entry.code, code)
+            if case .invalidResponse(let status) = error {
+                XCTAssertTrue(entry.safeReason?.contains(String(status)) == true,
+                    "HTTP status must survive the diagnostic conversion")
+            }
             XCTAssertEqual(entry.sourceTable, "data_records")
             XCTAssertEqual(entry.sourceField, "source_image_path")
             XCTAssertEqual(entry.recordHint, String(LocalImageStore.sha256(Data(privateID.lowercased().utf8)).prefix(10)))
