@@ -2,6 +2,147 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryMigrationCacheTests: XCTestCase {
+    func testLF03923TotalImageLimitUsesDistinctOverflowError() throws {
+        let limit = 128 * 1024 * 1024
+        XCTAssertEqual(try LocalHistoryMigrationCoordinator.checkedImageByteCount(current: limit - 1, adding: 1), limit)
+        XCTAssertThrowsError(try LocalHistoryMigrationCoordinator.checkedImageByteCount(current: limit, adding: 1)) { error in
+            XCTAssertEqual(error as? LocalHistoryImageDownloadError, .totalSizeExceeded)
+        }
+        XCTAssertThrowsError(try LocalHistoryMigrationCoordinator.checkedImageByteCount(current: Int.max, adding: 1)) { error in
+            XCTAssertEqual(error as? LocalHistoryImageDownloadError, .totalSizeExceeded)
+        }
+    }
+
+    func testLF03922LegacyDataRecordImageFlowsThroughCoordinatorCacheAndMapper() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        defer { try? database.writer.close() }
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let user = UUID().uuidString.lowercased()
+        let timestamp = "2026-10-24T00:30:00Z"
+        let paths = ["2026-10-24/legacy-a.jpg", "2026-10-24/legacy-b.jpg"]
+        let payloads = [paths[0]: Data("synthetic-a".utf8), paths[1]: Data("synthetic-b".utf8)]
+        let rows = paths.enumerated().map { index, path in
+            [
+                "id": AnyCodable(String(format: "00000000-0000-0000-0000-%012d", index + 1)),
+                "user_id": AnyCodable(user),
+                "domain_key": AnyCodable("food"),
+                "domain_version": AnyCodable("1.0"),
+                "title": AnyCodable("合成历史午餐"),
+                "summary": AnyCodable("500 kcal"),
+                "payload_jsonb": AnyCodable(["meal_type": "午餐", "total_calorie_kcal": 500]),
+                "occurred_at": AnyCodable(timestamp),
+                "created_at": AnyCodable(timestamp),
+                "updated_at": AnyCodable(timestamp),
+                "source_image_path": AnyCodable(path),
+                "source_image_hash": AnyCodable(LocalImageStore.sha256(payloads[path]!))
+            ]
+        }
+        let source = LocalHistoryMigrationSource { path, _, _ in
+            path == "rest/v1/data_records" ? rows : []
+        }
+        var failSecondImage = true
+        var calls: [String: Int] = [:]
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://synthetic.invalid")!) { request in
+            let url = try XCTUnwrap(request.url)
+            let fileName = url.lastPathComponent
+            calls[fileName, default: 0] += 1
+            if failSecondImage, fileName == "legacy-b.jpg" { throw URLError(.timedOut) }
+            return (try XCTUnwrap(payloads["2026-10-24/\(fileName)"]),
+                HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let imageStore = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images"))
+        let cache = LocalHistoryMigrationCache(database: database, imageStore: imageStore)
+        let coordinator = LocalHistoryMigrationCoordinator(source: source, downloader: downloader, cache: cache)
+
+        do {
+            _ = try await coordinator.prepare(profileID: profile.id, cloudUserID: user,
+                accessToken: "synthetic-session", isCurrent: { true })
+            XCTFail("The second image failure must stop preparation")
+        } catch {
+            let context = try XCTUnwrap(error as? LocalHistoryMigrationContextError)
+            XCTAssertEqual(context.table, "data_records")
+            XCTAssertEqual(context.field, "source_image_path")
+            XCTAssertEqual(context.recordID, "00000000-0000-0000-0000-000000000002")
+            XCTAssertEqual((context.underlying as? URLError)?.code, .timedOut)
+        }
+        XCTAssertEqual(try LocalHistoryMigrationStore(database: database).state(profileID: profile.id)?.status, .paused)
+        XCTAssertTrue(try LocalRecordRepository(database: database).records(profileID: profile.id, monthKey: "2026-10").isEmpty,
+            "A failed image preparation must not create local facts")
+
+        failSecondImage = false
+        let prepared = try await coordinator.prepare(profileID: profile.id, cloudUserID: user,
+            accessToken: "synthetic-session", isCurrent: { true })
+        XCTAssertEqual(prepared.images[paths[0]], payloads[paths[0]])
+        XCTAssertEqual(prepared.images[paths[1]], payloads[paths[1]])
+        XCTAssertEqual(try cache.image(state: prepared.state, sourcePath: paths[0]), payloads[paths[0]])
+        XCTAssertEqual(try cache.image(state: prepared.state, sourcePath: paths[1]), payloads[paths[1]])
+        XCTAssertEqual(calls["legacy-a.jpg"], 1, "Retry must reuse the valid cached legacy image")
+        XCTAssertEqual(calls["legacy-b.jpg"], 2, "Retry must fetch the image that failed previously")
+
+        let archive = try LocalHistoryMigrationMapper(schema: database).buildArchive(
+            prepared.inspection, profileID: profile.id, images: prepared.images)
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
+        let archivedImages = try XCTUnwrap(root["images"] as? [[String: Any]])
+        let archivedBytes = archivedImages.compactMap { image -> Data? in
+            guard let encoded = image["data"] as? String else { return nil }
+            return Data(base64Encoded: encoded)
+        }
+        XCTAssertEqual(Set(archivedBytes), Set(payloads.values), "The mapper must receive the original cache keys and bytes")
+        XCTAssertTrue(try LocalRecordRepository(database: database).records(profileID: profile.id, monthKey: "2026-10").isEmpty,
+            "Preparation and archive mapping do not commit the migration")
+    }
+
+    func testLF03923AccountSwitchAfterImageResponseDoesNotCacheOrCommitLateBytes() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        defer { try? database.writer.close() }
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let user = UUID().uuidString.lowercased()
+        let path = "2026-10-24/legacy.jpg"
+        let timestamp = "2026-10-24T00:30:00Z"
+        let source = LocalHistoryMigrationSource { table, _, _ in
+            guard table == "rest/v1/data_records" else { return [] }
+            return [[
+                "id": AnyCodable("00000000-0000-0000-0000-000000000001"),
+                "user_id": AnyCodable(user),
+                "domain_key": AnyCodable("food"), "domain_version": AnyCodable("1.0"),
+                "payload_jsonb": AnyCodable(["meal_type": "午餐", "total_calorie_kcal": 500]),
+                "occurred_at": AnyCodable(timestamp), "created_at": AnyCodable(timestamp),
+                "updated_at": AnyCodable(timestamp), "source_image_path": AnyCodable(path)
+            ]]
+        }
+        var current = true
+        var imageCalls = 0
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://synthetic.invalid")!) { request in
+            imageCalls += 1
+            if imageCalls == 1 { current = false }
+            return (Data("late-image".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let cache = LocalHistoryMigrationCache(database: database,
+            imageStore: try LocalImageStore(rootDirectory: directory.appendingPathComponent("images")))
+        let coordinator = LocalHistoryMigrationCoordinator(source: source, downloader: downloader, cache: cache)
+
+        do {
+            _ = try await coordinator.prepare(profileID: profile.id, cloudUserID: user,
+                accessToken: "synthetic-session", isCurrent: { current })
+            XCTFail("A response from an invalidated account must not escape preparation")
+        } catch is CancellationError {
+            // Expected: account identity changed after the request began.
+        }
+        XCTAssertEqual(try LocalHistoryMigrationStore(database: database).state(profileID: profile.id)?.status, .paused)
+        XCTAssertTrue(try LocalRecordRepository(database: database).records(profileID: profile.id, monthKey: "2026-10").isEmpty)
+
+        current = true
+        let retry = try await coordinator.prepare(profileID: profile.id, cloudUserID: user,
+            accessToken: "synthetic-session", isCurrent: { current })
+        XCTAssertEqual(imageCalls, 2, "Late response bytes must not have been written to migration cache")
+        XCTAssertNotNil(retry.images[path])
+        XCTAssertTrue(try LocalRecordRepository(database: database).records(profileID: profile.id, monthKey: "2026-10").isEmpty)
+    }
+
     func testLF03903NetworkFailureResumesMissingPageWithoutFetchingCommittedPageAgain() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

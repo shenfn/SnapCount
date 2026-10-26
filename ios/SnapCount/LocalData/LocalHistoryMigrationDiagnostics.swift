@@ -264,11 +264,18 @@ final class LocalHistoryMigrationDiagnosticStore {
         }
         if let error = error as? LocalHistoryImageDownloadError {
             switch error {
+            case .unsupportedPathFormat: return "HIST-IMAGE-PATH-UNSUPPORTED"
+            case .sourceScopeMismatch: return "HIST-IMAGE-SCOPE-MISMATCH"
             case .sessionExpired: return "HIST-IMAGE-401"
             case .accessDenied: return "HIST-IMAGE-403"
             case .missingImage: return "HIST-IMAGE-404"
             case .missingTemporaryImage: return "HIST-TEMP-IMAGE-404"
             case .invalidResponse: return "HIST-IMAGE-HTTP"
+            case .emptyResponse: return "HIST-IMAGE-EMPTY"
+            case .imageTooLarge: return "HIST-IMAGE-SINGLE-TOO-LARGE"
+            case .totalSizeExceeded: return "HIST-IMAGE-TOTAL-TOO-LARGE"
+            case .responseAddressMismatch: return "HIST-IMAGE-RESPONSE-ADDRESS"
+            case .hashMismatch: return "HIST-IMAGE-HASH"
             }
         }
         if let error = error as? LocalHistoryMappingError {
@@ -317,10 +324,18 @@ final class LocalHistoryMigrationDiagnosticStore {
             return "请核对账户期初余额与有效流水；核对一致前不会入账。"
         }
         switch error as? LocalHistoryImageDownloadError {
+        case .unsupportedPathFormat: return "请核对历史图片字段格式；原图和源记录仍保留，确认路径受支持后可重试。"
+        case .sourceScopeMismatch: return "该图片不属于当前账户已读取的迁移记录或项目存储范围；请核对源记录，不要跳过。"
         case .sessionExpired: return "请重新登录后重试。"
         case .accessDenied: return "请核对当前登录账户对该原图的访问权限。"
-        case .missingImage, .missingTemporaryImage: return "请查看受影响记录并核对原图来源；不会自动跳过。"
-        case .invalidResponse: return "请检查网络后重试。"
+        case .missingImage: return "请核对受影响记录的云端原图是否仍存在；不会自动跳过或删除源数据。"
+        case .missingTemporaryImage: return "请核对临时原图引用及其保留状态；具体删除原因未确认，不会自动跳过。"
+        case .invalidResponse: return "请检查网络和图片服务后重试；本次不会入账。"
+        case .emptyResponse: return "图片服务未返回内容；请重试或核对该对象，不会按无图迁入。"
+        case .imageTooLarge: return "该图片超过单图迁移上限；请核对图片来源与大小后再继续。"
+        case .totalSizeExceeded: return "图片总量超过本机迁移上限；请释放本机空间或分批评估迁移范围。"
+        case .responseAddressMismatch: return "图片服务返回了不同地址；请检查服务端存储响应，不会跟随该地址。"
+        case .hashMismatch: return "图片内容与源记录哈希不一致；请核对云端对象和源哈希后重试。"
         case nil: break
         }
         if error is LocalHistoryMappingError { return "请查看问题记录；无法等价恢复的数据需要先核对来源。" }
@@ -351,11 +366,18 @@ final class LocalHistoryMigrationDiagnosticStore {
         }
         if let error = error as? LocalHistoryImageDownloadError {
             switch error {
+            case .unsupportedPathFormat: return "历史图片路径不符合当前受支持格式，未按目录外观推断其归属。"
+            case .sourceScopeMismatch: return "图片引用未通过当前账户、inspection源记录或项目对象路径范围校验。"
             case .sessionExpired: return "图片读取会话已失效，需要重新登录。"
             case .accessDenied: return "当前账户无权读取该图片。"
             case .missingTemporaryImage: return "同账户临时图片当前不可读取，具体是已清理还是路径失效尚未确认。"
             case .missingImage: return "历史图片当前不可读取，来源状态尚未确认。"
             case .invalidResponse: return "图片服务未返回可用内容。"
+            case .emptyResponse: return "图片服务返回空内容，未把空响应当作原图。"
+            case .imageTooLarge: return "单张历史图片超过本机迁移上限。"
+            case .totalSizeExceeded: return "历史图片合计超过本机迁移上限。"
+            case .responseAddressMismatch: return "图片响应地址与当前账户的 authenticated 请求地址不一致。"
+            case .hashMismatch: return "历史图片内容与源记录哈希不一致。"
             }
         }
         if let error = error as? LocalDataError {

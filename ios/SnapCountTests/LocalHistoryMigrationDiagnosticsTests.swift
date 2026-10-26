@@ -2,6 +2,52 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryMigrationDiagnosticsTests: XCTestCase {
+    func testLF03923ImageFailureCategoriesStayDistinctAndRedacted() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("history-migration-diagnostics.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = try LocalHistoryMigrationDiagnosticStore(fileURL: url)
+        let privateID = UUID().uuidString
+        let expected: [(LocalHistoryImageDownloadError, String)] = [
+            (.unsupportedPathFormat, "HIST-IMAGE-PATH-UNSUPPORTED"),
+            (.sourceScopeMismatch, "HIST-IMAGE-SCOPE-MISMATCH"),
+            (.sessionExpired, "HIST-IMAGE-401"),
+            (.accessDenied, "HIST-IMAGE-403"),
+            (.missingImage, "HIST-IMAGE-404"),
+            (.missingTemporaryImage, "HIST-TEMP-IMAGE-404"),
+            (.invalidResponse(503), "HIST-IMAGE-HTTP"),
+            (.emptyResponse, "HIST-IMAGE-EMPTY"),
+            (.imageTooLarge, "HIST-IMAGE-SINGLE-TOO-LARGE"),
+            (.totalSizeExceeded, "HIST-IMAGE-TOTAL-TOO-LARGE"),
+            (.responseAddressMismatch, "HIST-IMAGE-RESPONSE-ADDRESS"),
+            (.hashMismatch, "HIST-IMAGE-HASH")
+        ]
+
+        for (error, code) in expected {
+            let context = LocalHistoryMigrationContextError(
+                table: "data_records", field: "source_image_path", recordID: privateID, underlying: error)
+            let entry = store.record(context, phase: "读取原图", sourceTable: "data_records",
+                sourceField: "source_image_path", recordID: privateID,
+                progressSummary: "2221行，28页，原图0/1368",
+                attemptID: UUID(), committed: false)
+
+            XCTAssertEqual(entry.code, code)
+            XCTAssertEqual(entry.sourceTable, "data_records")
+            XCTAssertEqual(entry.sourceField, "source_image_path")
+            XCTAssertEqual(entry.recordHint, String(LocalImageStore.sha256(Data(privateID.lowercased().utf8)).prefix(10)))
+            XCTAssertEqual(entry.progressSummary, "2221行，28页，原图0/1368")
+            XCTAssertFalse(entry.committed)
+            XCTAssertTrue(entry.userMessage.contains("本次尚未入账"))
+            XCTAssertFalse(entry.shareText.contains(privateID))
+            XCTAssertFalse(entry.shareText.contains("https://"))
+            XCTAssertFalse(entry.shareText.contains("token="))
+            XCTAssertFalse(entry.shareText.contains("source_image_path/2026-10-24"))
+            XCTAssertFalse(entry.safeReason?.isEmpty ?? true)
+            XCTAssertFalse(entry.recoveryAction.isEmpty)
+        }
+    }
+
     func testLF039UnknownFailurePersistsOnlyRedactedBoundedDiagnostic() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

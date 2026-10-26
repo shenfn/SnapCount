@@ -89,16 +89,30 @@ final class LocalHistoryMigrationCoordinator {
             var byteCount = 0
             for path in inspection.sourceImagePaths.sorted() {
                 guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                guard let reference = inspection.imageReference(for: path) else {
+                    throw LocalHistoryMigrationContextError(table: "image_objects", field: "path", recordID: "",
+                        underlying: LocalHistoryImageDownloadError.sourceScopeMismatch)
+                }
                 let bytes: Data
+                let needsCacheWrite: Bool
                 do {
-                    if let cached = try cache.image(state: state, sourcePath: path) { bytes = cached }
-                    else {
-                        let fetched = try await downloader.download(paths: [path], cloudUserID: cloudUserID,
-                            accessToken: accessToken, isCurrent: isCurrent)
-                        guard let data = fetched[path], isCurrent(), !Task.isCancelled else { throw CancellationError() }
-                        try cache.saveImage(state: state, sourcePath: path, data: data)
-                        bytes = data
+                    let expectedHash = try inspection.expectedImageHash(for: path)
+                    let cached = try cache.image(state: state, sourcePath: path)
+                    if let cached, expectedHash.map({ LocalImageStore.sha256(cached) == $0 }) ?? true {
+                        bytes = cached
+                        needsCacheWrite = false
                     }
+                    else {
+                        let fetched = try await downloader.download(reference: reference, inspection: inspection,
+                            cloudUserID: cloudUserID, accessToken: accessToken, isCurrent: isCurrent)
+                        guard let data = fetched[path] else { throw LocalHistoryImageDownloadError.sourceScopeMismatch }
+                        bytes = data
+                        needsCacheWrite = true
+                    }
+                    guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                    let nextByteCount = try Self.checkedImageByteCount(current: byteCount, adding: bytes.count)
+                    if needsCacheWrite { try cache.saveImage(state: state, sourcePath: path, data: bytes) }
+                    byteCount = nextByteCount
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch let error as LocalHistoryMigrationContextError {
@@ -112,18 +126,26 @@ final class LocalHistoryMigrationCoordinator {
                         underlying: error
                     )
                 }
-                byteCount += bytes.count
-                guard byteCount <= 128 * 1024 * 1024 else { throw LocalCompleteBackupError.archiveTooLarge }
                 images[path] = bytes
                 await onProgress?(LocalHistoryMigrationProgress(
                     phase: .downloadingImages, currentTable: nil, rowsRead: rowsRead, knownRowTotal: rowsRead,
                     pagesRead: pagesRead, imagesProcessed: images.count, imagesTotal: inspection.sourceImagePaths.count
                 ))
             }
+            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
             return LocalHistoryMigrationPreparedSource(inspection: inspection, images: images, state: state)
         } catch {
             try? cache.pause(state)
             throw error
         }
+    }
+
+    static func checkedImageByteCount(current: Int, adding: Int) throws -> Int {
+        guard current >= 0, adding >= 0 else { throw LocalHistoryImageDownloadError.totalSizeExceeded }
+        let (total, overflow) = current.addingReportingOverflow(adding)
+        guard !overflow, total <= 128 * 1024 * 1024 else {
+            throw LocalHistoryImageDownloadError.totalSizeExceeded
+        }
+        return total
     }
 }

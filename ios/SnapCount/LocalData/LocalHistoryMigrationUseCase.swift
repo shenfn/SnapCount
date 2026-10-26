@@ -1,27 +1,80 @@
 import Foundation
 
+struct LocalHistoryMigrationImageReference: Hashable {
+    let path: String
+    let table: String
+    let field: String
+    let recordID: String
+
+    fileprivate init(path: String, table: String, field: String, recordID: String) {
+        self.path = path
+        self.table = table
+        self.field = field
+        self.recordID = recordID
+    }
+}
+
 struct LocalHistoryMigrationInspection {
     let cloudUserID: String
     let rows: [LocalHistorySourceTable: [[String: AnyCodable]]]
     let blockers: [String]
     var counts: [String: Int] { Dictionary(uniqueKeysWithValues: rows.map { ($0.key.rawValue, $0.value.count) }) }
     var sourceImagePaths: Set<String> {
-        Set(rows.values.flatMap { $0 }.compactMap { row in
-            for key in ["image_url", "source_image_path", "image_path"] {
-                if let path = row[key]?.value as? String, !path.isEmpty { return path }
+        guard let cloudOwnerID = UUID(uuidString: cloudUserID) else { return [] }
+        return Set(LocalHistorySourceTable.allCases.flatMap { table in
+            rows[table, default: []].compactMap { row in
+                guard let owner = row["user_id"]?.value as? String,
+                      UUID(uuidString: owner) == cloudOwnerID,
+                      let id = row["id"]?.value as? String, UUID(uuidString: id) != nil,
+                      let image = Self.selectedImageReference(in: row) else { return nil }
+                return image.path
             }
-            return nil
         })
     }
-    func imageReference(for path: String) -> (table: String, field: String, recordID: String)? {
+    func imageReference(for path: String) -> LocalHistoryMigrationImageReference? {
+        guard let ownerID = UUID(uuidString: cloudUserID) else { return nil }
         for table in LocalHistorySourceTable.allCases {
             for row in rows[table, default: []] {
-                for field in ["image_url", "source_image_path", "image_path"] where row[field]?.value as? String == path {
-                    return (table.rawValue, field, row["id"]?.value as? String ?? "")
-                }
+                guard let owner = row["user_id"]?.value as? String, UUID(uuidString: owner) == ownerID,
+                      let recordID = row["id"]?.value as? String, UUID(uuidString: recordID) != nil,
+                      let image = Self.selectedImageReference(in: row), image.path == path else { continue }
+                return LocalHistoryMigrationImageReference(path: path, table: table.rawValue,
+                    field: image.field, recordID: recordID)
             }
         }
         return nil
+    }
+    func authorizesImage(_ reference: LocalHistoryMigrationImageReference, cloudUserID: String) -> Bool {
+        guard blockers.isEmpty,
+              UUID(uuidString: cloudUserID) == UUID(uuidString: self.cloudUserID),
+              let sourceReference = imageReference(for: reference.path) else { return false }
+        return sourceReference == reference
+    }
+    func expectedImageHashes(for path: String) -> Set<String> {
+        guard let ownerID = UUID(uuidString: cloudUserID) else { return [] }
+        var hashes = Set<String>()
+        for table in LocalHistorySourceTable.allCases {
+            for row in rows[table, default: []] {
+                guard let owner = row["user_id"]?.value as? String, UUID(uuidString: owner) == ownerID,
+                      let recordID = row["id"]?.value as? String, UUID(uuidString: recordID) != nil,
+                      let image = Self.selectedImageReference(in: row), image.path == path,
+                      let hash = ["image_hash", "source_image_hash"].compactMap({ row[$0]?.value as? String })
+                          .first(where: { !$0.isEmpty }) else { continue }
+                hashes.insert(hash.lowercased())
+            }
+        }
+        return hashes
+    }
+    func expectedImageHash(for path: String) throws -> String? {
+        let hashes = expectedImageHashes(for: path)
+        guard hashes.count <= 1 else { throw LocalHistoryImageDownloadError.hashMismatch }
+        return hashes.first
+    }
+    private static func selectedImageReference(in row: [String: AnyCodable]) -> (field: String, path: String)? {
+        ["image_url", "source_image_path", "image_path"].compactMap { field in
+            guard let path = row[field]?.value as? String, !path.isEmpty else { return nil }
+            return (field, path)
+        }.first
     }
     var summary: String {
         let detail = LocalHistorySourceTable.allCases.map { "\($0.rawValue)：\(rows[$0, default: []].count)" }.joined(separator: "、")

@@ -5659,7 +5659,16 @@ final class AppState: ObservableObject {
                 downloader: LocalHistoryImageDownloader(baseURL: baseURL), cache: cache
             ).prepare(profileID: profile.id, cloudUserID: session.user.id,
                       accessToken: session.accessToken, isCurrent: isCurrent,
-                      onProgress: { [weak self] progress in self?.historyMigrationProgress = progress })
+                      onProgress: { [weak self] progress in
+                          guard let self else { return }
+                          self.historyMigrationProgress = progress
+                          switch progress.phase {
+                          case .readingSource:
+                              self.historyMigrationPhase = progress.currentTable.map { "读取 \($0.rawValue)" } ?? "读取云端源数据"
+                          case .downloadingImages:
+                              self.historyMigrationPhase = "下载历史原图"
+                          }
+                      })
             guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
             let inspection = prepared.inspection
             historyMigrationCheckpoint = prepared.state
@@ -5912,18 +5921,24 @@ final class AppState: ObservableObject {
               let checkpoint = historyMigrationCheckpoint, let cache = localHistoryMigrationCache,
               let generation = historyMigrationGeneration,
               isCurrentUserLoad(generation, userId: owner) else { return false }
+        let attempt = historyMigrationAttempt
         isPreparingHistoryMigration = true
         historyMigrationPhase = "确认前复核云端源数据"
         historyMigrationImportError = nil
-        defer { if generation == userStateGeneration { isPreparingHistoryMigration = false } }
+        let isCurrentAttempt = { [weak self] in
+            self?.isCurrentUserLoad(generation, userId: owner) == true
+                && self?.historyMigrationAttempt == attempt
+        }
+        defer { if isCurrentAttempt() { isPreparingHistoryMigration = false } }
         do {
             let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: owner), session.user.id == owner else { return false }
+            guard isCurrentAttempt(), session.user.id == owner else { return false }
             let inspection = try await LocalHistoryMigrationUseCase().inspect(cloudUserID: owner,
                 accessToken: session.accessToken,
-                isCurrent: { [weak self] in self?.isCurrentUserLoad(generation, userId: owner) == true })
+                isCurrent: isCurrentAttempt)
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let current = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
+            guard isCurrentAttempt(), !Task.isCancelled else { throw CancellationError() }
             guard inspection.blockers.isEmpty, current == historyMigrationSourceDigest else {
                 try cache.restartSource(checkpoint)
                 historyMigrationArchive = nil
@@ -5935,9 +5950,41 @@ final class AppState: ObservableObject {
             }
             // Rows may omit a source hash; a stable URL alone cannot prove unchanged image bytes.
             guard let baseURL = URL(string: AppConfig.supabaseURL) else { throw LocalDataError.invalidRecord }
-            let currentImages = try await LocalHistoryImageDownloader(baseURL: baseURL).download(
-                paths: inspection.sourceImagePaths, cloudUserID: owner, accessToken: session.accessToken,
-                isCurrent: { [weak self] in self?.isCurrentUserLoad(generation, userId: owner) == true })
+            let downloader = LocalHistoryImageDownloader(baseURL: baseURL)
+            var currentImages: [String: Data] = [:]
+            var currentImageBytes = 0
+            historyMigrationPhase = "确认前复核原图"
+            let imagePaths = inspection.sourceImagePaths.sorted()
+            let sourceRowsRead = inspection.rows.values.reduce(0) { $0 + $1.count }
+            let sourcePagesRead = historyMigrationProgress?.pagesRead ?? 0
+            historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
+                rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
+                imagesProcessed: 0, imagesTotal: imagePaths.count)
+            for path in imagePaths {
+                guard let reference = inspection.imageReference(for: path) else {
+                    throw LocalHistoryMigrationContextError(table: "image_objects", field: "path", recordID: "",
+                        underlying: LocalHistoryImageDownloadError.sourceScopeMismatch)
+                }
+                do {
+                    let fetched = try await downloader.download(reference: reference, inspection: inspection,
+                        cloudUserID: owner, accessToken: session.accessToken, isCurrent: isCurrentAttempt)
+                    guard let data = fetched[path] else { throw LocalHistoryImageDownloadError.sourceScopeMismatch }
+                    currentImageBytes = try LocalHistoryMigrationCoordinator.checkedImageByteCount(
+                        current: currentImageBytes, adding: data.count)
+                    currentImages[path] = data
+                    historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
+                        rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
+                        imagesProcessed: currentImages.count, imagesTotal: imagePaths.count)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch let error as LocalHistoryMigrationContextError {
+                    throw error
+                } catch {
+                    throw LocalHistoryMigrationContextError(table: reference.table, field: reference.field,
+                        recordID: reference.recordID, underlying: error)
+                }
+            }
+            guard isCurrentAttempt(), !Task.isCancelled else { throw CancellationError() }
             guard currentImages.mapValues(LocalImageStore.sha256) == historyMigrationImageDigests else {
                 try cache.restartSource(checkpoint)
                 historyMigrationArchive = nil
@@ -5946,7 +5993,7 @@ final class AppState: ObservableObject {
                 historyMigrationMessage = "云端原图已变化，旧预检缓存已失效。请重新预检；尚未入账。"
                 return false
             }
-            guard isCurrentUserLoad(generation, userId: owner), !Task.isCancelled else { return false }
+            guard isCurrentAttempt(), !Task.isCancelled else { return false }
             try cache.assertCurrent(checkpoint)
             historyMigrationPhase = "事务入账与本机刷新"
             let imported = await importCompleteLocalBackup(archive, historyMigration: checkpoint)
@@ -5956,7 +6003,7 @@ final class AppState: ObservableObject {
                 return false
             }
             if imported { try? cache.cleanupAfterCompletion(checkpoint) }
-            guard isCurrentUserLoad(generation, userId: owner) else { return false }
+            guard isCurrentAttempt() else { return false }
             if imported {
                 let savedPhase = historyMigrationUnresolvedCount > 0 ? "已保留待核对" : "已入账"
                 historyMigrationPhase = savedPhase
@@ -5976,7 +6023,7 @@ final class AppState: ObservableObject {
             } else { historyMigrationMessage = settingsMessage }
             return imported
         } catch {
-            guard generation == userStateGeneration else { return false }
+            guard isCurrentAttempt() else { return false }
             if error is CancellationError {
                 historyMigrationPhase = "已取消"
                 historyMigrationMessage = "确认前复核已取消，尚未入账；可以重新预检。"
