@@ -5763,7 +5763,7 @@ final class AppState: ObservableObject {
             guard generation == userStateGeneration else { return }
             cloudHistoryInventory.status = .failed
             cloudHistoryInventory.sampledAt = Date()
-            let entry = historyMigrationDiagnosticStore?.record(error, phase: "云端数量盘点", operation: "cloud-inventory", accountID: currentUserId,
+            let entry = historyMigrationDiagnosticStore?.record(error, phase: "云端数量盘点", accountID: currentUserId, operation: "cloud-inventory",
                 progressSummary: "已读 \(cloudHistoryInventory.totalRowsRead) 行、\(cloudHistoryInventory.pagesRead) 页；当前表总量未知。",
                 attemptID: historyMigrationAttemptID, committed: false)
             historyMigrationDiagnostic = entry
