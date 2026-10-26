@@ -29,6 +29,10 @@ struct SettingsView: View {
                         Text(syncStatusTitle)
                             .foregroundStyle(.secondary)
                     }
+                    Text("普通同步范围：账户与消费；账户流水由本机消费投影维护。收入、四域记录、钱包快照、候选和还款不在此同步范围。‘已同步’不代表历史全量迁入或云本完全一致。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if canPreviewLocalBinding {
                         Button {
                             Task {
@@ -221,12 +225,48 @@ struct SettingsView: View {
                             .foregroundStyle(message.contains("失败") || message.contains("无法") ? JieziTheme.coral : .secondary)
                     }
                 }
-                if let diagnostic = appState.localSyncDiagnostic {
+                if appState.localSyncDiagnostic != nil || appState.localSyncFailureDiagnostic != nil {
                     Section("同步诊断") {
-                        Text(diagnostic.summary)
+                        if let diagnostic = appState.localSyncDiagnostic {
+                            Text(diagnostic.summary)
+                                .font(.footnote)
+                                .foregroundStyle(diagnostic.phase == .failed ? JieziTheme.coral : .secondary)
+                                .textSelection(.enabled)
+                        }
+                        if let diagnostic = appState.localSyncFailureDiagnostic {
+                            Text(diagnostic.userMessage)
+                                .font(.footnote)
+                                .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
+                            if let resolution = diagnostic.resolution {
+                                Text("恢复结果：\(resolution)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            diagnosticDetails(diagnostic)
+                        }
+                    }
+                }
+                if let diagnostic = appState.localStorageInitializationDiagnostic {
+                    Section("本机存储诊断") {
+                        Text(diagnostic.userMessage)
                             .font(.footnote)
-                            .foregroundStyle(diagnostic.phase == .failed ? JieziTheme.coral : .secondary)
-                            .textSelection(.enabled)
+                            .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
+                        if let resolution = diagnostic.resolution {
+                            Text("恢复结果：\(resolution)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        diagnosticDetails(diagnostic)
+                    }
+                }
+                if let diagnostic = appState.localProjectionRefreshDiagnostic {
+                    Section("本机列表刷新诊断") {
+                        Text(diagnostic.userMessage)
+                            .font(.footnote)
+                            .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
+                        if let resolution = diagnostic.resolution {
+                            Text("恢复结果：\(resolution)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        diagnosticDetails(diagnostic)
                     }
                 }
             }
@@ -263,6 +303,9 @@ struct SettingsView: View {
         }
         .task {
             appState.refreshLocalSyncState()
+            appState.loadLatestLocalSyncDiagnostic()
+            appState.loadLatestLocalStorageInitializationDiagnostic()
+            appState.loadLatestLocalProjectionRefreshDiagnostic()
             if appState.isSignedIn { await appState.loadUserSettings() }
         }
     }
@@ -293,7 +336,7 @@ struct SettingsView: View {
         case .disabled: return appState.isSignedIn ? "已登录，尚未开启" : "尚未开启"
         case .ready: return "已授权，等待同步"
         case .syncing: return "同步中"
-        case .synced: return "已同步"
+        case .synced: return "账户与消费已同步"
         case .failed: return "同步失败，可重试"
         }
     }
@@ -355,6 +398,18 @@ struct SettingsView: View {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         return build.isEmpty ? version : "\(version) (\(build))"
+    }
+}
+
+private func diagnosticDetails(_ diagnostic: LocalHistoryMigrationDiagnostic) -> some View {
+    DisclosureGroup("查看脱敏技术详情") {
+        Text(diagnostic.shareText)
+            .font(.caption.monospaced())
+            .textSelection(.enabled)
+        Button("复制脱敏诊断") {
+            UIPasteboard.general.string = diagnostic.shareText
+        }
+        ShareLink("分享脱敏诊断", item: diagnostic.shareText)
     }
 }
 
@@ -660,21 +715,176 @@ struct LocalHistoryMigrationView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsConfirmation = false
     @State private var preparationTask: Task<Void, Never>?
+    @State private var cloudInventoryTask: Task<Void, Never>?
 
     var body: some View {
         Form {
-            Section("迁移范围") {
-                Text("读取当前登录云账户的账户、流水、还款、消费、收入、四域记录、候选和原图。预检会在本机缓存源数据和原图，确认前不会入账，也不会自动开启云同步。")
-                Text("遇到缺图、余额不一致、无法等价恢复的历史状态或同ID内容冲突时，整包停止并显示原因。中断或重启后再次预检，将续传缺失页和图片；确认前仍会重新核对源数据。")
-                    .font(.footnote).foregroundStyle(.secondary)
+            Section("状态") {
+                Text(statusSummary)
+                    .font(.headline)
+                if let message = appState.historyMigrationMessage {
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundStyle(message.contains("暂停") || message.contains("失败") ? JieziTheme.coral : .secondary)
+                        .textSelection(.enabled)
+                }
             }
-            Section {
+
+            Section("云端与本机数据盘点") {
+                HStack {
+                    Text("类别")
+                    Spacer()
+                    Text("云端")
+                        .frame(minWidth: 88, alignment: .trailing)
+                    Text("本机")
+                        .frame(minWidth: 76, alignment: .trailing)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                ForEach(LocalHistoryInventoryCatalog.rows) { row in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(row.title)
+                            .font(.subheadline)
+                        Spacer(minLength: 4)
+                        Text(cloudValue(for: row))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                            .frame(minWidth: 88, alignment: .trailing)
+                        Text(localValue(for: row))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                            .frame(minWidth: 76, alignment: .trailing)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                Text("类别按各自来源表或本机表独立计数，账户流水用于账务对账，不等于额外业务账单。云端与本机数量差异不代表数据丢失或待迁入数量；以稳定标识和内容核对的迁移预览为准。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let snapshot = appState.localHistoryInventory {
+                    Text("本机：\(snapshot.scope) · profile #\(shortID(snapshot.profileID)) · \(snapshot.sampledAt.formatted(date: .numeric, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(localImageDetail(snapshot))
+                        .font(.caption)
+                        .foregroundStyle(snapshot.imageVerificationComplete ? .secondary : JieziTheme.coral)
+                } else if appState.isLoadingLocalHistoryInventory {
+                    ProgressView("正在只读统计本机数据")
+                } else if let error = appState.localHistoryInventoryError {
+                    Text(error).font(.caption).foregroundStyle(JieziTheme.coral)
+                }
+                if appState.cloudHistoryInventory.status == .notRead {
+                    Text("尚未读取云端数量。打开本页不会访问云端；点击下方按钮后才会在当前登录会话下逐表读取。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if let message = appState.cloudHistoryInventory.message {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+                if appState.isReadingCloudHistoryInventory,
+                   let table = appState.cloudHistoryInventory.currentTable {
+                    Text("当前表：\(tableTitle(table))，已读 \(appState.cloudHistoryInventory.currentTableRowsRead) 条；总量未知。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let sampledAt = appState.cloudHistoryInventory.sampledAt {
+                    let cloudAccount = appState.currentUserEmail.isEmpty ? "账户 #\(shortID(appState.currentUserId))" : appState.currentUserEmail
+                    Text("云端：\(cloudAccount) · 全日期 · \(sampledAt.formatted(date: .numeric, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if appState.isReadingCloudHistoryInventory {
+                    ProgressView("已读取 \(appState.cloudHistoryInventory.totalRowsRead) 条 · \(appState.cloudHistoryInventory.pagesRead) 页")
+                }
+                Button {
+                    cloudInventoryTask = Task { await appState.readCloudHistoryInventory() }
+                } label: {
+                    if appState.isReadingCloudHistoryInventory { ProgressView() }
+                    else { Label("读取云端数量", systemImage: "arrow.down.doc") }
+                }
+                .disabled(!appState.isSignedIn || appState.isReadingCloudHistoryInventory || appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
+                if appState.isReadingCloudHistoryInventory {
+                    Button("停止云端读取") { cloudInventoryTask?.cancel() }
+                }
+                Button("刷新本机盘点") {
+                    Task { await appState.loadLocalHistoryInventory() }
+                }
+                .disabled(appState.isLoadingLocalHistoryInventory)
+            }
+
+            Section("当前步骤") {
+                if appState.isPreparingHistoryMigration {
+                    ProgressView()
+                    Text(appState.historyMigrationPhase.isEmpty ? "正在准备" : appState.historyMigrationPhase)
+                        .font(.subheadline)
+                } else {
+                    Text(appState.historyMigrationPhase.isEmpty ? "尚未开始" : appState.historyMigrationPhase)
+                        .font(.subheadline)
+                }
+                if let progress = appState.historyMigrationProgress {
+                    if let table = progress.currentTable {
+                        Text("当前读取表：\(tableTitle(table))；总量未知")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("源数据：已读 \(progress.rowsRead) 条，\(progress.pagesRead) 页")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let total = progress.knownRowTotal {
+                        if total > 0 { ProgressView(value: Double(progress.rowsRead), total: Double(total)) }
+                        Text(total == 0 ? "源数据读取完成：0 条" : "源数据读取完成：\(progress.rowsRead) / \(total) 条")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if progress.phase == .downloadingImages {
+                        Text("原图：已处理 \(progress.imagesProcessed) / \(progress.imagesTotal) 张")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if appState.historyMigrationBlockerCount > 0 {
+                Section("迁移问题与恢复") {
+                    Text("共有 \(appState.historyMigrationBlockerCount) 项需要核对；本次尚未入账。先核对源表、字段和历史写入合同，不会自动跳过或补造事实。")
+                        .font(.subheadline)
+                        .foregroundStyle(JieziTheme.coral)
+                    DisclosureGroup("查看问题列表（最多展示 200 项）") {
+                        ForEach(Array(appState.historyMigrationBlockers.enumerated()), id: \.offset) { _, issue in
+                            Text(issue)
+                                .font(.caption)
+                                .textSelection(.enabled)
+                        }
+                        if appState.historyMigrationBlockerCount > appState.historyMigrationBlockers.count {
+                            Text("其余 \(appState.historyMigrationBlockerCount - appState.historyMigrationBlockers.count) 项已汇总，重新读取可查看最新清单。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("恢复：核对具体字段或来源后重新读取；若源数据仍不能等价映射，保留阻塞并导出诊断。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            if let diagnostic = appState.historyMigrationDiagnostic {
+                Section("最近诊断") {
+                    Text(diagnostic.userMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(JieziTheme.coral)
+                    diagnosticDetails(diagnostic)
+                }
+            }
+            if let diagnostic = appState.localProjectionRefreshDiagnostic {
+                Section("本机列表刷新诊断") {
+                    Text(diagnostic.userMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(diagnostic.resolution == nil ? JieziTheme.coral : .secondary)
+                    if let resolution = diagnostic.resolution {
+                        Text("恢复结果：\(resolution)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    diagnosticDetails(diagnostic)
+                }
+            }
+
+            Section("迁移操作") {
                 Button("预检或继续迁移") {
                     preparationTask = Task { await appState.prepareCloudHistoryMigration() }
                 }
                     .disabled(!appState.isSignedIn || appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
                 if !appState.isSignedIn { Text("请先登录要迁入的云账户。") }
-                if appState.isPreparingHistoryMigration { ProgressView("正在核对源数据与图片") }
                 if appState.canPauseHistoryMigration {
                     Button("暂停，保留进度") {
                         preparationTask?.cancel()
@@ -682,23 +892,105 @@ struct LocalHistoryMigrationView: View {
                     }
                 }
                 if let preview = appState.historyMigrationPreview {
-                    Text(preview).font(.footnote).textSelection(.enabled)
+                    DisclosureGroup("查看迁移预览与对账详情") {
+                        Text(preview).font(.footnote).textSelection(.enabled)
+                    }
                     Button("确认恢复到本机") { showsConfirmation = true }
                         .disabled(appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
                 }
-                Button("丢弃预检，重新读取") { appState.restartCloudHistoryMigrationPreview() }
-                    .disabled(appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
-                if let message = appState.historyMigrationMessage {
-                    Text(message).font(.footnote).textSelection(.enabled)
+                if appState.historyMigrationPhase == "已入账", appState.localProjectionRefreshMessage != nil {
+                    Button("只读重试本机列表刷新") {
+                        Task { await appState.retryLocalProjectionRefresh() }
+                    }
+                    Text("迁移数据已经入账。此操作只重新读取本机列表，不会再次导入或增加流水。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
+                Button("丢弃预检缓存并重新读取") { appState.restartCloudHistoryMigrationPreview() }
+                    .disabled(appState.isPreparingHistoryMigration || appState.isImportingLocalBackup)
+                Text("丢弃只清理未入账的预检缓存，不删除已经入账的数据。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("迁移范围与规则") {
+                DisclosureGroup("查看详细说明") {
+                    Text("读取当前登录云账户的账户、流水、还款、消费、收入、四域记录、候选和原图。预检会在本机缓存源数据和原图，确认前不会入账，也不会自动开启云同步。")
+                    Text("遇到缺图、余额不一致、无法等价恢复的历史状态或同ID内容冲突时，整包停止并显示原因。中断或重启后再次预检，将续传缺失页和图片；确认前仍会重新核对源数据。")
+                }
+                .font(.footnote).foregroundStyle(.secondary)
             }
         }
         .navigationTitle("历史数据迁移")
+        .onDisappear { cloudInventoryTask?.cancel() }
+        .task {
+            await appState.loadLocalHistoryInventory()
+            appState.loadLatestHistoryMigrationDiagnostic()
+            appState.loadLatestLocalProjectionRefreshDiagnostic()
+        }
         .confirmationDialog("确认将预检中的历史恢复到本机？", isPresented: $showsConfirmation, titleVisibility: .visible) {
             Button("确认恢复") { Task { _ = await appState.confirmCloudHistoryMigration() } }
             Button("取消", role: .cancel) {}
         } message: {
             Text("确认前会再次读取云端源数据和原图校验，可能产生下载流量。恢复不删除云副本，不改变云同步授权。建议先导出完整本地备份。")
+        }
+    }
+
+    private var statusSummary: String {
+        if appState.isPreparingHistoryMigration { return "历史迁移正在 \(appState.historyMigrationPhase)，尚未确认入账。" }
+        if appState.historyMigrationPhase == "已入账" { return "历史迁移已入账；请核对本机数量和恢复结果。" }
+        if appState.historyMigrationPreview != nil { return "预检已通过，等待你确认；当前尚未入账。" }
+        if appState.historyMigrationPhase == "预检暂停" || appState.historyMigrationPhase == "预检阻塞" || appState.historyMigrationPhase == "事务入账" { return "历史迁移暂停；请先查看问题和诊断。" }
+        if appState.historyMigrationPhase == "已取消" || appState.historyMigrationPhase == "已暂停" { return "预检已暂停，未入账；已缓存进度可继续。" }
+        return "预检前不会写入本机账目；云端数量需单独点击读取。"
+    }
+
+    private func localValue(for row: LocalHistoryInventoryCatalog.Row) -> String {
+        guard let snapshot = appState.localHistoryInventory else {
+            return appState.localHistoryInventoryError == nil ? "—" : "读取失败"
+        }
+        if row.key == "images.references" {
+            return "\(snapshot.counts["images.references", default: 0]) / \(snapshot.counts["images.unique", default: 0])"
+        }
+        if row.key == "account_entries" {
+            return "\(snapshot.counts["account_entries", default: 0]) / \(snapshot.counts["account_entries.effective", default: 0])"
+        }
+        return String(snapshot.counts[row.key, default: 0])
+    }
+
+    private func cloudValue(for row: LocalHistoryInventoryCatalog.Row) -> String {
+        let inventory = appState.cloudHistoryInventory
+        guard inventory.status != .notRead else { return "未读取" }
+        let value = inventory.counts[row.key, default: 0]
+        if inventory.status == .complete { return row.key == "images.references" ? "\(value) / \(inventory.counts["images.unique", default: 0])" : String(value) }
+        guard let sourceTable = row.sourceTable else { return "部分读取" }
+        if inventory.completedTables.contains(sourceTable) {
+            if row.key == "account_entries" { return "\(value) / \(inventory.counts["account_entries.effective", default: 0])" }
+            return String(value)
+        }
+        if inventory.currentTable == sourceTable { return "已读 \(value)，总量未知" }
+        return "未读取"
+    }
+
+    private func localImageDetail(_ snapshot: LocalHistoryInventorySnapshot) -> String {
+        let counts = snapshot.counts
+        let detail = "原图：引用 \(counts["images.references", default: 0])，去重文件 \(counts["images.unique", default: 0])，已缓存 \(counts["images.cached", default: 0])，已校验 \(counts["images.verified", default: 0])，缺失 \(counts["images.missing", default: 0])，未校验 \(counts["images.unverified", default: 0])。"
+        return snapshot.imageVerificationComplete ? detail : detail + "校验因本次读取上限未完成。"
+    }
+
+    private func shortID(_ value: String?) -> String {
+        guard let value else { return "尚无" }
+        return String(value.replacingOccurrences(of: "-", with: "").prefix(8)).lowercased()
+    }
+
+    private func tableTitle(_ table: LocalHistorySourceTable) -> String {
+        switch table {
+        case .accounts: return "账户"
+        case .accountEntries: return "账户流水"
+        case .repaymentCycles: return "还款周期"
+        case .payments: return "还款记录"
+        case .transactions: return "交易"
+        case .incomes: return "收入"
+        case .records: return "四域与钱包记录"
+        case .staging: return "候选"
         }
     }
 }

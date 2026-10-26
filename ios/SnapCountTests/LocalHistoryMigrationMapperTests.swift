@@ -2,6 +2,34 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryMigrationMapperTests: XCTestCase {
+    func testLF039MissingOccurredAtReportsSourceTableFieldAndRedactedRecord() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let schema = try LocalDatabase(databaseURL: directory.appendingPathComponent("schema.sqlite"))
+        let user = UUID(), record = UUID()
+        let inspection = LocalHistoryMigrationInspection(cloudUserID: user.uuidString, rows: [
+            .records: [
+                [
+                    "id": AnyCodable(record.uuidString),
+                    "user_id": AnyCodable(user.uuidString),
+                    "domain_key": AnyCodable("food"),
+                    "domain_version": AnyCodable("1.0"),
+                    "payload_jsonb": AnyCodable(["meal_type": "午餐", "total_calorie_kcal": 500]),
+                    "occurred_at": AnyCodable(NSNull()),
+                    "created_at": AnyCodable("2026-10-24T10:00:00Z")
+                ]
+            ]
+        ], blockers: [])
+
+        XCTAssertThrowsError(try LocalHistoryMigrationMapper(schema: schema).buildArchive(
+            inspection, profileID: UUID(), images: [:]
+        )) { error in
+            XCTAssertTrue(error.localizedDescription.contains("data_records"))
+            XCTAssertTrue(error.localizedDescription.contains("occurred_at"))
+            XCTAssertFalse(error.localizedDescription.contains(record.uuidString))
+        }
+    }
+
     func testLF039HistoryArchiveRestoresReconciledBalanceAndOriginalImage() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

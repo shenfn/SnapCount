@@ -51,6 +51,38 @@ final class LocalHistoryImageDownloaderTests: XCTestCase {
         XCTAssertEqual(result[path], bytes)
     }
 
+    func testLF03905SameOwnerTemporaryImageUsesAuthenticatedReceiptBucket() async throws {
+        let user = UUID().uuidString.lowercased()
+        let path = "tmp/\(user)/2026-10-24/original.jpg"
+        let bytes = Data("synthetic-temporary-image".utf8)
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!) { request in
+            XCTAssertEqual(request.url?.path, "/storage/v1/object/authenticated/receipt-images/\(path)")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer synthetic-test-token")
+            return (bytes, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+
+        let result = try await downloader.download(paths: [path], cloudUserID: user,
+            accessToken: "synthetic-test-token")
+
+        XCTAssertEqual(result[path], bytes)
+    }
+
+    func testLF03905MissingTemporaryImageHasDistinctRecoveryReason() async throws {
+        let user = UUID().uuidString.lowercased()
+        let path = "tmp/\(user)/2026-10-24/original.jpg"
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!) { request in
+            (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+        }
+
+        do {
+            _ = try await downloader.download(paths: [path], cloudUserID: user, accessToken: "synthetic-test-token")
+            XCTFail("Missing temporary image must block migration")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.localizedCaseInsensitiveContains("临时"))
+            XCTAssertFalse(error.localizedDescription.contains("synthetic-test-token"))
+        }
+    }
+
     func testLF043ForeignHostOwnerAndTraversalNeverStartDownload() async throws {
         let user = UUID().uuidString.lowercased()
         let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!) { _ in
