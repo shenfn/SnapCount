@@ -59,6 +59,8 @@ final class LocalHistoryUnresolvedRepositoryTests: XCTestCase {
         XCTAssertThrowsError(try portability.preview(JSONSerialization.data(withJSONObject: object)))
         // Old v24 packages did not contain this table; they still restore without fabricated rows.
         object = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
+        object["schemaVersion"] = 24
+        XCTAssertThrowsError(try portability.preview(JSONSerialization.data(withJSONObject: object)), "不能把含原文保全表的新包冒充旧版包")
         tables = try XCTUnwrap(object["tables"] as? [String: String])
         tables.removeValue(forKey: "local_history_unresolved_records")
         object["tables"] = tables

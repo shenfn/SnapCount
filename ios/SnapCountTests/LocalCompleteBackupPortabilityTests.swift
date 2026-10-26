@@ -323,6 +323,9 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         let currentBackup = try source.portability.exportBackup()
         var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: currentBackup) as? [String: Any])
         archive["schemaVersion"] = 17
+        var legacyTables = try XCTUnwrap(archive["tables"] as? [String: String])
+        XCTAssertEqual(legacyTables.removeValue(forKey: "local_history_unresolved_records"), "[]")
+        archive["tables"] = legacyTables
         archive["images"] = [[String: Any]]()
         let version17Backup = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
 
@@ -603,6 +606,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: currentData) as? [String: Any])
         var tables = try XCTUnwrap(archive["tables"] as? [String: String])
         XCTAssertNotNil(tables.removeValue(forKey: "local_wallet_snapshots"))
+        XCTAssertEqual(tables.removeValue(forKey: "local_history_unresolved_records"), "[]")
         archive["tables"] = tables
         archive["schemaVersion"] = 15
         let version15 = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
@@ -637,6 +641,7 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         var walletRows = try Self.tableRows("local_wallet_snapshots", in: tables)
         XCTAssertEqual(walletRows.count, 1)
         walletRows[0].removeValue(forKey: "linked_action")
+        XCTAssertEqual(tables.removeValue(forKey: "local_history_unresolved_records"), "[]")
         tables["local_wallet_snapshots"] = try Self.encodeRows(walletRows)
         archive["tables"] = tables
         archive["schemaVersion"] = 16
