@@ -548,27 +548,24 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
             expenses[0]["amount_minor"] = -1
             tables["local_expenses"] = try Self.encodeRows(expenses)
         }
-        XCTAssertThrowsError(try target.portability.importBackup(invalidAmount, into: targetProfile.id)) { error in
-            XCTAssertEqual(error as? LocalCompleteBackupError, .invalidRows("local_expenses"))
-        }
+        assertRejectedRow(invalidAmount, into: targetProfile.id, portability: target.portability,
+                          table: "local_expenses", field: "amount_minor")
 
         let nonNumericAmount = try tamper(backup) { tables in
             var expenses = try Self.tableRows("local_expenses", in: tables)
             expenses[0]["amount_minor"] = true
             tables["local_expenses"] = try Self.encodeRows(expenses)
         }
-        XCTAssertThrowsError(try target.portability.importBackup(nonNumericAmount, into: targetProfile.id)) { error in
-            XCTAssertEqual(error as? LocalCompleteBackupError, .invalidRows("local_expenses"))
-        }
+        assertRejectedRow(nonNumericAmount, into: targetProfile.id, portability: target.portability,
+                          table: "local_expenses", field: "amount_minor")
 
         let danglingAccount = try tamper(backup) { tables in
             var expenses = try Self.tableRows("local_expenses", in: tables)
             expenses[0]["account_id"] = UUID().uuidString
             tables["local_expenses"] = try Self.encodeRows(expenses)
         }
-        XCTAssertThrowsError(try target.portability.importBackup(danglingAccount, into: targetProfile.id)) { error in
-            XCTAssertEqual(error as? LocalCompleteBackupError, .invalidRows("local_expenses"))
-        }
+        assertRejectedRow(danglingAccount, into: targetProfile.id, portability: target.portability,
+                          table: "local_expenses", field: "account_id")
 
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_accounts"), 0)
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 0)
@@ -809,6 +806,23 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         return try (enumerator?.allObjects as? [URL] ?? []).filter {
             try $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
         }.map(\.lastPathComponent).sorted()
+    }
+
+    /// 行级拒绝必须指明「表.列 + #记录」，只给表名会让问题清单把它归到「其他」。
+    private func assertRejectedRow(
+        _ data: Data, into profileID: UUID, portability: LocalCompleteBackupPortability,
+        table: String, field: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let prefix = "\(table).\(field)"
+        XCTAssertThrowsError(try portability.importBackup(data, into: profileID), file: file, line: line) { error in
+            guard let failure = error as? LocalCompleteBackupError,
+                  case .invalidRows(let detail) = failure else {
+                return XCTFail("unexpected error: \(error)", file: file, line: line)
+            }
+            XCTAssertTrue(detail.hasPrefix(prefix), "期望以 \(prefix) 开头，实际：\(detail)", file: file, line: line)
+            XCTAssertTrue(detail.contains("记录 #"), "缺少记录标识：\(detail)", file: file, line: line)
+        }
     }
 
     private func tamper(
