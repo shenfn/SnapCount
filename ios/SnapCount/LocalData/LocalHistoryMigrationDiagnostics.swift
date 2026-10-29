@@ -452,7 +452,7 @@ final class LocalHistoryMigrationDiagnosticStore {
             case .missingImage: return "完整恢复所需的图片内容缺失。"
             case .conflictingStableID: return "本机已有同标识但内容不同的记录。"
             case .duplicateID: return "迁移数据中存在重复稳定标识。"
-            case .invalidFormat, .unsupportedSchemaVersion, .archiveTooLarge, .invalidRows:
+            case .invalidFormat, .unsupportedSchemaVersion, .archiveTooLarge, .invalidRows, .invalidRowIssues:
                 return "迁移归档格式、规模或记录关系不符合当前恢复规则。"
             }
         }

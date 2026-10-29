@@ -5668,10 +5668,16 @@ final class AppState: ObservableObject {
                     do {
                         try portability.validateImport(archive, into: profileID)
                     } catch let error as LocalCompleteBackupError {
-                        guard case .invalidRows(let detail) = error else { throw error }
                         // detail 已带「本机表.列 + 记录 #hash」。再包一层长句会把问题清单
                         // 用来归类的字段形状冲掉，失败记录就退化成「其他」而看不见。
-                        throw LocalHistoryMappingError.rows([detail])
+                        switch error {
+                        case .invalidRowIssues(let details):
+                            throw LocalHistoryMappingError.rows(details)
+                        case .invalidRows(let detail):
+                            throw LocalHistoryMappingError.rows([detail])
+                        default:
+                            throw error
+                        }
                     }
                 }
             ).prepare(profileID: profile.id, cloudUserID: session.user.id,

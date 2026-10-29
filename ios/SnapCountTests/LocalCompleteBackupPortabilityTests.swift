@@ -67,6 +67,54 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertThrowsError(try source.portability.preview(backup))
     }
 
+    /// 云端删流水时源交易被物理删除，account_entries 仍留下作废审计行。
+    /// 作废行的 source_id 允许悬空；同形状但未作废的行仍必须拒收。
+    func testLF02104VoidedLedgerSourceMayOutliveDeletedTransaction() throws {
+        let source = try makeFixture()
+        defer { cleanup(source) }
+        let exported = try source.portability.exportBackup()
+
+        let voided = try tamper(exported) { tables in
+            var entries = try Self.tableRows("local_account_entries", in: tables)
+            entries[0]["source_id"] = UUID().uuidString
+            entries[0]["is_voided"] = 1
+            entries[0]["voided_at"] = NSNull()
+            tables["local_account_entries"] = try Self.encodeRows(entries)
+        }
+        XCTAssertNoThrow(try source.portability.preview(voided))
+
+        let live = try tamper(exported) { tables in
+            var entries = try Self.tableRows("local_account_entries", in: tables)
+            entries[0]["source_id"] = UUID().uuidString
+            entries[0]["is_voided"] = 0
+            entries[0]["voided_at"] = NSNull()
+            tables["local_account_entries"] = try Self.encodeRows(entries)
+        }
+        XCTAssertThrowsError(try source.portability.preview(live))
+    }
+
+    /// 行级问题必须一次报全：否则每一轮真机验证只能修掉一类问题。
+    func testLF02104AllRowIssuesSurfaceInOneFailure() throws {
+        let source = try makeFixture()
+        defer { cleanup(source) }
+        let backup = try tamper(source.portability.exportBackup()) { tables in
+            var entries = try Self.tableRows("local_account_entries", in: tables)
+            for index in 0..<2 {
+                entries[index]["source_id"] = UUID().uuidString
+                entries[index]["is_voided"] = 0
+                entries[index]["voided_at"] = NSNull()
+            }
+            tables["local_account_entries"] = try Self.encodeRows(entries)
+        }
+        XCTAssertThrowsError(try source.portability.preview(backup)) { error in
+            guard let failure = error as? LocalCompleteBackupError,
+                  case .invalidRowIssues(let issues) = failure else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(issues.count, 2, "应同时报出两条悬空来源：\(issues)")
+        }
+    }
+
     func testLF03601FinancialImageReferencesSurviveCompleteBackup() throws {
         let source = try makeFixture()
         defer { cleanup(source) }
@@ -816,11 +864,18 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
     ) {
         let prefix = "\(table).\(field)"
         XCTAssertThrowsError(try portability.importBackup(data, into: profileID), file: file, line: line) { error in
-            guard let failure = error as? LocalCompleteBackupError,
-                  case .invalidRows(let detail) = failure else {
+            guard let failure = error as? LocalCompleteBackupError else {
                 return XCTFail("unexpected error: \(error)", file: file, line: line)
             }
-            XCTAssertTrue(detail.hasPrefix(prefix), "期望以 \(prefix) 开头，实际：\(detail)", file: file, line: line)
+            let details: [String]
+            switch failure {
+            case .invalidRowIssues(let list): details = list
+            case .invalidRows(let detail): details = [detail]
+            default: return XCTFail("unexpected error: \(error)", file: file, line: line)
+            }
+            guard let detail = details.first(where: { $0.hasPrefix(prefix) }) else {
+                return XCTFail("期望以 \(prefix) 开头的问题，实际：\(details)", file: file, line: line)
+            }
             XCTAssertTrue(detail.contains("记录 #"), "缺少记录标识：\(detail)", file: file, line: line)
         }
     }
