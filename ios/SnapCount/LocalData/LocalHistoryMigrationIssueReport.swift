@@ -44,9 +44,9 @@ struct LocalHistoryMigrationIssueReport {
             if let match = fields.first(where: { text.contains($0.0) }) {
                 return Issue(field: match.0, title: match.1, record: record)
             }
-            // 本机必填列没有源值：列名是 schema 信息，可以安全显示；原文仍然不导出。
+            // 本机约束未通过：列名是 schema 信息，可以安全显示；原文仍然不导出。
             if let token = Self.localColumn(in: text) {
-                return Issue(field: token, title: "本机必填字段没有源值（\(token)）", record: record)
+                return Issue(field: token, title: "本机导入校验未通过（\(token)）", record: record)
             }
             // Unknown messages may contain source values. Preserve their count and safe ID only.
             return Issue(field: "other", title: "其他迁移问题（原文未纳入安全清单）", record: record)

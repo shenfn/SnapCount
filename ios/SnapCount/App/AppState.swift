@@ -5668,10 +5668,10 @@ final class AppState: ObservableObject {
                     do {
                         try portability.validateImport(archive, into: profileID)
                     } catch let error as LocalCompleteBackupError {
-                        guard case .invalidRows(let table) = error else { throw error }
-                        throw LocalHistoryMappingError.rows([
-                            "本机导入校验未通过：\(table) 的记录存在引用不完整、金额或唯一约束冲突；整包未入账。"
-                        ])
+                        guard case .invalidRows(let detail) = error else { throw error }
+                        // detail 已带「本机表.列 + 记录 #hash」。再包一层长句会把问题清单
+                        // 用来归类的字段形状冲掉，失败记录就退化成「其他」而看不见。
+                        throw LocalHistoryMappingError.rows([detail])
                     }
                 }
             ).prepare(profileID: profile.id, cloudUserID: session.user.id,

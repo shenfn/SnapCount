@@ -476,7 +476,8 @@ final class LocalCompleteBackupPortability {
                           CFGetTypeID(number) != CFBooleanGetTypeID(),
                           let value = Int64(number.stringValue),
                           mustBePositive ? value > 0 : value >= 0 else {
-                        throw LocalCompleteBackupError.invalidRows(table)
+                        throw Self.invalidRow(table, field, row,
+                            mustBePositive ? "必须是大于 0 的整数分" : "必须是非负整数分")
                     }
                 }
             }
@@ -503,12 +504,17 @@ final class LocalCompleteBackupPortability {
             for row in rows[table] ?? [] {
                 if optional && (row[field] == nil || row[field] is NSNull) { continue }
                 guard let value = row[field] as? String, validIDs.contains(value) else {
-                    throw LocalCompleteBackupError.invalidRows(table)
+                    throw Self.invalidRow(table, field, row, "指向的记录不在本次迁移范围内")
                 }
             }
         }
+        // 云端 account_entries.source_table='transactions' 不区分 done/pending，同一条交易
+        // 在本地可能落到 local_expenses 或 local_pending_transactions。两处必须都算作
+        // expense 来源，否则这类流水会被判成「引用不完整」并拖垮整包。
+        let expenseSourceIDs = (rows["local_expenses"] ?? []).compactMap { $0["id"] as? String }
+            + (rows["local_pending_transactions"] ?? []).compactMap { $0["id"] as? String }
         let sources: [String: Set<String>] = [
-            "expense": Set((rows["local_expenses"] ?? []).compactMap { $0["id"] as? String }),
+            "expense": Set(expenseSourceIDs),
             "income": Set((rows["local_income_records"] ?? []).compactMap { $0["id"] as? String }),
             "liability_payment": Set((rows["local_liability_payments"] ?? []).compactMap { $0["id"] as? String }),
             "wallet_snapshot": walletSnapshots,
@@ -516,10 +522,11 @@ final class LocalCompleteBackupPortability {
             "historical_entry": Set((rows["local_account_entries"] ?? []).compactMap { $0["id"] as? String })
         ]
         for row in rows["local_account_entries"] ?? [] {
-            guard let kind = row["source_kind"] as? String,
-                  let id = row["source_id"] as? String,
-                  sources[kind]?.contains(id) == true else {
-                throw LocalCompleteBackupError.invalidRows("local_account_entries")
+            let kind = row["source_kind"] as? String ?? "未知来源"
+            let sourceID = row["source_id"] as? String ?? ""
+            guard sources[kind]?.contains(sourceID) == true else {
+                throw Self.invalidRow("local_account_entries", "source_id", row,
+                    "指向的 \(kind) 记录不在本次迁移范围内")
             }
         }
         // Cloud RPC 031 deletes a converted pending row. Its immutable source
@@ -527,10 +534,11 @@ final class LocalCompleteBackupPortability {
         for row in rows["local_pending_transactions"] ?? [] {
             let status = row["status"] as? String
             if status == "done" || status == "converted" {
-                guard let kind = row["target_kind"] as? String,
-                      let id = row["target_id"] as? String,
-                      ["expense", "income"].contains(kind), sources[kind]?.contains(id) == true else {
-                    throw LocalCompleteBackupError.invalidRows("local_pending_transactions")
+                let kind = row["target_kind"] as? String ?? ""
+                let targetID = row["target_id"] as? String ?? ""
+                guard ["expense", "income"].contains(kind), sources[kind]?.contains(targetID) == true else {
+                    throw Self.invalidRow("local_pending_transactions", "target_id", row,
+                        "已转换交易的目标记录不在本次迁移范围内")
                 }
             }
         }
@@ -541,19 +549,36 @@ final class LocalCompleteBackupPortability {
             else if (row["domain_key"] as? String) == "wallet" { targets = walletSnapshots }
             else if (row["domain_key"] as? String) == "expense" { targets = sources["expense"] ?? [] }
             else { targets = records }
-            guard targets.contains(id) else { throw LocalCompleteBackupError.invalidRows("local_staging_records") }
+            guard targets.contains(id) else {
+                throw Self.invalidRow("local_staging_records", "target_record_id", row,
+                    "关联的归档目标不在本次迁移范围内")
+            }
         }
         for row in rows["local_wallet_snapshots"] ?? [] {
             let linkedAccountID = row["linked_account_id"] as? String
             let linkedAction = row["linked_action"] as? String
             if linkedAccountID == nil {
-                guard linkedAction == nil else { throw LocalCompleteBackupError.invalidRows("local_wallet_snapshots") }
+                guard linkedAction == nil else {
+                    throw Self.invalidRow("local_wallet_snapshots", "linked_action", row,
+                        "未关联账户却带有联动动作")
+                }
             } else {
                 guard let linkedAction, ["create", "link"].contains(linkedAction) else {
-                    throw LocalCompleteBackupError.invalidRows("local_wallet_snapshots")
+                    throw Self.invalidRow("local_wallet_snapshots", "linked_action", row,
+                        "关联账户的联动动作不是 create/link")
                 }
             }
         }
+    }
+
+    /// 行级导入拒绝必须带「本机表.列 + 记录 #hash」。
+    /// 问题清单靠这个形状归类并统计记录；只给表名就只能归到「其他」，用户和我们都看不到是哪一行。
+    private static func invalidRow(_ table: String, _ field: String, _ row: [String: Any], _ detail: String) -> LocalCompleteBackupError {
+        let id = row["id"] as? String ?? ""
+        let hint = id.isEmpty
+            ? "，记录标识缺失"
+            : "，记录 #" + String(LocalImageStore.sha256(Data(id.lowercased().utf8)).prefix(10))
+        return LocalCompleteBackupError.invalidRows("\(table).\(field) \(detail)\(hint)")
     }
 
     private static func columns(in db: Database, table: String) throws -> [String] {

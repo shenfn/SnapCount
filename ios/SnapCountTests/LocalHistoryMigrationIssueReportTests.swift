@@ -46,18 +46,32 @@ final class LocalHistoryMigrationIssueReportTests: XCTestCase {
         XCTAssertEqual(report.issues.count, 2)
     }
 
-    /// 本机必填列没有源值时，问题清单必须说出是哪一列，否则只能归到「其他」。
+    /// 本机约束未通过时，问题清单必须说出是哪一列，否则只能归到「其他」。
     func testLF03933LocalRequiredColumnGapIsNamedInsteadOfFallingIntoOther() {
         let report = LocalHistoryMigrationIssueReport(blockers: [
             "local_records.created_at 缺少可确认的源字段，记录 #abcdef0123。"
         ])
         XCTAssertEqual(report.groups.count, 1)
         XCTAssertEqual(report.groups[0].id, "local_records.created_at")
-        XCTAssertEqual(report.groups[0].title, "本机必填字段没有源值（local_records.created_at）")
+        XCTAssertEqual(report.groups[0].title, "本机导入校验未通过（local_records.created_at）")
         XCTAssertEqual(report.affectedRecordCount, 1)
         XCTAssertEqual(report.unidentifiedIssueCount, 0)
         XCTAssertTrue(report.exportText.contains("local_records.created_at"))
         XCTAssertTrue(report.exportText.contains("#abcdef0123"))
+    }
+
+    /// 影子导入拒绝一条流水时，问题清单必须能归到具体表和列，并带上记录标识。
+    /// 修好根因之前这条只会显示成「其他迁移问题（原文未纳入安全清单）」。
+    func testLF03934ShadowImportRejectionIsNamedByTableAndColumn() {
+        let report = LocalHistoryMigrationIssueReport(blockers: [
+            "local_account_entries.source_id 指向的 expense 记录不在本次迁移范围内，记录 #0123456789"
+        ])
+        XCTAssertEqual(report.groups.count, 1)
+        XCTAssertEqual(report.groups[0].id, "local_account_entries.source_id")
+        XCTAssertEqual(report.unidentifiedIssueCount, 0)
+        XCTAssertEqual(report.affectedRecordCount, 1)
+        XCTAssertTrue(report.exportText.contains("local_account_entries.source_id"))
+        XCTAssertTrue(report.exportText.contains("#0123456789"))
     }
 
     /// 行级阻塞文案必须同时带「源表.字段」和「#记录标识」，否则归类与计数都做不到。

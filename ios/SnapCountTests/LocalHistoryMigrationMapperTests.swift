@@ -558,4 +558,42 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
             with: Data(try XCTUnwrap(tables["local_history_unresolved_records"]).utf8)) as? [[String: Any]])
         XCTAssertEqual(preserved.count, 1)
     }
+
+    /// 云端 account_entries.source_table='transactions' 不区分 done/pending（线上 15 条）。
+    /// 待处理交易在本地落 local_pending_transactions，导入校验必须同样认它是 expense 来源；
+    /// 旧实现只收集 local_expenses，这类流水被判「引用不完整」，整包回滚且只报一条无标识阻塞。
+    func testLF03934PendingTransactionSourceEntryStillImports() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        defer { try? database.writer.close() }
+        let user = UUID(), account = UUID(), pending = UUID()
+        let timestamp = "2026-10-24T00:30:00Z"
+        func row(_ values: [String: Any]) -> [String: AnyCodable] { values.mapValues(AnyCodable.init) }
+        let inspection = LocalHistoryMigrationInspection(cloudUserID: user.uuidString, rows: [
+            .accounts: [row(["id": account.uuidString, "user_id": user.uuidString, "name": "现金",
+                "type": "cash", "currency": "CNY", "initial_balance": 100, "current_balance": 80,
+                "created_at": timestamp, "updated_at": timestamp])],
+            .transactions: [row(["id": pending.uuidString, "user_id": user.uuidString,
+                "account_id": account.uuidString, "type": "expense", "status": "pending", "amount": 20,
+                "merchant_name": "待确认商户", "platform": "微信", "category": "food",
+                "payment_method": "微信支付", "transaction_date": "2026-10-24",
+                "created_at": timestamp, "updated_at": timestamp, "occurred_at": timestamp])],
+            .accountEntries: [row(["id": UUID().uuidString, "user_id": user.uuidString,
+                "account_id": account.uuidString, "direction": "out", "amount": 20, "entry_type": "expense",
+                "source_table": "transactions", "source_id": pending.uuidString,
+                "occurred_at": timestamp, "created_at": timestamp, "is_voided": false])]
+        ], blockers: [])
+        let profile = try LocalProfileStore(database: database).activeProfile().id
+        let archive = try LocalHistoryMigrationMapper(schema: database).buildArchive(
+            inspection, profileID: profile, images: [:])
+        let backup = LocalCompleteBackupPortability(database: database,
+            imageStore: try LocalImageStore(rootDirectory: directory.appendingPathComponent("images")))
+        XCTAssertNoThrow(try backup.validateImport(archive, into: profile))
+        _ = try backup.importBackup(archive, into: profile)
+        let repository = try LocalExpenseRepository(database: database)
+        XCTAssertEqual(try repository.accountEntries(accountID: account).count, 1)
+        XCTAssertEqual(try LocalPendingFinancialRepository(database: database).pending(profileID: profile).count, 1)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account), 8000)
+    }
 }
