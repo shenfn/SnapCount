@@ -224,7 +224,12 @@ final class LocalHistoryMigrationMapper {
                 if let value = values[name] {
                     if let string = value as? String, let uuid = UUID(uuidString: string) { output[name] = uuid.uuidString }
                     else if name.hasSuffix("_at"), let string = value as? String {
-                        guard let date = Self.parseDate(string) else { throw LocalDataError.invalidRecord }
+                        guard let date = Self.parseDate(string) else {
+                            throw LocalHistoryMigrationContextError(
+                                table: table, field: name, recordID: values["id"] as? String ?? "",
+                                underlying: LocalDataError.invalidRecord
+                            )
+                        }
                         let sql = DateFormatter(); sql.locale = Locale(identifier: "en_US_POSIX"); sql.timeZone = TimeZone(secondsFromGMT: 0); sql.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
                         output[name] = sql.string(from: date)
                     } else { output[name] = value }
@@ -303,11 +308,14 @@ final class LocalHistoryMigrationMapper {
     }
 
     private static func parseDate(_ value: String) -> Date? {
+        let normalized = normalizeISO8601(value)
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let normalized, let date = fractional.date(from: normalized) { return date }
         if let date = fractional.date(from: value) { return date }
         let standard = ISO8601DateFormatter()
         standard.formatOptions = [.withInternetDateTime]
+        if let normalized, let date = standard.date(from: normalized) { return date }
         if let date = standard.date(from: value) { return date }
 
         let formatter = DateFormatter()
@@ -324,6 +332,18 @@ final class LocalHistoryMigrationMapper {
             if let date = formatter.date(from: value) { return date }
         }
         return nil
+    }
+
+    private static func normalizeISO8601(_ value: String) -> String? {
+        var text = value.replacingOccurrences(of: " ", with: "T")
+        guard let dot = text.firstIndex(of: ".") else { return text }
+        let fractionStart = text.index(after: dot)
+        guard let zone = text[fractionStart...].firstIndex(where: { $0 == "+" || $0 == "-" || $0 == "Z" }) else { return nil }
+        let fraction = text[fractionStart..<zone]
+        guard !fraction.isEmpty, fraction.allSatisfy({ $0.isNumber }) else { return nil }
+        let milliseconds = String(fraction.prefix(3))
+        text = String(text[..<dot]) + "." + milliseconds + String(text[zone...])
+        return text
     }
 
     private static func recordHint(_ id: String) -> String {
