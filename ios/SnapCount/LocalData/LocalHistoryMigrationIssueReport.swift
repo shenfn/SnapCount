@@ -56,7 +56,8 @@ struct LocalHistoryMigrationIssueReport {
     private static func localColumn(in text: String) -> String? {
         text.range(of: "local_[a-z_]+\\.[a-z_]+", options: .regularExpression).map { String(text[$0]) }
     }
-    var issues: [String] { entries.map(\.text) }    var affectedRecordCount: Int { Set(entries.compactMap(\.record)).count }
+    var issues: [String] { entries.map(\.text) }
+    var affectedRecordCount: Int { Set(entries.compactMap(\.record)).count }
     var unidentifiedIssueCount: Int { entries.filter { $0.record == nil }.count }
     var groups: [Group] {
         Dictionary(grouping: entries, by: \.field).map { field, values in
