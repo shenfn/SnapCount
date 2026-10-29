@@ -338,6 +338,9 @@ final class LocalHistoryMigrationDiagnosticStore {
 
     private static func recovery(for error: Error) -> String {
         if let http = error as? LocalHistoryImageHTTPError {
+            if http.statusCode == 400, http.storageCode == "NoSuchKey" {
+                return "云端原图不存在；本图会跳过，仍可导入可映射的结构化记录。未删除源数据，不反复重试无效请求。"
+            }
             if http.statusCode == 400 {
                 return "服务器拒绝图片读取请求；请按HTTP状态和存储错误类别核对。未入账，缓存保留，不反复重试无效请求。"
             }
@@ -356,8 +359,8 @@ final class LocalHistoryMigrationDiagnosticStore {
         case .sourceScopeMismatch: return "该图片不属于当前账户已读取的迁移记录或项目存储范围；请核对源记录，不要跳过。"
         case .sessionExpired: return "请重新登录后重试。"
         case .accessDenied: return "请核对当前登录账户对该原图的访问权限。"
-        case .missingImage: return "请核对受影响记录的云端原图是否仍存在；不会自动跳过或删除源数据。"
-        case .missingTemporaryImage: return "请核对临时原图引用及其保留状态；具体删除原因未确认，不会自动跳过。"
+        case .missingImage: return "云端原图不可读取；本图会跳过，仍可导入可映射的结构化记录，不删除源数据。"
+        case .missingTemporaryImage: return "临时原图不可读取；本图会跳过，仍可导入可映射的结构化记录，不删除源数据。"
         case .invalidResponse: return "请检查网络和图片服务后重试；本次不会入账。"
         case .emptyResponse: return "图片服务未返回内容；请重试或核对该对象，不会按无图迁入。"
         case .imageTooLarge: return "该图片超过单图迁移上限；请核对图片来源与大小后再继续。"

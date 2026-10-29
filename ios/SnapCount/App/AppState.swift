@@ -148,6 +148,7 @@ final class AppState: ObservableObject {
     @Published var historyMigrationBlockers: [String] = []
     @Published var historyMigrationBlockerCount = 0
     @Published var historyMigrationUnresolvedCount = 0
+    @Published var historyMigrationSkippedImageCount = 0
     @Published var historyMigrationPreservationIssues: [String] = []
     @Published var localHistoryUnresolvedRecords: [LocalHistoryUnresolvedRecord] = []
     @Published var isLoadingHistoryUnresolvedRecords = false
@@ -5620,6 +5621,7 @@ final class AppState: ObservableObject {
         historyMigrationBlockers = []
         historyMigrationBlockerCount = 0
         historyMigrationUnresolvedCount = 0
+        historyMigrationSkippedImageCount = 0
         historyMigrationPreservationIssues = []
         historyMigrationPhase = "验证会话"
         defer {
@@ -5688,6 +5690,7 @@ final class AppState: ObservableObject {
                 inspection, profileID: profile.id, images: prepared.images)
             let preview = try portability.preview(archive)
             historyMigrationUnresolvedCount = preview.tableCounts["local_history_unresolved_records", default: 0]
+            historyMigrationSkippedImageCount = max(0, inspection.sourceImagePaths.count - prepared.images.count)
             historyMigrationPreservationIssues = [LocalHistorySourceTable.records, .staging].flatMap { table in
                 inspection.rows[table, default: []].flatMap {
                     LocalHistoryMigrationUseCase.preservationIssues(table: table, row: $0, rows: inspection.rows)
@@ -5700,8 +5703,11 @@ final class AppState: ObservableObject {
             historyMigrationOwner = session.user.id
             historyMigrationGeneration = generation
             historyMigrationPhase = "等待用户确认"
-            historyMigrationPreview = "云账户：\(session.user.email ?? session.user.id)。将合并到此 iPhone 现有账本，换号不会另建本机账本。\n" + inspection.summary + "\n" + preview.confirmationText
-            historyMigrationMessage = "预检通过，源数据与图片已暂存在本机，尚未提交。确认会一起保存可等价转换的数据与 \(historyMigrationUnresolvedCount) 条历史待核对原文；原文不会计入日统计。确认前重新核对源数据，冲突仍整包拒绝。"
+            let imageNote = historyMigrationSkippedImageCount > 0
+                ? "\n有 \(historyMigrationSkippedImageCount) 张历史原图无法读取；对应可映射记录仍会导入，图片字段留空。"
+                : ""
+            historyMigrationPreview = "云账户：\(session.user.email ?? session.user.id)。将合并到此 iPhone 现有账本，换号不会另建本机账本。\n" + inspection.summary + imageNote + "\n" + preview.confirmationText
+            historyMigrationMessage = "预检通过，源数据与可读取图片已暂存在本机，尚未提交。确认会一起保存可等价转换的数据与 \(historyMigrationUnresolvedCount) 条历史待核对原文。缺失图片的记录保留结构化字段但不含原图；原文不会计入日统计。确认前重新核对源数据，冲突仍整包拒绝。"
             if let diagnostic = historyMigrationDiagnostic,
                diagnostic.operation == "history-migration", !diagnostic.committed, diagnostic.resolution == nil,
                diagnostic.accountHint == LocalHistoryMigrationDiagnosticStore.identityHint(session.user.id) {
@@ -5906,6 +5912,7 @@ final class AppState: ObservableObject {
             historyMigrationPreview = nil
             historyMigrationSourceDigest = nil
             historyMigrationImageDigests = [:]
+            historyMigrationSkippedImageCount = 0
             historyMigrationBlockers = []
             historyMigrationBlockerCount = 0
             historyMigrationPhase = "预检已丢弃"
@@ -5965,6 +5972,7 @@ final class AppState: ObservableObject {
                     rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
                     imagesProcessed: processed, imagesTotal: imageTotal)
             }
+            historyMigrationSkippedImageCount = max(0, inspection.sourceImagePaths.count - currentImages.count)
             guard isCurrentAttempt(), !Task.isCancelled else { throw CancellationError() }
             guard currentImages.mapValues(LocalImageStore.sha256) == historyMigrationImageDigests else {
                 try cache.restartSource(checkpoint)
@@ -5999,7 +6007,10 @@ final class AppState: ObservableObject {
                     historyMigrationMessage = recordHistoryMigrationFailure(LocalHistoryMigrationPostCommitRefreshError(), committed: true)
                     historyMigrationPhase = savedPhase
                 } else {
-                    historyMigrationMessage = settingsMessage
+                    let imageNote = historyMigrationSkippedImageCount > 0
+                        ? "另有 \(historyMigrationSkippedImageCount) 张历史原图无法读取，相关结构化记录已保留但不含原图。"
+                        : ""
+                    historyMigrationMessage = [settingsMessage, imageNote].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
                 }
             } else { historyMigrationMessage = settingsMessage }
             return imported
@@ -6332,6 +6343,7 @@ final class AppState: ObservableObject {
         isLoadingHistoryUnresolvedRecords = false
         historyUnresolvedRecordsError = nil
         historyMigrationUnresolvedCount = 0
+        historyMigrationSkippedImageCount = 0
         historyMigrationPreservationIssues = []
         cloudHistoryInventory = .notRead
         isReadingCloudHistoryInventory = false

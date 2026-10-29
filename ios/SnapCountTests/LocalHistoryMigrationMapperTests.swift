@@ -2,6 +2,36 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryMigrationMapperTests: XCTestCase {
+    func testLF03926MissingImageDoesNotBlockMappableRecord() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let schema = try LocalDatabase(databaseURL: directory.appendingPathComponent("schema.sqlite"))
+        let user = UUID()
+        let record = UUID()
+        let profile = try LocalProfileStore(database: schema).activeProfile().id
+        let rows: [LocalHistorySourceTable: [[String: AnyCodable]]] = [
+            .records: [[
+                "id": AnyCodable(record.uuidString), "user_id": AnyCodable(user.uuidString),
+                "domain_key": AnyCodable("food"), "domain_version": AnyCodable("1.0"),
+                "title": AnyCodable("缺图历史记录"), "summary": AnyCodable("保留结构化事实"),
+                "payload_jsonb": AnyCodable(["meal_type": "lunch", "total_calorie_kcal": 500]),
+                "occurred_at": AnyCodable("2026-05-04T12:00:00Z"),
+                "created_at": AnyCodable("2026-05-04T12:00:00Z"),
+                "updated_at": AnyCodable("2026-05-04T12:00:00Z"),
+                "source_image_path": AnyCodable("2026-05-04/missing.jpg")
+            ]]
+        ]
+        let inspection = LocalHistoryMigrationInspection(cloudUserID: user.uuidString, rows: rows, blockers: [])
+        let archive = try LocalHistoryMigrationMapper(schema: schema).buildArchive(
+            inspection, profileID: profile, images: [:])
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
+        let tables = try XCTUnwrap(root["tables"] as? [String: String])
+        let records = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(try XCTUnwrap(tables["local_records"]).utf8)) as? [[String: Any]])
+        XCTAssertEqual(records.count, 1)
+        XCTAssertNil(records[0]["image_path"] as? String)
+    }
+
     func testLF03918UnknownDateAndUnroutedCandidateArePreservedWithoutFormalFacts() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

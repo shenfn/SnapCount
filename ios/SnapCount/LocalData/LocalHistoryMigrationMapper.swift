@@ -169,31 +169,25 @@ final class LocalHistoryMigrationMapper {
                     guard let path = row[field] as? String, !path.isEmpty else { return nil }
                     return (field, path)
                 }.first
-                if let (imageField, imagePath) = imageReference {
-                    guard let bytes = images[imagePath] else {
-                        throw LocalHistoryMigrationContextError(
-                            table: source.rawValue,
-                            field: imageField,
-                            recordID: id,
-                            underlying: LocalHistoryMappingError.unsupported("原图未完成下载")
-                        )
+                if let (_, imagePath) = imageReference {
+                    if let bytes = images[imagePath] {
+                        let hash = LocalImageStore.sha256(bytes)
+                        let expectedHash = ["image_hash", "source_image_hash"].compactMap { field -> (String, String)? in
+                            guard let value = row[field] as? String, !value.isEmpty else { return nil }
+                            return (field, value)
+                        }.first
+                        if let (hashField, expectedValue) = expectedHash, expectedValue.lowercased() != hash {
+                            throw LocalHistoryMigrationContextError(
+                                table: source.rawValue,
+                                field: hashField,
+                                recordID: id,
+                                underlying: LocalCompleteBackupError.invalidImage("history-image")
+                            )
+                        }
+                        let path = "records/history-\(hash).jpg"
+                        mapped["image_path"] = path; mapped["image_hash"] = hash
+                        imageFiles[path] = ["path": path, "hash": hash, "data": bytes.base64EncodedString()]
                     }
-                    let hash = LocalImageStore.sha256(bytes)
-                    let expectedHash = ["image_hash", "source_image_hash"].compactMap { field -> (String, String)? in
-                        guard let value = row[field] as? String, !value.isEmpty else { return nil }
-                        return (field, value)
-                    }.first
-                    if let (hashField, expectedValue) = expectedHash, expectedValue.lowercased() != hash {
-                        throw LocalHistoryMigrationContextError(
-                            table: source.rawValue,
-                            field: hashField,
-                            recordID: id,
-                            underlying: LocalCompleteBackupError.invalidImage("history-image")
-                        )
-                    }
-                    let path = "records/history-\(hash).jpg"
-                    mapped["image_path"] = path; mapped["image_hash"] = hash
-                    imageFiles[path] = ["path": path, "hash": hash, "data": bytes.base64EncodedString()]
                 }
                 if mapped["updated_at"] == nil { mapped["updated_at"] = mapped["created_at"] }
                 let completed = try normalized(mapped, table: table)

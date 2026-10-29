@@ -94,6 +94,26 @@ final class LocalHistoryImageDownloaderTests: XCTestCase {
     }
 
     @MainActor
+    func testLF03924NoSuchKeyWrapped400IsClassifiedAsMissingImage() async throws {
+        let user = UUID().uuidString.lowercased()
+        let (inspection, reference) = try source(user: user, path: "2026-05-04/missing.jpg")
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!) { request in
+            let body = Data(#"{"code":"NoSuchKey","error":"not_found"}"#.utf8)
+            return (body, HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!)
+        }
+
+        do {
+            _ = try await downloader.download(reference: reference, inspection: inspection,
+                cloudUserID: user, accessToken: "synthetic-token")
+            XCTFail("NoSuchKey must be surfaced as a skippable missing image")
+        } catch let error as LocalHistoryImageHTTPError {
+            XCTAssertEqual(error.statusCode, 400)
+            XCTAssertEqual(error.storageCode, "NoSuchKey")
+            XCTAssertEqual(error.failure, .missingImage)
+        }
+    }
+
+    @MainActor
     func testLF03924AccountChangeDuringBackoffStopsRetry() async throws {
         let user = UUID().uuidString.lowercased()
         let (inspection, reference) = try source(user: user, path: "2026-10-24/legacy.jpg")

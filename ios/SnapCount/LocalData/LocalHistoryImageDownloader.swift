@@ -20,8 +20,8 @@ enum LocalHistoryImageDownloadError: Error, Equatable, LocalizedError {
         case .sourceScopeMismatch: return "图片路径不属于当前账户已读取的迁移记录或项目存储范围；本次迁移未入账。"
         case .sessionExpired: return "图片读取会话已失效（401）；请重新登录后继续，已缓存内容保留。"
         case .accessDenied: return "当前账户无权读取此图片（403）；原图未删除，已缓存内容保留。"
-        case .missingImage: return "云端原图不存在（404）；请核对图片来源，迁移未完成。"
-        case .missingTemporaryImage: return "同账户临时图片返回404；可能是清理或路径失效，具体原因未确认。迁移未完成。"
+        case .missingImage: return "云端原图不存在（HTTP 400/404）；本图已跳过，可继续迁移结构化记录。"
+        case .missingTemporaryImage: return "同账户临时图片不可读取（HTTP 400/404）；本图已跳过，可继续迁移结构化记录。"
         case .invalidResponse(let code): return "图片服务返回异常状态（\(code)），迁移未完成。"
         case .emptyResponse: return "图片服务返回空内容；迁移未完成，原图引用保留。"
         case .imageTooLarge: return "单张历史图片超过本机迁移上限；迁移未完成。"
@@ -139,6 +139,11 @@ final class LocalHistoryImageDownloader {
             case 401: failure = .sessionExpired
             case 403: failure = .accessDenied
             case 404:
+                failure = validated.isTemporary ? .missingTemporaryImage : .missingImage
+            case 400 where storageCode == "NoSuchKey":
+                // Supabase Storage wraps the underlying 404 as HTTP 400 for
+                // this endpoint. Treat the storage fact as a missing image so
+                // migration can preserve the record without its bytes.
                 failure = validated.isTemporary ? .missingTemporaryImage : .missingImage
             default: failure = .invalidResponse(response.statusCode)
             }
