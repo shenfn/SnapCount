@@ -2,6 +2,44 @@ import XCTest
 @testable import SnapCount
 
 final class LocalHistoryMigrationMapperTests: XCTestCase {
+    func testLF03927MicrosecondCloudAccountTimestampMapsWalletBalance() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let schema = try LocalDatabase(databaseURL: directory.appendingPathComponent("schema.sqlite"))
+        let user = UUID()
+        let account = UUID()
+        let entry = UUID()
+        let timestamp = "2026-05-28T15:57:02.937968+00:00"
+        func row(_ values: [String: Any]) -> [String: AnyCodable] { values.mapValues(AnyCodable.init) }
+        let inspection = LocalHistoryMigrationInspection(cloudUserID: user.uuidString, rows: [
+            .accounts: [row([
+                "id": account.uuidString, "user_id": user.uuidString, "name": "微信余额",
+                "type": "wallet_balance", "currency": "CNY", "initial_balance": 8.54,
+                "current_balance": 8.54, "institution": "微信余额", "last4": NSNull(),
+                "created_at": timestamp, "updated_at": timestamp,
+                "auto_confirm_repayment": false, "grace_period_days": 0,
+                "is_default_expense": false, "is_default_income": false,
+                "is_archived": false, "sort_order": 0
+            ])],
+            .accountEntries: [row([
+                "id": entry.uuidString, "user_id": user.uuidString, "account_id": account.uuidString,
+                "amount": 8.54, "direction": "in", "entry_type": "snapshot_initialization",
+                "is_voided": false, "occurred_at": "2026-05-28T04:00:00+00:00",
+                "created_at": "2026-05-28T15:57:04.205121+00:00"
+            ])]
+        ], blockers: [])
+
+        let archive = try LocalHistoryMigrationMapper(schema: schema).buildArchive(
+            inspection, profileID: UUID(), images: [:])
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
+        let tables = try XCTUnwrap(root["tables"] as? [String: String])
+        let accounts = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(try XCTUnwrap(tables["local_accounts"]).utf8)) as? [[String: Any]])
+        XCTAssertEqual(accounts.count, 1)
+        XCTAssertEqual(accounts[0]["kind"] as? String, "wallet_balance")
+        XCTAssertEqual(accounts[0]["opening_balance_minor"] as? Int, 854)
+    }
+
     func testLF03926MissingImageDoesNotBlockMappableRecord() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

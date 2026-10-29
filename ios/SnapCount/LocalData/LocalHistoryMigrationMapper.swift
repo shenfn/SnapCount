@@ -224,9 +224,7 @@ final class LocalHistoryMigrationMapper {
                 if let value = values[name] {
                     if let string = value as? String, let uuid = UUID(uuidString: string) { output[name] = uuid.uuidString }
                     else if name.hasSuffix("_at"), let string = value as? String {
-                        let iso = ISO8601DateFormatter()
-                        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                        guard let date = iso.date(from: string) ?? ISO8601DateFormatter().date(from: string) else { throw LocalDataError.invalidRecord }
+                        guard let date = Self.parseDate(string) else { throw LocalDataError.invalidRecord }
                         let sql = DateFormatter(); sql.locale = Locale(identifier: "en_US_POSIX"); sql.timeZone = TimeZone(secondsFromGMT: 0); sql.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
                         output[name] = sql.string(from: date)
                     } else { output[name] = value }
@@ -300,10 +298,32 @@ final class LocalHistoryMigrationMapper {
     private static func day(_ value: String) throws -> String {
         let date = String(value.prefix(10))
         guard NativeLocalDate.monthKey(from: date) != nil else { throw LocalDataError.invalidRecord }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let parsed = formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value) else { throw LocalDataError.invalidRecord }
+        guard let parsed = parseDate(value) else { throw LocalDataError.invalidRecord }
         return NativeLocalDate.dateKey(parsed)
+    }
+
+    private static func parseDate(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        if let date = standard.date(from: value) { return date }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        for format in [
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+            "yyyy-MM-dd HH:mm:ss.SSSSSSXXXXX",
+            "yyyy-MM-dd HH:mm:ssXXXXX"
+        ] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value) { return date }
+        }
+        return nil
     }
 
     private static func recordHint(_ id: String) -> String {
