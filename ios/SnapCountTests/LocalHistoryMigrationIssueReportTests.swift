@@ -45,4 +45,30 @@ final class LocalHistoryMigrationIssueReportTests: XCTestCase {
         XCTAssertTrue(report.exportText.contains("#abcdef0123"))
         XCTAssertEqual(report.issues.count, 2)
     }
+
+    /// 本机必填列没有源值时，问题清单必须说出是哪一列，否则只能归到「其他」。
+    func testLF03933LocalRequiredColumnGapIsNamedInsteadOfFallingIntoOther() {
+        let report = LocalHistoryMigrationIssueReport(blockers: [
+            "local_records.created_at 缺少可确认的源字段，记录 #abcdef0123。"
+        ])
+        XCTAssertEqual(report.groups.count, 1)
+        XCTAssertEqual(report.groups[0].id, "local_records.created_at")
+        XCTAssertEqual(report.groups[0].title, "本机必填字段没有源值（local_records.created_at）")
+        XCTAssertEqual(report.affectedRecordCount, 1)
+        XCTAssertEqual(report.unidentifiedIssueCount, 0)
+        XCTAssertTrue(report.exportText.contains("local_records.created_at"))
+        XCTAssertTrue(report.exportText.contains("#abcdef0123"))
+    }
+
+    /// 行级阻塞文案必须同时带「源表.字段」和「#记录标识」，否则归类与计数都做不到。
+    func testLF03933BlockedRowTextKeepsFieldAndRecordIdentity() {
+        let report = LocalHistoryMigrationIssueReport(blockers: [
+            "staging_records.detected_domain_key 域 expense 尚无等价映射，记录 #0123456789。",
+            "staging_records.extracted_json.record_date 缺少有效业务日期，记录 #fedcba9876。"
+        ])
+        XCTAssertEqual(report.unidentifiedIssueCount, 0)
+        XCTAssertEqual(report.affectedRecordCount, 2)
+        XCTAssertEqual(Set(report.groups.map(\.id)),
+                       ["staging_records.detected_domain_key", "staging_records.extracted_json.record_date"])
+    }
 }

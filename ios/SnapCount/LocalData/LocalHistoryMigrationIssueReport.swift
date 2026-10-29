@@ -36,6 +36,7 @@ struct LocalHistoryMigrationIssueReport {
                 ("transactions.type", "账单类型尚无兼容映射"),
                 ("transactions.status", "账单状态尚无兼容映射"),
                 ("staging_records.status", "候选状态尚无兼容映射"),
+                ("staging_records.detected_domain_key", "候选尚未确定数据类型"),
                 ("staging_records.resolved_domain_key/detected_domain_key", "候选尚未确定数据类型"),
                 ("staging_records.extracted_json.record_date", "候选缺少可确认的业务日期"),
                 ("staging_records.target_record_id", "已归档候选缺少关联记录")
@@ -43,12 +44,19 @@ struct LocalHistoryMigrationIssueReport {
             if let match = fields.first(where: { text.contains($0.0) }) {
                 return Issue(field: match.0, title: match.1, record: record)
             }
+            // 本机必填列没有源值：列名是 schema 信息，可以安全显示；原文仍然不导出。
+            if let token = Self.localColumn(in: text) {
+                return Issue(field: token, title: "本机必填字段没有源值（\(token)）", record: record)
+            }
             // Unknown messages may contain source values. Preserve their count and safe ID only.
             return Issue(field: "other", title: "其他迁移问题（原文未纳入安全清单）", record: record)
         }
     }
-    var issues: [String] { entries.map(\.text) }
-    var affectedRecordCount: Int { Set(entries.compactMap(\.record)).count }
+    /// 从「local_xxx.yyy 缺少可确认的源字段」里取出列名。只接受本机 schema 形状，不返回原文。
+    private static func localColumn(in text: String) -> String? {
+        text.range(of: "local_[a-z_]+\\.[a-z_]+", options: .regularExpression).map { String(text[$0]) }
+    }
+    var issues: [String] { entries.map(\.text) }    var affectedRecordCount: Int { Set(entries.compactMap(\.record)).count }
     var unidentifiedIssueCount: Int { entries.filter { $0.record == nil }.count }
     var groups: [Group] {
         Dictionary(grouping: entries, by: \.field).map { field, values in

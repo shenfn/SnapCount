@@ -499,4 +499,63 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: asset), 8000)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: liability), 98000)
     }
+
+    /// 预检与映射必须共用同一份「候选域是否可写」判定。
+    /// 线上 18 条 expense 候选不是 archived 状态：旧代码预检放行、映射抛错，最后只报一条无标识的阻塞。
+    func testLF03932StagingDomainRuleIsSharedBetweenPreflightAndMapping() {
+        XCTAssertTrue(LocalHistoryMigrationUseCase.stagingDomainMappable("food", status: "pending_review"))
+        XCTAssertTrue(LocalHistoryMigrationUseCase.stagingDomainMappable("wallet", status: "pending_review"))
+        XCTAssertTrue(LocalHistoryMigrationUseCase.stagingDomainMappable("expense", status: "assigned"))
+        XCTAssertTrue(LocalHistoryMigrationUseCase.stagingDomainMappable("expense", status: "archived"))
+        XCTAssertFalse(LocalHistoryMigrationUseCase.stagingDomainMappable("expense", status: "pending_review"),
+                       "未归档的消费候选没有等价本地形态，必须走原文保留")
+        XCTAssertFalse(LocalHistoryMigrationUseCase.stagingDomainMappable("expense", status: "discarded"))
+        XCTAssertFalse(LocalHistoryMigrationUseCase.stagingDomainMappable("", status: "archived"))
+        XCTAssertFalse(LocalHistoryMigrationUseCase.stagingDomainMappable("unknown", status: "archived"))
+
+        // 关键不变量：预检判定为不可写时，必须转成「原文保留」，不能留给映射去抛错。
+        for domain in ["expense", "wallet", "food", "sleep", "sport", "reading", "", "unknown"] {
+            for status in ["unassigned", "pending_review", "assigned", "confirmed", "archived", "discarded", "failed", "routing_failed"] {
+                guard !LocalHistoryMigrationUseCase.stagingDomainMappable(domain, status: status) else { continue }
+                let row: [String: AnyCodable] = [
+                    "id": AnyCodable(UUID().uuidString), "status": AnyCodable(status),
+                    "detected_domain_key": AnyCodable(domain),
+                    "extracted_json": AnyCodable(["record_date": "2026-10-20"]),
+                    "created_at": AnyCodable("2026-10-20T10:00:00Z"),
+                    "updated_at": AnyCodable("2026-10-20T10:00:00Z")
+                ]
+                XCTAssertFalse(LocalHistoryMigrationUseCase.preservationIssues(
+                    table: .staging, row: row, rows: [.staging: [row]]).isEmpty,
+                    "\(domain)/\(status) 映射不收，预检必须转原文保留")
+            }
+        }
+    }
+
+    /// 线上现存的非归档消费候选：必须原文保留、不阻塞其余 2224 行。
+    func testLF03933NonArchivedExpenseCandidateIsPreservedInsteadOfBlocking() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let schema = try LocalDatabase(databaseURL: directory.appendingPathComponent("schema.sqlite"))
+        defer { try? schema.writer.close() }
+        let user = UUID(), candidate = UUID()
+        let rows: [LocalHistorySourceTable: [[String: AnyCodable]]] = [
+            .staging: [["id": AnyCodable(candidate.uuidString), "user_id": AnyCodable(user.uuidString),
+                "detected_domain_key": AnyCodable("expense"), "status": AnyCodable("pending_review"),
+                "extracted_json": AnyCodable(["record_date": "2026-10-20"]),
+                "ai_summary": AnyCodable("未归档消费候选"),
+                "created_at": AnyCodable("2026-10-20T10:00:00Z"),
+                "updated_at": AnyCodable("2026-10-20T10:00:00Z")]]
+        ]
+        XCTAssertTrue(LocalHistoryMigrationUseCase.blockers(rows).isEmpty)
+        let profile = try LocalProfileStore(database: schema).activeProfile().id
+        let archive = try LocalHistoryMigrationMapper(schema: schema).buildArchive(
+            LocalHistoryMigrationInspection(cloudUserID: user.uuidString, rows: rows, blockers: []),
+            profileID: profile, images: [:])
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
+        let tables = try XCTUnwrap(root["tables"] as? [String: String])
+        XCTAssertEqual(tables["local_staging_records"], "[]")
+        let preserved = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(try XCTUnwrap(tables["local_history_unresolved_records"]).utf8)) as? [[String: Any]])
+        XCTAssertEqual(preserved.count, 1)
+    }
 }

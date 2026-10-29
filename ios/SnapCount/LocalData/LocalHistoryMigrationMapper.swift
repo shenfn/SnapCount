@@ -87,7 +87,10 @@ final class LocalHistoryMigrationMapper {
                     for key in ["name", "currency", "institution", "last4", "bill_day", "payment_due_day", "auto_debit_account_id", "auto_confirm_repayment", "grace_period_days", "is_default_expense", "is_default_income", "is_archived", "last_reconciled_at", "created_at", "updated_at"] { copy(key) }
                     copy("type", "kind"); try minor("initial_balance", "opening_balance_minor"); mapped["origin"] = "remote"
                 case .transactions:
-                    guard (row["type"] as? String) == "expense" else { throw LocalHistoryMappingError.unsupported("交易 \(id) 类型不是消费，需核对收入转换关系") }
+                    guard (row["type"] as? String) == "expense" else {
+                        throw LocalHistoryMappingError.unsupported(
+                            Self.blocked("transactions", "type", "类型不是消费，需核对收入转换关系", id: id))
+                    }
                     let pending = (row["status"] as? String) == "pending"
                     table = pending ? "local_pending_transactions" : "local_expenses"
                     guard pending || (row["status"] as? String) == "done" else { throw LocalDataError.invalidRecord }
@@ -161,9 +164,15 @@ final class LocalHistoryMigrationMapper {
                         mapped["currency"] = payload["currency"] ?? "CNY"
                         if mapped["linked_account_id"] != nil { mapped["linked_action"] = "link" }
                     } else {
-                        guard LocalRecordValidation.supportedDomainKeys.contains(domain) else { throw LocalHistoryMappingError.unsupported("不支持的域：\(domain)") }
+                        guard LocalRecordValidation.supportedDomainKeys.contains(domain) else {
+                            throw LocalHistoryMappingError.unsupported(
+                                Self.blocked("data_records", "domain_key", "域 \(domain) 尚无等价映射", id: id))
+                        }
                         let version = row["domain_version"] as? String ?? "1.0"
-                        guard ["1", "1.0"].contains(version) else { throw LocalHistoryMappingError.unsupported("域版本 \(version) 需要显式迁移") }
+                        guard ["1", "1.0"].contains(version) else {
+                            throw LocalHistoryMappingError.unsupported(
+                                Self.blocked("data_records", "domain_version", "版本 \(version) 尚无等价映射", id: id))
+                        }
                         mapped["domain_version"] = 1; mapped["source_kind"] = "imported"
                         let validated = try LocalRecordCodec.normalizedPayload(domainKey: domain,
                             payload: try JSONDecoder().decode([String: AnyCodable].self, from: JSONSerialization.data(withJSONObject: payload)))
@@ -175,15 +184,24 @@ final class LocalHistoryMigrationMapper {
                     let domain = (row["resolved_domain_key"] as? String) ?? (row["detected_domain_key"] as? String) ?? ""
                     let status = try text(row, "status")
                     guard let localStatus = ["unassigned": "pending_review", "pending_review": "pending_review", "assigned": "archived", "confirmed": "archived", "archived": "archived", "discarded": "discarded", "failed": "failed"][status] else {
-                        throw LocalHistoryMappingError.unsupported("候选 \(id) 的历史状态 \(status) 需要显式兼容")
+                        throw LocalHistoryMappingError.unsupported(
+                            Self.blocked("staging_records", "status", "状态 \(status) 尚无等价映射", id: id))
                     }
-                    guard LocalRecordValidation.supportedStagingDomainKeys.contains(domain)
-                            || (localStatus == "archived" && domain == "expense") else { throw LocalHistoryMappingError.unsupported("候选 \(id) 域尚未支持：\(domain)") }
+                    // 与预检共用同一条可写判定：预检判定为「待核对」的候选在这里根本走不到，
+                    // 这条守卫只在两处定义不一致时才会触发。
+                    guard LocalHistoryMigrationUseCase.stagingDomainMappable(domain, status: status) else {
+                        throw LocalHistoryMappingError.unsupported(
+                            Self.blocked("staging_records", "detected_domain_key", "域 \(domain) 尚无等价映射", id: id))
+                    }
                     let nested = payload["payload_jsonb"] as? [String: Any] ?? [:]
                     let recordDate = (payload["record_date"] as? String) ?? (nested["record_date"] as? String)
-                    guard let recordDate, NativeLocalDate.monthKey(from: recordDate) != nil else { throw LocalHistoryMappingError.unsupported("候选 \(id) 缺少真实业务日期") }
+                    guard let recordDate, NativeLocalDate.monthKey(from: recordDate) != nil else {
+                        throw LocalHistoryMappingError.unsupported(
+                            Self.blocked("staging_records", "extracted_json.record_date", "缺少有效业务日期", id: id))
+                    }
                     if localStatus == "archived", row["target_record_id"] as? String == nil {
-                        throw LocalHistoryMappingError.unsupported("候选 \(id) 缺少可核对的归档目标")
+                        throw LocalHistoryMappingError.unsupported(
+                            Self.blocked("staging_records", "target_record_id", "已归档候选缺少可核对的目标", id: id))
                     }
                     mapped["domain_key"] = domain; mapped["status"] = localStatus; mapped["record_date"] = recordDate
                     mapped["payload_json"] = String(decoding: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]), as: UTF8.self)
@@ -261,7 +279,12 @@ final class LocalHistoryMigrationMapper {
                     let json = try String.fetchOne(db, sql: "SELECT json_quote(\(defaultSQL))") ?? "null"
                     output[name] = try JSONSerialization.jsonObject(with: Data(json.utf8), options: [.fragmentsAllowed])
                 } else if (column["notnull"] as Int) == 0 { output[name] = NSNull() }
-                else { throw LocalHistoryMappingError.unsupported("\(table).\(name) 缺少可确认的源字段") }
+                else {
+                    // 本机必填列没有源值：固定给出「本机表.列 + 记录 #hash」，
+                    // 否则问题清单只能归到「其他」，用户和我们都看不到是哪一列。
+                    throw LocalHistoryMappingError.unsupported(
+                        "\(table).\(name) 缺少可确认的源字段，记录 #\(Self.recordHint(values["id"] as? String ?? ""))。")
+                }
             }
             return output
         }
@@ -360,6 +383,12 @@ final class LocalHistoryMigrationMapper {
 
     private static func recordHint(_ id: String) -> String {
         String(LocalImageStore.sha256(Data(id.lowercased().utf8)).prefix(10))
+    }
+
+    /// 行级阻塞文案的固定形状：`源表.字段 说明，记录 #hash。`
+    /// 问题清单靠「表.字段」归类、靠 `#hash` 统计涉及记录；缺任一项就只能归到「其他」并且不显示原文。
+    private static func blocked(_ table: String, _ field: String, _ detail: String, id: String) -> String {
+        "\(table).\(field) \(detail)，记录 #\(recordHint(id))。"
     }
 
     /// 把行级错误压成一句可读、可核对、不含原始业务内容的问题描述。

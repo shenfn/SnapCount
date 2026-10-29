@@ -181,6 +181,14 @@ final class LocalHistoryMigrationUseCase {
         return result
     }
 
+    /// 候选能否原样落到本地候选表。预检（决定「原文保留」）与映射（决定是否抛错）必须共用这一份判定，
+    /// 否则会出现「预检说没问题、映射说不行」的单行阻塞。
+    static func stagingDomainMappable(_ domain: String, status: String) -> Bool {
+        let archived = ["assigned", "confirmed", "archived"].contains(status)
+        return LocalRecordValidation.supportedStagingDomainKeys.contains(domain)
+            || (archived && domain == "expense")
+    }
+
     static func preservationIssues(table: LocalHistorySourceTable, row: [String: AnyCodable],
                                    rows: [LocalHistorySourceTable: [[String: AnyCodable]]]) -> [String] {
         guard table == .records || table == .staging else { return [] }
@@ -294,8 +302,7 @@ final class LocalHistoryMigrationUseCase {
             }
             let domain = (row["resolved_domain_key"]?.value as? String) ?? (row["detected_domain_key"]?.value as? String) ?? ""
             let archived = ["assigned", "confirmed", "archived"].contains(status)
-            if !(Set(["expense", "wallet", "food", "sleep", "sport", "reading"]).contains(domain)
-                    || (archived && domain == "expense")) {
+            if !stagingDomainMappable(domain, status: status) {
                 result.append("staging_records.resolved_domain_key/detected_domain_key 缺失或没有当前迁移映射，记录 #\(hint)。")
             }
             let payload = row["extracted_json"]?.value as? [String: Any] ?? [:]
