@@ -23,7 +23,7 @@ enum LocalHistoryImageDownloadError: Error, Equatable, LocalizedError {
         case .missingImage: return "云端原图不存在（HTTP 400/404）；本图已跳过，可继续迁移结构化记录。"
         case .missingTemporaryImage: return "同账户临时图片不可读取（HTTP 400/404）；本图已跳过，可继续迁移结构化记录。"
         case .invalidResponse(let code): return "图片服务返回异常状态（\(code)），迁移未完成。"
-        case .emptyResponse: return "图片服务返回空内容；迁移未完成，原图引用保留。"
+        case .emptyResponse: return "图片服务返回空内容；本图已跳过，可继续迁移结构化记录。"
         case .imageTooLarge: return "单张历史图片超过本机迁移上限；迁移未完成。"
         case .totalSizeExceeded: return "历史图片总量超过本机迁移上限；迁移未完成。"
         case .responseAddressMismatch: return "图片服务响应地址与受信请求不一致，已拒绝该响应。"

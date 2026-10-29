@@ -167,10 +167,10 @@ final class LocalHistoryMigrationCoordinator {
                     }
                 case .failure(let error):
                     if error is CancellationError { group.cancelAll(); throw error }
-                    if Self.isSkippableMissingImage(error) {
-                        // The source record remains importable without its
-                        // missing image. Other integrity and business errors
-                        // remain hard blockers.
+                    if Self.isSkippableImageFailure(error) {
+                        // The source record remains importable without an
+                        // unavailable image. Other integrity and business
+                        // errors remain hard blockers.
                     } else if firstError == nil { firstError = error }
                 }
                 // Drain already-started successes into cache after a failure, but do not start another request.
@@ -188,13 +188,14 @@ final class LocalHistoryMigrationCoordinator {
         return images
     }
 
-    private static func isSkippableMissingImage(_ error: Error) -> Bool {
+    private static func isSkippableImageFailure(_ error: Error) -> Bool {
         guard let context = error as? LocalHistoryMigrationContextError else { return false }
         if let http = context.underlying as? LocalHistoryImageHTTPError {
             return http.failure == .missingImage || http.failure == .missingTemporaryImage
+                || http.failure == .emptyResponse
         }
         if let image = context.underlying as? LocalHistoryImageDownloadError {
-            return image == .missingImage || image == .missingTemporaryImage
+            return image == .missingImage || image == .missingTemporaryImage || image == .emptyResponse
         }
         return false
     }

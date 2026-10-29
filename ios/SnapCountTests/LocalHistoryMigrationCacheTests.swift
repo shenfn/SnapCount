@@ -161,7 +161,7 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
     }
 
     @MainActor
-    func testLF03926NoSuchKeyImageIsSkippedAndOtherImagesContinue() async throws {
+    func testLF03926MissingOrEmptyImagesAreSkippedAndOtherImagesContinue() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
@@ -169,7 +169,7 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
         let profile = try LocalProfileStore(database: database).activeProfile()
         let user = UUID().uuidString.lowercased()
         let timestamp = "2026-10-24T00:30:00Z"
-        let rows: [[String: AnyCodable]] = ["missing.jpg", "available.jpg"].enumerated().map { index, name in
+        let rows: [[String: AnyCodable]] = ["missing.jpg", "empty.jpg", "available.jpg"].enumerated().map { index, name in
             ["id": AnyCodable(String(format: "00000000-0000-0000-0000-%012d", index + 1)),
              "user_id": AnyCodable(user), "domain_key": AnyCodable("food"),
              "domain_version": AnyCodable("1.0"), "created_at": AnyCodable(timestamp),
@@ -185,6 +185,9 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
                 return (Data(#"{"code":"NoSuchKey","error":"not_found"}"#.utf8),
                     HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!)
             }
+            if request.url?.lastPathComponent == "empty.jpg" {
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }
             return (Data("available-image".utf8),
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         }
@@ -197,14 +200,15 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
         XCTAssertEqual(prepared.images.count, 1)
         XCTAssertNotNil(prepared.images["2026-10-24/available.jpg"])
         XCTAssertNil(prepared.images["2026-10-24/missing.jpg"])
+        XCTAssertNil(prepared.images["2026-10-24/empty.jpg"])
         let archive = try LocalHistoryMigrationMapper(schema: database).buildArchive(
             prepared.inspection, profileID: profile.id, images: prepared.images)
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
         let tables = try XCTUnwrap(root["tables"] as? [String: String])
         let records = try XCTUnwrap(JSONSerialization.jsonObject(
             with: Data(try XCTUnwrap(tables["local_records"]).utf8)) as? [[String: Any]])
-        XCTAssertEqual(records.count, 2)
-        XCTAssertEqual(records.filter { ($0["image_path"] as? String) == nil }.count, 1)
+        XCTAssertEqual(records.count, 3)
+        XCTAssertEqual(records.filter { ($0["image_path"] as? String) == nil }.count, 2)
     }
 
     func testLF03923AccountSwitchAfterImageResponseDoesNotCacheOrCommitLateBytes() async throws {

@@ -362,7 +362,7 @@ final class LocalHistoryMigrationDiagnosticStore {
         case .missingImage: return "云端原图不可读取；本图会跳过，仍可导入可映射的结构化记录，不删除源数据。"
         case .missingTemporaryImage: return "临时原图不可读取；本图会跳过，仍可导入可映射的结构化记录，不删除源数据。"
         case .invalidResponse: return "请检查网络和图片服务后重试；本次不会入账。"
-        case .emptyResponse: return "图片服务未返回内容；请重试或核对该对象，不会按无图迁入。"
+        case .emptyResponse: return "图片服务返回空内容；本图会跳过，仍可导入可映射的结构化记录。"
         case .imageTooLarge: return "该图片超过单图迁移上限；请核对图片来源与大小后再继续。"
         case .totalSizeExceeded: return "图片总量超过本机迁移上限；请释放本机空间或分批评估迁移范围。"
         case .responseAddressMismatch: return "图片服务返回了不同地址；请检查服务端存储响应，不会跟随该地址。"
