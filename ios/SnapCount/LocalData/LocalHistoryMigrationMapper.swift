@@ -343,42 +343,8 @@ final class LocalHistoryMigrationMapper {
     }
 
     private static func parseDate(_ value: String) -> Date? {
-        let normalized = normalizeISO8601(value)
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let normalized, let date = fractional.date(from: normalized) { return date }
-        if let date = fractional.date(from: value) { return date }
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        if let normalized, let date = standard.date(from: normalized) { return date }
-        if let date = standard.date(from: value) { return date }
-
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        for format in [
-            "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX",
-            "yyyy-MM-dd'T'HH:mm:ssXXXXX",
-            "yyyy-MM-dd HH:mm:ss.SSSSSSXXXXX",
-            "yyyy-MM-dd HH:mm:ssXXXXX"
-        ] {
-            formatter.dateFormat = format
-            if let date = formatter.date(from: value) { return date }
-        }
-        return nil
-    }
-
-    private static func normalizeISO8601(_ value: String) -> String? {
-        var text = value.replacingOccurrences(of: " ", with: "T")
-        guard let dot = text.firstIndex(of: ".") else { return text }
-        let fractionStart = text.index(after: dot)
-        guard let zone = text[fractionStart...].firstIndex(where: { $0 == "+" || $0 == "-" || $0 == "Z" }) else { return nil }
-        let fraction = text[fractionStart..<zone]
-        guard !fraction.isEmpty, fraction.allSatisfy({ $0.isNumber }) else { return nil }
-        let milliseconds = String(fraction.prefix(3))
-        text = String(text[..<dot]) + "." + milliseconds + String(text[zone...])
-        return text
+        // 与导入校验共用同一份解析（含微秒截断），否则会出现「映射能建、校验拒收」。
+        LocalHistorySourceCompatibility.parseTimestamp(value)
     }
 
     private static func recordHint(_ id: String) -> String {

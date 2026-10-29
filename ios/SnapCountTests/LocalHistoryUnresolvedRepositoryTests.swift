@@ -87,4 +87,44 @@ final class LocalHistoryUnresolvedRepositoryTests: XCTestCase {
             XCTAssertThrowsError(try LocalHistoryUnresolvedRepository.validate(invalid), key)
         }
     }
+
+    /// 云端 timestamptz 经 PostgREST 序列化后带 6 位微秒（如 2026-08-08T10:53:38.059384+00:00）。
+    /// 映射与导入校验必须解析成同一时刻，否则「建得出的归档」会在最后一步被判非法。
+    func testLF03935CloudMicrosecondTimestampParsesToTheSameInstant() throws {
+        let canonical = try XCTUnwrap(
+            LocalHistorySourceCompatibility.parseTimestamp("2026-08-08T10:53:38.059384+00:00"))
+        for text in [
+            "2026-08-08T10:53:38.059+00:00",
+            "2026-08-08 10:53:38.059384+00",
+            "2026-08-08T10:53:38.059384Z"
+        ] {
+            let date = try XCTUnwrap(LocalHistorySourceCompatibility.parseTimestamp(text), "解析失败：\(text)")
+            XCTAssertEqual(date.timeIntervalSince(canonical), 0, accuracy: 0.001, text)
+        }
+        XCTAssertNil(LocalHistorySourceCompatibility.parseTimestamp(""))
+        XCTAssertNil(LocalHistorySourceCompatibility.parseTimestamp("not-a-date"))
+    }
+
+    /// 待核对原文的原始时间戳带微秒时，导入校验必须接受。
+    /// 线上 18 条 data_records 会转成待核对原文，全部走这条比对。
+    func testLF03936UnresolvedOriginalWithMicrosecondTimestampValidates() throws {
+        let sourceID = UUID()
+        let created = "2026-08-08T10:53:38.059384+00:00"
+        let original: [String: Any] = [
+            "id": sourceID.uuidString.lowercased(),
+            "user_id": UUID().uuidString.lowercased(),
+            "created_at": created,
+            "updated_at": created
+        ]
+        let row: [String: Any] = [
+            "id": "data_records/\(sourceID.uuidString.lowercased())",
+            "source_table": "data_records",
+            "source_id": sourceID.uuidString,
+            "source_json": String(decoding: try JSONSerialization.data(withJSONObject: original), as: UTF8.self),
+            "issues_json": "[\"历史记录缺少可确认的发生日期\"]",
+            "created_at": "2026-08-08 10:53:38.059",
+            "updated_at": "2026-08-08 10:53:38.059"
+        ]
+        XCTAssertNoThrow(try LocalHistoryUnresolvedRepository.validate(row))
+    }
 }

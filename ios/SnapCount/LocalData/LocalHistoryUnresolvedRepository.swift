@@ -85,19 +85,8 @@ final class LocalHistoryUnresolvedRepository {
     }
 
     private static func parseDate(_ text: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: text) { return date }
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: text) { return date }
-        // GRDB's SQLite DATETIME JSON representation.
-        let sqlite = DateFormatter()
-        sqlite.locale = Locale(identifier: "en_US_POSIX")
-        sqlite.timeZone = TimeZone(secondsFromGMT: 0)
-        sqlite.isLenient = false
-        sqlite.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-        if let date = sqlite.date(from: text), sqlite.string(from: date) == text { return date }
-        sqlite.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        guard let date = sqlite.date(from: text), sqlite.string(from: date) == text else { return nil }
-        return date
+        // 与映射侧共用同一份解析：云端 timestamptz 带 6 位微秒，这里若只认 3 位，
+        // 就会出现「归档能建出来、导入校验却判它非法」。
+        LocalHistorySourceCompatibility.parseTimestamp(text)
     }
 }
