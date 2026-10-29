@@ -1,15 +1,21 @@
 import Foundation
-import CoreFoundation
 import GRDB
 
 enum LocalHistoryMappingError: Error, LocalizedError {
     case unsupported(String)
     case sourceFieldMissing(table: String, field: String, recordID: String)
     case sourceFieldInvalid(table: String, field: String, recordID: String)
+    /// 逐行收集到的全部不兼容项。一次报全，避免「修一条又冒一条」。
+    case rows([String])
 
     var errorDescription: String? {
         switch self {
         case .unsupported(let reason): return reason
+        case .rows(let issues):
+            let samples = issues.prefix(10).map { "· \($0)" }.joined(separator: "\n")
+            let remaining = issues.count - min(issues.count, 10)
+            return "历史数据有 \(issues.count) 项无法等价转换，本次未入账：\n\(samples)"
+                + (remaining > 0 ? "\n另有 \(remaining) 项。" : "")
         case .sourceFieldMissing(let table, let field, let recordID):
             let hint = String(LocalImageStore.sha256(Data(recordID.lowercased().utf8)).prefix(10))
             return "\(table).\(field) 缺少可确认的历史值，记录 #\(hint)；未使用创建时间代替，尚未入账。"
@@ -28,14 +34,19 @@ final class LocalHistoryMigrationMapper {
     func buildArchive(_ inspection: LocalHistoryMigrationInspection, profileID: UUID, images: [String: Data], at now: Date = Date()) throws -> Data {
         var tables: [String: [[String: Any]]] = [:]
         var imageFiles: [String: [String: Any]] = [:]
+        // 行级不兼容只记录、不中断：跑完全部行后一次性抛出，用户不必「修一条重启一次」。
+        var issues: [String] = []
         let walletIDs = Set(inspection.rows[.records, default: []].filter { ($0["domain_key"]?.value as? String) == "wallet" }.compactMap { ($0["id"]?.value as? String)?.lowercased() })
         if let blocker = LocalHistoryMigrationUseCase.blockers(inspection.rows).first {
             throw LocalHistoryMappingError.unsupported(blocker)
         }
         try reconcile(inspection)
         for source in LocalHistorySourceTable.allCases {
-            let raw = try JSONEncoder().encode(inspection.rows[source, default: []])
-            guard let rows = try JSONSerialization.jsonObject(with: raw) as? [[String: Any]] else { throw LocalDataError.invalidRecord }
+            // Keep the decoded values as-is. Re-encoding through JSONEncoder and
+            // JSONSerialization would turn every number into an NSNumber, whose
+            // decimal text is not the shortest round-trip form and cannot be
+            // reconciled as money.
+            let rows = inspection.rows[source, default: []].map { $0.mapValues(\.value) }
             for row in rows {
                 do {
                 let id = try text(row, "id")
@@ -48,7 +59,7 @@ final class LocalHistoryMigrationMapper {
                 func minor(_ sourceField: String, _ target: String) throws {
                     guard let value = row[sourceField], !(value is NSNull) else { return }
                     do {
-                        mapped[target] = try Self.minor(value)
+                        mapped[target] = try LocalHistorySourceCompatibility.minorValue(value)
                     } catch {
                         throw LocalHistoryMigrationContextError(
                             table: source.rawValue,
@@ -81,6 +92,11 @@ final class LocalHistoryMigrationMapper {
                     table = pending ? "local_pending_transactions" : "local_expenses"
                     guard pending || (row["status"] as? String) == "done" else { throw LocalDataError.invalidRecord }
                     for key in ["account_id", "merchant_name", "platform", "category", "payment_method", "transaction_date", "transaction_time", "note", "created_at", "updated_at", "occurred_at"] { copy(key) }
+                    // 云端这几列允许为空，本机是 NOT NULL。空串表示「未填写」，展示层已有
+                    // 「待补全消费」兜底；不编造商户名，也不把空值当迁移失败。
+                    for key in ["merchant_name", "platform", "category", "payment_method"] {
+                        mapped[key] = row[key] as? String ?? ""
+                    }
                     mapped["currency"] = row["currency"] ?? "CNY"
                     try minor("amount", "amount_minor")
                     if pending { mapped["status"] = "pending" }
@@ -138,7 +154,7 @@ final class LocalHistoryMigrationMapper {
                         guard let balance = LocalHistorySourceCompatibility.walletValue(row, field: "snapshot_balance") else {
                             throw LocalHistoryMappingError.sourceFieldMissing(table: "data_records", field: "snapshot_balance", recordID: id)
                         }
-                        mapped["snapshot_balance_minor"] = try Self.minor(balance)
+                        mapped["snapshot_balance_minor"] = try LocalHistorySourceCompatibility.minorValue(balance)
                         for key in ["linked_account_id", "account_snapshot_kind"] {
                             if let value = LocalHistorySourceCompatibility.walletValue(row, field: key) { mapped[key] = value }
                         }
@@ -204,21 +220,15 @@ final class LocalHistoryMigrationMapper {
                 if mapped["updated_at"] == nil { mapped["updated_at"] = mapped["created_at"] }
                 let completed = try normalized(mapped, table: table)
                 tables[table, default: []].append(completed)
-                } catch let error as LocalHistoryMappingError {
-                    switch error {
-                    case .sourceFieldMissing, .sourceFieldInvalid: throw error
-                    case .unsupported:
-                        throw LocalHistoryMigrationContextError(table: source.rawValue, field: nil, recordID: row["id"] as? String ?? "", underlying: error)
-                    }
                 } catch let error as LocalHistoryMigrationError {
-                    throw error
-                } catch let error as LocalHistoryMigrationContextError {
+                    // 归属/范围不一致是致命错误，必须立即停止，不能继续读其他行。
                     throw error
                 } catch {
-                    throw LocalHistoryMigrationContextError(table: source.rawValue, field: nil, recordID: row["id"] as? String ?? "", underlying: error)
+                    issues.append(Self.issueText(source: source, row: row, error: error))
                 }
             }
         }
+        guard issues.isEmpty else { throw LocalHistoryMappingError.rows(issues) }
         let allTables = ["local_accounts", "local_wallet_snapshots", "local_records", "local_expenses", "local_income_records", "local_staging_records", "local_repayment_cycles", "local_liability_payments", "local_account_entries", "local_image_intakes", "local_pending_transactions", "local_history_unresolved_records"]
         var encoded: [String: String] = [:]
         for table in allTables {
@@ -273,7 +283,7 @@ final class LocalHistoryMigrationMapper {
                 throw LocalHistoryMigrationContextError(table: "accounts", field: "current_balance", recordID: id, underlying: LocalDataError.invalidRecord)
             }
             var balance: Int64
-            do { balance = try Self.minor(opening.value) }
+            do { balance = try LocalHistorySourceCompatibility.minorValue(opening.value) }
             catch { throw LocalHistoryMigrationContextError(table: "accounts", field: "initial_balance", recordID: id, underlying: error) }
             for entry in inspection.rows[.accountEntries, default: []] where (entry["account_id"]?.value as? String)?.lowercased() == id.lowercased() {
                 if (entry["is_voided"]?.value as? Bool) == true || (entry["entry_type"]?.value as? String) == "snapshot_initialization" { continue }
@@ -282,7 +292,7 @@ final class LocalHistoryMigrationMapper {
                     throw LocalHistoryMigrationContextError(table: "account_entries", field: "amount/direction", recordID: entryID, underlying: LocalDataError.invalidRecord)
                 }
                 let delta: Int64
-                do { delta = try Self.minor(amount.value) }
+                do { delta = try LocalHistorySourceCompatibility.minorValue(amount.value) }
                 catch { throw LocalHistoryMigrationContextError(table: "account_entries", field: "amount", recordID: entryID, underlying: error) }
                 guard delta > 0 else {
                     throw LocalHistoryMigrationContextError(table: "account_entries", field: "amount", recordID: entryID, underlying: LocalDataError.invalidAmount)
@@ -294,23 +304,13 @@ final class LocalHistoryMigrationMapper {
                 balance = sum.partialValue
             }
             let currentBalance: Int64
-            do { currentBalance = try Self.minor(current.value) }
+            do { currentBalance = try LocalHistorySourceCompatibility.minorValue(current.value) }
             catch { throw LocalHistoryMigrationContextError(table: "accounts", field: "current_balance", recordID: id, underlying: error) }
             guard balance == currentBalance else {
                 throw LocalHistoryMigrationContextError(table: "accounts", field: "current_balance", recordID: id,
                     underlying: LocalHistoryMigrationValidationError.accountBalanceMismatch)
             }
         }
-    }
-    private static func minor(_ value: Any) throws -> Int64 {
-        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
-            throw LocalDataError.invalidRecord
-        }
-        guard let decimal = Decimal(string: String(describing: value), locale: Locale(identifier: "en_US_POSIX")) else { throw LocalDataError.invalidRecord }
-        let number = NSDecimalNumber(decimal: decimal * 100)
-        let result = number.int64Value
-        guard number == NSDecimalNumber(value: result) else { throw LocalDataError.invalidRecord }
-        return result
     }
     private static func day(_ value: String) throws -> String {
         let date = String(value.prefix(10))
@@ -360,5 +360,17 @@ final class LocalHistoryMigrationMapper {
 
     private static func recordHint(_ id: String) -> String {
         String(LocalImageStore.sha256(Data(id.lowercased().utf8)).prefix(10))
+    }
+
+    /// 把行级错误压成一句可读、可核对、不含原始业务内容的问题描述。
+    private static func issueText(source: LocalHistorySourceTable, row: [String: Any], error: Error) -> String {
+        let rowID = row["id"] as? String ?? ""
+        if let error = error as? LocalHistoryMappingError { return error.localizedDescription }
+        if let context = error as? LocalHistoryMigrationContextError {
+            if let inner = context.underlying as? LocalHistoryMappingError { return inner.localizedDescription }
+            let field = context.field.map { ".\($0)" } ?? ""
+            return "\(context.table)\(field) 无法等价映射，记录 #\(recordHint(context.recordID.isEmpty ? rowID : context.recordID))；尚未入账。"
+        }
+        return "\(source.rawValue) 记录 #\(recordHint(rowID)) 不符合本机事实合同；尚未入账。"
     }
 }

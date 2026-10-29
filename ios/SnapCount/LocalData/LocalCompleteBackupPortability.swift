@@ -328,6 +328,24 @@ final class LocalCompleteBackupPortability {
         return try importBackup(data, into: profile.id, historyMigration: historyMigration)
     }
 
+    /// 影子导入：在本机库的一次性副本上跑完整导入，用来把「最后一刻才炸」提前到预检。
+    /// 复用真实导入的全部校验与 SQLite 约束，不复制任何规则；副本用完即删。
+    /// 不覆盖：图片落盘与磁盘空间（预检归档不含图片字节）。
+    func validateImport(_ data: Data, into targetProfileID: UUID) throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jiezi-import-preflight-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let shadowQueue = try DatabaseQueue(path: directory.appendingPathComponent("preflight.sqlite").path)
+        try database.writer.backup(to: shadowQueue)
+        let shadow = try LocalDatabase(queue: shadowQueue)
+        defer { try? shadow.writer.close() }
+        let shadowImages = try LocalImageStore(rootDirectory: directory.appendingPathComponent("images"))
+        _ = try LocalCompleteBackupPortability(database: shadow, imageStore: shadowImages)
+            .importBackup(data, into: targetProfileID)
+    }
+
     private func decode(_ data: Data) throws -> DecodedArchive {
         guard data.count <= Self.maximumArchiveBytes else { throw LocalCompleteBackupError.archiveTooLarge }
         let archive: Archive

@@ -302,6 +302,7 @@ final class LocalHistoryMigrationDiagnosticStore {
             case .sourceFieldMissing: return "HIST-SOURCE-FIELD-MISSING"
             case .sourceFieldInvalid: return "HIST-SOURCE-FIELD-INVALID"
             case .unsupported: return "HIST-MAP-UNSUPPORTED"
+            case .rows: return "HIST-MAP-ROWS"
             }
         }
         if let error = error as? LocalCompleteBackupError,
@@ -332,6 +333,8 @@ final class LocalHistoryMigrationDiagnosticStore {
              .sourceFieldInvalid(let table, let field, let recordID):
             return (table, field, recordID)
         case .unsupported:
+            return nil
+        case .rows:
             return nil
         }
     }
@@ -396,6 +399,8 @@ final class LocalHistoryMigrationDiagnosticStore {
                 return "历史记录中的必需字段格式无法识别，无法安全映射。"
             case .unsupported:
                 return "历史记录字段或状态不符合当前兼容规则，无法无损迁移。"
+            case .rows(let issues):
+                return "本次预检发现 \(issues.count) 项无法等价转换的历史记录，全部未入账。"
             }
         }
         if let error = error as? LocalHistoryImageDownloadError {

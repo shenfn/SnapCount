@@ -22,10 +22,14 @@ final class LocalHistoryMigrationCoordinator {
     private let source: LocalHistoryMigrationSource
     private let downloader: LocalHistoryImageDownloader
     private let cache: LocalHistoryMigrationCache
+    /// 在下载原图之前跑一遍结构预检：先把「能不能入账」问清楚，再花时间下载。
+    private let validateStructure: ((LocalHistoryMigrationInspection, UUID) throws -> Void)?
 
     init(source: LocalHistoryMigrationSource = LocalHistoryMigrationSource(), downloader: LocalHistoryImageDownloader,
-         cache: LocalHistoryMigrationCache) {
+         cache: LocalHistoryMigrationCache,
+         validateStructure: ((LocalHistoryMigrationInspection, UUID) throws -> Void)? = nil) {
         self.source = source; self.downloader = downloader; self.cache = cache
+        self.validateStructure = validateStructure
     }
 
     @MainActor
@@ -82,6 +86,7 @@ final class LocalHistoryMigrationCoordinator {
             if !inspection.blockers.isEmpty {
                 return LocalHistoryMigrationPreparedSource(inspection: inspection, images: [:], state: state)
             }
+            try validateStructure?(inspection, profileID)
             let imageTotal = inspection.sourceImagePaths.count
             let images = try await loadImages(inspection: inspection, cloudUserID: cloudUserID,
                 accessToken: accessToken, state: state, isCurrent: isCurrent) { processed in

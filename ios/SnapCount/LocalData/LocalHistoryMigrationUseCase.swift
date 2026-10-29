@@ -185,14 +185,47 @@ final class LocalHistoryMigrationUseCase {
                                    rows: [LocalHistorySourceTable: [[String: AnyCodable]]]) -> [String] {
         guard table == .records || table == .staging else { return [] }
         var result = mappingIssues([table: [row]])
-        if table == .staging, let target = row["target_record_id"]?.value as? String,
-           rows[.records, default: []].contains(where: {
-               ($0["id"]?.value as? String)?.lowercased() == target.lowercased()
-                   && !mappingIssues([.records: [$0]]).isEmpty
-           }) {
-            result.append("staging_records.target_record_id 关联记录需要原文保留，候选一并保留，记录 #\(recordHint(row["id"]?.value as? String ?? ""))。")
+        if table == .staging, let target = row["target_record_id"]?.value as? String {
+            if !hasSourceTarget(target, row: row, rows: rows) {
+                // 目标记录已在云端被删除。若继续写 target_record_id，整包会在最后一步
+                // 因引用完整性被拒绝；这里按「历史待核对」保留原文，不影响其余记录入账。
+                result.append("staging_records.target_record_id 指向的记录不在源数据中，候选按原文保留，记录 #\(recordHint(row["id"]?.value as? String ?? ""))。")
+            }
+            if rows[.records, default: []].contains(where: {
+                ($0["id"]?.value as? String)?.lowercased() == target.lowercased()
+                    && !mappingIssues([.records: [$0]]).isEmpty
+            }) {
+                result.append("staging_records.target_record_id 关联记录需要原文保留，候选一并保留，记录 #\(recordHint(row["id"]?.value as? String ?? ""))。")
+            }
         }
         return result
+    }
+
+    /// 与本机导入的目标表判定保持一致：负债还款 → 周期，钱包 → 钱包快照，消费 → 交易，其余 → 记录。
+    private static func hasSourceTarget(_ target: String, row: [String: AnyCodable],
+                                        rows: [LocalHistorySourceTable: [[String: AnyCodable]]]) -> Bool {
+        let domain = (row["resolved_domain_key"]?.value as? String)
+            ?? (row["detected_domain_key"]?.value as? String) ?? ""
+        let table: LocalHistorySourceTable
+        let requiredDomain: String?
+        if (row["resolved_action"]?.value as? String) == "liability_repayment_confirmed" {
+            table = .repaymentCycles; requiredDomain = nil
+        } else if domain == "wallet" {
+            table = .records; requiredDomain = "wallet"
+        } else if domain == "expense" {
+            table = .transactions; requiredDomain = nil
+        } else {
+            table = .records; requiredDomain = nil
+        }
+        return rows[table, default: []].contains { candidate in
+            guard (candidate["id"]?.value as? String)?.lowercased() == target.lowercased() else { return false }
+            if let requiredDomain { return (candidate["domain_key"]?.value as? String) == requiredDomain }
+            if domain == "expense" {
+                // 待处理交易会落到 local_pending_transactions，不是消费目标。
+                return (candidate["status"]?.value as? String) != "pending"
+            }
+            return true
+        }
     }
 
     private static func mappingIssues(_ rows: [LocalHistorySourceTable: [[String: AnyCodable]]]) -> [String] {

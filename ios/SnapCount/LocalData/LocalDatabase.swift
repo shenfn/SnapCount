@@ -13,6 +13,12 @@ final class LocalDatabase {
         try Self.migrator.migrate(writer)
     }
 
+    /// 接管一个已打开的连接（校验副本用），并确保结构在当前版本。
+    init(queue: DatabaseQueue) throws {
+        writer = queue
+        try Self.migrator.migrate(writer)
+    }
+
     convenience init() throws {
         let directory = FileManager.default.urls(
             for: .applicationSupportDirectory,

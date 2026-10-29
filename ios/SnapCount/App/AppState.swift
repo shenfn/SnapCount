@@ -5657,8 +5657,23 @@ final class AppState: ObservableObject {
                 }
             }
             historyMigrationPhase = "读取云端源数据与原图"
+            let preflightSchema = try LocalDatabase()
             let prepared = try await LocalHistoryMigrationCoordinator(
-                downloader: LocalHistoryImageDownloader(baseURL: baseURL), cache: cache
+                downloader: LocalHistoryImageDownloader(baseURL: baseURL), cache: cache,
+                validateStructure: { inspection, profileID in
+                    // 结构预检：先在不含图片的归档上跑一遍真实导入，把字段/引用/约束问题
+                    // 在下载原图之前暴露出来，并一次报全。
+                    let archive = try LocalHistoryMigrationMapper(schema: preflightSchema).buildArchive(
+                        inspection, profileID: profileID, images: [:])
+                    do {
+                        try portability.validateImport(archive, into: profileID)
+                    } catch let error as LocalCompleteBackupError {
+                        guard case .invalidRows(let table) = error else { throw error }
+                        throw LocalHistoryMappingError.rows([
+                            "本机导入校验未通过：\(table) 的记录存在引用不完整、金额或唯一约束冲突；整包未入账。"
+                        ])
+                    }
+                }
             ).prepare(profileID: profile.id, cloudUserID: session.user.id,
                       accessToken: session.accessToken, isCurrent: isCurrent,
                       onProgress: { [weak self] progress in
@@ -5724,6 +5739,12 @@ final class AppState: ObservableObject {
             let failedPhase = historyMigrationPhase
             historyMigrationPhase = "预检暂停"
             historyMigrationMessage = recordHistoryMigrationFailure(error, committed: false, phase: failedPhase)
+            // 逐行问题一次列全，用户不必「修一条重启一次」。
+            if case .rows(let issues)? = error as? LocalHistoryMappingError {
+                historyMigrationPhase = "预检阻塞"
+                historyMigrationBlockers = issues
+                historyMigrationBlockerCount = issues.count
+            }
         }
     }
 
