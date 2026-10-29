@@ -45,7 +45,19 @@ final class LocalHistoryMigrationMapper {
                 var table: String
                 var mapped: [String: Any] = ["id": id.uppercased(), "profile_id": profileID.uuidString]
                 func copy(_ source: String, _ target: String? = nil) { if let value = row[source], !(value is NSNull) { mapped[target ?? source] = value } }
-                func minor(_ source: String, _ target: String) throws { if let value = row[source], !(value is NSNull) { mapped[target] = try Self.minor(value) } }
+                func minor(_ sourceField: String, _ target: String) throws {
+                    guard let value = row[sourceField], !(value is NSNull) else { return }
+                    do {
+                        mapped[target] = try Self.minor(value)
+                    } catch {
+                        throw LocalHistoryMigrationContextError(
+                            table: source.rawValue,
+                            field: sourceField,
+                            recordID: id,
+                            underlying: error
+                        )
+                    }
+                }
                 copy("deleted_at")
                 let preservationIssues = LocalHistoryMigrationUseCase.preservationIssues(
                     table: source, row: row.mapValues(AnyCodable.init), rows: inspection.rows)
