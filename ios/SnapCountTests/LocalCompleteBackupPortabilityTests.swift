@@ -426,13 +426,65 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         let imagesBefore = try imageFiles(in: target.imageDirectory)
 
         XCTAssertThrowsError(try target.portability.importBackup(backup, into: targetProfile.id)) { error in
-            guard case LocalCompleteBackupError.conflictingStableID = error else {
+            guard case LocalCompleteBackupError.invalidRowIssues(let issues) = error else {
                 return XCTFail("unexpected error: \(error)")
             }
+            XCTAssertEqual(issues.count, 1, "只应报一条同标识冲突：\(issues)")
+            XCTAssertTrue(issues[0].hasPrefix("local_expenses.id"), "冲突必须指明本机表与列：\(issues[0])")
+            XCTAssertTrue(issues[0].contains("amount_minor"), "冲突必须指明不一致的列：\(issues[0])")
         }
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_income_records"), incomeCountBefore)
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 2)
         XCTAssertEqual(try imageFiles(in: target.imageDirectory), imagesBefore)
+    }
+
+    /// 历史迁移的归档只带映射器认识的列，本机维护列（local_version、sort_order）不在其中。
+    /// 同标识的行必须按「内容一致即已存在」放行，否则本机一旦有数据就永远迁不进去。
+    func testLF02103ArchiveMissingLocalMaintainedColumnsIsTreatedAsExisting() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let targetProfile = try target.profileStore.activeProfile()
+        let originalBackup = try source.portability.exportBackup()
+        _ = try target.portability.importBackup(originalBackup, into: targetProfile.id)
+
+        let partial = try tamper(originalBackup) { tables in
+            var accounts = try Self.tableRows("local_accounts", in: tables)
+            for index in accounts.indices {
+                accounts[index].removeValue(forKey: "local_version")
+                accounts[index].removeValue(forKey: "sort_order")
+            }
+            tables["local_accounts"] = try Self.encodeRows(accounts)
+        }
+        let accountsBefore = try count(target.database, "SELECT COUNT(*) FROM local_accounts")
+        let result = try target.portability.importBackup(partial, into: targetProfile.id)
+        XCTAssertEqual(result.insertedRows, 0, "同标识同内容应全部按已存在跳过")
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_accounts"), accountsBefore)
+    }
+
+    /// 本机 DATETIME 由 GRDB 写成 `yyyy-MM-dd HH:mm:ss.SSS`，云端与归档给 ISO8601。
+    /// 同一时刻只是写法不同，不能判成同标识内容冲突。
+    func testLF02103EquivalentTimestampNotationIsNotAConflict() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let targetProfile = try target.profileStore.activeProfile()
+        let originalBackup = try source.portability.exportBackup()
+        _ = try target.portability.importBackup(originalBackup, into: targetProfile.id)
+
+        let stored = try XCTUnwrap(try String.fetchOne(
+            target.database.writer,
+            sql: "SELECT created_at FROM local_accounts LIMIT 1"
+        ))
+        let iso = stored.replacingOccurrences(of: " ", with: "T") + "Z"
+        XCTAssertNotEqual(iso, stored)
+        let rewritten = try tamper(originalBackup) { tables in
+            var accounts = try Self.tableRows("local_accounts", in: tables)
+            for index in accounts.indices { accounts[index]["created_at"] = iso }
+            tables["local_accounts"] = try Self.encodeRows(accounts)
+        }
+        let result = try target.portability.importBackup(rewritten, into: targetProfile.id)
+        XCTAssertEqual(result.insertedRows, 0, "同一时刻的不同写法不应判成冲突")
     }
 
     func testLF02107DatabaseFailureRollsBackRowsAndNewImageFiles() throws {

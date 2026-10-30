@@ -450,9 +450,12 @@ final class LocalHistoryMigrationDiagnosticStore {
             switch error {
             case .invalidImage: return "历史图片完整性校验未通过。"
             case .missingImage: return "完整恢复所需的图片内容缺失。"
-            case .conflictingStableID: return "本机已有同标识但内容不同的记录。"
             case .duplicateID: return "迁移数据中存在重复稳定标识。"
-            case .invalidFormat, .unsupportedSchemaVersion, .archiveTooLarge, .invalidRows, .invalidRowIssues:
+            case .invalidRowIssues(let issues):
+                // 行级文案只含「本机表.列 + #记录 + 不一致的列名」，不含原始值，可直接进诊断。
+                return issues.first.map { "本机导入规则未通过：\($0)" }
+                    ?? "迁移归档格式、规模或记录关系不符合当前恢复规则。"
+            case .invalidFormat, .unsupportedSchemaVersion, .archiveTooLarge, .invalidRows:
                 return "迁移归档格式、规模或记录关系不符合当前恢复规则。"
             }
         }

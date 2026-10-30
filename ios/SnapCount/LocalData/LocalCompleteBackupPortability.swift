@@ -46,7 +46,6 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
     /// 行级拒收一次报全：每条都带「本机表.列 + 记录 #hash」，可直接映射成问题清单的一行。
     case invalidRowIssues([String])
     case duplicateID(String)
-    case conflictingStableID(String)
     case invalidImage(String)
     case missingImage(String)
 
@@ -58,7 +57,6 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
         case .invalidRows(let table): "备份中的 \(table) 记录无效或关系不完整。"
         case .invalidRowIssues(let issues): "备份中有 \(issues.count) 项记录不满足本机导入规则。"
         case .duplicateID(let id): "备份内存在重复稳定标识：\(id)"
-        case .conflictingStableID(let id): "本机已存在内容不同的稳定标识：\(id)。本次导入未写入数据。"
         case .invalidImage(let path): "备份图片校验失败：\(path)"
         case .missingImage(let path): "完整备份缺少本地图片：\(path)"
         }
@@ -234,6 +232,7 @@ final class LocalCompleteBackupPortability {
                 ) == 1 else { throw LocalDataError.invalidIdentifier }
 
                 var skipped = Set<String>()
+                var conflicts: [String] = []
                 for table in Self.tableNames {
                     let columns = try Self.columns(in: db, table: table)
                     let pairs = columns.map { "'\($0)',\(Self.quote($0))" }.joined(separator: ",")
@@ -253,12 +252,21 @@ final class LocalCompleteBackupPortability {
                                 with: Data(existing.utf8),
                                 options: [.fragmentsAllowed]
                             )
-                            guard try Self.canonicalJSON(existingObject) == Self.canonicalJSON(incoming) else {
-                                throw LocalCompleteBackupError.conflictingStableID(id)
+                            // 只比「归档带到、本机也有」的列。本机维护列（local_version、
+                            // sort_order 等）归档不携带，逐列全等会把同一条记录误判成冲突，
+                            // 导致本机一旦有数据，历史迁移永远过不去。
+                            let differing = Self.contentDifferences(existing: existingObject, incoming: incoming)
+                            guard differing.isEmpty else {
+                                let detail = "与本机同标识记录内容不同（\(differing.prefix(6).joined(separator: "/"))）"
+                                conflicts.append(Self.invalidRowMessage(table, "id", row, detail))
+                                continue
                             }
                             skipped.insert("\(table):\(id)")
                         }
                     }
+                }
+                guard conflicts.isEmpty else {
+                    throw LocalCompleteBackupError.invalidRowIssues(conflicts)
                 }
 
                 for image in decoded.archive.images {
@@ -686,6 +694,83 @@ final class LocalCompleteBackupPortability {
         let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed])
         guard let string = String(data: data, encoding: .utf8) else { throw LocalCompleteBackupError.invalidFormat }
         return string
+    }
+
+    /// 同标识行比较。只比双方都有的列，并把等价写法归一化后比较：
+    /// - 本机 DATETIME 由 GRDB 存成 `yyyy-MM-dd HH:mm:ss.SSS`，云端是 ISO8601 字符串，
+    ///   同一时刻文本不同；数字 epoch 也按同一时刻比较。
+    /// - 布尔与 0/1、整数与浮点、内嵌 JSON 的键序差异都不算内容不同。
+    /// 归档不携带的本机列一律不参与判定，否则同一条记录必然被判成冲突。
+    private static func contentDifferences(existing: Any, incoming: [String: Any]) -> [String] {
+        guard let existingRow = existing as? [String: Any] else { return ["记录无法解析"] }
+        return incoming.keys
+            .filter { $0 != "id" && $0 != "profile_id" && existingRow[$0] != nil }
+            .filter { !isSameContent(incoming[$0], existingRow[$0]) }
+            .sorted()
+    }
+
+    private static func isSameContent(_ lhs: Any?, _ rhs: Any?) -> Bool {
+        if compareToken(lhs) == compareToken(rhs) { return true }
+        guard let left = instant(lhs), let right = instant(rhs) else { return false }
+        return left == right
+    }
+
+    private static func compareToken(_ value: Any?) -> String {
+        guard let value, !(value is NSNull) else { return "\u{1}null" }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "\u{1}n:1" : "\u{1}n:0" }
+            let double = number.doubleValue
+            if double == double.rounded(), abs(double) < 9_007_199_254_740_992 {
+                return "\u{1}n:" + String(Int64(double))
+            }
+            return "\u{1}n:" + number.stringValue
+        }
+        guard let text = value as? String else {
+            if let object = value as? [String: Any], let json = try? canonicalJSON(object) { return "\u{1}j:" + json }
+            if let array = value as? [Any], let json = try? canonicalJSON(array) { return "\u{1}j:" + json }
+            return "\u{1}s:" + String(describing: value)
+        }
+        if let milliseconds = instant(text) { return "\u{1}t:" + String(milliseconds) }
+        if let data = text.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+           JSONSerialization.isValidJSONObject(object),
+           let json = try? canonicalJSON(object) {
+            return "\u{1}j:" + json
+        }
+        return "\u{1}s:" + text
+    }
+
+    /// 归一化到「毫秒时间戳」。数字按 epoch 秒（>1e11 视为毫秒）处理；
+    /// 文本只接受日期时间形状，避免把普通数字或短文本当成时间。
+    private static func instant(_ value: Any?) -> Int64? {
+        if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+            let double = number.doubleValue
+            guard double > 100_000_000 else { return nil }
+            return double > 100_000_000_000 ? Int64(double.rounded()) : Int64((double * 1000).rounded())
+        }
+        guard let text = value as? String else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 19, trimmed.contains("-"), trimmed.contains(":") else { return nil }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso.date(from: trimmed) { return milliseconds(date) }
+        iso.formatOptions = [.withInternetDateTime]
+        if let date = iso.date(from: trimmed) { return milliseconds(date) }
+
+        // GRDB 默认把 Date 存成 `yyyy-MM-dd HH:mm:ss.SSS`（UTC）。
+        let grdb = DateFormatter()
+        grdb.locale = Locale(identifier: "en_US_POSIX")
+        grdb.timeZone = TimeZone(secondsFromGMT: 0)
+        for format in ["yyyy-MM-dd HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss"] {
+            grdb.dateFormat = format
+            if let date = grdb.date(from: trimmed) { return milliseconds(date) }
+        }
+        return nil
+    }
+
+    private static func milliseconds(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 
     private static func isAllowedImagePath(_ path: String) -> Bool {
