@@ -487,6 +487,31 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(result.insertedRows, 0, "同一时刻的不同写法不应判成冲突")
     }
 
+    /// 云端流水号与本机流水号不同：同一笔经济事实不能重复入账，
+    /// 唯一索引 (source_kind, source_id, account_id) 也不能被撞。
+    func testLF02103LedgerEntryWithDifferentIDButSameSourceIsSkipped() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let targetProfile = try target.profileStore.activeProfile()
+        let originalBackup = try source.portability.exportBackup()
+        _ = try target.portability.importBackup(originalBackup, into: targetProfile.id)
+
+        let renumbered = try tamper(originalBackup) { tables in
+            var entries = try Self.tableRows("local_account_entries", in: tables)
+            for index in entries.indices {
+                let isVoided = (entries[index]["is_voided"] as? NSNumber)?.boolValue ?? false
+                let hasVoidedAt = !(entries[index]["voided_at"] is NSNull)
+                if !isVoided && !hasVoidedAt { entries[index]["id"] = UUID().uuidString }
+            }
+            tables["local_account_entries"] = try Self.encodeRows(entries)
+        }
+        let entriesBefore = try count(target.database, "SELECT COUNT(*) FROM local_account_entries")
+        let result = try target.portability.importBackup(renumbered, into: targetProfile.id)
+        XCTAssertEqual(result.insertedRows, 0, "同来源流水不得重复入账")
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_account_entries"), entriesBefore)
+    }
+
     func testLF02107DatabaseFailureRollsBackRowsAndNewImageFiles() throws {
         let source = try makeFixture()
         let target = try makeEmptyFixture()

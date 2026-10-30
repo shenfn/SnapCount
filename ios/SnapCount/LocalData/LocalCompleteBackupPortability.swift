@@ -232,7 +232,7 @@ final class LocalCompleteBackupPortability {
                 ) == 1 else { throw LocalDataError.invalidIdentifier }
 
                 var skipped = Set<String>()
-                var conflicts: [String] = []
+                var rejected: [String] = []
                 for table in Self.tableNames {
                     let columns = try Self.columns(in: db, table: table)
                     let pairs = columns.map { "'\($0)',\(Self.quote($0))" }.joined(separator: ",")
@@ -258,15 +258,15 @@ final class LocalCompleteBackupPortability {
                             let differing = Self.contentDifferences(existing: existingObject, incoming: incoming)
                             guard differing.isEmpty else {
                                 let detail = "与本机同标识记录内容不同（\(differing.prefix(6).joined(separator: "/"))）"
-                                conflicts.append(Self.invalidRowMessage(table, "id", row, detail))
+                                rejected.append(Self.invalidRowMessage(table, "id", row, detail))
                                 continue
                             }
                             skipped.insert("\(table):\(id)")
                         }
                     }
                 }
-                guard conflicts.isEmpty else {
-                    throw LocalCompleteBackupError.invalidRowIssues(conflicts)
+                guard rejected.isEmpty else {
+                    throw LocalCompleteBackupError.invalidRowIssues(rejected)
                 }
 
                 for image in decoded.archive.images {
@@ -284,6 +284,14 @@ final class LocalCompleteBackupPortability {
                     for sourceRow in decoded.rows[table] ?? [] {
                         guard let id = sourceRow["id"] as? String,
                               !skipped.contains("\(table):\(id)") else { continue }
+                        // 同一笔经济事实在本机已有未作废流水时，唯一索引
+                        // (source_kind, source_id, account_id) 不允许再插一条。云端流水号
+                        // 与本机流水号不同，只能按逻辑来源判重，否则本地新建过的记录
+                        // 迁移后会被重复计一次。
+                        if table == "local_account_entries", try Self.hasActiveEntryTwin(db, row: sourceRow) {
+                            skipped.insert("\(table):\(id)")
+                            continue
+                        }
                         var row = try Self.dictionary(from: sourceRow)
                         row["id"] = try Self.mappedID(table: table, row: sourceRow, targetProfileID: targetProfileID)
                         row["profile_id"] = targetProfileID.uuidString
@@ -300,12 +308,22 @@ final class LocalCompleteBackupPortability {
                             arguments.append(json)
                             return "json_extract(?, '$.\(column)')"
                         }.joined(separator: ",")
-                        try db.execute(
-                            sql: "INSERT INTO \(Self.quote(table)) (\(names)) VALUES (\(values))",
-                            arguments: StatementArguments(arguments)
-                        )
+                        do {
+                            try db.execute(
+                                sql: "INSERT INTO \(Self.quote(table)) (\(names)) VALUES (\(values))",
+                                arguments: StatementArguments(arguments)
+                            )
+                        } catch let error as DatabaseError where error.resultCode == .SQLITE_CONSTRAINT {
+                            // 约束不满足本来就是整包失败；按行报出表、约束和记录，
+                            // 才不会又变成一句看不出是哪条数据的未知错误。
+                            rejected.append(Self.constraintIssue(table: table, row: sourceRow, message: error.message))
+                            continue
+                        }
                         inserted += 1
                     }
+                }
+                guard rejected.isEmpty else {
+                    throw LocalCompleteBackupError.invalidRowIssues(rejected)
                 }
 
                 // Resolve account-to-account references after every account exists.
@@ -681,6 +699,36 @@ final class LocalCompleteBackupPortability {
         }
         guard let hash = row["image_hash"] as? String else { throw LocalCompleteBackupError.invalidRows(table) }
         return "\(targetProfileID.uuidString)-\(hash)"
+    }
+
+    /// 同一笔经济事实在本机已有未作废流水时，唯一索引
+    /// `local_account_entries_active_source_idx(source_kind, source_id, account_id)`
+    /// 不允许再插一条。云端与本机的流水号不同，只能按逻辑来源判重。
+    /// 本机存的是大写 UUID，云端可能是小写，因此按小写比较。
+    private static func hasActiveEntryTwin(_ db: Database, row: [String: Any]) throws -> Bool {
+        guard row["voided_at"] == nil || row["voided_at"] is NSNull,
+              ((row["is_voided"] as? NSNumber)?.intValue ?? 0) == 0,
+              let kind = row["source_kind"] as? String,
+              let sourceID = row["source_id"] as? String,
+              let accountID = row["account_id"] as? String else { return false }
+        return try Bool.fetchOne(db, sql: """
+            SELECT EXISTS(
+                SELECT 1 FROM local_account_entries
+                WHERE lower(source_kind) = lower(?)
+                  AND lower(source_id) = lower(?)
+                  AND lower(account_id) = lower(?)
+                  AND voided_at IS NULL AND is_voided = 0
+            )
+            """, arguments: [kind, sourceID, accountID]) == true
+    }
+
+    /// 约束冲突按行报出：表 + 约束 + 记录 #hash。
+    /// SQLite 的 message 只含「UNIQUE constraint failed: 表.列」这类结构信息，不含业务值。
+    private static func constraintIssue(table: String, row: [String: Any], message: String?) -> String {
+        let text = (message ?? "约束不满足")
+            .replacingOccurrences(of: "constraint failed: ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return invalidRowMessage(table, "写入约束", row, "本机约束不允许写入（\(text.prefix(80))）")
     }
 
     private static func dictionary(from row: [String: Any]) throws -> [String: Any] {
