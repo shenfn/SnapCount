@@ -5,7 +5,7 @@ import XCTest
 
 final class LocalHistoryUnresolvedRepositoryTests: XCTestCase {
     // LF-039.18 / LF-039.19: preserved originals do not manufacture business dates.
-    func testOriginalSurvivesBackupWithoutEnteringStatisticsAndConflictRollsBack() async throws {
+    func testOriginalSurvivesBackupWithoutEnteringStatisticsAndConflictingIdentifierIsSkipped() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let source = try LocalDatabase(databaseURL: directory.appendingPathComponent("source.sqlite"))
@@ -52,8 +52,12 @@ final class LocalHistoryUnresolvedRepositoryTests: XCTestCase {
         rows.append(additional)
         tables["local_history_unresolved_records"] = String(decoding: try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys]), as: UTF8.self)
         object["tables"] = tables
-        XCTAssertThrowsError(try restore.importBackup(JSONSerialization.data(withJSONObject: object), into: targetProfile.id))
-        XCTAssertEqual(try repository.count(profileID: targetProfile.id), 1)
+        // 同标识已存在时按本机权威跳过，不覆盖；新标识正常入账。
+        let second = try restore.importBackup(JSONSerialization.data(withJSONObject: object), into: targetProfile.id)
+        XCTAssertEqual(second.insertedRows, 1, "同标识行应跳过，新增标识应入账")
+        XCTAssertEqual(try repository.count(profileID: targetProfile.id), 2)
+        XCTAssertEqual(try repository.record(id: id, profileID: targetProfile.id)?.sourceJSON, original,
+                       "本机原文不得被归档版本覆盖")
         object = try XCTUnwrap(JSONSerialization.jsonObject(with: archive) as? [String: Any])
         object["images"] = []
         XCTAssertThrowsError(try portability.preview(JSONSerialization.data(withJSONObject: object)))
