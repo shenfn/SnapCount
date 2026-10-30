@@ -235,6 +235,17 @@ final class LocalHistoryMigrationMapper {
                         imageFiles[path] = ["path": path, "hash": hash, "data": bytes.base64EncodedString()]
                     }
                 }
+                // 本机主键与外键统一是大写 UUID（UUID.uuidString），云端给的是小写文本。
+                // 只把主键转大写会让外键对不上账户行：记录在界面上会找不到所属账户，
+                // 与本机已有同一条记录比较时也会因为大小写不同被判成内容不同。
+                if table != "local_history_unresolved_records" {
+                    for key in ["account_id", "source_id", "evidence_record_id", "evidence_wallet_snapshot_id",
+                                "linked_account_id", "statement_id", "debit_account_id", "target_record_id"] {
+                        if let value = mapped[key] as? String, UUID(uuidString: value) != nil {
+                            mapped[key] = value.uppercased()
+                        }
+                    }
+                }
                 if mapped["updated_at"] == nil { mapped["updated_at"] = mapped["created_at"] }
                 let completed = try normalized(mapped, table: table)
                 tables[table, default: []].append(completed)

@@ -596,4 +596,53 @@ final class LocalHistoryMigrationMapperTests: XCTestCase {
         XCTAssertEqual(try LocalPendingFinancialRepository(database: database).pending(profileID: profile).count, 1)
         XCTAssertEqual(try repository.accountBalanceMinor(accountID: account), 8000)
     }
+
+    /// 云端 PostgREST 给的是小写 UUID，本机主键与外键是大写（UUID.uuidString）。
+    /// 只把主键转大写会让外键对不上账户行：界面上找不到所属账户，
+    /// 与本机已有同一条记录比较时也会因为大小写不同被判成「内容不同」。
+    func testLF03935CloudLowercaseIdentifiersMapToLocalUppercase() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        defer { try? database.writer.close() }
+        let user = UUID(), account = UUID(), expense = UUID(), entry = UUID()
+        let timestamp = "2026-10-24T00:30:00Z"
+        func row(_ values: [String: Any]) -> [String: AnyCodable] { values.mapValues(AnyCodable.init) }
+        let inspection = LocalHistoryMigrationInspection(cloudUserID: user.uuidString.lowercased(), rows: [
+            .accounts: [row(["id": account.uuidString.lowercased(), "user_id": user.uuidString.lowercased(),
+                "name": "现金", "type": "cash", "currency": "CNY", "initial_balance": 100,
+                "current_balance": 80, "created_at": timestamp, "updated_at": timestamp])],
+            .transactions: [row(["id": expense.uuidString.lowercased(), "user_id": user.uuidString.lowercased(),
+                "account_id": account.uuidString.lowercased(), "type": "expense", "status": "done",
+                "amount": 20, "merchant_name": "商户", "platform": "微信", "category": "food",
+                "payment_method": "微信支付", "transaction_date": "2026-10-24",
+                "created_at": timestamp, "updated_at": timestamp, "occurred_at": timestamp])],
+            .accountEntries: [row(["id": entry.uuidString.lowercased(), "user_id": user.uuidString.lowercased(),
+                "account_id": account.uuidString.lowercased(), "direction": "out", "amount": 20,
+                "entry_type": "expense", "source_table": "transactions",
+                "source_id": expense.uuidString.lowercased(),
+                "occurred_at": timestamp, "created_at": timestamp, "is_voided": false])]
+        ], blockers: [])
+        let profile = try LocalProfileStore(database: database).activeProfile().id
+        let archive = try LocalHistoryMigrationMapper(schema: database).buildArchive(
+            inspection, profileID: profile, images: [:])
+
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: archive) as? [String: Any])
+        let tables = try XCTUnwrap(root["tables"] as? [String: String])
+        func rows(_ table: String) throws -> [[String: Any]] {
+            let text = try XCTUnwrap(tables[table])
+            return try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        }
+        XCTAssertEqual(try rows("local_expenses").first?["account_id"] as? String, account.uuidString)
+        XCTAssertEqual(try rows("local_account_entries").first?["account_id"] as? String, account.uuidString)
+        XCTAssertEqual(try rows("local_account_entries").first?["source_id"] as? String, expense.uuidString)
+
+        let backup = LocalCompleteBackupPortability(database: database,
+            imageStore: try LocalImageStore(rootDirectory: directory.appendingPathComponent("images")))
+        XCTAssertNoThrow(try backup.validateImport(archive, into: profile))
+        _ = try backup.importBackup(archive, into: profile)
+        let repository = try LocalExpenseRepository(database: database)
+        XCTAssertEqual(try repository.accountEntries(accountID: account).count, 1)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: account), 8000)
+    }
 }

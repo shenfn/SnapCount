@@ -779,6 +779,8 @@ final class LocalCompleteBackupPortability {
             return "\u{1}s:" + String(describing: value)
         }
         if let milliseconds = instant(text) { return "\u{1}t:" + String(milliseconds) }
+        // UUID 大小写不改变指向；本机存大写，云端给的是小写。
+        if UUID(uuidString: text) != nil { return "\u{1}u:" + text.lowercased() }
         if let data = text.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
            JSONSerialization.isValidJSONObject(object),
