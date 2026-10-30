@@ -1,8 +1,11 @@
 import Foundation
 
 enum LocalIncomeReadModel {
-    static func detail(from income: LocalIncome) -> NativeRecordDetail {
+    static func detail(from income: LocalIncome, imageStore: LocalImageStore? = nil) -> NativeRecordDetail {
         let reference = "local-income/\(income.id.uuidString)"
+        // 本机已有的原图优先直接读文件：走远端签名等于每次看图都要联网，
+        // 而迁移落库的 image_path 是本机路径，云端根本没有这个对象。
+        let imageURL = localImageURL(income.imagePath, imageStore: imageStore)
         let amount = Double(income.amountMinor) / 100
         let sourceName = income.sourceName.isEmpty ? "收入记录" : income.sourceName
         let time = income.occurredAt.map { NativeLocalDate.timeKey($0) }
@@ -19,7 +22,8 @@ enum LocalIncomeReadModel {
             id: reference, rawId: income.id.uuidString, kind: "income",
             title: sourceName, subtitle: dateLabel,
             value: String(format: "+¥%.2f", amount), detailRows: rows,
-            imageURL: nil, imageLoadError: false, imagePath: income.imagePath, imageHash: income.imageHash,
+            imageURL: imageURL, imageLoadError: income.imagePath != nil && imageURL == nil,
+            imagePath: income.imagePath, imageHash: income.imageHash,
             amount: amount, merchantName: sourceName, platform: nil,
             category: income.category, paymentMethod: nil, recordDate: income.incomeDate,
             note: income.note, companionMessage: nil, accountId: income.accountID?.uuidString,
@@ -48,5 +52,10 @@ enum LocalIncomeReadModel {
                 }.sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }
             )
         }.sorted { $0.dateKey > $1.dateKey }
+    }
+
+    private static func localImageURL(_ path: String?, imageStore: LocalImageStore?) -> URL? {
+        guard let path, let imageStore, imageStore.contains(path: path) else { return nil }
+        return imageStore.url(for: path)
     }
 }

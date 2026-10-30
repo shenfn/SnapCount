@@ -1862,12 +1862,12 @@ final class AppState: ObservableObject {
             }
             localRecordMonthDetails[monthKey] = Dictionary(
                 uniqueKeysWithValues: month.expenses.map {
-                    let detail = LocalExpenseReadModel.detail(from: $0)
+                    let detail = LocalExpenseReadModel.detail(from: $0, imageStore: localImageStore)
                     return (detail.id, detail)
                 }
             ).merging(
                 Dictionary(uniqueKeysWithValues: incomeMonth.incomes.map {
-                    let detail = LocalIncomeReadModel.detail(from: $0)
+                    let detail = LocalIncomeReadModel.detail(from: $0, imageStore: localImageStore)
                     return (detail.id, detail)
                 }), uniquingKeysWith: { _, income in income }
             ).merging(localDomainDetails, uniquingKeysWith: { local, _ in local })
@@ -4339,7 +4339,7 @@ final class AppState: ObservableObject {
         do {
             guard let income = try await localExpenseUseCase.income(id: id) else { throw LocalDataError.recordNotFound }
             guard generation == userStateGeneration, activeRecordReference == canonicalReference else { return }
-            var detail = LocalIncomeReadModel.detail(from: income)
+            var detail = LocalIncomeReadModel.detail(from: income, imageStore: localImageStore)
             if let path = income.imagePath { detail.imageURL = localImageStore?.url(for: path) }
             recordDetailCache[canonicalReference] = detail
             selectedRecordDetail = detail
@@ -4394,7 +4394,7 @@ final class AppState: ObservableObject {
             }
             guard generation == userStateGeneration,
                   activeRecordReference == canonicalReference else { return }
-            var detail = LocalExpenseReadModel.detail(from: expense)
+            var detail = LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore)
             if let path = expense.imagePath { detail.imageURL = localImageStore?.url(for: path) }
             recordDetailCache[canonicalReference] = detail
             selectedRecordDetail = detail
