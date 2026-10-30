@@ -728,7 +728,7 @@ final class LocalCompleteBackupPortability {
         let text = (message ?? "约束不满足")
             .replacingOccurrences(of: "constraint failed: ", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return invalidRowMessage(table, "写入约束", row, "本机约束不允许写入（\(text.prefix(80))）")
+        return invalidRowMessage(table, "constraint", row, "本机约束不允许写入（\(text.prefix(80))）")
     }
 
     private static func dictionary(from row: [String: Any]) throws -> [String: Any] {

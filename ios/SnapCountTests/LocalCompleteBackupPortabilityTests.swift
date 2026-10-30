@@ -472,10 +472,9 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         let originalBackup = try source.portability.exportBackup()
         _ = try target.portability.importBackup(originalBackup, into: targetProfile.id)
 
-        let stored = try XCTUnwrap(try String.fetchOne(
-            target.database.writer,
-            sql: "SELECT created_at FROM local_accounts LIMIT 1"
-        ))
+        let stored = try XCTUnwrap(try target.database.writer.read { db in
+            try String.fetchOne(db, sql: "SELECT created_at FROM local_accounts LIMIT 1")
+        })
         let iso = stored.replacingOccurrences(of: " ", with: "T") + "Z"
         XCTAssertNotEqual(iso, stored)
         let rewritten = try tamper(originalBackup) { tables in
