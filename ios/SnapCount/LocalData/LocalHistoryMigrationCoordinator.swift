@@ -144,7 +144,9 @@ final class LocalHistoryMigrationCoordinator {
 
         try await withThrowingTaskGroup(of: ImageResult.self) { group in
             var next = 0
-            var firstError: Error?
+            var abortingError: Error?
+            // 图片总量到达上限后不再发起新请求，已拿到的照常入账，剩余图片留空。
+            var budgetExhausted = false
             // ponytail: At most three requests in flight; keep this bound until device measurements justify changing it.
             for _ in 0..<min(3, pending.count) {
                 let reference = pending[next]; next += 1
@@ -165,21 +167,17 @@ final class LocalHistoryMigrationCoordinator {
                         images[reference.path] = bytes
                         onProgress?(images.count)
                     } catch {
-                        if firstError == nil {
-                            firstError = LocalHistoryMigrationContextError(table: reference.table, field: reference.field,
-                                recordID: reference.recordID, underlying: error)
+                        // 容量到顶就停止后续下载（丢的是图片，不是记录）；其它写入失败只丢这一张。
+                        if (error as? LocalHistoryImageDownloadError) == .totalSizeExceeded {
+                            budgetExhausted = true
                         }
                     }
                 case .failure(let error):
                     if error is CancellationError { group.cancelAll(); throw error }
-                    if Self.isSkippableImageFailure(error) {
-                        // The source record remains importable without an
-                        // unavailable image. Other integrity and business
-                        // errors remain hard blockers.
-                    } else if firstError == nil { firstError = error }
+                    if Self.isFatalImageFailure(error), abortingError == nil { abortingError = error }
                 }
-                // Drain already-started successes into cache after a failure, but do not start another request.
-                if firstError == nil, next < pending.count {
+                // Drain already-started successes into cache after a fatal error, but do not start another request.
+                if abortingError == nil, !budgetExhausted, next < pending.count {
                     let reference = pending[next]; next += 1
                     group.addTask { @MainActor in
                         await self.downloadResult(reference, inspection: inspection, cloudUserID: cloudUserID,
@@ -187,20 +185,26 @@ final class LocalHistoryMigrationCoordinator {
                     }
                 }
             }
-            if let firstError { throw firstError }
+            if let abortingError { throw abortingError }
         }
         guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
         return images
     }
 
-    private static func isSkippableImageFailure(_ error: Error) -> Bool {
-        guard let context = error as? LocalHistoryMigrationContextError else { return false }
+    /// 图片是记录的补充材料，读不到不该拖住整包。只有「继续下去也没有意义」的情况才中断：
+    /// - 取消：用户主动停止。
+    /// - 会话失效（HTTP 401）：剩余图片会全部失败，应让用户重新登录，而不是把上千张图逐张跳过。
+    /// - 身份/范围类错误：本机与云账户归属不一致，继续写库是错的。
+    /// 其余（404/NoSuchKey、403 与 400 的 AccessDenied、空响应、单图超限、哈希不符、
+    /// 路径不被接受）都只是「这一张图拿不到」：跳过该图，对应记录照常入账，图片字段留空。
+    private static func isFatalImageFailure(_ error: Error) -> Bool {
+        guard let context = error as? LocalHistoryMigrationContextError else { return true }
+        if context.underlying is LocalHistoryMigrationError { return true }
         if let http = context.underlying as? LocalHistoryImageHTTPError {
-            return http.failure == .missingImage || http.failure == .missingTemporaryImage
-                || http.failure == .emptyResponse
+            return http.failure == .sessionExpired
         }
         if let image = context.underlying as? LocalHistoryImageDownloadError {
-            return image == .missingImage || image == .missingTemporaryImage || image == .emptyResponse
+            return image == .sessionExpired
         }
         return false
     }

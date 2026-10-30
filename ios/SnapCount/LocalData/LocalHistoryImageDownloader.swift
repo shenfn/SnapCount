@@ -19,7 +19,7 @@ enum LocalHistoryImageDownloadError: Error, Equatable, LocalizedError {
         case .unsupportedPathFormat: return "历史图片路径格式不受支持；本次迁移未入账，原图保留。"
         case .sourceScopeMismatch: return "图片路径不属于当前账户已读取的迁移记录或项目存储范围；本次迁移未入账。"
         case .sessionExpired: return "图片读取会话已失效（401）；请重新登录后继续，已缓存内容保留。"
-        case .accessDenied: return "当前账户无权读取此图片（403）；原图未删除，已缓存内容保留。"
+        case .accessDenied: return "云端拒绝当前账户读取此图片（HTTP 403/400）；本图已跳过，对应记录仍会导入。"
         case .missingImage: return "云端原图不存在（HTTP 400/404）；本图已跳过，可继续迁移结构化记录。"
         case .missingTemporaryImage: return "同账户临时图片不可读取（HTTP 400/404）；本图已跳过，可继续迁移结构化记录。"
         case .invalidResponse(let code): return "图片服务返回异常状态（\(code)），迁移未完成。"
@@ -145,6 +145,11 @@ final class LocalHistoryImageDownloader {
                 // this endpoint. Treat the storage fact as a missing image so
                 // migration can preserve the record without its bytes.
                 failure = validated.isTemporary ? .missingTemporaryImage : .missingImage
+            case 400 where storageCode == "AccessDenied":
+                // 对象存在、但当前账户的存储策略不允许读取时，Storage 同样用 400 承载
+                // AccessDenied（不是 403，也不是 NoSuchKey）。这是「这一张图读不到」，
+                // 不是「迁移不可行」：归类为 accessDenied，由上层跳过该图。
+                failure = .accessDenied
             default: failure = .invalidResponse(response.statusCode)
             }
             throw LocalHistoryImageHTTPError(failure: failure, statusCode: response.statusCode,

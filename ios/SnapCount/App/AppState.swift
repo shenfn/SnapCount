@@ -5999,9 +5999,15 @@ final class AppState: ObservableObject {
                     rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
                     imagesProcessed: processed, imagesTotal: imageTotal)
             }
-            historyMigrationSkippedImageCount = max(0, inspection.sourceImagePaths.count - currentImages.count)
+            // 只有「两边都拿到、但字节不同」才算源图变化。预检已跳过的图片没有可比内容，
+            // 复核时偶发读不到也不该把整轮预检作废 —— 归档用的是预检时已校验过的字节。
+            let prepareDigests = historyMigrationImageDigests
+            let changedImage = currentImages.contains { element in
+                guard let previous = prepareDigests[element.key] else { return false }
+                return previous != LocalImageStore.sha256(element.value)
+            }
             guard isCurrentAttempt(), !Task.isCancelled else { throw CancellationError() }
-            guard currentImages.mapValues(LocalImageStore.sha256) == historyMigrationImageDigests else {
+            guard !changedImage else {
                 try cache.restartSource(checkpoint)
                 historyMigrationArchive = nil
                 historyMigrationPreview = nil

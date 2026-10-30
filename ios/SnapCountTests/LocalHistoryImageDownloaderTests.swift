@@ -273,6 +273,28 @@ final class LocalHistoryImageDownloaderTests: XCTestCase {
         }
     }
 
+    /// Supabase Storage 对「对象存在但当前账户无权读取」返回 HTTP 400 + AccessDenied。
+    /// 归类成 invalidResponse 会让一张图把整包迁移打断（真机实测）。
+    @MainActor
+    func testLF03923StorageAccessDeniedOnHTTP400IsAccessDenied() async throws {
+        let user = UUID().uuidString.lowercased()
+        let (inspection, reference) = try source(user: user, path: "2026-10-24/image.jpg")
+        let downloader = LocalHistoryImageDownloader(baseURL: URL(string: "https://fixture.invalid")!) { request in
+            (Data(#"{"code":"AccessDenied","error":"Unauthorized"}"#.utf8),
+                HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!)
+        }
+        do {
+            _ = try await downloader.download(reference: reference, inspection: inspection,
+                cloudUserID: user, accessToken: "synthetic-token")
+            XCTFail("AccessDenied 不能当成图片内容")
+        } catch {
+            let http = try XCTUnwrap(error as? LocalHistoryImageHTTPError)
+            XCTAssertEqual(http.failure, .accessDenied)
+            XCTAssertEqual(http.statusCode, 400)
+            XCTAssertEqual(http.storageCode, "AccessDenied")
+        }
+    }
+
     func testLF03923RedirectResponseIsRejectedWithoutASecondCredentialedRequest() async throws {
         let user = UUID().uuidString.lowercased()
         let path = "2026-10-24/image.jpg"

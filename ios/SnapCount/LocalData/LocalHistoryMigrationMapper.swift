@@ -222,17 +222,13 @@ final class LocalHistoryMigrationMapper {
                             guard let value = row[field] as? String, !value.isEmpty else { return nil }
                             return (field, value)
                         }.first
-                        if let (hashField, expectedValue) = expectedHash, expectedValue.lowercased() != hash {
-                            throw LocalHistoryMigrationContextError(
-                                table: source.rawValue,
-                                field: hashField,
-                                recordID: id,
-                                underlying: LocalCompleteBackupError.invalidImage("history-image")
-                            )
+                        // 源端登记了哈希却不匹配：不写入不可信字节，但记录照常入账（图片留空）。
+                        // 图片是记录的补充材料，一张图不该让整包迁移失败。
+                        if expectedHash.map({ $0.1.lowercased() == hash }) ?? true {
+                            let path = "records/history-\(hash).jpg"
+                            mapped["image_path"] = path; mapped["image_hash"] = hash
+                            imageFiles[path] = ["path": path, "hash": hash, "data": bytes.base64EncodedString()]
                         }
-                        let path = "records/history-\(hash).jpg"
-                        mapped["image_path"] = path; mapped["image_hash"] = hash
-                        imageFiles[path] = ["path": path, "hash": hash, "data": bytes.base64EncodedString()]
                     }
                 }
                 // 本机主键与外键统一是大写 UUID（UUID.uuidString），云端给的是小写文本。
