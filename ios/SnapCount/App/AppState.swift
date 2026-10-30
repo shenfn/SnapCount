@@ -162,7 +162,6 @@ final class AppState: ObservableObject {
     private var historyMigrationOwner: String?
     private var historyMigrationGeneration: Int?
     private var historyMigrationSourceDigest: Data?
-    private var historyMigrationImageDigests: [String: String] = [:]
     private var historyMigrationAttempt = 0
     private var historyMigrationCheckpoint: LocalHistoryMigrationState?
     private var historyMigrationProfileID: UUID?
@@ -5719,7 +5718,6 @@ final class AppState: ObservableObject {
             }
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             historyMigrationSourceDigest = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
-            historyMigrationImageDigests = prepared.images.mapValues(LocalImageStore.sha256)
             historyMigrationArchive = archive
             historyMigrationOwner = session.user.id
             historyMigrationGeneration = generation
@@ -5938,7 +5936,6 @@ final class AppState: ObservableObject {
             historyMigrationArchive = nil
             historyMigrationPreview = nil
             historyMigrationSourceDigest = nil
-            historyMigrationImageDigests = [:]
             historyMigrationSkippedImageCount = 0
             historyMigrationBlockers = []
             historyMigrationBlockerCount = 0
@@ -5973,13 +5970,13 @@ final class AppState: ObservableObject {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let current = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
             guard isCurrentAttempt(), !Task.isCancelled else { throw CancellationError() }
-            guard inspection.blockers.isEmpty, current == historyMigrationSourceDigest else {
-                try cache.restartSource(checkpoint)
-                historyMigrationArchive = nil
-                historyMigrationPreview = nil
-                historyMigrationCheckpoint = nil
-                historyMigrationPreservationIssues = []
-                historyMigrationMessage = "云端源数据已变化，旧预检缓存已失效。请重新预检；尚未入账。"
+            // 源数据随时会变：PWA 记账、本机 outbox 上传都会改云端。冻结快照会让每一笔
+            // 新记录作废整轮预检与已下载原图，而导入本身按同标识跳过、天然幂等。
+            // 所以源变化不再中断，改为「按最新数据重建归档，图片走缓存只补新增」。
+            guard inspection.blockers.isEmpty else {
+                historyMigrationBlockerCount = inspection.blockers.count
+                historyMigrationBlockers = inspection.blockers
+                historyMigrationMessage = inspection.summary
                 return false
             }
             // Rows may omit a source hash; a stable URL alone cannot prove unchanged image bytes.
@@ -5993,32 +5990,26 @@ final class AppState: ObservableObject {
                 rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
                 imagesProcessed: 0, imagesTotal: imageTotal)
             let coordinator = LocalHistoryMigrationCoordinator(downloader: downloader, cache: cache)
+            // 传 state 才会命中预检已落盘的字节；只有缓存里没有的（新增记录）才真正走网络。
             let currentImages = try await coordinator.loadImages(inspection: inspection, cloudUserID: owner,
-                accessToken: session.accessToken, isCurrent: isCurrentAttempt) { processed in
+                accessToken: session.accessToken, state: checkpoint, isCurrent: isCurrentAttempt) { processed in
                 self.historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
                     rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
                     imagesProcessed: processed, imagesTotal: imageTotal)
             }
-            // 只有「两边都拿到、但字节不同」才算源图变化。预检已跳过的图片没有可比内容，
-            // 复核时偶发读不到也不该把整轮预检作废 —— 归档用的是预检时已校验过的字节。
-            let prepareDigests = historyMigrationImageDigests
-            let changedImage = currentImages.contains { element in
-                guard let previous = prepareDigests[element.key] else { return false }
-                return previous != LocalImageStore.sha256(element.value)
-            }
-            guard isCurrentAttempt(), !Task.isCancelled else { throw CancellationError() }
-            guard !changedImage else {
-                try cache.restartSource(checkpoint)
-                historyMigrationArchive = nil
-                historyMigrationPreview = nil
-                historyMigrationCheckpoint = nil
-                historyMigrationMessage = "云端原图已变化，旧预检缓存已失效。请重新预检；尚未入账。"
-                return false
-            }
             guard isCurrentAttempt(), !Task.isCancelled else { return false }
             try cache.assertCurrent(checkpoint)
+            // 源数据没变就用预检的归档；变了就按最新快照重建（图片来自缓存，不会重下）。
+            let importedArchive: Data
+            if current == historyMigrationSourceDigest {
+                importedArchive = archive
+            } else {
+                historyMigrationPhase = "按最新数据重建归档"
+                importedArchive = try LocalHistoryMigrationMapper(schema: LocalDatabase())
+                    .buildArchive(inspection, profileID: checkpoint.profileID, images: currentImages)
+            }
             historyMigrationPhase = "事务入账与本机刷新"
-            let imported = await importCompleteLocalBackup(archive, historyMigration: checkpoint)
+            let imported = await importCompleteLocalBackup(importedArchive, historyMigration: checkpoint)
             if !imported, let error = historyMigrationImportError {
                 historyMigrationPhase = "事务入账"
                 historyMigrationMessage = recordHistoryMigrationFailure(error, committed: false)
@@ -6395,7 +6386,6 @@ final class AppState: ObservableObject {
         historyMigrationOwner = nil
         historyMigrationGeneration = nil
         historyMigrationSourceDigest = nil
-        historyMigrationImageDigests = [:]
         historyMigrationCheckpoint = nil
         historyMigrationAttempt += 1
         historyMigrationAttemptID = UUID()

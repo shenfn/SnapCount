@@ -54,16 +54,12 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
         XCTAssertEqual(calls, 12, "Confirmation must still recheck original bytes without using preflight cache")
         XCTAssertEqual(fresh, prepared.images)
 
+        // 400 且没有存储错误码属于「这一张读不到」：跳过该图，不中断整包。
         fail = true
-        do {
-            _ = try await coordinator.loadImages(inspection: prepared.inspection, cloudUserID: user,
-                accessToken: "synthetic-token", isCurrent: { true })
-            XCTFail("Failed confirmation downloads must not be accepted")
-        } catch {
-            let context = try XCTUnwrap(error as? LocalHistoryMigrationContextError)
-            XCTAssertEqual((context.underlying as? LocalHistoryImageHTTPError)?.statusCode, 400)
-        }
-        XCTAssertEqual(calls, 15, "No additional work may be enqueued after the initial three requests fail")
+        let skipped = try await coordinator.loadImages(inspection: prepared.inspection, cloudUserID: user,
+            accessToken: "synthetic-token", isCurrent: { true })
+        XCTAssertTrue(skipped.isEmpty, "Unreadable images are skipped instead of aborting the archive")
+        XCTAssertEqual(calls, 18)
         XCTAssertLessThanOrEqual(probe.peak, 3)
         XCTAssertTrue(try LocalRecordRepository(database: database).records(profileID: profile.id, monthKey: "2026-10").isEmpty)
     }
@@ -122,20 +118,14 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
         let cache = LocalHistoryMigrationCache(database: database, imageStore: imageStore)
         let coordinator = LocalHistoryMigrationCoordinator(source: source, downloader: downloader, cache: cache)
 
-        do {
-            _ = try await coordinator.prepare(profileID: profile.id, cloudUserID: user,
-                accessToken: "synthetic-session", isCurrent: { true })
-            XCTFail("The second image failure must stop preparation")
-        } catch {
-            let context = try XCTUnwrap(error as? LocalHistoryMigrationContextError)
-            XCTAssertEqual(context.table, "data_records")
-            XCTAssertEqual(context.field, "source_image_path")
-            XCTAssertEqual(context.recordID, "00000000-0000-0000-0000-000000000002")
-            XCTAssertEqual((context.underlying as? URLError)?.code, .timedOut)
-        }
-        XCTAssertEqual(try LocalHistoryMigrationStore(database: database).state(profileID: profile.id)?.status, .paused)
+        // 单张原图读不到只丢这张图，不中断整轮预检（对应记录仍会入账）。
+        let first = try await coordinator.prepare(profileID: profile.id, cloudUserID: user,
+            accessToken: "synthetic-session", isCurrent: { true })
+        XCTAssertEqual(first.images[paths[0]], payloads[paths[0]])
+        XCTAssertNil(first.images[paths[1]], "A failed image must be skipped, not abort the whole preparation")
+        XCTAssertEqual(try LocalHistoryMigrationStore(database: database).state(profileID: profile.id)?.status, .running)
         XCTAssertTrue(try LocalRecordRepository(database: database).records(profileID: profile.id, monthKey: "2026-10").isEmpty,
-            "A failed image preparation must not create local facts")
+            "Preparation and archive mapping do not commit the migration")
 
         failSecondImage = false
         let prepared = try await coordinator.prepare(profileID: profile.id, cloudUserID: user,
@@ -413,16 +403,12 @@ final class LocalHistoryMigrationCacheTests: XCTestCase {
         }
         let cache = LocalHistoryMigrationCache(database: database, imageStore: try LocalImageStore(rootDirectory: directory.appendingPathComponent("images")))
         let coordinator = LocalHistoryMigrationCoordinator(source: source, downloader: downloader, cache: cache)
-        do {
-            _ = try await coordinator.prepare(profileID: profile.id, cloudUserID: user, accessToken: "synthetic", isCurrent: { true })
-            XCTFail("download must fail")
-        } catch {
-            let context = try XCTUnwrap(error as? LocalHistoryMigrationContextError)
-            XCTAssertEqual(context.table, "transactions")
-            XCTAssertEqual(context.field, "image_url")
-            XCTAssertEqual((context.underlying as? URLError)?.code, .timedOut)
-        }
-        XCTAssertEqual(try LocalHistoryMigrationStore(database: database).state(profileID: profile.id)?.status, .paused)
+        // 读不到的单张图跳过；下一次预检只补这张，不重下已成功的。
+        let first = try await coordinator.prepare(profileID: profile.id, cloudUserID: user, accessToken: "synthetic", isCurrent: { true })
+        XCTAssertEqual(first.images.count, 1)
+        XCTAssertEqual(calls["a.jpg"], 1)
+        XCTAssertEqual(calls["b.jpg"], 1)
+        XCTAssertEqual(try LocalHistoryMigrationStore(database: database).state(profileID: profile.id)?.status, .running)
         XCTAssertEqual(try LocalExpenseRepository(database: database).expenses(profileID: profile.id, monthKey: "2026-10").count, 0)
         fail = false
         let result = try await coordinator.prepare(profileID: profile.id, cloudUserID: user, accessToken: "synthetic", isCurrent: { true })
