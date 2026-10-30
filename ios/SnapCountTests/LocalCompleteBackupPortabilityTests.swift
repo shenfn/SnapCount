@@ -391,126 +391,32 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(restored.id, snapshot.id)
     }
 
-    func testLF02103ConflictingStableIDRejectsWholeBackupBeforeAnyInsert() throws {
+    /// 同标识记录已在本机时，迁移只跳过、不比较内容，也不能因写法不同整包拒收。
+    /// 真实数据里两边写法本来就不可能全等：transaction_time 本机存 HH:mm、云端是
+    /// HH:mm:ss；created_at 本机由同步写成 Date()、云端是原始时间。迁移只负责补
+    /// 本机没有的记录，内容一致性属于同步职责。
+    func testLF02103ExistingRecordIsSkippedWithoutContentComparison() throws {
         let source = try makeFixture()
         let target = try makeEmptyFixture()
         defer { cleanup(source); cleanup(target) }
         let targetProfile = try target.profileStore.activeProfile()
         let originalBackup = try source.portability.exportBackup()
         _ = try target.portability.importBackup(originalBackup, into: targetProfile.id)
+
         let backup = try tamper(originalBackup) { tables in
             var expenses = try Self.tableRows("local_expenses", in: tables)
-            expenses[0]["id"] = source.expenseID.uuidString
             expenses[0]["amount_minor"] = 99_999
-            tables["local_expenses"] = try Self.encodeRows(expenses)
-            var incomes = try Self.tableRows("local_income_records", in: tables)
-            incomes.append([
-                "id": UUID().uuidString,
-                "profile_id": source.profileID.uuidString,
-                "account_id": NSNull(),
-                "amount_minor": 1,
-                "currency": "CNY",
-                "source_name": "冲突时不得插入",
-                "category": "other",
-                "income_date": "2026-10-25",
-                "occurred_at": NSNull(),
-                "note": NSNull(),
-                "local_version": 1,
-                "created_at": Date().timeIntervalSince1970,
-                "updated_at": Date().timeIntervalSince1970,
-                "deleted_at": NSNull()
-            ])
-            tables["local_income_records"] = try Self.encodeRows(incomes)
-        }
-        let incomeCountBefore = try count(target.database, "SELECT COUNT(*) FROM local_income_records")
-        let imagesBefore = try imageFiles(in: target.imageDirectory)
-
-        XCTAssertThrowsError(try target.portability.importBackup(backup, into: targetProfile.id)) { error in
-            guard case LocalCompleteBackupError.invalidRowIssues(let issues) = error else {
-                return XCTFail("unexpected error: \(error)")
-            }
-            XCTAssertEqual(issues.count, 1, "只应报一条同标识冲突：\(issues)")
-            XCTAssertTrue(issues[0].hasPrefix("local_expenses.id"), "冲突必须指明本机表与列：\(issues[0])")
-            XCTAssertTrue(issues[0].contains("amount_minor"), "冲突必须指明不一致的列：\(issues[0])")
-        }
-        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_income_records"), incomeCountBefore)
-        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), 2)
-        XCTAssertEqual(try imageFiles(in: target.imageDirectory), imagesBefore)
-    }
-
-    /// 历史迁移的归档只带映射器认识的列，本机维护列（local_version、sort_order）不在其中。
-    /// 同标识的行必须按「内容一致即已存在」放行，否则本机一旦有数据就永远迁不进去。
-    func testLF02103ArchiveMissingLocalMaintainedColumnsIsTreatedAsExisting() throws {
-        let source = try makeFixture()
-        let target = try makeEmptyFixture()
-        defer { cleanup(source); cleanup(target) }
-        let targetProfile = try target.profileStore.activeProfile()
-        let originalBackup = try source.portability.exportBackup()
-        _ = try target.portability.importBackup(originalBackup, into: targetProfile.id)
-
-        let partial = try tamper(originalBackup) { tables in
-            var accounts = try Self.tableRows("local_accounts", in: tables)
-            for index in accounts.indices {
-                accounts[index].removeValue(forKey: "local_version")
-                accounts[index].removeValue(forKey: "sort_order")
-            }
-            tables["local_accounts"] = try Self.encodeRows(accounts)
-        }
-        let accountsBefore = try count(target.database, "SELECT COUNT(*) FROM local_accounts")
-        let result = try target.portability.importBackup(partial, into: targetProfile.id)
-        XCTAssertEqual(result.insertedRows, 0, "同标识同内容应全部按已存在跳过")
-        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_accounts"), accountsBefore)
-    }
-
-    /// 本机记录的 created_at/updated_at 由同步落库赋值（applyRemoteSnapshot 用 Date()），
-    /// 与云端原始时间必然不同；deleted_at 同理。它们不是记录内容，不能判成同标识冲突。
-    /// 经济事实（金额、账户、日期、商户、分类）仍必须一致。
-    func testLF02103LocalPersistedTimestampsAreNotRecordContent() throws {
-        let source = try makeFixture()
-        let target = try makeEmptyFixture()
-        defer { cleanup(source); cleanup(target) }
-        let targetProfile = try target.profileStore.activeProfile()
-        let backup = try source.portability.exportBackup()
-        _ = try target.portability.importBackup(backup, into: targetProfile.id)
-
-        let rewritten = try tamper(backup) { tables in
-            var expenses = try Self.tableRows("local_expenses", in: tables)
-            for index in expenses.indices {
-                expenses[index]["created_at"] = "2026-10-29 08:00:00.000"
-                expenses[index]["updated_at"] = "2026-10-29 08:00:00.000"
-                expenses[index]["deleted_at"] = "2026-10-29 09:00:00.000"
-            }
+            expenses[0]["transaction_time"] = "10:48:00"
+            expenses[0]["created_at"] = "2026-10-29 08:00:00.000"
             tables["local_expenses"] = try Self.encodeRows(expenses)
         }
         let rowsBefore = try count(target.database, "SELECT COUNT(*) FROM local_expenses")
-        let result = try target.portability.importBackup(rewritten, into: targetProfile.id)
+        let result = try target.portability.importBackup(backup, into: targetProfile.id)
         XCTAssertEqual(result.insertedRows, 0, "同标识记录已在本机，不应重复插入")
+        XCTAssertGreaterThan(result.skippedRows, 0)
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses"), rowsBefore)
-    }
-
-    /// 落库时间可以不同，但金额这类经济事实不同时仍必须拒收整包。
-    func testLF02103EconomicFactDifferenceStillRejectsWholeBackup() throws {
-        let source = try makeFixture()
-        let target = try makeEmptyFixture()
-        defer { cleanup(source); cleanup(target) }
-        let targetProfile = try target.profileStore.activeProfile()
-        let backup = try source.portability.exportBackup()
-        _ = try target.portability.importBackup(backup, into: targetProfile.id)
-
-        let rewritten = try tamper(backup) { tables in
-            var expenses = try Self.tableRows("local_expenses", in: tables)
-            expenses[0]["created_at"] = "2026-10-29 08:00:00.000"
-            expenses[0]["amount_minor"] = 99_999
-            tables["local_expenses"] = try Self.encodeRows(expenses)
-        }
-        XCTAssertThrowsError(try target.portability.importBackup(rewritten, into: targetProfile.id)) { error in
-            guard case LocalCompleteBackupError.invalidRowIssues(let issues) = error else {
-                return XCTFail("unexpected error: \(error)")
-            }
-            XCTAssertEqual(issues.count, 1, "只应报一条金额冲突：\(issues)")
-            XCTAssertTrue(issues[0].hasPrefix("local_expenses.id"), "冲突必须指明本机表与列：\(issues[0])")
-            XCTAssertTrue(issues[0].contains("amount_minor"), "冲突必须指明不一致的列：\(issues[0])")
-        }
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses WHERE amount_minor = 99999"), 0,
+                       "本机版本是权威，迁移不得覆盖")
     }
 
     /// 云端流水号与本机流水号不同：同一笔经济事实不能重复入账，

@@ -74,17 +74,16 @@ final class LocalHistoryMigrationIssueReportTests: XCTestCase {
         XCTAssertTrue(report.exportText.contains("#0123456789"))
     }
 
-    /// 同标识内容不同的行级问题必须说出「哪几列不一致」。
-    /// 只给到「local_expenses.id」时，用户和我们都无从判断是数据问题还是比较口径问题。
-    func testLF03934ConflictingColumnsAreNamedInReport() {
+    /// 字段名在标题里已经出现过，正文不应再重复一次。
+    /// 之前用户看到的是「本机导入校验未通过（local_expenses.id）（local_expenses.id）」。
+    func testLF03934FieldNameIsNotRepeatedInIssueText() {
         let report = LocalHistoryMigrationIssueReport(blockers: [
-            "local_expenses.id 与本机同标识记录内容不同（amount_minor/category），记录 #abcdef0123"
+            "local_expenses.constraint 本机约束不允许写入（UNIQUE failed），记录 #abcdef0123"
         ])
         XCTAssertEqual(report.groups.count, 1)
-        XCTAssertEqual(report.groups[0].id, "local_expenses.id")
+        XCTAssertEqual(report.groups[0].id, "local_expenses.constraint")
         XCTAssertEqual(report.affectedRecordCount, 1)
-        XCTAssertTrue(report.issues[0].contains("amount_minor/category"), report.issues[0])
-        XCTAssertFalse(report.issues[0].contains("（local_expenses.id）（local_expenses.id）"),
+        XCTAssertFalse(report.issues[0].contains("（local_expenses.constraint）（local_expenses.constraint）"),
                        "字段名不应重复：\(report.issues[0])")
     }
 
