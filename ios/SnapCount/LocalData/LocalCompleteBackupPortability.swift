@@ -244,6 +244,14 @@ final class LocalCompleteBackupPortability {
                             sql: "SELECT json_object(\(pairs)) FROM \(Self.quote(table)) WHERE id = ?",
                             arguments: [targetID]
                         ) {
+                            // 账户是用户配置对象，本地优先：同标识已存在即保留本机版本。
+                            // 同步落库只写 id/名称/类型/币种/期初/时间，institution、账单日等
+                            // 走表默认值，而归档带的是云端配置；逐列比较会把每个已同步账户
+                            // 都判成内容不同，把整包卡死，却没有任何修复价值。
+                            if table == "local_accounts" {
+                                skipped.insert("\(table):\(id)")
+                                continue
+                            }
                             var incoming = try Self.dictionary(from: row)
                             incoming["id"] = targetID
                             incoming["profile_id"] = targetProfileID.uuidString
@@ -744,6 +752,15 @@ final class LocalCompleteBackupPortability {
         return string
     }
 
+    /// 由本机维护、不代表记录内容的列，不参与「同标识内容不同」的判定。
+    /// created_at/updated_at 由同步落库写成 `Date()`（LocalExpenseRepository.applyRemoteSnapshot），
+    /// 本地删除也用 `Date()`；归档带的是云端原始时间，两者对同一条记录必然不同。
+    /// 同标识已存在按「本机权威」跳过，这些列也不该由迁移覆盖。
+    private static let locallyOwnedColumns: Set<String> = [
+        "id", "profile_id", "created_at", "updated_at", "deleted_at",
+        "local_version", "sort_order"
+    ]
+
     /// 同标识行比较。只比双方都有的列，并把等价写法归一化后比较：
     /// - 本机 DATETIME 由 GRDB 存成 `yyyy-MM-dd HH:mm:ss.SSS`，云端是 ISO8601 字符串，
     ///   同一时刻文本不同；数字 epoch 也按同一时刻比较。
@@ -752,7 +769,7 @@ final class LocalCompleteBackupPortability {
     private static func contentDifferences(existing: Any, incoming: [String: Any]) -> [String] {
         guard let existingRow = existing as? [String: Any] else { return ["记录无法解析"] }
         return incoming.keys
-            .filter { $0 != "id" && $0 != "profile_id" && existingRow[$0] != nil }
+            .filter { !locallyOwnedColumns.contains($0) && existingRow[$0] != nil }
             .filter { !isSameContent(incoming[$0], existingRow[$0]) }
             .sorted()
     }
@@ -802,11 +819,14 @@ final class LocalCompleteBackupPortability {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 19, trimmed.contains("-"), trimmed.contains(":") else { return nil }
 
+        // 云端时间戳带 5～6 位小数（...81522+00:00），ISO8601DateFormatter 的
+        // withFractionalSeconds 只按 3 位解析，多出的位数会直接失败。先规整到毫秒再解析。
+        let candidate = normalizedFraction(trimmed)
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso.date(from: trimmed) { return milliseconds(date) }
+        if let date = iso.date(from: candidate) { return milliseconds(date) }
         iso.formatOptions = [.withInternetDateTime]
-        if let date = iso.date(from: trimmed) { return milliseconds(date) }
+        if let date = iso.date(from: candidate) { return milliseconds(date) }
 
         // GRDB 默认把 Date 存成 `yyyy-MM-dd HH:mm:ss.SSS`（UTC）。
         let grdb = DateFormatter()
@@ -814,9 +834,17 @@ final class LocalCompleteBackupPortability {
         grdb.timeZone = TimeZone(secondsFromGMT: 0)
         for format in ["yyyy-MM-dd HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss"] {
             grdb.dateFormat = format
-            if let date = grdb.date(from: trimmed) { return milliseconds(date) }
+            if let date = grdb.date(from: candidate) { return milliseconds(date) }
         }
         return nil
+    }
+
+    /// 把小数秒统一成 3 位（补零或截断），其余部分原样保留。
+    private static func normalizedFraction(_ text: String) -> String {
+        guard let range = text.range(of: #"\.\d+"#, options: .regularExpression) else { return text }
+        let digits = text[range].dropFirst()
+        let millis = String(digits.prefix(3)).padding(toLength: 3, withPad: "0", startingAt: 0)
+        return text.replacingCharacters(in: range, with: "." + millis)
     }
 
     private static func milliseconds(_ date: Date) -> Int64 {

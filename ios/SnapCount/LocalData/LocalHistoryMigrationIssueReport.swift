@@ -12,7 +12,16 @@ struct LocalHistoryMigrationIssueReport {
         let field: String
         let title: String
         let record: String?
-        var text: String { "\(title)（\(field)）" + (record.map { "，记录 #\($0)。" } ?? "；未提供记录标识。") }
+        /// 行级详情里的列名清单（如 `amount_minor/created_at`）。只有 schema 列名会进来。
+        let detail: String?
+        var text: String {
+            // title 已经带了「（表.列）」就不再重复；否则补上字段名，
+            // 否则用户和我们都不知道是哪张表的哪一列。
+            var parts = [title.contains(field) ? title : "\(title)（\(field)）"]
+            if let detail, !detail.isEmpty { parts.append("不一致：\(detail)") }
+            let body = parts.joined(separator: "，")
+            return body + (record.map { "，记录 #\($0)。" } ?? "；未提供记录标识。")
+        }
     }
     private let entries: [Issue]
     static let pageSize = 50
@@ -42,15 +51,22 @@ struct LocalHistoryMigrationIssueReport {
                 ("staging_records.target_record_id", "已归档候选缺少关联记录")
             ]
             if let match = fields.first(where: { text.contains($0.0) }) {
-                return Issue(field: match.0, title: match.1, record: record)
+                return Issue(field: match.0, title: match.1, record: record, detail: nil)
             }
             // 本机约束未通过：列名是 schema 信息，可以安全显示；原文仍然不导出。
             if let token = Self.localColumn(in: text) {
-                return Issue(field: token, title: "本机导入校验未通过（\(token)）", record: record)
+                return Issue(field: token, title: "本机导入校验未通过（\(token)）",
+                             record: record, detail: Self.localDetail(in: text))
             }
             // Unknown messages may contain source values. Preserve their count and safe ID only.
-            return Issue(field: "other", title: "其他迁移问题（原文未纳入安全清单）", record: record)
+            return Issue(field: "other", title: "其他迁移问题（原文未纳入安全清单）", record: record, detail: nil)
         }
+    }
+    /// 从「local_xxx.yyy 与本机同标识记录内容不同（amount_minor/created_at）」里取出列名清单。
+    /// 只接受小写 schema 形状，中文等原文内容不会被带出。
+    private static func localDetail(in text: String) -> String? {
+        text.range(of: "（[a-z_]+(/[a-z_]+)*）", options: .regularExpression)
+            .map { String(text[$0].dropFirst().dropLast()) }
     }
     /// 从「local_xxx.yyy 缺少可确认的源字段」里取出列名。只接受本机 schema 形状，不返回原文。
     private static func localColumn(in text: String) -> String? {

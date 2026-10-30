@@ -74,6 +74,20 @@ final class LocalHistoryMigrationIssueReportTests: XCTestCase {
         XCTAssertTrue(report.exportText.contains("#0123456789"))
     }
 
+    /// 同标识内容不同的行级问题必须说出「哪几列不一致」。
+    /// 只给到「local_expenses.id」时，用户和我们都无从判断是数据问题还是比较口径问题。
+    func testLF03934ConflictingColumnsAreNamedInReport() {
+        let report = LocalHistoryMigrationIssueReport(blockers: [
+            "local_expenses.id 与本机同标识记录内容不同（amount_minor/category），记录 #abcdef0123"
+        ])
+        XCTAssertEqual(report.groups.count, 1)
+        XCTAssertEqual(report.groups[0].id, "local_expenses.id")
+        XCTAssertEqual(report.affectedRecordCount, 1)
+        XCTAssertTrue(report.issues[0].contains("amount_minor/category"), report.issues[0])
+        XCTAssertFalse(report.issues[0].contains("（local_expenses.id）（local_expenses.id）"),
+                       "字段名不应重复：\(report.issues[0])")
+    }
+
     /// 行级阻塞文案必须同时带「源表.字段」和「#记录标识」，否则归类与计数都做不到。
     func testLF03933BlockedRowTextKeepsFieldAndRecordIdentity() {
         let report = LocalHistoryMigrationIssueReport(blockers: [
