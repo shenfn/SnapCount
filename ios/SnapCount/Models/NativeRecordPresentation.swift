@@ -121,7 +121,8 @@ enum NativeRecordDetailPresentationAdapter {
                     label: "到账日期",
                     value: NativeLocalDate.financeDateKey(
                         occurredAt: detail.occurredAt,
-                        legacyDate: detail.recordDate
+                        legacyDate: detail.recordDate,
+                        createdAt: detail.createdAt
                     ) ?? "--"
                 ),
                 NativeDetailRow(label: "备注", value: detail.note ?? "无")
@@ -142,7 +143,8 @@ enum NativeRecordDetailPresentationAdapter {
                 label: "交易日期",
                 value: NativeLocalDate.financeDateKey(
                     occurredAt: detail.occurredAt,
-                    legacyDate: detail.recordDate
+                    legacyDate: detail.recordDate,
+                    createdAt: detail.createdAt
                 ) ?? "--"
             ),
             NativeDetailRow(label: "备注", value: detail.note ?? "无")
@@ -193,7 +195,8 @@ enum NativeRecordDetailPresentationAdapter {
             amount: detail.amount ?? 0,
             date: NativeLocalDate.financeDateKey(
                 occurredAt: detail.occurredAt,
-                legacyDate: detail.recordDate
+                legacyDate: detail.recordDate,
+                createdAt: detail.createdAt
             ) ?? "",
             time: NativeLocalDate.financeTimeKey(occurredAt: detail.occurredAt),
             occurredAt: detail.occurredAt,

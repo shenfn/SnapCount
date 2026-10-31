@@ -95,6 +95,15 @@ struct SettingsView: View {
 
                 Section("数据管理") {
                     NavigationLink {
+                        HistoryMigrationView()
+                    } label: {
+                        settingsRow(
+                            "历史数据迁移",
+                            detail: "查看待核对材料并导出给 AI 分析",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                    NavigationLink {
                         DataExportView()
                     } label: {
                         settingsRow("数据导出", detail: "导出支出、收入和通用记录", systemImage: "square.and.arrow.up")
@@ -1116,7 +1125,7 @@ struct DataExportView: View {
     }
 }
 
-private struct ActivityView: UIViewControllerRepresentable {
+struct ActivityView: UIViewControllerRepresentable {
     let activityItems: [Any]
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: activityItems, applicationActivities: nil)

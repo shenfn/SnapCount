@@ -17,6 +17,7 @@ import {
   toInstant,
   zonedParts,
 } from '../lib/time-core/index.js'
+import { resolveFinanceOccurrence } from './financeOccurrence.js'
 
 /**
  * 获取本地日期键（YYYY-MM-DD）。
@@ -106,6 +107,11 @@ export function platformBg(p) {
 
 export function mapTransaction(t) {
   const occurredParts = t.occurred_at ? zonedParts(t.occurred_at, DEFAULT_TZ) : null
+  const occurrence = resolveFinanceOccurrence({
+    occurredAt: t.occurred_at,
+    date: t.transaction_date,
+    fallbackInstant: t.created_at,
+  })
   const source = String(t.source || 'manual').trim().toLowerCase()
   const legacyManualTime = source === 'manual' && t.transaction_time
     ? String(t.transaction_time).slice(0, 5)
@@ -119,10 +125,8 @@ export function mapTransaction(t) {
     amount: Number(t.amount),
     createdAt: t.created_at,
     occurredAt: t.occurred_at || null,
-    date: occurredParts ? tcFormatRelativeDate(parseInstant(t.occurred_at, DEFAULT_TZ), DEFAULT_TZ) : formatDate(t.transaction_date),
-    dateRaw: occurredParts
-      ? tcFormatDateKey(parseInstant(t.occurred_at, DEFAULT_TZ), DEFAULT_TZ)
-      : t.transaction_date,
+    date: occurrence.date ? formatDate(occurrence.date) : '',
+    dateRaw: occurrence.date || t.transaction_date || '',
     time: occurredParts
       ? `${String(occurredParts.hour).padStart(2, '0')}:${String(occurredParts.minute).padStart(2, '0')}`
       : legacyManualTime,

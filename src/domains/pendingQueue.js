@@ -1,4 +1,5 @@
 import { localDateKeyOf } from '../utils/helpers.js'
+import { resolveStagingFinanceOccurrence } from '../utils/financeOccurrence.js'
 
 export const PENDING_SCOPE_ALL = 'all'
 export const PENDING_SCOPE_TODAY = 'today'
@@ -63,18 +64,21 @@ function comparePendingQueueItems(left, right) {
 export function buildPendingQueue({ stagingRecords = [], pendingBills = [] } = {}) {
   const stagingItems = stagingRecords
     .filter(record => !RESOLVED_STAGING_STATUSES.has(String(record?.status || '').trim().toLowerCase()))
-    .map(record => ({
-      queueId: `staging:${record.id}`,
-      source: 'staging',
-      sourceId: record.id,
-      status: pendingStatusGroup(record.status),
-      rawStatus: record.status,
-      occurredAt: record.occurredAt || '',
-      occurredDateKey: localDateKeyOf(record.occurredAt),
-      createdAt: record.createdAt || '',
-      imageUrl: record.imageUrl || '',
-      record,
-    }))
+    .map(record => {
+      const occurrence = resolveStagingFinanceOccurrence(record)
+      return {
+        queueId: `staging:${record.id}`,
+        source: 'staging',
+        sourceId: record.id,
+        status: pendingStatusGroup(record.status),
+        rawStatus: record.status,
+        occurredAt: record.occurredAt || '',
+        occurredDateKey: occurrence.date || '',
+        createdAt: record.createdAt || '',
+        imageUrl: record.imageUrl || '',
+        record,
+      }
+    })
 
   const billItems = pendingBills.map(bill => {
     const occurredAt = billOccurrenceValue(bill)

@@ -24,7 +24,14 @@ const queue = buildPendingQueue({
       id: 'unknown-occurrence',
       status: 'routing_failed',
       occurredAt: null,
-      createdAt: '2026-07-26T10:00:00+08:00',
+      createdAt: null,
+    },
+    {
+      id: 'legacy-date-today',
+      status: 'pending_review',
+      occurredAt: null,
+      createdAt: '2026-07-27T10:00:00+08:00',
+      extracted: { record_date: '2026-07-26' },
     },
     {
       id: 'already-confirmed',
@@ -64,13 +71,13 @@ const queue = buildPendingQueue({
 
 assert.deepEqual(
   queue.map(item => item.queueId),
-  ['bill:bill-today', 'staging:review-today', 'staging:error-yesterday', 'staging:unknown-occurrence'],
+  ['bill:bill-today', 'staging:review-today', 'staging:error-yesterday', 'staging:legacy-date-today', 'staging:unknown-occurrence'],
   'staging 与 bill 应按发生时间混排，未知发生时间最后显示',
 )
 
 assert.deepEqual(
   queue.map(item => item.status),
-  ['bill_pending', 'pending_review', 'ai_error', 'routing_failed'],
+  ['bill_pending', 'pending_review', 'ai_error', 'pending_review', 'routing_failed'],
   '底层状态别名应归一到产品筛选状态',
 )
 
@@ -87,7 +94,7 @@ const todayQueue = filterPendingQueue(queue, {
 })
 assert.deepEqual(
   todayQueue.map(item => item.queueId),
-  ['bill:bill-today', 'staging:review-today'],
+  ['bill:bill-today', 'staging:review-today', 'staging:legacy-date-today'],
   '今天只认发生日；今天上传的昨日或未知发生记录不得进入今天',
 )
 
@@ -103,9 +110,9 @@ assert.deepEqual(
 assert.deepEqual(
   countPendingQueueByStatus(queue, { scope: 'today', todayKey: '2026-07-26' }),
   {
-    all: 2,
+    all: 3,
     routing_failed: 0,
-    pending_review: 1,
+    pending_review: 2,
     ai_error: 0,
     schema_failed: 0,
     bill_pending: 1,
@@ -120,7 +127,7 @@ assert.equal(
 )
 assert.equal(
   pendingQueueItemAtPreviousIndex(queue.slice(0, -1), 99)?.queueId,
-  'staging:error-yesterday',
+  'staging:legacy-date-today',
   '处理末项后应回退到剩余末项',
 )
 

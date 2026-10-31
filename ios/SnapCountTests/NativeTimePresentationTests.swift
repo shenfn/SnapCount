@@ -47,6 +47,97 @@ final class NativeTimePresentationTests: XCTestCase {
         XCTAssertNil(NativeLocalDate.financeTimeKey(occurredAt: nil))
     }
 
+    func testStagingDatePrefersExtractedBusinessDateBeforeUploadDate() {
+        XCTAssertEqual(
+            NativeDataService.stagingDateKey(
+                occurredAt: nil,
+                extracted: ["record_date": AnyCodable("2026-08-08")],
+                createdAt: "2026-08-09T00:00:00Z"
+            ),
+            "2026-08-08"
+        )
+        XCTAssertEqual(
+            NativeDataService.stagingDateKey(
+                occurredAt: "2026-08-10T00:00:00Z",
+                extracted: ["record_date": AnyCodable("2026-08-08")],
+                createdAt: "2026-08-09T00:00:00Z"
+            ),
+            "2026-08-10"
+        )
+    }
+
+    func testStagingDateUsesUploadDateWithoutInventingDateWhenSourcesAreMissing() {
+        XCTAssertEqual(
+            NativeDataService.stagingDateKey(
+                occurredAt: nil,
+                extracted: nil,
+                createdAt: "2026-08-08T22:00:00Z"
+            ),
+            "2026-08-09"
+        )
+        XCTAssertEqual(
+            NativeDataService.stagingDateKey(
+                occurredAt: "not-a-timestamp",
+                extracted: nil,
+                createdAt: "2026-08-08T22:00:00Z"
+            ),
+            "2026-08-09"
+        )
+        XCTAssertNil(
+            NativeDataService.stagingDateKey(
+                occurredAt: nil,
+                extracted: nil,
+                createdAt: nil
+            )
+        )
+    }
+
+    func testInboxTodayScopeUsesStagingFallbackDate() {
+        let staging = NativeStagingRecord(
+            id: "staging-1",
+            dateKey: "2026-08-09",
+            title: "待确认截图",
+            summary: "待处理",
+            status: "pending_review",
+            statusLabel: "待确认",
+            recordTypeLabel: "截图识别",
+            createdAtLabel: "2026-08-09 06:00",
+            occurredAtLabel: nil,
+            confidencePercent: nil,
+            lastErrorMessage: nil,
+            retryCount: 0,
+            systemImage: "tray",
+            imagePath: nil,
+            imageURL: nil,
+            imageLoadError: false,
+            recordType: "expense",
+            domainKey: "expense",
+            domainName: "消费",
+            extracted: [:],
+            companionMessage: nil,
+            targetRecordId: nil,
+            imageHash: nil
+        )
+        guard let item = NativeInboxPresentation.items(pendingExpenses: [], stagingRecords: [staging]).first else {
+            return XCTFail("staging item should be present")
+        }
+        XCTAssertEqual(
+            NativeInboxPresentation.filtered([item], scope: .today, filter: .all, today: "2026-08-09").count,
+            1
+        )
+    }
+
+    func testEditDraftTreatsEmptyDateAsMissing() {
+        let detail = makeExpenseDetail(
+            recordDate: "",
+            transactionTime: "",
+            createdAt: "2026-08-08T22:00:00Z",
+            occurredAt: nil
+        )
+
+        XCTAssertEqual(NativeRecordEditDraft(detail: detail).recordDate, "2026-08-09")
+    }
+
     func testShanghaiWallTimeBuildsTheExpectedInstant() {
         XCTAssertEqual(
             NativeLocalDate.financeOccurredAt(

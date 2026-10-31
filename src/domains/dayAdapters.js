@@ -1,5 +1,6 @@
 import { incomeCatMap } from '../utils/helpers.js'
 import { formatCurrency, formatDuration } from '../utils/format.js'
+import { resolveStagingFinanceOccurrence } from '../utils/financeOccurrence.js'
 import { getSystemDomainLabel } from './registry.js'
 
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -74,8 +75,9 @@ export function buildDayRecords({ dateKey, bills = [], incomeRecords = [], dataR
     })
 
   const stagingItems = stagingRecords
-    .filter(item => datePart(item.occurredAt || item.createdAt) === dateKey)
-    .map(item => ({
+    .map(item => ({ item, occurrence: resolveStagingFinanceOccurrence(item) }))
+    .filter(({ occurrence }) => occurrence.date === dateKey)
+    .map(({ item, occurrence }) => ({
       id: `staging-${item.id}`,
       kind: 'staging',
       domainKey: 'staging',
@@ -83,8 +85,8 @@ export function buildDayRecords({ dateKey, bills = [], incomeRecords = [], dataR
       title: item.domainName || '待处理截图',
       subtitle: item.summary || '等待处理',
       value: item.recordType === 'income' ? '+ 待确认' : item.recordType === 'expense' ? '- 待确认' : '待分类',
-      time: displayRecordTime(timePart(item.occurredAt), item.createdAt),
-      sortTime: timePart(item.occurredAt || item.createdAt),
+      time: displayRecordTime(timePart(occurrence.occurredAt), item.createdAt),
+      sortTime: occurrence.occurredAt || item.createdAt || '',
       color: item.status === 'ai_error' ? '#b91c1c' : DOMAIN_COLORS.staging,
       raw: item,
     }))
@@ -98,7 +100,7 @@ function buildDailyCard({ dateKey, bills, incomeRecords, dataRecords, stagingRec
   const allBills = bills.filter(item => item.dateRaw === dateKey)
   const incomes = incomeRecords.filter(item => item.dateRaw === dateKey)
   const records = dataRecords.filter(item => datePart(item.occurredAt || item.createdAt) === dateKey)
-  const staging = stagingRecords.filter(item => datePart(item.occurredAt || item.createdAt) === dateKey)
+  const staging = stagingRecords.filter(item => resolveStagingFinanceOccurrence(item).date === dateKey)
 
   const rows = []
   const expenseTotal = doneBills.reduce((sum, item) => sum + Number(item.amount || 0), 0)
