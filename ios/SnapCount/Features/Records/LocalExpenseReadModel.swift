@@ -40,7 +40,7 @@ enum LocalExpenseReadModel {
             paymentMethod: expense.paymentMethod,
             recordDate: expense.transactionDate,
             note: expense.note,
-            companionMessage: nil,
+            companionMessage: expense.companionMessage,
             accountId: expense.accountID?.uuidString,
             systemImage: "creditcard",
             payload: nil,

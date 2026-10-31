@@ -26,7 +26,7 @@ enum LocalIncomeReadModel {
             imagePath: income.imagePath, imageHash: income.imageHash,
             amount: amount, merchantName: sourceName, platform: nil,
             category: income.category, paymentMethod: nil, recordDate: income.incomeDate,
-            note: income.note, companionMessage: nil, accountId: income.accountID?.uuidString,
+            note: income.note, companionMessage: income.companionMessage, accountId: income.accountID?.uuidString,
             systemImage: "arrow.down.circle", payload: nil,
             occurredAt: income.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
             transactionTime: time, domainKey: "income", source: "local", status: "local",

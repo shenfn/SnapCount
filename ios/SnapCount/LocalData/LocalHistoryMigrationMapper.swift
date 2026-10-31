@@ -102,10 +102,10 @@ final class LocalHistoryMigrationMapper {
                     }
                     mapped["currency"] = row["currency"] ?? "CNY"
                     try minor("amount", "amount_minor")
-                    if pending { mapped["status"] = "pending" }
+                    if pending { mapped["status"] = "pending" } else { copy("companion_message") }
                 case .incomes:
                     table = "local_income_records"
-                    for key in ["account_id", "source_name", "category", "income_date", "occurred_at", "note", "created_at", "updated_at", "source_pending_transaction_id"] { copy(key) }
+                    for key in ["account_id", "source_name", "category", "income_date", "occurred_at", "note", "created_at", "updated_at", "source_pending_transaction_id", "companion_message"] { copy(key) }
                     mapped["currency"] = row["currency"] ?? "CNY"; try minor("amount", "amount_minor")
                 case .accountEntries:
                     table = "local_account_entries"

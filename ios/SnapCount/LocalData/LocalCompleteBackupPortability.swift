@@ -65,7 +65,9 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 27
+    static let currentSchemaVersion = 28
+    /// 带 `companion_message` 列的财务表：同标识跳过时只补这一列的空值。
+    private static let companionBackfillTables: Set<String> = ["local_expenses", "local_income_records"]
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
     private static let maximumImageBytes = 128 * 1024 * 1024
     private static let maximumArchiveBytes = 180 * 1024 * 1024
@@ -251,6 +253,18 @@ final class LocalCompleteBackupPortability {
                             //   - 账户配置（institution、账单日）本机走表默认值，云端有实际值。
                             // 任何一处差异都会让整包拒收，而跳过既不覆盖也不丢数据。
                             // 内容一致性属于同步职责，不是一次性历史迁移的职责。
+                            // 例外：AI 陪伴列是后加的（local-v28），上一轮迁移的记录必然缺这一列，
+                            // 「同标识跳过」会让它们永远拿不到。只补空值，不覆盖本机已有内容。
+                            if Self.companionBackfillTables.contains(table),
+                               let companion = row["companion_message"] as? String, !companion.isEmpty {
+                                try db.execute(
+                                    sql: """
+                                        UPDATE \(Self.quote(table)) SET companion_message = ?
+                                        WHERE id = ? AND (companion_message IS NULL OR companion_message = '')
+                                        """,
+                                    arguments: [companion, targetID]
+                                )
+                            }
                             skipped.insert("\(table):\(id)")
                             continue
                         }
@@ -371,7 +385,7 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard [15, 16, 17, 18, 19, 20, 22, 23, 24, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
+        guard [15, 16, 17, 18, 19, 20, 22, 23, 24, 27, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
         var tables = archive.tables

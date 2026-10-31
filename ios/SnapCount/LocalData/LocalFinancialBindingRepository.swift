@@ -12,7 +12,7 @@ final class LocalFinancialBindingRepository {
                 amount: Double(expense.amountMinor) / 100, date: expense.transactionDate,
                 time: expense.transactionTime, platform: expense.platform, category: expense.category,
                 paymentMethod: expense.paymentMethod, note: expense.note, source: "local",
-                imagePath: expense.imagePath, imageHash: expense.imageHash, companionMessage: nil)
+                imagePath: expense.imagePath, imageHash: expense.imageHash, companionMessage: expense.companionMessage)
         }
         return expenses + (try unboundIncomes(profileID: profileID))
     }
@@ -26,7 +26,7 @@ final class LocalFinancialBindingRepository {
                 occurredAt: income.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
                 platform: nil, category: income.category, paymentMethod: nil, note: income.note,
                 source: "local", imagePath: income.imagePath, imageHash: income.imageHash,
-                companionMessage: nil)
+                companionMessage: income.companionMessage)
         }
     }
 

@@ -88,7 +88,7 @@ enum LocalFactReadModel {
             paymentMethod: payload.string("payment_method"),
             recordDate: fact.businessDate,
             note: fact.note,
-            companionMessage: nil,
+            companionMessage: fact.companionMessage,
             accountId: payload.string("account_id"),
             systemImage: fact.kind == .expense ? "creditcard" : NativeDayRecordKind(rawValue: fact.domainKey)?.systemImage ?? "square.grid.2x2",
             payload: payload,

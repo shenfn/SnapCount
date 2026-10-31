@@ -419,6 +419,33 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
                        "本机版本是权威，迁移不得覆盖")
     }
 
+    /// 陪伴文本列是后加的（local-v28）：同标识跳过时只补这一列的空值，
+    /// 否则上一轮已经入账的记录永远拿不到 AI 陪伴。
+    func testLF02103ExistingRecordReceivesBackfilledCompanionMessage() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let targetProfile = try target.profileStore.activeProfile()
+        let originalBackup = try source.portability.exportBackup()
+        _ = try target.portability.importBackup(originalBackup, into: targetProfile.id)
+
+        let backup = try tamper(originalBackup) { tables in
+            var expenses = try Self.tableRows("local_expenses", in: tables)
+            expenses[0]["companion_message"] = "记账辛苦了"
+            expenses[0]["amount_minor"] = 99_999
+            tables["local_expenses"] = try Self.encodeRows(expenses)
+        }
+        _ = try target.portability.importBackup(backup, into: targetProfile.id)
+
+        let stored = try target.database.writer.read { db in
+            try String.fetchOne(db, sql: "SELECT companion_message FROM local_expenses WHERE companion_message = ?",
+                                arguments: ["记账辛苦了"])
+        }
+        XCTAssertEqual(stored, "记账辛苦了", "缺陪伴的老记录应当被补上这一列")
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_expenses WHERE amount_minor = 99999"), 0,
+                       "补陪伴不得顺手覆盖本机其他列")
+    }
+
     /// 云端流水号与本机流水号不同：同一笔经济事实不能重复入账，
     /// 唯一索引 (source_kind, source_id, account_id) 也不能被撞。
     func testLF02103LedgerEntryWithDifferentIDButSameSourceIsSkipped() throws {

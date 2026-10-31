@@ -1488,7 +1488,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             note: row["note"],
             localVersion: row["local_version"],
             createdAt: row["created_at"],
-            updatedAt: row["updated_at"], imagePath: row["image_path"], imageHash: row["image_hash"]
+            updatedAt: row["updated_at"], imagePath: row["image_path"], imageHash: row["image_hash"],
+            companionMessage: row["companion_message"]
         )
     }
 
@@ -1543,7 +1544,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             sourceName: row["source_name"], category: row["category"],
             incomeDate: row["income_date"], occurredAt: row["occurred_at"],
             note: row["note"], localVersion: row["local_version"],
-            createdAt: createdAt, updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"]
+            createdAt: createdAt, updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"],
+            companionMessage: row["companion_message"]
         )
     }
 

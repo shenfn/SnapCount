@@ -651,6 +651,13 @@ final class LocalDatabase {
                 CREATE INDEX local_history_unresolved_profile_idx ON local_history_unresolved_records(profile_id, created_at, id);
                 """)
         }
+        // 云端 transactions / income_records 各有一列 companion_message（AI 陪伴文本）。
+        // 本机此前没有对应列，读模型一律写死 nil，历史迁移过来的记录永远看不到 AI 陪伴。
+        // 只加可空列，不涉及任何既有语义。
+        migrator.registerMigration("local-v28-financial-companion-message") { database in
+            try database.execute(sql: "ALTER TABLE local_expenses ADD COLUMN companion_message TEXT")
+            try database.execute(sql: "ALTER TABLE local_income_records ADD COLUMN companion_message TEXT")
+        }
         return migrator
     }
 }

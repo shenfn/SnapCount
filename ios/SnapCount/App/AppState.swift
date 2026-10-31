@@ -1790,9 +1790,16 @@ final class AppState: ObservableObject {
                     let pending = try repository.pending(profileID: profile.id)
                     guard generation == userStateGeneration else { return }
                     dashboard.pendingExpenses = pending.map { record in
-                        NativePendingExpense(id: record.id.uuidString, title: record.merchantName,
+                        // 迁移进本机的待补全账单，原图就在本机 records/history-<sha256>.jpg。
+                        // 只填 image_url 是云端路径，这里补一份本机文件 URL，卡片才能出证据底片。
+                        let imageURL: URL? = record.imagePath.flatMap { path -> URL? in
+                            guard let store = localImageStore, store.contains(path: path) else { return nil }
+                            return store.url(for: path)
+                        }
+                        return NativePendingExpense(id: record.id.uuidString, title: record.merchantName,
                             amount: Double(record.amountMinor) / 100, dateKey: record.transactionDate,
                             reference: "expense/\(record.id.uuidString)", imagePath: record.imagePath,
+                            imageURL: imageURL,
                             occurredAtLabel: record.transactionTime, createdAtLabel: "本机待确认")
                     }
                 }

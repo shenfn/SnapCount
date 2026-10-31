@@ -24,6 +24,7 @@ struct LocalFact: Equatable, Identifiable, Sendable {
     let note: String?
     let imagePath: String?
     let imageHash: String?
+    var companionMessage: String? = nil
     let localVersion: Int64
     let createdAt: Date
     let updatedAt: Date
@@ -145,7 +146,8 @@ final class LocalFactReader {
             note: row["note"],
             localVersion: row["local_version"],
             createdAt: createdAt,
-            updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"]
+            updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"],
+            companionMessage: row["companion_message"]
         ))
     }
 
@@ -162,7 +164,8 @@ final class LocalFactReader {
             amountMinor: row["amount_minor"], currency: row["currency"],
             sourceName: row["source_name"], category: row["category"],
             incomeDate: incomeDate, occurredAt: row["occurred_at"], note: row["note"],
-            localVersion: row["local_version"], createdAt: createdAt, updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"]
+            localVersion: row["local_version"], createdAt: createdAt, updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"],
+            companionMessage: row["companion_message"]
         )
         return fact(from: income)
     }
@@ -233,6 +236,7 @@ final class LocalFactReader {
             note: expense.note,
             imagePath: expense.imagePath,
             imageHash: expense.imageHash,
+            companionMessage: expense.companionMessage,
             localVersion: expense.localVersion,
             createdAt: expense.createdAt,
             updatedAt: expense.updatedAt
@@ -254,6 +258,7 @@ final class LocalFactReader {
             recordTime: income.occurredAt.map { NativeLocalDate.timeKey($0) },
             occurredAt: income.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
             note: income.note, imagePath: income.imagePath, imageHash: income.imageHash,
+            companionMessage: income.companionMessage,
             localVersion: income.localVersion, createdAt: income.createdAt, updatedAt: income.updatedAt
         )
     }

@@ -221,6 +221,7 @@ struct LocalExpense: Equatable {
     let updatedAt: Date
     var imagePath: String? = nil
     var imageHash: String? = nil
+    var companionMessage: String? = nil
 }
 
 struct LocalIncomeDraft: Equatable {
@@ -274,6 +275,7 @@ struct LocalIncome: Equatable {
     let updatedAt: Date
     var imagePath: String? = nil
     var imageHash: String? = nil
+    var companionMessage: String? = nil
 }
 
 struct LocalIncomeTombstone: Equatable {
