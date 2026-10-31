@@ -121,9 +121,11 @@ struct NativeInboxItem: Identifiable {
 
     var occurrenceDateKey: String? {
         if let pendingExpense {
-            return Self.dateKey(from: pendingExpense.occurredAtLabel) ?? Self.validDateKey(pendingExpense.dateKey)
+            return Self.dateKey(from: pendingExpense.occurredAtLabel)
+                ?? Self.validDateKey(pendingExpense.dateKey)
         }
         return Self.dateKey(from: stagingRecord?.occurredAtLabel)
+            ?? Self.validDateKey(stagingRecord?.dateKey)
     }
 
     var uploadedDateKey: String? {

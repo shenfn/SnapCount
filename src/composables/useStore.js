@@ -55,6 +55,7 @@ import { createAccountDetailFeature } from '../features/accounts/createAccountDe
 import { createAccountManagementFeature } from '../features/accounts/createAccountManagementFeature'
 import {
   resolveFinanceOccurrence,
+  resolveStagingFinanceOccurrence,
 } from '../utils/financeOccurrence'
 
 const PRIMARY_EXPENSE_CATEGORIES = new Set(['餐饮', '购物', '出行', '娱乐', '生活', '健康', '教育', '其他'])
@@ -1624,13 +1625,8 @@ export function useStore() {
     return { ...nested, ...direct }
   }
 
-  function stagingFinanceOccurrence(record, payload = {}) {
-    return resolveFinanceOccurrence({
-      occurredAt: payload.occurred_at || payload.order_finished_at || record?.occurredAt || null,
-      date: payload.transaction_date || payload.income_date || payload.record_date || payload.date || null,
-      time: payload.transaction_time || payload.record_time || payload.time || null,
-      fallbackInstant: record?.createdAt || null,
-    })
+  function stagingFinanceOccurrence(record, payload = null) {
+    return resolveStagingFinanceOccurrence(record, payload)
   }
 
   function openIncomeModal() {
@@ -2091,15 +2087,10 @@ export function useStore() {
     const meta = getUniversalDomainMeta(domainKey)
     if (!meta) return false
 
-    const extracted = record.extracted && typeof record.extracted === 'object' ? record.extracted : {}
-    const nestedPayload = extracted.payload_jsonb && typeof extracted.payload_jsonb === 'object'
-      ? extracted.payload_jsonb
-      : {}
-    const { payload_jsonb: _nested, ...directPayload } = extracted
-    const payload = { ...directPayload, ...nestedPayload }
-    const occurredAt = record.occurredAt || record.createdAt || new Date().toISOString()
+    const payload = stagingArchivePayload(record)
+    const occurrence = resolveStagingFinanceOccurrence(record, payload)
 
-    resetUniversalModal(universalModal, domainKey, meta, localDateKeyOf(occurredAt) || getLocalDateKey())
+    resetUniversalModal(universalModal, domainKey, meta, occurrence.date || getLocalDateKey())
     universalModal.stagingSource = {
       id: record.id,
       imagePath: record.imagePath || null,
@@ -2109,8 +2100,8 @@ export function useStore() {
     universalModal.primaryValue = payload[meta.primaryKey] == null ? '' : String(payload[meta.primaryKey])
     universalModal.dimension = String(payload[meta.dimensionKey] || '').trim()
     universalModal.note = /缺少字段|置信度不足/i.test(record.summary || '') ? '' : (record.summary || '')
-    universalModal.date = localDateKeyOf(occurredAt) || getLocalDateKey()
-    universalModal.time = String(occurredAt).slice(11, 16)
+    universalModal.date = occurrence.date || getLocalDateKey()
+    universalModal.time = occurrence.hasExactTime ? String(occurrence.time || '').slice(0, 5) : ''
     universalModal.imagePath = record.imagePath || null
     universalModal.imageUrl = record.imageUrl || null
     universalModal.imageLoadError = false

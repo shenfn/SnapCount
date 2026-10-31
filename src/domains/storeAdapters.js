@@ -1,4 +1,5 @@
 import { incomeCatMap, localDateKeyOf } from '../utils/helpers'
+import { resolveStagingFinanceOccurrence } from '../utils/financeOccurrence.js'
 import { getSystemDomainLabel } from './registry'
 
 export function buildTodaySummary({ bills, incomeRecords, dataRecords, stagingRecords, todayKey }) {
@@ -15,7 +16,7 @@ export function buildTodaySummary({ bills, incomeRecords, dataRecords, stagingRe
   const todaySleep = filterDataRecordsByDate(dataRecords, 'sleep', todayKey)
   const todayFood = filterDataRecordsByDate(dataRecords, 'food', todayKey)
   const todayIncome = incomeRecords.filter(record => record.dateRaw === todayKey)
-  const todayStaging = stagingRecords.filter(record => localDateKeyOf(record.occurredAt || record.createdAt) === todayKey)
+  const todayStaging = stagingRecords.filter(record => resolveStagingFinanceOccurrence(record).date === todayKey)
 
   const pendingExpenseTotal = todayPendingBills.reduce((sum, bill) => sum + (bill.amount || 0), 0)
   const todayCalorieTotal = todayFood.reduce((sum, record) => sum + (Number(record.payload?.total_calorie_kcal) || 0), 0)
@@ -59,20 +60,23 @@ export function buildTodaySummary({ bills, incomeRecords, dataRecords, stagingRe
 }
 
 export function buildHomeTimeline({ stagingRecords, bills, incomeRecords, dataRecords, domains }) {
-  const stagingItems = stagingRecords.slice(0, 8).map(item => ({
-    id: `staging-${item.id}`,
-    kind: 'staging',
-    title: item.domainName || '待处理截图',
-    subtitle: item.summary,
-    amountLabel: item.recordType === 'income' ? '+ 待确认' : item.recordType === 'expense' ? '- 待确认' : '待分类',
-    dateLabel: item.occurredAt || item.createdAt,
-    dateRaw: localDateKeyOf(item.occurredAt || item.createdAt),
-    occurredTime: item.occurredAt,
-    uploadTime: item.createdAt,
-    imageUrl: item.imageUrl,
-    color: item.status === 'ai_error' ? '#B91C1C' : '#B45309',
-    raw: item,
-  }))
+  const stagingItems = stagingRecords.slice(0, 8).map(item => {
+    const occurrence = resolveStagingFinanceOccurrence(item)
+    return {
+      id: `staging-${item.id}`,
+      kind: 'staging',
+      title: item.domainName || '待处理截图',
+      subtitle: item.summary,
+      amountLabel: item.recordType === 'income' ? '+ 待确认' : item.recordType === 'expense' ? '- 待确认' : '待分类',
+      dateLabel: occurrence.occurredAt || occurrence.date || item.createdAt,
+      dateRaw: occurrence.date || '',
+      occurredTime: occurrence.occurredAt,
+      uploadTime: item.createdAt,
+      imageUrl: item.imageUrl,
+      color: item.status === 'ai_error' ? '#B91C1C' : '#B45309',
+      raw: item,
+    }
+  })
 
   const expenseItems = bills.slice(0, 15).map(item => ({
     id: `expense-${item.id}`,

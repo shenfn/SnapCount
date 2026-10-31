@@ -49,16 +49,27 @@ enum NativeLocalDate {
         return "\(date) \(value[start..<end])"
     }
 
-    static func financeDateKey(occurredAt: String?, legacyDate: String?) -> String? {
+    static func dateValue(_ value: String?) -> Date? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return parse(value)
+    }
+
+    static func financeDateKey(occurredAt: String?, legacyDate: String?, createdAt: String? = nil) -> String? {
         if let occurredAt,
            let date = parse(occurredAt) {
             return dateKey(date)
         }
-        guard let legacyDate = legacyDate?.trimmingCharacters(in: .whitespacesAndNewlines),
-              legacyDate.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else {
+        if let legacyDate = legacyDate?.trimmingCharacters(in: .whitespacesAndNewlines),
+           legacyDate.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil {
+            return legacyDate
+        }
+        guard let createdAt,
+              let date = parse(createdAt) else {
             return nil
         }
-        return legacyDate
+        return dateKey(date)
     }
 
     static func financeTimeKey(occurredAt: String?) -> String? {

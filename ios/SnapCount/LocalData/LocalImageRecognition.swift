@@ -102,10 +102,18 @@ final class LocalImageRecognitionUseCase {
         ))
         guard !recognized.domainKey.isEmpty,
               !recognized.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !recognized.recordDate.isEmpty,
               LocalRecordValidation.supportedDomainKeys.contains(recognized.domainKey) else {
             throw LocalImageRecognitionError.unsupportedDomain(recognized.domainKey)
         }
+
+        let sourceDate = NativeLocalDate.financeDateKey(
+            occurredAt: recognized.occurredAt,
+            legacyDate: recognized.recordDate
+        )
+        let recordDate = sourceDate ?? NativeLocalDate.dateKey(createdAt)
+        let recordTime = sourceDate == nil
+            ? nil
+            : (recognized.recordTime ?? recognized.occurredAt.flatMap { NativeLocalDate.timeKey($0) })
 
         let candidate = LocalRecordCandidate(
             id: "local-ai-\(imageHash)",
@@ -114,8 +122,8 @@ final class LocalImageRecognitionUseCase {
             summary: recognized.summary,
             payload: recognized.payload,
             confidence: recognized.confidence,
-            recordDate: recognized.recordDate,
-            recordTime: recognized.recordTime,
+            recordDate: recordDate,
+            recordTime: recordTime,
             imageData: nil,
             createdAt: createdAt,
             imageReference: intakeReference,
@@ -166,8 +174,7 @@ final class HostedAIImageRecognitionProvider: LocalImageRecognitionProvider {
               let candidate = envelope.candidate,
               let domainKey = candidate.domainKey,
               let title = candidate.title,
-              let summary = candidate.summary,
-              let recordDate = candidate.recordDate else {
+              let summary = candidate.summary else {
             throw LocalImageRecognitionError.invalidCandidate
         }
         return LocalRecognitionCandidate(
@@ -177,7 +184,7 @@ final class HostedAIImageRecognitionProvider: LocalImageRecognitionProvider {
             summary: summary,
             payload: candidate.payload ?? [:],
             confidence: candidate.confidence,
-            recordDate: recordDate,
+            recordDate: candidate.recordDate ?? "",
             recordTime: candidate.recordTime,
             occurredAt: candidate.occurredAt,
             evidenceFields: candidate.evidenceFields ?? [],
