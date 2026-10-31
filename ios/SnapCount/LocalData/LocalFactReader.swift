@@ -62,7 +62,7 @@ final class LocalFactReader {
 
     func range(profileID: UUID, from startDate: String, to endDate: String) throws -> LocalFactMonth {
         try database.writer.read { db in
-            let expenses = try Row.fetchAll(
+            let expenseRows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_expenses
@@ -71,8 +71,16 @@ final class LocalFactReader {
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(expenseRow: $0) }
-            let records = try Row.fetchAll(
+            )
+            let expenses = expenseRows.compactMap { row in
+                do {
+                    return try Self.fact(expenseRow: row)
+                } catch {
+                    Self.reportProjectionSkip(table: "local_expenses", row: row, error: error)
+                    return nil
+                }
+            }
+            let recordRows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_records
@@ -82,7 +90,15 @@ final class LocalFactReader {
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(recordRow: $0) }
+            )
+            let records = recordRows.compactMap { row in
+                do {
+                    return try Self.fact(recordRow: row)
+                } catch {
+                    Self.reportProjectionSkip(table: "local_records", row: row, error: error)
+                    return nil
+                }
+            }
 
             return LocalFactMonth(
                 profileID: profileID,
@@ -189,6 +205,11 @@ final class LocalFactReader {
             createdAt: expense.createdAt,
             updatedAt: expense.updatedAt
         )
+    }
+
+    private static func reportProjectionSkip(table: String, row: Row, error: Error) {
+        let id: String = row["id"] ?? "<unknown>"
+        NSLog("LocalFactReader skipped invalid %@ row %@: %@", table, id, error.localizedDescription)
     }
 
     private static func fact(from record: LocalRecord) -> LocalFact {
