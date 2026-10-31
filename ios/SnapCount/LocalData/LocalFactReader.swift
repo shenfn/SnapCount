@@ -87,7 +87,7 @@ final class LocalFactReader {
     }
 
     private static func readMonth(_ db: Database, profileID: UUID, from startDate: String, to endDate: String) throws -> LocalFactMonth {
-            let expenses = try Row.fetchAll(
+            let expenseRows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_expenses
@@ -96,16 +96,24 @@ final class LocalFactReader {
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(expenseRow: $0) }
-            let incomes = try Row.fetchAll(
+            )
+            let expenses = expenseRows.compactMap { row in
+                do { return try Self.fact(expenseRow: row) }
+                catch { Self.reportProjectionSkip(table: "local_expenses", row: row, error: error); return nil }
+            }
+            let incomeRows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_income_records
                     WHERE profile_id = ? AND income_date BETWEEN ? AND ? AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(incomeRow: $0) }
-            let records = try Row.fetchAll(
+            )
+            let incomes = incomeRows.compactMap { row in
+                do { return try Self.fact(incomeRow: row) }
+                catch { Self.reportProjectionSkip(table: "local_income_records", row: row, error: error); return nil }
+            }
+            let recordRows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM local_records
@@ -115,7 +123,16 @@ final class LocalFactReader {
                       AND deleted_at IS NULL
                     """,
                 arguments: [profileID.uuidString, startDate, endDate]
-            ).map { try Self.fact(recordRow: $0) }.filter { $0.businessDate >= startDate && $0.businessDate <= endDate }
+            )
+            let records = recordRows.compactMap { row in
+                do {
+                    let fact = try Self.fact(recordRow: row)
+                    return fact.businessDate >= startDate && fact.businessDate <= endDate ? fact : nil
+                } catch {
+                    Self.reportProjectionSkip(table: "local_records", row: row, error: LocalDataError.invalidRecord)
+                    return nil
+                }
+            }
 
             return LocalFactMonth(
                 profileID: profileID,
@@ -261,6 +278,11 @@ final class LocalFactReader {
             companionMessage: income.companionMessage,
             localVersion: income.localVersion, createdAt: income.createdAt, updatedAt: income.updatedAt
         )
+    }
+
+    private static func reportProjectionSkip(table: String, row: Row, error: Error) {
+        let id: String = row["id"] ?? "<unknown>"
+        NSLog("LocalFactReader skipped invalid %@ row %@: %@", table, id, error.localizedDescription)
     }
 
     private static func fact(from record: LocalRecord) -> LocalFact {
