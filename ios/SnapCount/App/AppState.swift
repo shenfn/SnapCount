@@ -2180,7 +2180,11 @@ final class AppState: ObservableObject {
                   let id = UUID(uuidString: detail.rawId),
                   let accountID = detail.accountId.flatMap(UUID.init(uuidString:)),
                   let amount = detail.amount, amount > 0,
-                  let date = detail.recordDate,
+                  let date = NativeLocalDate.financeDateKey(
+                      occurredAt: detail.occurredAt,
+                      legacyDate: detail.recordDate,
+                      createdAt: detail.createdAt
+                  ),
                   let merchant = detail.merchantName else { return nil }
             return LocalExpenseDraft(
                 id: id,
@@ -2195,7 +2199,7 @@ final class AppState: ObservableObject {
                 transactionDate: date,
                 transactionTime: detail.transactionTime,
                 note: detail.note,
-                createdAt: Date()
+                createdAt: detail.createdAt.flatMap { NativeLocalDate.dateValue($0) } ?? Date()
             )
         }
         guard !drafts.isEmpty else { return }
