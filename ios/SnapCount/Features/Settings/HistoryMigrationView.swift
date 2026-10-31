@@ -108,7 +108,7 @@ struct HistoryMigrationView: View {
                 .disabled(isRefreshing)
 
                 Button {
-                    appState.selectedTab = .inbox
+                    appState.openInbox(filter: .all)
                 } label: {
                     Label("去待处理", systemImage: "tray")
                         .frame(maxWidth: .infinity)
