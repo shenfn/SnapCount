@@ -39,7 +39,7 @@ enum LocalStagingReadModel {
             domainKey: record.domainKey,
             domainName: domainName ?? fallbackDomainName(for: record.domainKey),
             extracted: payload,
-            companionMessage: nil,
+            companionMessage: payload.string("companion_message"),
             targetRecordId: record.targetRecordID?.uuidString,
             imageHash: record.imageHash
         )

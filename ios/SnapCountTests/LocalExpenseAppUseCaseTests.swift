@@ -149,6 +149,12 @@ final class LocalExpenseAppUseCaseTests: XCTestCase {
         XCTAssertThrowsError(try LocalExpenseMapper.amountMinor("0"))
     }
 
+    func testLF03604RecognitionAmountMapperAcceptsCurrencyTextWithoutDefaultingToZero() throws {
+        XCTAssertEqual(try LocalExpenseMapper.amountMinor(from: AnyCodable(2)), 200)
+        XCTAssertEqual(try LocalExpenseMapper.amountMinor(from: AnyCodable("￥2.00")), 200)
+        XCTAssertThrowsError(try LocalExpenseMapper.amountMinor(from: nil))
+    }
+
     func testUseCaseCreatesAndProjectsExpenseWithoutNetworkDependency() async throws {
         let databaseURL = temporaryDatabaseURL()
         defer { removeDatabase(at: databaseURL) }

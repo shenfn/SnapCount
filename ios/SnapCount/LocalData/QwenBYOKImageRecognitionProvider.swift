@@ -100,19 +100,22 @@ final class QwenBYOKImageRecognitionProvider: LocalImageRecognitionProvider {
               let recordDate = candidate.recordDate else {
             throw QwenBYOKError.invalidResponse
         }
+        let payload = candidate.payload ?? [:]
         return LocalRecognitionCandidate(
             id: candidate.id ?? UUID().uuidString,
             domainKey: domainKey,
             title: title,
             summary: summary,
-            payload: candidate.payload ?? [:],
+            payload: payload,
             confidence: candidate.confidence,
             recordDate: recordDate,
             recordTime: candidate.recordTime,
             occurredAt: candidate.occurredAt,
             evidenceFields: candidate.evidenceFields ?? [],
             missingFields: candidate.missingFields ?? [],
-            imageHash: candidate.imageHash
+            imageHash: candidate.imageHash,
+            companionMessage: candidate.companionMessage ?? payload.string("companion_message"),
+            aiFeedback: candidate.aiFeedback ?? payload.dictionary("ai_feedback")
         )
     }
 
@@ -163,6 +166,8 @@ private struct QwenRecognitionEnvelope: Decodable {
         let evidenceFields: [String]?
         let missingFields: [String]?
         let imageHash: String?
+        let companionMessage: String?
+        let aiFeedback: [String: AnyCodable]?
 
         enum CodingKeys: String, CodingKey {
             case id, title, summary, payload, confidence
@@ -173,6 +178,8 @@ private struct QwenRecognitionEnvelope: Decodable {
             case evidenceFields = "evidence_fields"
             case missingFields = "missing_fields"
             case imageHash = "image_hash"
+            case companionMessage = "companion_message"
+            case aiFeedback = "ai_feedback"
         }
     }
 }

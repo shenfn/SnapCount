@@ -21,6 +21,15 @@ test("LOCAL-P1-SPORT-001 J: recognize_only returns the provider-neutral candidat
   assert.match(recognizeOnlyBranch, /provider: \{ kind: "hosted_ai", name: aiProvider, model: aiModel \}/);
 });
 
+test("LF-036.04: recognize_only keeps finance amount and AI fields in the local candidate", () => {
+  assert.match(recognizeOnlyBranch, /\["expense", "income"\]\.includes\(domainKey\)/);
+  assert.match(recognizeOnlyBranch, /payload\.amount = normalizeAmount\(payload\.amount\) \?\? normalizeAmount\(ai\.amount\)/);
+  assert.match(recognizeOnlyBranch, /payload\.companion_message/);
+  assert.match(recognizeOnlyBranch, /payload\.ai_feedback/);
+  assert.match(recognizeOnlyBranch, /companion_message: candidateCompanion/);
+  assert.match(recognizeOnlyBranch, /ai_feedback: candidateFeedback/);
+});
+
 test("LOCAL-P1-SPORT-001 K-001: Hosted AI recognize_only keeps the existing authenticated boundary", () => {
   const authStart = source.indexOf("// 既没有有效 JWT，也没有有效 upload_token，拒绝请求");
   const authEnd = source.indexOf("if (userId) {", authStart);

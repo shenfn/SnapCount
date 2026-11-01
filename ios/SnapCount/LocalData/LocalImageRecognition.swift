@@ -5,6 +5,7 @@ enum LocalImageRecognitionError: Error, Equatable, LocalizedError {
     case unsupportedDomain(String)
     case missingUploadCredential
     case missingBYOKKey
+    case invalidFinancialAmount
     case retryLimitReached
     case alreadyInProgress
     case alreadyCompleted
@@ -19,6 +20,8 @@ enum LocalImageRecognitionError: Error, Equatable, LocalizedError {
             return "当前没有可用的 Hosted AI 凭据"
         case .missingBYOKKey:
             return "未找到 BYOK API Key；图片仍保存在本机，可手动处理"
+        case .invalidFinancialAmount:
+            return "识别结果没有有效金额；原图已保留，请手动补录"
         case .retryLimitReached:
             return "已达到三次重试上限，请手动处理或丢弃图片"
         case .alreadyInProgress:
@@ -49,6 +52,19 @@ struct LocalRecognitionCandidate {
     let evidenceFields: [String]
     let missingFields: [String]
     let imageHash: String?
+    let companionMessage: String? = nil
+    let aiFeedback: [String: AnyCodable]? = nil
+
+    var persistedPayload: [String: AnyCodable] {
+        var result = payload
+        if let companionMessage = companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines), !companionMessage.isEmpty {
+            result["companion_message"] = AnyCodable(companionMessage)
+        }
+        if let aiFeedback {
+            result["ai_feedback"] = AnyCodable(aiFeedback.mapValues(\.value))
+        }
+        return result
+    }
 }
 
 protocol LocalImageRecognitionProvider {
@@ -319,11 +335,18 @@ final class LocalImageRecognitionUseCase {
         }
         if ["expense", "income"].contains(recognized.domainKey), let pendingRepository {
             let id = Self.uuidFromHash(imageHash)
-            let rawAmount = recognized.payload["amount"]?.value
-            let amountText = rawAmount.map { String(describing: $0) } ?? "0"
-            let amount = (try? LocalExpenseMapper.amountMinor(amountText)) ?? 0
+            let recognizedPayload = recognized.persistedPayload
+            let amount: Int64
+            do {
+                amount = try LocalExpenseMapper.amountMinor(from: recognizedPayload["amount"])
+            } catch {
+                throw LocalImageRecognitionError.invalidFinancialAmount
+            }
+            let merchantName = recognizedPayload["merchant_name"]?.stringValue
+                ?? recognizedPayload["source_name"]?.stringValue
+                ?? recognized.title
             try pendingRepository.stage(LocalPendingFinancialRecord(id: id, profileID: profileID,
-                amountMinor: amount, currency: "CNY", merchantName: recognized.title,
+                amountMinor: amount, currency: "CNY", merchantName: merchantName,
                 transactionDate: recognized.recordDate, transactionTime: recognized.recordTime,
                 occurredAt: recognized.occurredAt.flatMap { ISO8601DateFormatter().date(from: $0) },
                 createdAt: createdAt, imagePath: imageReference.path, imageHash: imageHash,
@@ -354,7 +377,7 @@ final class LocalImageRecognitionUseCase {
             domainKey: recognized.domainKey,
             title: recognized.title,
             summary: recognized.summary,
-            payload: recognized.payload,
+            payload: recognized.persistedPayload,
             confidence: recognized.confidence,
             recordDate: recordDate,
             recordTime: recordTime,
@@ -402,6 +425,10 @@ final class LocalImageRecognitionUseCase {
         if let recognitionError = error as? LocalImageRecognitionError,
            case .unsupportedDomain(let domainKey) = recognitionError {
             return "本地暂不支持数据域：\(domainKey)"
+        }
+        if let recognitionError = error as? LocalImageRecognitionError,
+           recognitionError == .invalidFinancialAmount {
+            return recognitionError.localizedDescription
         }
         if error is CancellationError {
             return "识别已取消，可重试或手动处理"
@@ -451,19 +478,22 @@ final class HostedAIImageRecognitionProvider: LocalImageRecognitionProvider {
               let summary = candidate.summary else {
             throw LocalImageRecognitionError.invalidCandidate
         }
+        let payload = candidate.payload ?? [:]
         return LocalRecognitionCandidate(
             id: candidate.id ?? UUID().uuidString,
             domainKey: domainKey,
             title: title,
             summary: summary,
-            payload: candidate.payload ?? [:],
+            payload: payload,
             confidence: candidate.confidence,
             recordDate: candidate.recordDate ?? "",
             recordTime: candidate.recordTime,
             occurredAt: candidate.occurredAt,
             evidenceFields: candidate.evidenceFields ?? [],
             missingFields: candidate.missingFields ?? [],
-            imageHash: candidate.imageHash
+            imageHash: candidate.imageHash,
+            companionMessage: candidate.companionMessage ?? payload.string("companion_message"),
+            aiFeedback: candidate.aiFeedback ?? payload.dictionary("ai_feedback")
         )
     }
 }
@@ -493,6 +523,8 @@ private struct HostedAIRecognitionCandidate: Decodable {
     let evidenceFields: [String]?
     let missingFields: [String]?
     let imageHash: String?
+    let companionMessage: String?
+    let aiFeedback: [String: AnyCodable]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -507,5 +539,7 @@ private struct HostedAIRecognitionCandidate: Decodable {
         case evidenceFields = "evidence_fields"
         case missingFields = "missing_fields"
         case imageHash = "image_hash"
+        case companionMessage = "companion_message"
+        case aiFeedback = "ai_feedback"
     }
 }

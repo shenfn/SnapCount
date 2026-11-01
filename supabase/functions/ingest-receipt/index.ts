@@ -6429,15 +6429,61 @@ Deno.serve(async (req) => {
           : normalizeString(ai.domain_key) ?? normalizeString(ai.record_type) ?? "uncertain";
       const built = buildBuiltinPayload(ai, visionRawText);
       const payload = built?.payload ?? cleanPayload(ai);
+      if (["expense", "income"].includes(domainKey)) {
+        // Finance AI responses keep amount at the top level. The local iOS
+        // candidate contract reads payload.amount, so copy the normalized
+        // value before returning instead of allowing a missing value to turn
+        // into a zero-dollar local transaction.
+        payload.amount = normalizeAmount(payload.amount) ?? normalizeAmount(ai.amount);
+        payload.merchant_name = normalizeString(payload.merchant_name) ?? normalizeString(ai.merchant_name);
+        payload.source_name = normalizeString(payload.source_name) ?? normalizeString(ai.source_name);
+        payload.platform = normalizeString(payload.platform) ?? normalizeString(ai.platform);
+        payload.category = normalizeString(payload.category) ?? normalizeString(ai.category);
+        payload.payment_method = normalizeString(payload.payment_method) ?? normalizeString(ai.payment_method);
+        payload.income_category = normalizeString(payload.income_category) ?? normalizeString(ai.income_category);
+      }
+      const candidateTimeContext = buildTimeContext({
+        occurredAt: exactNormalizedIso(candidateReference),
+        orderFinishedAt: exactNormalizedIso(candidateOrderFinished),
+        clientCapturedAt,
+        requestReceivedAt,
+      });
+      const candidateCompanion = companionSettings.enabled
+        ? sanitizeCompanionMessageForTime(
+          sanitizeCompanionMessageForContent(
+            typeof ai.companion_message === "string" ? ai.companion_message : null,
+            ai,
+          ),
+          ai,
+          candidateTimeContext,
+        )
+        : null;
+      const candidateAmount = normalizeAmount(payload.amount) ?? normalizeAmount(ai.amount);
+      let candidateFeedback: AIFeedback | null = null;
+      if (companionSettings.enabled && aiOk) {
+        if (domainKey === "expense") {
+          candidateFeedback = buildExpenseAIFeedback(ai, candidateAmount, candidateTimeContext, false);
+        } else if (domainKey === "income") {
+          candidateFeedback = buildIncomeAIFeedback(ai, candidateAmount, candidateTimeContext);
+        } else if (isBuiltinDomain(domainKey) && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75) {
+          candidateFeedback = buildBuiltinAIFeedback(domainKey, built, candidateTimeContext, candidateCompanion);
+        }
+      }
+      if (candidateCompanion) payload.companion_message = candidateCompanion;
+      if (candidateFeedback) payload.ai_feedback = candidateFeedback;
       const evidenceFields = Object.entries(payload)
         .filter(([, value]) => value !== null && value !== undefined && value !== "")
         .map(([key]) => key)
         .sort();
-      const missingFields = built?.missingFields ?? ["domain_key"];
+      const missingFields = [...(built?.missingFields ?? [])];
+      if (domainKey === "uncertain" && !missingFields.includes("domain_key")) missingFields.push("domain_key");
+      if (["expense", "income"].includes(domainKey) && candidateAmount === null && !missingFields.includes("amount")) {
+        missingFields.push("amount");
+      }
       const responseCandidate = {
         id: `hosted-${hash}`,
         domain_key: domainKey,
-        title: built?.title ?? normalizeString(ai.title) ?? "待确认记录",
+        title: built?.title ?? normalizeString(ai.title) ?? normalizeString(ai.merchant_name ?? ai.source_name) ?? "待确认记录",
         summary: built?.summary ?? normalizeString(ai.summary) ?? "图片识别候选",
         confidence: Number.isFinite(ai.confidence) ? ai.confidence : null,
         payload,
@@ -6447,6 +6493,8 @@ Deno.serve(async (req) => {
         missing_fields: missingFields,
         evidence_fields: evidenceFields,
         image_hash: hash,
+        companion_message: candidateCompanion,
+        ai_feedback: candidateFeedback,
       };
       if (!aiOk) {
         return respondShortcut({

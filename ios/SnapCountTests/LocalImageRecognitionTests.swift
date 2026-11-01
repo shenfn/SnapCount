@@ -27,6 +27,85 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertTrue(try context.useCase.retryPendingImageCleanups().isEmpty)
         XCTAssertEqual(try context.imageStore.data(at: XCTUnwrap(candidate.imagePath)), data)
     }
+
+    func testLF03604InvalidFinanceCandidateNeverCreatesZeroAmount() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 1, payload: [:], missingFields: ["amount"]))
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider,
+            pendingRepository: pending
+        )
+        let imageData = Data("financial-missing-amount".utf8)
+
+        do {
+            _ = try await recognition.ingest(
+                imageData: imageData,
+                captureKind: "shortcut",
+                filename: "expense.jpg"
+            )
+            XCTFail("缺少金额的财务候选不能静默生成 0 元待确认记录")
+        } catch let error as LocalImageRecognitionError {
+            XCTAssertEqual(error, .invalidFinancialAmount)
+        }
+
+        let profile = try context.intakeRepository.activeProfile()
+        let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
+        let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
+        XCTAssertEqual(intake.status, .failed)
+        XCTAssertEqual(try pending.pending(profileID: profile.id).count, 0)
+        XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
+    }
+
+    func testLF03506LocalCandidatePersistsCompanionAndFeedbackForFormalRecord() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let feedback: [String: AnyCodable] = [
+            "badge": AnyCodable("节奏稳定"),
+            "emotion_line": AnyCodable("今天跑得很稳。"),
+            "utility_line": AnyCodable("继续保持这个节奏。"),
+            "detail_reason": AnyCodable("来自本次运动记录。")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "sport",
+            confidence: 0.95,
+            payload: [
+                "sport_type": AnyCodable("跑步"),
+                "duration_minutes": AnyCodable(35)
+            ],
+            missingFields: [],
+            companionMessage: "今天跑得很稳。",
+            aiFeedback: feedback
+        ))
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+
+        let outcome = try await recognition.ingest(
+            imageData: Data("candidate-with-ai-fields".utf8),
+            captureKind: "shortcut",
+            filename: "sport.jpg"
+        )
+        guard case let .archived(recordOutcome) = outcome.result else {
+            return XCTFail("完整高置信度候选应成为正式本地记录")
+        }
+
+        let profile = try LocalProfileStore(database: context.database).activeProfile()
+        let detail = LocalFactReadModel.detail(from: try XCTUnwrap(
+            LocalFactReader(database: context.database).month(profileID: profile.id, monthKey: "2026-09").facts.first
+        ))
+        XCTAssertEqual(detail.companionMessage, "今天跑得很稳。")
+        XCTAssertEqual(detail.aiFeedback?.badge, "节奏稳定")
+        XCTAssertEqual(LocalRecordReadModel.detail(from: recordOutcome.record).companionMessage, "今天跑得很稳。")
+    }
     func testLF03507DisabledRecognitionPersistsImageForManualProcessingWithoutProviderCall() async throws {
         let context = try makeContext()
         defer { cleanup(context) }
@@ -670,7 +749,9 @@ final class LocalImageRecognitionTests: XCTestCase {
             "sport_type": AnyCodable("跑步"),
             "duration_minutes": AnyCodable(30)
         ],
-        missingFields: [String] = []
+        missingFields: [String] = [],
+        companionMessage: String? = nil,
+        aiFeedback: [String: AnyCodable]? = nil
     ) -> LocalRecognitionCandidate {
         LocalRecognitionCandidate(
             id: id,
@@ -684,7 +765,9 @@ final class LocalImageRecognitionTests: XCTestCase {
             occurredAt: "2026-09-20T08:30:00+08:00",
             evidenceFields: Array(payload.keys).sorted(),
             missingFields: missingFields,
-            imageHash: nil
+            imageHash: nil,
+            companionMessage: companionMessage,
+            aiFeedback: aiFeedback
         )
     }
 

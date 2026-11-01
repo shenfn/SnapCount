@@ -25,7 +25,7 @@ enum LocalRecordReadModel {
             paymentMethod: nil,
             recordDate: record.businessDate,
             note: record.note,
-            companionMessage: nil,
+            companionMessage: payload.string("companion_message"),
             accountId: nil,
             systemImage: NativeDayRecordKind(rawValue: record.domainKey)?.systemImage ?? "square.grid.2x2",
             payload: payload,
@@ -71,6 +71,8 @@ enum LocalRecordReadModel {
             source: base.source,
             status: base.status,
             domainVersion: base.domainVersion,
+            aiFeedback: NativeAIFeedback(payload: payload.dictionary("ai_feedback")),
+            aiSummary: base.aiSummary,
             localVersion: base.localVersion
         )
     }

@@ -286,8 +286,9 @@ final class LocalFactReader {
     }
 
     private static func fact(from record: LocalRecord) -> LocalFact {
+        let payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
         let businessDate = NativeSleepFacts.businessDate(
-            domainKey: record.domainKey, payload: (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:], fallback: record.recordDate
+            domainKey: record.domainKey, payload: payload, fallback: record.recordDate
         )
         // ponytail: 旧睡眠无需改写历史行，暂在读层按醒来日过滤；数据量增大后迁移并索引规范业务日。
         return LocalFact(
@@ -310,6 +311,7 @@ final class LocalFactReader {
             note: record.note,
             imagePath: record.imagePath,
             imageHash: record.imageHash,
+            companionMessage: payload.string("companion_message"),
             localVersion: record.localVersion,
             createdAt: record.createdAt,
             updatedAt: record.updatedAt
