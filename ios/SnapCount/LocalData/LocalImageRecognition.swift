@@ -52,8 +52,8 @@ struct LocalRecognitionCandidate {
     let evidenceFields: [String]
     let missingFields: [String]
     let imageHash: String?
-    let companionMessage: String? = nil
-    let aiFeedback: [String: AnyCodable]? = nil
+    let companionMessage: String?
+    let aiFeedback: [String: AnyCodable]?
 
     init(
         id: String,
