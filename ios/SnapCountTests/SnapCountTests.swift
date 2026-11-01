@@ -679,7 +679,7 @@ final class SnapCountTests: XCTestCase {
 
         XCTAssertEqual(
             financeFilter,
-            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,transaction_date.gte.2026-08-01,transaction_date.lte.2026-08-31))"
+            "(and(occurred_at.gte.2026-07-31T16:00:00Z,occurred_at.lte.2026-08-31T15:59:59Z),and(occurred_at.is.null,transaction_date.gte.2026-08-01,transaction_date.lte.2026-08-31),and(occurred_at.is.null,transaction_date.is.null,created_at.gte.2026-07-31T16:00:00Z,created_at.lte.2026-08-31T15:59:59Z))"
         )
         XCTAssertTrue(financeFilter.hasPrefix("(and("))
         XCTAssertTrue(financeFilter.hasSuffix("))"))
@@ -3139,7 +3139,7 @@ final class SnapCountTests: XCTestCase {
             today: "2026-07-26"
         )
 
-        XCTAssertEqual(todayItems.map(\.id), ["staging-today"])
+        XCTAssertEqual(todayItems.map(\.id), ["staging-unknown", "staging-today"])
         XCTAssertEqual(allItems.count, 3)
     }
 
