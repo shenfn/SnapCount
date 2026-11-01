@@ -55,6 +55,38 @@ struct LocalRecognitionCandidate {
     let companionMessage: String? = nil
     let aiFeedback: [String: AnyCodable]? = nil
 
+    init(
+        id: String,
+        domainKey: String,
+        title: String,
+        summary: String,
+        payload: [String: AnyCodable],
+        confidence: Double?,
+        recordDate: String,
+        recordTime: String?,
+        occurredAt: String?,
+        evidenceFields: [String],
+        missingFields: [String],
+        imageHash: String?,
+        companionMessage: String? = nil,
+        aiFeedback: [String: AnyCodable]? = nil
+    ) {
+        self.id = id
+        self.domainKey = domainKey
+        self.title = title
+        self.summary = summary
+        self.payload = payload
+        self.confidence = confidence
+        self.recordDate = recordDate
+        self.recordTime = recordTime
+        self.occurredAt = occurredAt
+        self.evidenceFields = evidenceFields
+        self.missingFields = missingFields
+        self.imageHash = imageHash
+        self.companionMessage = companionMessage
+        self.aiFeedback = aiFeedback
+    }
+
     var persistedPayload: [String: AnyCodable] {
         var result = payload
         if let companionMessage = companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines), !companionMessage.isEmpty {
