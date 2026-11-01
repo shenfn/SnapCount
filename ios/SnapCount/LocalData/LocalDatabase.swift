@@ -658,6 +658,13 @@ final class LocalDatabase {
             try database.execute(sql: "ALTER TABLE local_expenses ADD COLUMN companion_message TEXT")
             try database.execute(sql: "ALTER TABLE local_income_records ADD COLUMN companion_message TEXT")
         }
+        // 待补全账单必须保留识别出的记账四要素，否则补全页只能让用户从零重填。
+        migrator.registerMigration("local-v29-pending-financial-facts") { database in
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN platform TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN category TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN payment_method TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN income_category TEXT")
+        }
         return migrator
     }
 }

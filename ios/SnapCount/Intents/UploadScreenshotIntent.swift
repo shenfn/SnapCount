@@ -72,7 +72,7 @@ struct UploadScreenshotIntent: AppIntent {
                             uploadToken: uploadToken
                         )
                         switch outcome.result {
-                        case .archived:
+                        case .archived, .financialArchived:
                             trialOutcome = .archived
                             result = ShortcutUploadResult(
                                 displayText: "AI 识别结果已自动记录到本机。",

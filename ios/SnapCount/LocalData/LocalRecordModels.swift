@@ -389,6 +389,7 @@ enum LocalRecordIntakeOutcome: Equatable {
     case archived(LocalRecordOutcome)
     case staged(LocalStagingOutcome)
     case financialPending(UUID)
+    case financialArchived(UUID)
 }
 
 enum LocalRecordIntakeRoute: Equatable {
@@ -417,6 +418,36 @@ enum LocalRecordIntakeRouter {
             return .staging
         }
         return .autoArchive
+    }
+}
+
+/// 记账域的自动归档规则，与云端 ingest-receipt 的判定保持一致：
+/// 支出要求金额、消费渠道、消费分类、支付方式齐全，收入只要求金额有效，
+/// 两者都要求置信度不低于 `0.70`，否则进入待补全。
+enum LocalFinancialAutoArchiveRule {
+    static let confidenceThreshold = 0.70
+
+    /// 金额用已经过 `LocalExpenseMapper` 解析的口径，避免再解析一次导致
+    /// `¥20.00` 这类带符号文本被判定为无效金额而永久无法自动归档。
+    static func shouldArchive(
+        kind: NativePendingEntryKind,
+        amountMinor: Int64,
+        payload: [String: AnyCodable],
+        confidence: Double?
+    ) -> Bool {
+        guard amountMinor > 0 else { return false }
+        guard let confidence, confidence >= confidenceThreshold else { return false }
+        switch kind {
+        case .expense:
+            return ["platform", "category", "payment_method"].allSatisfy { hasText(payload[$0]) }
+        case .income:
+            return true
+        }
+    }
+
+    private static func hasText(_ value: AnyCodable?) -> Bool {
+        guard let text = value?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        return !text.isEmpty
     }
 }
 

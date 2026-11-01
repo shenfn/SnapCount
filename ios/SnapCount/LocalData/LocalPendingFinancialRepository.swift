@@ -14,6 +14,10 @@ struct LocalPendingFinancialRecord: Equatable {
     var imagePath: String? = nil
     var imageHash: String? = nil
     var preferredKind: NativePendingEntryKind = .expense
+    var platform: String? = nil
+    var category: String? = nil
+    var paymentMethod: String? = nil
+    var incomeCategory: String? = nil
 }
 
 /// LF-037.31/41/44. The original transaction, target and ledger change together.
@@ -27,20 +31,104 @@ final class LocalPendingFinancialRepository {
             throw LocalDataError.invalidRecord
         }
         try database.writer.write { db in
-            if let existing = try Row.fetchOne(db, sql: "SELECT profile_id, image_hash FROM local_pending_transactions WHERE id = ?", arguments: [record.id.uuidString]) {
+            if let existing = try Row.fetchOne(db, sql: "SELECT profile_id, image_hash, status FROM local_pending_transactions WHERE id = ?", arguments: [record.id.uuidString]) {
                 guard (existing["profile_id"] as String) == record.profileID.uuidString,
                       (existing["image_hash"] as String?) == record.imageHash else { throw LocalDataError.invalidRecord }
-                return
+                // 待补全被删除后重新上传同一张图，按新事实落库，否则这一行会永远停在 deleted。
+                let status: String = existing["status"]
+                guard status == "deleted" else { return }
+                try db.execute(sql: "DELETE FROM local_pending_transactions WHERE id = ?", arguments: [record.id.uuidString])
             }
             try db.execute(sql: """
                 INSERT INTO local_pending_transactions
                 (id, profile_id, amount_minor, currency, merchant_name, transaction_date,
-                 transaction_time, occurred_at, created_at, image_path, image_hash, preferred_kind, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                 transaction_time, occurred_at, created_at, image_path, image_hash, preferred_kind,
+                 platform, category, payment_method, income_category, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """, arguments: [record.id.uuidString, record.profileID.uuidString,
                     record.amountMinor, record.currency, record.merchantName,
                     record.transactionDate, record.transactionTime, record.occurredAt,
-                    record.createdAt, record.imagePath, record.imageHash, record.preferredKind.rawValue])
+                    record.createdAt, record.imagePath, record.imageHash, record.preferredKind.rawValue,
+                    record.platform, record.category, record.paymentMethod, record.incomeCategory])
+        }
+    }
+
+    /// 高置信度自动归档：与云端 PWA 链路一致，记账四要素齐全时直接落正式账目，
+    /// 不进入待补全。待补全表仍写一行非 pending 记录，保证同一张图重复上传时幂等。
+    @discardableResult
+    func archiveDirectly(_ record: LocalPendingFinancialRecord, at now: Date = Date()) throws -> UUID {
+        guard record.amountMinor > 0, record.amountMinor <= 99_999_999,
+              NativeLocalDate.monthKey(from: record.transactionDate) != nil else {
+            throw LocalDataError.invalidRecord
+        }
+        return try database.writer.write { db in
+            if let row = try Row.fetchOne(db, sql: "SELECT profile_id, status, target_id FROM local_pending_transactions WHERE id = ?", arguments: [record.id.uuidString]) {
+                guard (row["profile_id"] as String) == record.profileID.uuidString else { throw LocalDataError.invalidRecord }
+                let status: String = row["status"]
+                switch status {
+                case "done", "converted":
+                    let existingTarget: String? = row["target_id"]
+                    return existingTarget.flatMap(UUID.init(uuidString:)) ?? record.id
+                case "deleted":
+                    // 已删除的事实按新图重新入账，否则重传会得到"已归档"的假成功。
+                    try db.execute(sql: "DELETE FROM local_pending_transactions WHERE id = ?", arguments: [record.id.uuidString])
+                default:
+                    throw LocalDataError.invalidRecord
+                }
+            }
+            let targetID: UUID
+            let targetKind: String
+            switch record.preferredKind {
+            case .expense:
+                guard let platform = record.platform, !platform.isEmpty,
+                      let category = record.category, !category.isEmpty,
+                      let paymentMethod = record.paymentMethod, !paymentMethod.isEmpty else {
+                    throw LocalDataError.invalidRecord
+                }
+                targetID = record.id
+                targetKind = "expense"
+                var expense = LocalExpenseDraft(id: targetID, profileID: record.profileID,
+                    accountID: nil, amountMinor: record.amountMinor, currency: record.currency,
+                    merchantName: record.merchantName, platform: platform, category: category,
+                    paymentMethod: paymentMethod, transactionDate: record.transactionDate,
+                    transactionTime: record.transactionTime, note: nil,
+                    createdAt: record.occurredAt ?? record.createdAt)
+                expense.imagePath = record.imagePath
+                expense.imageHash = record.imageHash
+                _ = try LocalExpenseRepository.insertExpense(expense, operationID: UUID(), database: db)
+            case .income:
+                targetID = UUID()
+                targetKind = "income"
+                var income = LocalIncomeDraft(id: targetID, profileID: record.profileID, accountID: nil,
+                    amountMinor: record.amountMinor, currency: record.currency,
+                    sourceName: record.merchantName,
+                    category: record.incomeCategory ?? "other",
+                    incomeDate: record.transactionDate, occurredAt: record.occurredAt,
+                    note: "截图识别自动归档", createdAt: now)
+                income.imagePath = record.imagePath
+                income.imageHash = record.imageHash
+                _ = try LocalExpenseRepository.insertIncome(income, database: db)
+            }
+            try db.execute(sql: """
+                INSERT INTO local_pending_transactions
+                (id, profile_id, amount_minor, currency, merchant_name, transaction_date,
+                 transaction_time, occurred_at, created_at, image_path, image_hash, preferred_kind,
+                 platform, category, payment_method, income_category, status, target_kind, target_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: [record.id.uuidString, record.profileID.uuidString,
+                    record.amountMinor, record.currency, record.merchantName,
+                    record.transactionDate, record.transactionTime, record.occurredAt,
+                    record.createdAt, record.imagePath, record.imageHash, record.preferredKind.rawValue,
+                    record.platform, record.category, record.paymentMethod, record.incomeCategory,
+                    targetKind == "expense" ? "done" : "converted", targetKind, targetID.uuidString])
+            return targetID
+        }
+    }
+
+    /// 查询一张图对应的处理状态，用于幂等判断：pending 仍需补全，done/converted 已归档，deleted 需重新识别。
+    func processedStatus(profileID: UUID, id: UUID) throws -> String? {
+        try database.writer.read { db in
+            try String.fetchOne(db, sql: "SELECT status FROM local_pending_transactions WHERE id = ? AND profile_id = ?", arguments: [id.uuidString, profileID.uuidString])
         }
     }
 
@@ -103,12 +191,6 @@ final class LocalPendingFinancialRepository {
         }
     }
 
-    func hasProcessedTransaction(profileID: UUID, id: UUID) throws -> Bool {
-        try database.writer.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM local_pending_transactions WHERE id = ? AND profile_id = ? AND status IN ('pending','done','converted')", arguments: [id.uuidString, profileID.uuidString]) == 1
-        }
-    }
-
     func nativeDetail(profileID: UUID, id: UUID, imageStore: LocalImageStore) throws -> NativeRecordDetail? {
         guard let source = try record(profileID: profileID, id: id) else { return nil }
         let amount = Double(source.amountMinor) / 100
@@ -117,7 +199,8 @@ final class LocalPendingFinancialRepository {
             value: String(format: "¥%.2f", amount), detailRows: [],
             imageURL: source.imagePath.map { imageStore.url(for: $0) }, imageLoadError: false,
             imagePath: source.imagePath, imageHash: source.imageHash, amount: amount,
-            merchantName: source.merchantName, platform: nil, category: nil, paymentMethod: nil,
+            merchantName: source.merchantName, platform: source.platform, category: source.category,
+            paymentMethod: source.paymentMethod,
             recordDate: source.transactionDate, note: nil, companionMessage: nil, accountId: nil,
             systemImage: "creditcard", payload: nil,
             occurredAt: source.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
@@ -148,6 +231,8 @@ final class LocalPendingFinancialRepository {
             amountMinor: row["amount_minor"], currency: row["currency"], merchantName: row["merchant_name"],
             transactionDate: row["transaction_date"], transactionTime: row["transaction_time"],
             occurredAt: row["occurred_at"], createdAt: row["created_at"], imagePath: row["image_path"], imageHash: row["image_hash"],
-            preferredKind: NativePendingEntryKind(rawValue: row["preferred_kind"]) ?? .expense)
+            preferredKind: NativePendingEntryKind(rawValue: row["preferred_kind"]) ?? .expense,
+            platform: row["platform"], category: row["category"],
+            paymentMethod: row["payment_method"], incomeCategory: row["income_category"])
     }
 }

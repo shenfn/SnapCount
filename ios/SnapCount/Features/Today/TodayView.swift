@@ -666,7 +666,7 @@ struct TodayView: View {
                 uploadToken: uploadToken
             )
             switch localOutcome.result {
-            case .archived:
+            case .archived, .financialArchived:
                 uploadMessage = "AI 识别结果已按高置信度规则自动记录到本机。"
             case .staged, .financialPending:
                 uploadMessage = "AI 识别结果已保存到本地收件箱，请确认后归档。"

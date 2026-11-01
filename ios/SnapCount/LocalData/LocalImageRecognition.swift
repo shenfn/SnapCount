@@ -174,8 +174,16 @@ final class LocalImageRecognitionUseCase {
         if let completed = try intakeRepository.intake(id: intakeID, profileID: profile.id),
            completed.status == .completed {
             let recordID = Self.uuidFromHash(imageHash)
-            if try pendingRepository?.hasProcessedTransaction(profileID: profile.id, id: recordID) == true {
-                return LocalImageIntakeOutcome(result: .financialPending(recordID), imageHash: imageHash)
+            if let status = try pendingRepository?.processedStatus(profileID: profile.id, id: recordID) {
+                switch status {
+                case "pending":
+                    return LocalImageIntakeOutcome(result: .financialPending(recordID), imageHash: imageHash)
+                case "done", "converted":
+                    return LocalImageIntakeOutcome(result: .financialArchived(recordID), imageHash: imageHash)
+                default:
+                    // 已删除的财务事实按新图重新识别。
+                    break
+                }
             }
             if let record = try await localRecordUseCase.record(id: recordID) {
                 return LocalImageIntakeOutcome(
@@ -377,17 +385,29 @@ final class LocalImageRecognitionUseCase {
             let merchantName = recognizedPayload["merchant_name"]?.stringValue
                 ?? recognizedPayload["source_name"]?.stringValue
                 ?? recognized.title
-            try pendingRepository.stage(LocalPendingFinancialRecord(id: id, profileID: profileID,
+            let kind = NativePendingEntryKind(rawValue: recognized.domainKey) ?? .expense
+            let financial = LocalPendingFinancialRecord(id: id, profileID: profileID,
                 amountMinor: amount, currency: "CNY", merchantName: merchantName,
                 transactionDate: recognized.recordDate, transactionTime: recognized.recordTime,
                 occurredAt: recognized.occurredAt.flatMap { ISO8601DateFormatter().date(from: $0) },
                 createdAt: createdAt, imagePath: imageReference.path, imageHash: imageHash,
-                preferredKind: NativePendingEntryKind(rawValue: recognized.domainKey) ?? .expense))
-            // The pending fact now owns this exact original path; do not remove
-            // it as if it were a redundant universal-domain intake copy.
+                preferredKind: kind,
+                platform: recognizedPayload.string("platform"),
+                category: recognizedPayload.string("category"),
+                paymentMethod: recognizedPayload.string("payment_method"),
+                incomeCategory: recognizedPayload.string("income_category"))
+            let autoArchive = LocalFinancialAutoArchiveRule.shouldArchive(
+                kind: kind, amountMinor: amount, payload: recognizedPayload, confidence: recognized.confidence)
+            if autoArchive {
+                try pendingRepository.archiveDirectly(financial)
+            } else {
+                try pendingRepository.stage(financial)
+            }
+            // 原图归这条财务事实所有；不要再按通用域的中转副本清理掉。
             try intakeRepository.markCompleted(id: intakeID, profileID: profileID,
                 operationID: operationID, cleanupMessage: nil, at: Date())
-            return LocalImageIntakeOutcome(result: .financialPending(id), imageHash: imageHash)
+            let outcome: LocalRecordIntakeOutcome = autoArchive ? .financialArchived(id) : .financialPending(id)
+            return LocalImageIntakeOutcome(result: outcome, imageHash: imageHash)
         }
         guard !recognized.domainKey.isEmpty,
               !recognized.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

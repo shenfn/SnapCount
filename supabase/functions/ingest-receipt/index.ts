@@ -6408,6 +6408,18 @@ Deno.serve(async (req) => {
     ai.category = ai.category
       ? normalizeExpenseCategory(ai.category) ?? "other"
       : null;
+    // 渠道缺省时按截图类型和明确平台特征兜底：收单机构写"财付通"、页面带"支付宝"
+    // 这类证据已经唯一确定渠道，不该因为页面没写出"微信"两个字就降级成待补全。
+    if (!ai.platform) {
+      const platformHaystack = `${visionRawText ?? ""} ${ai.payment_method ?? ""}`;
+      if (ai.image_type === "alipay_bill" || platformHaystack.includes("支付宝")) {
+        ai.platform = "支付宝";
+      } else if (ai.image_type === "wechat_bill"
+        || platformHaystack.includes("财付通")
+        || platformHaystack.includes("微信支付")) {
+        ai.platform = "微信";
+      }
+    }
     timings.mark("vision_total");
     const storageUpload = await storageUploadPromise;
     timings.record("storage_upload", storageUpload.durationMs);

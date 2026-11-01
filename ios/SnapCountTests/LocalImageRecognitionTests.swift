@@ -3,7 +3,7 @@ import XCTest
 @testable import SnapCount
 
 final class LocalImageRecognitionTests: XCTestCase {
-    func testLF03731RecognizedFinanceAlwaysWaitsForConfirmationAndKeepsOriginal() async throws {
+    func testLF03731IncompleteFinanceFactsWaitForConfirmationAndKeepOriginal() async throws {
         let context = try makeContext()
         defer { cleanup(context) }
         let pending = LocalPendingFinancialRepository(database: context.database)
@@ -14,7 +14,9 @@ final class LocalImageRecognitionTests: XCTestCase {
             provider: provider, pendingRepository: pending)
         let data = Data("financial-original".utf8)
         let outcome = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
-        guard case .financialPending(let id) = outcome.result else { return XCTFail("Finance must wait for explicit account confirmation") }
+        guard case .financialPending(let id) = outcome.result else {
+            return XCTFail("缺少渠道、分类或支付方式的记账仍需人工确认")
+        }
         let profile = try context.intakeRepository.activeProfile()
         let candidate = try XCTUnwrap(pending.record(profileID: profile.id, id: id))
         XCTAssertEqual(candidate.amountMinor, 2000)
@@ -26,6 +28,74 @@ final class LocalImageRecognitionTests: XCTestCase {
         XCTAssertTrue(try LocalExpenseRepository(database: context.database).expenses(profileID: profile.id, monthKey: "2026-09").isEmpty)
         XCTAssertTrue(try context.useCase.retryPendingImageCleanups().isEmpty)
         XCTAssertEqual(try context.imageStore.data(at: XCTUnwrap(candidate.imagePath)), data)
+    }
+
+    func testLF03731CompleteFinanceFactsArchiveWithoutConfirmation() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let payload: [String: AnyCodable] = [
+            "amount": AnyCodable(20),
+            "merchant_name": AnyCodable("沈氏牛肉汤春波店"),
+            "platform": AnyCodable("微信"),
+            "category": AnyCodable("food"),
+            "payment_method": AnyCodable("银行卡")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 0.92, payload: payload, missingFields: []))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending)
+        let data = Data("financial-auto-archive".utf8)
+        let outcome = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
+        guard case .financialArchived(let id) = outcome.result else {
+            return XCTFail("四要素齐全且置信度达标时应直接归档")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        let expenses = try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09")
+        let archived = try XCTUnwrap(expenses.first { $0.id == id })
+        XCTAssertEqual(archived.amountMinor, 2000)
+        XCTAssertEqual(archived.merchantName, "沈氏牛肉汤春波店")
+        XCTAssertEqual(archived.platform, "微信")
+        XCTAssertEqual(archived.category, "food")
+        XCTAssertEqual(archived.paymentMethod, "银行卡")
+        XCTAssertTrue(try pending.pending(profileID: profile.id).isEmpty)
+
+        let repeated = try await recognition.ingest(imageData: data, captureKind: "screenshot", filename: "expense.jpg")
+        XCTAssertEqual(repeated, outcome)
+        XCTAssertEqual(provider.callCount, 1)
+        XCTAssertEqual(try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09").count, 1)
+    }
+
+    func testLF03731LowConfidenceFinanceFactsStayPending() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let payload: [String: AnyCodable] = [
+            "amount": AnyCodable(20),
+            "platform": AnyCodable("微信"),
+            "category": AnyCodable("food"),
+            "payment_method": AnyCodable("银行卡")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 0.55, payload: payload, missingFields: []))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending)
+        let outcome = try await recognition.ingest(
+            imageData: Data("financial-low-confidence".utf8),
+            captureKind: "screenshot",
+            filename: "expense.jpg"
+        )
+        guard case .financialPending = outcome.result else {
+            return XCTFail("置信度不足时不能自动归档")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        XCTAssertEqual(try pending.pending(profileID: profile.id).count, 1)
+        XCTAssertTrue(try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09").isEmpty)
     }
 
     func testLF03604InvalidFinanceCandidateNeverCreatesZeroAmount() async throws {

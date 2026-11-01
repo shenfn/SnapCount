@@ -869,6 +869,11 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             let nextVersion = existing.localVersion + 1
             try db.execute(sql: "UPDATE local_income_records SET deleted_at = ?, local_version = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
                            arguments: [deletedAt, nextVersion, deletedAt, id.uuidString])
+            // 归档来源的事实被删除后，同一张图重传需要重新入账，锚点行必须一起失效。
+            try db.execute(
+                sql: "UPDATE local_pending_transactions SET status = 'deleted' WHERE profile_id = ? AND target_kind = 'income' AND target_id = ?",
+                arguments: [existing.profileID.uuidString, id.uuidString]
+            )
             return LocalIncomeTombstone(id: id, profileID: existing.profileID, localVersion: nextVersion, deletedAt: deletedAt)
         }
     }
@@ -1061,6 +1066,11 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             )
 
             try Self.enqueueFinancialImageCleanup(existing.imagePath, profileID: existing.profileID, at: deletedAt, database: db)
+            // 归档来源的事实被删除后，同一张图重传需要重新入账，锚点行必须一起失效。
+            try db.execute(
+                sql: "UPDATE local_pending_transactions SET status = 'deleted' WHERE profile_id = ? AND target_kind = 'expense' AND target_id = ?",
+                arguments: [existing.profileID.uuidString, id.uuidString]
+            )
             if existing.accountID != nil {
                 try Self.voidActiveEntry(sourceID: id, voidedAt: deletedAt, database: db)
             }
