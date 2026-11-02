@@ -116,7 +116,11 @@ Windows 环境无法运行 XCTest（无 swiftc / Xcode），本轮基线以 GitH
 
 ## 绿灯结果
 
-未执行（Windows 无 Swift 工具链）。待 CI。
+`ios-build.yml` run [41390367946](https://github.com/shenfn/SnapCount/actions/runs/41390367946)（`e0b2a93`）：**success**
+
+- `Build for simulator`：通过
+- `SnapCountTests`：**Executed 588 tests, with 1 test skipped and 0 failures**，耗时 180.6 秒
+- 新增 `LocalIntakeNotificationTextTests` 10 条全部 passed（单条 0.001–0.007 秒）
 
 ## PWA/iOS 差异
 
@@ -127,17 +131,32 @@ Windows 环境无法运行 XCTest（无 swiftc / Xcode），本轮基线以 GitH
 
 ## GitHub CI 结果
 
-未触发。iOS Build + XCTest 需在 macOS runner 上跑，等授权后执行。
+| run | 提交 | 结论 | 说明 |
+|---|---|---|---|
+| `release-validation.yml` 41381773715 | `c44f1e9` | **success** | 首次即过 |
+| `ios-build.yml` 41381761121 | `c44f1e9` | failure | `argument 'occurredAt' must precede argument 'aiFeedback'`，已修 |
+| `ios-build.yml` 41382507041 | `e0b2a93` | cancelled | 编译通过，`Run unit tests` 超 30 分钟未结束 |
+| `ios-build.yml` 41386378381 | `e0b2a93` | cancelled | 同上，`cancel` 请求 5 分钟未生效 |
+| `ios-build.yml` 41390367946 | `e0b2a93` | **success** | 588 tests / 0 failures |
+
+**关于「Run unit tests 挂起」**：属于既有间歇性问题，与本次改动无因果关系。同行证据——改动前的 `1c6784a` 有两次运行：41320336610 **success 12 分钟**、41315836247 **cancelled 361 分钟**；`f83d5a5` 也有一次失败耗时 73 分钟。同一提交的成功运行里测试步骤只用 180 秒，说明不是新增测试拖慢，而是 runner 侧偶发卡死。应对方式：取消后重新 `workflow_dispatch`，重跑可恢复。
+
+**环境备注**：本机 `api.github.com` 经 HTTP 代理（127.0.0.1:7897）会 TLS 握手失败或 502/EOF，
+改用 `ALL_PROXY=socks5://127.0.0.1:7897` 后 `gh` 全部正常；`git push` 同样需要
+`-c http.proxy=socks5h://127.0.0.1:7897`。
+
 
 ## 未解决风险
 
-1. **iOS 编译与 XCTest 未验证**：新增/改动的 Swift 仅做过静态核查（API 存在性、SQL 占位符、构造点枚举），真实编译结果以 CI 为准。
-2. `LocalImageRecognitionUseCase` 新增 `LocalExpenseRepository` 注入；快捷指令后台路径每次 `makeDefault` 会多构造一个 repository 并多跑两次月度查询。
-3. `TodayView` 现在有 5 个 `.sheet` 挂在同一层级，沿用现有写法，但多 sheet 并存的实际表现需真机确认。
-4. 通用域 `staged` 的文案用 `isPending: false`，与后端「已归档到」措辞一致，但记录实际仍在待确认状态，措辞可能偏乐观（PWA 同样如此，暂不改）。
+1. ~~iOS 编译与 XCTest 未验证~~ → 已由 run 41390367946 覆盖（Build 通过，588 tests 0 failures）。
+2. `LocalImageRecognitionUseCase` 新增 `LocalExpenseRepository` 注入；快捷指令后台路径每次 `makeDefault` 会多构造一个 repository 并多跑两次月度查询。测试未覆盖后台冷启动耗时。
+3. `TodayView` 现在有 5 个 `.sheet` 挂在同一层级，编译与单测通过，但多 sheet 并存的实际呈现需真机确认。
+4. 通用域 `staged` 的文案用 `isPending: false`，与后端「已归档到」措辞一致，但记录实际仍在待确认状态，措辞偏乐观（PWA 同样如此，暂不改）。
 5. BYOK 路径仍无 `ai_feedback` / `companion_message`，本次不覆盖。
+6. 通知折叠态实际显示行数、详情页卡片在 companion 缺失时的真实观感，均未真机验证。
 
 ## 对应提交
 
-待授权后填写。
+- `c44f1e9` feat(ios): 上传识别提示按域生成并对齐 PWA 反馈口径
+- `e0b2a93` fix(ios): 修正 nativeDetail 成员初始化参数顺序
 
