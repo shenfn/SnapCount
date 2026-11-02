@@ -458,16 +458,14 @@ final class LocalImageRecognitionUseCase {
                 occurredAt: recognized.occurredAt,
                 perceptualHash: perceptualHash
             )
-            let duplicateMatch = duplicateFacts.flatMap {
-                LocalFinancialDuplicateRule.findLikelyDuplicate($0, candidates: duplicateCandidates)
-            }
+            let duplicateMatch = LocalFinancialDuplicateRule.findLikelyDuplicate(
+                duplicateFacts, candidates: duplicateCandidates
+            )
             // 第二道只在图片判重没命中时才跑，与后端「先 perceptual 后 business」的顺序一致。
-            let businessDuplicate = duplicateMatch == nil
-                ? duplicateFacts.flatMap {
-                    LocalFinancialDuplicateRule.findBusinessDuplicate(
-                        $0, candidates: duplicateCandidates, now: createdAt
-                    )
-                }
+            let businessDuplicate: LocalFinancialDuplicateCandidate? = duplicateMatch == nil
+                ? LocalFinancialDuplicateRule.findBusinessDuplicate(
+                    duplicateFacts, candidates: duplicateCandidates, now: createdAt
+                )
                 : nil
             // PWA 在判重命中时把 companion 置空、改用「疑似重复」反馈，iOS 保持同一口径。
             let feedbackPayload = duplicateMatch == nil
