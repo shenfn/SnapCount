@@ -103,6 +103,10 @@
 - 全量 **609 tests / 0 failures / 1 skipped**（上一轮基线 588）
 - 新增 `LocalFinancialDuplicateRuleTests` **21 条全部 passed**，单条 0.001–0.018 秒
 - `release-validation.yml` run 41404992039：success（`b571128`）
+- `ios-testflight.yml` run [41430606161](https://github.com/shenfn/SnapCount/actions/runs/41430606161)：**success**
+  - 提交 `6e7bd2e`，8m47s
+  - **TestFlight build 156**（上一轮 AI-FB-001 为 155）
+  - `UPLOAD SUCCEEDED with no errors`，Delivery UUID `99a4d103-2366-4ad2-a1b8-19516fbffd59`
 
 过程中三次编译失败，均为类型/参数顺序问题，已逐个修正：
 
