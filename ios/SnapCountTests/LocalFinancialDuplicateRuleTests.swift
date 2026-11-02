@@ -169,16 +169,16 @@ final class LocalFinancialDuplicateRuleTests: XCTestCase {
 
     func testBusinessDuplicateRequiresSamePaymentMethod() {
         XCTAssertNil(LocalFinancialDuplicateRule.findBusinessDuplicate(
-            facts(occurredAt: baseDate, payment: "余额宝"),
-            candidates: [candidate(occurredAt: baseDate, payment: "花呗")],
+            facts(payment: "余额宝", occurredAt: baseDate),
+            candidates: [candidate(payment: "花呗", occurredAt: baseDate)],
             now: baseDate
         ))
     }
 
     func testBusinessDuplicateSkippedWithoutPaymentMethod() {
         XCTAssertNil(LocalFinancialDuplicateRule.findBusinessDuplicate(
-            facts(occurredAt: baseDate, payment: nil),
-            candidates: [candidate(occurredAt: baseDate, payment: nil)],
+            facts(payment: nil, occurredAt: baseDate),
+            candidates: [candidate(payment: nil, occurredAt: baseDate)],
             now: baseDate
         ))
     }
