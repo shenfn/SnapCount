@@ -106,6 +106,10 @@ protocol LocalImageRecognitionProvider {
 struct LocalImageIntakeOutcome: Equatable {
     let result: LocalRecordIntakeOutcome
     let imageHash: String
+    /// 供通知横幅与 App 内结果浮层展示；nil 时调用方回退到旧写死文案。
+    var notificationText: String? = nil
+    /// 已解析的结构化反馈，供结果浮层直接渲染卡片。
+    var feedback: NativeAIFeedback? = nil
 }
 
 final class LocalImageRecognitionUseCase {
@@ -115,6 +119,7 @@ final class LocalImageRecognitionUseCase {
     private let provider: LocalImageRecognitionProvider
     private let isRecognitionRequestCurrent: @MainActor () -> Bool
     private let pendingRepository: LocalPendingFinancialRepository?
+    private let expenseRepository: LocalExpenseRepositoryProtocol?
 
     init(
         localRecordUseCase: LocalRecordUseCaseProtocol,
@@ -122,7 +127,8 @@ final class LocalImageRecognitionUseCase {
         intakeRepository: LocalImageIntakeRepository,
         provider: LocalImageRecognitionProvider,
         isRecognitionRequestCurrent: @escaping @MainActor () -> Bool = { true },
-        pendingRepository: LocalPendingFinancialRepository? = nil
+        pendingRepository: LocalPendingFinancialRepository? = nil,
+        expenseRepository: LocalExpenseRepositoryProtocol? = nil
     ) {
         self.localRecordUseCase = localRecordUseCase
         self.imageStore = imageStore
@@ -130,6 +136,7 @@ final class LocalImageRecognitionUseCase {
         self.provider = provider
         self.isRecognitionRequestCurrent = isRecognitionRequestCurrent
         self.pendingRepository = pendingRepository
+        self.expenseRepository = expenseRepository
     }
 
     static func makeDefault(
@@ -150,7 +157,8 @@ final class LocalImageRecognitionUseCase {
             intakeRepository: LocalImageIntakeRepository(database: database),
             provider: provider,
             isRecognitionRequestCurrent: isRecognitionRequestCurrent,
-            pendingRepository: LocalPendingFinancialRepository(database: database)
+            pendingRepository: LocalPendingFinancialRepository(database: database),
+            expenseRepository: try LocalExpenseRepository(database: database)
         )
     }
 
@@ -176,35 +184,77 @@ final class LocalImageRecognitionUseCase {
             let recordID = Self.uuidFromHash(imageHash)
             if let status = try pendingRepository?.processedStatus(profileID: profile.id, id: recordID) {
                 switch status {
-                case "pending":
-                    return LocalImageIntakeOutcome(result: .financialPending(recordID), imageHash: imageHash)
-                case "done", "converted":
-                    return LocalImageIntakeOutcome(result: .financialArchived(recordID), imageHash: imageHash)
+                case "pending", "done", "converted":
+                    // 幂等重传：文案与首次保持一致，所以从锚点行读回已存的反馈与金额。
+                    let row = try pendingRepository?.recordIgnoringStatus(profileID: profile.id, id: recordID)
+                    let composed = row.map { record in
+                        composeNotification(
+                            domainKey: record.preferredKind.rawValue,
+                            feedbackPayload: Self.decodeFeedback(record.aiFeedbackJSON),
+                            confidence: nil,
+                            companionMessage: record.companionMessage,
+                            amountMinor: record.amountMinor,
+                            merchantName: record.merchantName,
+                            category: record.preferredKind == .expense ? record.category : record.incomeCategory,
+                            sourceName: record.preferredKind == .income ? record.merchantName : nil,
+                            isPending: status == "pending",
+                            profileID: profile.id,
+                            dateKey: record.transactionDate
+                        )
+                    }
+                    return LocalImageIntakeOutcome(
+                        result: status == "pending" ? .financialPending(recordID) : .financialArchived(recordID),
+                        imageHash: imageHash,
+                        notificationText: composed?.text,
+                        feedback: composed?.feedback
+                    )
                 default:
                     // 已删除的财务事实按新图重新识别。
                     break
                 }
             }
             if let record = try await localRecordUseCase.record(id: recordID) {
+                let composed = composeNotification(for: record, profileID: profile.id)
                 return LocalImageIntakeOutcome(
                     result: .archived(LocalRecordOutcome(record: record, profileID: profile.id)),
-                    imageHash: imageHash
+                    imageHash: imageHash,
+                    notificationText: composed.text,
+                    feedback: composed.feedback
                 )
             }
             if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
                staging.status == .pendingReview {
+                let payload = (try? LocalRecordCodec.decode(staging.payloadJSON)) ?? [:]
+                let composed = composeNotification(
+                    domainKey: staging.domainKey,
+                    feedbackPayload: payload.dictionary("ai_feedback"),
+                    confidence: nil,
+                    companionMessage: payload.string("companion_message"),
+                    amountMinor: nil,
+                    merchantName: nil,
+                    category: nil,
+                    sourceName: nil,
+                    isPending: false,
+                    profileID: profile.id,
+                    dateKey: staging.recordDate
+                )
                 return LocalImageIntakeOutcome(
                     result: .staged(LocalStagingOutcome(record: staging, profileID: profile.id)),
-                    imageHash: imageHash
+                    imageHash: imageHash,
+                    notificationText: composed.text,
+                    feedback: composed.feedback
                 )
             }
             if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
                staging.status == .archived,
                let targetRecordID = staging.targetRecordID,
                let record = try await localRecordUseCase.record(id: targetRecordID) {
+                let composed = composeNotification(for: record, profileID: profile.id)
                 return LocalImageIntakeOutcome(
                     result: .archived(LocalRecordOutcome(record: record, profileID: profile.id)),
-                    imageHash: imageHash
+                    imageHash: imageHash,
+                    notificationText: composed.text,
+                    feedback: composed.feedback
                 )
             }
         }
@@ -395,7 +445,9 @@ final class LocalImageRecognitionUseCase {
                 platform: recognizedPayload.string("platform"),
                 category: recognizedPayload.string("category"),
                 paymentMethod: recognizedPayload.string("payment_method"),
-                incomeCategory: recognizedPayload.string("income_category"))
+                incomeCategory: recognizedPayload.string("income_category"),
+                companionMessage: recognized.companionMessage,
+                aiFeedbackJSON: Self.encodeFeedback(recognized.aiFeedback))
             let autoArchive = LocalFinancialAutoArchiveRule.shouldArchive(
                 kind: kind, amountMinor: amount, payload: recognizedPayload, confidence: recognized.confidence)
             if autoArchive {
@@ -407,7 +459,27 @@ final class LocalImageRecognitionUseCase {
             try intakeRepository.markCompleted(id: intakeID, profileID: profileID,
                 operationID: operationID, cleanupMessage: nil, at: Date())
             let outcome: LocalRecordIntakeOutcome = autoArchive ? .financialArchived(id) : .financialPending(id)
-            return LocalImageIntakeOutcome(result: outcome, imageHash: imageHash)
+            let composed = composeNotification(
+                domainKey: recognized.domainKey,
+                feedbackPayload: recognized.aiFeedback,
+                confidence: recognized.confidence,
+                companionMessage: recognized.companionMessage,
+                amountMinor: amount,
+                merchantName: merchantName,
+                category: kind == .expense
+                    ? recognizedPayload.string("category")
+                    : recognizedPayload.string("income_category"),
+                sourceName: kind == .income ? merchantName : nil,
+                isPending: !autoArchive,
+                profileID: profileID,
+                dateKey: recognized.recordDate
+            )
+            return LocalImageIntakeOutcome(
+                result: outcome,
+                imageHash: imageHash,
+                notificationText: composed.text,
+                feedback: composed.feedback
+            )
         }
         guard !recognized.domainKey.isEmpty,
               !recognized.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -462,11 +534,106 @@ final class LocalImageRecognitionUseCase {
             at: Date()
         )
         _ = try? localRecordUseCase.retryPendingImageCleanups()
-        return LocalImageIntakeOutcome(result: result, imageHash: imageHash)
+        let composed = composeNotification(
+            domainKey: recognized.domainKey,
+            feedbackPayload: recognized.aiFeedback,
+            confidence: recognized.confidence,
+            companionMessage: recognized.companionMessage,
+            amountMinor: nil,
+            merchantName: nil,
+            category: nil,
+            sourceName: nil,
+            isPending: false,
+            profileID: profileID,
+            dateKey: recordDate
+        )
+        return LocalImageIntakeOutcome(
+            result: result,
+            imageHash: imageHash,
+            notificationText: composed.text,
+            feedback: composed.feedback
+        )
     }
 
     private static func intakeID(profileID: UUID, imageHash: String) -> String {
         "\(profileID.uuidString)-\(imageHash)"
+    }
+
+    /// 反馈以 JSON 文本落一列，避免为字段集合再拆表；读回见 `LocalPendingFinancialRepository.feedbackPayload`。
+    private static func encodeFeedback(_ payload: [String: AnyCodable]?) -> String? {
+        guard let payload, !payload.isEmpty,
+              let data = try? JSONEncoder().encode(payload) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func decodeFeedback(_ json: String?) -> [String: AnyCodable]? {
+        guard let json, !json.isEmpty, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode([String: AnyCodable].self, from: data)
+    }
+
+    /// 幂等重传时从已落库的通用域记录复现同一份文案。
+    private func composeNotification(
+        for record: LocalRecord,
+        profileID: UUID
+    ) -> (text: String, feedback: NativeAIFeedback?) {
+        let payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
+        return composeNotification(
+            domainKey: record.domainKey,
+            feedbackPayload: payload.dictionary("ai_feedback"),
+            confidence: nil,
+            companionMessage: payload.string("companion_message"),
+            amountMinor: nil,
+            merchantName: nil,
+            category: nil,
+            sourceName: nil,
+            isPending: false,
+            profileID: profileID,
+            dateKey: record.recordDate
+        )
+    }
+
+    /// 通知文案与结构化反馈一起产出：文案给横幅，反馈给 App 内结果浮层。
+    /// 汇总行取本地口径（已删除记录不计入），与 PWA 的展示格式一致。
+    private func composeNotification(
+        domainKey: String,
+        feedbackPayload: [String: AnyCodable]?,
+        confidence: Double?,
+        companionMessage: String?,
+        amountMinor: Int64?,
+        merchantName: String?,
+        category: String?,
+        sourceName: String?,
+        isPending: Bool,
+        profileID: UUID,
+        dateKey: String
+    ) -> (text: String, feedback: NativeAIFeedback?) {
+        var todaySpendMinor: Int64 = 0
+        var todaySpendCount = 0
+        var monthIncomeMinor: Int64 = 0
+        if let expenseRepository, let monthKey = NativeLocalDate.monthKey(from: dateKey) {
+            let expenses = (try? expenseRepository.expenses(profileID: profileID, monthKey: monthKey)) ?? []
+            let todays = expenses.filter { $0.transactionDate == dateKey }
+            todaySpendCount = todays.count
+            todaySpendMinor = todays.reduce(0) { $0 + $1.amountMinor }
+            monthIncomeMinor = ((try? expenseRepository.incomes(profileID: profileID, monthKey: monthKey)) ?? [])
+                .reduce(0) { $0 + $1.amountMinor }
+        }
+        let feedback = NativeAIFeedback(payload: feedbackPayload)
+        let text = LocalIntakeNotificationText.compose(LocalIntakeNotificationInput(
+            domainKey: domainKey,
+            feedback: feedback,
+            confidence: confidence,
+            companionMessage: companionMessage,
+            amountMinor: amountMinor,
+            merchantName: merchantName,
+            category: category,
+            sourceName: sourceName,
+            todaySpendMinor: todaySpendMinor,
+            todaySpendCount: todaySpendCount,
+            monthIncomeMinor: monthIncomeMinor,
+            isPending: isPending
+        ))
+        return (text, feedback)
     }
 
     private static func safeFailureMessage(for error: Error) -> String {

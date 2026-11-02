@@ -665,6 +665,11 @@ final class LocalDatabase {
             try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN payment_method TEXT")
             try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN income_category TEXT")
         }
+        // 待补全账单要保留 AI 陪伴文本与结构化反馈，否则待确认详情页只能显示空白。
+        migrator.registerMigration("local-v30-pending-ai-feedback") { database in
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN companion_message TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN ai_feedback TEXT")
+        }
         return migrator
     }
 }

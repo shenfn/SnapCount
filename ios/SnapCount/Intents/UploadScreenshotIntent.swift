@@ -74,16 +74,18 @@ struct UploadScreenshotIntent: AppIntent {
                         switch outcome.result {
                         case .archived, .financialArchived:
                             trialOutcome = .archived
+                            let text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
                             result = ShortcutUploadResult(
-                                displayText: "AI 识别结果已自动记录到本机。",
-                                notificationText: "AI 识别结果已自动记录到本机。",
+                                displayText: text,
+                                notificationText: text,
                                 route: "records"
                             )
                         case .staged, .financialPending:
                             trialOutcome = .staged
+                            let text = outcome.notificationText ?? "AI 识别结果已保存到本地收件箱，请打开芥子确认。"
                             result = ShortcutUploadResult(
-                                displayText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
-                                notificationText: "AI 识别结果已保存到本地收件箱，请打开芥子确认。",
+                                displayText: text,
+                                notificationText: text,
                                 route: "inbox"
                             )
                         }

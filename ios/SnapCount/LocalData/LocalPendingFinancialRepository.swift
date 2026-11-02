@@ -18,6 +18,8 @@ struct LocalPendingFinancialRecord: Equatable {
     var category: String? = nil
     var paymentMethod: String? = nil
     var incomeCategory: String? = nil
+    var companionMessage: String? = nil
+    var aiFeedbackJSON: String? = nil
 }
 
 /// LF-037.31/41/44. The original transaction, target and ledger change together.
@@ -43,13 +45,14 @@ final class LocalPendingFinancialRepository {
                 INSERT INTO local_pending_transactions
                 (id, profile_id, amount_minor, currency, merchant_name, transaction_date,
                  transaction_time, occurred_at, created_at, image_path, image_hash, preferred_kind,
-                 platform, category, payment_method, income_category, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                 platform, category, payment_method, income_category, companion_message, ai_feedback, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """, arguments: [record.id.uuidString, record.profileID.uuidString,
                     record.amountMinor, record.currency, record.merchantName,
                     record.transactionDate, record.transactionTime, record.occurredAt,
                     record.createdAt, record.imagePath, record.imageHash, record.preferredKind.rawValue,
-                    record.platform, record.category, record.paymentMethod, record.incomeCategory])
+                    record.platform, record.category, record.paymentMethod, record.incomeCategory,
+                    record.companionMessage, record.aiFeedbackJSON])
         }
     }
 
@@ -113,13 +116,15 @@ final class LocalPendingFinancialRepository {
                 INSERT INTO local_pending_transactions
                 (id, profile_id, amount_minor, currency, merchant_name, transaction_date,
                  transaction_time, occurred_at, created_at, image_path, image_hash, preferred_kind,
-                 platform, category, payment_method, income_category, status, target_kind, target_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 platform, category, payment_method, income_category, companion_message, ai_feedback,
+                 status, target_kind, target_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [record.id.uuidString, record.profileID.uuidString,
                     record.amountMinor, record.currency, record.merchantName,
                     record.transactionDate, record.transactionTime, record.occurredAt,
                     record.createdAt, record.imagePath, record.imageHash, record.preferredKind.rawValue,
                     record.platform, record.category, record.paymentMethod, record.incomeCategory,
+                    record.companionMessage, record.aiFeedbackJSON,
                     targetKind == "expense" ? "done" : "converted", targetKind, targetID.uuidString])
             return targetID
         }
@@ -129,6 +134,17 @@ final class LocalPendingFinancialRepository {
     func processedStatus(profileID: UUID, id: UUID) throws -> String? {
         try database.writer.read { db in
             try String.fetchOne(db, sql: "SELECT status FROM local_pending_transactions WHERE id = ? AND profile_id = ?", arguments: [id.uuidString, profileID.uuidString])
+        }
+    }
+
+    /// 幂等重传要复现首次的通知文案，这里不按 status 过滤。
+    func recordIgnoringStatus(profileID: UUID, id: UUID) throws -> LocalPendingFinancialRecord? {
+        try database.writer.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM local_pending_transactions WHERE id = ? AND profile_id = ?",
+                arguments: [id.uuidString, profileID.uuidString]
+            ).map(Self.record)
         }
     }
 
@@ -194,6 +210,7 @@ final class LocalPendingFinancialRepository {
     func nativeDetail(profileID: UUID, id: UUID, imageStore: LocalImageStore) throws -> NativeRecordDetail? {
         guard let source = try record(profileID: profileID, id: id) else { return nil }
         let amount = Double(source.amountMinor) / 100
+        let feedbackPayload = Self.feedbackPayload(from: source.aiFeedbackJSON)
         return NativeRecordDetail(id: "expense/\(id.uuidString)", rawId: id.uuidString, kind: source.preferredKind.rawValue,
             title: source.merchantName, subtitle: source.transactionDate,
             value: String(format: "¥%.2f", amount), detailRows: [],
@@ -201,10 +218,18 @@ final class LocalPendingFinancialRepository {
             imagePath: source.imagePath, imageHash: source.imageHash, amount: amount,
             merchantName: source.merchantName, platform: source.platform, category: source.category,
             paymentMethod: source.paymentMethod,
-            recordDate: source.transactionDate, note: nil, companionMessage: nil, accountId: nil,
-            systemImage: "creditcard", payload: nil,
+            recordDate: source.transactionDate, note: nil, companionMessage: source.companionMessage, accountId: nil,
+            systemImage: "creditcard",
+            payload: feedbackPayload.map { ["ai_feedback": AnyCodable($0.mapValues(\.value))] },
+            aiFeedback: NativeAIFeedback(payload: feedbackPayload),
             occurredAt: source.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
             transactionTime: source.transactionTime, source: "local", status: "pending")
+    }
+
+    /// 待补全行里的反馈以 JSON 文本存一列，读回时还原成 payload 字典。
+    private static func feedbackPayload(from json: String?) -> [String: AnyCodable]? {
+        guard let json, !json.isEmpty, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode([String: AnyCodable].self, from: data)
     }
 
     func delete(profileID: UUID, id: UUID, at now: Date = Date()) throws {
@@ -233,6 +258,7 @@ final class LocalPendingFinancialRepository {
             occurredAt: row["occurred_at"], createdAt: row["created_at"], imagePath: row["image_path"], imageHash: row["image_hash"],
             preferredKind: NativePendingEntryKind(rawValue: row["preferred_kind"]) ?? .expense,
             platform: row["platform"], category: row["category"],
-            paymentMethod: row["payment_method"], incomeCategory: row["income_category"])
+            paymentMethod: row["payment_method"], incomeCategory: row["income_category"],
+            companionMessage: row["companion_message"], aiFeedbackJSON: row["ai_feedback"])
     }
 }

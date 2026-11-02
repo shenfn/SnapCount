@@ -11,6 +11,9 @@ struct TodayView: View {
     @State private var uploadMessage: String?
     @State private var uploadMessageIsError = false
     @State private var showUploadResult = false
+    @State private var intakeFeedback: NativeAIFeedback?
+    @State private var showIntakeResult = false
+    @State private var intakeResultRoute: AppOverlay?
     @State private var showWidgetManager = false
     @State private var showDatePicker = false
     @State private var selectedDate = Date()
@@ -176,6 +179,20 @@ struct TodayView: View {
         .alert(uploadMessageIsError ? "上传失败" : "上传完成", isPresented: $showUploadResult) {
             Button("好", role: .cancel) {}
         } message: { Text(uploadMessage ?? "") }
+        .sheet(isPresented: $showIntakeResult) {
+            LocalIntakeResultSheet(
+                notificationText: uploadMessage ?? "",
+                feedback: intakeFeedback,
+                isError: false,
+                onViewRecord: {
+                    showIntakeResult = false
+                    if let route = intakeResultRoute { appState.presentedOverlay = route }
+                },
+                onDismiss: { showIntakeResult = false }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
         .task {
             if appState.accounts.isEmpty { await appState.loadAccounts() }
         }
@@ -667,10 +684,13 @@ struct TodayView: View {
             )
             switch localOutcome.result {
             case .archived, .financialArchived:
-                uploadMessage = "AI 识别结果已按高置信度规则自动记录到本机。"
+                uploadMessage = localOutcome.notificationText ?? "AI 识别结果已按高置信度规则自动记录到本机。"
+                intakeResultRoute = .records
             case .staged, .financialPending:
-                uploadMessage = "AI 识别结果已保存到本地收件箱，请确认后归档。"
+                uploadMessage = localOutcome.notificationText ?? "AI 识别结果已保存到本地收件箱，请确认后归档。"
+                intakeResultRoute = .inbox
             }
+            intakeFeedback = localOutcome.feedback
             uploadMessageIsError = false
             await appState.refreshLocalRecognitionProjection()
         } catch {
@@ -682,7 +702,12 @@ struct TodayView: View {
             uploadMessageIsError = true
             return
         }
-        showUploadResult = true
+        // 识别成功走结果浮层（含 AI 卡片）；失败保留系统 alert。
+        if uploadMessageIsError {
+            showUploadResult = true
+        } else {
+            showIntakeResult = true
+        }
     }
 
     private static let fullDateFormatter: DateFormatter = {

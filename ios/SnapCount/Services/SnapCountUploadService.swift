@@ -266,10 +266,20 @@ struct ShortcutUploadResult {
     }
 
     var notificationBody: String {
-        let compact = notificationText
-            .split(whereSeparator: \.isNewline)
-            .joined(separator: " ")
-        return compact.count > 160 ? "\(compact.prefix(157))..." : compact
+        // 保留换行：按域生成的文案本来就是多行，拍平会把 companion 与事实行糊成一句。
+        // 无 companion 时 PWA 会输出 5 行（反馈三行 + 域事实两行），这里不预裁行，
+        // 只守住 160 字预算，折叠/展开几行交给系统决定。
+        var lines: [String] = []
+        var budget = 160
+        for raw in notificationText.split(whereSeparator: \.isNewline) {
+            guard budget > 0 else { break }
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+            let clipped = line.count > budget ? String(line.prefix(budget)) : line
+            lines.append(clipped)
+            budget -= clipped.count + 1
+        }
+        return lines.joined(separator: "\n")
     }
 
     var compactDisplayText: String {
