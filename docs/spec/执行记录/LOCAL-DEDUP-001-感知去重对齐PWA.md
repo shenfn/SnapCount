@@ -131,3 +131,103 @@
 - `64a4ccb` fix(ios): 修正收入指纹取错类型与业务判重后缀位置
 - `e8cf347` fix(ios): duplicateFacts 非 Optional
 - `0022170` fix(test): 修正判重用例的参数顺序
+
+---
+
+# 2026-11-02 夜间修复：判重从头到尾没生效
+
+真机反馈「重新截图同一账单还是记了两条」，逐层排查后确认是三处独立缺陷叠加，
+其中前两处让判重在任何输入下都不可能命中。
+
+## 缺陷一：仓库从未注入
+
+`AppState` 构造 `LocalImageRecognitionUseCase` 时只传了 `pendingRepository`，
+`duplicateReviewRepository` 落到默认值 `nil`。`duplicateCandidates` 因此在
+`guard let repository else { return [] }` 处直接返回空数组，两道判重都拿空候选。
+
+只有 `LocalImageRecognitionUseCase.makeDefault` 和单测里手动传了仓库，
+App 主流程（相册/拍照/重试三条入口）全都没接上。
+
+609 个测试全绿掩盖了这一点：测试覆盖的是规则函数和仓库本身，没有一条验证装配。
+
+## 缺陷二：时间格式对不上，候选时间恒为 nil
+
+`combinedOccurrence` 用 `DateFormatter("yyyy-MM-dd HH:mm")` 解析库里的
+`transaction_date` + `transaction_time`，而后端 `record_time` 是 `18:49:57`。
+带秒的输入解析失败返回 nil，`findBusinessDuplicate` 里
+`guard let referenceTime = candidate.facts.occurredAt else { return false }`
+随即否决——即使注入正确，3 分钟判重也永远不命中。
+
+同时这里还有时区错位：账单存的是墙上时间，`occurredAt` 是带 `+08:00` 的绝对时刻，
+拿 `TimeZone.current` 解析会和绝对时刻整体差一个时区偏移（CI 跑在 UTC，差 8 小时）。
+
+修法是新增 `LocalFinancialDuplicateRule.wallClock(date:time:)`，
+手写解析 `HH:mm` / `HH:mm:ss` 两种格式，统一映射到 UTC 伪时间轴只比墙上时间。
+`duplicateFacts` 也改用 `recordDate + recordTime` 构造，不再读 `occurredAt`。
+
+## 缺陷三：候选查询把历史记录挡在外面
+
+三处候选 SQL 都带 `AND perceptual_hash IS NOT NULL`。`local-v31` 迁移只加列、
+没有回填，升级前录入的账 `perceptual_hash` 全是 NULL，因此全部被排除。
+这个条件本意只约束感知判重，实际把业务层判重一起掐死了。
+
+已去掉该条件；感知判重侧仍由 `guard let currentHash` 和
+`hammingDistance` 的 nil 语义自然跳过，不会拿缺失指纹蒙一个距离。
+
+## 缺陷四：aHash 对重新截图没有鉴别力
+
+按 `LocalPerceptualHash` 同一套算法（128px 缩略图 → 8×8 灰度均值二值化）
+对真实截图做对照实验：
+
+| 扰动 | 汉明距离 |
+|---|---|
+| 重压 JPEG q60 | 0 |
+| 状态栏时间变化 | 0 |
+| 亮度 ±6% | 0–2 |
+| 顶部/底部横幅替换 | 0 |
+| 整段详情区抹白 | 0 |
+| 金额 15.00 → 88.00 | 0 |
+| 商家名改掉 | 0 |
+| 整体平移 40px | 10–20 |
+| 缩放 2% | 10 |
+| 两张列表页截图（4 条 vs 6 条） | 11 |
+
+8×8 网格只保留整图布局，账单内容改动影响不到格子均值，而任何滚动/缩放都跨格。
+阈值 5 因此两头不靠：调高会误判（不同账单距离本来就是 0），保持 5 则永远漏判。
+
+PWA 能用这套是因为它拦的是「相册选同一张图重复上传」，那种情况距离为 0；
+iOS 是现场重新截图，场景本身不等价。
+
+## 口径变更：业务层判重改为阻断
+
+原先 `findBusinessDuplicate` 命中只给通知加「· 疑似 3 分钟内重复」后缀，照常归档。
+既然重新截图这条路只能靠字段判重兜底，它必须和感知判重一样具备阻断力：
+
+- 两道任一命中 → `autoArchive = false`，落待确认并写 `review_reason = possible_duplicate`
+- companion 置空，通知改用固定两行「这张图可能和已有记录重复 / 图片已保留并等待确认」
+- 删掉因此变成孤儿的 `appendingBusinessDuplicateSuffix`
+
+时间窗维持 PWA 的 3 分钟（`businessWindow`），感知判重的 10 分钟窗未改动。
+
+## 顺带修复
+
+`expenseRepository` 同样没注入，导致通知文案里的「今天已花 / 本月收入」恒为 0。
+已在 `AppState` 两处构造点一并补上。
+
+## 验证状态
+
+- `ios-build.yml` run [41472681824](https://github.com/shenfn/SnapCount/actions/runs/41472681824)：**success**
+- 新增用例全部 passed：
+  - `LocalImageRecognitionTests.testLF03731DuplicateScreenshotStopsAtPending`（整条链路：首张归档、第二张待确认）
+  - `LocalFinancialDuplicateRuleTests.testBusinessDuplicateMatchesCandidateWithoutPerceptualHash`
+  - `LocalFinancialDuplicateRuleTests.testPerceptualRuleStillSkipsCandidateWithoutHash`
+  - `LocalFinancialDuplicateRuleTests.testWallClockAcceptsTimeWithAndWithoutSeconds`
+  - `LocalFinancialDuplicateRuleTests.testBusinessDuplicateMatchesWhenTimeCarriesSeconds`
+- 中间一次失败（run 41469721593）就是集成用例抓到的时间格式问题，非环境抖动
+
+## 未解决风险
+
+- 3 分钟窗之外重新截图仍然会记两条。用户选择了 PWA 口径，长窗口未启用。
+- 收入侧只走感知判重，而感知判重已被证明对重新截图无效，等于收入没有重复保护。
+- 库里已有的重复记录不会被这次修复清理，需要用户手动删除。
+- 真机未验证：升级后连续截同一账单是否稳定停在待确认。
