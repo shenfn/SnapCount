@@ -467,11 +467,15 @@ final class LocalImageRecognitionUseCase {
                     duplicateFacts, candidates: duplicateCandidates, now: createdAt
                 )
                 : nil
+            // 两道任一命中都阻断自动归档。8×8 aHash 只对整图位移敏感、对账单内容没有
+            // 鉴别力（同一张详情页平移 40px 距离就到 10+），重新截图这条路上真正起作用的
+            // 是「3 分钟内同金额同商家」，所以它必须和感知判重一样具备阻断力。
+            let isDuplicate = duplicateMatch != nil || businessDuplicate != nil
             // PWA 在判重命中时把 companion 置空、改用「疑似重复」反馈，iOS 保持同一口径。
-            let feedbackPayload = duplicateMatch == nil
-                ? recognized.aiFeedback
-                : Self.duplicateFeedbackPayload(for: recognized)
-            let companionMessage = duplicateMatch == nil ? recognized.companionMessage : nil
+            let feedbackPayload = isDuplicate
+                ? Self.duplicateFeedbackPayload(for: recognized)
+                : recognized.aiFeedback
+            let companionMessage = isDuplicate ? nil : recognized.companionMessage
 
             let financial = LocalPendingFinancialRecord(id: id, profileID: profileID,
                 amountMinor: amount, currency: "CNY", merchantName: merchantName,
@@ -486,8 +490,8 @@ final class LocalImageRecognitionUseCase {
                 companionMessage: companionMessage,
                 aiFeedbackJSON: Self.encodeFeedback(feedbackPayload),
                 perceptualHash: perceptualHash,
-                reviewReason: duplicateMatch == nil ? nil : "possible_duplicate")
-            let autoArchive = duplicateMatch == nil && LocalFinancialAutoArchiveRule.shouldArchive(
+                reviewReason: isDuplicate ? "possible_duplicate" : nil)
+            let autoArchive = !isDuplicate && LocalFinancialAutoArchiveRule.shouldArchive(
                 kind: kind, amountMinor: amount, payload: recognizedPayload, confidence: recognized.confidence)
             if autoArchive {
                 try pendingRepository.archiveDirectly(financial)
@@ -500,7 +504,7 @@ final class LocalImageRecognitionUseCase {
             let outcome: LocalRecordIntakeOutcome = autoArchive ? .financialArchived(id) : .financialPending(id)
             // PWA 判重命中时通知是固定两行（`index.ts:7321`），不参与 feedback 的三行拼装；
             // 「疑似重复」那条 ai_feedback 只用于待处理页与卡片。
-            let baseComposed: (text: String, feedback: NativeAIFeedback?) = duplicateMatch != nil
+            let composed: (text: String, feedback: NativeAIFeedback?) = isDuplicate
                 ? (text: Self.duplicateNotificationText, feedback: NativeAIFeedback(payload: feedbackPayload))
                 : composeNotification(
                     domainKey: recognized.domainKey,
@@ -516,12 +520,6 @@ final class LocalImageRecognitionUseCase {
                     isPending: !autoArchive,
                     profileID: profileID,
                     dateKey: recognized.recordDate
-                )
-            let composed = businessDuplicate == nil
-                ? baseComposed
-                : (
-                    text: Self.appendingBusinessDuplicateSuffix(baseComposed.text),
-                    feedback: baseComposed.feedback
                 )
             return LocalImageIntakeOutcome(
                 result: outcome,
@@ -646,19 +644,6 @@ final class LocalImageRecognitionUseCase {
             occurredDate: recordDate,
             perceptualHash: perceptualHash
         )
-    }
-
-    /// 业务层判重只改通知里的金额行，与后端 `index.ts:7815` 一致：
-    /// 后端改的是 `_expenseNotif` 这一行，companion / 反馈行不受影响。
-    private static func appendingBusinessDuplicateSuffix(_ text: String) -> String {
-        var lines = text.components(separatedBy: "\n")
-        guard !lines.isEmpty else { return text }
-        let index = lines.firstIndex { $0.hasPrefix("💸 -") || $0.hasPrefix("⚠️ -") } ?? 0
-        let stripped = lines[index].replacingOccurrences(
-            of: #"^[💸⚠️]\s*"#, with: "", options: .regularExpression
-        )
-        lines[index] = "⚠️ \(stripped) · 疑似 3 分钟内重复"
-        return lines.joined(separator: "\n")
     }
 
     /// PWA 判重命中的通知是固定两行（`index.ts:7321`），第二行对应 keepSourceImages=true 的口径。

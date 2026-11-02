@@ -191,7 +191,7 @@ final class LocalFinancialDuplicateReviewRepository {
             SELECT id, amount_minor, merchant_name, platform, payment_method,
                    transaction_date, transaction_time, perceptual_hash, created_at
             FROM local_expenses
-            WHERE profile_id = ? AND deleted_at IS NULL AND perceptual_hash IS NOT NULL
+            WHERE profile_id = ? AND deleted_at IS NULL
               AND transaction_date BETWEEN ? AND ?
             """, arguments: [profileID.uuidString, from, to])
         return rows.compactMap { row in
@@ -223,7 +223,7 @@ final class LocalFinancialDuplicateReviewRepository {
             SELECT id, amount_minor, source_name, occurred_at, income_date,
                    perceptual_hash, created_at
             FROM local_income_records
-            WHERE profile_id = ? AND deleted_at IS NULL AND perceptual_hash IS NOT NULL
+            WHERE profile_id = ? AND deleted_at IS NULL
               AND income_date BETWEEN ? AND ?
             """, arguments: [profileID.uuidString, from, to])
         return rows.compactMap { row in
@@ -253,7 +253,7 @@ final class LocalFinancialDuplicateReviewRepository {
             SELECT id, amount_minor, merchant_name, preferred_kind, platform, payment_method,
                    occurred_at, transaction_date, transaction_time, perceptual_hash, created_at
             FROM local_pending_transactions
-            WHERE profile_id = ? AND status = 'pending' AND perceptual_hash IS NOT NULL
+            WHERE profile_id = ? AND status = 'pending'
               AND transaction_date BETWEEN ? AND ?
             """, arguments: [profileID.uuidString, from, to])
         return rows.compactMap { row in

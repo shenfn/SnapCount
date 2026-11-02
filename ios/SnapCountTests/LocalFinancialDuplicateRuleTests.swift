@@ -199,6 +199,24 @@ final class LocalFinancialDuplicateRuleTests: XCTestCase {
         ))
     }
 
+    /// v31 之前记账的历史记录没有感知指纹，业务层判重不能因此漏掉它们
+    /// （候选查询原先带 `perceptual_hash IS NOT NULL`，把这类记录全排除了）。
+    func testBusinessDuplicateMatchesCandidateWithoutPerceptualHash() {
+        XCTAssertNotNil(LocalFinancialDuplicateRule.findBusinessDuplicate(
+            facts(occurredAt: baseDate),
+            candidates: [candidate(occurredAt: baseDate, hash: nil)],
+            now: baseDate
+        ))
+    }
+
+    /// 感知判重对缺失指纹的候选仍然按不命中处理，不能靠 nil 蒙一个距离出来。
+    func testPerceptualRuleStillSkipsCandidateWithoutHash() {
+        XCTAssertNil(LocalFinancialDuplicateRule.findLikelyDuplicate(
+            facts(hash: "ffffffffffffffff"),
+            candidates: [candidate(hash: nil)]
+        ))
+    }
+
     // MARK: - 夹具
 
     private func facts(
