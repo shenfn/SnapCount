@@ -69,6 +69,46 @@ final class LocalImageRecognitionTests: XCTestCase {
             .expenses(profileID: profile.id, monthKey: "2026-09").count, 1)
     }
 
+    /// 同一笔账单重新截图：首张自动归档，第二张必须停在待确认。
+    /// 这条覆盖整条装配链路（UseCase → 候选查询 → 两道判重 → stage）。只测规则函数的
+    /// 单测发现不了「仓库没注入」这种静默失效——两边都返回空候选，判重永远不命中。
+    func testLF03731DuplicateScreenshotStopsAtPending() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let payload: [String: AnyCodable] = [
+            "amount": AnyCodable(15),
+            "merchant_name": AnyCodable("巡面（杭州滨江江陵路店）"),
+            "platform": AnyCodable("美团"),
+            "category": AnyCodable("food"),
+            "payment_method": AnyCodable("兴业银行储蓄卡")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 0.92, payload: payload, missingFields: []))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending,
+            duplicateReviewRepository: LocalFinancialDuplicateReviewRepository(database: context.database))
+
+        let first = try await recognition.ingest(
+            imageData: Data("bill-screenshot-a".utf8), captureKind: "screenshot", filename: "bill.png")
+        guard case .financialArchived = first.result else {
+            return XCTFail("首张账单四要素齐全时应直接归档")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+
+        // 重新截图后字节完全不同，精确哈希挡不住，只能靠字段判重。
+        let second = try await recognition.ingest(
+            imageData: Data("bill-screenshot-b".utf8), captureKind: "screenshot", filename: "bill.png")
+        guard case .financialPending(let pendingID) = second.result else {
+            return XCTFail("同金额、同商家、同支付方式在 3 分钟内重复出现，不能自动归档成第二笔")
+        }
+        let staged = try XCTUnwrap(pending.record(profileID: profile.id, id: pendingID))
+        XCTAssertEqual(staged.reviewReason, "possible_duplicate")
+        XCTAssertEqual(try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09").count, 1)
+    }
+
     func testLF03731LowConfidenceFinanceFactsStayPending() async throws {
         let context = try makeContext()
         defer { cleanup(context) }

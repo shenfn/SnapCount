@@ -1404,7 +1404,8 @@ final class AppState: ObservableObject {
             intakeRepository: localImageIntakeRepository,
             provider: provider,
             isRecognitionRequestCurrent: isRecognitionRequestCurrent,
-            pendingRepository: localPendingFinancialRepository
+            pendingRepository: localPendingFinancialRepository,
+            duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository()
         )
         return try await recognition.ingest(
             imageData: data,
@@ -1618,7 +1619,8 @@ final class AppState: ObservableObject {
                 intakeRepository: localImageIntakeRepository,
                 provider: provider,
                 isRecognitionRequestCurrent: isRecognitionRequestCurrent,
-                pendingRepository: localPendingFinancialRepository
+                pendingRepository: localPendingFinancialRepository,
+                duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository()
             )
             _ = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
             await refreshFailedLocalImageIntakes()
@@ -6964,6 +6966,12 @@ final class AppState: ObservableObject {
     private static func defaultLocalImageIntakeRepository() -> LocalImageIntakeRepository? {
         guard let database = try? LocalDatabase() else { return nil }
         return LocalImageIntakeRepository(database: database)
+    }
+
+    /// 判重候选查询依赖这个仓库；漏注入会让两道判重都拿到空候选、静默失效。
+    private static func defaultFinancialDuplicateReviewRepository() -> LocalFinancialDuplicateReviewRepository? {
+        guard let database = try? LocalDatabase() else { return nil }
+        return LocalFinancialDuplicateReviewRepository(database: database)
     }
 
     private static func defaultLocalRecordPortability() -> LocalRecordPortability? {
