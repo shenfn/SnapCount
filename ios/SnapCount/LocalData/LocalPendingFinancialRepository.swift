@@ -221,9 +221,9 @@ final class LocalPendingFinancialRepository {
             recordDate: source.transactionDate, note: nil, companionMessage: source.companionMessage, accountId: nil,
             systemImage: "creditcard",
             payload: feedbackPayload.map { ["ai_feedback": AnyCodable($0.mapValues(\.value))] },
-            aiFeedback: NativeAIFeedback(payload: feedbackPayload),
             occurredAt: source.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
-            transactionTime: source.transactionTime, source: "local", status: "pending")
+            transactionTime: source.transactionTime, source: "local", status: "pending",
+            aiFeedback: NativeAIFeedback(payload: feedbackPayload))
     }
 
     /// 待补全行里的反馈以 JSON 文本存一列，读回时还原成 payload 字典。
