@@ -801,7 +801,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     income.accountID?.uuidString, income.amountMinor, income.currency,
                     income.sourceName, income.category, income.incomeDate,
                     income.occurredAt, income.note, income.createdAt, income.updatedAt,
-                    income.imagePath, income.imageHash, income.perceptualHash
+                    income.imagePath, income.imageHash, draft.perceptualHash
                 ])
             if let accountID = income.accountID {
                 try Self.insertIncomeEntry(

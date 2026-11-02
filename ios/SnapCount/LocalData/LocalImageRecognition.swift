@@ -650,15 +650,16 @@ final class LocalImageRecognitionUseCase {
         )
     }
 
-    /// 业务层判重只改通知首行，与后端 `index.ts:7815` 的处理一致：
-    /// 去掉已有的 `💸` / `⚠️` 前缀，换成 `⚠️` 并追加「疑似 3 分钟内重复」。
+    /// 业务层判重只改通知里的金额行，与后端 `index.ts:7815` 一致：
+    /// 后端改的是 `_expenseNotif` 这一行，companion / 反馈行不受影响。
     private static func appendingBusinessDuplicateSuffix(_ text: String) -> String {
         var lines = text.components(separatedBy: "\n")
         guard !lines.isEmpty else { return text }
-        let stripped = lines[0].replacingOccurrences(
+        let index = lines.firstIndex { $0.hasPrefix("💸 -") || $0.hasPrefix("⚠️ -") } ?? 0
+        let stripped = lines[index].replacingOccurrences(
             of: #"^[💸⚠️]\s*"#, with: "", options: .regularExpression
         )
-        lines[0] = "⚠️ \(stripped) · 疑似 3 分钟内重复"
+        lines[index] = "⚠️ \(stripped) · 疑似 3 分钟内重复"
         return lines.joined(separator: "\n")
     }
 
