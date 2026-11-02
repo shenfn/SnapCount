@@ -99,14 +99,31 @@
 
 ## 验证状态
 
-- 待补：iOS 编译与 XCTest 以 GitHub macOS CI 为准（Windows 无 Swift 工具链）。
+- `ios-build.yml` run [41408037862](https://github.com/shenfn/SnapCount/actions/runs/41408037862)：**success**
+- 全量 **609 tests / 0 failures / 1 skipped**（上一轮基线 588）
+- 新增 `LocalFinancialDuplicateRuleTests` **21 条全部 passed**，单条 0.001–0.018 秒
+- `release-validation.yml` run 41404992039：success（`b571128`）
+
+过程中三次编译失败，均为类型/参数顺序问题，已逐个修正：
+
+| 提交 | 问题 |
+|---|---|
+| `b571128` | 首版 |
+| `64a4ccb` | `insertIncome` 内部构造的是 `LocalIncome`，`perceptualHash` 要从 `draft` 取；业务判重后缀误加在首行（应加金额行） |
+| `e8cf347` | `duplicateFacts` 返回非 Optional，误用 `.flatMap` |
+| `0022170` | 测试里 `payment` 参数必须写在 `occurredAt` 之前 |
 
 ## 未解决风险
 
 - `LocalFinancialDuplicateReviewRepository` 每次识别多一次只读查询（三表，按 profile + 日期范围）。
 - 时间窗判定依赖 `transaction_time` 有值；只有日期没有时刻时退化为同日比较，
   与后端一致，但同一天两笔同金额同商家的真实交易会被误判为重复。这是 PWA 既有口径。
+- 两端判重结果不完全等价：iOS 只查本机历史，跨设备截过的同一笔查不到。
+- 真机未验证：aHash 在真实微信/支付宝截图上的距离分布、通知折叠表现。
 
 ## 对应提交
 
-待填写。
+- `b571128` feat(ios): 补感知与业务层判重
+- `64a4ccb` fix(ios): 修正收入指纹取错类型与业务判重后缀位置
+- `e8cf347` fix(ios): duplicateFacts 非 Optional
+- `0022170` fix(test): 修正判重用例的参数顺序
