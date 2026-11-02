@@ -1405,6 +1405,7 @@ final class AppState: ObservableObject {
             provider: provider,
             isRecognitionRequestCurrent: isRecognitionRequestCurrent,
             pendingRepository: localPendingFinancialRepository,
+            expenseRepository: Self.defaultRecognitionExpenseRepository(),
             duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository()
         )
         return try await recognition.ingest(
@@ -1620,6 +1621,7 @@ final class AppState: ObservableObject {
                 provider: provider,
                 isRecognitionRequestCurrent: isRecognitionRequestCurrent,
                 pendingRepository: localPendingFinancialRepository,
+                expenseRepository: Self.defaultRecognitionExpenseRepository(),
                 duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository()
             )
             _ = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
@@ -6972,6 +6974,13 @@ final class AppState: ObservableObject {
     private static func defaultFinancialDuplicateReviewRepository() -> LocalFinancialDuplicateReviewRepository? {
         guard let database = try? LocalDatabase() else { return nil }
         return LocalFinancialDuplicateReviewRepository(database: database)
+    }
+
+    /// 通知文案里的「今天已花 / 本月收入」靠它算；漏注入时这两个数字恒为 0。
+    private static func defaultRecognitionExpenseRepository() -> LocalExpenseRepositoryProtocol? {
+        guard let database = try? LocalDatabase(),
+              let repository = try? LocalExpenseRepository(database: database) else { return nil }
+        return repository
     }
 
     private static func defaultLocalRecordPortability() -> LocalRecordPortability? {

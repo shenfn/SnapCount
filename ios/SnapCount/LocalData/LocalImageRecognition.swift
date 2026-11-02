@@ -455,7 +455,7 @@ final class LocalImageRecognitionUseCase {
                 merchantName: merchantName,
                 payload: recognizedPayload,
                 recordDate: recognized.recordDate,
-                occurredAt: recognized.occurredAt,
+                recordTime: recognized.recordTime,
                 perceptualHash: perceptualHash
             )
             let duplicateMatch = LocalFinancialDuplicateRule.findLikelyDuplicate(
@@ -629,7 +629,7 @@ final class LocalImageRecognitionUseCase {
         merchantName: String,
         payload: [String: AnyCodable],
         recordDate: String,
-        occurredAt: String?,
+        recordTime: String?,
         perceptualHash: String?
     ) -> LocalFinancialDuplicateFacts {
         LocalFinancialDuplicateFacts(
@@ -640,7 +640,9 @@ final class LocalImageRecognitionUseCase {
                 : merchantName,
             platform: payload.string("platform"),
             paymentMethod: payload.string("payment_method"),
-            occurredAt: occurredAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            // 用账单自己的「日期 + 时刻」比较，不拿 occurredAt 的绝对时刻去比：
+            // 库里存的是墙上时间，带偏移的 ISO8601 在非东八区会整体错位。
+            occurredAt: LocalFinancialDuplicateRule.wallClock(date: recordDate, time: recordTime),
             occurredDate: recordDate,
             perceptualHash: perceptualHash
         )

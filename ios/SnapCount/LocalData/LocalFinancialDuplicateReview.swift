@@ -146,6 +146,26 @@ enum LocalFinancialDuplicateRule {
             && !currentPayment.isEmpty && !referencePayment.isEmpty && currentPayment == referencePayment
     }
 
+    /// 账单上的「日期 + 时刻」是当地的墙上时间，库里也是当字符串存的。
+    /// 不能拿它跟带时区偏移的绝对时刻直接比：CI 跑在 UTC、设备跑在东八区，
+    /// 同一个 08:30 会差 8 小时。这里统一映射到 UTC 伪时间轴，只比较墙上时间本身。
+    /// 时刻既可能是 `HH:mm` 也可能是 `HH:mm:ss`，两种都要能解析。
+    static func wallClock(date: String?, time: String?) -> Date? {
+        guard let date, let time, !time.isEmpty else { return nil }
+        let dayParts = date.split(separator: "-").compactMap { Int($0) }
+        let clockParts = time.split(separator: ":").compactMap { Int($0) }
+        guard dayParts.count == 3, clockParts.count >= 2 else { return nil }
+        var components = DateComponents()
+        components.year = dayParts[0]
+        components.month = dayParts[1]
+        components.day = dayParts[2]
+        components.hour = clockParts[0]
+        components.minute = clockParts[1]
+        components.second = clockParts.count > 2 ? clockParts[2] : 0
+        components.timeZone = TimeZone(identifier: "UTC")
+        return Calendar(identifier: .gregorian).date(from: components)
+    }
+
     private static func sameOccurrence(
         _ current: LocalFinancialDuplicateFacts,
         _ reference: LocalFinancialDuplicateFacts,
@@ -278,10 +298,9 @@ final class LocalFinancialDuplicateReviewRepository {
         }
     }
 
-    /// 记账表只存日期和时刻两列，拼回 `Date` 才能参与 10 分钟窗口判定。
+    /// 记账表只存日期和时刻两列，拼回墙上时间才能参与窗口判定。
     private static func combinedOccurrence(date: String?, time: String?) -> Date? {
-        guard let date, let time, !time.isEmpty else { return nil }
-        return occurrenceFormatter.date(from: "\(date) \(time)")
+        LocalFinancialDuplicateRule.wallClock(date: date, time: time)
     }
 
     private static func neighborDates(_ recordDate: String) -> (String, String) {
@@ -296,14 +315,6 @@ final class LocalFinancialDuplicateReviewRepository {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
-    private static let occurrenceFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return formatter
     }()
 }

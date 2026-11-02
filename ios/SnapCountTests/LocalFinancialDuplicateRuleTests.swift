@@ -217,6 +217,25 @@ final class LocalFinancialDuplicateRuleTests: XCTestCase {
         ))
     }
 
+    /// 后端的 `record_time` 带秒（`18:49:57`），库里 `transaction_time` 原样存。
+    /// 早先按 `yyyy-MM-dd HH:mm` 解析会整条返回 nil，导致候选时间永远缺失、业务判重永远不命中。
+    func testWallClockAcceptsTimeWithAndWithoutSeconds() throws {
+        let withSeconds = try XCTUnwrap(
+            LocalFinancialDuplicateRule.wallClock(date: "2026-11-02", time: "18:49:57"))
+        let withoutSeconds = try XCTUnwrap(
+            LocalFinancialDuplicateRule.wallClock(date: "2026-11-02", time: "18:49"))
+        XCTAssertEqual(withSeconds.timeIntervalSince(withoutSeconds), 57, accuracy: 1)
+    }
+
+    func testBusinessDuplicateMatchesWhenTimeCarriesSeconds() {
+        XCTAssertNotNil(LocalFinancialDuplicateRule.findBusinessDuplicate(
+            facts(occurredAt: LocalFinancialDuplicateRule.wallClock(date: "2026-11-02", time: "18:49:57")),
+            candidates: [candidate(occurredAt: LocalFinancialDuplicateRule.wallClock(
+                date: "2026-11-02", time: "18:49:00"))],
+            now: baseDate
+        ))
+    }
+
     // MARK: - 夹具
 
     private func facts(
