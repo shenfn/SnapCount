@@ -141,6 +141,18 @@ Windows 环境无法运行 XCTest（无 swiftc / Xcode），本轮基线以 GitH
 
 **关于「Run unit tests 挂起」**：属于既有间歇性问题，与本次改动无因果关系。同行证据——改动前的 `1c6784a` 有两次运行：41320336610 **success 12 分钟**、41315836247 **cancelled 361 分钟**；`f83d5a5` 也有一次失败耗时 73 分钟。同一提交的成功运行里测试步骤只用 180 秒，说明不是新增测试拖慢，而是 runner 侧偶发卡死。应对方式：取消后重新 `workflow_dispatch`，重跑可恢复。
 
+## TestFlight
+
+- run [41392080681](https://github.com/shenfn/SnapCount/actions/runs/41392080681)：**success**
+- 提交：`e0b2a93`（通过 iOS Build/测试的同一提交）
+- 版本：`1.0`，构建号 **155**（`github.run_number`）
+- Delivery UUID：`9f02147b-be76-4150-a0db-43242be133cd`
+- IPA：28,802,387 bytes，Artifact ID `13117548650`
+
+> 注：`ios-testflight.yml` 的 `Set TestFlight build number` 步骤把 Info.plist 写成 `run_id`，
+> 但随后的 `Archive` 又用 `CURRENT_PROJECT_VERSION=run_number` 与
+> `INFOPLIST_KEY_CFBundleVersion=run_number` 覆盖，实际生效的是 **155**。该步骤目前是死写入，不在本次范围，未修。
+
 **环境备注**：本机 `api.github.com` 经 HTTP 代理（127.0.0.1:7897）会 TLS 握手失败或 502/EOF，
 改用 `ALL_PROXY=socks5://127.0.0.1:7897` 后 `gh` 全部正常；`git push` 同样需要
 `-c http.proxy=socks5h://127.0.0.1:7897`。
