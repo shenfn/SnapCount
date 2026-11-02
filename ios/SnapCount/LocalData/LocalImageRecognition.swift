@@ -120,6 +120,7 @@ final class LocalImageRecognitionUseCase {
     private let isRecognitionRequestCurrent: @MainActor () -> Bool
     private let pendingRepository: LocalPendingFinancialRepository?
     private let expenseRepository: LocalExpenseRepositoryProtocol?
+    private let duplicateReviewRepository: LocalFinancialDuplicateReviewRepository?
 
     init(
         localRecordUseCase: LocalRecordUseCaseProtocol,
@@ -128,7 +129,8 @@ final class LocalImageRecognitionUseCase {
         provider: LocalImageRecognitionProvider,
         isRecognitionRequestCurrent: @escaping @MainActor () -> Bool = { true },
         pendingRepository: LocalPendingFinancialRepository? = nil,
-        expenseRepository: LocalExpenseRepositoryProtocol? = nil
+        expenseRepository: LocalExpenseRepositoryProtocol? = nil,
+        duplicateReviewRepository: LocalFinancialDuplicateReviewRepository? = nil
     ) {
         self.localRecordUseCase = localRecordUseCase
         self.imageStore = imageStore
@@ -137,6 +139,7 @@ final class LocalImageRecognitionUseCase {
         self.isRecognitionRequestCurrent = isRecognitionRequestCurrent
         self.pendingRepository = pendingRepository
         self.expenseRepository = expenseRepository
+        self.duplicateReviewRepository = duplicateReviewRepository
     }
 
     static func makeDefault(
@@ -158,7 +161,8 @@ final class LocalImageRecognitionUseCase {
             provider: provider,
             isRecognitionRequestCurrent: isRecognitionRequestCurrent,
             pendingRepository: LocalPendingFinancialRepository(database: database),
-            expenseRepository: try LocalExpenseRepository(database: database)
+            expenseRepository: try LocalExpenseRepository(database: database),
+            duplicateReviewRepository: LocalFinancialDuplicateReviewRepository(database: database)
         )
     }
 
@@ -436,6 +440,41 @@ final class LocalImageRecognitionUseCase {
                 ?? recognizedPayload["source_name"]?.stringValue
                 ?? recognized.title
             let kind = NativePendingEntryKind(rawValue: recognized.domainKey) ?? .expense
+
+            // 感知判重：重新截图同一笔账单时字节全变，精确哈希挡不住，这里补感知指纹。
+            // 命中后一律不进自动归档，交给用户在待确认里核对。
+            let perceptualHash = LocalPerceptualHash.compute(from: imageData)
+            let duplicateCandidates = Self.duplicateCandidates(
+                repository: duplicateReviewRepository,
+                profileID: profileID,
+                recordDate: recognized.recordDate
+            )
+            let duplicateFacts = Self.duplicateFacts(
+                kind: kind,
+                amountMinor: amount,
+                merchantName: merchantName,
+                payload: recognizedPayload,
+                recordDate: recognized.recordDate,
+                occurredAt: recognized.occurredAt,
+                perceptualHash: perceptualHash
+            )
+            let duplicateMatch = duplicateFacts.flatMap {
+                LocalFinancialDuplicateRule.findLikelyDuplicate($0, candidates: duplicateCandidates)
+            }
+            // 第二道只在图片判重没命中时才跑，与后端「先 perceptual 后 business」的顺序一致。
+            let businessDuplicate = duplicateMatch == nil
+                ? duplicateFacts.flatMap {
+                    LocalFinancialDuplicateRule.findBusinessDuplicate(
+                        $0, candidates: duplicateCandidates, now: createdAt
+                    )
+                }
+                : nil
+            // PWA 在判重命中时把 companion 置空、改用「疑似重复」反馈，iOS 保持同一口径。
+            let feedbackPayload = duplicateMatch == nil
+                ? recognized.aiFeedback
+                : Self.duplicateFeedbackPayload(for: recognized)
+            let companionMessage = duplicateMatch == nil ? recognized.companionMessage : nil
+
             let financial = LocalPendingFinancialRecord(id: id, profileID: profileID,
                 amountMinor: amount, currency: "CNY", merchantName: merchantName,
                 transactionDate: recognized.recordDate, transactionTime: recognized.recordTime,
@@ -446,9 +485,11 @@ final class LocalImageRecognitionUseCase {
                 category: recognizedPayload.string("category"),
                 paymentMethod: recognizedPayload.string("payment_method"),
                 incomeCategory: recognizedPayload.string("income_category"),
-                companionMessage: recognized.companionMessage,
-                aiFeedbackJSON: Self.encodeFeedback(recognized.aiFeedback))
-            let autoArchive = LocalFinancialAutoArchiveRule.shouldArchive(
+                companionMessage: companionMessage,
+                aiFeedbackJSON: Self.encodeFeedback(feedbackPayload),
+                perceptualHash: perceptualHash,
+                reviewReason: duplicateMatch == nil ? nil : "possible_duplicate")
+            let autoArchive = duplicateMatch == nil && LocalFinancialAutoArchiveRule.shouldArchive(
                 kind: kind, amountMinor: amount, payload: recognizedPayload, confidence: recognized.confidence)
             if autoArchive {
                 try pendingRepository.archiveDirectly(financial)
@@ -459,21 +500,31 @@ final class LocalImageRecognitionUseCase {
             try intakeRepository.markCompleted(id: intakeID, profileID: profileID,
                 operationID: operationID, cleanupMessage: nil, at: Date())
             let outcome: LocalRecordIntakeOutcome = autoArchive ? .financialArchived(id) : .financialPending(id)
-            let composed = composeNotification(
-                domainKey: recognized.domainKey,
-                feedbackPayload: recognized.aiFeedback,
-                confidence: recognized.confidence,
-                companionMessage: recognized.companionMessage,
-                amountMinor: amount,
-                merchantName: merchantName,
-                category: kind == .expense
-                    ? recognizedPayload.string("category")
-                    : recognizedPayload.string("income_category"),
-                sourceName: kind == .income ? merchantName : nil,
-                isPending: !autoArchive,
-                profileID: profileID,
-                dateKey: recognized.recordDate
-            )
+            // PWA 判重命中时通知是固定两行（`index.ts:7321`），不参与 feedback 的三行拼装；
+            // 「疑似重复」那条 ai_feedback 只用于待处理页与卡片。
+            let baseComposed: (text: String, feedback: NativeAIFeedback?) = duplicateMatch != nil
+                ? (text: Self.duplicateNotificationText, feedback: NativeAIFeedback(payload: feedbackPayload))
+                : composeNotification(
+                    domainKey: recognized.domainKey,
+                    feedbackPayload: feedbackPayload,
+                    confidence: recognized.confidence,
+                    companionMessage: companionMessage,
+                    amountMinor: amount,
+                    merchantName: merchantName,
+                    category: kind == .expense
+                        ? recognizedPayload.string("category")
+                        : recognizedPayload.string("income_category"),
+                    sourceName: kind == .income ? merchantName : nil,
+                    isPending: !autoArchive,
+                    profileID: profileID,
+                    dateKey: recognized.recordDate
+                )
+            let composed = businessDuplicate == nil
+                ? baseComposed
+                : (
+                    text: Self.appendingBusinessDuplicateSuffix(baseComposed.text),
+                    feedback: baseComposed.feedback
+                )
             return LocalImageIntakeOutcome(
                 result: outcome,
                 imageHash: imageHash,
@@ -564,6 +615,86 @@ final class LocalImageRecognitionUseCase {
         guard let payload, !payload.isEmpty,
               let data = try? JSONEncoder().encode(payload) else { return nil }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// 判重是防错辅助，读候选失败时放行记账而不是阻断识别。
+    private static func duplicateCandidates(
+        repository: LocalFinancialDuplicateReviewRepository?,
+        profileID: UUID,
+        recordDate: String
+    ) -> [LocalFinancialDuplicateCandidate] {
+        guard let repository else { return [] }
+        return (try? repository.candidates(profileID: profileID, recordDate: recordDate)) ?? []
+    }
+
+    private static func duplicateFacts(
+        kind: NativePendingEntryKind,
+        amountMinor: Int64,
+        merchantName: String,
+        payload: [String: AnyCodable],
+        recordDate: String,
+        occurredAt: String?,
+        perceptualHash: String?
+    ) -> LocalFinancialDuplicateFacts {
+        LocalFinancialDuplicateFacts(
+            recordType: kind.rawValue,
+            amountMinor: amountMinor,
+            merchantOrSource: kind == .income
+                ? (payload.string("source_name") ?? merchantName)
+                : merchantName,
+            platform: payload.string("platform"),
+            paymentMethod: payload.string("payment_method"),
+            occurredAt: occurredAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            occurredDate: recordDate,
+            perceptualHash: perceptualHash
+        )
+    }
+
+    /// 业务层判重只改通知首行，与后端 `index.ts:7815` 的处理一致：
+    /// 去掉已有的 `💸` / `⚠️` 前缀，换成 `⚠️` 并追加「疑似 3 分钟内重复」。
+    private static func appendingBusinessDuplicateSuffix(_ text: String) -> String {
+        var lines = text.components(separatedBy: "\n")
+        guard !lines.isEmpty else { return text }
+        let stripped = lines[0].replacingOccurrences(
+            of: #"^[💸⚠️]\s*"#, with: "", options: .regularExpression
+        )
+        lines[0] = "⚠️ \(stripped) · 疑似 3 分钟内重复"
+        return lines.joined(separator: "\n")
+    }
+
+    /// PWA 判重命中的通知是固定两行（`index.ts:7321`），第二行对应 keepSourceImages=true 的口径。
+    /// iOS 本地优先，原图本就留在本机，不跟随服务端隐私配置。
+    private static let duplicateNotificationText = "⚠️ 这张图可能和已有记录重复\n图片已保留并等待确认"
+
+    /// 复刻后端 `buildExpenseAIFeedback(..., possibleDuplicate: true)`（`index.ts:2710`）
+    /// 与收入侧的覆盖文案（`index.ts:7229`）。文案里的时间窗按实现写 10 分钟，
+    /// 后端写的是「3 分钟内」，那是文档与实现不一致，不照抄。
+    private static func duplicateFeedbackPayload(
+        for recognized: LocalRecognitionCandidate
+    ) -> [String: AnyCodable] {
+        let isIncome = recognized.domainKey == "income"
+        let existingEmotion = recognized.aiFeedback?.string("emotion_line")
+        let existingSource = recognized.aiFeedback?.string("source")
+        return [
+            "version": AnyCodable("feedback-v1"),
+            "domain_key": AnyCodable(recognized.domainKey),
+            "badge": AnyCodable("疑似重复"),
+            "icon": AnyCodable(isIncome ? "💰" : "💸"),
+            "band": AnyCodable("watch"),
+            "tone": AnyCodable("verify_gently"),
+            "emotion_line": AnyCodable(existingEmotion ?? (isIncome
+                ? "这笔和刚才那笔收入很像，先别急着收两次。"
+                : "这笔和刚才的消费很像，先别急着算两次。")),
+            "utility_line": AnyCodable(isIncome
+                ? "轻确认：对照原图，确认这是另一笔收入再收下。"
+                : "轻确认：点进 App 看一眼是不是重复记账。"),
+            "detail_reason": AnyCodable(isIncome
+                ? "图片与已有收入记录相似，需要人工确认是否重复。"
+                : "10 分钟内存在同金额、同支付方式且商家相近的支出。"),
+            "internal_score": AnyCodable(50),
+            "confidence": AnyCodable(0.82),
+            "source": AnyCodable(existingSource ?? "rule")
+        ]
     }
 
     private static func decodeFeedback(_ json: String?) -> [String: AnyCodable]? {

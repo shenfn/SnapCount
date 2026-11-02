@@ -20,6 +20,9 @@ struct LocalPendingFinancialRecord: Equatable {
     var incomeCategory: String? = nil
     var companionMessage: String? = nil
     var aiFeedbackJSON: String? = nil
+    var perceptualHash: String? = nil
+    /// `possible_duplicate` 时待确认页按「可能已经记过」口径呈现，与 PWA 一致。
+    var reviewReason: String? = nil
 }
 
 /// LF-037.31/41/44. The original transaction, target and ledger change together.
@@ -45,14 +48,16 @@ final class LocalPendingFinancialRepository {
                 INSERT INTO local_pending_transactions
                 (id, profile_id, amount_minor, currency, merchant_name, transaction_date,
                  transaction_time, occurred_at, created_at, image_path, image_hash, preferred_kind,
-                 platform, category, payment_method, income_category, companion_message, ai_feedback, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                 platform, category, payment_method, income_category, companion_message, ai_feedback,
+                 perceptual_hash, review_reason, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """, arguments: [record.id.uuidString, record.profileID.uuidString,
                     record.amountMinor, record.currency, record.merchantName,
                     record.transactionDate, record.transactionTime, record.occurredAt,
                     record.createdAt, record.imagePath, record.imageHash, record.preferredKind.rawValue,
                     record.platform, record.category, record.paymentMethod, record.incomeCategory,
-                    record.companionMessage, record.aiFeedbackJSON])
+                    record.companionMessage, record.aiFeedbackJSON, record.perceptualHash,
+                    record.reviewReason])
         }
     }
 
@@ -98,6 +103,7 @@ final class LocalPendingFinancialRepository {
                     createdAt: record.occurredAt ?? record.createdAt)
                 expense.imagePath = record.imagePath
                 expense.imageHash = record.imageHash
+                expense.perceptualHash = record.perceptualHash
                 _ = try LocalExpenseRepository.insertExpense(expense, operationID: UUID(), database: db)
             case .income:
                 targetID = UUID()
@@ -110,6 +116,7 @@ final class LocalPendingFinancialRepository {
                     note: "截图识别自动归档", createdAt: now)
                 income.imagePath = record.imagePath
                 income.imageHash = record.imageHash
+                income.perceptualHash = record.perceptualHash
                 _ = try LocalExpenseRepository.insertIncome(income, database: db)
             }
             try db.execute(sql: """
@@ -117,14 +124,15 @@ final class LocalPendingFinancialRepository {
                 (id, profile_id, amount_minor, currency, merchant_name, transaction_date,
                  transaction_time, occurred_at, created_at, image_path, image_hash, preferred_kind,
                  platform, category, payment_method, income_category, companion_message, ai_feedback,
-                 status, target_kind, target_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 perceptual_hash, review_reason, status, target_kind, target_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [record.id.uuidString, record.profileID.uuidString,
                     record.amountMinor, record.currency, record.merchantName,
                     record.transactionDate, record.transactionTime, record.occurredAt,
                     record.createdAt, record.imagePath, record.imageHash, record.preferredKind.rawValue,
                     record.platform, record.category, record.paymentMethod, record.incomeCategory,
-                    record.companionMessage, record.aiFeedbackJSON,
+                    record.companionMessage, record.aiFeedbackJSON, record.perceptualHash,
+                    record.reviewReason,
                     targetKind == "expense" ? "done" : "converted", targetKind, targetID.uuidString])
             return targetID
         }
@@ -182,6 +190,7 @@ final class LocalPendingFinancialRepository {
                     note: nil, createdAt: source.occurredAt ?? source.createdAt)
                 expense.imagePath = source.imagePath
                 expense.imageHash = source.imageHash
+                expense.perceptualHash = source.perceptualHash
                 _ = try LocalExpenseRepository.insertExpense(expense, operationID: UUID(), database: db)
             case .income:
                 targetID = UUID()
@@ -192,6 +201,7 @@ final class LocalPendingFinancialRepository {
                     note: "由截图待补充转入收入", createdAt: now)
                 income.imagePath = source.imagePath
                 income.imageHash = source.imageHash
+                income.perceptualHash = source.perceptualHash
                 _ = try LocalExpenseRepository.insertIncome(income, database: db)
                 try db.execute(sql: "UPDATE local_income_records SET source_pending_transaction_id = ? WHERE id = ?", arguments: [pendingID.uuidString, targetID.uuidString])
             }
@@ -220,7 +230,7 @@ final class LocalPendingFinancialRepository {
             paymentMethod: source.paymentMethod,
             recordDate: source.transactionDate, note: nil, companionMessage: source.companionMessage, accountId: nil,
             systemImage: "creditcard",
-            payload: feedbackPayload.map { ["ai_feedback": AnyCodable($0.mapValues(\.value))] },
+            payload: Self.pendingPayload(feedback: feedbackPayload, reviewReason: source.reviewReason),
             occurredAt: source.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
             transactionTime: source.transactionTime, source: "local", status: "pending",
             aiFeedback: NativeAIFeedback(payload: feedbackPayload))
@@ -230,6 +240,21 @@ final class LocalPendingFinancialRepository {
     private static func feedbackPayload(from json: String?) -> [String: AnyCodable]? {
         guard let json, !json.isEmpty, let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode([String: AnyCodable].self, from: data)
+    }
+
+    /// 待确认详情页从 payload 里读 `review_reason` 判断是否要换「可能已经记过」口径。
+    private static func pendingPayload(
+        feedback: [String: AnyCodable]?,
+        reviewReason: String?
+    ) -> [String: AnyCodable]? {
+        var payload: [String: AnyCodable] = [:]
+        if let feedback {
+            payload["ai_feedback"] = AnyCodable(feedback.mapValues(\.value))
+        }
+        if let reviewReason, !reviewReason.isEmpty {
+            payload["review_reason"] = AnyCodable(reviewReason)
+        }
+        return payload.isEmpty ? nil : payload
     }
 
     func delete(profileID: UUID, id: UUID, at now: Date = Date()) throws {
@@ -259,6 +284,7 @@ final class LocalPendingFinancialRepository {
             preferredKind: NativePendingEntryKind(rawValue: row["preferred_kind"]) ?? .expense,
             platform: row["platform"], category: row["category"],
             paymentMethod: row["payment_method"], incomeCategory: row["income_category"],
-            companionMessage: row["companion_message"], aiFeedbackJSON: row["ai_feedback"])
+            companionMessage: row["companion_message"], aiFeedbackJSON: row["ai_feedback"],
+            perceptualHash: row["perceptual_hash"], reviewReason: row["review_reason"])
     }
 }

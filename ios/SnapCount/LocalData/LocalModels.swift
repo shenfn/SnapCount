@@ -181,6 +181,7 @@ struct LocalExpenseDraft: Equatable {
     let createdAt: Date
     var imagePath: String? = nil
     var imageHash: String? = nil
+    var perceptualHash: String? = nil
 }
 
 struct LocalExpenseUpdate: Equatable {
@@ -238,6 +239,7 @@ struct LocalIncomeDraft: Equatable {
     let createdAt: Date
     var imagePath: String? = nil
     var imageHash: String? = nil
+    var perceptualHash: String? = nil
 }
 
 struct LocalIncomeUpdate: Equatable {

@@ -670,6 +670,15 @@ final class LocalDatabase {
             try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN companion_message TEXT")
             try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN ai_feedback TEXT")
         }
+        // 感知指纹用于「重新截图同一笔账单」的判重：精确哈希只能挡住同一张图重传，
+        // 挡住不同字节但画面相同的截图。与 PWA 服务端 perceptual_hash 同算法（aHash 64 位）。
+        migrator.registerMigration("local-v31-financial-perceptual-hash") { database in
+            try database.execute(sql: "ALTER TABLE local_expenses ADD COLUMN perceptual_hash TEXT")
+            try database.execute(sql: "ALTER TABLE local_income_records ADD COLUMN perceptual_hash TEXT")
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN perceptual_hash TEXT")
+            // 与 PWA 的 review_reason = 'possible_duplicate' 同语义，供待确认页换成确认口径。
+            try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN review_reason TEXT")
+        }
         return migrator
     }
 }

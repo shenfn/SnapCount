@@ -723,8 +723,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     INSERT INTO local_expenses (
                         id, profile_id, account_id, amount_minor, currency, merchant_name,
                         platform, category, payment_method, transaction_date, transaction_time,
-                        note, local_version, created_at, updated_at, deleted_at, image_path, image_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                        note, local_version, created_at, updated_at, deleted_at, image_path, image_hash,
+                        perceptual_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
                     """,
                 arguments: [
                     draft.id.uuidString,
@@ -741,7 +742,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     draft.note,
                     localVersion,
                     draft.createdAt,
-                    draft.createdAt, draft.imagePath, draft.imageHash
+                    draft.createdAt, draft.imagePath, draft.imageHash, draft.perceptualHash
                 ]
             )
 
@@ -793,13 +794,14 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 INSERT INTO local_income_records (
                     id, profile_id, account_id, amount_minor, currency, source_name,
                     category, income_date, occurred_at, note, local_version,
-                    created_at, updated_at, deleted_at, image_path, image_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?)
+                    created_at, updated_at, deleted_at, image_path, image_hash, perceptual_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?, ?)
                 """, arguments: [
                     income.id.uuidString, income.profileID.uuidString,
                     income.accountID?.uuidString, income.amountMinor, income.currency,
                     income.sourceName, income.category, income.incomeDate,
-                    income.occurredAt, income.note, income.createdAt, income.updatedAt, income.imagePath, income.imageHash
+                    income.occurredAt, income.note, income.createdAt, income.updatedAt,
+                    income.imagePath, income.imageHash, income.perceptualHash
                 ])
             if let accountID = income.accountID {
                 try Self.insertIncomeEntry(

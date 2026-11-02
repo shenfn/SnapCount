@@ -2010,7 +2010,10 @@ private struct PendingExpenseResolutionView: View {
                                 if appState.isConfirmingPendingRecord {
                                     ProgressView().tint(.white).frame(maxWidth: .infinity)
                                 } else {
-                                    Label("确认保存", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                                    Label(
+                                        isPossibleDuplicate(detail) ? "确认为新记录" : "确认保存",
+                                        systemImage: "checkmark.circle.fill"
+                                    ).frame(maxWidth: .infinity)
                                 }
                             }
                             .buttonStyle(.borderedProminent)
@@ -2058,19 +2061,29 @@ private struct PendingExpenseResolutionView: View {
         }
     }
 
+    /// 与 PWA `PagePending.vue:489` 同语义：pending 行的 review_reason 为 possible_duplicate。
+    private func isPossibleDuplicate(_ detail: NativeRecordDetail) -> Bool {
+        detail.payload?["review_reason"]?.stringValue == "possible_duplicate"
+    }
+
     private func header(_ detail: NativeRecordDetail) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "clock.badge.exclamationmark")
+        let duplicate = isPossibleDuplicate(detail)
+        let accent = duplicate ? JieziTheme.coral : palette.light
+        return HStack(spacing: 12) {
+            Image(systemName: duplicate ? "exclamationmark.triangle.fill" : "clock.badge.exclamationmark")
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(palette.light)
+                .foregroundStyle(accent)
                 .frame(width: 40, height: 40)
-                .background(palette.light.opacity(0.12), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
+                .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(detail.title).font(.headline)
-                Text(detail.subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(duplicate ? "图片和账单信息都很相似，确认是新记录再收下" : detail.subtitle)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Text("待补全").font(.caption.weight(.bold)).foregroundStyle(palette.light)
+            Text(duplicate ? "可能已记过" : "待补全")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(accent)
         }
         .jieziCard(palette: palette, solid: true)
     }
