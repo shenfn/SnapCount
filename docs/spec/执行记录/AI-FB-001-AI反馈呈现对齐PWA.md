@@ -172,3 +172,46 @@ Windows 环境无法运行 XCTest（无 swiftc / Xcode），本轮基线以 GitH
 - `c44f1e9` feat(ios): 上传识别提示按域生成并对齐 PWA 反馈口径
 - `e0b2a93` fix(ios): 修正 nativeDetail 成员初始化参数顺序
 
+
+---
+
+# 2026-11-03 补记：归档路径丢掉了表达层
+
+真机反馈「详情页没有 AI 点评，前几个版本还有」，排查后确认是本地化时只迁移了记账字段，
+`companion_message` / `ai_feedback` 整套表达层在自动归档路径上丢失。
+
+## 三处断点
+
+1. `LocalPendingFinancialRepository.archiveDirectly` 构造 `LocalExpenseDraft` / `LocalIncomeDraft`
+   时没带这两个值。
+2. `local_expenses` / `local_income_records` **没有 `ai_feedback` 列**（只有待确认表有）。
+3. `companion_message` 列在 `local-v27` 就加过，但 `INSERT INTO local_expenses` 从未写它，
+   列一直是 NULL 空壳。
+
+结果：只有停在待确认页的记录能看到 AI 点评，自动归档的一条都没有。切成本地优先后
+不再读云端 `transactions`，所以「前几个版本还有」的观感成立。
+
+## 修复
+
+- `local-v32-financial-ai-feedback`：两张表加 `ai_feedback TEXT`
+- `LocalExpenseDraft` / `LocalIncomeDraft` / `LocalExpense` / `LocalIncome` 补
+  `companionMessage` + `aiFeedbackJSON`
+- 三处 `INSERT` 写列、两处行映射读回
+- `archiveDirectly` 把待确认记录里的两个值带进记账表
+- `LocalExpenseReadModel` / `LocalIncomeReadModel` 装配 `aiFeedback`
+- 集成用例 `testLF03731ArchivedExpenseKeepsCompanionAndFeedback`：归档后详情仍带反馈
+
+## 通知文案为什么千篇一律（非缺陷）
+
+生产 `recognize_only` 返回的 `ai_feedback` 由 `buildExpenseAIFeedback` 规则模板生成，只有
+6 档 badge，`utility_line` 是写死的字符串；`prompts.ts:101` 明确要求该路径
+「不要生成 companion_message」。PWA 前端 `ModalExpense` 不渲染这些卡，所以网页端看不出来。
+这条要改属于动生产 Edge Function，不在客户端范围。
+
+## 注意
+
+- 已归档的旧记录补不回来，修复只对之后新记的生效。
+- 详情页出现的是反馈卡；「💬 AI 陪伴」一句话在生产 `recognize_only` 路径恒为空。
+- TestFlight：run 41562044517（run_number 157），`UPLOAD SUCCEEDED`，
+  Delivery UUID `30ab9a7e-a0b8-4cd0-8159-effe47591eb6`，
+  IPA 内 `CFBundleVersion` 取的是 run id（与既往一致），TestFlight 里按长数字排序。
