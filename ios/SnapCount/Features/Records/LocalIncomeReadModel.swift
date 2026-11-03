@@ -30,9 +30,9 @@ enum LocalIncomeReadModel {
             systemImage: "arrow.down.circle", payload: nil,
             occurredAt: income.occurredAt.map { ISO8601DateFormatter().string(from: $0) },
             transactionTime: time, domainKey: "income", source: "local", status: "local",
-            localVersion: income.localVersion,
             aiFeedback: LocalPendingFinancialRepository.feedbackPayload(from: income.aiFeedbackJSON)
-                .flatMap { NativeAIFeedback(payload: $0) }
+                .flatMap { NativeAIFeedback(payload: $0) },
+            localVersion: income.localVersion
         )
     }
 
