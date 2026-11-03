@@ -182,6 +182,8 @@ struct LocalExpenseDraft: Equatable {
     var imagePath: String? = nil
     var imageHash: String? = nil
     var perceptualHash: String? = nil
+    var companionMessage: String? = nil
+    var aiFeedbackJSON: String? = nil
 }
 
 struct LocalExpenseUpdate: Equatable {
@@ -223,6 +225,7 @@ struct LocalExpense: Equatable {
     var imagePath: String? = nil
     var imageHash: String? = nil
     var companionMessage: String? = nil
+    var aiFeedbackJSON: String? = nil
 }
 
 struct LocalIncomeDraft: Equatable {
@@ -240,6 +243,8 @@ struct LocalIncomeDraft: Equatable {
     var imagePath: String? = nil
     var imageHash: String? = nil
     var perceptualHash: String? = nil
+    var companionMessage: String? = nil
+    var aiFeedbackJSON: String? = nil
 }
 
 struct LocalIncomeUpdate: Equatable {
@@ -278,6 +283,7 @@ struct LocalIncome: Equatable {
     var imagePath: String? = nil
     var imageHash: String? = nil
     var companionMessage: String? = nil
+    var aiFeedbackJSON: String? = nil
 }
 
 struct LocalIncomeTombstone: Equatable {

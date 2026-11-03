@@ -69,6 +69,49 @@ final class LocalImageRecognitionTests: XCTestCase {
             .expenses(profileID: profile.id, monthKey: "2026-09").count, 1)
     }
 
+    /// 自动归档必须把「AI 陪伴」与结构化反馈一起落库。
+    /// 只存记账字段时详情页只剩一句机械摘要，真机上看起来就是「AI 点评没了」。
+    func testLF03731ArchivedExpenseKeepsCompanionAndFeedback() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let pending = LocalPendingFinancialRepository(database: context.database)
+        let payload: [String: AnyCodable] = [
+            "amount": AnyCodable(15),
+            "merchant_name": AnyCodable("巡面（杭州滨江江陵路店）"),
+            "platform": AnyCodable("微信"),
+            "category": AnyCodable("food"),
+            "payment_method": AnyCodable("银行卡")
+        ]
+        let feedback: [String: AnyCodable] = [
+            "badge": AnyCodable("小额餐饮"),
+            "icon": AnyCodable("💸"),
+            "emotion_line": AnyCodable("巡面（杭州滨江江陵路店）¥15.00，这笔小额已落账。"),
+            "utility_line": AnyCodable("分类记到餐饮，后面看一周频率。"),
+            "detail_reason": AnyCodable("支出识别完整并已入账，本次反馈优先强调记录完整性。")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "expense", confidence: 0.92, payload: payload, missingFields: [],
+            companionMessage: "巡面这顿 15 块，今天小额外食第 1 笔。", aiFeedback: feedback))
+        let recognition = LocalImageRecognitionUseCase(localRecordUseCase: context.useCase,
+            imageStore: context.imageStore, intakeRepository: context.intakeRepository,
+            provider: provider, pendingRepository: pending)
+        let outcome = try await recognition.ingest(
+            imageData: Data("financial-expression".utf8), captureKind: "screenshot", filename: "expense.jpg")
+        guard case .financialArchived(let id) = outcome.result else {
+            return XCTFail("四要素齐全且置信度达标时应直接归档")
+        }
+        let profile = try context.intakeRepository.activeProfile()
+        let archived = try XCTUnwrap(try LocalExpenseRepository(database: context.database)
+            .expenses(profileID: profile.id, monthKey: "2026-09").first { $0.id == id })
+        XCTAssertEqual(archived.companionMessage, "巡面这顿 15 块，今天小额外食第 1 笔。")
+        XCTAssertNotNil(archived.aiFeedbackJSON)
+
+        let detail = LocalExpenseReadModel.detail(from: archived)
+        XCTAssertEqual(detail.companionMessage, "巡面这顿 15 块，今天小额外食第 1 笔。")
+        XCTAssertEqual(detail.aiFeedback?.badge, "小额餐饮")
+        XCTAssertEqual(detail.aiFeedback?.utilityLine, "分类记到餐饮，后面看一周频率。")
+    }
+
     /// 同一笔账单重新截图：首张自动归档，第二张必须停在待确认。
     /// 这条覆盖整条装配链路（UseCase → 候选查询 → 两道判重 → stage）。只测规则函数的
     /// 单测发现不了「仓库没注入」这种静默失效——两边都返回空候选，判重永远不命中。

@@ -52,7 +52,9 @@ enum LocalExpenseReadModel {
             domainKey: nil,
             source: "local",
             status: "local",
-            localVersion: expense.localVersion
+            localVersion: expense.localVersion,
+            aiFeedback: LocalPendingFinancialRepository.feedbackPayload(from: expense.aiFeedbackJSON)
+                .flatMap { NativeAIFeedback(payload: $0) }
         )
     }
 

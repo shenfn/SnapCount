@@ -104,6 +104,10 @@ final class LocalPendingFinancialRepository {
                 expense.imagePath = record.imagePath
                 expense.imageHash = record.imageHash
                 expense.perceptualHash = record.perceptualHash
+                // 表达层跟着记账一起落库：漏传会让详情页的「AI 陪伴」和点评卡整块消失，
+                // 只有停在待确认的账单看得到。
+                expense.companionMessage = record.companionMessage
+                expense.aiFeedbackJSON = record.aiFeedbackJSON
                 _ = try LocalExpenseRepository.insertExpense(expense, operationID: UUID(), database: db)
             case .income:
                 targetID = UUID()
@@ -117,6 +121,8 @@ final class LocalPendingFinancialRepository {
                 income.imagePath = record.imagePath
                 income.imageHash = record.imageHash
                 income.perceptualHash = record.perceptualHash
+                income.companionMessage = record.companionMessage
+                income.aiFeedbackJSON = record.aiFeedbackJSON
                 _ = try LocalExpenseRepository.insertIncome(income, database: db)
             }
             try db.execute(sql: """
@@ -237,7 +243,8 @@ final class LocalPendingFinancialRepository {
     }
 
     /// 待补全行里的反馈以 JSON 文本存一列，读回时还原成 payload 字典。
-    private static func feedbackPayload(from json: String?) -> [String: AnyCodable]? {
+    /// 归档记账的读模型也要解这一列，所以不设 private。
+    static func feedbackPayload(from json: String?) -> [String: AnyCodable]? {
         guard let json, !json.isEmpty, let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode([String: AnyCodable].self, from: data)
     }

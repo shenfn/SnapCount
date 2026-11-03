@@ -711,7 +711,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             note: draft.note,
             localVersion: localVersion,
             createdAt: draft.createdAt,
-            updatedAt: draft.createdAt, imagePath: draft.imagePath, imageHash: draft.imageHash
+            updatedAt: draft.createdAt, imagePath: draft.imagePath, imageHash: draft.imageHash,
+            companionMessage: draft.companionMessage, aiFeedbackJSON: draft.aiFeedbackJSON
         )
         let payload = try Self.outboxPayload(expense: expense)
 
@@ -724,8 +725,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         id, profile_id, account_id, amount_minor, currency, merchant_name,
                         platform, category, payment_method, transaction_date, transaction_time,
                         note, local_version, created_at, updated_at, deleted_at, image_path, image_hash,
-                        perceptual_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                        perceptual_hash, companion_message, ai_feedback
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
                     """,
                 arguments: [
                     draft.id.uuidString,
@@ -742,7 +743,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     draft.note,
                     localVersion,
                     draft.createdAt,
-                    draft.createdAt, draft.imagePath, draft.imageHash, draft.perceptualHash
+                    draft.createdAt, draft.imagePath, draft.imageHash, draft.perceptualHash,
+                    draft.companionMessage, draft.aiFeedbackJSON
                 ]
             )
 
@@ -785,7 +787,8 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             sourceName: draft.sourceName, category: draft.category,
             incomeDate: draft.incomeDate, occurredAt: draft.occurredAt,
             note: draft.note, localVersion: 1, createdAt: draft.createdAt,
-            updatedAt: draft.createdAt, imagePath: draft.imagePath, imageHash: draft.imageHash
+            updatedAt: draft.createdAt, imagePath: draft.imagePath, imageHash: draft.imageHash,
+            companionMessage: draft.companionMessage, aiFeedbackJSON: draft.aiFeedbackJSON
         )
             if let accountID = draft.accountID {
                 try Self.validateActiveIncomeAccount(id: accountID, profileID: draft.profileID, database: db)
@@ -794,14 +797,16 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 INSERT INTO local_income_records (
                     id, profile_id, account_id, amount_minor, currency, source_name,
                     category, income_date, occurred_at, note, local_version,
-                    created_at, updated_at, deleted_at, image_path, image_hash, perceptual_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?, ?)
+                    created_at, updated_at, deleted_at, image_path, image_hash, perceptual_hash,
+                    companion_message, ai_feedback
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?, ?, ?, ?)
                 """, arguments: [
                     income.id.uuidString, income.profileID.uuidString,
                     income.accountID?.uuidString, income.amountMinor, income.currency,
                     income.sourceName, income.category, income.incomeDate,
                     income.occurredAt, income.note, income.createdAt, income.updatedAt,
-                    income.imagePath, income.imageHash, draft.perceptualHash
+                    income.imagePath, income.imageHash, draft.perceptualHash,
+                    draft.companionMessage, draft.aiFeedbackJSON
                 ])
             if let accountID = income.accountID {
                 try Self.insertIncomeEntry(
@@ -914,13 +919,15 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                     INSERT INTO local_expenses (
                         id, profile_id, account_id, amount_minor, currency, merchant_name,
                         platform, category, payment_method, transaction_date, transaction_time,
-                        note, local_version, created_at, updated_at, deleted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+                        note, local_version, created_at, updated_at, deleted_at,
+                        companion_message, ai_feedback
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?)
                     """, arguments: [
                         draft.id.uuidString, draft.profileID.uuidString, draft.accountID?.uuidString,
                         draft.amountMinor, draft.currency, draft.merchantName, draft.platform,
                         draft.category, draft.paymentMethod, draft.transactionDate,
-                        draft.transactionTime, draft.note, draft.createdAt, draft.createdAt
+                        draft.transactionTime, draft.note, draft.createdAt, draft.createdAt,
+                        draft.companionMessage, draft.aiFeedbackJSON
                     ])
                 try db.execute(sql: """
                     INSERT OR IGNORE INTO local_account_entries (
@@ -1501,7 +1508,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             localVersion: row["local_version"],
             createdAt: row["created_at"],
             updatedAt: row["updated_at"], imagePath: row["image_path"], imageHash: row["image_hash"],
-            companionMessage: row["companion_message"]
+            companionMessage: row["companion_message"], aiFeedbackJSON: row["ai_feedback"]
         )
     }
 
@@ -1557,7 +1564,7 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
             incomeDate: row["income_date"], occurredAt: row["occurred_at"],
             note: row["note"], localVersion: row["local_version"],
             createdAt: createdAt, updatedAt: updatedAt, imagePath: row["image_path"], imageHash: row["image_hash"],
-            companionMessage: row["companion_message"]
+            companionMessage: row["companion_message"], aiFeedbackJSON: row["ai_feedback"]
         )
     }
 

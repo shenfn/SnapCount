@@ -679,6 +679,14 @@ final class LocalDatabase {
             // 与 PWA 的 review_reason = 'possible_duplicate' 同语义，供待确认页换成确认口径。
             try database.execute(sql: "ALTER TABLE local_pending_transactions ADD COLUMN review_reason TEXT")
         }
+        // 自动归档的记账同样要保留 AI 反馈：PWA 的 transactions / income_records 存了
+        // ai_feedback，详情页靠它渲染点评；本地表此前只有 pending 表有这一列，
+        // 归档后反馈直接丢失，详情页只剩一句机械摘要。
+        // companion_message 列早在 local-v27 就加过，但插入语句一直没写，等于空壳。
+        migrator.registerMigration("local-v32-financial-ai-feedback") { database in
+            try database.execute(sql: "ALTER TABLE local_expenses ADD COLUMN ai_feedback TEXT")
+            try database.execute(sql: "ALTER TABLE local_income_records ADD COLUMN ai_feedback TEXT")
+        }
         return migrator
     }
 }
