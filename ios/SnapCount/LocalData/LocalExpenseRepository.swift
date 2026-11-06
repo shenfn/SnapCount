@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 protocol LocalExpenseRepositoryProtocol {
     func createProfile(id: UUID, createdAt: Date) throws -> LocalProfile
@@ -60,6 +61,7 @@ extension LocalExpenseRepositoryProtocol {
 }
 
 final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.jiezi.app", category: "LocalSync")
     private let database: LocalDatabase
 
     init(database: LocalDatabase) throws {
@@ -1413,8 +1415,32 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
         excludingExpenseIDs: Set<UUID> = [],
         excludingAccountIDs: Set<UUID> = []
     ) throws -> Int {
+        do {
+            return try writeRemoteSnapshot(
+                snapshot,
+                profileID: profileID,
+                excludingExpenseIDs: excludingExpenseIDs,
+                excludingAccountIDs: excludingAccountIDs
+            )
+        } catch let error as DatabaseError {
+            // 本机约束失败（外键/唯一/非空）与网络无关。上层若把它归成 transport，
+            // 用户会反复重试而永远失败，所以这里换成可分类的写入错误。
+            if error.resultCode == .SQLITE_CONSTRAINT {
+                throw LocalWriteConstraintError(extendedCode: error.extendedResultCode.rawValue)
+            }
+            throw error
+        }
+    }
+
+    private func writeRemoteSnapshot(
+        _ snapshot: LocalRemoteSnapshot,
+        profileID: UUID,
+        excludingExpenseIDs: Set<UUID>,
+        excludingAccountIDs: Set<UUID>
+    ) throws -> Int {
         try database.writer.write { db in
             var imported = 0
+            var skippedOrphanExpenses = 0
             for account in snapshot.accounts {
                 if excludingAccountIDs.contains(account.id) { continue }
                 if account.deletedAt != nil {
@@ -1440,6 +1466,13 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         """, arguments: [account.name, account.kind, account.currency, account.id.uuidString, profileID.uuidString])
                 }
             }
+            // 本批账户已落库（含远端已删除而被跳过的那些），消费写入前用它做一次
+            // 存在性判断，避免逐条查询。
+            let knownAccountIDs = Set(try String.fetchAll(
+                db,
+                sql: "SELECT id FROM local_accounts WHERE profile_id = ?",
+                arguments: [profileID.uuidString]
+            ))
             for expense in snapshot.expenses {
                 if excludingExpenseIDs.contains(expense.id) { continue }
                 let row = try Row.fetchOne(db, sql: "SELECT local_version, deleted_at FROM local_expenses WHERE id = ? AND profile_id = ?", arguments: [expense.id.uuidString, profileID.uuidString])
@@ -1448,6 +1481,15 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                 let localDeletedAt: Date? = row?["deleted_at"]
                 if localDeletedAt != nil, expense.deletedAt == nil, expense.version <= localVersion {
                     continue
+                }
+                // 远端账户已删除时不会写进 local_accounts（该表没有 deleted_at），
+                // 但远端消费仍可能引用它。直接插入会触发外键 787 并回滚整批，
+                // 所以这里跳过这条孤儿消费，保住同批其余记录。
+                if expense.deletedAt == nil {
+                    guard knownAccountIDs.contains(expense.accountID.uuidString) else {
+                        skippedOrphanExpenses += 1
+                        continue
+                    }
                 }
                 if expense.deletedAt != nil {
                     try db.execute(sql: "UPDATE local_account_entries SET voided_at = COALESCE(voided_at, ?) WHERE source_kind = 'expense' AND source_id = ? AND voided_at IS NULL AND is_voided = 0", arguments: [expense.deletedAt, expense.id.uuidString])
@@ -1473,6 +1515,9 @@ final class LocalExpenseRepository: LocalExpenseRepositoryProtocol {
                         VALUES (?, ?, ?, 'out', ?, 'expense', 'expense', ?, ?, NULL)
                         """, arguments: [UUID().uuidString, profileID.uuidString, expense.accountID.uuidString, expense.amountMinor, expense.id.uuidString, Date()])
                 }
+            }
+            if skippedOrphanExpenses > 0 {
+                Self.logger.notice("remote_snapshot_orphan_expenses_skipped count=\(skippedOrphanExpenses, privacy: .public)")
             }
             return imported
         }

@@ -639,7 +639,7 @@ final class LocalImageRecognitionTests: XCTestCase {
         let intakeID = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
         let intake = try XCTUnwrap(context.intakeRepository.intake(id: intakeID, profileID: profile.id))
         XCTAssertEqual(intake.status, .failed)
-        XCTAssertEqual(intake.failureMessage, "本地暂不支持数据域：tax")
+        XCTAssertEqual(intake.failureMessage, "本地首片暂不支持数据域：tax")
         XCTAssertEqual(try context.imageStore.data(at: intake.imagePath), imageData)
         let records = try await context.useCase.records(monthKey: "2026-09")
         let staging = try await context.useCase.stagingRecords()

@@ -328,9 +328,10 @@ final class AppState: ObservableObject {
         } else if usesDefaultLocalStorage {
             self.localRecordUseCase = defaultLocalStorage?.recordUseCase
         } else {
-            self.localRecordUseCase = simulatesLocalStorageInitializationFailure
-                ? nil
-                : Self.defaultLocalRecordUseCase()
+            // Dependency-injected local stores are intentionally isolated. Creating
+            // the default record use case here would read the user's real local DB
+            // alongside a test/staging expense use case and contaminate projections.
+            self.localRecordUseCase = nil
         }
         self.localWalletSnapshotUseCase = localWalletSnapshotUseCase
             ?? (usesDefaultLocalStorage ? defaultLocalStorage?.walletSnapshotUseCase : nil)
@@ -804,6 +805,7 @@ final class AppState: ObservableObject {
         case .cursorExpired: return "SYNC-CURSOR-EXPIRED"
         case .conflict: return "SYNC-CONFLICT"
         case .invalidResponse: return "SYNC-INVALID-RESPONSE"
+        case .localConstraint: return "SYNC-LOCAL-CONSTRAINT"
         case .unknown: return "SYNC-UNKNOWN"
         }
     }
@@ -837,6 +839,9 @@ final class AppState: ObservableObject {
             case .invalidResponse: return .invalidResponse
             case .invalidWorkspace, .staleAttempt: return .unknown
             }
+        }
+        if error is LocalWriteConstraintError {
+            return .localConstraint
         }
         if error is SupabaseRemoteError {
             return .transport

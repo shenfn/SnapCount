@@ -9,7 +9,7 @@
 [![PWA](https://img.shields.io/badge/PWA-Ready-purple.svg)](#-部署指南)
 [![TRAE](https://img.shields.io/badge/TRAE-AI创造力大赛-orange.svg)](https://www.trae.cn/ai-creativity)
 
-**[🌐 在线体验](https://snapflow.me)** · **[📱 iOS 快捷指令](https://www.icloud.com/shortcuts/60be42007bee43ff850d53106813b351)**
+**[🌐 在线体验](https://snapflow.me)** · **[📱 iOS 快捷指令](https://www.icloud.com/shortcuts/7efcb7f1dbe74de0bf7caac6bff1be01)**
 
 ---
 
@@ -146,9 +146,9 @@ npm run build    # 构建 dist/
 
 ## 📱 iOS 快捷指令
 
-1. [点击导入芥子快捷指令](https://www.icloud.com/shortcuts/60be42007bee43ff850d53106813b351)
-2. 在 App 设置页复制你的 `upload_token`
-3. 打开快捷指令 App → 找到 `upload_token` 字段 → 粘贴 Token
+1. [点击导入芥子 iOS 快捷指令](https://www.icloud.com/shortcuts/7efcb7f1dbe74de0bf7caac6bff1be01)
+2. 打开芥子并登录，App 会自动同步快捷指令凭据
+3. 在快捷指令 App 中运行“芥子- 截图”，或使用“用芥子上传 JPEG”
 4. 绑定触发方式（辅助触控 / 操作按钮）
 
 配置完成后，在任意页面触发快捷指令即可自动上传截图识别。

@@ -188,7 +188,10 @@ enum NativeRecordExpressionFeedbackPolicy {
         guard let plannerPreview else { return existingVoice }
         if plannerPreview.source == "expression_planner",
            plannerPreview.presentationTarget == "feedback_card" {
-            return existingVoice ?? plannerPreview
+            // PWA gives a valid Planner delivery ownership of the feedback
+            // surface. The legacy Voice feedback remains available only as
+            // supporting content for an existing companion message.
+            return plannerPreview
         }
         return feedbackToDisplay(
             existing: existingVoice,
@@ -205,6 +208,11 @@ enum NativeRecordExpressionFeedbackPolicy {
         voiceFeedback: NativeAIFeedback?,
         plannerFeedback: NativeAIFeedback?
     ) -> [NativeAIFeedback] {
+        if let plannerFeedback,
+           plannerFeedback.source == "expression_planner",
+           plannerFeedback.presentationTarget == "feedback_card" {
+            return [plannerFeedback]
+        }
         var cards: [NativeAIFeedback] = []
         if let voiceFeedback = feedbackToRender(
             companionMessage: companionMessage,

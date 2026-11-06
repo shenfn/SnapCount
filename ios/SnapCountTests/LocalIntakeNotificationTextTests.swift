@@ -58,8 +58,8 @@ final class LocalIntakeNotificationTextTests: XCTestCase {
         XCTAssertEqual(output.first, "这笔咖啡记下了")
         XCTAssertFalse(text.contains("情绪句不应该出现在 companion 分支"))
         XCTAssertFalse(text.contains("实用句也不应该出现"))
-        // companion 一行 + 支出域 fallback 两行
-        XCTAssertEqual(output.count, 3)
+        // companion 已经占据表达层，不再追加域兜底。
+        XCTAssertEqual(output, ["这笔咖啡记下了"])
     }
 
     // 2
@@ -73,8 +73,8 @@ final class LocalIntakeNotificationTextTests: XCTestCase {
         XCTAssertEqual(output[0], "✨ 今天很稳")
         XCTAssertEqual(output[1], "记录已经落下。")
         XCTAssertEqual(output[2], "继续保持当前节奏。")
-        // 无 companion 时后端 preserveFallbackAll，fallback 两行继续排在后面
-        XCTAssertEqual(output.count, 5)
+        // 结构化反馈存在时只显示反馈内容，域兜底仅在反馈缺失时使用。
+        XCTAssertEqual(output.count, 3)
     }
 
     // 3
@@ -163,8 +163,7 @@ final class LocalIntakeNotificationTextTests: XCTestCase {
         )
 
         let output = lines(text)
-        XCTAssertEqual(output.count, 2)
-        XCTAssertEqual(output.first, "💸 -¥12.00 · 星巴克 · 餐饮")
+        XCTAssertEqual(output, ["💸 -¥12.00 · 星巴克 · 餐饮"])
     }
 
     // 8

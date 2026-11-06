@@ -168,7 +168,16 @@ final class SnapCountUploadService {
             throw SnapCountUploadServiceError.invalidURL
         }
 
-        let url = baseURL.appendingPathComponent("functions/v1/ingest-receipt")
+        // `SupabaseFunctionsURL` is configured as the functions base URL in the
+        // app project (`.../functions/v1`).  CI may instead provide the project
+        // root URL, so normalize both forms without ever duplicating the path.
+        let endpointPath = baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let url: URL
+        if endpointPath.hasSuffix("functions/v1") {
+            url = baseURL.appendingPathComponent("ingest-receipt")
+        } else {
+            url = baseURL.appendingPathComponent("functions/v1/ingest-receipt")
+        }
         let boundary = "Boundary-\(UUID().uuidString)"
         var multipart = MultipartFormData(boundary: boundary)
         if let uploadToken, !uploadToken.isEmpty {
@@ -210,6 +219,9 @@ final class SnapCountUploadService {
     }
 
     private func displayErrorMessage(from data: Data, fallback: String, statusCode: Int) -> String {
+        if statusCode == 401 {
+            return "登录凭据未同步或已失效，请打开芥子重新登录后再运行快捷指令。"
+        }
         if let payload = try? decoder.decode(UploadErrorPayload.self, from: data) {
             if payload.code == "WORKER_RESOURCE_LIMIT" {
                 return "AI 识别资源不足。请重试一次，或换一张更清晰、范围更小的截图。"

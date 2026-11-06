@@ -102,6 +102,41 @@ final class LocalSyncAppStateTests: XCTestCase {
     }
 
     @MainActor
+    func testLOCAL003E2LocalWriteConstraintFailureIsNotReportedAsTransport() async throws {
+        let profileID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let useCase = LocalSyncExpenseUseCaseStub(profileID: profileID)
+        let binding = LocalSyncBindingRepositorySpy(
+            profileID: profileID,
+            state: Self.syncState(profileID: profileID, status: .ready)
+        )
+        let runner = LocalSyncRunnerSpy(error: LocalWriteConstraintError(extendedCode: 787))
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("local-sync-diagnostics-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try LocalHistoryMigrationDiagnosticStore(
+            fileURL: directory.appendingPathComponent("diagnostics.json")
+        )
+        let state = AppState(
+            localExpenseUseCase: useCase,
+            localBindingRepository: binding,
+            localSyncRunner: runner,
+            sessionProvider: { _ in Self.session },
+            historyMigrationDiagnosticStore: store
+        )
+        state.isSignedIn = true
+        state.currentUserId = Self.session.user.id
+
+        await state.synchronizeLocalData()
+
+        XCTAssertEqual(state.localSyncDiagnostic?.failure, .localConstraint)
+        XCTAssertEqual(state.localSyncFailureDiagnostic?.code, "SYNC-LOCAL-CONSTRAINT")
+        XCTAssertEqual(state.localSyncFailureDiagnostic?.safeReason?.contains("本机数据库"), true)
+        XCTAssertEqual(state.localSyncMessage?.contains("本机数据库"), true)
+        XCTAssertEqual(state.localSyncMessage?.contains("与网络无关"), true)
+        XCTAssertEqual(useCase.monthKeys.count, 0)
+    }
+
+    @MainActor
     func testDREMOTE013ManualSyncIsIdempotentlyGuardedWhileRunning() async {
         let profileID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
         let binding = LocalSyncBindingRepositorySpy(

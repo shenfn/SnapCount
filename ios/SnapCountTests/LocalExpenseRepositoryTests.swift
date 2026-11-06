@@ -101,6 +101,43 @@ final class LocalExpenseRepositoryTests: XCTestCase {
         XCTAssertEqual(try repository.pendingOutboxOperations().count, 0)
     }
 
+    func testLOCAL003E1RemoteSnapshotSkipsExpenseOfDeletedAccountWithoutLosingBatch() throws {
+        let databaseURL = temporaryLocalDatabaseURL()
+        defer { removeLocalDatabase(at: databaseURL) }
+        let repository = try LocalExpenseRepository(database: LocalDatabase(databaseURL: databaseURL))
+        let profile = try repository.createProfile(id: UUID(), createdAt: fixedDate)
+        let keptAccountID = UUID()
+        let deletedAccountID = UUID()
+        let orphanExpenseID = UUID()
+        let keptExpenseID = UUID()
+
+        let snapshot = LocalRemoteSnapshot(
+            accounts: [
+                LocalRemoteAccount(
+                    id: keptAccountID, name: "仍存在的账户", kind: "debit_card", currency: "CNY",
+                    openingBalanceMinor: 20_000, version: 1, deletedAt: nil
+                ),
+                LocalRemoteAccount(
+                    id: deletedAccountID, name: "远端已删除账户", kind: "debit_card", currency: "CNY",
+                    openingBalanceMinor: 5_000, version: 2, deletedAt: editedDate
+                )
+            ],
+            expenses: [
+                remoteExpense(id: orphanExpenseID, accountID: deletedAccountID, amountMinor: 3_000),
+                remoteExpense(id: keptExpenseID, accountID: keptAccountID, amountMinor: 1_280)
+            ]
+        )
+
+        XCTAssertNoThrow(try repository.applyRemoteSnapshot(snapshot, profileID: profile.id))
+
+        XCTAssertEqual(try repository.accounts(profileID: profile.id).map(\.id), [keptAccountID])
+        XCTAssertNil(try repository.expense(id: orphanExpenseID))
+        XCTAssertTrue(try repository.accountEntries(sourceID: orphanExpenseID).isEmpty)
+        XCTAssertEqual(try repository.expense(id: keptExpenseID)?.amountMinor, 1_280)
+        XCTAssertEqual(try repository.accountEntries(sourceID: keptExpenseID).count, 1)
+        XCTAssertEqual(try repository.accountBalanceMinor(accountID: keptAccountID), 18_720)
+    }
+
     func testLOCAL002A1CreatesProfileAccountAndExpenseWithoutCloudSession() throws {
         let databaseURL = temporaryLocalDatabaseURL()
         defer { removeLocalDatabase(at: databaseURL) }
@@ -647,6 +684,28 @@ final class LocalExpenseRepositoryTests: XCTestCase {
             transactionTime: "12:30:00",
             note: "午餐",
             createdAt: fixedDate
+        )
+    }
+
+    private func remoteExpense(
+        id: UUID,
+        accountID: UUID,
+        amountMinor: Int64
+    ) -> LocalRemoteExpense {
+        LocalRemoteExpense(
+            id: id,
+            accountID: accountID,
+            amountMinor: amountMinor,
+            currency: "CNY",
+            merchantName: "全家便利店",
+            platform: "线下消费",
+            category: "food",
+            paymentMethod: "微信支付",
+            transactionDate: "2026-08-23",
+            transactionTime: "12:30:00",
+            note: "午餐",
+            version: 1,
+            deletedAt: nil
         )
     }
 

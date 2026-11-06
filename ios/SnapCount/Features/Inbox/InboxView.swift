@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct InboxView: View {
     @EnvironmentObject private var appState: AppState
@@ -194,6 +195,16 @@ struct InboxView: View {
                     .foregroundStyle(JieziTheme.ink)
                 ForEach(appState.failedLocalImageIntakes) { intake in
                     VStack(alignment: .leading, spacing: JieziSpacing.sm) {
+                        if let data = try? appState.localImageData(for: intake),
+                           let image = UIImage(data: data) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 150)
+                                .clipShape(RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
+                                .accessibilityLabel("原图预览")
+                        }
                         HStack {
                             Image(systemName: "photo.badge.exclamationmark")
                                 .foregroundStyle(JieziTheme.gold)

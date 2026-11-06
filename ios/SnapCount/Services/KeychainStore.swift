@@ -25,6 +25,10 @@ final class KeychainStore {
     }
 
     func setString(_ value: String, for key: String) throws {
+#if targetEnvironment(simulator)
+        UserDefaults.standard.set(value, forKey: simulatorStorageKey(for: key))
+        return
+#else
         let data = Data(value.utf8)
         var query = baseQuery(for: key)
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -46,9 +50,13 @@ final class KeychainStore {
         guard status == errSecSuccess else {
             throw KeychainStoreError.unexpectedStatus(status)
         }
+#endif
     }
 
     func string(for key: String) throws -> String? {
+#if targetEnvironment(simulator)
+        return UserDefaults.standard.string(forKey: simulatorStorageKey(for: key))
+#else
         var query = baseQuery(for: key)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -63,14 +71,26 @@ final class KeychainStore {
             throw KeychainStoreError.invalidData
         }
         return value
+#endif
     }
 
     func remove(_ key: String) throws {
+#if targetEnvironment(simulator)
+        UserDefaults.standard.removeObject(forKey: simulatorStorageKey(for: key))
+        return
+#else
         let status = SecItemDelete(baseQuery(for: key) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainStoreError.unexpectedStatus(status)
         }
+#endif
     }
+
+#if targetEnvironment(simulator)
+    private func simulatorStorageKey(for key: String) -> String {
+        "\(service).simulator.\(key)"
+    }
+#endif
 
     private func baseQuery(for key: String) -> [String: Any] {
         [

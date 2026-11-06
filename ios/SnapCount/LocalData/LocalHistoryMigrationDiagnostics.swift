@@ -375,6 +375,7 @@ final class LocalHistoryMigrationDiagnosticStore {
         if error is LocalHistoryMappingError { return "请查看问题记录；无法等价恢复的数据需要先核对来源。" }
         if error is LocalHistoryMigrationPostCommitRefreshError { return "只重试读取本机列表；不要重新提交迁移。" }
         if error is LocalWriteRefreshError { return "只重试读取本机列表；不要重复执行原保存操作。" }
+        if error is LocalWriteConstraintError { return "本机事实保留；这是本机写入冲突，反复重试不会改变结果，请先反馈诊断编号。" }
         if error is LocalSyncError { return "本机事实保留；核对同步状态后可重试当前支持范围。" }
         if error is CancellationError { return "可以从已缓存页和图片继续预检。" }
         return "请查看脱敏诊断并按错误阶段处理；不要丢弃无法恢复的数据后重试。"
@@ -460,6 +461,9 @@ final class LocalHistoryMigrationDiagnosticStore {
             }
         }
         if error is LocalSyncError { return "云同步未能完整确认；本机事实仍保留。" }
+        if let error = error as? LocalWriteConstraintError {
+            return "本机数据库拒绝写入（SQLite 约束 \(error.extendedCode)），与网络无关；请反馈脱敏诊断编号。"
+        }
         return "当前错误类型尚无更具体的安全说明，请提供脱敏诊断编号继续定位。"
     }
 

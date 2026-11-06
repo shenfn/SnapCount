@@ -1,5 +1,53 @@
 import Foundation
 
+/// Converts recognition failures into an actionable message shared by the
+/// Shortcut intent, the native photo picker, and the local image inbox.
+///
+/// The old flow deliberately collapsed every provider error into the same
+/// "AI 识别未完成" text. That made an expired upload credential look exactly
+/// like a bad image, even though the original is safely persisted and the
+/// user can fix the credential without changing the image.
+enum LocalImageRecognitionFailureMessage {
+    static func detail(for error: Error) -> String {
+        if let error = error as? LocalImageRecognitionError {
+            return error.localizedDescription
+        }
+        if let error = error as? SnapCountUploadServiceError {
+            return error.localizedDescription
+        }
+        if let error = error as? QwenBYOKError {
+            return error.localizedDescription
+        }
+        if error is CancellationError {
+            return "识别已取消，可重试或手动处理"
+        }
+        if let error = error as? URLError {
+            switch error.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return "网络连接失败，请检查网络后重试"
+            default:
+                break
+            }
+        }
+        let description = (error as NSError).localizedDescription
+        guard !description.isEmpty,
+              !description.contains("Swift.CancellationError"),
+              !description.contains("The operation couldn’t be completed") else {
+            return "AI 识别未完成，可重试或手动处理"
+        }
+        return description
+    }
+
+    static func result(for error: Error, persisted: Bool) -> String {
+        let detail = detail(for: error)
+        if persisted {
+            return "识别未完成：\(detail)\n图片已保存在本机收件箱，请打开芥子重试或手动处理。"
+        }
+        return "识别未完成：\(detail)\n图片未能确认保存在本机，请重新运行快捷指令。"
+    }
+}
+
 enum LocalImageRecognitionError: Error, Equatable, LocalizedError {
     case invalidCandidate
     case unsupportedDomain(String)
@@ -754,22 +802,7 @@ final class LocalImageRecognitionUseCase {
     }
 
     private static func safeFailureMessage(for error: Error) -> String {
-        if let providerError = error as? QwenBYOKError,
-           providerError == .invalidImage {
-            return providerError.localizedDescription
-        }
-        if let recognitionError = error as? LocalImageRecognitionError,
-           case .unsupportedDomain(let domainKey) = recognitionError {
-            return "本地暂不支持数据域：\(domainKey)"
-        }
-        if let recognitionError = error as? LocalImageRecognitionError,
-           recognitionError == .invalidFinancialAmount {
-            return recognitionError.localizedDescription
-        }
-        if error is CancellationError {
-            return "识别已取消，可重试或手动处理"
-        }
-        return "AI 识别未完成，可重试或手动处理"
+        LocalImageRecognitionFailureMessage.detail(for: error)
     }
 
     private static func uuidFromHash(_ hash: String) -> UUID {

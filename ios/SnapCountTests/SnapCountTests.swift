@@ -1135,8 +1135,8 @@ final class SnapCountTests: XCTestCase {
             companionMessage: "第一次遇见这家店。"
         )
 
-        XCTAssertEqual(selected, voice)
-        XCTAssertNotEqual(selected, planner)
+        XCTAssertEqual(selected, planner)
+        XCTAssertNotEqual(selected, voice)
     }
 
     func testEXP008FeedbackCardsAppendPlannerWithoutReplacingVoice() throws {
@@ -1160,9 +1160,8 @@ final class SnapCountTests: XCTestCase {
             plannerFeedback: planner
         )
 
-        XCTAssertEqual(cards.count, 2)
-        XCTAssertEqual(cards.first, voice)
-        XCTAssertEqual(cards.last, planner)
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(cards.first, planner)
     }
 
     func testEXP008ReviewTargetsTheCardTheUserActuallySelected() throws {

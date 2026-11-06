@@ -13,7 +13,8 @@ struct LocalIntakeResultSheet: View {
 
     /// 按换行拆分逐行渲染，避免单个 Text 内换行的行距无法控制；空行丢弃以免出现双倍空隙。
     private var messageLines: [String] {
-        notificationText
+        guard feedback == nil else { return [] }
+        return notificationText
             .components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
     }

@@ -459,7 +459,23 @@ enum LocalSyncDiagnosticFailure: String, Equatable {
     case cursorExpired
     case conflict
     case invalidResponse
+    /// 本机数据库约束拒绝写入。不是网络问题，重复重试不会改变结果。
+    case localConstraint
     case unknown
+}
+
+/// 本机 SQLite 约束失败（外键、唯一、非空）。与网络传输失败严格区分。
+struct LocalWriteConstraintError: Error, CustomNSError, Equatable {
+    /// SQLite 扩展结果码，例如 787 = 19 | (3 << 8) = `SQLITE_CONSTRAINT_FOREIGNKEY`。
+    let extendedCode: Int32
+
+    static var errorDomain: String { "JieziLocalWrite" }
+    var errorCode: Int { Int(extendedCode) }
+    var errorUserInfo: [String: Any] { [NSLocalizedDescriptionKey: description] }
+
+    var description: String {
+        "本机数据库拒绝写入（SQLite 约束 \(extendedCode)），与网络无关。"
+    }
 }
 
 struct LocalSyncDiagnostic: Equatable {
@@ -512,6 +528,7 @@ private extension LocalSyncDiagnosticFailure {
         case .cursorExpired: return "同步游标过期"
         case .conflict: return "存在数据冲突"
         case .invalidResponse: return "云端响应无效"
+        case .localConstraint: return "本机数据库写入受限"
         case .unknown: return "未知错误"
         }
     }

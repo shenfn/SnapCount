@@ -7,6 +7,13 @@ struct MainShellView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var themeManager: JieziThemeManager
     @State private var showManualRecordSheet = false
+    @State private var showCaptureOptions = false
+    @State private var showPhotoLibraryPicker = false
+    @State private var showCaptureResult = false
+    @State private var captureMessage = ""
+    @State private var captureFeedback: NativeAIFeedback?
+    @State private var captureRoute: AppOverlay?
+    @State private var captureIsError = false
     @State private var showsCalendar = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -40,6 +47,29 @@ struct MainShellView: View {
         }
         .sheet(isPresented: $showManualRecordSheet) {
             UnifiedManualRecordEntry(domain: appState.selectedDomain)
+        }
+        .confirmationDialog("留下此刻", isPresented: $showCaptureOptions, titleVisibility: .visible) {
+            Button("手动记录") { showManualRecordSheet = true }
+            Button("从相册选择") { showPhotoLibraryPicker = true }
+            Button("取消", role: .cancel) {}
+        }
+        .sheet(isPresented: $showPhotoLibraryPicker) {
+            PhotoLibraryPicker { data in
+                showPhotoLibraryPicker = false
+                Task { await recognizeCapturedImage(data) }
+            } onCancel: { showPhotoLibraryPicker = false }
+        }
+        .sheet(isPresented: $showCaptureResult) {
+            LocalIntakeResultSheet(
+                notificationText: captureMessage,
+                feedback: captureFeedback,
+                isError: captureIsError,
+                onViewRecord: {
+                    showCaptureResult = false
+                    if let captureRoute { appState.presentedOverlay = captureRoute }
+                },
+                onDismiss: { showCaptureResult = false }
+            )
         }
     }
 
@@ -243,7 +273,7 @@ struct MainShellView: View {
 
     private var addButton: some View {
         Button {
-            showManualRecordSheet = true
+            showCaptureOptions = true
         } label: {
             Image(systemName: "plus")
                 .font(.title3.weight(.semibold))
@@ -251,7 +281,38 @@ struct MainShellView: View {
                 .frame(width: JieziPrototypeLayout.add_button_size, height: JieziPrototypeLayout.add_button_size)
                 .background(JieziScene.expense.accent, in: Circle())
         }
-        .accessibilityLabel("记一笔")
+        .accessibilityLabel("留下此刻")
+    }
+
+    @MainActor
+    private func recognizeCapturedImage(_ data: Data) async {
+        do {
+            let token = appState.localVisionMode == .hosted
+                ? try? KeychainStore.shared.string(for: KeychainKeys.uploadToken)
+                : nil
+            let outcome = try await appState.ingestHostedImageLocally(
+                data: data,
+                captureKind: "photo_library",
+                filename: "photo-library-upload.jpg",
+                uploadToken: token
+            )
+            captureMessage = outcome.notificationText ?? "识别结果已保存到本机。"
+            captureFeedback = outcome.feedback
+            captureIsError = false
+            captureRoute = switch outcome.result {
+            case .archived, .financialArchived: .records
+            case .staged, .financialPending: .inbox
+            }
+        } catch {
+            captureMessage = LocalImageRecognitionFailureMessage.result(
+                for: error,
+                persisted: appState.hasPersistedInputImage(data)
+            )
+            captureFeedback = nil
+            captureIsError = true
+            captureRoute = .inbox
+        }
+        showCaptureResult = true
     }
 
     private var domainPageButtons: some View {
