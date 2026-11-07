@@ -79,7 +79,8 @@ struct NativeDomainPageContent: View {
                     }
 
                     domainSections
-                    if isDrillDown { currentCandidates } else { observationEntry }
+                    // 明细页只呈现所选日期的事实；未确认候选属于收件箱，不再在这里重复一遍。
+                    if !isDrillDown { observationEntry }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,41 +233,6 @@ struct NativeDomainPageContent: View {
         if let onSelectDate { onSelectDate(dateKey) } else { appState.selectedDateKey = dateKey }
     }
 
-    private var currentCandidates: some View {
-        let candidates = appState.dashboard.stagingRecords.filter { ($0.domainKey ?? $0.recordType) == domain.rawValue }
-        let expenses = domain == .expense ? appState.dashboard.pendingExpenses : []
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("当前待处理候选").font(JieziType.cardTitle)
-            Text("最新候选，不是所选历史日期的快照；未确认，不计入上方统计。")
-                .font(JieziFont.caption).fixedSize(horizontal: false, vertical: true)
-            if let message = appState.inboxFinanceMessage {
-                Text(message).font(JieziFont.caption)
-                Button("重读候选") { Task { await appState.refreshInboxProjection() } }
-            } else if candidates.isEmpty && expenses.isEmpty { Text("当前没有这一领域的候选").font(JieziFont.caption) }
-            ForEach(expenses) { pending in
-                Button { appState.openPendingExpense(pending) } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(pending.title).font(JieziType.cardTitle)
-                        Text("\(pending.dateKey) · 待确认支出 · \(String(format: "¥%.2f", pending.amount))").font(JieziFont.caption)
-                    }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                }.buttonStyle(.plain)
-            }
-            ForEach(candidates) { candidate in
-                Button {
-                    appState.presentedOverlay = .inbox
-                    appState.inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: candidate.id)])
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(candidate.title).font(JieziType.cardTitle)
-                        Text("\(candidate.dateKey) · \(candidate.statusLabel)").font(JieziFont.caption)
-                    }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                }.buttonStyle(.plain)
-            }
-        }
-        .foregroundStyle(scene.foreground).padding(JieziPrototypeLayout.card_inset)
-        .overlay(RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius).stroke(scene.accent.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-    }
-
     private var expenseTimeline: some View {
         let entriesByMinute = Dictionary(grouping: model.timeline, by: \.minute)
         let minutes = entriesByMinute.keys.sorted()
@@ -357,56 +323,215 @@ struct NativeDomainPageContent: View {
         String(format: "%02d:%02d", minute / 60, minute % 60)
     }
 
+    /// 首页双列卡里的「与前一天比较」：只报差额与两条对比，给最大一笔让位。
     private var previousDayComparison: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("与前一天比较").font(JieziFont.caption)
-            if let current = model.knownPrimaryTotal, let previous = model.previousExpenseTotal {
-                let delta = current - previous
-                Text(delta == 0 ? "持平" : "\(delta > 0 ? "+" : "−")\(formatted(abs(delta)))")
-                    .font(JieziType.moneyCard.monospacedDigit())
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("前一天 \(formatted(previous))")
-                    Text("当天 \(formatted(current))")
-                }
-                .font(JieziFont.caption.monospacedDigit())
-                .foregroundStyle(scene.muted)
-                .fixedSize(horizontal: false, vertical: true)
+        let current = model.knownPrimaryTotal
+        let previous = model.previousExpenseTotal
+        let delta = expenseDelta(current: current, previous: previous)
+
+        return JieziCompareTile(
+            label: "与前一天比较",
+            glyph: "arrow.left.arrow.right",
+            value: totalText(current),
+            valueTint: scene.foreground,
+            caption: expenseDeltaText(delta),
+            captionTint: delta.map(expenseDeltaTint),
+            tint: scene.dataAccent,
+            muted: scene.muted,
+            surface: scene.surface,
+            minHeight: 156
+        ) {
+            if let current, let previous {
+                JieziCompareBars(
+                    items: [
+                        .init(label: "当天", value: current, text: formatted(current), emphasized: true),
+                        .init(label: "前一天", value: previous, text: formatted(previous), emphasized: false)
+                    ],
+                    tint: scene.dataAccent,
+                    muted: scene.muted,
+                    spacing: 8
+                )
             } else {
-                Text("金额或读取结果不完整，暂不能比较。")
-                    .font(JieziFont.caption).foregroundStyle(scene.muted)
+                Text(model.previousExpenseCount == nil
+                     ? "前一天记录尚未读到"
+                     : "金额字段不完整，暂不能比较")
+                    .font(JieziFont.caption2)
+                    .foregroundStyle(scene.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .foregroundStyle(scene.foreground)
-        .padding(JieziPrototypeLayout.card_inset)
-        .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
-        .background(scene.surface.opacity(0.66), in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius))
     }
 
+    /// 明细页的「与前一天比较」：一张主卡报金额，两张小卡报笔数与最高一笔。
+    /// 版式对齐系统天气的分组卡——小字标题、大数字、可视化、一句说明，四层都齐。
     private var expenseComparison: some View {
         let count = model.records.filter { $0.kind == .expense && $0.transactionType != "income" }.count
-        return VStack(alignment: .leading, spacing: 14) {
-            Text("与前一天比较").font(JieziType.cardTitle)
-            comparisonRow("金额", current: model.knownPrimaryTotal.map { formatted($0) } ?? "金额字段缺失",
-                          previous: model.previousExpenseTotal.map { formatted($0) } ?? "暂不可比较")
-            comparisonRow("笔数", current: "\(count)笔",
-                          previous: model.previousExpenseCount.map { "\($0)笔" } ?? "暂不可比较")
-            comparisonRow("最高一笔", current: model.highestExpense.map {
-                "\(model.knownPrimaryTotal == nil ? "最大已知 " : "")\(recordValue($0)) · \($0.title)"
-            } ?? (count == 0 ? "暂无支出" : "金额字段缺失"),
-                          previous: model.previousHighestExpense.map { "\(recordValue($0)) · \($0.title)" }
-                            ?? (model.previousExpenseCount == 0 ? "暂无支出" : "暂不可比较"))
+        let current = model.knownPrimaryTotal
+        let previous = model.previousExpenseTotal
+        let delta = expenseDelta(current: current, previous: previous)
+        let previousDayKey = NativeLocalDate.shiftedDateKey(model.dateKey, byDays: -1)
+
+        return VStack(spacing: JieziPrototypeLayout.column_gap) {
+            JieziComparePanel(
+                title: "与前一天比较",
+                subtitle: "\(shortDateKey(model.dateKey)) / \(previousDayKey.map(shortDateKey) ?? "—")",
+                titleTint: scene.foreground,
+                muted: scene.muted,
+                surface: scene.surface
+            ) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(totalText(current))
+                            .font(JieziType.moneyHero.monospacedDigit())
+                            .foregroundStyle(scene.foreground)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(current == nil ? "金额字段缺失" : "\(count) 笔支出")
+                            .font(JieziFont.caption2)
+                            .foregroundStyle(scene.muted)
+                    }
+                    Spacer(minLength: 4)
+                    if let delta {
+                        JieziDeltaPill(
+                            direction: delta > 0 ? .up : (delta < 0 ? .down : .flat),
+                            text: expenseDeltaText(delta) ?? "持平",
+                            tint: expenseDeltaTint(delta)
+                        )
+                    }
+                }
+
+                if let current, let previous {
+                    JieziCompareBars(
+                        items: [
+                            .init(label: "当天", value: current, text: formatted(current), emphasized: true),
+                            .init(label: "前一天", value: previous, text: formatted(previous), emphasized: false)
+                        ],
+                        tint: scene.dataAccent,
+                        muted: scene.muted,
+                        barHeight: 8,
+                        spacing: 12
+                    )
+                } else {
+                    Text(model.previousExpenseCount == nil
+                         ? "前一天的记录还没读到，读到后这里会给出两条对比。"
+                         : "前一天有 \(model.previousExpenseCount ?? 0) 笔支出，但金额字段不完整，暂不能比较。")
+                        .font(JieziFont.caption2)
+                        .foregroundStyle(scene.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            pairedCards {
+                expenseCountTile(count: count)
+            } second: {
+                expenseHighestTile(count: count)
+            }
         }
-        .foregroundStyle(scene.foreground).padding(JieziPrototypeLayout.card_inset)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(scene.surface.opacity(0.66), in: RoundedRectangle(cornerRadius: JieziPrototypeLayout.card_radius))
     }
 
-    private func comparisonRow(_ label: String, current: String, previous: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(JieziFont.caption).foregroundStyle(scene.muted)
-            Text("当天 \(current)").font(JieziType.moneyInline)
-            Text("前一天 \(previous)").font(JieziFont.body)
-        }.fixedSize(horizontal: false, vertical: true)
+    private func expenseCountTile(count: Int) -> some View {
+        let previous = model.previousExpenseCount
+        return JieziCompareTile(
+            label: "笔数",
+            glyph: "list.bullet",
+            value: "\(count) 笔",
+            valueTint: scene.foreground,
+            caption: previous.map { "前一天 \($0) 笔" } ?? "前一天笔数暂不可比较",
+            tint: scene.dataAccent,
+            muted: scene.muted,
+            surface: scene.surface,
+            minHeight: 156
+        ) {
+            if let previous, count > 0 || previous > 0 {
+                JieziCompareBars(
+                    items: [
+                        .init(label: "当天", value: Double(count), text: "\(count)", emphasized: true),
+                        .init(label: "前一天", value: Double(previous), text: "\(previous)", emphasized: false)
+                    ],
+                    tint: scene.dataAccent,
+                    muted: scene.muted,
+                    barHeight: 6,
+                    spacing: 8
+                )
+            } else {
+                Text(count == 0 ? "这一天没有支出" : "前一天没有支出")
+                    .font(JieziFont.caption2)
+                    .foregroundStyle(scene.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func expenseHighestTile(count: Int) -> some View {
+        let highest = model.highestExpense
+        let previousHighest = model.previousHighestExpense
+        let amount = highest.flatMap { expenseAmount(for: $0) }.map { String(format: "¥%.2f", $0) }
+
+        return JieziCompareTile(
+            label: model.knownPrimaryTotal == nil ? "最大已知一笔" : "最高一笔",
+            glyph: "arrow.up.right",
+            value: amount ?? (count == 0 ? "暂无支出" : "金额字段缺失"),
+            valueTint: scene.foreground,
+            caption: highest?.title,
+            tint: scene.dataAccent,
+            muted: scene.muted,
+            surface: scene.surface,
+            minHeight: 156
+        ) {
+            VStack(alignment: .leading, spacing: 5) {
+                Rectangle()
+                    .fill(scene.muted.opacity(0.18))
+                    .frame(height: 0.5)
+                if let previousHighest, let previousAmount = expenseAmount(for: previousHighest) {
+                    Text("前一天 \(String(format: "¥%.2f", previousAmount))")
+                        .font(JieziFont.caption2.monospacedDigit())
+                        .foregroundStyle(scene.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Text(previousHighest.title)
+                        .font(JieziFont.caption2)
+                        .foregroundStyle(scene.muted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else if model.previousExpenseCount == 0 {
+                    Text("前一天没有支出")
+                        .font(JieziFont.caption2)
+                        .foregroundStyle(scene.muted)
+                } else {
+                    Text("前一天暂不可比较")
+                        .font(JieziFont.caption2)
+                        .foregroundStyle(scene.muted)
+                }
+            }
+        }
+    }
+
+    private func expenseDelta(current: Double?, previous: Double?) -> Double? {
+        guard let current, let previous else { return nil }
+        return current - previous
+    }
+
+    /// 支出变多是警示（赭红），变少是正向（墨绿），持平走中性。
+    private func expenseDeltaTint(_ delta: Double) -> Color {
+        if abs(delta) < 0.005 { return scene.muted }
+        return delta > 0 ? scene.dataAccent : scene.accent
+    }
+
+    private func expenseDeltaText(_ delta: Double?) -> String? {
+        guard let delta else { return nil }
+        if abs(delta) < 0.005 { return "与前一天持平" }
+        return "\(delta > 0 ? "多花" : "少花") \(formatted(abs(delta)))"
+    }
+
+    private func totalText(_ value: Double?) -> String {
+        value.map { formatted($0) } ?? "暂无完整金额"
+    }
+
+    private func shortDateKey(_ dateKey: String) -> String {
+        let parts = dateKey.split(separator: "-")
+        guard parts.count == 3 else { return dateKey }
+        return "\(parts[1])-\(parts[2])"
     }
 
     private var periodSummary: some View {
@@ -922,13 +1047,48 @@ struct NativeDomainPageContent: View {
     }
 
     private func highestExpenseCard(_ record: NativeDayRecord) -> some View {
-        Button { appState.openDayRecord(record) } label: {
-            metricCard(model.knownPrimaryTotal == nil ? "最大已知一笔" : "最大一笔",
-                value: expenseAmount(for: record).map { String(format: "¥%.2f", $0) } ?? "金额不可用",
-                caption: record.title)
+        let amount = expenseAmount(for: record)
+        let total = model.knownPrimaryTotal
+
+        return Button { appState.openDayRecord(record) } label: {
+            JieziCompareTile(
+                label: total == nil ? "最大已知一笔" : "最高一笔",
+                glyph: "arrow.up.right",
+                value: amount.map { String(format: "¥%.2f", $0) } ?? "金额不可用",
+                valueTint: scene.foreground,
+                caption: record.title,
+                tint: scene.dataAccent,
+                muted: scene.muted,
+                surface: scene.surface,
+                minHeight: 156
+            ) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let amount, let total, total > 0 {
+                        JieziMeterRow(
+                            ratio: amount / total,
+                            text: "占当日支出 \(Int((amount / total * 100).rounded()))%",
+                            tint: scene.dataAccent,
+                            muted: scene.muted
+                        )
+                    } else if let timeLabel = record.timeLabel {
+                        Text(timeLabel)
+                            .font(JieziFont.caption2.monospacedDigit())
+                            .foregroundStyle(scene.muted)
+                    }
+                    HStack(spacing: 3) {
+                        Spacer(minLength: 2)
+                        Text("详情")
+                            .font(JieziFont.caption2)
+                            .foregroundStyle(scene.accent)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(scene.accent)
+                    }
+                }
+            }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(model.knownPrimaryTotal == nil ? "最大已知一笔" : "最大一笔")，\(record.title)，打开记录详情")
+        .accessibilityLabel("\(total == nil ? "最大已知一笔" : "最高一笔")，\(record.title)，打开记录详情")
     }
 
     private var recordsCard: some View {
@@ -992,12 +1152,29 @@ struct NativeDomainPageContent: View {
         let rowLayout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        // 时间列只放时刻；「上传 」前缀折成第二行的小字标注，不再挤进同一行。
+        let rawTime = (timeLabel ?? record.timeLabel)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isUploadTime = rawTime?.hasPrefix("上传 ") == true
+        let clock: String? = {
+            guard let rawTime, !rawTime.isEmpty else { return nil }
+            return isUploadTime ? String(rawTime.dropFirst(3)) : rawTime
+        }()
         return rowLayout {
-                Text(timeLabel ?? record.timeLabel ?? "—")
-                    .font(JieziFont.caption2.monospacedDigit())
-                    .foregroundStyle(rowScene.muted)
-                    .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 42, alignment: .leading)
-                    .padding(.top, 3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(clock ?? "—")
+                        .font(JieziFont.caption2.monospacedDigit())
+                        .foregroundStyle(rowScene.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    if isUploadTime {
+                        Text("上传")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(rowScene.muted.opacity(0.62))
+                            .lineLimit(1)
+                    }
+                }
+                .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 42, alignment: .leading)
+                .padding(.top, 3)
 
                 if showsIcon { Image(systemName: record.systemImage)
                     .font(.system(size: 15, weight: .medium))
