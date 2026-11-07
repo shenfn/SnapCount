@@ -73,12 +73,15 @@ enum LocalExpenseReadModel {
                         title: expense.merchantName,
                         subtitle: expense.category,
                         value: String(format: "¥%.2f", Double(expense.amountMinor) / 100),
-                        timeLabel: expense.transactionTime,
+                        timeLabel: NativeLocalDate.listTimeLabel(
+                            recordTime: expense.transactionTime,
+                            uploadedAt: expense.createdAt
+                        ),
                         systemImage: "creditcard",
                         transactionType: "expense",
                         status: "local"
                     )
-                }.sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }
+                }.sorted { NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel) }
             )
         }.sorted { $0.dateKey > $1.dateKey }
     }

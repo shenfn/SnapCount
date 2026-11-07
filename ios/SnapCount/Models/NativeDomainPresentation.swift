@@ -37,7 +37,9 @@ enum NativeDomainPresentationAdapter {
             .flatMap(\.records)
             .filter { ($0.domainKey ?? $0.kind.rawValue) == definition.id && $0.kind != .staging }
             .sorted { lhs, rhs in
-                if lhs.dateKey == rhs.dateKey { return (lhs.timeLabel ?? "") > (rhs.timeLabel ?? "") }
+                if lhs.dateKey == rhs.dateKey {
+                    return NativeLocalDate.listTimeSortKey(lhs.timeLabel) > NativeLocalDate.listTimeSortKey(rhs.timeLabel)
+                }
                 return lhs.dateKey > rhs.dateKey
             }
         let details = dashboard.recordDetails

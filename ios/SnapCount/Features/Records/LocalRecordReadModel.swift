@@ -95,7 +95,10 @@ enum LocalRecordReadModel {
                         title: record.title,
                         subtitle: record.summary,
                         value: "",
-                        timeLabel: record.recordTime,
+                        timeLabel: NativeLocalDate.listTimeLabel(
+                            recordTime: record.recordTime,
+                            uploadedAt: record.createdAt
+                        ),
                         systemImage: kind.systemImage,
                         transactionType: record.domainKey,
                         status: "local"

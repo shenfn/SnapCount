@@ -405,11 +405,11 @@ struct NativeDomainScenePresentation {
     private static func currency(_ value: Double) -> String { String(format: "¥%.2f", value) }
 
     private static func chronologicalOrder(_ lhs: NativeDayRecord, _ rhs: NativeDayRecord) -> Bool {
-        switch (lhs.timeLabel, rhs.timeLabel) {
-        case let (left?, right?): return left > right
-        case (_?, nil): return true
-        case (nil, _?): return false
-        case (nil, nil): return lhs.reference < rhs.reference
-        }
+        // 「上传 HH:mm」是兜底时间，不能按字符串和真实时刻混排（否则「上传」的中文字会比数字大，全被顶到最前）。
+        let left = NativeLocalDate.listTimeSortKey(lhs.timeLabel)
+        let right = NativeLocalDate.listTimeSortKey(rhs.timeLabel)
+        if left != right { return left > right }
+        if lhs.timeLabel != rhs.timeLabel { return (lhs.timeLabel ?? "") < (rhs.timeLabel ?? "") }
+        return lhs.reference < rhs.reference
     }
 }

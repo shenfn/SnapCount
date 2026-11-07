@@ -81,6 +81,24 @@ enum NativeLocalDate {
         return "\(parts[0])年\(month)月"
     }
 
+    /// 列表按日期分组时的分组标题，与 PWA `dateSectionLabel` 同口径：
+    /// 「今天」「昨天」「10月31日 · 周五」，跨年才补「2026年」前缀。
+    /// 直接用 `2026-10-31` 当标题读起来像机器输出，和 PWA 放在一起尤其明显。
+    static func sectionTitle(_ value: String, today: String, yesterday: String) -> String {
+        if value == today { return "今天" }
+        if value == yesterday { return "昨天" }
+        guard let date = date(fromKey: value) else { return value }
+        let year = calendar.component(.year, from: date)
+        let currentYear = calendar.component(.year, from: Date())
+        let month = calendar.component(.month, from: date)
+        let day = calendar.component(.day, from: date)
+        let yearPrefix = year == currentYear ? "" : "\(year)年"
+        guard let weekday = weekdayShortLabel(for: value) else {
+            return "\(yearPrefix)\(month)月\(day)日"
+        }
+        return "\(yearPrefix)\(month)月\(day)日 · \(weekday)"
+    }
+
     static func dayOfMonth(_ dateKey: String) -> Int? {
         guard let date = date(fromKey: dateKey) else { return nil }
         return calendar.component(.day, from: date)
@@ -158,6 +176,43 @@ enum NativeLocalDate {
             return nil
         }
         return "上传 \(uploadTime)"
+    }
+
+    /// 把任意写法的时刻收敛成 `HH:mm`：`11:30:00` / `11:30` / `9:05` 都进得来，非法值返回 nil。
+    /// 列表的时间列只放「时刻」，秒和毫秒一律丢掉，否则窄列里会折成两行。
+    static func clockKey(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let parts = trimmed.split(separator: ":", omittingEmptySubsequences: false)
+        guard (2...3).contains(parts.count),
+              let hour = Int(parts[0]),
+              let minute = Int(parts[1]),
+              (0...23).contains(hour),
+              (0...59).contains(minute) else {
+            return nil
+        }
+        return String(format: "%02d:%02d", hour, minute)
+    }
+
+    /// 本机记录的列表时间：有发生时刻就用它，没有就退回「上传 HH:mm」由界面标成推断值。
+    /// 传 `uploadedAt` 而不是字符串，是因为本机模型的时间字段本来就是 `Date`。
+    static func listTimeLabel(recordTime: String?, uploadedAt: Date?) -> String? {
+        if let clock = clockKey(recordTime) {
+            return clock
+        }
+        guard let uploadedAt else { return nil }
+        return "上传 \(timeKey(uploadedAt))"
+    }
+
+    /// 时间列的排序键：真实发生时刻排前，上传时间兜底排后，无时间排最后。
+    /// 兜底行拿的是上传时刻，不能当成「这笔钱几点花的」插进时间轴中间。
+    static func listTimeSortKey(_ label: String?) -> String {
+        guard let label else { return "" }
+        if label.hasPrefix("上传 ") {
+            return "0" + (clockKey(String(label.dropFirst(3))) ?? "")
+        }
+        return "1" + (clockKey(label) ?? "")
     }
 
     static func financeOccurredAt(dateKey: String, timeKey: String?) -> String? {

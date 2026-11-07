@@ -39,7 +39,10 @@ enum LocalFactReadModel {
                         title: fact.title,
                         subtitle: fact.summary,
                         value: value,
-                        timeLabel: fact.recordTime,
+                        timeLabel: NativeLocalDate.listTimeLabel(
+                            recordTime: fact.recordTime,
+                            uploadedAt: fact.createdAt
+                        ),
                         systemImage: kind == .expense ? "creditcard" : kind.systemImage,
                         transactionType: fact.domainKey,
                         status: "local",

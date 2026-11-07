@@ -47,11 +47,14 @@ enum LocalIncomeReadModel {
                         dateKey: income.incomeDate, kind: .income, domainKey: "income",
                         title: income.sourceName.isEmpty ? "收入记录" : income.sourceName, subtitle: income.category,
                         value: String(format: "+¥%.2f", Double(income.amountMinor) / 100),
-                        timeLabel: income.occurredAt.map { NativeLocalDate.timeKey($0) },
+                        timeLabel: NativeLocalDate.listTimeLabel(
+                            recordTime: income.occurredAt.map { NativeLocalDate.timeKey($0) },
+                            uploadedAt: income.createdAt
+                        ),
                         systemImage: "arrow.down.circle", status: "local",
                         amount: Double(income.amountMinor) / 100
                     )
-                }.sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }
+                }.sorted { NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel) }
             )
         }.sorted { $0.dateKey > $1.dateKey }
     }

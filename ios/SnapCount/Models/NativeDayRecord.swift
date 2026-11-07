@@ -120,7 +120,9 @@ extension DashboardSnapshot {
         let preservedRecords = previous.dayRecordGroups.flatMap(\.records).filter { shouldPreserve($0.kind) }
         let records = currentRecords + preservedRecords
         return Dictionary(grouping: records, by: \.dateKey)
-            .map { NativeDayRecordGroup(dateKey: $0.key, records: $0.value.sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }) }
+            .map { NativeDayRecordGroup(dateKey: $0.key, records: $0.value.sorted {
+                NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel)
+            }) }
             .sorted { $0.dateKey > $1.dateKey }
     }
 
