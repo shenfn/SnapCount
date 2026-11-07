@@ -1221,7 +1221,9 @@ final class AppState: ObservableObject {
         }, by: \.0).map { dateKey, entries in
             NativeDayRecordGroup(
                 dateKey: dateKey,
-                records: entries.map(\.1).sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }
+                records: entries.map(\.1).sorted {
+                    NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel)
+                }
             )
         }.sorted { $0.dateKey > $1.dateKey }
     }
@@ -1809,7 +1811,11 @@ final class AppState: ObservableObject {
                             amount: Double(record.amountMinor) / 100, dateKey: record.transactionDate,
                             reference: "expense/\(record.id.uuidString)", imagePath: record.imagePath,
                             imageURL: imageURL,
-                            occurredAtLabel: record.transactionTime, createdAtLabel: "本机待确认")
+                            occurredAtLabel: record.transactionTime,
+                            createdAtLabel: "\(NativeLocalDate.dateKey(record.createdAt)) \(NativeLocalDate.timeKey(record.createdAt))",
+                            platform: record.platform,
+                            category: record.category,
+                            paymentMethod: record.paymentMethod)
                     }
                 }
             } catch { inboxFinanceMessage = "本机待补全读取失败：\(error.localizedDescription)" }

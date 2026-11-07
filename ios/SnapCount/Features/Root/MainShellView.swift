@@ -253,7 +253,9 @@ struct MainShellView: View {
             HStack(spacing: 7) {
                 Image(systemName: "tray.full")
                     .font(.system(size: 15, weight: .semibold))
-                Text("待确认")
+                // 入口名与页面标题保持一致（页面已从「待确认」改名为「待处理」），
+                // 否则同一个地方两套叫法，用户会以为是两个入口。
+                Text("待处理")
                     .font(JieziFont.caption)
                     .fixedSize()
                 Text("\(appState.dashboard.pendingCount)")

@@ -6,7 +6,7 @@ struct InboxView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var scope: NativeInboxScope = .all
     @State private var filter: NativeInboxFilter = .all
-    @State private var columnCount = 1
+    @State private var intakeExpanded = false
     @State private var stageItemId: String?
     @State private var manualIntakeData: Data?
     @State private var manualIntake: LocalImageIntake?
@@ -36,9 +36,26 @@ struct InboxView: View {
         )
     }
 
+    /// PWA 的六个 chip 始终都在（哪怕计数是 0），这样用户能看见「还有哪几种状态」，
+    /// 而不是被悄悄收成两个，误以为筛选只有两种。
     private var visibleFilters: [NativeInboxFilter] {
-        NativeInboxFilter.allCases.filter { option in
-            option == .all || option == filter || (filterCounts[option] ?? 0) > 0
+        NativeInboxFilter.pendingPageOrder
+    }
+
+    /// 与 PWA 同口径：范围只认「发生日期」，所以今天为空时要说清是日期口径，不是筛选口径。
+    private var todayItems: [NativeInboxItem] {
+        NativeInboxPresentation.filtered(allItems, scope: .today, filter: .all, today: Self.dateKey(daysFromToday: 0))
+    }
+
+    private var scopeSubtitle: String {
+        switch scope {
+        case .today:
+            // 短句：这一行要和「全部 / 今天」分段挤在同一行，太长会折成两行把分段顶歪。
+            return todayItems.isEmpty
+                ? "今天发生的记录为 0 条"
+                : "今天还有 \(todayItems.count) 条需要你决定"
+        case .all:
+            return allItems.isEmpty ? "当前没有待处理记录" : "全部 \(allItems.count) 条按发生时间排列"
         }
     }
 
@@ -69,7 +86,11 @@ struct InboxView: View {
             JieziPageBackground()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    pendingSummary
+                    InboxScopeHeader(
+                        subtitle: scopeSubtitle,
+                        scope: $scope,
+                        todayCount: todayItems.count
+                    )
 
                     if let message = appState.inboxFinanceMessage {
                         messageBanner(message, isError: false, isWorking: false)
@@ -87,15 +108,22 @@ struct InboxView: View {
                     failedImageCleanupSection
 
                     if allItems.isEmpty && appState.failedLocalImageIntakes.isEmpty && appState.pendingLocalImageCleanups.isEmpty {
-                        InboxSettledEmptyView()
-                    } else if !allItems.isEmpty {
-                        scopeControl
-                        workspaceHeading
-                        filterBar
+                        InboxScopeEmptyState(
+                            title: "微尘皆已落定",
+                            message: "新的截图会在这里稍作停留"
+                        )
+                    } else {
+                        if !allItems.isEmpty {
+                            InboxFilterChipRow(filters: visibleFilters, counts: filterCounts, filter: $filter)
+                        }
                         if visibleItems.isEmpty {
-                            filteredEmptyState
+                            emptyState
                         } else {
-                            workspaceSections
+                            InboxFilmSections(
+                                sections: sections,
+                                columns: dynamicTypeSize.isAccessibilitySize ? 1 : 2,
+                                onSelect: { item in stageItemId = item.id }
+                            )
                         }
                     }
                 }
@@ -108,7 +136,7 @@ struct InboxView: View {
                 await appState.refreshInboxProjection()
             }
         }
-        .navigationTitle("待确认")
+        .navigationTitle("待处理")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(JieziScene.expense.surface, for: .navigationBar)
         .navigationDestination(for: NativeInboxRoute.self) { route in
@@ -127,20 +155,6 @@ struct InboxView: View {
                 }
             case .record(let reference):
                 PendingExpenseResolutionView(reference: reference)
-            }
-        }
-        .toolbar {
-            if !visibleItems.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        withAnimation(JieziEasing.standard) {
-                            columnCount = columnCount == 2 ? 1 : 2
-                        }
-                    } label: {
-                        Image(systemName: columnCount == 2 ? "rectangle.grid.2x2" : "rectangle")
-                    }
-                    .accessibilityLabel(columnCount == 2 ? "切换为单列" : "切换为双列")
-                }
             }
         }
         .fullScreenCover(isPresented: stagePresented) {
@@ -189,97 +203,23 @@ struct InboxView: View {
     @ViewBuilder
     private var failedImageIntakesSection: some View {
         if !appState.failedLocalImageIntakes.isEmpty {
-            VStack(alignment: .leading, spacing: JieziSpacing.md) {
-                Text("未完成的图片")
-                    .font(.headline)
-                    .foregroundStyle(JieziTheme.ink)
-                ForEach(appState.failedLocalImageIntakes) { intake in
-                    VStack(alignment: .leading, spacing: JieziSpacing.sm) {
-                        if let data = try? appState.localImageData(for: intake),
-                           let image = UIImage(data: data) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 150)
-                                .clipShape(RoundedRectangle(cornerRadius: JieziRadius.sm, style: .continuous))
-                                .accessibilityLabel("原图预览")
-                        }
-                        HStack {
-                            Image(systemName: "photo.badge.exclamationmark")
-                                .foregroundStyle(JieziTheme.gold)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(intake.filename).font(.subheadline.weight(.semibold))
-                                Text(intake.status == .receiving ? "正在处理，请稍后查看" : intake.failureMessage ?? "识别中断，可重试或手动处理")
-                                    .font(.caption)
-                                    .foregroundStyle(JieziTheme.muted)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        if appState.hasLocalImage(for: intake) {
-                            Text("已重试 \(intake.retryCount)/3 次")
-                                .font(.caption2)
-                                .foregroundStyle(JieziTheme.muted)
-                        } else {
-                            Text("本机原图文件缺失；请重新选择图片，或关闭这条输入。")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                        HStack {
-                            if intake.status == .failed, appState.hasLocalImage(for: intake), intake.retryCount < 3 {
-                                Button("重试识别") {
-                                    Task { _ = await appState.retryLocalImageIntake(intake) }
-                                }
-                                .buttonStyle(.borderedProminent)
-                            } else if intake.status == .failed, appState.hasLocalImage(for: intake) {
-                                Text("已达重试上限")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(JieziTheme.muted)
-                            }
-                            if intake.status == .failed, appState.hasLocalImage(for: intake) {
-                                Button("手动处理") {
-                                    if let data = try? appState.localImageData(for: intake) {
-                                        manualIntake = intake
-                                        manualIntakeData = data
-                                    }
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                            if intake.status == .failed {
-                                Button("丢弃") { intakeToDiscard = intake }
-                                .buttonStyle(.bordered)
-                                .tint(.red)
-                            }
-                        }
+            InboxIntakeBanner(
+                intakes: appState.failedLocalImageIntakes,
+                expanded: $intakeExpanded,
+                dataFor: { intake in try? appState.localImageData(for: intake) },
+                hasImage: { appState.hasLocalImage(for: $0) },
+                onRetry: { intake in
+                    Task { _ = await appState.retryLocalImageIntake(intake) }
+                },
+                onManual: { intake in
+                    if let data = try? appState.localImageData(for: intake) {
+                        manualIntake = intake
+                        manualIntakeData = data
                     }
-                    .padding(JieziSpacing.lg)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: JieziRadius.md, style: .continuous))
-                }
-            }
-            .padding(.horizontal, JieziSpacing.xl2)
-            .padding(.bottom, JieziSpacing.lg)
+                },
+                onDiscard: { intake in intakeToDiscard = intake }
+            )
         }
-    }
-
-    private var pendingSummary: some View {
-        let pendingCount = allItems.count + appState.failedLocalImageIntakes.count + appState.pendingLocalImageCleanups.count
-        return HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(pendingCount == 0 ? "暂时没有待处理内容" : "核对这些记录")
-                    .font(JieziType.prototypeBrand)
-                    .foregroundStyle(JieziTheme.ink)
-                if pendingCount > 0 {
-                    Text("\(allItems.count) 条候选 · \(appState.failedLocalImageIntakes.count) 张待处理图片 · \(appState.pendingLocalImageCleanups.count) 张待清理")
-                        .font(.subheadline)
-                        .foregroundStyle(JieziTheme.muted)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, JieziSpacing.xl2)
-        .padding(.top, JieziSpacing.sm)
-        .padding(.bottom, JieziSpacing.md)
     }
 
     @ViewBuilder
@@ -317,111 +257,29 @@ struct InboxView: View {
         }
     }
 
-    private var scopeControl: some View {
-        Picker("记录范围", selection: $scope) {
-            ForEach(NativeInboxScope.allCases) { option in
-                Text(option.title).tag(option)
-            }
+    /// 空态分三种，别再用一句「今天没有这类记录」把范围问题和筛选问题混在一起。
+    @ViewBuilder
+    private var emptyState: some View {
+        if scope == .today && allItems.isEmpty == false && (filterCounts[.all] ?? 0) == 0 {
+            InboxScopeEmptyState(
+                title: "今天没有待处理记录",
+                message: "全部 \(allItems.count) 条的发生日期都早于今天",
+                actionTitle: "查看全部 \(allItems.count) 条",
+                action: { withAnimation(JieziEasing.standard) { scope = .all } }
+            )
+        } else if (filterCounts[filter] ?? 0) == 0 {
+            InboxScopeEmptyState(
+                title: "这个状态已经没有记录",
+                message: "同一范围下还有其他状态可以看",
+                actionTitle: "看全部状态",
+                action: { withAnimation(JieziEasing.standard) { filter = .all } }
+            )
+        } else {
+            InboxScopeEmptyState(
+                title: "当前范围已经处理完",
+                message: "切换范围或状态可以查看其他记录"
+            )
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, JieziSpacing.xl2)
-        .padding(.bottom, JieziSpacing.lg)
-    }
-
-    private var workspaceHeading: some View {
-        HStack(alignment: .bottom, spacing: JieziSpacing.md) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(scope == .today ? "今天发生的记录" : "全部待处理记录")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(JieziTheme.brand)
-                Text("待处理记录")
-                    .font(JieziType.cardTitle)
-                    .foregroundStyle(JieziTheme.ink)
-            }
-            Spacer()
-            Text("\(filterCounts[.all] ?? 0) 条")
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(JieziTheme.muted)
-        }
-        .padding(.horizontal, JieziSpacing.xl2)
-        .padding(.bottom, JieziSpacing.sm)
-    }
-
-    private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: JieziSpacing.sm) {
-                ForEach(visibleFilters) { option in
-                    Button {
-                        withAnimation(JieziEasing.standard) { filter = option }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(option.title)
-                            Text("\(filterCounts[option] ?? 0)")
-                                .monospacedDigit()
-                                .opacity(0.72)
-                        }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(filter == option ? .white : JieziTheme.ink)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 44)
-                        .background(
-                            filter == option ? InboxVisualStyle.color(for: option) : Color.white.opacity(0.56),
-                            in: Capsule()
-                        )
-                        .overlay {
-                            Capsule().stroke(InboxVisualStyle.color(for: option).opacity(filter == option ? 0 : 0.16))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, JieziSpacing.xl2)
-            .padding(.bottom, JieziSpacing.lg)
-        }
-    }
-
-    private var workspaceSections: some View {
-        ForEach(sections) { section in
-            VStack(alignment: .leading, spacing: JieziSpacing.sm) {
-                Text(section.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(JieziTheme.muted)
-                LazyVGrid(
-                    columns: Array(
-                        repeating: GridItem(.flexible(minimum: 0), spacing: JieziSpacing.lg, alignment: .top),
-                        count: dynamicTypeSize.isAccessibilitySize ? 1 : columnCount
-                    ),
-                    spacing: JieziSpacing.xl2
-                ) {
-                    ForEach(section.items) { item in
-                        Button {
-                            stageItemId = item.id
-                        } label: {
-                            NativeInboxItemRow(
-                                item: item,
-                                repaymentCandidate: item.stagingRecord.flatMap { appState.repaymentCandidates[$0.id] },
-                                showThumbnail: dynamicTypeSize.isAccessibilitySize || columnCount == 1
-                            )
-                            .jieziCard()
-                        }
-                        .buttonStyle(JieziPressableButtonStyle(pressedScale: 0.985))
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-            }
-            .padding(.horizontal, JieziSpacing.Semantic.card_padding)
-            .padding(.bottom, JieziSpacing.xl2)
-        }
-    }
-
-    private var filteredEmptyState: some View {
-        ContentUnavailableView(
-            scope == .today ? "今天没有这类记录" : "这类记录已经处理完了",
-            systemImage: "checkmark.circle",
-            description: Text(scope == .today ? "切换到“全部”可以查看更早的待处理记录。" : "换一个状态看看。")
-        )
-        .frame(maxWidth: .infinity)
-        .padding(.top, 56)
     }
 
     private static func dateKey(daysFromToday: Int) -> String {

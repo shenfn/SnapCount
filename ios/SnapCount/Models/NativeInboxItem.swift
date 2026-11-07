@@ -40,6 +40,15 @@ enum NativeInboxFilter: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// 筛选条上的短标签。PWA 的 chips 用「账单补全」而不是「待补全账单」，
+    /// 因为六个 chip 要在一行横向滚动里读得下去。
+    var chipTitle: String {
+        switch self {
+        case .pendingExpense: return "账单补全"
+        default: return title
+        }
+    }
+
     var galleryTitle: String {
         switch self {
         case .all: return "全部待处理"
@@ -81,6 +90,10 @@ struct NativePendingExpense: Identifiable {
     var imageLoadError: Bool
     let occurredAtLabel: String?
     let createdAtLabel: String
+    /// 账单事实三件套；缺省时卡片按「未知」呈现，与 PWA 的 pending-bill-facts 对齐。
+    let platform: String?
+    let category: String?
+    let paymentMethod: String?
 
     init(
         id: String,
@@ -92,7 +105,10 @@ struct NativePendingExpense: Identifiable {
         imageURL: URL? = nil,
         imageLoadError: Bool = false,
         occurredAtLabel: String? = nil,
-        createdAtLabel: String = "最近上传"
+        createdAtLabel: String = "最近上传",
+        platform: String? = nil,
+        category: String? = nil,
+        paymentMethod: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -104,6 +120,9 @@ struct NativePendingExpense: Identifiable {
         self.imageLoadError = imageLoadError
         self.occurredAtLabel = occurredAtLabel
         self.createdAtLabel = createdAtLabel
+        self.platform = platform
+        self.category = category
+        self.paymentMethod = paymentMethod
     }
 }
 
@@ -312,7 +331,7 @@ enum NativeInboxPresentation {
 
     static func sections(from items: [NativeInboxItem], today: String, yesterday: String) -> [NativeInboxSection] {
         Dictionary(grouping: items, by: \.dateKey).sorted { $0.key > $1.key }.map { dateKey, groupedItems in
-            let title = dateKey == today ? "今天" : (dateKey == yesterday ? "昨天" : dateKey)
+            let title = NativeLocalDate.sectionTitle(dateKey, today: today, yesterday: yesterday)
             return NativeInboxSection(id: dateKey, title: title, items: groupedItems)
         }
     }

@@ -303,7 +303,10 @@ final class NativeDataService {
                 reference: "expense/\(row.id)",
                 imagePath: row.imageURL,
                 occurredAtLabel: dateTimeLabel(row.occurredAt),
-                createdAtLabel: dateTimeLabel(row.createdAt) ?? "最近上传"
+                createdAtLabel: dateTimeLabel(row.createdAt) ?? "最近上传",
+                platform: row.platform,
+                category: row.category,
+                paymentMethod: row.paymentMethod
             )
         }
 
@@ -1126,7 +1129,9 @@ final class NativeDataService {
             records.append(NativeDayRecord(id: "staging-\(row.id)", reference: "staging-\(row.id)", dateKey: dateKey, kind: .staging, domainKey: row.detectedDomainKey, title: row.detectedDomainName ?? domainName(row.detectedDomainKey), subtitle: row.aiSummary ?? row.lastErrorMessage ?? "待处理截图", value: row.recordType == "income" ? "+ 待确认" : row.recordType == "expense" ? "- 待确认" : "待分类", timeLabel: NativeLocalDate.listTimeLabel(occurredAt: row.occurredAt, createdAt: row.createdAt), systemImage: stagingSystemImage(row.status ?? "unassigned")))
         }
         let groups = Dictionary(grouping: records) { $0.dateKey }
-        return groups.keys.sorted(by: >).map { dateKey in NativeDayRecordGroup(dateKey: dateKey, records: (groups[dateKey] ?? []).sorted { ($0.timeLabel ?? "") > ($1.timeLabel ?? "") }) }
+        return groups.keys.sorted(by: >).map { dateKey in NativeDayRecordGroup(dateKey: dateKey, records: (groups[dateKey] ?? []).sorted {
+            NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel)
+        }) }
     }
 
     func createManualRecord(
