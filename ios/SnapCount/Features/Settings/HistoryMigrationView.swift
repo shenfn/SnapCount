@@ -8,7 +8,10 @@ struct HistoryMigrationView: View {
     @State private var feedbackMessage: String?
 
     private var package: HistoryMigrationDiagnosticPackage {
-        HistoryMigrationExportBuilder.package(from: appState.dashboard)
+        HistoryMigrationExportBuilder.package(
+            from: appState.dashboard,
+            localInventory: appState.localHistoryInventory
+        )
     }
 
     private var groupedItems: [(HistoryMigrationIssueCategory, [HistoryMigrationDiagnosticItem])] {
@@ -43,6 +46,7 @@ struct HistoryMigrationView: View {
         .navigationTitle("历史数据迁移")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            await appState.loadLocalHistoryInventory()
             await refresh()
         }
         .sheet(item: $exportedFile) { file in
@@ -78,9 +82,9 @@ struct HistoryMigrationView: View {
                     columns: [GridItem(.flexible()), GridItem(.flexible())],
                     spacing: JieziSpacing.xl2
                 ) {
-                    JieziMetric(label: "当前已读取正式记录", value: "\(package.summary.readableRecords)")
-                    JieziMetric(label: "待补全账单", value: "\(package.summary.pendingExpenses)", valueTint: JieziTheme.coral)
-                    JieziMetric(label: "当前已读取待核对", value: "\(package.summary.pendingReview)", valueTint: JieziTheme.gold)
+                    JieziMetric(label: "本机正式记录（全日期）", value: "\(package.summary.readableRecords)")
+                    JieziMetric(label: "待补全账单（pending）", value: "\(package.summary.pendingExpenses)", valueTint: JieziTheme.coral)
+                    JieziMetric(label: "历史待核对（本机保留）", value: "\(package.summary.pendingReview)", valueTint: JieziTheme.gold)
                     JieziMetric(label: "已缓存图片", value: "\(package.summary.cachedImages)", valueTint: JieziTheme.mint)
                     JieziMetric(label: "缺失图片", value: "\(package.summary.missingImages)", valueTint: JieziTheme.coral)
                     JieziMetric(label: "读取警告", value: "\(package.summary.loadWarnings)", valueTint: package.summary.loadWarnings == 0 ? JieziTheme.mint : JieziTheme.coral)
@@ -151,13 +155,33 @@ struct HistoryMigrationView: View {
     private var reviewGroups: some View {
         VStack(alignment: .leading, spacing: JieziSpacing.md) {
             JieziSectionHeader(title: "待核对材料", subtitle: "点击记录查看原始字段")
-            if groupedItems.isEmpty {
+            if package.summary.pendingReview > 0 {
                 JieziCard(solid: true) {
-                    Label("当前没有已读取的待核对材料", systemImage: "checkmark.circle")
-                        .font(JieziFont.subheadline.weight(.semibold))
-                        .foregroundStyle(JieziTheme.mint)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(JieziSpacing.lg)
+                    VStack(alignment: .leading, spacing: JieziSpacing.md) {
+                        Label("本机已保留 \(package.summary.pendingReview) 条历史待核对记录", systemImage: "tray.full")
+                            .font(JieziFont.subheadline.weight(.semibold))
+                            .foregroundStyle(JieziTheme.gold)
+                        Text("这些记录不计入正式账目；详细原文和核对原因在设置中的历史待核对清单。")
+                            .font(JieziFont.caption)
+                            .foregroundStyle(JieziTheme.muted)
+                        NavigationLink("打开历史待核对清单") {
+                            LocalHistoryUnresolvedRecordsView()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(JieziSpacing.lg)
+                }
+            }
+            if groupedItems.isEmpty {
+                if package.summary.pendingReview == 0 {
+                    JieziCard(solid: true) {
+                        Label("当前没有已读取的待核对材料", systemImage: "checkmark.circle")
+                            .font(JieziFont.subheadline.weight(.semibold))
+                            .foregroundStyle(JieziTheme.mint)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(JieziSpacing.lg)
+                    }
                 }
             } else {
                 ForEach(groupedItems, id: \.0) { category, items in
@@ -206,7 +230,11 @@ struct HistoryMigrationView: View {
 
     private func export(_ format: HistoryMigrationExportFormat) {
         do {
-            exportedFile = try HistoryMigrationExportBuilder.write(format: format, snapshot: appState.dashboard)
+            exportedFile = try HistoryMigrationExportBuilder.write(
+                format: format,
+                snapshot: appState.dashboard,
+                localInventory: appState.localHistoryInventory
+            )
             feedbackMessage = "文件已生成，可以直接分享给 AI。"
         } catch {
             feedbackMessage = "导出失败：\(error.localizedDescription)"

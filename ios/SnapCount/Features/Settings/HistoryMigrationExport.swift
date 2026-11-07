@@ -63,21 +63,30 @@ enum HistoryMigrationExportFormat: String {
 enum HistoryMigrationExportBuilder {
     static func package(
         from snapshot: DashboardSnapshot,
+        localInventory: LocalHistoryInventorySnapshot? = nil,
         exportedAt: Date = Date()
     ) -> HistoryMigrationDiagnosticPackage {
         let items = diagnosticItems(from: snapshot)
         let cachedImages = items.filter { $0.imageStatus == "已缓存" }.count
         let missingImages = items.filter { $0.imageStatus != "已缓存" }.count
+        let readableRecords = localInventory.map { inventory in
+            ["expenses", "incomes", "records.food", "records.sleep", "records.sport", "records.reading", "records.wallet"]
+                .reduce(0) { $0 + inventory.counts[$1, default: 0] }
+        } ?? snapshot.monthCount
+        let pendingExpenses = localInventory?.counts["pending_expenses"] ?? snapshot.pendingExpenses.count
+        let pendingReview = localInventory?.counts["history.unresolved"] ?? snapshot.stagingRecords.count
 
         return HistoryMigrationDiagnosticPackage(
             format: "jiezi-migration-diagnostic",
             schemaVersion: 1,
             exportedAt: exportedAt,
-            scope: "当前已读取的本机/云端投影；不是完整线上迁移结果",
+            scope: localInventory == nil
+                ? "当前月份本机/云端投影；未读取全日期本机盘点"
+                : "本机全日期正式表、钱包快照、待处理和历史待核对保留；不是云端原子快照",
             summary: HistoryMigrationDiagnosticSummary(
-                readableRecords: snapshot.monthCount,
-                pendingExpenses: snapshot.pendingExpenses.count,
-                pendingReview: snapshot.stagingRecords.count,
+                readableRecords: readableRecords,
+                pendingExpenses: pendingExpenses,
+                pendingReview: pendingReview,
                 cachedImages: cachedImages,
                 missingImages: missingImages,
                 loadWarnings: snapshot.loadWarnings.count
@@ -97,9 +106,10 @@ enum HistoryMigrationExportBuilder {
     static func write(
         format: HistoryMigrationExportFormat,
         snapshot: DashboardSnapshot,
+        localInventory: LocalHistoryInventorySnapshot? = nil,
         exportedAt: Date = Date()
     ) throws -> NativeExportedFile {
-        let package = package(from: snapshot, exportedAt: exportedAt)
+        let package = package(from: snapshot, localInventory: localInventory, exportedAt: exportedAt)
         let data: Data
         switch format {
         case .json:
@@ -249,9 +259,9 @@ enum HistoryMigrationExportBuilder {
             "",
             "## 当前读取摘要",
             "",
-            "- 当前月已读取正式记录：\(package.summary.readableRecords)",
-            "- 待补全账单：\(package.summary.pendingExpenses)",
-            "- 历史待核对：\(package.summary.pendingReview)",
+            "- 本机全日期正式记录（含钱包快照）：\(package.summary.readableRecords)",
+            "- 待补全账单（当前 status=pending）：\(package.summary.pendingExpenses)",
+            "- 本机历史待核对保留：\(package.summary.pendingReview)",
             "- 已缓存图片：\(package.summary.cachedImages)",
             "- 缺失图片：\(package.summary.missingImages)",
             "- 读取警告：\(package.summary.loadWarnings)",
