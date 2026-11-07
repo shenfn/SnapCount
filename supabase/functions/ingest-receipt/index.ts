@@ -6460,7 +6460,7 @@ Deno.serve(async (req) => {
         clientCapturedAt,
         requestReceivedAt,
       });
-      const candidateCompanion = companionSettings.enabled
+      let candidateCompanion = companionSettings.enabled
         ? sanitizeCompanionMessageForTime(
           sanitizeCompanionMessageForContent(
             typeof ai.companion_message === "string" ? ai.companion_message : null,
@@ -6479,6 +6479,50 @@ Deno.serve(async (req) => {
           candidateFeedback = buildIncomeAIFeedback(ai, candidateAmount, candidateTimeContext);
         } else if (isBuiltinDomain(domainKey) && built && built.missingFields.length === 0 && (ai.confidence ?? 0) >= 0.75) {
           candidateFeedback = buildBuiltinAIFeedback(domainKey, built, candidateTimeContext, candidateCompanion);
+        }
+
+        // The local-first Hosted AI path used to stop after the vision call.
+        // That meant local records only received the deterministic templates
+        // above, while the regular cloud archive path received a second Voice
+        // call with a real model-generated expression. Keep both paths on the
+        // same expression pipeline and retain the deterministic result only
+        // when Voice is unavailable or fails validation.
+        const canGenerateVoice = Boolean(
+          textProvider
+          && (
+            domainKey === "expense" ||
+            domainKey === "income" ||
+            (isBuiltinDomain(domainKey)
+              && built
+              && built.missingFields.length === 0
+              && (ai.confidence ?? 0) >= 0.75)
+          )
+        );
+        if (canGenerateVoice) {
+          const voiceResult = await generateVoiceFeedback({
+            ai,
+            domainKey,
+            builtPayload: built?.payload ?? null,
+            normalizedAmount: candidateAmount,
+            domainProfiles,
+            timingSignal: timingSignalFor(domainKey, candidateTimeContext),
+            timeContext: candidateTimeContext,
+            clientLocalTime,
+            weekday: _weekdayCN,
+            persona: companionSettings.persona,
+            memoryStrength: companionSettings.memoryStrength,
+            expressionStyle: companionSettings.expressionStyle,
+            customNote: companionSettings.customNote,
+            recentCompanionLines: recentCompanionLinesFromContext(companionContext.memory),
+            memory: companionContext.memory,
+            textProvider,
+          });
+          if (voiceResult.companion_message) {
+            candidateCompanion = voiceResult.companion_message;
+          }
+          if (voiceResult.ai_feedback) {
+            candidateFeedback = voiceResult.ai_feedback;
+          }
         }
       }
       if (candidateCompanion) payload.companion_message = candidateCompanion;
