@@ -103,6 +103,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jiezi.app.tests
         DEVELOPMENT_TEAM: G6592SL596
+        # 单元测试 bundle 之前没有 Info.plist，也没开自动生成，
+        # `xcodebuild test` 会直接卡在 code sign：Cannot code sign because the target
+        # does not have an Info.plist file。打开自动生成即可，不需要真的写一个 plist。
+        GENERATE_INFOPLIST_FILE: YES
 
 schemes:
   SnapCount:
