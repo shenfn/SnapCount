@@ -24,7 +24,7 @@ final class LocalBYOKProviderTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(fakeKey)")
         XCTAssertEqual(candidate.domainKey, "wallet")
         XCTAssertEqual(candidate.title, "已还款截图")
-        let body = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
+        let body = try XCTUnwrap(BYOKURLProtocolStub.capturedBodies.first)
         let bodyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         let messages = try XCTUnwrap(bodyObject["messages"] as? [[String: Any]])
         let content = try XCTUnwrap(messages.first?["content"] as? [[String: Any]])
@@ -38,6 +38,39 @@ final class LocalBYOKProviderTests: XCTestCase {
         XCTAssertFalse(bodyText.contains(fakeKey))
         XCTAssertFalse(bodyText.contains("private-name.jpg"))
         XCTAssertFalse(request.url!.absoluteString.contains("supabase"))
+    }
+
+    func testLF02902BYOKRunsSecondTextCallAndKeepsGeneratedVoice() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BYOKURLProtocolStub.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let recognition = #"{"schema_version":"local-recognition-candidate-v1","operation":"recognize_only","candidate":{"domain_key":"expense","title":"便利店","summary":"支出8元","payload":{"amount":8,"merchant_name":"便利店","category":"food","platform":"支付宝","payment_method":"余额宝"},"confidence":0.92,"record_date":"2026-10-25","evidence_fields":["amount","merchant_name"],"missing_fields":[]}}"#
+        let voice = #"{"companion_message":"夜里的这点补给，先安稳收下。","ai_feedback":{"badge":"轻补给","icon":"💸","band":"neutral","emotion_line":"这笔小支出落在了今晚的节奏里。","utility_line":"先记住它，之后看一周频率。","detail_reason":"金额与商家已从图片中确认。","confidence":0.86}}"#
+        func response(_ content: String) -> Data {
+            let object: [String: Any] = [
+                "choices": [["message": ["content": content]]]
+            ]
+            return try! JSONSerialization.data(withJSONObject: object)
+        }
+        BYOKURLProtocolStub.configureSequence([
+            (200, response(recognition)),
+            (200, response(voice))
+        ])
+        let provider = QwenBYOKImageRecognitionProvider(apiKey: "sk-test-voice", session: session)
+
+        let candidate = try await provider.recognize(LocalImageRecognitionRequest(
+            imageData: try syntheticJPEG(), captureKind: "photo_library", filename: "receipt.jpg", uploadToken: nil
+        ))
+
+        XCTAssertEqual(BYOKURLProtocolStub.capturedBodies.count, 2)
+        XCTAssertEqual(candidate.companionMessage, "夜里的这点补给，先安稳收下。")
+        XCTAssertEqual(candidate.aiFeedback?["source"]?.stringValue, "hybrid")
+        let secondBody = try XCTUnwrap(BYOKURLProtocolStub.capturedBodies.last)
+        let secondObject = try XCTUnwrap(JSONSerialization.jsonObject(with: secondBody) as? [String: Any])
+        let messages = try XCTUnwrap(secondObject["messages"] as? [[String: Any]])
+        XCTAssertTrue((messages.first?["content"] as? String)?.contains("事实 JSON") == true)
+        XCTAssertFalse(String(decoding: secondBody, as: UTF8.self).contains("data:image/jpeg;base64"))
     }
 
     func testLF03004KeychainStoresAndDeletesBYOKCredential() throws {
@@ -217,6 +250,8 @@ final class BYOKURLProtocolStub: URLProtocol {
     private static var storedBody: Data?
     private static var storedResponseData = Data()
     private static var storedStatusCode = 200
+    private static var storedBodies: [Data] = []
+    private static var storedResponseQueue: [(Int, Data)] = []
 
     static var capturedRequest: URLRequest? {
         lock.lock(); defer { lock.unlock() }
@@ -228,31 +263,50 @@ final class BYOKURLProtocolStub: URLProtocol {
         return storedBody
     }
 
+    static var capturedBodies: [Data] {
+        lock.lock(); defer { lock.unlock() }
+        return storedBodies
+    }
+
     static func configure(statusCode: Int, responseData: Data) {
         lock.lock(); defer { lock.unlock() }
         storedRequest = nil
         storedBody = nil
+        storedBodies = []
         storedStatusCode = statusCode
         storedResponseData = responseData
+        storedResponseQueue = []
+    }
+
+    static func configureSequence(_ responses: [(statusCode: Int, responseData: Data)]) {
+        lock.lock(); defer { lock.unlock() }
+        storedRequest = nil
+        storedBody = nil
+        storedBodies = []
+        storedResponseQueue = responses
+        storedStatusCode = responses.last?.statusCode ?? 200
+        storedResponseData = responses.last?.responseData ?? Data()
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        let body = Self.requestBody(request)
+        let body = Self.requestBody(request) ?? Data()
         Self.lock.lock()
         Self.storedRequest = request
         Self.storedBody = body
-        let data = Self.storedResponseData
-        let status = Self.storedStatusCode
+        Self.storedBodies.append(body)
+        let responsePayload = Self.storedResponseQueue.isEmpty
+            ? (Self.storedStatusCode, Self.storedResponseData)
+            : Self.storedResponseQueue.removeFirst()
         Self.lock.unlock()
-        let response = HTTPURLResponse(
-            url: request.url!, statusCode: status, httpVersion: nil,
+        let httpResponse = HTTPURLResponse(
+            url: request.url!, statusCode: responsePayload.0, httpVersion: nil,
             headerFields: ["Content-Type": "application/json"]
         )!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocol(self, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: responsePayload.1)
         client?.urlProtocolDidFinishLoading(self)
     }
 
