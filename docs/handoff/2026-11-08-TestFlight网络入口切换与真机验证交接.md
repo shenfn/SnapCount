@@ -3,7 +3,7 @@ project: SnapCount
 name: TestFlight 网络入口切换与真机验证交接
 updated: 2026-11-08
 branch: release/1.0
-head: c8bdc35
+head: 6bff72f
 status: TestFlight #160 已上传；真机 Hosted AI Voice 已出现真实动态文案，等待新包处理完成后的网络与快捷指令矩阵验收
 tags: [handoff, testflight, ios, hosted-ai, shortcuts]
 ---
@@ -182,7 +182,7 @@ build 159 的请求实际走：
 ## 8. 本轮提交与文档同步
 
 - 代码修复提交：`4725f18`、`e4c01f2`
-- 当前文档提交：`c8bdc35`
-- `release/1.0` 与 `feature/inbox-pwa-parity` 已推送到 `c8bdc35`
+- 当前文档提交：`6bff72f`
+- `release/1.0` 与 `feature/inbox-pwa-parity` 已推送到 `6bff72f`
 - Obsidian 路线笔记和 SnapCount 记忆索引已同步更新
 
