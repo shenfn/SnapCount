@@ -2770,7 +2770,11 @@ function buildExpenseAIFeedback(
       emotion_line: aiLine ?? (merchant
         ? `${merchant} ${fmtYuan(amount)}，这笔小额已落账。`
         : `${fmtYuan(amount)} 的小额支出已落账。`),
-      utility_line: categoryLabel ? `分类记到${categoryLabel}，后面看一周频率。` : "先把这笔收住，后面再看频率。",
+      // Voice 已经提供陪伴句时，不再把固定的小额消费模板作为第二句拼进同一张卡；
+      // 没有 Voice 内容时仍保留原规则反馈，确保降级路径可用。
+      utility_line: aiLine
+        ? null
+        : (categoryLabel ? `分类记到${categoryLabel}，后面看一周频率。` : "先把这笔收住，后面再看频率。"),
       detail_reason: `本笔支出 ${fmtYuan(amount)}，属于小额消费，价值在于频率追踪。`,
       internal_score: 62,
       confidence: 0.7,
