@@ -180,6 +180,74 @@ final class LocalCompleteBackupPortabilityTests: XCTestCase {
         XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_account_entries"), 5)
     }
 
+    func testLF021CompleteBackupRestoresCompanionPlannerAndMemory() throws {
+        let source = try makeFixture()
+        let target = try makeEmptyFixture()
+        defer { cleanup(source); cleanup(target) }
+        let sourceProfile = try XCTUnwrap(source.profileID)
+        let sourceRecordID = UUID(uuidString: "00000000-0000-4000-8000-000000000003")!
+        let memoryRepository = LocalCompanionMemoryRepository(database: source.database)
+        _ = try memoryRepository.upsert(LocalCompanionMemoryDraft(
+            id: UUID(), profileID: sourceProfile,
+            memoryKey: "local_ai.food.recent_30d", memoryType: "derived_trend",
+            contentJSON: "{\"value\":\"近30天有2条饮食记录。\",\"count\":2,\"window_days\":30}",
+            sourceTable: "local_expression_projection", sourceID: sourceProfile.uuidString,
+            confidence: 0.65, createdAt: Date(), updatedAt: Date()
+        ))
+        try source.database.writer.write { db in
+            let planner = try LocalRecordCodec.encode([
+                "candidate_id": AnyCodable("local-planner-food-test"),
+                "semantic_key": AnyCodable("local_food_current_fact"),
+                "claim_fingerprint": AnyCodable("claim-food-test"),
+                "presentation_target": AnyCodable("feedback_card"),
+                "dimension": AnyCodable("current_fact"),
+                "source": AnyCodable("expression_planner"),
+                "emotion_line": AnyCodable("这条饮食记录已保留。"),
+                "utility_line": AnyCodable("之后可以继续观察。"),
+                "detail_reason": AnyCodable("来自当前饮食事实。")
+            ])
+            let payload = try LocalRecordCodec.encode([
+                "companion_message": AnyCodable("慢慢记下这一餐。"),
+                "ai_feedback": AnyCodable([
+                    "version": "feedback-v1", "domain_key": "food", "source": "hybrid",
+                    "emotion_line": "这一餐已经被好好保存。"
+                ]),
+                "planner_ai_feedback": AnyCodable(try JSONSerialization.jsonObject(with: Data(planner.utf8)))
+            ])
+            try db.execute(
+                sql: "UPDATE local_records SET payload_json = ? WHERE id = ?",
+                arguments: [payload, sourceRecordID.uuidString]
+            )
+            try db.execute(
+                sql: "UPDATE local_expenses SET companion_message = ?, ai_feedback = ? WHERE id = ?",
+                arguments: ["记下一笔也很不容易。", "{\"version\":\"feedback-v1\",\"domain_key\":\"expense\",\"source\":\"hybrid\",\"emotion_line\":\"消费已经保存。\"}", source.expenseID.uuidString]
+            )
+        }
+
+        let backup = try source.portability.exportBackup()
+        let preview = try source.portability.preview(backup)
+        XCTAssertEqual(preview.tableCounts["local_companion_memories"], 1)
+        let targetProfile = try target.profileStore.activeProfile()
+        _ = try target.portability.importBackup(backup, into: targetProfile.id)
+
+        let restoredMemory = try XCTUnwrap(
+            LocalCompanionMemoryRepository(database: target.database)
+                .memory(memoryKey: "local_ai.food.recent_30d", profileID: targetProfile.id)
+        )
+        XCTAssertEqual(restoredMemory.confidence, 0.65, accuracy: 0.0001)
+        XCTAssertTrue(restoredMemory.contentJSON.contains("近30天有2条饮食记录"))
+        let restoredPayload = try target.database.writer.read { db in
+            try String.fetchOne(db, sql: "SELECT payload_json FROM local_records WHERE id = ?", arguments: [sourceRecordID.uuidString])
+        }
+        XCTAssertTrue(try XCTUnwrap(restoredPayload).contains("慢慢记下这一餐"))
+        let restoredExpense = try target.database.writer.read { db in
+            try Row.fetchOne(db, sql: "SELECT companion_message, ai_feedback FROM local_expenses WHERE id = ?", arguments: [source.expenseID.uuidString])
+        }
+        XCTAssertEqual(restoredExpense?["companion_message"] as String?, "记下一笔也很不容易。")
+        XCTAssertTrue((restoredExpense?["ai_feedback"] as String? ?? "").contains("消费已经保存"))
+        XCTAssertEqual(try count(target.database, "SELECT COUNT(*) FROM local_outbox_operations"), 0)
+    }
+
     func testLF021CompleteBackupPreservesWalletSnapshotRepaymentEvidence() throws {
         let source = try makeFixture()
         let target = try makeEmptyFixture()

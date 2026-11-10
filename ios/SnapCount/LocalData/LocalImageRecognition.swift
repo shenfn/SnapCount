@@ -169,6 +169,7 @@ final class LocalImageRecognitionUseCase {
     private let pendingRepository: LocalPendingFinancialRepository?
     private let expenseRepository: LocalExpenseRepositoryProtocol?
     private let duplicateReviewRepository: LocalFinancialDuplicateReviewRepository?
+    private let expressionPersistence: LocalExpressionPersistence?
 
     init(
         localRecordUseCase: LocalRecordUseCaseProtocol,
@@ -178,7 +179,8 @@ final class LocalImageRecognitionUseCase {
         isRecognitionRequestCurrent: @escaping @MainActor () -> Bool = { true },
         pendingRepository: LocalPendingFinancialRepository? = nil,
         expenseRepository: LocalExpenseRepositoryProtocol? = nil,
-        duplicateReviewRepository: LocalFinancialDuplicateReviewRepository? = nil
+        duplicateReviewRepository: LocalFinancialDuplicateReviewRepository? = nil,
+        expressionPersistence: LocalExpressionPersistence? = nil
     ) {
         self.localRecordUseCase = localRecordUseCase
         self.imageStore = imageStore
@@ -188,6 +190,7 @@ final class LocalImageRecognitionUseCase {
         self.pendingRepository = pendingRepository
         self.expenseRepository = expenseRepository
         self.duplicateReviewRepository = duplicateReviewRepository
+        self.expressionPersistence = expressionPersistence
     }
 
     static func makeDefault(
@@ -197,10 +200,12 @@ final class LocalImageRecognitionUseCase {
         let database = try LocalDatabase()
         let imageStore = try LocalImageStore()
         let repository = try LocalRecordRepository(database: database)
+        let expressionPersistence = LocalExpressionPersistence(database: database)
         let recordUseCase = LocalRecordUseCase(
             profileStore: LocalProfileStore(database: database),
             repository: repository,
-            imageStore: imageStore
+            imageStore: imageStore,
+            expressionPersistence: expressionPersistence
         )
         return LocalImageRecognitionUseCase(
             localRecordUseCase: recordUseCase,
@@ -210,7 +215,8 @@ final class LocalImageRecognitionUseCase {
             isRecognitionRequestCurrent: isRecognitionRequestCurrent,
             pendingRepository: LocalPendingFinancialRepository(database: database),
             expenseRepository: try LocalExpenseRepository(database: database),
-            duplicateReviewRepository: LocalFinancialDuplicateReviewRepository(database: database)
+            duplicateReviewRepository: LocalFinancialDuplicateReviewRepository(database: database),
+            expressionPersistence: expressionPersistence
         )
     }
 
@@ -539,12 +545,13 @@ final class LocalImageRecognitionUseCase {
                 aiFeedbackJSON: Self.encodeFeedback(feedbackPayload),
                 perceptualHash: perceptualHash,
                 reviewReason: isDuplicate ? "possible_duplicate" : nil)
+            let persistedFinancial = expressionPersistence?.enrich(pending: financial) ?? financial
             let autoArchive = !isDuplicate && LocalFinancialAutoArchiveRule.shouldArchive(
                 kind: kind, amountMinor: amount, payload: recognizedPayload, confidence: recognized.confidence)
             if autoArchive {
-                try pendingRepository.archiveDirectly(financial)
+                try pendingRepository.archiveDirectly(persistedFinancial)
             } else {
-                try pendingRepository.stage(financial)
+                try pendingRepository.stage(persistedFinancial)
             }
             // 原图归这条财务事实所有；不要再按通用域的中转副本清理掉。
             try intakeRepository.markCompleted(id: intakeID, profileID: profileID,

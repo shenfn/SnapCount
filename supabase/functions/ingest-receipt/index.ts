@@ -5531,6 +5531,96 @@ Deno.serve(async (req) => {
       const jsonBody = await req.json().catch(() => ({}));
       const action = jsonBody?.action;
 
+      // Local-first Companion composition. This action is intentionally
+      // read-only: it accepts the current local fact and a bounded Planner
+      // candidate, calls the hosted text provider, and never writes a
+      // business row, memory row, or sync outbox item.
+      if (action === "generate_local_expression") {
+        const actionUserId = await authenticatedUserId(req);
+        if (!actionUserId || !textProvider) {
+          return new Response(JSON.stringify({ ok: false, error: "未授权或 Hosted Companion 不可用" }), {
+            status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+          });
+        }
+        const currentFact = jsonBody?.current_fact && typeof jsonBody.current_fact === "object"
+          ? jsonBody.current_fact as Record<string, unknown>
+          : {};
+        const candidate = jsonBody?.planner_candidate && typeof jsonBody.planner_candidate === "object"
+          ? jsonBody.planner_candidate as Record<string, unknown>
+          : {};
+        const allowedDomains = new Set(["expense", "income", "food", "sleep", "sport", "reading", "wallet"]);
+        const domainKey = typeof currentFact.domain_key === "string" && allowedDomains.has(currentFact.domain_key)
+          ? currentFact.domain_key
+          : "expense";
+        const amount = typeof currentFact.amount === "number" && Number.isFinite(currentFact.amount)
+          ? currentFact.amount
+          : null;
+        const payload = currentFact.payload_json && typeof currentFact.payload_json === "object"
+          ? currentFact.payload_json as Record<string, unknown>
+          : null;
+        const ai: AIResult = {
+          image_type: "local_fact",
+          record_type: domainKey as RecordType,
+          domain_key: domainKey === "expense" || domainKey === "income"
+            ? null
+            : domainKey as BuiltinDomainKey,
+          title: typeof currentFact.title === "string" ? currentFact.title.slice(0, 120) : null,
+          summary: typeof currentFact.summary === "string" ? currentFact.summary.slice(0, 500) : null,
+          amount,
+          merchant_name: typeof currentFact.merchant_name === "string" ? currentFact.merchant_name.slice(0, 120) : null,
+          platform: typeof currentFact.platform === "string" ? currentFact.platform.slice(0, 120) : null,
+          category: typeof currentFact.category === "string" ? currentFact.category.slice(0, 120) : null,
+          payment_method: typeof currentFact.payment_method === "string" ? currentFact.payment_method.slice(0, 120) : null,
+          source_name: typeof currentFact.source_name === "string" ? currentFact.source_name.slice(0, 120) : null,
+          occurred_at: typeof currentFact.occurred_at === "string" ? currentFact.occurred_at.slice(0, 64) : null,
+          payload_jsonb: payload,
+          confidence: 1,
+          companion_message: null,
+        };
+        const plannerBrief: PlannerVoiceBrief | null = typeof candidate.candidate_id === "string"
+          && typeof candidate.semantic_key === "string"
+          && typeof candidate.claim_fingerprint === "string"
+          ? {
+            candidate_id: candidate.candidate_id.slice(0, 200),
+            semantic_key: candidate.semantic_key.slice(0, 200),
+            dimension: typeof candidate.dimension === "string" ? candidate.dimension.slice(0, 100) : "current_fact",
+            canonical_text: typeof candidate.emotion_line === "string"
+              ? candidate.emotion_line.slice(0, 300)
+              : "当前事实",
+            source_surface: "record_detail",
+            planner_version: "local-planner-v1",
+            numbers: [],
+            count_numbers: [],
+            number_facts: [],
+            claim_fingerprint: candidate.claim_fingerprint.slice(0, 200),
+          }
+          : null;
+        const result = await generateVoiceFeedback({
+          ai,
+          domainKey,
+          builtPayload: payload,
+          normalizedAmount: amount,
+          domainProfiles: {},
+          timingSignal: null,
+          timeContext: null,
+          clientLocalTime: null,
+          weekday: null,
+          memory: null,
+          textProvider,
+          plannerBrief,
+        });
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            companion_message: result.companion_message,
+            ai_feedback: result.ai_feedback,
+            error: result.error ?? null,
+          },
+        }), {
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
       if (action === "list_companion_memories" || action === "delete_companion_memory") {
         const actionUserId = await authenticatedUserId(req);
         const userClient = authenticatedSupabaseClient(req);

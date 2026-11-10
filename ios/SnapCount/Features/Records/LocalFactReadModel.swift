@@ -135,6 +135,7 @@ enum LocalFactReadModel {
             status: base.status,
             domainVersion: base.domainVersion,
             aiFeedback: NativeAIFeedback(payload: payload.dictionary("ai_feedback")),
+            plannerAiFeedback: NativeAIFeedback(payload: payload.dictionary("planner_ai_feedback")),
             aiSummary: base.aiSummary,
             localVersion: base.localVersion
         )

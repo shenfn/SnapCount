@@ -629,15 +629,18 @@ final class LocalWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol {
     private let profileStore: LocalProfileStoreProtocol
     private let repository: LocalWalletSnapshotRepositoryProtocol
     private let imageStore: LocalImageStore?
+    private let expressionPersistence: LocalExpressionPersistence?
 
     init(
         profileStore: LocalProfileStoreProtocol,
         repository: LocalWalletSnapshotRepositoryProtocol,
-        imageStore: LocalImageStore? = nil
+        imageStore: LocalImageStore? = nil,
+        expressionPersistence: LocalExpressionPersistence? = nil
     ) {
         self.profileStore = profileStore
         self.repository = repository
         self.imageStore = imageStore
+        self.expressionPersistence = expressionPersistence
     }
 
     func create(_ command: LocalWalletSnapshotCommand) async throws -> LocalWalletSnapshot {
@@ -654,7 +657,7 @@ final class LocalWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol {
             imageReference = nil
         }
         do {
-            return try repository.create(LocalWalletSnapshotDraft(
+            let snapshot = try repository.create(LocalWalletSnapshotDraft(
                 id: command.id,
                 profileID: profile.id,
                 title: command.title,
@@ -670,6 +673,8 @@ final class LocalWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol {
                 imageHash: imageReference?.hash,
                 createdAt: command.createdAt
             ))
+            expressionPersistence?.refresh(wallet: snapshot)
+            return snapshot
         } catch {
             if let path = imageReference?.path { try? imageStore?.remove(path: path) }
             throw error
@@ -696,7 +701,7 @@ final class LocalWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol {
         guard profile.id == snapshot.profileID else { throw LocalDataError.invalidIdentifier }
         var payload = try LocalRecordCodec.decode(snapshot.payloadJSON)
         payload["snapshot_balance"] = AnyCodable(Double(balanceMinor) / 100)
-        return try repository.update(LocalWalletSnapshotUpdateDraft(
+        let updated = try repository.update(LocalWalletSnapshotUpdateDraft(
             id: snapshot.id,
             profileID: profile.id,
             expectedVersion: snapshot.localVersion,
@@ -706,17 +711,25 @@ final class LocalWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol {
             balanceMinor: balanceMinor,
             updatedAt: Date()
         ))
+        expressionPersistence?.refresh(wallet: updated)
+        return updated
     }
 
     func delete(_ snapshot: LocalWalletSnapshot) async throws -> LocalWalletSnapshot {
         let profile = try profileStore.activeProfile()
         guard profile.id == snapshot.profileID else { throw LocalDataError.invalidIdentifier }
-        return try repository.delete(
+        let deleted = try repository.delete(
             id: snapshot.id,
             profileID: profile.id,
             expectedVersion: snapshot.localVersion,
             deletedAt: Date()
         )
+        expressionPersistence?.deleteSource(
+            sourceTable: "local_wallet_snapshots",
+            sourceID: deleted.id.uuidString,
+            profileID: deleted.profileID
+        )
+        return deleted
     }
 
     func createAccount(from snapshot: LocalWalletSnapshot) async throws -> LocalWalletSnapshotActionResult {

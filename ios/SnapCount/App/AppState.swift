@@ -24,6 +24,8 @@ private struct AppDefaultLocalStorage {
     let recordUseCase: LocalRecordUseCaseProtocol
     let walletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol
     let factReader: LocalFactReader
+    let companionMemoryRepository: LocalCompanionMemoryRepository
+    let expressionPersistence: LocalExpressionPersistence
     let imageStore: LocalImageStore
     let pendingFinancialRepository: LocalPendingFinancialRepository
     let financialBindingRepository: LocalFinancialBindingRepository
@@ -178,6 +180,8 @@ final class AppState: ObservableObject {
     private let localRecordUseCase: LocalRecordUseCaseProtocol?
     private let localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol?
     private let localFactReader: LocalFactReader?
+    private let localCompanionMemoryRepository: LocalCompanionMemoryRepository?
+    private let localExpressionPersistence: LocalExpressionPersistence?
     private let localImageStore: LocalImageStore?
     private let localImageIntakeRepository: LocalImageIntakeRepository?
     private let localRecordPortability: LocalRecordPortability?
@@ -257,6 +261,8 @@ final class AppState: ObservableObject {
         localStorageInitializationMessage: String? = nil,
         localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol? = nil,
         localFactReader: LocalFactReader? = nil,
+        localCompanionMemoryRepository: LocalCompanionMemoryRepository? = nil,
+        localExpressionPersistence: LocalExpressionPersistence? = nil,
         localImageStore: LocalImageStore? = nil,
         localImageIntakeRepository: LocalImageIntakeRepository? = nil,
         localFactPortability: LocalFactPortability? = nil,
@@ -338,6 +344,10 @@ final class AppState: ObservableObject {
         self.localFactReader = usesDefaultLocalStorage
             ? (localFactReader ?? defaultLocalStorage?.factReader)
             : localFactReader
+        self.localCompanionMemoryRepository = localCompanionMemoryRepository
+            ?? (usesDefaultLocalStorage ? defaultLocalStorage?.companionMemoryRepository : nil)
+        self.localExpressionPersistence = localExpressionPersistence
+            ?? (usesDefaultLocalStorage ? defaultLocalStorage?.expressionPersistence : nil)
         self.localImageStore = localImageStore ?? defaultLocalStorage?.imageStore ?? Self.defaultLocalImageStore()
         self.localImageIntakeRepository = localImageIntakeRepository ?? Self.defaultLocalImageIntakeRepository()
         self.localRecordPortability = Self.defaultLocalRecordPortability()
@@ -1413,7 +1423,8 @@ final class AppState: ObservableObject {
             isRecognitionRequestCurrent: isRecognitionRequestCurrent,
             pendingRepository: localPendingFinancialRepository,
             expenseRepository: Self.defaultRecognitionExpenseRepository(),
-            duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository()
+            duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository(),
+            expressionPersistence: localExpressionPersistence
         )
         return try await recognition.ingest(
             imageData: data,
@@ -1629,7 +1640,8 @@ final class AppState: ObservableObject {
                 isRecognitionRequestCurrent: isRecognitionRequestCurrent,
                 pendingRepository: localPendingFinancialRepository,
                 expenseRepository: Self.defaultRecognitionExpenseRepository(),
-                duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository()
+                duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository(),
+                expressionPersistence: localExpressionPersistence
             )
             _ = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
             await refreshFailedLocalImageIntakes()
@@ -1834,7 +1846,8 @@ final class AppState: ObservableObject {
                 return LocalStagingReadModel.native(
                     from: record,
                     imageStore: localImageStore,
-                    domainName: domainName
+                    domainName: domainName,
+                    plannerEnabled: userSettings.companionEnabled
                 )
             }
             dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
@@ -2901,7 +2914,11 @@ final class AppState: ObservableObject {
         do {
             let staging = try await localRecordUseCase.stagingRecords()
             let candidates = staging.map { record in
-                LocalStagingReadModel.native(from: record, imageStore: localImageStore)
+                LocalStagingReadModel.native(
+                    from: record,
+                    imageStore: localImageStore,
+                    plannerEnabled: userSettings.companionEnabled
+                )
             }
             await loadLocalAccounts()
             guard generation == userStateGeneration else { return }
@@ -4267,7 +4284,8 @@ final class AppState: ObservableObject {
            let profile = try? await localExpenseUseCase?.prepareProfile(),
            let id = UUID(uuidString: parsedReference.rawId),
            let detail = try? repository.nativeDetail(profileID: profile.id, id: id, imageStore: imageStore) {
-            selectedRecordDetail = detail
+            let resolved = await localExpressionDetail(detail, generation: generation)
+            selectedRecordDetail = resolved
             return
         }
         if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
@@ -4366,6 +4384,7 @@ final class AppState: ObservableObject {
             guard generation == userStateGeneration, activeRecordReference == canonicalReference else { return }
             var detail = LocalIncomeReadModel.detail(from: income, imageStore: localImageStore)
             if let path = income.imagePath { detail.imageURL = localImageStore?.url(for: path) }
+            detail = await localExpressionDetail(detail, generation: generation)
             recordDetailCache[canonicalReference] = detail
             selectedRecordDetail = detail
         } catch {
@@ -4421,6 +4440,7 @@ final class AppState: ObservableObject {
                   activeRecordReference == canonicalReference else { return }
             var detail = LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore)
             if let path = expense.imagePath { detail.imageURL = localImageStore?.url(for: path) }
+            detail = await localExpressionDetail(detail, generation: generation)
             recordDetailCache[canonicalReference] = detail
             selectedRecordDetail = detail
         } catch {
@@ -4458,13 +4478,91 @@ final class AppState: ObservableObject {
             }
             guard generation == userStateGeneration,
                   activeRecordReference == canonicalReference else { return }
-            let detail = LocalRecordReadModel.detail(from: record, imageStore: localImageStore)
+            var detail = LocalRecordReadModel.detail(from: record, imageStore: localImageStore)
+            detail = await localExpressionDetail(detail, generation: generation)
             recordDetailCache[canonicalReference] = detail
             selectedRecordDetail = detail
         } catch {
             if activeRecordReference == canonicalReference {
                 recordDetailMessage = error.localizedDescription
             }
+        }
+    }
+
+    private func localExpressionDetail(
+        _ detail: NativeRecordDetail,
+        generation: Int
+    ) async -> NativeRecordDetail {
+        guard userSettings.companionEnabled,
+              let localCompanionMemoryRepository,
+              let profile = try? await localExpenseUseCase?.prepareProfile(),
+              generation == userStateGeneration else { return detail }
+        let memoryContext = userSettings.companionMemoryEnabled
+            ? try? localCompanionMemoryRepository.compactContextJSON(profileID: profile.id)
+            : nil
+        let context = LocalPlannerCandidateEngine.makeContext(
+            for: detail,
+            memoryContextJSON: memoryContext,
+            providerMode: .deterministic
+        )
+        guard let generatedPlannerFeedback = LocalPlannerCandidateEngine.selectedCandidate(
+            for: context.currentFact,
+            memoryContextJSON: context.memoryContextJSON
+        ) else { return detail }
+        let persistedPlannerFeedback = detail.expressionPlannerAiFeedback
+        let plannerFeedback = persistedPlannerFeedback?.claimFingerprint == generatedPlannerFeedback.claimFingerprint
+            ? (persistedPlannerFeedback ?? generatedPlannerFeedback)
+            : generatedPlannerFeedback
+        var resolved = detail
+        resolved.legacyAiFeedback = detail.voiceAiFeedback
+        resolved.plannerAiFeedback = plannerFeedback
+        resolved.aiFeedback = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
+            existingVoice: detail.voiceAiFeedback,
+            plannerPreview: plannerFeedback,
+            companionMessage: detail.companionMessage
+        )
+        return resolved
+    }
+
+    /// Provider composition is deliberately detached from the fact write. A
+    /// provider failure leaves the local fact and deterministic Planner intact.
+    private func scheduleLocalCompanion(for detail: NativeRecordDetail) {
+        guard userSettings.companionEnabled,
+              localExpressionPersistence != nil,
+              localVisionModeStore.mode != .disabled else { return }
+        let generation = userStateGeneration
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.userStateGeneration == generation,
+                  self.userSettings.companionEnabled,
+                  let memoryRepository = self.localCompanionMemoryRepository,
+                  let profile = try? await self.localExpenseUseCase?.prepareProfile() else { return }
+            let memoryContext = self.userSettings.companionMemoryEnabled
+                ? try? memoryRepository.compactContextJSON(profileID: profile.id)
+                : nil
+            let mode = self.localVisionModeStore.mode
+            let provider: LocalCompanionProvider
+            switch mode {
+            case .hosted:
+                guard let session = try? await self.validSession() else { return }
+                provider = HostedAICompanionProvider(accessToken: session.accessToken)
+            case .byok:
+                guard let apiKey = try? self.keychain.string(for: KeychainKeys.byokQwenAPIKey),
+                      !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                provider = QwenBYOKCompanionProvider(apiKey: apiKey)
+            case .disabled:
+                return
+            }
+            let context = LocalPlannerCandidateEngine.makeContext(
+                for: detail,
+                memoryContextJSON: memoryContext,
+                providerMode: mode == .hosted ? .hosted : .byok
+            )
+            guard let result = try? await provider.compose(context: context) else { return }
+            guard self.userStateGeneration == generation else { return }
+            self.localExpressionPersistence?.persist(companion: result, for: detail)
+            self.recordDetailCache.removeValue(forKey: NativeRecordReference(detail.id).canonicalValue)
+            await self.loadRecordDetail(reference: detail.id, force: true)
         }
     }
 
@@ -5312,7 +5410,16 @@ final class AppState: ObservableObject {
                       let id = UUID(uuidString: draft.pendingId),
                       let source = try repository.record(profileID: profile.id, id: id) else { throw LocalDataError.recordNotFound }
                 guard generation == userStateGeneration else { return false }
-                _ = try repository.resolve(profileID: profile.id, pendingID: id, draft: draft)
+                let accepted = try repository.resolve(profileID: profile.id, pendingID: id, draft: draft)
+                if accepted.recordType == "expense",
+                   let expenseID = UUID(uuidString: accepted.recordId),
+                   let expense = try await localExpenseUseCase?.expense(id: expenseID) {
+                    localExpressionPersistence?.refresh(expense: expense)
+                } else if accepted.recordType == "income",
+                          let incomeID = UUID(uuidString: accepted.recordId),
+                          let income = try await localExpenseUseCase?.income(id: incomeID) {
+                    localExpressionPersistence?.refresh(income: income)
+                }
                 await loadLocalAccounts()
                 await refreshLocalMonthProjection(monthKey: String(source.transactionDate.prefix(7)))
                 await applyLocalStagingProjection()
@@ -5383,6 +5490,11 @@ final class AppState: ObservableObject {
                   renderIdentity: feedbackIdentity
               ) else { return }
         recordFeedbackState = .submitting
+        if feedback.exposureEventId?.hasPrefix("local:") == true {
+            // Local Planner feedback never calls the remote feedback RPC.
+            recordFeedbackState = .submitted
+            return
+        }
         let result = await resolvedFeedbackSubmissionUseCase().perform(
             FeedbackSubmissionInput(
                 recordId: detail.rawId,
@@ -6663,6 +6775,9 @@ final class AppState: ObservableObject {
             createdAt: Date(), imageData: draft.imageData
         )
         let outcome = try await localExpenseUseCase.create(command)
+        if let expense = outcome.expense {
+            scheduleLocalCompanion(for: LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore))
+        }
         _ = await prepareLocalWorkspace()
         let monthKey = String(command.transactionDate.prefix(7))
         await refreshLocalMonthProjection(monthKey: monthKey)
@@ -6711,6 +6826,7 @@ final class AppState: ObservableObject {
             note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
             createdAt: Date(), imageData: draft.imageData
         ))
+        scheduleLocalCompanion(for: LocalIncomeReadModel.detail(from: saved, imageStore: localImageStore))
         _ = await prepareLocalWorkspace()
         await refreshLocalMonthProjection(monthKey: String(saved.incomeDate.prefix(7)))
         manualRecordMessage = localWriteMessage("收入已记录（本机）")
@@ -6770,6 +6886,7 @@ final class AppState: ObservableObject {
             ))
             record = created.record
         }
+        scheduleLocalCompanion(for: LocalRecordReadModel.detail(from: record, imageStore: localImageStore))
         let monthKey = String(record.recordDate.prefix(7))
         if let previousMonthKey, previousMonthKey != monthKey {
             await refreshLocalMonthProjection(monthKey: previousMonthKey)
@@ -6802,6 +6919,9 @@ final class AppState: ObservableObject {
                     category: draft.category, paymentMethod: draft.paymentMethod,
                     transactionDate: draft.dateKey, transactionTime: draft.timeKey, note: draft.note,
                     updatedAt: Date(), imageData: draft.imageData, removeImage: draft.removeImage))
+                if let updated = try await localExpenseUseCase.expense(id: id) {
+                    scheduleLocalCompanion(for: LocalExpenseReadModel.detail(from: updated, imageStore: localImageStore))
+                }
             } else {
                 guard let current = try await localExpenseUseCase.income(id: id) else { throw LocalDataError.recordNotFound }
                 oldDate = current.incomeDate
@@ -6812,6 +6932,9 @@ final class AppState: ObservableObject {
                     sourceName: draft.title, category: draft.category, incomeDate: draft.dateKey,
                     occurredAt: draft.occurredAt.flatMap { ISO8601DateFormatter().date(from: $0) }, note: draft.note,
                     updatedAt: Date(), imageData: draft.imageData, removeImage: draft.removeImage))
+                if let updated = try await localExpenseUseCase.income(id: id) {
+                    scheduleLocalCompanion(for: LocalIncomeReadModel.detail(from: updated, imageStore: localImageStore))
+                }
             }
             _ = await prepareLocalWorkspace()
             await refreshLocalMonthProjection(monthKey: String(oldDate.prefix(7)))
@@ -6854,7 +6977,7 @@ final class AppState: ObservableObject {
         }
         let amountMinor = try LocalExpenseMapper.amountMinor(draft.primaryValueText)
         let payload = draft.universalPayload(domain: domain)
-        _ = try await localWalletSnapshotUseCase.create(LocalWalletSnapshotCommand(
+        let snapshot = try await localWalletSnapshotUseCase.create(LocalWalletSnapshotCommand(
             id: UUID(),
             title: draft.resolvedTitle(domain: domain),
             summary: draft.resolvedSummary(domain: domain),
@@ -6867,6 +6990,37 @@ final class AppState: ObservableObject {
             kind: draft.walletRecordKind == "liability_snapshot" ? .liability : .asset,
             imageData: draft.imageData,
             createdAt: Date()
+        ))
+        let snapshotPayload = (try? LocalRecordCodec.decode(snapshot.payloadJSON)) ?? [:]
+        scheduleLocalCompanion(for: NativeRecordDetail(
+            id: "local-wallet/\(snapshot.id.uuidString)",
+            rawId: snapshot.id.uuidString,
+            kind: "wallet",
+            title: snapshot.title,
+            subtitle: snapshot.recordDate,
+            value: String(format: "¥%.2f", snapshot.balance),
+            detailRows: [],
+            imageURL: nil,
+            imageLoadError: false,
+            imagePath: snapshot.imagePath,
+            imageHash: snapshot.imageHash,
+            amount: snapshot.balance,
+            merchantName: nil,
+            platform: nil,
+            category: nil,
+            paymentMethod: nil,
+            recordDate: snapshot.recordDate,
+            note: nil,
+            companionMessage: snapshotPayload.string("companion_message"),
+            accountId: snapshot.linkedAccountID?.uuidString,
+            systemImage: "wallet.pass",
+            payload: snapshotPayload,
+            transactionTime: snapshot.recordTime,
+            domainKey: "wallet",
+            source: "local",
+            status: "local",
+            aiFeedback: NativeAIFeedback(payload: snapshotPayload.dictionary("ai_feedback")),
+            plannerAiFeedback: NativeAIFeedback(payload: snapshotPayload.dictionary("planner_ai_feedback"))
         ))
         do {
             try await loadLocalWalletSnapshots()
@@ -6931,19 +7085,33 @@ final class AppState: ObservableObject {
         let recordRepository = try LocalRecordRepository(database: database)
         let walletSnapshotRepository = try LocalWalletSnapshotRepository(database: database)
         let factReader = try LocalFactReader(database: database)
+        let companionMemoryRepository = LocalCompanionMemoryRepository(database: database)
+        let expressionPersistence = LocalExpressionPersistence(
+            database: database,
+            memoryRepository: companionMemoryRepository
+        )
         return AppDefaultLocalStorage(
-            expenseUseCase: LocalExpenseUseCase(profileStore: profileStore, repository: expenseRepository, imageStore: imageStore),
+            expenseUseCase: LocalExpenseUseCase(
+                profileStore: profileStore,
+                repository: expenseRepository,
+                imageStore: imageStore,
+                expressionPersistence: expressionPersistence
+            ),
             recordUseCase: LocalRecordUseCase(
                 profileStore: profileStore,
                 repository: recordRepository,
-                imageStore: imageStore
+                imageStore: imageStore,
+                expressionPersistence: expressionPersistence
             ),
             walletSnapshotUseCase: LocalWalletSnapshotUseCase(
                 profileStore: profileStore,
                 repository: walletSnapshotRepository,
-                imageStore: imageStore
+                imageStore: imageStore,
+                expressionPersistence: expressionPersistence
             ),
             factReader: factReader,
+            companionMemoryRepository: companionMemoryRepository,
+            expressionPersistence: expressionPersistence,
             imageStore: imageStore,
             pendingFinancialRepository: LocalPendingFinancialRepository(database: database),
             financialBindingRepository: try LocalFinancialBindingRepository(database: database),
@@ -6958,7 +7126,12 @@ final class AppState: ObservableObject {
         guard let database = try? LocalDatabase(),
               let repository = try? LocalExpenseRepository(database: database),
               let imageStore = try? LocalImageStore() else { return nil }
-        return LocalExpenseUseCase(profileStore: LocalProfileStore(database: database), repository: repository, imageStore: imageStore)
+        return LocalExpenseUseCase(
+            profileStore: LocalProfileStore(database: database),
+            repository: repository,
+            imageStore: imageStore,
+            expressionPersistence: LocalExpressionPersistence(database: database)
+        )
     }
 
     private static func defaultLocalRecordUseCase() -> LocalRecordUseCaseProtocol? {

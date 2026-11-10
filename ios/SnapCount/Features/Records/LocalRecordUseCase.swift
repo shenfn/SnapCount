@@ -27,15 +27,18 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
     private let profileStore: LocalProfileStoreProtocol
     private let repository: LocalRecordRepositoryProtocol
     private let imageStore: LocalImageStore?
+    private let expressionPersistence: LocalExpressionPersistence?
 
     init(
         profileStore: LocalProfileStoreProtocol,
         repository: LocalRecordRepositoryProtocol,
-        imageStore: LocalImageStore? = nil
+        imageStore: LocalImageStore? = nil,
+        expressionPersistence: LocalExpressionPersistence? = nil
     ) {
         self.profileStore = profileStore
         self.repository = repository
         self.imageStore = imageStore
+        self.expressionPersistence = expressionPersistence
     }
 
     func create(_ command: LocalRecordCommand) async throws -> LocalRecordOutcome {
@@ -83,6 +86,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         )
         do {
             let record = try repository.createRecord(draft)
+            expressionPersistence?.refresh(record: record)
             return LocalRecordOutcome(record: record, profileID: profile.id)
         } catch {
             try? imageStore?.remove(path: imageReference?.path)
@@ -135,6 +139,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             throw error
         }
         if current.imagePath != record.imagePath { _ = try? retryPendingImageCleanups() }
+        expressionPersistence?.refresh(record: record)
         return LocalRecordOutcome(record: record, profileID: profile.id)
     }
 
@@ -142,6 +147,11 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         let profile = try profileStore.activeProfile()
         let tombstone = try repository.deleteRecord(command, profileID: profile.id)
         if tombstone.imagePath != nil { _ = try? retryPendingImageCleanups() }
+        expressionPersistence?.deleteSource(
+            sourceTable: "local_records",
+            sourceID: tombstone.id.uuidString,
+            profileID: tombstone.profileID
+        )
         return LocalRecordDeleteOutcome(tombstone: tombstone, profileID: profile.id)
     }
 
@@ -244,6 +254,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
         )
         do {
             let record = try repository.createStaging(draft)
+            expressionPersistence?.refresh(staging: record)
             return LocalStagingOutcome(record: record, profileID: profile.id)
         } catch {
             try? imageStore?.remove(path: imageReference?.path)
@@ -318,6 +329,7 @@ final class LocalRecordUseCase: LocalRecordUseCaseProtocol {
             profileID: profile.id,
             changes: changes
         )
+        expressionPersistence?.refresh(record: record)
         return LocalRecordOutcome(record: record, profileID: profile.id)
     }
 

@@ -687,6 +687,34 @@ final class LocalDatabase {
             try database.execute(sql: "ALTER TABLE local_expenses ADD COLUMN ai_feedback TEXT")
             try database.execute(sql: "ALTER TABLE local_income_records ADD COLUMN ai_feedback TEXT")
         }
+        // 本地 Companion/Planner 的记忆投影只保存结构化事实、偏好和趋势。
+        // 记忆不进入业务 outbox，也不依赖云端 profile；profile 删除时随本地事实级联删除。
+        migrator.registerMigration("local-v33-companion-memories") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_companion_memories (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    memory_key TEXT NOT NULL CHECK(length(trim(memory_key)) BETWEEN 1 AND 128),
+                    memory_type TEXT NOT NULL CHECK(length(trim(memory_type)) BETWEEN 1 AND 32),
+                    content_json TEXT NOT NULL CHECK(json_valid(content_json) AND json_type(content_json) = 'object'),
+                    source_table TEXT,
+                    source_id TEXT,
+                    confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    deleted_at DATETIME,
+                    CHECK ((source_table IS NULL AND source_id IS NULL)
+                        OR (source_table IS NOT NULL AND source_id IS NOT NULL)),
+                    UNIQUE(profile_id, memory_key)
+                );
+
+                CREATE INDEX local_companion_memories_profile_idx
+                    ON local_companion_memories(profile_id, deleted_at, updated_at DESC, memory_key);
+
+                CREATE INDEX local_companion_memories_source_idx
+                    ON local_companion_memories(profile_id, source_table, source_id, deleted_at);
+                """)
+        }
         return migrator
     }
 }

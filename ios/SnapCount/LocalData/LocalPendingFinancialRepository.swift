@@ -193,7 +193,9 @@ final class LocalPendingFinancialRepository {
                     merchantName: draft.merchantOrSourceName, platform: draft.platform,
                     category: draft.category, paymentMethod: draft.paymentMethod,
                     transactionDate: source.transactionDate, transactionTime: source.transactionTime,
-                    note: nil, createdAt: source.occurredAt ?? source.createdAt)
+                    note: nil, createdAt: source.occurredAt ?? source.createdAt,
+                    companionMessage: source.companionMessage,
+                    aiFeedbackJSON: source.aiFeedbackJSON)
                 expense.imagePath = source.imagePath
                 expense.imageHash = source.imageHash
                 expense.perceptualHash = source.perceptualHash
@@ -204,7 +206,9 @@ final class LocalPendingFinancialRepository {
                     amountMinor: amount, currency: source.currency,
                     sourceName: draft.merchantOrSourceName, category: draft.incomeCategory,
                     incomeDate: source.transactionDate, occurredAt: source.occurredAt,
-                    note: "由截图待补充转入收入", createdAt: now)
+                    note: "由截图待补充转入收入", createdAt: now,
+                    companionMessage: source.companionMessage,
+                    aiFeedbackJSON: source.aiFeedbackJSON)
                 income.imagePath = source.imagePath
                 income.imageHash = source.imageHash
                 income.perceptualHash = source.perceptualHash

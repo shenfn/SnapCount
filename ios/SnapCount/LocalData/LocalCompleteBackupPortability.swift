@@ -65,7 +65,7 @@ enum LocalCompleteBackupError: Error, Equatable, LocalizedError {
 
 /// Full local recovery excludes credentials, cloud binding, sync state and the upload outbox.
 final class LocalCompleteBackupPortability {
-    static let currentSchemaVersion = 28
+    static let currentSchemaVersion = 29
     /// 带 `companion_message` 列的财务表：同标识跳过时只补这一列的空值。
     private static let companionBackfillTables: Set<String> = ["local_expenses", "local_income_records"]
     // ponytail: 128 MiB of image bytes keeps JSON/base64 imports bounded; raise with streaming archive support.
@@ -87,7 +87,8 @@ final class LocalCompleteBackupPortability {
         "local_account_entries",
         "local_image_intakes",
         "local_pending_transactions",
-        "local_history_unresolved_records"
+        "local_history_unresolved_records",
+        "local_companion_memories"
     ]
 
     private let database: LocalDatabase
@@ -385,7 +386,7 @@ final class LocalCompleteBackupPortability {
         do { archive = try JSONDecoder().decode(Archive.self, from: data) }
         catch { throw LocalCompleteBackupError.invalidFormat }
         guard archive.format == Archive.formatName else { throw LocalCompleteBackupError.invalidFormat }
-        guard [15, 16, 17, 18, 19, 20, 22, 23, 24, 27, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
+        guard [15, 16, 17, 18, 19, 20, 22, 23, 24, 27, 28, Self.currentSchemaVersion].contains(archive.schemaVersion) else {
             throw LocalCompleteBackupError.unsupportedSchemaVersion(archive.schemaVersion)
         }
         var tables = archive.tables
@@ -395,15 +396,24 @@ final class LocalCompleteBackupPortability {
         }
         if archive.schemaVersion < 22 { tables["local_pending_transactions"] = "[]" }
         let archiveTables = Set(tables.keys)
-        let legacyTables = Set(Self.tableNames).subtracting(["local_wallet_snapshots"])
-        let hasCurrentTables = archive.schemaVersion >= 16
-            && archiveTables == Set(Self.tableNames)
-        let hasLegacyTables = archive.schemaVersion == 15 && archiveTables == legacyTables
+        let preMemoryTables = Set(Self.tableNames).subtracting(["local_companion_memories"])
+        let legacyTables = preMemoryTables.subtracting(["local_wallet_snapshots"])
+        // Backward-compatible fixtures may be re-labeled with an older
+        // schemaVersion while still carrying the post-v29 memory table. Treat
+        // that table as optional for legacy archives and import it as empty.
+        let legacyArchiveTables = archiveTables.subtracting(["local_companion_memories"])
+        let hasCurrentTables = archive.schemaVersion == Self.currentSchemaVersion
+            ? archiveTables == Set(Self.tableNames)
+            : archive.schemaVersion >= 16 && legacyArchiveTables == preMemoryTables
+        let hasLegacyTables = archive.schemaVersion == 15 && legacyArchiveTables == legacyTables
         guard UUID(uuidString: archive.profileID) != nil,
               hasCurrentTables || hasLegacyTables else {
             throw LocalCompleteBackupError.invalidFormat
         }
         if hasLegacyTables { tables["local_wallet_snapshots"] = "[]" }
+        if archive.schemaVersion < Self.currentSchemaVersion || tables["local_companion_memories"] == nil {
+            tables["local_companion_memories"] = "[]"
+        }
 
         var rows: [String: [[String: Any]]] = [:]
         var totalRows = 0
@@ -461,6 +471,9 @@ final class LocalCompleteBackupPortability {
         try Self.validateFinancialRows(rows)
         for row in rows["local_history_unresolved_records"] ?? [] {
             try LocalHistoryUnresolvedRepository.validate(row)
+        }
+        for row in rows["local_companion_memories"] ?? [] {
+            try LocalCompanionMemoryRepository.validate(row)
         }
 
         var images: [String: Data] = [:]

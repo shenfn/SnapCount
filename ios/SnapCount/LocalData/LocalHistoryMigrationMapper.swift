@@ -254,7 +254,7 @@ final class LocalHistoryMigrationMapper {
             }
         }
         guard issues.isEmpty else { throw LocalHistoryMappingError.rows(issues) }
-        let allTables = ["local_accounts", "local_wallet_snapshots", "local_records", "local_expenses", "local_income_records", "local_staging_records", "local_repayment_cycles", "local_liability_payments", "local_account_entries", "local_image_intakes", "local_pending_transactions", "local_history_unresolved_records"]
+        let allTables = ["local_accounts", "local_wallet_snapshots", "local_records", "local_expenses", "local_income_records", "local_staging_records", "local_repayment_cycles", "local_liability_payments", "local_account_entries", "local_image_intakes", "local_pending_transactions", "local_history_unresolved_records", "local_companion_memories"]
         var encoded: [String: String] = [:]
         for table in allTables {
             encoded[table] = String(decoding: try JSONSerialization.data(withJSONObject: tables[table, default: []], options: [.sortedKeys]), as: UTF8.self)

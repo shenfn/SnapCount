@@ -6,6 +6,8 @@
 > 上游：`LOCAL-FIRST-BDD-COVERAGE.md`（LOCAL-FIRST-BDD-001）
 > 方法约束：KISS/YAGNI。只有多个真实 Scenario 共同依赖的能力才讨论抽取；本文不引入新架构层，新增代码仅为两处 AppState 内部收敛（见 §5-D2、Slice SL-02）。
 
+> **2026-11-10 口径覆盖**：Q-05 原先“本地零实现 / 仅确定性候选文案”的结论已被上架切片重新覆盖。当前本地 Companion 与 Planner 候选域以 `LOCAL-DATA-002`、`LOCAL-AI-003` 及 `docs/handoff/2026-11-09-本地配置记忆与同步开发交接.md` 为最新权威；本文保留历史收敛依据，但其中 SL-D 的旧范围不再作为开发入口。业务数据同步仍冻结，新用户默认关闭同步和云端原图。
+
 ## 0. 本轮新增验证事实（设计依据）
 
 在 BDD 文档基础上，本轮对源码补充验证了四个承重点：
@@ -30,7 +32,7 @@
 | **D4 候选/中转** | `local_staging_records` | LocalRecordRepository.swift:266-373（confirm 幂等+图片引用移交；discard 终态） | Inbox 投影、AI ingest、确认/丢弃 UI |
 | **D5 图片** | 文件系统 `JieziLocalData/images/{intake,records,staging}` | LocalImageStore.swift（save/move/remove/hash/路径防越界）；生命周期策略分散在 UseCase 各方法（见 §3-C3） | D2/D3/D4 写路径、导出、详情展示 |
 | **D6 识别** | 无自有存储（候选落 D4/D3） | LocalImageRecognition.swift（Provider 协议 + hash 确定性 ID :125,130-145）+ LocalRecordUseCase.ingest（路由唯一入口 :203-244） | Today 相册/拍照、快捷指令 Intent |
-| **D7 表达（AI Popup）** | 云端（快照/曝光/反馈三件套） | 冻结沿用云端；本地零实现 | 记录详情、通知卡片 |
+| **D7 表达（AI Popup）** | 云端（快照/曝光/反馈三件套）+ 本地 Companion/Planner 结果 | 云端路径继续沿用；本地新增 Companion 与 Planner 最小闭环，规则见 `LOCAL-AI-003` | 记录详情、Inbox、通知卡片 |
 | **D8 分析（Insights）** | 云端 `daily_domain_summary`/`ai_insights` | 冻结沿用云端；本地聚合零实现 | 报告页 |
 | **D9 同步** | `local_outbox_operations` + `local_sync_state` | LocalSyncCoordinator.swift + SupabaseSyncTransport.swift（**冻结**：仅 expense/账户，单设备） | 设置页手动入口、绑定确认 |
 | **D10 可携** | 导出文件 | LocalFactPortability（权威）+ LocalExpensePortability（expense 导入唯一权威）+ LocalRecordPortability（兜底，存疑） | 设置页导出、同步 fallback（冻结路径） |
@@ -206,7 +208,7 @@ F1 五域事实 ◄── F2 图片 ◄── F3 识别/候选      F12 同步(�
 | SL-A 收入本地域 | Q-01 | D3 模型+FactReader+导出+聚合+Today（F14/LF-032）；同时决定 LF-008 回退边界是否消失 |
 | SL-B 钱包快照本地域 | Q-01 | 同上 + F5 财务推演（LF-033） |
 | SL-C 设置本地镜像 | Q-04 | D11 + 登录合并（LF-019/020）；影响 F10 |
-| SL-D AI Popup 本地最小闭环 | Q-05 | D7 + SL-06 消费（LF-010~013）；选择 a/b/c 决定 SL-06 之后是否还有表达核心移植片 |
+| SL-D AI Popup 本地最小闭环 | 2026-11-10 新口径 | D7 + SL-06 消费（LF-010~013）；改由 `LOCAL-AI-003` 定义本地 Companion、Planner 候选域、记忆与结果持久化 |
 | SL-E BYOK Provider | Q-06 | D6（LF-029~031）；不改 ingest/保存流程（C1/INV-8 不变） |
 | SL-F 消费账户解耦 | Q-07 | D2（LF-017）：local_expenses.account_id 可空迁移 + 分录门禁；影响 SL-09 导入模型 |
 | SL-G 账号轮换/清空流程 | Q-02 | D1（LF-026）：可能引入多 profile 或门禁清空，牵动 INV-18 |
@@ -256,7 +258,7 @@ SL-01 文档收口
 | Q-02 | 换账号归属 | 维持现状（mismatch 只能[暂不同步/退出]，B 可见 A 本地数据），不做多 profile | SL-G 关闭（不实施）；风险已知并接受 |
 | Q-03 | 还款/截图还款/补绑/周期本地化 | **不做**。云端 RPC 是原子权威（ADR-040），本地重写状态机成本高且制造双权威；Phase 1 维持"登录可用" | SL 门关闭；SL-B 钱包因此定形为"只记事实" |
 | Q-04 | 设置本地镜像 | 未登录设置存本地；登录后"谁改得晚谁赢"（以后修改时间合并），之后以云端为准 | SL-C 解锁，策略固定 |
-| Q-05 | AI Popup 本地口径 | 方案 a：确定性候选文案（代码算、不调 LLM）；候选最小集=当前记录事实+简单周期两类；本地模式隐藏点评 UI，不实现本地曝光/反馈存储（LF-011 简化为不存储） | SL-D 解锁，范围缩小：无反馈存储、无复杂候选移植 |
+| Q-05 | AI Popup 本地口径 | **已被 2026-11-10 上架切片覆盖**：本地保留 Companion 与 Planner 候选域，支持本地记忆和本地结果持久化；不新增业务数据同步，云端曝光/反馈继续只服务云端路径 | SL-D 按 `LOCAL-AI-003` 重定义；不再按“本地零实现”或“仅确定性候选”开工 |
 | Q-06 | BYOK | **暂缓**，移出 Phase 1 | SL-E 关闭（移出）；LF-029~031 冻结登记 |
 | Q-07 | 消费账户解耦 | 维持现状：必须选账户才能保存。DM-GAP-10 不采纳，有真实需求再重新 Grooming | SL-F 关闭；BDD LF-017 标记不实施 |
 | Q-08 | 登录态新记录路由 | 维持现状（登录态新建走云端）。双轨定位见 10.2 | LF-002 特征化保留（SL-02），语义冻结 |
@@ -281,7 +283,7 @@ SL-01 文档收口（含：DM-GAP-10 标记不采纳、BDD LF-017/LF-028/LF-029~
   → SL-05 编辑换图（含 Q-09 删除残留断言）∥ SL-07 兜底/孤儿确认
   → SL-08 异常恢复 → SL-09 四域导入
   → SL-C 设置本地镜像（含 SL-H 的删 App 文案/删账号勾选框，或拆独立小片）
-  → SL-D AI 确定性候选文案（范围按 Q-05 收窄后开工）
+  → SL-D 本地 Companion + Planner（按 `LOCAL-AI-003` 开工）
 ```
 
 关闭/移出：SL-E（BYOK 暂缓）、SL-F（Q-07）、SL-G（Q-02）、SL-I 剩余项（Q-12）。

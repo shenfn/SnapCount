@@ -6,9 +6,26 @@ enum LocalStagingReadModel {
     static func native(
         from record: LocalStagingRecord,
         imageStore: LocalImageStore?,
-        domainName: String? = nil
+        domainName: String? = nil,
+        plannerEnabled: Bool = true
     ) -> NativeStagingRecord {
-        let payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
+        var payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
+        if plannerEnabled,
+           payload.dictionary("ai_feedback") == nil,
+           let feedback = LocalPlannerCandidateEngine.candidates(
+               for: LocalExpressionFact(
+                   id: record.id,
+                   domainKey: record.domainKey,
+                   title: record.title,
+                   summary: record.summary,
+                   recordDate: record.recordDate,
+                   recordTime: record.recordTime,
+                   amount: payload.double("amount_minor").map { $0 / 100 },
+                   category: payload.string("category")
+               )
+           ).first {
+            payload["ai_feedback"] = AnyCodable(feedback.localPayload.mapValues(\.value))
+        }
         let occurredAt = NativeLocalDate.financeOccurredAt(
             dateKey: record.recordDate,
             timeKey: record.recordTime

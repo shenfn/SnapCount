@@ -184,17 +184,20 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
     private let repository: LocalExpenseRepositoryProtocol
     private let operationIDProvider: () -> UUID
     private let imageStore: LocalImageStore?
+    private let expressionPersistence: LocalExpressionPersistence?
 
     init(
         profileStore: LocalProfileStoreProtocol,
         repository: LocalExpenseRepositoryProtocol,
         operationIDProvider: @escaping () -> UUID = UUID.init,
-        imageStore: LocalImageStore? = nil
+        imageStore: LocalImageStore? = nil,
+        expressionPersistence: LocalExpressionPersistence? = nil
     ) {
         self.profileStore = profileStore
         self.repository = repository
         self.operationIDProvider = operationIDProvider
         self.imageStore = imageStore
+        self.expressionPersistence = expressionPersistence
     }
 
     private func saveImage(_ data: Data?) throws -> LocalImageReference? {
@@ -322,6 +325,7 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         let expense: LocalExpense
         do { expense = try repository.createExpense(draft, operationID: operationIDProvider()) }
         catch { try? imageStore?.remove(path: image?.path); throw error }
+        expressionPersistence?.refresh(expense: expense)
         return LocalExpenseOutcome(expense: expense, tombstone: nil, profileID: profile.id)
     }
 
@@ -346,7 +350,11 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         )
         let image = try saveImage(command.imageData)
         draft.imagePath = image?.path; draft.imageHash = image?.hash
-        do { return try repository.createIncome(draft) }
+        do {
+            let income = try repository.createIncome(draft)
+            expressionPersistence?.refresh(income: income)
+            return income
+        }
         catch { try? imageStore?.remove(path: image?.path); throw error }
     }
 
@@ -388,6 +396,7 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         do { value = try repository.updateIncome(scopedUpdate) }
         catch { try? imageStore?.remove(path: image?.path); throw error }
         guard value.profileID == profile.id else { throw LocalDataError.invalidIdentifier }
+        expressionPersistence?.refresh(income: value)
         return value
     }
 
@@ -395,6 +404,11 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         let profile = try profileStore.activeProfile()
         let tombstone = try repository.deleteIncome(id: id, profileID: profile.id, expectedVersion: expectedVersion, deletedAt: deletedAt)
         guard tombstone.profileID == profile.id else { throw LocalDataError.invalidIdentifier }
+        expressionPersistence?.deleteSource(
+            sourceTable: "local_income_records",
+            sourceID: tombstone.id.uuidString,
+            profileID: tombstone.profileID
+        )
         return tombstone
     }
 
@@ -431,6 +445,7 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
         do { expense = try repository.updateExpense(update, operationID: operationIDProvider()) }
         catch { try? imageStore?.remove(path: image?.path); throw error }
         guard expense.profileID == profile.id else { throw LocalDataError.invalidIdentifier }
+        expressionPersistence?.refresh(expense: expense)
         return LocalExpenseOutcome(expense: expense, tombstone: nil, profileID: profile.id)
     }
 
@@ -444,6 +459,11 @@ final class LocalExpenseUseCase: LocalExpenseUseCaseProtocol {
             operationID: operationIDProvider()
         )
         guard tombstone.profileID == profile.id else { throw LocalDataError.invalidIdentifier }
+        expressionPersistence?.deleteSource(
+            sourceTable: "local_expenses",
+            sourceID: tombstone.id.uuidString,
+            profileID: tombstone.profileID
+        )
         return LocalExpenseOutcome(expense: nil, tombstone: tombstone, profileID: profile.id)
     }
 

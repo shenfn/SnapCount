@@ -130,6 +130,47 @@ final class SnapCountUploadService {
         )
     }
 
+    /// Ask the hosted text provider to compose a Companion for one local fact.
+    /// The endpoint is read-only and must not be used for business writes.
+    func generateLocalExpression(
+        currentFact: [String: Any],
+        plannerCandidate: [String: Any]?,
+        accessToken: String
+    ) async throws -> Data {
+        guard !AppConfig.supabaseFunctionsURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
+            throw SnapCountUploadServiceError.missingConfig
+        }
+        guard let baseURL = URL(string: AppConfig.supabaseFunctionsURL) else {
+            throw SnapCountUploadServiceError.invalidURL
+        }
+        let endpointPath = baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let url = endpointPath.hasSuffix("functions/v1")
+            ? baseURL.appendingPathComponent("ingest-receipt")
+            : baseURL.appendingPathComponent("functions/v1/ingest-receipt")
+        var body: [String: Any] = [
+            "action": "generate_local_expression",
+            "current_fact": currentFact,
+        ]
+        if let plannerCandidate { body["planner_candidate"] = plannerCandidate }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 60
+        request.httpMethod = "POST"
+        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (responseData, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw SnapCountUploadServiceError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SnapCountUploadServiceError.requestFailed(
+                displayErrorMessage(from: responseData, fallback: String(data: responseData, encoding: .utf8) ?? "", statusCode: http.statusCode)
+            )
+        }
+        return responseData
+    }
+
     private func uploadImage(
         data: Data,
         uploadToken: String,

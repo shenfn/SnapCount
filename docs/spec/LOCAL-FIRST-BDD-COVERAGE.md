@@ -6,6 +6,8 @@
 > 基线：主工作区分支 `codex/local-first-phase1-fact-reader`（HEAD `7005e81`，PR #199 系列）；根工作区存在用户 WIP，本轮未触碰
 > 编号纪律：沿用既有场景编号（REC/EXP/CORE/PWA/A4-IOS/D-REMOTE/LOCAL-002/LOCAL-003/LOCAL-P1-DM/LOCAL-P1-SPORT/LOCAL-DATA）；仅对**尚无编号的真实缺口**分配新前缀 `LF-001` 起的编号。同一不变量不另造平行编号。
 
+> **2026-11-10 口径覆盖**：本文的 F4/Q-05 场景来自 2026-09-25 的历史评审，不能继续作为 App Store 首版本地 AI 的实现口径。当前本地 Companion、Planner 候选域、记忆和结果持久化以 `LOCAL-AI-003`、`LOCAL-DATA-002` 及 2026-11-09 开发交接为准；业务数据同步仍冻结。
+
 ## 1. 目的与事实来源
 
 以现有 iOS + PWA 完整产品能力为基线，确认 Local-First 改造最终需要覆盖的全部用户能力和业务场景；反向检查遗漏；为后续 TDD 切片提供可直接引用的 BDD 场景。
@@ -279,11 +281,11 @@ Feature: 图片识别产生的候选全部本地生命周期
     # 云端有 sha256+感知哈希+3 分钟疑似重复三层；本地仅 hash 确定性 ID
 ```
 
-### Feature F4：AI Popup / 陪伴表达的本地适配
+### Feature F4：AI Companion / Planner 的本地适配（2026-11-10 口径）
 
 ```gherkin
-Feature: 表达能力从本地正式事实读取
-  表达核心算法为纯函数可移植；缺口在数据供给、曝光/反馈持久化与离线出口。
+Feature: 本地 Companion 与 Planner 从本地事实和记忆读取
+  本地表达结果服务记录详情、Inbox 和通知卡片；业务数据同步不属于本 Feature。
 
   [沿用] Scenario: 登录态表达链路保持（EXP-006/008/012）
     Given 已登录用户查看记录详情
@@ -293,24 +295,28 @@ Feature: 表达能力从本地正式事实读取
   [新 LF-010] Scenario: 表达候选从 LocalFactReader 供给
     Given 本地存在五域正式事实
     When 生成表达候选
-    Then 候选输入来自 LocalFactReader（补 income/wallet 后为完整事实集），表达核心规则（EXP-001~007）不变
-    # DM-GAP-08；表达核心（expression-core）为纯函数可移植，需数据适配层
+    Then 候选输入包含当前事实、近期事实、本地记忆和 Planner 候选域
+    And Companion 与 Planner 结果按记录、Inbox 和通知卡片的展示目标持久化
+    # 完整字段与七域候选矩阵见 LOCAL-AI-003
 
-  [新 LF-011] Scenario: 本地模式隐藏点评且不存曝光/反馈
-    Given 本地模式产生表达计划、曝光、用户点评
+  [新 LF-011] Scenario: 本地模式保存表达结果并保持本地确认语义
+    Given 本地模式产生 Companion/Planner 结果
     When 用户产生行为
-    Then 本地模式隐藏点评 UI，不新增本地曝光/反馈存储；这些派生数据不混入五域事实表
-    # Q-05 方案 a；在线表达仍沿用云端能力
+    Then 结果和本地曝光确认可在本地持久化
+    And 不创建云端 plan_token、exposure_event_id 或业务同步 outbox
+    And 这些派生数据不混入五域事实表
 
   [新 LF-012] Scenario: AI 关闭/断网时手动记录不受阻且有表达出口
     Given AI Provider 为 Disabled 或网络不可用
     When 用户创建/编辑/删除/导出记录
-    Then 全部成功；表达区按拍板口径显示确定性候选文案或隐藏（Q-05）
+    Then 全部成功
+    And 已有本地事实仍可生成不依赖网络的 Companion/Planner 结果或明确显示不可用状态
 
   [新 LF-013] Scenario: 本地模式的曝光身份语义
     Given 表达在本地模式运行（无云端 plan_token/exposure_event_id）
-    When 用户查看与点评
-    Then 本地模式不产生曝光确认、去重或点评持久化；只返回确定性候选文案或隐藏点评 UI
+    When 用户查看与确认
+    Then 本地去重和确认只使用本地稳定键
+    And 不向云端写入曝光、反馈或业务同步事件
 ```
 
 ### Feature F5：跨域 Analysis 的本地适配
@@ -581,7 +587,7 @@ Feature: 收入与钱包快照的本地域
 | Q-02 | 换账号使用同一设备的数据归属与清理流程？ | 选项：带门禁的"更换设备主人"清空流程 / 多 profile 支持 / 维持现状并明示限制（LF-026） |
 | Q-03 | 还款/撤销/补绑/截图还款/周期账务推演是否需要本地实现？ | **已拍板不做**；云端 RPC 保持原子权威。钱包快照按 Q-01 进入 SL-B 的只记事实形态 |
 | Q-04 | 设置 19 项的本地镜像与登录后合并策略？ | 未登录可存本地是底线；合并策略需定（云端覆盖/本地覆盖/按项）（LF-019/020） |
-| Q-05 | AI Popup 本地适配的最小闭环口径？ | 选项：a) 确定性候选文案（代码算、不调 LLM）先行；b) 全量表达核心移植+本地曝光/反馈存储；c) 本地模式隐藏表达（LF-010~013） |
+| Q-05 | AI Popup 本地适配的最小闭环口径？ | **已由 2026-11-10 上架切片重新定义**：本地 Companion + Planner 候选域、记忆和结果持久化；Hosted/BYOK 仅作为 AI 请求方式，不新增业务数据同步。详见 `LOCAL-AI-003`。 |
 | Q-06 | BYOK 三问题：Direct/Proxy/Aggregator？首批 Provider？Key 失效是否自动回退 Hosted？ | **已拍板暂缓**，移出 Phase 1；LF-029~031 仅冻结登记 |
 | Q-07 | 本地消费是否解耦账户（account_id 可空）？ | **已拍板维持现状**：消费必须先选账户；DM-GAP-10 不采纳 |
 | Q-08 | 登录态手动新建四域默认走云端的路由是否维持？ | **已拍板维持现状**；LF-002 作为特征测试，双轨仅是同步冻结期迁移策略 |
