@@ -1970,7 +1970,7 @@ type CompanionContext = {
 
 const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   enabled: true,
-  memoryEnabled: true,
+  memoryEnabled: false,
   persona: "observer",
   memoryStrength: "balanced",
   expressionStyle: "plain",
@@ -2034,7 +2034,7 @@ async function loadCompanionContext(
   const settingsRaw = (raw.settings || {}) as Record<string, unknown>;
   const settings: CompanionSettings = {
     enabled: settingsRaw.enabled !== false,
-    memoryEnabled: settingsRaw.memory_enabled !== false,
+    memoryEnabled: settingsRaw.memory_enabled === true,
     persona: typeof settingsRaw.persona === "string" ? settingsRaw.persona : "observer",
     memoryStrength: typeof settingsRaw.memory_strength === "string" ? settingsRaw.memory_strength : "balanced",
     expressionStyle: typeof settingsRaw.expression_style === "string" ? settingsRaw.expression_style : "plain",
@@ -3953,6 +3953,7 @@ async function generateVoiceFeedback(opts: {
   customNote?: string | null;
   recentCompanionLines?: string[];
   memory?: Record<string, unknown> | null;
+  localMemoryContext?: unknown;
   textProvider: ProviderConfig | null;
   plannerBrief?: PlannerVoiceBrief | null;
   plannerFallbackReason?: string | null;
@@ -3984,6 +3985,7 @@ async function generateVoiceFeedback(opts: {
       ? { selectedCandidates: [plannerBriefContextCandidate(opts.plannerBrief)] }
       : {}),
     memory: opts.memory ?? null,
+    localMemoryContext: opts.localMemoryContext ?? null,
     expressionPreferences: {
       persona: opts.persona ?? null,
       memory_strength: opts.memoryStrength ?? null,
@@ -5532,9 +5534,10 @@ Deno.serve(async (req) => {
       const action = jsonBody?.action;
 
       // Local-first Companion composition. This action is intentionally
-      // read-only: it accepts the current local fact and a bounded Planner
-      // candidate, calls the hosted text provider, and never writes a
-      // business row, memory row, or sync outbox item.
+      // read-only: it accepts the current local fact, a bounded Planner
+      // candidate, and optional compact same-domain memory context, calls the
+      // hosted text provider, and never writes a business row, memory row, or
+      // sync outbox item.
       if (action === "generate_local_expression") {
         const actionUserId = await authenticatedUserId(req);
         if (!actionUserId || !textProvider) {
@@ -5548,6 +5551,43 @@ Deno.serve(async (req) => {
         const candidate = jsonBody?.planner_candidate && typeof jsonBody.planner_candidate === "object"
           ? jsonBody.planner_candidate as Record<string, unknown>
           : {};
+        const rawPreferences = isRecordValue(jsonBody?.expression_preferences)
+          ? jsonBody.expression_preferences
+          : {};
+        const allowedPersonas = new Set(["observer", "warm", "sharp", "minimal"]);
+        const allowedMemoryStrengths = new Set(["light", "balanced", "bold"]);
+        const allowedExpressionStyles = new Set(["plain", "emoji", "kaomoji"]);
+        const persona = typeof rawPreferences.persona === "string" && allowedPersonas.has(rawPreferences.persona)
+          ? rawPreferences.persona
+          : "observer";
+        const memoryStrength = typeof rawPreferences.memory_strength === "string"
+            && allowedMemoryStrengths.has(rawPreferences.memory_strength)
+          ? rawPreferences.memory_strength
+          : "balanced";
+        const expressionStyle = typeof rawPreferences.expression_style === "string"
+            && allowedExpressionStyles.has(rawPreferences.expression_style)
+          ? rawPreferences.expression_style
+          : "plain";
+        const customNote = typeof rawPreferences.custom_note === "string"
+          ? rawPreferences.custom_note.trim().slice(0, 80) || null
+          : null;
+        const rawLocalTime = typeof jsonBody?.client_local_time === "string"
+          ? jsonBody.client_local_time.trim()
+          : "";
+        const clientLocalTime = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(rawLocalTime)
+          ? rawLocalTime
+          : null;
+        const weekdayValue = typeof jsonBody?.weekday === "string" ? jsonBody.weekday : "";
+        const weekday = new Set(["周一", "周二", "周三", "周四", "周五", "周六", "周日"]).has(weekdayValue)
+          ? weekdayValue
+          : null;
+        const recentCompanionLines = Array.isArray(jsonBody?.recent_companion_lines)
+          ? jsonBody.recent_companion_lines
+            .filter((line): line is string => typeof line === "string")
+            .map((line) => line.trim().slice(0, 80))
+            .filter((line) => line.length > 0)
+            .slice(0, 5)
+          : [];
         const allowedDomains = new Set(["expense", "income", "food", "sleep", "sport", "reading", "wallet"]);
         const domainKey = typeof currentFact.domain_key === "string" && allowedDomains.has(currentFact.domain_key)
           ? currentFact.domain_key
@@ -5603,9 +5643,15 @@ Deno.serve(async (req) => {
           domainProfiles: {},
           timingSignal: null,
           timeContext: null,
-          clientLocalTime: null,
-          weekday: null,
+          clientLocalTime,
+          weekday,
+          persona,
+          memoryStrength,
+          expressionStyle,
+          customNote,
+          recentCompanionLines,
           memory: null,
+          localMemoryContext: jsonBody?.local_memory_context ?? null,
           textProvider,
           plannerBrief,
         });
@@ -6082,7 +6128,7 @@ Deno.serve(async (req) => {
       photoVisionPrimary = prefRow?.photo_vision_primary ?? "qwen";
       companionSettings = {
         enabled: prefRow?.companion_enabled ?? true,
-        memoryEnabled: prefRow?.companion_memory_enabled ?? true,
+        memoryEnabled: prefRow?.companion_memory_enabled ?? false,
         persona: prefRow?.companion_persona ?? "observer",
         memoryStrength: prefRow?.companion_memory_strength ?? "balanced",
         expressionStyle: prefRow?.companion_expression_style ?? "plain",
@@ -6103,8 +6149,10 @@ Deno.serve(async (req) => {
             : qwenCfg.photoEnableThinking,
         };
       }
-      companionContextPromise = loadCompanionContext(supabase, userId, companionSettings);
-      domainProfilesPromise = loadDomainProfiles(supabase, userId);
+      if (!recognizeOnly) {
+        companionContextPromise = loadCompanionContext(supabase, userId, companionSettings);
+        domainProfilesPromise = loadDomainProfiles(supabase, userId);
+      }
     }
 
     const respondWithExpressionShadow = (
@@ -6554,7 +6602,7 @@ Deno.serve(async (req) => {
         clientCapturedAt,
         requestReceivedAt,
       });
-      let candidateCompanion = companionSettings.enabled
+      let candidateCompanion = !recognizeOnly && companionSettings.enabled
         ? sanitizeCompanionMessageForTime(
           sanitizeCompanionMessageForContent(
             typeof ai.companion_message === "string" ? ai.companion_message : null,
@@ -6566,7 +6614,7 @@ Deno.serve(async (req) => {
         : null;
       const candidateAmount = normalizeAmount(payload.amount) ?? normalizeAmount(ai.amount);
       let candidateFeedback: AIFeedback | null = null;
-      if (companionSettings.enabled && aiOk) {
+      if (!recognizeOnly && companionSettings.enabled && aiOk) {
         if (domainKey === "expense") {
           candidateFeedback = buildExpenseAIFeedback(ai, candidateAmount, candidateTimeContext, false);
         } else if (domainKey === "income") {
@@ -6582,7 +6630,8 @@ Deno.serve(async (req) => {
         // same expression pipeline and retain the deterministic result only
         // when Voice is unavailable or fails validation.
         const canGenerateVoice = Boolean(
-          textProvider
+          !recognizeOnly
+          && textProvider
           && (
             domainKey === "expense" ||
             domainKey === "income" ||
@@ -6618,6 +6667,13 @@ Deno.serve(async (req) => {
             candidateFeedback = voiceResult.ai_feedback;
           }
         }
+      }
+      if (recognizeOnly) {
+        // The local-first client composes the single Companion after the fact
+        // is saved, with on-device context. The image call returns facts only.
+        delete payload.companion_message;
+        delete payload.ai_feedback;
+        delete payload.planner_ai_feedback;
       }
       if (candidateCompanion) payload.companion_message = candidateCompanion;
       if (candidateFeedback) payload.ai_feedback = candidateFeedback;

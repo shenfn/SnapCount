@@ -67,6 +67,39 @@ struct LocalExpressionContext: Equatable {
     let memoryContextJSON: String?
     let plannerCandidates: [NativeAIFeedback]
     let providerMode: LocalExpressionProviderMode
+    var expressionPreferences = LocalCompanionExpressionPreferences.default
+    var clientLocalTime: String? = nil
+    var weekday: String? = nil
+    var recentCompanionLines: [String] = []
+}
+
+struct LocalCompanionExpressionPreferences: Equatable {
+    let persona: String
+    let memoryStrength: String
+    let expressionStyle: String
+    let customNote: String?
+
+    static let `default` = LocalCompanionExpressionPreferences(
+        persona: "observer",
+        memoryStrength: "balanced",
+        expressionStyle: "plain",
+        customNote: nil
+    )
+
+    init(settings: NativeUserSettings) {
+        persona = settings.companionPersona
+        memoryStrength = settings.companionMemoryStrength
+        expressionStyle = settings.companionExpressionStyle
+        let note = settings.companionCustomNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        customNote = note.isEmpty ? nil : String(note.prefix(80))
+    }
+
+    private init(persona: String, memoryStrength: String, expressionStyle: String, customNote: String?) {
+        self.persona = persona
+        self.memoryStrength = memoryStrength
+        self.expressionStyle = expressionStyle
+        self.customNote = customNote
+    }
 }
 
 /// Deterministic local Planner seed. It supplies stable, evidence-backed
@@ -80,15 +113,25 @@ enum LocalPlannerCandidateEngine {
         for detail: NativeRecordDetail,
         recentFacts: [LocalExpressionFact] = [],
         memoryContextJSON: String? = nil,
-        providerMode: LocalExpressionProviderMode = .deterministic
+        providerMode: LocalExpressionProviderMode = .deterministic,
+        expressionPreferences: LocalCompanionExpressionPreferences = .default,
+        clientLocalTime: String? = nil,
+        weekday: String? = nil,
+        recentCompanionLines: [String] = [],
+        now: Date = Date()
     ) -> LocalExpressionContext {
         let currentFact = LocalExpressionFact(detail: detail)
+        let localTime = Self.localTimeContext(for: now)
         return LocalExpressionContext(
             currentFact: currentFact,
             recentFacts: recentFacts,
             memoryContextJSON: memoryContextJSON,
             plannerCandidates: candidates(for: currentFact, memoryContextJSON: memoryContextJSON),
-            providerMode: providerMode
+            providerMode: providerMode,
+            expressionPreferences: expressionPreferences,
+            clientLocalTime: clientLocalTime ?? localTime.time,
+            weekday: weekday ?? localTime.weekday,
+            recentCompanionLines: Array(recentCompanionLines.prefix(5))
         )
     }
 
@@ -164,7 +207,7 @@ enum LocalPlannerCandidateEngine {
         ]
         guard let feedback = NativeAIFeedback(payload: payload) else { return [] }
         var result = [feedback]
-        if let memory = firstMemory(from: memoryContextJSON) {
+        if let memory = firstMemory(from: memoryContextJSON, matching: fact) {
             let memoryKey = memory.key
             let memoryFingerprint = LocalImageStore.sha256(Data("\(fact.id)|\(memoryKey)".utf8))
             let memoryLine = memory.value.map { "结合本地记忆：\(String($0.prefix(44)))" }
@@ -207,14 +250,43 @@ enum LocalPlannerCandidateEngine {
         return memoryConfidence(from: memoryContextJSON) >= 0.8 ? memory : current
     }
 
-    private static func firstMemory(from json: String?) -> (key: String, value: String?)? {
+    private static func firstMemory(
+        from json: String?,
+        matching fact: LocalExpressionFact
+    ) -> (key: String, value: String?)? {
         guard let json,
               let data = json.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let facts = object["facts"] as? [[String: Any]],
-              let key = facts.first?["key"] as? String,
-              !key.isEmpty else { return nil }
-        return (key, facts.first?["value"] as? String)
+              let facts = object["facts"] as? [[String: Any]] else { return nil }
+        let currentTitle = canonicalEntity(fact.title)
+        let currentCategory = canonicalEntity(fact.category ?? "")
+        for memory in facts {
+            guard let key = memory["key"] as? String, !key.isEmpty,
+                  let entityType = memory["entity_type"] as? String,
+                  let entityValue = memory["entity_value"] as? String else { continue }
+            let expected = entityType == "category" ? currentCategory : currentTitle
+            guard !expected.isEmpty, expected == canonicalEntity(entityValue) else { continue }
+            return (key, memory["value"] as? String)
+        }
+        return nil
+    }
+
+    private static func canonicalEntity(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .filter { !$0.isWhitespace && !$0.isPunctuation }
+    }
+
+    private static func localTimeContext(for date: Date) -> (time: String, weekday: String) {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let time = formatter.string(from: date)
+        let weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        let weekdayIndex = Calendar.current.component(.weekday, from: date) - 1
+        let weekday = weekdays.indices.contains(weekdayIndex) ? weekdays[weekdayIndex] : ""
+        return (time, weekday)
     }
 
     private static func memoryConfidence(from json: String?) -> Double {

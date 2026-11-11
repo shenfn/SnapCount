@@ -44,6 +44,12 @@ export interface ContextPacketCandidate {
   claim_fingerprint?: string | null;
 }
 
+export interface LocalMemoryContextEntry {
+  type: string;
+  summary: string;
+  confidence: number;
+}
+
 export interface ContextPacket {
   packet_version: "context-packet-v2";
   record_facts: Record<string, unknown>;
@@ -56,6 +62,7 @@ export interface ContextPacket {
     domain_key: string | null;
     entity_key: string | null;
   }>;
+  local_memory_context: LocalMemoryContextEntry[];
   expression_preferences: Record<string, unknown>;
   recent_expression_context: string[];
   trace: {
@@ -98,6 +105,33 @@ function contentFingerprint(value: unknown): string {
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function normalizeLocalMemoryContext(
+  value: unknown,
+  domainKey: string,
+): LocalMemoryContextEntry[] {
+  if (!isRecord(value) || !Array.isArray(value.facts)) return [];
+  const allowedDomains = new Set(["expense", "income", "food", "sleep", "sport", "reading", "wallet"]);
+  if (!allowedDomains.has(domainKey)) return [];
+  const prefixes = [`local_ai.${domainKey}.`, `${domainKey}.`];
+  const normalized: LocalMemoryContextEntry[] = [];
+  for (const raw of value.facts) {
+    if (!isRecord(raw)) continue;
+    const key = stringValue(raw.key);
+    const type = stringValue(raw.type);
+    const summary = stringValue(raw.value) ?? stringValue(raw.content);
+    const confidence = numberValue(raw.confidence);
+    if (!key || !prefixes.some((prefix) => key.startsWith(prefix)) || !type || !summary || confidence === null) continue;
+    if (confidence < 0 || confidence > 1 || type.length > 32 || summary.length > 240) continue;
+    normalized.push({
+      type,
+      summary,
+      confidence,
+    });
+    if (normalized.length >= 8) break;
+  }
+  return normalized;
 }
 
 function numberValue(value: unknown): number | null {
@@ -264,6 +298,7 @@ export function buildContextPacket(input: {
   signals: DomainSignal[];
   selectedCandidates?: ContextPacketCandidate[];
   memory?: Record<string, unknown> | null;
+  localMemoryContext?: unknown;
   expressionPreferences?: Record<string, unknown>;
   recentExpressionContext?: string[];
   fallbackReason?: string | null;
@@ -300,6 +335,7 @@ export function buildContextPacket(input: {
       domain_key: item.domainKey,
       entity_key: item.entityKey,
     })),
+    local_memory_context: normalizeLocalMemoryContext(input.localMemoryContext, input.domainKey),
     expression_preferences: input.expressionPreferences ?? {},
     recent_expression_context: (input.recentExpressionContext ?? []).slice(0, 5),
   };

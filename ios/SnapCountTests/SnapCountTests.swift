@@ -1139,7 +1139,7 @@ final class SnapCountTests: XCTestCase {
         XCTAssertNotEqual(selected, voice)
     }
 
-    func testEXP008FeedbackCardsAppendPlannerWithoutReplacingVoice() throws {
+    func testEXP008FeedbackCardsKeepRemotePlannerAndVoice() throws {
         let voice = try XCTUnwrap(NativeAIFeedback(payload: [
             "source": AnyCodable("hybrid"),
             "presentation_target": AnyCodable("feedback_card"),
@@ -1160,8 +1160,51 @@ final class SnapCountTests: XCTestCase {
             plannerFeedback: planner
         )
 
-        XCTAssertEqual(cards.count, 1)
-        XCTAssertEqual(cards.first, planner)
+        XCTAssertEqual(cards, [voice, planner])
+    }
+
+    func testLOCALAI003FPlannerFeedbackIsNotShownAsStandaloneCard() throws {
+        let planner = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("expression_planner"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "candidate_id": AnyCodable("local-planner-expense-memory"),
+            "exposure_event_id": AnyCodable("local:local-planner-fingerprint"),
+            "emotion_line": AnyCodable("结合近期记录，慢慢记下就好。")
+        ]))
+        let voice = try XCTUnwrap(NativeAIFeedback(payload: [
+            "source": AnyCodable("hybrid"),
+            "presentation_target": AnyCodable("feedback_card"),
+            "emotion_line": AnyCodable("当前记录已经整理好。")
+        ]))
+
+        XCTAssertEqual(
+            NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
+                existingVoice: voice,
+                plannerPreview: planner
+            ),
+            voice
+        )
+        XCTAssertEqual(NativeRecordExpressionFeedbackPolicy.feedbackCardsToRender(
+            companionMessage: nil,
+            voiceFeedback: voice,
+            plannerFeedback: planner
+        ), [voice])
+
+        XCTAssertTrue(NativeRecordExpressionFeedbackPolicy.feedbackCardsToRender(
+            companionMessage: "这笔也已经记下了。",
+            voiceFeedback: nil,
+            plannerFeedback: planner
+        ).isEmpty)
+        XCTAssertNil(NativeRecordExpressionFeedbackPolicy.companionFeedbackToReview(
+            companionMessage: "结合近期记录，慢慢记下就好。",
+            feedback: planner
+        ))
+
+        XCTAssertTrue(NativeRecordExpressionFeedbackPolicy.feedbackCardsToRender(
+            companionMessage: nil,
+            voiceFeedback: nil,
+            plannerFeedback: planner
+        ).isEmpty)
     }
 
     func testEXP008ReviewTargetsTheCardTheUserActuallySelected() throws {
@@ -1606,7 +1649,11 @@ final class SnapCountTests: XCTestCase {
             UploadResultURLProtocolStub.responseData = Data()
         }
 
-        let notification = try await SnapCountUploadService(session: session).uploadNativeImage(
+        let notification = try await SnapCountUploadService(
+            session: session,
+            functionsURL: "https://example.test/functions/v1",
+            anonKey: "test-publishable-key"
+        ).uploadNativeImage(
             data: Data([0x01, 0x02]),
             uploadToken: "test-upload-token",
             captureKind: "photo_library",
@@ -3925,7 +3972,7 @@ final class SnapCountTests: XCTestCase {
     func testRegistrationConsentUsesCurrentLegalVersions() {
         let consent = NativeRegistrationConsent.current(at: Date(timeIntervalSince1970: 0))
         XCTAssertEqual(consent.termsVersion, "2026-07-19")
-        XCTAssertEqual(consent.privacyVersion, "2026-07-22")
+        XCTAssertEqual(consent.privacyVersion, "2026-11-11")
         XCTAssertEqual(consent.legalAcceptedAt, consent.sensitiveDataAcceptedAt)
     }
 

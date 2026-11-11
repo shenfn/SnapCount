@@ -3,12 +3,46 @@ import XCTest
 @testable import SnapCount
 
 final class LocalExpressionContextTests: XCTestCase {
+    func testLOCALAI003FCompactMemoryIsSameDomainAndBounded() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try LocalDatabase(databaseURL: directory.appendingPathComponent("local.sqlite"))
+        let profile = try LocalProfileStore(database: database).activeProfile()
+        let repository = LocalCompanionMemoryRepository(database: database)
+        let now = Date()
+        for index in 0..<10 {
+            try repository.upsert(LocalCompanionMemoryDraft(
+                id: UUID(), profileID: profile.id,
+                memoryKey: "local_ai.expense.recent_\(index)", memoryType: "derived_trend",
+                contentJSON: #"{"value":"同域摘要 \#(index)"}"#,
+                sourceTable: nil, sourceID: nil, confidence: 0.9 - Double(index) / 100,
+                createdAt: now, updatedAt: now
+            ))
+        }
+        try repository.upsert(LocalCompanionMemoryDraft(
+            id: UUID(), profileID: profile.id,
+            memoryKey: "local_ai.food.recent_30d", memoryType: "derived_trend",
+            contentJSON: #"{"value":"其他领域摘要"}"#,
+            sourceTable: nil, sourceID: nil, confidence: 1,
+            createdAt: now, updatedAt: now
+        ))
+
+        let json = try repository.compactContextJSON(profileID: profile.id, domainKey: "expense")
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let facts = try XCTUnwrap(object["facts"] as? [[String: Any]])
+
+        XCTAssertEqual(facts.count, 8)
+        XCTAssertTrue(facts.allSatisfy { ($0["key"] as? String)?.hasPrefix("local_ai.expense.") == true })
+        XCTAssertTrue(facts.allSatisfy { (($0["value"] as? String)?.count ?? 999) <= 240 })
+    }
+
     func testHighConfidenceMemoryCanLeadCandidateSelection() throws {
         let fact = LocalExpressionFact(
             id: "fact-1", domainKey: "food", title: "晚餐", summary: "清淡",
             recordDate: "2026-11-10", recordTime: nil, amount: nil, category: nil
         )
-        let context = "{\"facts\":[{\"key\":\"food.preference\",\"value\":\"晚餐偏清淡\",\"confidence\":0.9}]}"
+        let context = "{\"facts\":[{\"key\":\"food.preference\",\"value\":\"晚餐偏清淡\",\"confidence\":0.9,\"entity_type\":\"merchant\",\"entity_value\":\"晚餐\"}]}"
         let selected = try XCTUnwrap(LocalPlannerCandidateEngine.selectedCandidate(for: fact, memoryContextJSON: context))
         XCTAssertEqual(selected.dimension, "memory_context")
         XCTAssertTrue(selected.emotionLine.contains("晚餐偏清淡"))

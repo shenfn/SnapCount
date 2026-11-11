@@ -387,7 +387,7 @@ private struct SettingsRow: Decodable {
             qwenPhotoThinking: qwenPhotoThinking ?? false,
             aiInsightProvider: NativeSettingsOptions.normalizedInsightProvider(aiInsightProvider ?? "auto"),
             companionEnabled: companionEnabled ?? true,
-            companionMemoryEnabled: companionMemoryEnabled ?? true,
+            companionMemoryEnabled: companionMemoryEnabled ?? false,
             companionPersona: companionPersona ?? "observer",
             companionMemoryStrength: companionMemoryStrength ?? "balanced",
             companionExpressionStyle: companionExpressionStyle ?? "plain",

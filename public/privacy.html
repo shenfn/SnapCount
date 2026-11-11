@@ -11,7 +11,7 @@
 <main>
   <nav><a href="./legal.html">法律与支持</a><a href="./terms.html">服务协议</a><a href="./support.html">用户支持</a></nav>
   <h1>芥子 App 隐私政策</h1>
-  <p class="meta">版本与生效日期：2026-07-22</p>
+  <p class="meta">版本与生效日期：2026-11-11</p>
   <p class="summary">芥子是由尹良超（个人开发者，以下简称“运营者”）提供的个人生活记录与数据整理工具。本政策说明芥子如何处理你的信息。</p>
 
   <h2>1. 适用范围</h2>
@@ -22,6 +22,7 @@
     <li><strong>账户信息：</strong>邮箱地址、用户 ID、登录会话和快捷指令上传凭据。密码由 Supabase Auth 处理，运营者不保存明文密码。</li>
     <li><strong>用户主动提交的内容：</strong>相机照片、相册图片、截图、OCR 文本、备注，以及消费、收入、账户、钱包、运动、睡眠、饮食和阅读记录。</li>
     <li><strong>敏感或高度私密信息：</strong>你主动记录的金额、账户余额、负债、还款、睡眠和其他生活状态。芥子不会在你未主动提交时读取这些内容。</li>
+    <li><strong>本机 AI 记忆摘要：</strong>仅在你开启“长期记忆”后，芥子才会从本机已保存的正式记录中整理与当前记录同类的有限摘要，并在生成陪伴文案时连同当前记录发送给所选 AI 服务。摘要可能包含常见商户或类别等模式，不包含完整历史记录。</li>
     <li><strong>设置与反馈：</strong>原图留存策略、AI 设置、陪伴偏好、表达反馈和你主动提交的问题说明。主动点评时会保存所点评的展示内容、选择的原因和可选说明，以便处理反馈。</li>
     <li><strong>必要的运行信息：</strong>请求时间、处理耗时、错误信息、记录标识、图片精确哈希、不可逆的图片感知指纹和模型调用状态。两类图片指纹仅用于同一账户内识别完全相同或疑似相似的图片，不能用于还原原图。AI 原始输出、额外调试日志和后台 AI 改进数据均默认关闭，仅在你分别主动开启相应设置后处理。</li>
   </ul>
@@ -35,10 +36,11 @@
     <li><strong>阿里云百炼 Qwen：</strong>用于图片识别、文案生成和联动分析。芥子当前接入阿里云百炼中国内地 OpenAI 兼容接口，仅使用 Qwen 3.6 Flash 和 Qwen 3.7 Plus。处理时会发送你主动选择的图片、必要提示词和完成当前功能所需的上下文。</li>
     <li><strong>GitHub Pages：</strong>仅用于托管本政策、服务协议和支持页面，不承载芥子用户记录。</li>
   </ul>
+  <p>新账户的“长期记忆”默认关闭。开启后，Hosted 模式会把当前记录、精简的同类本机记忆摘要和必要的表达偏好经芥子服务端转发给阿里云百炼 Qwen；BYOK 模式会由你的设备直接发送给你配置的模型服务商。摘要只用于当前文案请求，不写入 Supabase 业务记录、云端记忆表或同步队列。关闭后，芥子不读取、不发送本机记忆；已经生成的摘要仍保留在本机，重新开启时按当前正式记录重新整理。模型服务商对收到内容的留存和使用仍以其适用条款为准。</p>
   <p>第三方服务商会依据其服务条款和隐私规则处理数据。我们不会声称第三方“绝不留存”或“绝不用于改进服务”；其具体保留与使用规则以运营者购买的 API 服务条款和对应服务商政策为准。</p>
 
   <h2>5. 跨境传输</h2>
-  <p>芥子的主要数据存储在新加坡。为完成 Qwen 推理，相关图片和必要上下文会从新加坡或你的设备传输至阿里云百炼当前的中国内地接口。因此，使用 AI 识别功能会发生跨区域数据处理。注册时，芥子会就敏感数据处理和该数据路径单独取得你的确认。</p>
+  <p>芥子的主要数据存储在新加坡。为完成 Qwen 推理，相关图片和必要上下文会从新加坡或你的设备传输至阿里云百炼当前的中国内地接口。开启“长期记忆”时，本机同类摘要也会沿相同路径用于生成陪伴文案。因此，使用相应 AI 功能会发生跨区域数据处理。注册时，芥子会就敏感数据处理和该数据路径单独取得你的确认。</p>
 
   <h2>6. 保存期限与原图留存</h2>
   <ul>
@@ -70,13 +72,13 @@
 
   <hr class="language-divider">
   <h1 lang="en">Jiezi App Privacy Policy</h1>
-  <p class="meta" lang="en">Version and effective date: 2026-07-22</p>
+  <p class="meta" lang="en">Version and effective date: 2026-11-11</p>
   <div lang="en">
     <p>Jiezi is a personal life-record and data-organization tool operated by Yin Liangchao, an individual developer.</p>
     <h2>Information and purposes</h2>
-    <p>We process account email and identifiers, content you submit (including images, OCR text, financial, account, wallet, exercise, sleep, diet and reading records), settings, feedback, and necessary request/error metadata. When you actively submit feedback, we retain the reviewed display content, selected reason, and optional note to process that feedback. We use this information to authenticate users, recognize images, organize records, provide statistics and AI insights, export data, troubleshoot issues, secure the service, and process deletion requests. We do not sell personal information.</p>
+    <p>We process account email and identifiers, content you submit (including images, OCR text, financial, account, wallet, exercise, sleep, diet and reading records), settings, feedback, and necessary request/error metadata. If you enable Long-term Memory, Jiezi creates a limited same-domain summary from formal records stored on your device and sends it with the current record when generating Companion text. The summary can describe patterns such as recurring merchants or categories; it does not contain your full history.</p>
     <h2>Service providers and international processing</h2>
-    <p>Supabase provides authentication, database, Edge Functions and Storage in Singapore (ap-southeast-1). Images and necessary context selected for AI features are sent to Alibaba Cloud Bailian Qwen through the currently configured mainland China endpoint. Only Qwen 3.6 Flash and Qwen 3.7 Plus are used. Provider retention and processing are governed by the applicable API agreement and provider policy.</p>
+    <p>Supabase provides authentication, database, Edge Functions and Storage in Singapore (ap-southeast-1). Images and necessary context selected for AI features are sent to Alibaba Cloud Bailian Qwen through the currently configured mainland China endpoint. In Hosted mode, an enabled local-memory summary and the current record are relayed by Jiezi's service; in BYOK mode, your device sends them directly to the provider you configured. The summary is used for that request and is not written to Supabase business records, a cloud memory table, or a sync queue. Long-term Memory is off by default for new accounts. Turning it off stops local-memory reads and transmission; existing summaries remain on device and are rebuilt from current formal records if re-enabled. Provider retention and processing are governed by the applicable API agreement and provider policy.</p>
     <h2>Retention and controls</h2>
     <p>Structured records remain until you delete them or delete your account. Source images can be set to no retention, 7 days, 30 days, or permanent retention. Failed storage deletions are retried and are not represented as completed. AI logs, raw-output optimization, and AI improvement participation are off by default. If you opt in to AI improvement, only minimized semantic keys, scores, and rejection reasons are cleaned daily under a 30-day rule; source images, amounts, merchant names, and notification text are excluded. Turning the setting off stops collection and removes background improvement data not linked to feedback you actively submitted. Feedback-linked context remains until account deletion or a verified deletion request. You may access, correct, export, or delete records and request account deletion in Settings.</p>
     <h2>Children, security and contact</h2>

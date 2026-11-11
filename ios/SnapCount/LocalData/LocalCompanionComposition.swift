@@ -9,9 +9,8 @@ protocol LocalCompanionProvider {
     func compose(context: LocalExpressionContext) async throws -> LocalCompanionResult
 }
 
-/// Hosted composition sends only the current fact and the selected local
-/// Planner candidate. The hosted endpoint never receives the local memory
-/// context in this phase.
+/// Hosted composition sends the current fact, selected local Planner candidate,
+/// and the bounded local-memory context when the user has enabled memory.
 final class HostedAICompanionProvider: LocalCompanionProvider {
     private let accessToken: String
     private let service: SnapCountUploadService
@@ -24,11 +23,16 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
     func compose(context: LocalExpressionContext) async throws -> LocalCompanionResult {
         let selected = LocalPlannerCandidateEngine.selectedCandidate(
             for: context.currentFact,
-            memoryContextJSON: nil
+            memoryContextJSON: context.memoryContextJSON
         )
         let response = try await service.generateLocalExpression(
             currentFact: Self.factPayload(context.currentFact),
             plannerCandidate: selected?.localPayload.mapValues(\.value),
+            localMemoryContext: LocalCompanionCompositionSupport.jsonObject(context.memoryContextJSON) as? [String: Any],
+            expressionPreferences: Self.preferencesPayload(context.expressionPreferences),
+            clientLocalTime: context.clientLocalTime,
+            weekday: context.weekday,
+            recentCompanionLines: context.recentCompanionLines,
             accessToken: accessToken
         )
         guard let envelope = try? JSONDecoder().decode(HostedExpressionEnvelope.self, from: response),
@@ -46,6 +50,8 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
             "id": fact.id,
             "domain_key": fact.domainKey,
             "title": fact.title,
+            "merchant_name": fact.domainKey == "expense" ? fact.title : NSNull(),
+            "source_name": fact.domainKey == "income" ? fact.title : NSNull(),
             "summary": fact.summary,
             "record_date": fact.recordDate ?? NSNull(),
             "record_time": fact.recordTime ?? NSNull(),
@@ -60,6 +66,16 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
             object.removeValue(forKey: "planner_ai_feedback")
             payload["payload_json"] = object
         }
+        return payload
+    }
+
+    static func preferencesPayload(_ preferences: LocalCompanionExpressionPreferences) -> [String: Any] {
+        var payload: [String: Any] = [
+            "persona": preferences.persona,
+            "memory_strength": preferences.memoryStrength,
+            "expression_style": preferences.expressionStyle,
+        ]
+        if let customNote = preferences.customNote { payload["custom_note"] = customNote }
         return payload
     }
 }
@@ -85,6 +101,10 @@ final class QwenBYOKCompanionProvider: LocalCompanionProvider {
         )
         var facts = HostedAICompanionProvider.factPayload(context.currentFact)
         facts["planner_candidate"] = selected?.localPayload.mapValues(\.value) ?? NSNull()
+        facts["expression_preferences"] = HostedAICompanionProvider.preferencesPayload(context.expressionPreferences)
+        facts["client_local_time"] = context.clientLocalTime ?? NSNull()
+        facts["weekday"] = context.weekday ?? NSNull()
+        facts["recent_companion_lines"] = Array(context.recentCompanionLines.prefix(5))
         if let memory = LocalCompanionCompositionSupport.jsonObject(context.memoryContextJSON) {
             facts["memory_context"] = memory
         }
@@ -93,6 +113,7 @@ final class QwenBYOKCompanionProvider: LocalCompanionProvider {
         let prompt = """
         你是芥子的本地陪伴文案生成器。下面是已保存的当前事实、Planner 候选和（若存在）紧凑记忆 JSON。
         只能根据这些证据表达，不要补写 JSON 没有的金额、日期、商户、频率或健康结论；记忆只能改变观察角度，不能修改当前事实。
+        遵循 expression_preferences 中的说话风格；client_local_time 和 weekday 只用于自然把握此刻语境，不推断用户作息；recent_companion_lines 只用于避免重复句式。
         返回一个 JSON 对象，不能返回 Markdown。字段为 companion_message 和 ai_feedback。
         companion_message 是一句 8 到 30 字的陪伴语；ai_feedback 包含 badge、icon、band、emotion_line、utility_line、detail_reason、confidence。
         band 只能是 positive、neutral、watch、recover、ritual；emotion_line 不超过 30 字，utility_line 不超过 32 字，detail_reason 不超过 64 字；confidence 为 0 到 1 的数字且至少 0.5。

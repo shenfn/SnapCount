@@ -202,6 +202,71 @@ final class LocalCompanionMemoryRepository {
         return "{\"facts\":[]}"
     }
 
+    /// Returns only short summaries for the current fact's domain. This is the
+    /// context that may leave the device for Companion generation.
+    func compactContextJSON(profileID: UUID, domainKey: String, limit: Int = 8) throws -> String {
+        let domain = domainKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let allowedDomains: Set<String> = ["expense", "income", "food", "sleep", "sport", "reading", "wallet"]
+        guard allowedDomains.contains(domain) else { return "{\"facts\":[]}" }
+        let maximumItems = max(0, min(limit, 8))
+        guard maximumItems > 0 else { return "{\"facts\":[]}" }
+
+        let selected = try memories(profileID: profileID, limit: Self.maximumContextItems)
+            .filter { memory in
+                memory.memoryKey.hasPrefix("local_ai.\(domain).")
+                    || memory.memoryKey.hasPrefix("\(domain).")
+            }
+        var facts: [[String: Any]] = []
+        for memory in selected {
+            guard let content = try? Self.object(from: memory.contentJSON),
+                  let summary = (content["value"] as? String ?? content["content"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !summary.isEmpty,
+                  summary.count <= 240,
+                  memory.memoryType.count <= 32 else { continue }
+            facts.append([
+                "key": memory.memoryKey,
+                "type": memory.memoryType,
+                "confidence": memory.confidence,
+                "value": summary,
+                "entity_type": content["entity_type"] ?? NSNull(),
+                "entity_value": content["entity_value"] ?? NSNull()
+            ])
+            if facts.count >= maximumItems { break }
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["facts": facts], options: [.sortedKeys])
+        guard let result = String(data: data, encoding: .utf8) else { throw LocalDataError.invalidRecord }
+        return result
+    }
+
+    func recentCompanionLines(
+        profileID: UUID,
+        domainKey: String,
+        limit: Int = 5,
+        now: Date = Date()
+    ) throws -> [String] {
+        let boundedLimit = max(0, min(limit, 5))
+        guard boundedLimit > 0,
+              let start = Calendar(identifier: .gregorian).date(byAdding: .day, value: -30, to: now) else {
+            return []
+        }
+        let facts = try LocalFactReader(database: database).range(
+            profileID: profileID,
+            from: NativeLocalDate.dateKey(start),
+            to: NativeLocalDate.dateKey(now)
+        ).facts
+        return facts
+            .filter { $0.domainKey == domainKey }
+            .sorted { $0.createdAt > $1.createdAt }
+            .compactMap { fact in
+                guard let line = fact.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !line.isEmpty else { return nil }
+                return String(line.prefix(80))
+            }
+            .prefix(boundedLimit)
+            .map { $0 }
+    }
+
     static func validate(_ draft: LocalCompanionMemoryDraft) throws {
         let key = draft.memoryKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let type = draft.memoryType.trimmingCharacters(in: .whitespacesAndNewlines)

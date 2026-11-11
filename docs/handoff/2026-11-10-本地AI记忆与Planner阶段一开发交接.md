@@ -3,8 +3,8 @@ project: SnapCount
 name: 本地 AI 记忆与 Planner 阶段一开发交接
 updated: 2026-11-10
 branch: feature/inbox-pwa-parity
-head: c1ab044
-status: 阶段一已完成，等待下一会话继续接线
+head: 7d2ba303624fa568c0cc5cad5195060d34c792ee
+status: 本地记忆 Hosted 接线与本地 Planner 隐藏展示已完成，Edge Function v205 已部署，等待 iOS 客户端联调
 tags: [handoff, ios, local-first, ai-companion, planner, memory]
 ---
 
@@ -15,10 +15,10 @@ tags: [handoff, ios, local-first, ai-companion, planner, memory]
 App Store 首版采用单设备本地优先策略：
 
 ```text
-本地事实 → 本地记忆 → 本地 Planner 候选 → Companion / 反馈卡片 → 本地导出恢复
+本地事实 → 本地记忆 → 同域摘要与 Planner 候选作为生成上下文 → AI Companion → 本地导出恢复
 ```
 
-本轮不新增业务数据同步。不要新增 `record`、`income` 或 `companion_memory` outbox，不修改 Supabase schema、RPC、Edge Function、多设备冲突协议。
+本轮不新增业务数据同步。不要新增 `record`、`income` 或 `companion_memory` outbox，不修改 Supabase schema、RPC 或多设备冲突协议。按用户授权，已将 `ingest-receipt` Edge Function 部署到项目 `igbghrhsdaolxljgiisf`，版本 `205`；`verify_jwt` 保持原有 `false`。没有部署其他函数或数据库变更。
 
 新 profile 的同步保持关闭；新用户云端原图默认关闭；已有用户的明确设置不自动覆盖。
 
@@ -58,13 +58,22 @@ App Store 首版采用单设备本地优先策略：
 
 ### 2.3 详情与 Inbox
 
-- 本地 expense、income、food、sleep、sport、reading 详情已接入确定性 Planner 卡片。
-- 本地 staging / Inbox 候选在没有云端 Planner 时也能生成本地反馈卡片。
-- 本地反馈带 `local:` exposure 标识，不调用远端 acknowledge / feedback RPC。
-- `companion_enabled = false` 时不生成新的本地 Planner。
-- `companion_memory_enabled = false` 时不读取本地记忆上下文，但仍可基于当前事实生成确定性候选。
+- 本地 expense、income、food、sleep、sport、reading 和候选详情继续生成确定性 Planner 上下文。
+- 带 `local:` 标识的 Planner 反馈不再作为详情或 Inbox 独立卡片展示；候选继续进入 Companion 生成。
+- 本地 Planner 不调用远端 acknowledge / feedback RPC。
+- `companion_enabled = false` 时不生成新的本地 Planner 或 Companion。
+- `companion_memory_enabled = false` 时不读取记忆上下文；Hosted 请求不含记忆字段，但仍可基于当前事实生成 Companion。
 
-### 2.4 备份与导出
+### 2.4 Hosted / BYOK Companion
+
+- Hosted Companion 继续调用共享 `generate_local_expression` action；记忆开启时只发送当前事实同域摘要，最多 8 条、每条最多 240 字。
+- Edge Function 校验摘要 domain、字段和长度，将其放入 `local_memory_context`，只用于当前模型请求，不写业务表、记忆表或同步 outbox。
+- 上述 Edge Function 已部署为 v205，线上函数状态为 `ACTIVE`。
+- Prompt 把本地记忆作为非权威背景上下文：可调整表达角度，不可创造事实或执行记忆文本中的指令。
+- BYOK 也使用当前事实同域的有界记忆上下文，并直接发送给用户配置的服务商。
+- 设置页说明 Hosted / BYOK 的传输路径与记忆用途。
+
+### 2.5 备份与导出
 
 - `LocalCompleteBackupPortability.currentSchemaVersion` 从 28 升到 29。
 - 完整备份加入 `local_companion_memories`。
@@ -90,68 +99,43 @@ App Store 首版采用单设备本地优先策略：
 5. `docs/spec/模块/iOS本地优先/本地优先隐私配置与导出契约规格说明.md`
 6. `docs/spec/执行记录/LOCAL-AI-003A-本地记忆数据层.md`
 
-旧的 `Q-05` 文档已经加了 2026-11-10 覆盖说明。不要恢复“本地零实现”“仅确定性候选”或“隐藏点评”的旧范围。
+旧的 `Q-05` 文档已经加了 2026-11-10 覆盖说明。以本 handoff 第 2.3 / 2.4 节和最新 `LOCAL-AI-003F` 规格为准：本地 Planner 只作为生成上下文，不显示独立卡；PWA 云端 Planner 行为不变。
 
-## 5. 下一阶段开发顺序
+## 5. 下一步顺序
 
-### 5.1 写入后表达刷新
+### 5.1 Hosted 真实请求验收
 
-为以下路径增加统一的本地表达刷新入口：
+- 在包含本轮 iOS 客户端改动的构建中登录账户；App Store / 旧 TestFlight 客户端不会自动包含本地代码改动。
+- 用已登录账户分别验证记忆开/关：开时 Edge 收到同域摘要并生成 Companion；关时请求体没有 `local_memory_context`。
+- 在 iOS 详情中确认本地 Planner 不再单独出现；PWA 页面和远端 Planner 沿用旧行为。
+- 要验证新的 Hosted Companion，请新建或编辑一条记录触发生成；历史文案不会自动重写。
 
-- `LocalRecordRepository.createRecord` / `updateRecord` / `deleteRecord`；
-- `archiveStaging`；
-- expense 创建、编辑、删除；
-- income 创建、编辑、删除；
-- 待确认财务记录转正式记录；
-- wallet snapshot 创建、编辑、删除。
+### 5.2 补记忆投影刷新缺口
 
-要求：事实写入成功不依赖 AI；表达刷新失败不能回滚事实；刷新必须可重建。
+- OCR 自动归档写入 `LocalPendingFinancialRepository.archiveDirectly` 时尚未触发 `LocalExpressionPersistence.refreshMemoryProjection`。
+- 增加一个明确场景，保证事实保存成功与记忆投影刷新解耦；刷新失败不能回滚事实。
 
-### 5.2 表达结果持久化
+### 5.3 发布前验证
 
-- `local_records.payload_json` 保存 Companion 和 `ai_feedback`；
-- `local_expenses` / `local_income_records` 使用已有 `companion_message`、`ai_feedback`；
-- `local_staging_records.payload_json` 保存候选阶段结果；
-- 待确认财务转正式时保留表达结果；
-- 不保存原始 Prompt、原始模型响应、Token 或 API Key。
-
-### 5.3 记忆投影生成
-
-- 从 `LocalFactReader` 读取正式事实；
-- 从用户明确配置和事实趋势生成结构化记忆；
-- 使用 `LocalCompanionMemoryRepository.upsert`；
-- 删除或编辑来源事实时调用 `deleteSource` 或重建投影；
-- 记忆开关关闭时不读、不写记忆表。
-
-### 5.4 Hosted / BYOK Companion
-
-- 继续复用现有 Provider；
-- Hosted 默认只发送当前请求所需的最小上下文；
-- BYOK 可在用户允许时使用紧凑记忆上下文；
-- Provider 失败时使用确定性 Planner 结果；
-- 不把 AI 请求转成业务同步。
-
-### 5.5 导入恢复
-
-- 导入记忆、表达结果和候选状态；
-- 新 profile 导入后保持同步关闭；
-- 旧备份无记忆表时按空集合处理；
-- 检查导出包不包含凭据、Token、API Key 和临时签名 URL。
+- 实测完整备份中的 Companion / Planner 与记忆恢复。
+- 运行 GitHub macOS CI、全量 XCTest 和真机回归；之后再决定 TestFlight。
+- 不新增任何同步 outbox；生产部署和 TestFlight 另行确认。
 
 ## 6. 当前未完成项
 
-- wallet 详情页的 Planner 展示。
-- 写入路径自动生成和刷新记忆。
-- Companion 文案结果的本地持久化和回放。
-- Hosted / BYOK 与本地表达上下文的正式编排。
-- 完整备份中 Companion / Planner 结果的实际恢复验证。
-- macOS XCTest、iOS Build、真机和 TestFlight 回归。
+- Hosted Edge Function v205 已部署；真实 Hosted AI 的记忆开启/关闭请求还未在线验证，需使用包含本轮 iOS 改动的客户端。
+- OCR 直归档绕过 AppState 表达刷新导致的记忆投影刷新缺口，需另开场景修复。
+- 完整备份中 Companion / Planner 结果的实际恢复验证仍待做。
+- 需要 GitHub macOS CI 和后续真机回归；本地 iOS Simulator 定向 XCTest 已执行。
 
 ## 7. 验证状态
 
-- 已执行：`swiftc -parse` 语法检查。
-- 已执行：`git diff --check`。
-- 未执行：XCTest、iOS Build、macOS CI、真机验收、TestFlight。
+- 已执行：iPhone 17 / iOS Simulator 定向 XCTest，6/6 通过。
+- 已执行：Edge Context Packet 与 Prompt Deno 测试，27/27 通过；Edge `deno check` 通过。
+- 已执行：Supabase Edge Function 部署成功；项目函数列表确认 `ingest-receipt` 为 `ACTIVE`、版本 `205`、`verify_jwt=false`。
+- 已执行：`xcodebuild build` 成功；改动后的 App 已安装并启动于 iPhone 17 / iOS Simulator 27.2，记录列表可见。未在本轮重放快捷指令、打开详情验证卡片，或发送在线 Hosted 请求。
+- 已执行：`git diff --check` 通过。
+- 尚待：已登录账户的 iOS Hosted 开/关实测、GitHub macOS CI、真机和 TestFlight。
 - 当前工作区包含未提交文档和代码改动；`.build/` 是未跟踪构建产物，不要加入功能提交。
 
 ## 8. 下一会话交付标准

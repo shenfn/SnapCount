@@ -4,6 +4,80 @@ import XCTest
 @testable import SnapCount
 
 final class LocalBYOKProviderTests: XCTestCase {
+    func testLOCALAI003FHostedCompanionSendsCompactMemoryWhenProvided() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BYOKURLProtocolStub.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        BYOKURLProtocolStub.configure(
+            statusCode: 200,
+            responseData: Data(#"{"ok":true,"data":{"companion_message":"这笔也稳稳记下了。"}}"#.utf8)
+        )
+        let memory = #"{"facts":[{"key":"local_ai.expense.merchant_repeat","type":"merchant_pattern","confidence":0.9,"value":"近30天在「便利店」有重复消费记录。","entity_type":"merchant","entity_value":"便利店"}]}"#
+        let fact = LocalExpressionFact(
+            id: "fact-local-ai-003f", domainKey: "expense", title: "便利店", summary: "日常用品",
+            recordDate: "2026-11-10", recordTime: nil, amount: 12.8, category: "日用"
+        )
+        let context = LocalExpressionContext(
+            currentFact: fact, recentFacts: [], memoryContextJSON: memory,
+            plannerCandidates: LocalPlannerCandidateEngine.candidates(for: fact, memoryContextJSON: memory),
+            providerMode: .hosted
+        )
+        let provider = HostedAICompanionProvider(
+            accessToken: "test-access-token",
+            service: SnapCountUploadService(
+                session: session,
+                functionsURL: "https://example.test/functions/v1",
+                anonKey: "test-publishable-key"
+            )
+        )
+
+        _ = try await provider.compose(context: context)
+
+        let body = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let memoryObject = try XCTUnwrap(object["local_memory_context"] as? [String: Any])
+        let facts = try XCTUnwrap(memoryObject["facts"] as? [[String: Any]])
+        XCTAssertEqual(facts.first?["key"] as? String, "local_ai.expense.merchant_repeat")
+        let candidate = try XCTUnwrap(object["planner_candidate"] as? [String: Any])
+        XCTAssertEqual(candidate["dimension"] as? String, "memory_context")
+    }
+
+    func testLOCALAI003FHostedCompanionOmitsMemoryWhenDisabled() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BYOKURLProtocolStub.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        BYOKURLProtocolStub.configure(
+            statusCode: 200,
+            responseData: Data(#"{"ok":true,"data":{"companion_message":"这笔也稳稳记下了。"}}"#.utf8)
+        )
+        let fact = LocalExpressionFact(
+            id: "fact-local-ai-003f-off", domainKey: "expense", title: "便利店", summary: "日常用品",
+            recordDate: "2026-11-10", recordTime: nil, amount: 12.8, category: "日用"
+        )
+        let context = LocalExpressionContext(
+            currentFact: fact, recentFacts: [], memoryContextJSON: nil,
+            plannerCandidates: LocalPlannerCandidateEngine.candidates(for: fact), providerMode: .hosted
+        )
+        let provider = HostedAICompanionProvider(
+            accessToken: "test-access-token",
+            service: SnapCountUploadService(
+                session: session,
+                functionsURL: "https://example.test/functions/v1",
+                anonKey: "test-publishable-key"
+            )
+        )
+
+        _ = try await provider.compose(context: context)
+
+        let body = try XCTUnwrap(BYOKURLProtocolStub.capturedBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertNil(object["local_memory_context"])
+        let candidate = try XCTUnwrap(object["planner_candidate"] as? [String: Any])
+        XCTAssertEqual(candidate["dimension"] as? String, "current_fact")
+    }
+
     func testLF02902BYOKUsesFixedSupplierAndRoutesImageWithSyntheticKey() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [BYOKURLProtocolStub.self]
@@ -40,37 +114,28 @@ final class LocalBYOKProviderTests: XCTestCase {
         XCTAssertFalse(request.url!.absoluteString.contains("supabase"))
     }
 
-    func testLF02902BYOKRunsSecondTextCallAndKeepsGeneratedVoice() async throws {
+    func testLF02902BYOKKeepsRecognitionFactsWithoutGeneratedVoice() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [BYOKURLProtocolStub.self]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
         let recognition = #"{"schema_version":"local-recognition-candidate-v1","operation":"recognize_only","candidate":{"domain_key":"expense","title":"便利店","summary":"支出8元","payload":{"amount":8,"merchant_name":"便利店","category":"food","platform":"支付宝","payment_method":"余额宝"},"confidence":0.92,"record_date":"2026-10-25","evidence_fields":["amount","merchant_name"],"missing_fields":[]}}"#
-        let voice = #"{"companion_message":"夜里的这点补给，先安稳收下。","ai_feedback":{"badge":"轻补给","icon":"💸","band":"neutral","emotion_line":"这笔小支出落在了今晚的节奏里。","utility_line":"先记住它，之后看一周频率。","detail_reason":"金额与商家已从图片中确认。","confidence":0.86}}"#
         func response(_ content: String) -> Data {
             let object: [String: Any] = [
                 "choices": [["message": ["content": content]]]
             ]
             return try! JSONSerialization.data(withJSONObject: object)
         }
-        BYOKURLProtocolStub.configureSequence([
-            (200, response(recognition)),
-            (200, response(voice))
-        ])
+        BYOKURLProtocolStub.configure(statusCode: 200, responseData: response(recognition))
         let provider = QwenBYOKImageRecognitionProvider(apiKey: "sk-test-voice", session: session)
 
         let candidate = try await provider.recognize(LocalImageRecognitionRequest(
             imageData: try syntheticJPEG(), captureKind: "photo_library", filename: "receipt.jpg", uploadToken: nil
         ))
 
-        XCTAssertEqual(BYOKURLProtocolStub.capturedBodies.count, 2)
-        XCTAssertEqual(candidate.companionMessage, "夜里的这点补给，先安稳收下。")
-        XCTAssertEqual(candidate.aiFeedback?["source"]?.stringValue, "hybrid")
-        let secondBody = try XCTUnwrap(BYOKURLProtocolStub.capturedBodies.last)
-        let secondObject = try XCTUnwrap(JSONSerialization.jsonObject(with: secondBody) as? [String: Any])
-        let messages = try XCTUnwrap(secondObject["messages"] as? [[String: Any]])
-        XCTAssertTrue((messages.first?["content"] as? String)?.contains("事实 JSON") == true)
-        XCTAssertFalse(String(decoding: secondBody, as: UTF8.self).contains("data:image/jpeg;base64"))
+        XCTAssertEqual(BYOKURLProtocolStub.capturedBodies.count, 1)
+        XCTAssertNil(candidate.companionMessage)
+        XCTAssertNil(candidate.aiFeedback)
     }
 
     func testLF03004KeychainStoresAndDeletesBYOKCredential() throws {

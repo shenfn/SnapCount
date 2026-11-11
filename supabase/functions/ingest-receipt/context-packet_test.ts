@@ -134,6 +134,40 @@ Deno.test("context packet contains selected candidates and bounded semantic cont
   assert(packet.selected_candidates[0].source === "domain_profile_signal", "candidate source must be explicit");
 });
 
+Deno.test("LOCAL-AI-003F context packet keeps only bounded same-domain local memory", () => {
+  const packet = buildContextPacket({
+    domainKey: "expense",
+    recordFacts: { record_type: "expense", merchant_name: "示例便利店", amount: 12.8 },
+    signals: [],
+    localMemoryContext: {
+      facts: [
+        {
+          key: "local_ai.expense.recent_30d",
+          type: "derived_trend",
+          confidence: 0.9,
+          value: "近30天有12条消费记录，合计¥288.00。",
+        },
+        {
+          key: "local_ai.food.recent_30d",
+          type: "derived_trend",
+          confidence: 0.9,
+          value: "近30天有8条饮食记录。",
+        },
+        {
+          key: "local_ai.expense.unbounded",
+          type: "derived_trend",
+          confidence: 0.9,
+          value: "x".repeat(500),
+        },
+      ],
+    },
+  });
+
+  assert(packet.local_memory_context.length === 1, "only one valid expense memory should be included");
+  assert(packet.local_memory_context[0].summary.includes("12条消费记录"), "same-domain summary should be retained");
+  assert(packet.local_memory_context[0].summary.length <= 240, "local memory summary must be bounded");
+});
+
 Deno.test("context packet preserves Planner provenance and numeric roles", () => {
   const packet = buildContextPacket({
     domainKey: "expense",

@@ -10,7 +10,7 @@ struct NativeUserSettings: Equatable {
     var qwenPhotoThinking = false
     var aiInsightProvider = "auto"
     var companionEnabled = true
-    var companionMemoryEnabled = true
+    var companionMemoryEnabled = false
     var companionPersona = "observer"
     var companionMemoryStrength = "balanced"
     var companionExpressionStyle = "plain"

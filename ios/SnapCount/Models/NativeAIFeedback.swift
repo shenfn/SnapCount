@@ -103,6 +103,12 @@ struct NativeAIFeedback: Equatable {
         source == "expression_planner" && exposureEventId == nil
     }
 
+    var isLocalPlannerFeedback: Bool {
+        source == "expression_planner"
+            && (exposureEventId?.lowercased().hasPrefix("local:") == true
+                || candidateId?.lowercased().hasPrefix("local-planner-") == true)
+    }
+
     var isAcknowledgedPlannerFeedback: Bool {
         source == "expression_planner" && exposureEventId != nil
     }
@@ -186,12 +192,11 @@ enum NativeRecordExpressionFeedbackPolicy {
         companionMessage: String? = nil
     ) -> NativeAIFeedback? {
         guard let plannerPreview else { return existingVoice }
-        if plannerPreview.source == "expression_planner",
-           plannerPreview.presentationTarget == "feedback_card" {
-            // PWA gives a valid Planner delivery ownership of the feedback
-            // surface. The legacy Voice feedback remains available only as
-            // supporting content for an existing companion message.
-            return plannerPreview
+        if plannerPreview.isLocalPlannerFeedback {
+            // Local Planner candidates stay internal context for Companion.
+            // The record detail shows the generated Companion, not a second
+            // standalone card that repeats the same local analysis.
+            return existingVoice
         }
         return feedbackToDisplay(
             existing: existingVoice,
@@ -208,11 +213,6 @@ enum NativeRecordExpressionFeedbackPolicy {
         voiceFeedback: NativeAIFeedback?,
         plannerFeedback: NativeAIFeedback?
     ) -> [NativeAIFeedback] {
-        if let plannerFeedback,
-           plannerFeedback.source == "expression_planner",
-           plannerFeedback.presentationTarget == "feedback_card" {
-            return [plannerFeedback]
-        }
         var cards: [NativeAIFeedback] = []
         if let voiceFeedback = feedbackToRender(
             companionMessage: companionMessage,
@@ -225,11 +225,15 @@ enum NativeRecordExpressionFeedbackPolicy {
         guard let plannerFeedback else { return cards }
         if plannerFeedback.source == "expression_planner",
            plannerFeedback.presentationTarget == "feedback_card" {
+            if plannerFeedback.isLocalPlannerFeedback { return cards }
             let alreadyRendered = cards.contains {
                 $0.visibleContentIdentity == plannerFeedback.visibleContentIdentity
                     || $0.hasSameDeliveryIdentity(as: plannerFeedback)
             }
             if !alreadyRendered { cards.append(plannerFeedback) }
+            // The candidate has already served its purpose in local
+            // composition when it came from this device. Remote Planner
+            // feedback keeps its existing presentation behavior.
             return cards
         }
 
@@ -270,6 +274,7 @@ enum NativeRecordExpressionFeedbackPolicy {
         companionMessage: String? = nil
     ) -> NativeAIFeedback? {
         guard let preview else { return existing }
+        if preview.isLocalPlannerFeedback { return existing }
         if existing?.isAcknowledgedPlannerFeedback == true {
             return existing
         }
@@ -304,6 +309,7 @@ enum NativeRecordExpressionFeedbackPolicy {
         companionFeedback: NativeAIFeedback? = nil
     ) -> NativeAIFeedback? {
         guard let feedback else { return nil }
+        if feedback.isLocalPlannerFeedback { return nil }
         if feedback.hasExplicitPresentationTarget {
             return feedback.presentationTarget == "feedback_card" ? feedback : nil
         }
@@ -332,6 +338,7 @@ enum NativeRecordExpressionFeedbackPolicy {
         feedback: NativeAIFeedback?
     ) -> NativeAIFeedback? {
         guard let feedback else { return nil }
+        if feedback.isLocalPlannerFeedback { return nil }
         if feedback.source == "expression_planner" {
             return feedback.matchesVisibleCompanionMessage(companionMessage) ? feedback : nil
         }
@@ -346,6 +353,7 @@ enum NativeRecordExpressionFeedbackPolicy {
         feedback: NativeAIFeedback?
     ) -> NativeAIFeedback? {
         guard let feedback,
+              !feedback.isLocalPlannerFeedback,
               companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
             return nil
         }

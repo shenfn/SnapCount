@@ -1426,11 +1426,53 @@ final class AppState: ObservableObject {
             duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository(),
             expressionPersistence: localExpressionPersistence
         )
-        return try await recognition.ingest(
+        let outcome = try await recognition.ingest(
             imageData: data,
             captureKind: captureKind,
             filename: filename,
             uploadToken: recognitionUploadToken
+        )
+        return await composeLocalImageCompanion(outcome, using: recognition, mode: requestedMode)
+    }
+
+    private func composeLocalImageCompanion(
+        _ outcome: LocalImageIntakeOutcome,
+        using recognition: LocalImageRecognitionUseCase,
+        mode: LocalVisionMode
+    ) async -> LocalImageIntakeOutcome {
+        let isArchived: Bool
+        switch outcome.result {
+        case .archived(_), .financialArchived(_): isArchived = true
+        case .staged(_), .financialPending(_): isArchived = false
+        }
+        guard userSettings.companionEnabled, localVisionModeStore.mode == mode, isArchived else { return outcome }
+        let provider: LocalCompanionProvider
+        let providerMode: LocalExpressionProviderMode
+        switch mode {
+        case .hosted:
+            guard let session = try? await validSession() else { return outcome }
+            provider = HostedAICompanionProvider(accessToken: session.accessToken)
+            providerMode = .hosted
+        case .byok:
+            guard let apiKey = try? keychain.string(for: KeychainKeys.byokQwenAPIKey),
+                  !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return outcome }
+            provider = QwenBYOKCompanionProvider(apiKey: apiKey)
+            providerMode = .byok
+        case .disabled:
+            return outcome
+        }
+        guard let composed = await recognition.composeCompanion(
+            for: outcome.result,
+            provider: provider,
+            settings: userSettings,
+            providerMode: providerMode
+        ) else { return outcome }
+        let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return LocalImageIntakeOutcome(
+            result: outcome.result,
+            imageHash: outcome.imageHash,
+            notificationText: message?.isEmpty == false ? message : outcome.notificationText,
+            feedback: composed.aiFeedback.flatMap { NativeAIFeedback(payload: $0) } ?? outcome.feedback
         )
     }
 
@@ -1643,7 +1685,8 @@ final class AppState: ObservableObject {
                 duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository(),
                 expressionPersistence: localExpressionPersistence
             )
-            _ = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
+            let outcome = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
+            _ = await composeLocalImageCompanion(outcome, using: recognition, mode: requestedMode)
             await refreshFailedLocalImageIntakes()
             await refreshLocalRecognitionProjection()
             return true
@@ -4498,7 +4541,10 @@ final class AppState: ObservableObject {
               let profile = try? await localExpenseUseCase?.prepareProfile(),
               generation == userStateGeneration else { return detail }
         let memoryContext = userSettings.companionMemoryEnabled
-            ? try? localCompanionMemoryRepository.compactContextJSON(profileID: profile.id)
+            ? try? localCompanionMemoryRepository.compactContextJSON(
+                profileID: profile.id,
+                domainKey: detail.domainKey ?? detail.kind
+            )
             : nil
         let context = LocalPlannerCandidateEngine.makeContext(
             for: detail,
@@ -4535,11 +4581,7 @@ final class AppState: ObservableObject {
             guard let self,
                   self.userStateGeneration == generation,
                   self.userSettings.companionEnabled,
-                  let memoryRepository = self.localCompanionMemoryRepository,
                   let profile = try? await self.localExpenseUseCase?.prepareProfile() else { return }
-            let memoryContext = self.userSettings.companionMemoryEnabled
-                ? try? memoryRepository.compactContextJSON(profileID: profile.id)
-                : nil
             let mode = self.localVisionModeStore.mode
             let provider: LocalCompanionProvider
             switch mode {
@@ -4553,11 +4595,12 @@ final class AppState: ObservableObject {
             case .disabled:
                 return
             }
-            let context = LocalPlannerCandidateEngine.makeContext(
+            guard let context = self.localExpressionPersistence?.makeCompositionContext(
                 for: detail,
-                memoryContextJSON: memoryContext,
+                profileID: profile.id,
+                settings: self.userSettings,
                 providerMode: mode == .hosted ? .hosted : .byok
-            )
+            ) else { return }
             guard let result = try? await provider.compose(context: context) else { return }
             guard self.userStateGeneration == generation else { return }
             self.localExpressionPersistence?.persist(companion: result, for: detail)
@@ -5415,10 +5458,12 @@ final class AppState: ObservableObject {
                    let expenseID = UUID(uuidString: accepted.recordId),
                    let expense = try await localExpenseUseCase?.expense(id: expenseID) {
                     localExpressionPersistence?.refresh(expense: expense)
+                    scheduleLocalCompanion(for: LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore))
                 } else if accepted.recordType == "income",
                           let incomeID = UUID(uuidString: accepted.recordId),
                           let income = try await localExpenseUseCase?.income(id: incomeID) {
                     localExpressionPersistence?.refresh(income: income)
+                    scheduleLocalCompanion(for: LocalIncomeReadModel.detail(from: income, imageStore: localImageStore))
                 }
                 await loadLocalAccounts()
                 await refreshLocalMonthProjection(monthKey: String(source.transactionDate.prefix(7)))

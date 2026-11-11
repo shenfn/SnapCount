@@ -227,6 +227,49 @@ final class LocalImageRecognitionUseCase {
         return bytes == imageData
     }
 
+    /// Composes only after a fact is formally archived. A pending financial
+    /// item waits until the user confirms it in the app, and provider failures
+    /// never change the already-saved record.
+    func composeCompanion(
+        for outcome: LocalRecordIntakeOutcome,
+        provider: LocalCompanionProvider,
+        settings: NativeUserSettings,
+        providerMode: LocalExpressionProviderMode
+    ) async -> LocalCompanionResult? {
+        guard let expressionPersistence else { return nil }
+        let detail: NativeRecordDetail
+        let profileID: UUID
+        switch outcome {
+        case .archived(let archived):
+            detail = LocalRecordReadModel.detail(from: archived.record, imageStore: imageStore)
+            profileID = archived.profileID
+        case .financialArchived(let id):
+            if let expenseRepository, let expense = try? expenseRepository.expense(id: id) {
+                detail = LocalExpenseReadModel.detail(from: expense, imageStore: imageStore)
+                profileID = expense.profileID
+            } else if let expenseRepository, let income = try? expenseRepository.income(id: id) {
+                detail = LocalIncomeReadModel.detail(from: income, imageStore: imageStore)
+                profileID = income.profileID
+            } else {
+                return nil
+            }
+        case .staged, .financialPending:
+            return nil
+        }
+        guard (detail.companionMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let context = expressionPersistence.makeCompositionContext(
+                for: detail,
+                profileID: profileID,
+                settings: settings,
+                providerMode: providerMode
+              ),
+              let result = try? await provider.compose(context: context) else {
+            return nil
+        }
+        expressionPersistence.persist(companion: result, for: detail)
+        return result
+    }
+
     func ingest(
         imageData: Data,
         captureKind: String,
@@ -550,6 +593,10 @@ final class LocalImageRecognitionUseCase {
                 kind: kind, amountMinor: amount, payload: recognizedPayload, confidence: recognized.confidence)
             if autoArchive {
                 try pendingRepository.archiveDirectly(persistedFinancial)
+                // Direct OCR archive bypasses LocalExpenseUseCase's normal
+                // refresh hook, so refresh the local evidence after the fact
+                // is safely committed. This remains best-effort.
+                expressionPersistence?.refreshMemoryProjection(profileID: profileID)
             } else {
                 try pendingRepository.stage(persistedFinancial)
             }

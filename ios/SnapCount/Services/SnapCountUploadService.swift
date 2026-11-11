@@ -23,9 +23,17 @@ enum SnapCountUploadServiceError: LocalizedError {
 final class SnapCountUploadService {
     private let session: URLSession
     private let decoder = JSONDecoder()
+    private let functionsURLOverride: String?
+    private let anonKeyOverride: String?
 
-    init(session: URLSession = .shared) {
+    init(
+        session: URLSession = .shared,
+        functionsURL: String? = nil,
+        anonKey: String? = nil
+    ) {
         self.session = session
+        self.functionsURLOverride = functionsURL
+        self.anonKeyOverride = anonKey
     }
 
     func uploadShortcutImage(
@@ -135,12 +143,19 @@ final class SnapCountUploadService {
     func generateLocalExpression(
         currentFact: [String: Any],
         plannerCandidate: [String: Any]?,
+        localMemoryContext: [String: Any]?,
+        expressionPreferences: [String: Any],
+        clientLocalTime: String?,
+        weekday: String?,
+        recentCompanionLines: [String],
         accessToken: String
     ) async throws -> Data {
-        guard !AppConfig.supabaseFunctionsURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
+        let functionsURL = functionsURLOverride ?? AppConfig.supabaseFunctionsURL
+        let anonKey = anonKeyOverride ?? AppConfig.supabaseAnonKey
+        guard !functionsURL.isEmpty, !anonKey.isEmpty else {
             throw SnapCountUploadServiceError.missingConfig
         }
-        guard let baseURL = URL(string: AppConfig.supabaseFunctionsURL) else {
+        guard let baseURL = URL(string: functionsURL) else {
             throw SnapCountUploadServiceError.invalidURL
         }
         let endpointPath = baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -150,12 +165,17 @@ final class SnapCountUploadService {
         var body: [String: Any] = [
             "action": "generate_local_expression",
             "current_fact": currentFact,
+            "expression_preferences": expressionPreferences,
+            "recent_companion_lines": Array(recentCompanionLines.prefix(5)),
         ]
         if let plannerCandidate { body["planner_candidate"] = plannerCandidate }
+        if let localMemoryContext { body["local_memory_context"] = localMemoryContext }
+        if let clientLocalTime { body["client_local_time"] = clientLocalTime }
+        if let weekday { body["weekday"] = weekday }
         var request = URLRequest(url: url)
         request.timeoutInterval = 60
         request.httpMethod = "POST"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -202,10 +222,12 @@ final class SnapCountUploadService {
         responseMode: String,
         operation: String? = nil
     ) async throws -> Data {
-        guard !AppConfig.supabaseFunctionsURL.isEmpty, !AppConfig.supabaseAnonKey.isEmpty else {
+        let functionsURL = functionsURLOverride ?? AppConfig.supabaseFunctionsURL
+        let anonKey = anonKeyOverride ?? AppConfig.supabaseAnonKey
+        guard !functionsURL.isEmpty, !anonKey.isEmpty else {
             throw SnapCountUploadServiceError.missingConfig
         }
-        guard let baseURL = URL(string: AppConfig.supabaseFunctionsURL) else {
+        guard let baseURL = URL(string: functionsURL) else {
             throw SnapCountUploadServiceError.invalidURL
         }
 
@@ -241,7 +263,7 @@ final class SnapCountUploadService {
         var request = URLRequest(url: url)
         request.timeoutInterval = 60
         request.httpMethod = "POST"
-        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = multipart.body
 

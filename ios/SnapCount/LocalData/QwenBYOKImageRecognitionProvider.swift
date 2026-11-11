@@ -114,108 +114,10 @@ final class QwenBYOKImageRecognitionProvider: LocalImageRecognitionProvider {
             evidenceFields: candidate.evidenceFields ?? [],
             missingFields: candidate.missingFields ?? [],
             imageHash: candidate.imageHash,
-            companionMessage: candidate.companionMessage ?? payload.string("companion_message"),
-            aiFeedback: candidate.aiFeedback ?? payload.dictionary("ai_feedback")
+            companionMessage: nil,
+            aiFeedback: nil
         )
-        return await addingVoiceFeedback(to: recognized)
-    }
-
-    private func addingVoiceFeedback(to candidate: LocalRecognitionCandidate) async -> LocalRecognitionCandidate {
-        guard Self.shouldGenerateVoice(for: candidate),
-              let voice = try? await generateVoiceFeedback(for: candidate) else {
-            return candidate
-        }
-        return LocalRecognitionCandidate(
-            id: candidate.id,
-            domainKey: candidate.domainKey,
-            title: candidate.title,
-            summary: candidate.summary,
-            payload: candidate.payload,
-            confidence: candidate.confidence,
-            recordDate: candidate.recordDate,
-            recordTime: candidate.recordTime,
-            occurredAt: candidate.occurredAt,
-            evidenceFields: candidate.evidenceFields,
-            missingFields: candidate.missingFields,
-            imageHash: candidate.imageHash,
-            companionMessage: voice.companionMessage,
-            aiFeedback: voice.aiFeedback
-        )
-    }
-
-    private static func shouldGenerateVoice(for candidate: LocalRecognitionCandidate) -> Bool {
-        guard candidate.missingFields.isEmpty,
-              let confidence = candidate.confidence else { return false }
-        if ["expense", "income"].contains(candidate.domainKey) {
-            return confidence >= 0.7
-        }
-        return ["food", "sleep", "sport", "reading", "wallet"].contains(candidate.domainKey)
-            && confidence >= 0.75
-    }
-
-    private func generateVoiceFeedback(for candidate: LocalRecognitionCandidate) async throws -> QwenVoiceResult {
-        let facts: [String: Any] = [
-            "domain_key": candidate.domainKey,
-            "title": candidate.title,
-            "summary": candidate.summary,
-            "payload": candidate.payload.mapValues(\.value),
-            "record_date": candidate.recordDate,
-            "record_time": candidate.recordTime ?? NSNull(),
-            "occurred_at": candidate.occurredAt ?? NSNull(),
-            "confidence": candidate.confidence ?? NSNull()
-        ]
-        let factsData = try JSONSerialization.data(withJSONObject: facts, options: [.sortedKeys])
-        let factsText = String(decoding: factsData, as: UTF8.self)
-        let prompt = """
-        你是芥子的陪伴文案生成器。下面是已经由图片识别确认的事实 JSON。
-        只根据这些事实生成自然、具体、克制的中文表达，不要添加 JSON 中没有的金额、时间、商家、频率、历史比较或健康结论。
-        返回一个 JSON 对象，不能返回 Markdown。字段为 companion_message 和 ai_feedback。
-        companion_message 是一句 8 到 30 字的陪伴语；ai_feedback 包含 badge、icon、band、emotion_line、utility_line、detail_reason、confidence。
-        band 只能是 positive、neutral、watch、recover、ritual；emotion_line 不超过 30 字，utility_line 不超过 32 字，detail_reason 不超过 64 字；confidence 为 0 到 1 的数字。
-        不要机械复述“已记录”“已落账”，也不要把建议写成诊断或命令。没有足够依据时，把 utility_line 或 detail_reason 设为 null。
-
-        事实 JSON：
-        \(factsText)
-        """
-        let body: [String: Any] = [
-            "model": Self.model,
-            "stream": false,
-            "response_format": ["type": "json_object"],
-            "temperature": 0.8,
-            "messages": [["role": "user", "content": prompt]]
-        ]
-        let data = try await request(body: body)
-        guard let envelope = try? JSONDecoder().decode(ChatCompletionEnvelope.self, from: data),
-              let content = envelope.choices.first?.message.content,
-              let object = Self.jsonObject(from: content),
-              let companionMessage = Self.clipped(object["companion_message"] as? String, max: 30),
-              let feedbackObject = object["ai_feedback"] as? [String: Any] else {
-            throw QwenBYOKError.invalidResponse
-        }
-        guard let emotion = Self.clipped(feedbackObject["emotion_line"] as? String, max: 30),
-              !emotion.isEmpty else {
-            throw QwenBYOKError.invalidResponse
-        }
-        let confidence = Self.normalizedConfidence(feedbackObject["confidence"]) ?? 0.7
-        guard confidence >= 0.5 else { throw QwenBYOKError.invalidResponse }
-        let band = Self.allowedBands.contains(feedbackObject["band"] as? String ?? "")
-            ? (feedbackObject["band"] as? String ?? "neutral")
-            : "neutral"
-        let feedback: [String: AnyCodable] = [
-            "version": AnyCodable("feedback-v1"),
-            "domain_key": AnyCodable(candidate.domainKey),
-            "badge": AnyCodable(Self.clipped(feedbackObject["badge"] as? String, max: 10) ?? "即时反馈"),
-            "icon": AnyCodable(Self.clipped(feedbackObject["icon"] as? String, max: 4) ?? Self.icon(for: candidate.domainKey)),
-            "band": AnyCodable(band),
-            "tone": AnyCodable("ai_generated"),
-            "emotion_line": AnyCodable(emotion),
-            "utility_line": AnyCodable(Self.clipped(feedbackObject["utility_line"] as? String, max: 32) ?? NSNull()),
-            "detail_reason": AnyCodable(Self.clipped(feedbackObject["detail_reason"] as? String, max: 64) ?? NSNull()),
-            "confidence": AnyCodable(confidence),
-            "internal_score": AnyCodable(Int((confidence * 100).rounded())),
-            "source": AnyCodable("hybrid")
-        ]
-        return QwenVoiceResult(companionMessage: companionMessage, aiFeedback: feedback)
+        return recognized
     }
 
     private func request(body: [String: Any]) async throws -> Data {
@@ -243,47 +145,6 @@ final class QwenBYOKImageRecognitionProvider: LocalImageRecognitionProvider {
         return data
     }
 
-    private static let allowedBands: Set<String> = ["positive", "neutral", "watch", "recover", "ritual"]
-
-    private static func clipped(_ value: String?, max: Int) -> String? {
-        guard let value else { return nil }
-        let normalized = value.replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return nil }
-        return normalized.count <= max ? normalized : String(normalized.prefix(max))
-    }
-
-    private static func normalizedConfidence(_ value: Any?) -> Double? {
-        let number: Double?
-        if let value = value as? Double { number = value }
-        else if let value = value as? NSNumber { number = value.doubleValue }
-        else if let value = value as? String { number = Double(value) }
-        else { number = nil }
-        guard let number, number.isFinite else { return nil }
-        return min(1, max(0, number))
-    }
-
-    private static func jsonObject(from content: String) -> [String: Any]? {
-        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let candidate = trimmed.hasPrefix("```")
-            ? trimmed.split(separator: "\n").dropFirst().dropLast().joined(separator: "\n")
-            : trimmed
-        guard let data = candidate.data(using: .utf8) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    }
-
-    private static func icon(for domainKey: String) -> String {
-        switch domainKey {
-        case "sleep": return "🌙"
-        case "sport": return "🏃"
-        case "food": return "🍱"
-        case "reading": return "📚"
-        case "wallet": return "💳"
-        case "income": return "💰"
-        default: return "💸"
-        }
-    }
-
     private static func isValidJPEG(_ data: Data) -> Bool {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0,
@@ -298,11 +159,6 @@ final class QwenBYOKImageRecognitionProvider: LocalImageRecognitionProvider {
         ]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) != nil
     }
-}
-
-private struct QwenVoiceResult {
-    let companionMessage: String
-    let aiFeedback: [String: AnyCodable]
 }
 
 private struct ChatCompletionEnvelope: Decodable {
@@ -336,8 +192,6 @@ private struct QwenRecognitionEnvelope: Decodable {
         let evidenceFields: [String]?
         let missingFields: [String]?
         let imageHash: String?
-        let companionMessage: String?
-        let aiFeedback: [String: AnyCodable]?
 
         enum CodingKeys: String, CodingKey {
             case id, title, summary, payload, confidence
@@ -348,8 +202,6 @@ private struct QwenRecognitionEnvelope: Decodable {
             case evidenceFields = "evidence_fields"
             case missingFields = "missing_fields"
             case imageHash = "image_hash"
-            case companionMessage = "companion_message"
-            case aiFeedback = "ai_feedback"
         }
     }
 }

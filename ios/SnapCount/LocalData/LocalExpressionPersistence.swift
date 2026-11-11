@@ -38,6 +38,7 @@ final class LocalExpressionPersistence {
     }
 
     func refresh(record: LocalRecord) {
+        refreshMemoryProjection(profileID: record.profileID)
         guard let feedback = plannerFeedback(
             fact: LocalExpressionFact(
                 id: record.id.uuidString,
@@ -69,7 +70,6 @@ final class LocalExpressionPersistence {
                     arguments: [payloadJSON, record.id.uuidString, record.profileID.uuidString]
                 )
             }
-            refreshMemoryProjection(profileID: record.profileID)
         } catch {
             return
         }
@@ -113,6 +113,7 @@ final class LocalExpressionPersistence {
     }
 
     func refresh(expense: LocalExpense) {
+        refreshMemoryProjection(profileID: expense.profileID)
         guard let feedback = plannerFeedback(
             fact: LocalExpressionFact(
                 id: expense.id.uuidString,
@@ -133,10 +134,10 @@ final class LocalExpressionPersistence {
             existingJSON: expense.aiFeedbackJSON,
             feedback: feedback
         )
-        refreshMemoryProjection(profileID: expense.profileID)
     }
 
     func refresh(income: LocalIncome) {
+        refreshMemoryProjection(profileID: income.profileID)
         guard let feedback = plannerFeedback(
             fact: LocalExpressionFact(
                 id: income.id.uuidString,
@@ -157,7 +158,6 @@ final class LocalExpressionPersistence {
             existingJSON: income.aiFeedbackJSON,
             feedback: feedback
         )
-        refreshMemoryProjection(profileID: income.profileID)
     }
 
     func refresh(wallet: LocalWalletSnapshot) {
@@ -291,16 +291,17 @@ final class LocalExpressionPersistence {
 
     func deleteSource(sourceTable: String, sourceID: String, profileID: UUID) {
         let settings = settingsProvider()
-        guard settings.companionEnabled, settings.memoryEnabled else { return }
-        try? memoryRepository.deleteSource(sourceTable: sourceTable, sourceID: sourceID, profileID: profileID)
-        refreshMemoryProjection(profileID: profileID)
+        _ = try? memoryRepository.deleteSource(sourceTable: sourceTable, sourceID: sourceID, profileID: profileID)
+        if settings.memoryEnabled {
+            refreshMemoryProjection(profileID: profileID)
+        }
     }
 
     private func plannerFeedback(fact: LocalExpressionFact, profileID: UUID) -> NativeAIFeedback? {
         let settings = settingsProvider()
         guard settings.companionEnabled else { return nil }
         let memoryContext = settings.memoryEnabled
-            ? try? memoryRepository.compactContextJSON(profileID: profileID)
+            ? try? memoryRepository.compactContextJSON(profileID: profileID, domainKey: fact.domainKey)
             : nil
         return LocalPlannerCandidateEngine.selectedCandidate(
             for: fact,
@@ -330,9 +331,9 @@ final class LocalExpressionPersistence {
         }
     }
 
-    private func refreshMemoryProjection(profileID: UUID) {
+    func refreshMemoryProjection(profileID: UUID) {
         let settings = settingsProvider()
-        guard settings.companionEnabled, settings.memoryEnabled,
+        guard settings.memoryEnabled,
               let factReader,
               let start = Calendar(identifier: .gregorian).date(byAdding: .day, value: -Self.projectionWindowDays, to: Date()) else {
             return
@@ -364,8 +365,46 @@ final class LocalExpressionPersistence {
             return
         }
         for draft in drafts {
-            try? memoryRepository.upsert(draft)
+            _ = try? memoryRepository.upsert(draft)
         }
+    }
+
+    /// Builds the one-record Companion request context. Memory reads and recent
+    /// line reads are kept behind both the persisted consent and the current
+    /// settings snapshot so an off toggle cannot leak context through a caller.
+    func makeCompositionContext(
+        for detail: NativeRecordDetail,
+        profileID: UUID,
+        settings: NativeUserSettings,
+        providerMode: LocalExpressionProviderMode,
+        now: Date = Date()
+    ) -> LocalExpressionContext? {
+        let persistedSettings = settingsProvider()
+        guard settings.companionEnabled, persistedSettings.companionEnabled else { return nil }
+        let memoryEnabled = settings.companionMemoryEnabled && persistedSettings.memoryEnabled
+        var memoryContextJSON: String?
+        var recentLines: [String] = []
+        if memoryEnabled {
+            refreshMemoryProjection(profileID: profileID)
+            memoryContextJSON = try? memoryRepository.compactContextJSON(
+                profileID: profileID,
+                domainKey: detail.domainKey ?? detail.kind
+            )
+            recentLines = (try? memoryRepository.recentCompanionLines(
+                profileID: profileID,
+                domainKey: detail.domainKey ?? detail.kind,
+                limit: 5,
+                now: now
+            )) ?? []
+        }
+        return LocalPlannerCandidateEngine.makeContext(
+            for: detail,
+            memoryContextJSON: memoryContextJSON,
+            providerMode: providerMode,
+            expressionPreferences: LocalCompanionExpressionPreferences(settings: settings),
+            recentCompanionLines: recentLines,
+            now: now
+        )
     }
 
     private static func projectionDrafts(
@@ -376,7 +415,7 @@ final class LocalExpressionPersistence {
     ) -> [LocalCompanionMemoryDraft] {
         let grouped = Dictionary(grouping: facts, by: \.domainKey)
         let domains = ["expense", "income", "food", "sleep", "sport", "reading"]
-        return domains.compactMap { domain in
+        let aggregateDrafts: [LocalCompanionMemoryDraft] = domains.compactMap { domain -> LocalCompanionMemoryDraft? in
             guard let domainFacts = grouped[domain], !domainFacts.isEmpty else { return nil }
             let count = domainFacts.count
             let totalMinor = domain == "expense" || domain == "income"
@@ -410,6 +449,95 @@ final class LocalExpressionPersistence {
                 updatedAt: now
             )
         }
+        let patternDrafts = ["expense", "income"].flatMap { domain in
+            recurringFinancialPatternDrafts(
+                facts: grouped[domain] ?? [],
+                domain: domain,
+                profileID: profileID,
+                sourceID: sourceID,
+                now: now
+            )
+        }
+        return aggregateDrafts + patternDrafts
+    }
+
+    private static func recurringFinancialPatternDrafts(
+        facts: [LocalFact],
+        domain: String,
+        profileID: UUID,
+        sourceID: String,
+        now: Date
+    ) -> [LocalCompanionMemoryDraft] {
+        guard !facts.isEmpty else { return [] }
+        var values: [(type: String, entity: String, count: Int)] = []
+        let entities = [
+            (type: "merchant", values: Dictionary(grouping: facts, by: { canonical($0.title) })),
+            (type: "category", values: Dictionary(grouping: facts, by: { fact in
+                let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+                return canonical(payload.string("category") ?? payload.string("income_category") ?? "")
+            }))
+        ]
+        for entityGroup in entities {
+            for (key, group) in entityGroup.values where !key.isEmpty && group.count >= 2 {
+                guard let display = entityGroup.type == "merchant"
+                    ? group.first?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    : group.first.flatMap({ fact in
+                        let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
+                        return payload.string("category") ?? payload.string("income_category")
+                    }) else { continue }
+                guard display.count >= 2, !isGenericEntity(display, domain: domain) else { continue }
+                values.append((entityGroup.type, display, group.count))
+            }
+        }
+        return values
+            .sorted { left, right in
+                left.count == right.count
+                    ? (left.type, canonical(left.entity)) < (right.type, canonical(right.entity))
+                    : left.count > right.count
+            }
+            .prefix(4)
+            .compactMap { item in
+                let normalizedEntity = canonical(item.entity)
+                let digest = LocalImageStore.sha256(Data(normalizedEntity.utf8)).prefix(16)
+                let confidence = min(0.95, 0.65 + Double(max(0, item.count - 1)) * 0.08)
+                let display = String(item.entity.prefix(40))
+                let summary = item.type == "merchant"
+                    ? "近30天在「\(display)」有重复\(domain == "income" ? "收入" : "消费")记录。"
+                    : "近30天「\(display)」类别多次出现在\(domain == "income" ? "收入" : "消费")记录中。"
+                let content: [String: Any] = [
+                    "value": summary,
+                    "entity_type": item.type,
+                    "entity_value": display,
+                    "sample_count": item.count,
+                    "window_days": projectionWindowDays
+                ]
+                guard let data = try? JSONSerialization.data(withJSONObject: content, options: [.sortedKeys]),
+                      let contentJSON = String(data: data, encoding: .utf8) else { return nil }
+                return LocalCompanionMemoryDraft(
+                    id: UUID(),
+                    profileID: profileID,
+                    memoryKey: "local_ai.\(domain).\(item.type)_repeat.\(digest)",
+                    memoryType: item.type == "merchant" ? "merchant_pattern" : "category_pattern",
+                    contentJSON: contentJSON,
+                    sourceTable: projectionSourceTable,
+                    sourceID: sourceID,
+                    confidence: confidence,
+                    createdAt: now,
+                    updatedAt: now
+                )
+            }
+    }
+
+    private static func canonical(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .filter { !$0.isWhitespace && !$0.isPunctuation }
+    }
+
+    private static func isGenericEntity(_ value: String, domain: String) -> Bool {
+        let normalized = canonical(value)
+        let generic = ["expense", "income", "支出", "收入", "其他", "无分类", "未分类", "unknown"]
+        return generic.contains(normalized) || normalized == canonical(domainLabel(domain))
     }
 
     private static func amountMinor(from fact: LocalFact) -> Int64 {

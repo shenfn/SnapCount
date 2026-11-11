@@ -566,6 +566,9 @@ struct CompanionSettingsView: View {
             Section {
                 Toggle("陪伴文案", isOn: asyncToggle(appState.userSettings.companionEnabled, appState.setCompanionEnabled))
                 Toggle("长期记忆", isOn: asyncToggle(appState.userSettings.companionMemoryEnabled, appState.setCompanionMemoryEnabled))
+                Text("开启长期记忆后，精简的同类记录摘要会随当前记录发送给所选 AI 陪伴服务，用来生成更贴合的陪伴文案。Hosted 模式经芥子服务端转发给模型服务商；BYOK 模式直接发送给你配置的服务商。关闭后不读取、不发送本地记忆；已有摘要仍留在本机，重新开启时会按当前正式记录整理。摘要不进入云同步，也不单独展示为反馈。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             optionSection("语气", options: NativeSettingsOptions.personas, selected: appState.userSettings.companionPersona, action: appState.setCompanionPersona)
             optionSection("记忆强度", options: NativeSettingsOptions.memoryStrengths, selected: appState.userSettings.companionMemoryStrength, action: appState.setCompanionMemoryStrength)

@@ -71,10 +71,23 @@ struct UploadScreenshotIntent: AppIntent {
                             filename: "shortcut-jpeg.jpg",
                             uploadToken: uploadToken
                         )
+                        let localSettings = LocalUserSettingsStore().load()
                         switch outcome.result {
                         case .archived, .financialArchived:
                             trialOutcome = .archived
-                            let text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
+                            var text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
+                            if let companionProvider = await companionProvider(for: mode) {
+                                let providerMode: LocalExpressionProviderMode = mode == .hosted ? .hosted : .byok
+                                if let composed = await recognition.composeCompanion(
+                                    for: outcome.result,
+                                    provider: companionProvider,
+                                    settings: localSettings,
+                                    providerMode: providerMode
+                                ), let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                   !message.isEmpty {
+                                    text = message
+                                }
+                            }
                             result = ShortcutUploadResult(
                                 displayText: text,
                                 notificationText: text,
@@ -117,6 +130,46 @@ struct UploadScreenshotIntent: AppIntent {
         let message = "快捷指令图片上传需要 iOS 18 或更高版本。"
         if let trialID { await ShortcutTrialStore.shared.complete(id: trialID, outcome: .failed) }
         return .result(value: message)
+    }
+
+    private func companionProvider(for mode: LocalVisionMode) async -> LocalCompanionProvider? {
+        guard LocalUserSettingsStore().load().companionEnabled else { return nil }
+        switch mode {
+        case .hosted:
+            guard let accessToken = await currentHostedAccessToken() else { return nil }
+            return HostedAICompanionProvider(accessToken: accessToken)
+        case .byok:
+            guard let apiKey = try? KeychainStore.shared.string(for: KeychainKeys.byokQwenAPIKey),
+                  !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return QwenBYOKCompanionProvider(apiKey: apiKey)
+        case .disabled:
+            return nil
+        }
+    }
+
+    /// The Shortcut upload token is deliberately not accepted here. Hosted
+    /// Companion composition requires the user's short-lived Supabase JWT.
+    private func currentHostedAccessToken() async -> String? {
+        let keychain = KeychainStore.shared
+        guard let json = try? keychain.string(for: KeychainKeys.authSession),
+              let data = json.data(using: .utf8),
+              let storedSession = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) else {
+            return nil
+        }
+        if let expiration = storedSession.expirationEpoch,
+           expiration > Int(Date().timeIntervalSince1970) + 60 {
+            return storedSession.accessToken
+        }
+        guard let refreshToken = storedSession.refreshToken, !refreshToken.isEmpty,
+              let refreshed = try? await SupabaseAuthService().refreshSession(refreshToken: refreshToken),
+              let refreshedJSON = try? JSONEncoder().encode(refreshed),
+              let refreshedText = String(data: refreshedJSON, encoding: .utf8) else {
+            return nil
+        }
+        try? keychain.setString(refreshedText, for: KeychainKeys.authSession)
+        guard let expiration = refreshed.expirationEpoch,
+              expiration > Int(Date().timeIntervalSince1970) else { return nil }
+        return refreshed.accessToken
     }
 }
 
