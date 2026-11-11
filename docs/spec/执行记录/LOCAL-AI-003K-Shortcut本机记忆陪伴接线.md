@@ -1,6 +1,6 @@
 # LOCAL-AI-003K Shortcut 本机记忆陪伴接线
 
-- 状态：代码已接入；Edge v206 与默认值迁移已部署；iOS 编译与 626 条模拟器 XCTest 已通过；尚未真机验收
+- 状态：代码已接入；Edge v206 与默认值迁移已部署；iOS 编译与 626 条模拟器 XCTest 已通过；TestFlight #162 已上传；尚未真机验收
 - 日期：2026-11-11
 - 对应规格：[`本地 AI 陪伴与 Planner 候选域规格说明.md`](../模块/iOS本地优先/本地AI陪伴与Planner候选域规格说明.md) 的 LOCAL-AI-003K
 - 目标：让快捷指令识别后正式保存在本机的记录，使用本机同域记忆、当前表达偏好和本地时间生成并保存 Hosted/BYOK Companion。
@@ -20,6 +20,7 @@
 
 - 本轮 iOS Debug 编译通过；iPhone 17 / iOS 27.2 Simulator 的 626 条 XCTest 全部通过。Deno CLI 当前不可用，尚未运行 Deno 测试。
 - 尚未在登录真机/当前快捷指令上验证记忆开关、摘要真实内容、Hosted 模型输出、详情页最终持久化、待确认后生成和失败退化。
+- GitHub Actions 工作流 #162 已完成 Release Archive、导出和 TestFlight 上传；App Store Connect 处理结果仍待确认。
 - Supabase `ingest-receipt` 已从 v205 部署到 v206，状态 `ACTIVE`，保留 `verify_jwt=false`；部署后读取远端源码确认包含 `local_memory_context` 与 `recognize_only` 更新。
 - 已应用数据库迁移 `20261111001813_default_companion_memory_opt_in`；数据库列默认值验证为 `false`，31 个既有账户仍为 `true`。
 - 因此代码接线已经完成，但用户要求的“文案能看出本机习惯、自然接近 PWA”仍未验收，不应据此解锁 App Store 发布。
