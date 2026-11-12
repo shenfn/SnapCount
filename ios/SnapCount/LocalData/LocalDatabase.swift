@@ -715,6 +715,23 @@ final class LocalDatabase {
                     ON local_companion_memories(profile_id, source_table, source_id, deleted_at);
                 """)
         }
+        migrator.registerMigration("local-v34-import-metadata") { database in
+            try database.execute(sql: """
+                CREATE TABLE local_import_metadata (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    profile_id TEXT NOT NULL REFERENCES local_profiles(id) ON DELETE CASCADE,
+                    target_kind TEXT NOT NULL CHECK(target_kind IN ('expense', 'income')),
+                    target_id TEXT NOT NULL,
+                    source_record_id TEXT,
+                    source_fingerprint TEXT NOT NULL,
+                    source_payload_json TEXT NOT NULL CHECK(json_valid(source_payload_json)),
+                    imported_at DATETIME NOT NULL,
+                    UNIQUE(profile_id, target_kind, source_record_id),
+                    UNIQUE(profile_id, source_fingerprint)
+                );
+                CREATE INDEX local_import_metadata_target_idx ON local_import_metadata(profile_id, target_kind, target_id);
+                """)
+        }
         return migrator
     }
 }

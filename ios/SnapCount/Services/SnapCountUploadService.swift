@@ -322,10 +322,7 @@ struct ShortcutUploadResult {
             payload: payload
         )
         notificationText = text
-        displayText = ShortcutUploadResult.shortcutDisplayText(
-            notificationText: text,
-            payload: payload
-        )
+        displayText = text
         route = payload.routePath
     }
 
@@ -361,58 +358,38 @@ struct ShortcutUploadResult {
         "已发送到芥子。推荐点击通知回到 App 查看。"
     }
 
-    private static func shortcutDisplayText(notificationText: String, payload: ShortcutUploadPayload) -> String {
-        var lines: [String] = [notificationText]
-
-        if let companion = payload.companionMessage,
-           !companion.isEmpty,
-           !notificationText.contains(companion) {
-            lines.append(companion)
+    private static func notificationText(baseText: String, payload: ShortcutUploadPayload) -> String {
+        let fallbackLines = baseText.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        if let companion = compact(payload.companionMessage, max: 34) {
+            return unique([companion] + fallbackLines).joined(separator: "\n")
         }
-
-        if let utility = payload.aiFeedback?.utilityLine,
-           !utility.isEmpty,
-           !lines.contains(where: { $0.contains(utility) }) {
-            lines.append("观察：\(utility)")
+        guard let feedback = payload.aiFeedback, feedback.confidence == nil || feedback.confidence! >= 0.5 else {
+            return unique(fallbackLines).joined(separator: "\n")
         }
-
-        if let reason = payload.aiFeedback?.detailReason,
-           !reason.isEmpty,
-           !lines.contains(where: { $0.contains(reason) }) {
-            lines.append("依据：\(reason)")
-        }
-
-        switch payload.route {
-        case "inbox":
-            lines.append("状态：需要打开芥子收件箱确认")
-        case "records":
-            lines.append("状态：已归档到芥子记录")
-        default:
-            lines.append("状态：已发送到芥子")
-        }
-
-        lines.append("提示：点通知可回到芥子；这张卡片只负责确认。")
-        return lines.joined(separator: "\n")
+        return unique([
+            "\(feedback.icon ?? "✨") \(feedback.badge ?? "即时反馈")",
+            compact(feedback.emotionLine, max: 34),
+            compact(feedback.utilityLine, max: 34) ?? fallbackLines.first
+        ] + fallbackLines).joined(separator: "\n")
     }
 
-    private static func notificationText(baseText: String, payload: ShortcutUploadPayload) -> String {
-        var lines: [String] = []
-        let companion = payload.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let emotion = payload.aiFeedback?.emotionLine?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let expression = companion.isEmpty ? emotion : companion
-        if !expression.isEmpty, !baseText.contains(expression) {
-            lines.append(expression)
-        }
-        lines.append(contentsOf: baseText.split(whereSeparator: \.isNewline).map(String.init))
+    private static func compact(_ value: String?, max: Int) -> String? {
+        guard let value = value?.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        guard value.count > max else { return value }
+        let head = String(value.prefix(max))
+        let punctuation = ["。", "！", "？", "；", "，", ","]
+        let cut = punctuation.compactMap { head.lastIndex(of: Character($0)) }.map { head.distance(from: head.startIndex, to: $0) }.max() ?? -1
+        return cut >= max / 2 ? String(head.prefix(cut)) + "。" : String(head.prefix(max - 1)) + "…"
+    }
 
+    private static func unique(_ values: [String?]) -> [String] {
         var seen = Set<String>()
-        return lines.compactMap { line -> String? in
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            let key = trimmed.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return values.compactMap { value in
+            guard let line = value?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else { return nil }
+            let key = line.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             guard seen.insert(key).inserted else { return nil }
-            return trimmed
-        }.joined(separator: "\n")
+            return line
+        }
     }
 }
 
@@ -462,13 +439,17 @@ struct ShortcutUploadPayload: Decodable {
 }
 
 struct ShortcutAIFeedback: Decodable {
+    let icon: String?
     let badge: String?
+    let confidence: Double?
     let emotionLine: String?
     let utilityLine: String?
     let detailReason: String?
 
     enum CodingKeys: String, CodingKey {
+        case icon
         case badge
+        case confidence
         case emotionLine = "emotion_line"
         case utilityLine = "utility_line"
         case detailReason = "detail_reason"

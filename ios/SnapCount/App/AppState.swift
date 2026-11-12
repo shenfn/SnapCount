@@ -139,6 +139,7 @@ final class AppState: ObservableObject {
     @Published var isCleaningSourceImages = false
     @Published var isExportingData = false
     @Published var isImportingLocalBackup = false
+    @Published var isImportingGenericData = false
     @Published var isDeletingAccount = false
     @Published var isPreparingHistoryMigration = false
     @Published var canPauseHistoryMigration = false
@@ -187,6 +188,7 @@ final class AppState: ObservableObject {
     private let localRecordPortability: LocalRecordPortability?
     private let localFactPortability: LocalFactPortability?
     private let localCompleteBackupPortability: LocalCompleteBackupPortability?
+    private let genericImportService: GenericImportService?
     private let localPendingFinancialRepository: LocalPendingFinancialRepository?
     private let localFinancialBindingRepository: LocalFinancialBindingRepository?
     private let localHistoryMigrationCache: LocalHistoryMigrationCache?
@@ -267,6 +269,7 @@ final class AppState: ObservableObject {
         localImageIntakeRepository: LocalImageIntakeRepository? = nil,
         localFactPortability: LocalFactPortability? = nil,
         localCompleteBackupPortability: LocalCompleteBackupPortability? = nil,
+        genericImportService: GenericImportService? = nil,
         localPendingFinancialRepository: LocalPendingFinancialRepository? = nil,
         localFinancialBindingRepository: LocalFinancialBindingRepository? = nil,
         inboxRepository: InboxRepositoryProtocol = InboxRepository(),
@@ -355,6 +358,7 @@ final class AppState: ObservableObject {
             ? (localFactPortability ?? Self.defaultLocalFactPortability())
             : localFactPortability
         self.localCompleteBackupPortability = localCompleteBackupPortability ?? Self.defaultLocalCompleteBackupPortability()
+        self.genericImportService = genericImportService ?? Self.defaultGenericImportService()
         self.localPendingFinancialRepository = localPendingFinancialRepository ?? defaultLocalStorage?.pendingFinancialRepository
         self.localFinancialBindingRepository = localFinancialBindingRepository ?? defaultLocalStorage?.financialBindingRepository
         self.localHistoryMigrationCache = defaultLocalStorage?.historyMigrationCache
@@ -5785,6 +5789,27 @@ final class AppState: ObservableObject {
         }.value
     }
 
+    func previewGenericImport(_ data: Data) async throws -> GenericImportPreview {
+        guard let service = genericImportService else { throw LocalDataError.invalidRecord }
+        return try await Task.detached(priority: .userInitiated) { try service.preview(data) }.value
+    }
+
+    func importGenericData(_ data: Data) async -> Bool {
+        guard !isImportingGenericData, let service = genericImportService else { return false }
+        isImportingGenericData = true
+        defer { isImportingGenericData = false }
+        do {
+            let result = try await Task.detached(priority: .userInitiated) { try service.importCSV(data) }.value
+            recordDetailCache.removeAll(); recordMonthDetails.removeAll(); localFactMonths.removeAll()
+            await refreshLocalMonthProjection(monthKey: Self.currentMonthKey)
+            settingsMessage = "导入完成：新增 \(result.inserted) 条，跳过 \(result.skipped) 条，警告 \(result.warnings) 条。"
+            return true
+        } catch {
+            settingsMessage = "导入失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
     /// Explicit settings action: caches source bytes, never writes business facts or enables sync.
     func prepareCloudHistoryMigration() async {
         guard !isPreparingHistoryMigration, !isImportingLocalBackup else { return }
@@ -7228,6 +7253,11 @@ final class AppState: ObservableObject {
         guard let database = try? LocalDatabase(),
               let imageStore = try? LocalImageStore() else { return nil }
         return LocalCompleteBackupPortability(database: database, imageStore: imageStore)
+    }
+
+    private static func defaultGenericImportService() -> GenericImportService? {
+        guard let database = try? LocalDatabase() else { return nil }
+        return GenericImportService(database: database)
     }
 
     private static func defaultLocalBindingRepository() -> LocalBindingRepository? {

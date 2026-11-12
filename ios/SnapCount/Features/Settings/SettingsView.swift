@@ -1016,6 +1016,10 @@ struct DataExportView: View {
     @State private var isShowingBackupImporter = false
     @State private var isShowingBackupConfirmation = false
     @State private var backupImportError: String?
+    @State private var isShowingGenericImporter = false
+    @State private var genericImportData: Data?
+    @State private var genericPreview: GenericImportPreview?
+    @State private var genericImportError: String?
 
     var body: some View {
         Form {
@@ -1064,6 +1068,20 @@ struct DataExportView: View {
                         .foregroundStyle(message.contains("失败") ? JieziTheme.coral : JieziTheme.mint)
                 }
             }
+            Section("通用记账导入") {
+                Text("支持常见平台导出的 CSV。数据只写入本机，不绑定账户、不上传云端。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button { isShowingGenericImporter = true } label: {
+                    if appState.isImportingGenericData { ProgressView() }
+                    else { Label("导入 CSV 记账数据", systemImage: "arrow.down.doc") }
+                }
+                .disabled(appState.isImportingGenericData)
+                if let message = appState.settingsMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(message.contains("失败") ? JieziTheme.coral : JieziTheme.mint)
+                }
+            }
         }
         .navigationTitle("数据导出")
         .scrollContentBackground(.hidden)
@@ -1096,6 +1114,30 @@ struct DataExportView: View {
                 backupImportError = error.localizedDescription
             }
         }
+        .fileImporter(isPresented: $isShowingGenericImporter, allowedContentTypes: [.commaSeparatedText, .plainText]) { result in
+            do {
+                let url = try result.get()
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+                Task {
+                    do {
+                        genericPreview = try await appState.previewGenericImport(data)
+                        genericImportData = data
+                    } catch { genericImportError = error.localizedDescription }
+                }
+            } catch { genericImportError = error.localizedDescription }
+        }
+        .sheet(isPresented: Binding(get: { genericPreview != nil }, set: { if !$0 { genericPreview = nil; genericImportData = nil } })) {
+            if let preview = genericPreview {
+                GenericImportPreviewView(preview: preview, onCancel: {
+                    genericPreview = nil; genericImportData = nil
+                }, onImport: {
+                    guard let data = genericImportData else { return }
+                    Task { _ = await appState.importGenericData(data); genericPreview = nil; genericImportData = nil }
+                })
+            }
+        }
         .confirmationDialog(
             "确认恢复本地备份？",
             isPresented: $isShowingBackupConfirmation,
@@ -1125,6 +1167,9 @@ struct DataExportView: View {
         } message: {
             Text(backupImportError ?? "")
         }
+        .alert("无法读取导入文件", isPresented: Binding(get: { genericImportError != nil }, set: { if !$0 { genericImportError = nil } })) {
+            Button("好", role: .cancel) { genericImportError = nil }
+        } message: { Text(genericImportError ?? "") }
     }
 }
 

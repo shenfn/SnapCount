@@ -20,13 +20,17 @@ enum LocalIntakeNotificationText {
     static func compose(_ input: LocalIntakeNotificationInput) -> String {
         let fallback = fallbackText(input)
         if let companionLine = compactFeedbackText(input.companionMessage, max: 34) {
-            // 已有陪伴文案时，它就是当前表达层；域兜底只在没有任何表达时出现。
-            return companionLine
+            return uniqueNotificationLines([companionLine] + fallbackLines(fallback)).joined(separator: "\n")
         }
         if let feedback = input.feedback,
            input.confidence == nil || input.confidence! >= 0.5 {
-            // 结构化反馈已经拥有 badge、情绪句和建议，不再追加“已归档到…”等兜底行。
-            return feedbackNotification(feedback)
+            let fallbackLines = fallbackLines(fallback)
+            let feedbackLines: [String] = [
+                "\(feedback.icon) \(feedback.badge)",
+                compactFeedbackText(feedback.emotionLine, max: 34),
+                compactFeedbackText(feedback.utilityLine, max: 34) ?? fallbackLines.first
+            ].compactMap { $0 } + fallbackLines
+            return uniqueNotificationLines(feedbackLines).joined(separator: "\n")
         }
         return fallback
     }

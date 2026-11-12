@@ -1607,7 +1607,7 @@ final class SnapCountTests: XCTestCase {
                 "今日已花 ¥117.06（10 笔）"
             ]
         )
-        XCTAssertTrue(result.displayText.contains("观察：标记为首次光顾，方便日后回顾变化。"))
+        XCTAssertEqual(result.displayText, result.notificationText)
     }
 
     func testShortcutNotificationUsesFeedbackEmotionWhenCompanionIsMissing() throws {
@@ -1624,7 +1624,14 @@ final class SnapCountTests: XCTestCase {
         let payload = try JSONDecoder().decode(ShortcutUploadPayload.self, from: Data(json.utf8))
         let result = ShortcutUploadResult(payload: payload)
 
-        XCTAssertTrue(result.notificationText.hasPrefix("睡了5.73小时，比平时短些。下午补个觉吧。\n"))
+        XCTAssertEqual(
+            result.notificationText.split(separator: "\n").map(String.init),
+            [
+                "✨ 即时反馈",
+                "睡了5.73小时，比平时短些。下午补个觉吧。",
+                "🌙 已归档到睡眠记录"
+            ]
+        )
     }
 
     func testEXP012NativeUploadRequestsStructuredResultAndPreservesFoodVoice() async throws {
