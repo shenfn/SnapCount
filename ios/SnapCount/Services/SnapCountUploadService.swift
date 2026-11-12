@@ -322,7 +322,11 @@ struct ShortcutUploadResult {
             payload: payload
         )
         notificationText = text
-        displayText = text
+        displayText = ShortcutUploadResult.expandedDisplayText(
+            baseText: text,
+            companionMessage: payload.companionMessage,
+            feedback: payload.aiFeedback
+        )
         route = payload.routePath
     }
 
@@ -356,6 +360,65 @@ struct ShortcutUploadResult {
 
     var compactDisplayText: String {
         "已发送到芥子。推荐点击通知回到 App 查看。"
+    }
+
+    static func expandedDisplayText(
+        baseText: String,
+        companionMessage: String?,
+        feedback: NativeAIFeedback?
+    ) -> String {
+        expandedDisplayText(
+            baseText: baseText,
+            companionMessage: companionMessage,
+            icon: feedback?.icon,
+            badge: feedback?.badge,
+            emotionLine: feedback?.emotionLine,
+            utilityLine: feedback?.utilityLine
+        )
+    }
+
+    static func expandedDisplayText(
+        baseText: String,
+        companionMessage: String?,
+        feedback: ShortcutAIFeedback?
+    ) -> String {
+        expandedDisplayText(
+            baseText: baseText,
+            companionMessage: companionMessage,
+            icon: feedback?.icon,
+            badge: feedback?.badge,
+            emotionLine: feedback?.emotionLine,
+            utilityLine: feedback?.utilityLine
+        )
+    }
+
+    private static func expandedDisplayText(
+        baseText: String,
+        companionMessage: String?,
+        icon: String?,
+        badge: String?,
+        emotionLine: String?,
+        utilityLine: String?
+    ) -> String {
+        let fallbackLines = baseText
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let expressionLines: [String?]
+        if companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            expressionLines = [
+                compact(companionMessage, max: 34),
+                compact(emotionLine, max: 34),
+                compact(utilityLine, max: 34)
+            ]
+        } else {
+            expressionLines = [
+                "\(icon ?? "✨") \(badge ?? "即时反馈")",
+                compact(emotionLine, max: 34),
+                compact(utilityLine, max: 34)
+            ]
+        }
+        return unique(expressionLines + fallbackLines).joined(separator: "\n")
     }
 
     private static func notificationText(baseText: String, payload: ShortcutUploadPayload) -> String {

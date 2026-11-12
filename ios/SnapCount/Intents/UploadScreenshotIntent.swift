@@ -75,7 +75,8 @@ struct UploadScreenshotIntent: AppIntent {
                         switch outcome.result {
                         case .archived, .financialArchived:
                             trialOutcome = .archived
-                            var text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
+                            let text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
+                            var companionMessage: String?
                             if let companionProvider = await companionProvider(for: mode) {
                                 let providerMode: LocalExpressionProviderMode = mode == .hosted ? .hosted : .byok
                                 if let composed = await recognition.composeCompanion(
@@ -85,11 +86,15 @@ struct UploadScreenshotIntent: AppIntent {
                                     providerMode: providerMode
                                 ), let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
                                    !message.isEmpty {
-                                    text = message
+                                    companionMessage = message
                                 }
                             }
                             result = ShortcutUploadResult(
-                                displayText: text,
+                                displayText: ShortcutUploadResult.expandedDisplayText(
+                                    baseText: text,
+                                    companionMessage: companionMessage,
+                                    feedback: outcome.feedback
+                                ),
                                 notificationText: text,
                                 route: "records"
                             )
@@ -97,7 +102,11 @@ struct UploadScreenshotIntent: AppIntent {
                             trialOutcome = .staged
                             let text = outcome.notificationText ?? "AI 识别结果已保存到本地收件箱，请打开芥子确认。"
                             result = ShortcutUploadResult(
-                                displayText: text,
+                                displayText: ShortcutUploadResult.expandedDisplayText(
+                                    baseText: text,
+                                    companionMessage: nil,
+                                    feedback: outcome.feedback
+                                ),
                                 notificationText: text,
                                 route: "inbox"
                             )
