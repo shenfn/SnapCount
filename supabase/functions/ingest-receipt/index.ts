@@ -5582,7 +5582,7 @@ Deno.serve(async (req) => {
           ? weekdayValue
           : null;
         const recentCompanionLines = Array.isArray(jsonBody?.recent_companion_lines)
-          ? jsonBody.recent_companion_lines
+          ? (jsonBody.recent_companion_lines as unknown[])
             .filter((line): line is string => typeof line === "string")
             .map((line) => line.trim().slice(0, 80))
             .filter((line) => line.length > 0)
