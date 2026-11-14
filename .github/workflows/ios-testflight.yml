@@ -104,6 +104,8 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/SnapCount.xcarchive" \
+            -parallelizeTargets NO \
+            -jobs 1 \
             DEVELOPMENT_TEAM="G6592SL596" \
             PRODUCT_BUNDLE_IDENTIFIER="com.jiezi.app" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
