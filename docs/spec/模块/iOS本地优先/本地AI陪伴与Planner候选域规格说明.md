@@ -2,7 +2,7 @@
 
 > 编号：LOCAL-AI-003
 >
-> 更新：2026-11-11
+> 更新：2026-11-14
 >
 > 状态：已拍板，图片链路已接入，待真机场景验收
 
@@ -72,6 +72,38 @@ LocalRecordReadModel / LocalFactReadModel / Inbox
 - 只输出当前 profile 的有效记忆；
 - 删除或过期的记忆不进入上下文；
 - 不输出原图路径、Prompt、模型原始响应和凭据。
+
+### 3.3 最终请求包合同（LOCAL-AI-003A-K 共用）
+
+本地表达请求只使用一个只读请求包。iOS 在 Hosted 和 BYOK 两条路径都先构造同一组字段，Hosted 通过 `generate_local_expression` 传输，BYOK 将相同字段放入本机 Provider 的 JSON facts。请求包的顶层字段如下：
+
+```json
+{
+  "current_fact": {},
+  "recent_facts": [],
+  "memory_context": {"facts": []},
+  "planner_candidates": [],
+  "provider_mode": "hosted|byok|deterministic",
+  "expression_preferences": {},
+  "client_local_time": "YYYY-MM-DD HH:mm",
+  "client_captured_at": "ISO-8601",
+  "weekday": "周X",
+  "recent_companion_lines": []
+}
+```
+
+`current_fact` 是当前正式事实，`recent_facts` 只来自同 profile、同 domain 的正式事实，最多 12 条。`local_staging_records` 的 `pending_review`、`failed` 或已删除行不会进入这两个字段。事件时间按 `occurred_at`、`order_finished_at`、`record_date + record_time` 的顺序取值。`client_captured_at` 和请求接收时间只表示捕获/请求上下文，不得改写成事件发生时间。
+
+`memory_context` 仅在 `companion_memory_enabled` 开启时读取和发送。它只允许当前 domain 的 key，最多 8 条，每条 `type` 最多 32 字、`summary` 最多 240 字，`confidence` 必须在 0…1。记忆关闭或归一化后为空时省略整个字段。`recent_companion_lines` 同样受记忆开关控制，最多 5 条，用于去重。
+
+`planner_candidates` 的每项必须包含 `candidate_id`、`semantic_key`、`canonical_text`、`claim_fingerprint`、`dimension`、`source=expression_planner`、`evidence`、`numbers`、`count_numbers` 和 `number_facts`。`evidence` 最多 8 项，`numbers`、`count_numbers`、`number_facts` 各最多 8 项；候选文本最多 300 字，标识最多 200 字，证据 field 最多 80 字。证据 kind/source 使用 `current_fact/local_record`、`recent_fact/local_record`、`local_memory/local_memory`，每个 `number_fact` 必须带自己的 evidence。`claim_fingerprint` 是对 `{semantic_key, canonical_text}` 按键排序后使用 UTF-8 FNV-1a 64 的稳定指纹，格式为 `fnv1a64:<16位小写十六进制>`。
+
+Provider 无法使用、候选验证失败或证据/指纹越界时，丢弃整个非法候选，保留 `current_fact` 并使用确定性 fallback。Edge 的 `plannerFallbackReason`/`trace.fallback_reason` 记录 `invalid_planner_candidate`、`candidate_bounds_exceeded`、具体合同校验原因或 `null`。fallback 不撤销事实写入，也不写入业务同步 outbox。
+
+Hosted 和 BYOK 的结果在持久化前归一化为同一 schema。`companion_message` 是最多 30 字的可空主句，`ai_feedback` 为可空对象，字段固定为 `version=feedback-v1`、`domain_key`、`badge`、`icon`、`band`、`tone=ai_generated`、`emotion_line`、`utility_line`、`detail_reason`、`confidence`、`internal_score`、`source=hybrid`。`confidence < 0.5`、缺失 `emotion_line`/`confidence`、畸形类型或与最近表达重复时，`ai_feedback` 归一化为 `null`，不会产生第二套 Provider 合同。
+
+通知和结果页都先保留稳定事实 fallback，再按 `companion_message`、`ai_feedback` 的顺序合并。重复的主句、情绪行、工具行和事实行只保留第一次出现。Shortcut 结果按 `status`/`record_type` 生成 `inbox/<id>` 或 `records/<kind>/<id>` route，点击通知只改变 AppState overlay/path。结果页可以显示 Companion 和反馈，但不显示带 `local:` 标识的独立 Planner 卡。重复重试必须复用稳定记录 ID/指纹，不重复正式记录、通知行或结果卡。
+
 
 ## 4. Companion 规则
 
@@ -183,3 +215,19 @@ LocalRecordReadModel / LocalFactReadModel / Inbox
 | LOCAL-AI-003I | Hosted Companion 与记忆开关 | 开启时请求仅携带同域有界摘要，服务端将其作为背景上下文且不持久化；关闭时请求不含记忆字段 |
 | LOCAL-AI-003J | 本地 Planner 反馈卡 | iOS 详情和收件箱不显示带 `local:` 标识的独立 Planner 反馈卡，生成后的 Companion 仍可使用当前事实、Planner 候选和允许的记忆上下文；PWA 云端流程不变 |
 | LOCAL-AI-003K | Shortcut 正式入账后的本机记忆陪伴 | 识别只返回事实；自动入账后 Hosted 文字请求携带当前事实、同域本机摘要（仅开关开启时）、用户表达偏好和当前本地时间；待确认记录只在确认后生成；记忆关闭时不读/不发本机记忆；生成失败不影响事实保存；PWA 维持原流程 |
+
+### 7.1 Task 6 回归验收矩阵
+
+| 场景 | 回归入口 | 必须观察到的结果 |
+| --- | --- | --- |
+| LOCAL-AI-003A | `LocalExpressionPersistence.makeCompositionContext` + Hosted/BYOK provider | 未登录或无网络仍有当前事实、候选和确定性 fallback，Planner 只作为 Companion 内部上下文 |
+| LOCAL-AI-003B | `LocalFactReader`、`LocalExpressionContext` | expense/income 近期正式事实最多 12 条，staging 不混入，Hosted 只收到同域摘要 |
+| LOCAL-AI-003C | `LocalPlannerCandidateEngine` | food/sleep/sport/reading 候选 evidence 可回溯到正式事实，数字带 per-number provenance |
+| LOCAL-AI-003D | `LocalFactReader` + staging confirmation retry | pending staging 不进入 formal context，确认两次返回同一稳定正式记录 |
+| LOCAL-AI-003E | `LocalExpressionPersistence` settings gate | Companion 关闭时不构造表达 context，事实保存不受影响 |
+| LOCAL-AI-003F | `makeCompositionContext` + request body capture | 记忆关闭时不访问 memory repository、不发送 `local_memory_context` 或最近文案 |
+| LOCAL-AI-003G | Hosted/BYOK provider failure | Provider 错误可见，事实仍保留，已有 deterministic Planner feedback 不被清除 |
+| LOCAL-AI-003H | complete backup/export portability tests | Companion、Planner、memory 和候选状态随本机完整备份导出/导入保持稳定 |
+| LOCAL-AI-003I | Hosted action normalizer + `context-packet-v2` | memory 只带同域、有界摘要，Edge trace 记录 packet fingerprint、memory counts 和 fallback reason |
+| LOCAL-AI-003J | notification/result-sheet seams | Companion 与固定事实合并去重，不渲染独立 `local:` Planner 卡，PWA 云端流程不变 |
+| LOCAL-AI-003K | Shortcut result + AppState route + post-confirm composition | recognize-only 只返回事实，确认后再表达，通知 route 可重试且不重复行/卡，失败不影响入账 |
