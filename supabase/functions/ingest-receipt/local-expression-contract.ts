@@ -179,7 +179,7 @@ export function validateLocalPlannerCandidate(
     ? rawNumberFacts.flatMap((raw) => {
       if (!raw || typeof raw !== "object") return [];
       const item = raw as Record<string, unknown>;
-      const value = numericValue(item.value);
+      const value = typeof item.value === "number" && Number.isFinite(item.value) ? item.value : null;
       if (value === null || !["count", "measure"].includes(String(item.role))) return [];
       const rawNumberEvidence = Array.isArray(item.evidence) ? item.evidence : [];
       const numberEvidence = rawNumberEvidence.filter(isEvidenceReference);
