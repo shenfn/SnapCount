@@ -21,6 +21,8 @@ import {
   isRecordExpressionOwnerEnabled,
 } from "./expression-delivery.ts";
 import type { PlannerVoiceBrief } from "./expression-delivery.ts";
+import type { PlannerEvidenceReference } from "./local-expression-contract.ts";
+import { validateLocalPlannerCandidate } from "./local-expression-contract.ts";
 import {
   loadDomainProfiles,
   selectSignals,
@@ -3536,6 +3538,7 @@ function plannerBriefContextCandidate(brief: PlannerVoiceBrief): ContextPacketCa
     numbers: brief.numbers,
     count_numbers: brief.count_numbers,
     number_facts: brief.number_facts,
+    evidence: brief.evidence,
     source: "expression_planner",
     source_surface: brief.source_surface,
     planner_version: brief.planner_version,
@@ -5551,6 +5554,28 @@ Deno.serve(async (req) => {
         const candidate = jsonBody?.planner_candidate && typeof jsonBody.planner_candidate === "object"
           ? jsonBody.planner_candidate as Record<string, unknown>
           : {};
+        const finiteNumbers = (value: unknown): number[] => Array.isArray(value)
+          ? value
+            .filter((item): item is number => typeof item === "number" && Number.isFinite(item))
+            .slice(0, 8)
+          : [];
+        const candidateNumbers = finiteNumbers(candidate.numbers);
+        const candidateCountNumbers = finiteNumbers(candidate.count_numbers);
+        const candidateNumberFacts = Array.isArray(candidate.number_facts)
+          ? candidate.number_facts.flatMap((item) => {
+            if (!isRecordValue(item) || typeof item.value !== "number" || !Number.isFinite(item.value)) return [];
+            const role = item.role === "count" ? "count" as const : "measure" as const;
+            const evidence = Array.isArray(item.evidence)
+              ? item.evidence.filter((reference): reference is Record<string, unknown> => isRecordValue(reference))
+              : [];
+            return [{
+              value: item.value,
+              meaning: typeof item.meaning === "string" ? item.meaning.slice(0, 80) : null,
+              role,
+              evidence,
+            }];
+          }).slice(0, 8)
+          : [];
         const rawPreferences = isRecordValue(jsonBody?.expression_preferences)
           ? jsonBody.expression_preferences
           : {};
@@ -5581,6 +5606,37 @@ Deno.serve(async (req) => {
         const weekday = new Set(["周一", "周二", "周三", "周四", "周五", "周六", "周日"]).has(weekdayValue)
           ? weekdayValue
           : null;
+        const recordDate = typeof currentFact.record_date === "string"
+          ? currentFact.record_date.trim()
+          : "";
+        const recordTime = typeof currentFact.record_time === "string"
+          ? currentFact.record_time.trim()
+          : "";
+        const fallbackEventTime = /^\d{4}-\d{2}-\d{2}$/.test(recordDate)
+          ? /^\d{1,2}:\d{2}(?::\d{2})?$/.test(recordTime)
+            ? `${recordDate}T${recordTime}+08:00`
+            : recordDate
+          : null;
+        const localPayload = currentFact.payload_json && typeof currentFact.payload_json === "object"
+          ? currentFact.payload_json as Record<string, unknown>
+          : null;
+        const occurredAt = typeof currentFact.occurred_at === "string"
+          ? currentFact.occurred_at
+          : typeof localPayload?.occurred_at === "string"
+          ? localPayload.occurred_at
+          : null;
+        const orderFinishedAt = typeof currentFact.order_finished_at === "string"
+          ? currentFact.order_finished_at
+          : typeof localPayload?.order_finished_at === "string"
+          ? localPayload.order_finished_at
+          : null;
+        const timeContext = buildTimeContext({
+          occurredAt,
+          orderFinishedAt,
+          clientCapturedAt: jsonBody?.client_captured_at ?? clientLocalTime,
+          requestReceivedAt: new Date().toISOString(),
+          fallbackEventTime,
+        });
         const recentCompanionLines = Array.isArray(jsonBody?.recent_companion_lines)
           ? (jsonBody.recent_companion_lines as unknown[])
             .filter((line): line is string => typeof line === "string")
@@ -5617,21 +5673,45 @@ Deno.serve(async (req) => {
           confidence: 1,
           companion_message: null,
         };
-        const plannerBrief: PlannerVoiceBrief | null = typeof candidate.candidate_id === "string"
+        const plannerCandidateEvidence = Array.isArray(candidate.evidence)
+          ? candidate.evidence.filter((reference): reference is PlannerEvidenceReference => isRecordValue(reference))
+          : [];
+        const plannerCanonicalText = typeof candidate.canonical_text === "string"
+          ? candidate.canonical_text.slice(0, 300)
+          : typeof candidate.emotion_line === "string"
+          ? candidate.emotion_line.slice(0, 300)
+          : "当前事实";
+        const plannerValidation = validateLocalPlannerCandidate({
+          candidate_id: typeof candidate.candidate_id === "string" ? candidate.candidate_id : "",
+          semantic_key: typeof candidate.semantic_key === "string" ? candidate.semantic_key : "",
+          canonical_text: plannerCanonicalText,
+          dimension: typeof candidate.dimension === "string" ? candidate.dimension : "current_fact",
+          claim_fingerprint: typeof candidate.claim_fingerprint === "string" ? candidate.claim_fingerprint : "",
+          evidence: plannerCandidateEvidence,
+          number_facts: candidateNumberFacts,
+        }, {
+          currentFactId: typeof currentFact.id === "string" ? currentFact.id : "current_fact",
+          memoryKeys: isRecordValue(jsonBody?.local_memory_context) && Array.isArray(jsonBody.local_memory_context.facts)
+            ? jsonBody.local_memory_context.facts.flatMap((item) => isRecordValue(item) && typeof item.key === "string" ? [item.key] : [])
+            : [],
+        });
+        const plannerBrief: PlannerVoiceBrief | null = plannerValidation.ok
+          && typeof candidate.candidate_id === "string"
           && typeof candidate.semantic_key === "string"
           && typeof candidate.claim_fingerprint === "string"
           ? {
             candidate_id: candidate.candidate_id.slice(0, 200),
             semantic_key: candidate.semantic_key.slice(0, 200),
             dimension: typeof candidate.dimension === "string" ? candidate.dimension.slice(0, 100) : "current_fact",
-            canonical_text: typeof candidate.emotion_line === "string"
-              ? candidate.emotion_line.slice(0, 300)
-              : "当前事实",
+            canonical_text: plannerCanonicalText,
             source_surface: "record_detail",
-            planner_version: "local-planner-v1",
-            numbers: [],
-            count_numbers: [],
-            number_facts: [],
+            planner_version: typeof candidate.planner_version === "string"
+              ? candidate.planner_version.slice(0, 100)
+              : "local-planner-v1",
+            numbers: candidateNumbers,
+            count_numbers: candidateCountNumbers,
+            number_facts: candidateNumberFacts,
+            evidence: plannerCandidateEvidence,
             claim_fingerprint: candidate.claim_fingerprint.slice(0, 200),
           }
           : null;
@@ -5641,8 +5721,8 @@ Deno.serve(async (req) => {
           builtPayload: payload,
           normalizedAmount: amount,
           domainProfiles: {},
-          timingSignal: null,
-          timeContext: null,
+          timingSignal: timingSignalFor(domainKey, timeContext),
+          timeContext,
           clientLocalTime,
           weekday,
           persona,

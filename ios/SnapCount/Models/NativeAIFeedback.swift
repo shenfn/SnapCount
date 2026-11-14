@@ -1,6 +1,13 @@
 import Foundation
 
 struct NativeAIFeedback: Equatable {
+    struct EvidenceReference: Equatable {
+        let kind: String
+        let source: String
+        let reference: String
+        let field: String?
+    }
+
     let exposureEventId: String?
     let candidateId: String?
     let semanticKey: String
@@ -19,6 +26,7 @@ struct NativeAIFeedback: Equatable {
     let timingLabel: String
     let expressionCoverageSemanticKeys: [String]
     let expressionCoverageClaimFingerprint: String?
+    let evidence: [EvidenceReference]
 
     init?(payload: [String: AnyCodable]?) {
         guard let payload else { return nil }
@@ -83,6 +91,21 @@ struct NativeAIFeedback: Equatable {
         self.expressionCoverageClaimFingerprint = coverageIsCurrent
             ? rawCoverageClaimFingerprint
             : nil
+        self.evidence = (payload.array("evidence") ?? []).compactMap { value in
+            let object: [String: Any]
+            if let raw = value as? [String: Any] {
+                object = raw
+            } else if let raw = value as? [String: AnyCodable] {
+                object = raw.mapValues(\.value)
+            } else {
+                return nil
+            }
+            guard let kind = object["kind"] as? String,
+                  let source = object["source"] as? String,
+                  let reference = object["reference"] as? String,
+                  !kind.isEmpty, !source.isEmpty, !reference.isEmpty else { return nil }
+            return EvidenceReference(kind: kind, source: source, reference: reference, field: object["field"] as? String)
+        }
     }
 
     var bandLabel: String {

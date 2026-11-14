@@ -6,13 +6,71 @@ enum LocalExpressionProviderMode: String, Equatable {
     case deterministic
 }
 
+enum LocalExpressionContract {
+    static func claimFingerprint(semanticKey: String, canonicalText: String) -> String {
+        fingerprint(canonicalJSON([
+            "canonical_text": canonicalText.trimmingCharacters(in: .whitespacesAndNewlines),
+            "semantic_key": semanticKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        ]))
+    }
+
+    static func fingerprint(_ value: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return String(format: "fnv1a64:%016llx", hash)
+    }
+
+    static func validates(
+        candidate: NativeAIFeedback,
+        currentFactID: String,
+        memoryKeys: Set<String> = []
+    ) -> Bool {
+        guard candidate.source == "expression_planner",
+              !candidate.evidence.isEmpty,
+              candidate.claimFingerprint == claimFingerprint(
+                semanticKey: candidate.semanticKey,
+                canonicalText: candidate.emotionLine
+              ) else { return false }
+        return candidate.evidence.allSatisfy { evidence in
+            switch evidence.kind {
+            case "current_fact":
+                return evidence.source == "local_record" && evidence.reference == currentFactID
+            case "recent_fact":
+                return evidence.source == "local_record"
+            case "local_memory":
+                return evidence.source == "local_memory" && memoryKeys.contains(evidence.reference)
+            default:
+                return false
+            }
+        }
+    }
+
+    private static func canonicalJSON(_ value: [String: String]) -> String {
+        let entries = value.keys.sorted().compactMap { key -> String? in
+            guard let value = value[key] else { return nil }
+            let escapedKey = key.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedValue = value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            return "\"\(escapedKey)\":\"\(escapedValue)\""
+        }
+        return "{\(entries.joined(separator: ","))}"
+    }
+}
+
 struct LocalExpressionFact: Equatable {
     let id: String
     let domainKey: String
     let title: String
     let summary: String
+    let platform: String?
+    let paymentMethod: String?
+    let sourceName: String?
     let recordDate: String?
     let recordTime: String?
+    let occurredAt: String?
+    let orderFinishedAt: String?
     let amount: Double?
     let category: String?
     let payloadJSON: String?
@@ -26,8 +84,13 @@ struct LocalExpressionFact: Equatable {
         }
         title = detail.title
         summary = detail.value
+        platform = detail.platform
+        paymentMethod = detail.paymentMethod
+        sourceName = detail.kind == "income" ? detail.merchantName : detail.payload?.string("source_name")
         recordDate = detail.recordDate
         recordTime = detail.transactionTime
+        occurredAt = detail.occurredAt
+        orderFinishedAt = detail.payload?.string("order_finished_at")
         amount = detail.amount
         category = detail.category
         if let payload = detail.payload,
@@ -47,14 +110,24 @@ struct LocalExpressionFact: Equatable {
         recordTime: String?,
         amount: Double?,
         category: String?,
-        payloadJSON: String? = nil
+        payloadJSON: String? = nil,
+        platform: String? = nil,
+        paymentMethod: String? = nil,
+        sourceName: String? = nil,
+        occurredAt: String? = nil,
+        orderFinishedAt: String? = nil
     ) {
         self.id = id
         self.domainKey = domainKey
         self.title = title
         self.summary = summary
+        self.platform = platform
+        self.paymentMethod = paymentMethod
+        self.sourceName = sourceName
         self.recordDate = recordDate
         self.recordTime = recordTime
+        self.occurredAt = occurredAt
+        self.orderFinishedAt = orderFinishedAt
         self.amount = amount
         self.category = category
         self.payloadJSON = payloadJSON
@@ -69,6 +142,7 @@ struct LocalExpressionContext: Equatable {
     let providerMode: LocalExpressionProviderMode
     var expressionPreferences = LocalCompanionExpressionPreferences.default
     var clientLocalTime: String? = nil
+    var clientCapturedAt: String? = nil
     var weekday: String? = nil
     var recentCompanionLines: [String] = []
 }
@@ -122,6 +196,7 @@ enum LocalPlannerCandidateEngine {
     ) -> LocalExpressionContext {
         let currentFact = LocalExpressionFact(detail: detail)
         let localTime = Self.localTimeContext(for: now)
+        let capturedAt = ISO8601DateFormatter().string(from: now)
         return LocalExpressionContext(
             currentFact: currentFact,
             recentFacts: recentFacts,
@@ -130,6 +205,7 @@ enum LocalPlannerCandidateEngine {
             providerMode: providerMode,
             expressionPreferences: expressionPreferences,
             clientLocalTime: clientLocalTime ?? localTime.time,
+            clientCapturedAt: capturedAt,
             weekday: weekday ?? localTime.weekday,
             recentCompanionLines: Array(recentCompanionLines.prefix(5))
         )
@@ -141,12 +217,7 @@ enum LocalPlannerCandidateEngine {
     ) -> [NativeAIFeedback] {
         let domain = supportedDomains.contains(fact.domainKey) ? fact.domainKey : "expense"
         let semanticKey = "local_\(domain)_current_fact"
-        let fingerprint = LocalImageStore.sha256(Data([
-            domain, fact.id, fact.title, fact.summary, fact.recordDate ?? "", fact.recordTime ?? "",
-            fact.amount.map { String(format: "%.2f", $0) } ?? "", fact.category ?? "",
-            fact.payloadJSON ?? ""
-        ].joined(separator: "|").utf8))
-        let candidateID = "local-planner-\(domain)-\(String(fingerprint.prefix(16)))"
+        let candidateText: String
         let title = fact.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let subject = title.isEmpty ? domainLabel(domain) : title
         let emotionLine: String
@@ -188,9 +259,20 @@ enum LocalPlannerCandidateEngine {
             detailReason = "候选来自当前本地事实。"
         }
 
+        candidateText = emotionLine
+        let fingerprint = LocalExpressionContract.claimFingerprint(
+            semanticKey: semanticKey,
+            canonicalText: candidateText
+        )
+        let candidateID = "local-planner-\(domain)-\(String(fingerprint.suffix(16)))"
+        let currentEvidence: [[String: Any]] = [[
+            "kind": "current_fact", "source": "local_record", "reference": fact.id, "field": fact.amount == nil ? NSNull() : "amount"
+        ]]
+
         let payload: [String: AnyCodable] = [
             "candidate_id": AnyCodable(candidateID),
             "semantic_key": AnyCodable(semanticKey),
+            "canonical_text": AnyCodable(emotionLine),
             "claim_fingerprint": AnyCodable(fingerprint),
             "exposure_event_id": AnyCodable("local:\(fingerprint)"),
             "presentation_target": AnyCodable("feedback_card"),
@@ -204,17 +286,23 @@ enum LocalPlannerCandidateEngine {
             "detail_reason": AnyCodable(detailReason),
             "timing_signal": AnyCodable(["label": fact.recordDate ?? "本地事实"] as [String: Any]),
             "local_exposure": AnyCodable(true)
+            ,"evidence": AnyCodable(currentEvidence)
         ]
         guard let feedback = NativeAIFeedback(payload: payload) else { return [] }
         var result = [feedback]
         if let memory = firstMemory(from: memoryContextJSON, matching: fact) {
             let memoryKey = memory.key
-            let memoryFingerprint = LocalImageStore.sha256(Data("\(fact.id)|\(memoryKey)".utf8))
+            let memorySemanticKey = "local_\(domain)_memory_context"
             let memoryLine = memory.value.map { "结合本地记忆：\(String($0.prefix(44)))" }
                 ?? "结合你保存的本地偏好，这条记录可以继续观察。"
+            let memoryFingerprint = LocalExpressionContract.claimFingerprint(
+                semanticKey: memorySemanticKey,
+                canonicalText: memoryLine
+            )
             let memoryPayload: [String: AnyCodable] = [
                 "candidate_id": AnyCodable("local-planner-\(domain)-memory-\(String(memoryFingerprint.prefix(16)))"),
-                "semantic_key": AnyCodable("local_\(domain)_memory_context"),
+                "semantic_key": AnyCodable(memorySemanticKey),
+                "canonical_text": AnyCodable(memoryLine),
                 "claim_fingerprint": AnyCodable(memoryFingerprint),
                 "exposure_event_id": AnyCodable("local:\(memoryFingerprint)"),
                 "presentation_target": AnyCodable("feedback_card"),
@@ -228,6 +316,9 @@ enum LocalPlannerCandidateEngine {
                 "detail_reason": AnyCodable("候选引用本地记忆键 \(memoryKey)，并保留当前记录作为事实依据。"),
                 "timing_signal": AnyCodable(["label": "本地记忆"] as [String: Any]),
                 "local_exposure": AnyCodable(true)
+                ,"evidence": AnyCodable([[
+                    "kind": "local_memory", "source": "local_memory", "reference": memoryKey, "field": "summary"
+                ] as [String: Any]])
             ]
             if let memoryFeedback = NativeAIFeedback(payload: memoryPayload) {
                 result.append(memoryFeedback)
@@ -329,6 +420,19 @@ extension NativeAIFeedback {
             "detail_reason": AnyCodable(detailReason),
             "timing_signal": AnyCodable(["label": timingLabel] as [String: Any])
         ]
+        // The candidate's evidence is part of the cross-client contract. It
+        // remains empty for legacy remote feedback and explicit for local
+        // Planner candidates.
+        if !evidence.isEmpty {
+            payload["evidence"] = AnyCodable(evidence.map {
+                [
+                    "kind": $0.kind,
+                    "source": $0.source,
+                    "reference": $0.reference,
+                    "field": $0.field ?? NSNull()
+                ] as [String: Any]
+            })
+        }
         if let exposureEventId { payload["exposure_event_id"] = AnyCodable(exposureEventId) }
         return payload
     }

@@ -77,25 +77,35 @@ struct UploadScreenshotIntent: AppIntent {
                             trialOutcome = .archived
                             let text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
                             var companionMessage: String?
+                            var composedFeedback = outcome.feedback
                             if let companionProvider = await companionProvider(for: mode) {
                                 let providerMode: LocalExpressionProviderMode = mode == .hosted ? .hosted : .byok
-                                if let composed = await recognition.composeCompanion(
+                                let composed = await recognition.composeCompanion(
                                     for: outcome.result,
                                     provider: companionProvider,
                                     settings: localSettings,
                                     providerMode: providerMode
-                                ), let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                )
+                                if let message = composed?.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
                                    !message.isEmpty {
                                     companionMessage = message
                                 }
+                                if let feedback = composed?.aiFeedback.flatMap({ NativeAIFeedback(payload: $0) }) {
+                                    composedFeedback = feedback
+                                }
                             }
+                            let notificationText = LocalIntakeNotificationText.merge(
+                                baseText: text,
+                                companionMessage: companionMessage,
+                                feedback: composedFeedback
+                            )
                             result = ShortcutUploadResult(
                                 displayText: ShortcutUploadResult.expandedDisplayText(
-                                    baseText: text,
+                                    baseText: notificationText,
                                     companionMessage: companionMessage,
-                                    feedback: outcome.feedback
+                                    feedback: composedFeedback
                                 ),
-                                notificationText: text,
+                                notificationText: notificationText,
                                 route: "records"
                             )
                         case .staged, .financialPending:

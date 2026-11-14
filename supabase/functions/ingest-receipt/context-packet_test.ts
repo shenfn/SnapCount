@@ -5,6 +5,7 @@ import {
   selectSemanticContext,
   type ContextPacketCandidate,
 } from "./context-packet.ts";
+import { evidenceReference, localClaimFingerprint } from "./local-expression-contract.ts";
 
 const assert = (condition: boolean, message: string) => {
   if (!condition) throw new Error(message);
@@ -182,12 +183,14 @@ Deno.test("context packet preserves Planner provenance and numeric roles", () =>
       numbers: [1, 6.28],
       count_numbers: [1],
       number_facts: [
-        { value: 1, meaning: "first_occurrence_count", role: "count" },
-        { value: 6.28, meaning: "current_record_amount", role: "measure" },
+        { value: 1, meaning: "first_occurrence_count", role: "count", evidence: [evidenceReference("current_fact", "fact-1", "amount")] },
+        { value: 6.28, meaning: "current_record_amount", role: "measure", evidence: [evidenceReference("current_fact", "fact-1", "amount")] },
       ],
+      evidence: [evidenceReference("current_fact", "fact-1", "amount")],
       source: "expression_planner",
       source_surface: "record_detail",
       planner_version: "expression-shadow-auto-v0.6",
+      claim_fingerprint: localClaimFingerprint("expense_merchant_first_occurrence", "第一次记录「青禾茶饮」"),
     }],
   });
 

@@ -41,6 +41,8 @@ import {
 import { buildRenderPlans } from "../_shared/expression-core/render-contract.mjs";
 // @ts-ignore Pure shared data contract is bundled with the Edge Function.
 import { normalizeExpenseCategory } from "../../../src/domains/expenseCategories.js";
+import { evidenceReference, localClaimFingerprint, localExpressionFingerprint } from "./local-expression-contract.ts";
+import type { PlannerEvidenceReference } from "./local-expression-contract.ts";
 
 export interface ShadowExpenseTransaction {
   id: string; transaction_date: string; transaction_time?: string | null; occurred_at?: string | null; created_at?: string | null;
@@ -187,20 +189,11 @@ export function canonicalPlannerSource(value: unknown): string {
 }
 
 export function plannerSourceFingerprint(value: unknown): string {
-  const bytes = new TextEncoder().encode(canonicalPlannerSource(value));
-  let hash = 0xcbf29ce484222325n;
-  for (const byte of bytes) {
-    hash ^= BigInt(byte);
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-  }
-  return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
+  return localExpressionFingerprint(value);
 }
 
 export function plannerClaimFingerprint(semanticKey: string, canonicalText: string): string {
-  return plannerSourceFingerprint({
-    semantic_key: semanticKey.trim(),
-    canonical_text: canonicalText.trim(),
-  });
+  return localClaimFingerprint(semanticKey, canonicalText);
 }
 
 function evidenceRecordId(value: unknown): string | null {
@@ -257,7 +250,46 @@ function attachCandidateDependencies(
     .map((sourceRecordId) => dependencyById.get(sourceRecordId))
     .filter((dependency): dependency is PlannerSourceDependency => Boolean(dependency))
     .sort((left, right) => left.source_record_id.localeCompare(right.source_record_id));
-  return { ...candidate, source_dependencies: dependencies };
+  const candidateEvidence: PlannerEvidenceReference[] = (Array.isArray(candidate.evidence) ? candidate.evidence : [])
+    .flatMap((rawEvidence) => {
+      const item = rawEvidence && typeof rawEvidence === "object" ? rawEvidence as Record<string, unknown> : {};
+      const sourceId = evidenceRecordId(item.source_id);
+      if (!sourceId) return [];
+      return [evidenceReference(
+        sourceId === primaryRecordId ? "current_fact" : "recent_fact",
+        sourceId,
+        null,
+      )];
+    });
+  const numberFacts = Array.isArray(candidate.numbers)
+    ? candidate.numbers.flatMap((rawNumber) => {
+      if (!rawNumber || typeof rawNumber !== "object") return [];
+      const item = rawNumber as Record<string, unknown>;
+      const value = typeof item.value === "number" ? item.value : Number(item.value);
+      if (!Number.isFinite(value)) return [];
+      const role = item.role === "count" || /(?:count|occurrence|session|streak|consecutive)/i.test(String(item.meaning ?? ""))
+        ? "count" as const
+        : "measure" as const;
+      return [{
+        ...item,
+        value,
+        role,
+        meaning: typeof item.meaning === "string" ? item.meaning : null,
+        evidence: candidateEvidence.map((reference) => ({
+          ...reference,
+          field: typeof item.derivation === "string"
+            ? item.derivation.split(".").pop() ?? reference.field
+            : reference.field,
+        })),
+      }];
+    })
+    : [];
+  return {
+    ...candidate,
+    evidence: candidateEvidence,
+    numbers: numberFacts,
+    source_dependencies: dependencies,
+  };
 }
 function toFactEvent(record: ReturnType<typeof toRecord>) {
   const confirmed = record.fact_contract.fact_status === "confirmed";

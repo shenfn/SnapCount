@@ -3,6 +3,26 @@ import XCTest
 @testable import SnapCount
 
 final class LocalExpressionContextTests: XCTestCase {
+    func testLOCALAI003ContractKeepsEvidenceAndNumbersBoundToCandidateDimension() throws {
+        let fact = LocalExpressionFact(
+            id: "fact-contract-1", domainKey: "expense", title: "便利店", summary: "日常用品",
+            recordDate: "2026-11-14", recordTime: "10:00", amount: 12.8, category: "日用"
+        )
+        let candidates = LocalPlannerCandidateEngine.candidates(for: fact, memoryContextJSON: #"{"facts":[{"key":"local_ai.expense.recent_30d","value":"近30天有12条消费记录","confidence":0.9,"entity_type":"merchant","entity_value":"便利店"}]}"#)
+        let current = try XCTUnwrap(candidates.first)
+        let memory = try XCTUnwrap(candidates.first(where: { $0.dimension == "memory_context" }))
+        let currentPayload = try XCTUnwrap(HostedAICompanionProvider.plannerPayload(current, fact: fact))
+        let memoryPayload = try XCTUnwrap(HostedAICompanionProvider.plannerPayload(memory, fact: fact))
+        let currentEvidence = try XCTUnwrap(currentPayload["evidence"] as? [[String: Any]])
+        XCTAssertEqual(currentEvidence.first?["reference"] as? String, fact.id)
+        XCTAssertEqual(((currentPayload["number_facts"] as? [[String: Any]])?.first?["value"] as? NSNumber)?.doubleValue, 12.8)
+        XCTAssertTrue((memoryPayload["numbers"] as? [Double] ?? []).isEmpty)
+        XCTAssertTrue((memoryPayload["number_facts"] as? [[String: Any]] ?? []).isEmpty)
+        XCTAssertEqual(current.claimFingerprint, "fnv1a64:510d871ebff57f0f")
+        XCTAssertTrue(LocalExpressionContract.validates(candidate: current, currentFactID: fact.id))
+        XCTAssertEqual(current.claimFingerprint, LocalPlannerCandidateEngine.candidates(for: fact).first?.claimFingerprint)
+    }
+
     func testLOCALAI003FCompactMemoryIsSameDomainAndBounded() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

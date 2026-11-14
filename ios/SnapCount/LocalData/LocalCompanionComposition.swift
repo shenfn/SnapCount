@@ -27,10 +27,11 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
         )
         let response = try await service.generateLocalExpression(
             currentFact: Self.factPayload(context.currentFact),
-            plannerCandidate: selected?.localPayload.mapValues(\.value),
+            plannerCandidate: Self.plannerPayload(selected, fact: context.currentFact),
             localMemoryContext: LocalCompanionCompositionSupport.jsonObject(context.memoryContextJSON) as? [String: Any],
             expressionPreferences: Self.preferencesPayload(context.expressionPreferences),
             clientLocalTime: context.clientLocalTime,
+            clientCapturedAt: context.clientCapturedAt,
             weekday: context.weekday,
             recentCompanionLines: context.recentCompanionLines,
             accessToken: accessToken
@@ -46,15 +47,21 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
     }
 
     static func factPayload(_ fact: LocalExpressionFact) -> [String: Any] {
+        let merchant: Any = fact.domainKey == "expense" && !fact.title.isEmpty ? fact.title : NSNull()
+        let source: Any = fact.domainKey == "income" ? (fact.sourceName ?? fact.title) : NSNull()
         var payload: [String: Any] = [
             "id": fact.id,
             "domain_key": fact.domainKey,
             "title": fact.title,
-            "merchant_name": fact.domainKey == "expense" ? fact.title : NSNull(),
-            "source_name": fact.domainKey == "income" ? fact.title : NSNull(),
+            "merchant_name": merchant,
+            "source_name": source,
+            "platform": fact.platform ?? NSNull(),
+            "payment_method": fact.paymentMethod ?? NSNull(),
             "summary": fact.summary,
             "record_date": fact.recordDate ?? NSNull(),
             "record_time": fact.recordTime ?? NSNull(),
+            "occurred_at": fact.occurredAt ?? NSNull(),
+            "order_finished_at": fact.orderFinishedAt ?? NSNull(),
             "amount": fact.amount ?? NSNull(),
             "category": fact.category ?? NSNull()
         ]
@@ -65,6 +72,37 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
             object.removeValue(forKey: "ai_feedback")
             object.removeValue(forKey: "planner_ai_feedback")
             payload["payload_json"] = object
+        }
+        return payload
+    }
+
+    /// The cloud Planner brief carries its numeric evidence alongside the
+    /// candidate. Keep the local candidate on that same contract so the
+    /// shared Voice validator can apply the same evidence rules.
+    static func plannerPayload(
+        _ candidate: NativeAIFeedback?,
+        fact: LocalExpressionFact
+    ) -> [String: Any]? {
+        guard let candidate else { return nil }
+        var payload = candidate.localPayload.mapValues(\.value)
+        if candidate.dimension == "current_fact", let amount = fact.amount, amount.isFinite {
+            payload["numbers"] = [amount]
+            payload["count_numbers"] = []
+            payload["number_facts"] = [[
+                "value": amount,
+                "meaning": "amount",
+                "role": "measure",
+                "evidence": [[
+                    "kind": "current_fact",
+                    "source": "local_record",
+                    "reference": fact.id,
+                    "field": "amount"
+                ]]
+            ]]
+        } else {
+            payload["numbers"] = []
+            payload["count_numbers"] = []
+            payload["number_facts"] = []
         }
         return payload
     }
@@ -100,9 +138,10 @@ final class QwenBYOKCompanionProvider: LocalCompanionProvider {
             memoryContextJSON: context.memoryContextJSON
         )
         var facts = HostedAICompanionProvider.factPayload(context.currentFact)
-        facts["planner_candidate"] = selected?.localPayload.mapValues(\.value) ?? NSNull()
+        facts["planner_candidate"] = HostedAICompanionProvider.plannerPayload(selected, fact: context.currentFact) ?? NSNull()
         facts["expression_preferences"] = HostedAICompanionProvider.preferencesPayload(context.expressionPreferences)
         facts["client_local_time"] = context.clientLocalTime ?? NSNull()
+        facts["client_captured_at"] = context.clientCapturedAt ?? NSNull()
         facts["weekday"] = context.weekday ?? NSNull()
         facts["recent_companion_lines"] = Array(context.recentCompanionLines.prefix(5))
         if let memory = LocalCompanionCompositionSupport.jsonObject(context.memoryContextJSON) {
@@ -111,13 +150,17 @@ final class QwenBYOKCompanionProvider: LocalCompanionProvider {
         let factsData = try JSONSerialization.data(withJSONObject: facts, options: [.sortedKeys])
         let factsText = String(decoding: factsData, as: UTF8.self)
         let prompt = """
-        你是芥子的本地陪伴文案生成器。下面是已保存的当前事实、Planner 候选和（若存在）紧凑记忆 JSON。
-        只能根据这些证据表达，不要补写 JSON 没有的金额、日期、商户、频率或健康结论；记忆只能改变观察角度，不能修改当前事实。
-        遵循 expression_preferences 中的说话风格；client_local_time 和 weekday 只用于自然把握此刻语境，不推断用户作息；recent_companion_lines 只用于避免重复句式。
-        返回一个 JSON 对象，不能返回 Markdown。字段为 companion_message 和 ai_feedback。
-        companion_message 是一句 8 到 30 字的陪伴语；ai_feedback 包含 badge、icon、band、emotion_line、utility_line、detail_reason、confidence。
-        band 只能是 positive、neutral、watch、recover、ritual；emotion_line 不超过 30 字，utility_line 不超过 32 字，detail_reason 不超过 64 字；confidence 为 0 到 1 的数字且至少 0.5。
-        不要机械复述“已记录”，也不要把建议写成诊断或命令。依据不足时 utility_line 或 detail_reason 可为 null。
+        你是芥子的本地陪伴文案生成器。下面的 current fact、planner candidate 和（若存在）local memory context 是唯一上下文来源。
+        只能引用 current fact 或 planner candidate 中明确存在的数字、日期、商户、类别、频率和趋势；不能自行计算、回忆、补写或改变统计口径。
+        local memory context 只用于调整语气和观察角度，不是当前事实来源；不要把其中的金额、次数或统计写成确定事实。
+        occurred_at、record_date、record_time 和 client_local_time 只用于把握时间语境；不要把上传时间写成事件发生时间。
+        遵循 expression_preferences 中的说话风格；recent_companion_lines 只用于避免重复句式。
+        companion_message 是首选主表达，最多 30 个汉字；可返回空串。补充候选可放在 companion_candidates 中。
+        ai_feedback 只有能补充不同信息时才输出，不要换句话重复主表达；依据不足时返回 null。
+        companion_message、emotion_line 不主动给建议；utility_line 只能在事实支撑时给低风险、可选择的建议，禁止诊断、用药、强制要求以及“加油/注意身体/记得/超标/放纵”。
+        不要机械复述“已记录”，不要质问式反问，不要把 food 类别或时间擅自写成早餐、午餐、晚餐。
+        band 只能是 positive、neutral、watch、recover、ritual；emotion_line 不超过 28 字，utility_line 不超过 30 字，detail_reason 不超过 60 字；confidence 为 0 到 1 的数字。
+        返回纯 JSON（不能返回 Markdown）：{"companion_message":"≤30字","companion_candidates":["≤30字备选一","≤30字备选二"],"ai_feedback":{"badge":"4-8字","icon":"图标","band":"positive|neutral|watch|recover|ritual","emotion_line":"≤28字","utility_line":"≤30字或null","detail_reason":"≤60字或null","confidence":0.0}}
 
         事实 JSON：
         \(factsText)
@@ -152,35 +195,41 @@ final class QwenBYOKCompanionProvider: LocalCompanionProvider {
         guard data.count <= 2 * 1024 * 1024,
               let envelope = try? JSONDecoder().decode(LocalChatCompletionEnvelope.self, from: data),
               let content = envelope.choices.first?.message.content,
-              let object = LocalCompanionCompositionSupport.jsonObject(from: content),
-              let companion = LocalCompanionCompositionSupport.clipped(object["companion_message"] as? String, max: 30),
-              let feedbackObject = object["ai_feedback"] as? [String: Any] else {
+              let object = LocalCompanionCompositionSupport.jsonObject(from: content) else {
             throw QwenBYOKError.invalidResponse
         }
-        guard let emotion = LocalCompanionCompositionSupport.clipped(feedbackObject["emotion_line"] as? String, max: 30),
-              !emotion.isEmpty else {
-            throw QwenBYOKError.invalidResponse
+        let companion = LocalCompanionCompositionSupport.clipped(object["companion_message"] as? String, max: 30)
+        let feedback: [String: AnyCodable]?
+        if let feedbackObject = object["ai_feedback"] as? [String: Any],
+           let emotion = LocalCompanionCompositionSupport.clipped(feedbackObject["emotion_line"] as? String, max: 28),
+           !emotion.isEmpty {
+            let confidence = LocalCompanionCompositionSupport.normalizedConfidence(feedbackObject["confidence"]) ?? 0.7
+            if confidence >= 0.5 {
+                let domain = context.currentFact.domainKey
+                let band = LocalCompanionCompositionSupport.allowedBands.contains(feedbackObject["band"] as? String ?? "")
+                    ? (feedbackObject["band"] as? String ?? "neutral")
+                    : "neutral"
+                feedback = [
+                    "version": AnyCodable("feedback-v1"),
+                    "domain_key": AnyCodable(domain),
+                    "badge": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["badge"] as? String, max: 10) ?? "即时反馈"),
+                    "icon": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["icon"] as? String, max: 4) ?? LocalCompanionCompositionSupport.icon(for: domain)),
+                    "band": AnyCodable(band),
+                    "tone": AnyCodable("ai_generated"),
+                    "emotion_line": AnyCodable(emotion),
+                    "utility_line": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["utility_line"] as? String, max: 30) ?? NSNull()),
+                    "detail_reason": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["detail_reason"] as? String, max: 60) ?? NSNull()),
+                    "confidence": AnyCodable(confidence),
+                    "internal_score": AnyCodable(Int((confidence * 100).rounded())),
+                    "source": AnyCodable("hybrid")
+                ]
+            } else {
+                feedback = nil
+            }
+        } else {
+            feedback = nil
         }
-        let confidence = LocalCompanionCompositionSupport.normalizedConfidence(feedbackObject["confidence"]) ?? 0.7
-        guard confidence >= 0.5 else { throw QwenBYOKError.invalidResponse }
-        let domain = context.currentFact.domainKey
-        let band = LocalCompanionCompositionSupport.allowedBands.contains(feedbackObject["band"] as? String ?? "")
-            ? (feedbackObject["band"] as? String ?? "neutral")
-            : "neutral"
-        let feedback: [String: AnyCodable] = [
-            "version": AnyCodable("feedback-v1"),
-            "domain_key": AnyCodable(domain),
-            "badge": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["badge"] as? String, max: 10) ?? "即时反馈"),
-            "icon": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["icon"] as? String, max: 4) ?? LocalCompanionCompositionSupport.icon(for: domain)),
-            "band": AnyCodable(band),
-            "tone": AnyCodable("ai_generated"),
-            "emotion_line": AnyCodable(emotion),
-            "utility_line": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["utility_line"] as? String, max: 32) ?? NSNull()),
-            "detail_reason": AnyCodable(LocalCompanionCompositionSupport.clipped(feedbackObject["detail_reason"] as? String, max: 64) ?? NSNull()),
-            "confidence": AnyCodable(confidence),
-            "internal_score": AnyCodable(Int((confidence * 100).rounded())),
-            "source": AnyCodable("hybrid")
-        ]
+        guard companion != nil || feedback != nil else { throw QwenBYOKError.invalidResponse }
         return LocalCompanionResult(companionMessage: companion, aiFeedback: feedback)
     }
 }
