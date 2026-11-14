@@ -143,6 +143,7 @@ final class SnapCountUploadService {
     func generateLocalExpression(
         currentFact: [String: Any],
         plannerCandidate: [String: Any]?,
+        recentFacts: [[String: Any]],
         localMemoryContext: [String: Any]?,
         expressionPreferences: [String: Any],
         clientLocalTime: String?,
@@ -170,6 +171,7 @@ final class SnapCountUploadService {
             "recent_companion_lines": Array(recentCompanionLines.prefix(5)),
         ]
         if let plannerCandidate { body["planner_candidate"] = plannerCandidate }
+        if !recentFacts.isEmpty { body["recent_facts"] = Array(recentFacts.prefix(12)) }
         if let localMemoryContext { body["local_memory_context"] = localMemoryContext }
         if let clientLocalTime { body["client_local_time"] = clientLocalTime }
         if let clientCapturedAt { body["client_captured_at"] = clientCapturedAt }

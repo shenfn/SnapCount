@@ -304,8 +304,18 @@ final class LocalExpressionPersistence {
         let memoryContext = settings.memoryEnabled
             ? try? memoryRepository.compactContextJSON(profileID: profileID, domainKey: fact.domainKey)
             : nil
+        // Keep persisted feedback on the same cross-record path as the detail
+        // composition flow.  The current fact is excluded by id so a refresh
+        // cannot count itself as history.
+        let recentFacts = recentFormalFacts(
+            profileID: profileID,
+            currentFactID: fact.id,
+            domainKey: fact.domainKey,
+            now: Date()
+        )
         return LocalPlannerCandidateEngine.selectedCandidate(
             for: fact,
+            recentFacts: recentFacts,
             memoryContextJSON: memoryContext
         )
     }

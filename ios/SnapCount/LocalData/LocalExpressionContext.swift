@@ -484,10 +484,9 @@ enum LocalPlannerCandidateEngine {
         return NativeAIFeedback(payload: payload)!
     }
 
-    /// Only the current-fact candidate and a high-confidence memory angle are
-    /// selectable today. Repeat/continuity candidates are produced for a future
-    /// product decision but remain internal: the Hosted wire contract carries a
-    /// single candidate, and wiring cross-record selection needs its own slice.
+    /// Select one bounded local candidate for the existing single-candidate
+    /// Hosted/BYOK contract. Cross-record candidates can lead when they carry
+    /// stronger evidence than a memory-only angle.
     static func selectedCandidate(
         for fact: LocalExpressionFact,
         recentFacts: [LocalExpressionFact] = [],
@@ -495,12 +494,45 @@ enum LocalPlannerCandidateEngine {
     ) -> NativeAIFeedback? {
         let candidates = candidates(for: fact, recentFacts: recentFacts, memoryContextJSON: memoryContextJSON)
         guard let current = candidates.first else { return nil }
-        guard let memory = candidates.first(where: { $0.dimension == "memory_context" }) else {
-            return current
+        // Compare eligible dimensions before allowing a memory angle to lead.
+        // A memory summary is useful context, but must not eclipse a
+        // repeat/continuity candidate that carries several concrete records.
+        let memoryConfidence = memoryConfidence(from: memoryContextJSON)
+        return candidates.enumerated().max { left, right in
+            let leftScore = selectionScore(
+                dimension: left.element.dimension,
+                memoryConfidence: memoryConfidence,
+                evidenceCount: left.element.evidence.count
+            )
+            let rightScore = selectionScore(
+                dimension: right.element.dimension,
+                memoryConfidence: memoryConfidence,
+                evidenceCount: right.element.evidence.count
+            )
+            return leftScore == rightScore ? left.offset > right.offset : leftScore < rightScore
+        }?.element ?? current
+    }
+
+    private static func selectionScore(
+        dimension: String,
+        memoryConfidence: Double,
+        evidenceCount: Int
+    ) -> Double {
+        switch dimension {
+        case "repeat_pattern":
+            return 0.90 + min(Double(evidenceCount), 7) * 0.01
+        case "continuity":
+            return 0.78 + min(Double(evidenceCount), 7) * 0.005
+        case "memory_context":
+            // Keep the existing confidence gate: a weak memory summary must
+            // not outrank the current fact without concrete history.
+            guard memoryConfidence >= 0.8 else { return 0.50 }
+            return 0.70 + min(memoryConfidence, 1) * 0.10
+        case "current_fact":
+            return 0.60
+        default:
+            return 0.50
         }
-        // The current fact remains the default. A high-confidence memory angle
-        // may lead only when it has stronger evidence than that threshold.
-        return memoryConfidence(from: memoryContextJSON) >= 0.8 ? memory : current
     }
 
     private static func firstMemory(

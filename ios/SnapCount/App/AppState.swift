@@ -1,7382 +1,110 @@
-import SwiftUI
-import os
-
-typealias NativeSessionProvider = (_ forceRefresh: Bool) async throws -> SupabaseAuthSession
-typealias NativeSleepProvider = (_ nanoseconds: UInt64) async throws -> Void
-
-private struct WalletSnapshotReadModelRefreshError: LocalizedError {
-    let message: String
-
-    var errorDescription: String? { message }
-}
-
-private struct PendingRecordExpressionPlanDelivery {
-    let id: UUID
-    let recordId: String
-    let plan: NativeRecordExpressionPlan
-    let previousFeedback: NativeAIFeedback?
-    let userId: String
-    let generation: Int
-}
-
-private struct AppDefaultLocalStorage {
-    let expenseUseCase: LocalExpenseUseCaseProtocol
-    let recordUseCase: LocalRecordUseCaseProtocol
-    let walletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol
-    let factReader: LocalFactReader
-    let companionMemoryRepository: LocalCompanionMemoryRepository
-    let expressionPersistence: LocalExpressionPersistence
-    let imageStore: LocalImageStore
-    let pendingFinancialRepository: LocalPendingFinancialRepository
-    let financialBindingRepository: LocalFinancialBindingRepository
-    let historyMigrationCache: LocalHistoryMigrationCache
-    let historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore?
-    let historyInventoryReader: LocalHistoryInventoryReader
-    let historyUnresolvedRepository: LocalHistoryUnresolvedRepository
-}
-
-@MainActor
-final class AppState: ObservableObject {
-    private static let calendarSignposter = OSSignposter(subsystem: "com.jiezi.app", category: "DomainCalendar")
-    private static let recordReadSignposter = OSSignposter(subsystem: "com.jiezi.app", category: "RecordRead")
-    @Published var selectedDomain: AppDomain = .expense
-    @Published var selectedDateKey = NativeLocalDate.dateKey(Date())
-    @Published var presentedOverlay: AppOverlay = .none
-    @Published var isSignedIn = false
-    @Published var currentUserId = ""
-    @Published var currentUserEmail = ""
-    @Published var lastShortcutMessage: String?
-    @Published var isBootstrapping = true
-    @Published var isSigningIn = false
-    @Published var isSigningOut = false
-    @Published var authMessage: String?
-    @Published var authMessageIsError = false
-    @Published var hasUploadToken = false
-    @Published var dashboard = DashboardSnapshot()
-    @Published var failedLocalImageIntakes: [LocalImageIntake] = []
-    @Published var pendingLocalImageCleanups: [LocalImageCleanup] = []
-    @Published var dashboardMessage: String?
-    @Published var isLoadingDashboard = false
-    @Published var isShowingCachedDashboard = false
-    @Published var shortcutCredentialMessage: String?
-    @Published var notificationPermissionMessage: String?
-    @Published var notificationPermissionStatusText = "æ£€æŸ¥ä¸­"
-    @Published var shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
-    @Published var shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
-    @Published var isOnboardingPresented = false
-    @Published var todayPath = NavigationPath()
-    @Published var inboxPath = NavigationPath()
-    @Published var recordsPath = NavigationPath()
-    @Published var homePath = NavigationPath()
-    @Published var selectedRecordDetail: NativeRecordDetail?
-    @Published var recordDetailMessage: String?
-    @Published var isSavingRecordDetail = false
-    @Published var isDeletingRecordDetail = false
-    @Published var recordFeedbackState: NativeAIFeedbackReviewState = .idle
-    @Published var recordExpressionPlanExposureState: NativeRecordExpressionPlanExposureState = .idle
-    @Published var isCreatingManualRecord = false
-    @Published var manualRecordMessage: String?
-    @Published var localProjectionRefreshMessage: String?
-    @Published var localProjectionRefreshDiagnostic: LocalHistoryMigrationDiagnostic?
-    private var pendingLocalRefreshMonths: Set<String> = []
-    @Published var localStorageInitializationMessage: String?
-    @Published var localStorageInitializationDiagnostic: LocalHistoryMigrationDiagnostic?
-    @Published var recordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
-    @Published var recordMonthMessages: [String: String] = [:]
-    @Published var loadingRecordMonthKey: String?
-    @Published private var loadingRemoteRecordMonthKeys: Set<String> = []
-    @Published var accounts: [NativeAccount] = []
-    @Published var localAccounts: [LocalAccount] = []
-    @Published var localAccountBalances: [UUID: Int64] = [:]
-    @Published var localAccountMessage: String?
-    @Published var localSyncState: LocalSyncState?
-    @Published var localBindingPreview: LocalBindingPreview?
-    @Published var isLoadingLocalBindingPreview = false
-    @Published var isSynchronizingLocalData = false
-    @Published var localSyncMessage: String?
-    @Published var localSyncDiagnostic: LocalSyncDiagnostic?
-    @Published var localSyncFailureDiagnostic: LocalHistoryMigrationDiagnostic?
-    @Published var financeVocabulary: [NativeFinanceVocabularyEntry] = []
-    @Published var selectedAccountDetail: NativeAccountDetail?
-    @Published var selectedAccountSourceSnapshot: NativeWalletSnapshot?
-    @Published var accountMessage: String?
-    @Published var isLoadingAccounts = false
-    @Published var isSavingAccount = false
-    @Published var isSubmittingRepayment = false
-    @Published var repaymentMessage: String?
-    @Published var repaymentCandidates: [String: NativeRepaymentCandidate] = [:]
-    @Published var stagingRepaymentId: String?
-    @Published var inboxFinanceMessage: String?
-    @Published var inboxActionRecordId: String?
-    @Published var inboxActionMessage: String?
-    @Published var inboxActionMessageIsError = false
-    @Published var isConfirmingPendingRecord = false
-    @Published var pendingResolutionMessage: String?
-    @Published var unboundRecords: [NativeUnboundRecord] = []
-    @Published var unboundRecordsMessage: String?
-    @Published var unboundBindingMessage: String?
-    @Published var isLoadingUnboundRecords = false
-    @Published var isBindingUnboundRecords = false
-    @Published var walletSnapshots: [NativeWalletSnapshot] = []
-    @Published var localWalletSnapshots: [LocalWalletSnapshot] = []
-    @Published var localWalletSnapshotHistory: [LocalWalletSnapshot] = []
-    @Published var isLoadingWalletSnapshots = false
-    @Published var walletSnapshotActionId: String?
-    @Published var walletSnapshotMessage: String?
-    @Published var insightsSnapshot: NativeInsightSnapshot?
-    @Published var isLoadingInsights = false
-    @Published var insightsMessage: String?
-    @Published var aiInsight: NativeAIInsight?
-    @Published var isLoadingAIInsight = false
-    @Published var aiInsightMessage: String?
-    @Published var aiInsightIsCached = false
-    @Published var userSettings = NativeUserSettings()
-    @Published var localVisionMode = LocalVisionModeStore().mode
-    @Published var hasBYOKAPIKey = (try? KeychainStore.shared.string(for: KeychainKeys.byokQwenAPIKey))?.isEmpty == false
-    @Published var settingsMessage: String?
-    @Published var isLoadingSettings = false
-    @Published var isSavingSettings = false
-    @Published var isCleaningSourceImages = false
-    @Published var isExportingData = false
-    @Published var isImportingLocalBackup = false
-    @Published var isImportingGenericData = false
-    @Published var isDeletingAccount = false
-    @Published var isPreparingHistoryMigration = false
-    @Published var canPauseHistoryMigration = false
-    @Published var historyMigrationPreview: String?
-    @Published var historyMigrationMessage: String?
-    @Published var historyMigrationPhase = ""
-    @Published var historyMigrationDiagnostic: LocalHistoryMigrationDiagnostic?
-    @Published var historyMigrationProgress: LocalHistoryMigrationProgress?
-    @Published var historyMigrationBlockers: [String] = []
-    @Published var historyMigrationBlockerCount = 0
-    @Published var historyMigrationUnresolvedCount = 0
-    @Published var historyMigrationSkippedImageCount = 0
-    @Published var historyMigrationPreservationIssues: [String] = []
-    @Published var localHistoryUnresolvedRecords: [LocalHistoryUnresolvedRecord] = []
-    @Published var isLoadingHistoryUnresolvedRecords = false
-    @Published var historyUnresolvedRecordsError: String?
-    @Published var localHistoryInventory: LocalHistoryInventorySnapshot?
-    @Published var localHistoryInventoryError: String?
-    @Published var isLoadingLocalHistoryInventory = false
-    @Published var cloudHistoryInventory = LocalHistoryCloudInventory.notRead
-    @Published var isReadingCloudHistoryInventory = false
-    private var historyMigrationArchive: Data?
-    private var historyMigrationOwner: String?
-    private var historyMigrationGeneration: Int?
-    private var historyMigrationSourceDigest: Data?
-    private var historyMigrationAttempt = 0
-    private var historyMigrationCheckpoint: LocalHistoryMigrationState?
-    private var historyMigrationProfileID: UUID?
-    private var historyMigrationAttemptID = UUID()
-    private var historyMigrationImportError: Error?
-    private let historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore?
-    private let historyInventoryReader: LocalHistoryInventoryReader?
-    private let historyUnresolvedRepository: LocalHistoryUnresolvedRepository?
-
-    private let authService = SupabaseAuthService()
-    private let dashboardRepository: DashboardRepositoryProtocol
-    private let recordRepository: RecordRepositoryProtocol
-    private let localExpenseUseCase: LocalExpenseUseCaseProtocol?
-    private let localRecordUseCase: LocalRecordUseCaseProtocol?
-    private let localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol?
-    private let localFactReader: LocalFactReader?
-    private let localCompanionMemoryRepository: LocalCompanionMemoryRepository?
-    private let localExpressionPersistence: LocalExpressionPersistence?
-    private let localImageStore: LocalImageStore?
-    private let localImageIntakeRepository: LocalImageIntakeRepository?
-    private let localRecordPortability: LocalRecordPortability?
-    private let localFactPortability: LocalFactPortability?
-    private let localCompleteBackupPortability: LocalCompleteBackupPortability?
-    private let genericImportService: GenericImportService?
-    private let localPendingFinancialRepository: LocalPendingFinancialRepository?
-    private let localFinancialBindingRepository: LocalFinancialBindingRepository?
-    private let localHistoryMigrationCache: LocalHistoryMigrationCache?
-    private let inboxRepository: InboxRepositoryProtocol
-    private let domainRepository: DomainRepositoryProtocol
-    private let snapshotStore: DashboardSnapshotStoreProtocol
-    private let accountRepository: AccountRepositoryProtocol
-    private let accountManagementRepository: AccountManagementRepositoryProtocol
-    private let accountReadPreparationRepository: AccountReadPreparationRepositoryProtocol
-    private var repaymentActionUseCase: RepaymentActionUseCase?
-    private var screenshotRepaymentUseCase: ScreenshotRepaymentUseCase?
-    private var accountManagementActionUseCase: AccountManagementActionUseCase?
-    private var accountReadPreparationUseCase: AccountReadPreparationUseCase?
-    private var accountBindingUseCase: AccountBindingUseCase?
-    private var accountBindingUseCaseMonthKey: String?
-    private var stagingLifecycleUseCase: StagingLifecycleUseCase?
-    private var pendingConfirmationUseCase: PendingConfirmationUseCase?
-    private var feedbackSubmissionUseCase: FeedbackSubmissionUseCase?
-    private var recordDetailImageUseCase: RecordDetailImageUseCase?
-    private var thumbnailImageUseCase: RecordDetailImageUseCase?
-    private var dashboardCoreTask: Task<Void, Never>?
-    @Published private var loadingLocalReadKeys: Set<String> = []
-    private var localMonthReadVersions: [String: Int] = [:]
-    private var stagingReadVersion = 0
-    private let unboundRecordRepository: UnboundRecordRepositoryProtocol
-    private let walletSnapshotRepository: WalletSnapshotRepositoryProtocol
-    private var walletSnapshotActionUseCase: WalletSnapshotActionUseCase?
-    private let insightsRepository: InsightsRepositoryProtocol
-    private let settingsRepository: SettingsRepositoryProtocol
-    private let financeVocabularyRepository: FinanceVocabularyRepositoryProtocol
-    private let localBindingRepository: LocalBindingRepository?
-    private let localSyncRunner: LocalSyncRunner?
-    private let onboardingProgressStore: OnboardingProgressStore
-    private let sessionProvider: NativeSessionProvider?
-    private let expressionPlanAcknowledgementSleep: NativeSleepProvider
-    private let keychain = KeychainStore.shared
-    private let localVisionModeStore = LocalVisionModeStore()
-    private let localUserSettingsStore: LocalUserSettingsStore
-    private var lastDashboardRefreshAt: Date?
-    private var recordDetailCache: [String: NativeRecordDetail] = [:]
-    private var recordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
-    private var localExpenseMonthGroups: [String: [NativeDayRecordGroup]] = [:]
-    private var localIncomeMonthGroups: [String: [NativeDayRecordGroup]] = [:]
-    private var localRecordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
-    // Remote and local projections have different freshness and deletion
-    // semantics. Keep them separate so loading one cannot erase the other.
-    private var remoteRecordMonthGroups: [String: [NativeDayRecordGroup]] = [:]
-    private var localRecordMonthDetails: [String: [String: NativeRecordDetail]] = [:]
-    private var localFactMonths: [String: LocalFactMonth] = [:]
-    private var loadingLocalExpenseMonthKey: String?
-    private var loadingLocalRecordMonthKey: String?
-    private var remoteRecordMonthTasks: [String: Task<Void, Never>] = [:]
-    private var activeRecordReference: String?
-    private var prefetchingRecordReferences: Set<String> = []
-    private var expressionPlanDeliveryTokens: [String: UUID] = [:]
-    private var pendingRecordExpressionPlans: [String: PendingRecordExpressionPlanDelivery] = [:]
-    private var expressionPlanAcknowledgementTokens: [String: UUID] = [:]
-    private var visibleRecordExpressionPlanCards: [String: String] = [:]
-    private var insightsLoadedAt: Date?
-    private var insightsLoadedLocally = false
-    private var dashboardRefreshGeneration = 0
-    private var userStateGeneration = 0
-    private var dashboardSupplementTask: Task<Void, Never>?
-    private var isLoadingFinanceVocabulary = false
-    private var shouldDeferOnboardingForExternalRoute = false
-
-    init(
-        dashboardRepository: DashboardRepositoryProtocol = DashboardRepository(),
-        recordRepository: RecordRepositoryProtocol = RecordRepository(),
-        localExpenseUseCase: LocalExpenseUseCaseProtocol? = nil,
-        localRecordUseCase: LocalRecordUseCaseProtocol? = nil,
-        localStorageInitializationMessage: String? = nil,
-        localWalletSnapshotUseCase: LocalWalletSnapshotUseCaseProtocol? = nil,
-        localFactReader: LocalFactReader? = nil,
-        localCompanionMemoryRepository: LocalCompanionMemoryRepository? = nil,
-        localExpressionPersistence: LocalExpressionPersistence? = nil,
-        localImageStore: LocalImageStore? = nil,
-        localImageIntakeRepository: LocalImageIntakeRepository? = nil,
-        localFactPortability: LocalFactPortability? = nil,
-        localCompleteBackupPortability: LocalCompleteBackupPortability? = nil,
-        genericImportService: GenericImportService? = nil,
-        localPendingFinancialRepository: LocalPendingFinancialRepository? = nil,
-        localFinancialBindingRepository: LocalFinancialBindingRepository? = nil,
-        inboxRepository: InboxRepositoryProtocol = InboxRepository(),
-        domainRepository: DomainRepositoryProtocol = DomainRepository(),
-        snapshotStore: DashboardSnapshotStoreProtocol = DashboardSnapshotStore(),
-        accountRepository: AccountRepositoryProtocol = AccountRepository(),
-        accountManagementRepository: AccountManagementRepositoryProtocol? = nil,
-        accountReadPreparationRepository: AccountReadPreparationRepositoryProtocol? = nil,
-        repaymentActionUseCase: RepaymentActionUseCase? = nil,
-        screenshotRepaymentUseCase: ScreenshotRepaymentUseCase? = nil,
-        accountManagementActionUseCase: AccountManagementActionUseCase? = nil,
-        accountReadPreparationUseCase: AccountReadPreparationUseCase? = nil,
-        accountBindingUseCase: AccountBindingUseCase? = nil,
-        stagingLifecycleUseCase: StagingLifecycleUseCase? = nil,
-        pendingConfirmationUseCase: PendingConfirmationUseCase? = nil,
-        feedbackSubmissionUseCase: FeedbackSubmissionUseCase? = nil,
-        recordDetailImageUseCase: RecordDetailImageUseCase? = nil,
-        unboundRecordRepository: UnboundRecordRepositoryProtocol = UnboundRecordRepository(),
-        walletSnapshotRepository: WalletSnapshotRepositoryProtocol = WalletSnapshotRepository(),
-        walletSnapshotActionUseCase: WalletSnapshotActionUseCase? = nil,
-        insightsRepository: InsightsRepositoryProtocol = InsightsRepository(),
-        settingsRepository: SettingsRepositoryProtocol = SettingsRepository(),
-        financeVocabularyRepository: FinanceVocabularyRepositoryProtocol = FinanceVocabularyRepository(),
-        localBindingRepository: LocalBindingRepository? = nil,
-        localSyncRunner: LocalSyncRunner? = nil,
-        onboardingProgressStore: OnboardingProgressStore = OnboardingProgressStore(),
-        sessionProvider: NativeSessionProvider? = nil,
-        localUserSettingsStore: LocalUserSettingsStore = LocalUserSettingsStore(),
-        historyMigrationDiagnosticStore: LocalHistoryMigrationDiagnosticStore? = nil,
-        historyUnresolvedRepository: LocalHistoryUnresolvedRepository? = nil,
-        expressionPlanAcknowledgementSleep: @escaping NativeSleepProvider = {
-            try await Task<Never, Never>.sleep(nanoseconds: $0)
-        }
-    ) {
-        self.dashboardRepository = dashboardRepository
-        self.recordRepository = recordRepository
-        let simulatesLocalStorageInitializationFailure = localStorageInitializationMessage != nil
-        let usesDefaultLocalStorage = !simulatesLocalStorageInitializationFailure
-            && localExpenseUseCase == nil && localRecordUseCase == nil
-        let defaultLocalStorage: AppDefaultLocalStorage?
-        var localStorageInitializationError: Error? = nil
-        var storageInitializationMessage = localStorageInitializationMessage
-        if usesDefaultLocalStorage {
-            do {
-                defaultLocalStorage = try Self.makeDefaultLocalStorage()
-            } catch {
-                defaultLocalStorage = nil
-                localStorageInitializationError = error
-                storageInitializationMessage = nil
-            }
-        } else {
-            defaultLocalStorage = nil
-        }
-        if let localExpenseUseCase {
-            self.localExpenseUseCase = localExpenseUseCase
-        } else if usesDefaultLocalStorage {
-            self.localExpenseUseCase = defaultLocalStorage?.expenseUseCase
-        } else {
-            self.localExpenseUseCase = simulatesLocalStorageInitializationFailure
-                ? nil
-                : Self.defaultLocalExpenseUseCase()
-        }
-        if let localRecordUseCase {
-            self.localRecordUseCase = localRecordUseCase
-        } else if usesDefaultLocalStorage {
-            self.localRecordUseCase = defaultLocalStorage?.recordUseCase
-        } else {
-            // Dependency-injected local stores are intentionally isolated. Creating
-            // the default record use case here would read the user's real local DB
-            // alongside a test/staging expense use case and contaminate projections.
-            self.localRecordUseCase = nil
-        }
-        self.localWalletSnapshotUseCase = localWalletSnapshotUseCase
-            ?? (usesDefaultLocalStorage ? defaultLocalStorage?.walletSnapshotUseCase : nil)
-        self.localFactReader = usesDefaultLocalStorage
-            ? (localFactReader ?? defaultLocalStorage?.factReader)
-            : localFactReader
-        self.localCompanionMemoryRepository = localCompanionMemoryRepository
-            ?? (usesDefaultLocalStorage ? defaultLocalStorage?.companionMemoryRepository : nil)
-        self.localExpressionPersistence = localExpressionPersistence
-            ?? (usesDefaultLocalStorage ? defaultLocalStorage?.expressionPersistence : nil)
-        self.localImageStore = localImageStore ?? defaultLocalStorage?.imageStore ?? Self.defaultLocalImageStore()
-        self.localImageIntakeRepository = localImageIntakeRepository ?? Self.defaultLocalImageIntakeRepository()
-        self.localRecordPortability = Self.defaultLocalRecordPortability()
-        self.localFactPortability = usesDefaultLocalStorage
-            ? (localFactPortability ?? Self.defaultLocalFactPortability())
-            : localFactPortability
-        self.localCompleteBackupPortability = localCompleteBackupPortability ?? Self.defaultLocalCompleteBackupPortability()
-        self.genericImportService = genericImportService ?? Self.defaultGenericImportService()
-        self.localPendingFinancialRepository = localPendingFinancialRepository ?? defaultLocalStorage?.pendingFinancialRepository
-        self.localFinancialBindingRepository = localFinancialBindingRepository ?? defaultLocalStorage?.financialBindingRepository
-        self.localHistoryMigrationCache = defaultLocalStorage?.historyMigrationCache
-        self.historyMigrationDiagnosticStore = historyMigrationDiagnosticStore
-            ?? defaultLocalStorage?.historyMigrationDiagnosticStore
-            ?? (try? LocalHistoryMigrationDiagnosticStore())
-        self.historyInventoryReader = defaultLocalStorage?.historyInventoryReader
-        self.historyUnresolvedRepository = historyUnresolvedRepository ?? defaultLocalStorage?.historyUnresolvedRepository
-        self.inboxRepository = inboxRepository
-        self.domainRepository = domainRepository
-        self.snapshotStore = snapshotStore
-        self.accountRepository = accountRepository
-        self.accountManagementRepository = accountManagementRepository
-            ?? (accountRepository as? AccountManagementRepositoryProtocol)
-            ?? AccountRepository()
-        self.accountReadPreparationRepository = accountReadPreparationRepository
-            ?? (accountRepository as? AccountReadPreparationRepositoryProtocol)
-            ?? AccountRepository()
-        self.accountManagementActionUseCase = accountManagementActionUseCase
-        self.repaymentActionUseCase = repaymentActionUseCase
-        self.screenshotRepaymentUseCase = screenshotRepaymentUseCase
-        self.accountReadPreparationUseCase = accountReadPreparationUseCase
-        self.accountBindingUseCase = accountBindingUseCase
-        self.stagingLifecycleUseCase = stagingLifecycleUseCase
-        self.pendingConfirmationUseCase = pendingConfirmationUseCase
-        self.feedbackSubmissionUseCase = feedbackSubmissionUseCase
-        self.recordDetailImageUseCase = recordDetailImageUseCase
-        self.unboundRecordRepository = unboundRecordRepository
-        self.walletSnapshotRepository = walletSnapshotRepository
-        self.walletSnapshotActionUseCase = walletSnapshotActionUseCase
-        self.insightsRepository = insightsRepository
-        self.settingsRepository = settingsRepository
-        self.financeVocabularyRepository = financeVocabularyRepository
-        self.localBindingRepository = localBindingRepository ?? Self.defaultLocalBindingRepository()
-        self.localSyncRunner = localSyncRunner ?? Self.defaultLocalSyncRunner()
-        self.onboardingProgressStore = onboardingProgressStore
-        self.sessionProvider = sessionProvider
-        self.localUserSettingsStore = localUserSettingsStore
-        self.userSettings = localUserSettingsStore.load()
-        self.expressionPlanAcknowledgementSleep = expressionPlanAcknowledgementSleep
-        self.localStorageInitializationMessage = storageInitializationMessage
-        if let localStorageInitializationError {
-            let entry = recordLocalStorageInitializationFailure(localStorageInitializationError)
-            self.localStorageInitializationMessage = entry?.userMessage ?? "æœ¬åœ°æ•°æ®åˆå§‹åŒ–å¤±è´¥ï¼›åŽŸå§‹é”™è¯¯å·²éšè—ã€‚"
-        }
-    }
-
-    func bootstrap() {
-        Task {
-            if let localStorageInitializationMessage {
-                manualRecordMessage = localStorageInitializationMessage
-                presentedOverlay = .settings
-                isBootstrapping = false
-                return
-            }
-            do {
-                _ = try await localExpenseUseCase?.prepareProfile()
-                if let diagnostic = try? historyMigrationDiagnosticStore?.resolveLatest(
-                    operation: "local-storage-init",
-                    outcome: "æœ¬æœºæ•°æ®åº“å·²å°±ç»ªã€‚",
-                    expectedAccountID: nil
-                ) {
-                    localStorageInitializationDiagnostic = diagnostic
-                }
-                refreshLocalSyncState()
-            } catch {
-                let diagnostic = recordLocalStorageInitializationFailure(error)
-                manualRecordMessage = diagnostic?.userMessage ?? "æœ¬åœ°æ•°æ®åˆå§‹åŒ–å¤±è´¥ï¼›åŽŸå§‹é”™è¯¯å·²éšè—ã€‚"
-            }
-            await restoreAuthentication()
-            if !isSignedIn {
-                presentedOverlay = .records
-                await loadRecordMonth(Self.currentMonthKey, force: true)
-            }
-            isBootstrapping = false
-            await refreshNotificationPermissionStatus()
-            presentOnboardingIfNeeded()
-        }
-    }
-
-    @discardableResult
-    private func recordLocalStorageInitializationFailure(_ error: Error) -> LocalHistoryMigrationDiagnostic? {
-        guard let historyMigrationDiagnosticStore else { return nil }
-        let entry = historyMigrationDiagnosticStore.record(
-            error,
-            phase: "æœ¬æœºæ•°æ®åº“åˆå§‹åŒ–",
-            operation: "local-storage-init",
-            codeOverride: "LOCAL-STORAGE-INIT",
-            attemptID: UUID(),
-            committed: false,
-            recoveryAction: "è¯·æ£€æŸ¥æœ¬æœºå­˜å‚¨çŠ¶æ€åŽé‡å¯åº”ç”¨ï¼›ä¸è¦æ¸…é™¤åº”ç”¨æ•°æ®ã€‚"
-        )
-        localStorageInitializationDiagnostic = entry
-        return entry
-    }
-
-    private func restoreAuthentication() async {
-        let generation = userStateGeneration
-        do {
-            let session: SupabaseAuthSession
-            do {
-                session = try await authService.currentSession()
-            } catch {
-                guard let legacy = try? requireSession(),
-                      let refreshToken = legacy.refreshToken, !refreshToken.isEmpty else {
-                    hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
-                    updateShortcutCredentialMessage()
-                    return
-                }
-                session = try await authService.restoreSession(accessToken: legacy.accessToken, refreshToken: refreshToken)
-            }
-            guard generation == userStateGeneration else { return }
-            try save(session: session)
-            apply(session: session)
-            if mayReadRemoteBusinessData { restoreDashboardSnapshot(userId: session.user.id) }
-            hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
-            updateShortcutCredentialMessage()
-            Task {
-                await loadAccounts()
-                await refreshDashboard()
-                await loadRecordMonth(Self.currentMonthKey, force: true)
-            }
-        } catch {
-            guard generation == userStateGeneration else { return }
-            if isInvalidRefreshSessionError(error) {
-                invalidateSession(message: "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•ã€‚")
-            } else {
-                authMessage = error.localizedDescription
-                authMessageIsError = true
-            }
-        }
-    }
-
-    func signIn(email: String, password: String) async {
-        guard !isSigningOut else { authMessage = "æ­£åœ¨å®Œæˆä¸Šæ¬¡é€€å‡ºï¼Œè¯·ç¨åŽé‡è¯•ã€‚"; return }
-        guard !isSigningIn else { return }
-        isSigningIn = true
-        defer { isSigningIn = false }
-        authMessage = nil
-        authMessageIsError = false
-
-        do {
-            let session = try await authService.signIn(email: email, password: password)
-            try save(session: session)
-            apply(session: session)
-            let generation = userStateGeneration
-            hasUploadToken = false
-            authMessage = "å·²ç™»å½•ï¼Œæœ¬æœºæ•°æ®å¯ç»§ç»­ä½¿ç”¨ã€‚"
-            do {
-                let uploadToken = try await authService.fetchUploadToken(userId: session.user.id, accessToken: session.accessToken)
-                guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-                try keychain.setString(uploadToken, for: KeychainKeys.uploadToken)
-                hasUploadToken = true
-            } catch {
-                guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-                authMessage = "å·²ç™»å½•ï¼›Hosted å¿«æ·æŒ‡ä»¤å‡­æ®æš‚ä¸å¯ç”¨ï¼Œå¯åœ¨è®¾ç½®ä¸­é‡è¯•ã€‚"
-            }
-            updateShortcutCredentialMessage()
-            presentOnboardingIfNeeded()
-            await loadAccounts()
-            await refreshDashboard()
-            await loadRecordMonth(Self.currentMonthKey, force: true)
-        } catch {
-            authMessage = error.localizedDescription
-            authMessageIsError = true
-        }
-
-        isSigningIn = false
-    }
-
-    func signUp(
-        email: String,
-        password: String,
-        acceptedTerms: Bool,
-        acceptedSensitiveData: Bool
-    ) async {
-        guard !isSigningOut else { authMessage = "æ­£åœ¨å®Œæˆä¸Šæ¬¡é€€å‡ºï¼Œè¯·ç¨åŽé‡è¯•ã€‚"; return }
-        guard !isSigningIn else { return }
-        guard acceptedTerms else {
-            authMessage = "è¯·å…ˆé˜…è¯»å¹¶åŒæ„æœåŠ¡åè®®ä¸Žéšç§æ”¿ç­–"
-            authMessageIsError = true
-            return
-        }
-        guard acceptedSensitiveData else {
-            authMessage = "è¯·ç¡®è®¤åŒæ„å¤„ç†ä¸»åŠ¨æäº¤çš„æ•æ„Ÿæ•°æ®åŠè·¨å¢ƒå­˜å‚¨è¯´æ˜Ž"
-            authMessageIsError = true
-            return
-        }
-        isSigningIn = true
-        authMessage = nil
-        authMessageIsError = false
-        defer { isSigningIn = false }
-
-        do {
-            let result = try await authService.signUp(
-                email: email,
-                password: password,
-                consent: .current()
-            )
-            switch result {
-            case .confirmationRequired(let address):
-                authMessage = "æ³¨å†ŒæˆåŠŸã€‚è¯·å‰å¾€ \(address) å®Œæˆé‚®ç®±ç¡®è®¤ï¼Œç„¶åŽè¿”å›žç™»å½•ã€‚"
-                authMessageIsError = false
-
-            case .signedIn(let session):
-                let uploadToken = try? await fetchUploadTokenAfterRegistration(session: session)
-                if let uploadToken, !uploadToken.isEmpty {
-                    try save(session: session, uploadToken: uploadToken)
-                    hasUploadToken = true
-                } else {
-                    try save(session: session)
-                    hasUploadToken = false
-                }
-                apply(session: session)
-                authMessage = hasUploadToken
-                    ? "æ³¨å†ŒæˆåŠŸï¼Œå¿«æ·æŒ‡ä»¤å‡­æ®å·²åŒæ­¥ã€‚"
-                    : "æ³¨å†ŒæˆåŠŸã€‚ä¸Šä¼ å‡­æ®æ­£åœ¨ç”Ÿæˆï¼Œå¯ç¨åŽåœ¨è®¾ç½®ä¸­é‡æ–°æ£€æŸ¥ã€‚"
-                updateShortcutCredentialMessage()
-                presentOnboardingIfNeeded()
-                await refreshDashboard()
-            }
-        } catch {
-            authMessage = error.localizedDescription
-            authMessageIsError = true
-        }
-    }
-
-    func signOut() {
-        guard !isSigningOut else { return }
-        let userId = currentUserId.isEmpty ? (try? requireSession().user.id) : currentUserId
-        // Revoke UI/request generations before awaiting the SDK's network work.
-        invalidateSession(message: "")
-        isSigningOut = true
-        let generation = userStateGeneration
-        if let userId { try? snapshotStore.remove(userId: userId) }
-        Task {
-            defer { isSigningOut = false }
-            do {
-                try await authService.signOut()
-            } catch {
-                guard generation == userStateGeneration else { return }
-                authMessage = "æœ¬æœºå·²é€€å‡ºï¼›äº‘ç«¯ä¼šè¯æ³¨é”€æš‚æœªç¡®è®¤ï¼š\(error.localizedDescription)"
-                authMessageIsError = true
-            }
-        }
-    }
-
-    func verifyShortcutCredential() {
-        do {
-            hasUploadToken = (try keychain.string(for: KeychainKeys.uploadToken))?.isEmpty == false
-            updateShortcutCredentialMessage()
-        } catch {
-            shortcutCredentialMessage = error.localizedDescription
-        }
-    }
-
-    func refreshLocalSyncState() {
-        guard let localBindingRepository else {
-            localSyncState = nil
-            return
-        }
-        do {
-            let profile = try localBindingRepository.activeProfile()
-            localSyncState = try localBindingRepository.syncState(profileID: profile.id)
-            localSyncMessage = nil
-        } catch {
-            localSyncState = nil
-            localSyncMessage = "æœ¬åœ°åŒæ­¥çŠ¶æ€è¯»å–å¤±è´¥ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    func prepareLocalBindingPreview() async {
-        guard isSignedIn, !currentUserId.isEmpty else { return }
-        guard let localBindingRepository else {
-            localSyncMessage = "æœ¬åœ°åŒæ­¥æœåŠ¡ä¸å¯ç”¨ã€‚"
-            return
-        }
-        guard !isLoadingLocalBindingPreview else { return }
-        isLoadingLocalBindingPreview = true
-        localSyncMessage = nil
-        defer { isLoadingLocalBindingPreview = false }
-
-        do {
-            let session = try await validSession()
-            let userID = session.user.id
-            guard userID == currentUserId else { return }
-            let useCase = LocalBindingPreviewUseCase(
-                repository: localBindingRepository,
-                scopeProvider: DomainRepositoryBindingScopeProvider(
-                    repository: domainRepository,
-                    accessTokenProvider: { [weak self] in
-                        guard let self else { throw SupabaseRemoteError.missingSession }
-                        let session = try await self.validSession()
-                        return session.accessToken
-                    }
-                )
-            )
-            localBindingPreview = try await useCase.makePreview(
-                cloudUserID: userID,
-                email: session.user.email
-            )
-        } catch {
-            localBindingPreview = nil
-            localSyncMessage = "æ— æ³•è¯»å–äº‘ç«¯åŒæ­¥èŒƒå›´ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    func deferLocalSync() {
-        localBindingPreview = nil
-        refreshLocalSyncState()
-        localSyncMessage = "å·²ä¿ç•™æœ¬åœ°æ•°æ®ï¼ŒåŒæ­¥å°šæœªå¼€å¯ã€‚"
-    }
-
-    func disableLocalSync() {
-        guard let localBindingRepository else { return }
-        do {
-            let profile = try localBindingRepository.activeProfile()
-            localSyncState = try localBindingRepository.disableSync(profileID: profile.id)
-            localBindingPreview = nil
-            localSyncMessage = "äº‘åŒæ­¥å·²å…³é—­ï¼Œæœ¬åœ°æ•°æ®ä»ä¿ç•™åœ¨æ­¤ iPhoneã€‚"
-        } catch {
-            localSyncMessage = "å…³é—­äº‘åŒæ­¥å¤±è´¥ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    func confirmLocalBinding() {
-        guard let preview = localBindingPreview,
-              let localBindingRepository else { return }
-        do {
-            localSyncState = try localBindingRepository.confirmBinding(
-                profileID: preview.workspaceID,
-                cloudUserID: preview.candidateCloudUserID
-            )
-            localBindingPreview = nil
-            localSyncMessage = "å·²ç»‘å®šæœ¬åœ° workspaceï¼Œæ­£åœ¨è¿›è¡Œé¦–æ¬¡åŒæ­¥ã€‚"
-            Task { await synchronizeLocalData() }
-        } catch {
-            localSyncMessage = error.localizedDescription
-        }
-    }
-
-    func synchronizeLocalData() async {
-        guard !isSynchronizingLocalData else { return }
-        guard isSignedIn, !currentUserId.isEmpty else {
-            localSyncMessage = "è¯·å…ˆç™»å½•åŽå†åŒæ­¥ã€‚"
-            return
-        }
-        guard let localBindingRepository else {
-            localSyncMessage = "æœ¬åœ°åŒæ­¥æœåŠ¡ä¸å¯ç”¨ã€‚"
-            return
-        }
-        guard let localSyncRunner else {
-            localSyncMessage = "æœ¬åœ°åŒæ­¥æœåŠ¡ä¸å¯ç”¨ã€‚"
-            return
-        }
-
-        isSynchronizingLocalData = true
-        localSyncMessage = nil
-        defer { isSynchronizingLocalData = false }
-
-        let syncAttemptID = UUID()
-        var diagnosticProfileID: UUID?
-        var pendingOperationCount = 0
-        do {
-            let profile = try localBindingRepository.activeProfile()
-            diagnosticProfileID = profile.id
-            pendingOperationCount = try localBindingRepository.workspaceSummary(profileID: profile.id).pendingOutboxCount
-            localSyncDiagnostic = LocalSyncDiagnostic(
-                phase: .preflight,
-                profileID: profile.id,
-                pendingOperationCount: pendingOperationCount,
-                uploadedOperationCount: 0,
-                importedRecordCount: 0,
-                failure: nil,
-                syncStatus: localSyncState?.status
-            )
-            let session = try await validSession()
-            guard session.user.id == currentUserId else {
-                throw LocalSyncError.syncNotAuthorized
-            }
-            localSyncDiagnostic = LocalSyncDiagnostic(
-                phase: .transport,
-                profileID: profile.id,
-                pendingOperationCount: pendingOperationCount,
-                uploadedOperationCount: 0,
-                importedRecordCount: 0,
-                failure: nil,
-                syncStatus: .syncing
-            )
-            let result = try await localSyncRunner.synchronize(
-                profileID: profile.id,
-                cloudUserID: session.user.id
-            )
-            localSyncState = result.state
-            localSyncDiagnostic = LocalSyncDiagnostic(
-                phase: .completed,
-                profileID: profile.id,
-                pendingOperationCount: pendingOperationCount,
-                uploadedOperationCount: result.uploadedOperationCount,
-                importedRecordCount: result.importedRecordCount,
-                failure: nil,
-                syncStatus: result.state.status
-            )
-            _ = await prepareLocalWorkspace()
-            await loadRecordMonth(Self.currentMonthKey, force: true)
-            // Refreshing the current dashboard may run concurrently with the
-            // sync completion projection. Keep the authoritative runner
-            // result visible unless that refresh explicitly invalidated the
-            // session (in which case the state was intentionally reset).
-            if isSignedIn {
-                localSyncState = result.state
-            }
-            if let diagnostic = try? historyMigrationDiagnosticStore?.resolveLatest(
-                operation: "local-sync",
-                outcome: "é‡è¯•åŒæ­¥å·²å®Œæˆã€‚",
-                expectedAccountID: currentUserId
-            ) {
-                localSyncFailureDiagnostic = diagnostic
-            }
-            localSyncMessage = result.importedRecordCount > 0
-                ? "åŒæ­¥å®Œæˆï¼Œå·²åˆå¹¶ \(result.importedRecordCount) æ¡æœ¬åœ°è®°å½•ã€‚"
-                : "åŒæ­¥å®Œæˆã€‚"
-        } catch {
-            refreshLocalSyncState()
-            if let diagnosticProfileID {
-                localSyncDiagnostic = LocalSyncDiagnostic(
-                    phase: .failed,
-                    profileID: diagnosticProfileID,
-                    pendingOperationCount: pendingOperationCount,
-                    uploadedOperationCount: 0,
-                    importedRecordCount: 0,
-                    failure: Self.syncDiagnosticFailure(for: error),
-                    syncStatus: localSyncState?.status
-                )
-            }
-            let failure = Self.syncDiagnosticFailure(for: error)
-            let entry = historyMigrationDiagnosticStore?.record(
-                error,
-                phase: "åŒæ­¥è¯·æ±‚",
-                accountID: currentUserId,
-                operation: "local-sync",
-                codeOverride: Self.syncDiagnosticCode(for: failure),
-                progressSummary: Self.syncProgressSummary(for: error, pendingOperationCount: pendingOperationCount),
-                attemptID: syncAttemptID,
-                committed: false,
-                recoveryAction: "æœ¬æœºäº‹å®žä¿ç•™ï¼›æ ¸å¯¹åŒæ­¥çŠ¶æ€åŽå¯é‡è¯•å½“å‰æ”¯æŒèŒƒå›´ã€‚"
-            )
-            localSyncFailureDiagnostic = entry
-            localSyncMessage = entry?.userMessage ?? "äº‘åŒæ­¥æœªå®Œæˆï¼›æœ¬æœºæ•°æ®ä¿ç•™ï¼Œè¯·æ£€æŸ¥è®¾ç½®ä¸­çš„åŒæ­¥çŠ¶æ€åŽé‡è¯•ã€‚"
-        }
-    }
-
-    private static func syncDiagnosticCode(for failure: LocalSyncDiagnosticFailure) -> String {
-        switch failure {
-        case .transport: return "SYNC-TRANSPORT"
-        case .notAuthorized: return "SYNC-NOT-AUTHORIZED"
-        case .partialFailure: return "SYNC-PARTIAL-FAILURE"
-        case .cursorExpired: return "SYNC-CURSOR-EXPIRED"
-        case .conflict: return "SYNC-CONFLICT"
-        case .invalidResponse: return "SYNC-INVALID-RESPONSE"
-        case .localConstraint: return "SYNC-LOCAL-CONSTRAINT"
-        case .unknown: return "SYNC-UNKNOWN"
-        }
-    }
-
-    private static func syncProgressSummary(for error: Error, pendingOperationCount: Int) -> String {
-        if let syncError = error as? LocalSyncError,
-           case .partialFailure(let rejectedOperationIDs) = syncError {
-            return "å¼€å§‹æ—¶å¾…å¤„ç† \(pendingOperationCount) é¡¹ï¼›æœåŠ¡ç«¯æ‹’ç» \(rejectedOperationIDs.count) é¡¹ã€‚"
-        }
-        return "å¼€å§‹æ—¶å¾…å¤„ç† \(pendingOperationCount) é¡¹ã€‚"
-    }
-
-    func loadLatestLocalSyncDiagnostic() {
-        guard let historyMigrationDiagnosticStore, !currentUserId.isEmpty else {
-            localSyncFailureDiagnostic = nil
-            return
-        }
-        let accountHint = LocalHistoryMigrationDiagnosticStore.identityHint(currentUserId)
-        localSyncFailureDiagnostic = (try? historyMigrationDiagnosticStore.recent())?.last {
-            $0.operation == "local-sync" && $0.accountHint == accountHint
-        }
-    }
-
-    private static func syncDiagnosticFailure(for error: Error) -> LocalSyncDiagnosticFailure {
-        if let syncError = error as? LocalSyncError {
-            switch syncError {
-            case .syncNotAuthorized, .bindingMismatch: return .notAuthorized
-            case .partialFailure: return .partialFailure
-            case .cursorExpired: return .cursorExpired
-            case .remoteConflict: return .conflict
-            case .invalidResponse: return .invalidResponse
-            case .invalidWorkspace, .staleAttempt: return .unknown
-            }
-        }
-        if error is LocalWriteConstraintError {
-            return .localConstraint
-        }
-        if error is SupabaseRemoteError {
-            return .transport
-        }
-        return .transport
-    }
-
-    func refreshDashboard() async {
-        if let task = dashboardCoreTask { await task.value; return }
-        let generation = userStateGeneration
-        let task = Task { @MainActor in
-            defer { if generation == self.userStateGeneration { self.dashboardCoreTask = nil } }
-            await self.performDashboardRefresh()
-        }
-        dashboardCoreTask = task
-        await task.value
-    }
-
-    private func performDashboardRefresh() async {
-        guard !isLoadingDashboard else { return }
-        dashboardRefreshGeneration += 1
-        let generation = dashboardRefreshGeneration
-        dashboardSupplementTask?.cancel()
-        isLoadingDashboard = true
-        dashboardMessage = nil
-        lastDashboardRefreshAt = Date()
-        defer {
-            if generation == dashboardRefreshGeneration {
-                isLoadingDashboard = false
-            }
-        }
-
-        if !mayReadRemoteBusinessData,
-           localFactReader != nil || localExpenseUseCase != nil || localRecordUseCase != nil {
-            dashboard = DashboardSnapshot()
-            dashboard.domains = Self.fallbackDomains
-            isShowingCachedDashboard = false
-            let monthKey = Self.currentMonthKey
-            var monthKeys = Set(localFactMonths.keys)
-            monthKeys.formUnion(localExpenseMonthGroups.keys)
-            monthKeys.formUnion(localRecordMonthGroups.keys)
-            monthKeys.insert(monthKey)
-            if localFactReader != nil {
-                for key in monthKeys.sorted() {
-                    await readDeviceFactMonth(key, force: true)
-                }
-            } else {
-                for key in monthKeys.sorted() {
-                    if localExpenseUseCase != nil { await readDeviceExpenseMonth(key, force: true) }
-                    if localRecordUseCase != nil { await readDeviceRecordMonth(key, force: true) }
-                }
-                if monthKey == Self.currentMonthKey {
-                    applyLocalRecordMonth()
-                    await applyLocalStagingProjection()
-                }
-            }
-            dashboard.domains = domainsWithUpdatedCounts(Self.fallbackDomains, snapshot: dashboard)
-            dashboardMessage = recordMonthMessages[monthKey]
-            return
-        }
-
-        do {
-            let (fetchedSnapshot, session) = try await fetchDashboardCoreWithValidSession()
-            guard generation == dashboardRefreshGeneration else { return }
-            let snapshot = preparedCoreSnapshot(fetchedSnapshot)
-            publishDashboard(snapshot, userId: session.user.id)
-            await importRemoteExpenseDetails(snapshot.recordDetails.values)
-            guard generation == dashboardRefreshGeneration else { return }
-            scheduleDashboardSupplement(snapshot, session: session, generation: generation)
-            Task { [weak self] in await self?.loadFinanceVocabulary() }
-        } catch {
-            guard generation == dashboardRefreshGeneration, !(error is CancellationError) else { return }
-            if isInvalidRefreshSessionError(error) {
-                invalidateSession(message: "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•ã€‚")
-            } else {
-                dashboardMessage = isShowingCachedDashboard
-                    ? "ç½‘ç»œåŒæ­¥æš‚æ—¶å¤±è´¥ï¼Œæ­£åœ¨å±•ç¤ºä¸Šæ¬¡ä¿å­˜çš„æ•°æ®ã€‚"
-                    : error.localizedDescription
-            }
-        }
-
-    }
-
-    private func fetchDashboardCoreWithValidSession() async throws -> (DashboardSnapshot, SupabaseAuthSession) {
-        var session = try await validSession()
-        do {
-            return (try await dashboardRepository.fetchDashboardCore(accessToken: session.accessToken), session)
-        } catch {
-            guard isExpiredJWTError(error) else { throw error }
-            session = try await validSession(forceRefresh: true)
-            return (try await dashboardRepository.fetchDashboardCore(accessToken: session.accessToken), session)
-        }
-    }
-
-    private func preparedCoreSnapshot(_ snapshot: DashboardSnapshot) -> DashboardSnapshot {
-        let mergedSnapshot = snapshot.mergingUnavailableSections(from: dashboard)
-        var cachedImageURLs: [String: URL] = [:]
-        for detail in dashboard.recordDetails.values {
-            if let path = detail.imagePath, let url = detail.imageURL { cachedImageURLs[path] = url }
-        }
-        for record in dashboard.stagingRecords {
-            if let path = record.imagePath, let url = record.imageURL { cachedImageURLs[path] = url }
-        }
-        for expense in dashboard.pendingExpenses {
-            if let path = expense.imagePath, let url = expense.imageURL { cachedImageURLs[path] = url }
-        }
-        for detail in recordDetailCache.values {
-            if let path = detail.imagePath, let url = detail.imageURL { cachedImageURLs[path] = url }
-        }
-
-        var prepared = mergedSnapshot.applyingSignedImageURLs(
-            cachedImageURLs,
-            markMissingAsFailure: false
-        )
-        let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
-        prepared.domains = domainsWithUpdatedCounts(definitions, snapshot: prepared)
-        return prepared
-    }
-
-    private func publishDashboard(_ snapshot: DashboardSnapshot, userId: String) {
-        dashboard = snapshot
-        isShowingCachedDashboard = false
-        try? snapshotStore.save(snapshot, userId: userId)
-        for detail in snapshot.recordDetails.values {
-            let canonicalReference = NativeRecordReference(detail.id).canonicalValue
-            recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
-        }
-    }
-
-    private func scheduleDashboardSupplement(
-        _ snapshot: DashboardSnapshot,
-        session: SupabaseAuthSession,
-        generation: Int
-    ) {
-        dashboardSupplementTask = Task { [weak self] in
-            guard let self else { return }
-            async let resolvedDomains = self.resolvedDomains(
-                accessToken: session.accessToken,
-                snapshot: snapshot
-            )
-            async let hydratedSnapshot = try? self.dashboardRepository.hydrateDashboardImages(
-                snapshot,
-                accessToken: session.accessToken
-            )
-            let (domains, hydrated) = await (resolvedDomains, hydratedSnapshot)
-            guard !Task.isCancelled,
-                  self.isSignedIn,
-                  generation == self.dashboardRefreshGeneration else { return }
-
-            var supplemented = hydrated ?? snapshot
-            supplemented.domains = domains
-            self.publishDashboard(supplemented, userId: session.user.id)
-            await self.importRemoteExpenseDetails(supplemented.recordDetails.values)
-            if let selectedId = self.selectedRecordDetail?.id,
-               let selected = self.recordDetailCache[NativeRecordReference(selectedId).canonicalValue] {
-                self.selectedRecordDetail = selected
-            }
-            self.prefetchDashboardImages(supplemented)
-        }
-    }
-
-    private func restoreDashboardSnapshot(userId: String) {
-        guard let persisted = try? snapshotStore.load(userId: userId) else { return }
-        dashboard = persisted.dashboardSnapshot
-        isShowingCachedDashboard = true
-        lastDashboardRefreshAt = persisted.savedAt
-    }
-
-    private func fetchUploadTokenAfterRegistration(session: SupabaseAuthSession) async throws -> String {
-        var lastError: Error?
-        for attempt in 0..<3 {
-            do {
-                return try await authService.fetchUploadToken(
-                    userId: session.user.id,
-                    accessToken: session.accessToken
-                )
-            } catch {
-                lastError = error
-                if attempt < 2 {
-                    try await Task.sleep(for: .milliseconds(500))
-                }
-            }
-        }
-        throw lastError ?? SupabaseAuthServiceError.emptyUploadToken
-    }
-
-    private func resolvedDomains(accessToken: String, snapshot: DashboardSnapshot) async -> [NativeDomainDefinition] {
-        let definitions = (try? await domainRepository.fetchDefinitions(accessToken: accessToken)) ?? Self.fallbackDomains
-        return domainsWithUpdatedCounts(definitions, snapshot: snapshot)
-    }
-
-    private func domainsWithUpdatedCounts(
-        _ definitions: [NativeDomainDefinition],
-        snapshot: DashboardSnapshot
-    ) -> [NativeDomainDefinition] {
-        let counts = Dictionary(
-            grouping: snapshot.dayRecordGroups.flatMap(\.records).filter { $0.kind != .staging }
-        ) { $0.domainKey ?? $0.kind.rawValue }.mapValues(\.count)
-        return definitions.map { domain in
-            NativeDomainDefinition(
-                id: domain.id,
-                name: domain.name,
-                description: domain.description,
-                icon: domain.icon,
-                isSystem: domain.isSystem,
-                schema: domain.schema,
-                display: domain.display,
-                recordCount: counts[domain.id] ?? 0
-            )
-        }
-    }
-
-    private static let fallbackDomains = InboxArchiveDomains.all.map { NativeDomainDefinition(id: $0.id, name: $0.title, description: "", icon: "", isSystem: true, schema: [:], display: [:], recordCount: 0) }
-
-    private func prefetchDashboardImages(_ snapshot: DashboardSnapshot) {
-        let urls = snapshot.recordDetails.values.compactMap(\.imageURL)
-            + snapshot.stagingRecords.compactMap(\.imageURL)
-            + snapshot.pendingExpenses.compactMap(\.imageURL)
-        Task {
-            await RemoteImageRepository.shared.prefetch(urls)
-        }
-    }
-
-    func refreshDashboardIfStale(minInterval: TimeInterval = 3, force: Bool = false) async {
-        if !force,
-           let lastDashboardRefreshAt,
-           Date().timeIntervalSince(lastDashboardRefreshAt) < minInterval {
-            return
-        }
-        let generation = userStateGeneration
-        _ = await prepareLocalWorkspace()
-        guard generation == userStateGeneration else { return }
-        // Intent å¯ä»Žç‹¬ç«‹è¿žæŽ¥å†™å…¥ï¼›å›žå‰å°å…ˆé‡è¯»å½“å‰åŠå·²æ‰“å¼€æœˆä»½çš„æœ¬æœºäº‹å®žã€‚
-        var months = Set(localFactMonths.keys)
-            .union(localExpenseMonthGroups.keys)
-            .union(localIncomeMonthGroups.keys)
-            .union(localRecordMonthGroups.keys)
-        months.insert(Self.currentMonthKey)
-        if let selectedMonth = NativeLocalDate.monthKey(from: selectedDateKey) {
-            months.insert(selectedMonth)
-        }
-        for month in months.sorted() {
-            await refreshLocalMonthProjection(monthKey: month)
-            guard generation == userStateGeneration else { return }
-        }
-        guard isSignedIn else {
-            lastDashboardRefreshAt = Date()
-            return
-        }
-        await refreshDashboard()
-    }
-
-    func recordGroups(monthKey: String) -> [NativeDayRecordGroup] {
-        let local = (localExpenseMonthGroups[monthKey] ?? [])
-            + (localIncomeMonthGroups[monthKey] ?? [])
-            + (localRecordMonthGroups[monthKey] ?? [])
-        // æˆåŠŸè¯»å–çš„æœ¬åœ°æœˆä»½ï¼ˆåŒ…æ‹¬ç©ºæœˆï¼‰æ˜¯æœªç™»å½•æ€æƒå¨ï¼Œä¸èƒ½æŠŠå·²åˆ é™¤çš„æ—§ Dashboard æŠ•å½±åˆå¹¶å›žæ¥ã€‚
-        if !mayReadRemoteBusinessData,
-           localExpenseMonthGroups[monthKey] != nil || localIncomeMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil {
-            return Self.mergeRecordGroups(local: local, remote: [])
-        }
-        let remote = monthKey == Self.currentMonthKey
-            ? dashboard.dayRecordGroups
-            : (remoteRecordMonthGroups[monthKey] ?? [])
-        guard !local.isEmpty else { return remote }
-        return Self.mergeRecordGroups(local: local, remote: remote)
-    }
-
-    func hasLoadedRecordMonth(_ monthKey: String) -> Bool {
-        if !mayReadRemoteBusinessData {
-            return localExpenseMonthGroups[monthKey] != nil || localIncomeMonthGroups[monthKey] != nil || localRecordMonthGroups[monthKey] != nil
-        }
-        return localExpenseMonthGroups[monthKey] != nil
-            || localIncomeMonthGroups[monthKey] != nil
-            || localRecordMonthGroups[monthKey] != nil
-            || remoteRecordMonthGroups[monthKey] != nil
-    }
-
-    func isLoadingRecordMonth(_ monthKey: String) -> Bool {
-        loadingRecordMonthKey == monthKey || loadingRemoteRecordMonthKeys.contains(monthKey)
-            || loadingLocalReadKeys.contains { $0.hasSuffix(":\(monthKey)") }
-            || (monthKey == Self.currentMonthKey && isLoadingDashboard)
-    }
-
-    func recordGroups(from startDateKey: String, through endDateKey: String) -> [NativeDayRecordGroup] {
-        let monthKeys = NativeLocalDate.monthKeys(from: startDateKey, through: endDateKey)
-        guard !monthKeys.isEmpty else { return [] }
-        let groups = monthKeys.flatMap { recordGroups(monthKey: $0) }
-        return NativeRecordQuery.groups(
-            from: groups,
-            startingOn: startDateKey,
-            through: endDateKey
-        )
-    }
-
-    func recordDetails(from startDateKey: String, through endDateKey: String) -> [String: NativeRecordDetail] {
-        let interval = Self.recordReadSignposter.beginInterval("CollectRecordDetails", id: Self.recordReadSignposter.makeSignpostID())
-        defer { Self.recordReadSignposter.endInterval("CollectRecordDetails", interval) }
-        let monthKeys = NativeLocalDate.monthKeys(from: startDateKey, through: endDateKey)
-        var result = mayReadRemoteBusinessData ? dashboard.recordDetails : [:]
-        for monthKey in monthKeys {
-            if mayReadRemoteBusinessData {
-                result.merge(recordMonthDetails[monthKey] ?? [:], uniquingKeysWith: { _, remote in remote })
-            }
-            result.merge(localRecordMonthDetails[monthKey] ?? [:], uniquingKeysWith: { _, local in local })
-        }
-        if mayReadRemoteBusinessData {
-            for (reference, detail) in recordDetailCache {
-                result[reference] = detail
-            }
-        }
-        return result
-    }
-
-    func loadRecordDateWindow(around dateKey: String, force: Bool = false) async {
-        // äº”åŸŸå…±äº«æµè§ˆæ—¥æœŸï¼šä¸€æ¬¡è¡¥é½è‡ªç„¶å‘¨å’Œæˆªæ­¢æ‰€é€‰æ—¥çš„è¿‘ä¸ƒæ—¥ï¼Œåˆ‡åŸŸæ— éœ€å†ç­‰ä¸€æ¬¡è·¨æœˆè¯»å–ã€‚
-        let days = (NativeLocalDate.weekDateKeys(containing: dateKey)
-            + NativeDomainScenePresentation.trendDateKeys(for: .sleep, dateKey: dateKey)
-            + [NativeLocalDate.shiftedDateKey(dateKey, byDays: -30) ?? dateKey]).sorted()
-        guard let start = days.first, let end = days.last else { return }
-        let selectedMonth = String(dateKey.prefix(7))
-        let months = NativeLocalDate.monthKeys(from: start, through: end)
-        let orderedMonths = months.contains(selectedMonth)
-            ? [selectedMonth] + months.filter { $0 != selectedMonth } : months
-        for monthKey in orderedMonths {
-            if Task.isCancelled { return }
-            await loadRecordMonth(monthKey, force: force)
-        }
-    }
-
-    func dailyExpenseAmounts(monthKey: String) -> [String: Double] {
-        let interval = Self.calendarSignposter.beginInterval("AggregateCalendarExpense", id: Self.calendarSignposter.makeSignpostID())
-        defer { Self.calendarSignposter.endInterval("AggregateCalendarExpense", interval) }
-        let groups = recordGroups(monthKey: monthKey)
-        let days = NativeLocalDate.monthDateKeys(monthKey)
-        guard let firstDay = days.first, let lastDay = days.last else { return [:] }
-        let details = recordDetails(from: firstDay, through: lastDay)
-        var totals: [String: Double] = [:]
-        for record in groups.flatMap(\.records) where NativeRecordQuery.isFormal(record)
-            && record.kind == .expense && record.transactionType != "income" {
-            guard let amount = Self.expenseAmount(for: record, details: details) else { continue }
-            totals[record.dateKey, default: 0] += amount
-        }
-        return totals
-    }
-
-    private static func expenseAmount(for record: NativeDayRecord, details: [String: NativeRecordDetail]) -> Double? {
-        let canonical = NativeRecordReference(record.reference).canonicalValue
-        if let detail = details[record.reference]
-            ?? details[canonical]
-            ?? details.values.first(where: { NativeRecordReference($0.id).canonicalValue == canonical }),
-           let amount = detail.amount {
-            return amount
-        }
-        let numeric = record.value.filter { $0.isNumber || $0 == "." || $0 == "-" }
-        guard !numeric.isEmpty else { return nil }
-        return Double(numeric)
-    }
-
-    private static func mergeRecordGroups(
-        local: [NativeDayRecordGroup],
-        remote: [NativeDayRecordGroup]
-    ) -> [NativeDayRecordGroup] {
-        let localReferences = Set(
-            local.flatMap(\.records).map { NativeRecordReference($0.reference).canonicalValue }
-        )
-        let merged = local + remote.map { group in
-            NativeDayRecordGroup(
-                dateKey: group.dateKey,
-                records: group.records.filter {
-                    !localReferences.contains(NativeRecordReference($0.reference).canonicalValue)
-                }
-            )
-        }
-        return Dictionary(grouping: merged.flatMap { group in
-            group.records.map { (group.dateKey, $0) }
-        }, by: \.0).map { dateKey, entries in
-            NativeDayRecordGroup(
-                dateKey: dateKey,
-                records: entries.map(\.1).sorted {
-                    NativeLocalDate.listTimeSortKey($0.timeLabel) > NativeLocalDate.listTimeSortKey($1.timeLabel)
-                }
-            )
-        }.sorted { $0.dateKey > $1.dateKey }
-    }
-
-    func loadRecordMonth(_ monthKey: String, force: Bool = false) async {
-        await loadUnifiedRecordMonth(monthKey, force: force)
-    }
-
-    private func loadUnifiedRecordMonth(_ monthKey: String, force: Bool = false) async {
-        if localFactReader != nil {
-            await readDeviceFactMonth(monthKey, force: force)
-            if mayReadRemoteBusinessData {
-                await loadRemoteRecordMonth(monthKey, force: force)
-            }
-            return
-        }
-        if localExpenseUseCase != nil || localRecordUseCase != nil {
-            if localExpenseUseCase != nil {
-                await readDeviceExpenseMonth(monthKey, force: force)
-            }
-            if localRecordUseCase != nil {
-                await readDeviceRecordMonth(monthKey, force: force)
-            }
-            if mayReadRemoteBusinessData {
-                await loadRemoteRecordMonth(monthKey, force: force)
-            }
-            return
-        }
-        await loadRemoteRecordMonth(monthKey, force: force)
-    }
-
-    private var mayReadRemoteBusinessData: Bool {
-        // The local fact reader is the production authority. Binding authorizes
-        // the expense/accounts coordinator, not the legacy five-domain REST loader.
-        // Repository-only legacy adapters retain their explicit binding contract.
-        guard localFactReader == nil, localStorageInitializationMessage == nil,
-              isSignedIn, !currentUserId.isEmpty,
-              localSyncState?.binding == .bound(currentUserId),
-              localSyncState?.status != .disabled else {
-            return false
-        }
-        return true
-    }
-
-    /// SL-02ï¼ˆC4ï¼‰ï¼šæ‰€æœ‰å†™è·¯å¾„çš„"å†™åŽå½“æœˆæŠ•å½±åˆ·æ–°"ç»Ÿä¸€èµ°è¿™é‡Œã€‚
-    /// FactReader æƒå¨æ¨¡å¼åˆ·æ–°ç»Ÿä¸€äº‹å®žæœˆï¼›é™çº§åŒ UseCase æ¨¡å¼åˆ·æ–°å…¶æ‹¥æœ‰çš„ä¸¤ä¸ªæœ¬åœ°æœˆç¼“å­˜ã€‚
-    /// è¯»å–è·¯å¾„ï¼ˆloadUnifiedRecordMonthã€è¯†åˆ«æŠ•å½±ï¼‰ä¸ä½¿ç”¨æœ¬æ–¹æ³•ã€‚
-    private func refreshLocalMonthProjection(monthKey: String) async {
-        let generation = userStateGeneration
-        let wasMonthPending = pendingLocalRefreshMonths.contains(monthKey)
-        let hadPendingRefresh = !pendingLocalRefreshMonths.isEmpty
-        insightsLoadedAt = nil
-        if localFactReader != nil {
-            await readDeviceFactMonth(monthKey, force: true)
-        } else if localExpenseUseCase != nil {
-            await readDeviceExpenseMonth(monthKey, force: true)
-        }
-        if localFactReader == nil, localRecordUseCase != nil {
-            await readDeviceRecordMonth(monthKey, force: true)
-        }
-        guard generation == userStateGeneration else { return }
-        if recordMonthMessages[monthKey] != nil {
-            pendingLocalRefreshMonths.insert(monthKey)
-        } else {
-            pendingLocalRefreshMonths.remove(monthKey)
-        }
-        if pendingLocalRefreshMonths.isEmpty {
-            localProjectionRefreshMessage = nil
-            if wasMonthPending,
-               let diagnostic = try? historyMigrationDiagnosticStore?.resolveLatest(
-                   operation: "local-write-refresh",
-                   outcome: "æœ¬æœºåˆ—è¡¨å·²åˆ·æ–°ï¼›åŽŸä¿å­˜æ“ä½œæœªé‡æ”¾ã€‚",
-                   expectedAccountID: currentUserId.isEmpty ? nil : currentUserId
-               ) {
-                localProjectionRefreshDiagnostic = diagnostic
-            }
-            if wasMonthPending { resolvePostCommitMigrationRefreshIfNeeded() }
-        } else if !hadPendingRefresh {
-            let entry = historyMigrationDiagnosticStore?.record(
-                LocalWriteRefreshError(),
-                phase: "æœ¬æœºåˆ—è¡¨åˆ·æ–°",
-                accountID: currentUserId.isEmpty ? nil : currentUserId,
-                operation: "local-write-refresh",
-                codeOverride: "LOCAL-POST-COMMIT-REFRESH",
-                progressSummary: "å¾…è¯»å–æœˆä»½ \(pendingLocalRefreshMonths.count) ä¸ªã€‚",
-                attemptID: UUID(),
-                committed: true,
-                recoveryAction: "åªé‡è¯•è¯»å–æœ¬æœºåˆ—è¡¨ï¼›ä¸è¦é‡å¤æ‰§è¡ŒåŽŸä¿å­˜æ“ä½œã€‚"
-            )
-            localProjectionRefreshDiagnostic = entry
-            localProjectionRefreshMessage = entry?.userMessage
-                ?? "æ•°æ®å·²ä¿å­˜ï¼Œåˆ—è¡¨åˆ·æ–°å¤±è´¥ï¼›è¯·åªé‡è¯•è¯»å–ï¼Œæ— éœ€å†æ¬¡ä¿å­˜ã€‚"
-        } else {
-            localProjectionRefreshMessage = "æ•°æ®å·²ä¿å­˜ï¼Œåˆ—è¡¨åˆ·æ–°å¤±è´¥ï¼›è¯·åªé‡è¯•è¯»å–ï¼Œæ— éœ€å†æ¬¡ä¿å­˜ã€‚"
-        }
-    }
-
-    func retryLocalProjectionRefresh() async {
-        for month in pendingLocalRefreshMonths.sorted() {
-            await refreshLocalMonthProjection(monthKey: month)
-        }
-        if pendingLocalRefreshMonths.isEmpty {
-            resolvePostCommitMigrationRefreshIfNeeded()
-        }
-    }
-
-    private func resolvePostCommitMigrationRefreshIfNeeded() {
-        if let diagnostic = historyMigrationDiagnostic, diagnostic.code == "HIST-POST-COMMIT-REFRESH" {
-            try? historyMigrationDiagnosticStore?.resolve(diagnostic.id, outcome: "æœ¬æœºåˆ—è¡¨å·²åˆ·æ–°ï¼›è¿ç§»å…¥è´¦æœªé‡æ”¾ã€‚", expectedAccountID: currentUserId)
-            loadLatestHistoryMigrationDiagnostic()
-            if historyMigrationPhase == "å·²å…¥è´¦" || historyMigrationPhase == "å·²ä¿ç•™å¾…æ ¸å¯¹" {
-                historyMigrationMessage = historyMigrationUnresolvedCount > 0
-                    ? "è¿ç§»å†…å®¹å·²ä¿å­˜ï¼Œå« \(historyMigrationUnresolvedCount) æ¡åŽ†å²å¾…æ ¸å¯¹åŽŸæ–‡ï¼›åˆ—è¡¨åˆ·æ–°å®Œæˆï¼Œæœªé‡å¤æäº¤ã€‚"
-                    : "åŽ†å²è®°å½•å·²å…¥è´¦ï¼›æœ¬æœºåˆ—è¡¨åˆ·æ–°å®Œæˆï¼Œæœªé‡å¤æäº¤ã€‚"
-            }
-        }
-    }
-
-    private func localWriteMessage(_ message: String) -> String {
-        localProjectionRefreshMessage.map { "\(message)ã€‚\($0)" } ?? message
-    }
-
-    private func refreshAfterRecordWrite(affectedDateKeys: [String] = []) async {
-        let generation = userStateGeneration
-        var months = Set(remoteRecordMonthGroups.keys).union(recordMonthDetails.keys).union(remoteRecordMonthTasks.keys)
-        months.formUnion(affectedDateKeys.compactMap { NativeLocalDate.monthKey(from: $0) })
-        if let month = NativeLocalDate.monthKey(from: selectedDateKey) { months.insert(month) }
-        if let pending = dashboardCoreTask { await pending.value }
-        guard generation == userStateGeneration else { return }
-        await refreshDashboard()
-        guard generation == userStateGeneration else { return }
-        await refreshLocalMonthProjection(monthKey: Self.currentMonthKey)
-        for month in months.sorted() where month != Self.currentMonthKey {
-            // å†™å…¥å‰çš„åœ¨é€”è¯»å–å…ˆç»“æŸï¼ŒéšåŽå¼ºåˆ¶è¯»å–å†™å…¥åŽçš„äº‹å®žã€‚
-            if let task = remoteRecordMonthTasks[month] { await task.value }
-            guard generation == userStateGeneration else { return }
-            await loadRecordMonth(month, force: true)
-            guard generation == userStateGeneration else { return }
-        }
-    }
-
-    // Compatibility name retained for older feature tests; new callers use the unified facade above.
-    private func loadLocalExpenseMonth(_ monthKey: String, force: Bool) async {
-        await readDeviceExpenseMonth(monthKey, force: force)
-    }
-
-    func ingestHostedImageLocally(
-        data: Data,
-        captureKind: String,
-        filename: String,
-        uploadToken: String? = nil
-    ) async throws -> LocalImageIntakeOutcome {
-        guard localVisionMode != .disabled else { throw LocalDataError.invalidRecord }
-        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else {
-            throw LocalDataError.invalidRecord
-        }
-        let provider: LocalImageRecognitionProvider
-        let recognitionUploadToken: String?
-        var isRecognitionRequestCurrent: @MainActor () -> Bool = { true }
-        switch localVisionMode {
-        case .disabled:
-            throw LocalDataError.invalidRecord
-        case .hosted:
-            provider = HostedAIImageRecognitionProvider()
-            recognitionUploadToken = uploadToken
-        case .byok:
-            let apiKey = (try? keychain.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
-            provider = QwenBYOKImageRecognitionProvider(apiKey: apiKey)
-            let credentialStore = keychain
-            isRecognitionRequestCurrent = {
-                (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) == apiKey
-            }
-            recognitionUploadToken = nil
-        }
-        let credentialCheck = isRecognitionRequestCurrent
-        let generation = userStateGeneration
-        let requestedMode = localVisionMode
-        isRecognitionRequestCurrent = { [weak self] in
-            guard let self, self.userStateGeneration == generation, self.localVisionMode == requestedMode else { return false }
-            return credentialCheck()
-        }
-        let recognition = LocalImageRecognitionUseCase(
-            localRecordUseCase: localRecordUseCase,
-            imageStore: localImageStore,
-            intakeRepository: localImageIntakeRepository,
-            provider: provider,
-            isRecognitionRequestCurrent: isRecognitionRequestCurrent,
-            pendingRepository: localPendingFinancialRepository,
-            expenseRepository: Self.defaultRecognitionExpenseRepository(),
-            duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository(),
-            expressionPersistence: localExpressionPersistence
-        )
-        let outcome = try await recognition.ingest(
-            imageData: data,
-            captureKind: captureKind,
-            filename: filename,
-            uploadToken: recognitionUploadToken
-        )
-        return await composeLocalImageCompanion(outcome, using: recognition, mode: requestedMode)
-    }
-
-    private func composeLocalImageCompanion(
-        _ outcome: LocalImageIntakeOutcome,
-        using recognition: LocalImageRecognitionUseCase,
-        mode: LocalVisionMode
-    ) async -> LocalImageIntakeOutcome {
-        let isArchived: Bool
-        switch outcome.result {
-        case .archived(_), .financialArchived(_): isArchived = true
-        case .staged(_), .financialPending(_): isArchived = false
-        }
-        guard userSettings.companionEnabled, localVisionModeStore.mode == mode, isArchived else { return outcome }
-        let provider: LocalCompanionProvider
-        let providerMode: LocalExpressionProviderMode
-        switch mode {
-        case .hosted:
-            guard let session = try? await validSession() else { return outcome }
-            provider = HostedAICompanionProvider(accessToken: session.accessToken)
-            providerMode = .hosted
-        case .byok:
-            guard let apiKey = try? keychain.string(for: KeychainKeys.byokQwenAPIKey),
-                  !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return outcome }
-            provider = QwenBYOKCompanionProvider(apiKey: apiKey)
-            providerMode = .byok
-        case .disabled:
-            return outcome
-        }
-        guard let composed = await recognition.composeCompanion(
-            for: outcome.result,
-            provider: provider,
-            settings: userSettings,
-            providerMode: providerMode
-        ) else { return outcome }
-        let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let composedFeedback = composed.aiFeedback.flatMap { NativeAIFeedback(payload: $0) }
-        let feedback = composedFeedback ?? outcome.feedback
-        let feedbackConfidence = composed.aiFeedback?.double("confidence") ?? outcome.feedbackConfidence
-        let deliveryFeedback: NativeAIFeedback?
-        if let feedback, let feedbackConfidence, feedbackConfidence < 0.5 {
-            deliveryFeedback = nil
-        } else {
-            deliveryFeedback = feedback
-        }
-        return LocalImageIntakeOutcome(
-            result: outcome.result,
-            imageHash: outcome.imageHash,
-            notificationText: LocalIntakeNotificationText.merge(
-                baseText: outcome.notificationText,
-                companionMessage: message,
-                feedbackParts: deliveryFeedback.map {
-                    LocalIntakeNotificationFeedback($0, confidence: feedbackConfidence)
-                }
-            ),
-            feedback: deliveryFeedback,
-            feedbackConfidence: feedbackConfidence
-        )
-    }
-
-    func receiveImageForManualProcessing(
-        data: Data,
-        captureKind: String,
-        filename: String
-    ) throws -> LocalImageIntake {
-        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else {
-            throw LocalDataError.invalidRecord
-        }
-        let recognition = LocalImageRecognitionUseCase(
-            localRecordUseCase: localRecordUseCase,
-            imageStore: localImageStore,
-            intakeRepository: localImageIntakeRepository,
-            provider: HostedAIImageRecognitionProvider()
-        )
-        let intake = try recognition.receiveForManual(
-            imageData: data, captureKind: captureKind, filename: filename
-        )
-        Task { await refreshFailedLocalImageIntakes() }
-        return intake
-    }
-
-    func hasPersistedInputImage(_ data: Data) -> Bool {
-        guard let repository = localImageIntakeRepository, let store = localImageStore,
-              let profile = try? repository.activeProfile(),
-              let intake = try? repository.intake(id: "\(profile.id.uuidString)-\(LocalImageStore.sha256(data))", profileID: profile.id),
-              let saved = try? store.data(at: intake.imagePath) else { return false }
-        return saved == data
-    }
-
-    func setLocalVisionMode(_ mode: LocalVisionMode) {
-        if mode == .byok, !hasBYOKAPIKey {
-            settingsMessage = "å…ˆä¿å­˜ BYOK API Keyï¼Œå†å¯ç”¨ BYOKã€‚"
-            return
-        }
-        localVisionModeStore.save(mode)
-        localVisionMode = mode
-    }
-
-    func saveBYOKAPIKey(_ apiKey: String) -> Bool {
-        let normalized = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else {
-            settingsMessage = "API Key ä¸èƒ½ä¸ºç©ºã€‚"
-            return false
-        }
-        do {
-            try keychain.setString(normalized, for: KeychainKeys.byokQwenAPIKey)
-            hasBYOKAPIKey = true
-            settingsMessage = "API Key å·²å®‰å…¨ä¿å­˜ï¼›å°šæœªå‘é€ä»»ä½•å›¾ç‰‡ã€‚"
-            setLocalVisionMode(.byok)
-            return true
-        } catch {
-            settingsMessage = "API Key æœªèƒ½ä¿å­˜åˆ° Keychainï¼š\(error.localizedDescription)"
-            return false
-        }
-    }
-
-    func deleteBYOKAPIKey() -> Bool {
-        do {
-            try keychain.remove(KeychainKeys.byokQwenAPIKey)
-            hasBYOKAPIKey = false
-            if localVisionMode == .byok { setLocalVisionMode(.disabled) }
-            settingsMessage = "æœ¬æœº BYOK API Key å·²åˆ é™¤ï¼›ä¾›åº”å•†è´¦æˆ·ä¸­çš„ Key ä»éœ€å•ç‹¬æ’¤é”€ã€‚"
-            return true
-        } catch {
-            settingsMessage = "API Key æœªèƒ½ä»Ž Keychain åˆ é™¤ï¼š\(error.localizedDescription)"
-            return false
-        }
-    }
-
-    var supportsLocalDomainRecords: Bool { localRecordUseCase != nil && localImageStore != nil }
-
-    func localImageDataForRecord(id: String) async throws -> Data {
-        guard let recordID = UUID(uuidString: id),
-              let localImageStore else {
-            throw LocalDataError.recordNotFound
-        }
-        if let record = try await localRecordUseCase?.record(id: recordID), let path = record.imagePath {
-            return try localImageStore.data(at: path)
-        }
-        if let expense = try await localExpenseUseCase?.expense(id: recordID), let path = expense.imagePath {
-            return try localImageStore.data(at: path)
-        }
-        if let income = try await localExpenseUseCase?.income(id: recordID), let path = income.imagePath {
-            return try localImageStore.data(at: path)
-        }
-        throw LocalDataError.recordNotFound
-    }
-
-    func localImageDataForWalletSnapshot(id: UUID) throws -> Data {
-        guard let snapshot = localWalletSnapshotHistory.first(where: { $0.id == id }),
-              let imagePath = snapshot.imagePath,
-              let localImageStore else {
-            throw LocalDataError.recordNotFound
-        }
-        return try localImageStore.data(at: imagePath)
-    }
-
-    func refreshLocalRecognitionProjection(monthKey requestedMonthKey: String? = nil) async {
-        let monthKey = requestedMonthKey ?? Self.currentMonthKey
-        if localFactReader != nil {
-            await readDeviceFactMonth(monthKey, force: true)
-            if monthKey == Self.currentMonthKey, let month = localFactMonths[monthKey] {
-                applyLocalFactMonth(month)
-            }
-        } else {
-            await readDeviceRecordMonth(monthKey, force: true)
-            if monthKey == Self.currentMonthKey {
-                applyLocalRecordMonth()
-            }
-        }
-        if monthKey == Self.currentMonthKey {
-            await applyLocalStagingProjection()
-        }
-    }
-
-    /// Rebuilds the Inbox from the authoritative local projection when no
-    /// cloud session is available. Remote repayment candidates remain
-    /// session-scoped and are intentionally loaded only when signed in.
-    func refreshInboxProjection() async {
-        await refreshFailedLocalImageIntakes()
-        await refreshLocalImageCleanups()
-        if !mayReadRemoteBusinessData {
-            await refreshLocalRecognitionProjection()
-        }
-        await loadInboxRepaymentCandidates()
-    }
-
-    func refreshLocalImageCleanups() async {
-        guard let localRecordUseCase else {
-            pendingLocalImageCleanups = []
-            return
-        }
-        do {
-            pendingLocalImageCleanups = try localRecordUseCase.retryPendingImageCleanups()
-        } catch {
-            inboxActionMessage = "æœ¬åœ°å›¾ç‰‡æ¸…ç†çŠ¶æ€è¯»å–å¤±è´¥ï¼š\(error.localizedDescription)"
-            inboxActionMessageIsError = true
-        }
-    }
-
-    func retryLocalImageCleanups() async {
-        await refreshLocalImageCleanups()
-        if pendingLocalImageCleanups.isEmpty {
-            inboxActionMessage = "æœ¬æœºå›¾ç‰‡æ¸…ç†å·²å®Œæˆ"
-            inboxActionMessageIsError = false
-        } else {
-            inboxActionMessage = "ä»æœ‰ \(pendingLocalImageCleanups.count) å¼ å›¾ç‰‡å¾…æ¸…ç†"
-            inboxActionMessageIsError = true
-        }
-    }
-
-    func refreshFailedLocalImageIntakes() async {
-        guard let repository = localImageIntakeRepository,
-              let profile = try? repository.activeProfile() else {
-            failedLocalImageIntakes = []
-            return
-        }
-        do {
-            try repository.recoverInterrupted(profileID: profile.id, before: Date().addingTimeInterval(-120))
-            failedLocalImageIntakes = try repository.failedIntakes(profileID: profile.id)
-        } catch {
-            dashboardMessage = "æœ¬åœ°å›¾ç‰‡æ”¶ä»¶ç®±è¯»å–å¤±è´¥ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    func retryLocalImageIntake(_ intake: LocalImageIntake) async -> Bool {
-        guard localVisionMode != .disabled else {
-            inboxActionMessage = "AI è¯†åˆ«å·²å…³é—­ï¼›è¯·å¼€å¯åŽé‡è¯•ï¼Œæˆ–æ‰‹åŠ¨å¤„ç†åŽŸå›¾ã€‚"
-            inboxActionMessageIsError = true
-            return false
-        }
-        guard let localRecordUseCase, let localImageStore, let localImageIntakeRepository else { return false }
-        do {
-            let provider: LocalImageRecognitionProvider
-            let uploadToken: String?
-            var isRecognitionRequestCurrent: @MainActor () -> Bool = { true }
-            switch localVisionMode {
-            case .disabled:
-                return false
-            case .hosted:
-                provider = HostedAIImageRecognitionProvider()
-                uploadToken = try? keychain.string(for: KeychainKeys.uploadToken)
-            case .byok:
-                let apiKey = (try? keychain.string(for: KeychainKeys.byokQwenAPIKey)) ?? ""
-                provider = QwenBYOKImageRecognitionProvider(apiKey: apiKey)
-                let credentialStore = keychain
-                isRecognitionRequestCurrent = {
-                    (try? credentialStore.string(for: KeychainKeys.byokQwenAPIKey)) == apiKey
-                }
-                uploadToken = nil
-            }
-            let credentialCheck = isRecognitionRequestCurrent
-            let generation = userStateGeneration
-            let requestedMode = localVisionMode
-            isRecognitionRequestCurrent = { [weak self] in
-                guard let self, self.userStateGeneration == generation, self.localVisionMode == requestedMode else { return false }
-                return credentialCheck()
-            }
-            let recognition = LocalImageRecognitionUseCase(
-                localRecordUseCase: localRecordUseCase,
-                imageStore: localImageStore,
-                intakeRepository: localImageIntakeRepository,
-                provider: provider,
-                isRecognitionRequestCurrent: isRecognitionRequestCurrent,
-                pendingRepository: localPendingFinancialRepository,
-                expenseRepository: Self.defaultRecognitionExpenseRepository(),
-                duplicateReviewRepository: Self.defaultFinancialDuplicateReviewRepository(),
-                expressionPersistence: localExpressionPersistence
-            )
-            let outcome = try await recognition.retry(intakeID: intake.id, uploadToken: uploadToken)
-            _ = await composeLocalImageCompanion(outcome, using: recognition, mode: requestedMode)
-            await refreshFailedLocalImageIntakes()
-            await refreshLocalRecognitionProjection()
-            return true
-        } catch {
-            await refreshFailedLocalImageIntakes()
-            inboxActionMessage = "é‡è¯•æœªå®Œæˆï¼š\(error.localizedDescription)"
-            inboxActionMessageIsError = true
-            return false
-        }
-    }
-
-    func discardLocalImageIntake(_ intake: LocalImageIntake) -> Bool {
-        guard let repository = localImageIntakeRepository,
-              let profile = try? repository.activeProfile() else { return false }
-        do {
-            try repository.discard(id: intake.id, profileID: profile.id)
-            failedLocalImageIntakes.removeAll { $0.id == intake.id }
-            pendingLocalImageCleanups = try localRecordUseCase?.retryPendingImageCleanups() ?? []
-            return true
-        } catch {
-            inboxActionMessage = "å›¾ç‰‡æœªèƒ½ä¸¢å¼ƒï¼š\(error.localizedDescription)"
-            inboxActionMessageIsError = true
-            return false
-        }
-    }
-
-    func localImageData(for intake: LocalImageIntake) throws -> Data {
-        guard let repository = localImageIntakeRepository,
-              let imageStore = localImageStore,
-              let profile = try? repository.activeProfile(),
-              intake.profileID == profile.id else {
-            throw LocalDataError.invalidIdentifier
-        }
-        return try imageStore.data(at: intake.imagePath)
-    }
-
-    func hasLocalImage(for intake: LocalImageIntake) -> Bool {
-        localImageStore?.contains(path: intake.imagePath) == true
-    }
-
-    func discardLocalImageIntake(matching imageData: Data) -> Bool {
-        guard let repository = localImageIntakeRepository,
-              let profile = try? repository.activeProfile() else { return false }
-        let id = "\(profile.id.uuidString)-\(LocalImageStore.sha256(imageData))"
-        do {
-            guard let intake = try repository.intake(id: id, profileID: profile.id) else { return true }
-            return discardLocalImageIntake(intake)
-        } catch {
-            return false
-        }
-    }
-
-    private func readDeviceFactMonth(_ monthKey: String, force: Bool) async {
-        guard let localFactReader else { return }
-        guard force || localFactMonths[monthKey] == nil else { return }
-        let readKey = "facts:\(monthKey)"
-        guard force || !loadingLocalReadKeys.contains(readKey) else { return }
-        let readVersion = (localMonthReadVersions[readKey] ?? 0) + 1
-        localMonthReadVersions[readKey] = readVersion
-        loadingLocalReadKeys.insert(readKey)
-        let interval = Self.recordReadSignposter.beginInterval("ReadAndProjectLocalFactMonth", id: Self.recordReadSignposter.makeSignpostID())
-        defer { Self.recordReadSignposter.endInterval("ReadAndProjectLocalFactMonth", interval) }
-        let generation = userStateGeneration
-        loadingLocalExpenseMonthKey = monthKey
-        loadingLocalRecordMonthKey = monthKey
-        loadingRecordMonthKey = monthKey
-        recordMonthMessages.removeValue(forKey: monthKey)
-        defer {
-            if generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion {
-                loadingLocalReadKeys.remove(readKey)
-                if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
-                if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
-                if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey),
-                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }) {
-                    loadingRecordMonthKey = nil
-                }
-            }
-        }
-        do {
-            guard let month = try await localFactReader.activeMonth(monthKey: monthKey) else { return }
-            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
-            localFactMonths[monthKey] = month
-            localExpenseMonthGroups[monthKey] = LocalFactReadModel.groups(
-                from: month,
-                including: [.expense, .income]
-            )
-            localIncomeMonthGroups[monthKey] = []
-            localRecordMonthGroups[monthKey] = LocalFactReadModel.groups(
-                from: month,
-                including: [.record]
-            )
-            localRecordMonthDetails[monthKey] = LocalFactReadModel.details(
-                from: month,
-                imageStore: localImageStore
-            )
-            if monthKey == Self.currentMonthKey && !mayReadRemoteBusinessData {
-                applyLocalFactMonth(month)
-                await applyLocalStagingProjection()
-            }
-        } catch {
-            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
-            recordMonthMessages[monthKey] = error.localizedDescription
-        }
-    }
-
-    private func applyLocalFactMonth(_ month: LocalFactMonth) {
-        let todayKey = NativeLocalDate.dateKey(Date())
-        let groups = recordGroups(monthKey: Self.currentMonthKey)
-        let expenses = month.facts.filter { $0.kind == .expense }
-        let incomes = month.facts.filter { $0.kind == .income }
-        let todayExpenses = expenses.filter { $0.businessDate == todayKey }
-        let todayIncomes = incomes.filter { $0.businessDate == todayKey }
-        dashboard.dayRecordGroups = groups
-        dashboard.dailySummaries = groups.map { group in
-            let expense = expenses
-                .filter { $0.businessDate == group.dateKey }
-                .reduce(0.0) { total, fact in
-                    let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
-                    return total + ((payload.double("amount_minor") ?? 0) / 100)
-                }
-            let income = incomes
-                .filter { $0.businessDate == group.dateKey }
-                .reduce(0.0) { total, fact in
-                    let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
-                    return total + ((payload.double("amount_minor") ?? 0) / 100)
-                }
-            return NativeDailySummary(
-                dateKey: group.dateKey,
-                expense: expense,
-                income: income,
-                pendingCount: 0,
-                recordCount: group.records.count
-            )
-        }
-        dashboard.todayCount = groups.first(where: { $0.dateKey == todayKey })?.records.count ?? 0
-        dashboard.monthCount = groups.flatMap(\.records).count
-        dashboard.todayExpense = todayExpenses.reduce(0) { total, fact in
-            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
-            return total + ((payload.double("amount_minor") ?? 0) / 100)
-        }
-        dashboard.monthExpense = expenses.reduce(0) { total, fact in
-            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
-            return total + ((payload.double("amount_minor") ?? 0) / 100)
-        }
-        dashboard.todayIncome = todayIncomes.reduce(0) { total, fact in
-            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
-            return total + ((payload.double("amount_minor") ?? 0) / 100)
-        }
-        dashboard.monthIncome = incomes.reduce(0) { total, fact in
-            let payload = (try? LocalRecordCodec.decode(fact.payloadJSON)) ?? [:]
-            return total + ((payload.double("amount_minor") ?? 0) / 100)
-        }
-        dashboard.pendingCount = 0
-        dashboard.recordDetails = localRecordMonthDetails[Self.currentMonthKey] ?? [:]
-        dashboard.recentRecords = []
-        dashboard.stagingRecords = []
-        dashboard.pendingExpenses = []
-    }
-
-    private func applyLocalStagingProjection() async {
-        stagingReadVersion += 1
-        let version = stagingReadVersion
-        let generation = userStateGeneration
-        if let repository = localPendingFinancialRepository {
-            do {
-                if let profile = try await localExpenseUseCase?.prepareProfile() {
-                    let pending = try repository.pending(profileID: profile.id)
-                    guard generation == userStateGeneration else { return }
-                    dashboard.pendingExpenses = pending.map { record in
-                        // è¿ç§»è¿›æœ¬æœºçš„å¾…è¡¥å…¨è´¦å•ï¼ŒåŽŸå›¾å°±åœ¨æœ¬æœº records/history-<sha256>.jpgã€‚
-                        // åªå¡« image_url æ˜¯äº‘ç«¯è·¯å¾„ï¼Œè¿™é‡Œè¡¥ä¸€ä»½æœ¬æœºæ–‡ä»¶ URLï¼Œå¡ç‰‡æ‰èƒ½å‡ºè¯æ®åº•ç‰‡ã€‚
-                        let imageURL: URL? = record.imagePath.flatMap { path -> URL? in
-                            guard let store = localImageStore, store.contains(path: path) else { return nil }
-                            return store.url(for: path)
-                        }
-                        return NativePendingExpense(id: record.id.uuidString, title: record.merchantName,
-                            amount: Double(record.amountMinor) / 100, dateKey: record.transactionDate,
-                            reference: "expense/\(record.id.uuidString)", imagePath: record.imagePath,
-                            imageURL: imageURL,
-                            occurredAtLabel: record.transactionTime,
-                            createdAtLabel: "\(NativeLocalDate.dateKey(record.createdAt)) \(NativeLocalDate.timeKey(record.createdAt))",
-                            platform: record.platform,
-                            category: record.category,
-                            paymentMethod: record.paymentMethod)
-                    }
-                }
-            } catch { inboxFinanceMessage = "æœ¬æœºå¾…è¡¥å…¨è¯»å–å¤±è´¥ï¼š\(error.localizedDescription)" }
-        }
-        guard let localRecordUseCase else {
-            dashboard.stagingRecords = []
-            dashboard.pendingCount = dashboard.pendingExpenses.count
-            return
-        }
-        do {
-            let records = try await localRecordUseCase.stagingRecords()
-            guard generation == userStateGeneration, version == stagingReadVersion else { return }
-            let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
-            dashboard.stagingRecords = records.map { record in
-                let domainName = definitions.first(where: { $0.id == record.domainKey })?.shortName
-                return LocalStagingReadModel.native(
-                    from: record,
-                    imageStore: localImageStore,
-                    domainName: domainName,
-                    plannerEnabled: userSettings.companionEnabled
-                )
-            }
-            dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
-        } catch {
-            guard generation == userStateGeneration, version == stagingReadVersion else { return }
-            dashboard.stagingRecords = []
-            dashboard.pendingCount = dashboard.pendingExpenses.count
-            inboxFinanceMessage = "æœ¬åœ°ä¸­è½¬ç«™æš‚æ—¶æ— æ³•è¯»å–ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    private func readDeviceExpenseMonth(_ monthKey: String, force: Bool) async {
-        guard force || localExpenseMonthGroups[monthKey] == nil else { return }
-        let readKey = "expense:\(monthKey)"
-        guard force || !loadingLocalReadKeys.contains(readKey) else { return }
-        let readVersion = (localMonthReadVersions[readKey] ?? 0) + 1
-        localMonthReadVersions[readKey] = readVersion
-        loadingLocalReadKeys.insert(readKey)
-        let generation = userStateGeneration
-        loadingLocalExpenseMonthKey = monthKey
-        loadingRecordMonthKey = monthKey
-        recordMonthMessages.removeValue(forKey: monthKey)
-        defer {
-            if generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion {
-                loadingLocalReadKeys.remove(readKey)
-                if loadingLocalExpenseMonthKey == monthKey { loadingLocalExpenseMonthKey = nil }
-                if loadingRecordMonthKey == monthKey, !loadingRemoteRecordMonthKeys.contains(monthKey),
-                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }) {
-                    loadingRecordMonthKey = nil
-                }
-            }
-        }
-        do {
-            guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
-            let month = try await localExpenseUseCase.month(monthKey)
-            let incomeMonth = try await localExpenseUseCase.incomes(monthKey)
-            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
-            let groups = Self.mergeRecordGroups(
-                local: LocalExpenseReadModel.groups(from: month) + LocalIncomeReadModel.groups(from: incomeMonth),
-                remote: []
-            )
-            localExpenseMonthGroups[monthKey] = LocalExpenseReadModel.groups(from: month)
-            localIncomeMonthGroups[monthKey] = LocalIncomeReadModel.groups(from: incomeMonth)
-            let localDomainDetails = (localRecordMonthDetails[monthKey] ?? [:]).filter {
-                $0.value.kind == "data"
-            }
-            localRecordMonthDetails[monthKey] = Dictionary(
-                uniqueKeysWithValues: month.expenses.map {
-                    let detail = LocalExpenseReadModel.detail(from: $0, imageStore: localImageStore)
-                    return (detail.id, detail)
-                }
-            ).merging(
-                Dictionary(uniqueKeysWithValues: incomeMonth.incomes.map {
-                    let detail = LocalIncomeReadModel.detail(from: $0, imageStore: localImageStore)
-                    return (detail.id, detail)
-                }), uniquingKeysWith: { _, income in income }
-            ).merging(localDomainDetails, uniquingKeysWith: { local, _ in local })
-            if monthKey == Self.currentMonthKey && !isSignedIn {
-                applyLocalExpenseMonth(month, incomeMonth: incomeMonth, groups: groups)
-            }
-        } catch {
-            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
-            recordMonthMessages[monthKey] = error.localizedDescription
-        }
-    }
-
-    private func readDeviceRecordMonth(_ monthKey: String, force: Bool) async {
-        guard let localRecordUseCase else { return }
-        guard force || localRecordMonthGroups[monthKey] == nil else { return }
-        let readKey = "records:\(monthKey)"
-        guard force || !loadingLocalReadKeys.contains(readKey) else { return }
-        let readVersion = (localMonthReadVersions[readKey] ?? 0) + 1
-        localMonthReadVersions[readKey] = readVersion
-        loadingLocalReadKeys.insert(readKey)
-        let generation = userStateGeneration
-        loadingLocalRecordMonthKey = monthKey
-        loadingRecordMonthKey = monthKey
-        recordMonthMessages.removeValue(forKey: monthKey)
-        defer {
-            if generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion {
-                loadingLocalReadKeys.remove(readKey)
-                if loadingLocalRecordMonthKey == monthKey { loadingLocalRecordMonthKey = nil }
-                if loadingRecordMonthKey == monthKey,
-                   !loadingRemoteRecordMonthKeys.contains(monthKey),
-                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }) {
-                    loadingRecordMonthKey = nil
-                }
-            }
-        }
-        do {
-            let month = try await localRecordUseCase.month(monthKey)
-            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
-            let groups = LocalRecordReadModel.groups(from: month, imageStore: localImageStore)
-            localRecordMonthGroups[monthKey] = groups
-            let localExpenseDetails = (localRecordMonthDetails[monthKey] ?? [:]).filter {
-                $0.value.kind == "expense"
-            }
-            localRecordMonthDetails[monthKey] = localExpenseDetails.merging(
-                Dictionary(uniqueKeysWithValues: month.records.map {
-                    let detail = LocalRecordReadModel.detail(from: $0, imageStore: localImageStore)
-                    return (detail.id, detail)
-                }),
-                uniquingKeysWith: { _, local in local }
-            )
-            if monthKey == Self.currentMonthKey {
-                applyLocalRecordMonth()
-                if !isSignedIn {
-                    await applyLocalStagingProjection()
-                }
-            }
-        } catch {
-            guard generation == userStateGeneration, localMonthReadVersions[readKey] == readVersion else { return }
-            recordMonthMessages[monthKey] = error.localizedDescription
-        }
-    }
-
-    private func applyLocalRecordMonth() {
-        let mergedGroups = recordGroups(monthKey: Self.currentMonthKey)
-        let todayKey = NativeLocalDate.dateKey(Date())
-        dashboard.dayRecordGroups = mergedGroups
-        dashboard.todayCount = mergedGroups
-            .first(where: { $0.dateKey == todayKey })?
-            .records.filter { $0.kind != .staging }.count ?? 0
-        dashboard.monthCount = mergedGroups.flatMap(\.records).filter { $0.kind != .staging }.count
-        dashboard.recordDetails = dashboard.recordDetails.merging(
-            localRecordMonthDetails[Self.currentMonthKey] ?? [:],
-            uniquingKeysWith: { _, local in local }
-        )
-        let previousSummaries = Dictionary(uniqueKeysWithValues: dashboard.dailySummaries.map { ($0.dateKey, $0) })
-        dashboard.dailySummaries = mergedGroups.map { group in
-            let previous = previousSummaries[group.dateKey]
-            return NativeDailySummary(
-                dateKey: group.dateKey,
-                expense: previous?.expense ?? 0,
-                income: previous?.income ?? 0,
-                pendingCount: group.records.filter { $0.kind == .staging }.count,
-                recordCount: group.records.count
-            )
-        }
-    }
-
-    private func applyLocalExpenseMonth(
-        _ month: LocalExpenseMonth,
-        incomeMonth: LocalIncomeMonth,
-        groups: [NativeDayRecordGroup]
-    ) {
-        let todayKey = NativeLocalDate.dateKey(Date())
-        let todayExpenses = month.expenses.filter { $0.transactionDate == todayKey }
-        let todayIncomes = incomeMonth.incomes.filter { $0.incomeDate == todayKey }
-        dashboard.dayRecordGroups = groups
-        dashboard.dailySummaries = groups.map { group in
-            let expense = group.records.reduce(0.0) { total, record in
-                guard let local = month.expenses.first(where: { $0.id.uuidString == record.id }) else { return total }
-                return total + Double(local.amountMinor) / 100
-            }
-            return NativeDailySummary(
-                dateKey: group.dateKey,
-                expense: expense,
-                income: group.records.filter { $0.kind == .income }.reduce(0) { total, record in
-                    total + (incomeMonth.incomes.first(where: { $0.id.uuidString == record.id }).map { Double($0.amountMinor) / 100 } ?? 0)
-                },
-                pendingCount: 0,
-                recordCount: group.records.count
-            )
-        }
-        dashboard.todayCount = todayExpenses.count + todayIncomes.count
-        dashboard.monthCount = month.expenses.count + incomeMonth.incomes.count
-        dashboard.todayExpense = todayExpenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
-        dashboard.monthExpense = month.expenses.reduce(0) { $0 + Double($1.amountMinor) / 100 }
-        dashboard.todayIncome = todayIncomes.reduce(0) { $0 + Double($1.amountMinor) / 100 }
-        dashboard.monthIncome = incomeMonth.incomes.reduce(0) { $0 + Double($1.amountMinor) / 100 }
-        dashboard.pendingCount = 0
-        dashboard.recordDetails = localRecordMonthDetails[Self.currentMonthKey] ?? [:]
-        dashboard.recentRecords = []
-        dashboard.stagingRecords = []
-        dashboard.pendingExpenses = []
-    }
-
-    func reportSnapshot(monthKey: String) -> DashboardSnapshot {
-        var snapshot = monthKey == Self.currentMonthKey ? dashboard : DashboardSnapshot()
-        let groups = recordGroups(monthKey: monthKey)
-        let details = (recordMonthDetails[monthKey] ?? [:]).merging(
-            localRecordMonthDetails[monthKey] ?? [:],
-            uniquingKeysWith: { _, local in local }
-        )
-        let records = groups.flatMap(\.records).filter { $0.kind != .staging }
-        snapshot.dayRecordGroups = groups
-        snapshot.recordDetails = details
-        snapshot.monthCount = records.count
-        snapshot.monthExpense = NativeHomeInsightAnalytics.confirmedExpenseTotal(from: snapshot)
-        snapshot.monthIncome = records
-            .filter { $0.kind == .income }
-            .reduce(0) { total, record in
-                total + (details[record.reference]?.amount ?? details[record.id]?.amount ?? record.amount ?? 0)
-            }
-        let definitions = dashboard.domains.isEmpty ? Self.fallbackDomains : dashboard.domains
-        snapshot.domains = domainsWithUpdatedCounts(definitions, snapshot: snapshot)
-        return snapshot
-    }
-
-    private func loadRemoteRecordMonth(_ monthKey: String, force: Bool = false) async {
-        guard monthKey != Self.currentMonthKey else {
-            if force || dashboard.dayRecordGroups.isEmpty || dashboardCoreTask != nil {
-                await refreshDashboard()
-                await refreshLocalMonthProjection(monthKey: monthKey)
-            }
-            return
-        }
-        guard force || remoteRecordMonthGroups[monthKey] == nil else { return }
-        if let task = remoteRecordMonthTasks[monthKey] {
-            await task.value
-            return
-        }
-        let generation = userStateGeneration
-        // æœˆè¯»å–å±žäºŽè´¦å·ä¼šè¯ï¼›é¡µé¢å–æ¶ˆä¸å–æ¶ˆå…±äº«è¯·æ±‚ï¼Œè´¦å·é‡ç½®æ—¶é›†ä¸­å–æ¶ˆã€‚
-        let task = Task { @MainActor in
-            await self.performRemoteRecordMonthLoad(monthKey, generation: generation)
-        }
-        remoteRecordMonthTasks[monthKey] = task
-        loadingRemoteRecordMonthKeys.insert(monthKey)
-        await task.value
-    }
-
-    private func performRemoteRecordMonthLoad(_ monthKey: String, generation: Int) async {
-        guard generation == userStateGeneration else { return }
-        loadingRecordMonthKey = monthKey
-        recordMonthMessages.removeValue(forKey: monthKey)
-        defer {
-            // æ—§èº«ä»½è¯·æ±‚ç»“æŸæ—¶ä¸èƒ½ç§»é™¤æ–°èº«ä»½çš„åŒæœˆä»»åŠ¡æˆ–åŠ è½½çŠ¶æ€ã€‚
-            if generation == userStateGeneration {
-                remoteRecordMonthTasks.removeValue(forKey: monthKey)
-                loadingRemoteRecordMonthKeys.remove(monthKey)
-                if loadingRecordMonthKey == monthKey,
-                   !loadingLocalReadKeys.contains(where: { $0.hasSuffix(":\(monthKey)") }),
-                   loadingLocalExpenseMonthKey != monthKey,
-                   loadingLocalRecordMonthKey != monthKey {
-                    loadingRecordMonthKey = nil
-                }
-            }
-        }
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            let month = try await recordRepository.fetchMonth(
-                monthKey: monthKey,
-                accessToken: session.accessToken
-            )
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            recordMonthDetails[monthKey] = month.details
-            for (reference, detail) in month.details {
-                let canonicalReference = NativeRecordReference(reference).canonicalValue
-                recordDetailCache[canonicalReference] = detailPreservingExpressionFeedback(detail)
-            }
-            remoteRecordMonthGroups[monthKey] = month.groups
-            await importRemoteExpenseDetails(month.details.values)
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            await refreshLocalMonthProjection(monthKey: monthKey)
-        } catch {
-            guard generation == userStateGeneration else { return }
-            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return }
-            recordMonthMessages[monthKey] = error.localizedDescription
-        }
-    }
-
-    func loadAccounts() async {
-        guard !isLoadingAccounts else { return }
-        let generation = userStateGeneration
-        isLoadingAccounts = true
-        accountMessage = nil
-        defer { isLoadingAccounts = false }
-        if localExpenseUseCase != nil, !mayReadRemoteBusinessData {
-            await loadLocalAccounts()
-            if accounts.isEmpty, let localAccountMessage {
-                accountMessage = localAccountMessage
-            }
-            return
-        }
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            let loadedAccounts = try await accountRepository.fetchAccounts(accessToken: session.accessToken)
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            accounts = loadedAccounts
-            if shouldProjectRemoteData, let localExpenseUseCase {
-                let localAccounts = loadedAccounts.compactMap { account -> LocalAccount? in
-                    guard let id = UUID(uuidString: account.id) else { return nil }
-                    return LocalAccount(
-                        id: id,
-                        profileID: UUID(),
-                        name: account.name,
-                        kind: account.type.rawValue,
-                        currency: account.currency,
-                        openingBalanceMinor: Int64((account.initialBalance * 100).rounded()),
-                        createdAt: Date(),
-                        institution: account.institution,
-                        last4: account.last4,
-                        billDay: account.billDay,
-                        paymentDueDay: account.paymentDueDay,
-                        autoDebitAccountID: account.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
-                        autoConfirmRepayment: account.autoConfirmRepayment,
-                        gracePeriodDays: account.gracePeriodDays,
-                        lastReconciledAt: Self.parseISO8601(account.lastReconciledAt),
-                        isDefaultExpense: account.isDefaultExpense,
-                        isDefaultIncome: account.isDefaultIncome,
-                        isArchived: account.isArchived,
-                        sortOrder: account.sortOrder
-                    )
-                }
-                try await localExpenseUseCase.importRemoteAccounts(localAccounts)
-                _ = await prepareLocalWorkspace()
-            }
-        } catch {
-            guard generation == userStateGeneration else { return }
-            if !isSignedIn {
-                await loadLocalAccounts()
-                accountMessage = nil
-            } else {
-                accountMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func importRemoteExpenseDetails(_ details: Dictionary<String, NativeRecordDetail>.Values) async {
-        guard shouldProjectRemoteData, let localExpenseUseCase else { return }
-        let referencedAccountIDs = Set(details.compactMap { $0.accountId })
-        let missingAccounts = accounts.compactMap { account -> LocalAccount? in
-            guard referencedAccountIDs.contains(account.id),
-                  let id = UUID(uuidString: account.id),
-                  !localAccounts.contains(where: { $0.id == id }) else { return nil }
-            return LocalAccount(
-                id: id,
-                profileID: UUID(),
-                name: account.name,
-                kind: account.type.rawValue,
-                currency: account.currency,
-                openingBalanceMinor: Int64((account.initialBalance * 100).rounded()),
-                createdAt: Date(),
-                institution: account.institution,
-                last4: account.last4,
-                billDay: account.billDay,
-                paymentDueDay: account.paymentDueDay,
-                autoDebitAccountID: account.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
-                autoConfirmRepayment: account.autoConfirmRepayment,
-                gracePeriodDays: account.gracePeriodDays,
-                lastReconciledAt: Self.parseISO8601(account.lastReconciledAt),
-                isDefaultExpense: account.isDefaultExpense,
-                isDefaultIncome: account.isDefaultIncome,
-                isArchived: account.isArchived,
-                sortOrder: account.sortOrder
-            )
-        }
-        if !missingAccounts.isEmpty {
-            try? await localExpenseUseCase.importRemoteAccounts(missingAccounts)
-            _ = await prepareLocalWorkspace()
-        }
-        let drafts = details.compactMap { detail -> LocalExpenseDraft? in
-            guard detail.kind == "expense",
-                  let id = UUID(uuidString: detail.rawId),
-                  let accountID = detail.accountId.flatMap(UUID.init(uuidString:)),
-                  let amount = detail.amount, amount > 0,
-                  let date = NativeLocalDate.financeDateKey(
-                      occurredAt: detail.occurredAt,
-                      legacyDate: detail.recordDate,
-                      createdAt: detail.createdAt
-                  ),
-                  let merchant = detail.merchantName else { return nil }
-            return LocalExpenseDraft(
-                id: id,
-                profileID: UUID(),
-                accountID: accountID,
-                amountMinor: Int64((amount * 100).rounded()),
-                currency: "CNY",
-                merchantName: merchant,
-                platform: detail.platform ?? "",
-                category: detail.category ?? "other",
-                paymentMethod: detail.paymentMethod ?? "",
-                transactionDate: date,
-                transactionTime: detail.transactionTime,
-                note: detail.note,
-                createdAt: detail.createdAt.flatMap { NativeLocalDate.dateValue($0) } ?? Date()
-            )
-        }
-        guard !drafts.isEmpty else { return }
-        try? await localExpenseUseCase.importRemoteExpenses(drafts)
-        _ = await prepareLocalWorkspace()
-    }
-
-    private var shouldProjectRemoteData: Bool {
-        guard isSignedIn,
-              let state = localSyncState,
-              case .bound(let userID) = state.binding else { return false }
-        return userID == currentUserId
-    }
-
-    private func loadLocalAccounts() async {
-        guard let workspace = await prepareLocalWorkspace() else {
-            accounts = []
-            return
-        }
-        var projected: [NativeAccount] = []
-        for account in workspace.accounts {
-            let balance: Int64
-            if let useCase = localExpenseUseCase,
-               let value = try? await useCase.accountBalanceMinor(account.id) {
-                balance = value
-            } else {
-                balance = account.openingBalanceMinor
-            }
-            projected.append(Self.nativeAccount(from: account, balanceMinor: balance))
-        }
-        accounts = projected
-    }
-
-    private static func nativeAccount(from account: LocalAccount, balanceMinor: Int64) -> NativeAccount {
-        NativeAccount(
-            id: account.id.uuidString,
-            name: account.name,
-            type: NativeAccountType.normalized(account.kind),
-            institution: account.institution,
-            last4: account.last4,
-            currency: account.currency,
-            initialBalance: Double(account.openingBalanceMinor) / 100,
-            currentBalance: Double(balanceMinor) / 100,
-            snapshotBalance: nil,
-            snapshotAt: nil,
-            sourceRecordTable: "",
-            sourceRecordId: "",
-            billDay: account.billDay,
-            paymentDueDay: account.paymentDueDay,
-            autoDebitAccountId: account.autoDebitAccountID?.uuidString,
-            autoConfirmRepayment: account.autoConfirmRepayment,
-            gracePeriodDays: account.gracePeriodDays,
-            lastReconciledAt: account.lastReconciledAt.map { ISO8601DateFormatter().string(from: $0) },
-            isDefaultExpense: account.isDefaultExpense,
-            isDefaultIncome: account.isDefaultIncome,
-            isArchived: account.isArchived,
-            sortOrder: account.sortOrder
-        )
-    }
-
-    private static func nativeRepaymentCycle(from cycle: LocalRepaymentCycle) throws -> NativeRepaymentCycle {
-        guard let status = NativeRepaymentStatus(rawValue: cycle.status) else { throw LocalDataError.invalidRecord }
-        return NativeRepaymentCycle(
-            id: cycle.id.uuidString, accountId: cycle.accountID.uuidString, cycleMonth: cycle.cycleMonth,
-            statementStartDate: cycle.statementStartDate, statementEndDate: cycle.statementEndDate,
-            dueDate: cycle.dueDate, statementAmount: Double(cycle.statementAmountMinor) / 100,
-            paidAmount: Double(cycle.paidAmountMinor) / 100, remainingAmount: Double(cycle.remainingAmountMinor) / 100,
-            carriedOverAmount: Double(cycle.carriedOverAmountMinor) / 100,
-            originalStatementAmount: cycle.originalStatementAmountMinor.map { Double($0) / 100 },
-            minPaymentAmount: cycle.minPaymentAmountMinor.map { Double($0) / 100 },
-            refundAppliedAmount: Double(cycle.refundAppliedAmountMinor) / 100, status: status,
-            autoDebitAccountId: cycle.autoDebitAccountID?.uuidString,
-            autoConfirmRepayment: cycle.autoConfirmRepayment, source: cycle.source,
-            evidenceRecordId: cycle.evidenceRecordID?.uuidString, confidence: cycle.confidence,
-            note: cycle.note, confirmedAt: cycle.confirmedAt.map { ISO8601DateFormatter().string(from: $0) }
-        )
-    }
-
-    private static func parseISO8601(_ value: String?) -> Date? {
-        guard let value else { return nil }
-        return ISO8601DateFormatter().date(from: value)
-    }
-
-    private static func nativeLiabilityPayment(from payment: LocalLiabilityPayment) -> NativeLiabilityPayment {
-        NativeLiabilityPayment(
-            id: payment.id.uuidString, accountId: payment.accountID.uuidString,
-            statementId: payment.statementID?.uuidString, debitAccountId: payment.debitAccountID?.uuidString,
-            amount: Double(payment.amountMinor) / 100,
-            overpaymentAmount: Double(payment.overpaymentAmountMinor) / 100,
-            paidAt: ISO8601DateFormatter().string(from: payment.paidAt), source: payment.source,
-            evidenceRecordId: payment.evidenceRecordID?.uuidString, status: payment.status,
-            note: payment.note ?? ""
-        )
-    }
-
-    func loadFinanceVocabulary() async {
-        guard mayReadRemoteBusinessData else { financeVocabulary = []; return }
-        guard !isLoadingFinanceVocabulary else { return }
-        let generation = userStateGeneration
-        isLoadingFinanceVocabulary = true
-        defer { isLoadingFinanceVocabulary = false }
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            let entries = try await financeVocabularyRepository.fetch(accessToken: session.accessToken)
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            financeVocabulary = entries
-        } catch {
-            guard generation == userStateGeneration else { return }
-        }
-    }
-
-    private func scheduleConfirmedExpenseVocabulary(
-        platform: String,
-        category: String,
-        paymentMethod: String,
-        accountId: String?,
-        userId: String,
-        accessToken: String
-    ) {
-        let generation = userStateGeneration
-        Task { [weak self] in
-            await self?.recordConfirmedExpenseVocabulary(
-                platform: platform,
-                category: category,
-                paymentMethod: paymentMethod,
-                accountId: accountId,
-                userId: userId,
-                generation: generation,
-                accessToken: accessToken
-            )
-        }
-    }
-
-    private func recordConfirmedExpenseVocabulary(
-        platform: String,
-        category: String,
-        paymentMethod: String,
-        accountId: String?,
-        userId: String,
-        generation: Int,
-        accessToken: String
-    ) async {
-        guard mayReadRemoteBusinessData else { return }
-        let categoryTitle = NativeFinanceOptionCatalog.categoryTitle(for: category)
-        let requests: [(NativeFinanceVocabularyKind, String, String?, String?)] = [
-            (.platform, platform, nil, nil),
-            (.payment, paymentMethod, nil, accountId),
-            (.category, categoryTitle ?? "", categoryTitle, nil)
-        ]
-
-        for (kind, rawDisplayName, primaryCategory, linkedAccountId) in requests {
-            guard isCurrentUserLoad(generation, userId: userId) else { return }
-            let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !displayName.isEmpty else { continue }
-            do {
-                let entry = try await financeVocabularyRepository.record(
-                    kind: kind,
-                    displayName: displayName,
-                    primaryCategory: primaryCategory,
-                    linkedAccountId: linkedAccountId,
-                    accessToken: accessToken
-                )
-                guard isCurrentUserLoad(generation, userId: userId) else { return }
-                if let index = financeVocabulary.firstIndex(where: { $0.id == entry.id }) {
-                    financeVocabulary[index] = entry
-                } else {
-                    financeVocabulary.append(entry)
-                }
-            } catch {
-                continue
-            }
-        }
-    }
-
-    func loadAccountDetail(_ account: NativeAccount) async {
-        let generation = userStateGeneration
-        selectedAccountDetail = nil
-        selectedAccountSourceSnapshot = nil
-        accountMessage = nil
-        if !mayReadRemoteBusinessData {
-            await loadLocalAccountDetail(account)
-            return
-        }
-        let session = try? await validSession()
-        guard let session else {
-            await loadLocalAccountDetail(account)
-            return
-        }
-        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-        if account.type.isLiability {
-            let preparation = await resolvedAccountReadPreparationUseCase().prepare(monthKey: Self.currentMonthKey)
-            guard projectAccountReadPreparationResult(preparation, onFailure: { [weak self] message in
-                self?.accountMessage = message
-            }) else { return }
-        }
-        let loadedDetail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
-        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-        selectedAccountDetail = loadedDetail
-        if account.sourceRecordTable == "data_records", !account.sourceRecordId.isEmpty {
-            let sourceSnapshot = try? await walletSnapshotRepository.fetch(
-                id: account.sourceRecordId,
-                accessToken: session.accessToken
-            )
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            selectedAccountSourceSnapshot = sourceSnapshot
-            let reference = "data/\(account.sourceRecordId)"
-            if recordDetailCache[reference] == nil,
-               let detail = try? await recordRepository.fetchDetail(
-                   reference: reference,
-                   accessToken: session.accessToken
-               ) {
-                guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-                recordDetailCache[reference] = detail
-                if let imageURL = detail.imageURL {
-                    Task { await RemoteImageRepository.shared.prefetch([imageURL]) }
-                }
-            }
-        }
-    }
-
-    private func loadLocalAccountDetail(_ account: NativeAccount) async {
-        guard let accountID = UUID(uuidString: account.id),
-              let localExpenseUseCase else {
-            accountMessage = "æœ¬æœºè´¦æˆ·æ ‡è¯†æ— æ•ˆã€‚"
-            return
-        }
-        do {
-            await loadLocalAccounts()
-            let currentAccount = accounts.first(where: { $0.id == account.id }) ?? account
-            let entries = try await localExpenseUseCase.accountEntries(accountID: accountID)
-            let nativeEntries = entries.map { entry in
-                NativeAccountEntry(
-                    id: entry.id.uuidString,
-                    accountId: entry.accountID.uuidString,
-                    direction: entry.direction,
-                    amount: Double(entry.amountMinor) / 100,
-                    entryType: entry.entryKind,
-                    sourceTable: entry.sourceKind,
-                    sourceId: entry.sourceID.uuidString,
-                    occurredAt: entry.occurredAt.map { ISO8601DateFormatter().string(from: $0) } ?? "",
-                    note: "",
-                    isVoided: entry.voidedAt != nil || entry.isVoided,
-                    voidedReason: entry.voidedAt == nil && !entry.isVoided ? "" : "å·²ä½œåºŸ"
-                )
-            }
-            var cycles: [NativeRepaymentCycle] = []
-            var payments: [NativeLiabilityPayment] = []
-            if currentAccount.type.isLiability {
-                _ = try await localExpenseUseCase.ensureRepaymentCycles(Self.currentMonthKey, now: Date())
-                cycles = try await localExpenseUseCase.repaymentCycles(accountID: accountID).map(Self.nativeRepaymentCycle(from:))
-                payments = try await localExpenseUseCase.liabilityPayments(accountID: accountID).map(Self.nativeLiabilityPayment(from:))
-            }
-            selectedAccountDetail = NativeAccountDetail(
-                account: currentAccount,
-                entries: nativeEntries,
-                repaymentCycles: cycles,
-                payments: payments,
-                loadErrors: [:]
-            )
-            accountMessage = nil
-        } catch {
-            accountMessage = error.localizedDescription
-        }
-    }
-
-    func confirmRepayment(
-        cycle: NativeRepaymentCycle,
-        paidAmount: Double,
-        debitAccountId: String?,
-        status: NativeRepaymentStatus,
-        note: String
-    ) async -> Bool {
-        if !mayReadRemoteBusinessData {
-            return await confirmLocalRepayment(
-                cycle: cycle, paidAmount: paidAmount, debitAccountId: debitAccountId,
-                status: status, note: note
-            )
-        }
-        return await performRepaymentAction(.confirm(
-            cycleId: cycle.id,
-            accountId: cycle.accountId,
-            paidAmount: paidAmount,
-            debitAccountId: debitAccountId,
-            status: status,
-            note: note
-        ))
-    }
-
-    func revokeLiabilityPayment(
-        payment: NativeLiabilityPayment,
-        accountId: String
-    ) async -> Bool {
-        if !mayReadRemoteBusinessData {
-            guard !isSubmittingRepayment,
-                  let localExpenseUseCase,
-                  let paymentID = UUID(uuidString: payment.id) else { return false }
-            isSubmittingRepayment = true
-            repaymentMessage = nil
-            defer { isSubmittingRepayment = false }
-            do {
-                _ = try await localExpenseUseCase.revokeLiabilityPayment(
-                    id: paymentID, reason: "ç”¨æˆ·æ’¤é”€è¿˜æ¬¾", now: Date()
-                )
-                await loadLocalAccounts()
-                if let refreshed = accounts.first(where: { $0.id == accountId }) {
-                    await loadLocalAccountDetail(refreshed)
-                }
-                repaymentMessage = "è¿˜æ¬¾å·²åœ¨æ­¤è®¾å¤‡æ’¤é”€"
-                return true
-            } catch {
-                repaymentMessage = error.localizedDescription
-                return false
-            }
-        }
-        return await performRepaymentAction(.revoke(
-            paymentId: payment.id,
-            cycleId: payment.statementId ?? "",
-            accountId: accountId
-        ))
-    }
-
-    private func confirmLocalRepayment(
-        cycle: NativeRepaymentCycle,
-        paidAmount: Double,
-        debitAccountId: String?,
-        status: NativeRepaymentStatus,
-        note: String
-    ) async -> Bool {
-        guard !isSubmittingRepayment, paidAmount.isFinite, paidAmount >= 0,
-              let localExpenseUseCase,
-              let cycleID = UUID(uuidString: cycle.id) else { return false }
-        let debitID: UUID?
-        if let debitAccountId {
-            guard let parsed = UUID(uuidString: debitAccountId) else {
-                repaymentMessage = "æ‰£æ¬¾è´¦æˆ·æ— æ•ˆã€‚"
-                return false
-            }
-            debitID = parsed
-        } else {
-            debitID = nil
-        }
-        let paidAmountMinor: Int64
-        do {
-            paidAmountMinor = try LocalExpenseMapper.nonnegativeAmountMinor(String(paidAmount))
-        } catch {
-            repaymentMessage = error.localizedDescription
-            return false
-        }
-        isSubmittingRepayment = true
-        repaymentMessage = nil
-        defer { isSubmittingRepayment = false }
-        do {
-            _ = try await localExpenseUseCase.confirmRepayment(
-                cycleID: cycleID, paidAmountMinor: paidAmountMinor, debitAccountID: debitID,
-                status: status.rawValue, note: note, paidAt: Date()
-            )
-            await loadLocalAccounts()
-            if let refreshed = accounts.first(where: { $0.id == cycle.accountId }) {
-                await loadLocalAccountDetail(refreshed)
-            }
-            repaymentMessage = "è¿˜æ¬¾å·²ä¿å­˜åœ¨æ­¤è®¾å¤‡"
-            return true
-        } catch {
-            repaymentMessage = error.localizedDescription
-            return false
-        }
-    }
-
-    private func performRepaymentAction(_ command: RepaymentActionCommand) async -> Bool {
-        let ownsBusyState = !isSubmittingRepayment
-        if ownsBusyState {
-            isSubmittingRepayment = true
-            repaymentMessage = nil
-        }
-        defer {
-            if ownsBusyState { isSubmittingRepayment = false }
-        }
-
-        let result = await resolvedRepaymentActionUseCase().perform(command)
-        return projectRepaymentActionResult(result)
-    }
-
-    private func resolvedRepaymentActionUseCase() -> RepaymentActionUseCase {
-        if let repaymentActionUseCase { return repaymentActionUseCase }
-        let useCase = RepaymentActionUseCase(
-            repository: accountRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return RepaymentActionUserContext(userId: "", generation: -1, isSignedIn: false)
-                }
-                return RepaymentActionUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn
-                )
-            },
-            applyAccepted: { [weak self] cycle in
-                self?.applyCanonicalRepaymentCycle(cycle)
-            },
-            refresh: { [weak self] accountId in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                try await self.refreshAfterRepayment(accountId: accountId)
-            }
-        )
-        repaymentActionUseCase = useCase
-        return useCase
-    }
-
-    private func resolvedAccountReadPreparationUseCase() -> AccountReadPreparationUseCase {
-        if let accountReadPreparationUseCase { return accountReadPreparationUseCase }
-        let useCase = AccountReadPreparationUseCase(
-            repository: accountReadPreparationRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return AccountReadPreparationUserContext(userId: "", generation: -1, isSignedIn: false)
-                }
-                return AccountReadPreparationUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn
-                )
-            }
-        )
-        accountReadPreparationUseCase = useCase
-        return useCase
-    }
-
-    private func projectAccountReadPreparationResult(
-        _ result: AccountReadPreparationResult,
-        onFailure: (String) -> Void
-    ) -> Bool {
-        switch result.transaction {
-        case .accepted:
-            return true
-        case .failed(let message):
-            onFailure("è¿˜æ¬¾è®¡åˆ’å‡†å¤‡å¤±è´¥ï¼š\(message)")
-            return true
-        case .rejected(.unauthenticated):
-            onFailure("ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•ã€‚")
-            return false
-        case .rejected(.invalidInput):
-            onFailure("è¿˜æ¬¾è®¡åˆ’æœˆä»½æ— æ•ˆ")
-            return false
-        case .stale:
-            return false
-        }
-    }
-
-    private func resolvedScreenshotRepaymentUseCase() -> ScreenshotRepaymentUseCase {
-        if let screenshotRepaymentUseCase { return screenshotRepaymentUseCase }
-        let useCase = ScreenshotRepaymentUseCase(
-            repository: inboxRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return ScreenshotRepaymentUserContext(userId: "", generation: -1, isSignedIn: false)
-                }
-                return ScreenshotRepaymentUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn
-                )
-            }
-        )
-        screenshotRepaymentUseCase = useCase
-        return useCase
-    }
-
-    private func projectScreenshotRepaymentResult(_ result: ScreenshotRepaymentResult) -> Bool {
-        switch result.transaction {
-        case .accepted:
-            if case .failed(let message) = result.refresh {
-                inboxFinanceMessage = "å·²æ ¹æ®æˆªå›¾ç¡®è®¤è¿˜æ¬¾ï¼Œä½†åˆ·æ–°å¤±è´¥ï¼š\(message)"
-            } else {
-                inboxFinanceMessage = "å·²æ ¹æ®æˆªå›¾ç¡®è®¤è¿˜æ¬¾"
-            }
-            return true
-        case .rejected(.unauthenticated):
-            inboxFinanceMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•ã€‚"
-        case .rejected(.invalidInput):
-            inboxFinanceMessage = "è¿˜æ¬¾å‚æ•°æ— æ•ˆ"
-        case .conflict(.screenshotRepaymentConflict):
-            inboxFinanceMessage = "è¿˜æ¬¾æˆªå›¾æ­£åœ¨ä»¥å¦ä¸€ç§æ–¹å¼å¤„ç†ï¼Œè¯·ç¨åŽé‡è¯•"
-        case .failed(let message):
-            inboxFinanceMessage = message
-        case .stale:
-            return false
-        }
-        return false
-    }
-
-    private func projectRepaymentActionResult(_ result: RepaymentActionResult) -> Bool {
-        switch result.transaction {
-        case .accepted(let accepted):
-            let successMessage: String
-            switch accepted.operation {
-            case .confirm:
-                successMessage = accepted.recordedDebit ? "å·²ç¡®è®¤è¿˜æ¬¾å¹¶è®°å½•æ‰£æ¬¾" : "å·²ç¡®è®¤è¿˜æ¬¾"
-            case .revoke:
-                successMessage = "å·²æ’¤é”€è¿˜æ¬¾"
-            }
-            if case .failed(let message) = result.refresh {
-                repaymentMessage = "\(successMessage)ï¼Œä½†åˆ·æ–°å¤±è´¥ï¼š\(message)"
-            } else {
-                repaymentMessage = successMessage
-            }
-            return true
-        case .rejected(.unauthenticated):
-            repaymentMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•ã€‚"
-        case .rejected(.invalidInput):
-            repaymentMessage = "è¿˜æ¬¾å‚æ•°æ— æ•ˆ"
-        case .conflict(.repaymentConflict):
-            repaymentMessage = "å½“å‰è´¦å•æ­£åœ¨æ‰§è¡Œå¦ä¸€é¡¹è¿˜æ¬¾æ“ä½œ"
-        case .failed(let message):
-            repaymentMessage = message
-        case .stale:
-            return false
-        }
-        return false
-    }
-
-    private func applyCanonicalRepaymentCycle(_ cycle: NativeRepaymentCycle) {
-        guard let detail = selectedAccountDetail, detail.account.id == cycle.accountId else { return }
-        var cycles = detail.repaymentCycles
-        if let index = cycles.firstIndex(where: { $0.id == cycle.id }) {
-            cycles[index] = cycle
-        } else {
-            cycles.insert(cycle, at: 0)
-        }
-        selectedAccountDetail = NativeAccountDetail(
-            account: detail.account,
-            entries: detail.entries,
-            repaymentCycles: cycles,
-            payments: detail.payments,
-            loadErrors: detail.loadErrors
-        )
-    }
-
-    func loadInboxRepaymentCandidates() async {
-        if !mayReadRemoteBusinessData, localExpenseUseCase != nil {
-            await loadLocalInboxRepaymentCandidates()
-            return
-        }
-        guard isSignedIn else {
-            repaymentCandidates = [:]
-            inboxFinanceMessage = nil
-            return
-        }
-        let generation = userStateGeneration
-        let stagingRecords = dashboard.stagingRecords
-        guard !stagingRecords.isEmpty else {
-            repaymentCandidates = [:]
-            return
-        }
-
-        do {
-            let session = try await validSession()
-            let preparation = await resolvedAccountReadPreparationUseCase().prepare(monthKey: Self.currentMonthKey)
-            guard projectAccountReadPreparationResult(preparation, onFailure: { [weak self] message in
-                self?.inboxFinanceMessage = message
-            }) else { return }
-            async let accountRows = accountRepository.fetchAccounts(accessToken: session.accessToken)
-            async let cycleRows = accountRepository.fetchOpenRepaymentCycles(accessToken: session.accessToken)
-            let (loadedAccounts, cycles) = try await (accountRows, cycleRows)
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            accounts = loadedAccounts
-            repaymentCandidates = Dictionary(
-                uniqueKeysWithValues: stagingRecords.compactMap { record in
-                    NativeRepaymentCandidateEngine.candidate(
-                        for: record,
-                        accounts: loadedAccounts,
-                        cycles: cycles
-                    ).map { (record.id, $0) }
-                }
-            )
-            inboxFinanceMessage = nil
-        } catch {
-            guard generation == userStateGeneration else { return }
-            repaymentCandidates = [:]
-            inboxFinanceMessage = "è¿˜æ¬¾å€™é€‰æš‚æ—¶æ— æ³•åŒ¹é…ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    func confirmStagingRepayment(_ record: NativeStagingRecord) async -> Bool {
-        guard stagingRepaymentId == nil,
-              let candidate = repaymentCandidates[record.id] else {
-            return false
-        }
-        if let localStagingID = LocalStagingReadModel.localID(from: record.id) {
-            guard let localExpenseUseCase,
-                  let cycleID = UUID(uuidString: candidate.cycle.id) else { return false }
-            let debitIDText = candidate.cycle.autoDebitAccountId ?? candidate.account.autoDebitAccountId
-            let debitID = debitIDText.flatMap(UUID.init(uuidString:))
-            guard debitIDText == nil || debitID != nil else { return false }
-            stagingRepaymentId = record.id
-            inboxFinanceMessage = nil
-            defer { stagingRepaymentId = nil }
-            do {
-                let paidAmountMinor = try LocalExpenseMapper.amountMinor(String(candidate.amount))
-                _ = try await localExpenseUseCase.confirmScreenshotRepayment(
-                    stagingID: localStagingID,
-                    cycleID: cycleID,
-                    paidAmountMinor: paidAmountMinor,
-                    debitAccountID: debitID,
-                    note: "æ ¹æ®è¿˜æ¬¾æˆªå›¾ç¡®è®¤",
-                    paidAt: Date()
-                )
-                repaymentCandidates.removeValue(forKey: record.id)
-                removeStagingRecordLocally(record.id)
-                await loadLocalAccounts()
-                if selectedAccountDetail?.account.id == candidate.account.id,
-                   let refreshed = accounts.first(where: { $0.id == candidate.account.id }) {
-                    await loadLocalAccountDetail(refreshed)
-                }
-                await refreshDashboard()
-                inboxFinanceMessage = "æˆªå›¾è¿˜æ¬¾å·²ä¿å­˜åœ¨æ­¤è®¾å¤‡"
-                return true
-            } catch {
-                inboxFinanceMessage = "æœ¬åœ°æˆªå›¾è¿˜æ¬¾æœªç¡®è®¤ï¼š\(error.localizedDescription)"
-                return false
-            }
-        }
-        stagingRepaymentId = record.id
-        inboxFinanceMessage = nil
-        defer { stagingRepaymentId = nil }
-
-        let result = await resolvedScreenshotRepaymentUseCase().confirm(
-            ScreenshotRepaymentCommand(
-                stagingId: record.id,
-                cycleId: candidate.cycle.id,
-                paidAmount: candidate.amount,
-                debitAccountId: candidate.cycle.autoDebitAccountId ?? candidate.account.autoDebitAccountId,
-                note: "æ ¹æ®è¿˜æ¬¾æˆªå›¾ç¡®è®¤"
-            ),
-            onAccepted: { [weak self] cycle in
-                guard let self else { return }
-                self.applyCanonicalRepaymentCycle(cycle)
-                self.repaymentCandidates.removeValue(forKey: record.id)
-                self.inboxPath = NavigationPath()
-            },
-            refresh: { [weak self] _ in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                await self.loadAccounts()
-                if let message = self.accountMessage, !message.isEmpty {
-                    throw WalletSnapshotReadModelRefreshError(message: message)
-                }
-                await self.refreshDashboard()
-                if let message = self.dashboardMessage, !message.isEmpty {
-                    throw WalletSnapshotReadModelRefreshError(message: message)
-                }
-            }
-        )
-        return projectScreenshotRepaymentResult(result)
-    }
-
-    private func loadLocalInboxRepaymentCandidates() async {
-        guard let localExpenseUseCase, let localRecordUseCase else {
-            repaymentCandidates = [:]
-            return
-        }
-        let generation = userStateGeneration
-        do {
-            let staging = try await localRecordUseCase.stagingRecords()
-            let candidates = staging.map { record in
-                LocalStagingReadModel.native(
-                    from: record,
-                    imageStore: localImageStore,
-                    plannerEnabled: userSettings.companionEnabled
-                )
-            }
-            await loadLocalAccounts()
-            guard generation == userStateGeneration else { return }
-            _ = try await localExpenseUseCase.ensureRepaymentCycles(Self.currentMonthKey, now: Date())
-            var cycles: [NativeRepaymentCycle] = []
-            for account in accounts where account.type.isLiability && !account.isArchived {
-                guard let id = UUID(uuidString: account.id) else { continue }
-                let localCycles = try await localExpenseUseCase.repaymentCycles(accountID: id)
-                cycles += try localCycles.map(Self.nativeRepaymentCycle(from:))
-            }
-            guard generation == userStateGeneration else { return }
-            repaymentCandidates = Dictionary(
-                uniqueKeysWithValues: candidates.compactMap { record in
-                    NativeRepaymentCandidateEngine.candidate(
-                        for: record,
-                        accounts: accounts,
-                        cycles: cycles
-                    ).map { (record.id, $0) }
-                }
-            )
-            inboxFinanceMessage = nil
-        } catch {
-            guard generation == userStateGeneration else { return }
-            repaymentCandidates = [:]
-            inboxFinanceMessage = "æœ¬åœ°è¿˜æ¬¾å€™é€‰æš‚æ—¶æ— æ³•åŒ¹é…ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    private func refreshAfterRepayment(accountId: String) async throws {
-        await loadAccounts()
-        if let accountMessage, !accountMessage.isEmpty {
-            throw WalletSnapshotReadModelRefreshError(message: accountMessage)
-        }
-        if let account = accounts.first(where: { $0.id == accountId }) {
-            let generation = userStateGeneration
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            let refreshedDetail = await accountRepository.fetchDetail(
-                account: account,
-                accessToken: session.accessToken
-            )
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-
-            let canonicalCycles = selectedAccountDetail?.account.id == accountId
-                ? selectedAccountDetail?.repaymentCycles ?? []
-                : []
-            if refreshedDetail.loadError(for: .repaymentCycles) != nil, !canonicalCycles.isEmpty {
-                selectedAccountDetail = NativeAccountDetail(
-                    account: refreshedDetail.account,
-                    entries: refreshedDetail.entries,
-                    repaymentCycles: canonicalCycles,
-                    payments: refreshedDetail.payments,
-                    loadErrors: refreshedDetail.loadErrors
-                )
-            } else {
-                selectedAccountDetail = refreshedDetail
-            }
-            if let message = refreshedDetail.loadErrors.values.first {
-                throw WalletSnapshotReadModelRefreshError(message: message)
-            }
-        }
-        await refreshDashboard()
-        if let dashboardMessage, !dashboardMessage.isEmpty {
-            throw WalletSnapshotReadModelRefreshError(message: dashboardMessage)
-        }
-    }
-
-    func saveAccount(_ draft: NativeAccountDraft) async -> Bool {
-        if !mayReadRemoteBusinessData {
-            return await saveLocalManagedAccount(draft)
-        }
-        guard let initialBalance = Double(draft.initialBalanceText.isEmpty ? "0" : draft.initialBalanceText) else {
-            accountMessage = "åˆå§‹ä½™é¢å¿…é¡»æ˜¯æ•°å­—"
-            return false
-        }
-        let command = AccountManagementActionCommand.save(
-            AccountManagementSaveCommand(
-                accountId: draft.accountId,
-                name: draft.name,
-                type: draft.type,
-                institution: draft.institution,
-                last4: draft.last4,
-                initialBalance: initialBalance,
-                billDay: Int(draft.billDayText),
-                paymentDueDay: Int(draft.paymentDueDayText),
-                autoDebitAccountId: draft.autoDebitAccountId,
-                autoConfirmRepayment: draft.autoConfirmRepayment,
-                isDefaultExpense: draft.isDefaultExpense,
-                isDefaultIncome: draft.isDefaultIncome
-            )
-        )
-        return await performAccountManagementAction(command)
-    }
-
-    func setAccountArchived(_ account: NativeAccount, archived: Bool) async -> Bool {
-        if !mayReadRemoteBusinessData {
-            _ = await prepareLocalWorkspace()
-            guard let id = UUID(uuidString: account.id), let local = localAccounts.first(where: { $0.id == id }) else {
-                accountMessage = "æœ¬åœ°è´¦æˆ·ä¸å¯ç”¨ï¼Œè¯·åˆ·æ–°åŽé‡è¯•ã€‚"
-                return false
-            }
-            guard let localExpenseUseCase else {
-                accountMessage = "æœ¬åœ°è´¦æˆ·å­˜å‚¨æš‚ä¸å¯ç”¨ã€‚"
-                return false
-            }
-            do {
-                _ = try await localExpenseUseCase.updateAccount(LocalAccountEditCommand(
-                    id: local.id, expectedVersion: local.localVersion, name: local.name,
-                    kind: local.kind, institution: local.institution, last4: local.last4,
-                    billDay: local.billDay, paymentDueDay: local.paymentDueDay,
-                    autoDebitAccountID: archived ? nil : local.autoDebitAccountID,
-                    autoConfirmRepayment: archived ? false : local.autoConfirmRepayment,
-                    gracePeriodDays: local.gracePeriodDays,
-                    isDefaultExpense: archived ? false : local.isDefaultExpense,
-                    isDefaultIncome: archived ? false : local.isDefaultIncome,
-                    isArchived: archived, sortOrder: local.sortOrder
-                ))
-                await loadLocalAccounts()
-                accountMessage = archived ? "è´¦æˆ·å·²å½’æ¡£" : "è´¦æˆ·å·²æ¢å¤"
-                return true
-            } catch {
-                accountMessage = error.localizedDescription
-                return false
-            }
-        }
-        return await performAccountManagementAction(
-            .setArchived(accountId: account.id, archived: archived)
-        )
-    }
-
-    private func saveLocalManagedAccount(_ draft: NativeAccountDraft) async -> Bool {
-        guard !isSavingAccount else { return false }
-        isSavingAccount = true
-        accountMessage = nil
-        defer { isSavingAccount = false }
-        if let validation = draft.validationMessage {
-            accountMessage = validation
-            return false
-        }
-        _ = await prepareLocalWorkspace()
-        return await persistLocalManagedAccount(draft)
-    }
-
-    private func persistLocalManagedAccount(_ draft: NativeAccountDraft) async -> Bool {
-        guard let localExpenseUseCase else {
-            accountMessage = "æœ¬åœ°è´¦æˆ·å­˜å‚¨æš‚ä¸å¯ç”¨ã€‚"
-            return false
-        }
-        let autoDebitID: UUID?
-        if let value = draft.autoDebitAccountId {
-            guard let parsed = UUID(uuidString: value) else {
-                accountMessage = "è‡ªåŠ¨æ‰£æ¬¾è´¦æˆ·æ— æ•ˆã€‚"
-                return false
-            }
-            autoDebitID = parsed
-        } else {
-            autoDebitID = nil
-        }
-        do {
-            if let accountIDText = draft.accountId {
-                guard let accountID = UUID(uuidString: accountIDText),
-                      let local = localAccounts.first(where: { $0.id == accountID }) else {
-                    accountMessage = "æœ¬åœ°è´¦æˆ·ä¸å¯ç”¨ï¼Œè¯·åˆ·æ–°åŽé‡è¯•ã€‚"
-                    return false
-                }
-                _ = try await localExpenseUseCase.updateAccount(LocalAccountEditCommand(
-                    id: local.id, expectedVersion: local.localVersion,
-                    name: draft.name, kind: draft.type.rawValue, institution: draft.institution,
-                    last4: draft.last4, billDay: Int(draft.billDayText),
-                    paymentDueDay: Int(draft.paymentDueDayText), autoDebitAccountID: autoDebitID,
-                    autoConfirmRepayment: draft.autoConfirmRepayment,
-                    gracePeriodDays: Int(draft.gracePeriodDaysText) ?? 0,
-                    isDefaultExpense: draft.isDefaultExpense, isDefaultIncome: draft.isDefaultIncome,
-                    isArchived: local.isArchived, sortOrder: local.sortOrder
-                ))
-            } else {
-                let command = LocalAccountSetupCommand(
-                    id: UUID(), name: draft.name, kind: draft.type.rawValue,
-                    openingBalanceText: draft.initialBalanceText.isEmpty ? "0" : draft.initialBalanceText,
-                    createdAt: Date(), institution: draft.institution, last4: draft.last4,
-                    billDay: Int(draft.billDayText), paymentDueDay: Int(draft.paymentDueDayText),
-                    autoDebitAccountID: autoDebitID, autoConfirmRepayment: draft.autoConfirmRepayment,
-                    gracePeriodDays: Int(draft.gracePeriodDaysText) ?? 0,
-                    isDefaultExpense: draft.isDefaultExpense, isDefaultIncome: draft.isDefaultIncome
-                )
-                _ = try await localExpenseUseCase.createAccount(command)
-            }
-            await loadLocalAccounts()
-            accountMessage = "è´¦æˆ·å·²ä¿å­˜åœ¨æ­¤è®¾å¤‡"
-            return true
-        } catch {
-            accountMessage = error.localizedDescription
-            return false
-        }
-    }
-
-    private func performAccountManagementAction(_ command: AccountManagementActionCommand) async -> Bool {
-        guard !isSavingAccount else { return false }
-        isSavingAccount = true
-        accountMessage = nil
-        defer { isSavingAccount = false }
-
-        let result = await resolvedAccountManagementActionUseCase().perform(command)
-        switch result.transaction {
-        case .accepted:
-            switch result.refresh {
-            case .notStarted, .succeeded:
-                accountMessage = "è´¦æˆ·å·²ä¿å­˜"
-            case .failed(let message):
-                accountMessage = "è´¦æˆ·å·²ä¿å­˜ï¼Œä½†åˆ·æ–°å¤±è´¥ï¼š\(message)"
-            }
-            return true
-        case .rejected(.unauthenticated):
-            accountMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•ã€‚"
-        case .rejected(.invalidInput):
-            accountMessage = "è´¦æˆ·ä¿¡æ¯ä¸å®Œæ•´ï¼Œè¯·æ£€æŸ¥åŽé‡è¯•ã€‚"
-        case .conflict:
-            accountMessage = "è´¦æˆ·æ­£åœ¨ä¿å­˜ï¼Œè¯·ç¨åŽé‡è¯•ã€‚"
-        case .failed(let message):
-            accountMessage = message
-        case .stale:
-            return false
-        }
-        return false
-    }
-
-    private func resolvedAccountManagementActionUseCase() -> AccountManagementActionUseCase {
-        if let accountManagementActionUseCase { return accountManagementActionUseCase }
-        let useCase = AccountManagementActionUseCase(
-            repository: accountManagementRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return AccountManagementUserContext(userId: "", generation: -1, isSignedIn: false)
-                }
-                return AccountManagementUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn
-                )
-            },
-            applyAccepted: { [weak self] account in
-                self?.applyCanonicalAccount(account)
-            },
-            refresh: { [weak self] accountId in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                try await self.refreshAfterAccountManagement(accountId: accountId)
-            }
-        )
-        accountManagementActionUseCase = useCase
-        return useCase
-    }
-
-    private func applyCanonicalAccount(_ account: NativeAccount) {
-        if let index = accounts.firstIndex(where: { $0.id == account.id }) {
-            accounts[index] = account
-        } else {
-            accounts.append(account)
-        }
-        guard selectedAccountDetail?.account.id == account.id,
-              let detail = selectedAccountDetail else { return }
-        selectedAccountDetail = NativeAccountDetail(
-            account: account,
-            entries: detail.entries,
-            repaymentCycles: detail.repaymentCycles,
-            payments: detail.payments,
-            loadErrors: detail.loadErrors
-        )
-    }
-
-    private func refreshAfterAccountManagement(accountId: String) async throws {
-        await loadAccounts()
-        if let accountMessage, !accountMessage.isEmpty {
-            throw WalletSnapshotReadModelRefreshError(message: accountMessage)
-        }
-        guard let account = accounts.first(where: { $0.id == accountId }) else {
-            throw WalletSnapshotReadModelRefreshError(message: "è´¦æˆ·åˆ·æ–°åŽæœªæ‰¾åˆ°")
-        }
-        let generation = userStateGeneration
-        let session = try await validSession()
-        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-        let detail = await accountRepository.fetchDetail(account: account, accessToken: session.accessToken)
-        guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-        selectedAccountDetail = detail
-        if let message = detail.loadErrors.values.first {
-            throw WalletSnapshotReadModelRefreshError(message: message)
-        }
-        await refreshDashboard()
-        if let dashboardMessage, !dashboardMessage.isEmpty {
-            throw WalletSnapshotReadModelRefreshError(message: dashboardMessage)
-        }
-    }
-
-    func loadUnboundRecords(monthKey: String) async {
-        guard !isLoadingUnboundRecords else { return }
-        let generation = userStateGeneration
-        isLoadingUnboundRecords = true
-        unboundRecordsMessage = nil
-        defer { isLoadingUnboundRecords = false }
-
-        if !mayReadRemoteBusinessData {
-            do {
-                guard let repository = localFinancialBindingRepository,
-                      let profile = try await localExpenseUseCase?.prepareProfile() else {
-                    unboundRecords = []
-                    return
-                }
-                guard generation == userStateGeneration else { return }
-                unboundRecords = try repository.unboundRecords(profileID: profile.id)
-            } catch { unboundRecordsMessage = "æœ¬æœºæœªç»‘å®šè®°å½•è¯»å–å¤±è´¥ï¼š\(error.localizedDescription)" }
-            return
-        }
-
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            let records = try await unboundRecordRepository.fetch(
-                monthKey: monthKey,
-                accessToken: session.accessToken
-            )
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            unboundRecords = records
-        } catch {
-            guard generation == userStateGeneration else { return }
-            unboundRecordsMessage = error.localizedDescription
-        }
-    }
-
-    private func resolvedAccountBindingUseCase(monthKey: String) -> AccountBindingUseCase {
-        if let accountBindingUseCase {
-            if accountBindingUseCaseMonthKey == nil || accountBindingUseCaseMonthKey == monthKey {
-                return accountBindingUseCase
-            }
-        }
-        let useCase = AccountBindingUseCase(
-            repository: unboundRecordRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else { throw SupabaseRemoteError.requestFailed("ä¼šè¯å·²å¤±æ•ˆ") }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return AccountBindingUserContext(userId: "", generation: -1, isSignedIn: false)
-                }
-                return AccountBindingUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn
-                )
-            },
-            applyAccepted: { [weak self] accepted in
-                self?.unboundRecords.removeAll { $0.id == accepted.recordId && $0.kind == accepted.kind }
-            },
-            refresh: { [weak self] in
-                guard let self else { return }
-                try await self.refreshAfterAccountBinding(monthKey: monthKey)
-            }
-        )
-        accountBindingUseCase = useCase
-        accountBindingUseCaseMonthKey = monthKey
-        return useCase
-    }
-
-    func bindUnboundRecord(
-        _ record: NativeUnboundRecord,
-        accountId: String,
-        monthKey: String
-    ) async -> Bool {
-        guard !isBindingUnboundRecords else { return false }
-        isBindingUnboundRecords = true
-        unboundBindingMessage = nil
-        defer { isBindingUnboundRecords = false }
-        let generation = userStateGeneration
-        if !mayReadRemoteBusinessData {
-            do {
-                try await bindLocalFinancialRecord(record, accountId: accountId)
-                guard generation == userStateGeneration else { return true }
-                await loadUnboundRecords(monthKey: monthKey)
-                await loadLocalAccounts()
-                await refreshLocalMonthProjection(monthKey: String(record.date.prefix(7)))
-                guard generation == userStateGeneration else { return true }
-                unboundBindingMessage = localWriteMessage("å·²è¡¥ç»‘æœ¬æœºè´¦æˆ·å¹¶ç”Ÿæˆæµæ°´")
-                return true
-            } catch {
-                guard generation == userStateGeneration else { return false }
-                unboundBindingMessage = "æœ¬æœºè¡¥ç»‘å¤±è´¥ï¼š\(error.localizedDescription)"
-                return false
-            }
-        }
-        let result = await resolvedAccountBindingUseCase(monthKey: monthKey).bind(record, accountId: accountId)
-        switch result.transaction {
-        case .accepted(let accepted):
-            unboundRecords.removeAll { $0.id == accepted.recordId && $0.kind == accepted.kind }
-            unboundBindingMessage = result.refresh.failureMessage.map { "å·²è¡¥ç»‘è´¦æˆ·å¹¶ç”Ÿæˆæµæ°´ï¼›åˆ·æ–°å¤±è´¥ï¼š\($0)" }
-                ?? "å·²è¡¥ç»‘è´¦æˆ·å¹¶ç”Ÿæˆæµæ°´"
-            return true
-        case .rejected(.unauthenticated):
-            unboundBindingMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•"
-        case .rejected(.invalidInput):
-            unboundBindingMessage = "è¡¥ç»‘è®°å½•æˆ–è´¦æˆ·æ— æ•ˆ"
-        case .conflict:
-            unboundBindingMessage = "è¯¥è®°å½•æ­£åœ¨ä½¿ç”¨å…¶ä»–è´¦æˆ·è¡¥ç»‘"
-        case .failed(let message):
-            unboundBindingMessage = message
-        case .stale:
-            return false
-        }
-        return false
-    }
-
-    func batchBindUnboundRecords(
-        _ candidates: [NativeUnboundBindingCandidate],
-        monthKey: String
-    ) async -> Bool {
-        guard !isBindingUnboundRecords, !candidates.isEmpty else { return false }
-        isBindingUnboundRecords = true
-        unboundBindingMessage = nil
-        defer { isBindingUnboundRecords = false }
-        if !mayReadRemoteBusinessData {
-            let generation = userStateGeneration
-            var succeeded = 0
-            var failures: [String] = []
-            var months: Set<String> = []
-            for candidate in candidates {
-                guard generation == userStateGeneration else { return succeeded > 0 }
-                do {
-                    try await bindLocalFinancialRecord(candidate.record, accountId: candidate.recommendation.account.id)
-                    succeeded += 1
-                    months.insert(String(candidate.record.date.prefix(7)))
-                } catch { failures.append("\(candidate.record.title)ï¼š\(error.localizedDescription)") }
-            }
-            guard generation == userStateGeneration else { return succeeded > 0 }
-            await loadUnboundRecords(monthKey: monthKey)
-            await loadLocalAccounts()
-            for month in months { await refreshLocalMonthProjection(monthKey: month) }
-            guard generation == userStateGeneration else { return succeeded > 0 }
-            unboundBindingMessage = localWriteMessage("å·²è¡¥ç»‘ \(succeeded) æ¡ï¼Œå¤±è´¥ \(failures.count) æ¡" + (failures.isEmpty ? "" : "ï¼š" + failures.joined(separator: "ï¼›")))
-            return succeeded > 0
-        }
-        let result = await resolvedAccountBindingUseCase(monthKey: monthKey).bindBatch(candidates)
-        for item in result.items {
-            if case .accepted = item.transaction {
-                unboundRecords.removeAll { $0.id == item.recordId && $0.kind == item.kind }
-            }
-        }
-        switch result.status {
-        case .allSucceeded:
-            unboundBindingMessage = "å·²æ‰¹é‡è¡¥ç»‘ \(result.successCount) æ¡è®°å½•"
-        case .partial:
-            unboundBindingMessage = "å·²è¡¥ç»‘ \(result.successCount) æ¡ï¼Œ\(result.failedCount) æ¡å¤±è´¥"
-        case .failed:
-            unboundBindingMessage = "æ‰¹é‡è¡¥ç»‘å¤±è´¥"
-        case .stale:
-            return false
-        }
-        if let message = result.refresh.failureMessage {
-            unboundBindingMessage = "\(unboundBindingMessage ?? "å·²è¡¥ç»‘")ï¼›åˆ·æ–°å¤±è´¥ï¼š\(message)"
-        }
-        return result.successCount > 0
-    }
-
-    private func bindLocalFinancialRecord(_ record: NativeUnboundRecord, accountId: String) async throws {
-        let generation = userStateGeneration
-        guard let repository = localFinancialBindingRepository,
-              let profile = try await localExpenseUseCase?.prepareProfile(),
-              let id = UUID(uuidString: record.id), let accountID = UUID(uuidString: accountId) else {
-            throw LocalDataError.invalidIdentifier
-        }
-        guard generation == userStateGeneration else { throw CancellationError() }
-        switch record.kind {
-        case .expense: try repository.bindExpense(profileID: profile.id, id: id, accountID: accountID)
-        case .income: try repository.bindIncome(profileID: profile.id, id: id, accountID: accountID)
-        }
-    }
-
-    func loadWalletSnapshots() async {
-        guard !isLoadingWalletSnapshots else { return }
-        let generation = userStateGeneration
-        isLoadingWalletSnapshots = true
-        walletSnapshotMessage = nil
-        defer { isLoadingWalletSnapshots = false }
-
-        if let localWalletSnapshotUseCase {
-            do {
-                let loaded = try await localWalletSnapshotUseCase.history()
-                guard generation == userStateGeneration else { return }
-                localWalletSnapshotHistory = loaded
-                localWalletSnapshots = loaded.filter { $0.linkedAccountID == nil && $0.deletedAt == nil }
-            } catch {
-                guard generation == userStateGeneration else { return }
-                walletSnapshotMessage = error.localizedDescription
-            }
-        }
-        guard mayReadRemoteBusinessData else {
-            walletSnapshots = []
-            return
-        }
-        do {
-            let session = try await validSession()
-            async let snapshotRows = walletSnapshotRepository.fetchUnlinked(accessToken: session.accessToken)
-            async let accountRows = accountRepository.fetchAccounts(accessToken: session.accessToken)
-            let (loadedSnapshots, loadedAccounts) = try await (snapshotRows, accountRows)
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            walletSnapshots = loadedSnapshots
-            accounts = loadedAccounts
-        } catch {
-            guard generation == userStateGeneration else { return }
-            walletSnapshotMessage = error.localizedDescription
-        }
-    }
-
-    func loadInsights(range: NativeInsightRange, force: Bool = false) async {
-        let shouldLoadLocally = !mayReadRemoteBusinessData && localFactReader != nil
-        if !force,
-           insightsLoadedLocally == shouldLoadLocally,
-           insightsSnapshot?.range == range,
-           let insightsLoadedAt,
-           Date().timeIntervalSince(insightsLoadedAt) < 60 {
-            return
-        }
-        guard !isLoadingInsights else { return }
-        let generation = userStateGeneration
-        isLoadingInsights = true
-        insightsMessage = nil
-        defer { isLoadingInsights = false }
-
-        do {
-            if !mayReadRemoteBusinessData, let localFactReader {
-                let todayKey = NativeLocalDate.dateKey(Date())
-                let startKey = NativeLocalDate.shiftedDateKey(todayKey, byDays: -(range.rawValue - 1)) ?? todayKey
-                let facts = try await localFactReader.activeRange(from: startKey, to: todayKey)?.facts ?? []
-                guard generation == userStateGeneration else { return }
-                insightsSnapshot = NativeInsightSnapshot(
-                    range: range,
-                    rows: LocalInsightAggregator.rows(from: facts)
-                )
-                aiInsight = nil
-                aiInsightIsCached = false
-                aiInsightMessage = nil
-                insightsLoadedAt = Date()
-                insightsLoadedLocally = true
-                return
-            }
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            let snapshot = try await insightsRepository.fetchDailySummary(
-                range: range,
-                accessToken: session.accessToken
-            )
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            insightsSnapshot = snapshot
-            insightsLoadedAt = Date()
-            insightsLoadedLocally = false
-            Task { await loadLatestAIInsight(range: range, generation: generation, userId: session.user.id) }
-        } catch {
-            guard generation == userStateGeneration else { return }
-            insightsMessage = error.localizedDescription
-        }
-    }
-
-    func loadLatestAIInsight(
-        range: NativeInsightRange,
-        generation: Int? = nil,
-        userId: String? = nil
-    ) async {
-        let expectedGeneration = generation ?? userStateGeneration
-        do {
-            let session = try await validSession()
-            let expectedUserId = userId ?? session.user.id
-            guard isCurrentUserLoad(expectedGeneration, userId: expectedUserId),
-                  session.user.id == expectedUserId else { return }
-            let latest = try await insightsRepository.fetchLatestAIInsight(
-                range: range,
-                accessToken: session.accessToken
-            )
-            guard isCurrentUserLoad(expectedGeneration, userId: expectedUserId),
-                  insightsSnapshot?.range == range else { return }
-            aiInsight = latest
-            aiInsightIsCached = latest != nil
-            aiInsightMessage = nil
-        } catch {
-            guard expectedGeneration == userStateGeneration,
-                  insightsSnapshot?.range == range else { return }
-            aiInsightMessage = nil
-        }
-    }
-
-    func generateAIInsight(
-        range: NativeInsightRange,
-        question: String,
-        force: Bool = false
-    ) async -> Bool {
-        guard !isLoadingAIInsight else { return false }
-        let generation = userStateGeneration
-        let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty else {
-            aiInsightMessage = "è¯·è¾“å…¥ä½ æƒ³åˆ†æžçš„é—®é¢˜"
-            return false
-        }
-        guard insightsSnapshot?.range == range, insightsSnapshot?.rows.isEmpty == false else {
-            aiInsightMessage = "å½“å‰èŒƒå›´æ²¡æœ‰å¯åˆ†æžçš„æ•°æ®"
-            return false
-        }
-
-        isLoadingAIInsight = true
-        aiInsightMessage = nil
-        defer { if generation == userStateGeneration { isLoadingAIInsight = false } }
-
-        do {
-            let session = try await validSession()
-            let response = try await insightsRepository.generateAIInsight(
-                range: range,
-                force: force,
-                question: question,
-                accessToken: session.accessToken
-            )
-            guard isCurrentUserLoad(generation, userId: session.user.id),
-                  insightsSnapshot?.range == range else { return false }
-            aiInsight = response.insight.scoped(to: range)
-            aiInsightIsCached = response.cached
-            return true
-        } catch {
-            guard generation == userStateGeneration else { return false }
-            aiInsightMessage = error.localizedDescription
-            return false
-        }
-    }
-
-    func createAccountFromWalletSnapshot(_ snapshot: NativeWalletSnapshot) async -> Bool {
-        await performWalletSnapshotAction(
-            .create(recordId: snapshot.id),
-            snapshot: snapshot
-        )
-    }
-
-    func linkWalletSnapshot(
-        _ snapshot: NativeWalletSnapshot,
-        to account: NativeAccount
-    ) async -> Bool {
-        await performWalletSnapshotAction(
-            .link(recordId: snapshot.id, accountId: account.id),
-            snapshot: snapshot,
-            account: account
-        )
-    }
-
-    func createLocalAccountFromWalletSnapshot(_ snapshot: LocalWalletSnapshot) async -> Bool {
-        await performLocalWalletSnapshotAction(snapshot) {
-            try await $0.createAccount(from: snapshot)
-        }
-    }
-
-    func linkLocalWalletSnapshot(_ snapshot: LocalWalletSnapshot, to accountID: UUID) async -> Bool {
-        await performLocalWalletSnapshotAction(snapshot) {
-            try await $0.link(snapshot, to: accountID)
-        }
-    }
-
-    func updateLocalWalletSnapshot(
-        _ snapshot: LocalWalletSnapshot,
-        title: String,
-        summary: String,
-        balanceMinor: Int64
-    ) async -> Bool {
-        await performLocalWalletSnapshotMutation(snapshot, successMessage: "æœ¬æœºå¿«ç…§å·²æ›´æ–°") {
-            try await $0.update(snapshot, title: title, summary: summary, balanceMinor: balanceMinor)
-        }
-    }
-
-    func deleteLocalWalletSnapshot(_ snapshot: LocalWalletSnapshot) async -> Bool {
-        await performLocalWalletSnapshotMutation(snapshot, successMessage: "æœ¬æœºå¿«ç…§å·²ç§»å…¥åˆ é™¤åŽ†å²") {
-            try await $0.delete(snapshot)
-        }
-    }
-
-    private func performLocalWalletSnapshotMutation(
-        _ snapshot: LocalWalletSnapshot,
-        successMessage: String,
-        mutation: (LocalWalletSnapshotUseCaseProtocol) async throws -> LocalWalletSnapshot
-    ) async -> Bool {
-        guard walletSnapshotActionId == nil,
-              let localWalletSnapshotUseCase else { return false }
-        let actionID = snapshot.id.uuidString
-        walletSnapshotActionId = actionID
-        walletSnapshotMessage = nil
-        defer {
-            if walletSnapshotActionId == actionID { walletSnapshotActionId = nil }
-        }
-        do {
-            _ = try await mutation(localWalletSnapshotUseCase)
-        } catch {
-            walletSnapshotMessage = error.localizedDescription
-            return false
-        }
-        do {
-            try await loadLocalWalletSnapshots()
-            walletSnapshotMessage = successMessage
-        } catch {
-            walletSnapshotMessage = "\(successMessage)ï¼Œä½†åŽ†å²åˆ·æ–°å¤±è´¥ï¼š\(error.localizedDescription)"
-        }
-        return true
-    }
-
-    private func performLocalWalletSnapshotAction(
-        _ snapshot: LocalWalletSnapshot,
-        action: (LocalWalletSnapshotUseCaseProtocol) async throws -> LocalWalletSnapshotActionResult
-    ) async -> Bool {
-        guard walletSnapshotActionId == nil,
-              let localWalletSnapshotUseCase else { return false }
-        let actionID = snapshot.id.uuidString
-        walletSnapshotActionId = actionID
-        walletSnapshotMessage = nil
-        defer {
-            if walletSnapshotActionId == actionID { walletSnapshotActionId = nil }
-        }
-        do {
-            let result = try await action(localWalletSnapshotUseCase)
-            let outcomeText: String
-            switch result.kind {
-            case .created: outcomeText = "å·²ä»Žæœ¬æœºå¿«ç…§åˆ›å»ºè´¦æˆ·"
-            case .linked: outcomeText = "æœ¬æœºå¿«ç…§å·²å…³è”è´¦æˆ·"
-            case .replayed: outcomeText = "æœ¬æœºå¿«ç…§å…³è”å·²å­˜åœ¨"
-            }
-            let confirmationText = result.reviewRequired ? "ï¼›è´¦æˆ·å·²å…³è”ï¼Œè´¦æœŸ/è¿˜æ¬¾éœ€è¦ç¡®è®¤" : ""
-            var refreshErrors: [String] = []
-            do {
-                try await loadLocalWalletSnapshots()
-            } catch {
-                refreshErrors.append("åˆ—è¡¨åˆ·æ–°å¤±è´¥ï¼š\(error.localizedDescription)")
-            }
-            if mayReadRemoteBusinessData {
-                _ = await prepareLocalWorkspace()
-            } else {
-                await loadLocalAccounts()
-            }
-            if let localAccountMessage, !localAccountMessage.isEmpty {
-                refreshErrors.append("è´¦æˆ·åˆ·æ–°å¤±è´¥ï¼š\(localAccountMessage)")
-            }
-            walletSnapshotMessage = ([outcomeText + confirmationText] + refreshErrors).joined(separator: "ï¼›")
-            return true
-        } catch {
-            walletSnapshotMessage = error.localizedDescription
-            return false
-        }
-    }
-
-    private func loadLocalWalletSnapshots() async throws {
-        guard let localWalletSnapshotUseCase else { return }
-        let history = try await localWalletSnapshotUseCase.history()
-        localWalletSnapshotHistory = history
-        localWalletSnapshots = history.filter { $0.linkedAccountID == nil && $0.deletedAt == nil }
-    }
-
-    private func performWalletSnapshotAction(
-        _ command: WalletSnapshotActionCommand,
-        snapshot: NativeWalletSnapshot,
-        account: NativeAccount? = nil
-    ) async -> Bool {
-        let ownsBusyState = walletSnapshotActionId == nil
-        if ownsBusyState {
-            walletSnapshotActionId = snapshot.id
-            walletSnapshotMessage = nil
-        }
-        defer {
-            if ownsBusyState, walletSnapshotActionId == snapshot.id {
-                walletSnapshotActionId = nil
-            }
-        }
-
-        let result = await resolvedWalletSnapshotActionUseCase().perform(
-            command,
-            snapshot: snapshot,
-            account: account
-        )
-        return projectWalletSnapshotActionResult(result)
-    }
-
-    private func resolvedWalletSnapshotActionUseCase() -> WalletSnapshotActionUseCase {
-        if let walletSnapshotActionUseCase { return walletSnapshotActionUseCase }
-        let useCase = WalletSnapshotActionUseCase(
-            repository: walletSnapshotRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return WalletSnapshotActionUserContext(
-                        userId: "",
-                        generation: -1,
-                        isSignedIn: false
-                    )
-                }
-                return WalletSnapshotActionUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn
-                )
-            },
-            refresh: { [weak self] in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                try await self.refreshAfterWalletSnapshotLink()
-            }
-        )
-        walletSnapshotActionUseCase = useCase
-        return useCase
-    }
-
-    private func projectWalletSnapshotActionResult(_ result: WalletSnapshotActionResult) -> Bool {
-        switch result.transaction {
-        case .accepted(let outcome):
-            let successMessage = walletSnapshotSuccessMessage(outcome)
-            switch result.refresh {
-            case .failed(let message):
-                walletSnapshotMessage = "\(successMessage)ï¼Œä½†åˆ·æ–°å¤±è´¥ï¼š\(message)"
-            case .notStarted, .succeeded:
-                walletSnapshotMessage = successMessage
-            }
-            return true
-        case .rejected(.unauthenticated):
-            walletSnapshotMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•ã€‚"
-        case .rejected(.invalidInput):
-            walletSnapshotMessage = "é’±åŒ…å¿«ç…§å‚æ•°æ— æ•ˆ"
-        case .conflict(.walletSnapshotBusy):
-            walletSnapshotMessage = "é’±åŒ…å¿«ç…§æ­£åœ¨å¤„ç†ä¸­"
-        case .conflict(.walletSnapshotConflict):
-            walletSnapshotMessage = "è¯¥å¿«ç…§æ­£åœ¨æ‰§è¡Œå¦ä¸€é¡¹å…³è”æ“ä½œ"
-        case .failed(let message):
-            walletSnapshotMessage = message
-        case .stale:
-            return false
-        }
-        return false
-    }
-
-    private func walletSnapshotSuccessMessage(_ outcome: NativeWalletSnapshotOutcome) -> String {
-        switch outcome {
-        case .created: return "å·²ä»Žå¿«ç…§åˆ›å»ºè´¦æˆ·"
-        case .linked: return "å·²å…³è”è´¦æˆ·"
-        case .replayed: return "å¿«ç…§å…³è”å·²å­˜åœ¨"
-        case .needsConfirmation: return "è´¦æˆ·å·²å…³è”ï¼Œè´¦æœŸ/è¿˜æ¬¾éœ€è¦ç¡®è®¤"
-        }
-    }
-
-    private func refreshAfterWalletSnapshotLink() async throws {
-        await loadAccounts()
-        if let accountMessage, !accountMessage.isEmpty {
-            throw WalletSnapshotReadModelRefreshError(message: accountMessage)
-        }
-        await loadWalletSnapshots()
-        if let walletSnapshotMessage, !walletSnapshotMessage.isEmpty {
-            throw WalletSnapshotReadModelRefreshError(message: walletSnapshotMessage)
-        }
-        await refreshDashboard()
-        if let dashboardMessage, !dashboardMessage.isEmpty {
-            throw WalletSnapshotReadModelRefreshError(message: dashboardMessage)
-        }
-    }
-
-    func openUnboundRecord(_ record: NativeUnboundRecord) {
-        presentedOverlay = .records
-        recordsPath = NavigationPath([NativeRecordRoute(reference: record.reference)])
-    }
-
-    func openWalletSnapshot(_ snapshot: NativeWalletSnapshot) {
-        presentedOverlay = .records
-        let reference = "data/\(snapshot.id)"
-        recordsPath = NavigationPath([NativeRecordRoute(reference: reference)])
-    }
-
-    private func refreshAfterAccountBinding(monthKey: String) async throws {
-        await loadAccounts()
-        await loadUnboundRecords(monthKey: monthKey)
-        await refreshDashboard()
-        if let message = accountMessage, !message.isEmpty { throw WalletSnapshotReadModelRefreshError(message: message) }
-        if let message = unboundRecordsMessage, !message.isEmpty { throw WalletSnapshotReadModelRefreshError(message: message) }
-        if let message = dashboardMessage, !message.isEmpty { throw WalletSnapshotReadModelRefreshError(message: message) }
-    }
-
-    func prefetchRecordDetails(_ references: [String]) {
-        let missing = references
-            .map { NativeRecordReference($0).canonicalValue }
-            .filter { reference in
-                guard !prefetchingRecordReferences.contains(reference) else { return false }
-                guard let cached = recordDetailCache[reference] else { return true }
-                return cached.imagePath != nil && cached.imageURL == nil && !cached.imageLoadError
-            }
-            .prefix(4)
-        for reference in missing {
-            Task { await prefetchRecordDetail(reference: reference) }
-        }
-    }
-
-    private func prefetchRecordDetail(reference: String) async {
-        if let cached = recordDetailCache[reference],
-           cached.imagePath == nil || cached.imageURL != nil || cached.imageLoadError {
-            return
-        }
-        guard !prefetchingRecordReferences.contains(reference) else { return }
-        let generation = userStateGeneration
-        prefetchingRecordReferences.insert(reference)
-        defer { prefetchingRecordReferences.remove(reference) }
-        do {
-            let session = try await validSession()
-            let detail = try await recordRepository.fetchDetail(reference: reference, accessToken: session.accessToken)
-            guard generation == userStateGeneration,
-                  isSignedIn,
-                  currentUserId == session.user.id else { return }
-            recordDetailCache[reference] = detailPreservingExpressionFeedback(detail)
-        } catch {
-            return
-        }
-    }
-
-    func openDayRecord(_ record: NativeDayRecord) {
-        if record.reference.hasPrefix("staging-") {
-            presentedOverlay = .inbox
-            inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: String(record.reference.dropFirst("staging-".count)))])
-        } else {
-            homePath.append(NativeRecordRoute(reference: record.reference))
-        }
-    }
-
-    func openDomainDrill(_ domain: AppDomain, dateKey: String) {
-        homePath.append(NativeDomainDrillRoute(domain: domain, dateKey: dateKey))
-    }
-
-    func openPendingExpense(_ pending: NativePendingExpense) {
-        presentedOverlay = .inbox
-        // Keep completion inside the inbox queue. The card opens the inline
-        // editor, while the queue remains responsible for next-item routing.
-        inboxPath = NavigationPath([NativeInboxRoute.category(filter: .pendingExpense)])
-    }
-
-    func openInbox(filter: NativeInboxFilter) {
-        presentedOverlay = .inbox
-        inboxPath = NavigationPath([NativeInboxRoute.category(filter: filter)])
-    }
-
-    func handleDeepLink(_ url: URL) {
-        guard url.scheme == "jiezi" else { return }
-        shouldDeferOnboardingForExternalRoute = true
-        isOnboardingPresented = false
-
-        switch url.host {
-        case "inbox":
-            presentedOverlay = .inbox
-        case "records", "record":
-            presentedOverlay = .records
-        case "settings":
-            presentedOverlay = .settings
-        default:
-            presentedOverlay = .none
-        }
-
-        guard isSignedIn else { return }
-        Task {
-            await refreshDashboard()
-        }
-    }
-
-    func handleShortcutNotificationRoute(_ route: String?) {
-        shouldDeferOnboardingForExternalRoute = true
-        isOnboardingPresented = false
-        let parts = (route ?? "")
-            .split(separator: "/")
-            .map(String.init)
-        let target = parts.first
-        let detailPath = parts.dropFirst().joined(separator: "/")
-
-        switch target {
-        case "inbox":
-            presentedOverlay = .inbox
-            if !detailPath.isEmpty {
-                inboxPath = NavigationPath([NativeInboxRoute.staging(recordId: detailPath)])
-            }
-        case "records":
-            presentedOverlay = .records
-            if !detailPath.isEmpty {
-                recordsPath = NavigationPath([NativeRecordRoute(reference: detailPath)])
-            }
-        case "settings":
-            presentedOverlay = .settings
-        default:
-            presentedOverlay = .none
-        }
-
-        guard isSignedIn else { return }
-        Task {
-            await refreshDashboard()
-        }
-    }
-
-    @discardableResult
-    func discardStagingRecord(
-        _ record: NativeStagingRecord,
-        preserveInboxNavigation: Bool = false
-    ) async -> Bool {
-        guard inboxActionRecordId == nil else { return false }
-        if let localID = LocalStagingReadModel.localID(from: record.id) {
-            return await discardLocalStagingRecord(
-                localID,
-                record: record,
-                preserveInboxNavigation: preserveInboxNavigation
-            )
-        }
-        inboxActionRecordId = record.id
-        inboxActionMessage = "æ­£åœ¨é”€æ¯æˆªå›¾â€¦"
-        inboxActionMessageIsError = false
-        defer { inboxActionRecordId = nil }
-        let result = await resolvedStagingLifecycleUseCase().perform(.discard(recordId: record.id))
-        switch result.transaction {
-        case .accepted:
-            if !preserveInboxNavigation { inboxPath = NavigationPath() }
-            inboxActionMessage = result.refresh.failureMessage.map {
-                "å·²é”€æ¯è¿™æ¡å¾…å¤„ç†æˆªå›¾ï¼ŒåŽŸå›¾å°†åœ¨åŽå°å®‰å…¨æ¸…ç†ï¼›åˆ·æ–°å¤±è´¥ï¼š\($0)"
-            } ?? "å·²é”€æ¯è¿™æ¡å¾…å¤„ç†æˆªå›¾ï¼ŒåŽŸå›¾å°†åœ¨åŽå°å®‰å…¨æ¸…ç†"
-            return true
-        case .rejected(.unauthenticated):
-            inboxActionMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•"
-        case .rejected(.invalidInput):
-            inboxActionMessage = "å¾…å¤„ç†æˆªå›¾æ— æ•ˆ"
-        case .conflict:
-            inboxActionMessage = "è¿™æ¡å¾…å¤„ç†æˆªå›¾æ­£åœ¨æ‰§è¡Œå…¶ä»–æ“ä½œ"
-        case .failed(let message):
-            inboxActionMessage = "é”€æ¯å¤±è´¥ï¼š\(message)"
-        case .stale:
-            return false
-        }
-        inboxActionMessageIsError = true
-        return false
-    }
-
-    @discardableResult
-    func retryStagingRecord(
-        _ record: NativeStagingRecord,
-        preserveInboxNavigation: Bool = false
-    ) async -> Bool {
-        guard inboxActionRecordId == nil else { return false }
-        if LocalStagingReadModel.localID(from: record.id) != nil {
-            inboxActionMessage = "æœ¬åœ°å€™é€‰éœ€é‡æ–°å‘èµ·è¯†åˆ«"
-            inboxActionMessageIsError = true
-            return false
-        }
-        inboxActionRecordId = record.id
-        inboxActionMessage = "æ­£åœ¨é‡æ–°è¯†åˆ«â€¦"
-        inboxActionMessageIsError = false
-        defer { inboxActionRecordId = nil }
-        let result = await resolvedStagingLifecycleUseCase().perform(.retry(recordId: record.id))
-        switch result.transaction {
-        case .accepted(let accepted):
-            let remainsInInbox = dashboard.stagingRecords.contains { $0.id == record.id }
-            if !remainsInInbox, !preserveInboxNavigation {
-                inboxPath = NavigationPath()
-            }
-            let actionMessage = remainsInInbox
-                ? "é‡æ–°è¯†åˆ«å®Œæˆï¼Œä»éœ€ç¡®è®¤æˆ–é€‰æ‹©å½’æ¡£åŸŸ"
-                : "é‡æ–°è¯†åˆ«æˆåŠŸï¼Œè®°å½•å·²è‡ªåŠ¨å½’æ¡£"
-            inboxActionMessage = accepted.route?.hasPrefix("inbox") == true
-                ? "é‡æ–°è¯†åˆ«å®Œæˆï¼Œä»éœ€ç¡®è®¤æˆ–é€‰æ‹©å½’æ¡£åŸŸ"
-                : actionMessage
-            if case .failed(let message) = result.refresh {
-                inboxActionMessage = "\(inboxActionMessage ?? actionMessage)ï¼›åˆ·æ–°å¤±è´¥ï¼š\(message)"
-            }
-            return true
-        case .rejected(.unauthenticated):
-            inboxActionMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•"
-        case .rejected(.invalidInput):
-            inboxActionMessage = "å¾…å¤„ç†æˆªå›¾æ— æ•ˆ"
-        case .conflict:
-            inboxActionMessage = "è¿™æ¡å¾…å¤„ç†æˆªå›¾æ­£åœ¨æ‰§è¡Œå…¶ä»–æ“ä½œ"
-        case .failed(let message):
-            inboxActionMessage = "é‡æ–°è¯†åˆ«å¤±è´¥ï¼š\(message)"
-        case .stale:
-            return false
-        }
-        inboxActionMessageIsError = true
-        return false
-    }
-
-    @discardableResult
-    func archiveStagingRecord(
-        _ record: NativeStagingRecord,
-        domainKey: String,
-        preserveInboxNavigation: Bool = false
-    ) async -> String? {
-        guard inboxActionRecordId == nil else { return nil }
-        if let localID = LocalStagingReadModel.localID(from: record.id) {
-            return await archiveLocalStagingRecord(
-                localID,
-                record: record,
-                preserveInboxNavigation: preserveInboxNavigation
-            )
-        }
-        inboxActionRecordId = record.id
-        let domainTitle = dashboard.domains.first(where: { $0.id == domainKey })?.shortName
-            ?? InboxArchiveDomains.all.first(where: { $0.id == domainKey })?.title
-            ?? domainKey
-        inboxActionMessage = "æ­£åœ¨å½’æ¡£åˆ°\(domainTitle)â€¦"
-        inboxActionMessageIsError = false
-        defer { inboxActionRecordId = nil }
-        let result = await resolvedStagingLifecycleUseCase().perform(
-            .archive(record: record, domainKey: domainKey)
-        )
-        switch result.transaction {
-        case .accepted(let accepted):
-            if !preserveInboxNavigation { inboxPath = NavigationPath() }
-            inboxActionMessage = result.refresh.failureMessage.map {
-                "å·²å½’æ¡£åˆ°\(domainTitle)ï¼›åˆ·æ–°å¤±è´¥ï¼š\($0)"
-            } ?? "å·²å½’æ¡£åˆ°\(domainTitle)"
-            return accepted.targetReference
-        case .rejected(.unauthenticated):
-            inboxActionMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•"
-        case .rejected(.invalidInput):
-            inboxActionMessage = "å¾…å¤„ç†æˆªå›¾æˆ–å½’æ¡£åŸŸæ— æ•ˆ"
-        case .conflict:
-            inboxActionMessage = "è¿™æ¡å¾…å¤„ç†æˆªå›¾æ­£åœ¨æ‰§è¡Œå…¶ä»–æ“ä½œ"
-        case .failed(let message):
-            inboxActionMessage = "å½’æ¡£å¤±è´¥ï¼š\(message)"
-        case .stale:
-            return nil
-        }
-        inboxActionMessageIsError = true
-        return nil
-    }
-
-    @discardableResult
-    func archiveStagingRecord(
-        _ record: NativeStagingRecord,
-        draft: NativeManualRecordDraft,
-        domain: NativeDomainDefinition?,
-        preserveInboxNavigation: Bool = false
-    ) async -> String? {
-        let adjustedRecord = record.applyingArchiveDraft(draft, domain: domain)
-        if let localID = LocalStagingReadModel.localID(from: record.id) {
-            guard inboxActionRecordId == nil else { return nil }
-            let changes = LocalStagingConfirmation(
-                domainKey: draft.domainKey, title: draft.resolvedTitle(domain: domain),
-                summary: draft.resolvedSummary(domain: domain), payload: draft.universalPayload(domain: domain),
-                recordDate: draft.dateKey, recordTime: draft.timeKey,
-                note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note
-            )
-            return await archiveLocalStagingRecord(
-                localID, record: adjustedRecord, preserveInboxNavigation: preserveInboxNavigation, changes: changes
-            )
-        }
-        return await archiveStagingRecord(
-            adjustedRecord,
-            domainKey: draft.domainKey,
-            preserveInboxNavigation: preserveInboxNavigation
-        )
-    }
-
-    private func discardLocalStagingRecord(
-        _ localID: String,
-        record: NativeStagingRecord,
-        preserveInboxNavigation: Bool
-    ) async -> Bool {
-        guard let localRecordUseCase else { return false }
-        inboxActionRecordId = record.id
-        inboxActionMessage = "æ­£åœ¨é”€æ¯æœ¬åœ°å€™é€‰â€¦"
-        inboxActionMessageIsError = false
-        defer { inboxActionRecordId = nil }
-        do {
-            try await localRecordUseCase.discardStaging(id: localID)
-            removeStagingRecordLocally(record.id)
-            if !preserveInboxNavigation { inboxPath = NavigationPath() }
-            inboxActionMessage = "å·²é”€æ¯æœ¬åœ°å€™é€‰ï¼ŒåŽŸå›¾å·²æ¸…ç†"
-            return true
-        } catch {
-            inboxActionMessage = "é”€æ¯å¤±è´¥ï¼š\(error.localizedDescription)"
-            inboxActionMessageIsError = true
-            return false
-        }
-    }
-
-    private func archiveLocalStagingRecord(
-        _ localID: String,
-        record: NativeStagingRecord,
-        preserveInboxNavigation: Bool,
-        changes: LocalStagingConfirmation? = nil
-    ) async -> String? {
-        guard let localRecordUseCase else { return nil }
-        inboxActionRecordId = record.id
-        inboxActionMessage = "æ­£åœ¨å½’æ¡£æœ¬åœ°å€™é€‰â€¦"
-        inboxActionMessageIsError = false
-        defer { inboxActionRecordId = nil }
-        do {
-            let outcome = try await localRecordUseCase.confirmStaging(
-                id: localID,
-                recordID: UUID(),
-                changes: changes
-            )
-            removeStagingRecordLocally(record.id)
-            let monthKey = String(outcome.record.recordDate.prefix(7))
-            await refreshLocalMonthProjection(monthKey: monthKey)
-            if !preserveInboxNavigation { inboxPath = NavigationPath() }
-            inboxActionMessage = "å·²å½’æ¡£åˆ°\(record.domainName ?? "æœ¬åœ°è®°å½•")"
-            return "local-data/\(outcome.record.id.uuidString)"
-        } catch {
-            inboxActionMessage = "å½’æ¡£å¤±è´¥ï¼š\(error.localizedDescription)"
-            inboxActionMessageIsError = true
-            return nil
-        }
-    }
-
-    private func removeStagingRecordLocally(_ recordId: String) {
-        stagingReadVersion += 1
-        dashboard.stagingRecords.removeAll { $0.id == recordId }
-        dashboard.pendingCount = dashboard.pendingExpenses.count + dashboard.stagingRecords.count
-    }
-
-    private func resolvedStagingLifecycleUseCase() -> StagingLifecycleUseCase {
-        if let stagingLifecycleUseCase { return stagingLifecycleUseCase }
-        let useCase = StagingLifecycleUseCase(
-            repository: inboxRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else { throw SupabaseRemoteError.requestFailed("ä¼šè¯å·²å¤±æ•ˆ") }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return StagingLifecycleUserContext(userId: "", generation: -1, isSignedIn: false)
-                }
-                return StagingLifecycleUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn
-                )
-            },
-            applyAccepted: { [weak self] accepted in
-                guard let self else { return }
-                if accepted.action == .discard || accepted.action == .archive {
-                    self.removeStagingRecordLocally(accepted.recordId)
-                }
-            },
-            refresh: { [weak self] in
-                guard let self else { return }
-                await self.refreshAfterRecordWrite()
-                if let message = self.dashboardMessage, !message.isEmpty {
-                    throw WalletSnapshotReadModelRefreshError(message: message)
-                }
-            }
-        )
-        stagingLifecycleUseCase = useCase
-        return useCase
-    }
-
-    private func resolvedPendingConfirmationUseCase() -> PendingConfirmationUseCase {
-        if let pendingConfirmationUseCase { return pendingConfirmationUseCase }
-        let useCase = PendingConfirmationUseCase(
-            repository: inboxRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else { throw SupabaseRemoteError.requestFailed("ä¼šè¯å·²å¤±æ•ˆ") }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return PendingConfirmationUserContext(userId: "", generation: -1, isSignedIn: false)
-                }
-                return PendingConfirmationUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn
-                )
-            },
-            applyAccepted: { [weak self] accepted in
-                self?.invalidateRecordExpressionPlanState(
-                    afterChanging: ["expense/\(accepted.pendingId)", accepted.recordReference]
-                )
-            },
-            refresh: { [weak self] in
-                guard let self else { return }
-                await self.loadAccounts()
-                if let message = self.accountMessage, !message.isEmpty {
-                    throw WalletSnapshotReadModelRefreshError(message: message)
-                }
-                await self.refreshAfterRecordWrite()
-                if let message = self.dashboardMessage, !message.isEmpty {
-                    throw WalletSnapshotReadModelRefreshError(message: message)
-                }
-            }
-        )
-        pendingConfirmationUseCase = useCase
-        return useCase
-    }
-
-    func resolveStagingImageURL(for record: NativeStagingRecord) async throws -> URL {
-        guard let imagePath = record.imagePath, !imagePath.isEmpty else {
-            throw SupabaseRemoteError.requestFailed("è¿™æ¡è®°å½•æ²¡æœ‰å¯æŸ¥çœ‹çš„æˆªå›¾")
-        }
-        let session = try await validSession()
-        return try await inboxRepository.resolveImageURL(path: imagePath, accessToken: session.accessToken)
-    }
-
-    private func loadRemoteRecordDetail(
-        reference canonicalReference: String,
-        force: Bool,
-        generation: Int
-    ) async {
-        if !force, let cached = recordDetailCache[canonicalReference] {
-            selectedRecordDetail = cached
-            if let session = try? await validSession() {
-                hydrateRecordDetailImageIfNeeded(cached, reference: canonicalReference, session: session, generation: generation)
-                await prepareRecordExpressionPlan(
-                    for: cached,
-                    canonicalReference: canonicalReference,
-                    session: session,
-                    generation: generation
-                )
-            }
-            return
-        }
-        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
-            selectedRecordDetail = nil
-        }
-        do {
-            let session = try await validSession()
-            let detail = try await recordRepository.fetchDetail(reference: canonicalReference, accessToken: session.accessToken)
-            guard generation == userStateGeneration,
-                  isSignedIn,
-                  currentUserId == session.user.id else { return }
-            let mergedDetail = detailPreservingExpressionFeedback(detail)
-            recordDetailCache[canonicalReference] = mergedDetail
-            guard activeRecordReference == canonicalReference else { return }
-            selectedRecordDetail = mergedDetail
-            hydrateRecordDetailImageIfNeeded(mergedDetail, reference: canonicalReference, session: session, generation: generation)
-            await prepareRecordExpressionPlan(
-                for: mergedDetail,
-                canonicalReference: canonicalReference,
-                session: session,
-                generation: generation
-            )
-        } catch {
-            if activeRecordReference == canonicalReference {
-                recordDetailMessage = error.localizedDescription
-            }
-        }
-    }
-
-    func loadRecordDetail(reference: String, force: Bool = false) async {
-        let parsedReference = NativeRecordReference(reference)
-        let canonicalReference = parsedReference.canonicalValue
-        let generation = userStateGeneration
-        if let previousReference = activeRecordReference,
-           previousReference != canonicalReference {
-            deactivateRecordDetail(reference: previousReference)
-        }
-        activeRecordReference = canonicalReference
-        recordDetailMessage = nil
-        if parsedReference.kind == "expense", let repository = localPendingFinancialRepository, let imageStore = localImageStore,
-           let profile = try? await localExpenseUseCase?.prepareProfile(),
-           let id = UUID(uuidString: parsedReference.rawId),
-           let detail = try? repository.nativeDetail(profileID: profile.id, id: id, imageStore: imageStore) {
-            let resolved = await localExpressionDetail(detail, generation: generation)
-            selectedRecordDetail = resolved
-            return
-        }
-        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
-            recordFeedbackState = .idle
-            recordExpressionPlanExposureState = .idle
-        }
-        if parsedReference.kind == "local-expense"
-            || (parsedReference.kind == "expense" && isKnownLocalFactReference(reference)) {
-            await loadLocalExpenseDetail(reference: reference, force: force, generation: generation)
-            return
-        }
-        if parsedReference.kind == "local-income" {
-            await loadLocalIncomeDetail(reference: reference, force: force, generation: generation)
-            return
-        }
-        if parsedReference.kind == "local-data"
-            || (parsedReference.kind == "data" && isKnownLocalFactReference(reference)) {
-            await loadLocalDomainDetail(reference: reference, force: force, generation: generation)
-            return
-        }
-        if parsedReference.kind == "data", await hasLocalDomainRecord(reference: reference) {
-            await loadLocalDomainDetail(reference: reference, force: force, generation: generation)
-            return
-        }
-        if parsedReference.kind == "expense", await hasLocalExpense(reference: reference) {
-            await loadLocalExpenseDetail(reference: reference, force: force, generation: generation)
-            return
-        }
-        if parsedReference.kind == "income", await hasLocalIncome(reference: reference) {
-            await loadLocalIncomeDetail(reference: reference, force: force, generation: generation)
-            return
-        }
-        guard mayReadRemoteBusinessData else {
-            selectedRecordDetail = nil
-            recordDetailMessage = "æœ¬æœºæ²¡æœ‰è¿™æ¡è®°å½•ï¼ŒæœªæŽˆæƒçš„äº‘ç«¯è¯»å–å·²åœæ­¢ã€‚"
-            return
-        }
-        await loadRemoteRecordDetail(reference: canonicalReference, force: force, generation: generation)
-    }
-
-    private func hasLocalDomainRecord(reference: String) async -> Bool {
-        guard let localRecordUseCase,
-              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
-            return false
-        }
-        do {
-            return try await localRecordUseCase.record(id: id) != nil
-        } catch {
-            return false
-        }
-    }
-
-    private func hasLocalExpense(reference: String) async -> Bool {
-        guard let localExpenseUseCase,
-              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
-            return false
-        }
-        do {
-            return try await localExpenseUseCase.expense(id: id) != nil
-        } catch {
-            return false
-        }
-    }
-
-    private func hasLocalIncome(reference: String) async -> Bool {
-        guard let localExpenseUseCase,
-              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else { return false }
-        return (try? await localExpenseUseCase.income(id: id)) != nil
-    }
-
-    private func isLocalIncomeReference(_ reference: String) -> Bool {
-        let parsed = NativeRecordReference(reference)
-        return parsed.kind == "local-income"
-            || (parsed.kind == "income" && isKnownLocalFactReference(reference))
-    }
-
-    private func isLocalExpenseReference(_ reference: String) -> Bool {
-        let parsed = NativeRecordReference(reference)
-        return parsed.kind == "local-expense"
-            || (parsed.kind == "expense" && isKnownLocalFactReference(reference))
-    }
-
-    private func loadLocalIncomeDetail(reference: String, force: Bool, generation: Int) async {
-        guard let localExpenseUseCase,
-              let id = UUID(uuidString: NativeRecordReference(reference).rawId) else {
-            recordDetailMessage = "æœ¬åœ°æ”¶å…¥è®°å½•ä¸å¯ç”¨"
-            return
-        }
-        let canonicalReference = NativeRecordReference(reference).canonicalValue
-        if !force, let cached = recordDetailCache[canonicalReference] {
-            selectedRecordDetail = cached
-            return
-        }
-        do {
-            guard let income = try await localExpenseUseCase.income(id: id) else { throw LocalDataError.recordNotFound }
-            guard generation == userStateGeneration, activeRecordReference == canonicalReference else { return }
-            var detail = LocalIncomeReadModel.detail(from: income, imageStore: localImageStore)
-            if let path = income.imagePath { detail.imageURL = localImageStore?.url(for: path) }
-            detail = await localExpressionDetail(detail, generation: generation)
-            recordDetailCache[canonicalReference] = detail
-            selectedRecordDetail = detail
-        } catch {
-            if activeRecordReference == canonicalReference { recordDetailMessage = error.localizedDescription }
-        }
-    }
-
-    private func isLocalDomainReference(_ reference: String) -> Bool {
-        let parsed = NativeRecordReference(reference)
-        return parsed.kind == "local-data"
-            || (parsed.kind == "data" && isKnownLocalFactReference(reference))
-    }
-
-    private func isKnownLocalFactReference(_ reference: String) -> Bool {
-        let canonical = NativeRecordReference(reference).canonicalValue
-        if localRecordMonthDetails.values.contains(where: { details in
-            details.keys.contains { NativeRecordReference($0).canonicalValue == canonical }
-        }) {
-            return true
-        }
-        return localFactMonths.values.contains { month in
-            month.facts.contains { NativeRecordReference($0.reference).canonicalValue == canonical }
-        }
-    }
-
-    private func loadLocalExpenseDetail(
-        reference: String,
-        force: Bool,
-        generation: Int
-    ) async {
-        guard let localExpenseUseCase else {
-            recordDetailMessage = "æœ¬åœ°æ•°æ®ä¸å¯ç”¨"
-            return
-        }
-        let resolved = NativeRecordReference(reference)
-        guard let id = UUID(uuidString: resolved.rawId) else {
-            recordDetailMessage = "æœ¬åœ°è®°å½•æ ‡è¯†æ— æ•ˆ"
-            return
-        }
-        let canonicalReference = resolved.canonicalValue
-        if !force, let cached = recordDetailCache[canonicalReference] {
-            selectedRecordDetail = cached
-            return
-        }
-        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
-            selectedRecordDetail = nil
-        }
-        do {
-            guard let expense = try await localExpenseUseCase.expense(id: id) else {
-                throw LocalDataError.recordNotFound
-            }
-            guard generation == userStateGeneration,
-                  activeRecordReference == canonicalReference else { return }
-            var detail = LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore)
-            if let path = expense.imagePath { detail.imageURL = localImageStore?.url(for: path) }
-            detail = await localExpressionDetail(detail, generation: generation)
-            recordDetailCache[canonicalReference] = detail
-            selectedRecordDetail = detail
-        } catch {
-            if activeRecordReference == canonicalReference {
-                recordDetailMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func loadLocalDomainDetail(
-        reference: String,
-        force: Bool,
-        generation: Int
-    ) async {
-        guard let localRecordUseCase else {
-            recordDetailMessage = "æœ¬åœ°æ•°æ®ä¸å¯ç”¨"
-            return
-        }
-        let resolved = NativeRecordReference(reference)
-        guard let id = UUID(uuidString: resolved.rawId) else {
-            recordDetailMessage = "æœ¬åœ°è®°å½•æ ‡è¯†æ— æ•ˆ"
-            return
-        }
-        let canonicalReference = resolved.canonicalValue
-        if !force, let cached = recordDetailCache[canonicalReference] {
-            selectedRecordDetail = cached
-            return
-        }
-        if selectedRecordDetail.map({ !NativeRecordReference($0.id).matchesReference(canonicalReference) }) ?? true {
-            selectedRecordDetail = nil
-        }
-        do {
-            guard let record = try await localRecordUseCase.record(id: id) else {
-                throw LocalDataError.recordNotFound
-            }
-            guard generation == userStateGeneration,
-                  activeRecordReference == canonicalReference else { return }
-            var detail = LocalRecordReadModel.detail(from: record, imageStore: localImageStore)
-            detail = await localExpressionDetail(detail, generation: generation)
-            recordDetailCache[canonicalReference] = detail
-            selectedRecordDetail = detail
-        } catch {
-            if activeRecordReference == canonicalReference {
-                recordDetailMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func localExpressionDetail(
-        _ detail: NativeRecordDetail,
-        generation: Int
-    ) async -> NativeRecordDetail {
-        guard userSettings.companionEnabled,
-              let localCompanionMemoryRepository,
-              let profile = try? await localExpenseUseCase?.prepareProfile(),
-              generation == userStateGeneration else { return detail }
-        let memoryContext = userSettings.companionMemoryEnabled
-            ? try? localCompanionMemoryRepository.compactContextJSON(
-                profileID: profile.id,
-                domainKey: detail.domainKey ?? detail.kind
-            )
-            : nil
-        let context = LocalPlannerCandidateEngine.makeContext(
-            for: detail,
-            memoryContextJSON: memoryContext,
-            providerMode: .deterministic
-        )
-        guard let generatedPlannerFeedback = LocalPlannerCandidateEngine.selectedCandidate(
-            for: context.currentFact,
-            memoryContextJSON: context.memoryContextJSON
-        ) else { return detail }
-        let persistedPlannerFeedback = detail.expressionPlannerAiFeedback
-        let plannerFeedback = persistedPlannerFeedback?.claimFingerprint == generatedPlannerFeedback.claimFingerprint
-            ? (persistedPlannerFeedback ?? generatedPlannerFeedback)
-            : generatedPlannerFeedback
-        var resolved = detail
-        resolved.legacyAiFeedback = detail.voiceAiFeedback
-        resolved.plannerAiFeedback = plannerFeedback
-        resolved.aiFeedback = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
-            existingVoice: detail.voiceAiFeedback,
-            plannerPreview: plannerFeedback,
-            companionMessage: detail.companionMessage
-        )
-        return resolved
-    }
-
-    /// Provider composition is deliberately detached from the fact write. A
-    /// provider failure leaves the local fact and deterministic Planner intact.
-    private func scheduleLocalCompanion(for detail: NativeRecordDetail) {
-        guard userSettings.companionEnabled,
-              localExpressionPersistence != nil,
-              localVisionModeStore.mode != .disabled else { return }
-        let generation = userStateGeneration
-        Task { @MainActor [weak self] in
-            guard let self,
-                  self.userStateGeneration == generation,
-                  self.userSettings.companionEnabled,
-                  let profile = try? await self.localExpenseUseCase?.prepareProfile() else { return }
-            let mode = self.localVisionModeStore.mode
-            let provider: LocalCompanionProvider
-            switch mode {
-            case .hosted:
-                guard let session = try? await self.validSession() else { return }
-                provider = HostedAICompanionProvider(accessToken: session.accessToken)
-            case .byok:
-                guard let apiKey = try? self.keychain.string(for: KeychainKeys.byokQwenAPIKey),
-                      !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                provider = QwenBYOKCompanionProvider(apiKey: apiKey)
-            case .disabled:
-                return
-            }
-            guard let context = self.localExpressionPersistence?.makeCompositionContext(
-                for: detail,
-                profileID: profile.id,
-                settings: self.userSettings,
-                providerMode: mode == .hosted ? .hosted : .byok
-            ) else { return }
-            guard let result = try? await provider.compose(context: context) else { return }
-            guard self.userStateGeneration == generation else { return }
-            self.localExpressionPersistence?.persist(companion: result, for: detail)
-            self.recordDetailCache.removeValue(forKey: NativeRecordReference(detail.id).canonicalValue)
-            await self.loadRecordDetail(reference: detail.id, force: true)
-        }
-    }
-
-    private func hydrateRecordDetailImageIfNeeded(
-        _ detail: NativeRecordDetail,
-        reference: String,
-        session: SupabaseAuthSession?,
-        generation: Int
-    ) {
-        guard detail.imagePath != nil, detail.imageURL == nil, let session else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            let useCase = self.resolvedRecordDetailImageUseCase()
-            let result = await useCase.perform(detail, reference: reference)
-            switch result.transaction {
-            case .hydrated:
-                guard let hydrated = result.detail else { return }
-                let mergedDetail = self.detailPreservingExpressionFeedback(hydrated)
-                self.recordDetailCache[reference] = mergedDetail
-                if self.selectedRecordDetail?.id == hydrated.id {
-                    self.selectedRecordDetail = mergedDetail
-                }
-            case .failed:
-                var failedDetail = detail
-                failedDetail.imageLoadError = true
-                let mergedDetail = self.detailPreservingExpressionFeedback(failedDetail)
-                guard self.userStateGeneration == generation,
-                      self.activeRecordReference == reference,
-                      self.isSignedIn,
-                      self.currentUserId == session.user.id else { return }
-                self.recordDetailCache[reference] = mergedDetail
-                if self.selectedRecordDetail?.id == detail.id {
-                    self.selectedRecordDetail = mergedDetail
-                }
-            case .notNeeded, .stale:
-                return
-            }
-        }
-    }
-
-    private func resolvedRecordDetailImageUseCase() -> RecordDetailImageUseCase {
-        if let recordDetailImageUseCase { return recordDetailImageUseCase }
-        let useCase = RecordDetailImageUseCase(
-            repository: recordRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return RecordDetailImageUserContext(userId: "", generation: -1, isSignedIn: false)
-                }
-                return RecordDetailImageUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn,
-                    activeRecordReference: self.activeRecordReference
-                )
-            }
-        )
-        recordDetailImageUseCase = useCase
-        return useCase
-    }
-
-    func thumbnailImageURL(for record: NativeDayRecord, force: Bool = false) async -> URL? {
-        let generation = userStateGeneration
-        let reference = NativeRecordReference(record.reference).canonicalValue
-        let month = String(record.dateKey.prefix(7))
-        func isListed() -> Bool {
-            recordGroups(monthKey: month).flatMap(\.records).contains {
-                NativeRecordReference($0.reference).canonicalValue == reference
-            }
-        }
-        func currentDetail() -> NativeRecordDetail? {
-            let values = recordDetails(from: record.dateKey, through: record.dateKey)
-            return values[reference] ?? values[record.reference]
-        }
-        guard isListed() else { return nil }
-        if isLocalDomainReference(record.reference) {
-            if force { await refreshLocalMonthProjection(monthKey: month) }
-            guard generation == userStateGeneration, isListed() else { return nil }
-            return currentDetail()?.imageURL
-        }
-        guard var detail = currentDetail() else { return nil }
-        if !force, let url = detail.imageURL { return url }
-        if force { detail.imageURL = nil }
-        if thumbnailImageUseCase == nil {
-            thumbnailImageUseCase = RecordDetailImageUseCase(
-                repository: recordRepository,
-                sessionProvider: { [weak self] forceRefresh in
-                    guard let self else { throw SupabaseRemoteError.requestFailed("app_state_unavailable") }
-                    return try await self.validSession(forceRefresh: forceRefresh)
-                },
-                contextProvider: { [weak self] in
-                    RecordDetailImageUserContext(userId: self?.currentUserId ?? "", generation: self?.userStateGeneration ?? -1,
-                                                 isSignedIn: self?.isSignedIn ?? false)
-                }
-            )
-        }
-        guard let useCase = thumbnailImageUseCase else { return nil }
-        let result = await useCase.perform(detail, reference: reference)
-        guard generation == userStateGeneration, isListed(), currentDetail()?.imagePath == detail.imagePath else { return nil }
-        return result.detail?.imageURL
-    }
-
-    private func prepareRecordExpressionPlan(
-        for detail: NativeRecordDetail,
-        canonicalReference: String,
-        session: SupabaseAuthSession,
-        generation: Int
-    ) async {
-        var currentDetail = detail
-        if let pending = pendingRecordExpressionPlans[canonicalReference],
-           pending.plan.feedback.isCompanionMessageDelivery,
-           !pending.plan.feedback.matchesVisibleCompanionMessage(detail.companionMessage) {
-            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
-            if currentDetail.aiFeedback == pending.plan.feedback {
-                currentDetail.aiFeedback = pending.previousFeedback
-                currentDetail.plannerAiFeedback = nil
-            }
-        }
-        var baseDetail = detailPreservingExpressionFeedback(currentDetail)
-        let selectedFeedback = selectedRecordDetail.flatMap { selected -> NativeAIFeedback? in
-            NativeRecordReference(selected.id).canonicalValue == canonicalReference
-                ? selected.aiFeedback
-                : nil
-        }
-        baseDetail.aiFeedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
-            existing: [
-                baseDetail.aiFeedback,
-                recordDetailCache[canonicalReference]?.aiFeedback,
-                selectedFeedback
-            ],
-            pending: nil
-        )
-        guard !NativeRecordExpressionFeedbackPolicy.hasAcknowledgedPlannerFeedback([
-            baseDetail.aiFeedback,
-            recordDetailCache[canonicalReference]?.aiFeedback,
-            selectedFeedback
-        ]) else {
-            publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
-            return
-        }
-
-        if let pending = pendingRecordExpressionPlans[canonicalReference],
-           pending.userId == session.user.id,
-           pending.generation == generation {
-            let selected = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
-                existingVoice: baseDetail.voiceAiFeedback,
-                plannerPreview: pending.plan.feedback,
-                companionMessage: baseDetail.companionMessage
-            )
-            let plannerIsIndependentCard = pending.plan.feedback.presentationTarget == "feedback_card"
-            if !plannerIsIndependentCard, selected != pending.plan.feedback {
-                discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
-                baseDetail.aiFeedback = selected
-                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
-            } else {
-                baseDetail.aiFeedback = selected
-                baseDetail.plannerAiFeedback = pending.plan.feedback
-                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
-            }
-            return
-        }
-        guard expressionPlanDeliveryTokens[canonicalReference] == nil else { return }
-        let deliveryToken = UUID()
-        expressionPlanDeliveryTokens[canonicalReference] = deliveryToken
-        defer {
-            if expressionPlanDeliveryTokens[canonicalReference] == deliveryToken {
-                expressionPlanDeliveryTokens.removeValue(forKey: canonicalReference)
-            }
-        }
-
-        guard let preview = await NativeRecordExpressionPlanRetryPolicy.resolve(
-            fetch: {
-                try await self.recordRepository.getRecordExpressionPlan(
-                    reference: detail.id,
-                    accessToken: session.accessToken
-                )
-            },
-            shouldContinue: {
-                self.expressionPlanDeliveryTokens[canonicalReference] == deliveryToken
-                    && self.isCurrentExpressionPlanDelivery(
-                    canonicalReference: canonicalReference,
-                    session: session,
-                    generation: generation
-                )
-            }
-        ) else {
-            if isCurrentExpressionPlanDelivery(
-                canonicalReference: canonicalReference,
-                session: session,
-                generation: generation
-            ) {
-                publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
-            }
-            return
-        }
-
-        guard !Task.isCancelled,
-              expressionPlanDeliveryTokens[canonicalReference] == deliveryToken,
-              generation == userStateGeneration,
-              isSignedIn,
-              currentUserId == session.user.id,
-              activeRecordReference == canonicalReference else { return }
-
-        guard !NativeRecordExpressionFeedbackPolicy.hasAcknowledgedPlannerFeedback([
-            baseDetail.aiFeedback,
-            recordDetailCache[canonicalReference]?.aiFeedback
-        ]) else {
-            publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
-            return
-        }
-
-        let previousFeedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
-            existing: [
-                baseDetail.aiFeedback,
-                recordDetailCache[canonicalReference]?.aiFeedback
-            ],
-            pending: nil
-        )
-        let selected = NativeRecordExpressionFeedbackPolicy.plannerFeedbackToDisplayWithoutReplacingVoice(
-            existingVoice: baseDetail.voiceAiFeedback ?? previousFeedback,
-            plannerPreview: preview.feedback,
-            companionMessage: baseDetail.companionMessage
-        )
-        baseDetail.aiFeedback = selected
-        let plannerIsIndependentCard = preview.feedback.presentationTarget == "feedback_card"
-        if selected == preview.feedback || plannerIsIndependentCard {
-            baseDetail.plannerAiFeedback = preview.feedback
-        }
-        guard selected == preview.feedback || plannerIsIndependentCard else {
-            publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
-            recordExpressionPlanExposureState = .idle
-            return
-        }
-
-        pendingRecordExpressionPlans[canonicalReference] = PendingRecordExpressionPlanDelivery(
-            id: UUID(),
-            recordId: detail.rawId,
-            plan: preview,
-            previousFeedback: previousFeedback,
-            userId: session.user.id,
-            generation: generation
-        )
-        publishResolvedRecordDetail(baseDetail, canonicalReference: canonicalReference)
-        recordFeedbackState = .idle
-        recordExpressionPlanExposureState = .idle
-    }
-
-    private func publishResolvedRecordDetail(
-        _ detail: NativeRecordDetail,
-        canonicalReference: String
-    ) {
-        let synchronized = synchronizeAIFeedbackSlots(detail)
-        recordDetailCache[canonicalReference] = synchronized
-        guard activeRecordReference == canonicalReference else { return }
-        selectedRecordDetail = synchronized
-    }
-
-    func setRecordExpressionPlanCardVisible(
-        _ isVisible: Bool,
-        reference: String,
-        feedbackIdentity: String? = nil
-    ) {
-        let canonicalReference = NativeRecordReference(reference).canonicalValue
-        let identity = feedbackIdentity ?? selectedRecordDetail.flatMap { detail -> String? in
-            guard NativeRecordReference(detail.id).canonicalValue == canonicalReference else { return nil }
-            return detail.aiFeedback?.renderIdentity
-        }
-        if isVisible {
-            guard let identity else { return }
-            visibleRecordExpressionPlanCards[canonicalReference] = identity
-        } else if feedbackIdentity == nil
-                    || visibleRecordExpressionPlanCards[canonicalReference] == feedbackIdentity {
-            visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
-        }
-    }
-
-    func isRecordExpressionPlanCardVisible(
-        reference: String,
-        feedbackIdentity: String? = nil
-    ) -> Bool {
-        let visibleIdentity = visibleRecordExpressionPlanCards[
-            NativeRecordReference(reference).canonicalValue
-        ]
-        if let feedbackIdentity {
-            return visibleIdentity == feedbackIdentity
-        }
-        return visibleIdentity != nil
-    }
-
-    func acknowledgeRecordExpressionPlanIfVisible(reference: String) async {
-        let canonicalReference = NativeRecordReference(reference).canonicalValue
-        guard let pending = pendingRecordExpressionPlans[canonicalReference] else { return }
-        guard expressionPlanAcknowledgementTokens[canonicalReference] == nil else { return }
-        guard isPendingExpressionPlanActive(
-            pending,
-            canonicalReference: canonicalReference
-        ) else {
-            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
-            return
-        }
-        guard !Task.isCancelled,
-              visibleRecordExpressionPlanCards[canonicalReference]
-                == pending.plan.feedback.renderIdentity else { return }
-
-        let acknowledgementToken = UUID()
-        expressionPlanAcknowledgementTokens[canonicalReference] = acknowledgementToken
-        recordExpressionPlanExposureState = .acknowledging
-        defer {
-            if expressionPlanAcknowledgementTokens[canonicalReference] == acknowledgementToken {
-                expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
-            }
-        }
-
-        let session: SupabaseAuthSession
-        do {
-            session = try await validSession()
-        } catch {
-            handleExpressionPlanAcknowledgementFailure(
-                pending,
-                canonicalReference: canonicalReference
-            )
-            return
-        }
-        guard session.user.id == pending.userId,
-              isPendingExpressionPlanActive(
-                pending,
-                canonicalReference: canonicalReference
-              ) else {
-            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
-            return
-        }
-
-        guard let acknowledgedFeedback = await NativeRecordExpressionPlanAcknowledgementRetryPolicy.resolve(
-            acknowledge: {
-                try await self.recordRepository.acknowledgeRecordExpressionPlan(
-                    recordId: pending.recordId,
-                    planToken: pending.plan.planToken,
-                    candidateId: pending.plan.candidateId,
-                    accessToken: session.accessToken
-                )
-            },
-            shouldContinue: {
-                !Task.isCancelled
-                    && self.isPendingExpressionPlanActive(
-                        pending,
-                        canonicalReference: canonicalReference
-                    )
-            },
-            sleep: expressionPlanAcknowledgementSleep
-        ) else {
-            handleExpressionPlanAcknowledgementFailure(
-                pending,
-                canonicalReference: canonicalReference
-            )
-            return
-        }
-
-        guard expressionPlanAcknowledgementTokens[canonicalReference] == acknowledgementToken,
-              isPendingExpressionPlanActive(
-            pending,
-            canonicalReference: canonicalReference
-        ) else { return }
-        guard pending.plan.feedback.hasSameDeliveryIdentity(as: acknowledgedFeedback) else {
-            handleExpressionPlanAcknowledgementFailure(
-                pending,
-                canonicalReference: canonicalReference
-            )
-            return
-        }
-        if pendingRecordExpressionPlans[canonicalReference]?.id == pending.id {
-            pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
-        }
-        guard var finalDetail = recordDetailCache[canonicalReference] else { return }
-        finalDetail.plannerAiFeedback = acknowledgedFeedback
-        finalDetail.aiFeedback = acknowledgedFeedback.presentationTarget == "feedback_card"
-            ? (finalDetail.voiceAiFeedback ?? acknowledgedFeedback)
-            : acknowledgedFeedback
-        recordDetailCache[canonicalReference] = finalDetail
-        if activeRecordReference == canonicalReference,
-           selectedRecordDetail.map({ NativeRecordReference($0.id).canonicalValue == canonicalReference }) == true {
-            selectedRecordDetail = finalDetail
-            recordFeedbackState = .idle
-            recordExpressionPlanExposureState = .idle
-        }
-    }
-
-    private func restoreUnacknowledgedExpressionPreview(
-        _ previewFeedback: NativeAIFeedback,
-        previousFeedback: NativeAIFeedback?,
-        canonicalReference: String
-    ) {
-        if var cached = recordDetailCache[canonicalReference],
-           cached.aiFeedback == previewFeedback || cached.plannerAiFeedback == previewFeedback {
-            if cached.aiFeedback == previewFeedback {
-                cached.aiFeedback = previousFeedback
-            }
-            if cached.plannerAiFeedback == previewFeedback {
-                cached.plannerAiFeedback = nil
-            }
-            recordDetailCache[canonicalReference] = cached
-        }
-        if activeRecordReference == canonicalReference,
-           var selected = selectedRecordDetail,
-           selected.aiFeedback == previewFeedback || selected.plannerAiFeedback == previewFeedback {
-            if selected.aiFeedback == previewFeedback {
-                selected.aiFeedback = previousFeedback
-            }
-            if selected.plannerAiFeedback == previewFeedback {
-                selected.plannerAiFeedback = nil
-            }
-            selectedRecordDetail = selected
-        }
-    }
-
-    private func isPendingExpressionPlanActive(
-        _ pending: PendingRecordExpressionPlanDelivery,
-        canonicalReference: String
-    ) -> Bool {
-        pendingRecordExpressionPlans[canonicalReference]?.id == pending.id
-            && pending.generation == userStateGeneration
-            && isSignedIn
-            && currentUserId == pending.userId
-            && activeRecordReference == canonicalReference
-            && selectedRecordDetail.map {
-                guard NativeRecordReference($0.id).canonicalValue == canonicalReference else { return false }
-                if pending.plan.feedback.presentationTarget == "feedback_card" {
-                    return $0.plannerAiFeedback == pending.plan.feedback
-                }
-                return $0.aiFeedback == pending.plan.feedback
-            } == true
-    }
-
-    private func handleExpressionPlanAcknowledgementFailure(
-        _ pending: PendingRecordExpressionPlanDelivery,
-        canonicalReference: String
-    ) {
-        guard isPendingExpressionPlanActive(
-            pending,
-            canonicalReference: canonicalReference
-        ) else {
-            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
-            return
-        }
-        recordExpressionPlanExposureState = .failed
-    }
-
-    private func discardPendingExpressionPlan(
-        _ pending: PendingRecordExpressionPlanDelivery,
-        canonicalReference: String
-    ) {
-        guard pendingRecordExpressionPlans[canonicalReference]?.id == pending.id else { return }
-        pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
-        expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
-        visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
-        restoreUnacknowledgedExpressionPreview(
-            pending.plan.feedback,
-            previousFeedback: pending.previousFeedback,
-            canonicalReference: canonicalReference
-        )
-        if activeRecordReference == canonicalReference {
-            recordExpressionPlanExposureState = .idle
-        }
-    }
-
-    private func isCurrentExpressionPlanDelivery(
-        canonicalReference: String,
-        session: SupabaseAuthSession,
-        generation: Int
-    ) -> Bool {
-        !Task.isCancelled
-            && generation == userStateGeneration
-            && isSignedIn
-            && currentUserId == session.user.id
-            && activeRecordReference == canonicalReference
-    }
-
-    private func detailPreservingExpressionFeedback(
-        _ detail: NativeRecordDetail
-    ) -> NativeRecordDetail {
-        let synchronizedDetail = synchronizeAIFeedbackSlots(detail)
-        let canonicalReference = NativeRecordReference(synchronizedDetail.id).canonicalValue
-        let selectedFeedback = selectedRecordDetail.flatMap { selected -> NativeAIFeedback? in
-            NativeRecordReference(selected.id).canonicalValue == canonicalReference
-                ? selected.aiFeedback
-                : nil
-        }
-        guard let feedback = NativeRecordExpressionFeedbackPolicy.feedbackToPreserve(
-            existing: [selectedFeedback, recordDetailCache[canonicalReference]?.aiFeedback],
-            pending: pendingRecordExpressionPlans[canonicalReference]?.plan.feedback,
-            companionMessage: synchronizedDetail.companionMessage
-        ) else { return synchronizedDetail }
-        var preserved = synchronizedDetail
-        preserved.aiFeedback = feedback
-        return synchronizeAIFeedbackSlots(preserved)
-    }
-
-    private func synchronizeAIFeedbackSlots(
-        _ detail: NativeRecordDetail
-    ) -> NativeRecordDetail {
-        var synchronized = detail
-        guard let feedback = synchronized.aiFeedback else { return synchronized }
-        if feedback.source == "expression_planner" {
-            synchronized.plannerAiFeedback = feedback
-        } else if synchronized.legacyAiFeedback == nil {
-            synchronized.legacyAiFeedback = feedback
-        }
-        return synchronized
-    }
-
-    func recordDetail(matching reference: String) -> NativeRecordDetail? {
-        let canonicalReference = NativeRecordReference(reference).canonicalValue
-        guard let detail = selectedRecordDetail,
-              NativeRecordReference(detail.id).canonicalValue == canonicalReference else { return nil }
-        return detail
-    }
-
-    func deactivateRecordDetail(reference: String) {
-        let canonicalReference = NativeRecordReference(reference).canonicalValue
-        guard activeRecordReference == canonicalReference else { return }
-        if let pending = pendingRecordExpressionPlans[canonicalReference] {
-            discardPendingExpressionPlan(pending, canonicalReference: canonicalReference)
-        }
-        expressionPlanDeliveryTokens.removeValue(forKey: canonicalReference)
-        expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
-        visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
-        activeRecordReference = nil
-        selectedRecordDetail = nil
-        recordFeedbackState = .idle
-        recordExpressionPlanExposureState = .idle
-    }
-
-    func invalidateRecordExpressionPlanState(afterChanging references: [String]) {
-        let canonicalReferences = Set(references.map { NativeRecordReference($0).canonicalValue })
-        for canonicalReference in canonicalReferences {
-            pendingRecordExpressionPlans.removeValue(forKey: canonicalReference)
-            expressionPlanDeliveryTokens.removeValue(forKey: canonicalReference)
-            expressionPlanAcknowledgementTokens.removeValue(forKey: canonicalReference)
-            visibleRecordExpressionPlanCards.removeValue(forKey: canonicalReference)
-            recordDetailCache.removeValue(forKey: canonicalReference)
-        }
-        if let selectedReference = selectedRecordDetail.map({
-            NativeRecordReference($0.id).canonicalValue
-        }), canonicalReferences.contains(selectedReference) {
-            selectedRecordDetail = nil
-        }
-        if let activeRecordReference, canonicalReferences.contains(activeRecordReference) {
-            self.activeRecordReference = nil
-            recordFeedbackState = .idle
-            recordExpressionPlanExposureState = .idle
-        }
-    }
-
-    private func localExpenseForReference(_ reference: String) async throws -> LocalExpense {
-        guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
-        let resolved = NativeRecordReference(reference)
-        guard resolved.kind == "local-expense" || resolved.kind == "expense",
-              let id = UUID(uuidString: resolved.rawId) else {
-            throw LocalDataError.invalidIdentifier
-        }
-        guard let expense = try await localExpenseUseCase.expense(id: id) else {
-            throw LocalDataError.recordNotFound
-        }
-        return expense
-    }
-
-    private func saveLocalRecordDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
-        guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
-        let current = try await localExpenseForReference(draft.reference)
-        guard let expectedVersion = draft.localVersion else { throw LocalDataError.invalidRecord }
-        let accountID = draft.accountId.flatMap(UUID.init(uuidString:))
-        let command = LocalExpenseUpdateCommand(
-            id: current.id,
-            expectedVersion: expectedVersion,
-            accountID: accountID,
-            amountText: draft.amountText,
-            currency: current.currency,
-            merchantName: draft.title,
-            platform: draft.platform,
-            category: draft.category,
-            paymentMethod: draft.paymentMethod,
-            transactionDate: draft.recordDate,
-            transactionTime: draft.transactionTime,
-            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
-            updatedAt: Date()
-        )
-        let outcome = try await localExpenseUseCase.update(command)
-        guard let saved = outcome.expense else { throw LocalDataError.invalidRecord }
-        let oldMonth = String(current.transactionDate.prefix(7))
-        let newMonth = String(saved.transactionDate.prefix(7))
-        invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
-        _ = await prepareLocalWorkspace()
-        await refreshLocalMonthProjection(monthKey: oldMonth)
-        if newMonth != oldMonth {
-            await refreshLocalMonthProjection(monthKey: newMonth)
-        }
-        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
-        await loadRecordDetail(reference: "local-expense/\(saved.id.uuidString)", force: true)
-        return true
-    }
-
-    private func saveLocalIncomeDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
-        guard let localExpenseUseCase,
-              let id = UUID(uuidString: NativeRecordReference(draft.reference).rawId),
-              let current = try await localExpenseUseCase.income(id: id),
-              let expectedVersion = draft.localVersion else {
-            throw LocalDataError.recordNotFound
-        }
-        let eventTime: Date?
-        if let time = draft.transactionTime {
-            guard let timestamp = NativeLocalDate.financeOccurredAt(dateKey: draft.recordDate, timeKey: time),
-                  let parsed = ISO8601DateFormatter().date(from: timestamp),
-                  NativeLocalDate.dateKey(parsed) == draft.recordDate else {
-                throw LocalDataError.invalidRecord
-            }
-            eventTime = parsed
-        } else {
-            eventTime = nil
-        }
-        let profile = try await localExpenseUseCase.prepareProfile()
-        let saved = try await localExpenseUseCase.updateIncome(LocalIncomeUpdate(
-            id: current.id,
-            profileID: profile.id,
-            expectedVersion: expectedVersion,
-            accountID: draft.accountId.flatMap(UUID.init(uuidString:)),
-            amountMinor: try LocalExpenseMapper.amountMinor(draft.amountText),
-            currency: current.currency,
-            sourceName: draft.title.trimmingCharacters(in: .whitespacesAndNewlines),
-            category: draft.category,
-            incomeDate: draft.recordDate,
-            occurredAt: eventTime,
-            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
-            updatedAt: Date()
-        ))
-        let oldMonth = String(current.incomeDate.prefix(7))
-        let newMonth = String(saved.incomeDate.prefix(7))
-        invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
-        _ = await prepareLocalWorkspace()
-        await refreshLocalMonthProjection(monthKey: oldMonth)
-        if oldMonth != newMonth { await refreshLocalMonthProjection(monthKey: newMonth) }
-        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
-        await loadRecordDetail(reference: "local-income/\(saved.id.uuidString)", force: true)
-        return true
-    }
-
-    private func deleteLocalIncome(reference: String) async throws -> Bool {
-        guard let localExpenseUseCase,
-              let id = UUID(uuidString: NativeRecordReference(reference).rawId),
-              let current = try await localExpenseUseCase.income(id: id) else {
-            throw LocalDataError.recordNotFound
-        }
-        _ = try await localExpenseUseCase.deleteIncome(id: current.id, expectedVersion: current.localVersion, deletedAt: Date())
-        invalidateRecordExpressionPlanState(afterChanging: [reference])
-        recordsPath = NavigationPath()
-        _ = await prepareLocalWorkspace()
-        await refreshLocalMonthProjection(monthKey: String(current.incomeDate.prefix(7)))
-        return true
-    }
-
-    private func deleteLocalRecord(reference: String) async throws -> Bool {
-        guard let localExpenseUseCase else { throw LocalDataError.invalidRecord }
-        let current = try await localExpenseForReference(reference)
-        _ = try await localExpenseUseCase.delete(LocalExpenseDeleteCommand(
-            id: current.id,
-            expectedVersion: current.localVersion,
-            deletedAt: Date()
-        ))
-        let monthKey = String(current.transactionDate.prefix(7))
-        invalidateRecordExpressionPlanState(afterChanging: [reference])
-        recordsPath = NavigationPath()
-        _ = await prepareLocalWorkspace()
-        await refreshLocalMonthProjection(monthKey: monthKey)
-        return true
-    }
-
-    private func localDomainRecordForReference(_ reference: String) async throws -> LocalRecord {
-        guard let localRecordUseCase else { throw LocalDataError.invalidRecord }
-        let resolved = NativeRecordReference(reference)
-        guard resolved.kind == "local-data" || resolved.kind == "data",
-              let id = UUID(uuidString: resolved.rawId) else {
-            throw LocalDataError.invalidIdentifier
-        }
-        guard let record = try await localRecordUseCase.record(id: id) else {
-            throw LocalDataError.recordNotFound
-        }
-        return record
-    }
-
-    private func saveLocalDomainRecord(_ draft: NativeRecordEditDraft) async throws -> Bool {
-        guard let localRecordUseCase else { throw LocalDataError.invalidRecord }
-        let current = try await localDomainRecordForReference(draft.reference)
-        guard let expectedVersion = draft.localVersion else { throw LocalDataError.invalidRecord }
-        var payload = (try? LocalRecordCodec.decode(current.payloadJSON)) ?? [:]
-        let trimmedNote = draft.note.trimmingCharacters(in: .whitespacesAndNewlines)
-        payload["note"] = trimmedNote.isEmpty
-            ? AnyCodable(NSNull())
-            : AnyCodable(trimmedNote)
-        let command = LocalRecordUpdateCommand(
-            id: current.id,
-            expectedVersion: expectedVersion,
-            title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? current.title
-                : draft.title,
-            summary: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? current.summary
-                : draft.note,
-            payload: payload,
-            recordDate: draft.recordDate,
-            recordTime: draft.transactionTime,
-            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
-            updatedAt: Date()
-        )
-        let outcome = try await localRecordUseCase.update(command)
-        let oldMonth = String(current.businessDate.prefix(7))
-        let newMonth = String(outcome.record.recordDate.prefix(7))
-        invalidateRecordExpressionPlanState(afterChanging: [draft.reference])
-        await refreshLocalMonthProjection(monthKey: oldMonth)
-        if newMonth != oldMonth {
-            await refreshLocalMonthProjection(monthKey: newMonth)
-        }
-        recordDetailCache.removeValue(forKey: NativeRecordReference(draft.reference).canonicalValue)
-        await loadRecordDetail(reference: "local-data/\(outcome.record.id.uuidString)", force: true)
-        return true
-    }
-
-    private func deleteLocalDomainRecord(reference: String) async throws -> Bool {
-        guard let localRecordUseCase else { throw LocalDataError.invalidRecord }
-        let current = try await localDomainRecordForReference(reference)
-        _ = try await localRecordUseCase.delete(LocalRecordDeleteCommand(
-            id: current.id,
-            expectedVersion: current.localVersion,
-            deletedAt: Date()
-        ))
-        invalidateRecordExpressionPlanState(afterChanging: [reference])
-        recordsPath = NavigationPath()
-        await refreshLocalMonthProjection(monthKey: String(current.businessDate.prefix(7)))
-        return true
-    }
-
-    private func saveRemoteRecordDetail(_ draft: NativeRecordEditDraft) async throws -> Bool {
-        let session = try await validSession()
-        let reference = try await recordRepository.saveDetail(draft, accessToken: session.accessToken)
-        let oldReference = NativeRecordReference(draft.reference).canonicalValue
-        let savedReference = NativeRecordReference(reference).canonicalValue
-        invalidateRecordExpressionPlanState(
-            afterChanging: [oldReference, savedReference]
-        )
-        await refreshAfterRecordWrite(affectedDateKeys: [draft.recordDate])
-        await loadAccounts()
-        recordDetailCache.removeValue(forKey: savedReference)
-        await loadRecordDetail(reference: savedReference, force: true)
-        return true
-    }
-
-    private func deleteRemoteRecord(reference: String) async throws -> Bool {
-        let session = try await validSession()
-        try await recordRepository.delete(reference: reference, accessToken: session.accessToken)
-        invalidateRecordExpressionPlanState(afterChanging: [reference])
-        recordsPath = NavigationPath()
-        await loadAccounts()
-        await refreshAfterRecordWrite()
-        return true
-    }
-
-    func saveRecordDetail(_ draft: NativeRecordEditDraft) async -> Bool {
-        guard !isSavingRecordDetail else { return false }
-        isSavingRecordDetail = true
-        recordDetailMessage = nil
-        defer { isSavingRecordDetail = false }
-
-        do {
-            if isLocalIncomeReference(draft.reference) {
-                return try await saveLocalIncomeDetail(draft)
-            }
-            if isLocalExpenseReference(draft.reference) {
-                return try await saveLocalRecordDetail(draft)
-            }
-            if isLocalDomainReference(draft.reference) {
-                return try await saveLocalDomainRecord(draft)
-            }
-            guard mayReadRemoteBusinessData else { throw LocalDataError.recordNotFound }
-            return try await saveRemoteRecordDetail(draft)
-        } catch {
-            recordDetailMessage = error.localizedDescription
-            return false
-        }
-    }
-
-    func deleteRecord(reference: String) async -> Bool {
-        guard !isDeletingRecordDetail else { return false }
-        isDeletingRecordDetail = true
-        recordDetailMessage = nil
-        defer { isDeletingRecordDetail = false }
-
-        do {
-            if !mayReadRemoteBusinessData, let repository = localPendingFinancialRepository,
-               let profile = try await localExpenseUseCase?.prepareProfile(),
-               let id = UUID(uuidString: NativeRecordReference(reference).rawId),
-               NativeRecordReference(reference).kind == "expense",
-               try repository.record(profileID: profile.id, id: id) != nil {
-                try repository.delete(profileID: profile.id, id: id)
-                selectedRecordDetail = nil
-                await applyLocalStagingProjection()
-                await retryLocalImageCleanups()
-                return true
-            }
-            if isLocalIncomeReference(reference) {
-                return try await deleteLocalIncome(reference: reference)
-            }
-            if isLocalExpenseReference(reference) {
-                return try await deleteLocalRecord(reference: reference)
-            }
-            if isLocalDomainReference(reference) {
-                return try await deleteLocalDomainRecord(reference: reference)
-            }
-            guard mayReadRemoteBusinessData else { throw LocalDataError.recordNotFound }
-            return try await deleteRemoteRecord(reference: reference)
-        } catch {
-            recordDetailMessage = error.localizedDescription
-            return false
-        }
-    }
-
-    func confirmPendingRecord(
-        _ draft: NativePendingResolutionDraft,
-        preserveInboxNavigation: Bool = false
-    ) async -> Bool {
-        guard !isConfirmingPendingRecord else { return false }
-        if let validationMessage = draft.validationMessage {
-            pendingResolutionMessage = validationMessage
-            return false
-        }
-        isConfirmingPendingRecord = true
-        pendingResolutionMessage = "æ­£åœ¨ä¿å­˜â€¦"
-        defer { isConfirmingPendingRecord = false }
-        let generation = userStateGeneration
-        if !mayReadRemoteBusinessData {
-            do {
-                guard let repository = localPendingFinancialRepository,
-                      let profile = try await localExpenseUseCase?.prepareProfile(),
-                      let id = UUID(uuidString: draft.pendingId),
-                      let source = try repository.record(profileID: profile.id, id: id) else { throw LocalDataError.recordNotFound }
-                guard generation == userStateGeneration else { return false }
-                let accepted = try repository.resolve(profileID: profile.id, pendingID: id, draft: draft)
-                if accepted.recordType == "expense",
-                   let expenseID = UUID(uuidString: accepted.recordId),
-                   let expense = try await localExpenseUseCase?.expense(id: expenseID) {
-                    localExpressionPersistence?.refresh(expense: expense)
-                    scheduleLocalCompanion(for: LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore))
-                } else if accepted.recordType == "income",
-                          let incomeID = UUID(uuidString: accepted.recordId),
-                          let income = try await localExpenseUseCase?.income(id: incomeID) {
-                    localExpressionPersistence?.refresh(income: income)
-                    scheduleLocalCompanion(for: LocalIncomeReadModel.detail(from: income, imageStore: localImageStore))
-                }
-                await loadLocalAccounts()
-                await refreshLocalMonthProjection(monthKey: String(source.transactionDate.prefix(7)))
-                await applyLocalStagingProjection()
-                guard generation == userStateGeneration else { return true }
-                if !preserveInboxNavigation { inboxPath = NavigationPath() }
-                pendingResolutionMessage = localWriteMessage(draft.kind == .income ? "æ”¶å…¥å·²è®°å½•ï¼ˆæœ¬æœºï¼‰" : (draft.accountId == nil ? "æ”¯å‡ºå·²è¡¥å…¨ï¼ˆä»…æœ¬æœºï¼Œå¾…è¡¥ç»‘è´¦æˆ·ï¼‰" : "æ”¯å‡ºå·²è¡¥å…¨ï¼ˆæœ¬æœºï¼‰"))
-                return true
-            } catch {
-                guard generation == userStateGeneration else { return false }
-                pendingResolutionMessage = "ä¿å­˜å¤±è´¥ï¼š\(error.localizedDescription)"
-                return false
-            }
-        }
-        let result = await resolvedPendingConfirmationUseCase().perform(
-            draft
-        )
-        switch result.transaction {
-        case .accepted(let accepted):
-            if accepted.recordType == "expense" {
-                await scheduleConfirmedExpenseVocabularyIfCurrent(draft)
-            }
-            if !preserveInboxNavigation { inboxPath = NavigationPath() }
-            let message = draft.kind == .income ? "æ”¶å…¥å·²è®°å½•" : "æ”¯å‡ºå·²è¡¥å…¨"
-            pendingResolutionMessage = result.refresh.failureMessage.map {
-                "\(message)ï¼Œåˆ·æ–°å¤±è´¥ï¼š\($0)"
-            } ?? message
-            return true
-        case .rejected(.unauthenticated):
-            pendingResolutionMessage = "ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•"
-        case .rejected(.invalidInput):
-            pendingResolutionMessage = draft.validationMessage ?? "å¾…è¡¥å…¨è´¦å•æ— æ•ˆ"
-        case .conflict:
-            pendingResolutionMessage = "è¿™æ¡å¾…è¡¥å…¨è´¦å•æ­£åœ¨ä¿å­˜"
-        case .failed(let message):
-            pendingResolutionMessage = "ä¿å­˜å¤±è´¥ï¼š\(message)"
-        case .stale:
-            return false
-        }
-        return false
-    }
-
-    private func scheduleConfirmedExpenseVocabularyIfCurrent(
-        _ draft: NativePendingResolutionDraft
-    ) async {
-        guard let session = try? await validSession(),
-              isCurrentUserLoad(userStateGeneration, userId: session.user.id) else { return }
-        scheduleConfirmedExpenseVocabulary(
-            platform: draft.platform,
-            category: draft.category,
-            paymentMethod: draft.paymentMethod,
-            accountId: draft.accountId,
-            userId: session.user.id,
-            accessToken: session.accessToken
-        )
-    }
-
-    func submitRecordFeedback(
-        choice: NativeAIFeedbackReviewChoice,
-        freeText: String,
-        feedbackIdentity: String? = nil
-    ) async {
-        if case .submitting = recordFeedbackState { return }
-        guard let detail = selectedRecordDetail,
-              let feedback = NativeRecordExpressionFeedbackPolicy.feedbackForReview(
-                  voiceFeedback: detail.voiceAiFeedback,
-                  plannerFeedback: detail.expressionPlannerAiFeedback,
-                  fallbackFeedback: detail.aiFeedback,
-                  renderIdentity: feedbackIdentity
-              ) else { return }
-        recordFeedbackState = .submitting
-        if feedback.exposureEventId?.hasPrefix("local:") == true {
-            // Local Planner feedback never calls the remote feedback RPC.
-            recordFeedbackState = .submitted
-            return
-        }
-        let result = await resolvedFeedbackSubmissionUseCase().perform(
-            FeedbackSubmissionInput(
-                recordId: detail.rawId,
-                feedbackIdentity: feedback.renderIdentity,
-                choice: choice,
-                freeText: freeText,
-                exposureEventId: feedback.exposureEventId
-            )
-        )
-        switch result.transaction {
-        case .accepted:
-            recordFeedbackState = .submitted
-        case .rejected(.unauthenticated):
-            recordFeedbackState = .failed("ç™»å½•çŠ¶æ€å·²å¤±æ•ˆï¼Œè¯·é‡æ–°ç™»å½•")
-        case .rejected(.invalidInput):
-            recordFeedbackState = .failed("åé¦ˆå‚æ•°æ— æ•ˆ")
-        case .failed(let message):
-            recordFeedbackState = .failed(message)
-        case .stale:
-            return
-        }
-    }
-
-    private func resolvedFeedbackSubmissionUseCase() -> FeedbackSubmissionUseCase {
-        if let feedbackSubmissionUseCase { return feedbackSubmissionUseCase }
-        let useCase = FeedbackSubmissionUseCase(
-            repository: recordRepository,
-            sessionProvider: { [weak self] forceRefresh in
-                guard let self else {
-                    throw SupabaseRemoteError.requestFailed("app_state_unavailable")
-                }
-                return try await self.validSession(forceRefresh: forceRefresh)
-            },
-            contextProvider: { [weak self] in
-                guard let self else {
-                    return FeedbackSubmissionUserContext(userId: "", generation: -1, isSignedIn: false)
-                }
-                return FeedbackSubmissionUserContext(
-                    userId: self.currentUserId,
-                    generation: self.userStateGeneration,
-                    isSignedIn: self.isSignedIn
-                )
-            }
-        )
-        feedbackSubmissionUseCase = useCase
-        return useCase
-    }
-
-    func loadUserSettings() async {
-        userSettings = localUserSettingsStore.load()
-        settingsMessage = nil
-    }
-
-    func loadCloudPrivacySettings() async {
-        guard !isLoadingSettings else { return }
-        guard isSignedIn else {
-            settingsMessage = "ç™»å½•åŽå¯è¯»å–æˆ–ä¿®æ”¹äº‘ç«¯ç­–ç•¥ï¼›æœ¬æœºåŽŸå›¾ä¸å—è¿™äº›æœŸé™å½±å“ã€‚"
-            return
-        }
-        let generation = userStateGeneration
-        isLoadingSettings = true
-        defer { if generation == userStateGeneration { isLoadingSettings = false } }
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            let remote = try await settingsRepository.fetch(userId: session.user.id, accessToken: session.accessToken)
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            // Display cloud policy without importing ordinary preferences or
-            // changing the device AI mode and its explicit consent.
-            userSettings.aiLogsEnabled = remote.aiLogsEnabled
-            userSettings.promptOptimizationEnabled = remote.promptOptimizationEnabled
-            userSettings.expressionImprovementEnabled = remote.expressionImprovementEnabled
-            userSettings.keepSourceImages = remote.keepSourceImages
-            userSettings.imageRetentionDays = remote.imageRetentionDays
-            settingsMessage = nil
-        } catch {
-            guard generation == userStateGeneration else { return }
-            settingsMessage = "æœªèƒ½ç¡®è®¤å½“å‰äº‘ç«¯ç­–ç•¥ï¼Œè¯·è”ç½‘åŽé‡è¯•ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    func setCompanionEnabled(_ enabled: Bool) async {
-        await updateSettings(["companion_enabled": AnyCodable(enabled)]) { $0.companionEnabled = enabled }
-    }
-
-    func setCompanionMemoryEnabled(_ enabled: Bool) async {
-        await updateSettings(["companion_memory_enabled": AnyCodable(enabled)]) { $0.companionMemoryEnabled = enabled }
-    }
-
-    func setCompanionPersona(_ value: String) async {
-        await updateSettings(["companion_persona": AnyCodable(value)]) { $0.companionPersona = value }
-    }
-
-    func setCompanionMemoryStrength(_ value: String) async {
-        await updateSettings(["companion_memory_strength": AnyCodable(value)]) { $0.companionMemoryStrength = value }
-    }
-
-    func setCompanionExpressionStyle(_ value: String) async {
-        await updateSettings(["companion_expression_style": AnyCodable(value)]) { $0.companionExpressionStyle = value }
-    }
-
-    func setCompanionCustomNote(_ value: String) async {
-        let value = String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
-        await updateSettings(["companion_custom_note": AnyCodable(value)]) { $0.companionCustomNote = value }
-    }
-
-    func setInsightProvider(_ value: String) async {
-        let provider = NativeSettingsOptions.normalizedInsightProvider(value)
-        await updateSettings(["ai_insight_provider": AnyCodable(provider)]) { $0.aiInsightProvider = provider }
-    }
-
-    func setVisionProvider(_ value: String, forPhoto: Bool) async {
-        let provider = NativeSettingsOptions.normalizedVisionProvider(value, fallback: forPhoto ? "qwen" : "auto")
-        let key = forPhoto ? "photo_vision_primary" : "screenshot_vision_primary"
-        var values = [key: AnyCodable(provider)]
-        if !forPhoto { values["vision_primary"] = AnyCodable(provider) }
-        await updateSettings(values) {
-            if forPhoto { $0.photoVisionPrimary = provider }
-            else { $0.screenshotVisionPrimary = provider }
-        }
-    }
-
-    func setQwenModel(_ value: String, forPhoto: Bool) async {
-        let model = NativeSettingsOptions.normalizedQwenModel(value)
-        let key = forPhoto ? "qwen_photo_model" : "qwen_screenshot_model"
-        await updateSettings([key: AnyCodable(model)]) {
-            if forPhoto { $0.qwenPhotoModel = model }
-            else { $0.qwenScreenshotModel = model }
-        }
-    }
-
-    func setQwenThinking(_ enabled: Bool, forPhoto: Bool) async {
-        let key = forPhoto ? "qwen_photo_enable_thinking" : "qwen_screenshot_enable_thinking"
-        await updateSettings([key: AnyCodable(enabled)]) {
-            if forPhoto { $0.qwenPhotoThinking = enabled }
-            else { $0.qwenScreenshotThinking = enabled }
-        }
-    }
-
-    func setAILogsEnabled(_ enabled: Bool) async {
-        await updateSettings(["ai_logs_enabled": AnyCodable(enabled)]) { $0.aiLogsEnabled = enabled }
-    }
-
-    func setPromptOptimizationEnabled(_ enabled: Bool) async {
-        await updateSettings(["prompt_optimization_enabled": AnyCodable(enabled)]) { $0.promptOptimizationEnabled = enabled }
-    }
-
-    func setExpressionImprovementEnabled(_ enabled: Bool) async {
-        await updateSettings(["expression_improvement_enabled": AnyCodable(enabled)]) { $0.expressionImprovementEnabled = enabled }
-    }
-
-    func setImageRetention(days: Int, cleanupExisting: Bool = false) async {
-        let keepImages = days != 0
-        let retentionDays = keepImages ? days : 7
-        await updateSettings([
-            "keep_source_images": AnyCodable(keepImages),
-            "image_retention_days": AnyCodable(retentionDays)
-        ]) {
-            $0.keepSourceImages = keepImages
-            $0.imageRetentionDays = retentionDays
-        }
-        guard cleanupExisting, settingsMessage == nil else { return }
-        guard !isCleaningSourceImages else { return }
-        isCleaningSourceImages = true
-        settingsMessage = "æ­£åœ¨æ¸…ç†å·²æœ‰äº‘ç«¯åŽŸå›¾â€¦"
-        defer { isCleaningSourceImages = false }
-        do {
-            let session = try await validSession()
-            let cleanup = try await settingsRepository.cleanupSourceImages(accessToken: session.accessToken)
-            await RemoteImageRepository.shared.clear()
-            dashboard = dashboard.clearingSignedImageURLs()
-            recordDetailCache = recordDetailCache.mapValues { detail in
-                var cleared = detail
-                cleared.imageURL = nil
-                cleared.imageLoadError = false
-                return cleared
-            }
-            if var detail = selectedRecordDetail {
-                detail.imageURL = nil
-                detail.imageLoadError = false
-                selectedRecordDetail = detail
-            }
-            await refreshDashboard()
-            settingsMessage = cleanup.displayMessage
-        } catch {
-            settingsMessage = "ç•™å­˜è®¾ç½®å·²ä¿å­˜ï¼Œä½†æ¸…ç†å·²æœ‰åŽŸå›¾å¤±è´¥ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    func exportData(_ request: NativeDataExportRequest) async -> NativeExportedFile? {
-        guard !isExportingData else { return nil }
-        isExportingData = true
-        settingsMessage = nil
-        defer { isExportingData = false }
-        do {
-            if localFactPortability != nil || request.content == .universal {
-                let data: Data
-                let filenamePrefix: String
-                if let localFactPortability {
-                    data = try localFactPortability.exportArchive(request: request)
-                    filenamePrefix = "jiezi-local-facts"
-                } else if let localRecordPortability {
-                    data = try localRecordPortability.exportArchive(request: request)
-                    filenamePrefix = "jiezi-local-records"
-                } else {
-                    throw LocalDataError.invalidRecord
-                }
-                let filename = "\(filenamePrefix)-\(NativeLocalDate.dateKey(Date())).\(request.format.rawValue)"
-                let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-                try data.write(to: url, options: .atomic)
-                return NativeExportedFile(url: url)
-            }
-            throw LocalDataError.invalidRecord
-        } catch {
-            settingsMessage = "å¯¼å‡ºå¤±è´¥ï¼š\(error.localizedDescription)"
-            return nil
-        }
-    }
-
-    func exportCompleteLocalBackup() async -> NativeExportedFile? {
-        guard !isExportingData, let portability = localCompleteBackupPortability else { return nil }
-        isExportingData = true
-        settingsMessage = nil
-        defer { isExportingData = false }
-        do {
-            let data = try await Task.detached(priority: .userInitiated) {
-                try portability.exportBackup()
-            }.value
-            let filename = "jiezi-local-complete-backup-\(NativeLocalDate.dateKey(Date())).json"
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-            try data.write(to: url, options: .atomic)
-            return NativeExportedFile(url: url)
-        } catch {
-            settingsMessage = "å®Œæ•´æœ¬åœ°å¤‡ä»½å¤±è´¥ï¼š\(error.localizedDescription)"
-            return nil
-        }
-    }
-
-    func previewCompleteLocalBackup(_ data: Data) async throws -> LocalCompleteBackupPreview {
-        guard let portability = localCompleteBackupPortability else { throw LocalDataError.invalidRecord }
-        return try await Task.detached(priority: .userInitiated) {
-            try portability.preview(data)
-        }.value
-    }
-
-    func previewGenericImport(_ data: Data) async throws -> GenericImportPreview {
-        guard let service = genericImportService else { throw LocalDataError.invalidRecord }
-        return try await Task.detached(priority: .userInitiated) { try service.preview(data) }.value
-    }
-
-    func importGenericData(_ data: Data) async -> Bool {
-        guard !isImportingGenericData, let service = genericImportService else { return false }
-        isImportingGenericData = true
-        defer { isImportingGenericData = false }
-        do {
-            let result = try await Task.detached(priority: .userInitiated) { try service.importCSV(data) }.value
-            recordDetailCache.removeAll(); recordMonthDetails.removeAll(); localFactMonths.removeAll()
-            await refreshLocalMonthProjection(monthKey: Self.currentMonthKey)
-            settingsMessage = "å¯¼å…¥å®Œæˆï¼šæ–°å¢ž \(result.inserted) æ¡ï¼Œè·³è¿‡ \(result.skipped) æ¡ï¼Œè­¦å‘Š \(result.warnings) æ¡ã€‚"
-            return true
-        } catch {
-            settingsMessage = "å¯¼å…¥å¤±è´¥ï¼š\(error.localizedDescription)"
-            return false
-        }
-    }
-
-    /// Explicit settings action: caches source bytes, never writes business facts or enables sync.
-    func prepareCloudHistoryMigration() async {
-        guard !isPreparingHistoryMigration, !isImportingLocalBackup else { return }
-        loadLatestHistoryMigrationDiagnostic()
-        isPreparingHistoryMigration = true
-        canPauseHistoryMigration = true
-        historyMigrationAttempt += 1
-        let attempt = historyMigrationAttempt
-        let generation = userStateGeneration
-        historyMigrationAttemptID = UUID()
-        historyMigrationArchive = nil
-        historyMigrationPreview = nil
-        historyMigrationMessage = nil
-        historyMigrationCheckpoint = nil
-        historyMigrationProgress = nil
-        historyMigrationBlockers = []
-        historyMigrationBlockerCount = 0
-        historyMigrationUnresolvedCount = 0
-        historyMigrationSkippedImageCount = 0
-        historyMigrationPreservationIssues = []
-        historyMigrationPhase = "éªŒè¯ä¼šè¯"
-        defer {
-            if generation == userStateGeneration, attempt == historyMigrationAttempt {
-                isPreparingHistoryMigration = false
-                canPauseHistoryMigration = false
-            }
-        }
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id),
-                  let profile = try await localExpenseUseCase?.prepareProfile(),
-                  let portability = localCompleteBackupPortability,
-                  let cache = localHistoryMigrationCache,
-                  let baseURL = URL(string: AppConfig.supabaseURL) else { throw LocalDataError.invalidRecord }
-            guard profile.cloudUserID == nil || profile.cloudUserID == session.user.id else {
-                throw LocalHistoryMappingError.unsupported("æœ¬æœºå·¥ä½œåŒºä»ç»‘å®šå¦ä¸€ä¸ªäº‘è´¦æˆ·ï¼Œè¯·å…ˆæ ¸å¯¹æ•°æ®å½’å±žã€‚")
-            }
-            historyMigrationProfileID = profile.id
-            let isCurrent = { [weak self] in
-                self?.isCurrentUserLoad(generation, userId: session.user.id) == true
-                    && self?.historyMigrationAttempt == attempt
-            }
-            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
-            if let existing = try cache.state(profileID: profile.id) {
-                guard existing.cloudUserID == session.user.id else { throw LocalHistoryMigrationError.identityMismatch }
-                if existing.status == .completed {
-                    try? cache.cleanupAfterCompletion(existing)
-                    historyMigrationUnresolvedCount = try historyUnresolvedRepository?.count(profileID: profile.id) ?? 0
-                    historyMigrationPhase = historyMigrationUnresolvedCount > 0 ? "å·²ä¿ç•™å¾…æ ¸å¯¹" : "å·²å…¥è´¦"
-                    historyMigrationMessage = "æ­¤å·¥ä½œåŒºå·²å®Œæˆä¸€æ¬¡åŽ†å²è¿å…¥ï¼ŒåŽ†å²å¾…æ ¸å¯¹ \(historyMigrationUnresolvedCount) æ¡ä»ä¸å±žäºŽæ­£å¼å…¥è´¦ã€‚æ™®é€šåŒæ­¥åªæ”¯æŒå…¶å·²å£°æ˜ŽèŒƒå›´ï¼Œä¸ä»£è¡¨å…¨åŸŸäº‘æœ¬ä¸€è‡´ã€‚"
-                    return
-                }
-            }
-            historyMigrationPhase = "è¯»å–äº‘ç«¯æºæ•°æ®ä¸ŽåŽŸå›¾"
-            let preflightSchema = try LocalDatabase()
-            let prepared = try await LocalHistoryMigrationCoordinator(
-                downloader: LocalHistoryImageDownloader(baseURL: baseURL), cache: cache,
-                validateStructure: { inspection, profileID in
-                    // ç»“æž„é¢„æ£€ï¼šå…ˆåœ¨ä¸å«å›¾ç‰‡çš„å½’æ¡£ä¸Šè·‘ä¸€éçœŸå®žå¯¼å…¥ï¼ŒæŠŠå­—æ®µ/å¼•ç”¨/çº¦æŸé—®é¢˜
-                    // åœ¨ä¸‹è½½åŽŸå›¾ä¹‹å‰æš´éœ²å‡ºæ¥ï¼Œå¹¶ä¸€æ¬¡æŠ¥å…¨ã€‚
-                    let archive = try LocalHistoryMigrationMapper(schema: preflightSchema).buildArchive(
-                        inspection, profileID: profileID, images: [:])
-                    do {
-                        try portability.validateImport(archive, into: profileID)
-                    } catch let error as LocalCompleteBackupError {
-                        // detail å·²å¸¦ã€Œæœ¬æœºè¡¨.åˆ— + è®°å½• #hashã€ã€‚å†åŒ…ä¸€å±‚é•¿å¥ä¼šæŠŠé—®é¢˜æ¸…å•
-                        // ç”¨æ¥å½’ç±»çš„å­—æ®µå½¢çŠ¶å†²æŽ‰ï¼Œå¤±è´¥è®°å½•å°±é€€åŒ–æˆã€Œå…¶ä»–ã€è€Œçœ‹ä¸è§ã€‚
-                        switch error {
-                        case .invalidRowIssues(let details):
-                            throw LocalHistoryMappingError.rows(details)
-                        case .invalidRows(let detail):
-                            throw LocalHistoryMappingError.rows([detail])
-                        default:
-                            throw error
-                        }
-                    }
-                }
-            ).prepare(profileID: profile.id, cloudUserID: session.user.id,
-                      accessToken: session.accessToken, isCurrent: isCurrent,
-                      onProgress: { [weak self] progress in
-                          guard let self else { return }
-                          self.historyMigrationProgress = progress
-                          switch progress.phase {
-                          case .readingSource:
-                              self.historyMigrationPhase = progress.currentTable.map { "è¯»å– \($0.rawValue)" } ?? "è¯»å–äº‘ç«¯æºæ•°æ®"
-                          case .downloadingImages:
-                              self.historyMigrationPhase = "ä¸‹è½½åŽ†å²åŽŸå›¾"
-                          }
-                      })
-            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
-            let inspection = prepared.inspection
-            historyMigrationCheckpoint = prepared.state
-            guard inspection.blockers.isEmpty else {
-                try cache.pause(prepared.state)
-                historyMigrationPhase = "é¢„æ£€é˜»å¡ž"
-                historyMigrationBlockerCount = inspection.blockers.count
-                historyMigrationBlockers = inspection.blockers
-                historyMigrationMessage = inspection.summary
-                return
-            }
-            historyMigrationBlockers = []
-            historyMigrationBlockerCount = 0
-            guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
-            historyMigrationPhase = "æ ¸å¯¹åŽ†å²å­—æ®µä¸Žè½¬æ¢"
-            let archive = try LocalHistoryMigrationMapper(schema: LocalDatabase()).buildArchive(
-                inspection, profileID: profile.id, images: prepared.images)
-            let preview = try portability.preview(archive)
-            historyMigrationUnresolvedCount = preview.tableCounts["local_history_unresolved_records", default: 0]
-            historyMigrationSkippedImageCount = max(0, inspection.sourceImagePaths.count - prepared.images.count)
-            historyMigrationPreservationIssues = [LocalHistorySourceTable.records, .staging].flatMap { table in
-                inspection.rows[table, default: []].flatMap {
-                    LocalHistoryMigrationUseCase.preservationIssues(table: table, row: $0, rows: inspection.rows)
-                }
-            }
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            historyMigrationSourceDigest = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
-            historyMigrationArchive = archive
-            historyMigrationOwner = session.user.id
-            historyMigrationGeneration = generation
-            historyMigrationPhase = "ç­‰å¾…ç”¨æˆ·ç¡®è®¤"
-            let imageNote = historyMigrationSkippedImageCount > 0
-                ? "\næœ‰ \(historyMigrationSkippedImageCount) å¼ åŽ†å²åŽŸå›¾æ— æ³•è¯»å–ï¼›å¯¹åº”å¯æ˜ å°„è®°å½•ä»ä¼šå¯¼å…¥ï¼Œå›¾ç‰‡å­—æ®µç•™ç©ºã€‚"
-                : ""
-            historyMigrationPreview = "äº‘è´¦æˆ·ï¼š\(session.user.email ?? session.user.id)ã€‚å°†åˆå¹¶åˆ°æ­¤ iPhone çŽ°æœ‰è´¦æœ¬ï¼Œæ¢å·ä¸ä¼šå¦å»ºæœ¬æœºè´¦æœ¬ã€‚\n" + inspection.summary + imageNote + "\n" + preview.confirmationText
-            historyMigrationMessage = "é¢„æ£€é€šè¿‡ï¼Œæºæ•°æ®ä¸Žå¯è¯»å–å›¾ç‰‡å·²æš‚å­˜åœ¨æœ¬æœºï¼Œå°šæœªæäº¤ã€‚ç¡®è®¤ä¼šä¸€èµ·ä¿å­˜å¯ç­‰ä»·è½¬æ¢çš„æ•°æ®ä¸Ž \(historyMigrationUnresolvedCount) æ¡åŽ†å²å¾…æ ¸å¯¹åŽŸæ–‡ã€‚ç¼ºå¤±å›¾ç‰‡çš„è®°å½•ä¿ç•™ç»“æž„åŒ–å­—æ®µä½†ä¸å«åŽŸå›¾ï¼›åŽŸæ–‡ä¸ä¼šè®¡å…¥æ—¥ç»Ÿè®¡ã€‚ç¡®è®¤å‰é‡æ–°æ ¸å¯¹æºæ•°æ®ï¼Œå†²çªä»æ•´åŒ…æ‹’ç»ã€‚"
-            if let diagnostic = historyMigrationDiagnostic,
-               diagnostic.operation == "history-migration", !diagnostic.committed, diagnostic.resolution == nil,
-               diagnostic.accountHint == LocalHistoryMigrationDiagnosticStore.identityHint(session.user.id) {
-                try? historyMigrationDiagnosticStore?.resolve(diagnostic.id, outcome: "é‡è¯•é¢„æ£€é€šè¿‡ï¼›æ•°æ®ä»å¾…ç”¨æˆ·ç¡®è®¤å…¥è´¦ã€‚", expectedAccountID: session.user.id)
-                loadLatestHistoryMigrationDiagnostic()
-            }
-        } catch is CancellationError {
-            guard generation == userStateGeneration, attempt == historyMigrationAttempt else { return }
-            historyMigrationPhase = "å·²å–æ¶ˆ"
-            historyMigrationMessage = "é¢„æ£€å·²å–æ¶ˆï¼Œå°šæœªå…¥è´¦ï¼›å·²ç¼“å­˜çš„è¯»å–è¿›åº¦ä¿ç•™ã€‚"
-        } catch {
-            guard generation == userStateGeneration, attempt == historyMigrationAttempt else { return }
-            if let state = historyMigrationCheckpoint { try? localHistoryMigrationCache?.pause(state) }
-            let failedPhase = historyMigrationPhase
-            historyMigrationPhase = "é¢„æ£€æš‚åœ"
-            historyMigrationMessage = recordHistoryMigrationFailure(error, committed: false, phase: failedPhase)
-            // é€è¡Œé—®é¢˜ä¸€æ¬¡åˆ—å…¨ï¼Œç”¨æˆ·ä¸å¿…ã€Œä¿®ä¸€æ¡é‡å¯ä¸€æ¬¡ã€ã€‚
-            if case .rows(let issues)? = error as? LocalHistoryMappingError {
-                historyMigrationPhase = "é¢„æ£€é˜»å¡ž"
-                historyMigrationBlockers = issues
-                historyMigrationBlockerCount = issues.count
-            }
-        }
-    }
-
-    func loadLocalHistoryUnresolvedRecords() async {
-        guard !isLoadingHistoryUnresolvedRecords else { return }
-        let generation = userStateGeneration
-        isLoadingHistoryUnresolvedRecords = true
-        historyUnresolvedRecordsError = nil
-        defer { if generation == userStateGeneration { isLoadingHistoryUnresolvedRecords = false } }
-        do {
-            guard let repository = historyUnresolvedRepository else { throw LocalDataError.invalidRecord }
-            guard let profileID = try localFactReader?.activeProfileID() else {
-                localHistoryUnresolvedRecords = []
-                return
-            }
-            let records = try await Task.detached(priority: .utility) {
-                try repository.records(profileID: profileID)
-            }.value
-            guard generation == userStateGeneration else { return }
-            localHistoryUnresolvedRecords = records
-        } catch {
-            guard generation == userStateGeneration else { return }
-            localHistoryUnresolvedRecords = []
-            historyUnresolvedRecordsError = "åŽ†å²å¾…æ ¸å¯¹è®°å½•è¯»å–å¤±è´¥ï¼›æœªæŒ‰ç©ºæ¸…å•æ˜¾ç¤ºï¼Œè¯·é‡è¯•æœ¬æœºè¯»å–ã€‚"
-        }
-    }
-
-    func localImageDataForHistoryUnresolvedRecord(id: String) async throws -> Data {
-        let generation = userStateGeneration
-        guard let repository = historyUnresolvedRepository, let store = localImageStore,
-              let profileID = try localFactReader?.activeProfileID(),
-              let record = try repository.record(id: id, profileID: profileID),
-              let path = record.imagePath, let hash = record.imageHash else { throw LocalDataError.recordNotFound }
-        let bytes = try await Task.detached(priority: .utility) { try store.data(at: path) }.value
-        guard generation == userStateGeneration else { throw CancellationError() }
-        guard LocalImageStore.sha256(bytes) == hash else { throw LocalCompleteBackupError.invalidImage("history-image") }
-        return bytes
-    }
-
-    func loadLocalHistoryInventory() async {
-        guard !isLoadingLocalHistoryInventory else { return }
-        guard let historyInventoryReader else {
-            localHistoryInventory = nil
-            localHistoryInventoryError = localStorageInitializationMessage ?? "æœ¬æœºæ•°æ®ä¸å¯è¯»å–ã€‚"
-            return
-        }
-        isLoadingLocalHistoryInventory = true
-        localHistoryInventoryError = nil
-        defer { isLoadingLocalHistoryInventory = false }
-        do {
-            localHistoryInventory = try await Task.detached(priority: .utility) {
-                try historyInventoryReader.readLocal()
-            }.value
-        } catch {
-            localHistoryInventory = nil
-            let entry = historyMigrationDiagnosticStore?.record(error, phase: "æœ¬æœºæ•°æ®ç›˜ç‚¹", operation: "local-inventory", attemptID: historyMigrationAttemptID, committed: false)
-            historyMigrationDiagnostic = entry
-            localHistoryInventoryError = "æœ¬æœºæ•°æ®è¯»å–å¤±è´¥ï¼›æœªæŒ‰ 0 æ¡æ˜¾ç¤ºã€‚\(entry.map { "è¯Šæ–­ç¼–å·ï¼š\($0.id)ã€‚" } ?? "")"
-        }
-    }
-
-    /// Explicit user action. This reads each cloud source table under the current session/RLS and does not download images or write business data.
-    func readCloudHistoryInventory() async {
-        guard !isReadingCloudHistoryInventory else { return }
-        guard isSignedIn else {
-            cloudHistoryInventory = LocalHistoryCloudInventory.notRead
-            cloudHistoryInventory.status = .failed
-            cloudHistoryInventory.message = "è¯·å…ˆç™»å½•è¦ç›˜ç‚¹çš„äº‘è´¦æˆ·ã€‚"
-            return
-        }
-        isReadingCloudHistoryInventory = true
-        historyMigrationAttemptID = UUID()
-        cloudHistoryInventory = LocalHistoryCloudInventory(
-            status: .loading, sampledAt: nil, counts: [:], completedTables: [], currentTable: nil,
-            currentTableRowsRead: 0, totalRowsRead: 0, pagesRead: 0, message: nil
-        )
-        defer { isReadingCloudHistoryInventory = false }
-        let generation = userStateGeneration
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            let inspection = try await LocalHistoryMigrationUseCase().inspect(
-                cloudUserID: session.user.id,
-                accessToken: session.accessToken,
-                isCurrent: { [weak self] in self?.isCurrentUserLoad(generation, userId: session.user.id) == true },
-                onProgress: { [weak self] progress in
-                    guard let self, self.isCurrentUserLoad(generation, userId: session.user.id) else { return }
-                    self.cloudHistoryInventory = LocalHistoryCloudInventory(
-                        status: .loading, sampledAt: nil, counts: progress.counts,
-                        completedTables: progress.completedTables, currentTable: progress.currentTable,
-                        currentTableRowsRead: progress.currentTableRowsRead, totalRowsRead: progress.totalRowsRead,
-                        pagesRead: progress.pagesRead, message: nil
-                    )
-                }
-            )
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            cloudHistoryInventory = LocalHistoryCloudInventory(
-                status: .complete, sampledAt: Date(), counts: LocalHistoryInventoryCatalog.cloudCounts(inspection.rows),
-                completedTables: Set(LocalHistorySourceTable.allCases), currentTable: nil,
-                currentTableRowsRead: 0, totalRowsRead: inspection.rows.values.reduce(0) { $0 + $1.count },
-                pagesRead: cloudHistoryInventory.pagesRead, message: "å·²å®Œæˆæœ¬æ¬¡åˆ†é¡µè¯»å–ï¼›å¤šè¡¨è¯»å–ä¸æ˜¯åŽŸå­äº‘å¿«ç…§ã€‚å›¾ç‰‡ä»…ç»Ÿè®¡å¼•ç”¨ä¸ŽåŽ»é‡è·¯å¾„ï¼Œæœªä¸‹è½½éªŒè¯ã€‚"
-            )
-        } catch is CancellationError {
-            guard generation == userStateGeneration else { return }
-            cloudHistoryInventory.status = .incomplete
-            cloudHistoryInventory.sampledAt = Date()
-            cloudHistoryInventory.message = "è¯»å–å·²å–æ¶ˆï¼›å·²å®Œæˆè¡¨å¯æŸ¥çœ‹ï¼Œå½“å‰è¡¨çš„æ€»é‡æœªçŸ¥ã€‚"
-        } catch {
-            guard generation == userStateGeneration else { return }
-            cloudHistoryInventory.status = .failed
-            cloudHistoryInventory.sampledAt = Date()
-            let entry = historyMigrationDiagnosticStore?.record(error, phase: "äº‘ç«¯æ•°é‡ç›˜ç‚¹", accountID: currentUserId, operation: "cloud-inventory",
-                progressSummary: "å·²è¯» \(cloudHistoryInventory.totalRowsRead) è¡Œã€\(cloudHistoryInventory.pagesRead) é¡µï¼›å½“å‰è¡¨æ€»é‡æœªçŸ¥ã€‚",
-                attemptID: historyMigrationAttemptID, committed: false)
-            historyMigrationDiagnostic = entry
-            cloudHistoryInventory.message = "äº‘ç«¯è¯»å–å¤±è´¥ï¼›å·²å®Œæˆè¡¨å¯æŸ¥çœ‹ï¼Œå½“å‰è¡¨æ€»é‡æœªçŸ¥ã€‚\(entry.map { "è¯Šæ–­ç¼–å·ï¼š\($0.id)ã€‚" } ?? "")"
-        }
-    }
-
-    func loadLatestHistoryMigrationDiagnostic() {
-        guard let historyMigrationDiagnosticStore else {
-            historyMigrationDiagnostic = nil
-            return
-        }
-        let entries = (try? historyMigrationDiagnosticStore.recent()) ?? []
-        let operations: Set<String> = ["history-migration", "cloud-inventory", "local-inventory"]
-        if currentUserId.isEmpty {
-            historyMigrationDiagnostic = entries.last {
-                operations.contains($0.operation ?? "history-migration") && $0.accountHint == nil
-            }
-        } else {
-            let currentHint = LocalHistoryMigrationDiagnosticStore.identityHint(currentUserId)
-            historyMigrationDiagnostic = entries.last {
-                operations.contains($0.operation ?? "history-migration")
-                    && ($0.accountHint == nil || $0.accountHint == currentHint)
-            }
-        }
-    }
-
-    func loadLatestLocalStorageInitializationDiagnostic() {
-        guard let historyMigrationDiagnosticStore else {
-            localStorageInitializationDiagnostic = nil
-            return
-        }
-        localStorageInitializationDiagnostic = (try? historyMigrationDiagnosticStore.recent())?.last {
-            $0.operation == "local-storage-init" && $0.accountHint == nil
-        }
-    }
-
-    func loadLatestLocalProjectionRefreshDiagnostic() {
-        guard let historyMigrationDiagnosticStore else {
-            localProjectionRefreshDiagnostic = nil
-            return
-        }
-        let accountHint = currentUserId.isEmpty
-            ? nil
-            : LocalHistoryMigrationDiagnosticStore.identityHint(currentUserId)
-        localProjectionRefreshDiagnostic = (try? historyMigrationDiagnosticStore.recent())?.last {
-            $0.operation == "local-write-refresh" && $0.accountHint == accountHint
-        }
-    }
-
-    func pauseCloudHistoryMigration() {
-        guard canPauseHistoryMigration else { return }
-        if let profileID = historyMigrationProfileID,
-           let state = try? localHistoryMigrationCache?.state(profileID: profileID) {
-            try? localHistoryMigrationCache?.pause(state)
-        }
-        historyMigrationAttempt += 1
-        canPauseHistoryMigration = false
-        historyMigrationPhase = "å·²æš‚åœ"
-        isPreparingHistoryMigration = false
-        historyMigrationMessage = "å·²æš‚åœï¼Œå°šæœªå…¥è´¦ã€‚å†æ¬¡é¢„æ£€å°†ä»Žå·²ç¼“å­˜çš„é¡µå’Œå›¾ç‰‡ç»§ç»­ã€‚"
-    }
-
-    func restartCloudHistoryMigrationPreview() {
-        guard !isPreparingHistoryMigration, !isImportingLocalBackup,
-              let profileID = historyMigrationProfileID, let cache = localHistoryMigrationCache else { return }
-        do {
-            guard let checkpoint = try cache.state(profileID: profileID), checkpoint.cloudUserID == currentUserId else {
-                throw LocalHistoryMigrationError.identityMismatch
-            }
-            try cache.restartSource(checkpoint)
-            historyMigrationCheckpoint = nil
-            historyMigrationArchive = nil
-            historyMigrationPreview = nil
-            historyMigrationSourceDigest = nil
-            historyMigrationSkippedImageCount = 0
-            historyMigrationBlockers = []
-            historyMigrationBlockerCount = 0
-            historyMigrationPhase = "é¢„æ£€å·²ä¸¢å¼ƒ"
-            historyMigrationPreservationIssues = []
-            historyMigrationUnresolvedCount = 0
-            historyMigrationMessage = "å·²ä¸¢å¼ƒé¢„æ£€ç¼“å­˜ã€‚å†æ¬¡é¢„æ£€ä¼šé‡æ–°è¯»å–äº‘ç«¯åŽ†å²ï¼Œæœ¬æœºåŽŸæœ‰è´¦ç›®å’Œå›¾ç‰‡æœªæ”¹å˜ã€‚"
-        } catch { historyMigrationMessage = "æ— æ³•ä¸¢å¼ƒæ—§é¢„æ£€ï¼š\(error.localizedDescription)" }
-    }
-
-    func confirmCloudHistoryMigration() async -> Bool {
-        guard !isPreparingHistoryMigration, !isImportingLocalBackup,
-              let archive = historyMigrationArchive, let owner = historyMigrationOwner,
-              let checkpoint = historyMigrationCheckpoint, let cache = localHistoryMigrationCache,
-              let generation = historyMigrationGeneration,
-              isCurrentUserLoad(generation, userId: owner) else { return false }
-        let attempt = historyMigrationAttempt
-        isPreparingHistoryMigration = true
-        historyMigrationPhase = "ç¡®è®¤å‰å¤æ ¸äº‘ç«¯æºæ•°æ®"
-        historyMigrationImportError = nil
-        let isCurrentAttempt = { [weak self] in
-            self?.isCurrentUserLoad(generation, userId: owner) == true
-                && self?.historyMigrationAttempt == attempt
-        }
-        defer { if isCurrentAttempt() { isPreparingHistoryMigration = false } }
-        do {
-            let session = try await validSession()
-            guard isCurrentAttempt(), session.user.id == owner else { return false }
-            let inspection = try await LocalHistoryMigrationUseCase().inspect(cloudUserID: owner,
-                accessToken: session.accessToken,
-                isCurrent: isCurrentAttempt)
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            let current = try encoder.encode(Dictionary(uniqueKeysWithValues: inspection.rows.map { ($0.key.rawValue, $0.value) }))
-            guard isCurrentAttempt(), !Task.isCancelled else { throw CancellationError() }
-            // æºæ•°æ®éšæ—¶ä¼šå˜ï¼šPWA è®°è´¦ã€æœ¬æœº outbox ä¸Šä¼ éƒ½ä¼šæ”¹äº‘ç«¯ã€‚å†»ç»“å¿«ç…§ä¼šè®©æ¯ä¸€ç¬”
-            // æ–°è®°å½•ä½œåºŸæ•´è½®é¢„æ£€ä¸Žå·²ä¸‹è½½åŽŸå›¾ï¼Œè€Œå¯¼å…¥æœ¬èº«æŒ‰åŒæ ‡è¯†è·³è¿‡ã€å¤©ç„¶å¹‚ç­‰ã€‚
-            // æ‰€ä»¥æºå˜åŒ–ä¸å†ä¸­æ–­ï¼Œæ”¹ä¸ºã€ŒæŒ‰æœ€æ–°æ•°æ®é‡å»ºå½’æ¡£ï¼Œå›¾ç‰‡èµ°ç¼“å­˜åªè¡¥æ–°å¢žã€ã€‚
-            guard inspection.blockers.isEmpty else {
-                historyMigrationBlockerCount = inspection.blockers.count
-                historyMigrationBlockers = inspection.blockers
-                historyMigrationMessage = inspection.summary
-                return false
-            }
-            // Rows may omit a source hash; a stable URL alone cannot prove unchanged image bytes.
-            guard let baseURL = URL(string: AppConfig.supabaseURL) else { throw LocalDataError.invalidRecord }
-            let downloader = LocalHistoryImageDownloader(baseURL: baseURL)
-            historyMigrationPhase = "ç¡®è®¤å‰å¤æ ¸åŽŸå›¾"
-            let imageTotal = inspection.sourceImagePaths.count
-            let sourceRowsRead = inspection.rows.values.reduce(0) { $0 + $1.count }
-            let sourcePagesRead = historyMigrationProgress?.pagesRead ?? 0
-            historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
-                rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
-                imagesProcessed: 0, imagesTotal: imageTotal)
-            let coordinator = LocalHistoryMigrationCoordinator(downloader: downloader, cache: cache)
-            // ä¼  state æ‰ä¼šå‘½ä¸­é¢„æ£€å·²è½ç›˜çš„å­—èŠ‚ï¼›åªæœ‰ç¼“å­˜é‡Œæ²¡æœ‰çš„ï¼ˆæ–°å¢žè®°å½•ï¼‰æ‰çœŸæ­£èµ°ç½‘ç»œã€‚
-            let currentImages = try await coordinator.loadImages(inspection: inspection, cloudUserID: owner,
-                accessToken: session.accessToken, state: checkpoint, isCurrent: isCurrentAttempt) { processed in
-                self.historyMigrationProgress = LocalHistoryMigrationProgress(phase: .downloadingImages, currentTable: nil,
-                    rowsRead: sourceRowsRead, knownRowTotal: sourceRowsRead, pagesRead: sourcePagesRead,
-                    imagesProcessed: processed, imagesTotal: imageTotal)
-            }
-            guard isCurrentAttempt(), !Task.isCancelled else { return false }
-            try cache.assertCurrent(checkpoint)
-            // æºæ•°æ®æ²¡å˜å°±ç”¨é¢„æ£€çš„å½’æ¡£ï¼›å˜äº†å°±æŒ‰æœ€æ–°å¿«ç…§é‡å»ºï¼ˆå›¾ç‰‡æ¥è‡ªç¼“å­˜ï¼Œä¸ä¼šé‡ä¸‹ï¼‰ã€‚
-            let importedArchive: Data
-            if current == historyMigrationSourceDigest {
-                importedArchive = archive
-            } else {
-                historyMigrationPhase = "æŒ‰æœ€æ–°æ•°æ®é‡å»ºå½’æ¡£"
-                importedArchive = try LocalHistoryMigrationMapper(schema: LocalDatabase())
-                    .buildArchive(inspection, profileID: checkpoint.profileID, images: currentImages)
-            }
-            historyMigrationPhase = "äº‹åŠ¡å…¥è´¦ä¸Žæœ¬æœºåˆ·æ–°"
-            let imported = await importCompleteLocalBackup(importedArchive, historyMigration: checkpoint)
-            if !imported, let error = historyMigrationImportError {
-                historyMigrationPhase = "äº‹åŠ¡å…¥è´¦"
-                historyMigrationMessage = recordHistoryMigrationFailure(error, committed: false)
-                return false
-            }
-            if imported { try? cache.cleanupAfterCompletion(checkpoint) }
-            guard isCurrentAttempt() else { return false }
-            if imported {
-                let savedPhase = historyMigrationUnresolvedCount > 0 ? "å·²ä¿ç•™å¾…æ ¸å¯¹" : "å·²å…¥è´¦"
-                historyMigrationPhase = savedPhase
-                historyMigrationPreservationIssues = []
-                historyMigrationBlockers = []
-                historyMigrationBlockerCount = 0
-                historyMigrationArchive = nil
-                historyMigrationPreview = nil
-                historyMigrationCheckpoint = nil
-                if localProjectionRefreshMessage != nil {
-                    historyMigrationPhase = "å…¥è´¦åŽåˆ·æ–°"
-                    historyMigrationMessage = recordHistoryMigrationFailure(LocalHistoryMigrationPostCommitRefreshError(), committed: true)
-                    historyMigrationPhase = savedPhase
-                } else {
-                    let imageNote = historyMigrationSkippedImageCount > 0
-                        ? "å¦æœ‰ \(historyMigrationSkippedImageCount) å¼ åŽ†å²åŽŸå›¾æ— æ³•è¯»å–ï¼Œç›¸å…³ç»“æž„åŒ–è®°å½•å·²ä¿ç•™ä½†ä¸å«åŽŸå›¾ã€‚"
-                        : ""
-                    historyMigrationMessage = [settingsMessage, imageNote].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
-                }
-            } else { historyMigrationMessage = settingsMessage }
-            return imported
-        } catch {
-            guard isCurrentAttempt() else { return false }
-            if error is CancellationError {
-                historyMigrationPhase = "å·²å–æ¶ˆ"
-                historyMigrationMessage = "ç¡®è®¤å‰å¤æ ¸å·²å–æ¶ˆï¼Œå°šæœªå…¥è´¦ï¼›å¯ä»¥é‡æ–°é¢„æ£€ã€‚"
-                return false
-            }
-            if (error as? LocalHistoryMigrationError) == .staleAttempt {
-                historyMigrationPhase = "å·²æš‚åœ"
-                historyMigrationMessage = "è¿ç§»å°è¯•å·²å¤±æ•ˆï¼Œå°šæœªå…¥è´¦ï¼›è¯·é‡æ–°é¢„æ£€ã€‚"
-                return false
-            }
-            historyMigrationMessage = recordHistoryMigrationFailure(error, committed: false)
-            return false
-        }
-    }
-
-    func importCompleteLocalBackup(_ data: Data, historyMigration: LocalHistoryMigrationState? = nil) async -> Bool {
-        guard !isImportingLocalBackup, let portability = localCompleteBackupPortability else { return false }
-        isImportingLocalBackup = true
-        settingsMessage = nil
-        insightsLoadedAt = nil
-        defer { isImportingLocalBackup = false }
-        do {
-            let result = try await Task.detached(priority: .userInitiated) {
-                try portability.importBackupIntoActiveProfile(data, historyMigration: historyMigration)
-            }.value
-            recordDetailCache.removeAll()
-            recordMonthDetails.removeAll()
-            localFactMonths.removeAll()
-            let monthKeys = Set([Self.currentMonthKey, String(selectedDateKey.prefix(7))])
-            if !mayReadRemoteBusinessData {
-                await loadLocalAccounts()
-                await applyLocalStagingProjection()
-            }
-            for monthKey in monthKeys { await refreshLocalMonthProjection(monthKey: monthKey) }
-            let preserved = result.preservedRows > 0
-                ? "åŒ…ä¸­ \(result.preservedRows) æ¡åŽ†å²å¾…æ ¸å¯¹åŽŸæ–‡å·²ä¿ç•™ï¼Œå°šæœªè½¬ä¸ºæ­£å¼è®°å½•ï¼Œä¸è®¡å…¥æ—¥ç»Ÿè®¡ã€‚" : ""
-            settingsMessage = localWriteMessage("æœ¬åœ°æ¢å¤å®Œæˆï¼šæ–°å¢ž \(result.insertedRows) æ¡ï¼Œå·²å­˜åœ¨ \(result.skippedRows) æ¡ï¼Œæ¢å¤ \(result.restoredImages) å¼ å›¾ç‰‡ã€‚" + preserved)
-            await loadLocalHistoryUnresolvedRecords()
-            await loadLocalHistoryInventory()
-            return true
-        } catch {
-            if historyMigration != nil { historyMigrationImportError = error }
-            settingsMessage = "æœ¬åœ°æ¢å¤å¤±è´¥ï¼š\(error.localizedDescription)"
-            return false
-        }
-    }
-
-    func recordHistoryMigrationFailure(_ error: Error, committed: Bool, phase: String? = nil) -> String {
-        let failurePhase = phase ?? historyMigrationPhase
-        guard let store = historyMigrationDiagnosticStore else {
-            let diagnosticID = UUID().uuidString.lowercased()
-            let impact = committed ? "è¿ç§»å†…å®¹å·²ä¿å­˜ï¼ˆå¯èƒ½åŒ…å«å¾…æ ¸å¯¹åŽŸæ–‡ï¼‰ï¼Œä½†åŽç»­åˆ·æ–°æœªå®Œæˆã€‚" : "æœ¬æ¬¡å°šæœªå…¥è´¦ã€‚"
-            return "åŽ†å²è¿ç§»åœ¨\(failurePhase)æš‚åœã€‚\(impact)è¯·æŸ¥çœ‹é”™è¯¯é˜¶æ®µåŽå¤„ç†ã€‚è¯Šæ–­ç¼–å·ï¼š\(diagnosticID)ã€‚"
-        }
-        let progressSummary: String? = historyMigrationProgress.map { progress in
-            "å·²è¯» \(progress.rowsRead) è¡Œã€\(progress.pagesRead) é¡µï¼›åŽŸå›¾ \(progress.imagesProcessed)/\(progress.imagesTotal) å¼ ã€‚"
-        }
-        let entry = store.record(error, phase: failurePhase, accountID: currentUserId.isEmpty ? nil : currentUserId,
-            operation: "history-migration", progressSummary: progressSummary,
-            attemptID: historyMigrationAttemptID, committed: committed)
-        historyMigrationDiagnostic = entry
-        return entry.userMessage
-    }
-
-    func deleteAccount() async -> Bool {
-        guard !isDeletingAccount else { return false }
-        let generation = userStateGeneration
-        isDeletingAccount = true
-        settingsMessage = nil
-        defer { isDeletingAccount = false }
-
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
-            let deletion = try await settingsRepository.deleteAccount(accessToken: session.accessToken)
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return false }
-            invalidateSession(message: "")
-            authMessage = deletion.displayMessage
-            authMessageIsError = false
-            return true
-        } catch {
-            guard generation == userStateGeneration else { return false }
-            settingsMessage = "è´¦æˆ·åˆ é™¤å¤±è´¥ï¼š\(error.localizedDescription)"
-            return false
-        }
-    }
-
-    private func updateSettings(
-        _ values: [String: AnyCodable],
-        apply: (inout NativeUserSettings) -> Void
-    ) async {
-        guard !isSavingSettings else { return }
-        let generation = userStateGeneration
-        let previous = userSettings
-        apply(&userSettings)
-        let consentKeys: Set<String> = ["companion_memory_enabled", "ai_logs_enabled", "prompt_optimization_enabled", "expression_improvement_enabled", "keep_source_images", "image_retention_days"]
-        if consentKeys.isDisjoint(with: values.keys) || Set(values.keys).isSubset(of: ["companion_memory_enabled"]) {
-            localUserSettingsStore.save(userSettings)
-            localUserSettingsStore.saveExplicitConsent(userSettings, keys: Set(values.keys))
-            settingsMessage = nil
-            return
-        }
-        isSavingSettings = true
-        settingsMessage = nil
-        defer { isSavingSettings = false }
-        do {
-            let session = try await validSession()
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            try await settingsRepository.update(
-                userId: session.user.id,
-                values: values,
-                accessToken: session.accessToken
-            )
-            guard isCurrentUserLoad(generation, userId: session.user.id) else { return }
-            localUserSettingsStore.save(userSettings)
-            localUserSettingsStore.saveExplicitConsent(userSettings, keys: Set(values.keys))
-        } catch {
-            guard generation == userStateGeneration else { return }
-            userSettings = previous
-            settingsMessage = "è®¾ç½®ä¿å­˜å¤±è´¥ï¼š\(error.localizedDescription)"
-        }
-    }
-
-    func requestShortcutNotificationPermission() async {
-        let granted = await ShortcutNotificationService.shared.requestAuthorization()
-        ShortcutFeedbackPreferences.applyNotificationAuthorization(granted: granted)
-        syncShortcutFeedbackPreferences()
-        await refreshNotificationPermissionStatus()
-        notificationPermissionMessage = granted
-            ? "å·²å¼€å¯ã€‚å¿«æ·æŒ‡ä»¤ä¸Šä¼ å®ŒæˆåŽï¼ŒèŠ¥å­ä¼šå¼¹å‡ºç»“æžœé€šçŸ¥ï¼Œç‚¹å‡»é€šçŸ¥å¯å›žåˆ° Appã€‚"
-            : "æœªå¼€å¯ã€‚è¯·åœ¨ç³»ç»Ÿè®¾ç½®é‡Œå…è®¸èŠ¥å­é€šçŸ¥ï¼Œå¿«æ·æŒ‡ä»¤ä»ä¼šåœ¨â€œæ˜¾ç¤ºç»“æžœâ€é‡Œå±•ç¤ºæ‘˜è¦ã€‚"
-    }
-
-    func refreshNotificationPermissionStatus() async {
-        notificationPermissionStatusText = await ShortcutNotificationService.shared.authorizationStatusText()
-    }
-
-    func presentOnboarding() {
-        isOnboardingPresented = true
-    }
-
-    func presentOnboardingIfNeeded() {
-        guard !shouldDeferOnboardingForExternalRoute else { return }
-
-        if isSignedIn, !currentUserId.isEmpty {
-            let deviceCompletion = onboardingProgressStore.completion(for: .device)
-            let deviceAccountID = onboardingProgressStore.linkedAccountIDForDeviceProgress()
-            if let accountCompletion = onboardingProgressStore.completion(for: .account(currentUserId)) {
-                if deviceAccountID == nil || deviceAccountID == currentUserId {
-                    if accountCompletion == .completed || deviceCompletion != .completed {
-                        onboardingProgressStore.mark(accountCompletion, for: .device)
-                    }
-                    onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
-                }
-                return
-            }
-
-            if let deviceCompletion,
-               onboardingProgressStore.linkedAccountIDForDeviceProgress() == currentUserId {
-                onboardingProgressStore.mark(deviceCompletion, for: .account(currentUserId))
-                return
-            }
-
-            if let deviceCompletion,
-               onboardingProgressStore.linkedAccountIDForDeviceProgress() == nil {
-                onboardingProgressStore.mark(deviceCompletion, for: .account(currentUserId))
-                onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
-                return
-            }
-
-            isOnboardingPresented = true
-            return
-        }
-
-        guard onboardingProgressStore.shouldPresent(for: .device) else { return }
-        isOnboardingPresented = true
-    }
-
-    func finishOnboarding(skipped: Bool) {
-        let completion: NativeOnboardingCompletion = skipped ? .skipped : .completed
-        guard isSignedIn, !currentUserId.isEmpty else {
-            let deviceExisting = onboardingProgressStore.completion(for: .device)
-            if !skipped || deviceExisting != .completed {
-                onboardingProgressStore.mark(completion, for: .device)
-            }
-            isOnboardingPresented = false
-            return
-        }
-
-        let existing = onboardingProgressStore.completion(for: .account(currentUserId))
-        if !skipped || existing != .completed {
-            onboardingProgressStore.mark(completion, for: .account(currentUserId))
-        }
-
-        let deviceAccountID = onboardingProgressStore.linkedAccountIDForDeviceProgress()
-        if deviceAccountID == nil || deviceAccountID == currentUserId {
-            let deviceExisting = onboardingProgressStore.completion(for: .device)
-            let deviceCompletion = existing == .completed || deviceExisting == .completed
-                ? NativeOnboardingCompletion.completed
-                : completion
-            onboardingProgressStore.mark(deviceCompletion, for: .device)
-            onboardingProgressStore.linkDeviceProgress(toAccount: currentUserId)
-        }
-        isOnboardingPresented = false
-    }
-
-    var onboardingScope: OnboardingProgressScope {
-        isSignedIn && !currentUserId.isEmpty
-            ? .account(currentUserId)
-            : .device
-    }
-
-    var onboardingStatusText: String {
-        onboardingProgressStore.completion(for: onboardingScope)?.statusText ?? "å°šæœªå®Œæˆ"
-    }
-
-    func sendTestShortcutNotification() async {
-        await ShortcutNotificationService.shared.sendTestNotification()
-        await refreshNotificationPermissionStatus()
-        notificationPermissionMessage = "å·²å‘é€æµ‹è¯•é€šçŸ¥ã€‚å¦‚æžœæ²¡æœ‰å£°éŸ³ï¼Œè¯·æ£€æŸ¥é™éŸ³é”®ã€ä¸“æ³¨æ¨¡å¼ï¼Œä»¥åŠç³»ç»Ÿè®¾ç½®é‡Œçš„â€œå£°éŸ³â€å¼€å…³ã€‚"
-    }
-
-    func setShortcutNotificationsEnabled(_ enabled: Bool) {
-        ShortcutFeedbackPreferences.notificationsEnabled = enabled
-        syncShortcutFeedbackPreferences()
-    }
-
-    func setShortcutResultCardEnabled(_ enabled: Bool) {
-        ShortcutFeedbackPreferences.resultCardEnabled = enabled
-        syncShortcutFeedbackPreferences()
-    }
-
-    func syncShortcutFeedbackPreferences() {
-        shortcutNotificationsEnabled = ShortcutFeedbackPreferences.notificationsEnabled
-        shortcutResultCardEnabled = ShortcutFeedbackPreferences.resultCardEnabled
-    }
-
-    private func apply(session: SupabaseAuthSession) {
-        if !currentUserId.isEmpty, currentUserId != session.user.id {
-            resetUserScopedState()
-            Task { await RemoteImageRepository.shared.clear() }
-        }
-        isSignedIn = true
-        currentUserId = session.user.id
-        ShortcutTrialStore.shared.synchronize(scope: onboardingScope)
-        currentUserEmail = session.user.email ?? ""
-        refreshLocalSyncState()
-    }
-
-    private func updateShortcutCredentialMessage() {
-        shortcutCredentialMessage = hasUploadToken
-            ? "å·²åŒæ­¥ã€‚å¿«æ·æŒ‡ä»¤ä¼šè‡ªåŠ¨è¯»å– Keychainï¼Œä¸éœ€è¦æ‰‹åŠ¨å¡«å†™ upload_tokenã€‚"
-            : "æœªåŒæ­¥ã€‚è¯·å…ˆç™»å½•èŠ¥å­ã€‚"
-    }
-
-    private func save(session: SupabaseAuthSession, uploadToken: String) throws {
-        let data = try JSONEncoder().encode(session)
-        guard let json = String(data: data, encoding: .utf8) else { return }
-        try keychain.setString(json, for: KeychainKeys.authSession)
-        try keychain.setString(uploadToken, for: KeychainKeys.uploadToken)
-    }
-
-    private func save(session: SupabaseAuthSession) throws {
-        let data = try JSONEncoder().encode(session)
-        guard let json = String(data: data, encoding: .utf8) else { return }
-        try keychain.setString(json, for: KeychainKeys.authSession)
-    }
-
-    private func validSession(forceRefresh: Bool = false) async throws -> SupabaseAuthSession {
-        if let sessionProvider {
-            let session = try await sessionProvider(forceRefresh)
-            apply(session: session)
-            return session
-        }
-        if forceRefresh {
-            let refreshed = try await authService.refreshSession()
-            try save(session: refreshed)
-            apply(session: refreshed)
-            return refreshed
-        }
-        let session = try await authService.currentSession()
-        try save(session: session)
-        apply(session: session)
-        return session
-    }
-
-    private func isCurrentUserLoad(_ generation: Int, userId: String) -> Bool {
-        isSignedIn && generation == userStateGeneration && currentUserId == userId
-    }
-
-    private func isExpiredJWTError(_ error: Error) -> Bool {
-        let message = error.localizedDescription.lowercased()
-        return message.contains("pgrst303") || message.contains("jwt expired")
-    }
-
-    private func isInvalidRefreshSessionError(_ error: Error) -> Bool {
-        let message = error.localizedDescription.lowercased()
-        return message.contains("invalid refresh token")
-            || message.contains("refresh token not found")
-            || message.contains("refresh_token_not_found")
-            || message.contains("already used")
-            || message.contains("session_not_found")
-    }
-
-    private func invalidateSession(message: String) {
-        disableLocalSync()
-        try? keychain.remove(KeychainKeys.authSession)
-        try? keychain.remove(KeychainKeys.uploadToken)
-        isSignedIn = false
-        currentUserId = ""
-        ShortcutTrialStore.shared.synchronize(scope: onboardingScope)
-        currentUserEmail = ""
-        hasUploadToken = false
-        shortcutCredentialMessage = nil
-        resetUserScopedState()
-        refreshLocalSyncState()
-        presentedOverlay = .records
-        Task { await RemoteImageRepository.shared.clear() }
-        authMessage = message
-        authMessageIsError = !message.isEmpty
-    }
-
-    func resetUserScopedState() {
-        localHistoryUnresolvedRecords = []
-        isLoadingHistoryUnresolvedRecords = false
-        historyUnresolvedRecordsError = nil
-        historyMigrationUnresolvedCount = 0
-        historyMigrationSkippedImageCount = 0
-        historyMigrationPreservationIssues = []
-        cloudHistoryInventory = .notRead
-        isReadingCloudHistoryInventory = false
-        localSyncFailureDiagnostic = nil
-        localProjectionRefreshDiagnostic = nil
-        if let profileID = historyMigrationProfileID,
-           let state = try? localHistoryMigrationCache?.state(profileID: profileID), state.status == .running {
-            try? localHistoryMigrationCache?.pause(state)
-        }
-        historyMigrationProfileID = nil
-        historyMigrationProgress = nil
-        historyMigrationBlockers = []
-        historyMigrationBlockerCount = 0
-        historyMigrationArchive = nil
-        historyMigrationPreview = nil
-        historyMigrationOwner = nil
-        historyMigrationGeneration = nil
-        historyMigrationSourceDigest = nil
-        historyMigrationCheckpoint = nil
-        historyMigrationAttempt += 1
-        historyMigrationAttemptID = UUID()
-        canPauseHistoryMigration = false
-        historyMigrationMessage = nil
-        isPreparingHistoryMigration = false
-        historyMigrationPhase = ""
-        historyMigrationDiagnostic = nil
-        homePath = NavigationPath()
-        dashboardRefreshGeneration += 1
-        userStateGeneration += 1
-        stagingReadVersion += 1
-        localMonthReadVersions.removeAll()
-        loadingLocalReadKeys.removeAll()
-        walletSnapshotActionUseCase?.reset()
-        repaymentActionUseCase?.reset()
-        accountManagementActionUseCase?.reset()
-        accountReadPreparationUseCase?.reset()
-        screenshotRepaymentUseCase?.reset()
-        accountBindingUseCase?.reset()
-        stagingLifecycleUseCase?.reset()
-        pendingConfirmationUseCase?.reset()
-        feedbackSubmissionUseCase?.reset()
-        recordDetailImageUseCase?.reset()
-        thumbnailImageUseCase?.reset()
-        dashboardSupplementTask?.cancel()
-        dashboardSupplementTask = nil
-        dashboardCoreTask?.cancel()
-        dashboardCoreTask = nil
-        isLoadingDashboard = false
-        dashboard = DashboardSnapshot()
-        todayPath = NavigationPath()
-        inboxPath = NavigationPath()
-        recordsPath = NavigationPath()
-        selectedRecordDetail = nil
-        recordMonthGroups = [:]
-        remoteRecordMonthGroups = [:]
-        localExpenseMonthGroups = [:]
-        localIncomeMonthGroups = [:]
-        localRecordMonthGroups = [:]
-        localRecordMonthDetails = [:]
-        localFactMonths = [:]
-        recordMonthDetails = [:]
-        recordMonthMessages = [:]
-        loadingRecordMonthKey = nil
-        loadingLocalExpenseMonthKey = nil
-        loadingLocalRecordMonthKey = nil
-        for task in remoteRecordMonthTasks.values { task.cancel() }
-        remoteRecordMonthTasks.removeAll()
-        loadingRemoteRecordMonthKeys.removeAll()
-        recordDetailCache.removeAll()
-        activeRecordReference = nil
-        prefetchingRecordReferences.removeAll()
-        expressionPlanDeliveryTokens.removeAll()
-        pendingRecordExpressionPlans.removeAll()
-        expressionPlanAcknowledgementTokens.removeAll()
-        visibleRecordExpressionPlanCards.removeAll()
-        recordDetailMessage = nil
-        isSavingRecordDetail = false
-        isDeletingRecordDetail = false
-        recordFeedbackState = .idle
-        recordExpressionPlanExposureState = .idle
-        manualRecordMessage = nil
-        accounts = []
-        financeVocabulary = []
-        isLoadingFinanceVocabulary = false
-        selectedAccountDetail = nil
-        selectedAccountSourceSnapshot = nil
-        accountMessage = nil
-        localSyncState = nil
-        localSyncDiagnostic = nil
-        localBindingPreview = nil
-        isLoadingLocalBindingPreview = false
-        isSynchronizingLocalData = false
-        localSyncMessage = nil
-        isLoadingAccounts = false
-        isSavingAccount = false
-        isSubmittingRepayment = false
-        repaymentMessage = nil
-        repaymentCandidates = [:]
-        stagingRepaymentId = nil
-        inboxFinanceMessage = nil
-        inboxActionRecordId = nil
-        inboxActionMessage = nil
-        inboxActionMessageIsError = false
-        unboundRecords = []
-        unboundRecordsMessage = nil
-        unboundBindingMessage = nil
-        walletSnapshots = []
-        localWalletSnapshots = []
-        localWalletSnapshotHistory = []
-        isLoadingWalletSnapshots = false
-        walletSnapshotActionId = nil
-        walletSnapshotMessage = nil
-        insightsSnapshot = nil
-        insightsLoadedLocally = false
-        isLoadingInsights = false
-        insightsMessage = nil
-        insightsLoadedAt = nil
-        aiInsight = nil
-        isLoadingAIInsight = false
-        aiInsightMessage = nil
-        aiInsightIsCached = false
-        userSettings = localUserSettingsStore.load()
-        settingsMessage = nil
-        isLoadingSettings = false
-        isSavingSettings = false
-        isCleaningSourceImages = false
-        isExportingData = false
-        isDeletingAccount = false
-        isOnboardingPresented = false
-        dashboardMessage = nil
-        isShowingCachedDashboard = false
-        presentedOverlay = .none
-        selectedDomain = .expense
-        lastDashboardRefreshAt = nil
-    }
-
-    private func requireSession() throws -> SupabaseAuthSession {
-        guard let sessionJSON = try keychain.string(for: KeychainKeys.authSession),
-              let data = sessionJSON.data(using: .utf8),
-              let session = try? JSONDecoder().decode(SupabaseAuthSession.self, from: data) else {
-            throw SupabaseRemoteError.missingSession
-        }
-        return session
-    }
-
-    func createManualRecord(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?) async -> Bool {
-        guard !isCreatingManualRecord else { return false }
-        guard localStorageInitializationMessage == nil else {
-            manualRecordMessage = localStorageInitializationMessage
-            return false
-        }
-        isCreatingManualRecord = true
-        manualRecordMessage = nil
-        defer { isCreatingManualRecord = false }
-
-        do {
-            return try await createUnifiedManualRecord(draft, domain: domain)
-        } catch {
-            manualRecordMessage = error.localizedDescription
-            return false
-        }
-    }
-
-    func prepareLocalWorkspace() async -> LocalExpenseWorkspace? {
-        guard let localExpenseUseCase else { return nil }
-        do {
-            let workspace = try await localExpenseUseCase.prepareWorkspace()
-            localAccounts = workspace.accounts
-            var balances: [UUID: Int64] = [:]
-            for account in workspace.accounts {
-                balances[account.id] = try await localExpenseUseCase.accountBalanceMinor(account.id)
-            }
-            localAccountBalances = balances
-            localAccountMessage = nil
-            return workspace
-        } catch {
-            localAccountMessage = error.localizedDescription
-            return nil
-        }
-    }
-
-    func createLocalAccount(_ command: LocalAccountSetupCommand) async -> LocalAccount? {
-        guard let localExpenseUseCase else { return nil }
-        do {
-            let account = try await localExpenseUseCase.createAccount(command)
-            await loadLocalAccounts()
-            localAccountMessage = nil
-            return account
-        } catch {
-            localAccountMessage = error.localizedDescription
-            return nil
-        }
-    }
-
-    func createLocalExpense(
-        amountText: String,
-        accountID: UUID,
-        merchantName: String,
-        platform: String,
-        category: String,
-        paymentMethod: String,
-        date: Date,
-        note: String
-    ) async -> Bool {
-        let draft = NativeManualRecordDraft(
-            kind: .expense,
-            accountID: accountID,
-            amountText: amountText,
-            title: merchantName,
-            platform: platform,
-            category: category,
-            paymentMethod: paymentMethod,
-            date: date,
-            note: note
-        )
-        return await createManualRecord(draft, domain: nil)
-    }
-
-    private func createLocalExpense(_ draft: NativeManualRecordDraft) async throws -> Bool {
-        guard draft.existingRawId == nil else { throw LocalDataError.invalidRecord }
-        guard let localExpenseUseCase else {
-            throw LocalDataError.invalidIdentifier
-        }
-        let accountText = draft.accountId
-        let accountID = accountText.flatMap(UUID.init(uuidString:))
-        // A user can open the form while the background account refresh is
-        // still running. Ensure a cloud account selected by the unified form
-        // exists in the local projection before validating the expense.
-        if let accountID, !localAccounts.contains(where: { $0.id == accountID }),
-           let cloudAccount = accounts.first(where: { $0.id == accountText }) {
-            let mirror = LocalAccount(
-                id: accountID,
-                profileID: UUID(),
-                name: cloudAccount.name,
-                kind: cloudAccount.type.rawValue,
-                currency: cloudAccount.currency,
-                openingBalanceMinor: Int64((cloudAccount.initialBalance * 100).rounded()),
-                createdAt: Date(),
-                institution: cloudAccount.institution,
-                last4: cloudAccount.last4,
-                billDay: cloudAccount.billDay,
-                paymentDueDay: cloudAccount.paymentDueDay,
-                autoDebitAccountID: cloudAccount.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
-                autoConfirmRepayment: cloudAccount.autoConfirmRepayment,
-                gracePeriodDays: cloudAccount.gracePeriodDays,
-                lastReconciledAt: Self.parseISO8601(cloudAccount.lastReconciledAt),
-                isDefaultExpense: cloudAccount.isDefaultExpense,
-                isDefaultIncome: cloudAccount.isDefaultIncome,
-                isArchived: cloudAccount.isArchived,
-                sortOrder: cloudAccount.sortOrder
-            )
-            try await localExpenseUseCase.importRemoteAccounts([mirror])
-            _ = await prepareLocalWorkspace()
-        }
-        let command = LocalExpenseCommand(
-            id: UUID(),
-            accountID: accountID,
-            amountText: draft.amountText,
-            currency: "CNY",
-            merchantName: draft.title,
-            platform: draft.platform,
-            category: draft.category,
-            paymentMethod: draft.paymentMethod,
-            transactionDate: NativeLocalDate.dateKey(draft.date),
-            transactionTime: draft.includesTime ? NativeLocalDate.timeKey(draft.time) : nil,
-            note: draft.note.isEmpty ? nil : draft.note,
-            createdAt: Date(), imageData: draft.imageData
-        )
-        let outcome = try await localExpenseUseCase.create(command)
-        if let expense = outcome.expense {
-            scheduleLocalCompanion(for: LocalExpenseReadModel.detail(from: expense, imageStore: localImageStore))
-        }
-        _ = await prepareLocalWorkspace()
-        let monthKey = String(command.transactionDate.prefix(7))
-        await refreshLocalMonthProjection(monthKey: monthKey)
-        manualRecordMessage = outcome.expense == nil ? "æœ¬åœ°è®°å½•æœªä¿å­˜" : localWriteMessage(accountID == nil ? "è®°å½•å·²ä¿å­˜ï¼ˆä»…æœ¬æœºï¼Œè¡¥ç»‘åŽå¯åŒæ­¥ï¼‰" : "è®°å½•å·²ä¿å­˜ï¼ˆæœ¬æœºï¼‰")
-        return outcome.expense != nil
-    }
-
-    private func createLocalIncome(
-        _ draft: NativeManualRecordDraft,
-        domain: NativeDomainDefinition?
-    ) async throws -> Bool {
-        guard draft.existingRawId == nil, let localExpenseUseCase else { throw LocalDataError.invalidRecord }
-        guard draft.validationMessage(domain: domain) == nil else { throw LocalDataError.invalidRecord }
-        let accountID = draft.accountId.flatMap(UUID.init(uuidString:))
-        if let accountID, !localAccounts.contains(where: { $0.id == accountID }),
-           let cloudAccount = accounts.first(where: { $0.id == accountID.uuidString }) {
-            let mirror = LocalAccount(
-                id: accountID, profileID: UUID(), name: cloudAccount.name,
-                kind: cloudAccount.type.rawValue, currency: cloudAccount.currency,
-                openingBalanceMinor: Int64((cloudAccount.initialBalance * 100).rounded()), createdAt: Date(),
-                institution: cloudAccount.institution, last4: cloudAccount.last4,
-                billDay: cloudAccount.billDay, paymentDueDay: cloudAccount.paymentDueDay,
-                autoDebitAccountID: cloudAccount.autoDebitAccountId.flatMap(UUID.init(uuidString:)),
-                autoConfirmRepayment: cloudAccount.autoConfirmRepayment, gracePeriodDays: cloudAccount.gracePeriodDays,
-                lastReconciledAt: Self.parseISO8601(cloudAccount.lastReconciledAt),
-                isDefaultExpense: cloudAccount.isDefaultExpense, isDefaultIncome: cloudAccount.isDefaultIncome,
-                isArchived: cloudAccount.isArchived, sortOrder: cloudAccount.sortOrder
-            )
-            try await localExpenseUseCase.importRemoteAccounts([mirror])
-            _ = await prepareLocalWorkspace()
-        }
-        let occurredAt: Date?
-        if let timestamp = draft.occurredAt {
-            guard let parsed = ISO8601DateFormatter().date(from: timestamp),
-                  NativeLocalDate.dateKey(parsed) == draft.dateKey else {
-                throw LocalDataError.invalidRecord
-            }
-            occurredAt = parsed
-        } else {
-            occurredAt = nil
-        }
-        let saved = try await localExpenseUseCase.createIncome(LocalIncomeCommand(
-            id: UUID(), accountID: accountID, amountText: draft.amountText, currency: "CNY",
-            sourceName: draft.title, category: draft.category, incomeDate: draft.dateKey,
-            occurredAt: occurredAt,
-            note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
-            createdAt: Date(), imageData: draft.imageData
-        ))
-        scheduleLocalCompanion(for: LocalIncomeReadModel.detail(from: saved, imageStore: localImageStore))
-        _ = await prepareLocalWorkspace()
-        await refreshLocalMonthProjection(monthKey: String(saved.incomeDate.prefix(7)))
-        manualRecordMessage = localWriteMessage("æ”¶å…¥å·²è®°å½•ï¼ˆæœ¬æœºï¼‰")
-        return true
-    }
-
-    private func createLocalDomainRecord(
-        _ draft: NativeManualRecordDraft,
-        domain: NativeDomainDefinition?
-    ) async throws -> Bool {
-        guard let localRecordUseCase,
-              LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey) else {
-            throw LocalDataError.invalidRecord
-        }
-        guard draft.validationMessage(domain: domain) == nil else {
-            throw LocalDataError.invalidRecord
-        }
-        let payload = draft.universalPayload(domain: domain)
-        let title = draft.resolvedTitle(domain: domain)
-        let summary = draft.resolvedSummary(domain: domain)
-        let record: LocalRecord
-        var previousMonthKey: String?
-        if let existingRawId = draft.existingRawId {
-            guard let existingID = UUID(uuidString: existingRawId) else {
-                throw LocalDataError.invalidIdentifier
-            }
-            guard let current = try await localRecordUseCase.record(id: existingID) else {
-                throw LocalDataError.recordNotFound
-            }
-            previousMonthKey = String(current.businessDate.prefix(7))
-            let updated = try await localRecordUseCase.update(LocalRecordUpdateCommand(
-                id: existingID,
-                expectedVersion: current.localVersion,
-                title: title,
-                summary: summary,
-                payload: payload,
-                recordDate: draft.dateKey,
-                recordTime: draft.timeKey,
-                note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
-                updatedAt: Date(),
-                imageData: draft.imageData,
-                removeImage: draft.removeImage
-            ))
-            record = updated.record
-        } else {
-            let created = try await localRecordUseCase.create(LocalRecordCommand(
-                id: UUID(),
-                domainKey: draft.domainKey,
-                title: title,
-                summary: summary,
-                payload: payload,
-                recordDate: draft.dateKey,
-                recordTime: draft.timeKey,
-                note: draft.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : draft.note,
-                imageData: draft.imageData,
-                createdAt: Date()
-            ))
-            record = created.record
-        }
-        scheduleLocalCompanion(for: LocalRecordReadModel.detail(from: record, imageStore: localImageStore))
-        let monthKey = String(record.recordDate.prefix(7))
-        if let previousMonthKey, previousMonthKey != monthKey {
-            await refreshLocalMonthProjection(monthKey: previousMonthKey)
-        }
-        await refreshLocalMonthProjection(monthKey: monthKey)
-        if let existingRawId = draft.existingRawId {
-            let oldReference = "local-data/\(existingRawId)"
-            invalidateRecordExpressionPlanState(afterChanging: [oldReference])
-            recordDetailCache.removeValue(forKey: NativeRecordReference(oldReference).canonicalValue)
-            await loadRecordDetail(reference: "local-data/\(record.id.uuidString)", force: true)
-        }
-        manualRecordMessage = localWriteMessage(draft.existingRawId == nil ? "è®°å½•å·²ä¿å­˜ï¼ˆæœ¬æœºï¼‰" : "è®°å½•å·²æ›´æ–°ï¼ˆæœ¬æœºï¼‰")
-        return true
-    }
-
-    private func createUnifiedManualRecord(
-        _ draft: NativeManualRecordDraft,
-        domain: NativeDomainDefinition?
-    ) async throws -> Bool {
-        if draft.kind != .universal, let existingID = draft.existingRawId,
-           let id = UUID(uuidString: existingID), let localExpenseUseCase {
-            let oldDate: String
-            if draft.kind == .expense {
-                guard let current = try await localExpenseUseCase.expense(id: id) else { throw LocalDataError.recordNotFound }
-                oldDate = current.transactionDate
-                _ = try await localExpenseUseCase.update(LocalExpenseUpdateCommand(id: id,
-                    expectedVersion: draft.localVersion ?? current.localVersion,
-                    accountID: draft.accountId.flatMap(UUID.init(uuidString:)), amountText: draft.amountText,
-                    currency: current.currency, merchantName: draft.title, platform: draft.platform,
-                    category: draft.category, paymentMethod: draft.paymentMethod,
-                    transactionDate: draft.dateKey, transactionTime: draft.timeKey, note: draft.note,
-                    updatedAt: Date(), imageData: draft.imageData, removeImage: draft.removeImage))
-                if let updated = try await localExpenseUseCase.expense(id: id) {
-                    scheduleLocalCompanion(for: LocalExpenseReadModel.detail(from: updated, imageStore: localImageStore))
-                }
-            } else {
-                guard let current = try await localExpenseUseCase.income(id: id) else { throw LocalDataError.recordNotFound }
-                oldDate = current.incomeDate
-                _ = try await localExpenseUseCase.updateIncome(LocalIncomeUpdate(id: id, profileID: current.profileID,
-                    expectedVersion: draft.localVersion ?? current.localVersion,
-                    accountID: draft.accountId.flatMap(UUID.init(uuidString:)),
-                    amountMinor: try LocalExpenseMapper.amountMinor(draft.amountText), currency: current.currency,
-                    sourceName: draft.title, category: draft.category, incomeDate: draft.dateKey,
-                    occurredAt: draft.occurredAt.flatMap { ISO8601DateFormatter().date(from: $0) }, note: draft.note,
-                    updatedAt: Date(), imageData: draft.imageData, removeImage: draft.removeImage))
-                if let updated = try await localExpenseUseCase.income(id: id) {
-                    scheduleLocalCompanion(for: LocalIncomeReadModel.detail(from: updated, imageStore: localImageStore))
-                }
-            }
-            _ = await prepareLocalWorkspace()
-            await refreshLocalMonthProjection(monthKey: String(oldDate.prefix(7)))
-            if String(oldDate.prefix(7)) != String(draft.dateKey.prefix(7)) {
-                await refreshLocalMonthProjection(monthKey: String(draft.dateKey.prefix(7)))
-            }
-            let reference = "\(draft.kind == .expense ? "expense" : "income")/\(id.uuidString)"
-            recordDetailCache.removeValue(forKey: NativeRecordReference(reference).canonicalValue)
-            await loadRecordDetail(reference: reference, force: true)
-            await retryLocalImageCleanups()
-            manualRecordMessage = localWriteMessage("è®°å½•å·²æ›´æ–°ï¼ˆæœ¬æœºï¼‰")
-            return true
-        }
-        if draft.kind == .universal, draft.domainKey == "wallet",
-           draft.existingRawId == nil, localWalletSnapshotUseCase != nil {
-            return try await createLocalWalletSnapshot(draft, domain: domain)
-        }
-        if draft.kind == .expense, localExpenseUseCase != nil {
-            return try await createLocalExpense(draft)
-        }
-        if draft.kind == .income, localExpenseUseCase != nil {
-            return try await createLocalIncome(draft, domain: domain)
-        }
-        if draft.kind == .universal,
-           localRecordUseCase != nil,
-           LocalRecordValidation.supportedDomainKeys.contains(draft.domainKey),
-           await shouldCreateLocalDomainRecord(for: draft) {
-            return try await createLocalDomainRecord(draft, domain: domain)
-        }
-        return try await createRemoteManualRecord(draft, domain: domain)
-    }
-
-    private func createLocalWalletSnapshot(
-        _ draft: NativeManualRecordDraft,
-        domain: NativeDomainDefinition?
-    ) async throws -> Bool {
-        guard let localWalletSnapshotUseCase, draft.existingRawId == nil,
-              draft.validationMessage(domain: domain) == nil else {
-            throw LocalDataError.invalidRecord
-        }
-        let amountMinor = try LocalExpenseMapper.amountMinor(draft.primaryValueText)
-        let payload = draft.universalPayload(domain: domain)
-        let snapshot = try await localWalletSnapshotUseCase.create(LocalWalletSnapshotCommand(
-            id: UUID(),
-            title: draft.resolvedTitle(domain: domain),
-            summary: draft.resolvedSummary(domain: domain),
-            payload: payload,
-            recordDate: draft.dateKey,
-            recordTime: draft.timeKey,
-            occurredAt: draft.occurredAt,
-            balanceMinor: amountMinor,
-            currency: "CNY",
-            kind: draft.walletRecordKind == "liability_snapshot" ? .liability : .asset,
-            imageData: draft.imageData,
-            createdAt: Date()
-        ))
-        let snapshotPayload = (try? LocalRecordCodec.decode(snapshot.payloadJSON)) ?? [:]
-        scheduleLocalCompanion(for: NativeRecordDetail(
-            id: "local-wallet/\(snapshot.id.uuidString)",
-            rawId: snapshot.id.uuidString,
-            kind: "wallet",
-            title: snapshot.title,
-            subtitle: snapshot.recordDate,
-            value: String(format: "Â¥%.2f", snapshot.balance),
-            detailRows: [],
-            imageURL: nil,
-            imageLoadError: false,
-            imagePath: snapshot.imagePath,
-            imageHash: snapshot.imageHash,
-            amount: snapshot.balance,
-            merchantName: nil,
-            platform: nil,
-            category: nil,
-            paymentMethod: nil,
-            recordDate: snapshot.recordDate,
-            note: nil,
-            companionMessage: snapshotPayload.string("companion_message"),
-            accountId: snapshot.linkedAccountID?.uuidString,
-            systemImage: "wallet.pass",
-            payload: snapshotPayload,
-            transactionTime: snapshot.recordTime,
-            domainKey: "wallet",
-            source: "local",
-            status: "local",
-            aiFeedback: NativeAIFeedback(payload: snapshotPayload.dictionary("ai_feedback")),
-            plannerAiFeedback: NativeAIFeedback(payload: snapshotPayload.dictionary("planner_ai_feedback"))
-        ))
-        do {
-            try await loadLocalWalletSnapshots()
-        } catch {
-            manualRecordMessage = "å¿«ç…§å·²ä¿å­˜åœ¨æœ¬æœºï¼Œä½†åˆ—è¡¨åˆ·æ–°å¤±è´¥ï¼š\(error.localizedDescription)"
-            return true
-        }
-        manualRecordMessage = "é’±åŒ…å¿«ç…§å·²ä¿å­˜ï¼ˆæœ¬æœºï¼‰"
-        return true
-    }
-
-    private func shouldCreateLocalDomainRecord(for draft: NativeManualRecordDraft) async -> Bool {
-        guard let localRecordUseCase else { return false }
-        guard let existingRawId = draft.existingRawId else { return true }
-        guard let existingID = UUID(uuidString: existingRawId) else { return false }
-        return (try? await localRecordUseCase.record(id: existingID)) != nil
-    }
-
-    private func createRemoteManualRecord(_ draft: NativeManualRecordDraft, domain: NativeDomainDefinition?) async throws -> Bool {
-        let session = try await validSession()
-        let reference = try await recordRepository.create(
-            draft,
-            domain: domain,
-            userId: session.user.id,
-            accessToken: session.accessToken
-        )
-        let savedReference = NativeRecordReference(reference).canonicalValue
-        if let existingRawId = draft.existingRawId {
-            let originalReference = NativeRecordReference(
-                kind: "data",
-                rawId: existingRawId
-            ).canonicalValue
-            invalidateRecordExpressionPlanState(afterChanging: [originalReference, savedReference])
-        }
-        if draft.kind == .expense {
-            scheduleConfirmedExpenseVocabulary(
-                platform: draft.platform,
-                category: draft.category,
-                paymentMethod: draft.paymentMethod,
-                accountId: draft.accountId,
-                userId: session.user.id,
-                accessToken: session.accessToken
-            )
-        }
-        await refreshAfterRecordWrite(affectedDateKeys: [draft.dateKey])
-        if draft.kind != .universal || draft.domainKey == "wallet" {
-            await loadAccounts()
-        }
-        if draft.existingRawId != nil {
-            recordDetailCache.removeValue(forKey: savedReference)
-            await loadRecordDetail(reference: savedReference, force: true)
-        }
-        manualRecordMessage = draft.existingRawId == nil ? "è®°å½•å·²ä¿å­˜" : "è®°å½•å·²æ›´æ–°"
-        return true
-    }
-
-    private static func makeDefaultLocalStorage() throws -> AppDefaultLocalStorage {
-        let database = try LocalDatabase()
-        let imageStore = try LocalImageStore()
-        let profileStore = LocalProfileStore(database: database)
-        let expenseRepository = try LocalExpenseRepository(database: database)
-        let recordRepository = try LocalRecordRepository(database: database)
-        let walletSnapshotRepository = try LocalWalletSnapshotRepository(database: database)
-        let factReader = try LocalFactReader(database: database)
-        let companionMemoryRepository = LocalCompanionMemoryRepository(database: database)
-        let expressionPersistence = LocalExpressionPersistence(
-            database: database,
-            memoryRepository: companionMemoryRepository
-        )
-        return AppDefaultLocalStorage(
-            expenseUseCase: LocalExpenseUseCase(
-                profileStore: profileStore,
-                repository: expenseRepository,
-                imageStore: imageStore,
-                expressionPersistence: expressionPersistence
-            ),
-            recordUseCase: LocalRecordUseCase(
-                profileStore: profileStore,
-                repository: recordRepository,
-                imageStore: imageStore,
-                expressionPersistence: expressionPersistence
-            ),
-            walletSnapshotUseCase: LocalWalletSnapshotUseCase(
-                profileStore: profileStore,
-                repository: walletSnapshotRepository,
-                imageStore: imageStore,
-                expressionPersistence: expressionPersistence
-            ),
-            factReader: factReader,
-            companionMemoryRepository: companionMemoryRepository,
-            expressionPersistence: expressionPersistence,
-            imageStore: imageStore,
-            pendingFinancialRepository: LocalPendingFinancialRepository(database: database),
-            financialBindingRepository: try LocalFinancialBindingRepository(database: database),
-            historyMigrationCache: LocalHistoryMigrationCache(database: database, imageStore: imageStore),
-            historyMigrationDiagnosticStore: try? LocalHistoryMigrationDiagnosticStore(),
-            historyInventoryReader: LocalHistoryInventoryReader(database: database, imageStore: imageStore),
-            historyUnresolvedRepository: LocalHistoryUnresolvedRepository(database: database)
-        )
-    }
-
-    private static func defaultLocalExpenseUseCase() -> LocalExpenseUseCaseProtocol? {
-        guard let database = try? LocalDatabase(),
-              let repository = try? LocalExpenseRepository(database: database),
-              let imageStore = try? LocalImageStore() else { return nil }
-        return LocalExpenseUseCase(
-            profileStore: LocalProfileStore(database: database),
-            repository: repository,
-            imageStore: imageStore,
-            expressionPersistence: LocalExpressionPersistence(database: database)
-        )
-    }
-
-    private static func defaultLocalRecordUseCase() -> LocalRecordUseCaseProtocol? {
-        guard let database = try? LocalDatabase(),
-              let repository = try? LocalRecordRepository(database: database),
-              let imageStore = try? LocalImageStore() else { return nil }
-        return LocalRecordUseCase(
-            profileStore: LocalProfileStore(database: database),
-            repository: repository,
-            imageStore: imageStore
-        )
-    }
-
-    private static func defaultLocalImageStore() -> LocalImageStore? {
-        try? LocalImageStore()
-    }
-
-    private static func defaultLocalImageIntakeRepository() -> LocalImageIntakeRepository? {
-        guard let database = try? LocalDatabase() else { return nil }
-        return LocalImageIntakeRepository(database: database)
-    }
-
-    /// åˆ¤é‡å€™é€‰æŸ¥è¯¢ä¾èµ–è¿™ä¸ªä»“åº“ï¼›æ¼æ³¨å…¥ä¼šè®©ä¸¤é“åˆ¤é‡éƒ½æ‹¿åˆ°ç©ºå€™é€‰ã€é™é»˜å¤±æ•ˆã€‚
-    private static func defaultFinancialDuplicateReviewRepository() -> LocalFinancialDuplicateReviewRepository? {
-        guard let database = try? LocalDatabase() else { return nil }
-        return LocalFinancialDuplicateReviewRepository(database: database)
-    }
-
-    /// é€šçŸ¥æ–‡æ¡ˆé‡Œçš„ã€Œä»Šå¤©å·²èŠ± / æœ¬æœˆæ”¶å…¥ã€é å®ƒç®—ï¼›æ¼æ³¨å…¥æ—¶è¿™ä¸¤ä¸ªæ•°å­—æ’ä¸º 0ã€‚
-    private static func defaultRecognitionExpenseRepository() -> LocalExpenseRepositoryProtocol? {
-        guard let database = try? LocalDatabase(),
-              let repository = try? LocalExpenseRepository(database: database) else { return nil }
-        return repository
-    }
-
-    private static func defaultLocalRecordPortability() -> LocalRecordPortability? {
-        guard let database = try? LocalDatabase(),
-              let imageStore = try? LocalImageStore() else { return nil }
-        return LocalRecordPortability(database: database, imageStore: imageStore)
-    }
-
-    private static func defaultLocalFactPortability() -> LocalFactPortability? {
-        guard let database = try? LocalDatabase(),
-              let imageStore = try? LocalImageStore() else { return nil }
-        return LocalFactPortability(database: database, imageStore: imageStore)
-    }
-
-    private static func defaultLocalCompleteBackupPortability() -> LocalCompleteBackupPortability? {
-        guard let database = try? LocalDatabase(),
-              let imageStore = try? LocalImageStore() else { return nil }
-        return LocalCompleteBackupPortability(database: database, imageStore: imageStore)
-    }
-
-    private static func defaultGenericImportService() -> GenericImportService? {
-        guard let database = try? LocalDatabase() else { return nil }
-        return GenericImportService(database: database)
-    }
-
-    private static func defaultLocalBindingRepository() -> LocalBindingRepository? {
-        guard let database = try? LocalDatabase() else { return nil }
-        return LocalProfileStore(database: database)
-    }
-
-    private static func defaultLocalSyncRunner() -> LocalSyncRunner? {
-        guard let database = try? LocalDatabase(),
-              let repository = try? LocalExpenseRepository(database: database) else { return nil }
-        let profileStore = LocalProfileStore(database: database)
-        let transport = SupabaseSyncTransport(
-            remoteClient: SupabaseRemoteClient(),
-            accessToken: {
-                try await SupabaseAuthService().currentSession().accessToken
-            }
-        )
-        return LocalSyncCoordinator(
-            stateStore: profileStore,
-            repository: repository,
-            portability: LocalExpensePortability(database: database),
-            transport: transport
-        )
-    }
-
-    private static let monthKeyFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM"
-        return formatter
-    }()
-
-    private static var currentMonthKey: String {
-        monthKeyFormatter.string(from: Date())
-    }
-}
-
-/// äº”åŸŸä¸»åœºæ™¯çš„æ¨ªæ»‘åŸŸï¼ˆIOS-V2-SHELL-001ï¼‰ã€‚
-enum AppDomain: String, CaseIterable, Identifiable {
-    case expense
-    case sleep
-    case food
-    case sport
-    case reading
-
-    var id: String { rawValue }
-
-    static func pagerDomain(at x: CGFloat) -> AppDomain? {
-        let width = JieziPrototypeLayout.page_dot_hit_width
-        guard x.isFinite, width > 0 else { return nil }
-        if x <= 0 { return allCases.first }
-        if x >= CGFloat(allCases.count) * width { return allCases.last }
-        return allCases[Int(x / width)]
-    }
-
-    var title: String {
-        switch self {
-        case .expense: return "è®°è´¦"
-        case .sleep: return "ç¡çœ "
-        case .food: return "é¥®é£Ÿ"
-        case .sport: return "è¿åŠ¨"
-        case .reading: return "é˜…è¯»"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .expense: return "creditcard"
-        case .sleep: return "moon.zzz"
-        case .food: return "fork.knife"
-        case .sport: return "figure.run"
-        case .reading: return "book"
-        }
-    }
-
-    /// æ–°å£³äº”åŸŸä¸Ž dashboard.domains ä¸­æ—§åŸŸ key çš„å¯¹åº”å…³ç³»ï¼ˆç”¨äºŽç©ºæ€åˆ¤å®šä¸ŽåŽç»­å†…å®¹æŽ¥çº¿ï¼‰ã€‚
-    var legacyDomainKey: String {
-        switch self {
-        case .expense: return "expense"
-        case .sleep, .food, .sport, .reading: return rawValue
-        }
-    }
-}
-
-/// ä¸»åœºæ™¯ä¹‹ä¸Šçš„å…¨å±è¦†ç›–å±‚ï¼ˆIOS-V2-SHELL-004ï¼‰ï¼›`.none` è¡¨ç¤ºæ— è¦†ç›–å±‚ã€åœç•™åœ¨äº”åŸŸæ¨ªæ»‘ã€‚
-enum AppOverlay: String, CaseIterable, Identifiable {
-    case none
-    case inbox
-    case records
-    case insights
-    case wallet
-    case settings
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .none: return ""
-        case .inbox: return "æ”¶ä»¶ç®±"
-        case .records: return "è®°å½•"
-        case .insights: return "è§‚å¯Ÿ"
-        case .wallet: return "é’±åŒ…"
-        case .settings: return "è®¾ç½®"
-        }
-    }
-}
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×^ºãÄèµ©hºÚn¶X§zÍZ[\ÜÝÚYRBš[\ÜÜÂ‚\X[X\È˜]]™TÙ\ÜÚ[Û”›ÝšY\ˆH
+È›Ü˜ÙT™Yœ™\Úˆ›ÛÛ
+H\Þ[˜È›ÝÜÈOˆÝ\X˜\ÙP]]Ù\ÜÚ[Û‚\X[X\È˜]]™TÛY\›ÝšY\ˆH
+È˜[›ÜÙXÛÛ™ÎˆR[
+H\Þ[˜È›ÝÜÈOˆ›ÚY‚œš]˜]HÝXÝØ[]Û˜\ÚÝ™XY[Ù[™Yœ™\Ú\œ›ÜŽˆØØ[^™Y\œ›ÜˆÂˆ]Y\ÜØYÙNˆÝš[™Â‚ˆ˜\ˆ\œ›Ü‘\ØÜš\[ÛŽˆÝš[™ÏÈÈY\ÜØYÙHBŸB‚œš]˜]HÝXÝ[™[™Ô™XÛÜ™^™\ÜÚ[Û”[‘[]™\žHÂˆ]YˆURQˆ]™XÛÜ™YˆÝš[™Âˆ][Žˆ˜]]™T™XÛÜ™^™\ÜÚ[Û”[‚ˆ]™]š[Ý\Ñ™YY˜XÚÎˆ˜]]™PRQ™YY˜XÚÏÂˆ]\Ù\’YˆÝš[™Âˆ]Ù[™\˜][ÛŽˆ[ŸB‚œš]˜]HÝXÝ\Y˜][ØØ[ÝÜ˜YÙHÂˆ]^[œÙU\ÙPØ\ÙNˆØØ[^[œÙU\ÙPØ\ÙT›ÝØÛÛˆ]™XÛÜ™\ÙPØ\ÙNˆØØ[™XÛÜ™\ÙPØ\ÙT›ÝØÛÛˆ]Ø[]Û˜\ÚÝ\ÙPØ\ÙNˆØØ[Ø[]Û˜\ÚÝ\ÙPØ\ÙT›ÝØÛÛˆ]˜XÝ™XY\ŽˆØØ[˜XÝ™XY\‚ˆ]ÛÛ\[š[Û“Y[[ÜžT™\ÜÚ]ÜžNˆØØ[ÛÛ\[š[Û“Y[[ÜžT™\ÜÚ]ÜžBˆ]^™\ÜÚ[Û”\œÚ\Ý[˜ÙNˆØØ[^™\ÜÚ[Û”\œÚ\Ý[˜ÙBˆ][XYÙTÝÜ™NˆØØ[[XYÙTÝÜ™Bˆ][™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜžNˆØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜžBˆ]š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜžNˆØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜžBˆ]\ÝÜžSZYÜ˜][ÛØXÚNˆØØ[\ÝÜžSZYÜ˜][ÛØXÚBˆ]\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™NˆØØ[\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™OÂˆ]\ÝÜžR[™[ÜžT™XY\ŽˆØØ[\ÝÜžR[™[ÜžT™XY\‚ˆ]\ÝÜžU[œ™\ÛÛ™Y™\ÜÚ]ÜžNˆØØ[\ÝÜžU[œ™\ÛÛ™Y™\ÜÚ]ÜžBŸB‚XZ[XÝÜ‚™š[˜[Û\ÜÈ\Ý]NˆØœÙ\˜X›SØš™XÝÂˆš]˜]HÝ]XÈ]Ø[[™\”ÚYÛœÜÝ\ˆHÔÔÚYÛœÜÝ\ŠÝXœÞ\Ý[Nˆ˜ÛÛKššY^šK˜\‹Ø]YÛÜžNˆ‘ÛXZ[Ø[[™\ˆŠBˆš]˜]HÝ]XÈ]™XÛÜ™™XYÚYÛœÜÝ\ˆHÔÔÚYÛœÜÝ\ŠÝXœÞ\Ý[Nˆ˜ÛÛKššY^šK˜\‹Ø]YÛÜžNˆ”™XÛÜ™™XYŠBˆX›\ÚY˜\ˆÙ[XÝYÛXZ[Žˆ\ÛXZ[ˆH™^[œÙBˆX›\ÚY˜\ˆÙ[XÝY]RÙ^HH˜]]™SØØ[]K™]RÙ^J]J
+JBˆX›\ÚY˜\ˆ™\Ù[YÝ™\›^Nˆ\Ý™\›^HH››Û™BˆX›\ÚY˜\ˆ\ÔÚYÛ™Y[ˆH˜[ÙBˆX›\ÚY˜\ˆÝ\œ™[\Ù\’YHˆ‚ˆX›\ÚY˜\ˆÝ\œ™[\Ù\‘[XZ[Hˆ‚ˆX›\ÚY˜\ˆ\ÝÚÜÝ]Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ\Ð›ÛÝÝ˜\[™ÈHYBˆX›\ÚY˜\ˆ\ÔÚYÛš[™Ò[ˆH˜[ÙBˆX›\ÚY˜\ˆ\ÔÚYÛš[™ÓÝ]H˜[ÙBˆX›\ÚY˜\ˆ]]Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ]]Y\ÜØYÙR\Ñ\œ›ÜˆH˜[ÙBˆX›\ÚY˜\ˆ\Õ\ØYÚÙ[ˆH˜[ÙBˆX›\ÚY˜\ˆ\Ú›Ø\™H\Ú›Ø\™Û˜\ÚÝ
+
+BˆX›\ÚY˜\ˆ˜Z[YØØ[[XYÙR[ZÙ\ÎˆÓØØ[[XYÙR[ZÙWHH×BˆX›\ÚY˜\ˆ[™[™ÓØØ[[XYÙPÛX[\ÎˆÓØØ[[XYÙPÛX[\HH×BˆX›\ÚY˜\ˆ\Ú›Ø\™Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™Ñ\Ú›Ø\™H˜[ÙBˆX›\ÚY˜\ˆ\ÔÚÝÚ[™ÐØXÚY\Ú›Ø\™H˜[ÙBˆX›\ÚY˜\ˆÚÜÝ]Ü™Y[X[Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ›ÝYšXØ][Û”\›Z\ÜÚ[Û“Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ›ÝYšXØ][Û”\›Z\ÜÚ[Û”Ý]\Õ^H¹¨à9§éy.+H‚ˆX›\ÚY˜\ˆÚÜÝ]›ÝYšXØ][ÛœÑ[˜X›YHÚÜÝ]™YY˜XÚÔ™Y™\™[˜Ù\Ë››ÝYšXØ][ÛœÑ[˜X›YˆX›\ÚY˜\ˆÚÜÝ]™\Ý[Ø\™[˜X›YHÚÜÝ]™YY˜XÚÔ™Y™\™[˜Ù\Ëœ™\Ý[Ø\™[˜X›YˆX›\ÚY˜\ˆ\ÓÛ˜›Ø\™[™Ô™\Ù[YH˜[ÙBˆX›\ÚY˜\ˆÙ^T]H˜]šYØ][Û”]
+
+BˆX›\ÚY˜\ˆ[˜›Þ]H˜]šYØ][Û”]
+
+BˆX›\ÚY˜\ˆ™XÛÜ™Ô]H˜]šYØ][Û”]
+
+BˆX›\ÚY˜\ˆÛYT]H˜]šYØ][Û”]
+
+BˆX›\ÚY˜\ˆÙ[XÝY™XÛÜ™]Z[ˆ˜]]™T™XÛÜ™]Z[ÂˆX›\ÚY˜\ˆ™XÛÜ™]Z[Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ\ÔØ]š[™Ô™XÛÜ™]Z[H˜[ÙBˆX›\ÚY˜\ˆ\Ñ[][™Ô™XÛÜ™]Z[H˜[ÙBˆX›\ÚY˜\ˆ™XÛÜ™™YY˜XÚÔÝ]Nˆ˜]]™PRQ™YY˜XÚÔ™]šY]ÔÝ]HHšYBˆX›\ÚY˜\ˆ™XÛÜ™^™\ÜÚ[Û”[‘^ÜÝ\™TÝ]Nˆ˜]]™T™XÛÜ™^™\ÜÚ[Û”[‘^ÜÝ\™TÝ]HHšYBˆX›\ÚY˜\ˆ\ÐÜ™X][™ÓX[X[™XÛÜ™H˜[ÙBˆX›\ÚY˜\ˆX[X[™XÛÜ™Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆØØ[›Ú™XÝ[Û”™Yœ™\ÚY\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆØØ[›Ú™XÝ[Û”™Yœ™\ÚXYÛ›ÜÝXÎˆØØ[\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÏÂˆš]˜]H˜\ˆ[™[™ÓØØ[™Yœ™\Ú[ÛÎˆÙ]Ýš[™ÏˆH×BˆX›\ÚY˜\ˆØØ[ÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆØØ[ÝÜ˜YÙR[š]X[^˜][Û‘XYÛ›ÜÝXÎˆØØ[\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÏÂˆX›\ÚY˜\ˆ™XÛÜ™[ÛÜ›Ý\ÎˆÔÝš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›Ý\WHHÎ—BˆX›\ÚY˜\ˆ™XÛÜ™[ÛY\ÜØYÙ\ÎˆÔÝš[™ÎˆÝš[™×HHÎ—BˆX›\ÚY˜\ˆØY[™Ô™XÛÜ™[ÛÙ^NˆÝš[™ÏÂˆX›\ÚYš]˜]H˜\ˆØY[™Ô™[[ÝT™XÛÜ™[ÛÙ^\ÎˆÙ]Ýš[™ÏˆH×BˆX›\ÚY˜\ˆXØÛÝ[ÎˆÓ˜]]™PXØÛÝ[HH×BˆX›\ÚY˜\ˆØØ[XØÛÝ[ÎˆÓØØ[XØÛÝ[HH×BˆX›\ÚY˜\ˆØØ[XØÛÝ[˜[[˜Ù\ÎˆÕURQˆ[HHÎ—BˆX›\ÚY˜\ˆØØ[XØÛÝ[Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆØØ[Þ[˜ÔÝ]NˆØØ[Þ[˜ÔÝ]OÂˆX›\ÚY˜\ˆØØ[š[™[™Ô™]šY]ÎˆØØ[š[™[™Ô™]šY]ÏÂˆX›\ÚY˜\ˆ\ÓØY[™ÓØØ[š[™[™Ô™]šY]ÈH˜[ÙBˆX›\ÚY˜\ˆ\ÔÞ[˜Ú›Ûš^š[™ÓØØ[]HH˜[ÙBˆX›\ÚY˜\ˆØØ[Þ[˜ÓY\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆØØ[Þ[˜ÑXYÛ›ÜÝXÎˆØØ[Þ[˜ÑXYÛ›ÜÝXÏÂˆX›\ÚY˜\ˆØØ[Þ[˜Ñ˜Z[\™QXYÛ›ÜÝXÎˆØØ[\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÏÂˆX›\ÚY˜\ˆš[˜[˜ÙU›ØØX[\žNˆÓ˜]]™Qš[˜[˜ÙU›ØØX[\žQ[žWHH×BˆX›\ÚY˜\ˆÙ[XÝYXØÛÝ[]Z[ˆ˜]]™PXØÛÝ[]Z[ÂˆX›\ÚY˜\ˆÙ[XÝYXØÛÝ[ÛÝ\˜ÙTÛ˜\ÚÝˆ˜]]™UØ[]Û˜\ÚÝÂˆX›\ÚY˜\ˆXØÛÝ[Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™ÐXØÛÝ[ÈH˜[ÙBˆX›\ÚY˜\ˆ\ÔØ]š[™ÐXØÛÝ[H˜[ÙBˆX›\ÚY˜\ˆ\ÔÝX›Z][™Ô™\^[Y[H˜[ÙBˆX›\ÚY˜\ˆ™\^[Y[Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ™\^[Y[Ø[™Y]\ÎˆÔÝš[™Îˆ˜]]™T™\^[Y[Ø[™Y]WHHÎ—BˆX›\ÚY˜\ˆÝYÚ[™Ô™\^[Y[YˆÝš[™ÏÂˆX›\ÚY˜\ˆ[˜›Þš[˜[˜ÙSY\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ[˜›ÞXÝ[Û”™XÛÜ™YˆÝš[™ÏÂˆX›\ÚY˜\ˆ[˜›ÞXÝ[Û“Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ[˜›ÞXÝ[Û“Y\ÜØYÙR\Ñ\œ›ÜˆH˜[ÙBˆX›\ÚY˜\ˆ\ÐÛÛ™š\›Z[™Ô[™[™Ô™XÛÜ™H˜[ÙBˆX›\ÚY˜\ˆ[™[™Ô™\ÛÛ][Û“Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ[˜›Ý[™™XÛÜ™ÎˆÓ˜]]™U[˜›Ý[™™XÛÜ™HH×BˆX›\ÚY˜\ˆ[˜›Ý[™™XÛÜ™ÓY\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ[˜›Ý[™š[™[™ÓY\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™Õ[˜›Ý[™™XÛÜ™ÈH˜[ÙBˆX›\ÚY˜\ˆ\Ðš[™[™Õ[˜›Ý[™™XÛÜ™ÈH˜[ÙBˆX›\ÚY˜\ˆØ[]Û˜\ÚÝÎˆÓ˜]]™UØ[]Û˜\ÚÝHH×BˆX›\ÚY˜\ˆØØ[Ø[]Û˜\ÚÝÎˆÓØØ[Ø[]Û˜\ÚÝHH×BˆX›\ÚY˜\ˆØØ[Ø[]Û˜\ÚÝ\ÝÜžNˆÓØØ[Ø[]Û˜\ÚÝHH×BˆX›\ÚY˜\ˆ\ÓØY[™ÕØ[]Û˜\ÚÝÈH˜[ÙBˆX›\ÚY˜\ˆØ[]Û˜\ÚÝXÝ[Û’YˆÝš[™ÏÂˆX›\ÚY˜\ˆØ[]Û˜\ÚÝY\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ[œÚYÚÔÛ˜\ÚÝˆ˜]]™R[œÚYÚÛ˜\ÚÝÂˆX›\ÚY˜\ˆ\ÓØY[™Ò[œÚYÚÈH˜[ÙBˆX›\ÚY˜\ˆ[œÚYÚÓY\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆZR[œÚYÚˆ˜]]™PRR[œÚYÚÂˆX›\ÚY˜\ˆ\ÓØY[™ÐRR[œÚYÚH˜[ÙBˆX›\ÚY˜\ˆZR[œÚYÚY\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆZR[œÚYÚ\ÐØXÚYH˜[ÙBˆX›\ÚY˜\ˆ\Ù\”Ù][™ÜÈH˜]]™U\Ù\”Ù][™ÜÊ
+BˆX›\ÚY˜\ˆØØ[š\Ú[Û“[ÙHHØØ[š\Ú[Û“[ÙTÝÜ™J
+K›[ÙBˆX›\ÚY˜\ˆ\Ð–SÒÐTRÙ^HH
+žOÈÙ^XÚZ[”ÝÜ™KœÚ\™YœÝš[™Ê›ÜŽˆÙ^XÚZ[’Ù^\Ë˜ž[ÚÔ]Ù[TRÙ^JJOËš\Ñ[\HOH˜[ÙBˆX›\ÚY˜\ˆÙ][™ÜÓY\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™ÔÙ][™ÜÈH˜[ÙBˆX›\ÚY˜\ˆ\ÔØ]š[™ÔÙ][™ÜÈH˜[ÙBˆX›\ÚY˜\ˆ\ÐÛX[š[™ÔÛÝ\˜ÙR[XYÙ\ÈH˜[ÙBˆX›\ÚY˜\ˆ\Ñ^Ü[™Ñ]HH˜[ÙBˆX›\ÚY˜\ˆ\Ò[\Ü[™ÓØØ[˜XÚÝ\H˜[ÙBˆX›\ÚY˜\ˆ\Ò[\Ü[™ÑÙ[™\šXÑ]HH˜[ÙBˆX›\ÚY˜\ˆ\Ñ[][™ÐXØÛÝ[H˜[ÙBˆX›\ÚY˜\ˆ\Ô™\\š[™Ò\ÝÜžSZYÜ˜][ÛˆH˜[ÙBˆX›\ÚY˜\ˆØ[”]\ÙR\ÝÜžSZYÜ˜][ÛˆH˜[ÙBˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û”™]šY]ÎˆÝš[™ÏÂˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û“Y\ÜØYÙNˆÝš[™ÏÂˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û”\ÙHHˆ‚ˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÎˆØØ[\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÏÂˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û”›ÙÜ™\ÜÎˆØØ[\ÝÜžSZYÜ˜][Û”›ÙÜ™\ÜÏÂˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û›ØÚÙ\œÎˆÔÝš[™×HH×BˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û›ØÚÙ\ÛÝ[HˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û•[œ™\ÛÛ™YÛÝ[HˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û”ÚÚ\Y[XYÙPÛÝ[HˆX›\ÚY˜\ˆ\ÝÜžSZYÜ˜][Û”™\Ù\˜][Û’\ÜÝY\ÎˆÔÝš[™×HH×BˆX›\ÚY˜\ˆØØ[\ÝÜžU[œ™\ÛÛ™Y™XÛÜ™ÎˆÓØØ[\ÝÜžU[œ™\ÛÛ™Y™XÛÜ™HH×BˆX›\ÚY˜\ˆ\ÓØY[™Ò\ÝÜžU[œ™\ÛÛ™Y™XÛÜ™ÈH˜[ÙBˆX›\ÚY˜\ˆ\ÝÜžU[œ™\ÛÛ™Y™XÛÜ™Ñ\œ›ÜŽˆÝš[™ÏÂˆX›\ÚY˜\ˆØØ[\ÝÜžR[™[ÜžNˆØØ[\ÝÜžR[™[ÜžTÛ˜\ÚÝÂˆX›\ÚY˜\ˆØØ[\ÝÜžR[™[ÜžQ\œ›ÜŽˆÝš[™ÏÂˆX›\ÚY˜\ˆ\ÓØY[™ÓØØ[\ÝÜžR[™[ÜžHH˜[ÙBˆX›\ÚY˜\ˆÛÝY\ÝÜžR[™[ÜžHHØØ[\ÝÜžPÛÝY[™[ÜžK››Ý™XYˆX›\ÚY˜\ˆ\Ô™XY[™ÐÛÝY\ÝÜžR[™[ÜžHH˜[ÙBˆš]˜]H˜\ˆ\ÝÜžSZYÜ˜][Û\˜Ú]™Nˆ]OÂˆš]˜]H˜\ˆ\ÝÜžSZYÜ˜][Û“ÝÛ™\ŽˆÝš[™ÏÂˆš]˜]H˜\ˆ\ÝÜžSZYÜ˜][Û‘Ù[™\˜][ÛŽˆ[Âˆš]˜]H˜\ˆ\ÝÜžSZYÜ˜][Û”ÛÝ\˜ÙQYÙ\Ýˆ]OÂˆš]˜]H˜\ˆ\ÝÜžSZYÜ˜][Û][\Hˆš]˜]H˜\ˆ\ÝÜžSZYÜ˜][ÛÚXÚÜÚ[ˆØØ[\ÝÜžSZYÜ˜][Û”Ý]OÂˆš]˜]H˜\ˆ\ÝÜžSZYÜ˜][Û”›Ùš[RQˆURQÂˆš]˜]H˜\ˆ\ÝÜžSZYÜ˜][Û][\QHURQ
+
+Bˆš]˜]H˜\ˆ\ÝÜžSZYÜ˜][Û’[\Ü\œ›ÜŽˆ\œ›ÜÂˆš]˜]H]\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™NˆØØ[\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™OÂˆš]˜]H]\ÝÜžR[™[ÜžT™XY\ŽˆØØ[\ÝÜžR[™[ÜžT™XY\Âˆš]˜]H]\ÝÜžU[œ™\ÛÛ™Y™\ÜÚ]ÜžNˆØØ[\ÝÜžU[œ™\ÛÛ™Y™\ÜÚ]ÜžOÂ‚ˆš]˜]H]]]Ù\šXÙHHÝ\X˜\ÙP]]Ù\šXÙJ
+Bˆš]˜]H]\Ú›Ø\™™\ÜÚ]ÜžNˆ\Ú›Ø\™™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]™XÛÜ™™\ÜÚ]ÜžNˆ™XÛÜ™™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]ØØ[^[œÙU\ÙPØ\ÙNˆØØ[^[œÙU\ÙPØ\ÙT›ÝØÛÛÂˆš]˜]H]ØØ[™XÛÜ™\ÙPØ\ÙNˆØØ[™XÛÜ™\ÙPØ\ÙT›ÝØÛÛÂˆš]˜]H]ØØ[Ø[]Û˜\ÚÝ\ÙPØ\ÙNˆØØ[Ø[]Û˜\ÚÝ\ÙPØ\ÙT›ÝØÛÛÂˆš]˜]H]ØØ[˜XÝ™XY\ŽˆØØ[˜XÝ™XY\Âˆš]˜]H]ØØ[ÛÛ\[š[Û“Y[[ÜžT™\ÜÚ]ÜžNˆØØ[ÛÛ\[š[Û“Y[[ÜžT™\ÜÚ]ÜžOÂˆš]˜]H]ØØ[^™\ÜÚ[Û”\œÚ\Ý[˜ÙNˆØØ[^™\ÜÚ[Û”\œÚ\Ý[˜ÙOÂˆš]˜]H]ØØ[[XYÙTÝÜ™NˆØØ[[XYÙTÝÜ™OÂˆš]˜]H]ØØ[[XYÙR[ZÙT™\ÜÚ]ÜžNˆØØ[[XYÙR[ZÙT™\ÜÚ]ÜžOÂˆš]˜]H]ØØ[™XÛÜ™ÜXš[]NˆØØ[™XÛÜ™ÜXš[]OÂˆš]˜]H]ØØ[˜XÝÜXš[]NˆØØ[˜XÝÜXš[]OÂˆš]˜]H]ØØ[ÛÛ\]P˜XÚÝ\ÜXš[]NˆØØ[ÛÛ\]P˜XÚÝ\ÜXš[]OÂˆš]˜]H]Ù[™\šXÒ[\ÜÙ\šXÙNˆÙ[™\šXÒ[\ÜÙ\šXÙOÂˆš]˜]H]ØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜžNˆØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜžOÂˆš]˜]H]ØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜžNˆØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜžOÂˆš]˜]H]ØØ[\ÝÜžSZYÜ˜][ÛØXÚNˆØØ[\ÝÜžSZYÜ˜][ÛØXÚOÂˆš]˜]H][˜›Þ™\ÜÚ]ÜžNˆ[˜›Þ™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]ÛXZ[”™\ÜÚ]ÜžNˆÛXZ[”™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]Û˜\ÚÝÝÜ™Nˆ\Ú›Ø\™Û˜\ÚÝÝÜ™T›ÝØÛÛˆš]˜]H]XØÛÝ[™\ÜÚ]ÜžNˆXØÛÝ[™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]XØÛÝ[X[˜YÙ[Y[™\ÜÚ]ÜžNˆXØÛÝ[X[˜YÙ[Y[™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]XØÛÝ[™XY™\\˜][Û”™\ÜÚ]ÜžNˆXØÛÝ[™XY™\\˜][Û”™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H˜\ˆ™\^[Y[XÝ[Û•\ÙPØ\ÙNˆ™\^[Y[XÝ[Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆØÜ™Y[œÚÝ™\^[Y[\ÙPØ\ÙNˆØÜ™Y[œÚÝ™\^[Y[\ÙPØ\ÙOÂˆš]˜]H˜\ˆXØÛÝ[X[˜YÙ[Y[XÝ[Û•\ÙPØ\ÙNˆXØÛÝ[X[˜YÙ[Y[XÝ[Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆXØÛÝ[™XY™\\˜][Û•\ÙPØ\ÙNˆXØÛÝ[™XY™\\˜][Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆXØÛÝ[š[™[™Õ\ÙPØ\ÙNˆXØÛÝ[š[™[™Õ\ÙPØ\ÙOÂˆš]˜]H˜\ˆXØÛÝ[š[™[™Õ\ÙPØ\ÙS[ÛÙ^NˆÝš[™ÏÂˆš]˜]H˜\ˆÝYÚ[™ÓY™XÞXÛU\ÙPØ\ÙNˆÝYÚ[™ÓY™XÞXÛU\ÙPØ\ÙOÂˆš]˜]H˜\ˆ[™[™ÐÛÛ™š\›X][Û•\ÙPØ\ÙNˆ[™[™ÐÛÛ™š\›X][Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆ™YY˜XÚÔÝX›Z\ÜÚ[Û•\ÙPØ\ÙNˆ™YY˜XÚÔÝX›Z\ÜÚ[Û•\ÙPØ\ÙOÂˆš]˜]H˜\ˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙNˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙOÂˆš]˜]H˜\ˆ[X›˜Z[[XYÙU\ÙPØ\ÙNˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙOÂˆš]˜]H˜\ˆ\Ú›Ø\™ÛÜ™U\ÚÎˆ\ÚÏ›ÚY™]™\ÂˆX›\ÚYš]˜]H˜\ˆØY[™ÓØØ[™XYÙ^\ÎˆÙ]Ýš[™ÏˆH×Bˆš]˜]H˜\ˆØØ[[Û™XY™\œÚ[ÛœÎˆÔÝš[™Îˆ[HHÎ—Bˆš]˜]H˜\ˆÝYÚ[™Ô™XY™\œÚ[ÛˆHˆš]˜]H][˜›Ý[™™XÛÜ™™\ÜÚ]ÜžNˆ[˜›Ý[™™XÛÜ™™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]Ø[]Û˜\ÚÝ™\ÜÚ]ÜžNˆØ[]Û˜\ÚÝ™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H˜\ˆØ[]Û˜\ÚÝXÝ[Û•\ÙPØ\ÙNˆØ[]Û˜\ÚÝXÝ[Û•\ÙPØ\ÙOÂˆš]˜]H][œÚYÚÔ™\ÜÚ]ÜžNˆ[œÚYÚÔ™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]Ù][™ÜÔ™\ÜÚ]ÜžNˆÙ][™ÜÔ™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]š[˜[˜ÙU›ØØX[\žT™\ÜÚ]ÜžNˆš[˜[˜ÙU›ØØX[\žT™\ÜÚ]ÜžT›ÝØÛÛˆš]˜]H]ØØ[š[™[™Ô™\ÜÚ]ÜžNˆØØ[š[™[™Ô™\ÜÚ]ÜžOÂˆš]˜]H]ØØ[Þ[˜Ô[›™\ŽˆØØ[Þ[˜Ô[›™\Âˆš]˜]H]Û˜›Ø\™[™Ô›ÙÜ™\ÜÔÝÜ™NˆÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔÝÜ™Bˆš]˜]H]Ù\ÜÚ[Û”›ÝšY\Žˆ˜]]™TÙ\ÜÚ[Û”›ÝšY\Âˆš]˜]H]^™\ÜÚ[Û”[XÚÛ›ÝÛYÙ[Y[ÛY\ˆ˜]]™TÛY\›ÝšY\‚ˆš]˜]H]Ù^XÚZ[ˆHÙ^XÚZ[”ÝÜ™KœÚ\™Yˆš]˜]H]ØØ[š\Ú[Û“[ÙTÝÜ™HHØØ[š\Ú[Û“[ÙTÝÜ™J
+Bˆš]˜]H]ØØ[\Ù\”Ù][™ÜÔÝÜ™NˆØØ[\Ù\”Ù][™ÜÔÝÜ™Bˆš]˜]H˜\ˆ\Ý\Ú›Ø\™™Yœ™\Ú]ˆ]OÂˆš]˜]H˜\ˆ™XÛÜ™]Z[ØXÚNˆÔÝš[™Îˆ˜]]™T™XÛÜ™]Z[HHÎ—Bˆš]˜]H˜\ˆ™XÛÜ™[Û]Z[ÎˆÔÝš[™ÎˆÔÝš[™Îˆ˜]]™T™XÛÜ™]Z[WHHÎ—Bˆš]˜]H˜\ˆØØ[^[œÙS[ÛÜ›Ý\ÎˆÔÝš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›Ý\WHHÎ—Bˆš]˜]H˜\ˆØØ[[˜ÛÛYS[ÛÜ›Ý\ÎˆÔÝš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›Ý\WHHÎ—Bˆš]˜]H˜\ˆØØ[™XÛÜ™[ÛÜ›Ý\ÎˆÔÝš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›Ý\WHHÎ—BˆËÈ™[[ÝH[™ØØ[›Ú™XÝ[ÛœÈ]™HY™™\™[œ™\Ú™\ÜÈ[™[][Û‚ˆËÈÙ[X[XÜËˆÙY\[HÙ\\˜]HÛÈØY[™ÈÛ™HØ[››Ý\˜\ÙHHÝ\‹‚ˆš]˜]H˜\ˆ™[[ÝT™XÛÜ™[ÛÜ›Ý\ÎˆÔÝš[™ÎˆÓ˜]]™Q^T™XÛÜ™Ü›Ý\WHHÎ—Bˆš]˜]H˜\ˆØØ[™XÛÜ™[Û]Z[ÎˆÔÝš[™ÎˆÔÝš[™Îˆ˜]]™T™XÛÜ™]Z[WHHÎ—Bˆš]˜]H˜\ˆØØ[˜XÝ[ÛÎˆÔÝš[™ÎˆØØ[˜XÝ[ÛHHÎ—Bˆš]˜]H˜\ˆØY[™ÓØØ[^[œÙS[ÛÙ^NˆÝš[™ÏÂˆš]˜]H˜\ˆØY[™ÓØØ[™XÛÜ™[ÛÙ^NˆÝš[™ÏÂˆš]˜]H˜\ˆ™[[ÝT™XÛÜ™[Û\ÚÜÎˆÔÝš[™Îˆ\ÚÏ›ÚY™]™\—HHÎ—Bˆš]˜]H˜\ˆXÝ]™T™XÛÜ™™Y™\™[˜ÙNˆÝš[™ÏÂˆš]˜]H˜\ˆ™Y™]Ú[™Ô™XÛÜ™™Y™\™[˜Ù\ÎˆÙ]Ýš[™ÏˆH×Bˆš]˜]H˜\ˆ^™\ÜÚ[Û”[‘[]™\žUÚÙ[œÎˆÔÝš[™ÎˆURQHHÎ—Bˆš]˜]H˜\ˆ[™[™Ô™XÛÜ™^™\ÜÚ[Û”[œÎˆÔÝš[™Îˆ[™[™Ô™XÛÜ™^™\ÜÚ[Û”[‘[]™\žWHHÎ—Bˆš]˜]H˜\ˆ^™\ÜÚ[Û”[XÚÛ›ÝÛYÙ[Y[ÚÙ[œÎˆÔÝš[™ÎˆURQHHÎ—Bˆš]˜]H˜\ˆš\ÚX›T™XÛÜ™^™\ÜÚ[Û”[Ø\™ÎˆÔÝš[™ÎˆÝš[™×HHÎ—Bˆš]˜]H˜\ˆ[œÚYÚÓØYY]ˆ]OÂˆš]˜]H˜\ˆ[œÚYÚÓØYYØØ[HH˜[ÙBˆš]˜]H˜\ˆ\Ú›Ø\™™Yœ™\ÚÙ[™\˜][ÛˆHˆš]˜]H˜\ˆ\Ù\”Ý]QÙ[™\˜][ÛˆHˆš]˜]H˜\ˆ\Ú›Ø\™Ý\[Y[\ÚÎˆ\ÚÏ›ÚY™]™\Âˆš]˜]H˜\ˆ\ÓØY[™Ñš[˜[˜ÙU›ØØX[\žHH˜[ÙBˆš]˜]H˜\ˆÚÝ[Y™\“Û˜›Ø\™[™Ñ›Ü‘^\›˜[›Ý]HH˜[ÙB‚ˆ[š]
+ˆ\Ú›Ø\™™\ÜÚ]ÜžNˆ\Ú›Ø\™™\ÜÚ]ÜžT›ÝØÛÛH\Ú›Ø\™™\ÜÚ]ÜžJ
+Kˆ™XÛÜ™™\ÜÚ]ÜžNˆ™XÛÜ™™\ÜÚ]ÜžT›ÝØÛÛH™XÛÜ™™\ÜÚ]ÜžJ
+KˆØØ[^[œÙU\ÙPØ\ÙNˆØØ[^[œÙU\ÙPØ\ÙT›ÝØÛÛÈHš[ˆØØ[™XÛÜ™\ÙPØ\ÙNˆØØ[™XÛÜ™\ÙPØ\ÙT›ÝØÛÛÈHš[ˆØØ[ÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙNˆÝš[™ÏÈHš[ˆØØ[Ø[]Û˜\ÚÝ\ÙPØ\ÙNˆØØ[Ø[]Û˜\ÚÝ\ÙPØ\ÙT›ÝØÛÛÈHš[ˆØØ[˜XÝ™XY\ŽˆØØ[˜XÝ™XY\ÈHš[ˆØØ[ÛÛ\[š[Û“Y[[ÜžT™\ÜÚ]ÜžNˆØØ[ÛÛ\[š[Û“Y[[ÜžT™\ÜÚ]ÜžOÈHš[ˆØØ[^™\ÜÚ[Û”\œÚ\Ý[˜ÙNˆØØ[^™\ÜÚ[Û”\œÚ\Ý[˜ÙOÈHš[ˆØØ[[XYÙTÝÜ™NˆØØ[[XYÙTÝÜ™OÈHš[ˆØØ[[XYÙR[ZÙT™\ÜÚ]ÜžNˆØØ[[XYÙR[ZÙT™\ÜÚ]ÜžOÈHš[ˆØØ[˜XÝÜXš[]NˆØØ[˜XÝÜXš[]OÈHš[ˆØØ[ÛÛ\]P˜XÚÝ\ÜXš[]NˆØØ[ÛÛ\]P˜XÚÝ\ÜXš[]OÈHš[ˆÙ[™\šXÒ[\ÜÙ\šXÙNˆÙ[™\šXÒ[\ÜÙ\šXÙOÈHš[ˆØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜžNˆØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜžOÈHš[ˆØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜžNˆØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜžOÈHš[ˆ[˜›Þ™\ÜÚ]ÜžNˆ[˜›Þ™\ÜÚ]ÜžT›ÝØÛÛH[˜›Þ™\ÜÚ]ÜžJ
+KˆÛXZ[”™\ÜÚ]ÜžNˆÛXZ[”™\ÜÚ]ÜžT›ÝØÛÛHÛXZ[”™\ÜÚ]ÜžJ
+KˆÛ˜\ÚÝÝÜ™Nˆ\Ú›Ø\™Û˜\ÚÝÝÜ™T›ÝØÛÛH\Ú›Ø\™Û˜\ÚÝÝÜ™J
+KˆXØÛÝ[™\ÜÚ]ÜžNˆXØÛÝ[™\ÜÚ]ÜžT›ÝØÛÛHXØÛÝ[™\ÜÚ]ÜžJ
+KˆXØÛÝ[X[˜YÙ[Y[™\ÜÚ]ÜžNˆXØÛÝ[X[˜YÙ[Y[™\ÜÚ]ÜžT›ÝØÛÛÈHš[ˆXØÛÝ[™XY™\\˜][Û”™\ÜÚ]ÜžNˆXØÛÝ[™XY™\\˜][Û”™\ÜÚ]ÜžT›ÝØÛÛÈHš[ˆ™\^[Y[XÝ[Û•\ÙPØ\ÙNˆ™\^[Y[XÝ[Û•\ÙPØ\ÙOÈHš[ˆØÜ™Y[œÚÝ™\^[Y[\ÙPØ\ÙNˆØÜ™Y[œÚÝ™\^[Y[\ÙPØ\ÙOÈHš[ˆXØÛÝ[X[˜YÙ[Y[XÝ[Û•\ÙPØ\ÙNˆXØÛÝ[X[˜YÙ[Y[XÝ[Û•\ÙPØ\ÙOÈHš[ˆXØÛÝ[™XY™\\˜][Û•\ÙPØ\ÙNˆXØÛÝ[™XY™\\˜][Û•\ÙPØ\ÙOÈHš[ˆXØÛÝ[š[™[™Õ\ÙPØ\ÙNˆXØÛÝ[š[™[™Õ\ÙPØ\ÙOÈHš[ˆÝYÚ[™ÓY™XÞXÛU\ÙPØ\ÙNˆÝYÚ[™ÓY™XÞXÛU\ÙPØ\ÙOÈHš[ˆ[™[™ÐÛÛ™š\›X][Û•\ÙPØ\ÙNˆ[™[™ÐÛÛ™š\›X][Û•\ÙPØ\ÙOÈHš[ˆ™YY˜XÚÔÝX›Z\ÜÚ[Û•\ÙPØ\ÙNˆ™YY˜XÚÔÝX›Z\ÜÚ[Û•\ÙPØ\ÙOÈHš[ˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙNˆ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙOÈHš[ˆ[˜›Ý[™™XÛÜ™™\ÜÚ]ÜžNˆ[˜›Ý[™™XÛÜ™™\ÜÚ]ÜžT›ÝØÛÛH[˜›Ý[™™XÛÜ™™\ÜÚ]ÜžJ
+KˆØ[]Û˜\ÚÝ™\ÜÚ]ÜžNˆØ[]Û˜\ÚÝ™\ÜÚ]ÜžT›ÝØÛÛHØ[]Û˜\ÚÝ™\ÜÚ]ÜžJ
+KˆØ[]Û˜\ÚÝXÝ[Û•\ÙPØ\ÙNˆØ[]Û˜\ÚÝXÝ[Û•\ÙPØ\ÙOÈHš[ˆ[œÚYÚÔ™\ÜÚ]ÜžNˆ[œÚYÚÔ™\ÜÚ]ÜžT›ÝØÛÛH[œÚYÚÔ™\ÜÚ]ÜžJ
+KˆÙ][™ÜÔ™\ÜÚ]ÜžNˆÙ][™ÜÔ™\ÜÚ]ÜžT›ÝØÛÛHÙ][™ÜÔ™\ÜÚ]ÜžJ
+Kˆš[˜[˜ÙU›ØØX[\žT™\ÜÚ]ÜžNˆš[˜[˜ÙU›ØØX[\žT™\ÜÚ]ÜžT›ÝØÛÛHš[˜[˜ÙU›ØØX[\žT™\ÜÚ]ÜžJ
+KˆØØ[š[™[™Ô™\ÜÚ]ÜžNˆØØ[š[™[™Ô™\ÜÚ]ÜžOÈHš[ˆØØ[Þ[˜Ô[›™\ŽˆØØ[Þ[˜Ô[›™\ÈHš[ˆÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔÝÜ™NˆÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔÝÜ™HHÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔÝÜ™J
+KˆÙ\ÜÚ[Û”›ÝšY\Žˆ˜]]™TÙ\ÜÚ[Û”›ÝšY\ÈHš[ˆØØ[\Ù\”Ù][™ÜÔÝÜ™NˆØØ[\Ù\”Ù][™ÜÔÝÜ™HHØØ[\Ù\”Ù][™ÜÔÝÜ™J
+Kˆ\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™NˆØØ[\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™OÈHš[ˆ\ÝÜžU[œ™\ÛÛ™Y™\ÜÚ]ÜžNˆØØ[\ÝÜžU[œ™\ÛÛ™Y™\ÜÚ]ÜžOÈHš[ˆ^™\ÜÚ[Û”[XÚÛ›ÝÛYÙ[Y[ÛY\ˆ\ØØ\[™È˜]]™TÛY\›ÝšY\ˆHÂˆžH]ØZ]\ÚÏ™]™\‹™]™\‹œÛY\
+˜[›ÜÙXÛÛ™Îˆ	
+BˆBˆ
+HÂˆÙ[‹™\Ú›Ø\™™\ÜÚ]ÜžHH\Ú›Ø\™™\ÜÚ]ÜžBˆÙ[‹œ™XÛÜ™™\ÜÚ]ÜžHH™XÛÜ™™\ÜÚ]ÜžBˆ]Ú[][]\ÓØØ[ÝÜ˜YÙR[š]X[^˜][Û‘˜Z[\™HHØØ[ÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHOHš[ˆ]\Ù\ÑY˜][ØØ[ÝÜ˜YÙHH\Ú[][]\ÓØØ[ÝÜ˜YÙR[š]X[^˜][Û‘˜Z[\™Bˆ	‰ˆØØ[^[œÙU\ÙPØ\ÙHOHš[	‰ˆØØ[™XÛÜ™\ÙPØ\ÙHOHš[ˆ]Y˜][ØØ[ÝÜ˜YÙNˆ\Y˜][ØØ[ÝÜ˜YÙOÂˆ˜\ˆØØ[ÝÜ˜YÙR[š]X[^˜][Û‘\œ›ÜŽˆ\œ›ÜÈHš[ˆ˜\ˆÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHHØØ[ÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙBˆYˆ\Ù\ÑY˜][ØØ[ÝÜ˜YÙHÂˆÈÂˆY˜][ØØ[ÝÜ˜YÙHHžHÙ[‹›XZÙQY˜][ØØ[ÝÜ˜YÙJ
+BˆHØ]ÚÂˆY˜][ØØ[ÝÜ˜YÙHHš[ˆØØ[ÝÜ˜YÙR[š]X[^˜][Û‘\œ›ÜˆH\œ›Ü‚ˆÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHHš[ˆBˆH[ÙHÂˆY˜][ØØ[ÝÜ˜YÙHHš[ˆBˆYˆ]ØØ[^[œÙU\ÙPØ\ÙHÂˆÙ[‹›ØØ[^[œÙU\ÙPØ\ÙHHØØ[^[œÙU\ÙPØ\ÙBˆH[ÙHYˆ\Ù\ÑY˜][ØØ[ÝÜ˜YÙHÂˆÙ[‹›ØØ[^[œÙU\ÙPØ\ÙHHY˜][ØØ[ÝÜ˜YÙOË™^[œÙU\ÙPØ\ÙBˆH[ÙHÂˆÙ[‹›ØØ[^[œÙU\ÙPØ\ÙHHÚ[][]\ÓØØ[ÝÜ˜YÙR[š]X[^˜][Û‘˜Z[\™BˆÈš[ˆˆÙ[‹™Y˜][ØØ[^[œÙU\ÙPØ\ÙJ
+BˆBˆYˆ]ØØ[™XÛÜ™\ÙPØ\ÙHÂˆÙ[‹›ØØ[™XÛÜ™\ÙPØ\ÙHHØØ[™XÛÜ™\ÙPØ\ÙBˆH[ÙHYˆ\Ù\ÑY˜][ØØ[ÝÜ˜YÙHÂˆÙ[‹›ØØ[™XÛÜ™\ÙPØ\ÙHHY˜][ØØ[ÝÜ˜YÙOËœ™XÛÜ™\ÙPØ\ÙBˆH[ÙHÂˆËÈ\[™[˜ÞKZ[š™XÝYØØ[ÝÜ™\È\™H[[[Û˜[H\ÛÛ]YˆÜ™X][™ÂˆËÈHY˜][™XÛÜ™\ÙHØ\ÙH\™HÛÝ[™XYH\Ù\‰ÜÈ™X[ØØ[‚ˆËÈ[Û™ÜÚYHH\ÝÜÝYÚ[™È^[œÙH\ÙHØ\ÙH[™ÛÛ[Z[˜]H›Ú™XÝ[ÛœË‚ˆÙ[‹›ØØ[™XÛÜ™\ÙPØ\ÙHHš[ˆBˆÙ[‹›ØØ[Ø[]Û˜\ÚÝ\ÙPØ\ÙHHØØ[Ø[]Û˜\ÚÝ\ÙPØ\ÙBˆÏÈ
+\Ù\ÑY˜][ØØ[ÝÜ˜YÙHÈY˜][ØØ[ÝÜ˜YÙOËØ[]Û˜\ÚÝ\ÙPØ\ÙHˆš[
+BˆÙ[‹›ØØ[˜XÝ™XY\ˆH\Ù\ÑY˜][ØØ[ÝÜ˜YÙBˆÈ
+ØØ[˜XÝ™XY\ˆÏÈY˜][ØØ[ÝÜ˜YÙOË™˜XÝ™XY\ŠBˆˆØØ[˜XÝ™XY\‚ˆÙ[‹›ØØ[ÛÛ\[š[Û“Y[[ÜžT™\ÜÚ]ÜžHHØØ[ÛÛ\[š[Û“Y[[ÜžT™\ÜÚ]ÜžBˆÏÈ
+\Ù\ÑY˜][ØØ[ÝÜ˜YÙHÈY˜][ØØ[ÝÜ˜YÙOË˜ÛÛ\[š[Û“Y[[ÜžT™\ÜÚ]ÜžHˆš[
+BˆÙ[‹›ØØ[^™\ÜÚ[Û”\œÚ\Ý[˜ÙHHØØ[^™\ÜÚ[Û”\œÚ\Ý[˜ÙBˆÏÈ
+\Ù\ÑY˜][ØØ[ÝÜ˜YÙHÈY˜][ØØ[ÝÜ˜YÙOË™^™\ÜÚ[Û”\œÚ\Ý[˜ÙHˆš[
+BˆÙ[‹›ØØ[[XYÙTÝÜ™HHØØ[[XYÙTÝÜ™HÏÈY˜][ØØ[ÝÜ˜YÙOËš[XYÙTÝÜ™HÏÈÙ[‹™Y˜][ØØ[[XYÙTÝÜ™J
+BˆÙ[‹›ØØ[[XYÙR[ZÙT™\ÜÚ]ÜžHHØØ[[XYÙR[ZÙT™\ÜÚ]ÜžHÏÈÙ[‹™Y˜][ØØ[[XYÙR[ZÙT™\ÜÚ]ÜžJ
+BˆÙ[‹›ØØ[™XÛÜ™ÜXš[]HHÙ[‹™Y˜][ØØ[™XÛÜ™ÜXš[]J
+BˆÙ[‹›ØØ[˜XÝÜXš[]HH\Ù\ÑY˜][ØØ[ÝÜ˜YÙBˆÈ
+ØØ[˜XÝÜXš[]HÏÈÙ[‹™Y˜][ØØ[˜XÝÜXš[]J
+JBˆˆØØ[˜XÝÜXš[]BˆÙ[‹›ØØ[ÛÛ\]P˜XÚÝ\ÜXš[]HHØØ[ÛÛ\]P˜XÚÝ\ÜXš[]HÏÈÙ[‹™Y˜][ØØ[ÛÛ\]P˜XÚÝ\ÜXš[]J
+BˆÙ[‹™Ù[™\šXÒ[\ÜÙ\šXÙHHÙ[™\šXÒ[\ÜÙ\šXÙHÏÈÙ[‹™Y˜][Ù[™\šXÒ[\ÜÙ\šXÙJ
+BˆÙ[‹›ØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜžHHØØ[[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜžHÏÈY˜][ØØ[ÝÜ˜YÙOËœ[™[™Ñš[˜[˜ÚX[™\ÜÚ]ÜžBˆÙ[‹›ØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜžHHØØ[š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜžHÏÈY˜][ØØ[ÝÜ˜YÙOË™š[˜[˜ÚX[š[™[™Ô™\ÜÚ]ÜžBˆÙ[‹›ØØ[\ÝÜžSZYÜ˜][ÛØXÚHHY˜][ØØ[ÝÜ˜YÙOËš\ÝÜžSZYÜ˜][ÛØXÚBˆÙ[‹š\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™HH\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™BˆÏÈY˜][ØØ[ÝÜ˜YÙOËš\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™BˆÏÈ
+žOÈØØ[\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™J
+JBˆÙ[‹š\ÝÜžR[™[ÜžT™XY\ˆHY˜][ØØ[ÝÜ˜YÙOËš\ÝÜžR[™[ÜžT™XY\‚ˆÙ[‹š\ÝÜžU[œ™\ÛÛ™Y™\ÜÚ]ÜžHH\ÝÜžU[œ™\ÛÛ™Y™\ÜÚ]ÜžHÏÈY˜][ØØ[ÝÜ˜YÙOËš\ÝÜžU[œ™\ÛÛ™Y™\ÜÚ]ÜžBˆÙ[‹š[˜›Þ™\ÜÚ]ÜžHH[˜›Þ™\ÜÚ]ÜžBˆÙ[‹™ÛXZ[”™\ÜÚ]ÜžHHÛXZ[”™\ÜÚ]ÜžBˆÙ[‹œÛ˜\ÚÝÝÜ™HHÛ˜\ÚÝÝÜ™BˆÙ[‹˜XØÛÝ[™\ÜÚ]ÜžHHXØÛÝ[™\ÜÚ]ÜžBˆÙ[‹˜XØÛÝ[X[˜YÙ[Y[™\ÜÚ]ÜžHHXØÛÝ[X[˜YÙ[Y[™\ÜÚ]ÜžBˆÏÈ
+XØÛÝ[™\ÜÚ]ÜžH\ÏÈXØÛÝ[X[˜YÙ[Y[™\ÜÚ]ÜžT›ÝØÛÛ
+BˆÏÈXØÛÝ[™\ÜÚ]ÜžJ
+BˆÙ[‹˜XØÛÝ[™XY™\\˜][Û”™\ÜÚ]ÜžHHXØÛÝ[™XY™\\˜][Û”™\ÜÚ]ÜžBˆÏÈ
+XØÛÝ[™\ÜÚ]ÜžH\ÏÈXØÛÝ[™XY™\\˜][Û”™\ÜÚ]ÜžT›ÝØÛÛ
+BˆÏÈXØÛÝ[™\ÜÚ]ÜžJ
+BˆÙ[‹˜XØÛÝ[X[˜YÙ[Y[XÝ[Û•\ÙPØ\ÙHHXØÛÝ[X[˜YÙ[Y[XÝ[Û•\ÙPØ\ÙBˆÙ[‹œ™\^[Y[XÝ[Û•\ÙPØ\ÙHH™\^[Y[XÝ[Û•\ÙPØ\ÙBˆÙ[‹œØÜ™Y[œÚÝ™\^[Y[\ÙPØ\ÙHHØÜ™Y[œÚÝ™\^[Y[\ÙPØ\ÙBˆÙ[‹˜XØÛÝ[™XY™\\˜][Û•\ÙPØ\ÙHHXØÛÝ[™XY™\\˜][Û•\ÙPØ\ÙBˆÙ[‹˜XØÛÝ[š[™[™Õ\ÙPØ\ÙHHXØÛÝ[š[™[™Õ\ÙPØ\ÙBˆÙ[‹œÝYÚ[™ÓY™XÞXÛU\ÙPØ\ÙHHÝYÚ[™ÓY™XÞXÛU\ÙPØ\ÙBˆÙ[‹œ[™[™ÐÛÛ™š\›X][Û•\ÙPØ\ÙHH[™[™ÐÛÛ™š\›X][Û•\ÙPØ\ÙBˆÙ[‹™™YY˜XÚÔÝX›Z\ÜÚ[Û•\ÙPØ\ÙHH™YY˜XÚÔÝX›Z\ÜÚ[Û•\ÙPØ\ÙBˆÙ[‹œ™XÛÜ™]Z[[XYÙU\ÙPØ\ÙHH™XÛÜ™]Z[[XYÙU\ÙPØ\ÙBˆÙ[‹[˜›Ý[™™XÛÜ™™\ÜÚ]ÜžHH[˜›Ý[™™XÛÜ™™\ÜÚ]ÜžBˆÙ[‹Ø[]Û˜\ÚÝ™\ÜÚ]ÜžHHØ[]Û˜\ÚÝ™\ÜÚ]ÜžBˆÙ[‹Ø[]Û˜\ÚÝXÝ[Û•\ÙPØ\ÙHHØ[]Û˜\ÚÝXÝ[Û•\ÙPØ\ÙBˆÙ[‹š[œÚYÚÔ™\ÜÚ]ÜžHH[œÚYÚÔ™\ÜÚ]ÜžBˆÙ[‹œÙ][™ÜÔ™\ÜÚ]ÜžHHÙ][™ÜÔ™\ÜÚ]ÜžBˆÙ[‹™š[˜[˜ÙU›ØØX[\žT™\ÜÚ]ÜžHHš[˜[˜ÙU›ØØX[\žT™\ÜÚ]ÜžBˆÙ[‹›ØØ[š[™[™Ô™\ÜÚ]ÜžHHØØ[š[™[™Ô™\ÜÚ]ÜžHÏÈÙ[‹™Y˜][ØØ[š[™[™Ô™\ÜÚ]ÜžJ
+BˆÙ[‹›ØØ[Þ[˜Ô[›™\ˆHØØ[Þ[˜Ô[›™\ˆÏÈÙ[‹™Y˜][ØØ[Þ[˜Ô[›™\Š
+BˆÙ[‹›Û˜›Ø\™[™Ô›ÙÜ™\ÜÔÝÜ™HHÛ˜›Ø\™[™Ô›ÙÜ™\ÜÔÝÜ™BˆÙ[‹œÙ\ÜÚ[Û”›ÝšY\ˆHÙ\ÜÚ[Û”›ÝšY\‚ˆÙ[‹›ØØ[\Ù\”Ù][™ÜÔÝÜ™HHØØ[\Ù\”Ù][™ÜÔÝÜ™BˆÙ[‹\Ù\”Ù][™ÜÈHØØ[\Ù\”Ù][™ÜÔÝÜ™K›ØY
+
+BˆÙ[‹™^™\ÜÚ[Û”[XÚÛ›ÝÛYÙ[Y[ÛY\H^™\ÜÚ[Û”[XÚÛ›ÝÛYÙ[Y[ÛY\ˆÙ[‹›ØØ[ÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHHÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙBˆYˆ]ØØ[ÝÜ˜YÙR[š]X[^˜][Û‘\œ›ÜˆÂˆ][žHH™XÛÜ™ØØ[ÝÜ˜YÙR[š]X[^˜][Û‘˜Z[\™JØØ[ÝÜ˜YÙR[š]X[^˜][Û‘\œ›ÜŠBˆÙ[‹›ØØ[ÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHH[žOË\Ù\“Y\ÜØYÙHÏÈ¹§+9g,9¥l9£k¹b'yiâùc%¹i,z-){ï&ùc§ùiâúe&z+ëùmìºf¤:%ãøà ˆ‚ˆBˆB‚ˆ[˜È›ÛÝÝ˜\
+
+HÂˆ\ÚÈÂˆYˆ]ØØ[ÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙHÂˆX[X[™XÛÜ™Y\ÜØYÙHHØØ[ÝÜ˜YÙR[š]X[^˜][Û“Y\ÜØYÙBˆ™\Ù[YÝ™\›^HHœÙ][™ÜÂˆ\Ð›ÛÝÝ˜\[™ÈH˜[ÙBˆ™]\›‚ˆBˆÈÂˆÈHžH]ØZ]ØØ[^[œÙU\ÙPØ\ÙOËœ™\\™T›Ùš[J
+BˆYˆ]XYÛ›ÜÝXÈHžOÈ\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™OËœ™\ÛÛ™S]\Ý
+ˆÜ\˜][ÛŽˆ›ØØ[\ÝÜ˜YÙKZ[š]‹ˆÝ]ÛÛYNˆ¹§+9§.¹¥l9£k¹n¤ùmì¹l,yîê¸à ˆ‹ˆ^XÝYXØÛÝ[Qˆš[ˆ
+HÂˆØØ[ÝÜ˜YÙR[š]X[^˜][Û‘XYÛ›ÜÝXÈHXYÛ›ÜÝXÂˆBˆ™Yœ™\ÚØØ[Þ[˜ÔÝ]J
+BˆHØ]ÚÂˆ]XYÛ›ÜÝXÈH™XÛÜ™ØØ[ÝÜ˜YÙR[š]X[^˜][Û‘˜Z[\™J\œ›ÜŠBˆX[X[™XÛÜ™Y\ÜØYÙHHXYÛ›ÜÝXÏË\Ù\“Y\ÜØYÙHÏÈ¹§+9g,9¥l9£k¹b'yiâùc%¹i,z-){ï&ùc§ùiâúe&z+ëùmìºf¤:%ãøà ˆ‚ˆBˆ]ØZ]™\ÝÜ™P]][XØ][ÛŠ
+BˆYˆZ\ÔÚYÛ™Y[ˆÂˆ™\Ù[YÝ™\›^HHœ™XÛÜ™Âˆ]ØZ]ØY™XÛÜ™[Û
+Ù[‹˜Ý\œ™[[ÛÙ^K›Ü˜ÙNˆYJBˆBˆ\Ð›ÛÝÝ˜\[™ÈH˜[ÙBˆ]ØZ]™Yœ™\Ú›ÝYšXØ][Û”\›Z\ÜÚ[Û”Ý]\Ê
+Bˆ™\Ù[Û˜›Ø\™[™ÒY“™YYY
+
+BˆBˆB‚ˆ\ØØ\™X›T™\Ý[ˆš]˜]H[˜È™XÛÜ™ØØ[ÝÜ˜YÙR[š]X[^˜][Û‘˜Z[\™JÈ\œ›ÜŽˆ\œ›ÜŠHOˆØØ[\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÏÈÂˆÝX\™]\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™H[ÙHÈ™]\›ˆš[Bˆ][žHH\ÝÜžSZYÜ˜][Û‘XYÛ›ÜÝXÔÝÜ™Kœ™XÛÜ™
+ˆ\œ›Ü‹ˆ\ÙNˆ¹§+9§.¹¥l9£k¹n¤ùb'yiâùc%ˆ‹ˆÜ\˜][ÛŽˆ›ØØ[\ÝÜ˜YÙKZ[š]‹ˆÛÙSÝ™\œšYNˆ“ÐÐSTÕÔQÑKRS’U‹ˆ][\QˆURQ
+
+KˆÛÛ[Z]Yˆ˜[ÙKˆ™XÛÝ™\žPXÝ[ÛŽˆº+íù¨à9§éy§+9§.¹kf9`ª9â­¹  yd#ºaãyd+ùn¥9å*;ï&ù.#z) y®!zfi9n¥9å*9¥l9£k¸à ˆ‚ˆ
+BˆØØ[ÝÜ˜YÙR[š]X[^˜][Û‘XYÛ›ÜÝXÈH[žBˆ™]\›ˆ[žBˆB‚ˆš]˜]H[˜È™\ÝÜ™P]][XØ][ÛŠ
+H\Þ[˜ÈÂˆ]Ù[™\˜][ÛˆH\Ù\”Ý]QÙ[™\˜][Û‚ˆÈÂˆ]Ù\ÜÚ[ÛŽˆÝ\X˜\ÙP]]Ù\ÜÚ[Û‚ˆÈÂˆÙ\ÜÚ[ÛˆHžH]ØZ]]]Ù\šXÙK˜Ý\œ™[Ù\ÜÚ[ÛŠ
+BˆHØ]ÚÂˆÝX\™]YØXÞHHžOÈ™\]Z\™TÙ\ÜÚ[ÛŠ
+Kˆ]™Yœ™\ÚÚÙ[ˆHYØXÞKœ™Yœ™\ÚÚÙ[‹\™Yœ™\ÚÚÙ[‹š\Ñ[\H[ÙHÂˆ\Õ\ØYÚÙ[ˆH
+žHÙ^XÚZ[‹œÝš[™Ê›ÜŽˆÙ^XÚZ[’Ù^\Ë\ØYÚÙ[ŠJOËš\Ñ[\HOH˜[ÙBˆ\]TÚÜÝ]Ü™Y[X[Y\ÜØYÙJ
+Bˆ™]\›‚ˆBˆÙ\ÜÚ[ÛˆHžH]ØZ]]]Ù\šXÙKœ™\ÝÜ™TÙ\ÜÚ[ÛŠXØÙ\ÜÕÚÙ[ŽˆYØXÞK˜XØÙ\ÜÕÚÙ[‹™Yœ™\ÚÚÙ[Žˆ™Yœ™\ÚÚÙ[ŠBˆBˆÝX\™Ù[™\˜][ÛˆOH\Ù\”Ý]QÙ[™\˜][Ûˆ[ÙHÈ™]\›ˆBˆžHØ]™JÙ\ÜÚ[ÛŽˆÙ\ÜÚ[ÛŠBˆ\JÙ\ÜÚ[ÛŽˆÙ\ÜÚ[ÛŠBˆYˆX^T™XY™[[ÝP\Ú[™\ÜÑ]HÈ™\ÝÜ™Q\Ú›Ø\™Û˜\ÚÝ
+\Ù\’YˆÙ\ÜÚ[Û‹\Ù\‹šY
+HBˆ\Õ\ØYÚÙ[ˆH
+žHÙ^XÚZ[‹œÝš[™Ê›ÜŽˆÙ^XÚZ[’Ù^\Ë\ØYÚÙ[ŠJOËš\Ñ[\HOH˜[ÙBˆ\]TÚÜÝ]Ü™Y[X[Y\ÜØYÙJ
+Bˆ\ÚÈÂˆ]ØZ]ØYXØÛÝ[Ê
+Bˆ]ØZ]™Yœ™\Ú\Ú›Ø\™
+
+Bˆ]ØZ]ØY™XÛÜ™[Û
+Ù[‹˜Ý\œ™[[ÛÙ^K›Ü˜ÙNˆYJBˆBˆHØ]ÚÂˆÝX\™Ù[™\˜][ÛˆOH\Ù\”Ý]QÙ[™\˜][Ûˆ[ÙHÈ™]\›ˆBˆYˆ\Ò[˜[Y™Yœ™\ÚÙ\ÜÚ[Û‘\œ›ÜŠ\œ›ÜŠHÂˆ[˜[Y]TÙ\ÜÚ[ÛŠY\ÜØYÙNˆ¹ænùoeyâ­¹  ymì¹i,y¥b;ï#:+íúaãy¥¬9ænùoexà ˆŠBˆH[ÙHÂˆ]]Y\ÜØYÙHH\œ›Ü‹›ØØ[^™Y\ØÜš\[Û‚ˆ]]Y\ÜØYÙR\Ñ\œ›ÜˆHYBˆBˆBˆB‚ˆ[˜ÈÚYÛ’[Š[XZ[ˆÝš[™Ë\ÜÝÛÜ™ˆÝš[™ÊH\Þ[˜ÈÂˆÝX\™Z\ÔÚYÛš[™ÓÝ][ÙHÈ]]Y\ÜØYÙHH¹«hùg*9k£9¢$9."¹«(z` 9aî»ï#:+íùê#yd#ºaãz+åxà ˆŽÈ™]\›ˆBˆÝX\™Z\ÔÚYÛš[™Ò[ˆ[ÙHÈ™]\›ˆBˆ\ÔÚYÛš[™Ò[ˆHYBˆY™\ˆÈ\ÔÚYÛš[™Ò[ˆH˜[ÙHBˆ]]Y\ÜØYÙHHš[ˆ]]Y\ÜØYÙR\Ñ\œ›ÜˆH˜[ÙB‚ˆÈÂˆ]Ù\ÜÚ[ÛˆHžH]ØZ]]]Ù\šXÙKœÚYÛ’[Š[XZ[ˆ[XZ[\ÜÝÛÜ™ˆ\ÜÝÛÜ™
+BˆžHØ]™JÙ\ÜÚ[ÛŽˆÙ\ÜÚ[ÛŠBˆ\JÙ\ÜÚ[ÛŽˆÙ\ÜÚ[ÛŠBˆ]Ù[™\˜][ÛˆH\Ù\”Ý]QÙ[™\˜][Û‚ˆ\Õ\ØYÚÙ[ˆH˜[ÙBˆ]]Y\ÜØYÙHH¹mì¹ænùoe{ï#9§+9§.¹¥l9£k¹cëùîéùîëy/oùå*8à ˆ‚ˆÈÂˆ]\ØYÚÙ[ˆHžH]ØZ]]]Ù\šXÙK™™]Ú\ØYÚÙ[Š\Ù\’YˆÙ\ÜÚ[Û‹\Ù\‹šYXØÙ\ÜÕÚÙ[ŽˆÙ\ÜÚ[Û‹˜XØÙ\ÜÕÚÙ[ŠBˆÝX\™\ÐÝ\œ™[\Ù\“ØY
+Ù[™\˜][Û‹\Ù\’YˆÙ\ÜÚ[Û‹\Ù\‹šY
+H[ÙHÈ™]\›ˆBˆžHÙ^XÚZ[‹œÙ]Ýš[™Ê\ØYÚÙ[‹›ÜŽˆÙ^XÚZ[’Ù^\Ë\ØYÚÙ[ŠBˆ\Õ\ØYÚÙ[ˆHYBˆHØ]ÚÂˆÝX\™\ÐÝ\œ™[\Ù\“ØY
+Ù[™\˜][Û‹\Ù\’YˆÙ\ÜÚ[Û‹\Ù\‹šY
+H[ÙHÈ™]\›ˆBˆ]]Y\ÜØYÙHH¹mì¹ænùoe{ï&ÒÜÝY9oêù£mù£!ù.é9aëy£k¹¦ ¹.#ycëùå*;ï#9cëùg*:+¯¹ïk¹.+zaãz+åxà ˆ‚ˆBˆ\]TÚÜÝ]Ü™Y[X[Y\ÜØYÙJ
+Bˆ™\Ù[Û˜›Ø\™[™ÒY“™YYY
+
+Bˆ]ØZ]ØYXØÛÝ[Ê
+Bˆ]ØZ]™Yœ™\Ú\Ú›Ø\™
+
+Bˆ]ØZ]ØY™XÛÜ™[Û
+Ù[‹˜Ý\œ™[[ÛÙ^K›Ü˜ÙNˆYJBˆHØ]ÚÂˆ]]Y\ÜØYÙHH\œ›Ü‹›ØØ[^™Y\ØÜš\[Û‚ˆ]]Y\ÜØYÙR\Ñ\œ›ÜˆHYBˆB‚ˆ\ÔÚYÛš[™Ò[ˆH˜[ÙBˆB‚ˆ[˜ÈÚYÛ•\
+ˆ[XZ[ˆÝš[™Ëˆ\ÜÝÛÜ™ˆÝš[™ËˆXØÙ\Y\›\Îˆ›ÛÛˆXØÙ\YÙ[œÚ]]™Q]Nˆ›ÛÛˆ
+H\Þ[˜ÈÂˆÝX\™Z\ÔÚYÛš[™ÓÝ][ÙHÈ]]Y\ÜØYÙHH¹«hùg*9k£9¢$9."¹«(z` 9aî»ï#:+íùê#yd#ºaãz+åxà ˆŽÈ™]\›ˆBˆÝX\™Z\ÔÚYÛš[™Ò[ˆ[ÙHÈ™]\›ˆBˆÝX\™XØÙ\Y=ë®<¶‰žËkºwµçfBVÇ6R²&WGW&âfÇ6RÐ¢wV&BÆö6Å7F÷&vT–æ—F–Æ—¦F–öäÖW76vRÓÒæ–ÂVÇ6R°¢ÖçVÅ&V6÷&DÖW76vRÒÆö6Å7F÷&vT–æ—F–Æ—¦F–öäÖW76vP¢&WGW&âfÇ6P¢Ð¢—47&VF–ætÖçVÅ&V6÷&BÒG'VP¢ÖçVÅ&V6÷&DÖW76vRÒæ–À¢FVfW"²—47&VF–ætÖçVÅ&V6÷&BÒfÇ6RÐ ¢Fò°¢&WGW&âG'’v—B7&VFUVæ–f–VDÖçVÅ&V6÷&B†G&gBÂFöÖ–ã¢FöÖ–â¢Ò6F6‚°¢ÖçVÅ&V6÷&DÖW76vRÒW'&÷"æÆö6Æ—¦VDFW67&—F–öà¢&WGW&âfÇ6P¢Ð¢Ð ¢gVæ2&W&TÆö6Åv÷&·76R‚’7–æ2ÓâÆö6ÄW‡Vç6Uv÷&·76Sò°¢wV&BÆWBÆö6ÄW‡Vç6UW6T66RVÇ6R²&WGW&âæ–ÂÐ¢Fò°¢ÆWBv÷&·76RÒG'’v—BÆö6ÄW‡Vç6UW6T66Rç&W&Uv÷&·76R‚¢Æö6Ä66÷VçG2Òv÷&·76Ræ66÷VçG0¢f"&Ææ6W3¢µUT”C¢–çCcEÒÒ³¥Ð¢f÷"66÷VçB–âv÷&·76Ræ66÷VçG2°¢&Ææ6W5¶66÷VçBæ–EÒÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ66÷VçD&Ææ6TÖ–æ÷"†66÷VçBæ–B¢Ð¢Æö6Ä66÷VçD&Ææ6W2Ò&Ææ6W0¢Æö6Ä66÷VçDÖW76vRÒæ–À¢&WGW&âv÷&·76P¢Ò6F6‚°¢Æö6Ä66÷VçDÖW76vRÒW'&÷"æÆö6Æ—¦VDFW67&—F–öà¢&WGW&âæ–À¢Ð¢Ð ¢gVæ27&VFTÆö6Ä66÷VçB…ò6öÖÖæC¢Æö6Ä66÷VçE6WGW6öÖÖæB’7–æ2ÓâÆö6Ä66÷VçCò°¢wV&BÆWBÆö6ÄW‡Vç6UW6T66RVÇ6R²&WGW&âæ–ÂÐ¢Fò°¢ÆWB66÷VçBÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ7&VFT66÷VçB†6öÖÖæB¢v—BÆöDÆö6Ä66÷VçG2‚¢Æö6Ä66÷VçDÖW76vRÒæ–À¢&WGW&â66÷Vç@¢Ò6F6‚°¢Æö6Ä66÷VçDÖW76vRÒW'&÷"æÆö6Æ—¦VDFW67&—F–öà¢&WGW&âæ–À¢Ð¢Ð ¢gVæ27&VFTÆö6ÄW‡Vç6R€¢Ö÷VçEFW‡C¢7G&–ærÀ¢66÷VçD”C¢UT”BÀ¢ÖW&6†çDæÖS¢7G&–ærÀ¢ÆFf÷&Ó¢7G&–ærÀ¢6FVv÷'“¢7G&–ærÀ¢–ÖVçDÖWF†öC¢7G&–ærÀ¢FFS¢FFRÀ¢æ÷FS¢7G&–æp¢’7–æ2Óâ&ööÂ°¢ÆWBG&gBÒæF—fTÖçVÅ&V6÷&DG&gB€¢¶–æC¢æW‡Vç6RÀ¢66÷VçD”C¢66÷VçD”BÀ¢Ö÷VçEFW‡C¢Ö÷VçEFW‡BÀ¢F—FÆS¢ÖW&6†çDæÖRÀ¢ÆFf÷&Ó¢ÆFf÷&ÒÀ¢6FVv÷'“¢6FVv÷'’À¢–ÖVçDÖWF†öC¢–ÖVçDÖWF†öBÀ¢FFS¢FFRÀ¢æ÷FS¢æ÷FP¢¢&WGW&âv—B7&VFTÖçVÅ&V6÷&B†G&gBÂFöÖ–ã¢æ–Â¢Ð ¢&—fFRgVæ27&VFTÆö6ÄW‡Vç6R…òG&gC¢æF—fTÖçVÅ&V6÷&DG&gB’7–æ2F‡&÷w2Óâ&ööÂ°¢wV&BG&gBæW†—7F–æu&t–BÓÒæ–ÂVÇ6R²F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&BÐ¢wV&BÆWBÆö6ÄW‡Vç6UW6T66RVÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–D–FVçF–f–W ¢Ð¢ÆWB66÷VçEFW‡BÒG&gBæ66÷VçD–@¢ÆWB66÷VçD”BÒ66÷VçEFW‡BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’¢òòW6W"6â÷VâF†Rf÷&Òv†–ÆRF†R&6¶w&÷VæB66÷VçB&Vg&W6‚—0¢òò7F–ÆÂ'Vææ–ærâVç7W&R6Æ÷VB66÷VçB6VÆV7FVB'’F†RVæ–f–VBf÷&Ð¢òòW†—7G2–âF†RÆö6Â&ö¦V7F–öâ&Vf÷&RfÆ–FF–ærF†RW‡Vç6Rà¢–bÆWB66÷VçD”BÂÆö6Ä66÷VçG2æ6öçF–ç2‡v†W&S¢²Cæ–BÓÒ66÷VçD”BÒ’À¢ÆWB6Æ÷VD66÷VçBÒ66÷VçG2æf—'7B‡v†W&S¢²Cæ–BÓÒ66÷VçEFW‡BÒ’°¢ÆWBÖ—'&÷"ÒÆö6Ä66÷VçB€¢–C¢66÷VçD”BÀ¢&öf–ÆT”C¢UT”B‚’À¢æÖS¢6Æ÷VD66÷VçBææÖRÀ¢¶–æC¢6Æ÷VD66÷VçBçG—Rç&ufÇVRÀ¢7W'&Væ7“¢6Æ÷VD66÷VçBæ7W'&Væ7’À¢÷Væ–æt&Ææ6TÖ–æ÷#¢–çCcB‚†6Æ÷VD66÷VçBæ–æ—F–Ä&Ææ6R¢’ç&÷VæFVB‚’’À¢7&VFVDC¢FFR‚’À¢–ç7F—GWF–öã¢6Æ÷VD66÷VçBæ–ç7F—GWF–öâÀ¢Æ7CC¢6Æ÷VD66÷VçBæÆ7CBÀ¢&–ÆÄF“¢6Æ÷VD66÷VçBæ&–ÆÄF’À¢–ÖVçDGVTF“¢6Æ÷VD66÷VçBç–ÖVçDGVTF’À¢WFôFV&—D66÷VçD”C¢6Æ÷VD66÷VçBæWFôFV&—D66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’’À¢WFô6öæf—&Õ&W–ÖVçC¢6Æ÷VD66÷VçBæWFô6öæf—&Õ&W–ÖVçBÀ¢w&6UW&–öDF—3¢6Æ÷VD66÷VçBæw&6UW&–öDF—2À¢Æ7E&V6öæ6–ÆVDC¢6VÆbç'6T•4óƒc†6Æ÷VD66÷VçBæÆ7E&V6öæ6–ÆVDB’À¢—4FVfVÇDW‡Vç6S¢6Æ÷VD66÷VçBæ—4FVfVÇDW‡Vç6RÀ¢—4FVfVÇD–æ6öÖS¢6Æ÷VD66÷VçBæ—4FVfVÇD–æ6öÖRÀ¢—4&6†—fVC¢6Æ÷VD66÷VçBæ—4&6†—fVBÀ¢6÷'D÷&FW#¢6Æ÷VD66÷VçBç6÷'D÷&FW ¢¢G'’v—BÆö6ÄW‡Vç6UW6T66Ræ–×÷'E&VÖ÷FT66÷VçG2…¶Ö—'&÷%Ò¢òÒv—B&W&TÆö6Åv÷&·76R‚¢Ð¢ÆWB6öÖÖæBÒÆö6ÄW‡Vç6T6öÖÖæB€¢–C¢UT”B‚’À¢66÷VçD”C¢66÷VçD”BÀ¢Ö÷VçEFW‡C¢G&gBæÖ÷VçEFW‡BÀ¢7W'&Væ7“¢$4å’"À¢ÖW&6†çDæÖS¢G&gBçF—FÆRÀ¢ÆFf÷&Ó¢G&gBçÆFf÷&ÒÀ¢6FVv÷'“¢G&gBæ6FVv÷'’À¢–ÖVçDÖWF†öC¢G&gBç–ÖVçDÖWF†öBÀ¢G&ç67F–öäFFS¢æF—fTÆö6ÄFFRæFFT¶W’†G&gBæFFR’À¢G&ç67F–öåF–ÖS¢G&gBæ–æ6ÇVFW5F–ÖRòæF—fTÆö6ÄFFRçF–ÖT¶W’†G&gBçF–ÖR’¢æ–ÂÀ¢æ÷FS¢G&gBææ÷FRæ—4V×G’òæ–Â¢G&gBææ÷FRÀ¢7&VFVDC¢FFR‚’Â–ÖvTFF¢G&gBæ–ÖvTFF¢¢ÆWB÷WF6öÖRÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ7&VFR†6öÖÖæB¢–bÆWBW‡Vç6RÒ÷WF6öÖRæW‡Vç6R°¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6ÄW‡Vç6U&VDÖöFVÂæFWF–Â†g&öÓ¢W‡Vç6RÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢Ð¢òÒv—B&W&TÆö6Åv÷&·76R‚¢ÆWBÖöçF„¶W’Ò7G&–ær†6öÖÖæBçG&ç67F–öäFFRç&Vf—‚ƒr’¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢ÖöçF„¶W’¢ÖçVÅ&V6÷&DÖW76vRÒ÷WF6öÖRæW‡Vç6RÓÒæ–Âò.iÊÎYËŠë[Ù^iÊ®KùÞZÙ‚"¢Æö6Åw&—FTÖW76vR†66÷VçD”BÓÒæ–Âò.Šë[Ù^[{.KùÞZÙŽûÈŽK¸^iÊÎiË®ûÈÎŠ^{¹YîXúþYÎjÚ^ûÈ’"¢.Šë[Ù^[{.KùÞZÙŽûÈŽiÊÎiË®ûÈ’"¢&WGW&â÷WF6öÖRæW‡Vç6RÒæ–À¢Ð ¢&—fFRgVæ27&VFTÆö6Ä–æ6öÖR€¢òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÀ¢FöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãð¢’7–æ2F‡&÷w2Óâ&ööÂ°¢wV&BG&gBæW†—7F–æu&t–BÓÒæ–ÂÂÆWBÆö6ÄW‡Vç6UW6T66RVÇ6R²F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&BÐ¢wV&BG&gBçfÆ–FF–öäÖW76vR†FöÖ–ã¢FöÖ–â’ÓÒæ–ÂVÇ6R²F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&BÐ¢ÆWB66÷VçD”BÒG&gBæ66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’¢–bÆWB66÷VçD”BÂÆö6Ä66÷VçG2æ6öçF–ç2‡v†W&S¢²Cæ–BÓÒ66÷VçD”BÒ’À¢ÆWB6Æ÷VD66÷VçBÒ66÷VçG2æf—'7B‡v†W&S¢²Cæ–BÓÒ66÷VçD”BçWV–E7G&–ærÒ’°¢ÆWBÖ—'&÷"ÒÆö6Ä66÷VçB€¢–C¢66÷VçD”BÂ&öf–ÆT”C¢UT”B‚’ÂæÖS¢6Æ÷VD66÷VçBææÖRÀ¢¶–æC¢6Æ÷VD66÷VçBçG—Rç&ufÇVRÂ7W'&Væ7“¢6Æ÷VD66÷VçBæ7W'&Væ7’À¢÷Væ–æt&Ææ6TÖ–æ÷#¢–çCcB‚†6Æ÷VD66÷VçBæ–æ—F–Ä&Ææ6R¢’ç&÷VæFVB‚’’Â7&VFVDC¢FFR‚’À¢–ç7F—GWF–öã¢6Æ÷VD66÷VçBæ–ç7F—GWF–öâÂÆ7CC¢6Æ÷VD66÷VçBæÆ7CBÀ¢&–ÆÄF“¢6Æ÷VD66÷VçBæ&–ÆÄF’Â–ÖVçDGVTF“¢6Æ÷VD66÷VçBç–ÖVçDGVTF’À¢WFôFV&—D66÷VçD”C¢6Æ÷VD66÷VçBæWFôFV&—D66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’’À¢WFô6öæf—&Õ&W–ÖVçC¢6Æ÷VD66÷VçBæWFô6öæf—&Õ&W–ÖVçBÂw&6UW&–öDF—3¢6Æ÷VD66÷VçBæw&6UW&–öDF—2À¢Æ7E&V6öæ6–ÆVDC¢6VÆbç'6T•4óƒc†6Æ÷VD66÷VçBæÆ7E&V6öæ6–ÆVDB’À¢—4FVfVÇDW‡Vç6S¢6Æ÷VD66÷VçBæ—4FVfVÇDW‡Vç6RÂ—4FVfVÇD–æ6öÖS¢6Æ÷VD66÷VçBæ—4FVfVÇD–æ6öÖRÀ¢—4&6†—fVC¢6Æ÷VD66÷VçBæ—4&6†—fVBÂ6÷'D÷&FW#¢6Æ÷VD66÷VçBç6÷'D÷&FW ¢¢G'’v—BÆö6ÄW‡Vç6UW6T66Ræ–×÷'E&VÖ÷FT66÷VçG2…¶Ö—'&÷%Ò¢òÒv—B&W&TÆö6Åv÷&·76R‚¢Ð¢ÆWBö67W'&VDC¢FFSð¢–bÆWBF–ÖW7F×ÒG&gBæö67W'&VDB°¢wV&BÆWB'6VBÒ•4óƒcFFTf÷&ÖGFW"‚’æFFR†g&öÓ¢F–ÖW7F×’À¢æF—fTÆö6ÄFFRæFFT¶W’‡'6VB’ÓÒG&gBæFFT¶W’VÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&@¢Ð¢ö67W'&VDBÒ'6V@¢ÒVÇ6R°¢ö67W'&VDBÒæ–À¢Ð¢ÆWB6fVBÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ7&VFT–æ6öÖR„Æö6Ä–æ6öÖT6öÖÖæB€¢–C¢UT”B‚’Â66÷VçD”C¢66÷VçD”BÂÖ÷VçEFW‡C¢G&gBæÖ÷VçEFW‡BÂ7W'&Væ7“¢$4å’"À¢6÷W&6TæÖS¢G&gBçF—FÆRÂ6FVv÷'“¢G&gBæ6FVv÷'’Â–æ6öÖTFFS¢G&gBæFFT¶W’À¢ö67W'&VDC¢ö67W'&VDBÀ¢æ÷FS¢G&gBææ÷FRçG&–ÖÖ–æt6†&7FW'2†–ã¢çv†—FW76W4æDæWvÆ–æW2’æ—4V×G’òæ–Â¢G&gBææ÷FRÀ¢7&VFVDC¢FFR‚’Â–ÖvTFF¢G&gBæ–ÖvTFF¢’¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6Ä–æ6öÖU&VDÖöFVÂæFWF–Â†g&öÓ¢6fVBÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢òÒv—B&W&TÆö6Åv÷&·76R‚¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢7G&–ær‡6fVBæ–æ6öÖTFFRç&Vf—‚ƒr’’¢ÖçVÅ&V6÷&DÖW76vRÒÆö6Åw&—FTÖW76vR‚.iKnXZ^[{.Šë[Ù^ûÈŽiÊÎiË®ûÈ’"¢&WGW&âG'VP¢Ð ¢&—fFRgVæ27&VFTÆö6ÄFöÖ–å&V6÷&B€¢òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÀ¢FöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãð¢’7–æ2F‡&÷w2Óâ&ööÂ°¢wV&BÆWBÆö6Å&V6÷&EW6T66RÀ¢Æö6Å&V6÷&EfÆ–FF–öâç7W÷'FVDFöÖ–ä¶W—2æ6öçF–ç2†G&gBæFöÖ–ä¶W’’VÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&@¢Ð¢wV&BG&gBçfÆ–FF–öäÖW76vR†FöÖ–ã¢FöÖ–â’ÓÒæ–ÂVÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&@¢Ð¢ÆWB–ÆöBÒG&gBçVæ—fW'6Å–ÆöB†FöÖ–ã¢FöÖ–â¢ÆWBF—FÆRÒG&gBç&W6öÇfVEF—FÆR†FöÖ–ã¢FöÖ–â¢ÆWB7VÖÖ'’ÒG&gBç&W6öÇfVE7VÖÖ'’†FöÖ–ã¢FöÖ–â¢ÆWB&V6÷&C¢Æö6Å&V6÷&@¢f"&Wf–÷W4ÖöçF„¶W“¢7G&–æsð¢–bÆWBW†—7F–æu&t–BÒG&gBæW†—7F–æu&t–B°¢wV&BÆWBW†—7F–æt”BÒUT”B‡WV–E7G&–æs¢W†—7F–æu&t–B’VÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–D–FVçF–f–W ¢Ð¢wV&BÆWB7W'&VçBÒG'’v—BÆö6Å&V6÷&EW6T66Rç&V6÷&B†–C¢W†—7F–æt”B’VÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"ç&V6÷&Dæ÷Df÷Væ@¢Ð¢&Wf–÷W4ÖöçF„¶W’Ò7G&–ær†7W'&VçBæ'W6–æW74FFRç&Vf—‚ƒr’¢ÆWBWFFVBÒG'’v—BÆö6Å&V6÷&EW6T66RçWFFR„Æö6Å&V6÷&EWFFT6öÖÖæB€¢–C¢W†—7F–æt”BÀ¢W‡V7FVEfW'6–öã¢7W'&VçBæÆö6ÅfW'6–öâÀ¢F—FÆS¢F—FÆRÀ¢7VÖÖ'“¢7VÖÖ'’À¢–ÆöC¢–ÆöBÀ¢&V6÷&DFFS¢G&gBæFFT¶W’À¢&V6÷&EF–ÖS¢G&gBçF–ÖT¶W’À¢æ÷FS¢G&gBææ÷FRçG&–ÖÖ–æt6†&7FW'2†–ã¢çv†—FW76W4æDæWvÆ–æW2’æ—4V×G’òæ–Â¢G&gBææ÷FRÀ¢WFFVDC¢FFR‚’À¢–ÖvTFF¢G&gBæ–ÖvTFFÀ¢&VÖ÷fT–ÖvS¢G&gBç&VÖ÷fT–ÖvP¢’¢&V6÷&BÒWFFVBç&V6÷&@¢ÒVÇ6R°¢ÆWB7&VFVBÒG'’v—BÆö6Å&V6÷&EW6T66Ræ7&VFR„Æö6Å&V6÷&D6öÖÖæB€¢–C¢UT”B‚’À¢FöÖ–ä¶W“¢G&gBæFöÖ–ä¶W’À¢F—FÆS¢F—FÆRÀ¢7VÖÖ'“¢7VÖÖ'’À¢–ÆöC¢–ÆöBÀ¢&V6÷&DFFS¢G&gBæFFT¶W’À¢&V6÷&EF–ÖS¢G&gBçF–ÖT¶W’À¢æ÷FS¢G&gBææ÷FRçG&–ÖÖ–æt6†&7FW'2†–ã¢çv†—FW76W4æDæWvÆ–æW2’æ—4V×G’òæ–Â¢G&gBææ÷FRÀ¢–ÖvTFF¢G&gBæ–ÖvTFFÀ¢7&VFVDC¢FFR‚¢’¢&V6÷&BÒ7&VFVBç&V6÷&@¢Ð¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6Å&V6÷&E&VDÖöFVÂæFWF–Â†g&öÓ¢&V6÷&BÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢ÆWBÖöçF„¶W’Ò7G&–ær‡&V6÷&Bç&V6÷&DFFRç&Vf—‚ƒr’¢–bÆWB&Wf–÷W4ÖöçF„¶W’Â&Wf–÷W4ÖöçF„¶W’ÒÖöçF„¶W’°¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢&Wf–÷W4ÖöçF„¶W’¢Ð¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢ÖöçF„¶W’¢–bÆWBW†—7F–æu&t–BÒG&gBæW†—7F–æu&t–B°¢ÆWBöÆE&VfW&Væ6RÒ&Æö6ÂÖFFõÂ†W†—7F–æu&t–B’ ¢–çfÆ–FFU&V6÷&DW‡&W76–öåÆå7FFR†gFW$6†æv–æs¢¶öÆE&VfW&Væ6UÒ¢&V6÷&DFWF–Ä66†Rç&VÖ÷fUfÇVR†f÷$¶W“¢æF—fU&V6÷&E&VfW&Væ6R†öÆE&VfW&Væ6R’æ6æöæ–6ÅfÇVR¢v—BÆöE&V6÷&DFWF–Â‡&VfW&Væ6S¢&Æö6ÂÖFFõÂ‡&V6÷&Bæ–BçWV–E7G&–ær’"Âf÷&6S¢G'VR¢Ð¢ÖçVÅ&V6÷&DÖW76vRÒÆö6Åw&—FTÖW76vR†G&gBæW†—7F–æu&t–BÓÒæ–Âò.Šë[Ù^[{.KùÞZÙŽûÈŽiÊÎiË®ûÈ’"¢.Šë[Ù^[{.i»NikûÈŽiÊÎiË®ûÈ’"¢&WGW&âG'VP¢Ð ¢&—fFRgVæ27&VFUVæ–f–VDÖçVÅ&V6÷&B€¢òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÀ¢FöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãð¢’7–æ2F‡&÷w2Óâ&ööÂ°¢–bG&gBæ¶–æBÒçVæ—fW'6ÂÂÆWBW†—7F–æt”BÒG&gBæW†—7F–æu&t–BÀ¢ÆWB–BÒUT”B‡WV–E7G&–æs¢W†—7F–æt”B’ÂÆWBÆö6ÄW‡Vç6UW6T66R°¢ÆWBöÆDFFS¢7G&–æp¢–bG&gBæ¶–æBÓÒæW‡Vç6R°¢wV&BÆWB7W'&VçBÒG'’v—BÆö6ÄW‡Vç6UW6T66RæW‡Vç6R†–C¢–B’VÇ6R²F‡&÷rÆö6ÄFFW'&÷"ç&V6÷&Dæ÷Df÷VæBÐ¢öÆDFFRÒ7W'&VçBçG&ç67F–öäFFP¢òÒG'’v—BÆö6ÄW‡Vç6UW6T66RçWFFR„Æö6ÄW‡Vç6UWFFT6öÖÖæB†–C¢–BÀ¢W‡V7FVEfW'6–öã¢G&gBæÆö6ÅfW'6–öâóò7W'&VçBæÆö6ÅfW'6–öâÀ¢66÷VçD”C¢G&gBæ66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’’ÂÖ÷VçEFW‡C¢G&gBæÖ÷VçEFW‡BÀ¢7W'&Væ7“¢7W'&VçBæ7W'&Væ7’ÂÖW&6†çDæÖS¢G&gBçF—FÆRÂÆFf÷&Ó¢G&gBçÆFf÷&ÒÀ¢6FVv÷'“¢G&gBæ6FVv÷'’Â–ÖVçDÖWF†öC¢G&gBç–ÖVçDÖWF†öBÀ¢G&ç67F–öäFFS¢G&gBæFFT¶W’ÂG&ç67F–öåF–ÖS¢G&gBçF–ÖT¶W’Âæ÷FS¢G&gBææ÷FRÀ¢WFFVDC¢FFR‚’Â–ÖvTFF¢G&gBæ–ÖvTFFÂ&VÖ÷fT–ÖvS¢G&gBç&VÖ÷fT–ÖvR’¢–bÆWBWFFVBÒG'’v—BÆö6ÄW‡Vç6UW6T66RæW‡Vç6R†–C¢–B’°¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6ÄW‡Vç6U&VDÖöFVÂæFWF–Â†g&öÓ¢WFFVBÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢Ð¢ÒVÇ6R°¢wV&BÆWB7W'&VçBÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ–æ6öÖR†–C¢–B’VÇ6R²F‡&÷rÆö6ÄFFW'&÷"ç&V6÷&Dæ÷Df÷VæBÐ¢öÆDFFRÒ7W'&VçBæ–æ6öÖTFFP¢òÒG'’v—BÆö6ÄW‡Vç6UW6T66RçWFFT–æ6öÖR„Æö6Ä–æ6öÖUWFFR†–C¢–BÂ&öf–ÆT”C¢7W'&VçBç&öf–ÆT”BÀ¢W‡V7FVEfW'6–öã¢G&gBæÆö6ÅfW'6–öâóò7W'&VçBæÆö6ÅfW'6–öâÀ¢66÷VçD”C¢G&gBæ66÷VçD–BæfÆDÖ…UT”Bæ–æ—B‡WV–E7G&–æs¢’’À¢Ö÷VçDÖ–æ÷#¢G'’Æö6ÄW‡Vç6TÖW"æÖ÷VçDÖ–æ÷"†G&gBæÖ÷VçEFW‡B’Â7W'&Væ7“¢7W'&VçBæ7W'&Væ7’À¢6÷W&6TæÖS¢G&gBçF—FÆRÂ6FVv÷'“¢G&gBæ6FVv÷'’Â–æ6öÖTFFS¢G&gBæFFT¶W’À¢ö67W'&VDC¢G&gBæö67W'&VDBæfÆDÖ²•4óƒcFFTf÷&ÖGFW"‚’æFFR†g&öÓ¢C’ÒÂæ÷FS¢G&gBææ÷FRÀ¢WFFVDC¢FFR‚’Â–ÖvTFF¢G&gBæ–ÖvTFFÂ&VÖ÷fT–ÖvS¢G&gBç&VÖ÷fT–ÖvR’¢–bÆWBWFFVBÒG'’v—BÆö6ÄW‡Vç6UW6T66Ræ–æ6öÖR†–C¢–B’°¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢Æö6Ä–æ6öÖU&VDÖöFVÂæFWF–Â†g&öÓ¢WFFVBÂ–ÖvU7F÷&S¢Æö6Ä–ÖvU7F÷&R’¢Ð¢Ð¢òÒv—B&W&TÆö6Åv÷&·76R‚¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢7G&–ær†öÆDFFRç&Vf—‚ƒr’’¢–b7G&–ær†öÆDFFRç&Vf—‚ƒr’’Ò7G&–ær†G&gBæFFT¶W’ç&Vf—‚ƒr’’°¢v—B&Vg&W6„Æö6ÄÖöçF…&ö¦V7F–öâ†ÖöçF„¶W“¢7G&–ær†G&gBæFFT¶W’ç&Vf—‚ƒr’’¢Ð¢ÆWB&VfW&Væ6RÒ%Â†G&gBæ¶–æBÓÒæW‡Vç6Rò&W‡Vç6R"¢&–æ6öÖR"’õÂ†–BçWV–E7G&–ær’ ¢&V6÷&DFWF–Ä66†Rç&VÖ÷fUfÇVR†f÷$¶W“¢æF—fU&V6÷&E&VfW&Væ6R‡&VfW&Væ6R’æ6æöæ–6ÅfÇVR¢v—BÆöE&V6÷&DFWF–Â‡&VfW&Væ6S¢&VfW&Væ6RÂf÷&6S¢G'VR¢v—B&WG'”Æö6Ä–ÖvT6ÆVçW2‚¢ÖçVÅ&V6÷&DÖW76vRÒÆö6Åw&—FTÖW76vR‚.Šë[Ù^[{.i»NikûÈŽiÊÎiË®ûÈ’"¢&WGW&âG'VP¢Ð¢–bG&gBæ¶–æBÓÒçVæ—fW'6ÂÂG&gBæFöÖ–ä¶W’ÓÒ'vÆÆWB"À¢G&gBæW†—7F–æu&t–BÓÒæ–ÂÂÆö6ÅvÆÆWE6æ6†÷EW6T66RÒæ–Â°¢&WGW&âG'’v—B7&VFTÆö6ÅvÆÆWE6æ6†÷B†G&gBÂFöÖ–ã¢FöÖ–â¢Ð¢–bG&gBæ¶–æBÓÒæW‡Vç6RÂÆö6ÄW‡Vç6UW6T66RÒæ–Â°¢&WGW&âG'’v—B7&VFTÆö6ÄW‡Vç6R†G&gB¢Ð¢–bG&gBæ¶–æBÓÒæ–æ6öÖRÂÆö6ÄW‡Vç6UW6T66RÒæ–Â°¢&WGW&âG'’v—B7&VFTÆö6Ä–æ6öÖR†G&gBÂFöÖ–ã¢FöÖ–â¢Ð¢–bG&gBæ¶–æBÓÒçVæ—fW'6ÂÀ¢Æö6Å&V6÷&EW6T66RÒæ–ÂÀ¢Æö6Å&V6÷&EfÆ–FF–öâç7W÷'FVDFöÖ–ä¶W—2æ6öçF–ç2†G&gBæFöÖ–ä¶W’’À¢v—B6†÷VÆD7&VFTÆö6ÄFöÖ–å&V6÷&B†f÷#¢G&gB’°¢&WGW&âG'’v—B7&VFTÆö6ÄFöÖ–å&V6÷&B†G&gBÂFöÖ–ã¢FöÖ–â¢Ð¢&WGW&âG'’v—B7&VFU&VÖ÷FTÖçVÅ&V6÷&B†G&gBÂFöÖ–ã¢FöÖ–â¢Ð ¢&—fFRgVæ27&VFTÆö6ÅvÆÆWE6æ6†÷B€¢òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÀ¢FöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãð¢’7–æ2F‡&÷w2Óâ&ööÂ°¢wV&BÆWBÆö6ÅvÆÆWE6æ6†÷EW6T66RÂG&gBæW†—7F–æu&t–BÓÒæ–ÂÀ¢G&gBçfÆ–FF–öäÖW76vR†FöÖ–ã¢FöÖ–â’ÓÒæ–ÂVÇ6R°¢F‡&÷rÆö6ÄFFW'&÷"æ–çfÆ–E&V6÷&@¢Ð¢ÆWBÖ÷VçDÖ–æ÷"ÒG'’Æö6ÄW‡Vç6TÖW"æÖ÷VçDÖ–æ÷"†G&gBç&–Ö'•fÇVUFW‡B¢ÆWB–ÆöBÒG&gBçVæ—fW'6Å–ÆöB†FöÖ–ã¢FöÖ–â¢ÆWB6æ6†÷BÒG'’v—BÆö6ÅvÆÆWE6æ6†÷EW6T66Ræ7&VFR„Æö6ÅvÆÆWE6æ6†÷D6öÖÖæB€¢–C¢UT”B‚’À¢F—FÆS¢G&gBç&W6öÇfVEF—FÆR†FöÖ–ã¢FöÖ–â’À¢7VÖÖ'“¢G&gBç&W6öÇfVE7VÖÖ'’†FöÖ–ã¢FöÖ–â’À¢–ÆöC¢–ÆöBÀ¢&V6÷&DFFS¢G&gBæFFT¶W’À¢&V6÷&EF–ÖS¢G&gBçF–ÖT¶W’À¢ö67W'&VDC¢G&gBæö67W'&VDBÀ¢&Ææ6TÖ–æ÷#¢Ö÷VçDÖ–æ÷"À¢7W'&Væ7“¢$4å’"À¢¶–æC¢G&gBçvÆÆWE&V6÷&D¶–æBÓÒ&Æ–&–Æ—G•÷6æ6†÷B"òæÆ–&–Æ—G’¢æ76WBÀ¢–ÖvTFF¢G&gBæ–ÖvTFFÀ¢7&VFVDC¢FFR‚¢’¢ÆWB6æ6†÷E–ÆöBÒ‡G'“òÆö6Å&V6÷&D6öFV2æFV6öFR‡6æ6†÷Bç–ÆöD¥4ôâ’’óò³¥Ð¢66†VGVÆTÆö6Ä6ö×æ–öâ†f÷#¢æF—fU&V6÷&DFWF–Â€¢–C¢&Æö6Â×vÆÆWBõÂ‡6æ6†÷Bæ–BçWV–E7G&–ær’"À¢&t–C¢6æ6†÷Bæ–BçWV–E7G&–ærÀ¢¶–æC¢'vÆÆWB"À¢F—FÆS¢6æ6†÷BçF—FÆRÀ¢7V'F—FÆS¢6æ6†÷Bç&V6÷&DFFRÀ¢fÇVS¢7G&–ær†f÷&ÖC¢,*RRã&b"Â6æ6†÷Bæ&Ææ6R’À¢FWF–Å&÷w3¢µÒÀ¢–ÖvUU$Ã¢æ–ÂÀ¢–ÖvTÆöDW'&÷#¢fÇ6RÀ¢–ÖvUFƒ¢6æ6†÷Bæ–ÖvUF‚À¢–ÖvT†6ƒ¢6æ6†÷Bæ–ÖvT†6‚À¢Ö÷VçC¢6æ6†÷Bæ&Ææ6RÀ¢ÖW&6†çDæÖS¢æ–ÂÀ¢ÆFf÷&Ó¢æ–ÂÀ¢6FVv÷'“¢æ–ÂÀ¢–ÖVçDÖWF†öC¢æ–ÂÀ¢&V6÷&DFFS¢6æ6†÷Bç&V6÷&DFFRÀ¢æ÷FS¢æ–ÂÀ¢6ö×æ–öäÖW76vS¢6æ6†÷E–ÆöBç7G&–ær‚&6ö×æ–öåöÖW76vR"’À¢66÷VçD–C¢6æ6†÷BæÆ–æ¶VD66÷VçD”CòçWV–E7G&–ærÀ¢7—7FVÔ–ÖvS¢'vÆÆWBç72"À¢–ÆöC¢6æ6†÷E–ÆöBÀ¢G&ç67F–öåF–ÖS¢6æ6†÷Bç&V6÷&EF–ÖRÀ¢FöÖ–ä¶W“¢'vÆÆWB"À¢6÷W&6S¢&Æö6Â"À¢7FGW3¢&Æö6Â"À¢”fVVF&6³¢æF—fT”fVVF&6²‡–ÆöC¢6æ6†÷E–ÆöBæF–7F–öæ'’‚&•öfVVF&6²"’’À¢ÆææW$”fVVF&6³¢æF—fT”fVVF&6²‡–ÆöC¢6æ6†÷E–ÆöBæF–7F–öæ'’‚'ÆææW%ö•öfVVF&6²"’¢’¢Fò°¢G'’v—BÆöDÆö6ÅvÆÆWE6æ6†÷G2‚¢Ò6F6‚°¢ÖçVÅ&V6÷&DÖW76vRÒ.[ú¾xZ~[{.KùÞZÙŽYÊŽiÊÎiË®ûÈÎKØnX‰~ŠŽX‹~ikZK‹J^ûÉ¥Â†W'&÷"æÆö6Æ—¦VDFW67&—F–öâ’ ¢&WGW&âG'VP¢Ð¢ÖçVÅ&V6÷&DÖW76vRÒ.™+XÈ^[ú¾xZ~[{.KùÞZÙŽûÈŽiÊÎiË®ûÈ’ ¢&WGW&âG'VP¢Ð ¢&—fFRgVæ26†÷VÆD7&VFTÆö6ÄFöÖ–å&V6÷&B†f÷"G&gC¢æF—fTÖçVÅ&V6÷&DG&gB’7–æ2Óâ&ööÂ°¢wV&BÆWBÆö6Å&V6÷&EW6T66RVÇ6R²&WGW&âfÇ6RÐ¢wV&BÆWBW†—7F–æu&t–BÒG&gBæW†—7F–æu&t–BVÇ6R²&WGW&âG'VRÐ¢wV&BÆWBW†—7F–æt”BÒUT”B‡WV–E7G&–æs¢W†—7F–æu&t–B’VÇ6R²&WGW&âfÇ6RÐ¢&WGW&â‡G'“òv—BÆö6Å&V6÷&EW6T66Rç&V6÷&B†–C¢W†—7F–æt”B’’Òæ–À¢Ð ¢&—fFRgVæ27&VFU&VÖ÷FTÖçVÅ&V6÷&B…òG&gC¢æF—fTÖçVÅ&V6÷&DG&gBÂFöÖ–ã¢æF—fTFöÖ–äFVf–æ—F–öãò’7–æ2F‡&÷w2Óâ&ööÂ°¢ÆWB6W76–öâÒG'’v—BfÆ–E6W76–öâ‚¢ÆWB&VfW&Væ6RÒG'’v—B&V6÷&E&W÷6—F÷'’æ7&VFR€¢G&gBÀ¢FöÖ–ã¢FöÖ–âÀ¢W6W$–C¢6W76–öâçW6W"æ–BÀ¢66W75Fö¶Vã¢6W76–öâæ66W75Fö¶Và¢¢ÆWB6fVE&VfW&Væ6RÒæF—fU&V6÷&E&VfW&Væ6R‡&VfW&Væ6R’æ6æöæ–6ÅfÇVP¢–bÆWBW†—7F–æu&t–BÒG&gBæW†—7F–æu&t–B°¢ÆWB÷&–v–æÅ&VfW&Væ6RÒæF—fU&V6÷&E&VfW&Væ6R€¢¶–æC¢&FF"À¢&t–C¢W†—7F–æu&t–@¢’æ6æöæ–6ÅfÇVP¢–çfÆ–FFU&V6÷&DW‡&W76–öåÆå7FFR†gFW$6†æv–æs¢¶÷&–v–æÅ&VfW&Væ6RÂ6fVE&VfW&Væ6UÒ¢Ð¢–bG&gBæ¶–æBÓÒæW‡Vç6R°¢66†VGVÆT6öæf—&ÖVDW‡Vç6Ufö6'VÆ'’€¢ÆFf÷&Ó¢G&gBçÆFf÷&ÒÀ¢6FVv÷'“¢G&gBæ6FVv÷'’À¢–ÖVçDÖWF†öC¢G&gBç–ÖVçDÖWF†öBÀ¢66÷VçD–C¢G&gBæ66÷VçD–BÀ¢W6W$–C¢6W76–öâçW6W"æ–BÀ¢66W75Fö¶Vã¢6W76–öâæ66W75Fö¶Và¢¢Ð¢v—B&Vg&W6„gFW%&V6÷&Ew&—FR†ffV7FVDFFT¶W—3¢¶G&gBæFFT¶W•Ò¢–bG&gBæ¶–æBÒçVæ—fW'6ÂÇÂG&gBæFöÖ–ä¶W’ÓÒ'vÆÆWB"°¢v—BÆöD66÷VçG2‚¢Ð¢–bG&gBæW†—7F–æu&t–BÒæ–Â°¢&V6÷&DFWF–Ä66†Rç&VÖ÷fUfÇVR†f÷$¶W“¢6fVE&VfW&Væ6R¢v—BÆöE&V6÷&DFWF–Â‡&VfW&Væ6S¢6fVE&VfW&Væ6RÂf÷&6S¢G'VR¢Ð¢ÖçVÅ&V6÷&DÖW76vRÒG&gBæW†—7F–æu&t–BÓÒæ–Âò.Šë[Ù^[{.KùÞZÙ‚"¢.Šë[Ù^[{.i»Nik ¢&WGW&âG'VP¢Ð ¢&—fFR7FF–2gVæ2Ö¶TFVfVÇDÆö6Å7F÷&vR‚’F‡&÷w2ÓâFVfVÇDÆö6Å7F÷&vR°¢ÆWBFF&6RÒG'’Æö6ÄFF&6R‚¢ÆWB–ÖvU7F÷&RÒG'’Æö6Ä–ÖvU7F÷&R‚¢ÆWB&öf–ÆU7F÷&RÒÆö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R¢ÆWBW‡Vç6U&W÷6—F÷'’ÒG'’Æö6ÄW‡Vç6U&W÷6—F÷'’†FF&6S¢FF&6R¢ÆWB&V6÷&E&W÷6—F÷'’ÒG'’Æö6Å&V6÷&E&W÷6—F÷'’†FF&6S¢FF&6R¢ÆWBvÆÆWE6æ6†÷E&W÷6—F÷'’ÒG'’Æö6ÅvÆÆWE6æ6†÷E&W÷6—F÷'’†FF&6S¢FF&6R¢ÆWBf7E&VFW"ÒG'’Æö6Äf7E&VFW"†FF&6S¢FF&6R¢ÆWB6ö×æ–öäÖVÖ÷'•&W÷6—F÷'’ÒÆö6Ä6ö×æ–öäÖVÖ÷'•&W÷6—F÷'’†FF&6S¢FF&6R¢ÆWBW‡&W76–öåW'6—7FVæ6RÒÆö6ÄW‡&W76–öåW'6—7FVæ6R€¢FF&6S¢FF&6RÀ¢ÖVÖ÷'•&W÷6—F÷'“¢6ö×æ–öäÖVÖ÷'•&W÷6—F÷'¢¢&WGW&âFVfVÇDÆö6Å7F÷&vR€¢W‡Vç6UW6T66S¢Æö6ÄW‡Vç6UW6T66R€¢&öf–ÆU7F÷&S¢&öf–ÆU7F÷&RÀ¢&W÷6—F÷'“¢W‡Vç6U&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢W‡&W76–öåW'6—7FVæ6S¢W‡&W76–öåW'6—7FVæ6P¢’À¢&V6÷&EW6T66S¢Æö6Å&V6÷&EW6T66R€¢&öf–ÆU7F÷&S¢&öf–ÆU7F÷&RÀ¢&W÷6—F÷'“¢&V6÷&E&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢W‡&W76–öåW'6—7FVæ6S¢W‡&W76–öåW'6—7FVæ6P¢’À¢vÆÆWE6æ6†÷EW6T66S¢Æö6ÅvÆÆWE6æ6†÷EW6T66R€¢&öf–ÆU7F÷&S¢&öf–ÆU7F÷&RÀ¢&W÷6—F÷'“¢vÆÆWE6æ6†÷E&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢W‡&W76–öåW'6—7FVæ6S¢W‡&W76–öåW'6—7FVæ6P¢’À¢f7E&VFW#¢f7E&VFW"À¢6ö×æ–öäÖVÖ÷'•&W÷6—F÷'“¢6ö×æ–öäÖVÖ÷'•&W÷6—F÷'’À¢W‡&W76–öåW'6—7FVæ6S¢W‡&W76–öåW'6—7FVæ6RÀ¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢VæF–ætf–ææ6–Å&W÷6—F÷'“¢Æö6ÅVæF–ætf–ææ6–Å&W÷6—F÷'’†FF&6S¢FF&6R’À¢f–ææ6–Ä&–æF–æu&W÷6—F÷'“¢G'’Æö6Äf–ææ6–Ä&–æF–æu&W÷6—F÷'’†FF&6S¢FF&6R’À¢†—7F÷'”Ö–w&F–öä66†S¢Æö6Ä†—7F÷'”Ö–w&F–öä66†R†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R’À¢†—7F÷'”Ö–w&F–öäF–væ÷7F–57F÷&S¢G'“òÆö6Ä†—7F÷'”Ö–w&F–öäF–væ÷7F–57F÷&R‚’À¢†—7F÷'”–çfVçF÷'•&VFW#¢Æö6Ä†—7F÷'”–çfVçF÷'•&VFW"†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R’À¢†—7F÷'•Vç&W6öÇfVE&W÷6—F÷'“¢Æö6Ä†—7F÷'•Vç&W6öÇfVE&W÷6—F÷'’†FF&6S¢FF&6R¢¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDÆö6ÄW‡Vç6UW6T66R‚’ÓâÆö6ÄW‡Vç6UW6T66U&÷Fö6öÃò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB&W÷6—F÷'’ÒG'“òÆö6ÄW‡Vç6U&W÷6—F÷'’†FF&6S¢FF&6R’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&âÆö6ÄW‡Vç6UW6T66R€¢&öf–ÆU7F÷&S¢Æö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R’À¢&W÷6—F÷'“¢&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&RÀ¢W‡&W76–öåW'6—7FVæ6S¢Æö6ÄW‡&W76–öåW'6—7FVæ6R†FF&6S¢FF&6R¢¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Å&V6÷&EW6T66R‚’ÓâÆö6Å&V6÷&EW6T66U&÷Fö6öÃò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB&W÷6—F÷'’ÒG'“òÆö6Å&V6÷&E&W÷6—F÷'’†FF&6S¢FF&6R’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&âÆö6Å&V6÷&EW6T66R€¢&öf–ÆU7F÷&S¢Æö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R’À¢&W÷6—F÷'“¢&W÷6—F÷'’À¢–ÖvU7F÷&S¢–ÖvU7F÷&P¢¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Ä–ÖvU7F÷&R‚’ÓâÆö6Ä–ÖvU7F÷&Sò°¢G'“òÆö6Ä–ÖvU7F÷&R‚¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Ä–ÖvT–çF¶U&W÷6—F÷'’‚’ÓâÆö6Ä–ÖvT–çF¶U&W÷6—F÷'“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&âÆö6Ä–ÖvT–çF¶U&W÷6—F÷'’†FF&6S¢FF&6R¢Ð ¢òòòXŠN˜xÞX	ž˜žiú^Šú.KéÞ‹Yn‹ùžKŠ®K¹>[©>ûÉ¾kÈþk:ŽXZ^KÉ®ŠêžKŠN˜>XŠN˜xÞ˜;Þh»þX‹z›®X	ž˜ž8™Ùž›¹ŽZKiXŽ8 ¢&—fFR7FF–2gVæ2FVfVÇDf–ææ6–ÄGWÆ–6FU&Wf–Wu&W÷6—F÷'’‚’ÓâÆö6Äf–ææ6–ÄGWÆ–6FU&Wf–Wu&W÷6—F÷'“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&âÆö6Äf–ææ6–ÄGWÆ–6FU&Wf–Wu&W÷6—F÷'’†FF&6S¢FF&6R¢Ð ¢òòò˜	®yú^ih~jŽ˜xÎy¨N8ÎK¸®ZJž[{.ˆ«òiÊÎiÈŽiKnXZ^8Þ™ÚZè>zé~ûÉ¾kÈþk:ŽXZ^i{n‹ùžKŠNKŠ®i[ZÙ~h.K‹¢8 ¢&—fFR7FF–2gVæ2FVfVÇE&V6övæ—F–öäW‡Vç6U&W÷6—F÷'’‚’ÓâÆö6ÄW‡Vç6U&W÷6—F÷'•&÷Fö6öÃò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB&W÷6—F÷'’ÒG'“òÆö6ÄW‡Vç6U&W÷6—F÷'’†FF&6S¢FF&6R’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&â&W÷6—F÷'¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Å&V6÷&E÷'F&–Æ—G’‚’ÓâÆö6Å&V6÷&E÷'F&–Æ—G“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&âÆö6Å&V6÷&E÷'F&–Æ—G’†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Äf7E÷'F&–Æ—G’‚’ÓâÆö6Äf7E÷'F&–Æ—G“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&âÆö6Äf7E÷'F&–Æ—G’†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Ä6ö×ÆWFT&6·W÷'F&–Æ—G’‚’ÓâÆö6Ä6ö×ÆWFT&6·W÷'F&–Æ—G“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB–ÖvU7F÷&RÒG'“òÆö6Ä–ÖvU7F÷&R‚’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&âÆö6Ä6ö×ÆWFT&6·W÷'F&–Æ—G’†FF&6S¢FF&6RÂ–ÖvU7F÷&S¢–ÖvU7F÷&R¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDvVæW&–4–×÷'E6W'f–6R‚’ÓâvVæW&–4–×÷'E6W'f–6Sò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&âvVæW&–4–×÷'E6W'f–6R†FF&6S¢FF&6R¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Ä&–æF–æu&W÷6—F÷'’‚’ÓâÆö6Ä&–æF–æu&W÷6—F÷'“ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’VÇ6R²&WGW&âæ–ÂÐ¢&WGW&âÆö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R¢Ð ¢&—fFR7FF–2gVæ2FVfVÇDÆö6Å7–æ5'VææW"‚’ÓâÆö6Å7–æ5'VææW#ò°¢wV&BÆWBFF&6RÒG'“òÆö6ÄFF&6R‚’À¢ÆWB&W÷6—F÷'’ÒG'“òÆö6ÄW‡Vç6U&W÷6—F÷'’†FF&6S¢FF&6R’VÇ6R²&WGW&âæ–ÂÐ¢ÆWB&öf–ÆU7F÷&RÒÆö6Å&öf–ÆU7F÷&R†FF&6S¢FF&6R¢ÆWBG&ç7÷'BÒ7W&6U7–æ5G&ç7÷'B€¢&VÖ÷FT6Æ–VçC¢7W&6U&VÖ÷FT6Æ–VçB‚’À¢66W75Fö¶Vã¢°¢G'’v—B7W&6TWF…6W'f–6R‚’æ7W'&VçE6W76–öâ‚’æ66W75Fö¶Và¢Ð¢¢&WGW&âÆö6Å7–æ46ö÷&F–æF÷"€¢7FFU7F÷&S¢&öf–ÆU7F÷&RÀ¢&W÷6—F÷'“¢&W÷6—F÷'’À¢÷'F&–Æ—G“¢Æö6ÄW‡Vç6U÷'F&–Æ—G’†FF&6S¢FF&6R’À¢G&ç7÷'C¢G&ç7÷'@¢¢Ð ¢&—fFR7FF–2ÆWBÖöçF„¶W”f÷&ÖGFW#¢FFTf÷&ÖGFW"Ò°¢ÆWBf÷&ÖGFW"ÒFFTf÷&ÖGFW"‚¢f÷&ÖGFW"æÆö6ÆRÒÆö6ÆR†–FVçF–f–W#¢&VåõU5õõ4•‚"¢f÷&ÖGFW"æFFTf÷&ÖBÒ'———’ÔÔÒ ¢&WGW&âf÷&ÖGFW ¢Ò‚ ¢&—fFR7FF–2f"7W'&VçDÖöçF„¶W“¢7G&–ær°¢ÖöçF„¶W”f÷&ÖGFW"ç7G&–ær†g&öÓ¢FFR‚’¢Ð§Ð ¢òòòK©NYùþK‹¾YË®išþy¨NjŠ®k¹YùþûÈ„”õ2Õc"Õ4„TÄÂÓûÈž8 ¦VçVÒFöÖ–ã¢7G&–ærÂ66T—FW&&ÆRÂ–FVçF–f–&ÆR°¢66RW‡Vç6P¢66R6ÆVW ¢66Rföö@¢66R7÷'@¢66R&VF–æp ¢f"–C¢7G&–ær²&ufÇVRÐ ¢7FF–2gVæ2vW$FöÖ–â†Bƒ¢4tfÆöB’ÓâFöÖ–ãò°¢ÆWBv–GF‚Ò¦–W¦•&÷F÷G—TÆ–÷WBçvUöF÷Eö†—E÷v–GF€¢wV&B‚æ—4f–æ—FRÂv–GF‚âVÇ6R²&WGW&âæ–ÂÐ¢–b‚ÃÒ²&WGW&âÆÄ66W2æf—'7BÐ¢–b‚ãÒ4tfÆöB†ÆÄ66W2æ6÷VçB’¢v–GF‚²&WGW&âÆÄ66W2æÆ7BÐ¢&WGW&âÆÄ66W5´–çB‡‚òv–GF‚•Ð¢Ð ¢f"F—FÆS¢7G&–ær°¢7v—F6‚6VÆb°¢66RæW‡Vç6S¢&WGW&â.Šë‹Jb ¢66Rç6ÆVW¢&WGW&â.yÚyÊ ¢66RæfööC¢&WGW&â.šZîš9ò ¢66Rç7÷'C¢&WGW&â.‹ùXª‚ ¢66Rç&VF–æs¢&WGW&â.™ˆ^Šû² ¢Ð¢Ð ¢f"7—7FVÔ–ÖvS¢7G&–ær°¢7v—F6‚6VÆb°¢66RæW‡Vç6S¢&WGW&â&7&VF—F6&B ¢66Rç6ÆVW¢&WGW&â&Öööâç§§¢ ¢66RæfööC¢&WGW&â&f÷&²æ¶æ–fR ¢66Rç7÷'C¢&WGW&â&f–wW&Rç'Vâ ¢66Rç&VF–æs¢&WGW&â&&öö² ¢Ð¢Ð ¢òòòikZ;>K©NYùþKˆâF6†&ö&BæFöÖ–ç2KŠÞiz~Yùò¶W’y¨NZûž[©NX[>{;¾ûÈŽyJŽK¨îz›®hXŠNZé®KˆîYî{ºÞXh^Zëžhê^{«þûÈž8 ¢f"ÆVv7”FöÖ–ä¶W“¢7G&–ær°¢7v—F6‚6VÆb°¢66RæW‡Vç6S¢&WGW&â&W‡Vç6R ¢66Rç6ÆVWÂæfööBÂç7÷'BÂç&VF–æs¢&WGW&â&ufÇVP¢Ð¢Ð§Ð ¢òòòK‹¾YË®išþK˜¾Kˆ®y¨NXZŽ[þŠhny¹n[.ûÈ„”õ2Õc"Õ4„TÄÂÓNûÈžûÉ¶ææöæVŠŽzK®izŠhny¹n[.8XÎyYžYÊŽK©NYùþjŠ®k¹8 ¦VçVÒ÷fW&Æ“¢7G&–ærÂ66T—FW&&ÆRÂ–FVçF–f–&ÆR°¢66RæöæP¢66R–æ&÷€¢66R&V6÷&G0¢66R–ç6–v‡G0¢66RvÆÆW@¢66R6WGF–æw0 ¢f"–C¢7G&–ær²&ufÇVRÐ ¢f"F—FÆS¢7G&–ær°¢7v—F6‚6VÆb°¢66RææöæS¢&WGW&â" ¢66Ræ–æ&÷ƒ¢&WGW&â.iKnK»nzë ¢66Rç&V6÷&G3¢&WGW&â.Šë[ÙR ¢66Ræ–ç6–v‡G3¢&WGW&â.Šx.Zùò ¢66RçvÆÆWC¢&WGW&â.™+XÈR ¢66Rç6WGF–æw3¢&WGW&â.Šëî{Úâ ¢Ð¢Ð§Ð

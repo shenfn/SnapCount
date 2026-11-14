@@ -29,6 +29,7 @@ final class HostedAICompanionProvider: LocalCompanionProvider {
         let response = try await service.generateLocalExpression(
             currentFact: Self.factPayload(context.currentFact),
             plannerCandidate: Self.plannerPayload(selected, fact: context.currentFact),
+            recentFacts: context.recentFacts.map(Self.factPayload),
             localMemoryContext: LocalCompanionCompositionSupport.jsonObject(context.memoryContextJSON) as? [String: Any],
             expressionPreferences: Self.preferencesPayload(context.expressionPreferences),
             clientLocalTime: context.clientLocalTime,

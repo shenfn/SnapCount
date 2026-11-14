@@ -302,6 +302,26 @@ final class LocalExpressionContextTests: XCTestCase {
         XCTAssertEqual(selected.dimension, "current_fact")
     }
 
+    func testHistoryCandidateOutranksMemoryOnlyAngle() throws {
+        let fact = LocalExpressionFact(
+            id: "fact-history", domainKey: "expense", title: "小屁孩", summary: "生活",
+            recordDate: "2026-11-14", recordTime: nil, amount: 150, category: "生活"
+        )
+        let recent = (0..<3).map { index in
+            LocalExpressionFact(
+                id: "recent-\(index)", domainKey: "expense", title: "其他商家", summary: "生活",
+                recordDate: "2026-11-\(String(format: "%02d", 13 - index))", recordTime: nil,
+                amount: Double(index + 10), category: "生活"
+            )
+        }
+        let memory = #"{"facts":[{"key":"local_ai.expense.recent_30d","value":"近30天生活类多次出现","confidence":0.95,"entity_type":"category","entity_value":"生活"}]}"#
+        let selected = try XCTUnwrap(LocalPlannerCandidateEngine.selectedCandidate(
+            for: fact, recentFacts: recent, memoryContextJSON: memory
+        ))
+        XCTAssertEqual(selected.dimension, "continuity")
+        XCTAssertGreaterThan(selected.evidence.count, 1)
+    }
+
     func testProviderCompanionPersistsBesidePlannerFeedback() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -3,6 +3,40 @@ import XCTest
 @testable import SnapCount
 
 final class LocalImageRecognitionTests: XCTestCase {
+    func testLOCALP1FOOD001HostedFoodPayloadArchivesWithoutDatabaseError() async throws {
+        let context = try makeContext()
+        defer { cleanup(context) }
+        let payload: [String: AnyCodable] = [
+            "dishes": AnyCodable([
+                ["name": "白米饭", "estimated_grams": 200, "calorie_kcal": 230,
+                 "protein_g": 4.6, "carb_g": 50, "fat_g": 0.5],
+                ["name": "蟹柳", "estimated_grams": 100, "calorie_kcal": 110,
+                 "protein_g": 10, "carb_g": 5, "fat_g": 4]
+            ]),
+            "meal_type": AnyCodable("lunch"),
+            "total_calorie_kcal": AnyCodable(340),
+            "source_app": AnyCodable("截图识别")
+        ]
+        let provider = StubLocalImageRecognitionProvider(candidate: makeCandidate(
+            domainKey: "food", confidence: 0.85, payload: payload))
+        let recognition = LocalImageRecognitionUseCase(
+            localRecordUseCase: context.useCase,
+            imageStore: context.imageStore,
+            intakeRepository: context.intakeRepository,
+            provider: provider
+        )
+
+        let outcome = try await recognition.ingest(
+            imageData: Data("food-photo".utf8), captureKind: "photo", filename: "food.jpg")
+        guard case .archived(let archived) = outcome.result else {
+            return XCTFail("完整饮食候选应直接写入本地正式记录")
+        }
+        XCTAssertEqual(archived.record.domainKey, "food")
+        XCTAssertEqual(try LocalRecordCodec.decode(archived.record.payloadJSON)["meal_type"]?.stringValue, "lunch")
+        XCTAssertEqual(try LocalRecordCodec.decode(archived.record.payloadJSON).double("total_calorie_kcal"), 340)
+        XCTAssertTrue(try context.imageStore.contains(path: XCTUnwrap(archived.record.imagePath)))
+    }
+
     func testLF03731IncompleteFinanceFactsWaitForConfirmationAndKeepOriginal() async throws {
         let context = try makeContext()
         defer { cleanup(context) }
