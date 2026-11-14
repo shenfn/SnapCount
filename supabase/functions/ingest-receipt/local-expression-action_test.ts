@@ -135,6 +135,21 @@ Deno.test("Hosted action rejects forged fingerprint and evidence", () => {
   assertEquals(unsupported.plannerFallbackReason, "unsupported_evidence_reference", "unsupported evidence reason must be traceable");
 });
 
+Deno.test("Hosted action strips unknown evidence fields before the planner packet", () => {
+  const evidence = {
+    ...evidenceReference("current_fact", "fact-1", "amount"),
+    extra: "untrusted".repeat(2_000),
+  };
+  const result = normalizeLocalExpressionAction(baseInput(candidate({
+    evidence: [evidence],
+    number_facts: [{ value: 12.8, meaning: "amount", role: "measure", evidence: [evidence] }],
+  })));
+  assert(result.candidate !== null, "valid evidence fields should remain accepted");
+  const sanitizedEvidence = result.candidate?.evidence[0] as unknown as Record<string, unknown>;
+  assertEquals(Object.keys(sanitizedEvidence).sort().join(","), "field,kind,reference,source", "unknown evidence keys must be stripped");
+  assertEquals(JSON.stringify(result.candidate).includes("untrusted"), false, "unknown evidence content must not reach the packet");
+});
+
 Deno.test("Hosted action rejects fabricated current-fact identity", () => {
   const missingIdentity = normalizeLocalExpressionAction({
     ...baseInput(candidate()),

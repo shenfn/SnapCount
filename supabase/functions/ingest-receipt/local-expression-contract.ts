@@ -72,6 +72,17 @@ function isEvidenceReference(value: unknown): value is PlannerEvidenceReference 
     && (item.field === null || typeof item.field === "string");
 }
 
+function sanitizeEvidenceReference(value: unknown): PlannerEvidenceReference | null {
+  if (!isEvidenceReference(value)) return null;
+  const item = value as Record<string, unknown>;
+  return {
+    kind: item.kind as PlannerEvidenceKind,
+    source: item.source as PlannerEvidenceSource,
+    reference: (item.reference as string).trim(),
+    field: item.field === null ? null : (item.field as string).trim() || null,
+  };
+}
+
 function numericValue(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
@@ -156,7 +167,10 @@ export function validateLocalPlannerCandidate(
     return { ok: false, reason: "claim_fingerprint_mismatch" };
   }
   const rawEvidence = Array.isArray(candidate.evidence) ? candidate.evidence : [];
-  const evidence = rawEvidence.filter(isEvidenceReference);
+  const evidence = rawEvidence.flatMap((item) => {
+    const sanitized = sanitizeEvidenceReference(item);
+    return sanitized ? [sanitized] : [];
+  });
   if (evidence.length === 0) return { ok: false, reason: "missing_evidence" };
   if (evidence.length !== rawEvidence.length) return { ok: false, reason: "invalid_evidence_reference" };
   if (evidence.some((item) => item.kind === "current_fact")
@@ -186,7 +200,10 @@ export function validateLocalPlannerCandidate(
       const value = typeof item.value === "number" && Number.isFinite(item.value) ? item.value : null;
       if (value === null || !["count", "measure"].includes(String(item.role))) return [];
       const rawNumberEvidence = Array.isArray(item.evidence) ? item.evidence : [];
-      const numberEvidence = rawNumberEvidence.filter(isEvidenceReference);
+      const numberEvidence = rawNumberEvidence.flatMap((reference) => {
+        const sanitized = sanitizeEvidenceReference(reference);
+        return sanitized ? [sanitized] : [];
+      });
       if (numberEvidence.length === 0) return [];
       if (numberEvidence.length !== rawNumberEvidence.length) return [];
       return [{
