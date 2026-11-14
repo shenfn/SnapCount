@@ -26,3 +26,11 @@
 - GREEN：`node_modules/.bin/esbuild ... --bundle` 解析 Edge 合同、context packet、planner、delivery、index 均通过。
 - GREEN：临时 Node Deno harness 执行合同测试 3/3 和 context packet 测试 20/20 通过。
 - GREEN：`xcodebuild -project ios/SnapCount.xcodeproj -scheme SnapCount -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SnapCountTests/LocalExpressionContextTests test`，5/5 通过。
+
+## Task 3 Hosted action hardening addendum（2026-11-14）
+
+- Hosted `generate_local_expression` now normalizes the complete read-only packet before Voice. The public candidate contract sees unfiltered evidence and numeric arrays, while invalid candidates are discarded as a unit.
+- A rejected candidate selects current-fact-only generation and records the deterministic contract reason in the context trace and action result. Its canonical text, numbers, evidence, fingerprint, and memory-derived claim do not enter Voice.
+- Local memory is re-normalized at the Edge boundary to same-domain keys, compact summaries, confidence bounds, and an eight-item limit. An explicit disabled or empty context becomes no memory context.
+- Event time uses valid `occurred_at`, then `order_finished_at`, then `record_date` / `record_time`; invalid or absent event timestamps fall back to capture/reference context without relabeling capture time as event time.
+- Task 3 focused tests cover valid current/recent/memory candidates, forged fingerprint/evidence, number provenance and array failures, invalid event timestamp fallback, and traceable current-fact-only fallback. The esbuild + Node Deno-compatible harness passes 8/8.

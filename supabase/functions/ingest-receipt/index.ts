@@ -21,8 +21,7 @@ import {
   isRecordExpressionOwnerEnabled,
 } from "./expression-delivery.ts";
 import type { PlannerVoiceBrief } from "./expression-delivery.ts";
-import type { PlannerEvidenceReference } from "./local-expression-contract.ts";
-import { validateLocalPlannerCandidate } from "./local-expression-contract.ts";
+import { normalizeLocalExpressionAction } from "./local-expression-action.ts";
 import {
   loadDomainProfiles,
   selectSignals,
@@ -5548,12 +5547,16 @@ Deno.serve(async (req) => {
             status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
           });
         }
-        const currentFact = jsonBody?.current_fact && typeof jsonBody.current_fact === "object"
-          ? jsonBody.current_fact as Record<string, unknown>
-          : {};
-        const candidate = jsonBody?.planner_candidate && typeof jsonBody.planner_candidate === "object"
-          ? jsonBody.planner_candidate as Record<string, unknown>
-          : {};
+        const normalizedAction = normalizeLocalExpressionAction({
+          currentFact: jsonBody?.current_fact,
+          plannerCandidate: jsonBody?.planner_candidate,
+          localMemoryContext: jsonBody?.local_memory_context,
+          recentFacts: jsonBody?.recent_facts,
+          clientLocalTime: jsonBody?.client_local_time,
+          clientCapturedAt: jsonBody?.client_captured_at,
+          requestReceivedAt: new Date().toISOString(),
+        });
+        const currentFact = normalizedAction.currentFact;
         const rawPreferences = isRecordValue(jsonBody?.expression_preferences)
           ? jsonBody.expression_preferences
           : {};
@@ -5574,47 +5577,12 @@ Deno.serve(async (req) => {
         const customNote = typeof rawPreferences.custom_note === "string"
           ? rawPreferences.custom_note.trim().slice(0, 80) || null
           : null;
-        const rawLocalTime = typeof jsonBody?.client_local_time === "string"
-          ? jsonBody.client_local_time.trim()
-          : "";
-        const clientLocalTime = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(rawLocalTime)
-          ? rawLocalTime
-          : null;
+        const clientLocalTime = normalizedAction.clientLocalTime;
         const weekdayValue = typeof jsonBody?.weekday === "string" ? jsonBody.weekday : "";
         const weekday = new Set(["周一", "周二", "周三", "周四", "周五", "周六", "周日"]).has(weekdayValue)
           ? weekdayValue
           : null;
-        const recordDate = typeof currentFact.record_date === "string"
-          ? currentFact.record_date.trim()
-          : "";
-        const recordTime = typeof currentFact.record_time === "string"
-          ? currentFact.record_time.trim()
-          : "";
-        const fallbackEventTime = /^\d{4}-\d{2}-\d{2}$/.test(recordDate)
-          ? /^\d{1,2}:\d{2}(?::\d{2})?$/.test(recordTime)
-            ? `${recordDate}T${recordTime}+08:00`
-            : recordDate
-          : null;
-        const localPayload = currentFact.payload_json && typeof currentFact.payload_json === "object"
-          ? currentFact.payload_json as Record<string, unknown>
-          : null;
-        const occurredAt = typeof currentFact.occurred_at === "string"
-          ? currentFact.occurred_at
-          : typeof localPayload?.occurred_at === "string"
-          ? localPayload.occurred_at
-          : null;
-        const orderFinishedAt = typeof currentFact.order_finished_at === "string"
-          ? currentFact.order_finished_at
-          : typeof localPayload?.order_finished_at === "string"
-          ? localPayload.order_finished_at
-          : null;
-        const timeContext = buildTimeContext({
-          occurredAt,
-          orderFinishedAt,
-          clientCapturedAt: jsonBody?.client_captured_at ?? clientLocalTime,
-          requestReceivedAt: new Date().toISOString(),
-          fallbackEventTime,
-        });
+        const timeContext = normalizedAction.timeContext;
         const recentCompanionLines = Array.isArray(jsonBody?.recent_companion_lines)
           ? (jsonBody.recent_companion_lines as unknown[])
             .filter((line): line is string => typeof line === "string")
@@ -5622,10 +5590,7 @@ Deno.serve(async (req) => {
             .filter((line) => line.length > 0)
             .slice(0, 5)
           : [];
-        const allowedDomains = new Set(["expense", "income", "food", "sleep", "sport", "reading", "wallet"]);
-        const domainKey = typeof currentFact.domain_key === "string" && allowedDomains.has(currentFact.domain_key)
-          ? currentFact.domain_key
-          : "expense";
+        const domainKey = normalizedAction.domainKey;
         const amount = typeof currentFact.amount === "number" && Number.isFinite(currentFact.amount)
           ? currentFact.amount
           : null;
@@ -5651,55 +5616,22 @@ Deno.serve(async (req) => {
           confidence: 1,
           companion_message: null,
         };
-        const plannerCandidateEvidence = Array.isArray(candidate.evidence)
-          ? candidate.evidence.filter((reference): reference is PlannerEvidenceReference => isRecordValue(reference))
-          : [];
-        const plannerCanonicalText = typeof candidate.canonical_text === "string"
-          ? candidate.canonical_text.slice(0, 300)
-          : typeof candidate.emotion_line === "string"
-          ? candidate.emotion_line.slice(0, 300)
-          : "当前事实";
-        const memoryFacts = isRecordValue(jsonBody?.local_memory_context) && Array.isArray(jsonBody.local_memory_context.facts)
-          ? jsonBody.local_memory_context.facts.filter((item): item is Record<string, unknown> => isRecordValue(item))
-          : [];
-        const plannerValidation = validateLocalPlannerCandidate({
-          candidate_id: typeof candidate.candidate_id === "string" ? candidate.candidate_id : "",
-          semantic_key: typeof candidate.semantic_key === "string" ? candidate.semantic_key : "",
-          canonical_text: plannerCanonicalText,
-          dimension: typeof candidate.dimension === "string" ? candidate.dimension : "current_fact",
-          claim_fingerprint: typeof candidate.claim_fingerprint === "string" ? candidate.claim_fingerprint : "",
-          evidence: plannerCandidateEvidence,
-          numbers: candidate.numbers,
-          count_numbers: candidate.count_numbers,
-          number_facts: candidate.number_facts,
-        }, {
-          currentFactId: typeof currentFact.id === "string" ? currentFact.id : "current_fact",
-          currentFact,
-          memoryKeys: isRecordValue(jsonBody?.local_memory_context) && Array.isArray(jsonBody.local_memory_context.facts)
-            ? jsonBody.local_memory_context.facts.flatMap((item) => isRecordValue(item) && typeof item.key === "string" ? [item.key] : [])
-            : [],
-          memoryFacts,
-        });
-        const plannerBrief: PlannerVoiceBrief | null = plannerValidation.ok
-          && typeof candidate.candidate_id === "string"
-          && typeof candidate.semantic_key === "string"
-          && typeof candidate.claim_fingerprint === "string"
+        const plannerCandidate = normalizedAction.candidate;
+        const plannerBrief: PlannerVoiceBrief | undefined = plannerCandidate
           ? {
-            candidate_id: candidate.candidate_id.slice(0, 200),
-            semantic_key: candidate.semantic_key.slice(0, 200),
-            dimension: typeof candidate.dimension === "string" ? candidate.dimension.slice(0, 100) : "current_fact",
-            canonical_text: plannerCanonicalText,
+            candidate_id: plannerCandidate.candidate_id.slice(0, 200),
+            semantic_key: plannerCandidate.semantic_key.slice(0, 200),
+            dimension: plannerCandidate.dimension.slice(0, 100),
+            canonical_text: plannerCandidate.canonical_text,
             source_surface: "record_detail",
-            planner_version: typeof candidate.planner_version === "string"
-              ? candidate.planner_version.slice(0, 100)
-              : "local-planner-v1",
-            numbers: plannerValidation.candidate.number_facts.map((item) => item.value),
-            count_numbers: plannerValidation.candidate.number_facts.filter((item) => item.role === "count").map((item) => item.value),
-            number_facts: plannerValidation.candidate.number_facts,
-            evidence: plannerCandidateEvidence,
-            claim_fingerprint: candidate.claim_fingerprint.slice(0, 200),
+            planner_version: normalizedAction.plannerVersion,
+            numbers: plannerCandidate.number_facts.map((item) => item.value),
+            count_numbers: plannerCandidate.number_facts.filter((item) => item.role === "count").map((item) => item.value),
+            number_facts: plannerCandidate.number_facts,
+            evidence: plannerCandidate.evidence,
+            claim_fingerprint: plannerCandidate.claim_fingerprint,
           }
-          : null;
+          : undefined;
         const result = await generateVoiceFeedback({
           ai,
           domainKey,
@@ -5716,16 +5648,18 @@ Deno.serve(async (req) => {
           customNote,
           recentCompanionLines,
           memory: null,
-          localMemoryContext: jsonBody?.local_memory_context ?? null,
+          localMemoryContext: normalizedAction.localMemoryContext,
           textProvider,
           plannerBrief,
+          plannerFallbackReason: normalizedAction.plannerFallbackReason,
         });
         return new Response(JSON.stringify({
           ok: true,
           data: {
             companion_message: result.companion_message,
             ai_feedback: result.ai_feedback,
-            error: result.error ?? null,
+            error: normalizedAction.plannerFallbackReason ?? result.error ?? null,
+            planner_fallback_reason: normalizedAction.plannerFallbackReason,
           },
         }), {
           headers: { "Content-Type": "application/json", ...corsHeaders },

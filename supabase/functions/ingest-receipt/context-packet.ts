@@ -116,6 +116,7 @@ export function normalizeLocalMemoryContext(
   domainKey: string,
 ): LocalMemoryContextEntry[] {
   if (!isRecord(value) || !Array.isArray(value.facts)) return [];
+  if (value.enabled === false) return [];
   const allowedDomains = new Set(["expense", "income", "food", "sleep", "sport", "reading", "wallet"]);
   if (!allowedDomains.has(domainKey)) return [];
   const prefixes = [`local_ai.${domainKey}.`, `${domainKey}.`];
