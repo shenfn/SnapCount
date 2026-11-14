@@ -74,7 +74,7 @@ The fixed cross-client fingerprint assertion is `fnv1a64:510d871ebff57f0f` for t
 
 ## Commit
 
-`1edc21b feat(local-ai): add evidence-bound planner contract`
+`1edc21b feat(local-ai): add evidence-bound planner contract`, followed by a small TypeScript provenance typing fix in the final worktree commit.
 
 ## Concerns
 

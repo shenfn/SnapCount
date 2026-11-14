@@ -5561,12 +5561,12 @@ Deno.serve(async (req) => {
           : [];
         const candidateNumbers = finiteNumbers(candidate.numbers);
         const candidateCountNumbers = finiteNumbers(candidate.count_numbers);
-        const candidateNumberFacts = Array.isArray(candidate.number_facts)
+        const candidateNumberFacts: PlannerVoiceBrief["number_facts"] = Array.isArray(candidate.number_facts)
           ? candidate.number_facts.flatMap((item) => {
             if (!isRecordValue(item) || typeof item.value !== "number" || !Number.isFinite(item.value)) return [];
             const role = item.role === "count" ? "count" as const : "measure" as const;
             const evidence = Array.isArray(item.evidence)
-              ? item.evidence.filter((reference): reference is Record<string, unknown> => isRecordValue(reference))
+              ? item.evidence.filter((reference): reference is PlannerEvidenceReference => isRecordValue(reference))
               : [];
             return [{
               value: item.value,
