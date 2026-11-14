@@ -72,11 +72,63 @@ function isEvidenceReference(value: unknown): value is PlannerEvidenceReference 
     && (item.field === null || typeof item.field === "string");
 }
 
-function evidenceForNumber(value: number, provenance: PlannerNumberProvenance[]): PlannerEvidenceReference[] {
-  return provenance
-    .filter((item) => Number.isFinite(item.value) && Math.abs(item.value - value) < 1e-9)
-    .flatMap((item) => item.evidence)
-    .filter(isEvidenceReference);
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function numberArray(value: unknown): { present: boolean; values: number[]; valid: boolean } {
+  if (value === undefined) return { present: false, values: [], valid: true };
+  if (!Array.isArray(value)) return { present: true, values: [], valid: false };
+  const values = value.map((item) => item && typeof item === "object" && !Array.isArray(item)
+    ? numericValue((item as Record<string, unknown>).value)
+    : numericValue(item));
+  return {
+    present: true,
+    values: values.filter((item): item is number => item !== null),
+    valid: values.every((item): item is number => item !== null),
+  };
+}
+
+function numericFieldValue(value: unknown, field: string | null): number | null {
+  if (field && value && typeof value === "object" && !Array.isArray(value)) {
+    const item = value as Record<string, unknown>;
+    const direct = numericValue(item[field]);
+    if (direct !== null) return direct;
+    const payload = item.payload_json && typeof item.payload_json === "object"
+      ? item.payload_json as Record<string, unknown>
+      : item.payload && typeof item.payload === "object"
+      ? item.payload as Record<string, unknown>
+      : null;
+    return payload ? numericValue(payload[field]) : null;
+  }
+  return numericValue(value);
+}
+
+function evidenceValue(
+  evidence: PlannerEvidenceReference,
+  options: {
+    currentFact?: Record<string, unknown>;
+    recentFacts?: Record<string, unknown>[];
+    memoryFacts?: Record<string, unknown>[];
+  },
+): number | null {
+  if (evidence.kind === "current_fact" && evidence.source === "local_record") {
+    return numericFieldValue(options.currentFact, evidence.field);
+  }
+  if (evidence.kind === "recent_fact" && evidence.source === "local_record") {
+    const fact = (options.recentFacts ?? []).find((item) => item.id === evidence.reference);
+    return numericFieldValue(fact, evidence.field);
+  }
+  if (evidence.kind === "local_memory" && evidence.source === "local_memory") {
+    const memory = (options.memoryFacts ?? []).find((item) => item.key === evidence.reference);
+    return numericFieldValue(memory, evidence.field);
+  }
+  return null;
 }
 
 /**
@@ -85,7 +137,14 @@ function evidenceForNumber(value: number, provenance: PlannerNumberProvenance[])
  */
 export function validateLocalPlannerCandidate(
   candidate: Partial<LocalPlannerCandidateContract> & Record<string, unknown>,
-  options: { currentFactId: string; recentFactIds?: string[]; memoryKeys?: string[] },
+  options: {
+    currentFactId: string;
+    currentFact?: Record<string, unknown>;
+    recentFactIds?: string[];
+    recentFacts?: Record<string, unknown>[];
+    memoryKeys?: string[];
+    memoryFacts?: Record<string, unknown>[];
+  },
 ): { ok: true; candidate: LocalPlannerCandidateContract } | { ok: false; reason: string } {
   const candidateId = typeof candidate.candidate_id === "string" ? candidate.candidate_id.trim() : "";
   const semanticKey = typeof candidate.semantic_key === "string" ? candidate.semantic_key.trim() : "";
@@ -109,12 +168,19 @@ export function validateLocalPlannerCandidate(
     return recentIds.has(item.reference);
   });
   if (!supported) return { ok: false, reason: "unsupported_evidence_reference" };
-  const numberFacts = Array.isArray(candidate.number_facts)
-    ? candidate.number_facts.flatMap((raw) => {
+  const rawNumberFacts = candidate.number_facts;
+  if (rawNumberFacts !== undefined && !Array.isArray(rawNumberFacts)) {
+    return { ok: false, reason: "invalid_number_facts" };
+  }
+  const numbers = numberArray(candidate.numbers);
+  const countNumbers = numberArray(candidate.count_numbers);
+  if (!numbers.valid || !countNumbers.valid) return { ok: false, reason: "invalid_number_array" };
+  const numberFacts = Array.isArray(rawNumberFacts)
+    ? rawNumberFacts.flatMap((raw) => {
       if (!raw || typeof raw !== "object") return [];
       const item = raw as Record<string, unknown>;
-      const value = typeof item.value === "number" ? item.value : Number(item.value);
-      if (!Number.isFinite(value) || !["count", "measure"].includes(String(item.role))) return [];
+      const value = numericValue(item.value);
+      if (value === null || !["count", "measure"].includes(String(item.role))) return [];
       const rawNumberEvidence = Array.isArray(item.evidence) ? item.evidence : [];
       const numberEvidence = rawNumberEvidence.filter(isEvidenceReference);
       if (numberEvidence.length === 0) return [];
@@ -127,12 +193,32 @@ export function validateLocalPlannerCandidate(
       }];
     })
     : [];
+  if (Array.isArray(rawNumberFacts) && numberFacts.length !== rawNumberFacts.length) {
+    return { ok: false, reason: "invalid_number_facts" };
+  }
+  if ((numbers.present || countNumbers.present) && !Array.isArray(rawNumberFacts)) {
+    return { ok: false, reason: "missing_number_facts" };
+  }
+  if (numbers.present && numbers.values.some((value) => !numberFacts.some((fact) => Math.abs(fact.value - value) < 1e-9))) {
+    return { ok: false, reason: "number_without_provenance" };
+  }
+  if (countNumbers.present && countNumbers.values.some((value) => !numberFacts.some((fact) =>
+    fact.role === "count" && Math.abs(fact.value - value) < 1e-9
+  ))) return { ok: false, reason: "count_without_provenance" };
   if (numberFacts.some((item) => !item.evidence.every((reference) => evidence.some((candidateReference) =>
     reference.kind === candidateReference.kind
       && reference.source === candidateReference.source
       && reference.reference === candidateReference.reference
       && reference.field === candidateReference.field
   )))) return { ok: false, reason: "number_evidence_not_in_candidate" };
+  for (const item of numberFacts) {
+    for (const reference of item.evidence) {
+      const actual = evidenceValue(reference, options);
+      if (actual === null || Math.abs(actual - item.value) >= 1e-9) {
+        return { ok: false, reason: "number_value_mismatch" };
+      }
+    }
+  }
   return {
     ok: true,
     candidate: {

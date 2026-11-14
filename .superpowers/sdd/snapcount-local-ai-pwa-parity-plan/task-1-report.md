@@ -80,3 +80,52 @@ The fixed cross-client fingerprint assertion is `fnv1a64:510d871ebff57f0f` for t
 
 - Deno-native execution and `deno check` remain unavailable in this environment. Edge TypeScript files were syntax-bundled with esbuild, and contract/context tests ran through a Deno-compatible Node harness.
 - The branch retains unrelated pre-existing WIP in `AppState.swift`, intake UI files, `SnapCountUploadService.swift`, and `NativeAIFeedbackCard.swift`, plus untracked `.build/` and `tools/persona-lab/`. They were not staged or reset.
+
+## Round 1 fix
+
+- Numeric arrays now require complete `number_facts` provenance. Every number is validated against its referenced current fact, bounded recent fact, or bounded memory entry before a `PlannerVoiceBrief` is built. Malformed records are rejected with deterministic reasons instead of being dropped.
+- Swift recent-fact evidence now requires membership in the bounded `recentFactIDs` set, matching Edge behavior. Added valid and forged-reference XCTest coverage.
+- Restored the pre-task Shortcut presentation path. Companion contract work remains separate from later delivery UI changes.
+
+### Covering tests
+
+Command
+
+```text
+node_modules/.bin/esbuild supabase/functions/ingest-receipt/local-expression-contract_test.ts --bundle --format=esm --platform=node --outfile=/tmp/local-expression-contract_test.mjs
+node --input-type=module -e '...Deno-compatible Node harness...'
+```
+
+Output
+
+```text
+tests=4 failures=0
+```
+
+Command
+
+```text
+node_modules/.bin/esbuild supabase/functions/ingest-receipt/context-packet_test.ts --bundle --format=esm --platform=node --outfile=/tmp/context-packet_test.mjs
+node --input-type=module -e '...Deno-compatible Node harness...'
+```
+
+Output
+
+```text
+tests=20 failures=0
+```
+
+Command
+
+```text
+xcodebuild -project ios/SnapCount.xcodeproj -scheme SnapCount -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SnapCountTests/LocalExpressionContextTests test
+```
+
+Output
+
+```text
+Executed 6 tests, with 0 failures
+** TEST SUCCEEDED **
+```
+
+All changed Edge TypeScript files also parsed successfully with esbuild. Deno remains unavailable in this environment.

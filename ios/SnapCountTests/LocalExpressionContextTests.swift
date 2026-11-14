@@ -23,6 +23,36 @@ final class LocalExpressionContextTests: XCTestCase {
         XCTAssertEqual(current.claimFingerprint, LocalPlannerCandidateEngine.candidates(for: fact).first?.claimFingerprint)
     }
 
+    func testLOCALAI003ContractBoundsRecentFactEvidenceReferences() throws {
+        let semanticKey = "expense_recent_amount"
+        let text = "近期金额 8 元"
+        let fingerprint = LocalExpressionContract.claimFingerprint(semanticKey: semanticKey, canonicalText: text)
+        let payload: [String: AnyCodable] = [
+            "candidate_id": AnyCodable("recent-candidate"),
+            "semantic_key": AnyCodable(semanticKey),
+            "canonical_text": AnyCodable(text),
+            "claim_fingerprint": AnyCodable(fingerprint),
+            "presentation_target": AnyCodable("feedback_card"),
+            "dimension": AnyCodable("recent_fact"),
+            "source": AnyCodable("expression_planner"),
+            "emotion_line": AnyCodable(text),
+            "evidence": AnyCodable([[
+                "kind": "recent_fact", "source": "local_record", "reference": "fact-2", "field": "amount"
+            ] as [String: Any]])
+        ]
+        let candidate = try XCTUnwrap(NativeAIFeedback(payload: payload))
+        XCTAssertTrue(LocalExpressionContract.validates(
+            candidate: candidate,
+            currentFactID: "fact-1",
+            recentFactIDs: ["fact-2"]
+        ))
+        XCTAssertFalse(LocalExpressionContract.validates(
+            candidate: candidate,
+            currentFactID: "fact-1",
+            recentFactIDs: []
+        ))
+    }
+
     func testLOCALAI003FCompactMemoryIsSameDomainAndBounded() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

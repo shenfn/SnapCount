@@ -26,6 +26,7 @@ enum LocalExpressionContract {
     static func validates(
         candidate: NativeAIFeedback,
         currentFactID: String,
+        recentFactIDs: Set<String> = [],
         memoryKeys: Set<String> = []
     ) -> Bool {
         guard candidate.source == "expression_planner",
@@ -39,7 +40,7 @@ enum LocalExpressionContract {
             case "current_fact":
                 return evidence.source == "local_record" && evidence.reference == currentFactID
             case "recent_fact":
-                return evidence.source == "local_record"
+                return evidence.source == "local_record" && recentFactIDs.contains(evidence.reference)
             case "local_memory":
                 return evidence.source == "local_memory" && memoryKeys.contains(evidence.reference)
             default:

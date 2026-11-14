@@ -5554,28 +5554,6 @@ Deno.serve(async (req) => {
         const candidate = jsonBody?.planner_candidate && typeof jsonBody.planner_candidate === "object"
           ? jsonBody.planner_candidate as Record<string, unknown>
           : {};
-        const finiteNumbers = (value: unknown): number[] => Array.isArray(value)
-          ? value
-            .filter((item): item is number => typeof item === "number" && Number.isFinite(item))
-            .slice(0, 8)
-          : [];
-        const candidateNumbers = finiteNumbers(candidate.numbers);
-        const candidateCountNumbers = finiteNumbers(candidate.count_numbers);
-        const candidateNumberFacts: PlannerVoiceBrief["number_facts"] = Array.isArray(candidate.number_facts)
-          ? candidate.number_facts.flatMap((item) => {
-            if (!isRecordValue(item) || typeof item.value !== "number" || !Number.isFinite(item.value)) return [];
-            const role = item.role === "count" ? "count" as const : "measure" as const;
-            const evidence = Array.isArray(item.evidence)
-              ? item.evidence.filter((reference): reference is PlannerEvidenceReference => isRecordValue(reference))
-              : [];
-            return [{
-              value: item.value,
-              meaning: typeof item.meaning === "string" ? item.meaning.slice(0, 80) : null,
-              role,
-              evidence,
-            }];
-          }).slice(0, 8)
-          : [];
         const rawPreferences = isRecordValue(jsonBody?.expression_preferences)
           ? jsonBody.expression_preferences
           : {};
@@ -5681,6 +5659,9 @@ Deno.serve(async (req) => {
           : typeof candidate.emotion_line === "string"
           ? candidate.emotion_line.slice(0, 300)
           : "当前事实";
+        const memoryFacts = isRecordValue(jsonBody?.local_memory_context) && Array.isArray(jsonBody.local_memory_context.facts)
+          ? jsonBody.local_memory_context.facts.filter((item): item is Record<string, unknown> => isRecordValue(item))
+          : [];
         const plannerValidation = validateLocalPlannerCandidate({
           candidate_id: typeof candidate.candidate_id === "string" ? candidate.candidate_id : "",
           semantic_key: typeof candidate.semantic_key === "string" ? candidate.semantic_key : "",
@@ -5688,12 +5669,14 @@ Deno.serve(async (req) => {
           dimension: typeof candidate.dimension === "string" ? candidate.dimension : "current_fact",
           claim_fingerprint: typeof candidate.claim_fingerprint === "string" ? candidate.claim_fingerprint : "",
           evidence: plannerCandidateEvidence,
-          number_facts: candidateNumberFacts,
+          number_facts: candidate.number_facts,
         }, {
           currentFactId: typeof currentFact.id === "string" ? currentFact.id : "current_fact",
+          currentFact,
           memoryKeys: isRecordValue(jsonBody?.local_memory_context) && Array.isArray(jsonBody.local_memory_context.facts)
             ? jsonBody.local_memory_context.facts.flatMap((item) => isRecordValue(item) && typeof item.key === "string" ? [item.key] : [])
             : [],
+          memoryFacts,
         });
         const plannerBrief: PlannerVoiceBrief | null = plannerValidation.ok
           && typeof candidate.candidate_id === "string"
@@ -5708,9 +5691,9 @@ Deno.serve(async (req) => {
             planner_version: typeof candidate.planner_version === "string"
               ? candidate.planner_version.slice(0, 100)
               : "local-planner-v1",
-            numbers: candidateNumbers,
-            count_numbers: candidateCountNumbers,
-            number_facts: candidateNumberFacts,
+            numbers: plannerValidation.candidate.number_facts.map((item) => item.value),
+            count_numbers: plannerValidation.candidate.number_facts.filter((item) => item.role === "count").map((item) => item.value),
+            number_facts: plannerValidation.candidate.number_facts,
             evidence: plannerCandidateEvidence,
             claim_fingerprint: candidate.claim_fingerprint.slice(0, 200),
           }

@@ -20,11 +20,42 @@ Deno.test("local candidate contract fingerprints claims and validates current-fa
     evidence: currentEvidence,
     number_facts: [{ value: 12.8, meaning: "current_record_amount", role: "measure", evidence: currentEvidence }],
   };
-  const result = validateLocalPlannerCandidate(candidate, { currentFactId: "fact-1" });
+  const result = validateLocalPlannerCandidate(candidate, { currentFactId: "fact-1", currentFact: { id: "fact-1", amount: 12.8 } });
   assert(result.ok, "current fact evidence should validate");
   assert(candidate.claim_fingerprint === "fnv1a64:1d29f4363af06560", "fingerprint must be stable across clients");
-  assert(!validateLocalPlannerCandidate({ ...candidate, canonical_text: "篡改后的金额 99 元" }, { currentFactId: "fact-1" }).ok,
+  assert(!validateLocalPlannerCandidate({ ...candidate, canonical_text: "篡改后的金额 99 元" }, { currentFactId: "fact-1", currentFact: { id: "fact-1", amount: 12.8 } }).ok,
     "changing claim text must invalidate the stable fingerprint");
+});
+
+Deno.test("numeric arrays require complete provenance and matching values", () => {
+  const base = {
+    candidate_id: "candidate-number",
+    semantic_key: "expense_current_record_context",
+    canonical_text: "当前金额 12.8 元",
+    dimension: "current_fact",
+    claim_fingerprint: localClaimFingerprint("expense_current_record_context", "当前金额 12.8 元"),
+    evidence: [evidenceReference("current_fact", "fact-1", "amount")],
+  };
+  const missingFacts = validateLocalPlannerCandidate({ ...base, numbers: [12.8] }, {
+    currentFactId: "fact-1", currentFact: { id: "fact-1", amount: 12.8 },
+  });
+  assert(!missingFacts.ok && missingFacts.reason === "missing_number_facts", "numeric arrays without number facts must reject");
+  const forged = validateLocalPlannerCandidate({
+    ...base,
+    numbers: [99],
+    number_facts: [{ value: 99, meaning: "amount", role: "measure", evidence: [evidenceReference("current_fact", "fact-1", "amount")] }],
+  }, { currentFactId: "fact-1", currentFact: { id: "fact-1", amount: 12.8 } });
+  assert(!forged.ok && forged.reason === "number_value_mismatch", "current-fact number must match supplied fact");
+  const validRecent = validateLocalPlannerCandidate({
+    ...base,
+    semantic_key: "expense_recent_amount",
+    canonical_text: "近期金额 8 元",
+    claim_fingerprint: localClaimFingerprint("expense_recent_amount", "近期金额 8 元"),
+    evidence: [evidenceReference("recent_fact", "fact-2", "amount")],
+    numbers: [8],
+    number_facts: [{ value: 8, meaning: "recent_amount", role: "measure", evidence: [evidenceReference("recent_fact", "fact-2", "amount")] }],
+  }, { currentFactId: "fact-1", currentFact: { id: "fact-1", amount: 12.8 }, recentFactIds: ["fact-2"], recentFacts: [{ id: "fact-2", amount: 8 }] });
+  assert(validRecent.ok, "recent fact number should validate when its reference is bounded");
 });
 
 Deno.test("memory candidate cannot inherit current-fact number provenance", () => {
