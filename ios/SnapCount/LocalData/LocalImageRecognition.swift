@@ -158,6 +158,15 @@ struct LocalImageIntakeOutcome: Equatable {
     var notificationText: String? = nil
     /// 已解析的结构化反馈，供结果浮层直接渲染卡片。
     var feedback: NativeAIFeedback? = nil
+    /// 原始反馈置信度，用于在异步 Companion 接线时保持低置信度降级。
+    var feedbackConfidence: Double? = nil
+
+    static func == (lhs: LocalImageIntakeOutcome, rhs: LocalImageIntakeOutcome) -> Bool {
+        lhs.result == rhs.result
+            && lhs.imageHash == rhs.imageHash
+            && lhs.notificationText == rhs.notificationText
+            && lhs.feedback == rhs.feedback
+    }
 }
 
 final class LocalImageRecognitionUseCase {
@@ -307,7 +316,8 @@ final class LocalImageRecognitionUseCase {
                         result: status == "pending" ? .financialPending(recordID) : .financialArchived(recordID),
                         imageHash: imageHash,
                         notificationText: composed?.text,
-                        feedback: composed?.feedback
+                        feedback: composed?.feedback,
+                        feedbackConfidence: composed?.confidence
                     )
                 default:
                     // 已删除的财务事实按新图重新识别。
@@ -320,7 +330,8 @@ final class LocalImageRecognitionUseCase {
                     result: .archived(LocalRecordOutcome(record: record, profileID: profile.id)),
                     imageHash: imageHash,
                     notificationText: composed.text,
-                    feedback: composed.feedback
+                    feedback: composed.feedback,
+                    feedbackConfidence: composed.confidence
                 )
             }
             if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
@@ -343,7 +354,8 @@ final class LocalImageRecognitionUseCase {
                     result: .staged(LocalStagingOutcome(record: staging, profileID: profile.id)),
                     imageHash: imageHash,
                     notificationText: composed.text,
-                    feedback: composed.feedback
+                    feedback: composed.feedback,
+                    feedbackConfidence: composed.confidence
                 )
             }
             if let staging = try await localRecordUseCase.staging(id: "local-ai-\(imageHash)"),
@@ -355,7 +367,8 @@ final class LocalImageRecognitionUseCase {
                     result: .archived(LocalRecordOutcome(record: record, profileID: profile.id)),
                     imageHash: imageHash,
                     notificationText: composed.text,
-                    feedback: composed.feedback
+                    feedback: composed.feedback,
+                    feedbackConfidence: composed.confidence
                 )
             }
         }
@@ -606,8 +619,8 @@ final class LocalImageRecognitionUseCase {
             let outcome: LocalRecordIntakeOutcome = autoArchive ? .financialArchived(id) : .financialPending(id)
             // PWA 判重命中时通知是固定两行（`index.ts:7321`），不参与 feedback 的三行拼装；
             // 「疑似重复」那条 ai_feedback 只用于待处理页与卡片。
-            let composed: (text: String, feedback: NativeAIFeedback?) = isDuplicate
-                ? (text: Self.duplicateNotificationText, feedback: NativeAIFeedback(payload: feedbackPayload))
+            let composed: (text: String, feedback: NativeAIFeedback?, confidence: Double?) = isDuplicate
+                ? (text: Self.duplicateNotificationText, feedback: NativeAIFeedback(payload: feedbackPayload), confidence: recognized.confidence)
                 : composeNotification(
                     domainKey: recognized.domainKey,
                     feedbackPayload: feedbackPayload,
@@ -627,7 +640,8 @@ final class LocalImageRecognitionUseCase {
                 result: outcome,
                 imageHash: imageHash,
                 notificationText: composed.text,
-                feedback: composed.feedback
+                feedback: composed.feedback,
+                feedbackConfidence: composed.confidence
             )
         }
         guard !recognized.domainKey.isEmpty,
@@ -700,7 +714,8 @@ final class LocalImageRecognitionUseCase {
             result: result,
             imageHash: imageHash,
             notificationText: composed.text,
-            feedback: composed.feedback
+            feedback: composed.feedback,
+            feedbackConfidence: composed.confidence
         )
     }
 
@@ -794,7 +809,7 @@ final class LocalImageRecognitionUseCase {
     private func composeNotification(
         for record: LocalRecord,
         profileID: UUID
-    ) -> (text: String, feedback: NativeAIFeedback?) {
+    ) -> (text: String, feedback: NativeAIFeedback?, confidence: Double?) {
         let payload = (try? LocalRecordCodec.decode(record.payloadJSON)) ?? [:]
         return composeNotification(
             domainKey: record.domainKey,
@@ -825,7 +840,7 @@ final class LocalImageRecognitionUseCase {
         isPending: Bool,
         profileID: UUID,
         dateKey: String
-    ) -> (text: String, feedback: NativeAIFeedback?) {
+    ) -> (text: String, feedback: NativeAIFeedback?, confidence: Double?) {
         var todaySpendMinor: Int64 = 0
         var todaySpendCount = 0
         var monthIncomeMinor: Int64 = 0
@@ -852,7 +867,7 @@ final class LocalImageRecognitionUseCase {
             monthIncomeMinor: monthIncomeMinor,
             isPending: isPending
         ))
-        return (text, feedback)
+        return (text, feedback, confidence)
     }
 
     private static func safeFailureMessage(for error: Error) -> String {

@@ -13,6 +13,25 @@ struct UploadScreenshotIntent: AppIntent {
         Summary("上传 \(\.$image) 到芥子")
     }
 
+    static func normalizedShortcutFeedback(
+        outcomeFeedback: NativeAIFeedback?,
+        outcomeConfidence: Double?,
+        composedResult: LocalCompanionResult?
+    ) -> NativeAIFeedback? {
+        guard let composedResult else {
+            guard outcomeConfidence == nil || outcomeConfidence! >= 0.5 else { return nil }
+            return outcomeFeedback
+        }
+        guard let feedbackPayload = composedResult.aiFeedback,
+              let feedback = NativeAIFeedback(payload: feedbackPayload) else {
+            return nil
+        }
+        guard let confidence = feedbackPayload.double("confidence"), confidence >= 0.5 else {
+            return nil
+        }
+        return feedback
+    }
+
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let trialID = await ShortcutTrialStore.shared.claim()
         guard let image else {
@@ -77,6 +96,11 @@ struct UploadScreenshotIntent: AppIntent {
                             trialOutcome = .archived
                             let text = outcome.notificationText ?? "AI 识别结果已自动记录到本机。"
                             var companionMessage: String?
+                            var deliveryFeedback = Self.normalizedShortcutFeedback(
+                                outcomeFeedback: outcome.feedback,
+                                outcomeConfidence: outcome.feedbackConfidence,
+                                composedResult: nil
+                            )
                             if let companionProvider = await companionProvider(for: mode) {
                                 let providerMode: LocalExpressionProviderMode = mode == .hosted ? .hosted : .byok
                                 if let composed = await recognition.composeCompanion(
@@ -84,16 +108,23 @@ struct UploadScreenshotIntent: AppIntent {
                                     provider: companionProvider,
                                     settings: localSettings,
                                     providerMode: providerMode
-                                ), let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
-                                   !message.isEmpty {
-                                    companionMessage = message
+                                ) {
+                                    if let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                       !message.isEmpty {
+                                        companionMessage = message
+                                    }
+                                    deliveryFeedback = Self.normalizedShortcutFeedback(
+                                        outcomeFeedback: outcome.feedback,
+                                        outcomeConfidence: outcome.feedbackConfidence,
+                                        composedResult: composed
+                                    )
                                 }
                             }
                             result = ShortcutUploadResult(
                                 displayText: ShortcutUploadResult.expandedDisplayText(
                                     baseText: text,
                                     companionMessage: companionMessage,
-                                    feedback: outcome.feedback
+                                    feedback: deliveryFeedback
                                 ),
                                 notificationText: text,
                                 route: "records"
@@ -105,7 +136,11 @@ struct UploadScreenshotIntent: AppIntent {
                                 displayText: ShortcutUploadResult.expandedDisplayText(
                                     baseText: text,
                                     companionMessage: nil,
-                                    feedback: outcome.feedback
+                                    feedback: Self.normalizedShortcutFeedback(
+                                        outcomeFeedback: outcome.feedback,
+                                        outcomeConfidence: outcome.feedbackConfidence,
+                                        composedResult: nil
+                                    )
                                 ),
                                 notificationText: text,
                                 route: "inbox"

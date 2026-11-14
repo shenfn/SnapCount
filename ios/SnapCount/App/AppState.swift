@@ -1472,16 +1472,27 @@ final class AppState: ObservableObject {
             providerMode: providerMode
         ) else { return outcome }
         let message = composed.companionMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let feedback = composed.aiFeedback.flatMap { NativeAIFeedback(payload: $0) } ?? outcome.feedback
+        let composedFeedback = composed.aiFeedback.flatMap { NativeAIFeedback(payload: $0) }
+        let feedback = composedFeedback ?? outcome.feedback
+        let feedbackConfidence = composed.aiFeedback?.double("confidence") ?? outcome.feedbackConfidence
+        let deliveryFeedback: NativeAIFeedback?
+        if let feedback, let feedbackConfidence, feedbackConfidence < 0.5 {
+            deliveryFeedback = nil
+        } else {
+            deliveryFeedback = feedback
+        }
         return LocalImageIntakeOutcome(
             result: outcome.result,
             imageHash: outcome.imageHash,
             notificationText: LocalIntakeNotificationText.merge(
                 baseText: outcome.notificationText,
                 companionMessage: message,
-                feedbackParts: feedback.map { LocalIntakeNotificationFeedback($0) }
+                feedbackParts: deliveryFeedback.map {
+                    LocalIntakeNotificationFeedback($0, confidence: feedbackConfidence)
+                }
             ),
-            feedback: feedback
+            feedback: deliveryFeedback,
+            feedbackConfidence: feedbackConfidence
         )
     }
 

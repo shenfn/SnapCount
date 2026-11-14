@@ -1,5 +1,20 @@
 import SwiftUI
 
+enum LocalIntakeResultPresentation {
+    static func primaryMessage(
+        notificationText: String,
+        feedback: NativeAIFeedback?
+    ) -> String? {
+        guard let feedback else { return nil }
+        let emotion = feedback.emotionLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !emotion.isEmpty else { return nil }
+        return notificationText
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { $0 == emotion })
+    }
+}
+
 /// 本机截图识别结果浮层：标题行 + 通知文案 + AI 反馈卡 + 操作按钮。
 /// 由 TodayView 以 `.sheet` + `.presentationDetents([.medium])` 呈现，故内容整体可滚动。
 struct LocalIntakeResultSheet: View {
@@ -19,8 +34,10 @@ struct LocalIntakeResultSheet: View {
     }
 
     private var primaryMessage: String? {
-        guard feedback != nil else { return nil }
-        return messageLines.first
+        LocalIntakeResultPresentation.primaryMessage(
+            notificationText: notificationText,
+            feedback: feedback
+        )
     }
 
     var body: some View {

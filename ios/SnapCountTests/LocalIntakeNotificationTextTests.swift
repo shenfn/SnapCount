@@ -315,6 +315,101 @@ extension LocalIntakeNotificationTextTests {
         XCTAssertEqual(pending, "⚠️ -¥25.00 · 便利店 · 请打开 App 补全")
     }
 
+    func testResultSheetPrimaryMessageTargetsOnlyVisibleEmotionLine() throws {
+        let modelFeedback = try feedback(emotion: "记录已经落下。", utility: "继续保持当前节奏。")
+        let fixedFacts = "💸 -¥12.00 · 星巴克 · 餐饮\n今日尚无支出记录"
+        let withoutCompanion = LocalIntakeNotificationText.merge(
+            baseText: fixedFacts,
+            companionMessage: nil,
+            feedbackParts: LocalIntakeNotificationFeedback(modelFeedback)
+        )
+        XCTAssertEqual(
+            LocalIntakeResultPresentation.primaryMessage(
+                notificationText: withoutCompanion,
+                feedback: modelFeedback
+            ),
+            "记录已经落下。"
+        )
+
+        let withCompanion = LocalIntakeNotificationText.merge(
+            baseText: fixedFacts,
+            companionMessage: "这笔咖啡记下了",
+            feedbackParts: LocalIntakeNotificationFeedback(modelFeedback)
+        )
+        XCTAssertNil(
+            LocalIntakeResultPresentation.primaryMessage(
+                notificationText: withCompanion,
+                feedback: modelFeedback
+            )
+        )
+    }
+
+    func testLowConfidenceFeedbackCannotReenterDelivery() {
+        let lowConfidence = LocalIntakeNotificationFeedback(
+            icon: "✨",
+            badge: "今天很稳",
+            confidence: 0.49,
+            emotionLine: "低置信度情绪句",
+            utilityLine: "低置信度实用句"
+        )
+        let text = LocalIntakeNotificationText.merge(
+            baseText: "💸 -¥12.00 · 星巴克 · 餐饮\n今日尚无支出记录",
+            companionMessage: nil,
+            feedbackParts: lowConfidence
+        )
+        XCTAssertEqual(text, "💸 -¥12.00 · 星巴克 · 餐饮\n今日尚无支出记录")
+        XCTAssertFalse(text.contains("低置信度"))
+    }
+
+    func testShortcutDeliveryUsesNormalizedCompanionFeedbackOnlyWhenComposed() throws {
+        let outcomeFeedback = try feedback(emotion: "识别结果反馈", utility: "识别结果建议")
+        let normalizedPayload: [String: AnyCodable] = [
+            "badge": AnyCodable("陪伴反馈"),
+            "emotion_line": AnyCodable("陪伴结果反馈"),
+            "utility_line": AnyCodable("陪伴结果建议"),
+            "confidence": AnyCodable(0.9)
+        ]
+        let composed = LocalCompanionResult(
+            companionMessage: "已记下",
+            aiFeedback: normalizedPayload
+        )
+
+        let normalized = UploadScreenshotIntent.normalizedShortcutFeedback(
+            outcomeFeedback: outcomeFeedback,
+            outcomeConfidence: 0.9,
+            composedResult: composed
+        )
+        XCTAssertEqual(normalized?.badge, "陪伴反馈")
+        XCTAssertEqual(normalized?.emotionLine, "陪伴结果反馈")
+
+        let noFeedbackComposed = LocalCompanionResult(
+            companionMessage: "已记下",
+            aiFeedback: nil
+        )
+        XCTAssertNil(
+            UploadScreenshotIntent.normalizedShortcutFeedback(
+                outcomeFeedback: outcomeFeedback,
+                outcomeConfidence: 0.9,
+                composedResult: noFeedbackComposed
+            )
+        )
+        XCTAssertEqual(
+            UploadScreenshotIntent.normalizedShortcutFeedback(
+                outcomeFeedback: outcomeFeedback,
+                outcomeConfidence: 0.9,
+                composedResult: nil
+            ),
+            outcomeFeedback
+        )
+        XCTAssertNil(
+            UploadScreenshotIntent.normalizedShortcutFeedback(
+                outcomeFeedback: outcomeFeedback,
+                outcomeConfidence: 0.49,
+                composedResult: nil
+            )
+        )
+    }
+
     func testShortcutNotificationBodyRetainsLineBreaksWithinBudget() {
         let base = String(repeating: "事实", count: 90)
         let result = ShortcutUploadResult(
