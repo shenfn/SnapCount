@@ -75,7 +75,7 @@ LocalRecordReadModel / LocalFactReadModel / Inbox
 
 ### 3.3 最终请求包合同（LOCAL-AI-003A-K 共用）
 
-本地表达请求只使用一个只读请求包。iOS 在 Hosted 和 BYOK 两条路径都先构造同一组字段，Hosted 通过 `generate_local_expression` 传输，BYOK 将相同字段放入本机 Provider 的 JSON facts。请求包的顶层字段如下：
+本地表达上下文只使用一个只读请求包。iOS 在 Hosted 和 BYOK 两条路径都先构造同一组字段，Hosted 通过 `generate_local_expression` 投影其中的请求字段，BYOK 将相同上下文放入本机 Provider 的 JSON facts。请求包的顶层字段如下：
 
 ```json
 {
@@ -91,6 +91,8 @@ LocalRecordReadModel / LocalFactReadModel / Inbox
   "recent_companion_lines": []
 }
 ```
+
+Shortcut 的 Hosted 线上请求保持现有入口语义，传输 `current_fact`、选中的 `planner_candidate`、可选的 `local_memory_context`、偏好和时间字段；`recent_facts` 与 `provider_mode` 仍是 iOS 本地上下文和 Edge 归一化所使用的路由元数据。不得因此扩展图片识别或 PWA 业务请求。
 
 `current_fact` 是当前正式事实，`recent_facts` 只来自同 profile、同 domain 的正式事实，最多 12 条。`local_staging_records` 的 `pending_review`、`failed` 或已删除行不会进入这两个字段。事件时间按 `occurred_at`、`order_finished_at`、`record_date + record_time` 的顺序取值。`client_captured_at` 和请求接收时间只表示捕获/请求上下文，不得改写成事件发生时间。
 
