@@ -125,7 +125,7 @@ export function normalizeLocalMemoryContext(
     if (!isRecord(raw)) continue;
     const key = stringValue(raw.key);
     const type = stringValue(raw.type);
-    const summary = stringValue(raw.value) ?? stringValue(raw.content);
+    const summary = stringValue(raw.value) ?? stringValue(raw.content) ?? stringValue(raw.summary);
     const confidence = numberValue(raw.confidence);
     if (!key || !prefixes.some((prefix) => key.startsWith(prefix)) || !type || !summary || confidence === null) continue;
     if (confidence < 0 || confidence > 1 || type.length > 32 || summary.length > 240) continue;

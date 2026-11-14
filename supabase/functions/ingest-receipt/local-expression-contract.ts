@@ -159,6 +159,10 @@ export function validateLocalPlannerCandidate(
   const evidence = rawEvidence.filter(isEvidenceReference);
   if (evidence.length === 0) return { ok: false, reason: "missing_evidence" };
   if (evidence.length !== rawEvidence.length) return { ok: false, reason: "invalid_evidence_reference" };
+  if (evidence.some((item) => item.kind === "current_fact")
+    && (!options.currentFactId || options.currentFactId.trim() === "" || options.currentFactId === "current_fact")) {
+    return { ok: false, reason: "missing_current_fact_identity" };
+  }
   const recentIds = new Set(options.recentFactIds ?? []);
   const memoryKeys = new Set(options.memoryKeys ?? []);
   const supported = evidence.every((item) => {

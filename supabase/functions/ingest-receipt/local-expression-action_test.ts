@@ -3,6 +3,7 @@ import {
   localClaimFingerprint,
 } from "./local-expression-contract.ts";
 import { normalizeLocalExpressionAction } from "./local-expression-action.ts";
+import { buildContextPacket } from "./context-packet.ts";
 
 const assert = (condition: boolean, message: string) => {
   if (!condition) throw new Error(message);
@@ -98,6 +99,13 @@ Deno.test("Hosted action accepts bounded local-memory evidence", () => {
   });
   assert(result.candidate !== null, "bounded memory candidate should be selected");
   assertEquals(result.localMemoryContext?.facts.length, 1, "same-domain memory should be retained");
+  const packet = buildContextPacket({
+    domainKey: "expense",
+    recordFacts: { record_type: "expense" },
+    signals: [],
+    localMemoryContext: result.localMemoryContext,
+  });
+  assertEquals(packet.local_memory_context.length, 1, "normalized memory must reach the final context packet");
 });
 
 Deno.test("Hosted action omits disabled or empty local memory", () => {
@@ -127,6 +135,22 @@ Deno.test("Hosted action rejects forged fingerprint and evidence", () => {
   assertEquals(unsupported.plannerFallbackReason, "unsupported_evidence_reference", "unsupported evidence reason must be traceable");
 });
 
+Deno.test("Hosted action rejects fabricated current-fact identity", () => {
+  const missingIdentity = normalizeLocalExpressionAction({
+    ...baseInput(candidate()),
+    currentFact: { ...currentFact, id: undefined },
+  });
+  assertEquals(missingIdentity.candidate, null, "current evidence needs a real fact identity");
+  assertEquals(missingIdentity.plannerFallbackReason, "missing_current_fact_identity", "missing identity reason must be deterministic");
+
+  const syntheticIdentity = normalizeLocalExpressionAction({
+    ...baseInput(candidate()),
+    currentFact: { ...currentFact, id: "current_fact" },
+  });
+  assertEquals(syntheticIdentity.candidate, null, "synthetic identity must not authorize evidence");
+  assertEquals(syntheticIdentity.plannerFallbackReason, "missing_current_fact_identity", "synthetic identity reason must be deterministic");
+});
+
 Deno.test("Hosted action rejects unsupported number provenance and malformed arrays", () => {
   const missingProvenance = normalizeLocalExpressionAction(baseInput(candidate({
     number_facts: [],
@@ -139,6 +163,41 @@ Deno.test("Hosted action rejects unsupported number provenance and malformed arr
   })));
   assertEquals(malformed.candidate, null, "malformed numeric arrays must fail closed");
   assertEquals(malformed.plannerFallbackReason, "invalid_number_array", "numeric array reason must be traceable");
+});
+
+Deno.test("Hosted action bounds untrusted candidate and fact fields before Voice", () => {
+  const oversizedText = normalizeLocalExpressionAction(baseInput(candidate({ canonical_text: "x".repeat(301) })));
+  assertEquals(oversizedText.candidate, null, "oversized canonical text must not reach Voice");
+  assertEquals(oversizedText.plannerFallbackReason, "candidate_bounds_exceeded", "candidate size reason must be deterministic");
+
+  const oversizedEvidence = normalizeLocalExpressionAction(baseInput(candidate({
+    evidence: Array.from({ length: 9 }, () => evidenceReference("current_fact", "fact-1", "amount")),
+  })));
+  assertEquals(oversizedEvidence.candidate, null, "oversized evidence must not reach Voice");
+
+  const oversizedNumberEvidence = normalizeLocalExpressionAction(baseInput(candidate({
+    number_facts: [{
+      value: 12.8,
+      meaning: "amount",
+      role: "measure",
+      evidence: Array.from({ length: 9 }, () => evidenceReference("current_fact", "fact-1", "amount")),
+    }],
+  })));
+  assertEquals(oversizedNumberEvidence.candidate, null, "oversized number evidence must not reach Voice");
+
+  const oversizedFact = normalizeLocalExpressionAction({
+    ...baseInput(null),
+    currentFact: {
+      ...currentFact,
+      summary: "untrusted".repeat(200),
+      payload_json: { ignored_secret: "x".repeat(5000), sport_type: "跑步" },
+    },
+    recentFacts: Array.from({ length: 20 }, (_, index) => ({ id: `recent-${index}`, summary: "y".repeat(5000) })),
+  });
+  assert((oversizedFact.currentFact.summary as string).length <= 240, "current fact text must be clipped");
+  assert(!("ignored_secret" in ((oversizedFact.currentFact.payload_json ?? {}) as Record<string, unknown>)), "unknown payload fields must be removed");
+  assertEquals(oversizedFact.recentFacts.length, 12, "recent facts must be cardinality bounded");
+  assert((oversizedFact.recentFacts[0].summary as string).length <= 240, "recent fact text must be clipped");
 });
 
 Deno.test("Hosted action derives event time from record date/time after invalid AI timestamps", () => {
