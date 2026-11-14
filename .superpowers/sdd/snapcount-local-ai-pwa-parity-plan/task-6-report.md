@@ -56,7 +56,12 @@ Executed 654 tests, with 0 failures (0 unexpected)
 Edge parse checks:
 
 ```text
-node_modules/.bin/esbuild supabase/functions/ingest-receipt/index.ts supabase/functions/ingest-receipt/local-expression-action.ts supabase/functions/ingest-receipt/context-packet.ts supabase/functions/ingest-receipt/expression-delivery.ts --bundle --platform=neutral --format=esm --external:'npm:*' --outdir="$EDGE_TMP"
+EDGE_TMP="$(mktemp -d /tmp/snapcount-edge-parse-task6.XXXXXX)"
+for entry in supabase/functions/ingest-receipt/index.ts supabase/functions/ingest-receipt/local-expression-action.ts supabase/functions/ingest-receipt/context-packet.ts supabase/functions/ingest-receipt/expression-delivery.ts; do
+  name="$(basename "$entry" .ts)"
+  node_modules/.bin/esbuild "$entry" --bundle --platform=neutral --format=esm --external:'npm:*' --outfile="${EDGE_TMP}/${name}.js" >/dev/null
+done
+printf 'esbuild parse bundles: 4/4 passed (npm: imports externalized)\n'
 ```
 
 Output:
@@ -68,6 +73,25 @@ esbuild parse bundles: 4/4 passed (npm: imports externalized)
 Deno-compatible Edge harness. Deno is unavailable in this environment (`zsh: command not found: deno`), so the three focused Edge test files were bundled with esbuild and executed under a Node harness that provides `Deno.test`.
 
 ```text
+EDGE_TMP="$(mktemp -d /tmp/snapcount-edge-task6.XXXXXX)"
+for test_file in local-expression-contract_test local-expression-action_test context-packet_test; do
+  node_modules/.bin/esbuild "supabase/functions/ingest-receipt/${test_file}.ts" --bundle --platform=node --format=cjs --outfile="${EDGE_TMP}/${test_file}.cjs" >/dev/null
+done
+EDGE_TMP="$EDGE_TMP" node --input-type=module <<'NODE'
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+const root = process.env.EDGE_TMP;
+let passed = 0;
+let total = 0;
+for (const file of readdirSync(root).filter((name) => name.endsWith('.cjs'))) {
+  const tests = [];
+  globalThis.Deno = { test(name, fn) { tests.push({ name, fn }); } };
+  await import(`file://${join(root, file)}?${Date.now()}-${file}`);
+  for (const test of tests) { await test.fn(); passed += 1; total += 1; }
+}
+console.log(`Edge Node Deno-compatible harness: ${passed}/${total} passed`);
+NODE
+
 Edge Node Deno-compatible harness: 36/36 passed
 ```
 
