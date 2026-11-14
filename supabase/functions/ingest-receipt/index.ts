@@ -5669,6 +5669,8 @@ Deno.serve(async (req) => {
           dimension: typeof candidate.dimension === "string" ? candidate.dimension : "current_fact",
           claim_fingerprint: typeof candidate.claim_fingerprint === "string" ? candidate.claim_fingerprint : "",
           evidence: plannerCandidateEvidence,
+          numbers: candidate.numbers,
+          count_numbers: candidate.count_numbers,
           number_facts: candidate.number_facts,
         }, {
           currentFactId: typeof currentFact.id === "string" ? currentFact.id : "current_fact",

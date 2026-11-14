@@ -27,7 +27,7 @@ Deno.test("local candidate contract fingerprints claims and validates current-fa
     "changing claim text must invalidate the stable fingerprint");
 });
 
-Deno.test("numeric arrays require complete provenance and matching values", () => {
+Deno.test("generate_local_expression numeric arrays require complete provenance and matching values", () => {
   const base = {
     candidate_id: "candidate-number",
     semantic_key: "expense_current_record_context",

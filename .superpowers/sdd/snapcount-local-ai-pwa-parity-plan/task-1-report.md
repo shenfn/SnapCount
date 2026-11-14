@@ -129,3 +129,23 @@ Executed 6 tests, with 0 failures
 ```
 
 All changed Edge TypeScript files also parsed successfully with esbuild. Deno remains unavailable in this environment.
+
+## Round 2 fix
+
+The `generate_local_expression` seam now passes the raw `numbers` and `count_numbers` arrays into `validateLocalPlannerCandidate`. This prevents a forged numeric array from being omitted before validation and PlannerVoiceBrief construction. The public contract regression explicitly sends `numbers: [99]` without `number_facts` and asserts deterministic rejection.
+
+Commands and output
+
+```text
+node_modules/.bin/esbuild supabase/functions/ingest-receipt/local-expression-contract_test.ts --bundle --format=esm --platform=node --outfile=/tmp/local-expression-contract_test.mjs
+node --input-type=module -e '...Deno-compatible Node harness...'
+tests=4 failures=0
+
+node_modules/.bin/esbuild supabase/functions/ingest-receipt/context-packet_test.ts --bundle --format=esm --platform=node --outfile=/tmp/context-packet_test.mjs
+node --input-type=module -e '...Deno-compatible Node harness...'
+tests=20 failures=0
+
+xcodebuild -project ios/SnapCount.xcodeproj -scheme SnapCount -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SnapCountTests/LocalExpressionContextTests test
+Executed 6 tests, with 0 failures
+** TEST SUCCEEDED **
+```
